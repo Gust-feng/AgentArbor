@@ -108,7 +108,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("function ConfirmationSettings"), false);
   assert.equal(settingsDialog.includes("function AppearanceSettings"), false);
   assert.equal(settingsDialog.includes("function AboutSettings"), true);
-  assert.equal(settingsDialog.includes("<AppearanceSettings config={props.config} />"), true);
+  assert.equal(settingsDialog.includes("<AppearanceSettings />"), true);
   assert.equal(settingsDialog.includes("<LazyAppearanceSettings"), false);
   assert.equal(settingsDialog.includes("<AboutSettings config={props.config} />"), true);
   assert.equal(settingsDialog.includes("useBrowserAppearanceSnapshot"), false);
@@ -164,8 +164,9 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(skillSettings.includes('aria-label="技能列表"'), true);
   assert.equal(skillSettings.includes("SKILL.md"), true);
   assert.equal(appearanceSettings.includes("export function AppearanceSettings"), true);
-  assert.equal(appearanceSettings.includes("useBrowserAppearanceSnapshot"), true);
+  assert.equal(appearanceSettings.includes("useBrowserAppearanceSnapshot"), false);
   assert.equal(appearanceSettings.includes("<ThemeSwitcher"), true);
+  assert.equal(appearanceSettings.includes("当前环境"), false);
   assert.equal(capabilitySettings.includes("网络搜索"), true);
   assert.equal(capabilitySettings.includes("网页查证"), false);
   assert.equal(capabilitySettings.includes("McpReferencePanel"), true);

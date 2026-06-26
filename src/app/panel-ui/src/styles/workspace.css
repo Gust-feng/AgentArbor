@@ -39,6 +39,31 @@
   gap: var(--space-3);
 }
 
+.workspace-directory-field {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.workspace-directory-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+}
+
+.workspace-directory-actions .page-action-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-lg);
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
 .service-settings-stack {
   display: grid;
   gap: var(--space-3);
@@ -53,6 +78,7 @@
 .service-config-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
   gap: var(--space-3);
   border-top: var(--border-width-thin) solid color-mix(in oklch, var(--border) 76%, transparent);
   padding-top: var(--space-3);
@@ -63,6 +89,10 @@
   gap: 6px;
   color: var(--fg);
   font-size: 12px;
+}
+
+.web-search-config-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .mcp-board {
@@ -1587,5 +1617,17 @@
   .skills-row > .capability-toggle {
     justify-content: center;
     width: 100%;
+  }
+
+  .workspace-directory-field {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-directory-actions {
+    width: 100%;
+  }
+
+  .workspace-directory-actions .page-action-button {
+    flex: 1 1 0;
   }
 }

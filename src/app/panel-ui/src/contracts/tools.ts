@@ -169,6 +169,8 @@ export type ToolsResponse = {
       readonly provider?: string;
       readonly maxResults?: number;
       readonly secretConfigured?: boolean;
+      readonly status?: "ready" | "no-provider" | "disabled";
+      readonly engineId?: string;
     };
     readonly catalog?: {
       readonly tools?: readonly ToolCatalogItem[];

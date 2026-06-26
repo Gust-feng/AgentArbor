@@ -37,6 +37,49 @@ test("panel transcript nodes drop generic ordinary processing notes", () => {
   assert.deepEqual(nodes, []);
 });
 
+test("panel transcript nodes attach model usage to completed answer bodies", () => {
+  const nodes = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:event:10:model.output.delta:1",
+      sequence: 1,
+      type: "model.output.delta",
+      delta: "最终回答。",
+      modelCallRefs: ["model-request-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:event:10:model.output.completed",
+      sequence: 2,
+      type: "model.output.completed",
+      summary: "内容已整理。",
+      modelCallRefs: ["model-request-1"],
+      detail: {
+        kind: "work",
+        modelUsage: {
+          inputTokens: 100,
+          outputTokens: 25,
+          totalTokens: 125,
+          latencyMs: 1_500,
+          firstTokenLatencyMs: 300,
+          outputDurationMs: 1_200,
+          outputTokensPerSecond: 20.83,
+        },
+      },
+    }),
+  ]);
+
+  const body = nodes.find((item) => item.kind === "body");
+  assert.equal(body?.text, "最终回答。");
+  assert.deepEqual(body?.modelUsage, {
+    inputTokens: 100,
+    outputTokens: 25,
+    totalTokens: 125,
+    latencyMs: 1_500,
+    firstTokenLatencyMs: 300,
+    outputDurationMs: 1_200,
+    outputTokensPerSecond: 20.83,
+  });
+});
+
 test("timeline projection keeps thinking and excludes answer nodes from the activity rail", () => {
   const projected = timelineVisibleNodes([
     node({ nodeId: "answer", kind: "answer", eventType: "final.result", sequence: 4, summary: "最终回答" }),
@@ -736,6 +779,7 @@ function panelEvent(input: {
   readonly type: string;
   readonly summary?: string;
   readonly delta?: string;
+  readonly detail?: Parameters<typeof createPanelTranscriptNodes>[0][number]["detail"];
   readonly modelCallRefs?: readonly string[];
   readonly toolCallRefs?: readonly string[];
 }) {
@@ -747,6 +791,7 @@ function panelEvent(input: {
     createdAt: "2026-06-04T00:00:00.000Z",
     summary: input.summary,
     delta: input.delta,
+    detail: input.detail,
     sourceRefs: [],
     modelCallRefs: input.modelCallRefs ?? [],
     toolCallRefs: input.toolCallRefs ?? [],
@@ -764,6 +809,7 @@ function node(input: {
   readonly text?: string;
   readonly toolName?: string;
   readonly display?: TranscriptNode["display"];
+  readonly modelUsage?: TranscriptNode["modelUsage"];
   readonly refs?: TranscriptNode["refs"];
 }): TranscriptNode {
   return {
@@ -779,6 +825,7 @@ function node(input: {
     timestamp: "2026-06-04T00:00:00.000Z",
     toolName: input.toolName,
     display: input.display,
+    modelUsage: input.modelUsage,
     refs: input.refs ?? [],
   };
 }

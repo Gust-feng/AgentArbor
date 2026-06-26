@@ -115,6 +115,9 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("function taskSoilInputFromAttachments"), false);
   assert.equal(app.includes("function mergeConfigResponse"), false);
   assert.equal(app.includes("function startSkillChat"), false);
+  assert.equal(app.includes("app.busy || modelResponding"), false);
+  assert.equal(app.includes("queueReadyAfterRunRef"), false);
+  assert.equal(app.includes("if (app.busy) {\n        enqueueMessage(goal);"), true);
   assert.equal(app.includes("SkillsPage"), false);
   assert.equal(app.includes("ToolsPage"), false);
   assert.equal(app.includes("onStartSkill"), false);
@@ -134,8 +137,10 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appRuntimeControls.includes("export function stopLiveUpdates"), true);
   assert.equal(appAttachments.includes("export function taskSoilInputFromAttachments"), true);
   assert.equal(appAttachments.includes("export async function previewContextAttachment"), true);
+  assert.equal(appAttachments.includes("export async function uploadContextAttachmentFiles"), true);
   assert.equal(appAttachments.includes("export function blockedContextAttachment"), true);
   assert.equal(appAttachments.includes("/api/context/attachments/preview"), true);
+  assert.equal(appAttachments.includes("/api/context/attachments/upload"), true);
   assert.equal(appBootstrap.includes("export async function loadAppBootstrap"), true);
   assert.equal(appBootstrap.includes("export function applyAppBootstrap"), true);
   assert.equal(appBootstrap.includes('getJson<ConfigResponse>("/api/config")'), true);
@@ -152,6 +157,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appConfigActions.includes("export async function updateMcpToolState"), true);
   assert.equal(appConfigActions.includes("export async function updateSkillState"), true);
   assert.equal(appConfigActions.includes("export async function refreshSkillCatalog"), true);
+  assert.equal(appConfigActions.includes("export async function selectWorkspaceDirectory"), true);
   assert.equal(appConfigActions.includes('postJson<ConfigResponse>("/api/config/model-provider"'), true);
   assert.equal(appConfigActions.includes('postJson<ToolsResponse>("/api/config/tools/web-search"'), true);
   assert.equal(appConfigActions.includes('postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp"'), true);
@@ -270,6 +276,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appSettingsController.includes("saveMcpServerSettings"), true);
   assert.equal(appSettingsController.includes("updateMcpToolState"), true);
   assert.equal(appSettingsController.includes("updateSkillState"), true);
+  assert.equal(appSettingsController.includes("selectWorkspaceDirectory"), true);
   assert.equal(appState.includes("export type AppState"), true);
   assert.equal(appState.includes("export function createInitialAppState"), true);
   assert.equal(appState.includes("transcriptNodesByRunId"), true);
@@ -404,6 +411,12 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(sidebar.includes("PanelLeftClose"), false);
   assert.equal(sidebar.includes("PanelLeftOpen"), false);
   assert.equal(shellStyles.includes(".app-workbench-sidebar-toggle"), true);
+  assert.equal(app.includes("Maximize2"), true);
+  assert.equal(app.includes("Minimize2"), true);
+  assert.equal(app.includes("getWindowState"), true);
+  assert.equal(app.includes("onWindowStateChanged"), true);
+  assert.equal(app.includes("Square"), false);
+  assert.equal(shellStyles.includes('data-window-animating="true"'), true);
   assert.equal(app.includes("window.confirm"), false);
   assert.equal(app.includes("(response.conversations ?? previous.conversations).filter"), true);
   assert.equal(shellStyles.includes(".topbar"), false);

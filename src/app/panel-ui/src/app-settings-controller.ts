@@ -18,6 +18,7 @@ import {
   saveToolConfirmationConfig,
   saveToolSettings,
   saveWorkspaceDirectory,
+  selectWorkspaceDirectory,
   selectModelProviderModel,
   testMcpServer,
   checkMcpEnvironment,
@@ -42,9 +43,10 @@ export type AppSettingsController = {
   readonly fetchModelsForProfile: (profileId?: string) => Promise<ModelProviderModelCatalog | undefined>;
   readonly saveModelCatalog: (profileId: string, catalog: ModelProviderModelCatalog) => Promise<void>;
   readonly saveWorkspace: (nextWorkspaceDirectory?: string) => Promise<void>;
+  readonly selectWorkspace: () => Promise<void>;
   readonly saveCommandShell: (kind: CommandShellKind | "auto") => Promise<void>;
   readonly saveToolConfirmationPolicy: (policy: ComposerToolConfirmationPolicy) => Promise<void>;
-  readonly saveTools: () => Promise<void>;
+  readonly saveTools: (nextToolForm?: ToolForm) => Promise<void>;
   readonly saveMcpServer: (nextMcpServerForm?: McpServerForm) => Promise<void>;
   readonly loadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
   readonly importMcpConfig: (config: string) => Promise<void>;
@@ -71,6 +73,7 @@ export type AppSettingsControllerOptions = {
   readonly setMcpServerForm: React.Dispatch<React.SetStateAction<McpServerForm>>;
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly modelSaveQueueRef: React.MutableRefObject<Promise<void>>;
+  readonly toolSaveQueueRef: React.MutableRefObject<Promise<void>>;
   readonly mcpToolSaveQueueRef: React.MutableRefObject<Promise<void>>;
   readonly mcpToolUpdateVersionRef: React.MutableRefObject<number>;
   readonly mcpToolCatalogDraftRef: React.MutableRefObject<readonly McpServerCatalogItem[] | undefined>;
@@ -363,6 +366,25 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
+  async function selectWorkspace(): Promise<void> {
+    options.setSavingWorkspace(true);
+    try {
+      const workspace = await selectWorkspaceDirectory();
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({ ...previous, config: { ...previous.config, workspace } }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "工作目录选择失败。",
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingWorkspace(false);
+    }
+  }
+
   async function saveCommandShell(kind: CommandShellKind | "auto"): Promise<void> {
     options.setSavingWorkspace(true);
     try {
@@ -407,10 +429,18 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function saveTools(): Promise<void> {
+  async function saveTools(nextToolForm: ToolForm = options.toolForm): Promise<void> {
+    const save = options.toolSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistTools(nextToolForm));
+    options.toolSaveQueueRef.current = save.catch(() => undefined);
+    await save;
+  }
+
+  async function persistTools(nextToolForm: ToolForm): Promise<void> {
     options.setSavingTools(true);
     try {
-      const response = await saveToolSettings(options.toolForm);
+      const response = await saveToolSettings(nextToolForm);
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
@@ -419,7 +449,9 @@ export function createAppSettingsController(options: AppSettingsControllerOption
             mcpCatalog: response.mcpCatalog ?? previous.tools?.mcpCatalog,
           },
         }));
-        options.setToolForm((previous) => ({ ...previous, tavilyApiKey: "" }));
+        if (nextToolForm.apiKey.trim().length > 0) {
+          options.setToolForm((previous) => ({ ...previous, apiKey: "" }));
+        }
       }
     } catch (error) {
       if (options.mountedRef.current) {
@@ -689,6 +721,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     fetchModelsForProfile,
     saveModelCatalog,
     saveWorkspace,
+    selectWorkspace,
     saveCommandShell,
     saveToolConfirmationPolicy,
     saveTools,

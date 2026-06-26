@@ -15,6 +15,11 @@ export function confirmationRuleLabel(tool: ToolCatalogItem, policy: ToolConfirm
 
 export function providerName(value: string): string {
   if (value === "tavily") return "Tavily";
+  if (value === "exa") return "Exa";
+  if (value === "zai") return "Z.AI";
+  if (value === "google") return "Google";
+  if (value === "bing") return "Bing Legacy";
+  if (value === "model_builtin") return "模型内置";
   if (value === "none") return "未启用";
   return value;
 }

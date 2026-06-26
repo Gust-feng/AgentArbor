@@ -26,6 +26,7 @@
 /* Color layer — per-style palettes (classic; glass palettes are in style-glass.css) */
 @import "./styles/colors-classic-warm.css";
 @import "./styles/colors-classic-forest.css";
+@import "./styles/colors-classic-slate.css";
 
 /* Theme switcher component */
 @import "./styles/theme-switcher.css";

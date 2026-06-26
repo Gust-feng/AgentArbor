@@ -27,6 +27,8 @@ test("configured provider projection keeps user display identity editable", asyn
   assert.equal(settings.includes("provider-detail-logo-edit"), true);
   assert.equal(settings.includes("aria-label=\"供应商名称\""), true);
   assert.equal(settings.includes("LOGO_FILE_MAX_BYTES"), true);
+  assert.equal(settings.includes("LOGO_FILE_MIME_BY_EXTENSION"), true);
+  assert.equal(settings.includes("logoDataUrlFromFileReaderResult"), true);
   assert.equal(form.includes("供应商名称"), false);
   assert.equal(icons.includes("provider-logo-image"), true);
   assert.equal(logos.includes("readonly logoDataUrl?: string"), true);

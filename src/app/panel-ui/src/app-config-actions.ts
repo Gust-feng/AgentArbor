@@ -195,10 +195,18 @@ export async function saveModelProviderCatalog(input: {
   };
 }
 
-export async function saveWorkspaceDirectory(workspaceDirectory: string): Promise<{ readonly workspaceDirectory?: string }> {
+export async function saveWorkspaceDirectory(workspaceDirectory?: string): Promise<{ readonly workspaceDirectory?: string }> {
   const response = await postJson<{ readonly workspace: { readonly workspaceDirectory?: string } }>("/api/config/workspace", {
-    workspaceDirectory,
+    workspaceDirectory: workspaceDirectory ?? "",
   });
+  return response.workspace;
+}
+
+export async function selectWorkspaceDirectory(): Promise<{ readonly workspaceDirectory?: string }> {
+  const response = await postJson<{
+    readonly status?: "completed" | "cancelled";
+    readonly workspace: { readonly workspaceDirectory?: string };
+  }>("/api/config/workspace/select-directory", {});
   return response.workspace;
 }
 
@@ -213,8 +221,9 @@ export async function saveToolConfirmationConfig(policy: ComposerToolConfirmatio
 export async function saveToolSettings(form: ToolForm): Promise<ToolsResponse> {
   return postJson<ToolsResponse>("/api/config/tools/web-search", {
     provider: form.provider,
-    tavilyApiKey: form.tavilyApiKey,
+    apiKey: form.apiKey,
     maxResults: Number(form.maxResults),
+    googleEngineId: form.googleEngineId,
   });
 }
 

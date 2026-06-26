@@ -15,7 +15,7 @@ export function BasicCapabilitiesSettings(props: {
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
   readonly savingTools?: boolean;
-  readonly onSaveTools: () => void;
+  readonly onSaveTools: (form: ToolForm) => void;
 }): React.ReactElement {
   return (
     <div className="service-settings-stack">
@@ -69,13 +69,29 @@ function WebSearchSettings(props: {
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
   readonly saving?: boolean;
-  readonly onSaveTools: () => void;
+  readonly onSaveTools: (form: ToolForm) => void;
 }): React.ReactElement {
-  const configured = props.tools?.tools?.webSearch?.secretConfigured === true;
+  const provider = props.toolForm.provider;
+  const configured =
+    props.tools?.tools?.webSearch?.secretConfigured === true &&
+    props.tools.tools.webSearch.provider === provider;
+  const externalProvider = provider !== "model_builtin";
+  const updateForm = (form: ToolForm, options: { readonly save?: boolean } = { save: true }): void => {
+    props.setToolForm(form);
+    if (options.save !== false) {
+      props.onSaveTools(form);
+    }
+  };
+  const saveSecretOnCommit = (apiKey: string): void => {
+    if (apiKey.trim().length === 0) {
+      return;
+    }
+    props.onSaveTools({ ...props.toolForm, apiKey });
+  };
   return (
-    <section className="settings-card service-settings-card">
+    <section className="settings-card service-settings-card" aria-busy={props.saving === true}>
       <h3>网络搜索</h3>
-      <div className="service-config-grid">
+      <div className="service-config-grid web-search-config-grid">
         <label>
           搜索服务
           <SettingsSelectControl
@@ -84,44 +100,85 @@ function WebSearchSettings(props: {
             value={props.toolForm.provider}
             options={[
               { value: "tavily", label: "Tavily" },
-              { value: "none", label: "无" },
+              { value: "exa", label: "Exa" },
+              { value: "zai", label: "Z.AI" },
+              { value: "google", label: "Google" },
+              { value: "bing", label: "Bing Legacy" },
+              { value: "model_builtin", label: "模型内置" },
             ]}
-            onChange={(value) => props.setToolForm({ ...props.toolForm, provider: value })}
+            onChange={(value) => updateForm({ ...props.toolForm, provider: value, apiKey: "" })}
           />
         </label>
-        <label>
-          Tavily Key
-          <input
-            type="password"
-            value={props.toolForm.tavilyApiKey}
-            spellCheck={false}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            onChange={(event) => props.setToolForm({ ...props.toolForm, tavilyApiKey: event.target.value })}
-            placeholder={configured ? SAVED_API_KEY_MASK : "请输入密钥"}
-          />
-        </label>
-        <label>
-          结果数
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={props.toolForm.maxResults}
-            spellCheck={false}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            onChange={(event) => props.setToolForm({ ...props.toolForm, maxResults: event.target.value })}
-          />
-        </label>
-        <button type="button" className="page-action-button primary" onClick={props.onSaveTools} disabled={props.saving}>
-          {props.saving ? "保存中" : "保存"}
-        </button>
+        {externalProvider && (
+          <label>
+            {webSearchApiKeyLabel(provider)}
+            <input
+              type="password"
+              value={props.toolForm.apiKey}
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              onBlur={(event) => saveSecretOnCommit(event.currentTarget.value)}
+              onChange={(event) => updateForm({ ...props.toolForm, apiKey: event.target.value }, { save: false })}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.currentTarget.blur();
+                }
+              }}
+              placeholder={configured ? SAVED_API_KEY_MASK : "请输入密钥"}
+            />
+          </label>
+        )}
+        {externalProvider && provider === "google" && (
+          <label>
+            Engine ID
+            <input
+              type="text"
+              value={props.toolForm.googleEngineId}
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              onChange={(event) => updateForm({ ...props.toolForm, googleEngineId: event.target.value })}
+              placeholder="cx"
+            />
+          </label>
+        )}
+        {externalProvider && (
+          <label>
+            结果数
+            <input
+              type="number"
+              min={1}
+              max={webSearchMaxResults(provider)}
+              value={props.toolForm.maxResults}
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              onChange={(event) => updateForm({ ...props.toolForm, maxResults: event.target.value })}
+            />
+          </label>
+        )}
       </div>
     </section>
   );
+}
+
+function webSearchApiKeyLabel(provider: string): string {
+  if (provider === "exa") return "Exa Key";
+  if (provider === "zai") return "Z.AI Key";
+  if (provider === "google") return "Google Key";
+  if (provider === "bing") return "Bing Key";
+  return "Tavily Key";
+}
+
+function webSearchMaxResults(provider: string): number {
+  if (provider === "google") return 10;
+  if (provider === "tavily") return 20;
+  if (provider === "exa") return 100;
+  return 50;
 }
 
 function McpServiceBoard(props: {

@@ -2,8 +2,9 @@ export type { ModelForm } from "./model-settings";
 
 export type ToolForm = {
   readonly provider: string;
-  readonly tavilyApiKey: string;
+  readonly apiKey: string;
   readonly maxResults: string;
+  readonly googleEngineId: string;
 };
 
 export type McpServerForm = {

@@ -516,6 +516,15 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatMessageStyles.includes("task-situation"), false);
   assert.equal(chatMessageStyles.includes(".user-message-queued"), true);
   assert.equal(chatMessageStyles.includes(".assistant-workline-collapsed"), true);
+  assert.equal(chatTranscriptChain.includes("AssistantResponseMeta"), true);
+  assert.equal(chatTranscriptChain.includes("workflowModelUsage"), true);
+  assert.equal(chatTranscriptChain.includes("cachedInputTokens"), true);
+  assert.equal(chatTranscriptChain.includes("uncachedInputTokens"), true);
+  assert.equal(chatTranscriptChain.includes("new`"), true);
+  assert.equal(chatTranscriptChain.includes("context`"), true);
+  assert.equal(chatTranscriptChain.includes("首 token"), true);
+  assert.equal(chatMessageStyles.includes(".assistant-response-meta"), true);
+  assert.equal(chatMessageStyles.includes(".assistant-model-usage svg"), true);
   assert.equal(chatMessageStyles.includes("queued-dot-breathe"), true);
   assert.equal(chatMessageStyles.includes(".rich-text"), false);
   assert.equal(chatMessageStyles.includes(".live-stream-frozen-chunk"), false);

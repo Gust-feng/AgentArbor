@@ -25,6 +25,14 @@ export type { ModelForm } from "./model-settings-projection";
 
 const LOGO_FILE_MAX_BYTES = 150_000;
 const LOGO_FILE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+const LOGO_FILE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  ".gif": "image/gif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+};
 
 type ModelProviderProjectionDraft = {
   readonly createdProfiles: readonly ModelProviderProfileItem[];
@@ -267,13 +275,15 @@ export function ModelSettings(props: {
 
   function updateProviderLogo(file: File | undefined): void {
     if (file === undefined) return;
-    if (!LOGO_FILE_TYPES.has(file.type) || file.size > LOGO_FILE_MAX_BYTES) {
+    const mimeType = supportedLogoMimeType(file);
+    if (mimeType === undefined || file.size > LOGO_FILE_MAX_BYTES) {
       return;
     }
     const reader = new FileReader();
     reader.addEventListener("load", () => {
-      if (typeof reader.result !== "string") return;
-      updateModelForm({ logoDataUrl: reader.result, logoCleared: false });
+      const logoDataUrl = logoDataUrlFromFileReaderResult(reader.result, mimeType);
+      if (logoDataUrl === undefined) return;
+      updateModelForm({ logoDataUrl, logoCleared: false });
     });
     reader.readAsDataURL(file);
   }
@@ -633,4 +643,24 @@ function sameProfileList(
 
 function isDefinedString(value: string | undefined): value is string {
   return value !== undefined;
+}
+
+function supportedLogoMimeType(file: File): string | undefined {
+  if (LOGO_FILE_TYPES.has(file.type)) {
+    return file.type;
+  }
+  const normalizedName = file.name.toLowerCase();
+  const extension = Object.keys(LOGO_FILE_MIME_BY_EXTENSION).find((item) => normalizedName.endsWith(item));
+  return extension === undefined ? undefined : LOGO_FILE_MIME_BY_EXTENSION[extension];
+}
+
+function logoDataUrlFromFileReaderResult(result: FileReader["result"], mimeType: string): string | undefined {
+  if (typeof result !== "string") {
+    return undefined;
+  }
+  const separator = result.indexOf(",");
+  if (!result.startsWith("data:") || separator < 0) {
+    return undefined;
+  }
+  return `data:${mimeType};base64,${result.slice(separator + 1)}`;
 }

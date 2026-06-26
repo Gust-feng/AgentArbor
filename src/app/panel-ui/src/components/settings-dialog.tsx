@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from "react";
 import {
+  CheckCircle2,
   CloudCog,
   Database,
   FileText,
+  Folder,
+  HardDrive,
   Info,
+  Monitor,
   Palette,
   Server,
   SlidersHorizontal,
@@ -46,13 +50,14 @@ export function SettingsDialog(props: {
   readonly modelCatalogs?: Readonly<Record<string, ModelProviderModelCatalog>>;
   readonly skills: readonly SkillDefinition[];
   readonly onSaveWorkspace: (workspaceDirectory?: string) => void;
+  readonly onSelectWorkspaceDirectory: () => void;
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
   readonly mcpServerForm: McpServerForm;
   readonly setMcpServerForm: (form: McpServerForm) => void;
   readonly savingTools?: boolean;
-  readonly onSaveTools: () => void;
+  readonly onSaveTools: (form: ToolForm) => void;
   readonly onSaveMcpServer: (form?: McpServerForm) => Promise<void>;
   readonly onLoadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
   readonly onImportMcpConfig: (config: string) => void;
@@ -177,11 +182,12 @@ export function SettingsDialog(props: {
                 workspaceDirectory={props.workspaceDirectory}
                 setWorkspaceDirectory={props.setWorkspaceDirectory}
                 onSave={props.onSaveWorkspace}
+                onSelectDirectory={props.onSelectWorkspaceDirectory}
                 savingCommandShell={props.savingWorkspace}
                 onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
-            {activeGroup === "appearance" && <AppearanceSettings config={props.config} />}
+            {activeGroup === "appearance" && <AppearanceSettings />}
             {activeGroup === "about" && <AboutSettings config={props.config} />}
           </div>
         </div>
@@ -202,32 +208,72 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
 
 function AboutSettings(props: { readonly config?: ConfigResponse }): React.ReactElement {
   const product = props.config?.product;
+  const productName = product?.name ?? "AgentArbor";
+  const version = product?.version ?? "未提供";
+  const defaultEntry = product?.defaultEntry ?? "Desktop Shell / Panel";
+  const configDirectory = product?.configDirectory ?? "未提供";
+  const runtimeDirectory = product?.runtimeDirectory ?? "未提供";
+
   return (
-    <div className="workspace-settings-stack">
-      <section className="settings-card">
-        <h3>{product?.name ?? "AgentArbor"}</h3>
-        <p>桌面通用 Agent 工作台。</p>
-        <div className="settings-row">
-          <span>版本</span>
-          <div><span className="settings-value">{product?.version ?? "未提供"}</span></div>
-        </div>
-        <div className="settings-row">
-          <span>默认入口</span>
-          <div><span className="settings-value">{product?.defaultEntry ?? "Desktop Shell / Panel"}</span></div>
-        </div>
-        <div className="settings-row">
-          <span>默认运行模式</span>
-          <div><span className="settings-value">{product?.runtimeModeLabel ?? "普通 agent"}</span></div>
-        </div>
-        <div className="settings-row">
-          <span>配置目录</span>
-          <div><span className="settings-value">{product?.configDirectory ?? "未提供"}</span></div>
-        </div>
-        <div className="settings-row">
-          <span>运行数据目录</span>
-          <div><span className="settings-value">{product?.runtimeDirectory ?? "未提供"}</span></div>
+    <div className="about-settings">
+      <section className="settings-card about-product-card">
+        <div className="about-product-main">
+          <span className="about-product-mark" aria-hidden="true">
+            <img src="/favicon.svg" alt="" />
+          </span>
+          <div>
+            <h3>{productName}</h3>
+          </div>
         </div>
       </section>
+
+      <section className="about-fact-grid" aria-label="产品运行信息">
+        <AboutFact icon={<CheckCircle2 size={16} />} label="版本" value={version} />
+        <AboutFact icon={<Monitor size={16} />} label="默认入口" value={defaultEntry} />
+      </section>
+
+      <section className="settings-card about-path-card">
+        <div className="settings-card-title-row">
+          <h3>本机数据</h3>
+          <span>仅此设备</span>
+        </div>
+        <div className="about-path-list" aria-label="本机数据目录">
+          <AboutPath icon={<Folder size={16} />} label="配置目录" value={configDirectory} />
+          <AboutPath icon={<HardDrive size={16} />} label="运行数据目录" value={runtimeDirectory} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AboutFact(props: {
+  readonly icon: React.ReactNode;
+  readonly label: string;
+  readonly value: string;
+}): React.ReactElement {
+  return (
+    <div className="about-fact">
+      <span className="about-fact-icon" aria-hidden="true">
+        {props.icon}
+      </span>
+      <span className="about-fact-label">{props.label}</span>
+      <strong>{props.value}</strong>
+    </div>
+  );
+}
+
+function AboutPath(props: {
+  readonly icon: React.ReactNode;
+  readonly label: string;
+  readonly value: string;
+}): React.ReactElement {
+  return (
+    <div className="about-path-row">
+      <span className="about-path-icon" aria-hidden="true">
+        {props.icon}
+      </span>
+      <span className="about-path-label">{props.label}</span>
+      <code>{props.value}</code>
     </div>
   );
 }

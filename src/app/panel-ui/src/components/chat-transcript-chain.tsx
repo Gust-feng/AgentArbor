@@ -1,6 +1,12 @@
 import React, { useCallback, useRef } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  Clock3,
   Copy,
+  Gauge,
+  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import type { ConversationTurn } from "../contracts/conversation";
 import type {
@@ -142,14 +148,7 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
             />
           );
         })}
-        {workflow.copyText.trim().length > 0 && workflow.showCopyActions && (
-          <div className="turn-actions">
-            <button type="button" onClick={() => copyToClipboard(workflow.copyText)}>
-              <Copy size={13} />
-              复制
-            </button>
-          </div>
-        )}
+        <AssistantResponseMeta workflow={workflow} />
       </div>
     </article>
   );
@@ -193,14 +192,7 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
             showActions={true}
           />
         )}
-        {workflow !== undefined && workflow.copyText.trim().length > 0 && workflow.showCopyActions && (
-          <div className="turn-actions">
-            <button type="button" onClick={() => copyToClipboard(workflow.copyText)}>
-              <Copy size={13} />
-              复制
-            </button>
-          </div>
-        )}
+        {workflow !== undefined && <AssistantResponseMeta workflow={workflow} />}
         <AssistantFailureNotice error={props.failure.error} />
         {activitySegments.length > 0 && (
           <div className="assistant-failure-activity">
@@ -279,6 +271,68 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
           </button>
         </div>
       )}
+    </div>
+  );
+});
+
+const AssistantResponseMeta = React.memo(function AssistantResponseMeta(props: {
+  readonly workflow: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
+}): React.ReactElement | null {
+  const showActions = props.workflow.copyText.trim().length > 0 && props.workflow.showCopyActions;
+  const usage = workflowModelUsage(props.workflow);
+  if (!showActions && usage === undefined) {
+    return null;
+  }
+  return (
+    <div className="assistant-response-meta">
+      {showActions && (
+        <div className="turn-actions">
+          <button type="button" onClick={() => copyToClipboard(props.workflow.copyText)}>
+            <Copy size={13} />
+            复制
+          </button>
+        </div>
+      )}
+      <AssistantModelUsageLine usage={usage} />
+    </div>
+  );
+});
+
+type AssistantModelUsage = {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly totalTokens?: number;
+  readonly cachedInputTokens?: number;
+  readonly uncachedInputTokens?: number;
+  readonly reasoningOutputTokens?: number;
+  readonly latencyMs?: number;
+  readonly firstTokenLatencyMs?: number;
+  readonly outputDurationMs?: number;
+  readonly outputTokensPerSecond?: number;
+};
+
+type AssistantModelUsageItem = {
+  readonly key: string;
+  readonly icon: LucideIcon;
+  readonly text: string;
+  readonly title: string;
+};
+
+const AssistantModelUsageLine = React.memo(function AssistantModelUsageLine(props: {
+  readonly usage?: AssistantModelUsage;
+}): React.ReactElement | null {
+  const items = modelUsageItems(props.usage);
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="assistant-model-usage" aria-label="模型 token 信息">
+      {items.map((item) => (
+        <span key={item.key} title={item.title}>
+          <item.icon size={13} strokeWidth={2.2} aria-hidden="true" />
+          {item.text}
+        </span>
+      ))}
     </div>
   );
 });
@@ -379,6 +433,130 @@ function assistantModelLabel(model: AssistantModelBadge | undefined): string | u
   if (model === undefined) return undefined;
   const name = model.modelName.trim();
   return name.length > 0 ? name : undefined;
+}
+
+function workflowModelUsage(
+  workflow: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>
+): AssistantModelUsage | undefined {
+  return [...workflow.segments]
+    .reverse()
+    .find((segment): segment is Extract<typeof segment, { readonly kind: "body" }> =>
+      segment.kind === "body" && segment.modelUsage !== undefined
+    )
+    ?.modelUsage;
+}
+
+function modelUsageItems(usage: AssistantModelUsage | undefined): readonly AssistantModelUsageItem[] {
+  if (usage === undefined) {
+    return [];
+  }
+  const items: AssistantModelUsageItem[] = [];
+  const inputItem = inputUsageItem(usage);
+  if (inputItem !== undefined) {
+    items.push(inputItem);
+  }
+  const outputText = formatTokenCount(usage.outputTokens);
+  if (outputText !== undefined) {
+    const reasoningText = formatTokenCount(usage.reasoningOutputTokens);
+    items.push({
+      key: "output",
+      icon: ArrowDown,
+      text: reasoningText === undefined ? `${outputText} tokens` : `${outputText} tokens (${reasoningText} reasoning)`,
+      title: "输出 token",
+    });
+  }
+  const speedText = formatTokenSpeed(usage.outputTokensPerSecond);
+  if (speedText !== undefined) {
+    items.push({
+      key: "speed",
+      icon: Zap,
+      text: speedText,
+      title: "输出 token 速度",
+    });
+  }
+  const latencyText = formatDuration(usage.latencyMs);
+  if (latencyText !== undefined) {
+    items.push({
+      key: "latency",
+      icon: Clock3,
+      text: latencyText,
+      title: "总耗时",
+    });
+  }
+  const firstTokenText = formatDuration(usage.firstTokenLatencyMs);
+  if (firstTokenText !== undefined) {
+    items.push({
+      key: "first-token",
+      icon: Gauge,
+      text: `首 token ${firstTokenText}`,
+      title: "首 token 延迟",
+    });
+  }
+  return items;
+}
+
+function inputUsageItem(usage: AssistantModelUsage): AssistantModelUsageItem | undefined {
+  const cachedText = formatTokenCount(usage.cachedInputTokens);
+  const uncachedText = formatTokenCount(usage.uncachedInputTokens);
+  if (cachedText !== undefined || uncachedText !== undefined) {
+    const parts = [
+      uncachedText === undefined ? undefined : `${uncachedText} new`,
+      cachedText === undefined ? undefined : `${cachedText} cached`,
+    ].filter((part): part is string => part !== undefined);
+    return {
+      key: "input",
+      icon: ArrowUp,
+      text: parts.join(" + "),
+      title: "输入上下文 token，按 provider usage 拆分为 cache miss 与 cache hit；工具、系统提示和历史前缀命中缓存时计入 cached。",
+    };
+  }
+  const inputText = formatTokenCount(usage.inputTokens);
+  if (inputText === undefined) {
+    return undefined;
+  }
+  return {
+    key: "input",
+    icon: ArrowUp,
+    text: `${inputText} context`,
+    title: "整次模型请求上下文 token；provider 未返回 cache hit/miss 拆分。",
+  };
+}
+
+function formatTokenSpeed(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  const fixed = value >= 10 ? value.toFixed(1) : value.toFixed(2);
+  return `${trimTrailingZeros(fixed)} tok/s`;
+}
+
+function formatDuration(ms: number | undefined): string | undefined {
+  if (ms === undefined || !Number.isFinite(ms) || ms < 0) {
+    return undefined;
+  }
+  if (ms < 1_000) {
+    return `${Math.round(ms)}ms`;
+  }
+  const seconds = ms / 1_000;
+  return `${trimTrailingZeros((seconds >= 10 ? seconds.toFixed(1) : seconds.toFixed(2)))}s`;
+}
+
+function formatTokenCount(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  const rounded = Math.max(0, Math.floor(value));
+  if (rounded >= 1_000_000) {
+    return `${trimTrailingZeros((rounded / 1_000_000).toFixed(1))}M`;
+  }
+  if (rounded >= 1_000) {
+    return `${trimTrailingZeros((rounded / 1_000).toFixed(1))}K`;
+  }
+  return rounded.toLocaleString("en-US");
+}
+
+function trimTrailingZeros(value: string): string {
+  return value.replace(/\.0+$/u, "").replace(/(\.\d*?)0+$/u, "$1");
 }
 
 function streamingPreviewText(value: string): string {

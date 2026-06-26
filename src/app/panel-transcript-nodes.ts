@@ -1,4 +1,5 @@
 import type { TranscriptNode, TranscriptNodePhase } from "../domain/basic-agent/index.js";
+import type { ModelUsage } from "../domain/intelligence/index.js";
 import type { ObservationRef } from "../domain/observation/index.js";
 import { type ToolDisplayProjection, type ToolErrorDomain, type ToolErrorFacts, type ToolResultEnvelope } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
@@ -51,6 +52,7 @@ export type PanelTranscriptStreamEvent = {
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;
     readonly errorFacts?: ToolErrorFacts;
+    readonly modelUsage?: ModelUsage;
   };
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];
@@ -234,6 +236,7 @@ function transcriptNodeForEvent(
       phase: "completed",
       title: "结果",
       summary: event.summary,
+      modelUsage: event.detail?.modelUsage,
     });
   }
   if (event.type === "run.failed" || event.type === "run.blocked" || event.type === "run.cancelled") {
@@ -344,6 +347,7 @@ function bodyNodeFromPending(input: PendingBodyNode): TranscriptNode {
     title: "",
     summary: compactSafeLine(input.stream.text, 220),
     text: input.stream.text,
+    modelUsage: input.event.detail?.modelUsage,
   });
 }
 
@@ -412,6 +416,7 @@ function transcriptNode(
     readonly text?: string;
     readonly display?: ToolDisplayProjection;
     readonly confirmation?: TranscriptNode["confirmation"];
+    readonly modelUsage?: ModelUsage;
   }
 ): TranscriptNode {
   return {
@@ -428,6 +433,7 @@ function transcriptNode(
     toolName: event.toolName,
     display: input.display,
     confirmation: input.confirmation,
+    modelUsage: input.modelUsage,
     refs: transcriptRefsForEvent(event),
   };
 }

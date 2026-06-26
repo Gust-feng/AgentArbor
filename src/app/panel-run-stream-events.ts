@@ -1,5 +1,6 @@
 import type { ArborMessageType } from "../domain/common.js";
 import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../domain/config/index.js";
+import type { ModelUsage } from "../domain/intelligence/index.js";
 import {
   createRunObservationEventViews,
   type RunObservationEventView,
@@ -11,6 +12,7 @@ import {
 import {
   asRecord,
   isString,
+  numberOrUndefined,
   stringOrUndefined,
   unique,
 } from "./panel-read-model-utils.js";
@@ -107,6 +109,7 @@ export function createPanelRunStreamEvents(input: {
   if (input.status === "completed") {
     const finalSummary = finalResultSummary(input);
     if (finalSummary !== undefined) {
+      const modelUsage = latestCompletedModelUsage(input.eventEntries);
       push({
         eventId: `${input.runId}:final.result`,
         runId: input.runId,
@@ -115,6 +118,10 @@ export function createPanelRunStreamEvents(input: {
         agentLabel,
         summary: finalSummary,
         status: "completed",
+        detail: modelUsage === undefined ? undefined : {
+          kind: "work",
+          modelUsage,
+        },
         sourceRefs: finalSourceRefs(input),
         modelCallRefs: [],
         toolCallRefs: [],
@@ -318,6 +325,10 @@ function appendStreamEventsForEvent(input: {
       agentLabel: "助手",
       summary: modelCompletedSummary(payload),
       status: "completed",
+      detail: {
+        kind: "work",
+        modelUsage: modelUsageOrUndefined(payload.usage),
+      },
     });
     return;
   }
@@ -531,4 +542,45 @@ function toolCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, 
     return [];
   }
   return stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string];
+}
+
+function modelUsageOrUndefined(value: unknown): ModelUsage | undefined {
+  const record = asRecord(value);
+  const usage: ModelUsage = {
+    inputTokens: nonNegativeNumber(record.inputTokens),
+    outputTokens: nonNegativeNumber(record.outputTokens),
+    totalTokens: nonNegativeNumber(record.totalTokens),
+    cachedInputTokens: nonNegativeNumber(record.cachedInputTokens),
+    uncachedInputTokens: nonNegativeNumber(record.uncachedInputTokens),
+    reasoningOutputTokens: nonNegativeNumber(record.reasoningOutputTokens),
+    estimatedCostUsd: nonNegativeNumber(record.estimatedCostUsd),
+    latencyMs: nonNegativeNumber(record.latencyMs),
+    firstTokenLatencyMs: nonNegativeNumber(record.firstTokenLatencyMs),
+    outputDurationMs: nonNegativeNumber(record.outputDurationMs),
+    outputTokensPerSecond: nonNegativeNumber(record.outputTokensPerSecond),
+  };
+  const compact = Object.fromEntries(Object.entries(usage).filter(([, item]) => item !== undefined)) as ModelUsage;
+  return Object.keys(compact).length === 0 ? undefined : compact;
+}
+
+function latestCompletedModelUsage(entries: readonly EventLogEntry[]): ModelUsage | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type !== "model.completed") {
+      continue;
+    }
+    const usage = modelUsageOrUndefined(asRecord(entry.message.payload).usage);
+    if (usage !== undefined) {
+      return usage;
+    }
+  }
+  return undefined;
+}
+
+function nonNegativeNumber(value: unknown): number | undefined {
+  const number = numberOrUndefined(value);
+  if (number === undefined || number < 0) {
+    return undefined;
+  }
+  return number;
 }

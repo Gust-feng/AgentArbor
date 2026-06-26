@@ -1,4 +1,5 @@
 import { isStaleModelProgressSummary } from "./panel-model-progress-copy.js";
+import type { ModelUsage } from "../domain/intelligence/index.js";
 import { userVisibleAnswer } from "./panel-assistant-visible-text.js";
 import { genericItemLabel } from "./panel-transcript-tool-format.js";
 import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
@@ -135,6 +136,7 @@ export type ProjectableTranscriptNode = {
     readonly runId?: string;
     readonly actionSummary?: string;
   };
+  readonly modelUsage?: ModelUsage;
   readonly refs: readonly TranscriptObservationRefLike[];
 };
 

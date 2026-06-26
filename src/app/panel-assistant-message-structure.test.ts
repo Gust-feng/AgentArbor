@@ -279,6 +279,71 @@ test("assistant message structure exposes segment lifecycle", () => {
   );
 });
 
+test("assistant message structure keeps model usage on the matching answer body", () => {
+  const structure = projectAssistantMessageStructure({
+    transcriptNodes: [
+      node({
+        nodeId: "body-1",
+        sequence: 1,
+        kind: "body",
+        eventType: "model.output.completed",
+        phase: "completed",
+        text: "最终回答。",
+        modelUsage: {
+          inputTokens: 100,
+          outputTokens: 25,
+          totalTokens: 125,
+          latencyMs: 1_500,
+          firstTokenLatencyMs: 300,
+          outputDurationMs: 1_200,
+          outputTokensPerSecond: 20.83,
+        },
+      }),
+    ],
+  });
+
+  const body = structure.segments.find((segment) => segment.kind === "body");
+  assert.deepEqual(body?.kind === "body" ? body.modelUsage : undefined, {
+    inputTokens: 100,
+    outputTokens: 25,
+    totalTokens: 125,
+    latencyMs: 1_500,
+    firstTokenLatencyMs: 300,
+    outputDurationMs: 1_200,
+    outputTokensPerSecond: 20.83,
+  });
+});
+
+test("assistant message structure applies final-result model usage to fallback answer bodies", () => {
+  const structure = projectAssistantMessageStructure({
+    fallbackText: "直接回答。",
+    transcriptNodes: [
+      node({
+        nodeId: "answer-1",
+        sequence: 1,
+        kind: "answer",
+        eventType: "final.result",
+        phase: "completed",
+        summary: "直接回答。",
+        modelUsage: {
+          inputTokens: 12,
+          outputTokens: 6,
+          totalTokens: 18,
+          latencyMs: 800,
+        },
+      }),
+    ],
+  });
+
+  const body = structure.segments.find((segment) => segment.kind === "body");
+  assert.deepEqual(body?.kind === "body" ? body.modelUsage : undefined, {
+    inputTokens: 12,
+    outputTokens: 6,
+    totalTokens: 18,
+    latencyMs: 800,
+  });
+});
+
 test("assistant message structure merges fallback answer into the latest body when the copy overlaps", () => {
   const structure = projectAssistantMessageStructure({
     fallbackText: "最终回答",
@@ -328,6 +393,7 @@ function node(input: {
   readonly text?: string;
   readonly summary?: string;
   readonly refs?: ProjectableTranscriptNode["refs"];
+  readonly modelUsage?: ProjectableTranscriptNode["modelUsage"];
 }): ProjectableTranscriptNode {
   return {
     nodeId: input.nodeId,
@@ -340,6 +406,7 @@ function node(input: {
     text: input.text,
     summary: input.summary,
     timestamp: "2026-06-18T00:00:00.000Z",
+    modelUsage: input.modelUsage,
     refs: input.refs ?? [],
   };
 }

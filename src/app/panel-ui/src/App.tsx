@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Minus, PanelLeftClose, PanelLeftOpen, Square, X } from "lucide-react";
+import { Maximize2, Minimize2, Minus, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { isConversationWaitingForUser } from "./conversation-state";
 import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
@@ -11,7 +11,8 @@ import {
   startupIntroTimingStyle,
   useStartupIntro,
 } from "./app-startup-intro";
-import { selectLocalContextAttachment, uniqueAttachments } from "./app-attachments";
+import { getStartupAnimationEnabled, subscribeMotionSettingsChanged } from "./app-motion";
+import { selectLocalContextAttachment, uniqueAttachments, uploadContextAttachmentFiles } from "./app-attachments";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
   normalizeVisibleAiMode,
@@ -39,7 +40,6 @@ import {
 } from "./app-run-projection";
 import { createAppRunController } from "./app-run-controller";
 import {
-  shouldKeepRefreshing,
   stopLiveUpdates,
 } from "./app-runtime-controls";
 import { createInitialAppState } from "./app-state";
@@ -54,12 +54,18 @@ type StartupIntroRootStyle = React.CSSProperties & {
   "--startup-intro-empty-grid-top-padding"?: string;
 };
 
+type DesktopWindowState = {
+  readonly maximized: boolean;
+  readonly animating: boolean;
+};
+
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
   const [screen, setScreen] = useState<Screen>("chat-empty");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("models");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsedPreference);
+  const [startupAnimationEnabled, setStartupAnimationEnabled] = useState(getStartupAnimationEnabled);
   const [inputCloseSignal, setInputCloseSignal] = useState(0);
   const [goal, setGoal] = useState("");
   const [aiMode, setAiMode] = useState<VisibleAiMode>("openai-responses");
@@ -81,8 +87,9 @@ export function App(): React.ReactElement {
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
   const [toolForm, setToolForm] = useState<ToolForm>({
     provider: "tavily",
-    tavilyApiKey: "",
+    apiKey: "",
     maxResults: "5",
+    googleEngineId: "",
   });
   const [mcpServerForm, setMcpServerForm] = useState<McpServerForm>({
     serverId: "",
@@ -125,6 +132,7 @@ export function App(): React.ReactElement {
   const conversationLoadAbortRef = useRef<AbortController | undefined>(undefined);
   const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const toolSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const mcpToolSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const mcpToolUpdateVersionRef = useRef(0);
   const mcpToolCatalogDraftRef = useRef<readonly McpServerCatalogItem[] | undefined>(undefined);
@@ -192,9 +200,10 @@ export function App(): React.ReactElement {
     const webSearch = app.tools?.tools?.webSearch;
     if (webSearch !== undefined) {
       setToolForm({
-        provider: webSearch.provider ?? "tavily",
-        tavilyApiKey: "",
+        provider: webSearch.provider === "none" ? "model_builtin" : (webSearch.provider ?? "tavily"),
+        apiKey: "",
         maxResults: String(webSearch.maxResults ?? 5),
+        googleEngineId: webSearch.engineId ?? "",
       });
     }
   }, [app.tools]);
@@ -239,7 +248,6 @@ export function App(): React.ReactElement {
   );
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = useMemo(() => projectCurrentRun(app), currentRunProjectionDeps(app));
-  const modelResponding = currentRun.run !== undefined && shouldKeepRefreshing(currentRun.run.status);
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
   const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
   const pendingCount = Math.max(pendingConversationCount, pendingConfirmation === undefined ? 0 : 1);
@@ -296,6 +304,7 @@ export function App(): React.ReactElement {
     setMcpServerForm,
     mountedRef,
     modelSaveQueueRef,
+    toolSaveQueueRef,
     mcpToolSaveQueueRef,
     mcpToolUpdateVersionRef,
     mcpToolCatalogDraftRef,
@@ -313,6 +322,7 @@ export function App(): React.ReactElement {
     fetchModelsForProfile,
     saveModelCatalog,
     saveWorkspace,
+    selectWorkspace,
     saveCommandShell,
     saveToolConfirmationPolicy,
     saveTools,
@@ -350,6 +360,10 @@ export function App(): React.ReactElement {
     persistSidebarCollapsedPreference(sidebarCollapsed);
   }, [sidebarCollapsed]);
 
+  useEffect(() => subscribeMotionSettingsChanged(() => {
+    setStartupAnimationEnabled(getStartupAnimationEnabled());
+  }), []);
+
   function selectInputModel(modelOptionId: string): void {
     const fallbackModelId = selectedModelId;
     setComposerSelectedModelId(modelOptionId);
@@ -372,6 +386,24 @@ export function App(): React.ReactElement {
     } catch (error) {
       if (mountedRef.current) {
         setApp((previous) => ({ ...previous, error: errorText(error, "添加附件失败。") }));
+      }
+    } finally {
+      if (mountedRef.current) setContextBusy(false);
+    }
+  }
+
+  async function uploadAttachments(files: readonly File[]): Promise<void> {
+    if (contextBusy || files.length === 0) return;
+    setContextBusy(true);
+    try {
+      const uploaded = await uploadContextAttachmentFiles(files);
+      if (mountedRef.current && uploaded.length > 0) {
+        setAttachments((previous) => uniqueAttachments([...previous, ...uploaded]));
+        setApp((previous) => ({ ...previous, error: undefined }));
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "上传附件失败。") }));
       }
     } finally {
       if (mountedRef.current) setContextBusy(false);
@@ -479,41 +511,22 @@ export function App(): React.ReactElement {
     );
   }, []);
 
-  const previousRunActivityRef = useRef<{ readonly runId?: string; readonly responding: boolean }>({ responding: false });
-  const queueReadyAfterRunRef = useRef<string | undefined>(undefined);
-  const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    const previousRunActivity = previousRunActivityRef.current;
-    const activeRun = currentRun.run;
-    previousRunActivityRef.current = {
-      runId: activeRun?.runId,
-      responding: modelResponding,
-    };
-    if (!previousRunActivity.responding || modelResponding) return;
-    if (activeRun === undefined || activeRun.runId !== previousRunActivity.runId) return;
-    queueReadyAfterRunRef.current = activeRun.status === "completed" ? activeRun.runId : undefined;
-  }, [currentRun.run, modelResponding]);
-
-  useEffect(() => {
-    const readyRunId = queueReadyAfterRunRef.current;
-    if (readyRunId === undefined || app.busy) return;
-    if (currentRun.run?.runId !== readyRunId) return;
-    if (dispatchedQueueAfterRunRef.current === readyRunId) return;
     if (queuedMessages.length === 0) return;
+    if (app.busy) return;
     const next = queuedMessages[0];
     if (next === undefined) return;
-    dispatchedQueueAfterRunRef.current = readyRunId;
-    queueReadyAfterRunRef.current = undefined;
     setQueuedMessages((previous) => previous.slice(1));
     setGoal(next.content);
     void startTask(next.content);
-  }, [app.busy, currentRun.run, queuedMessages, startTask]);
+  }, [app.busy, queuedMessages, startTask]);
 
   const inputProps = {
     value: goal,
     onChange: setGoal,
     attachments,
     onSelectAttachment: () => void selectAttachment(),
+    onUploadAttachmentFiles: (files: readonly File[]) => void uploadAttachments(files),
     onRemoveAttachment: removeAttachment,
     contextBusy,
     busy: app.busy,
@@ -528,7 +541,7 @@ export function App(): React.ReactElement {
     onModelSelect: selectInputModel,
     onOpenSettings: () => openSettings("models"),
     onSubmit: () => {
-      if (app.busy || modelResponding) {
+      if (app.busy) {
         enqueueMessage(goal);
         setGoal("");
       } else {
@@ -537,14 +550,13 @@ export function App(): React.ReactElement {
     },
     allowInputWhileBusy: true,
     onCancel: () => {
-      queueReadyAfterRunRef.current = undefined;
       setQueuedMessages([]);
       void cancelRun();
     },
   };
 
   const isBootstrapping = app.config === undefined && app.conversations.length === 0 && app.error === undefined;
-  const startupIntro = useStartupIntro(isBootstrapping);
+  const startupIntro = useStartupIntro(isBootstrapping, { startupAnimationEnabled });
   const startupIntroStyle = useMemo(() => {
     const style = startupIntroTimingStyle(startupIntro.timing) as StartupIntroRootStyle;
     if (startupIntro.reveal !== undefined) {
@@ -640,6 +652,7 @@ export function App(): React.ReactElement {
           modelCatalogs={modelCatalogs}
           skills={app.skills}
           onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
+          onSelectWorkspaceDirectory={() => void selectWorkspace()}
           onSaveCommandShell={saveCommandShell}
           tools={app.tools}
           toolForm={toolForm}
@@ -647,7 +660,7 @@ export function App(): React.ReactElement {
           mcpServerForm={mcpServerForm}
           setMcpServerForm={setMcpServerForm}
           savingTools={savingTools}
-          onSaveTools={() => void saveTools()}
+          onSaveTools={(nextToolForm) => void saveTools(nextToolForm)}
           onSaveMcpServer={saveMcpServer}
           onLoadMcpReferences={loadMcpReferences}
           onImportMcpConfig={(config) => void importMcpConfig(config)}
@@ -692,6 +705,12 @@ function WorkbenchHeader(props: {
           >
             {props.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
+          <div className="app-workbench-brand" aria-label="AgentArbor">
+            <span className="app-workbench-brand-mark" aria-hidden="true">
+              <img src="/favicon.svg" alt="" />
+            </span>
+            <strong>AgentArbor</strong>
+          </div>
         </div>
         {hasDesktopWindowControls && <DesktopWindowControls />}
       </div>
@@ -700,6 +719,32 @@ function WorkbenchHeader(props: {
 }
 
 function DesktopWindowControls(): React.ReactElement {
+  const [windowState, setWindowState] = useState<DesktopWindowState>({
+    maximized: false,
+    animating: false,
+  });
+
+  useEffect(() => {
+    const desktop = window.agentarborDesktop;
+    if (desktop === undefined) return;
+    let mounted = true;
+    void desktop.getWindowState().then((nextState) => {
+      if (mounted) {
+        setWindowState(nextState);
+      }
+    }).catch(() => undefined);
+    const unsubscribe = desktop.onWindowStateChanged((nextState) => {
+      setWindowState(nextState);
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const maximizeLabel = windowState.maximized ? "还原窗口" : "最大化窗口";
+  const MaximizeIcon = windowState.maximized ? Minimize2 : Maximize2;
+
   return (
     <div className="app-window-controls" aria-label="窗口控制">
       <button
@@ -714,11 +759,14 @@ function DesktopWindowControls(): React.ReactElement {
       <button
         type="button"
         className="app-window-control"
-        aria-label="最大化或还原窗口"
-        title="最大化/还原"
+        aria-label={maximizeLabel}
+        aria-pressed={windowState.maximized}
+        data-window-state={windowState.maximized ? "maximized" : "normal"}
+        data-window-animating={windowState.animating ? "true" : "false"}
+        title={maximizeLabel}
         onClick={() => window.agentarborDesktop?.toggleMaximizeWindow()}
       >
-        <Square size={12} />
+        <MaximizeIcon size={14} />
       </button>
       <button
         type="button"

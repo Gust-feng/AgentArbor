@@ -49,7 +49,7 @@ export type PanelRunTrackingReadModel = {
     readonly sourcePreference: SanitizedInformationAccessConfig["sourcePreference"];
     readonly web: {
       readonly provider: SanitizedInformationAccessConfig["web"]["provider"];
-      readonly providerKind: "tavily";
+      readonly providerKind: SanitizedInformationAccessConfig["web"]["providerKind"];
       readonly maxResults: number;
       readonly secretConfigured: boolean;
       readonly status: "ready" | "no-provider" | "disabled";

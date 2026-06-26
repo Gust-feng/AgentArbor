@@ -491,6 +491,15 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
         requestId: "request-direct",
         contractId: "desktop.chat.answer.v1",
         decisionSummary: "Direct answer text.",
+        usage: {
+          inputTokens: 40,
+          outputTokens: 12,
+          totalTokens: 52,
+          latencyMs: 900,
+          firstTokenLatencyMs: 240,
+          outputDurationMs: 660,
+          outputTokensPerSecond: 18.18,
+        },
       }),
     ],
     createdAt: "2026-05-07T00:00:00.000Z",
@@ -547,9 +556,20 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
     updatedAt: "2026-05-07T00:00:05.000Z",
   });
   const completedTool = withTool.find((event) => event.type === "tool.completed");
+  const directAnswerNode = createPanelTranscriptNodes(direct).find((node) => node.kind === "answer");
 
   assert.deepEqual(direct.map((event) => event.type), ["run.started", "final.result"]);
   assert.equal(direct.at(-1)?.summary?.includes("Direct answer text."), true);
+  assert.deepEqual(direct.at(-1)?.detail?.modelUsage, {
+    inputTokens: 40,
+    outputTokens: 12,
+    totalTokens: 52,
+    latencyMs: 900,
+    firstTokenLatencyMs: 240,
+    outputDurationMs: 660,
+    outputTokensPerSecond: 18.18,
+  });
+  assert.deepEqual(directAnswerNode?.modelUsage, direct.at(-1)?.detail?.modelUsage);
   assert.equal(withTool.some((event) => event.type === "agent.note.delta"), false);
   assert.equal(withTool.some((event) => event.type === "tool.requested"), true);
   assert.equal(withTool.some((event) => event.type === "model.output.completed"), true);
@@ -1153,6 +1173,7 @@ function modelCompletedEntry(input: {
   readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
   readonly reasoningContent?: string;
   readonly reasoningSummary?: string;
+  readonly usage?: Record<string, unknown>;
 }): EventLogEntry {
   const type: ArborMessageType = "model.completed";
   const message: ArborMessage = {
@@ -1174,6 +1195,7 @@ function modelCompletedEntry(input: {
       outputKind: "explanation",
       validationStatus: "passed",
       visibleOutput: visibleOutput(input.contractId, input.decisionSummary),
+      usage: input.usage,
       reasoningOutput:
         input.reasoningSummary === undefined && input.reasoningContent === undefined
           ? undefined

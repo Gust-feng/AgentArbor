@@ -17,6 +17,7 @@ export type TranscriptNodeIdentityLike = {
   readonly summary?: string;
   readonly text?: string;
   readonly timestamp?: string;
+  readonly modelUsage?: unknown;
   readonly refs?: readonly TranscriptNodeRefLike[];
 };
 
@@ -87,6 +88,7 @@ export function mergeTranscriptNodes<TNode extends TranscriptNodeIdentityLike>(
     nodeId: previous.nodeId,
     sequence: previous.sequence,
     timestamp: previous.timestamp ?? incoming.timestamp,
+    modelUsage: incoming.modelUsage ?? previous.modelUsage,
     refs: mergeTranscriptRefs(previous.refs ?? [], incoming.refs ?? []),
     text,
     summary: text === undefined ? incoming.summary ?? previous.summary : compactTranscriptSummary(text),

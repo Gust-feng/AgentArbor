@@ -36,6 +36,7 @@ export type QueuedChatMessage = {
 type AttachmentInputProps = {
   readonly attachments: readonly ContextAttachment[];
   readonly onSelectAttachment: () => void;
+  readonly onUploadAttachmentFiles?: (files: readonly File[]) => void | Promise<void>;
   readonly onRemoveAttachment: (attachmentId: string) => void;
   readonly contextBusy?: boolean;
 };
@@ -108,9 +109,11 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
   const [confirmedChip, setConfirmedChip] = useState<ComposerChipFeedback | undefined>();
+  const [fileDragOver, setFileDragOver] = useState(false);
   const selectedModel = props.models.find((model) => model.id === props.selectedModelId);
   const canSend = props.value.trim().length > 0 && (!props.busy || props.allowInputWhileBusy === true);
   const modelGroups = useMemo(() => groupModels(props.models), [props.models]);
+  const canUploadAttachments = props.onUploadAttachmentFiles !== undefined && props.contextBusy !== true;
 
   function showChipFeedback(target: ComposerChipFeedback): void {
     if (chipFeedbackTimerRef.current !== undefined) {
@@ -203,6 +206,49 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
     setAccessMenuOpen(false);
   }
 
+  function uploadFiles(files: readonly File[]): void {
+    if (files.length === 0 || props.onUploadAttachmentFiles === undefined || props.contextBusy === true) {
+      return;
+    }
+    Promise.resolve(props.onUploadAttachmentFiles(files)).catch(() => {
+      // The app controller projects the failure into the shared error line.
+    });
+  }
+
+  function handleFileDrag(event: React.DragEvent<HTMLDivElement>): void {
+    if (!dragHasFiles(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = canUploadAttachments ? "copy" : "none";
+    setFileDragOver(true);
+  }
+
+  function handleFileDragLeave(event: React.DragEvent<HTMLDivElement>): void {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
+      return;
+    }
+    setFileDragOver(false);
+  }
+
+  function handleFileDrop(event: React.DragEvent<HTMLDivElement>): void {
+    if (!dragHasFiles(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    setFileDragOver(false);
+    uploadFiles(filesFromFileList(event.dataTransfer.files));
+  }
+
+  function handleTextPaste(event: React.ClipboardEvent<HTMLTextAreaElement>): void {
+    const files = filesFromClipboard(event.clipboardData);
+    if (files.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    uploadFiles(files);
+  }
+
   function selectModel(modelId: string): void {
     if (modelId === props.selectedModelId) {
       setModelMenuOpen(false);
@@ -215,7 +261,13 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   }
 
   const inputCard = (
-    <div className={`chat-input-card ${focused ? "focused" : ""}`}>
+    <div
+      className={`chat-input-card ${focused ? "focused" : ""} ${fileDragOver ? "drag-over" : ""}`}
+      onDragEnter={handleFileDrag}
+      onDragOver={handleFileDrag}
+      onDragLeave={handleFileDragLeave}
+      onDrop={handleFileDrop}
+    >
       {props.attachments.length > 0 && (
         <div className="attachment-row">
           {props.attachments.map((attachment) => (
@@ -241,6 +293,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
         onChange={(event) => props.onChange(event.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        onPaste={handleTextPaste}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
@@ -587,4 +640,27 @@ function toolAccessPolicyLabel(value: ComposerToolConfirmationPolicy): string {
 
 function modelOptionInitial(model: ChatModelOption): string {
   return (model.providerLabel.trim() || model.name.trim() || "M").slice(0, 1).toUpperCase();
+}
+
+function dragHasFiles(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes("Files");
+}
+
+function filesFromFileList(files: FileList | null | undefined): readonly File[] {
+  return Array.from(files ?? []).filter(isUsableFile);
+}
+
+function filesFromClipboard(dataTransfer: DataTransfer): readonly File[] {
+  const directFiles = filesFromFileList(dataTransfer.files);
+  if (directFiles.length > 0) {
+    return directFiles;
+  }
+  return Array.from(dataTransfer.items)
+    .map((item) => item.kind === "file" ? item.getAsFile() : undefined)
+    .filter((file): file is File => file !== undefined && file !== null)
+    .filter(isUsableFile);
+}
+
+function isUsableFile(file: File): boolean {
+  return file.name.length > 0 || file.size > 0 || file.type.length > 0;
 }

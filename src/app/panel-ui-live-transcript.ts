@@ -1,3 +1,4 @@
+import type { ModelUsage } from "../domain/intelligence/index.js";
 import type { LiveModelTurnBuffer, LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import {
   comparableTranscriptText,
@@ -33,6 +34,7 @@ export type LiveTranscriptNode = {
   readonly summary?: string;
   readonly text?: string;
   readonly timestamp: string;
+  readonly modelUsage?: ModelUsage;
   readonly refs: readonly LiveTranscriptObservationRef[];
 };
 
@@ -196,6 +198,7 @@ function liveSideTextNode(runId: string, turn: LiveModelTurnBuffer, existing: Li
     summary: compact(text, 220),
     text,
     timestamp: existing?.timestamp ?? "",
+    modelUsage: existing?.modelUsage,
     refs: existing === undefined ? modelRefs : mergeRefs(existing.refs, modelRefs),
   };
 }

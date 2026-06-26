@@ -4,6 +4,7 @@ import {
   createStartupIntroDefaultWindowSize,
   createStartupIntroWindowSize,
 } from "../../panel-startup-intro-geometry";
+import { isReducedMotionEffective, subscribeMotionSettingsChanged } from "./app-motion";
 
 export type StartupIntroPhase = "loading" | "handoff-ready" | "expanding" | "title-ready" | "title-handoff" | "done";
 export type StartupIntroVisiblePhase = Exclude<StartupIntroPhase, "done">;
@@ -46,6 +47,10 @@ export type StartupIntroState = {
   readonly overlayPhase: StartupIntroVisiblePhase | undefined;
   readonly timing: StartupIntroTiming;
   readonly reveal: StartupIntroReveal | undefined;
+};
+
+type StartupIntroOptions = {
+  readonly startupAnimationEnabled?: boolean;
 };
 
 type StartupIntroWindowExpansion = {
@@ -164,7 +169,6 @@ const STARTUP_INTRO_TITLE_HANDOFF_SAMPLE_FRAMES = 4;
 const STARTUP_INTRO_HANDOFF_HOLD_MS = 0;
 const STARTUP_INTRO_VISUAL_SAMPLE_INTERVAL_MS = 80;
 const REDUCED_MOTION_EXPAND_MS = 80;
-const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 const STARTUP_INTRO_TITLE_HANDOFF_SETTLE_MS = 980;
 const REDUCED_MOTION_TITLE_HANDOFF_SETTLE_MS = 96;
 const STARTUP_INTRO_TITLE_BRIDGE_DURATION_MS = 760;
@@ -183,15 +187,22 @@ const STARTUP_INTRO_TIMING = {
 } as const;
 const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-export function useStartupIntro(isBootstrapping: boolean): StartupIntroState {
+export function useStartupIntro(
+  isBootstrapping: boolean,
+  options: StartupIntroOptions = {},
+): StartupIntroState {
   const runtimeMode = readStartupRuntimeMode();
-  const [phase, setPhase] = useState<StartupIntroPhase>("loading");
+  const startupAnimationEnabled = options.startupAnimationEnabled !== false;
+  const [phase, setPhase] = useState<StartupIntroPhase>(() => startupAnimationEnabled ? "loading" : "done");
   const [reveal, setReveal] = useState<StartupIntroReveal | undefined>(undefined);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(readPrefersReducedMotion);
   const [timing, setTiming] = useState(() => createStartupIntroTiming({ reducedMotion: readPrefersReducedMotion() }));
   const handoffVisibleNotifiedRef = useRef(false);
   const introStartedAtRef = useRef(readStartupIntroNow());
   const desktopStartupRequestedRef = useRef(false);
+  const disabledStartupStateAppliedRef = useRef(false);
+  const disabledStartupOverlayReadyRef = useRef(false);
+  const disabledStartupCompletedRef = useRef(false);
   const rendererFrameProbeRef = useRef<StartupIntroRendererFrameProbe | undefined>(undefined);
   const rendererFrameStatsRef = useRef<StartupIntroRendererFrameStats | undefined>(undefined);
   const rendererFrameStatsNotifiedRef = useRef(false);
@@ -207,20 +218,53 @@ export function useStartupIntro(isBootstrapping: boolean): StartupIntroState {
   };
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia(REDUCED_MOTION_QUERY);
-    const update = () => setPrefersReducedMotion(media.matches);
+    const update = () => setPrefersReducedMotion(readPrefersReducedMotion());
     update();
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", update);
-      return () => media.removeEventListener("change", update);
-    }
-    media.addListener(update);
-    return () => media.removeListener(update);
+    return subscribeMotionSettingsChanged(update);
   }, []);
 
   useEffect(() => {
-    if (runtimeMode !== "main-window" || isBootstrapping || phase !== "loading") return;
+    if (startupAnimationEnabled) {
+      disabledStartupStateAppliedRef.current = false;
+      return;
+    }
+    if (disabledStartupStateAppliedRef.current) return;
+    disabledStartupStateAppliedRef.current = true;
+    setTiming(createStartupIntroTiming({ reducedMotion: true }));
+    setReveal(undefined);
+    setPhase("done");
+  }, [startupAnimationEnabled]);
+
+  useEffect(() => {
+    if (runtimeMode !== "main-window" || startupAnimationEnabled || disabledStartupOverlayReadyRef.current) return;
+    disabledStartupOverlayReadyRef.current = true;
+    window.agentarborDesktop?.notifyStartupOverlayReady();
+  }, [runtimeMode, startupAnimationEnabled]);
+
+  useEffect(() => {
+    if (runtimeMode !== "main-window" || startupAnimationEnabled || isBootstrapping) return;
+    if (disabledStartupCompletedRef.current) return;
+    disabledStartupCompletedRef.current = true;
+    let cancelled = false;
+    const reducedMotion = true;
+    const finishDesktopStartup = async (): Promise<void> => {
+      window.agentarborDesktop?.notifyStartupMainReady();
+      await requestDesktopStartupWindowExpansion({ reducedMotion });
+      if (cancelled) return;
+      await requestDesktopStartupWindowBeginExpansion();
+      if (cancelled) return;
+      handoffVisibleNotifiedRef.current = true;
+      notifyDesktopStartupMainHandoffVisible();
+      notifyStartupRendererFrameStats();
+    };
+    void finishDesktopStartup();
+    return () => {
+      cancelled = true;
+    };
+  }, [isBootstrapping, runtimeMode, startupAnimationEnabled]);
+
+  useEffect(() => {
+    if (!startupAnimationEnabled || runtimeMode !== "main-window" || isBootstrapping || phase !== "loading") return;
     if (desktopStartupRequestedRef.current) return;
     desktopStartupRequestedRef.current = true;
     let cancelled = false;
@@ -246,10 +290,10 @@ export function useStartupIntro(isBootstrapping: boolean): StartupIntroState {
       cancelled = true;
       window.clearTimeout(printTimeout);
     };
-  }, [isBootstrapping, runtimeMode]);
+  }, [isBootstrapping, runtimeMode, startupAnimationEnabled]);
 
   useEffect(() => {
-    if (runtimeMode !== "single-window" || isBootstrapping || phase !== "loading") return;
+    if (!startupAnimationEnabled || runtimeMode !== "single-window" || isBootstrapping || phase !== "loading") return;
     const timeout = window.setTimeout(() => {
       const fallbackReveal = createFallbackStartupReveal(prefersReducedMotion);
       setTiming(createStartupIntroTiming({ reducedMotion: prefersReducedMotion }));
@@ -257,7 +301,7 @@ export function useStartupIntro(isBootstrapping: boolean): StartupIntroState {
       setPhase("handoff-ready");
     }, startupIntroRemainingMinRectMs(introStartedAtRef.current, prefersReducedMotion));
     return () => window.clearTimeout(timeout);
-  }, [isBootstrapping, phase, prefersReducedMotion, runtimeMode]);
+  }, [isBootstrapping, phase, prefersReducedMotion, runtimeMode, startupAnimationEnabled]);
 
   useEffect(() => {
     if (phase !== "handoff-ready") return;
@@ -314,7 +358,7 @@ export function useStartupIntro(isBootstrapping: boolean): StartupIntroState {
   }, [phase, runtimeMode, timing.phaseDurationMs]);
 
   useEffect(() => {
-    if (runtimeMode !== "main-window") return;
+    if (runtimeMode !== "main-window" || !startupAnimationEnabled) return;
     if (phase === "expanding" && rendererFrameProbeRef.current === undefined) {
       rendererFrameProbeRef.current = createStartupIntroRendererFrameProbe({
         collectVisualStats: readStartupSmokeMode(),
@@ -342,16 +386,25 @@ export function useStartupIntro(isBootstrapping: boolean): StartupIntroState {
     }
     if (phase !== "done") return;
     notifyStartupRendererFrameStats();
-  }, [phase, runtimeMode, timing]);
+  }, [phase, runtimeMode, startupAnimationEnabled, timing]);
 
-  const effectiveReveal = reveal ?? (runtimeMode === "main-window" ? createFallbackStartupReveal(prefersReducedMotion) : undefined);
-  const overlayPhase = phase !== "done" && (effectiveReveal !== undefined || runtimeMode === "main-window") ? phase : undefined;
+  const effectiveReveal = startupAnimationEnabled
+    ? reveal ?? (runtimeMode === "main-window" ? createFallbackStartupReveal(prefersReducedMotion) : undefined)
+    : undefined;
+  const overlayPhase =
+    startupAnimationEnabled && phase !== "done" && (effectiveReveal !== undefined || runtimeMode === "main-window")
+      ? phase
+      : undefined;
   return {
     phase,
     overlayPhase,
     timing,
     reveal: effectiveReveal,
   };
+}
+
+function notifyDesktopStartupMainHandoffVisible(): void {
+  window.agentarborDesktop?.notifyStartupMainHandoffVisible();
 }
 
 export function StartupIntroOverlay(props: {
@@ -1133,8 +1186,7 @@ function readStartupIntroNow(): number {
 }
 
 function readPrefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
-  return window.matchMedia(REDUCED_MOTION_QUERY).matches;
+  return isReducedMotionEffective();
 }
 
 async function requestDesktopStartupWindowExpansion(

@@ -159,6 +159,20 @@ export type RunEvent = {
   };
 };
 
+export type ModelUsage = {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly totalTokens?: number;
+  readonly cachedInputTokens?: number;
+  readonly uncachedInputTokens?: number;
+  readonly reasoningOutputTokens?: number;
+  readonly estimatedCostUsd?: number;
+  readonly latencyMs?: number;
+  readonly firstTokenLatencyMs?: number;
+  readonly outputDurationMs?: number;
+  readonly outputTokensPerSecond?: number;
+};
+
 export type PanelStreamEvent = {
   readonly eventId: string;
   readonly runId: string;
@@ -182,6 +196,7 @@ export type PanelStreamEvent = {
     readonly errorDomain?: string;
     readonly errorFacts?: ToolErrorFacts;
     readonly truncated?: boolean;
+    readonly modelUsage?: ModelUsage;
   };
 };
 
@@ -235,6 +250,7 @@ export type TranscriptNode = {
   readonly toolName?: string;
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: TranscriptConfirmation;
+  readonly modelUsage?: ModelUsage;
   readonly refs: readonly ObservationRef[];
 };
 

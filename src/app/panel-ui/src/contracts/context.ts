@@ -14,6 +14,7 @@ export type ContextAttachment = {
     readonly available: boolean;
     readonly title?: string;
     readonly byteLength?: number;
+    readonly mimeType?: string;
     readonly truncated?: boolean;
   };
   readonly status: "ready" | "blocked";

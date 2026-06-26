@@ -3,6 +3,7 @@ import {
   type AgentWorkTimelineView,
 } from "./panel-agent-work-timeline-view.js";
 import type { ActivityItem } from "./panel-transcript-activity-copy.js";
+import type { ModelUsage } from "../domain/intelligence/index.js";
 import {
   isModelNarrativeActivityItem,
   mergeModelNarrativeActivityItem,
@@ -39,6 +40,7 @@ export type AssistantMessageSegment<
       readonly live: boolean;
       readonly animateOnMount: boolean;
       readonly tone: LiveAnswerTone;
+      readonly modelUsage?: ModelUsage;
     }
   | {
       readonly kind: "awaiting";
@@ -169,9 +171,11 @@ function assistantBodySegments<
       text,
       copyText: text,
       tone: input.tone,
+      modelUsage: node.modelUsage,
     };
   });
   const fallbackText = input.fallbackText?.trim();
+  const fallbackModelUsage = latestAnswerModelUsage(input.transcriptNodes);
   if (input.preferTranscriptBodies && bodyNodes.length === 0) {
     return finalizeBodySegments(drafts, input.animateOnMount);
   }
@@ -183,6 +187,7 @@ function assistantBodySegments<
       text: fallbackText,
       live: input.live,
       tone: input.tone,
+      modelUsage: fallbackModelUsage,
     }),
     input.animateOnMount,
   );
@@ -195,6 +200,7 @@ function fallbackBodyDraft<
   readonly text: string;
   readonly live: boolean;
   readonly tone: LiveAnswerTone;
+  readonly modelUsage?: ModelUsage;
 }): BodySegmentDraft<TNode, TConfirmation> {
   return {
     kind: "body",
@@ -205,6 +211,7 @@ function fallbackBodyDraft<
     text: fallback.text,
     copyText: fallback.text,
     tone: fallback.tone,
+    modelUsage: fallback.modelUsage,
   };
 }
 
@@ -241,6 +248,7 @@ function mergeFallbackIntoBodyDrafts<
     readonly text: string;
     readonly live: boolean;
     readonly tone: LiveAnswerTone;
+    readonly modelUsage?: ModelUsage;
   },
 ): readonly BodySegmentDraft<TNode, TConfirmation>[] {
   const fallbackDraft = fallbackBodyDraft<TNode, TConfirmation>(fallback);
@@ -262,9 +270,19 @@ function mergeFallbackIntoBodyDrafts<
           copyText: mergedCopyText,
           phase: fallback.live ? "noted" : "completed",
           tone: fallback.tone,
+          modelUsage: draft.modelUsage ?? fallback.modelUsage,
         }
       : draft
   ));
+}
+
+function latestAnswerModelUsage<TNode extends ProjectableTranscriptNode>(
+  nodes: readonly TNode[],
+): ModelUsage | undefined {
+  return [...nodes]
+    .reverse()
+    .find((node) => node.kind === "answer" && node.modelUsage !== undefined)
+    ?.modelUsage;
 }
 
 function finalizeBodySegments<
@@ -423,12 +441,17 @@ function mergeAdjacentBodySegments<
     if (previous?.kind === "body" && segment.kind === "body") {
       const mergedText = mergeBodyText(previous.text, segment.text);
       const mergedCopyText = mergeBodyText(previous.copyText, segment.copyText);
+      if ((previous.modelUsage !== undefined || segment.modelUsage !== undefined) && (mergedText === undefined || mergedCopyText === undefined)) {
+        merged.push(segment);
+        continue;
+      }
       merged[merged.length - 1] = {
         ...segment,
         segmentKey: previous.segmentKey,
         lifecycle: previous.lifecycle === "open" || segment.lifecycle === "open" ? "open" : segment.lifecycle,
         text: mergedText ?? `${previous.text}\n\n${segment.text}`.trim(),
         copyText: mergedCopyText ?? `${previous.copyText}\n\n${segment.copyText}`.trim(),
+        modelUsage: segment.modelUsage ?? previous.modelUsage,
       };
       continue;
     }

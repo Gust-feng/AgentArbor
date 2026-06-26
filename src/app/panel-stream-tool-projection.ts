@@ -1,4 +1,5 @@
 import type { ToolDisplayProjection, ToolErrorDomain, ToolErrorFacts, ToolResultEnvelope } from "../domain/tools/index.js";
+import type { ModelUsage } from "../domain/intelligence/index.js";
 import { isToolErrorDomain, normalizeToolErrorFacts, toolDisplayName } from "../domain/tools/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 import { commandTextFromToolInput, commandTextFromToolResult } from "./command-text.js";
@@ -25,6 +26,7 @@ export type PanelRunStreamEventDetail = {
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
+  readonly modelUsage?: ModelUsage;
 };
 
 export function toolSummary(

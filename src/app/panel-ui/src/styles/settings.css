@@ -138,8 +138,10 @@
 }
 
 .settings-content {
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
+  overflow-x: hidden;
   overflow-y: auto;
   background: var(--detail-pane-bg);
   padding: var(--space-6);

@@ -434,9 +434,15 @@ html[data-desktop-shell="true"] .startup-intro-text {
   font-size: 46px;
 }
 
+html[data-motion-effective="reduced"] .startup-intro-char,
+html[data-motion-effective="reduced"] .startup-intro-char::after {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .startup-intro-char,
-  .startup-intro-char::after {
+  html:not([data-motion-effective]) .startup-intro-char,
+  html:not([data-motion-effective]) .startup-intro-char::after {
     animation-duration: 1ms !important;
     animation-delay: 0ms !important;
   }

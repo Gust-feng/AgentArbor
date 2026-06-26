@@ -114,9 +114,24 @@ html[data-desktop-shell="true"] .app-window-control {
     color 150ms var(--motion-ease-standard);
 }
 
+.app-window-control svg {
+  transition:
+    opacity var(--motion-fast-duration) var(--motion-ease-standard),
+    transform var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
 .app-window-control:hover {
   background: color-mix(in oklch, var(--fg) 7%, transparent);
   color: var(--fg);
+}
+
+.app-window-control:active svg,
+.app-window-control[data-window-animating="true"] svg {
+  transform: scale(0.88);
+}
+
+.app-window-control[aria-pressed="true"] {
+  color: color-mix(in oklch, var(--fg) 84%, var(--accent));
 }
 
 .app-window-control-close:hover {
@@ -159,6 +174,13 @@ html[data-desktop-shell="true"] .app-window-control {
   display: block;
   width: 18px;
   height: 18px;
+}
+
+.app-workbench-brand-mark img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
 }
 
 .app-sidebar {

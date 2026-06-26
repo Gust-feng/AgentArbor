@@ -17,7 +17,7 @@ interface Window {
   readonly agentarborDesktop?: {
     readonly getStartupThemeSnapshot: () => {
       readonly styleId: "default" | "classic" | "glass";
-      readonly colorId: "light" | "dark" | "warm" | "forest" | "aurora" | "sunset" | "ocean";
+      readonly colorId: "system" | "light" | "dark" | "warm" | "forest" | "slate" | "aurora" | "sunset" | "ocean";
       readonly backgroundColor: string;
       readonly shellColor: string;
       readonly borderColor: string;
@@ -74,6 +74,14 @@ interface Window {
         readonly titleHandoffLastSizeErrorPx: number;
       };
     }) => void;
+    readonly getWindowState: () => Promise<{
+      readonly maximized: boolean;
+      readonly animating: boolean;
+    }>;
+    readonly onWindowStateChanged: (callback: (state: {
+      readonly maximized: boolean;
+      readonly animating: boolean;
+    }) => void) => () => void;
     readonly minimizeWindow: () => void;
     readonly toggleMaximizeWindow: () => void;
     readonly closeWindow: () => void;

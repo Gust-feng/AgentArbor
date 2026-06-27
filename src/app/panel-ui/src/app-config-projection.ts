@@ -4,6 +4,19 @@ export type ComposerReasoningEffort = "" | "low" | "medium" | "high";
 export type ComposerToolConfirmationPolicy = ToolConfirmationPolicy;
 export type VisibleAiMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
+/**
+ * Agent 模式选择：用户在 Desktop Shell 入口处显式选择的 agent 运行路径。
+ *
+ * 与 {@link VisibleAiMode} 严格区分：
+ * - VisibleAiMode 是模型 provider 选择（none/fake/openai-compatible/openai-responses），
+ *   决定走哪个模型接入层；
+ * - AgentMode 是 agent 运行编排路径（普通 Agent 主循环 / Deep 地下认知运行时），
+ *   决定提交目标（/api/conversations vs /api/deep/*）和视图投影。
+ *
+ * 默认 "normal"（普通 Agent），"deep" 为显式深入入口（FR-001）。
+ */
+export type AgentMode = "normal" | "deep";
+
 export function mergeConfigResponse(previous: ConfigResponse | undefined, incoming: ConfigResponse): ConfigResponse {
   return {
     ...previous,
@@ -21,7 +34,6 @@ export function mergeConfigResponse(previous: ConfigResponse | undefined, incomi
     capabilities: incoming.capabilities ?? previous?.capabilities,
   };
 }
-
 export function normalizeVisibleAiMode(mode: VisibleAiMode | undefined): VisibleAiMode {
   return mode === "none" ||
     mode === "fake" ||
@@ -29,6 +41,14 @@ export function normalizeVisibleAiMode(mode: VisibleAiMode | undefined): Visible
     mode === "openai-responses"
     ? mode
     : "openai-compatible";
+}
+
+/**
+ * 归一化 agent 模式：仅接受显式 "deep"，其余一律回退到默认 "normal"。
+ * 防止后端投影或本地存储中的未知值泄漏到 UI 入口。
+ */
+export function normalizeAgentMode(mode: AgentMode | undefined): AgentMode {
+  return mode === "deep" ? "deep" : "normal";
 }
 
 export function normalizeComposerToolConfirmationPolicy(

@@ -15,11 +15,13 @@ import { getStartupAnimationEnabled, subscribeMotionSettingsChanged } from "./ap
 import { selectLocalContextAttachment, uniqueAttachments, uploadContextAttachmentFiles } from "./app-attachments";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
+  normalizeAgentMode,
   normalizeVisibleAiMode,
   normalizeComposerToolConfirmationPolicy,
   visibleConfigBaseUrl,
   visibleConfigLabel,
   catalogRecordFromList,
+  type AgentMode,
   type ComposerReasoningEffort,
   type ComposerToolConfirmationPolicy,
   type VisibleAiMode,
@@ -432,6 +434,23 @@ export function App(): React.ReactElement {
       });
   }
 
+  /**
+   * 切换 agent 运行模式（普通 Agent / Deep）。
+   * - 切换到普通 Agent 时清空 deep 运行视图投影与异步状态，避免残留投影干扰普通视图；
+   * - 切换到 Deep 时保留普通运行状态，便于用户回切后继续会话。
+   * 当前仅做模式状态切换，deep 提交路径与视图由 T3-4c/T3-4d 接入。
+   */
+  function changeAgentMode(nextMode: AgentMode): void {
+    const normalized = normalizeAgentMode(nextMode);
+    setApp((previous) => {
+      if (previous.agentMode === normalized) return previous;
+      if (normalized === "normal") {
+        return { ...previous, agentMode: normalized, deep: undefined, deepBusy: false, error: undefined };
+      }
+      return { ...previous, agentMode: normalized, error: undefined };
+    });
+  }
+
   async function renameConversation(conversationId: string, title: string): Promise<void> {
     try {
       const response = await renameConversationTitle(conversationId, title);
@@ -616,7 +635,10 @@ export function App(): React.ReactElement {
       <div className="app-workbench">
         <WorkbenchHeader
           collapsed={sidebarCollapsed}
+          agentMode={app.agentMode}
+          modeDisabled={app.busy || app.deepBusy}
           onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onChangeAgentMode={changeAgentMode}
         />
         <main className="app-main">
           {isBootstrapping && (
@@ -710,7 +732,10 @@ export function App(): React.ReactElement {
 
 function WorkbenchHeader(props: {
   readonly collapsed: boolean;
+  readonly agentMode: AgentMode;
+  readonly modeDisabled: boolean;
   readonly onToggleSidebar: () => void;
+  readonly onChangeAgentMode: (nextMode: AgentMode) => void;
 }): React.ReactElement {
   const toggleLabel = props.collapsed ? "展开侧栏" : "收起侧栏";
   const hasDesktopWindowControls = typeof window !== "undefined" && window.agentarborDesktop !== undefined;
@@ -734,6 +759,33 @@ function WorkbenchHeader(props: {
             </span>
             <strong>AgentArbor</strong>
           </div>
+        </div>
+        <div
+          className="app-workbench-mode"
+          role="group"
+          aria-label="运行模式"
+          data-agent-mode={props.agentMode}
+        >
+          <button
+            type="button"
+            className="app-workbench-mode-option"
+            aria-pressed={props.agentMode === "normal"}
+            disabled={props.modeDisabled}
+            title="普通 Agent：默认连续会话与模型工具主循环"
+            onClick={() => props.onChangeAgentMode("normal")}
+          >
+            普通
+          </button>
+          <button
+            type="button"
+            className="app-workbench-mode-option"
+            aria-pressed={props.agentMode === "deep"}
+            disabled={props.modeDisabled}
+            title="Deep：地下认知运行时，目标成形、多路探索与父层综合"
+            onClick={() => props.onChangeAgentMode("deep")}
+          >
+            Deep
+          </button>
         </div>
         {hasDesktopWindowControls && <DesktopWindowControls />}
       </div>

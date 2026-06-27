@@ -183,6 +183,57 @@ html[data-desktop-shell="true"] .app-window-control {
   object-fit: contain;
 }
 
+/* 模式入口 segmented control：普通 Agent / Deep 并列，默认普通，Deep 显式选择（FR-001） */
+.app-workbench-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--bg) 92%, transparent);
+}
+
+.app-workbench-mode-option {
+  display: inline-flex;
+  min-width: 48px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: color-mix(in oklch, var(--muted) 80%, var(--fg));
+  font-size: 12px;
+  font-weight: var(--weight-label);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard),
+    transform var(--motion-fast-duration) var(--motion-ease-snap);
+}
+
+.app-workbench-mode-option:hover:not(:disabled) {
+  background: var(--nav-hover-bg);
+  color: var(--fg);
+}
+
+.app-workbench-mode-option[aria-pressed="true"] {
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
+  color: color-mix(in oklch, var(--fg) 78%, var(--accent));
+}
+
+.app-workbench-mode-option:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.app-workbench-mode-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .app-sidebar {
   position: relative;
   z-index: 20;

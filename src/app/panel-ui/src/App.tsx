@@ -48,6 +48,7 @@ import {
 } from "./app-runtime-controls";
 import { createInitialAppState } from "./app-state";
 import { submitDeepTask } from "./app-deep-task-submission";
+import { createDeepRunUpdateController } from "./app-deep-live-updates";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
 import type { McpServerCatalogItem } from "./contracts/tools";
@@ -134,6 +135,7 @@ export function App(): React.ReactElement {
   const streamRef = useRef<EventSource | undefined>(undefined);
   const activeRunIdRef = useRef<string | undefined>(undefined);
   const viewEpochRef = useRef(0);
+  const deepPollTimerRef = useRef<number | undefined>(undefined);
   const conversationLoadAbortRef = useRef<AbortController | undefined>(undefined);
   const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -170,6 +172,10 @@ export function App(): React.ReactElement {
       conversationLoadAbortRef.current?.abort();
       conversationLoadAbortRef.current = undefined;
       stopLiveUpdates(pollTimer, streamRef);
+      if (deepPollTimerRef.current !== undefined) {
+        window.clearInterval(deepPollTimerRef.current);
+        deepPollTimerRef.current = undefined;
+      }
     };
   }, []);
 
@@ -296,6 +302,14 @@ export function App(): React.ReactElement {
     decideConfirmation,
     resetChat,
   } = runController;
+  const deepRunUpdateController = useMemo(
+    () => createDeepRunUpdateController({
+      setApp,
+      mountedRef,
+      pollTimerRef: deepPollTimerRef,
+    }),
+    [],
+  );
   const settingsController = createAppSettingsController({
     app,
     setApp,
@@ -585,7 +599,7 @@ export function App(): React.ReactElement {
       explicitGoal,
     );
     if (result !== undefined) {
-      // TODO(T3-4e): 使用 result.runId / result.conversationId 启动 /api/deep/runs/:runId/view 轮询。
+      deepRunUpdateController.startPolling(result.runId);
     }
   }
 

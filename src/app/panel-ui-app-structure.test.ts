@@ -35,6 +35,7 @@ test("panel UI app shell delegates data and control work", async () => {
     deepView,
     deepRunTree,
     deepConclusion,
+    appDeepLiveUpdates,
     shellStyles,
     chatComposerStyles,
     motionResponsiveStyles,
@@ -70,6 +71,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource(path.join("components", "deep-view.tsx")),
     readPanelUiSource(path.join("components", "deep-run-tree.tsx")),
     readPanelUiSource(path.join("components", "deep-conclusion.tsx")),
+    readPanelUiSource("app-deep-live-updates.ts"),
     readPanelUiStyle("shell.css"),
     readPanelUiStyle("chat-composer.css"),
     readPanelUiStyle("motion-responsive.css"),
@@ -134,6 +136,13 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(deepView.includes("DeepConclusion"), true);
   assert.equal(deepRunTree.includes("export function DeepRunTree"), true);
   assert.equal(deepConclusion.includes("export function DeepConclusion"), true);
+  assert.equal(appDeepLiveUpdates.includes("export function createDeepRunUpdateController"), true);
+  assert.equal(appDeepLiveUpdates.includes("/api/deep/runs/"), true);
+  assert.equal(appDeepLiveUpdates.includes("TERMINAL_DEEP_RUN_STATUSES"), true);
+  assert.equal(app.includes('from "./app-deep-live-updates"'), true);
+  assert.equal(app.includes("deepRunUpdateController.startPolling(result.runId)"), true);
+  assert.equal(app.includes("deepPollTimerRef"), true);
+  assert.equal(app.includes("TODO(T3-4e)"), false);
   assert.equal(app.includes("SkillsPage"), false);
   assert.equal(app.includes("ToolsPage"), false);
   assert.equal(app.includes("onStartSkill"), false);

@@ -521,7 +521,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptChain.includes("cachedInputTokens"), true);
   assert.equal(chatTranscriptChain.includes("uncachedInputTokens"), true);
   assert.equal(chatTranscriptChain.includes("new`"), true);
-  assert.equal(chatTranscriptChain.includes("context`"), true);
+  assert.equal(chatTranscriptChain.includes("tokens ("), true);
   assert.equal(chatTranscriptChain.includes("首 token"), true);
   assert.equal(chatMessageStyles.includes(".assistant-response-meta"), true);
   assert.equal(chatMessageStyles.includes(".assistant-model-usage svg"), true);

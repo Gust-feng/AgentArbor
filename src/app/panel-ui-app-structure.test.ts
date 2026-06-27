@@ -115,9 +115,9 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("function taskSoilInputFromAttachments"), false);
   assert.equal(app.includes("function mergeConfigResponse"), false);
   assert.equal(app.includes("function startSkillChat"), false);
-  assert.equal(app.includes("app.busy || modelResponding"), false);
-  assert.equal(app.includes("queueReadyAfterRunRef"), false);
-  assert.equal(app.includes("if (app.busy) {\n        enqueueMessage(goal);"), true);
+  assert.equal(app.includes("app.busy || modelResponding"), true);
+  assert.equal(app.includes("queueReadyAfterRunRef"), true);
+  assert.equal(app.includes("if (app.busy || modelResponding) {\n        enqueueMessage(goal);"), true);
   assert.equal(app.includes("SkillsPage"), false);
   assert.equal(app.includes("ToolsPage"), false);
   assert.equal(app.includes("onStartSkill"), false);

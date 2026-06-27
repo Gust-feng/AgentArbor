@@ -496,8 +496,17 @@ function modelUsageItems(usage: AssistantModelUsage | undefined): readonly Assis
 }
 
 function inputUsageItem(usage: AssistantModelUsage): AssistantModelUsageItem | undefined {
+  const inputText = formatTokenCount(usage.inputTokens);
   const cachedText = formatTokenCount(usage.cachedInputTokens);
   const uncachedText = formatTokenCount(usage.uncachedInputTokens);
+  if (inputText !== undefined) {
+    return {
+      key: "input",
+      icon: ArrowUp,
+      text: cachedText === undefined ? `${inputText} tokens` : `${inputText} tokens (${cachedText} cached)`,
+      title: "本次模型请求的总输入上下文 token；括号内为 provider 报告的缓存命中部分。系统提示、工具 schema、历史对话和附件上下文都可能计入总输入，命中缓存时计入 cached。",
+    };
+  }
   if (cachedText !== undefined || uncachedText !== undefined) {
     const parts = [
       uncachedText === undefined ? undefined : `${uncachedText} new`,
@@ -510,16 +519,7 @@ function inputUsageItem(usage: AssistantModelUsage): AssistantModelUsageItem | u
       title: "输入上下文 token，按 provider usage 拆分为 cache miss 与 cache hit；工具、系统提示和历史前缀命中缓存时计入 cached。",
     };
   }
-  const inputText = formatTokenCount(usage.inputTokens);
-  if (inputText === undefined) {
-    return undefined;
-  }
-  return {
-    key: "input",
-    icon: ArrowUp,
-    text: `${inputText} context`,
-    title: "整次模型请求上下文 token；provider 未返回 cache hit/miss 拆分。",
-  };
+  return undefined;
 }
 
 function formatTokenSpeed(value: number | undefined): string | undefined {

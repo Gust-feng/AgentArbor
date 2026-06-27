@@ -40,6 +40,7 @@ import {
 } from "./app-run-projection";
 import { createAppRunController } from "./app-run-controller";
 import {
+  shouldKeepRefreshing,
   stopLiveUpdates,
 } from "./app-runtime-controls";
 import { createInitialAppState } from "./app-state";
@@ -248,6 +249,7 @@ export function App(): React.ReactElement {
   );
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = useMemo(() => projectCurrentRun(app), currentRunProjectionDeps(app));
+  const modelResponding = currentRun.run !== undefined && shouldKeepRefreshing(currentRun.run.status);
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
   const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
   const pendingCount = Math.max(pendingConversationCount, pendingConfirmation === undefined ? 0 : 1);
@@ -511,15 +513,35 @@ export function App(): React.ReactElement {
     );
   }, []);
 
+  const previousRunActivityRef = useRef<{ readonly runId?: string; readonly responding: boolean }>({ responding: false });
+  const queueReadyAfterRunRef = useRef<string | undefined>(undefined);
+  const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
   useEffect(() => {
+    const previousRunActivity = previousRunActivityRef.current;
+    const activeRun = currentRun.run;
+    previousRunActivityRef.current = {
+      runId: activeRun?.runId,
+      responding: modelResponding,
+    };
+    if (!previousRunActivity.responding || modelResponding) return;
+    if (activeRun === undefined || activeRun.runId !== previousRunActivity.runId) return;
+    queueReadyAfterRunRef.current = activeRun.status === "completed" ? activeRun.runId : undefined;
+  }, [currentRun.run, modelResponding]);
+
+  useEffect(() => {
+    const readyRunId = queueReadyAfterRunRef.current;
+    if (readyRunId === undefined || app.busy) return;
+    if (currentRun.run?.runId !== readyRunId) return;
+    if (dispatchedQueueAfterRunRef.current === readyRunId) return;
     if (queuedMessages.length === 0) return;
-    if (app.busy) return;
     const next = queuedMessages[0];
     if (next === undefined) return;
+    dispatchedQueueAfterRunRef.current = readyRunId;
+    queueReadyAfterRunRef.current = undefined;
     setQueuedMessages((previous) => previous.slice(1));
     setGoal(next.content);
     void startTask(next.content);
-  }, [app.busy, queuedMessages, startTask]);
+  }, [app.busy, currentRun.run, queuedMessages, startTask]);
 
   const inputProps = {
     value: goal,
@@ -541,7 +563,7 @@ export function App(): React.ReactElement {
     onModelSelect: selectInputModel,
     onOpenSettings: () => openSettings("models"),
     onSubmit: () => {
-      if (app.busy) {
+      if (app.busy || modelResponding) {
         enqueueMessage(goal);
         setGoal("");
       } else {
@@ -550,6 +572,7 @@ export function App(): React.ReactElement {
     },
     allowInputWhileBusy: true,
     onCancel: () => {
+      queueReadyAfterRunRef.current = undefined;
       setQueuedMessages([]);
       void cancelRun();
     },

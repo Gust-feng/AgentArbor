@@ -36,6 +36,14 @@ export async function handlePanelRunRoute(
   response: ServerResponse,
   url: URL
 ): Promise<boolean> {
+  // ── 废弃候选（T3-5 / ADR-0025 deep 一期）──────────────────────────────────
+  // 正式 deep HTTP 入口为 /api/deep/*（见 src/app/panel-server/deep-routes.ts）：
+  //   POST /api/deep/conversations + POST /api/deep/conversations/:id/runs +
+  //   GET /api/deep/conversations/:id/runs/:runId/view + SSE + control。
+  // 下列 /api/underground/* 兼容路由驱动旧 UndergroundAgentOrchestrator 固定拓扑
+  // （与 directionHandoffPackage / Plan 强耦合），非正式 DeepRuntime。
+  // 退役前置 = 调用方迁移到 /api/deep/* + 等价能力验证完成（闭环4）。当前保持运行不阻塞。
+  // ──────────────────────────────────────────────────────────────────────────
   if (request.method === "POST" && url.pathname === "/api/underground/run") {
     await handleRunRequest(runtime, request, response, "underground");
     return true;

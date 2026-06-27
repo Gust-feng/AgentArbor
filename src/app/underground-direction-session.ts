@@ -80,6 +80,22 @@ export async function runUndergroundDirectionSession(
   return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
 }
 
+/**
+ * @deprecated 废弃候选（T3-5 / ADR-0025 deep 一期）—— compat→UndergroundAgentOrchestrator 链核心。
+ *
+ * 正式 deep 运行入口为 src/app/deep/*（DeepRuntime：manager 自由决策循环 → 一层 child →
+ * 父层综合 → SynthesizedConclusion），经 /api/deep/* 端点暴露。
+ *
+ * 本函数实例化旧 UndergroundAgentOrchestrator 固定拓扑（与 directionHandoffPackage / Plan
+ * 强耦合），是 compat 链的实际驱动者；ADR-0025 三段式重构不转正本路径，DeepRuntime 是替代物。
+ *
+ * 退役前置条件（闭环4）：所有调用方（clarification-flow / minimal-loop / underground-demo /
+ * panel compat / 测试）迁移到 DeepRuntime 且等价能力验证完成。
+ *
+ * 边界：domain/underground 的 AgentLoop / Guard / run tree / 事件契约为保留复用抽象，不在退役范围。
+ *
+ * 当前保持运行不阻塞；禁止改名 / 删除（panel-server-structure.test.ts 结构断言要求签名存在）。
+ */
 export async function runUndergroundDirectionSessionWithIntelligence(
   goal: string,
   options: RunUndergroundDirectionSessionWithIntelligenceOptions

@@ -46,6 +46,7 @@ import {
   stopLiveUpdates,
 } from "./app-runtime-controls";
 import { createInitialAppState } from "./app-state";
+import { submitDeepTask } from "./app-deep-task-submission";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
 import type { McpServerCatalogItem } from "./contracts/tools";
@@ -562,6 +563,31 @@ export function App(): React.ReactElement {
     void startTask(next.content);
   }, [app.busy, currentRun.run, queuedMessages, startTask]);
 
+  /**
+   * Deep 任务提交入口：当 agentMode === "deep" 时由 onSubmit 路由调用。
+   * 创建独立 deep 会话并启动后台 deep run（FR-001 入口分流）。返回的运行引用
+   * 供 T3-4e /view 轮询接入；当前阶段提交后 deepBusy 保持 true，视图区与轮询待 T3-4d/T3-4e。
+   */
+  async function startDeepTask(explicitGoal?: string): Promise<void> {
+    const result = await submitDeepTask(
+      {
+        app,
+        setApp,
+        setGoal,
+        setScreen,
+        setAttachments,
+        attachments,
+        goal,
+        aiMode,
+        mountedRef,
+      },
+      explicitGoal,
+    );
+    if (result !== undefined) {
+      // TODO(T3-4e): 使用 result.runId / result.conversationId 启动 /api/deep/runs/:runId/view 轮询。
+    }
+  }
+
   const inputProps = {
     value: goal,
     onChange: setGoal,
@@ -582,9 +608,11 @@ export function App(): React.ReactElement {
     onModelSelect: selectInputModel,
     onOpenSettings: () => openSettings("models"),
     onSubmit: () => {
-      if (app.busy || modelResponding) {
+      if (app.busy || modelResponding || app.deepBusy) {
         enqueueMessage(goal);
         setGoal("");
+      } else if (app.agentMode === "deep") {
+        void startDeepTask();
       } else {
         void startTask();
       }

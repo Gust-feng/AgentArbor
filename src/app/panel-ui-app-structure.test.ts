@@ -117,7 +117,9 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("function startSkillChat"), false);
   assert.equal(app.includes("app.busy || modelResponding"), true);
   assert.equal(app.includes("queueReadyAfterRunRef"), true);
-  assert.equal(app.includes("if (app.busy || modelResponding) {\n        enqueueMessage(goal);"), true);
+  assert.equal(app.includes("if (app.busy || modelResponding || app.deepBusy) {\n        enqueueMessage(goal);"), true);
+  assert.equal(app.includes('} else if (app.agentMode === "deep") {\n        void startDeepTask();'), true);
+  assert.equal(app.includes('from "./app-deep-task-submission"'), true);
   assert.equal(app.includes("SkillsPage"), false);
   assert.equal(app.includes("ToolsPage"), false);
   assert.equal(app.includes("onStartSkill"), false);

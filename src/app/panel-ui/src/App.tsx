@@ -606,6 +606,7 @@ export function App(): React.ReactElement {
   const inputProps = {
     value: goal,
     onChange: setGoal,
+    agentMode: app.agentMode,
     attachments,
     onSelectAttachment: () => void selectAttachment(),
     onUploadAttachmentFiles: (files: readonly File[]) => void uploadAttachments(files),

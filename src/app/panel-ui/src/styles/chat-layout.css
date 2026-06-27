@@ -55,6 +55,32 @@
   display: inline-block;
 }
 
+/* Deep 模式激活标识（FR-001 模式切换可见性）*/
+.chat-empty-mode-badge {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 14px;
+  border: 1px solid color-mix(in oklch, var(--accent) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: color-mix(in oklch, var(--fg) 60%, var(--accent));
+  font-size: 13px;
+  font-weight: var(--weight-label);
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.chat-empty-subheading {
+  margin: 0;
+  max-width: 520px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: var(--weight-base);
+  line-height: 1.6;
+  text-align: center;
+}
+
 .system-error-line {
   margin: 0;
   border: 1px solid var(--danger-border);

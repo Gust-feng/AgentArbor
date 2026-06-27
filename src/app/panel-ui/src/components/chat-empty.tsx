@@ -8,7 +8,7 @@ import {
   X,
 } from "lucide-react";
 import { compact } from "../text";
-import type { ComposerToolConfirmationPolicy } from "../app-config-projection";
+import type { AgentMode, ComposerToolConfirmationPolicy } from "../app-config-projection";
 import type { ContextAttachment } from "../contracts/context";
 import type { ModelProviderIdentity } from "../model-provider-logos";
 
@@ -16,6 +16,9 @@ type ComposerChipFeedback = "model" | "reasoning" | "access";
 
 const COMPOSER_CHIP_FEEDBACK_MS = 540;
 const EMPTY_HEADING = "今天想处理什么？";
+const DEEP_EMPTY_HEADING = "Deep 认知运行时";
+const DEEP_EMPTY_HINT = "输入探索目标，地下运行时将自主决策、多路探索并给出可解释的综合结论。";
+const DEEP_PLACEHOLDER = "输入探索目标，Deep 将多路探索并综合...";
 
 export type ChatModelOption = {
   readonly id: string;
@@ -59,6 +62,7 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly onCancel?: () => void;
   readonly autoFocus?: boolean;
   readonly running?: boolean;
+  readonly agentMode?: AgentMode;
   readonly placeholder?: string;
   readonly variant?: "embedded" | "floating";
   readonly queuedMessages?: readonly QueuedChatMessage[];
@@ -70,16 +74,23 @@ export type ChatInputProps = AttachmentInputProps & {
 export function ChatEmpty(props: ChatInputProps & {
   readonly error?: string;
 }): React.ReactElement {
+  const isDeep = props.agentMode === "deep";
   return (
-    <div className="chat-empty-screen">
+    <div className="chat-empty-screen" data-agent-mode={props.agentMode ?? "normal"}>
       <main className="chat-empty-main">
         <div className="chat-empty-grid">
           <section className="chat-empty-copy" aria-label="任务输入">
+            {isDeep && (
+              <span className="chat-empty-mode-badge" data-mode="deep">Deep 模式</span>
+            )}
             <h1 className="chat-empty-heading">
               <span className="chat-empty-heading-title" data-startup-title-anchor>
-                {EMPTY_HEADING}
+                {isDeep ? DEEP_EMPTY_HEADING : EMPTY_HEADING}
               </span>
             </h1>
+            {isDeep && (
+              <p className="chat-empty-subheading">{DEEP_EMPTY_HINT}</p>
+            )}
             {props.error && <div className="system-error-line">{props.error}</div>}
           </section>
         </div>
@@ -87,7 +98,7 @@ export function ChatEmpty(props: ChatInputProps & {
       <ChatInputBar
         {...props}
         variant="floating"
-        placeholder="输入任务..."
+        placeholder={isDeep ? DEEP_PLACEHOLDER : "输入任务..."}
       />
     </div>
   );

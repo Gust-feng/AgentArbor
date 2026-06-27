@@ -3,6 +3,7 @@ import { Maximize2, Minimize2, Minus, PanelLeftClose, PanelLeftOpen, X } from "l
 import { isConversationWaitingForUser } from "./conversation-state";
 import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
+import { DeepView } from "./components/deep-view";
 import { SettingsDialog } from "./components/settings-dialog";
 import { Sidebar, type Screen } from "./components/sidebar";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./components/settings-types";
@@ -626,6 +627,8 @@ export function App(): React.ReactElement {
   };
 
   const isBootstrapping = app.config === undefined && app.conversations.length === 0 && app.error === undefined;
+  /** deep 模式且有进行中/已完成的 run 时，主区切换到 DeepView；否则保留普通会话视图与输入框。 */
+  const deepActive = app.agentMode === "deep" && (app.deepBusy || app.deep !== undefined);
   const startupIntro = useStartupIntro(isBootstrapping, { startupAnimationEnabled });
   const startupIntroStyle = useMemo(() => {
     const style = startupIntroTimingStyle(startupIntro.timing) as StartupIntroRootStyle;
@@ -675,14 +678,17 @@ export function App(): React.ReactElement {
               <p>正在初始化工作台</p>
             </div>
           )}
-          {!isBootstrapping && chatScreen === "chat-empty" && (
+          {!isBootstrapping && deepActive && (
+            <DeepView view={app.deep} busy={app.deepBusy} />
+          )}
+          {!isBootstrapping && !deepActive && chatScreen === "chat-empty" && (
             <ChatEmpty
               {...inputProps}
               autoFocus={!startupIntroActive}
               error={app.error}
             />
           )}
-          {!isBootstrapping && chatScreen === "chat-active" && (
+          {!isBootstrapping && !deepActive && chatScreen === "chat-active" && (
             <ChatActive
               {...inputProps}
               conversation={app.conversation}

@@ -1,0 +1,764 @@
+/*
+ * Deep 视图样式（T3-4d）。
+ *
+ * 覆盖 deep-view / deep-run-tree / deep-conclusion 三类组件的呈现层，
+ * 复用 foundation.css 的设计令牌（颜色 / 圆角 / 间距 / 阴影），
+ * 与既有 panel card / transcript 视觉语言保持一致。
+ *
+ * 安全口径：本样式只决定呈现，不改变契约字段语义。
+ */
+
+/* ---------------------------------------------------------------------------
+ * 容器与运行头
+ * ------------------------------------------------------------------------- */
+
+.deep-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-4);
+  max-width: var(--panel-reading-width);
+  margin: 0 auto;
+  width: 100%;
+}
+
+.deep-view-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.deep-view-goal-icon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+.deep-view-goal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.deep-view-goal {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.deep-view-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.deep-view-run-id {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deep-view-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--accent);
+}
+
+.deep-view-busy-icon {
+  width: 14px;
+  height: 14px;
+  animation: deep-view-busy-spin 1.1s linear infinite;
+}
+
+@keyframes deep-view-busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 状态徽章（跨组件共享）
+ * ------------------------------------------------------------------------- */
+
+.deep-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.deep-status-running,
+.deep-status-pending,
+.deep-status-planned,
+.deep-status-resumed {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-color: var(--accent-border-soft);
+}
+
+.deep-status-completed {
+  background: var(--cyan-soft);
+  color: var(--cyan-text);
+  border-color: color-mix(in oklch, var(--status-success) 28%, var(--border));
+}
+
+.deep-status-failed {
+  background: var(--danger-soft);
+  color: var(--status-danger);
+  border-color: var(--danger-border);
+}
+
+.deep-status-interrupted,
+.deep-status-corrected,
+.deep-status-stopped {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+  border-color: color-mix(in oklch, var(--status-warning) 28%, var(--border));
+}
+
+/* ---------------------------------------------------------------------------
+ * 来源徽章（ai / 兜底）
+ * ------------------------------------------------------------------------- */
+
+.deep-source-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.68rem;
+  font-weight: 500;
+  background: var(--amber-soft);
+  color: var(--amber-text);
+  border: 1px solid color-mix(in oklch, var(--status-warning) 24%, var(--border));
+}
+
+/* ---------------------------------------------------------------------------
+ * Run tree 投影
+ * ------------------------------------------------------------------------- */
+
+.deep-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--panel-card-bg);
+  border: 1px solid var(--panel-card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--panel-card-shadow);
+}
+
+.deep-tree-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.deep-tree-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--secondary);
+}
+
+.deep-tree-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg);
+  flex: 1 1 auto;
+}
+
+.deep-tree-progress-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.deep-tree-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deep-tree-counts li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-md);
+  min-width: 96px;
+}
+
+.deep-tree-count-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.deep-tree-count-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.deep-tree-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-md);
+}
+
+.deep-tree-root-kind {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.deep-tree-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.deep-tree-group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.deep-tree-group-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.deep-tree-children,
+.deep-tree-decisions,
+.deep-tree-syntheses {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 节点行（root manager 顶部展示） */
+.deep-node-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.deep-node-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--secondary);
+}
+
+.deep-node-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.deep-node-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.deep-node-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* child 节点 */
+.deep-child {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--border);
+}
+
+.deep-child-running {
+  border-left-color: var(--accent);
+}
+
+.deep-child-completed {
+  border-left-color: var(--status-success);
+}
+
+.deep-child-failed {
+  border-left-color: var(--status-danger);
+}
+
+.deep-child-interrupted,
+.deep-child-resumed {
+  border-left-color: var(--status-warning);
+}
+
+.deep-child-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.deep-child-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.deep-child-role {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.deep-child-summary {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--fg);
+  line-height: 1.5;
+}
+
+.deep-child-findings {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.8rem;
+  color: var(--fg);
+}
+
+.deep-child-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.deep-child-confidence {
+  color: var(--secondary);
+  font-weight: 500;
+}
+
+.deep-child-uncertainty {
+  color: var(--amber-text);
+}
+
+.deep-child-failure {
+  color: var(--status-danger);
+}
+
+/* 决策节点 */
+.deep-decision {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.deep-decision-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.deep-decision-action {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.deep-decision-confidence {
+  font-size: 0.74rem;
+  color: var(--secondary);
+}
+
+.deep-decision-rationale {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--fg);
+  line-height: 1.5;
+}
+
+.deep-decision-uncertainty {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--amber-text);
+}
+
+/* 父层综合节点 */
+.deep-synthesis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--secondary);
+  border-radius: var(--radius-md);
+}
+
+.deep-synthesis-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.deep-synthesis-next {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+.deep-synthesis-confidence {
+  font-size: 0.74rem;
+  color: var(--secondary);
+}
+
+.deep-synthesis-summary {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--fg);
+  line-height: 1.5;
+}
+
+.deep-synthesis-uncertainty {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--amber-text);
+}
+
+.deep-synthesis-material {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.deep-synthesis-material-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 引用芯片（跨组件共享）
+ * ------------------------------------------------------------------------- */
+
+.deep-child-refs,
+.deep-decision-refs,
+.deep-conclusion-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-1);
+}
+
+.deep-ref-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.deep-ref-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deep-ref-chip {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  padding: 1px var(--space-2);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * 可解释结论区
+ * ------------------------------------------------------------------------- */
+
+.deep-conclusion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: linear-gradient(180deg, var(--cyan-soft), transparent 60%), var(--surface);
+  border: 1px solid color-mix(in oklch, var(--status-success) 24%, var(--border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+}
+
+.deep-conclusion-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.deep-conclusion-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--status-success);
+}
+
+.deep-conclusion-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg);
+  flex: 1 1 auto;
+}
+
+.deep-conclusion-confidence {
+  font-size: 0.78rem;
+  color: var(--secondary);
+  font-weight: 500;
+}
+
+.deep-conclusion-text {
+  margin: 0;
+  font-size: 0.94rem;
+  color: var(--fg);
+  line-height: 1.6;
+}
+
+.deep-conclusion-rationale {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.deep-conclusion-uncertainty {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--amber-text);
+  line-height: 1.5;
+}
+
+.deep-conclusion-uncertainty-label {
+  font-weight: 600;
+  margin-right: var(--space-1);
+}
+
+/* 候选取舍展开 */
+.deep-conclusion-dispositions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.deep-dispositions-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  color: var(--fg);
+  cursor: pointer;
+  align-self: flex-start;
+  transition:
+    background var(--motion-fast-duration) var(--motion-ease-standard),
+    border-color var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.deep-dispositions-toggle:hover {
+  background: var(--surface-subtle);
+  border-color: var(--accent-border-soft);
+}
+
+.deep-dispositions-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.deep-dispositions-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--secondary);
+}
+
+.deep-dispositions-summary {
+  flex: 1 1 auto;
+}
+
+.deep-dispositions-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  transition: transform var(--motion-quick-duration) var(--motion-ease-standard);
+  transform: rotate(-90deg);
+}
+
+.deep-chevron-open {
+  transform: rotate(0deg);
+}
+
+.deep-dispositions-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.deep-disposition-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.deep-disposition-group-title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.deep-disposition-selected .deep-disposition-group-title {
+  color: var(--status-success);
+}
+
+.deep-disposition-rejected .deep-disposition-group-title {
+  color: var(--status-danger);
+}
+
+.deep-disposition-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deep-disposition-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.deep-disposition-selected .deep-disposition-item {
+  border-left: 3px solid var(--status-success);
+}
+
+.deep-disposition-rejected .deep-disposition-item {
+  border-left: 3px solid var(--status-danger);
+}
+
+.deep-disposition-label {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.deep-disposition-reason {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------------------
+ * 占位与空态
+ * ------------------------------------------------------------------------- */
+
+.deep-view-pending,
+.deep-view-empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-4);
+  color: var(--muted);
+}
+
+.deep-view-pending-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+  animation: deep-view-busy-spin 1.1s linear infinite;
+}
+
+.deep-view-pending-text,
+.deep-view-empty-text {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  max-width: 420px;
+}
+
+.deep-view-empty-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}

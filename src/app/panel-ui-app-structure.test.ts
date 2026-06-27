@@ -32,6 +32,9 @@ test("panel UI app shell delegates data and control work", async () => {
     capabilitySettings,
     skillSettings,
     workspaceSettings,
+    deepView,
+    deepRunTree,
+    deepConclusion,
     shellStyles,
     chatComposerStyles,
     motionResponsiveStyles,
@@ -64,6 +67,9 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource(path.join("components", "capability-settings.tsx")),
     readPanelUiSource(path.join("components", "skill-settings.tsx")),
     readPanelUiSource(path.join("components", "workspace-settings.tsx")),
+    readPanelUiSource(path.join("components", "deep-view.tsx")),
+    readPanelUiSource(path.join("components", "deep-run-tree.tsx")),
+    readPanelUiSource(path.join("components", "deep-conclusion.tsx")),
     readPanelUiStyle("shell.css"),
     readPanelUiStyle("chat-composer.css"),
     readPanelUiStyle("motion-responsive.css"),
@@ -120,6 +126,14 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("if (app.busy || modelResponding || app.deepBusy) {\n        enqueueMessage(goal);"), true);
   assert.equal(app.includes('} else if (app.agentMode === "deep") {\n        void startDeepTask();'), true);
   assert.equal(app.includes('from "./app-deep-task-submission"'), true);
+  assert.equal(app.includes('from "./components/deep-view"'), true);
+  assert.equal(app.includes('const deepActive = app.agentMode === "deep" && (app.deepBusy || app.deep !== undefined)'), true);
+  assert.equal(app.includes("<DeepView view={app.deep} busy={app.deepBusy} />"), true);
+  assert.equal(deepView.includes("export function DeepView"), true);
+  assert.equal(deepView.includes("DeepRunTree"), true);
+  assert.equal(deepView.includes("DeepConclusion"), true);
+  assert.equal(deepRunTree.includes("export function DeepRunTree"), true);
+  assert.equal(deepConclusion.includes("export function DeepConclusion"), true);
   assert.equal(app.includes("SkillsPage"), false);
   assert.equal(app.includes("ToolsPage"), false);
   assert.equal(app.includes("onStartSkill"), false);

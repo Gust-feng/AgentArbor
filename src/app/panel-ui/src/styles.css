@@ -17,6 +17,7 @@
 @import "./styles/settings-forms.css";
 @import "./styles/motion-responsive.css";
 @import "./styles/app-states.css";
+@import "./styles/deep-view.css";
 
 /* Style layer — structural visual language */
 @import "./styles/style-default.css";

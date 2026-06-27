@@ -1,3 +1,9 @@
+/**
+ * @deprecated 测试废弃候选（T4-1 / ADR-0025 deep 一期）— 随被测 ①/②/②' 废弃候选代码一并退役。
+ *
+ * 闭环4 §8.1 阶段②：被测代码迁移到 DeepRuntime 后，本测试随之迁移或退役；
+ * 当前保持运行不阻塞构建。
+ */
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { IntelligenceChannel, ModelRequest, ModelResponse } from "../../../domain/intelligence/index.js";

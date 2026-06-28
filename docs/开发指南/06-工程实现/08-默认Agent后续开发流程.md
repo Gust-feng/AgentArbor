@@ -2,9 +2,9 @@
 
 ## 目标
 
-当前开发先补稳两种模式共享的基础设施，再在这套基础设施上完成默认普通桌面 Agent。`agent` 和未来 `deep` 共享 AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase、Skill Context 和 Workbench Panel read-model；二者隔离的是编排策略、用户入口和可见语义，而不是运行平台。
+当前开发先补稳两种模式共享的基础设施，再在这套基础设施上完成默认普通桌面 Agent。`agent` 和显式多 Agent（内部 `deep` / `DeepRuntime`）共享 AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase、Skill Context 和 Workbench Panel read-model；二者隔离的是编排策略、用户入口和可见语义，而不是运行平台。
 
-deep / Agent 集群是未来项目边界：不做默认可见入口，不主动改动 deep 后端，也不把复杂输入自动升级到 Underground。显式 deep 兼容能力只能保留在后端未来边界中，普通会话入口始终默认创建 `agent` 运行。这里反对的过度设计是普通路径概念命名和流程包装过重，不是删除 deep 长期方向。
+默认入口仍是普通 `agent`。显式多 Agent 已通过 Panel 模块和 `/api/deep/*` 暴露，用户文案使用“多 Agent”，内部 API / 实现仍可叫 `deep` / `DeepRuntime`；普通会话入口始终默认创建 `agent` 运行，不因复杂输入、关键词、文件数量或模型判断自动升级到多 Agent。默认 Agent 开发不能顺手夹带 deep 编排变更；显式多 Agent 变更必须按 ADR-0025 的边界推进，并证明不污染普通路径。这里反对的过度设计是普通路径概念命名和流程包装过重，不是删除 deep 长期方向。
 
 后续每一轮开发都必须能回答：
 
@@ -12,13 +12,14 @@ deep / Agent 集群是未来项目边界：不做默认可见入口，不主动�
 2. 这是否复用了现有 AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase 和 Workbench Panel。
 3. 这是否避免把历史 `.trellis/tasks`、deep 编排或平台适配文件重新变成当前事实源。
 4. 这是否使用了和真实职责匹配的朴素命名，而不是把普通动作包装成 agent / Plan / Handoff / atomic 概念。
+5. 这是否保持用户文案“多 Agent”和内部实现 `deep` / `DeepRuntime` 的边界，不把 deep 术语泄漏到普通用户路径。
 
 ## 开发顺序
 
 ### 1. 共享基础设施基线
 
 - 固化 `runMode: "agent" | "deep"` 的语义：它只表示编排策略选择，不代表两套工具、事件、确认、持久化或投影实现。
-- 默认会话 API、工作台输入、普通回答和命令确认卡固定走 `agent`；未来 deep 只能复用同一套基础设施，不能另起平行运行时。
+- 默认会话 API、工作台输入、普通回答和命令确认卡固定走 `agent`；显式多 Agent 只能通过独立模块和 `/api/deep/*` 进入，并复用同一套基础设施，不能另起平行运行时。
 - 模型运行只产出模型响应、流式增量、模型 refs 和失败归一化。
 - 工程边界只作为运行守卫和诊断投影存在，不能被包装成模型的能力限制；普通回答应表达可做什么、需要什么上下文或下一步怎么继续。
 - 工程动作使用朴素名称：文件编辑叫编辑或补丁，批量变更叫变更集，helper / adapter 保持 helper / adapter；只有真正具有全成功/全失败、回滚或一致性边界时才使用 atomic。
@@ -32,7 +33,7 @@ deep / Agent 集群是未来项目边界：不做默认可见入口，不主动�
 - 稳定新会话、连续追问、历史可见消息回填和取消。
 - 普通问题直接由默认普通 `agent` 主循环返回自然语言回答；当前模型目的使用 `desktop_agent`，`desktop_chat` 只作为历史事件和旧记录读取兼容名称。
 - 复杂输入也先进入普通 Agent，由模型决定回答、请求补充、调用授权工具或说明需要的上下文与下一步。
-- 验收：普通问答不产生 fake report、不进入 Underground、不展示 deep / Plan / child agent 文案。
+- 验收：普通问答不产生 fake report、不进入多 Agent / Underground、不展示 deep / Plan / child agent 文案。
 
 ### 3. 工具和确认闭环
 
@@ -45,7 +46,7 @@ deep / Agent 集群是未来项目边界：不做默认可见入口，不主动�
 
 - 主工作区优先展示回答、结果摘要、关键证据、不确定性和下一步。
 - 详情抽屉承载模型 refs、工具 refs、运行 trace、诊断和错误边界。
-- Skills、Tools、Settings 只展示真实可用能力；Routines、团队 agent、deep 入口不做占位。
+- Skills、Tools、Settings 只展示真实可用能力；多 Agent 已是真实模块，不再作为占位；Routines、团队 agent 和未完成 deep 能力不做占位。
 - 验收：空态、运行态、待确认、完成态、失败态都可读，不出现内部架构菜单或调试面板首屏化。
 
 ### 5. 持久化和恢复
@@ -83,9 +84,10 @@ deep / Agent 集群是未来项目边界：不做默认可见入口，不主动�
 ## 禁止回退
 
 - 不从 `.trellis/tasks` 创建、启动或续接当前任务。
-- 不新增可见 deep 入口。
-- 不主动改动 deep 后端。
-- 不用关键词、长度或工程规则把普通请求自动升级到 Underground。
+- 不新增绕过 Panel 显式“多 Agent”模块的隐式 deep 入口。
+- 不在默认 Agent 开发中夹带 DeepRuntime / `/api/deep/*` 编排变更；显式多 Agent 变更必须按 ADR-0025 单独说明边界和验证。
+- 不用关键词、长度、文件数量或工程规则把普通请求自动升级到多 Agent / Underground。
+- 不把 `deep`、`DeepRuntime`、`/api/deep/*` 写成用户可见主文案；用户侧称“多 Agent”，内部契约可继续沿用 deep 命名。
 - 不把普通文件编辑、helper、adapter、状态更新或一次工具循环命名为 deep、Plan、Handoff、Agent cluster 或 atomic mutation。
 - 不让平台适配目录、Codex / Claude / OpenCode agent 文件或历史 Trellis skill 反向定义 AgentArbor 产品语义。
 - 不为了演示效果创建假报告、假 artifact、假任务、假运行进度或未出生的能力入口。

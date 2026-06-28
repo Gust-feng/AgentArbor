@@ -9,7 +9,7 @@
 - 架构设计：长期架构决策、协议边界、工作区结构和产品架构资料。
 - 历史看板：早期 Trellis 任务状态的人类态势快照，仅作背景，不再作为当前任务源或约束入口。
 
-当前长期产品架构事实源是 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)；当前活跃实现路线是 [ADR-0024-桌面基础Agent与基础设施优先路线](架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md)。[ADR-0018-AgentArbor原生概念树架构](架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md) 保留为历史架构基线和术语来源，但不再单独决定当前产品主线。
+当前长期产品架构事实源是 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)；当前默认普通 Agent 路线仍以 [ADR-0024-桌面基础Agent与基础设施优先路线](架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md) 为准；显式多 Agent 最小协作闭环以 [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](架构设计/产品架构/ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 为准。[ADR-0018-AgentArbor原生概念树架构](架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md) 保留为历史架构基线和术语来源，但不再单独决定当前产品主线。
 
 历史经验、推进记录、阶段计划、会话沉淀、草案包和准备包不再保留在 `docs/` 活跃知识面中。对未来开发没有直接架构或研究价值的材料应删除，避免干扰。
 
@@ -19,7 +19,7 @@
 2. Desktop Shell 如何接收任务、文件、项目和网页上下文，并形成 Task Soil。
 3. 当前默认普通 Agent 如何完成直接回答、模型工具循环、确认、事件重放、会话持久化和 Skills 最小闭环。
 4. 当前普通 Agent 为什么不能把普通文件编辑、helper、adapter 或一次工具循环包装成 deep / Plan / Handoff 等过重概念。
-5. Underground / Plan / Aboveground 如何作为长期架构边界和未来 deep / Agent 集群能力保留，并等待显式深入项目重启。
+5. 显式“多 Agent”能力如何按 ADR-0025 暴露，同时用户文案不使用 deep / Underground，内部 API 与实现仍可沿用 `deep` / `DeepRuntime`。
 6. Plan / Plan Package 如何在长期架构中承接地下收束结果，并作为 Aboveground Execution Runtime 的可持久化输入。
 7. Observation Panel 和普通工作台如何展示运行投影，同时保证普通回答、工具结果、错误信息、stdout/stderr、文件正文和开发上下文不被脱敏或安全投影吞掉。
 8. Run Memory、Experience Candidate、Capability Asset 和 Path Bias 如何经过 Governance Pipeline 才能回流 Global Soil。
@@ -84,7 +84,7 @@ docs/
 - `.opencode/` 保存 OpenCode 开发适配文件。
 - `.claude/` 保存 Claude Code 开发适配文件。
 - `.agentarbor/` 是未来 Plan Package 的默认存储目录名，只在 Plan 契约、读写规则、权限边界和真实出生依据稳定后增量创建；它不是产品概念树节点，不保存最终资产，也不替代 Global Soil。
-- `src/` 保存 AgentArbor TypeScript 实现代码；当前优先围绕默认普通 Desktop Agent、工作台体验、工具循环、命令确认、运行投影和持久化推进。已有 Underground / Agent Fabric 代码作为长期 deep 能力基础保留，但不能自动污染普通路径。
+- `src/` 保存 AgentArbor TypeScript 实现代码；当前优先围绕默认普通 Desktop Agent、工作台体验、工具循环、命令确认、运行投影和持久化推进。显式多 Agent 已有 `/api/deep/*` / `DeepRuntime` 最小协作闭环；它必须保持独立入口和独立编排，不能自动污染普通路径。
 
 `docs/开发指南/` 负责当前开发规则。
 

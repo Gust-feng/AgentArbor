@@ -24,7 +24,7 @@ export function SkillSettings(props: {
         </button>
       </header>
       {props.skills.length === 0 ? (
-        <div className="skills-empty">暂无技能 · <code>.agents/skills/&lt;skill-name&gt;/SKILL.md</code></div>
+        <div className="skills-empty">暂无技能</div>
       ) : (
         <div className="skills-list" aria-label="技能列表">
           {props.skills.map((skill) => (
@@ -46,8 +46,9 @@ function SkillRow(props: {
   readonly saving?: boolean;
   readonly onToggle: () => void;
 }): React.ReactElement {
-  const sourcePath = compactSkillSourcePath(props.skill.sourcePath);
-  const lastUsedAt = formatSkillDateTime(props.skill.lastUsedAt);
+  const lastUsed = skillLastUsedView(props.skill.lastUsedAt);
+  const hasCategory = props.skill.category !== undefined && props.skill.category.length > 0;
+  const hasMeta = hasCategory || lastUsed !== undefined;
   const toggleActionLabel = props.skill.enabled ? "停用" : "启用";
   return (
     <article className={`skills-row ${props.skill.enabled ? "" : "disabled"}`}>
@@ -57,12 +58,20 @@ function SkillRow(props: {
           <span className={props.skill.enabled ? "enabled" : "disabled"}>{props.skill.enabled ? "启用" : "停用"}</span>
         </div>
         <p>{skillSummary(props.skill)}</p>
-        <div className="skills-row-meta">
-          <span>{skillTriggerLabel(props.skill)}</span>
-          {props.skill.category !== undefined && props.skill.category.length > 0 && <span>{props.skill.category}</span>}
-          {lastUsedAt !== undefined && <span>最近使用：{lastUsedAt}</span>}
-          {sourcePath !== undefined && <span title={props.skill.sourcePath}>{sourcePath}</span>}
-        </div>
+        {hasMeta && (
+          <div className="skills-row-meta">
+            {hasCategory && <span>{props.skill.category}</span>}
+            {lastUsed !== undefined && (
+              <span className={lastUsed.kind === "invalid" ? "muted" : undefined} title={lastUsed.title}>
+                最近使用：{lastUsed.dateTime === undefined ? (
+                  lastUsed.label
+                ) : (
+                  <time dateTime={lastUsed.dateTime}>{lastUsed.label}</time>
+                )}
+              </span>
+            )}
+          </div>
+        )}
         {props.skill.loadError !== undefined && props.skill.loadError.length > 0 && (
           <div className="skills-row-error">加载失败：{props.skill.loadError}</div>
         )}
@@ -85,39 +94,58 @@ function skillSummary(skill: SkillDefinition): string {
   return skill.summary?.trim() || skill.description?.trim() || "未填写描述";
 }
 
-function skillTriggerLabel(skill: SkillDefinition): string {
-  const triggers = skill.triggers ?? [];
-  if (triggers.length === 0) {
-    return "按任务匹配";
-  }
-  return `按任务匹配 · ${triggers.slice(0, 3).join(" / ")}`;
-}
+type SkillLastUsedView = {
+  readonly kind: "known" | "invalid";
+  readonly label: string;
+  readonly dateTime?: string;
+  readonly title?: string;
+};
 
-function compactSkillSourcePath(sourcePath: string | undefined): string | undefined {
-  if (sourcePath === undefined || sourcePath.length === 0) {
-    return undefined;
-  }
-  const normalized = sourcePath.replace(/\\/g, "/");
-  const marker = "/.agents/skills/";
-  const markerIndex = normalized.lastIndexOf(marker);
-  if (markerIndex >= 0) {
-    return normalized.slice(markerIndex + 1);
-  }
-  return normalized;
-}
-
-function formatSkillDateTime(value: string | undefined): string | undefined {
+function skillLastUsedView(value: string | undefined): SkillLastUsedView | undefined {
   if (value === undefined || value.length === 0) {
     return undefined;
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return value;
+    return { kind: "invalid", label: "记录异常", title: value };
   }
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return {
+    kind: "known",
+    label: formatSkillLastUsedDate(date),
+    dateTime: date.toISOString(),
+    title: date.toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }),
+  };
+}
+
+function formatSkillLastUsedDate(date: Date): string {
+  const now = new Date();
+  const todayStart = startOfLocalDay(now).getTime();
+  const dateStart = startOfLocalDay(date).getTime();
+  const dayOffset = Math.round((dateStart - todayStart) / 86_400_000);
+  const time = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  if (dayOffset === 0) {
+    return `今天 ${time}`;
+  }
+  if (dayOffset === -1) {
+    return `昨天 ${time}`;
+  }
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${pad2(date.getMonth() + 1)}月${pad2(date.getDate())}日 ${time}`;
+  }
+  return `${date.getFullYear()}年${pad2(date.getMonth() + 1)}月${pad2(date.getDate())}日 ${time}`;
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function pad2(value: number): string {
+  return value.toString().padStart(2, "0");
 }

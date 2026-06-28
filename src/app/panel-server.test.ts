@@ -246,7 +246,9 @@ test("panel skills route returns real discovered SKILL metadata only", async () 
     assert.equal(response.status, 200);
     assert.equal(response.body.skills.length, 1);
     assert.equal(response.body.skills[0].name, "Safe Skill");
-    assert.deepEqual(response.body.skills[0].triggers, ["summary"]);
+    assert.equal("triggers" in response.body.skills[0], false);
+    assert.equal("sourcePath" in response.body.skills[0], false);
+    assert.equal(JSON.stringify(response.body.skills).includes(skillRoot), false);
     assert.equal(JSON.stringify(response.body.skills).includes("BODY_SENTINEL"), false);
 
     const extraSkillDir = path.join(skillRoot, "extra-skill");
@@ -262,6 +264,8 @@ test("panel skills route returns real discovered SKILL metadata only", async () 
       refreshed.body.skills.map((skill: { readonly name: string }) => skill.name).sort(),
       ["Extra Skill", "Safe Skill"]
     );
+    assert.equal(refreshed.body.skills.some((skill: Record<string, unknown>) => "sourcePath" in skill), false);
+    assert.equal(refreshed.body.skills.some((skill: Record<string, unknown>) => "triggers" in skill), false);
     assert.equal(JSON.stringify(refreshed.body.skills).includes("EXTRA_BODY_SENTINEL"), false);
   } finally {
     await server.close();
@@ -346,6 +350,7 @@ test("panel skills state route updates source-qualified skill state", async () =
       assert.equal(updated.status, 200);
       assert.equal(refreshedProject.enabled, false);
       assert.equal(refreshedUser.enabled, true);
+      assert.equal(JSON.stringify(updated.body.skills).includes("sourcePath"), false);
       assert.equal(JSON.stringify(updated.body.skills).includes("PROJECT_BODY"), false);
       assert.equal(JSON.stringify(updated.body.skills).includes("USER_BODY"), false);
     } finally {

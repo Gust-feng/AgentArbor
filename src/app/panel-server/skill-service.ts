@@ -35,6 +35,20 @@ export type PanelSkillRuntime = {
   };
 };
 
+export type PanelSkillSettingsItem = {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly enabled: boolean;
+  readonly lastUsedAt?: string;
+  readonly summary?: string;
+  readonly category?: string;
+  readonly sourceKind?: "project" | "user" | "plugin" | "admin" | "custom";
+  readonly sourceRootId?: string;
+  readonly stateKey?: string;
+  readonly loadError?: string;
+};
+
 export type ResolveTriggeredSkillContextsOptions = {
   readonly intelligenceChannel?: IntelligenceChannel;
   readonly historySummary?: string;
@@ -52,9 +66,17 @@ export async function listPanelSkills(runtime: PanelSkillRuntime): Promise<reado
   return discoverSkills({ roots: runtime.skillRoots, stateStore: runtime.skillStateStore });
 }
 
+export async function listPanelSkillSettings(runtime: PanelSkillRuntime): Promise<readonly PanelSkillSettingsItem[]> {
+  return (await listPanelSkills(runtime)).map(projectPanelSkillSettingsItem);
+}
+
 export async function refreshPanelSkills(runtime: PanelSkillRuntime): Promise<readonly SkillDefinition[]> {
   runtime.capabilityCenter?.invalidate();
   return listPanelSkills(runtime);
+}
+
+export async function refreshPanelSkillSettings(runtime: PanelSkillRuntime): Promise<readonly PanelSkillSettingsItem[]> {
+  return (await refreshPanelSkills(runtime)).map(projectPanelSkillSettingsItem);
 }
 
 export async function setPanelSkillEnabled(
@@ -74,6 +96,23 @@ export async function setPanelSkillEnabled(
   );
   runtime.capabilityCenter?.invalidate();
   return true;
+}
+
+export function projectPanelSkillSettingsItem(skill: SkillDefinition): PanelSkillSettingsItem {
+  const optionalFacts = skill as SkillDefinition & { readonly loadError?: unknown };
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    enabled: skill.enabled,
+    lastUsedAt: skill.lastUsedAt,
+    summary: skill.summary,
+    category: skill.category,
+    sourceKind: skill.sourceKind,
+    sourceRootId: skill.sourceRootId,
+    stateKey: skill.stateKey,
+    loadError: typeof optionalFacts.loadError === "string" ? optionalFacts.loadError : undefined,
+  };
 }
 
 export async function resolveTriggeredSkillContexts(

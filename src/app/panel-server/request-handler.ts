@@ -38,7 +38,7 @@ import {
 } from "./run-execution.js";
 import { handlePanelRunRoute } from "./run-routes.js";
 import { handlePanelDeepRoute } from "./deep-routes.js";
-import { listPanelSkills, refreshPanelSkills, setPanelSkillEnabled } from "./skill-service.js";
+import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 export async function startLocalPanelServer(options: PanelServerOptions = {}): Promise<StartedPanelServer> {
@@ -152,7 +152,7 @@ async function handlePanelRequest(
   if (request.method === "GET" && url.pathname === "/api/skills") {
     writeJson(response, 200, {
       ok: true,
-      skills: await listPanelSkills(runtime),
+      skills: await listPanelSkillSettings(runtime),
     });
     return;
   }
@@ -160,7 +160,7 @@ async function handlePanelRequest(
   if (request.method === "POST" && url.pathname === "/api/skills/refresh") {
     writeJson(response, 200, {
       ok: true,
-      skills: await refreshPanelSkills(runtime),
+      skills: await refreshPanelSkillSettings(runtime),
     });
     return;
   }
@@ -216,7 +216,7 @@ async function handleUpdateSkillStateRequest(
   }
   writeJson(response, 200, {
     ok: true,
-    skills: await listPanelSkills(runtime),
+    skills: await listPanelSkillSettings(runtime),
   });
 }
 

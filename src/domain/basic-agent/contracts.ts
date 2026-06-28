@@ -134,6 +134,7 @@ export type SkillDefinition = {
   readonly sourceRootId?: string;
   readonly sourcePrecedence?: number;
   readonly stateKey?: string;
+  readonly loadError?: string;
   readonly version?: string;
   readonly provenance?: Readonly<Record<string, SkillJsonValue>>;
   readonly whenToUse?: string;

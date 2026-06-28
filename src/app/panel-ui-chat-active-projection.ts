@@ -20,6 +20,25 @@ export type ChatActiveConversationTurn = {
   readonly content: string;
   readonly status: string;
   readonly runId?: string;
+  readonly attachments?: readonly {
+    readonly attachmentId: string;
+    readonly kind: "workspace" | "file" | "project" | "web";
+    readonly title: string;
+    readonly summary?: string;
+    readonly readonlyPreviewMeta?: {
+      readonly available?: boolean;
+      readonly title?: string;
+      readonly byteLength?: number;
+      readonly mimeType?: string;
+      readonly truncated?: boolean;
+    };
+    readonly mediaPreview?: {
+      readonly kind: "image";
+      readonly url: string;
+      readonly mimeType: string;
+      readonly byteLength?: number;
+    };
+  }[];
 };
 
 export type ChatActiveConversation = {

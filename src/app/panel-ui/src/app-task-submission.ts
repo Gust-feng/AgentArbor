@@ -1,6 +1,6 @@
 import type React from "react";
 import { postJson } from "./api";
-import { taskSoilInputFromAttachments } from "./app-attachments";
+import { conversationTurnAttachmentsFromContextAttachments, taskSoilInputFromAttachments } from "./app-attachments";
 import {
   runReasoningSettings,
   type ComposerReasoningEffort,
@@ -42,6 +42,7 @@ export type PanelTaskSubmissionOptions = {
   readonly setGoal: (goal: string) => void;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
+  readonly selectedWorkspaceDirectory?: string;
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly composerReasoningEffort: ComposerReasoningEffort;
@@ -95,7 +96,12 @@ export async function submitPanelTask(
       ...previous,
       ...capabilityState,
       busy: true,
-      conversation: optimisticConversationForSubmit(previous.conversation, trimmed),
+      conversation: optimisticConversationForSubmit(
+        previous.conversation,
+        trimmed,
+        undefined,
+        conversationTurnAttachmentsFromContextAttachments(attachmentsBeforeSubmit)
+      ),
       error: undefined,
       run: likelyQueuesBehindActiveRun ? previous.run : undefined,
       events: likelyQueuesBehindActiveRun ? previous.events : [],
@@ -118,6 +124,7 @@ export async function submitPanelTask(
       aiMode: options.aiMode,
       toolConfirmationPolicy: options.toolConfirmationPolicy,
       modelOverride: modelOverrideFromSelectedOption(options.selectedModelId),
+      workspaceDirectory: options.selectedWorkspaceDirectory,
       taskSoilInput: taskSoilInputFromAttachments(options.attachments),
       ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),
     });

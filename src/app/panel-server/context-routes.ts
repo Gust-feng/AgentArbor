@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ContextAttachment } from "../../domain/basic-agent/index.js";
 import type { ConfigCenter } from "../config-center.js";
 import {
   ContextAttachmentPreviewError,
@@ -13,12 +14,14 @@ import {
 } from "../context-attachments.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import { asRecord, optionalString } from "./request-parsers.js";
-import type { PanelContextAttachmentSelection } from "./types.js";
+import type { PanelContextAttachmentMediaEntry, PanelContextAttachmentSelection } from "./types.js";
 
 export type PanelContextRouteRuntime = {
   readonly configCenter: ConfigCenter;
   readonly configDirectory?: string;
+  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
+  readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
 };
 
 const MAX_ATTACHMENT_UPLOAD_BYTES = 64 * 1024 * 1024;
@@ -30,6 +33,12 @@ export async function handlePanelContextRoute(
   response: ServerResponse,
   url: URL
 ): Promise<boolean> {
+  const mediaMatch = /^\/api\/context\/attachments\/media\/([^/]+)$/u.exec(url.pathname);
+  if (request.method === "GET" && mediaMatch !== null) {
+    await writeContextAttachmentMedia(runtime, decodeMediaAttachmentId(mediaMatch[1] ?? ""), response);
+    return true;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/context/attachments/preview") {
     const body = await readJsonBody(request);
     const workspace = await runtime.configCenter.getWorkspaceConfig();
@@ -42,7 +51,10 @@ export async function handlePanelContextRoute(
       }
       throw error;
     });
-    writeJson(response, 200, { ok: true, attachment });
+    writeJson(response, 200, {
+      ok: true,
+      attachment: await attachMediaPreview(runtime, attachment, workspace.workspaceDirectory),
+    });
     return true;
   }
 
@@ -56,7 +68,7 @@ export async function handlePanelContextRoute(
     }
     const uploadDirectory = path.join(resolveAttachmentUploadRoot(runtime.configDirectory), randomUUID());
     await fs.mkdir(uploadDirectory, { recursive: true });
-    const attachments = [];
+    const attachments: ContextAttachment[] = [];
     for (const [index, file] of files.entries()) {
       const savedPath = path.join(uploadDirectory, storedUploadFilename(file.filename, index));
       await fs.writeFile(savedPath, file.body);
@@ -70,7 +82,7 @@ export async function handlePanelContextRoute(
         }
         throw error;
       });
-      attachments.push(attachment);
+      attachments.push(await attachMediaPreview(runtime, attachment));
     }
     writeJson(response, 200, {
       ok: true,
@@ -101,7 +113,28 @@ export async function handlePanelContextRoute(
     writeJson(response, 200, {
       ok: true,
       status: "completed",
-      attachment,
+      attachment: await attachMediaPreview(runtime, attachment),
+    });
+    return true;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/context/workspace/select-directory") {
+    if (runtime.workspaceDirectoryPicker === undefined) {
+      throw new PanelHttpError(501, "workspace_picker_unavailable", "当前环境不支持系统文件夹选择器。");
+    }
+    const selectedDirectory = await runtime.workspaceDirectoryPicker();
+    if (selectedDirectory === undefined) {
+      writeJson(response, 200, {
+        ok: true,
+        status: "cancelled",
+        message: "已取消选择文件夹。",
+      });
+      return true;
+    }
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      workspaceDirectory: path.resolve(selectedDirectory),
     });
     return true;
   }
@@ -254,6 +287,138 @@ function storedUploadFilename(filename: string, index: number): string {
   const basename = path.basename(filename).replace(/[<>:"/\\|?*\u0000-\u001f]+/gu, "_").trim();
   const safe = basename.length === 0 ? `attachment-${index + 1}` : basename.slice(0, 160);
   return `${String(index + 1).padStart(2, "0")}-${randomUUID()}-${safe}`;
+}
+
+async function attachMediaPreview(
+  runtime: PanelContextRouteRuntime,
+  attachment: ContextAttachment,
+  workspaceRoot?: string
+): Promise<ContextAttachment> {
+  const entry = await mediaEntryForAttachment(attachment, workspaceRoot);
+  if (entry === undefined) {
+    return attachment;
+  }
+  runtime.contextAttachmentMedia.set(entry.attachmentId, entry);
+  return {
+    ...attachment,
+    mediaPreview: {
+      kind: entry.kind,
+      url: mediaPreviewUrl(entry.attachmentId),
+      mimeType: entry.mimeType,
+      byteLength: entry.byteLength,
+    },
+  };
+}
+
+async function mediaEntryForAttachment(
+  attachment: ContextAttachment,
+  workspaceRoot?: string
+): Promise<PanelContextAttachmentMediaEntry | undefined> {
+  const mimeType = attachment.readonlyPreviewMeta.mimeType;
+  if (
+    attachment.kind !== "file" ||
+    attachment.status !== "ready" ||
+    mimeType === undefined ||
+    !isImageMimeType(mimeType)
+  ) {
+    return undefined;
+  }
+  const absolutePath = resolveAttachmentFilePath(attachment.ref, workspaceRoot);
+  if (absolutePath === undefined) {
+    return undefined;
+  }
+  const stat = await fs.stat(absolutePath).catch(() => undefined);
+  if (stat?.isFile() !== true) {
+    return undefined;
+  }
+  return {
+    attachmentId: attachment.attachmentId,
+    kind: "image",
+    absolutePath,
+    mimeType,
+    byteLength: stat.size,
+    title: attachment.title,
+  };
+}
+
+async function writeContextAttachmentMedia(
+  runtime: PanelContextRouteRuntime,
+  attachmentId: string,
+  response: ServerResponse
+): Promise<void> {
+  if (attachmentId.length === 0) {
+    throw new PanelHttpError(400, "invalid_attachment_media_id", "附件媒体 ID 无效。");
+  }
+  const entry = runtime.contextAttachmentMedia.get(attachmentId);
+  if (entry === undefined) {
+    throw new PanelHttpError(404, "attachment_media_not_found", "没有找到这个附件预览。");
+  }
+  if (!isImageMimeType(entry.mimeType)) {
+    throw new PanelHttpError(404, "attachment_media_not_found", "没有找到这个附件预览。");
+  }
+  const stat = await fs.stat(entry.absolutePath).catch(() => undefined);
+  if (stat?.isFile() !== true) {
+    runtime.contextAttachmentMedia.delete(attachmentId);
+    throw new PanelHttpError(410, "attachment_media_unavailable", "附件预览文件已不可用。");
+  }
+  const body = await fs.readFile(entry.absolutePath).catch(() => undefined);
+  if (body === undefined) {
+    throw new PanelHttpError(410, "attachment_media_unavailable", "附件预览文件已不可用。");
+  }
+  response.writeHead(200, {
+    "content-type": entry.mimeType,
+    "content-length": body.length,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
+  response.end(body);
+}
+
+function resolveAttachmentFilePath(ref: string, workspaceRoot: string | undefined): string | undefined {
+  if (ref.startsWith("local-file:")) {
+    const absolutePath = ref.slice("local-file:".length);
+    return path.isAbsolute(absolutePath) ? path.resolve(absolutePath) : undefined;
+  }
+  if (workspaceRoot === undefined) {
+    return undefined;
+  }
+  if (ref.startsWith("file:")) {
+    return resolveWorkspaceFilePath(workspaceRoot, ref.slice("file:".length));
+  }
+  if (ref.startsWith("workspace:")) {
+    const relativePath = ref.slice("workspace:".length);
+    if (relativePath.length === 0 || relativePath === "current" || relativePath.startsWith("goal-")) {
+      return undefined;
+    }
+    return resolveWorkspaceFilePath(workspaceRoot, relativePath);
+  }
+  return undefined;
+}
+
+function resolveWorkspaceFilePath(workspaceRoot: string, relativePath: string): string | undefined {
+  const root = path.resolve(workspaceRoot);
+  const absolutePath = path.resolve(root, relativePath);
+  const relative = path.relative(root, absolutePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return undefined;
+  }
+  return absolutePath;
+}
+
+function mediaPreviewUrl(attachmentId: string): string {
+  return `/api/context/attachments/media/${encodeURIComponent(attachmentId)}`;
+}
+
+function decodeMediaAttachmentId(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new PanelHttpError(400, "invalid_attachment_media_id", "附件媒体 ID 无效。");
+  }
+}
+
+function isImageMimeType(mimeType: string): boolean {
+  return /^image\/(?:png|jpeg|gif|webp)$/iu.test(mimeType);
 }
 
 function parseContextAttachmentPreviewInput(raw: unknown): CreateContextAttachmentPreviewInput {

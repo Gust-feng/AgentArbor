@@ -37,6 +37,7 @@ export type PanelRunInput = {
     readonly profileId: string;
     readonly model: string;
   };
+  readonly workspaceDirectory?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
 };
 
@@ -370,6 +371,7 @@ export function parseRunInput(raw: unknown): PanelRunInput {
     reasoningEffort: parseRunReasoningEffort(record.reasoningEffort, record.openAI),
     toolConfirmationPolicy: parseToolConfirmationPolicy(record.toolConfirmationPolicy),
     modelOverride: parseModelOverride(record.modelOverride),
+    workspaceDirectory: optionalString(record.workspaceDirectory),
     taskSoilInput,
   };
 }

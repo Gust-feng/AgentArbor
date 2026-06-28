@@ -143,7 +143,10 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("} else if (app.busy || modelResponding) {\n        enqueueMessage(goal);"), true);
   assert.equal(app.includes('const chatScreen = app.agentMode === "deep"'), true);
   assert.equal(app.includes("function openNormalTaskEntry"), true);
-  assert.equal(app.includes('changeAgentMode("normal");\n    resetChat();'), true);
+  assert.equal(app.includes('changeAgentMode("normal");\n    setSelectedWorkspaceDirectory(undefined);\n    resetChat();'), true);
+  assert.equal(app.includes("app.conversation.workspaceFolder?.path"), true);
+  assert.equal(app.includes("app.conversation?.workspaceFolder?.path"), true);
+  assert.equal(app.includes("summary?.workspaceFolder?.path"), true);
   assert.equal(app.includes("function openAgentClusterEntry"), true);
   assert.equal(app.includes("function openCurrentModeTaskEntry"), true);
   assert.equal(app.includes('agentMode: "deep"'), true);

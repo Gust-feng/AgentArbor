@@ -1,4 +1,5 @@
 import type { ContextAttachment } from "./contracts/context";
+import type { ConversationTurnAttachment } from "./contracts/conversation";
 import { ApiError, postJson } from "./api";
 
 export function taskSoilInputFromAttachments(attachments: readonly ContextAttachment[]): {
@@ -51,6 +52,59 @@ export function uniqueAttachments(attachments: readonly ContextAttachment[]): re
     result.push(attachment);
   }
   return result;
+}
+
+export function conversationTurnAttachmentsFromContextAttachments(
+  attachments: readonly ContextAttachment[]
+): readonly ConversationTurnAttachment[] | undefined {
+  const ready = attachments.filter((attachment) => attachment.status === "ready");
+  if (ready.length === 0) {
+    return undefined;
+  }
+  return ready.map((attachment) => ({
+    attachmentId: attachment.attachmentId,
+    kind: attachment.kind,
+    title: attachment.title,
+    summary: safeConversationAttachmentSummary(attachment),
+    readonlyPreviewMeta: {
+      available: attachment.readonlyPreviewMeta.available,
+      title: attachment.readonlyPreviewMeta.title,
+      byteLength: attachment.readonlyPreviewMeta.byteLength,
+      mimeType: attachment.readonlyPreviewMeta.mimeType,
+      truncated: attachment.readonlyPreviewMeta.truncated,
+    },
+    mediaPreview: attachment.mediaPreview?.kind === "image" ? attachment.mediaPreview : undefined,
+  }));
+}
+
+function safeConversationAttachmentSummary(attachment: ContextAttachment): string | undefined {
+  const parts = [
+    attachment.mediaPreview?.mimeType ?? attachment.readonlyPreviewMeta.mimeType,
+    byteSizeLabel(attachment.mediaPreview?.byteLength ?? attachment.readonlyPreviewMeta.byteLength),
+  ].filter((value): value is string => value !== undefined);
+  if (parts.length > 0) {
+    return parts.join(" · ");
+  }
+  if (attachment.ref.startsWith("local-file:")) {
+    return "本地文件";
+  }
+  if (attachment.ref.startsWith("local-project:")) {
+    return "本地文件夹";
+  }
+  return attachment.summary;
+}
+
+function byteSizeLabel(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${value} bytes`;
 }
 
 export async function previewContextAttachment(input: {

@@ -8,6 +8,7 @@ import type {
   PanelConversationReadModel,
   PanelConversationSummaryReadModel,
   PanelConversationTurn,
+  PanelConversationTurnAttachment,
   PanelConversationTurnModel,
   PanelConversationTurnRole,
   PanelConversationTurnStatus,
@@ -17,6 +18,7 @@ import {
   CONVERSATION_USER_MESSAGE_MAX_CHARS,
   compact,
   compactMessageContent,
+  normalizeTurnAttachments,
   normalizeTurnModel,
   toConversationReadModel,
   toConversationSummary,
@@ -32,6 +34,7 @@ export type {
   PanelConversationReadModel,
   PanelConversationSummaryReadModel,
   PanelConversationTurn,
+  PanelConversationTurnAttachment,
   PanelConversationTurnModel,
   PanelConversationTurnReadModel,
   PanelConversationTurnRole,
@@ -144,6 +147,7 @@ export class PanelConversationStore {
         updatedAt: turn.updatedAt,
         runId: turn.runId,
         responseModel: normalizeTurnModel(turn.responseModel),
+        attachments: normalizeTurnAttachments(turn.attachments),
       })),
     };
     reserveConversationIds(conversation);
@@ -172,6 +176,7 @@ export class PanelConversationStore {
   startDesktopMessage(input: {
     readonly goal: string;
     readonly taskSoilInput?: DesktopTaskSoilInput;
+    readonly attachments?: readonly NonNullable<PanelConversationTurn["attachments"]>[number][];
     readonly conversationId?: string;
     readonly queueBehindRunId?: string;
   }): {
@@ -192,6 +197,7 @@ export class PanelConversationStore {
       content: compactMessageContent(input.goal, CONVERSATION_USER_MESSAGE_MAX_CHARS),
       status: queued ? "pending" : "completed",
       taskSoilInput: input.taskSoilInput,
+      attachments: input.attachments,
     });
     const assistantTurn = createTurn({
       role: "assistant",
@@ -396,6 +402,7 @@ function createTurn(input: {
   readonly content: string;
   readonly status: PanelConversationTurnStatus;
   readonly taskSoilInput?: DesktopTaskSoilInput;
+  readonly attachments?: readonly NonNullable<PanelConversationTurn["attachments"]>[number][];
 }): PanelConversationTurn {
   const createdAt = nowIso();
   return {
@@ -410,6 +417,7 @@ function createTurn(input: {
     createdAt,
     updatedAt: createdAt,
     taskSoilInput: input.taskSoilInput,
+    attachments: normalizeTurnAttachments(input.attachments),
   };
 }
 

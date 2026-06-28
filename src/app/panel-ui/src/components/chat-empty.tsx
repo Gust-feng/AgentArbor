@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   ChevronDown,
+  ChevronRight,
+  FolderOpen,
   Paperclip,
   PencilLine,
   ShieldCheck,
@@ -16,9 +18,9 @@ type ComposerChipFeedback = "model" | "reasoning" | "access";
 
 const COMPOSER_CHIP_FEEDBACK_MS = 540;
 const EMPTY_HEADING = "今天想处理什么？";
-const DEEP_EMPTY_HEADING = "Deep 认知运行时";
-const DEEP_EMPTY_HINT = "输入探索目标，地下运行时将自主决策、多路探索并给出可解释的综合结论。";
-const DEEP_PLACEHOLDER = "输入探索目标，Deep 将多路探索并综合...";
+const MULTI_AGENT_EMPTY_HEADING = "多 Agent";
+const MULTI_AGENT_EMPTY_HINT = "适合方向不明确、需要比较多个可能方案的任务。";
+const MULTI_AGENT_PLACEHOLDER = "输入需要比较或判断的目标...";
 
 export type ChatModelOption = {
   readonly id: string;
@@ -38,6 +40,8 @@ export type QueuedChatMessage = {
 
 type AttachmentInputProps = {
   readonly attachments: readonly ContextAttachment[];
+  readonly selectedWorkspaceDirectory?: string;
+  readonly onSelectWorkspaceDirectory?: () => void;
   readonly onSelectAttachment: () => void;
   readonly onUploadAttachmentFiles?: (files: readonly File[]) => void | Promise<void>;
   readonly onRemoveAttachment: (attachmentId: string) => void;
@@ -60,6 +64,7 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly onOpenSettings: () => void;
   readonly onSubmit: () => void;
   readonly onCancel?: () => void;
+  readonly cancelLabel?: string;
   readonly autoFocus?: boolean;
   readonly running?: boolean;
   readonly agentMode?: AgentMode;
@@ -81,15 +86,15 @@ export function ChatEmpty(props: ChatInputProps & {
         <div className="chat-empty-grid">
           <section className="chat-empty-copy" aria-label="任务输入">
             {isDeep && (
-              <span className="chat-empty-mode-badge" data-mode="deep">Deep 模式</span>
+              <span className="chat-empty-mode-badge" data-mode="deep">多 Agent</span>
             )}
             <h1 className="chat-empty-heading">
               <span className="chat-empty-heading-title" data-startup-title-anchor>
-                {isDeep ? DEEP_EMPTY_HEADING : EMPTY_HEADING}
+                {isDeep ? MULTI_AGENT_EMPTY_HEADING : EMPTY_HEADING}
               </span>
             </h1>
             {isDeep && (
-              <p className="chat-empty-subheading">{DEEP_EMPTY_HINT}</p>
+              <p className="chat-empty-subheading">{MULTI_AGENT_EMPTY_HINT}</p>
             )}
             {props.error && <div className="system-error-line">{props.error}</div>}
           </section>
@@ -98,7 +103,7 @@ export function ChatEmpty(props: ChatInputProps & {
       <ChatInputBar
         {...props}
         variant="floating"
-        placeholder={isDeep ? DEEP_PLACEHOLDER : "输入任务..."}
+        placeholder={isDeep ? MULTI_AGENT_PLACEHOLDER : "输入任务..."}
       />
     </div>
   );
@@ -125,6 +130,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   const canSend = props.value.trim().length > 0 && (!props.busy || props.allowInputWhileBusy === true);
   const modelGroups = useMemo(() => groupModels(props.models), [props.models]);
   const canUploadAttachments = props.onUploadAttachmentFiles !== undefined && props.contextBusy !== true;
+  const hasTaskWorkspace = props.selectedWorkspaceDirectory !== undefined;
 
   function showChipFeedback(target: ComposerChipFeedback): void {
     if (chipFeedbackTimerRef.current !== undefined) {
@@ -281,17 +287,45 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
     >
       {props.attachments.length > 0 && (
         <div className="attachment-row">
-          {props.attachments.map((attachment) => (
-            <span className={`attachment-pill ${attachment.status === "blocked" ? "blocked" : ""}`} key={attachment.attachmentId}>
-              <span>
-                <strong>{attachment.title}</strong>
-                <small>{compact(attachment.summary, 48)}</small>
+          {props.attachments.map((attachment) => {
+            const mediaPreview = attachmentMediaPreview(attachment);
+            if (mediaPreview !== undefined) {
+              return (
+                <span
+                  className={`attachment-pill attachment-image-card ${attachment.status === "blocked" ? "blocked" : ""}`}
+                  key={attachment.attachmentId}
+                >
+                  <span className="attachment-image-thumbnail">
+                    <img
+                      src={mediaPreview.url}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      draggable={false}
+                    />
+                  </span>
+                  <span className="attachment-image-copy">
+                    <strong>{attachment.title}</strong>
+                    <small>{compact(attachmentImageSummary(attachment), 56)}</small>
+                  </span>
+                  <button type="button" onClick={() => props.onRemoveAttachment(attachment.attachmentId)} aria-label={`移除${attachment.title}`}>
+                    <X size={12} />
+                  </button>
+                </span>
+              );
+            }
+            return (
+              <span className={`attachment-pill ${attachment.status === "blocked" ? "blocked" : ""}`} key={attachment.attachmentId}>
+                <span>
+                  <strong>{attachment.title}</strong>
+                  <small>{compact(attachment.summary, 48)}</small>
+                </span>
+                <button type="button" onClick={() => props.onRemoveAttachment(attachment.attachmentId)} aria-label={`移除${attachment.title}`}>
+                  <X size={12} />
+                </button>
               </span>
-              <button type="button" onClick={() => props.onRemoveAttachment(attachment.attachmentId)} aria-label={`移除${attachment.title}`}>
-                <X size={12} />
-              </button>
-            </span>
-          ))}
+            );
+          })}
         </div>
       )}
       <textarea
@@ -456,6 +490,25 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
           </div>
         </div>
         <div className="chat-input-right">
+          {props.onSelectWorkspaceDirectory !== undefined && (
+            <button
+              type="button"
+              className="composer-tool-button composer-workspace-button"
+              onClick={() => {
+                closeComposerPanels();
+                props.onSelectWorkspaceDirectory?.();
+              }}
+              disabled={props.contextBusy === true}
+              aria-label={hasTaskWorkspace ? "更换当前工作空间" : "选择工作空间"}
+              title={props.selectedWorkspaceDirectory ?? "选择工作空间"}
+            >
+              <FolderOpen size={18} aria-hidden="true" />
+              <span className="composer-workspace-label">
+                {hasTaskWorkspace ? workspaceDirectoryLabel(props.selectedWorkspaceDirectory) : "选择工作空间"}
+              </span>
+              <ChevronRight size={15} aria-hidden="true" />
+            </button>
+          )}
           <button
             type="button"
             className="composer-tool-button composer-icon-button"
@@ -470,7 +523,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
           </button>
           {props.running && (
             <button type="button" className="composer-cancel-button" onClick={props.onCancel}>
-              取消
+              {props.cancelLabel ?? "取消"}
             </button>
           )}
           <button
@@ -619,6 +672,39 @@ function groupModels(models: readonly ChatModelOption[]): readonly { readonly la
     groups.set(label, [...(groups.get(label) ?? []), model]);
   }
   return [...groups.entries()].map(([label, items]) => ({ label, items }));
+}
+
+function attachmentMediaPreview(attachment: ContextAttachment): NonNullable<ContextAttachment["mediaPreview"]> | undefined {
+  return attachment.mediaPreview?.kind === "image" ? attachment.mediaPreview : undefined;
+}
+
+function workspaceDirectoryLabel(directory: string | undefined): string {
+  const normalized = (directory ?? "").trim().replace(/[\\/]+$/u, "");
+  if (normalized.length === 0) {
+    return "工作区";
+  }
+  const parts = normalized.split(/[\\/]+/u);
+  return parts[parts.length - 1] || normalized;
+}
+
+function attachmentImageSummary(attachment: ContextAttachment): string {
+  const mimeType = attachment.mediaPreview?.mimeType ?? attachment.readonlyPreviewMeta.mimeType;
+  const byteLength = attachment.mediaPreview?.byteLength ?? attachment.readonlyPreviewMeta.byteLength;
+  const parts = [mimeType, byteSizeLabel(byteLength)].filter((value): value is string => value !== undefined);
+  return parts.length === 0 ? attachment.summary : parts.join(" · ");
+}
+
+function byteSizeLabel(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${value} bytes`;
 }
 
 const REASONING_EFFORT_OPTIONS: readonly {

@@ -863,6 +863,37 @@ test("panel workspace picker route handles success cancellation and unavailable 
   }
 });
 
+test("panel task workspace picker returns a transient directory without updating the default workspace", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-task-workspace-picker-"));
+  const defaultWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-default-workspace-"));
+  const selectedWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-task-workspace-"));
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    workspaceDirectoryPicker: async () => selectedWorkspace,
+  });
+  try {
+    const configured = await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: defaultWorkspace },
+    });
+    const selected = await requestJson(server.url, "/api/context/workspace/select-directory", { method: "POST" });
+    const after = await requestJson(server.url, "/api/config");
+
+    assert.equal(configured.status, 200);
+    assert.equal(configured.body.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
+    assert.equal(selected.status, 200);
+    assert.equal(selected.body.status, "completed");
+    assert.equal(selected.body.workspaceDirectory, path.resolve(selectedWorkspace));
+    assert.equal(after.body.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(defaultWorkspace);
+    await removeTemporaryTree(selectedWorkspace);
+  }
+});
+
 function mcpServerSource(): string {
   const mcpServerModule = import.meta.resolve("@modelcontextprotocol/sdk/server/mcp.js");
   const stdioTransportModule = import.meta.resolve("@modelcontextprotocol/sdk/server/stdio.js");

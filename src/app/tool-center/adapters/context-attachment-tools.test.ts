@@ -133,6 +133,186 @@ test("context attachment PDF tool extracts text-native PDF content without expos
   }
 });
 
+test("context attachment image tool reads selected local image as ephemeral model attachment", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
+  const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-image-"));
+  const imageFile = path.join(localRoot, "screenshot.png");
+  const image = createTinyPngBuffer();
+  await fs.writeFile(imageFile, image);
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [
+        {
+          attachmentId: "ctx_screenshot",
+          ref: `local-file:${imageFile}`,
+          kind: "file",
+          title: "screenshot.png",
+          summary: "Selected screenshot.",
+          metadata: {
+            byteLength: image.length,
+            mimeType: "image/png",
+            available: true,
+          },
+        },
+      ],
+      permissionBoundaryRefs: [`read:local-file:${imageFile}`],
+    });
+    const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace, supportsVisionInput: true });
+    const permission = {
+      callerAgentId: TOOL_CONTEXT.callerAgentId,
+      allowedTools: [
+        "list_context_attachments",
+        "read_context_attachment_image",
+      ],
+    };
+    const listed = await center.execute(
+      {
+        callId: "call:list-image",
+        toolName: "list_context_attachments",
+        input: {},
+      },
+      TOOL_CONTEXT,
+      permission
+    );
+    const read = await center.execute(
+      {
+        callId: "call:read-image",
+        toolName: "read_context_attachment_image",
+        input: { attachmentId: "ctx_screenshot", detail: "high" },
+      },
+      TOOL_CONTEXT,
+      permission
+    );
+    const projected = JSON.stringify([
+      listed.projection?.agentContent,
+      read.projection?.agentContent,
+    ]);
+    const output = JSON.stringify(read.output);
+    const attachment = read.projection?.modelAttachments?.[0];
+
+    assert.equal(listed.status, "completed");
+    assert.equal(read.status, "completed");
+    assert.equal(projected.includes("\"format\":\"image\""), true);
+    assert.equal(projected.includes("\"canReadImage\":true"), true);
+    assert.equal(projected.includes("\"attached\":true"), true);
+    assert.equal(projected.includes(imageFile), false);
+    assert.equal(projected.includes("local-file:"), false);
+    assert.equal(output.includes(image.toString("base64")), false);
+    assert.equal(attachment?.kind, "image");
+    assert.equal(attachment?.attachmentId, "ctx_screenshot");
+    assert.equal(attachment?.inputRef?.includes("local-file:"), false);
+    assert.equal(attachment?.inputRef?.includes(imageFile), false);
+    assert.equal(attachment?.filename, "screenshot.png");
+    assert.equal(attachment?.detail, "high");
+    assert.equal(attachment?.byteLength, image.length);
+    assert.equal(attachment?.source.kind, "data");
+    if (attachment?.source.kind === "data") {
+      assert.equal(attachment.source.mimeType, "image/png");
+      assert.equal(attachment.source.data, image.toString("base64"));
+    }
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(localRoot, { recursive: true, force: true });
+  }
+});
+
+test("context attachment image tool reads image inside selected local project by relative path", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-image-project-"));
+  const image = createTinyPngBuffer();
+  await fs.mkdir(path.join(projectRoot, "assets"), { recursive: true });
+  await fs.writeFile(path.join(projectRoot, "assets", "screen.jpg"), image);
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [
+        {
+          attachmentId: "ctx_project",
+          ref: `local-project:${projectRoot}`,
+          kind: "project",
+          title: "image-project",
+          metadata: { available: true },
+        },
+      ],
+      permissionBoundaryRefs: [`read:local-project:${projectRoot}`],
+    });
+    const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace, supportsVisionInput: true });
+    const result = await center.execute(
+      {
+        callId: "call:read-project-image",
+        toolName: "read_context_attachment_image",
+        input: { attachmentId: "ctx_project", path: "assets/screen.jpg" },
+      },
+      TOOL_CONTEXT,
+      {
+        callerAgentId: TOOL_CONTEXT.callerAgentId,
+        allowedTools: ["read_context_attachment_image"],
+      }
+    );
+    const modelVisible = JSON.stringify(result.projection?.agentContent);
+    const attachment = result.projection?.modelAttachments?.[0];
+
+    assert.equal(result.status, "completed");
+    assert.equal(modelVisible.includes("assets/screen.jpg"), true);
+    assert.equal(modelVisible.includes(projectRoot), false);
+    assert.equal(modelVisible.includes("local-project:"), false);
+    assert.equal(attachment?.kind, "image");
+    assert.equal(attachment?.filename, "screen.jpg");
+    assert.equal(attachment?.source.kind, "data");
+    if (attachment?.source.kind === "data") {
+      assert.equal(attachment.source.mimeType, "image/jpeg");
+      assert.equal(attachment.source.data, image.toString("base64"));
+    }
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("context attachment image tool reports unsupported when model lacks vision input", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
+  const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-no-vision-"));
+  const imageFile = path.join(localRoot, "diagram.png");
+  const image = createTinyPngBuffer();
+  await fs.writeFile(imageFile, image);
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [
+        {
+          attachmentId: "ctx_diagram",
+          ref: `local-file:${imageFile}`,
+          kind: "file",
+          title: "diagram.png",
+          metadata: { available: true, mimeType: "image/png", byteLength: image.length },
+        },
+      ],
+      permissionBoundaryRefs: [`read:local-file:${imageFile}`],
+    });
+    const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace, supportsVisionInput: false });
+    const result = await center.execute(
+      {
+        callId: "call:no-vision",
+        toolName: "read_context_attachment_image",
+        input: { attachmentId: "ctx_diagram" },
+      },
+      TOOL_CONTEXT,
+      {
+        callerAgentId: TOOL_CONTEXT.callerAgentId,
+        allowedTools: ["read_context_attachment_image"],
+      }
+    );
+    const modelVisible = JSON.stringify(result.projection?.agentContent);
+
+    assert.equal(result.status, "completed");
+    assert.equal(modelVisible.includes("model_does_not_support_vision_input"), true);
+    assert.equal(modelVisible.includes("\"attached\":false"), true);
+    assert.equal(modelVisible.includes(imageFile), false);
+    assert.equal(result.projection?.modelAttachments, undefined);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(localRoot, { recursive: true, force: true });
+  }
+});
+
 test("context attachment tools browse search and read files inside selected local project", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-project-"));
@@ -591,6 +771,7 @@ test("context attachment tools reject refs outside current Task Soil permissions
 function contextAttachmentToolCenter(input: {
   readonly taskSoil: TaskSoil;
   readonly workspaceRoot: string;
+  readonly supportsVisionInput?: boolean;
 }): ToolCenter {
   const center = new ToolCenter();
   for (const tool of createContextAttachmentTools(input)) {
@@ -609,6 +790,13 @@ function taskSoilWithContext(input: Pick<TaskSoil, "contextRefs" | "permissionBo
     permissionBoundaryRefs: input.permissionBoundaryRefs,
     createdAt: "2026-06-27T00:00:00.000Z",
   });
+}
+
+function createTinyPngBuffer(): Buffer {
+  return Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    "base64"
+  );
 }
 
 function createMinimalXlsxBuffer(): Buffer {

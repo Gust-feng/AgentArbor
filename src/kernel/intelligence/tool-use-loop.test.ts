@@ -274,6 +274,88 @@ test("executeToolUseLoop preserves user message attachments across tool rounds",
   assert.equal(JSON.stringify(secondUser).includes("aW1hZ2U="), true);
 });
 
+test("executeToolUseLoop forwards projected tool model attachments after tool result messages", async () => {
+  const attachmentData = "aW1hZ2UtYnl0ZXM=";
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-read-image", "read_context_attachment_image"),
+    textResponse("model-request-final", "Final answer after inspecting tool-provided image."),
+  ]);
+  const broker: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "read_context_attachment_image",
+        description: "Projected image read tool.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "read_context_attachment_image",
+    execute: async (request, _context, _permission) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { raw: "raw output without image bytes" },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        agentContent: {
+          summary: "image metadata returned",
+          attachmentId: "ctx-image",
+          modelInput: { attached: true, detail: "auto" },
+        },
+        modelAttachments: [{
+          kind: "image",
+          attachmentId: "ctx-image",
+          inputRef: "local-file:C:/secret/screenshot.png",
+          filename: "screenshot.png",
+          detail: "auto",
+          byteLength: 11,
+          source: { kind: "data", mimeType: "image/png", data: attachmentData },
+        }],
+        uiSummary: "Image attached for model input.",
+        truncated: false,
+        redacted: false,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: broker,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read_context_attachment_image"],
+    },
+    createValidModelRequest()
+  );
+
+  const messages = channel.requests[1]?.sanitizedMessages ?? [];
+  const toolMessageIndex = messages.findIndex((message) => message.role === "tool");
+  const attachmentMessageIndex = messages.findIndex((message) => message.ref === "tool:call-read-image:model-attachments");
+  const toolMessage = messages[toolMessageIndex];
+  const attachmentMessage = messages[attachmentMessageIndex];
+
+  assert.ok(toolMessageIndex >= 0);
+  assert.ok(attachmentMessageIndex > toolMessageIndex);
+  assert.equal(toolMessage?.content.includes("image metadata returned"), true);
+  assert.equal(toolMessage?.content.includes(attachmentData), false);
+  assert.equal(attachmentMessage?.role, "user");
+  assert.equal(attachmentMessage?.content.includes("not a new user request"), true);
+  assert.equal(attachmentMessage?.content.includes(attachmentData), false);
+  assert.equal(attachmentMessage?.content.includes("local-file:"), false);
+  assert.equal(attachmentMessage?.content.includes("[local-ref-hidden]"), true);
+  assert.equal(attachmentMessage?.attachments?.[0]?.kind, "image");
+  assert.equal(attachmentMessage?.attachments?.[0]?.attachmentId, "ctx-image");
+  assert.equal(attachmentMessage?.attachments?.[0]?.source.kind, "data");
+  if (attachmentMessage?.attachments?.[0]?.source.kind === "data") {
+    assert.equal(attachmentMessage.attachments[0].source.mimeType, "image/png");
+    assert.equal(attachmentMessage.attachments[0].source.data, attachmentData);
+  }
+});
+
 test("executeToolUseLoop returns tool execution failures as model-visible observations", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([

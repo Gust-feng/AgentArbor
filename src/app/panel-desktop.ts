@@ -6,6 +6,7 @@ import {
   screen,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type OpenDialogOptions,
   type Rectangle,
 } from "electron";
 import { stat } from "node:fs/promises";
@@ -217,19 +218,28 @@ async function main(): Promise<void> {
 
 async function selectWorkspaceDirectory(): Promise<string | undefined> {
   await app.whenReady();
-  const result = await dialog.showOpenDialog({
+  const window = currentPanelDialogWindow();
+  const options: OpenDialogOptions = {
+    title: "选择工作空间",
     properties: ["openDirectory"],
-  });
+  };
+  const result = window === undefined
+    ? await dialog.showOpenDialog(options)
+    : await dialog.showOpenDialog(window, options);
   return result.canceled ? undefined : result.filePaths[0];
 }
 
 async function selectContextAttachment(): Promise<{ readonly kind: "file" | "project"; readonly path: string } | undefined> {
   await app.whenReady();
-  const result = await dialog.showOpenDialog({
+  const window = currentPanelDialogWindow();
+  const options: OpenDialogOptions = {
     title: "选择附件",
     properties: ["openFile"],
     filters: [{ name: "所有文件", extensions: ["*"] }],
-  });
+  };
+  const result = window === undefined
+    ? await dialog.showOpenDialog(options)
+    : await dialog.showOpenDialog(window, options);
   if (result.canceled) {
     return undefined;
   }
@@ -242,6 +252,14 @@ async function selectContextAttachment(): Promise<{ readonly kind: "file" | "pro
     kind: selectedStat?.isDirectory() === true ? "project" : "file",
     path: selectedPath,
   };
+}
+
+function currentPanelDialogWindow(): BrowserWindow | undefined {
+  const focusedWindow = BrowserWindow.getFocusedWindow();
+  if (focusedWindow !== null && activeWindows.has(focusedWindow) && !focusedWindow.isDestroyed()) {
+    return focusedWindow;
+  }
+  return [...activeWindows].find((candidate) => !candidate.isDestroyed());
 }
 
 function createElectronPanelWindow(

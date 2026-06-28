@@ -23,6 +23,7 @@ import {
   createDesktopBasicToolRegistry,
   type ToolRegistryFetchLike,
 } from "./basic-agent-runtime/builtin-tool-runtime.js";
+import { normalizeWorkspaceDirectory } from "./config-center/workspace-settings.js";
 import type { ToolCatalogItem } from "./basic-agent-runtime/tool-registry.js";
 import { discoverSkills, parseSkillMarkdown, type SkillRootInput } from "./skills/skill-loader.js";
 import type { SkillStateStore } from "./skills/skill-state-store.js";
@@ -35,6 +36,9 @@ export type CapabilityCenterOptions = {
   readonly playwrightAvailable?: boolean;
 };
 
+export type CapabilityCenterSnapshotInput = {
+  readonly workspaceDirectory?: string;
+};
 
 export class CapabilityCenter {
   private skillsPromise?: Promise<readonly SkillDefinition[]>;
@@ -63,7 +67,10 @@ export class CapabilityCenter {
     return this.skillsPromise;
   }
 
-  async snapshot(): Promise<BasicAgentCapabilitySnapshot> {
+  async snapshot(input: CapabilityCenterSnapshotInput = {}): Promise<BasicAgentCapabilitySnapshot> {
+    if (input.workspaceDirectory !== undefined) {
+      return this.buildSnapshot(input);
+    }
     if (this.snapshotPromise === undefined) {
       const current = this.buildSnapshot();
       this.snapshotPromise = current.catch((error) => {
@@ -76,18 +83,25 @@ export class CapabilityCenter {
     return this.snapshotPromise;
   }
 
-  private async buildSnapshot(): Promise<BasicAgentCapabilitySnapshot> {
-    const [activeModel, overrides, toolStates, toolConfirmation, mcpServers, workspace, commandShell, env, skills] = await Promise.all([
+  private async buildSnapshot(input: CapabilityCenterSnapshotInput = {}): Promise<BasicAgentCapabilitySnapshot> {
+    const [activeModel, overrides, toolStates, toolConfirmation, configuredWorkspace, mcpServers, commandShell, env, skills] = await Promise.all([
       this.options.configCenter.getModelProviderConfig(),
       this.options.configCenter.listModelCapabilityOverrides(),
       this.options.configCenter.listToolStates(),
       this.options.configCenter.getToolConfirmationConfig(),
-      this.options.configCenter.listMcpServers(),
       this.options.configCenter.getWorkspaceConfig(),
+      this.options.configCenter.listMcpServers(),
       this.options.configCenter.getCommandShellConfig(),
       this.options.configCenter.createModelRuntimeEnvironment(),
       this.listSkills(),
     ]);
+    const workspace = input.workspaceDirectory === undefined
+      ? configuredWorkspace
+      : {
+          ...configuredWorkspace,
+          workspaceDirectory: await normalizeWorkspaceDirectory(input.workspaceDirectory),
+          updatedAt: nowIso(),
+    };
     const connectableMcpServers = mcpServers.filter(isMcpServerConnectable);
     const cachedMcpServers = connectableMcpServers.filter(hasUsableMcpToolCache);
     const mcpToolProvider = cachedMcpServers.length === 0
@@ -99,6 +113,7 @@ export class CapabilityCenter {
             baseEnv: env,
           }),
         });
+    const modelCapabilities = resolveModelCapabilities({ profile: activeModel, overrides });
     const registry = createDesktopBasicToolRegistry({
       env,
       fetch: this.options.fetch,
@@ -108,6 +123,7 @@ export class CapabilityCenter {
       mcpManager: mcpToolProvider,
       commandShell,
       includeSkillResourceToolCatalog: true,
+      modelCapabilities,
     });
     const desktopToolCatalog = registry.catalog("desktop-basic");
     const mcpToolCatalog = registry.catalog("mcp");
@@ -120,7 +136,6 @@ export class CapabilityCenter {
       ...desktopToolCatalog.allowedTools,
       ...exposedMcpToolCatalog.allowedTools,
     ];
-    const modelCapabilities = resolveModelCapabilities({ profile: activeModel, overrides });
     const warnings = capabilityWarnings({
       activeModel,
       toolCount: allAllowedTools.length,

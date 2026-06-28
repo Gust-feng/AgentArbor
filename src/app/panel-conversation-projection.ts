@@ -8,6 +8,7 @@ import type {
   PanelConversationReadModel,
   PanelConversationSummaryReadModel,
   PanelConversationStatus,
+  PanelConversationTurnAttachment,
   PanelConversationTurnModel,
   PanelConversationTurnRole,
   PanelConversationTurnStatus,
@@ -85,6 +86,7 @@ export function toConversationReadModel(
       updatedAt: turn.updatedAt,
       runId: turn.runId,
       responseModel: normalizeTurnModel(turn.responseModel),
+      attachments: normalizeTurnAttachments(turn.attachments),
     })),
   };
 }
@@ -119,6 +121,7 @@ export function toRuntimeConversationRecord(
       status: turn.status,
       runId: turn.runId,
       responseModel: normalizeTurnModel(turn.responseModel),
+      attachments: normalizeTurnAttachments(turn.attachments),
       createdAt: turn.createdAt,
       updatedAt: turn.updatedAt,
     })),
@@ -198,6 +201,80 @@ export function compactMessageContent(value: string, maxLength: number): string 
     return normalized;
   }
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+export function normalizeTurnAttachments(
+  value: readonly PanelConversationTurnAttachment[] | undefined
+): readonly PanelConversationTurnAttachment[] | undefined {
+  if (value === undefined || value.length === 0) {
+    return undefined;
+  }
+  const attachments = value
+    .map(normalizeTurnAttachment)
+    .filter((attachment): attachment is PanelConversationTurnAttachment => attachment !== undefined);
+  return attachments.length === 0 ? undefined : attachments;
+}
+
+function normalizeTurnAttachment(
+  value: PanelConversationTurnAttachment
+): PanelConversationTurnAttachment | undefined {
+  const attachmentId = compact(value.attachmentId, 220);
+  const title = compact(value.title, 120);
+  if (attachmentId.length === 0 || title.length === 0) {
+    return undefined;
+  }
+  return {
+    attachmentId,
+    kind: value.kind,
+    title,
+    summary: value.summary === undefined ? undefined : compact(value.summary, 280),
+    readonlyPreviewMeta: normalizeTurnAttachmentMeta(value.readonlyPreviewMeta),
+    mediaPreview: normalizeTurnAttachmentMediaPreview(value.mediaPreview),
+  };
+}
+
+function normalizeTurnAttachmentMeta(
+  value: PanelConversationTurnAttachment["readonlyPreviewMeta"] | undefined
+): PanelConversationTurnAttachment["readonlyPreviewMeta"] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const meta = {
+    available: value.available,
+    title: value.title === undefined ? undefined : compact(value.title, 120),
+    byteLength: nonNegativeInteger(value.byteLength),
+    mimeType: value.mimeType === undefined ? undefined : compact(value.mimeType, 120),
+    truncated: value.truncated,
+  };
+  return meta.available === undefined &&
+    meta.title === undefined &&
+    meta.byteLength === undefined &&
+    meta.mimeType === undefined &&
+    meta.truncated === undefined
+    ? undefined
+    : meta;
+}
+
+function normalizeTurnAttachmentMediaPreview(
+  value: PanelConversationTurnAttachment["mediaPreview"] | undefined
+): PanelConversationTurnAttachment["mediaPreview"] | undefined {
+  if (
+    value?.kind !== "image" ||
+    !value.url.startsWith("/api/context/attachments/media/") ||
+    !/^image\/(?:png|jpeg|gif|webp)$/iu.test(value.mimeType)
+  ) {
+    return undefined;
+  }
+  return {
+    kind: "image",
+    url: compact(value.url, 300),
+    mimeType: compact(value.mimeType, 120),
+    byteLength: nonNegativeInteger(value.byteLength),
+  };
+}
+
+function nonNegativeInteger(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
 }
 
 function closedTurnPrefix(

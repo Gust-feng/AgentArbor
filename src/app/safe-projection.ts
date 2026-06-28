@@ -6,7 +6,7 @@ import type {
   ToolErrorFacts,
   ToolSafeProjection,
 } from "../domain/tools/index.js";
-import { toolDisplayName } from "../domain/tools/index.js";
+import { toolDisplayName, toolModelAttachmentsFromOutput } from "../domain/tools/index.js";
 import {
   projectToolResultEnvelope as projectKernelToolResultEnvelope,
   projectToolStatusEnvelope,
@@ -56,6 +56,7 @@ export function projectToolResult(input: {
   // display previews must never replace it.
   return {
     agentContent: projectToolAgentContent(input.request, input.output, truncated),
+    modelAttachments: toolModelAttachmentsFromOutput(input.output),
     uiSummary: compactSafeText(summary ?? `${toolDisplayName(input.request.toolName)}已完成。`, input.maxPreviewChars ?? 800),
     diagnosticRef,
     display,
@@ -498,6 +499,25 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       rawContentRef: content?.rawRef,
     };
   }
+  if (request.toolName === "read_context_attachment_image") {
+    return {
+      summary,
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      mimeType: stringOrUndefined(result.mimeType),
+      bytes: numberOrUndefined(result.bytes),
+      format: stringOrUndefined(result.format),
+      readable: booleanOrUndefined(result.readable),
+      reason: stringOrUndefined(result.reason),
+      modelInput: {
+        attached: booleanOrUndefined(asRecord(result.modelInput).attached),
+        detail: stringOrUndefined(asRecord(result.modelInput).detail),
+      },
+      truncated,
+    };
+  }
   if (request.toolName === "list_context_attachments") {
     return {
       summary,
@@ -932,6 +952,7 @@ function projectContextAttachment(value: unknown): {
   readonly ref?: string;
   readonly canReadText?: boolean;
   readonly canReadPdfText?: boolean;
+  readonly canReadImage?: boolean;
   readonly canReadTable?: boolean;
   readonly canInspectArchive?: boolean;
   readonly canListFiles?: boolean;
@@ -953,6 +974,7 @@ function projectContextAttachment(value: unknown): {
     ref: stringOrUndefined(record.ref),
     canReadText: booleanOrUndefined(record.canReadText),
     canReadPdfText: booleanOrUndefined(record.canReadPdfText),
+    canReadImage: booleanOrUndefined(record.canReadImage),
     canReadTable: booleanOrUndefined(record.canReadTable),
     canInspectArchive: booleanOrUndefined(record.canInspectArchive),
     canListFiles: booleanOrUndefined(record.canListFiles),

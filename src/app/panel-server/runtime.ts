@@ -34,7 +34,13 @@ import {
   type SkillRootInput,
   type SkillStateStore,
 } from "../skills/index.js";
-import type { PanelContextAttachmentSelection, PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions } from "./types.js";
+import type {
+  PanelContextAttachmentMediaEntry,
+  PanelContextAttachmentSelection,
+  PanelModelCatalogFetch,
+  PanelProviderFetch,
+  PanelServerOptions,
+} from "./types.js";
 import { syncConversationTurnForJob } from "./conversation-sync.js";
 import { appendLiveModelOutputDelta } from "./live-model-stream.js";
 import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
@@ -52,6 +58,7 @@ export type PanelRuntime = {
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
+  readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
   readonly runJobs: PanelRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
   readonly abortControllers: Map<string, AbortController>;
@@ -144,6 +151,7 @@ function assemblePanelRuntime(input: {
   const activeRunJobs = new Set<Promise<void>>();
   const abortControllers = new Map<string, AbortController>();
   const persistenceChains = new Map<string, Promise<void>>();
+  const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
   const conversations = new PanelConversationStore();
   const processRegistry = new InMemoryProcessRegistry();
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
@@ -163,6 +171,7 @@ function assemblePanelRuntime(input: {
     modelCatalogFetch: input.modelCatalogFetch,
     workspaceDirectoryPicker: input.workspaceDirectoryPicker,
     contextAttachmentPicker: input.contextAttachmentPicker,
+    contextAttachmentMedia,
     runJobs,
     activeRunJobs,
     abortControllers,
@@ -243,7 +252,11 @@ async function preparePanelBasicRunStart(
     };
   }
 
-  const baseCapabilitySnapshot = await capabilitySnapshotForRun(runtime, input.modelOverride);
+  const baseCapabilitySnapshot = await capabilitySnapshotForRun(
+    runtime,
+    input.modelOverride,
+    input.workspaceDirectory
+  );
   const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
     baseCapabilitySnapshot,
     input.reasoningEffort
@@ -281,9 +294,12 @@ async function modelProviderConfigForRun(
 
 async function capabilitySnapshotForRun(
   runtime: PanelRuntime,
-  override: BasicAgentRunStartInput["modelOverride"]
+  override: BasicAgentRunStartInput["modelOverride"],
+  workspaceDirectory: BasicAgentRunStartInput["workspaceDirectory"]
 ): Promise<NonNullable<BasicAgentRunStartFacts["capabilitySnapshot"]>> {
-  const snapshot = await runtime.capabilityCenter.snapshot();
+  const snapshot = workspaceDirectory === undefined
+    ? await runtime.capabilityCenter.snapshot()
+    : await runtime.capabilityCenter.snapshot({ workspaceDirectory });
   if (override === undefined) {
     return snapshot;
   }

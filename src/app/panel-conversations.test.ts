@@ -66,6 +66,39 @@ test("panel conversations preserve assistant markdown line breaks", () => {
   assert.equal(persisted.turns[1]?.content.includes("\n- **证据**"), true);
 });
 
+test("panel conversations preserve safe user turn attachment projections", () => {
+  const store = new PanelConversationStore();
+  const started = store.startDesktopMessage({
+    goal: "看这张图片",
+    attachments: [{
+      attachmentId: "ctx-image",
+      kind: "file",
+      title: "screen.png",
+      summary: "上传附件：screen.png",
+      readonlyPreviewMeta: {
+        available: true,
+        byteLength: 8,
+        mimeType: "image/png",
+      },
+      mediaPreview: {
+        kind: "image",
+        url: "/api/context/attachments/media/ctx-image",
+        mimeType: "image/png",
+        byteLength: 8,
+      },
+    }],
+  });
+
+  const conversation = store.getReadModel(started.conversation.conversationId)!;
+  const persisted = toRuntimeConversationRecord(conversation);
+  const restored = new PanelConversationStore().restore(persisted);
+
+  assert.equal(conversation.turns[0]?.attachments?.[0]?.attachmentId, "ctx-image");
+  assert.equal(conversation.turns[0]?.attachments?.[0]?.mediaPreview?.url, "/api/context/attachments/media/ctx-image");
+  assert.equal(persisted.turns[0]?.attachments?.[0]?.readonlyPreviewMeta?.mimeType, "image/png");
+  assert.equal(restored.turns[0]?.attachments?.[0]?.mediaPreview?.kind, "image");
+});
+
 test("panel conversation summaries do not invent completed results for empty assistant turns", () => {
   const store = new PanelConversationStore();
   const conversation = store.restore({

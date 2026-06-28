@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
 import {
+  BUILTIN_MODEL_DEFINITIONS,
   PROTOCOL_BASELINE_MODEL_CAPABILITIES,
   hasModelCapabilityOverride,
   resolveModelCapabilities,
@@ -139,6 +140,15 @@ test("model capability override can still close protocol tool support", () => {
   assert.equal(resolved.supportsToolCalling, false);
   assert.equal(resolved.supportsParallelToolCalls, false);
 });
+
+test("all built-in model definitions support vision input by default", () => {
+  const nonVisionDefinitions = BUILTIN_MODEL_DEFINITIONS
+    .filter((definition) => definition.capabilities.supportsVisionInput !== true)
+    .map((definition) => definition.label);
+
+  assert.deepEqual(nonVisionDefinitions, []);
+});
+
 test("model capability registry resolves current OpenAI-compatible model families", () => {
   const capabilities = resolveModelCapabilities({ profile: profile("gpt-5.5") });
 
@@ -173,6 +183,7 @@ test("model capability registry enables tools for current DeepSeek V4 OpenAI-com
   assert.equal(capabilities.supportsToolCalling, true);
   assert.equal(capabilities.supportsParallelToolCalls, false);
   assert.equal(capabilities.supportsStructuredOutputs, true);
+  assert.equal(capabilities.supportsVisionInput, true);
   assert.equal(capabilities.preferredApiStyle, "openai_compatible");
 });
 
@@ -245,10 +256,35 @@ test("model capability registry keeps provider-specific reasoning controls conse
   assert.equal(glm51.supportsReasoningEffort, false);
   assert.equal(glm51.supportsReasoningOutput, true);
   assert.equal(glm51.supportsStreaming, true);
+  assert.equal(glm51.supportsVisionInput, true);
   assert.equal(minimax.reasoningControl, "reasoning_split");
   assert.equal(minimax.supportsReasoningEffort, false);
   assert.equal(minimax.supportsReasoningOutput, true);
   assert.equal(minimax.supportsStreaming, true);
+  assert.equal(minimax.supportsVisionInput, true);
+});
+
+test("model capability registry enables vision for both MiniMax-M2 and MiniMax-M3", () => {
+  const minimaxM2 = resolveModelCapabilities({
+    profile: profile("MiniMax-M2", {
+      profileId: "minimax",
+      label: "MiniMax",
+      baseUrl: "https://api.minimaxi.com/v1",
+    }),
+  });
+  const minimaxM3 = resolveModelCapabilities({
+    profile: profile("MiniMax-M3", {
+      profileId: "minimax",
+      label: "MiniMax",
+      baseUrl: "https://api.minimaxi.com/v1",
+    }),
+  });
+
+  assert.equal(minimaxM2.supportsVisionInput, true);
+  assert.equal(minimaxM3.protocolProfileId, "minimax");
+  assert.equal(minimaxM3.contextWindowTokens, 1_000_000);
+  assert.equal(minimaxM3.supportsVisionInput, true);
+  assert.equal(minimaxM3.preferredApiStyle, "chat_completions");
 });
 
 test("protocol baseline models keep tool calling while budgets stay conservative", () => {

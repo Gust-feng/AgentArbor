@@ -182,6 +182,7 @@ async function handleStartRunRequest(
     goal: runInput.goal,
     aiMode: runInput.aiMode,
     taskSoilInput: runInput.taskSoilInput,
+    workspaceDirectory: runInput.workspaceDirectory,
     reasoningEffort: runInput.reasoningEffort,
     toolConfirmationPolicy: runInput.toolConfirmationPolicy,
     modelOverride: runInput.modelOverride,

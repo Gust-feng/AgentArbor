@@ -33,6 +33,7 @@ export type AppRunControllerOptions = {
   readonly setGoal: (goal: string) => void;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
+  readonly selectedWorkspaceDirectory?: string;
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly composerReasoningEffort: ComposerReasoningEffort;

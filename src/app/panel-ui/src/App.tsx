@@ -348,6 +348,10 @@ export function App(): React.ReactElement {
     decideConfirmation,
     resetChat,
   } = runController;
+  useEffect(() => {
+    if (app.agentMode !== "normal" || app.conversation === undefined) return;
+    setSelectedWorkspaceDirectory(app.conversation.workspaceFolder?.path);
+  }, [app.agentMode, app.conversation?.conversationId, app.conversation?.workspaceFolder?.path]);
   const deepRunUpdateController = useMemo(
     () => createDeepRunUpdateController({
       setApp,
@@ -540,11 +544,14 @@ export function App(): React.ReactElement {
 
   function openNormalTaskEntry(): void {
     changeAgentMode("normal");
+    setSelectedWorkspaceDirectory(undefined);
     resetChat();
   }
 
   function openNormalConversation(conversationId: string): void {
     changeAgentMode("normal");
+    const summary = app.conversations.find((item) => item.conversationId === conversationId);
+    setSelectedWorkspaceDirectory(summary?.workspaceFolder?.path);
     void loadConversation(conversationId);
   }
 
@@ -681,6 +688,7 @@ export function App(): React.ReactElement {
     try {
       const response = await removeConversation(conversationId);
       if (!mountedRef.current) return;
+      setSelectedWorkspaceDirectory(undefined);
       resetChat();
       setApp((previous) => ({
         ...previous,
@@ -690,6 +698,7 @@ export function App(): React.ReactElement {
     } catch (error) {
       if (mountedRef.current) {
         if (isMissingConversationError(error)) {
+          setSelectedWorkspaceDirectory(undefined);
           resetChat();
           setApp((previous) => ({
             ...previous,

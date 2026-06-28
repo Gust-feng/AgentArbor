@@ -1,5 +1,6 @@
 import type {
   CapabilityToolAvailability,
+  ModelCapabilities,
   SanitizedCommandShellConfig,
   ToolStateSettings,
 } from "../../domain/config/index.js";
@@ -70,6 +71,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly includeSkillResourceToolCatalog?: boolean;
   readonly taskSoil?: TaskSoil;
+  readonly modelCapabilities?: ModelCapabilities;
 };
 
 export type ToolRegistryFetchLike = (
@@ -124,7 +126,11 @@ export function createDesktopBasicToolRegistry(
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
     createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
-    ...createContextAttachmentTools({ taskSoil: options.taskSoil, workspaceRoot }),
+    ...createContextAttachmentTools({
+      taskSoil: options.taskSoil,
+      workspaceRoot,
+      supportsVisionInput: options.modelCapabilities?.supportsVisionInput,
+    }),
     ...skillResourceTool,
     createHttpRequestTool(),
     createBrowserSnapshotTool(),
@@ -139,14 +145,17 @@ export function createDesktopBasicToolRegistry(
     const state = options.toolStates?.find((item) => item.name === executor.definition.name);
     const enabledByDefault = state?.enabled ?? executor.definition.name !== "run_command";
     const frozenAvailability = toolCatalogAvailability.get(executor.definition.name);
+    const currentAvailability =
+      executor.definition.name === "browser_snapshot" && !playwrightAvailable
+        ? { status: "unavailable" as const, disabledReason: "Playwright is not installed in this workspace." }
+        : executor.definition.name === "read_context_attachment_image" && options.modelCapabilities?.supportsVisionInput === false
+          ? { status: "unavailable" as const, disabledReason: "Current model does not support vision input." }
+          : { status: "available" as const };
     registry.register({
       executor,
       scopes: ["desktop-basic", toolScopeFor(executor.definition.metadata?.category)],
       enabledByDefault,
-      availability:
-        frozenAvailability ?? (executor.definition.name === "browser_snapshot" && !playwrightAvailable
-          ? { status: "unavailable", disabledReason: "Playwright is not installed in this workspace." }
-          : { status: "available" }),
+      availability: frozenAvailability ?? currentAvailability,
     });
   }
   if (options.mcpManager !== undefined) {

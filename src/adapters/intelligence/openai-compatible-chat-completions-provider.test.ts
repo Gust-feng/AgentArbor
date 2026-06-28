@@ -126,6 +126,55 @@ test("OpenAI-compatible Chat Completions adapter maps image attachments to image
   }]);
 });
 
+test("OpenAI-compatible Chat Completions adapter maps MiniMax image auto detail to default", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-minimax-image-test",
+        model: "MiniMax-M3",
+        choices: [
+          {
+            message: { role: "assistant", content: JSON.stringify({ summary: "Image received." }) },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.minimaxi.com/v1",
+    apiKey: "sk-test-secret-token",
+    model: "MiniMax-M3",
+    providerProfileId: "minimax",
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Describe this image.",
+      attachments: [{
+        kind: "image",
+        source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+        filename: "image.png",
+        detail: "auto",
+      }],
+    }],
+  }));
+
+  assert.deepEqual(calls[0]?.body.messages, [{
+    role: "user",
+    content: [
+      { type: "text", text: "Describe this image." },
+      { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=", detail: "default" } },
+    ],
+  }]);
+});
+
 test("OpenAI-compatible Chat Completions adapter appends /v1 only for bare OpenAI base URL", async () => {
   const calls: { url: string }[] = [];
   const fetch: FetchLike = async (url) => {

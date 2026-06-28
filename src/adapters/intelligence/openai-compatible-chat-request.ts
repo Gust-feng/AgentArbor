@@ -36,7 +36,7 @@ export function buildOpenAICompatibleChatRequestBody(input: {
     dialect: input.dialect,
     fields: {
       model: input.model,
-      messages: input.request.sanitizedMessages.map(toOpenAIMessage),
+      messages: input.request.sanitizedMessages.map((message) => toOpenAIMessage(message, input.dialect)),
       tools: input.request.tools === undefined || input.request.tools.length === 0 ? undefined : input.request.tools.map(toOpenAITool),
       tool_choice: toOpenAIToolChoice(input.request.toolChoice),
       response_format:
@@ -48,7 +48,10 @@ export function buildOpenAICompatibleChatRequestBody(input: {
   }));
 }
 
-function toOpenAIMessage(message: ModelMessage): Record<string, unknown> {
+function toOpenAIMessage(
+  message: ModelMessage,
+  dialect: OpenAICompatibleChatDialect
+): Record<string, unknown> {
   if (message.role === "tool") {
     return {
       role: "tool",
@@ -68,11 +71,14 @@ function toOpenAIMessage(message: ModelMessage): Record<string, unknown> {
 
   return {
     role: message.role,
-    content: toOpenAIMessageContent(message),
+    content: toOpenAIMessageContent(message, dialect),
   };
 }
 
-function toOpenAIMessageContent(message: ModelMessage): unknown {
+function toOpenAIMessageContent(
+  message: ModelMessage,
+  dialect: OpenAICompatibleChatDialect
+): unknown {
   if (message.role !== "user" || message.attachments === undefined || message.attachments.length === 0) {
     return message.content;
   }
@@ -81,7 +87,7 @@ function toOpenAIMessageContent(message: ModelMessage): unknown {
     parts.push({ type: "text", text: message.content });
   }
   for (const attachment of message.attachments) {
-    const part = toOpenAIContentPart(attachment);
+    const part = toOpenAIContentPart(attachment, dialect);
     if (part !== undefined) {
       parts.push(part);
     }
@@ -89,7 +95,10 @@ function toOpenAIMessageContent(message: ModelMessage): unknown {
   return parts.length === 0 ? message.content : parts;
 }
 
-function toOpenAIContentPart(attachment: ModelInputAttachment): Record<string, unknown> | undefined {
+function toOpenAIContentPart(
+  attachment: ModelInputAttachment,
+  dialect: OpenAICompatibleChatDialect
+): Record<string, unknown> | undefined {
   if (attachment.kind === "image") {
     if (attachment.source.kind === "file_id") {
       return {
@@ -107,7 +116,7 @@ function toOpenAIContentPart(attachment: ModelInputAttachment): Record<string, u
       type: "image_url",
       image_url: removeUndefinedValues({
         url,
-        detail: chatImageDetail(attachment.detail),
+        detail: chatImageDetail(attachment.detail, dialect),
       }),
     };
   }
@@ -165,9 +174,15 @@ function dataUrl(mimeType: string, data: string): string {
   return `data:${mimeType};base64,${data}`;
 }
 
-function chatImageDetail(value: Extract<ModelInputAttachment, { readonly kind: "image" }>["detail"]): "auto" | "low" | "high" | undefined {
-  if (value === "auto" || value === "low" || value === "high") {
+function chatImageDetail(
+  value: Extract<ModelInputAttachment, { readonly kind: "image" }>["detail"],
+  dialect: OpenAICompatibleChatDialect
+): "auto" | "default" | "low" | "high" | undefined {
+  if (value === "low" || value === "high") {
     return value;
+  }
+  if (value === "auto") {
+    return dialect.profileId === "minimax" ? "default" : "auto";
   }
   if (value === "original") {
     return "high";

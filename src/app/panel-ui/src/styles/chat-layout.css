@@ -55,7 +55,7 @@
   display: inline-block;
 }
 
-/* Deep 模式激活标识（FR-001 模式切换可见性）*/
+/* 多 Agent 入口激活标识（FR-001 显式入口可见性）*/
 .chat-empty-mode-badge {
   justify-self: center;
   display: inline-flex;

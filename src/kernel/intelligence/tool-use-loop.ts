@@ -24,7 +24,7 @@ import {
 } from "./tool-use-loop-execution.js";
 import {
   assistantToolCallMessage,
-  toolResultMessage,
+  toolResultMessages,
 } from "./tool-use-loop-messages.js";
 import {
   abortedLoopResult,
@@ -101,10 +101,10 @@ export async function resumeToolUseLoopFromConfirmationDecision(
     messages: [
       ...cloneMessages(pendingApproval.messagesBeforeToolCall),
       cloneModelMessage(pendingApproval.assistantMessage),
-      ...cloneToolResults([
+      ...toolResultMessages(cloneToolResults([
         ...pendingApproval.completedToolResults,
         ...decisionRoundResults,
-      ]).map(toolResultMessage),
+      ])),
     ],
     toolCalls,
     modelRounds: pendingApproval.modelRounds,
@@ -220,7 +220,7 @@ async function resumeApprovalCore(
     messages: [
       ...cloneMessages(pendingApproval.messagesBeforeToolCall),
       cloneModelMessage(pendingApproval.assistantMessage),
-      ...completedToolResults.map(toolResultMessage),
+      ...toolResultMessages(completedToolResults),
     ],
     toolCalls,
     modelRounds: pendingApproval.modelRounds,
@@ -341,7 +341,7 @@ async function continueToolUseLoopAfterToolResults(input: {
     messages = [
       ...messages,
       assistantToolCallMessage(response, requestedToolCalls),
-      ...roundResults.map(toolResultMessage),
+      ...toolResultMessages(roundResults),
     ];
     requestId = createId("model-request");
 

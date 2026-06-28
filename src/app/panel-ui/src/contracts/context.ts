@@ -17,6 +17,12 @@ export type ContextAttachment = {
     readonly mimeType?: string;
     readonly truncated?: boolean;
   };
+  readonly mediaPreview?: {
+    readonly kind: "image";
+    readonly url: string;
+    readonly mimeType: string;
+    readonly byteLength?: number;
+  };
   readonly status: "ready" | "blocked";
   readonly warning?: string;
 };

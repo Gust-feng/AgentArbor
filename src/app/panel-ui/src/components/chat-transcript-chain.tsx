@@ -1,14 +1,17 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useId, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  ChevronUp,
   Clock3,
   Copy,
   Gauge,
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { ConversationTurn } from "../contracts/conversation";
+import type { ConversationTurn, ConversationTurnAttachment } from "../contracts/conversation";
+import { compact } from "../text";
 import type {
   TranscriptNode,
 } from "../contracts/run";
@@ -62,7 +65,14 @@ export function TranscriptChain(props: {
       )}
       {items.map((item) => {
         if (item.kind === "user") {
-          return <UserMessage key={item.key} content={item.turn.content} status={item.turn.status} />;
+          return (
+            <UserMessage
+              key={item.key}
+              content={item.turn.content}
+              status={item.turn.status}
+              attachments={item.turn.attachments}
+            />
+          );
         }
         const model = item.source === "turn" && item.turn !== undefined
           ? assistantModelForTurn(item.turn, props.models, props.selectedModelId)
@@ -92,14 +102,20 @@ export function TranscriptChain(props: {
   );
 }
 
-const UserMessage = React.memo(function UserMessage({ content, status }: { readonly content: string; readonly status: string }): React.ReactElement {
+const UserMessage = React.memo(function UserMessage(props: {
+  readonly content: string;
+  readonly status: string;
+  readonly attachments?: readonly ConversationTurnAttachment[];
+}): React.ReactElement {
+  const { content, status } = props;
   const queued = status === "pending";
   return (
     <article className="user-message" {...(queued ? { "data-entering": "" } : undefined)}>
       <div className="user-message-wrap">
-        <div className="user-message-content">
-          <RichText text={content} />
-        </div>
+        <UserMessageAttachments attachments={props.attachments} />
+        {content.trim().length > 0 && (
+          <UserMessageContent content={content} />
+        )}
         {queued && (
           <p className="user-message-queued" role="status" aria-label="等待当前回复完成">
             <span aria-hidden="true" />
@@ -109,6 +125,81 @@ const UserMessage = React.memo(function UserMessage({ content, status }: { reado
         )}
       </div>
     </article>
+  );
+});
+
+const USER_MESSAGE_COLLAPSE_CHAR_LIMIT = 720;
+const USER_MESSAGE_COLLAPSE_LINE_LIMIT = 12;
+
+const UserMessageContent = React.memo(function UserMessageContent(props: {
+  readonly content: string;
+}): React.ReactElement {
+  const contentId = useId();
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = useMemo(() => shouldCollapseUserMessage(props.content), [props.content]);
+  const collapsed = collapsible && !expanded;
+  return (
+    <>
+      <div
+        id={contentId}
+        className="user-message-content"
+        {...(collapsible ? { "data-collapsible": "true" } : undefined)}
+        {...(collapsed ? { "data-collapsed": "true" } : undefined)}
+      >
+        <RichText text={props.content} />
+      </div>
+      {collapsible && (
+        <button
+          type="button"
+          className="user-message-toggle"
+          aria-controls={contentId}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <span>{expanded ? "收起" : "显示更多"}</span>
+          {expanded ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+        </button>
+      )}
+    </>
+  );
+});
+
+const UserMessageAttachments = React.memo(function UserMessageAttachments(props: {
+  readonly attachments?: readonly ConversationTurnAttachment[];
+}): React.ReactElement | null {
+  const attachments = props.attachments?.filter((attachment) => attachment.attachmentId.trim().length > 0) ?? [];
+  if (attachments.length === 0) {
+    return null;
+  }
+  return (
+    <div className="user-message-attachments" aria-label="已发送附件">
+      {attachments.map((attachment) => {
+        const mediaPreview = attachment.mediaPreview?.kind === "image" ? attachment.mediaPreview : undefined;
+        if (mediaPreview !== undefined) {
+          return (
+            <figure className="user-message-image-attachment" key={attachment.attachmentId}>
+              <img
+                src={mediaPreview.url}
+                alt={attachment.title}
+                loading="lazy"
+                decoding="async"
+                draggable={false}
+              />
+              <figcaption>
+                <strong>{attachment.title}</strong>
+                <span>{compact(attachmentSummary(attachment), 72)}</span>
+              </figcaption>
+            </figure>
+          );
+        }
+        return (
+          <span className="user-message-file-attachment" key={attachment.attachmentId}>
+            <strong>{attachment.title}</strong>
+            <small>{compact(attachment.summary ?? attachmentSummary(attachment), 72)}</small>
+          </span>
+        );
+      })}
+    </div>
   );
 });
 
@@ -409,6 +500,34 @@ function workflowHasCollapsedActivity(
   workflow: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection> | undefined,
 ): boolean {
   return workflow?.segments.some((segment) => segment.kind === "activity" && segment.collapsed) === true;
+}
+
+function shouldCollapseUserMessage(content: string): boolean {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  if (normalized.length > USER_MESSAGE_COLLAPSE_CHAR_LIMIT) {
+    return true;
+  }
+  return normalized.split("\n").length > USER_MESSAGE_COLLAPSE_LINE_LIMIT;
+}
+
+function attachmentSummary(attachment: ConversationTurnAttachment): string {
+  const mimeType = attachment.mediaPreview?.mimeType ?? attachment.readonlyPreviewMeta?.mimeType;
+  const byteLength = attachment.mediaPreview?.byteLength ?? attachment.readonlyPreviewMeta?.byteLength;
+  const parts = [mimeType, byteSizeLabel(byteLength)].filter((value): value is string => value !== undefined);
+  return parts.length === 0 ? attachment.summary ?? attachment.kind : parts.join(" · ");
+}
+
+function byteSizeLabel(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${value} bytes`;
 }
 
 function assistantModelLabel(model: AssistantModelBadge | undefined): string | undefined {

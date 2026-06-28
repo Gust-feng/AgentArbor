@@ -133,6 +133,35 @@ test("submit flow appends optimistic user turn without fabricating assistant con
   assert.equal(conversation.turns[1]?.status, "running");
 });
 
+test("submit flow carries optimistic user attachments", () => {
+  const conversation = optimisticConversationForSubmit(
+    undefined,
+    "看这张图",
+    "2026-06-03T00:00:00.000Z",
+    [{
+      attachmentId: "ctx-image",
+      kind: "file",
+      title: "screen.png",
+      summary: "上传附件：screen.png",
+      readonlyPreviewMeta: {
+        available: true,
+        byteLength: 8,
+        mimeType: "image/png",
+      },
+      mediaPreview: {
+        kind: "image",
+        url: "/api/context/attachments/media/ctx-image",
+        mimeType: "image/png",
+        byteLength: 8,
+      },
+    }]
+  );
+
+  assert.equal(conversation.turns[0]?.attachments?.[0]?.attachmentId, "ctx-image");
+  assert.equal(conversation.turns[0]?.attachments?.[0]?.mediaPreview?.kind, "image");
+  assert.equal(conversation.turns[1]?.attachments, undefined);
+});
+
 test("submit flow does not keep completed replay text as a live stream", () => {
   const live = liveRunForObservedReplay({
     observedRunId: "run-1",

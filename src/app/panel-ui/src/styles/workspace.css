@@ -1564,6 +1564,10 @@
   white-space: nowrap;
 }
 
+.skills-row-meta span.muted {
+  color: color-mix(in oklch, var(--muted) 72%, transparent);
+}
+
 .skills-row-error {
   border: 1px solid color-mix(in oklch, var(--status-danger) 38%, var(--border));
   border-radius: var(--radius-md);
@@ -1582,11 +1586,6 @@
   text-align: center;
   font-size: 13px;
   box-shadow: var(--empty-state-shadow);
-}
-
-.skills-empty code {
-  color: var(--fg);
-  font-size: 12px;
 }
 
 .workspace-empty {

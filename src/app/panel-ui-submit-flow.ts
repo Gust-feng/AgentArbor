@@ -27,6 +27,26 @@ export type StartedConversationRun = {
   };
 };
 
+export type SubmitFlowConversationTurnAttachment = {
+  readonly attachmentId: string;
+  readonly kind: "workspace" | "file" | "project" | "web";
+  readonly title: string;
+  readonly summary?: string;
+  readonly readonlyPreviewMeta?: {
+    readonly available?: boolean;
+    readonly title?: string;
+    readonly byteLength?: number;
+    readonly mimeType?: string;
+    readonly truncated?: boolean;
+  };
+  readonly mediaPreview?: {
+    readonly kind: "image";
+    readonly url: string;
+    readonly mimeType: string;
+    readonly byteLength?: number;
+  };
+};
+
 export type SubmitFlowConversationTurn = {
   readonly turnId: string;
   readonly role: "user" | "assistant";
@@ -34,6 +54,7 @@ export type SubmitFlowConversationTurn = {
   readonly content: string;
   readonly status: string;
   readonly runId?: string;
+  readonly attachments?: readonly SubmitFlowConversationTurnAttachment[];
 };
 
 export type SubmitFlowConversation = {
@@ -128,7 +149,8 @@ export function immediateRunForStartedConversation(input: {
 export function optimisticConversationForSubmit(
   conversation: SubmitFlowConversation | undefined,
   goal: string,
-  now = new Date().toISOString()
+  now = new Date().toISOString(),
+  attachments?: readonly SubmitFlowConversationTurnAttachment[]
 ): SubmitFlowConversation {
   const userTurn = {
     turnId: `optimistic-user-${now}`,
@@ -136,6 +158,7 @@ export function optimisticConversationForSubmit(
     title: "你的消息",
     content: goal,
     status: "completed",
+    attachments,
   };
   const assistantTurn = {
     turnId: `optimistic-assistant-${now}`,

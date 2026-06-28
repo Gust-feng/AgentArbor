@@ -12,6 +12,7 @@ import type { InformationSourceKind } from "../domain/research/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type {
   CapabilityToolAvailability,
+  ModelCapabilities,
   ModelProviderModelCatalog,
   ProviderProtocolProfileId,
   SanitizedCommandShellConfig,
@@ -312,6 +313,7 @@ export function createDefaultToolCenter(input: {
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly includeSkillResourceToolCatalog?: boolean;
   readonly taskSoil?: TaskSoil;
+  readonly modelCapabilities?: ModelCapabilities;
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -336,6 +338,7 @@ export async function createConfiguredToolCenter(
     readonly skillContexts?: readonly DesktopAgentSkillContext[];
     readonly includeSkillResourceToolCatalog?: boolean;
     readonly taskSoil?: TaskSoil;
+    readonly modelCapabilities?: ModelCapabilities;
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
@@ -363,6 +366,7 @@ export async function createConfiguredToolCenterFactory(
     readonly skillContexts?: readonly DesktopAgentSkillContext[];
     readonly includeSkillResourceToolCatalog?: boolean;
     readonly taskSoil?: TaskSoil;
+    readonly modelCapabilities?: ModelCapabilities;
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
   const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
@@ -387,6 +391,7 @@ function createToolCenterFromEnvironment(input: {
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly includeSkillResourceToolCatalog?: boolean;
   readonly taskSoil?: TaskSoil;
+  readonly modelCapabilities?: ModelCapabilities;
 }): ToolExecutionBroker {
   return createDesktopBasicToolRegistry(input).createToolCenterForScopes(input.toolRegistryScopes ?? ["desktop-basic"]);
 }

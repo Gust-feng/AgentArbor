@@ -6,6 +6,7 @@ import type {
   RunCapabilityResolution,
   SanitizedInformationAccessConfig,
 } from "../config/contracts.js";
+import type { ModelUsage } from "../intelligence/contracts.js";
 import type { ToolDisplayProjection, ToolErrorDomain, ToolErrorFacts, ToolResultEnvelope } from "../tools/contracts.js";
 import type {
   ObservationProgress,
@@ -58,8 +59,29 @@ export type RuntimeConversationTurnRecord = {
     readonly baseUrl?: string;
     readonly model?: string;
   };
+  readonly attachments?: readonly RuntimeConversationTurnAttachmentRecord[];
   readonly createdAt: string;
   readonly updatedAt: string;
+};
+
+export type RuntimeConversationTurnAttachmentRecord = {
+  readonly attachmentId: string;
+  readonly kind: "workspace" | "file" | "project" | "web";
+  readonly title: string;
+  readonly summary?: string;
+  readonly readonlyPreviewMeta?: {
+    readonly available?: boolean;
+    readonly title?: string;
+    readonly byteLength?: number;
+    readonly mimeType?: string;
+    readonly truncated?: boolean;
+  };
+  readonly mediaPreview?: {
+    readonly kind: "image";
+    readonly url: string;
+    readonly mimeType: string;
+    readonly byteLength?: number;
+  };
 };
 
 export type RuntimeConversationRecord = {
@@ -143,6 +165,7 @@ export type RuntimeModelCallRecord = {
   readonly validationStatus?: string;
   readonly failureKind?: string;
   readonly retryable?: boolean;
+  readonly usage?: ModelUsage;
   readonly eventRefs: readonly string[];
 };
 

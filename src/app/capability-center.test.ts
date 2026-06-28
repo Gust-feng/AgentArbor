@@ -7,6 +7,34 @@ import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "..
 import { CapabilityCenter } from "./capability-center.js";
 import { ConfigCenter } from "./config-center.js";
 
+test("CapabilityCenter freezes transient run workspace without changing the default workspace", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-"));
+  const defaultWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-default-workspace-"));
+  const runWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-run-workspace-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.updateWorkspaceConfig({ workspaceDirectory: defaultWorkspace });
+    const center = new CapabilityCenter({ configCenter, skillRoots: [] });
+
+    const defaultSnapshot = await center.snapshot();
+    const runSnapshot = await center.snapshot({ workspaceDirectory: runWorkspace });
+    const cachedDefaultSnapshot = await center.snapshot();
+    const persistedWorkspace = await configCenter.getWorkspaceConfig();
+
+    assert.equal(defaultSnapshot.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
+    assert.equal(runSnapshot.workspace.workspaceDirectory, path.resolve(runWorkspace));
+    assert.equal(cachedDefaultSnapshot.snapshotId, defaultSnapshot.snapshotId);
+    assert.equal(cachedDefaultSnapshot.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
+    assert.equal(persistedWorkspace.workspaceDirectory, path.resolve(defaultWorkspace));
+  } finally {
+    await fs.rm(directory, { force: true, recursive: true });
+    await fs.rm(defaultWorkspace, { force: true, recursive: true });
+    await fs.rm(runWorkspace, { force: true, recursive: true });
+  }
+});
+
 test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projections", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-"));
   const skillRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-skills-"));

@@ -1,4 +1,5 @@
 import type { ConfirmationRequest } from "../basic-agent/confirmation-contracts.js";
+import type { ModelInputAttachment } from "../intelligence/model-input-attachments.js";
 
 export type ToolInputSchema = {
   readonly type: "object";
@@ -140,6 +141,12 @@ export type ToolDefinitionMetadata = {
 
 export type ToolSafeProjection = {
   readonly agentContent?: unknown;
+  /**
+   * Ephemeral model-input attachments produced by a tool for the next model
+   * round. These payloads must not be projected into events, panel read-models,
+   * or runtime persistence; those surfaces should keep only metadata and refs.
+   */
+  readonly modelAttachments?: readonly ModelInputAttachment[];
   readonly uiSummary?: string;
   readonly diagnosticRef?: string;
   readonly display?: ToolDisplayProjection;

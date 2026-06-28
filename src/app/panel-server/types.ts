@@ -26,6 +26,15 @@ export type PanelContextAttachmentSelection = {
   readonly path: string;
 };
 
+export type PanelContextAttachmentMediaEntry = {
+  readonly attachmentId: string;
+  readonly kind: "image";
+  readonly absolutePath: string;
+  readonly mimeType: string;
+  readonly byteLength?: number;
+  readonly title?: string;
+};
+
 export type PanelProviderFetch = (
   url: string,
   init: {

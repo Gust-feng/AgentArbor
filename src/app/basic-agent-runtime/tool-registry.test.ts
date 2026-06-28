@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
 import {
   modelVisibleToolDescription,
@@ -25,6 +26,7 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "list_context_attachments",
     "list_dir",
     "read",
+    "read_context_attachment_image",
     "read_context_attachment_pdf_text",
     "read_context_attachment_table",
     "read_context_attachment_text",
@@ -88,6 +90,7 @@ test("desktop-basic model-visible tools carry structured model contracts", () =>
     "list_context_attachments",
     "read_context_attachment_text",
     "read_context_attachment_pdf_text",
+    "read_context_attachment_image",
     "inspect_context_attachment_table",
     "read_context_attachment_table",
     "inspect_context_attachment_archive",
@@ -155,6 +158,22 @@ test("desktop-basic tool registry keeps unavailable browser tools out of allowed
   assert.equal(browser?.availability, "unavailable");
   assert.equal(catalog.allowedTools.includes("browser_snapshot"), false);
   assert.equal(registry.createToolCenter("desktop-basic").has("browser_snapshot"), false);
+});
+
+test("desktop-basic tool registry keeps image attachment tool unavailable when model lacks vision input", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    modelCapabilities: modelCapabilities({ supportsVisionInput: false }),
+  });
+  const catalog = registry.catalog("desktop-basic");
+  const imageTool = catalog.tools.find((tool) => tool.name === "read_context_attachment_image");
+
+  assert.equal(imageTool?.availability, "unavailable");
+  assert.equal(imageTool?.disabledReason, "Current model does not support vision input.");
+  assert.equal(catalog.allowedTools.includes("read_context_attachment_image"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("read_context_attachment_image"), false);
 });
 
 test("desktop-basic tool registry prefers frozen tool availability over current environment", () => {
@@ -457,5 +476,22 @@ function mcpToolExecutor(): ToolExecutor {
     async execute() {
       return { ok: true };
     },
+  };
+}
+
+function modelCapabilities(overrides: Partial<ModelCapabilities> = {}): ModelCapabilities {
+  return {
+    contextWindowTokens: 16_000,
+    maxOutputTokens: 4_000,
+    supportsToolCalling: true,
+    supportsParallelToolCalls: true,
+    supportsStructuredOutputs: true,
+    supportsStreaming: true,
+    supportsVisionInput: true,
+    supportsReasoningEffort: false,
+    supportsReasoningOutput: false,
+    preferredApiStyle: "openai_compatible",
+    stability: "stable",
+    ...overrides,
   };
 }

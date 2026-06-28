@@ -1945,6 +1945,9 @@ function definedRuntimeDatabaseOverrides(
   overrides: Partial<RuntimeDatabase>
 ): Partial<RuntimeDatabase> {
   return Object.fromEntries(
-    Object.entries(overrides).filter((entry): entry is [keyof RuntimeDatabase, RuntimeDatabase[keyof RuntimeDatabase]] => entry[1] !== undefined)
+    Object.entries(overrides).filter((entry): entry is [
+      keyof RuntimeDatabase,
+      NonNullable<RuntimeDatabase[keyof RuntimeDatabase]>
+    ] => entry[1] !== undefined)
   ) as Partial<RuntimeDatabase>;
 }

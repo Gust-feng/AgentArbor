@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type {
   RuntimeConversationRecord,
+  RuntimeDatabase,
   RuntimeModelCallRecord,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
 } from "../domain/runtime-database/index.js";
 import {
   USAGE_HEATMAP_WINDOW_DAYS,
+  createPanelUsageStatistics,
   createUsageStatistics,
 } from "./panel-usage-statistics.js";
 
@@ -127,6 +129,50 @@ test("usage statistics returns an empty local view without storage", () => {
     unknownUsageModelCallCount: 0,
   });
   assert.equal(statistics.dailyActivity.every((item) => item.level === 0), true);
+});
+
+test("panel usage statistics reads model calls through the runtime database fast path", async () => {
+  const run = runRecord({
+    runId: "run-fast",
+    runMode: "agent",
+    createdAt: "2026-06-28T01:00:01.000Z",
+    updatedAt: "2026-06-28T01:00:02.000Z",
+  });
+  let getRunCalled = false;
+  const runtimeDatabase = {
+    listConversations: async () => [],
+    listRuns: async () => [run],
+    listModelCallsForRuns: async (runIds: readonly string[]) => {
+      assert.deepEqual(runIds, ["run-fast"]);
+      return [
+        {
+          runId: "run-fast",
+          modelCalls: [
+            modelCallRecord("request-fast", {
+              inputTokens: 5,
+              outputTokens: 2,
+            }),
+          ],
+        },
+      ];
+    },
+    getRun: async () => {
+      getRunCalled = true;
+      throw new Error("getRun should not be used for usage statistics when model-call fast path exists.");
+    },
+  } as unknown as RuntimeDatabase;
+
+  const response = await createPanelUsageStatistics({
+    runtimeDatabase,
+    generatedAt: "2026-06-28T12:00:00.000Z",
+  });
+
+  assert.equal(getRunCalled, false);
+  assert.equal(response.statistics.totals.runCount, 1);
+  assert.equal(response.statistics.totals.modelCallCount, 1);
+  assert.equal(response.statistics.totals.inputTokens, 5);
+  assert.equal(response.statistics.totals.outputTokens, 2);
+  assert.equal(response.statistics.totals.totalTokens, 7);
 });
 
 function conversationRecord(input: {

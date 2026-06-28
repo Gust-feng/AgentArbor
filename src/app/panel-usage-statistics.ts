@@ -3,6 +3,7 @@ import type {
   RuntimeConversationRecord,
   RuntimeDatabase,
   RuntimeModelCallRecord,
+  RuntimeRunModelCallsRecord,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
 } from "../domain/runtime-database/index.js";
@@ -66,6 +67,7 @@ export async function createPanelUsageStatistics(input: {
         conversations: [],
         runs: [],
         snapshots: [],
+        modelCallsByRun: [],
       }),
     };
   }
@@ -74,7 +76,7 @@ export async function createPanelUsageStatistics(input: {
     input.runtimeDatabase.listConversations(ALL_LOCAL_RECORD_LIMIT),
     input.runtimeDatabase.listRuns(ALL_LOCAL_RECORD_LIMIT),
   ]);
-  const snapshots = await Promise.all(runs.map((run) => input.runtimeDatabase!.getRun(run.runId)));
+  const modelCallsByRun = await listModelCallsForRuns(input.runtimeDatabase, runs);
   return {
     ok: true,
     status: "completed",
@@ -83,7 +85,8 @@ export async function createPanelUsageStatistics(input: {
       storageAvailable: true,
       conversations,
       runs,
-      snapshots: snapshots.filter((snapshot): snapshot is RuntimeRunSnapshot => snapshot !== undefined),
+      modelCallsByRun,
+      snapshots: [],
     }),
   };
 }
@@ -93,7 +96,8 @@ export function createUsageStatistics(input: {
   readonly storageAvailable: boolean;
   readonly conversations: readonly RuntimeConversationRecord[];
   readonly runs: readonly RuntimeRunRecord[];
-  readonly snapshots: readonly RuntimeRunSnapshot[];
+  readonly snapshots?: readonly RuntimeRunSnapshot[];
+  readonly modelCallsByRun?: readonly UsageStatisticsModelCallGroup[];
 }): UsageStatistics {
   const daily = createDailyBuckets(input.generatedAt);
   const activityDates: string[] = [];
@@ -122,12 +126,18 @@ export function createUsageStatistics(input: {
   }
 
   const runById = new Map(input.runs.map((run) => [run.runId, run]));
-  for (const snapshot of input.snapshots) {
-    const run = runById.get(snapshot.run.runId) ?? snapshot.run;
+  for (const run of input.runs) {
     addActivityDate(activityDates, run.createdAt);
     addActivityDate(activityDates, run.updatedAt);
     addDailyCount(daily, run.createdAt, "runCount", 1);
-    for (const call of snapshot.modelCalls) {
+  }
+
+  for (const group of modelCallGroups(input)) {
+    const run = runById.get(group.runId) ?? group.run;
+    if (run === undefined) {
+      continue;
+    }
+    for (const call of group.modelCalls) {
       addModelCallUsage(totals, daily, run, call);
     }
   }
@@ -148,6 +158,42 @@ export function createUsageStatistics(input: {
 type MutableUsageStatisticsTotals = {
   -readonly [K in keyof UsageStatisticsTotals]: UsageStatisticsTotals[K];
 };
+
+type UsageStatisticsModelCallGroup = {
+  readonly runId: string;
+  readonly run?: RuntimeRunRecord;
+  readonly modelCalls: readonly RuntimeModelCallRecord[];
+};
+
+async function listModelCallsForRuns(
+  runtimeDatabase: RuntimeDatabase,
+  runs: readonly RuntimeRunRecord[]
+): Promise<readonly RuntimeRunModelCallsRecord[]> {
+  if (runtimeDatabase.listModelCallsForRuns !== undefined) {
+    return runtimeDatabase.listModelCallsForRuns(runs.map((run) => run.runId));
+  }
+  const snapshots = await Promise.all(runs.map((run) => runtimeDatabase.getRun(run.runId)));
+  return snapshots
+    .filter((snapshot): snapshot is RuntimeRunSnapshot => snapshot !== undefined)
+    .map((snapshot) => ({
+      runId: snapshot.run.runId,
+      modelCalls: snapshot.modelCalls,
+    }));
+}
+
+function modelCallGroups(input: {
+  readonly snapshots?: readonly RuntimeRunSnapshot[];
+  readonly modelCallsByRun?: readonly UsageStatisticsModelCallGroup[];
+}): readonly UsageStatisticsModelCallGroup[] {
+  if (input.modelCallsByRun !== undefined) {
+    return input.modelCallsByRun;
+  }
+  return (input.snapshots ?? []).map((snapshot) => ({
+    runId: snapshot.run.runId,
+    run: snapshot.run,
+    modelCalls: snapshot.modelCalls,
+  }));
+}
 
 type MutableDailyActivity = Omit<UsageStatisticsDailyActivity, "level"> & {
   level?: UsageStatisticsDailyActivity["level"];

@@ -228,6 +228,11 @@ export type RuntimeRunSnapshot = {
   readonly contextLedger?: RuntimeContextLedgerRecord;
 };
 
+export type RuntimeRunModelCallsRecord = {
+  readonly runId: string;
+  readonly modelCalls: readonly RuntimeModelCallRecord[];
+};
+
 export interface RuntimeDatabase {
   upsertWorkspace(record: RuntimeWorkspaceRecord): Promise<RuntimeWorkspaceRecord>;
   upsertConversation(record: RuntimeConversationRecord): Promise<RuntimeConversationRecord>;
@@ -245,4 +250,5 @@ export interface RuntimeDatabase {
   upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord>;
   getRun(runId: string): Promise<RuntimeRunSnapshot | undefined>;
   listRuns(limit?: number): Promise<readonly RuntimeRunRecord[]>;
+  listModelCallsForRuns?(runIds: readonly string[]): Promise<readonly RuntimeRunModelCallsRecord[]>;
 }

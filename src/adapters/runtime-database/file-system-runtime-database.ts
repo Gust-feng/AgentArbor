@@ -9,6 +9,7 @@ import type {
   RuntimeConfirmationRecord,
   RuntimeEventRecord,
   RuntimeModelCallRecord,
+  RuntimeRunModelCallsRecord,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
   RuntimeToolCallRecord,
@@ -178,6 +179,15 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
       .filter((run): run is RuntimeRunRecord => run !== undefined)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .slice(0, Math.max(0, Math.floor(limit)));
+  }
+
+  async listModelCallsForRuns(runIds: readonly string[]): Promise<readonly RuntimeRunModelCallsRecord[]> {
+    return Promise.all(
+      runIds.map(async (runId) => ({
+        runId,
+        modelCalls: await readJsonlFile<RuntimeModelCallRecord>(this.runJsonlPath(runId, "model-calls.jsonl")),
+      }))
+    );
   }
 
   runHome(runId: string): string {

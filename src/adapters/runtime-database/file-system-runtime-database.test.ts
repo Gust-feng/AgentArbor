@@ -151,6 +151,7 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     ]);
 
     const snapshot = await database.getRun("panel-run-0001");
+    const modelCallsByRun = await database.listModelCallsForRuns(["panel-run-0001"]);
     const runs = await database.listRuns();
     const conversation = await database.getConversation("conversation-0001");
     const conversations = await database.listConversations();
@@ -170,6 +171,13 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     assert.equal(snapshot?.events[0]?.type, "goal.received");
     assert.equal(snapshot?.modelCalls[0]?.requestId, "model-request-0001");
     assert.deepEqual(snapshot?.modelCalls[0]?.usage, {
+      inputTokens: 12,
+      outputTokens: 4,
+      totalTokens: 16,
+      cachedInputTokens: 3,
+    });
+    assert.equal(modelCallsByRun[0]?.runId, "panel-run-0001");
+    assert.deepEqual(modelCallsByRun[0]?.modelCalls[0]?.usage, {
       inputTokens: 12,
       outputTokens: 4,
       totalTokens: 16,

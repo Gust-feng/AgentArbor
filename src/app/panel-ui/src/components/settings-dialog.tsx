@@ -25,7 +25,7 @@ import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-sett
 import { ModelSettings } from "./model-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { SkillSettings } from "./skill-settings";
-import { UsageStatisticsSettings } from "./usage-statistics-settings";
+import { UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
 import { WorkspaceSettings } from "./workspace-settings";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
@@ -75,6 +75,7 @@ export function SettingsDialog(props: {
   useEffect(() => {
     if (props.open) {
       setActiveGroup(props.initialGroup ?? "models");
+      preloadUsageStatistics();
     }
   }, [props.open, props.initialGroup]);
 
@@ -117,6 +118,12 @@ export function SettingsDialog(props: {
                 key={group.id}
                 className={group.id === activeGroup ? "active" : ""}
                 onClick={() => setActiveGroup(group.id)}
+                onFocus={() => {
+                  if (group.id === "statistics") preloadUsageStatistics();
+                }}
+                onMouseEnter={() => {
+                  if (group.id === "statistics") preloadUsageStatistics();
+                }}
               >
                 {group.icon}
                 <span>{group.label}</span>

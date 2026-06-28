@@ -1377,6 +1377,72 @@ test("ConfigCenter preserves MCP tool cache across policy edits and clears it wh
   }
 });
 
+test("ConfigCenter preserves MCP server order when updating existing servers", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-mcp-order-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.upsertMcpServer({
+      serverId: "context7",
+      label: "Context7",
+      transport: "http",
+      url: "https://context7.example.test/mcp",
+      enabled: true,
+    });
+    await configCenter.upsertMcpServer({
+      serverId: "exa",
+      label: "Exa",
+      transport: "http",
+      url: "https://exa.example.test/mcp",
+      enabled: false,
+    });
+    await configCenter.upsertMcpServer({
+      serverId: "docs",
+      label: "Docs",
+      transport: "stdio",
+      command: "node",
+      args: ["server.mjs"],
+      enabled: true,
+    });
+
+    const afterPolicyEdit = await configCenter.upsertMcpServer({
+      serverId: "context7",
+      enabled: false,
+      toolExposureMode: "selected",
+      enabledTools: ["lookup"],
+    });
+    const afterConnectionState = await configCenter.updateMcpServerConnectionState({
+      serverId: "exa",
+      connectedAt: "2026-06-20T00:00:00.000Z",
+      cachedTools: [{
+        name: "search",
+        description: "Search.",
+        inputSchema: { type: "object", properties: { query: { type: "string" } } },
+      }],
+    });
+    const afterConnectionEdit = await configCenter.upsertMcpServer({
+      serverId: "context7",
+      url: "https://context7.example.test/changed",
+    });
+    const afterAppend = await configCenter.upsertMcpServer({
+      serverId: "new-docs",
+      label: "New Docs",
+      transport: "http",
+      url: "https://docs.example.test/mcp",
+      enabled: true,
+    });
+
+    assert.deepEqual(afterPolicyEdit.map((server) => server.serverId), ["context7", "exa", "docs"]);
+    assert.deepEqual(afterConnectionState.map((server) => server.serverId), ["context7", "exa", "docs"]);
+    assert.deepEqual(afterConnectionEdit.map((server) => server.serverId), ["context7", "exa", "docs"]);
+    assert.deepEqual(afterAppend.map((server) => server.serverId), ["context7", "exa", "docs", "new-docs"]);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("ConfigCenter stores and validates workspace directory", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-config-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-root-"));

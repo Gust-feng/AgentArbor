@@ -511,6 +511,7 @@ export type CapabilityMcpCatalogItem = {
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
   readonly toolsCachedAt?: string;
+  readonly cachedTools?: readonly McpCachedToolInfo[];
   readonly promptCount?: number;
   readonly resourceCount?: number;
   readonly resourceTemplateCount?: number;

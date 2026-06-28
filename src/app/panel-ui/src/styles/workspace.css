@@ -167,14 +167,14 @@
 .mcp-service-card {
   position: relative;
   display: grid;
-  gap: 6px;
-  align-content: start;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 12px;
+  align-items: start;
   border: 1px solid var(--row-border);
   border-radius: var(--radius-lg);
   background: var(--row-bg);
-  padding: 10px 12px;
+  padding: 12px 14px;
   color: var(--fg);
-  text-align: left;
   transition:
     border-color var(--motion-fast-duration) var(--motion-ease-standard),
     background-color var(--motion-fast-duration) var(--motion-ease-standard),
@@ -193,9 +193,27 @@
   box-shadow: var(--row-active-shadow);
 }
 
+.mcp-service-card-main {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mcp-service-card-main:focus-visible,
+.mcp-service-enable-toggle:focus-visible {
+  border-radius: var(--radius-md);
+  outline: 2px solid color-mix(in oklch, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
 .mcp-service-card-top {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
   gap: 9px;
 }
@@ -251,6 +269,55 @@
   gap: 6px 12px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.mcp-service-card-controls {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.mcp-service-enable-toggle {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border: 1px solid var(--content-border);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 18%, var(--surface));
+  padding: 2px;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast-duration) var(--motion-ease-standard),
+    background-color var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.mcp-service-enable-toggle > span {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--shadow-ink) 20%, transparent);
+  transform: translateX(0);
+  transition: transform var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.mcp-service-enable-toggle[aria-pressed="true"] {
+  border-color: color-mix(in oklch, var(--status-success) 46%, var(--border));
+  background: color-mix(in oklch, var(--status-success) 72%, var(--surface));
+}
+
+.mcp-service-enable-toggle[aria-pressed="true"] > span {
+  transform: translateX(16px);
+}
+
+.mcp-service-enable-toggle:hover:not(:disabled) {
+  border-color: var(--row-hover-border);
+}
+
+.mcp-service-enable-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .mcp-service-empty {
@@ -1552,13 +1619,14 @@
     width: 100%;
   }
 
-  .mcp-service-card-top {
-    grid-template-columns: 30px minmax(0, 1fr);
+  .mcp-service-card {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .mcp-service-card-top .mcp-status-pill {
-    grid-column: 2;
-    justify-self: start;
+  .mcp-service-card-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   .mcp-subpanel {

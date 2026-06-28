@@ -154,6 +154,19 @@ export type McpServerCatalogItem = {
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
   readonly toolsCachedAt?: string;
+  readonly cachedTools?: readonly {
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    readonly inputSchema?: Record<string, unknown>;
+    readonly outputSchema?: Record<string, unknown>;
+    readonly annotations?: {
+      readonly title?: string;
+      readonly readOnlyHint?: boolean;
+      readonly destructiveHint?: boolean;
+      readonly openWorldHint?: boolean;
+    };
+  }[];
   readonly promptCount?: number;
   readonly resourceCount?: number;
   readonly resourceTemplateCount?: number;

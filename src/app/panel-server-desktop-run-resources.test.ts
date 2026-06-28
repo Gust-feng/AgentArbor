@@ -361,13 +361,35 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
             enabled: true,
             confirmationMode: "unsafe_only",
             availability: "configured",
-            runtimeStatus: "connected",
+            runtimeStatus: "configured",
             commandSummary: `${process.execPath} server.mjs`,
             envSecretRefCount: 0,
             authSecretRefCount: 0,
             toolExposureMode: "selected",
             enabledTools: ["lookup", "mutate"],
             autoApprovedTools: ["mutate"],
+            cachedTools: [
+              {
+                name: "lookup",
+                description: "Lookup frozen MCP data.",
+                inputSchema: {
+                  type: "object",
+                  properties: { query: { type: "string" } },
+                  required: ["query"],
+                },
+                annotations: { readOnlyHint: true },
+              },
+              {
+                name: "mutate",
+                description: "Mutate frozen MCP data.",
+                inputSchema: {
+                  type: "object",
+                  properties: { value: { type: "string" } },
+                  required: ["value"],
+                },
+                annotations: { destructiveHint: true },
+              },
+            ],
             runtimeConfig: {
               transport: "stdio",
               command: process.execPath,

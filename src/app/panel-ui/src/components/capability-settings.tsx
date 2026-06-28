@@ -229,6 +229,18 @@ function McpServiceBoard(props: {
       // The settings controller already publishes the visible error.
     }
   };
+  const toggleServerEnabled = async (server: McpCatalogServer): Promise<void> => {
+    const nextForm = {
+      ...formFromMcpCatalog(server, props.form),
+      enabled: !server.enabled,
+    };
+    try {
+      props.setForm(nextForm);
+      await saveServer(nextForm);
+    } catch {
+      // The settings controller already publishes the visible error.
+    }
+  };
   return (
     <section className="mcp-board">
       <header className="mcp-board-header">
@@ -259,31 +271,47 @@ function McpServiceBoard(props: {
           const serverStatus = mcpRuntimeStatusLabel(server.runtimeStatus ?? server.availability);
           const serverDescription = mcpServerCardDescription(server);
           return (
-            <button
-              type="button"
+            <article
               key={server.serverId}
               className={`mcp-service-card ${selected ? "selected" : ""}`}
-              onClick={() => {
-                props.setForm(formFromMcpCatalog(server, props.form));
-                setPanelMode("edit");
-              }}
             >
-              <span className="mcp-service-card-top">
-                <span className="mcp-service-card-title">
-                  <strong>{server.label}</strong>
-                  <span>{transportLabel(server.transport)}</span>
+              <button
+                type="button"
+                className="mcp-service-card-main"
+                onClick={() => {
+                  props.setForm(formFromMcpCatalog(server, props.form));
+                  setPanelMode("edit");
+                }}
+              >
+                <span className="mcp-service-card-top">
+                  <span className="mcp-service-card-title">
+                    <strong>{server.label}</strong>
+                    <span>{transportLabel(server.transport)}</span>
+                  </span>
                 </span>
+                {serverDescription !== undefined && (
+                  <span className="mcp-service-card-description">{serverDescription}</span>
+                )}
+                <span className="mcp-service-card-footer">
+                  {mcpServerCardFacts(server).map((fact) => (
+                    <span key={fact}>{fact}</span>
+                  ))}
+                </span>
+              </button>
+              <span className="mcp-service-card-controls">
                 <span className={`mcp-status-pill ${mcpStatusTone(server.runtimeStatus ?? server.availability)}`}>{serverStatus}</span>
+                <button
+                  type="button"
+                  className="mcp-service-enable-toggle"
+                  aria-pressed={server.enabled}
+                  aria-label={`${server.enabled ? "停用" : "启用"} ${server.label}`}
+                  onClick={() => void toggleServerEnabled(server)}
+                  disabled={props.saving}
+                >
+                  <span aria-hidden="true" />
+                </button>
               </span>
-              {serverDescription !== undefined && (
-                <span className="mcp-service-card-description">{serverDescription}</span>
-              )}
-              <span className="mcp-service-card-footer">
-                {mcpServerCardFacts(server).map((fact) => (
-                  <span key={fact}>{fact}</span>
-                ))}
-              </span>
-            </button>
+            </article>
           );
         })}
       </div>
@@ -1152,6 +1180,7 @@ function canSaveMcpServerForm(form: McpServerForm): boolean {
 
 function canTestMcpServerForm(form: McpServerForm): boolean {
   if (!canSaveMcpServerForm(form)) return false;
+  if (!form.enabled) return false;
   if (form.transport === "stdio") {
     return form.commandLine.trim().length > 0 || form.command.trim().length > 0;
   }

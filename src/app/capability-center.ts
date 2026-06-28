@@ -15,9 +15,8 @@ import type {
   SanitizedModelProviderConfig,
 } from "../domain/config/index.js";
 import type { SkillDefinition } from "../domain/basic-agent/index.js";
-import type { ToolExecutor } from "../domain/tools/index.js";
 import { createId, nowIso } from "../kernel/id.js";
-import { createCachedMcpToolExecutor, McpManager, type McpManagerConfig, type McpServerRuntimeSnapshot } from "../adapters/mcp/index.js";
+import { LazyMcpToolExecutorProvider } from "../adapters/mcp/index.js";
 import type { ConfigCenter } from "./config-center.js";
 import { resolveModelCapabilities } from "./model-capability-registry.js";
 import {
@@ -28,25 +27,14 @@ import type { ToolCatalogItem } from "./basic-agent-runtime/tool-registry.js";
 import { discoverSkills, parseSkillMarkdown, type SkillRootInput } from "./skills/skill-loader.js";
 import type { SkillStateStore } from "./skills/skill-state-store.js";
 
-const DEFAULT_MCP_CONNECT_TIMEOUT_MS = 8_000;
-
 export type CapabilityCenterOptions = {
   readonly configCenter: ConfigCenter;
   readonly skillRoots: readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly fetch?: ToolRegistryFetchLike;
   readonly playwrightAvailable?: boolean;
-  readonly mcpConnectTimeoutMs?: number;
-  readonly createMcpManager?: (config: McpManagerConfig) => CapabilityCenterMcpManager;
 };
 
-export type CapabilityCenterMcpManager = {
-  connectAll(): Promise<void>;
-  disconnectAll(): Promise<void>;
-  getServerRuntimeSnapshots(): readonly McpServerRuntimeSnapshot[];
-  getToolsForRegistry(): readonly ToolExecutor[];
-  getDiscoveredToolsForRegistry?(): readonly ToolExecutor[];
-};
 
 export class CapabilityCenter {
   private skillsPromise?: Promise<readonly SkillDefinition[]>;
@@ -102,47 +90,28 @@ export class CapabilityCenter {
     ]);
     const connectableMcpServers = mcpServers.filter(isMcpServerConnectable);
     const cachedMcpServers = connectableMcpServers.filter(hasUsableMcpToolCache);
-    const liveMcpServers = connectableMcpServers.filter((server) => !hasUsableMcpToolCache(server));
-    const mcpEnv = await this.options.configCenter.createMcpRuntimeEnvironment({
-      servers: liveMcpServers,
-      baseEnv: env,
+    const mcpToolProvider = cachedMcpServers.length === 0
+      ? undefined
+      : new LazyMcpToolExecutorProvider({
+          servers: cachedMcpServers,
+          env: await this.options.configCenter.createMcpRuntimeEnvironment({
+            servers: cachedMcpServers,
+            baseEnv: env,
+          }),
+        });
+    const registry = createDesktopBasicToolRegistry({
+      env,
+      fetch: this.options.fetch,
+      workspaceRoot: workspace.workspaceDirectory,
+      playwrightAvailable: this.options.playwrightAvailable,
+      toolStates,
+      mcpManager: mcpToolProvider,
+      commandShell,
+      includeSkillResourceToolCatalog: true,
     });
-    const mcpManager = this.createMcpManager({
-      servers: liveMcpServers,
-      env: mcpEnv,
-      connectTimeoutMs: this.options.mcpConnectTimeoutMs ?? DEFAULT_MCP_CONNECT_TIMEOUT_MS,
-    });
-    let desktopToolCatalog;
-    let mcpToolCatalog;
-    let exposedMcpToolCatalog;
-    let mcpRuntimeSnapshots;
-    try {
-      if (liveMcpServers.length > 0) {
-        await mcpManager.connectAll();
-      }
-      const mcpToolProvider = cachedMcpServers.length === 0
-        ? mcpManager
-        : mergeMcpToolProviders(mcpManager, cachedMcpServers);
-      const registry = createDesktopBasicToolRegistry({
-        env,
-        fetch: this.options.fetch,
-        workspaceRoot: workspace.workspaceDirectory,
-        playwrightAvailable: this.options.playwrightAvailable,
-        toolStates,
-        mcpManager: mcpToolProvider,
-        commandShell,
-        includeSkillResourceToolCatalog: true,
-      });
-      desktopToolCatalog = registry.catalog("desktop-basic");
-      mcpToolCatalog = registry.catalog("mcp");
-      exposedMcpToolCatalog = filteredMcpToolCatalog(mcpToolCatalog, mcpServers);
-      mcpRuntimeSnapshots = [
-        ...cachedMcpRuntimeSnapshots(cachedMcpServers),
-        ...mcpManager.getServerRuntimeSnapshots(),
-      ];
-    } finally {
-      await mcpManager.disconnectAll();
-    }
+    const desktopToolCatalog = registry.catalog("desktop-basic");
+    const mcpToolCatalog = registry.catalog("mcp");
+    const exposedMcpToolCatalog = filteredMcpToolCatalog(mcpToolCatalog, mcpServers);
     const allTools = [
       ...desktopToolCatalog.tools,
       ...exposedMcpToolCatalog.tools,
@@ -169,7 +138,7 @@ export class CapabilityCenter {
       },
       skillCatalog,
       mcpCatalog: mcpServers.map((server): CapabilityMcpCatalogItem =>
-        mcpCatalogItemForServer(server, mcpRuntimeSnapshots, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
+        mcpCatalogItemForServer(server, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
       ),
       workspace,
       commandShell,
@@ -177,10 +146,6 @@ export class CapabilityCenter {
       securitySummary: `本轮模型、工具、技能和工作区能力快照。确认策略：${toolConfirmation.label}。`,
       warnings,
     };
-  }
-
-  private createMcpManager(config: McpManagerConfig): CapabilityCenterMcpManager {
-    return this.options.createMcpManager?.(config) ?? new McpManager(config);
   }
 }
 
@@ -417,58 +382,6 @@ function hasUsableMcpToolCache(server: McpServerSettings): boolean {
   return server.lastError === undefined && (server.cachedTools?.length ?? 0) > 0;
 }
 
-function mergeMcpToolProviders(
-  liveManager: CapabilityCenterMcpManager,
-  cachedServers: readonly McpServerSettings[]
-): CapabilityCenterMcpManager {
-  const cachedDiscoveredTools = cachedMcpToolExecutors(cachedServers, { exposedOnly: false });
-  const cachedExposedTools = cachedMcpToolExecutors(cachedServers, { exposedOnly: true });
-  return {
-    connectAll: () => liveManager.connectAll(),
-    disconnectAll: () => liveManager.disconnectAll(),
-    getServerRuntimeSnapshots: () => [
-      ...cachedMcpRuntimeSnapshots(cachedServers),
-      ...liveManager.getServerRuntimeSnapshots(),
-    ],
-    getToolsForRegistry: () => [
-      ...liveManager.getToolsForRegistry(),
-      ...cachedExposedTools,
-    ],
-    getDiscoveredToolsForRegistry: () => [
-      ...(liveManager.getDiscoveredToolsForRegistry?.() ?? liveManager.getToolsForRegistry()),
-      ...cachedDiscoveredTools,
-    ],
-  };
-}
-
-function cachedMcpToolExecutors(
-  servers: readonly McpServerSettings[],
-  options: { readonly exposedOnly: boolean }
-): readonly ToolExecutor[] {
-  const executors: ToolExecutor[] = [];
-  for (const server of servers) {
-    for (const tool of server.cachedTools ?? []) {
-      if (options.exposedOnly && !isMcpToolEnabledForServer(server, `${server.serverId}__${tool.name}`)) {
-        continue;
-      }
-      executors.push(createCachedMcpToolExecutor(tool, server.serverId, {
-        confirmationMode: server.confirmationMode,
-        autoApprovedTools: server.autoApprovedTools,
-      }));
-    }
-  }
-  return executors;
-}
-
-function cachedMcpRuntimeSnapshots(servers: readonly McpServerSettings[]): readonly McpServerRuntimeSnapshot[] {
-  return servers.map((server) => ({
-    serverId: server.serverId,
-    status: "connected" as const,
-    lastConnectedAt: server.lastConnectedAt ?? server.toolsCachedAt,
-    toolNames: (server.cachedTools ?? []).map((tool) => tool.name),
-  }));
-}
-
 function capabilityWarnings(input: {
   readonly activeModel: SanitizedModelProviderConfig;
   readonly toolCount: number;
@@ -526,13 +439,17 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
 
 function mcpCatalogItemForServer(
   server: McpServerSettings,
-  runtimeSnapshots: readonly McpServerRuntimeSnapshot[],
   discoveredMcpTools: readonly ToolCatalogItem[],
   exposedMcpTools: readonly ToolCatalogItem[]
 ): CapabilityMcpCatalogItem {
   const availability = server.enabled ? mcpAvailability(server) : "disabled";
-  const runtime = runtimeSnapshots.find((snapshot) => snapshot.serverId === server.serverId);
-  const runtimeStatus = mcpRuntimeStatusFor(server, availability, runtime);
+  const runtimeStatus = mcpRuntimeStatusFor(server, availability);
+  const discoveredTools = discoveredMcpTools
+    .filter((tool) => tool.name.startsWith(`${server.serverId}__`))
+    .map(capabilityToolCatalogItem);
+  const exposedTools = exposedMcpTools
+    .filter((tool) => tool.name.startsWith(`${server.serverId}__`))
+    .map(capabilityToolCatalogItem);
   return {
     serverId: server.serverId,
     label: server.label,
@@ -542,7 +459,7 @@ function mcpCatalogItemForServer(
     confirmationMode: server.confirmationMode,
     availability,
     runtimeStatus,
-    errorSummary: runtime === undefined ? server.lastError : runtime.errorSummary,
+    errorSummary: server.lastError,
     commandSummary: commandSummaryFor(server.command, server.args),
     url: isNetworkMcpTransport(server.transport) ? server.url : undefined,
     envSecretRefCount: server.envSecretRefs.length,
@@ -554,9 +471,17 @@ function mcpCatalogItemForServer(
     toolExposureMode: server.toolExposureMode,
     enabledTools: [...server.enabledTools],
     autoApprovedTools: [...server.autoApprovedTools],
-    lastConnectedAt: runtime?.lastConnectedAt ?? server.lastConnectedAt,
+    lastConnectedAt: server.lastConnectedAt,
     lastError: server.lastError,
     toolsCachedAt: server.toolsCachedAt,
+    cachedTools: server.cachedTools === undefined ? undefined : server.cachedTools.map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: { ...tool.inputSchema },
+      outputSchema: tool.outputSchema === undefined ? undefined : { ...tool.outputSchema },
+      annotations: tool.annotations === undefined ? undefined : { ...tool.annotations },
+    })),
     promptCount: server.cachedReferences?.prompts.length,
     resourceCount: server.cachedReferences?.resources.length,
     resourceTemplateCount: server.cachedReferences?.resourceTemplates.length,
@@ -576,16 +501,8 @@ function mcpCatalogItemForServer(
       enabledTools: [...server.enabledTools],
       autoApprovedTools: [...server.autoApprovedTools],
     } : undefined,
-    tools: runtimeStatus === "connected"
-      ? discoveredMcpTools
-          .filter((tool) => tool.name.startsWith(`${server.serverId}__`))
-          .map(capabilityToolCatalogItem)
-      : [],
-    exposedTools: runtimeStatus === "connected"
-      ? exposedMcpTools
-          .filter((tool) => tool.name.startsWith(`${server.serverId}__`))
-          .map(capabilityToolCatalogItem)
-      : [],
+    tools: discoveredTools,
+    exposedTools,
     updatedAt: server.updatedAt,
   };
 }
@@ -647,8 +564,7 @@ function mcpAvailability(server: {
 
 function mcpRuntimeStatusFor(
   server: McpServerSettings,
-  availability: CapabilityMcpCatalogItem["availability"],
-  runtime: McpServerRuntimeSnapshot | undefined
+  availability: CapabilityMcpCatalogItem["availability"]
 ): NonNullable<CapabilityMcpCatalogItem["runtimeStatus"]> {
   if (!server.enabled) {
     return "disabled";
@@ -656,13 +572,10 @@ function mcpRuntimeStatusFor(
   if (availability === "unavailable") {
     return "unavailable";
   }
-  if (runtime === undefined) {
-    return "configured";
+  if (server.lastError !== undefined) {
+    return "error";
   }
-  if (runtime.status === "disconnected") {
-    return "configured";
-  }
-  return runtime.status;
+  return "configured";
 }
 
 function isMcpServerConnectable(server: McpServerSettings): boolean {

@@ -447,10 +447,7 @@ export class ConfigCenter {
     const next = normalizeLocalSettings({
       ...current,
       version: 3,
-      mcpServers: [
-        ...(current.mcpServers ?? []).filter((server) => server.serverId !== serverId),
-        nextServer,
-      ],
+      mcpServers: upsertMcpServerInOrder(current.mcpServers ?? [], nextServer),
       updatedAt: now,
     });
     await this.options.settingsStore.writeSettings(next);
@@ -506,10 +503,7 @@ export class ConfigCenter {
     const next = normalizeLocalSettings({
       ...current,
       version: 3,
-      mcpServers: [
-        ...(current.mcpServers ?? []).filter((server) => server.serverId !== serverId),
-        nextServer,
-      ],
+      mcpServers: upsertMcpServerInOrder(current.mcpServers ?? [], nextServer),
       updatedAt: now,
     });
     await this.options.settingsStore.writeSettings(next);
@@ -790,6 +784,17 @@ function mcpConnectionConfigChanged(left: McpServerSettings, right: McpServerSet
     left.apiKeySecretRef !== right.apiKeySecretRef ||
     left.apiKeyHeaderName !== right.apiKeyHeaderName
   );
+}
+
+function upsertMcpServerInOrder(
+  servers: readonly McpServerSettings[],
+  nextServer: McpServerSettings
+): readonly McpServerSettings[] {
+  const existingIndex = servers.findIndex((server) => server.serverId === nextServer.serverId);
+  if (existingIndex < 0) {
+    return [...servers, nextServer];
+  }
+  return servers.map((server, index) => index === existingIndex ? nextServer : server);
 }
 
 function sameStringList(left: readonly string[], right: readonly string[]): boolean {

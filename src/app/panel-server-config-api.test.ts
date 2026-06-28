@@ -578,6 +578,14 @@ test("panel MCP management API tests connection, lists tools, updates whitelist,
           autoApprovedTools: [],
         },
       });
+      const disabled = await requestJson(server.url, "/api/config/mcp/docs", {
+        method: "POST",
+        body: {
+          serverId: "docs",
+          enabled: false,
+        },
+      });
+      const disabledTest = await requestJson(server.url, "/api/config/mcp/docs/test", { method: "POST" });
       const reloaded = await requestJson(server.url, "/api/config/mcp/reload", { method: "POST" });
 
       assert.equal(created.status, 200);
@@ -611,9 +619,16 @@ test("panel MCP management API tests connection, lists tools, updates whitelist,
       assert.deepEqual(narrowed.body.catalog[0].tools.map((tool: { name: string }) => tool.name), ["docs__lookup", "docs__mutate"]);
       assert.deepEqual(narrowed.body.catalog[0].exposedTools.map((tool: { name: string }) => tool.name), ["docs__lookup"]);
       assert.equal(narrowed.body.catalog[0].exposedTools[0].requiresConfirmation, true);
+      assert.equal(disabled.status, 200);
+      assert.equal(disabled.body.catalog[0].enabled, false);
+      assert.equal(disabled.body.catalog[0].runtimeStatus, "disabled");
+      assert.equal(disabledTest.status, 200);
+      assert.equal(disabledTest.body.ok, false);
+      assert.equal(disabledTest.body.errorCode, "mcp_server_disabled");
+      assert.equal(disabledTest.body.toolCount, 0);
       assert.equal(reloaded.status, 200);
-      assert.equal(reloaded.body.connected, 1);
-      for (const response of [created, secret, rejectedSecret, tested, listed, references, narrowed, reloaded]) {
+      assert.equal(reloaded.body.connected, 0);
+      for (const response of [created, secret, rejectedSecret, tested, listed, references, narrowed, disabled, disabledTest, reloaded]) {
         assert.equal(response.text.includes(bearerSecret), false);
         assert.equal(response.text.includes("should-not-save"), false);
       }

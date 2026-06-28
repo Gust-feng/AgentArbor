@@ -5,7 +5,7 @@ import type {
   SanitizedModelProviderConfig,
   ToolStateSettings,
 } from "../../domain/config/index.js";
-import { McpManager } from "../../adapters/mcp/index.js";
+import { LazyMcpToolExecutorProvider } from "../../adapters/mcp/index.js";
 import {
   createDefaultToolCenter,
   createModelRuntimeConfig,
@@ -138,7 +138,7 @@ async function mcpManagerFromCapabilitySnapshot(
   runtime: PanelRuntime,
   snapshot: BasicAgentCapabilitySnapshot,
   env: Readonly<Record<string, string | undefined>>
-): Promise<McpManager | undefined> {
+): Promise<LazyMcpToolExecutorProvider | undefined> {
   const servers = snapshot.mcpCatalog
     .filter((server) => server.enabled && server.availability === "configured" && server.runtimeConfig !== undefined)
     .filter((server) => server.exposedTools.length > 0)
@@ -159,6 +159,8 @@ async function mcpManagerFromCapabilitySnapshot(
       enabledTools: server.runtimeConfig!.enabledTools,
       autoApprovedTools: server.runtimeConfig!.autoApprovedTools,
       enabled: true,
+      cachedTools: server.cachedTools ?? [],
+      toolsCachedAt: server.toolsCachedAt ?? snapshot.createdAt,
       updatedAt: server.updatedAt,
     }));
   if (servers.length === 0) {
@@ -168,9 +170,7 @@ async function mcpManagerFromCapabilitySnapshot(
     typeof runtime.configCenter.createMcpRuntimeEnvironment === "function"
       ? await runtime.configCenter.createMcpRuntimeEnvironment({ servers, baseEnv: env })
       : env;
-  const manager = new McpManager({ servers, env: mcpEnv });
-  await manager.connectAll();
-  return manager;
+  return new LazyMcpToolExecutorProvider({ servers, env: mcpEnv });
 }
 
 export function createDesktopToolCenterFactory(

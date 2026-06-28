@@ -138,6 +138,15 @@ export async function testPanelMcpServer(
   if (server === undefined) {
     throw new PanelHttpError(404, "mcp_server_not_found", "未找到 MCP 服务。");
   }
+  if (!server.enabled) {
+    return {
+      ok: false,
+      errorCode: "mcp_server_disabled",
+      errorSummary: "MCP 服务已停用。",
+      tools: [],
+      catalog: (await runtime.capabilityCenter.snapshot()).mcpCatalog,
+    };
+  }
   if (!hasCompleteMcpRuntimeConfig(server)) {
     if (options.persistConnectionState !== false) {
       await runtime.configCenter.updateMcpServerConnectionState({
@@ -282,6 +291,16 @@ export async function listPanelMcpReferences(
   const server = (await runtime.configCenter.listMcpServers()).find((item) => item.serverId === serverId);
   if (server === undefined) {
     throw new PanelHttpError(404, "mcp_server_not_found", "未找到 MCP 服务。");
+  }
+  if (!server.enabled) {
+    return {
+      ok: false,
+      errorCode: "mcp_server_disabled",
+      errorSummary: "MCP 服务已停用。",
+      prompts: [],
+      resources: [],
+      resourceTemplates: [],
+    };
   }
   if (server.cachedReferences !== undefined && server.lastError === undefined) {
     return {

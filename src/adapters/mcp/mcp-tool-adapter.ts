@@ -29,12 +29,21 @@ export function createMcpToolExecutor(
   return {
     definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
     async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
-      const result = await client.callTool(tool.name, input);
-      if (result.isError === true) {
-        const errorText = extractTextContent(result.content);
-        throw new Error(errorText.length > 0 ? errorText : `MCP tool "${tool.name}" returned an error.`);
-      }
-      return buildToolOutput(result.content);
+      return executeMcpTool(client, tool, input);
+    },
+  };
+}
+
+export function createLazyMcpToolExecutor(
+  getClient: () => Promise<McpClientWrapper>,
+  tool: McpToolInfo,
+  serverId: string,
+  confirmationStrategy: McpToolConfirmationStrategy = DEFAULT_CONFIRMATION_STRATEGY
+): ToolExecutor {
+  return {
+    definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
+    async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
+      return executeMcpTool(await getClient(), tool, input);
     },
   };
 }
@@ -50,6 +59,19 @@ export function createCachedMcpToolExecutor(
       throw new Error(`MCP tool "${serverId}__${tool.name}" is cached for catalog use and requires a live MCP connection to execute.`);
     },
   };
+}
+
+export async function executeMcpTool(
+  client: McpClientWrapper,
+  tool: Pick<McpToolInfo, "name">,
+  input: unknown
+): Promise<unknown> {
+  const result = await client.callTool(tool.name, input);
+  if (result.isError === true) {
+    const errorText = extractTextContent(result.content);
+    throw new Error(errorText.length > 0 ? errorText : `MCP tool "${tool.name}" returned an error.`);
+  }
+  return buildToolOutput(result.content);
 }
 
 function createMcpToolDefinition(

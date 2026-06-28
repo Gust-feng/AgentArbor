@@ -177,7 +177,14 @@ function parseCliArgs(argv) {
 }
 
 function stripArgumentSeparator(argv) {
-  return argv[0] === "--" ? argv.slice(1) : argv;
+  const separatorIndex = argv.indexOf("--");
+  if (separatorIndex < 0) {
+    return argv;
+  }
+  return [
+    ...argv.slice(0, separatorIndex),
+    ...argv.slice(separatorIndex + 1),
+  ];
 }
 
 function hasOption(tokens, name) {
@@ -319,22 +326,19 @@ async function waitForHttp(label, url, predicate) {
 
 async function waitForDevServers(host, frontendPort, apiPort, options = {}) {
   const { waitForApi = true, waitForProxy = true } = options;
-  const checks = [
-    waitForHttp("vite", `http://${host}:${frontendPort}/`, (response, body) => {
-      return response.status === 200 && body.includes('<div id="root">') && body.includes("/src/main.tsx");
-    }),
-  ];
+  await waitForHttp("vite", `http://${host}:${frontendPort}/`, (response, body) => {
+    return response.status === 200 && body.includes('<div id="root">') && body.includes("/src/main.tsx");
+  });
   if (waitForApi) {
-    checks.push(waitForHttp("panel-api", `http://${host}:${apiPort}/health`, (response, body) => {
+    await waitForHttp("panel-api", `http://${host}:${apiPort}/health`, (response, body) => {
       return response.status === 200 && body.includes('"ok":true');
-    }));
+    });
   }
   if (waitForProxy) {
-    checks.push(waitForHttp("vite-proxy", `http://${host}:${frontendPort}/health`, (response, body) => {
+    await waitForHttp("vite-proxy", `http://${host}:${frontendPort}/health`, (response, body) => {
       return response.status === 200 && body.includes('"ok":true');
-    }));
+    });
   }
-  await Promise.all(checks);
 }
 
 function errorMessage(error) {

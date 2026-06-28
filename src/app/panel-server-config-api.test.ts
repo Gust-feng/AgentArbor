@@ -304,6 +304,66 @@ test("panel capability and profile APIs expose safe unified capability projectio
   }
 });
 
+test("panel config API projects context windows for every configured model option", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-model-capability-options-"));
+  const secret = "sk-panel-model-capability-secret";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const createProfile = await requestJson(server.url, "/api/config/model-profiles", {
+      method: "POST",
+      body: {
+        profileId: "openai-router",
+        label: "OpenAI Router",
+        providerKind: "openai_compatible",
+        protocolKind: "openai_responses",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o",
+        defaultAiMode: "openai-responses",
+        apiKey: secret,
+      },
+    });
+    const savedCatalog = await requestJson(server.url, "/api/config/model-profiles/openai-router/model-catalog", {
+      method: "POST",
+      body: {
+        label: "OpenAI Router",
+        baseUrl: "https://api.openai.com/v1",
+        modelsPath: "/models",
+        fetchedAt: "2026-06-28T00:00:00.000Z",
+        models: [
+          { id: "gpt-4.1", displayName: "GPT-4.1" },
+          { id: "gpt-4o", displayName: "GPT-4o" },
+        ],
+      },
+    });
+    const config = await requestJson(server.url, "/api/config");
+    const modelCapabilities = (config.body.modelCapabilityProfiles as readonly {
+      readonly profileId: string;
+      readonly model: string;
+      readonly capabilities: { readonly contextWindowTokens?: number; readonly maxOutputTokens?: number };
+    }[]).filter((item) => item.profileId === "openai-router");
+
+    assert.equal(createProfile.status, 200);
+    assert.equal(savedCatalog.status, 200);
+    assert.equal(config.status, 200);
+    assert.equal(
+      modelCapabilities.find((item) => item.model === "gpt-4.1")?.capabilities.contextWindowTokens,
+      1_047_576
+    );
+    assert.equal(
+      modelCapabilities.find((item) => item.model === "gpt-4o")?.capabilities.contextWindowTokens,
+      128_000
+    );
+    assert.equal(
+      modelCapabilities.find((item) => item.model === "gpt-4o")?.capabilities.maxOutputTokens,
+      16_384
+    );
+    assert.equal(config.text.includes(secret), false);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel model profile catalog route fetches provider models without leaking API keys", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-model-catalog-"));
   const secret = "sk-panel-catalog-secret";

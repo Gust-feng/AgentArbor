@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ConfigResponse,
+  ModelCapabilities,
   ModelProviderModelCatalog,
 } from "../contracts/config";
 import { resolveModelIconSvgForModel } from "../model-icons";
 import { modelCapabilitySummary } from "../model-capability-display";
-import { modelCapabilitiesForProfileModel } from "../model-options";
 import { resolveModelProviderIdentity } from "../model-provider-logos";
 import { EmptyBlock } from "./workspace-common";
 import { ModelCatalogPanel } from "./model-catalog-panel";
@@ -95,6 +95,10 @@ export function ModelSettings(props: {
   const selectedCatalog = selectedItem?.profileId === undefined ? undefined : props.modelCatalogs?.[selectedItem.profileId];
   const catalogState = useModelCatalogState({ selectedItem, selectedCatalog });
   const selectedProfileId = selectedItem?.profileId;
+  const selectedModelCapabilities = useMemo(
+    () => modelCapabilitiesById(projectedConfig, selectedProfileId),
+    [projectedConfig, selectedProfileId]
+  );
   const selectedProviderIdentity = selectedItem === undefined ? "unknown" : resolveModelProviderIdentity(selectedItem);
   const selectedBuiltinLocked = selectedItem?.protectedBuiltin === true;
   const hasKey = props.modelForm.apiKey.length > 0;
@@ -503,7 +507,7 @@ export function ModelSettings(props: {
             displayName: model.displayName,
           })}
           modelMeta={(model) =>
-            modelCapabilitySummary(modelCapabilitiesForProfileModel(projectedConfig, selectedProfileId, model.id))}
+            modelCapabilitySummary(selectedModelCapabilities.get(model.id))}
           saving={props.saving}
           modelsFetchBusy={modelsFetchBusy}
           onModelQueryChange={catalogState.setModelQuery}
@@ -636,6 +640,32 @@ function addProviderKey(
 ): readonly string[] {
   const withoutAddedKey = currentKeys.filter((key) => key !== nextKey && key !== previousKey);
   return [...withoutAddedKey, nextKey];
+}
+
+function modelCapabilitiesById(
+  config: ConfigResponse | undefined,
+  profileId: string | undefined
+): ReadonlyMap<string, ModelCapabilities> {
+  const map = new Map<string, ModelCapabilities>();
+  if (profileId === undefined || profileId.trim().length === 0) {
+    return map;
+  }
+  for (const item of config?.modelCapabilityProfiles ?? []) {
+    if (item.profileId === profileId && item.model.trim().length > 0) {
+      map.set(item.model, item.capabilities);
+    }
+  }
+  const activeModel = config?.config?.model;
+  const activeCapabilities = config?.capabilities?.modelCapabilities;
+  if (
+    config?.config?.profileId === profileId &&
+    activeModel !== undefined &&
+    activeCapabilities !== undefined &&
+    !map.has(activeModel)
+  ) {
+    map.set(activeModel, activeCapabilities);
+  }
+  return map;
 }
 
 function sameProfileList(

@@ -321,6 +321,9 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
 .model-row-copy small {
   overflow: hidden;
   padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -398,6 +401,12 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
 .model-candidate-copy strong {
   font-size: 13px;
   font-weight: var(--weight-body);
+}
+
+.model-candidate-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 14px;
 }
 
 @media (max-width: 620px) {

@@ -17,6 +17,7 @@ export function ModelCatalogPanel(props: {
   readonly selectedModelRowId?: string;
   readonly modelNameDrafts: Readonly<Record<string, string>>;
   readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
+  readonly modelMeta: (model: ModelProviderModelItem) => string | undefined;
   readonly saving?: boolean;
   readonly modelsFetchBusy?: boolean;
   readonly onModelQueryChange: (value: string) => void;
@@ -73,6 +74,7 @@ function SavedModels(props: {
   readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
   readonly selectedModelRowId?: string;
   readonly saving?: boolean;
+  readonly modelMeta: (model: ModelProviderModelItem) => string | undefined;
   readonly onSelectCatalogModel: (modelId: string) => void;
   readonly onModelNameDraftChange: (modelId: string, value: string) => void;
   readonly onCommitModelDisplayName: (modelId: string, value: string) => Promise<void>;
@@ -86,62 +88,90 @@ function SavedModels(props: {
         props.catalogModels.length > 0 && (
           <div className="model-list">
             {props.visibleCatalogModels.map((model) => (
-              <div
-                className={`model-list-row saved ${model.id === props.selectedModelRowId ? "selected" : ""}`}
+              <SavedModelRow
                 key={model.id}
-                role="option"
-                aria-selected={model.id === props.selectedModelRowId}
-                tabIndex={0}
-                onClick={() => props.onSelectCatalogModel(model.id)}
-                onKeyDown={(event) => {
-                  if (event.target !== event.currentTarget) return;
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  props.onSelectCatalogModel(model.id);
-                }}
-              >
-                <ModelIcon svg={props.modelIconSvg(model)} />
-                <div className="model-row-copy">
-                  <input
-                    className="model-name-input"
-                    value={props.modelNameDrafts[model.id] ?? model.displayName ?? model.id}
-                    placeholder={model.id}
-                    aria-label={`模型名称 ${model.id}`}
-                    spellCheck={false}
-                    onChange={(event) => props.onModelNameDraftChange(model.id, event.target.value)}
-                    onFocus={() => props.onSelectCatalogModel(model.id)}
-                    onBlur={(event) => {
-                      void props.onCommitModelDisplayName(model.id, event.target.value);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        event.currentTarget.blur();
-                      }
-                    }}
-                  />
-                  <small>{model.id}</small>
-                </div>
-                <button
-                  type="button"
-                  className="model-row-action"
-                  aria-label={`移除 ${model.displayName}`}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void props.onRemoveCatalogModel(model.id);
-                  }}
-                  disabled={props.saving}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
+                model={model}
+                meta={props.modelMeta(model)}
+                selected={model.id === props.selectedModelRowId}
+                saving={props.saving}
+                nameDraft={props.modelNameDrafts[model.id] ?? model.displayName ?? model.id}
+                iconSvg={props.modelIconSvg(model)}
+                onSelectCatalogModel={props.onSelectCatalogModel}
+                onModelNameDraftChange={props.onModelNameDraftChange}
+                onCommitModelDisplayName={props.onCommitModelDisplayName}
+                onRemoveCatalogModel={props.onRemoveCatalogModel}
+              />
             ))}
           </div>
         )
       )}
+    </div>
+  );
+}
+
+function SavedModelRow(props: {
+  readonly model: ModelProviderModelItem;
+  readonly meta: string | undefined;
+  readonly selected: boolean;
+  readonly saving?: boolean;
+  readonly nameDraft: string;
+  readonly iconSvg: string | undefined;
+  readonly onSelectCatalogModel: (modelId: string) => void;
+  readonly onModelNameDraftChange: (modelId: string, value: string) => void;
+  readonly onCommitModelDisplayName: (modelId: string, value: string) => Promise<void>;
+  readonly onRemoveCatalogModel: (modelId: string) => Promise<void>;
+}): React.ReactElement {
+  return (
+    <div
+      className={`model-list-row saved ${props.selected ? "selected" : ""}`}
+      role="option"
+      aria-selected={props.selected}
+      tabIndex={0}
+      onClick={() => props.onSelectCatalogModel(props.model.id)}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        props.onSelectCatalogModel(props.model.id);
+      }}
+    >
+      <ModelIcon svg={props.iconSvg} />
+      <div className="model-row-copy">
+        <input
+          className="model-name-input"
+          value={props.nameDraft}
+          placeholder={props.model.id}
+          aria-label={`模型名称 ${props.model.id}`}
+          spellCheck={false}
+          onChange={(event) => props.onModelNameDraftChange(props.model.id, event.target.value)}
+          onFocus={() => props.onSelectCatalogModel(props.model.id)}
+          onBlur={(event) => {
+            void props.onCommitModelDisplayName(props.model.id, event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
+        />
+        <small>{modelRowMeta(props.model.id, props.meta)}</small>
+      </div>
+      <button
+        type="button"
+        className="model-row-action"
+        aria-label={`移除 ${props.model.displayName}`}
+        onMouseDown={(event) => {
+          event.preventDefault();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          void props.onRemoveCatalogModel(props.model.id);
+        }}
+        disabled={props.saving}
+      >
+        <Trash2 size={14} />
+      </button>
     </div>
   );
 }
@@ -151,6 +181,7 @@ function FetchedModels(props: {
   readonly visibleFetchedCandidates: readonly ModelProviderModelItem[];
   readonly hasModelQuery: boolean;
   readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
+  readonly modelMeta: (model: ModelProviderModelItem) => string | undefined;
   readonly saving?: boolean;
   readonly onAddCatalogModel: (model: ModelProviderModelItem) => Promise<void>;
 }): React.ReactElement {
@@ -166,25 +197,33 @@ function FetchedModels(props: {
         <div className="model-empty compact">无匹配模型</div>
       ) : (
         <div className="model-list">
-          {props.visibleFetchedCandidates.map((model) => (
-            <div className="model-list-row" key={model.id}>
-              <ModelIcon svg={props.modelIconSvg(model)} />
-              <div className="model-candidate-copy">
-                <strong>{model.displayName === model.id ? model.id : model.displayName}</strong>
-                {model.displayName !== model.id && <small>{model.id}</small>}
+          {props.visibleFetchedCandidates.map((model) => {
+            const meta = modelRowMeta(model.displayName !== model.id ? model.id : undefined, props.modelMeta(model));
+            return (
+              <div className="model-list-row" key={model.id}>
+                <ModelIcon svg={props.modelIconSvg(model)} />
+                <div className="model-candidate-copy">
+                  <strong>{model.displayName === model.id ? model.id : model.displayName}</strong>
+                  {meta.length > 0 && <small>{meta}</small>}
+                </div>
+                <button
+                  type="button"
+                  className="model-row-add"
+                  onClick={() => void props.onAddCatalogModel(model)}
+                  disabled={props.saving}
+                >
+                  添加
+                </button>
               </div>
-              <button
-                type="button"
-                className="model-row-add"
-                onClick={() => void props.onAddCatalogModel(model)}
-                disabled={props.saving}
-              >
-                添加
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
+}
+
+function modelRowMeta(modelId: string | undefined, meta: string | undefined): string {
+  const parts = [modelId, meta].filter((value): value is string => value !== undefined && value.length > 0);
+  return parts.join(" · ");
 }

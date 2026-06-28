@@ -94,6 +94,31 @@ test("Basic Agent runtime does not depend on underground domain contracts", asyn
   assert.deepEqual(violations, [], "Basic Agent runtime should keep deep/underground structures behind app-level attachments");
 });
 
+test("ordinary Agent paths do not import top-level domain barrels", async () => {
+  const files = await collectOrdinaryAgentSourceFiles();
+  const forbiddenTargets = new Set([
+    relativePath(path.join(process.cwd(), "src", "domain", "contracts.ts")),
+    relativePath(path.join(process.cwd(), "src", "domain", "index.ts")),
+  ]);
+  const violations: string[] = [];
+
+  for (const file of files) {
+    const source = await fs.readFile(file, "utf8");
+    for (const target of resolveRelativeImports(file, source)) {
+      const targetPath = relativePath(target);
+      if (forbiddenTargets.has(targetPath)) {
+        violations.push(`${relativePath(file)} -> ${targetPath}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    violations,
+    [],
+    "ordinary Agent paths should import narrow domain contracts instead of src/domain top-level barrels"
+  );
+});
+
 test("Basic Agent run executor consumes prepared start facts instead of route infrastructure", async () => {
   const runtimeRoot = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
   const [executorSource, contractsSource] = await Promise.all([
@@ -544,6 +569,32 @@ async function collectSourceFiles(directory: string): Promise<string[]> {
   }
 
   return files;
+}
+
+async function collectOrdinaryAgentSourceFiles(): Promise<string[]> {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const panelServerRoot = path.join(appRoot, "panel-server");
+  const files = [
+    ...(await collectSourceFiles(path.join(appRoot, "basic-agent-runtime"))),
+    ...(await collectDirectSourceFiles(appRoot, (name) => name.startsWith("desktop-agent-session"))),
+    ...(await collectDirectSourceFiles(panelServerRoot, (name) => name.startsWith("basic-agent"))),
+    ...(await collectDirectSourceFiles(panelServerRoot, (name) => name.startsWith("conversation"))),
+  ];
+
+  return [...new Set(files)].sort((left, right) => relativePath(left).localeCompare(relativePath(right)));
+}
+
+async function collectDirectSourceFiles(directory: string, matchesName: (name: string) => boolean): Promise<string[]> {
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+
+  return entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        matchesName(entry.name) &&
+        SOURCE_EXTENSIONS.includes(path.extname(entry.name) as (typeof SOURCE_EXTENSIONS)[number])
+    )
+    .map((entry) => path.join(directory, entry.name));
 }
 
 async function readSource(file: string): Promise<string> {

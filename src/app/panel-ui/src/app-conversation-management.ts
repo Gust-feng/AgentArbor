@@ -44,6 +44,7 @@ export function upsertConversationSummary(
     titleEditedAt: conversation.titleEditedAt,
     activeRunId: conversation.activeRunId,
     latestRunId: conversation.latestRunId,
+    workspaceFolder: conversation.workspaceFolder,
     queuedRunIds: conversation.queuedRunIds,
     queuedRunCount: conversation.queuedRunIds?.length,
     pinnedAt: conversation.pinnedAt,

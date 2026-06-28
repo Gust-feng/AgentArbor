@@ -92,6 +92,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
 
   assert.equal(app.includes("/api/conversations"), false);
   assert.equal(appBootstrap.includes("/api/conversations"), true);
+  assert.equal(appBootstrap.includes("/api/deep/runs?limit=50"), true);
   assert.equal(appConversationRefresh.includes("/api/conversations"), true);
   assert.equal(appConversationRefresh.includes("/api/basic-agent/runs/"), false);
   assert.equal(appConversationRefresh.includes("/events?cursor="), false);
@@ -157,7 +158,9 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appLiveRunUpdates.includes("FALLBACK_POLL_INTERVAL_MS"), true);
   assert.equal(runtime.includes("/stream?cursor="), true);
   assert.equal(runtime.includes("/view?cursor="), true);
-  assert.equal(runtime.includes("/events?cursor="), false);
+  assert.equal(runtime.includes("openDeepRunStream"), true);
+  assert.equal(runtime.includes("/api/deep/runs/"), true);
+  assert.equal(runtime.includes("/events?cursor="), true);
   assert.equal(runtime.includes("agent.note.delta"), true);
   assert.equal(runtime.includes("agent.note.completed"), true);
   assert.equal(runtime.includes("agent.delegation.planned"), false);
@@ -357,12 +360,16 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(modelProviderLogos.includes("默认配置"), false);
   assert.equal(modelProviderLogos.includes("value.includes(\"default\")"), false);
   assert.equal(chatEmpty.includes("任务输入"), true);
+  assert.equal(chatEmpty.includes("多 Agent"), true);
+  assert.equal(chatEmpty.includes("Deep 模式"), false);
   assert.equal(chatEmpty.includes("ChatInputBar"), true);
   assert.equal(chatEmpty.includes("composer-options-button"), true);
   assert.equal(chatEmpty.includes("composer-options-popover"), true);
   assert.equal(chatEmpty.includes("model-select-button"), false);
   assert.equal(motionResponsiveStyles.includes(".model-select-button"), false);
   assert.equal(sidebar.includes("新任务"), true);
+  assert.equal(sidebar.includes("多 Agent"), true);
+  assert.equal(sidebar.includes("Deep 模式"), false);
   assert.equal(sidebar.includes("工作方式"), false);
   assert.equal(sidebar.includes("技能"), false);
   assert.equal(sidebar.includes("Wrench"), false);
@@ -377,10 +384,12 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(sidebar.includes("等待你确认、拒绝或补充指导。"), false);
   assert.equal(sidebar.includes("等待前序任务完成后自动继续。"), false);
   assert.equal(sidebar.includes("sidebar-confirmation-card"), false);
-  assert.equal(sidebar.includes("最近会话"), true);
+  assert.equal(sidebar.includes("SidebarFolderHeading"), true);
+  assert.equal(sidebar.includes("groupSidebarItemsByWorkspaceFolder"), true);
   assert.equal(app.includes('from "./components/topbar"'), false);
   assert.equal(app.includes("sidebarCollapsed"), true);
   assert.equal(app.includes("onToggleSidebar"), true);
+  assert.equal(app.includes("app-workbench-mode"), false);
   assert.equal(motionResponsiveStyles.includes(".topbar-chip"), false);
   assert.equal(chatActive.includes("WorkContextPanel"), false);
   assert.equal(chatActive.includes("工作上下文"), false);
@@ -390,6 +399,9 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(transcriptConfirmation.includes("不执行"), true);
   assert.equal(chatActive.includes("assistant-workline"), false);
   assert.equal(chatTranscriptChain.includes("assistant-workline"), true);
+  assert.equal(chatTranscriptChain.includes("UserMessageAttachments"), true);
+  assert.equal(chatTranscriptChain.includes("user-message-image-attachment"), true);
+  assert.equal(chatTranscriptChain.includes("attachment.mediaPreview?.kind === \"image\""), true);
   assert.equal(chatActive.includes("deliverableAsLinearText"), false);
   assert.equal(chatTranscriptChain.includes("deliverableAsLinearText"), false);
   assert.equal(chatTranscriptChain.includes("assistantMessageOutput"), false);

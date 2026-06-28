@@ -4,6 +4,7 @@ import type {
   PanelBasicAgentRunViewReadModel,
 } from "./panel-basic-agent-run-view-contracts.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
+import type { WorkspaceFolderSummary } from "./workspace-folder-summary.js";
 
 export type PanelConversationTurnRole = "user" | "assistant";
 export type PanelConversationTurnStatus =
@@ -27,6 +28,26 @@ export type PanelConversationTurnModel = {
   readonly model?: string;
 };
 
+export type PanelConversationTurnAttachment = {
+  readonly attachmentId: string;
+  readonly kind: "workspace" | "file" | "project" | "web";
+  readonly title: string;
+  readonly summary?: string;
+  readonly readonlyPreviewMeta?: {
+    readonly available?: boolean;
+    readonly title?: string;
+    readonly byteLength?: number;
+    readonly mimeType?: string;
+    readonly truncated?: boolean;
+  };
+  readonly mediaPreview?: {
+    readonly kind: "image";
+    readonly url: string;
+    readonly mimeType: string;
+    readonly byteLength?: number;
+  };
+};
+
 export type PanelConversationTurn = {
   readonly turnId: string;
   readonly role: PanelConversationTurnRole;
@@ -38,6 +59,7 @@ export type PanelConversationTurn = {
   runId?: string;
   responseModel?: PanelConversationTurnModel;
   taskSoilInput?: DesktopTaskSoilInput;
+  attachments?: readonly PanelConversationTurnAttachment[];
 };
 
 export type PanelConversation = {
@@ -63,6 +85,7 @@ export type PanelConversationTurnReadModel = {
   readonly updatedAt: string;
   readonly runId?: string;
   readonly responseModel?: PanelConversationTurnModel;
+  readonly attachments?: readonly PanelConversationTurnAttachment[];
 };
 
 export type PanelConversationReadModel = {
@@ -78,6 +101,7 @@ export type PanelConversationReadModel = {
   readonly status: PanelConversationStatus;
   readonly activeRunId?: string;
   readonly latestRunId?: string;
+  readonly workspaceFolder?: WorkspaceFolderSummary;
   readonly requiresUserAction: boolean;
   readonly queuedRunIds: readonly string[];
   readonly queuedRunCount: number;

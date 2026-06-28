@@ -32,6 +32,7 @@ export type DeepTaskSubmissionOptions = {
   readonly setScreen: (screen: "chat-empty" | "chat-active") => void;
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
   readonly attachments: readonly ContextAttachment[];
+  readonly selectedWorkspaceDirectory?: string;
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly mountedRef: React.MutableRefObject<boolean>;
@@ -64,6 +65,9 @@ export async function submitDeepTask(
   options.setApp((previous) => ({
     ...previous,
     deepBusy: true,
+    deepPendingGoal: trimmed,
+    deepActiveRunId: undefined,
+    deepSelectedRunId: undefined,
     deep: undefined,
     error: undefined,
   }));
@@ -75,6 +79,7 @@ export async function submitDeepTask(
       {
         goal: trimmed,
         aiMode: options.aiMode,
+        workspaceDirectory: options.selectedWorkspaceDirectory,
         taskSoilInput: taskSoilInputFromAttachments(options.attachments),
       },
     );
@@ -83,7 +88,7 @@ export async function submitDeepTask(
     // 步骤 2：启动后台 deep run（202 不阻塞；run 完成后 record 写入 store 供 /view 轮询）。
     const startResponse = await postJson<StartDeepRunResponse>(
       `/api/deep/conversations/${encodeURIComponent(conversationId)}/runs`,
-      { aiMode: options.aiMode },
+      { aiMode: options.aiMode, workspaceDirectory: options.selectedWorkspaceDirectory },
     );
 
     if (!options.mountedRef.current) return undefined;
@@ -91,6 +96,9 @@ export async function submitDeepTask(
     options.setApp((previous) => ({
       ...previous,
       deepBusy: true,
+      deepPendingGoal: trimmed,
+      deepActiveRunId: startResponse.run.runId,
+      deepSelectedRunId: startResponse.run.runId,
       error: undefined,
     }));
     return {
@@ -102,6 +110,9 @@ export async function submitDeepTask(
       options.setApp((previous) => ({
         ...previous,
         deepBusy: false,
+        deepPendingGoal: undefined,
+        deepActiveRunId: undefined,
+        deepSelectedRunId: undefined,
         error: deepSubmissionErrorMessage(error),
       }));
     }
@@ -113,5 +124,5 @@ function deepSubmissionErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.length > 0) {
     return error.message;
   }
-  return "deep 任务提交失败。";
+  return "多 Agent 任务提交失败。";
 }

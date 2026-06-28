@@ -356,9 +356,75 @@ test("context attachment preview feeds the Basic Agent work session read model w
   }
 });
 
+test("conversation runs can use a transient workspace without updating the default workspace", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-task-workspace-"));
+  const defaultWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-default-workspace-"));
+  const runWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-run-workspace-"));
+  const followUpWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-follow-up-workspace-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: defaultWorkspace },
+    });
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: {
+        goal: "使用本次工作区启动普通任务",
+        aiMode: "fake",
+        workspaceDirectory: runWorkspace,
+      },
+    });
+    const runId = start.body.run.runId;
+    await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversationId = start.body.conversation.conversationId;
+    const followUp = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: "POST",
+      body: {
+        goal: "继续使用另一个本次工作区",
+        aiMode: "fake",
+        workspaceDirectory: followUpWorkspace,
+      },
+    });
+    const followUpRunId = followUp.body.run.runId;
+    await waitForRun(server.url, followUpRunId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const persistedRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
+    const persistedFollowUpRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(followUpRunId)}`);
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const conversations = await requestJson(server.url, "/api/conversations");
+    const config = await requestJson(server.url, "/api/config");
+
+    assert.equal(start.status, 202);
+    assert.equal(followUp.status, 202);
+    assert.equal(persistedRun.status, 200);
+    assert.equal(persistedFollowUpRun.status, 200);
+    assert.equal(persistedRun.body.snapshot.run.workspacePath, path.resolve(runWorkspace));
+    assert.equal(persistedFollowUpRun.body.snapshot.run.workspacePath, path.resolve(followUpWorkspace));
+    assert.equal(
+      persistedRun.body.snapshot.run.capabilitySnapshot.workspace.workspaceDirectory,
+      path.resolve(runWorkspace)
+    );
+    assert.equal(conversation.body.conversation.workspaceFolder.label, path.basename(runWorkspace));
+    assert.equal(conversation.body.conversation.workspaceFolder.path, path.resolve(runWorkspace));
+    const listed = conversations.body.conversations.find((item: { conversationId: string }) =>
+      item.conversationId === conversationId
+    );
+    assert.equal(listed.workspaceFolder.label, path.basename(runWorkspace));
+    assert.equal(listed.workspaceFolder.path, path.resolve(runWorkspace));
+    assert.equal(config.body.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(defaultWorkspace);
+    await removeTemporaryTree(runWorkspace);
+    await removeTemporaryTree(followUpWorkspace);
+  }
+});
+
 test("context attachment upload stores multipart files as refs for conversation context", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-upload-"));
   const uploadSecret = "sk-uploaded-file-secret";
+  const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const upload = await requestMultipartJson(server.url, "/api/context/attachments/upload", [
@@ -372,7 +438,7 @@ test("context attachment upload stores multipart files as refs for conversation 
         fieldName: "files",
         filename: "screen.png",
         contentType: "image/png",
-        body: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        body: imageBytes,
       },
     ]);
     const attachments = upload.body.attachments as readonly {
@@ -388,6 +454,12 @@ test("context attachment upload stores multipart files as refs for conversation 
         readonly byteLength?: number;
         readonly mimeType?: string;
         readonly truncated?: boolean;
+      };
+      readonly mediaPreview?: {
+        readonly kind: "image";
+        readonly url: string;
+        readonly mimeType: string;
+        readonly byteLength?: number;
       };
       readonly status: string;
     }[];
@@ -407,6 +479,18 @@ test("context attachment upload stores multipart files as refs for conversation 
     assert.equal(imageAttachment.title, "screen.png");
     assert.equal(imageAttachment.readonlyPreviewMeta.mimeType, "image/png");
     assert.equal(imageAttachment.readonlyPreview?.text, "[binary file preview omitted]");
+    assert.equal(imageAttachment.mediaPreview?.kind, "image");
+    assert.equal(imageAttachment.mediaPreview?.mimeType, "image/png");
+    assert.equal(imageAttachment.mediaPreview?.byteLength, imageBytes.length);
+    assert.equal(
+      imageAttachment.mediaPreview?.url,
+      `/api/context/attachments/media/${encodeURIComponent(imageAttachment.attachmentId)}`
+    );
+
+    const media = await requestBytes(server.url, imageAttachment.mediaPreview?.url ?? "");
+    assert.equal(media.status, 200);
+    assert.equal(media.headers["content-type"], "image/png");
+    assert.deepEqual(media.body, imageBytes);
 
     const savedTextPath = textAttachment.ref.slice("local-file:".length);
     assert.equal(savedTextPath.startsWith(path.join(directory, "attachments")), true);
@@ -438,6 +522,58 @@ test("context attachment upload stores multipart files as refs for conversation 
     assert.equal(start.status, 202);
     assert.equal(start.body.conversation.turns[0].content.includes(uploadSecret), false);
     assert.equal(start.body.conversation.turns[0].content, "请基于刚上传的附件回答。");
+    assert.equal(start.body.conversation.turns[0].attachments.length, 2);
+    assert.equal(start.body.conversation.turns[0].attachments[0].title, "notes.md");
+    assert.equal(start.body.conversation.turns[0].attachments[0].mediaPreview, undefined);
+    assert.equal(start.body.conversation.turns[0].attachments[1].attachmentId, imageAttachment.attachmentId);
+    assert.equal(start.body.conversation.turns[0].attachments[1].mediaPreview.kind, "image");
+    assert.equal(start.body.conversation.turns[0].attachments[1].mediaPreview.url, imageAttachment.mediaPreview?.url);
+    assert.equal(start.body.conversation.turns[0].attachments[1].readonlyPreviewMeta.mimeType, "image/png");
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("context attachment picker returns local image media previews", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-select-image-"));
+  const imagePath = path.join(directory, "local-screen.png");
+  const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await fs.writeFile(imagePath, imageBytes);
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    contextAttachmentPicker: async () => ({ kind: "file", path: imagePath }),
+  });
+  try {
+    const selected = await requestJson(server.url, "/api/context/attachments/select-local", {
+      method: "POST",
+      body: {},
+    });
+    const attachment = selected.body.attachment as {
+      readonly attachmentId: string;
+      readonly ref: string;
+      readonly readonlyPreviewMeta: { readonly mimeType?: string; readonly byteLength?: number };
+      readonly mediaPreview?: {
+        readonly kind: "image";
+        readonly url: string;
+        readonly mimeType: string;
+        readonly byteLength?: number;
+      };
+    };
+
+    assert.equal(selected.status, 200);
+    assert.equal(selected.body.status, "completed");
+    assert.equal(attachment.ref, `local-file:${imagePath}`);
+    assert.equal(attachment.readonlyPreviewMeta.mimeType, "image/png");
+    assert.equal(attachment.readonlyPreviewMeta.byteLength, imageBytes.length);
+    assert.equal(attachment.mediaPreview?.kind, "image");
+    assert.equal(attachment.mediaPreview?.url, `/api/context/attachments/media/${encodeURIComponent(attachment.attachmentId)}`);
+
+    const media = await requestBytes(server.url, attachment.mediaPreview?.url ?? "");
+    assert.equal(media.status, 200);
+    assert.equal(media.headers["content-type"], "image/png");
+    assert.deepEqual(media.body, imageBytes);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -1660,6 +1796,33 @@ type MultipartTestFile = {
   readonly contentType?: string;
   readonly body: Buffer;
 };
+
+type RequestBytesResult = {
+  readonly status: number;
+  readonly headers: Record<string, string | string[] | undefined>;
+  readonly body: Buffer;
+};
+
+function requestBytes(baseUrl: string, pathname: string): Promise<RequestBytesResult> {
+  const url = new URL(pathname, baseUrl);
+  return new Promise((resolve, reject) => {
+    const req = request(url, { method: "GET" }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "binary"));
+      });
+      response.on("end", () => {
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          body: Buffer.concat(chunks),
+        });
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 function requestMultipartJson(
   baseUrl: string,

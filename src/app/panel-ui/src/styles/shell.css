@@ -83,6 +83,8 @@ html[data-desktop-shell="true"] .app-workbench-header-inner {
 }
 
 html[data-desktop-shell="true"] .app-workbench-sidebar-toggle,
+html[data-desktop-shell="true"] .app-mode-switch,
+html[data-desktop-shell="true"] .app-mode-switch-button,
 html[data-desktop-shell="true"] .app-window-controls,
 html[data-desktop-shell="true"] .app-window-control {
   -webkit-app-region: no-drag;
@@ -143,95 +145,48 @@ html[data-desktop-shell="true"] .app-window-control {
   transform: scale(0.95);
 }
 
-.app-workbench-brand {
+.app-mode-switch {
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 10px;
-  color: var(--fg);
+  gap: 2px;
+  padding: 3px;
+  border: var(--border-width-thin) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
 }
 
-.app-workbench-brand strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.app-mode-switch-button {
+  min-width: 92px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
   font-size: 14px;
   font-weight: var(--weight-label);
   line-height: 1;
-}
-
-.app-workbench-brand-mark {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-
-.app-workbench-brand-mark svg {
-  display: block;
-  width: 18px;
-  height: 18px;
-}
-
-.app-workbench-brand-mark img {
-  display: block;
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-}
-
-/* 模式入口 segmented control：普通 Agent / Deep 并列，默认普通，Deep 显式选择（FR-001） */
-.app-workbench-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in oklch, var(--bg) 92%, transparent);
-}
-
-.app-workbench-mode-option {
-  display: inline-flex;
-  min-width: 48px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 10px;
-  border: 0;
-  border-radius: calc(var(--radius-md) - 2px);
-  background: transparent;
-  color: color-mix(in oklch, var(--muted) 80%, var(--fg));
-  font-size: 12px;
-  font-weight: var(--weight-label);
-  line-height: 1;
-  cursor: pointer;
   transition:
     background-color var(--motion-interaction-duration) var(--motion-ease-standard),
     color var(--motion-interaction-duration) var(--motion-ease-standard),
-    transform var(--motion-fast-duration) var(--motion-ease-snap);
+    box-shadow var(--motion-interaction-duration) var(--motion-ease-standard);
 }
 
-.app-workbench-mode-option:hover:not(:disabled) {
-  background: var(--nav-hover-bg);
+.app-mode-switch-button:hover:not(:disabled) {
   color: var(--fg);
+  background: var(--nav-hover-bg);
 }
 
-.app-workbench-mode-option[aria-pressed="true"] {
-  background: color-mix(in oklch, var(--accent) 16%, transparent);
-  color: color-mix(in oklch, var(--fg) 78%, var(--accent));
+.app-mode-switch-button.active {
+  color: var(--fg);
+  background: var(--nav-active-bg);
+  box-shadow: var(--shadow-soft);
 }
 
-.app-workbench-mode-option:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-.app-workbench-mode-option:disabled {
+.app-mode-switch-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.58;
 }
 
 .app-sidebar {
@@ -263,6 +218,8 @@ html[data-desktop-shell="true"] .app-window-control {
 }
 
 .sidebar-new-wrap {
+  display: grid;
+  gap: 8px;
   padding: 18px var(--space-5) 16px;
   border-bottom: var(--border-width-thin) solid var(--border);
   transition:
@@ -567,6 +524,28 @@ html[data-desktop-shell="true"] .app-window-control {
   font-weight: var(--weight-label);
 }
 
+.sidebar-folder-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in oklch, var(--fg) 78%, var(--bg));
+  font-size: 13px;
+  font-weight: var(--weight-body);
+}
+
+.sidebar-folder-heading svg {
+  flex: 0 0 auto;
+  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+}
+
+.sidebar-folder-heading span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-recent-list {
   display: grid;
   gap: 4px;
@@ -610,6 +589,53 @@ html[data-desktop-shell="true"] .app-window-control {
   padding: 8px 6px 8px 10px;
   text-align: left;
   color: inherit;
+}
+
+.sidebar-deep-run-row {
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.sidebar-deep-run-status {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+}
+
+.sidebar-deep-run-status-running,
+.sidebar-deep-run-status-pending {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.sidebar-deep-run-status-completed {
+  background: var(--status-success);
+}
+
+.sidebar-deep-run-status-failed {
+  background: var(--status-danger);
+}
+
+.sidebar-deep-run-status-interrupted,
+.sidebar-deep-run-status-corrected,
+.sidebar-deep-run-status-stopped {
+  background: var(--status-warning);
+}
+
+.sidebar-deep-run-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.sidebar-deep-run-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-conversation-badge {

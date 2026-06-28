@@ -15,7 +15,7 @@
  *
  * DeepRuntime 是新建的正式边界，不是任何旧文件（cognitive-work-session-* /
  * underground/orchestrator* / underground-direction-session*）改名为正式主线。
- * cognitive-work-session-* 的六动作 action loop 仅作为 manager 决策动作集的
+ * cognitive-work-session-* 的 action loop 仅作为 manager 决策动作集的
  * 设计输入（design.md §4.1），实现由新建 DeepRunExecutor 承担（T2-3）。
  *
  * 命名红线（ADR-0025 决策三）：一期产物统一为 {@link SynthesizedConclusion}
@@ -25,10 +25,14 @@
  * 现有枚举（{@link DEEP_RUN_MODE}），不在此引入新的 runMode 语义。
  */
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
+import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type {
   AgentRunTree,
   AgentSpec,
   ChildAgentRun,
+  ChildAgentRunParentInstructionStatus,
+  ChildAgentRunParentReview,
+  ChildAgentRunPendingApproval,
   ParentSynthesisResult,
 } from "../../domain/underground/agent-fabric.js";
 import {
@@ -45,6 +49,7 @@ import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 // ---------------------------------------------------------------------------
 
 export type { AgentRunTree, AgentSpec, ChildAgentRun, ParentSynthesisResult };
+export type { ChildAgentRunParentReview };
 export { AGENT_FABRIC_MVP_MAX_DEPTH, assertNoDirectChildOutputHandoff };
 
 // ---------------------------------------------------------------------------
@@ -73,6 +78,30 @@ export type DeepConversationIsolationMark = {
   readonly runMode: typeof DEEP_RUN_MODE;
 };
 
+export type DeepIntakeDecisionAction = "ask_user" | "direct_answer" | "start_collaboration";
+
+export type DeepIntakeStatus = "needs_input" | "answered" | "running";
+
+export type DeepIntakeTurn = {
+  readonly turnId: string;
+  readonly userMessage: string;
+  readonly assistantMessage: string;
+  readonly action: DeepIntakeDecisionAction;
+  readonly normalizedObjective?: string;
+  readonly plan?: string;
+  readonly uncertainty?: string;
+  readonly confidence?: number;
+  readonly createdAt: string;
+};
+
+export type DeepIntakeContext = {
+  readonly normalizedObjective?: string;
+  readonly plan?: string;
+  readonly assistantMessage: string;
+  readonly uncertainty?: string;
+  readonly confidence?: number;
+};
+
 /**
  * DeepConversation —— 一次 deep 会话的生命周期与隔离边界记录。
  *
@@ -84,6 +113,11 @@ export type DeepConversation = {
   readonly conversationId: string;
   readonly title: string;
   readonly goal: string;
+  /** Intake 对话轮次：协作 run 启动前的理解、澄清、直接回答或计划。 */
+  readonly intakeTurns?: readonly DeepIntakeTurn[];
+  /** 当前已明确的协作目标；只有 intake 判定可启动协作时才写入。 */
+  readonly currentObjective?: string;
+  readonly birthWorkspaceDirectory?: string;
   readonly isolation: DeepConversationIsolationMark;
   /**
    * 用户显式选择的 workspace 上下文 + 权限边界输入快照。沿用 Desktop Shell 系统
@@ -122,9 +156,17 @@ export type DeepRunStatus =
 export type DeepRun = {
   readonly runId: string;
   readonly conversationId: string;
+  /** 上一轮多 Agent run；首轮为空。follow-up 会创建新 run，而不是复活旧 run。 */
+  readonly parentRunId?: string;
+  /** 同一多 Agent 任务链的根 run。首轮等于自身 runId。 */
+  readonly rootRunId?: string;
+  /** 同一任务链内的轮次序号，首轮为 1。 */
+  readonly turnOrdinal?: number;
   readonly goal: string;
   readonly status: DeepRunStatus;
   readonly isolation: DeepConversationIsolationMark;
+  /** run 启动时使用的模型运行模式；用于跨进程恢复同一 deep run 的子 Agent loop。 */
+  readonly aiMode?: ModelRuntimeMode;
   /** run 启动时冻结的能力快照（FR-003，保证运行中能力边界稳定）。 */
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly startedAt: string;
@@ -132,23 +174,51 @@ export type DeepRun = {
   readonly completedAt?: string;
 };
 
+export type DeepFollowUpChildSummary = {
+  readonly childRunId: string;
+  readonly displayName: string;
+  readonly role: string;
+  readonly status: DeepChildStatus | "planned" | "resumed";
+  readonly summary: string;
+  readonly findings: readonly string[];
+  readonly evidenceRefs: readonly string[];
+  readonly confidence?: number;
+  readonly uncertainty?: string;
+};
+
+/**
+ * 续聊上下文：只保存上一轮安全结构化产物，供新一轮 manager 决策使用。
+ * 不包含 raw prompt / raw response / raw tool output。
+ */
+export type DeepFollowUpContext = {
+  readonly message: string;
+  readonly previousRunId: string;
+  readonly previousGoal: string;
+  readonly previousStatus: DeepRunStatus;
+  readonly previousConclusion?: string;
+  readonly previousOneLineRationale?: string;
+  readonly childSummaries: readonly DeepFollowUpChildSummary[];
+  readonly synthesisSummary?: string;
+};
+
 // ---------------------------------------------------------------------------
-// manager 决策动作集（六动作，FR-003）
+// manager 决策动作集（FR-003）
 // ---------------------------------------------------------------------------
 //
 // 决策动作集吸收 cognitive-work-session-* 的 action loop 语义作为设计输入
 // （design.md §4.1），但与本文件 import 复用的 domain DelegationDecision（八动作，
-// 用于 AgentRunTree 持久化）语义不同——deep 一期 manager 决策固定为六动作，去掉
+// 用于 AgentRunTree 持久化）语义不同——deep 一期 manager 决策去掉
 // ③ 的 use_tools / produce_artifact（工具调用并入 child 探索；产物统一为
 // SynthesizedConclusion，不走 artifact 语义）。因此命名为 DeepDelegationDecision，
 // 与 domain 的 DelegationDecision 区分，避免名称冲突与语义混淆。
 
 /**
- * manager 决策六动作枚举（FR-003 / design.md §5.3）。
+ * manager 决策动作枚举（FR-003 / design.md §5.3）。
  *
  * - `direct_answer`：直接产出结论（简单任务，无需多角度探索）
  * - `spawn_children`：派生多个 child 探索（需多角度/多证据）
  * - `wait_children`：等待已派生 child（child 进行中）
+ * - `continue_child`：父层审查已有 child 后，给同一个 child run 追加指令继续标准 Agent loop
  * - `synthesize`：父层综合（child 材料已足够）
  * - `ask_user`：询问用户澄清（证据/方向不足；AI-first 边界，不伪装完成）
  * - `stop`：停止（预算耗尽或用户要求）
@@ -159,6 +229,7 @@ export const DEEP_DELEGATION_ACTIONS = [
   "direct_answer",
   "spawn_children",
   "wait_children",
+  "continue_child",
   "synthesize",
   "ask_user",
   "stop",
@@ -171,7 +242,8 @@ export type DeepDelegationAction = (typeof DEEP_DELEGATION_ACTIONS)[number];
  *
  * 与 domain AgentSpec 区分：DeepChildSpec 是 manager 决策语义层的轻量派生请求，
  * 不携带 protocol/permissions/budget 等完整 AgentSpec 字段；child 实际派生时
- * （T2-4）由 Child Delegation 补全为完整 AgentSpec 后写入 AgentRunTree。
+ * （T2-4）由 Child Delegation 补全为完整 AgentSpec，并把父层生成的 objective
+ * 冻结到 AgentSpec.instructions 后写入 AgentRunTree，供恢复、失败降级和复盘使用。
  */
 export type DeepChildSpec = {
   readonly specId: string;
@@ -180,10 +252,28 @@ export type DeepChildSpec = {
   readonly objective: string;
   readonly allowedTools: readonly string[];
   readonly inputRefs: readonly string[];
+  /** Optional parent-assigned child Agent model loop budget. Omitted means no fixed round limit. */
+  readonly maxModelRounds?: number;
+  /** Optional parent-assigned child Agent tool loop budget. Omitted means no fixed round limit. */
+  readonly maxToolRounds?: number;
 };
 
 /**
- * DeepDelegationDecision —— manager 逐 step 决策结果（六动作）。
+ * 父层对已有 child run 的操作请求。
+ *
+ * 当前只支持 continue：父 Agent 审查 child 的材料/阻塞/失败状态后，给同一个
+ * childRunId 追加指令，让它复用标准 AgentTurnRuntime autonomous loop 继续工作。
+ * 不创建新 child、不直连用户、不引入 child 互聊。
+ */
+export type DeepChildOperation = {
+  readonly childRunId: string;
+  /** Parent Agent's safe review of the child material/status that led to this operation. */
+  readonly review?: ChildAgentRunParentReview;
+  readonly instruction: string;
+};
+
+/**
+ * DeepDelegationDecision —— manager 逐 step 决策结果。
  *
  * 决策由模型语义推理产出（source: "ai"）；确定性逻辑只守边界，不替代语义判断
  * （ADR-0025 决策一 AI-first 边界）。`source: "deterministic_fallback"` 仅在
@@ -195,6 +285,8 @@ export type DeepDelegationDecision = {
   readonly action: DeepDelegationAction;
   /** spawn_children 动作时由模型给出的 child 派生请求；其他动作为空。 */
   readonly childSpecs: readonly DeepChildSpec[];
+  /** continue_child 动作时由模型给出的已有 child 操作请求；其他动作为空。 */
+  readonly childOperations: readonly DeepChildOperation[];
   readonly decisionSummary: string;
   readonly rationale: string;
   readonly uncertainty: string;
@@ -275,6 +367,84 @@ export type DeepChildSummary = {
   readonly uncertainty?: string;
 };
 
+// ---------------------------------------------------------------------------
+// DeepLiveProjection —— 运行中实时流程投影（Panel 默认可视化）
+// ---------------------------------------------------------------------------
+
+/**
+ * 多 Agent 显式入口的实时阶段投影。
+ *
+ * 该字段只服务 Panel 默认流程图，不替代 DeepExplorationReport 和 AgentRunTree 的
+ * 复盘契约；字段均为安全结构化摘要，不包含 raw prompt / raw response / 工具原始输出。
+ */
+export type DeepLivePhase =
+  | "starting"
+  | "deciding"
+  | "exploring"
+  | "synthesizing"
+  | "completed"
+  | "needs_input"
+  | "stopped"
+  | "failed";
+
+/** 实时流程图中的真实 child 节点投影。 */
+export type DeepLiveChildParentOperationProjection = {
+  readonly status: ChildAgentRunParentInstructionStatus;
+  readonly messageRef?: string;
+  readonly queuedCount?: number;
+  readonly updatedAt: string;
+};
+
+export type DeepLiveChildProjection = {
+  readonly childRunId: string;
+  readonly displayName: string;
+  readonly objective: string;
+  readonly role: string;
+  readonly status: ChildAgentRun["status"];
+  readonly updatedAt: string;
+  readonly summary?: string;
+  readonly confidence?: number;
+  readonly uncertainty?: string;
+  readonly pendingApproval?: ChildAgentRunPendingApproval;
+  readonly parentOperation?: DeepLiveChildParentOperationProjection;
+};
+
+/** manager 最新方向判断的轻量投影。 */
+export type DeepLiveDecisionProjection = {
+  readonly decisionId: string;
+  readonly action: DeepDelegationAction;
+  readonly summary: string;
+  readonly confidence: number;
+  readonly updatedAt: string;
+};
+
+/** 父层综合的轻量投影。 */
+export type DeepLiveSynthesisProjection = {
+  readonly synthesisId?: string;
+  readonly status: "pending" | "running" | "completed";
+  readonly summary?: string;
+  readonly confidence?: number;
+  readonly updatedAt: string;
+};
+
+/** 最终结论的轻量投影。 */
+export type DeepLiveConclusionProjection = {
+  readonly conclusionId: string;
+  readonly oneLineRationale: string;
+  readonly confidence: number;
+  readonly updatedAt: string;
+};
+
+export type DeepLiveProjection = {
+  readonly phase: DeepLivePhase;
+  readonly activeNodeId: string;
+  readonly children: readonly DeepLiveChildProjection[];
+  readonly decision?: DeepLiveDecisionProjection;
+  readonly synthesis?: DeepLiveSynthesisProjection;
+  readonly conclusion?: DeepLiveConclusionProjection;
+  readonly updatedAt: string;
+};
+
 /**
  * DeepExplorationReport —— 一次 deep run 产出的运行级报告。
  *
@@ -295,3 +465,156 @@ export type DeepExplorationReport = {
   readonly conclusion: SynthesizedConclusion;
   readonly createdAt: string;
 };
+
+// ---------------------------------------------------------------------------
+// Task Board 契约（T1-1，闭环1 并发任务闭环类型前置）
+// ---------------------------------------------------------------------------
+//
+// 以下类型为 DeepTaskBoard（运行中权威状态）与 DeepChildScheduler（并发调度）提供
+// 输入输出契约基础（design.md §3.1/§3.2/§3.5）。命名红线（ADR-0025 决策三）依旧：
+// 不出现 Plan / directionHandoffPackage / artifact / Fruits 产物字段；DeepChildTask
+// 只记安全结构化字段，不保存 raw prompt / raw response / 工具原始输出（FR-TB-01）。
+//
+// 字段复用来源（不重定义，FR-010）：DeepChildTask.spec 复用 {@link DeepChildSpec}；
+// DeepChildTask.summary 复用 {@link DeepChildSummary}（其 status 复用
+// ChildAgentRun["status"]）。DeepChildStatus 是任务板专用的七态任务状态，与
+// DeepChildSummary.status（child run 级状态）语义层次不同，T2-1 投影派生时做枚举映射。
+
+/**
+ * DeepChildStatus —— 任务板内单个 child 任务的状态（七态，FR-TB-01）。
+ *
+ * 与 {@link DeepChildSummary}["status"]（复用 ChildAgentRun["status"]，child run 级
+ * 状态）区分：DeepChildStatus 是任务板级的调度状态，多了 `pending`（已入板未启动）、
+ * `cancelled`（被取消，不再启动 / stop 后保留）、`blocked`（需要确认/预算/上下文等外部条件）、
+ * `interrupted`（child 自身中断，父层仍可审查后继续同一 childRunId），覆盖 scheduler 调度生命周期。
+ *
+ * 合法迁移（由 DeepTaskBoard 守卫）：pending → running → completed/failed/interrupted；
+ * pending → cancelled（stop 取消未启动任务）；running → cancelled（保留，本轮 scheduler
+ * 不对 running 直接 cancel，running 自然完成进保留材料）；终态（completed/failed/
+ * cancelled）不可逆。running → blocked 表示 child Agent 自主 loop 因确认等待、显式
+ * 轮次预算、上下文溢出等标准 Agent 结果暂停，父层可把 blocked 材料纳入审查；
+ * running → interrupted 表示 child 自身中断或异常停止，父层仍可继续同一 child。
+ */
+export const DEEP_CHILD_STATUSES = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "interrupted",
+  "cancelled",
+  "blocked",
+] as const;
+
+export type DeepChildStatus = (typeof DEEP_CHILD_STATUSES)[number];
+
+/**
+ * DeepChildTaskSeed —— scheduler 派生 child 后向 board 入板的最小种子。
+ *
+ * board 据此生成任务板内稳定 taskId 并记录 pending 任务；childRunId 与
+ * {@link ChildAgentRun}.childRunId 对齐，作为 AgentRunTree/材料的关联键。
+ */
+export type DeepChildTaskSeed = {
+  readonly childRunId: string;
+  readonly spec: DeepChildSpec;
+};
+
+/**
+ * DeepChildTask —— 任务板内单个 child 任务的安全结构化记录（FR-TB-01）。
+ *
+ * 只记安全字段，**不保存** raw prompt / raw response / 工具原始输出；child 完整材料仍由
+ * {@link DeepChildSummary}、{@link ChildAgentRun}、event refs、DeepExplorationReport 承载。
+ * 字段含义见 design.md §3.1。
+ */
+export type DeepChildTask = {
+  /** 任务板内稳定 id（board 生成，与 childRunId 解耦）。 */
+  readonly taskId: string;
+  /** 对应 ChildAgentRun.childRunId（与 AgentRunTree/材料关联键）。 */
+  readonly childRunId: string;
+  /** manager 派生请求（复用 DeepChildSpec）。 */
+  readonly spec: DeepChildSpec;
+  /** 任务板级调度状态（七态）。 */
+  readonly status: DeepChildStatus;
+  readonly startedAt?: string;
+  readonly updatedAt: string;
+  readonly completedAt?: string;
+  /** 完成时回填的安全摘要（复用 DeepChildSummary）。 */
+  readonly summary?: DeepChildSummary;
+  /** 失败/阻塞原因（failed/cancelled/blocked 时回填）。 */
+  readonly failure?: string;
+  /** child 标准 Agent loop 等待工具确认时的安全投影；不含 raw prompt / response / tool output。 */
+  readonly pendingApproval?: ChildAgentRunPendingApproval;
+};
+
+/**
+ * DeepTaskBoardPhase —— 任务板当前相位（manager 决策循环的运行中投影）。
+ *
+ * 由 executor 在 step 边界 `setPhase` 置位（design.md §3.1）。与 {@link DeepLivePhase}
+ * （Panel 面向用户的展示相位）区分：board.phase 含 `planning`/`waiting` 等调度相位，
+ * T2-1 投影派生时映射为 DeepLivePhase（保持对外展示相位字段稳定）。
+ */
+export const DEEP_TASK_BOARD_PHASES = [
+  "planning",
+  "deciding",
+  "exploring",
+  "waiting",
+  "synthesizing",
+  "completed",
+  "needs_input",
+  "stopped",
+  "failed",
+] as const;
+
+export type DeepTaskBoardPhase = (typeof DEEP_TASK_BOARD_PHASES)[number];
+
+/**
+ * DeepTaskBoardSnapshot —— 任务板的不可变快照（FR-TB-02 运行中事实源对外投影）。
+ *
+ * `tasks` 为深拷贝，外部修改不影响 board 内部状态。liveProjection 与 eventSequence 的
+ * child 状态在 T2-1 后均从此快照派生（单一事实源链，design.md §6 风险3）。
+ */
+export type DeepTaskBoardSnapshot = {
+  readonly runId: string;
+  readonly phase: DeepTaskBoardPhase;
+  readonly tasks: readonly DeepChildTask[];
+  readonly updatedAt: string;
+};
+
+/**
+ * DeepResearchBrief —— 低心智计划投影契约（FR-BRIEF-01）。
+ *
+ * 承载简短计划投影，不直接把 manager 的长 rationale 暴露给用户。由 executor 在首次
+ * spawn_children 决策后从 childSpecs 摘要装配（FR-BRIEF-02/03），写入 DeepRunRecord
+ * 供 Panel 消费（T2-1 写入侧 / T3-1 前端消费侧）。
+ *
+ * 命名红线：不叫 Plan / PlanPackage（OOS-07），是 deep 一期的简短研究简报投影。
+ */
+export type DeepResearchBrief = {
+  readonly briefId: string;
+  readonly goal: string;
+  readonly scopeSummary: string;
+  readonly sourcePolicySummary: string;
+  readonly plannedAngles: readonly string[];
+  /** 本轮固定 false（不强制"用户批准计划"流程，FR-BRIEF-02）。 */
+  readonly needsUserApproval: boolean;
+  readonly updatedAt: string;
+};
+
+// ---------------------------------------------------------------------------
+// DeepChildStatus → 投影展示状态映射类型位（FR-PROJ 派生口径预留）
+// ---------------------------------------------------------------------------
+//
+// 引入 DeepChildStatus（七态任务状态）后，DeepLiveChildProjection.status 仍复用
+// ChildAgentRun["status"]（对外投影字段稳定，design.md §3.4.3）。T2-1 的
+// liveProjectionFromBoard 提供实际映射函数把任务状态映射为展示状态；此处只预留类型位，
+// 避免后续派生口径调整时再回到 contracts.ts 补类型（映射实现归 T2-1 runtime 派生）。
+
+/**
+ * DeepChildStatus → 展示状态映射的类型位（映射实现归 T2-1 runtime 派生）。
+ *
+ * 目标类型沿用 {@link DeepChildSummary}["status"]（= ChildAgentRun["status"]），
+ * 保持对外投影字段稳定；pending/cancelled 等任务板专用态由 T2-1 映射为最接近的
+ * 展示状态，blocked/interrupted 则作为真实 child run 暂停/中断态保留。
+ */
+export type DeepChildStatusProjectionMap = Readonly<
+  Record<DeepChildStatus, DeepChildSummary["status"]>
+>;

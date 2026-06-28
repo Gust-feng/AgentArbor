@@ -2,6 +2,7 @@ import React from "react";
 import {
   Check,
   EllipsisVertical,
+  Folder,
   Plus,
   Settings,
   ShieldCheck,
@@ -12,16 +13,21 @@ import {
 } from "../conversation-state";
 import { compact } from "../text";
 import type { ConversationSummary } from "../contracts/conversation";
+import type { DeepRunStatus, DeepRunSummary } from "../contracts/deep";
 
 export type Screen = "chat-empty" | "chat-active";
 
 export function Sidebar(props: {
   readonly currentScreen: Screen;
   readonly conversations: readonly ConversationSummary[];
+  readonly deepRuns: readonly DeepRunSummary[];
   readonly activeConversationId?: string;
+  readonly activeDeepRunId?: string;
   readonly pendingCount: number;
   readonly collapsed: boolean;
+  readonly agentClusterActive: boolean;
   readonly onNew: () => void;
+  readonly onOpenDeepRun: (runId: string) => void;
   readonly onOpen: (conversationId: string) => void;
   readonly onRename: (conversationId: string, title: string) => void;
   readonly onTogglePinned: (conversationId: string, pinned: boolean) => void;
@@ -31,13 +37,19 @@ export function Sidebar(props: {
   const [editingConversationId, setEditingConversationId] = React.useState<string | undefined>();
   const [editingTitle, setEditingTitle] = React.useState("");
   const [openMenuConversationId, setOpenMenuConversationId] = React.useState<string | undefined>();
-  const newTaskActive = props.currentScreen === "chat-empty" && props.activeConversationId === undefined;
+  const newTaskActive = props.agentClusterActive
+    ? props.currentScreen === "chat-empty" && props.activeDeepRunId === undefined
+    : props.currentScreen === "chat-empty" && props.activeConversationId === undefined;
   const pendingConversations = props.conversations.filter(isConversationWaitingForUser);
   const visibleConversations = [...props.conversations].sort(
     compareSidebarConversations
   ).slice(0, 24);
   const pinnedConversations = visibleConversations.filter((conversation) => conversation.pinnedAt !== undefined);
   const recentConversations = visibleConversations.filter((conversation) => conversation.pinnedAt === undefined);
+  const recentConversationGroups = groupSidebarItemsByWorkspaceFolder(
+    recentConversations,
+    sidebarConversationTime
+  );
 
   React.useEffect(() => {
     if (openMenuConversationId === undefined) {
@@ -140,7 +152,7 @@ export function Sidebar(props: {
         </button>
       </div>
 
-      {props.pendingCount > 0 && (
+      {!props.agentClusterActive && props.pendingCount > 0 && (
         <button
           type="button"
           className="sidebar-action sidebar-rail-button sidebar-pending-reminder sidebar-collapsed-button"
@@ -162,11 +174,18 @@ export function Sidebar(props: {
 
       <section
         className="sidebar-expandable sidebar-recent"
-        aria-label="会话列表"
+        aria-label={props.agentClusterActive ? "多 Agent 历史" : "会话列表"}
         aria-hidden={props.collapsed}
       >
         <div className="sidebar-recent-list">
-          {visibleConversations.length === 0 ? (
+          {props.agentClusterActive ? (
+            <DeepRunGroup
+              runs={props.deepRuns}
+              activeDeepRunId={props.activeDeepRunId}
+              collapsed={props.collapsed}
+              onOpen={props.onOpenDeepRun}
+            />
+          ) : visibleConversations.length === 0 ? (
             <SidebarEmptyState />
           ) : (
             <>
@@ -191,25 +210,29 @@ export function Sidebar(props: {
                   onDelete={deleteConversation}
                 />
               )}
-              <ConversationGroup
-                title="最近会话"
-                hideTitle={pinnedConversations.length === 0}
-                conversations={recentConversations}
-                activeConversationId={props.activeConversationId}
-                collapsed={props.collapsed}
-                editingConversationId={editingConversationId}
-                editingTitle={editingTitle}
-                openMenuConversationId={openMenuConversationId}
-                setEditingTitle={setEditingTitle}
-                onOpen={props.onOpen}
-                onRenameStart={beginRename}
-                onRenameCancel={cancelRename}
-                onRenameCommit={commitRename}
-                onRenameSubmit={submitRename}
-                onMenuToggle={toggleMenu}
-                onTogglePinned={togglePinned}
-                onDelete={deleteConversation}
-              />
+              {recentConversationGroups.map((group) => (
+                <ConversationGroup
+                  key={group.key}
+                  title={group.label}
+                  titlePath={group.path}
+                  folderHeading
+                  conversations={group.items}
+                  activeConversationId={props.activeConversationId}
+                  collapsed={props.collapsed}
+                  editingConversationId={editingConversationId}
+                  editingTitle={editingTitle}
+                  openMenuConversationId={openMenuConversationId}
+                  setEditingTitle={setEditingTitle}
+                  onOpen={props.onOpen}
+                  onRenameStart={beginRename}
+                  onRenameCancel={cancelRename}
+                  onRenameCommit={commitRename}
+                  onRenameSubmit={submitRename}
+                  onMenuToggle={toggleMenu}
+                  onTogglePinned={togglePinned}
+                  onDelete={deleteConversation}
+                />
+              ))}
             </>
           )}
         </div>
@@ -232,9 +255,66 @@ export function Sidebar(props: {
   );
 }
 
-function SidebarEmptyState(): React.ReactElement {
+function DeepRunGroup(props: {
+  readonly runs: readonly DeepRunSummary[];
+  readonly activeDeepRunId?: string;
+  readonly collapsed: boolean;
+  readonly onOpen: (runId: string) => void;
+}): React.ReactElement {
+  const visibleRuns = props.runs.slice(0, 24);
+  if (visibleRuns.length === 0) {
+    return <SidebarEmptyState label="暂无多 Agent 任务" />;
+  }
+  const groups = groupSidebarItemsByWorkspaceFolder(visibleRuns, sidebarDeepRunTime);
   return (
-    <div className="sidebar-empty-state" aria-label="暂无会话">
+    <>
+      {groups.map((group) => (
+        <div className="sidebar-conversation-group sidebar-deep-run-group" key={group.key}>
+          <SidebarFolderHeading title={group.label} titlePath={group.path} />
+          {group.items.map((run) => (
+            <DeepRunListItem
+              key={run.runId}
+              run={run}
+              active={run.runId === props.activeDeepRunId}
+              collapsed={props.collapsed}
+              onOpen={props.onOpen}
+            />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function DeepRunListItem(props: {
+  readonly run: DeepRunSummary;
+  readonly active: boolean;
+  readonly collapsed: boolean;
+  readonly onOpen: (runId: string) => void;
+}): React.ReactElement {
+  return (
+    <div className={`sidebar-recent-item sidebar-deep-run-item ${props.active ? "active" : ""}`}>
+      <button
+        type="button"
+        onClick={() => props.onOpen(props.run.runId)}
+        className="sidebar-recent-row sidebar-deep-run-row"
+        aria-label={props.run.goal}
+        tabIndex={props.collapsed ? -1 : 0}
+      >
+        <span className={`sidebar-deep-run-status sidebar-deep-run-status-${props.run.status}`} aria-hidden="true" />
+        <span className="sidebar-conversation-copy sidebar-deep-run-copy">
+          <strong>{compact(props.run.goal, 34)}</strong>
+          <small>{deepRunStatusLabel(props.run.status)} · {sidebarDeepRunTimeLabel(props.run.updatedAt)}</small>
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function SidebarEmptyState(props: { readonly label?: string }): React.ReactElement {
+  const label = props.label ?? "暂无会话";
+  return (
+    <div className="sidebar-empty-state" aria-label={label}>
       <div className="sidebar-empty-rail" aria-hidden="true">
         <span className="sidebar-empty-rail-dot active" />
         <span className="sidebar-empty-rail-line" />
@@ -249,8 +329,22 @@ function SidebarEmptyState(): React.ReactElement {
   );
 }
 
+function SidebarFolderHeading(props: {
+  readonly title: string;
+  readonly titlePath?: string;
+}): React.ReactElement {
+  return (
+    <div className="sidebar-list-heading sidebar-folder-heading" title={props.titlePath ?? props.title}>
+      <Folder size={15} aria-hidden="true" />
+      <span>{props.title}</span>
+    </div>
+  );
+}
+
 function ConversationGroup(props: {
   readonly title: string;
+  readonly titlePath?: string;
+  readonly folderHeading?: boolean;
   readonly hideTitle?: boolean;
   readonly conversations: readonly ConversationSummary[];
   readonly activeConversationId?: string;
@@ -274,9 +368,13 @@ function ConversationGroup(props: {
   return (
     <div className="sidebar-conversation-group">
       {!props.hideTitle && (
-        <div className="sidebar-list-heading">
-          <span>{props.title}</span>
-        </div>
+        props.folderHeading
+          ? <SidebarFolderHeading title={props.title} titlePath={props.titlePath} />
+          : (
+              <div className="sidebar-list-heading">
+                <span>{props.title}</span>
+              </div>
+            )
       )}
       {props.conversations.map((conversation) => (
         <ConversationListItem
@@ -439,9 +537,104 @@ function sidebarConversationTime(conversation: ConversationSummary): number {
   return Number.isFinite(time) ? time : 0;
 }
 
+function sidebarDeepRunTime(run: DeepRunSummary): number {
+  const time = Date.parse(run.updatedAt);
+  return Number.isFinite(time) ? time : 0;
+}
+
+type SidebarWorkspaceItem = {
+  readonly workspaceFolder?: {
+    readonly label: string;
+    readonly path?: string;
+  };
+};
+
+type SidebarWorkspaceGroup<T> = {
+  readonly key: string;
+  readonly label: string;
+  readonly path?: string;
+  readonly items: readonly T[];
+};
+
+function groupSidebarItemsByWorkspaceFolder<T extends SidebarWorkspaceItem>(
+  items: readonly T[],
+  itemTime: (item: T) => number
+): readonly SidebarWorkspaceGroup<T>[] {
+  const groups = new Map<string, { label: string; path?: string; items: T[]; latestTime: number }>();
+  for (const item of items) {
+    const folder = item.workspaceFolder;
+    const key = folder?.path ?? folder?.label ?? "__ungrouped__";
+    const label = folder?.label ?? "未归类";
+    const current = groups.get(key);
+    const latestTime = itemTime(item);
+    if (current === undefined) {
+      groups.set(key, {
+        label,
+        path: folder?.path,
+        items: [item],
+        latestTime,
+      });
+      continue;
+    }
+    current.items.push(item);
+    current.latestTime = Math.max(current.latestTime, latestTime);
+  }
+  return [...groups.entries()]
+    .map(([key, group]) => ({
+      key,
+      label: group.label,
+      path: group.path,
+      items: group.items,
+      latestTime: group.latestTime,
+    }))
+    .sort((left, right) => right.latestTime - left.latestTime || left.label.localeCompare(right.label));
+}
+
 function compareSidebarConversations(left: ConversationSummary, right: ConversationSummary): number {
   const pinned = (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "");
   return pinned === 0 ? sidebarConversationTime(right) - sidebarConversationTime(left) : pinned;
+}
+
+function deepRunStatusLabel(status: DeepRunStatus): string {
+  switch (status) {
+    case "pending":
+      return "待启动";
+    case "running":
+      return "运行中";
+    case "interrupted":
+      return "已打断";
+    case "corrected":
+      return "已修正";
+    case "stopped":
+      return "已停止";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    default:
+      return status;
+  }
+}
+
+function sidebarDeepRunTimeLabel(timestamp: string): string {
+  const time = Date.parse(timestamp);
+  if (!Number.isFinite(time)) {
+    return "未知";
+  }
+  const diff = Date.now() - time;
+  if (diff < 60_000) {
+    return "刚刚";
+  }
+  if (diff < 60 * 60_000) {
+    return `${Math.max(1, Math.floor(diff / 60_000))} 分钟前`;
+  }
+  if (diff < 24 * 60 * 60_000) {
+    return `${Math.floor(diff / (60 * 60_000))} 小时前`;
+  }
+  return new Date(timestamp).toLocaleDateString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+  });
 }
 
 function conversationHasActiveWork(conversation: ConversationSummary): boolean {

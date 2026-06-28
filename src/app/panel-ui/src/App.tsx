@@ -3,7 +3,7 @@ import { Maximize2, Minimize2, Minus, PanelLeftClose, PanelLeftOpen, X } from "l
 import { isConversationWaitingForUser } from "./conversation-state";
 import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
-import { DeepView } from "./components/deep-view";
+import { MultiAgentWorkspace } from "./components/multi-agent-workspace";
 import { SettingsDialog } from "./components/settings-dialog";
 import { Sidebar, type Screen } from "./components/sidebar";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./components/settings-types";
@@ -13,7 +13,13 @@ import {
   useStartupIntro,
 } from "./app-startup-intro";
 import { getStartupAnimationEnabled, subscribeMotionSettingsChanged } from "./app-motion";
-import { selectLocalContextAttachment, uniqueAttachments, uploadContextAttachmentFiles } from "./app-attachments";
+import {
+  selectLocalContextAttachment,
+  taskSoilInputFromAttachments,
+  uniqueAttachments,
+  uploadContextAttachmentFiles,
+} from "./app-attachments";
+import { selectTaskWorkspaceDirectory } from "./app-workspace-selection";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
   normalizeAgentMode,
@@ -47,10 +53,31 @@ import {
   stopLiveUpdates,
 } from "./app-runtime-controls";
 import { createInitialAppState } from "./app-state";
-import { submitDeepTask } from "./app-deep-task-submission";
+import { requestDeepIntake } from "./app-deep-intake";
 import { createDeepRunUpdateController } from "./app-deep-live-updates";
+import {
+  deepRunSummaryFromView,
+  isTerminalDeepRunStatus,
+  latestActiveDeepRun,
+  latestRestorableDeepRun,
+  openDeepRun,
+  upsertDeepRunSummary,
+} from "./app-deep-history";
+import {
+  decideDeepChildConfirmation,
+  requestDeepChildMessage,
+  requestDeepRunCorrection,
+  requestDeepRunResynthesis,
+  requestDeepRunStop,
+} from "./app-deep-control";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
+import type {
+  DeepChildOperationResponse,
+  DeepLivePhase,
+  DeepRunStatus,
+  DeepRunView,
+} from "./contracts/deep";
 import type { McpServerCatalogItem } from "./contracts/tools";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
 
@@ -124,7 +151,10 @@ export function App(): React.ReactElement {
     enabled: true,
   });
   const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
+  const [selectedWorkspaceDirectory, setSelectedWorkspaceDirectory] = useState<string | undefined>(undefined);
   const [confirmationBusy, setConfirmationBusy] = useState(false);
+  const [deepChildOperationBusyId, setDeepChildOperationBusyId] = useState<string | undefined>(undefined);
+  const [deepResynthesisBusy, setDeepResynthesisBusy] = useState(false);
   const [contextBusy, setContextBusy] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<readonly { readonly id: string; readonly content: string }[]>([]);
   const [savingModel, setSavingModel] = useState(false);
@@ -136,6 +166,8 @@ export function App(): React.ReactElement {
   const activeRunIdRef = useRef<string | undefined>(undefined);
   const viewEpochRef = useRef(0);
   const deepPollTimerRef = useRef<number | undefined>(undefined);
+  const deepStreamRef = useRef<EventSource | undefined>(undefined);
+  const deepOpenEpochRef = useRef(0);
   const conversationLoadAbortRef = useRef<AbortController | undefined>(undefined);
   const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -158,6 +190,12 @@ export function App(): React.ReactElement {
     void loadAppBootstrap().then((bootstrap) => {
       if (mountedRef.current) {
         setApp((previous) => applyAppBootstrap(previous, bootstrap));
+        const activeDeepRun = latestActiveDeepRun(bootstrap.deepRuns);
+        if (activeDeepRun !== undefined) {
+          setScreen("chat-active");
+          setInputCloseSignal((value) => value + 1);
+          void openAgentClusterRun(activeDeepRun.runId, { auto: true });
+        }
       }
     }).catch((error) => {
       if (mountedRef.current) {
@@ -175,6 +213,10 @@ export function App(): React.ReactElement {
       if (deepPollTimerRef.current !== undefined) {
         window.clearInterval(deepPollTimerRef.current);
         deepPollTimerRef.current = undefined;
+      }
+      if (deepStreamRef.current !== undefined) {
+        deepStreamRef.current.close();
+        deepStreamRef.current = undefined;
       }
     };
   }, []);
@@ -257,7 +299,9 @@ export function App(): React.ReactElement {
     () => modelOptionSupportsReasoningEffort(app.config, selectedModelId),
     [app.config, selectedModelId]
   );
-  const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
+  const chatScreen = app.agentMode === "deep"
+    ? screen
+    : screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = useMemo(() => projectCurrentRun(app), currentRunProjectionDeps(app));
   const modelResponding = currentRun.run !== undefined && shouldKeepRefreshing(currentRun.run.status);
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
@@ -270,6 +314,7 @@ export function App(): React.ReactElement {
     setGoal,
     attachments,
     setAttachments,
+    selectedWorkspaceDirectory,
     goal,
     aiMode,
     composerReasoningEffort,
@@ -287,6 +332,7 @@ export function App(): React.ReactElement {
   }), [
     app,
     attachments,
+    selectedWorkspaceDirectory,
     goal,
     aiMode,
     composerReasoningEffort,
@@ -307,6 +353,7 @@ export function App(): React.ReactElement {
       setApp,
       mountedRef,
       pollTimerRef: deepPollTimerRef,
+      streamRef: deepStreamRef,
     }),
     [],
   );
@@ -412,6 +459,24 @@ export function App(): React.ReactElement {
     }
   }
 
+  async function selectTaskWorkspace(): Promise<void> {
+    if (contextBusy) return;
+    setContextBusy(true);
+    try {
+      const directory = await selectTaskWorkspaceDirectory();
+      if (mountedRef.current && directory !== undefined) {
+        setSelectedWorkspaceDirectory(directory);
+        setApp((previous) => ({ ...previous, error: undefined }));
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "选择工作区失败。") }));
+      }
+    } finally {
+      if (mountedRef.current) setContextBusy(false);
+    }
+  }
+
   async function uploadAttachments(files: readonly File[]): Promise<void> {
     if (contextBusy || files.length === 0) return;
     setContextBusy(true);
@@ -451,20 +516,141 @@ export function App(): React.ReactElement {
   }
 
   /**
-   * 切换 agent 运行模式（普通 Agent / Deep）。
-   * - 切换到普通 Agent 时清空 deep 运行视图投影与异步状态，避免残留投影干扰普通视图；
-   * - 切换到 Deep 时保留普通运行状态，便于用户回切后继续会话。
-   * 当前仅做模式状态切换，deep 提交路径与视图由 T3-4c/T3-4d 接入。
+   * 切换 agent 运行模式。
+   * 这是模块切换，不是新建任务：普通 Agent 会话和多 Agent 当前任务各自保留。
    */
   function changeAgentMode(nextMode: AgentMode): void {
     const normalized = normalizeAgentMode(nextMode);
     setApp((previous) => {
       if (previous.agentMode === normalized) return previous;
-      if (normalized === "normal") {
-        return { ...previous, agentMode: normalized, deep: undefined, deepBusy: false, error: undefined };
-      }
       return { ...previous, agentMode: normalized, error: undefined };
     });
+  }
+
+  function selectAgentMode(nextMode: AgentMode): void {
+    if (app.agentMode === nextMode) {
+      return;
+    }
+    if (nextMode === "deep") {
+      openAgentClusterEntry();
+      return;
+    }
+    changeAgentMode("normal");
+  }
+
+  function openNormalTaskEntry(): void {
+    changeAgentMode("normal");
+    resetChat();
+  }
+
+  function openNormalConversation(conversationId: string): void {
+    changeAgentMode("normal");
+    void loadConversation(conversationId);
+  }
+
+  async function openAgentClusterRun(
+    runId: string,
+    options?: { readonly auto?: boolean },
+  ): Promise<void> {
+    const epoch = deepOpenEpochRef.current + 1;
+    deepOpenEpochRef.current = epoch;
+    setScreen("chat-active");
+    setGoal("");
+    setAttachments([]);
+    setApp((previous) => ({
+      ...previous,
+      agentMode: "deep",
+      deepSelectedRunId: runId,
+      deepActiveRunId: runId,
+      deepBusy: previous.deep?.run.runId === runId ? previous.deepBusy : true,
+      deepPendingGoal: previous.deep?.run.runId === runId ? previous.deepPendingGoal : undefined,
+      deepConversation: undefined,
+      deepIntakeStatus: undefined,
+      error: undefined,
+    }));
+    try {
+      const view = await openDeepRun(runId);
+      if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
+      const terminal = isTerminalDeepRunStatus(view.run.status);
+      const summary = deepRunSummaryFromView(view);
+      setApp((previous) => ({
+        ...previous,
+        agentMode: "deep",
+        deep: view,
+        deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+        deepActiveRunId: view.run.runId,
+        deepSelectedRunId: view.run.runId,
+        deepPendingGoal: undefined,
+        deepConversation: view.conversation ?? previous.deepConversation,
+        deepIntakeStatus: undefined,
+        deepBusy: !terminal,
+        error: undefined,
+      }));
+      if (!terminal) {
+        deepRunUpdateController.startPolling(view.run.runId);
+      }
+    } catch (error) {
+      if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
+      setApp((previous) => ({
+        ...previous,
+        agentMode: "deep",
+        deepBusy: false,
+        deepPendingGoal: undefined,
+        error: errorText(
+          error,
+          options?.auto === true ? "恢复多 Agent 运行失败。" : "打开多 Agent 运行失败。",
+        ),
+      }));
+    }
+  }
+
+  function openAgentClusterEntry(): void {
+    setInputCloseSignal((value) => value + 1);
+    setScreen("chat-empty");
+    setGoal("");
+    setAttachments([]);
+    const existingRunId = app.deep?.run.runId ?? app.deepSelectedRunId;
+    const restorableRunId = existingRunId ?? latestRestorableDeepRun(app.deepRuns)?.runId;
+    if (restorableRunId !== undefined) {
+      void openAgentClusterRun(restorableRunId);
+      return;
+    }
+    setApp((previous) => ({
+      ...previous,
+      agentMode: "deep",
+      deep: undefined,
+      deepPendingGoal: undefined,
+      deepActiveRunId: undefined,
+      deepSelectedRunId: undefined,
+      deepConversation: undefined,
+      deepIntakeStatus: undefined,
+      deepBusy: false,
+      error: undefined,
+    }));
+  }
+
+  function openCurrentModeTaskEntry(): void {
+    if (app.agentMode !== "deep") {
+      openNormalTaskEntry();
+      return;
+    }
+    deepRunUpdateController.stopPolling();
+    setInputCloseSignal((value) => value + 1);
+    setScreen("chat-empty");
+    setGoal("");
+    setAttachments([]);
+    setApp((previous) => ({
+      ...previous,
+      agentMode: "deep",
+      deep: undefined,
+      deepPendingGoal: undefined,
+      deepActiveRunId: undefined,
+      deepSelectedRunId: undefined,
+      deepConversation: undefined,
+      deepIntakeStatus: undefined,
+      deepBusy: false,
+      error: undefined,
+    }));
   }
 
   async function renameConversation(conversationId: string, title: string): Promise<void> {
@@ -578,28 +764,223 @@ export function App(): React.ReactElement {
     void startTask(next.content);
   }, [app.busy, currentRun.run, queuedMessages, startTask]);
 
-  /**
-   * Deep 任务提交入口：当 agentMode === "deep" 时由 onSubmit 路由调用。
-   * 创建独立 deep 会话并启动后台 deep run（FR-001 入口分流）。返回的运行引用
-   * 供 T3-4e /view 轮询接入；当前阶段提交后 deepBusy 保持 true，视图区与轮询待 T3-4d/T3-4e。
-   */
-  async function startDeepTask(explicitGoal?: string): Promise<void> {
-    const result = await submitDeepTask(
-      {
-        app,
-        setApp,
-        setGoal,
-        setScreen,
-        setAttachments,
-        attachments,
-        goal,
+  async function submitDeepInput(explicitGoal?: string): Promise<void> {
+    const trimmed = (explicitGoal ?? goal).trim();
+    if (trimmed.length === 0) return;
+    const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId ?? app.deepSelectedRunId;
+    const activeDeepRunStatus = app.deep?.run.status ??
+      app.deepRuns.find((run) => run.runId === activeDeepRunId)?.status;
+    if (app.deepBusy) {
+      if (activeDeepRunId === undefined) {
+        setApp((previous) => ({
+          ...previous,
+          error: "正在理解你的补充，请稍后再发送。",
+        }));
+        return;
+      }
+      setGoal("");
+      setAttachments([]);
+      try {
+        await requestDeepRunCorrection(activeDeepRunId, [trimmed]);
+        if (!mountedRef.current) return;
+        setApp((previous) => ({ ...previous, error: undefined }));
+        deepRunUpdateController.startPolling(activeDeepRunId);
+      } catch (error) {
+        if (mountedRef.current) {
+          setApp((previous) => ({ ...previous, error: errorText(error, "补充多 Agent 上下文失败。") }));
+        }
+      }
+      return;
+    }
+    const terminalActiveRunId =
+      activeDeepRunId !== undefined &&
+      activeDeepRunStatus !== undefined &&
+      isTerminalDeepRunStatus(activeDeepRunStatus)
+        ? activeDeepRunId
+        : undefined;
+    const deepConversationId =
+      app.deepConversation?.conversationId ??
+      app.deep?.conversation?.conversationId ??
+      app.deep?.run.conversationId;
+    setGoal("");
+    setAttachments([]);
+    setScreen("chat-active");
+    setApp((previous) => ({
+      ...previous,
+      deepBusy: true,
+      deepPendingGoal: trimmed,
+      deepActiveRunId: undefined,
+      deepSelectedRunId: terminalActiveRunId,
+      deepIntakeStatus: undefined,
+      error: undefined,
+    }));
+    try {
+      const response = await requestDeepIntake({
+        conversationId: deepConversationId,
+        activeRunId: terminalActiveRunId,
+        message: trimmed,
         aiMode,
-        mountedRef,
-      },
-      explicitGoal,
-    );
-    if (result !== undefined) {
-      deepRunUpdateController.startPolling(result.runId);
+        workspaceDirectory: selectedWorkspaceDirectory,
+        taskSoilInput: taskSoilInputFromAttachments(attachments),
+      });
+      if (!mountedRef.current) return;
+      if (response.status === "running") {
+        setApp((previous) => ({
+          ...previous,
+          deep: undefined,
+          deepConversation: response.conversation,
+          deepIntakeStatus: response.status,
+          deepBusy: true,
+          deepPendingGoal: trimmed,
+          deepActiveRunId: response.run.runId,
+          deepSelectedRunId: response.run.runId,
+          error: undefined,
+        }));
+        deepRunUpdateController.startPolling(response.run.runId);
+        return;
+      }
+      setApp((previous) => ({
+        ...previous,
+        deep: undefined,
+        deepConversation: response.conversation,
+        deepIntakeStatus: response.status,
+        deepBusy: false,
+        deepPendingGoal: undefined,
+        deepActiveRunId: undefined,
+        deepSelectedRunId: undefined,
+        error: undefined,
+      }));
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({
+          ...previous,
+          deepBusy: false,
+          deepPendingGoal: undefined,
+          error: errorText(error, "多 Agent 理解失败。"),
+        }));
+      }
+    }
+  }
+
+  async function stopDeepTask(): Promise<void> {
+    const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId;
+    if (activeDeepRunId === undefined || !app.deepBusy) {
+      return;
+    }
+    try {
+      await requestDeepRunStop(activeDeepRunId);
+      if (!mountedRef.current) return;
+      setApp((previous) => ({ ...previous, deepBusy: true, error: undefined }));
+      deepRunUpdateController.startPolling(activeDeepRunId);
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "停止多 Agent 运行失败。") }));
+      }
+    }
+  }
+
+  async function sendDeepChildMessage(childRunId: string, message: string): Promise<void> {
+    const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId;
+    if (activeDeepRunId === undefined || deepChildOperationBusyId !== undefined) {
+      return;
+    }
+    setDeepChildOperationBusyId(childRunId);
+    try {
+      const response = await requestDeepChildMessage(activeDeepRunId, childRunId, message);
+      if (!mountedRef.current) return;
+      const view = applyQueuedChildOperationProjection(response);
+      const summary = deepRunSummaryFromView(view);
+      setApp((previous) => ({
+        ...previous,
+        deep: view,
+        deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+        deepActiveRunId: view.run.runId,
+        deepSelectedRunId: view.run.runId,
+        deepBusy: response.status === "queued" || !isTerminalDeepRunStatus(view.run.status),
+        error: undefined,
+      }));
+      deepRunUpdateController.startPolling(activeDeepRunId);
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "继续协作项失败。") }));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDeepChildOperationBusyId(undefined);
+      }
+    }
+  }
+
+  async function decideDeepChild(
+    childRunId: string,
+    confirmationId: string,
+    decision: "approve_once" | "deny" | "guidance",
+    guidance?: string,
+  ): Promise<void> {
+    const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId;
+    if (activeDeepRunId === undefined || deepChildOperationBusyId !== undefined) {
+      return;
+    }
+    setDeepChildOperationBusyId(childRunId);
+    try {
+      const response = await decideDeepChildConfirmation(
+        activeDeepRunId,
+        childRunId,
+        confirmationId,
+        decision,
+        guidance,
+      );
+      if (!mountedRef.current) return;
+      const summary = deepRunSummaryFromView(response.view);
+      setApp((previous) => ({
+        ...previous,
+        deep: response.view,
+        deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+        deepActiveRunId: response.view.run.runId,
+        deepSelectedRunId: response.view.run.runId,
+        deepBusy: !isTerminalDeepRunStatus(response.view.run.status),
+        error: undefined,
+      }));
+      deepRunUpdateController.startPolling(activeDeepRunId);
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "处理协作项确认失败。") }));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDeepChildOperationBusyId(undefined);
+      }
+    }
+  }
+
+  async function resynthesizeDeepRun(): Promise<void> {
+    const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId;
+    if (activeDeepRunId === undefined || deepResynthesisBusy || deepChildOperationBusyId !== undefined) {
+      return;
+    }
+    setDeepResynthesisBusy(true);
+    try {
+      const response = await requestDeepRunResynthesis(activeDeepRunId);
+      if (!mountedRef.current) return;
+      const summary = deepRunSummaryFromView(response.view);
+      setApp((previous) => ({
+        ...previous,
+        deep: response.view,
+        deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+        deepActiveRunId: response.view.run.runId,
+        deepSelectedRunId: response.view.run.runId,
+        deepBusy: !isTerminalDeepRunStatus(response.view.run.status),
+        error: undefined,
+      }));
+      deepRunUpdateController.startPolling(activeDeepRunId);
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "重新综合失败。") }));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDeepResynthesisBusy(false);
+      }
     }
   }
 
@@ -608,6 +989,8 @@ export function App(): React.ReactElement {
     onChange: setGoal,
     agentMode: app.agentMode,
     attachments,
+    selectedWorkspaceDirectory,
+    onSelectWorkspaceDirectory: () => void selectTaskWorkspace(),
     onSelectAttachment: () => void selectAttachment(),
     onUploadAttachmentFiles: (files: readonly File[]) => void uploadAttachments(files),
     onRemoveAttachment: removeAttachment,
@@ -624,11 +1007,11 @@ export function App(): React.ReactElement {
     onModelSelect: selectInputModel,
     onOpenSettings: () => openSettings("models"),
     onSubmit: () => {
-      if (app.busy || modelResponding || app.deepBusy) {
+      if (app.agentMode === "deep") {
+        void submitDeepInput();
+      } else if (app.busy || modelResponding) {
         enqueueMessage(goal);
         setGoal("");
-      } else if (app.agentMode === "deep") {
-        void startDeepTask();
       } else {
         void startTask();
       }
@@ -640,10 +1023,34 @@ export function App(): React.ReactElement {
       void cancelRun();
     },
   };
+  const deepInputProps = {
+    ...inputProps,
+    selectedWorkspaceDirectory: undefined,
+    onSelectWorkspaceDirectory: undefined,
+    busy: app.deepBusy && app.deep === undefined && app.deepActiveRunId === undefined,
+    running: app.deepBusy && (app.deep !== undefined || app.deepActiveRunId !== undefined),
+    queuedMessages: undefined,
+    onRemoveQueuedMessage: undefined,
+    onUpdateQueuedMessage: undefined,
+    placeholder: deepInputPlaceholder(
+      app.deep?.run.status,
+      app.deep?.liveProjection.phase,
+      app.deepBusy,
+      app.deep !== undefined || app.deepActiveRunId !== undefined || app.deepSelectedRunId !== undefined,
+      app.deepIntakeStatus,
+    ),
+    onSubmit: () => {
+      void submitDeepInput();
+    },
+    onCancel: () => {
+      void stopDeepTask();
+    },
+    cancelLabel: "停止",
+  };
 
   const isBootstrapping = app.config === undefined && app.conversations.length === 0 && app.error === undefined;
-  /** deep 模式且有进行中/已完成的 run 时，主区切换到 DeepView；否则保留普通会话视图与输入框。 */
-  const deepActive = app.agentMode === "deep" && (app.deepBusy || app.deep !== undefined);
+  /** 多 Agent 模式进入专属工作区；是否已有 run 由工作区内部处理。 */
+  const deepActive = app.agentMode === "deep";
   const startupIntro = useStartupIntro(isBootstrapping, { startupAnimationEnabled });
   const startupIntroStyle = useMemo(() => {
     const style = startupIntroTimingStyle(startupIntro.timing) as StartupIntroRootStyle;
@@ -667,11 +1074,15 @@ export function App(): React.ReactElement {
       <Sidebar
         currentScreen={chatScreen}
         conversations={app.conversations}
-        activeConversationId={app.conversation?.conversationId}
+        deepRuns={app.deepRuns}
+        activeConversationId={app.agentMode === "deep" ? undefined : app.conversation?.conversationId}
+        activeDeepRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}
         pendingCount={pendingCount}
         collapsed={sidebarCollapsed}
-        onNew={resetChat}
-        onOpen={(id) => void loadConversation(id)}
+        agentClusterActive={app.agentMode === "deep"}
+        onNew={openCurrentModeTaskEntry}
+        onOpenDeepRun={(runId) => void openAgentClusterRun(runId)}
+        onOpen={openNormalConversation}
         onRename={(id, title) => void renameConversation(id, title)}
         onTogglePinned={(id, pinned) => void toggleConversationPinned(id, pinned)}
         onDelete={(id) => void deleteConversation(id)}
@@ -682,9 +1093,9 @@ export function App(): React.ReactElement {
         <WorkbenchHeader
           collapsed={sidebarCollapsed}
           agentMode={app.agentMode}
-          modeDisabled={app.busy || app.deepBusy}
+          disabled={isBootstrapping || app.busy || modelResponding}
           onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
-          onChangeAgentMode={changeAgentMode}
+          onModeChange={selectAgentMode}
         />
         <main className="app-main">
           {isBootstrapping && (
@@ -694,7 +1105,22 @@ export function App(): React.ReactElement {
             </div>
           )}
           {!isBootstrapping && deepActive && (
-            <DeepView view={app.deep} busy={app.deepBusy} />
+            <MultiAgentWorkspace
+              view={app.deep}
+              conversation={app.deepConversation}
+              intakeStatus={app.deepIntakeStatus}
+              busy={app.deepBusy || deepChildOperationBusyId !== undefined}
+              pendingGoal={app.deepPendingGoal}
+              runs={app.deepRuns}
+              activeRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}
+              error={app.error}
+              inputProps={deepInputProps}
+              childOperationBusyId={deepChildOperationBusyId}
+              resynthesisBusy={deepResynthesisBusy}
+              onChildMessage={sendDeepChildMessage}
+              onChildConfirmation={decideDeepChild}
+              onResynthesize={resynthesizeDeepRun}
+            />
           )}
           {!isBootstrapping && !deepActive && chatScreen === "chat-empty" && (
             <ChatEmpty
@@ -782,9 +1208,9 @@ export function App(): React.ReactElement {
 function WorkbenchHeader(props: {
   readonly collapsed: boolean;
   readonly agentMode: AgentMode;
-  readonly modeDisabled: boolean;
+  readonly disabled: boolean;
   readonly onToggleSidebar: () => void;
-  readonly onChangeAgentMode: (nextMode: AgentMode) => void;
+  readonly onModeChange: (mode: AgentMode) => void;
 }): React.ReactElement {
   const toggleLabel = props.collapsed ? "展开侧栏" : "收起侧栏";
   const hasDesktopWindowControls = typeof window !== "undefined" && window.agentarborDesktop !== undefined;
@@ -802,39 +1228,26 @@ function WorkbenchHeader(props: {
           >
             {props.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
-          <div className="app-workbench-brand" aria-label="AgentArbor">
-            <span className="app-workbench-brand-mark" aria-hidden="true">
-              <img src="/favicon.svg" alt="" />
-            </span>
-            <strong>AgentArbor</strong>
+          <div className="app-mode-switch" role="tablist" aria-label="工作模式">
+            <button
+              type="button"
+              className={`app-mode-switch-button ${props.agentMode === "normal" ? "active" : ""}`}
+              aria-pressed={props.agentMode === "normal"}
+              disabled={props.disabled}
+              onClick={() => props.onModeChange("normal")}
+            >
+              桌面 Agent
+            </button>
+            <button
+              type="button"
+              className={`app-mode-switch-button ${props.agentMode === "deep" ? "active" : ""}`}
+              aria-pressed={props.agentMode === "deep"}
+              disabled={props.disabled}
+              onClick={() => props.onModeChange("deep")}
+            >
+              多 Agent
+            </button>
           </div>
-        </div>
-        <div
-          className="app-workbench-mode"
-          role="group"
-          aria-label="运行模式"
-          data-agent-mode={props.agentMode}
-        >
-          <button
-            type="button"
-            className="app-workbench-mode-option"
-            aria-pressed={props.agentMode === "normal"}
-            disabled={props.modeDisabled}
-            title="普通 Agent：默认连续会话与模型工具主循环"
-            onClick={() => props.onChangeAgentMode("normal")}
-          >
-            普通
-          </button>
-          <button
-            type="button"
-            className="app-workbench-mode-option"
-            aria-pressed={props.agentMode === "deep"}
-            disabled={props.modeDisabled}
-            title="Deep：地下认知运行时，目标成形、多路探索与父层综合"
-            onClick={() => props.onChangeAgentMode("deep")}
-          >
-            Deep
-          </button>
         </div>
         {hasDesktopWindowControls && <DesktopWindowControls />}
       </div>
@@ -911,6 +1324,72 @@ function errorText(error: unknown, fallback: string): string {
 
 function startupIntroEmptyGridTopPadding(targetHeight: number): number {
   return Math.round(Math.min(Math.max(targetHeight * 0.16, 112), 154));
+}
+
+function deepInputPlaceholder(
+  status: DeepRunStatus | undefined,
+  phase: DeepLivePhase | undefined,
+  busy: boolean,
+  hasActiveRun: boolean,
+  intakeStatus: "needs_input" | "answered" | "running" | undefined,
+): string {
+  if (busy && !hasActiveRun) {
+    return "正在理解...";
+  }
+  if (intakeStatus === "needs_input") {
+    return "补充要求或范围...";
+  }
+  if (intakeStatus === "answered" && !hasActiveRun) {
+    return "继续围绕当前主题补充...";
+  }
+  if (!hasActiveRun) {
+    return "描述要协作处理的目标...";
+  }
+  if (busy || status === "running" || status === "pending" || phase === "needs_input") {
+    return "补充要求...";
+  }
+  if (status !== undefined && isTerminalDeepRunStatus(status)) {
+    return "继续围绕当前主题补充...";
+  }
+  return "描述要协作处理的目标...";
+}
+
+function applyQueuedChildOperationProjection(response: DeepChildOperationResponse): DeepRunView {
+  if (
+    response.status !== "queued" ||
+    response.childRunId === undefined ||
+    response.messageRef === undefined ||
+    response.queuedAt === undefined
+  ) {
+    return response.view;
+  }
+  const childRunId = response.childRunId;
+  const messageRef = response.messageRef;
+  const queuedAt = response.queuedAt;
+  const queuedCount = response.queuedCount;
+  const children = response.view.liveProjection.children.map((child) =>
+    child.childRunId === childRunId
+      ? {
+          ...child,
+          parentOperation: {
+            status: "queued" as const,
+            messageRef,
+            queuedCount,
+            updatedAt: queuedAt,
+          },
+          updatedAt: queuedAt,
+        }
+      : child
+  );
+  return {
+    ...response.view,
+    liveProjection: {
+      ...response.view.liveProjection,
+      activeNodeId: childRunId,
+      children,
+      updatedAt: queuedAt,
+    },
+  };
 }
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "agentarbor.panel.sidebar.collapsed";

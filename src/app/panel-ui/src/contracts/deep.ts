@@ -18,6 +18,8 @@
  *   - `report` 在 run 未完成或失败前未产出时为 `undefined`。
  */
 
+import type { WorkspaceFolderSummary } from "./common";
+
 // ---------------------------------------------------------------------------
 // 隔离标记与状态枚举（镜像 DEEP_RUN_KIND / DEEP_RUN_MODE / DeepRunStatus）
 // ---------------------------------------------------------------------------
@@ -48,6 +50,22 @@ export type DeepRunStatus =
   | "completed"
   | "failed";
 
+export type DeepIntakeStatus = "needs_input" | "answered" | "running";
+
+export type DeepIntakeDecisionAction = "ask_user" | "direct_answer" | "start_collaboration";
+
+export type DeepIntakeTurn = {
+  readonly turnId: string;
+  readonly userMessage: string;
+  readonly assistantMessage: string;
+  readonly action: DeepIntakeDecisionAction;
+  readonly normalizedObjective?: string;
+  readonly plan?: string;
+  readonly uncertainty?: string;
+  readonly confidence?: number;
+  readonly createdAt: string;
+};
+
 /** AgentRunTree 级状态（4 值）。镜像 [`AgentRunTree.status`](src/domain/underground/agent-fabric.ts:123)。 */
 export type DeepAgentRunTreeStatus = "running" | "completed" | "failed" | "stopped";
 
@@ -55,6 +73,7 @@ export type DeepAgentRunTreeStatus = "running" | "completed" | "failed" | "stopp
 export type DeepChildRunStatus =
   | "planned"
   | "running"
+  | "blocked"
   | "completed"
   | "failed"
   | "interrupted"
@@ -69,6 +88,9 @@ export type DeepConversationView = {
   readonly conversationId: string;
   readonly title: string;
   readonly goal: string;
+  readonly intakeTurns: readonly DeepIntakeTurn[];
+  readonly currentObjective?: string;
+  readonly birthWorkspaceDirectory?: string;
   readonly isolation: DeepConversationIsolationMark;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -78,6 +100,9 @@ export type DeepConversationView = {
 export type DeepRunSummary = {
   readonly runId: string;
   readonly conversationId: string;
+  readonly parentRunId?: string;
+  readonly rootRunId?: string;
+  readonly turnOrdinal?: number;
   readonly goal: string;
   readonly status: DeepRunStatus;
   readonly runKind: DeepRunKind;
@@ -87,18 +112,24 @@ export type DeepRunSummary = {
   readonly hasConclusion: boolean;
   readonly childCount: number;
   readonly eventCount: number;
+  readonly workspaceFolder?: WorkspaceFolderSummary;
+  readonly brief?: DeepResearchBriefView;
 };
 
 /** run 级摘要（projectDeepRunView 的 `run` 字段，也用于 start run 响应）。 */
 export type DeepRunRecord = {
   readonly runId: string;
   readonly conversationId: string;
+  readonly parentRunId?: string;
+  readonly rootRunId?: string;
+  readonly turnOrdinal?: number;
   readonly goal: string;
   readonly status: DeepRunStatus;
   readonly runKind: DeepRunKind;
   readonly runMode: DeepRunMode;
   readonly startedAt: string;
   readonly updatedAt: string;
+  readonly workspaceFolder?: WorkspaceFolderSummary;
 };
 
 // ---------------------------------------------------------------------------
@@ -127,13 +158,17 @@ export type DeepAgentRunTreeRef = {
 // SSE 流式事件（镜像 DeepRunStreamEvent / DeepEventType）
 // ---------------------------------------------------------------------------
 
-/** deep 运行 SSE 流式事件类型全集（10 个 deep.* 类型）。镜像 [`DeepEventType`](src/app/deep/deep-events.ts:37)。 */
+/** deep 运行 SSE 流式事件类型全集。镜像 [`DeepEventType`](src/app/deep/deep-events.ts:37)。 */
 export type DeepEventType =
   | "deep.goal_received"
   | "deep.manager.decided"
   | "deep.child.started"
   | "deep.child.waiting"
+  | "deep.child.instruction_queued"
   | "deep.child.completed"
+  | "deep.child.blocked"
+  | "deep.child.interrupted"
+  | "deep.child.failed"
   | "deep.parent_synthesis.completed"
   | "deep.interrupted"
   | "deep.corrected"
@@ -146,6 +181,7 @@ export type DeepStreamEventRef = {
     | "conversation"
     | "delegation_decision"
     | "child_run"
+    | "child_instruction"
     | "parent_synthesis"
     | "control"
     | "conclusion"
@@ -220,6 +256,8 @@ export type DeepChildSpec = {
   readonly objective: string;
   readonly allowedTools: readonly string[];
   readonly inputRefs: readonly string[];
+  readonly maxModelRounds?: number;
+  readonly maxToolRounds?: number;
 };
 
 /**
@@ -238,6 +276,110 @@ export type DeepChildSummaryView = {
 };
 
 // ---------------------------------------------------------------------------
+// 实时流程投影（view.liveProjection）
+// ---------------------------------------------------------------------------
+
+export type DeepLivePhase =
+  | "starting"
+  | "deciding"
+  | "exploring"
+  | "synthesizing"
+  | "completed"
+  | "needs_input"
+  | "stopped"
+  | "failed";
+
+export type DeepLiveChildParentOperationProjection = {
+  readonly status: "queued" | "executed" | "cancelled";
+  readonly messageRef?: string;
+  readonly queuedCount?: number;
+  readonly updatedAt: string;
+};
+
+export type DeepLiveChildProjection = {
+  readonly childRunId: string;
+  readonly displayName: string;
+  readonly objective: string;
+  readonly role: string;
+  readonly status: DeepChildRunStatus;
+  readonly updatedAt: string;
+  readonly summary?: string;
+  readonly confidence?: number;
+  readonly uncertainty?: string;
+  readonly pendingApproval?: DeepChildAgentRunPendingApprovalView;
+  readonly parentOperation?: DeepLiveChildParentOperationProjection;
+};
+
+export type DeepLiveDecisionAction =
+  | "direct_answer"
+  | "spawn_children"
+  | "wait_children"
+  | "continue_child"
+  | "synthesize"
+  | "ask_user"
+  | "stop";
+
+export type DeepLiveDecisionProjection = {
+  readonly decisionId: string;
+  readonly action: DeepLiveDecisionAction;
+  readonly summary: string;
+  readonly confidence: number;
+  readonly updatedAt: string;
+};
+
+export type DeepLiveSynthesisProjection = {
+  readonly synthesisId?: string;
+  readonly status: "pending" | "running" | "completed";
+  readonly summary?: string;
+  readonly confidence?: number;
+  readonly updatedAt: string;
+};
+
+export type DeepLiveConclusionProjection = {
+  readonly conclusionId: string;
+  readonly oneLineRationale: string;
+  readonly confidence: number;
+  readonly updatedAt: string;
+};
+
+export type DeepLiveProjection = {
+  readonly phase: DeepLivePhase;
+  readonly activeNodeId: string;
+  readonly children: readonly DeepLiveChildProjection[];
+  readonly decision?: DeepLiveDecisionProjection;
+  readonly synthesis?: DeepLiveSynthesisProjection;
+  readonly conclusion?: DeepLiveConclusionProjection;
+  readonly updatedAt: string;
+};
+
+// ---------------------------------------------------------------------------
+// 研究 brief（T3-1，FR-BRIEF-01 前端消费侧）
+// ---------------------------------------------------------------------------
+//
+// 镜像后端 DeepRunRecord.brief（T2-1 写入侧：executor 首次 spawn_children 后从 childSpecs
+// 摘要装配）。brief 是低心智计划投影，不直接把 manager 的长 rationale 暴露给用户——
+// Panel 计划阶段只消费 brief 的安全字段。与后端 DeepResearchBrief（src/app/deep/contracts.ts）
+// 字段一一对齐，纯安全投影子集，不含 raw 字段。
+
+/**
+ * 多 Agent 研究简报（低心智计划投影）。
+ *
+ * 镜像 [`DeepResearchBrief`](src/app/deep/contracts.ts:486)。承载简短计划投影：目标、范围摘要、
+ * 来源策略摘要、计划探索角度。`needsUserApproval` 本轮固定 false（目标明确自动进入探索，
+ * 不强制"用户批准计划"流程，FR-BRIEF-02）。run 未进入 spawn 阶段时为 `undefined`。
+ */
+export type DeepResearchBriefView = {
+  readonly briefId: string;
+  readonly goal: string;
+  readonly scopeSummary: string;
+  readonly sourcePolicySummary: string;
+  readonly plannedAngles: readonly string[];
+  /** 本轮固定 false（不强制"用户批准计划"流程，FR-BRIEF-02）。 */
+  readonly needsUserApproval: boolean;
+  readonly updatedAt: string;
+};
+
+// ---------------------------------------------------------------------------
 // 完整领域 AgentRunTree（report.agentRunTree，结构化复盘 FR-009）
 // ---------------------------------------------------------------------------
 
@@ -253,8 +395,8 @@ export type DeepAgentProtocol = {
 
 /** AgentSpec 的 budget 子结构。镜像 [`AgentSpecBudget`](src/domain/underground/agent-fabric.ts:44)。 */
 export type DeepAgentSpecBudget = {
-  readonly maxModelRounds: number;
-  readonly maxToolRounds: number;
+  readonly maxModelRounds?: number;
+  readonly maxToolRounds?: number;
   readonly maxChildRuns?: number;
   readonly maxOutputRefs?: number;
 };
@@ -263,9 +405,18 @@ export type DeepAgentSpecBudget = {
 export type DeepAgentPermissionPolicy = {
   readonly allowModel: boolean;
   readonly allowedTools: readonly string[];
-  readonly maxModelRounds: number;
-  readonly maxToolRounds: number;
+  readonly maxModelRounds?: number;
+  readonly maxToolRounds?: number;
   readonly fallback: "deterministic" | "disabled";
+};
+
+/**
+ * AgentSpec 的 instructions 子结构。child run 会把父 Agent 派生的 objective 冻结在这里，
+ * 作为恢复、复盘和 UI 详情展示的出生事实；systemPromptRef 只暴露稳定 prompt 引用，不含 raw prompt。
+ */
+export type DeepAgentSpecInstructionsView = {
+  readonly objective?: string;
+  readonly systemPromptRef?: string;
 };
 
 /**
@@ -279,6 +430,7 @@ export type DeepAgentSpecView = {
   readonly agentKind: "manager" | "core" | "rootlet" | "child";
   readonly role: string;
   readonly rootletKind?: string;
+  readonly instructions?: DeepAgentSpecInstructionsView;
   readonly protocol: DeepAgentProtocol;
   readonly promptRef: string;
   readonly outputContractRef: string;
@@ -286,6 +438,63 @@ export type DeepAgentSpecView = {
   readonly budget: DeepAgentSpecBudget;
   readonly inputRefs: readonly string[];
   readonly createdAt: string;
+};
+
+export type DeepChildAgentRunToolCallTraceView = {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly status: "completed" | "failed" | "approval_required" | "cancelled";
+};
+
+/**
+ * ChildAgentRun 的安全执行事实投影。只含轮次、模型请求/响应引用和工具调用状态，
+ * 不含 raw prompt / raw response / 工具原始输出。
+ */
+export type DeepChildAgentRunExecutionView = {
+  readonly modelRounds: number;
+  readonly toolRounds: number;
+  readonly modelRequestId?: string;
+  readonly modelResponseId?: string;
+  readonly toolCalls: readonly DeepChildAgentRunToolCallTraceView[];
+};
+
+export type DeepChildAgentRunExecutionSegmentView = DeepChildAgentRunExecutionView & {
+  readonly outcome: "completed" | "blocked" | "failed" | "interrupted";
+  readonly recordedAt: string;
+};
+
+export type DeepChildAgentRunPendingApprovalView = {
+  readonly confirmationId: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly title: string;
+  readonly actionSummary: string;
+  readonly affectedResources: readonly string[];
+  readonly riskLevel: "low" | "medium" | "high";
+  readonly resumeAvailability?: "live" | "lost_after_restart";
+  readonly requestedAt: string;
+  readonly expiresAt?: string;
+  readonly sourceRefs: readonly string[];
+};
+
+export type DeepChildAgentRunParentInstructionView = {
+  readonly instructionId: string;
+  readonly messageRef?: string;
+  readonly source: "manager" | "control_api";
+  readonly status: "queued" | "executed" | "cancelled";
+  readonly instructionSummary: string;
+  readonly review?: DeepChildAgentRunParentReviewView;
+  readonly requestedAt: string;
+  readonly queuedAt?: string;
+  readonly executedAt?: string;
+  readonly cancelledAt?: string;
+};
+
+export type DeepChildAgentRunParentReviewView = {
+  readonly decision: "accepted" | "rejected" | "needs_followup";
+  readonly reason: string;
+  readonly evidenceRefs: readonly string[];
+  readonly confidence?: number;
 };
 
 /**
@@ -303,6 +512,10 @@ export type DeepChildAgentRunView = {
   readonly failureReason?: string;
   readonly uncertainty?: string;
   readonly confidence?: number;
+  readonly execution?: DeepChildAgentRunExecutionView;
+  readonly executionHistory?: readonly DeepChildAgentRunExecutionSegmentView[];
+  readonly parentInstructions?: readonly DeepChildAgentRunParentInstructionView[];
+  readonly pendingApproval?: DeepChildAgentRunPendingApprovalView;
   readonly startedAt: string;
   readonly completedAt?: string;
 };
@@ -331,7 +544,7 @@ export type DeepDelegationDecisionView = {
   readonly inputRefs: readonly string[];
   readonly rationale: string;
   readonly uncertainty: string;
-  readonly source: "ai" | "deterministic_fallback";
+  readonly source: "ai" | "deterministic_fallback" | "control_api";
   readonly confidence: number;
   readonly reasoningTraceRefs: readonly string[];
   readonly createdAt: string;
@@ -343,6 +556,20 @@ export type DeepParentSynthesisNextAction =
   | "request_convergence"
   | "request_user_clarification"
   | "stop";
+
+export type DeepParentSynthesisChildReviewDecision =
+  | "accepted"
+  | "rejected"
+  | "needs_followup";
+
+export type DeepParentSynthesisChildReviewView = {
+  readonly childRunId: string;
+  readonly decision: DeepParentSynthesisChildReviewDecision;
+  readonly reason: string;
+  readonly evidenceRefs: readonly string[];
+  readonly sourceCandidateId?: string;
+  readonly confidence?: number;
+};
 
 /**
  * 父层综合记录前端镜像。镜像 [`ParentSynthesisResult`](src/domain/underground/agent-fabric.ts:97)。
@@ -356,6 +583,7 @@ export type DeepParentSynthesisView = {
   readonly retainedMaterialRefs: readonly string[];
   readonly rejectedMaterialRefs: readonly string[];
   readonly conflictRefs: readonly string[];
+  readonly childReviews?: readonly DeepParentSynthesisChildReviewView[];
   readonly outputRefs: readonly string[];
   readonly nextAction: DeepParentSynthesisNextAction;
   readonly decisionSummary: string;
@@ -423,9 +651,18 @@ export type DeepExplorationReportView = {
  */
 export type DeepRunView = {
   readonly run: DeepRunRecord;
+  readonly conversation?: DeepConversationView;
   readonly agentRunTree: DeepAgentRunTreeRef;
   readonly report: DeepExplorationReportView | undefined;
   readonly eventSequence: readonly DeepStreamEvent[];
+  readonly liveProjection: DeepLiveProjection;
+  /**
+   * 研究 brief（T3-1，FR-BRIEF-01 前端消费侧）。
+   *
+   * 首次 spawn_children 后由后端装配（T2-1 写入 record.brief），run 未进入 spawn 阶段时为
+   * `undefined`。Panel 计划阶段消费此 brief 的安全字段，不直接暴露 manager 长 rationale。
+   */
+  readonly brief?: DeepResearchBriefView;
 };
 
 // ---------------------------------------------------------------------------
@@ -449,13 +686,45 @@ export type StartDeepRunResponse = {
     readonly status: DeepRunStatus;
     readonly runKind: DeepRunKind;
     readonly runMode: DeepRunMode;
+    readonly rootRunId?: string;
+    readonly turnOrdinal?: number;
   };
 };
+
+/** POST /api/deep/intake 响应。 */
+export type DeepIntakeResponse =
+  | {
+      readonly ok: true;
+      readonly status: "needs_input" | "answered";
+      readonly conversation: DeepConversationView;
+      readonly intake: DeepIntakeTurn;
+    }
+  | {
+      readonly ok: true;
+      readonly status: "running";
+      readonly conversation: DeepConversationView;
+      readonly intake: DeepIntakeTurn;
+      readonly run: {
+        readonly runId: string;
+        readonly conversationId: string;
+        readonly status: DeepRunStatus;
+        readonly runKind: DeepRunKind;
+        readonly runMode: DeepRunMode;
+        readonly rootRunId?: string;
+        readonly turnOrdinal?: number;
+      };
+    };
 
 /** GET /api/deep/conversations/:id/runs 响应（历史复盘列表）。 */
 export type ListDeepRunsResponse = {
   readonly ok: true;
   readonly conversationId: string;
+  readonly runs: readonly DeepRunSummary[];
+};
+
+/** GET /api/deep/runs 响应（跨会话最近运行列表）。 */
+export type ListDeepRunSummariesResponse = {
+  readonly ok: true;
   readonly runs: readonly DeepRunSummary[];
 };
 
@@ -470,4 +739,38 @@ export type DeepRunControlResponse = {
   readonly ok: true;
   readonly status: "interrupt_requested" | "correct_requested" | "stop_requested";
   readonly runId: string;
+};
+
+/** POST /api/deep/runs/:runId/follow-up 响应。 */
+export type DeepRunFollowUpResponse = {
+  readonly ok: true;
+  readonly status: "running";
+  readonly conversationId: string;
+  readonly runId: string;
+  readonly parentRunId: string;
+};
+
+/** POST /api/deep/runs/:runId/resynthesize 响应。 */
+export type DeepRunResynthesisResponse = {
+  readonly ok: true;
+  readonly view: DeepRunView;
+};
+
+/** POST /api/deep/runs/:runId/children/:childRunId/messages 响应。 */
+export type DeepChildOperationResponse = {
+  readonly ok: true;
+  readonly status?: "queued" | "continued";
+  readonly runId?: string;
+  readonly childRunId?: string;
+  readonly messageRef?: string;
+  readonly childStatus?: DeepChildRunStatus;
+  readonly queuedCount?: number;
+  readonly queuedAt?: string;
+  readonly view: DeepRunView;
+};
+
+/** POST /api/deep/runs/:runId/children/:childRunId/confirmations/:confirmationId/decision 响应。 */
+export type DeepChildConfirmationResponse = {
+  readonly ok: true;
+  readonly view: DeepRunView;
 };

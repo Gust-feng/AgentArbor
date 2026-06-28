@@ -145,6 +145,7 @@ export function createFileSystemDeepConversationStore(runtimeHome: string): Deep
 export type CreateDeepConversationInput = {
   readonly title?: string;
   readonly goal: string;
+  readonly birthWorkspaceDirectory?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
 };
 
@@ -205,6 +206,7 @@ export function createDeepConversationService(options: {
         conversationId,
         title: deriveTitle(input.title, goal),
         goal,
+        birthWorkspaceDirectory: emptyToUndefined(input.birthWorkspaceDirectory),
         isolation: createDeepConversationIsolationMark(),
         taskSoilInput: validatedTaskSoilInput,
         permissionBoundaryRefs: validatedTaskSoilInput.permissionBoundaryRefs ?? [],
@@ -259,6 +261,11 @@ function deriveTitle(title: string | undefined, goal: string): string {
     return "Deep 会话";
   }
   return goal.length > 60 ? `${goal.slice(0, 59)}…` : goal;
+}
+
+function emptyToUndefined(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
 function cloneDeepConversation(conversation: DeepConversation): DeepConversation {

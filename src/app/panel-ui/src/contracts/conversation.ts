@@ -1,6 +1,27 @@
 import type {
   BasicAgentRunView,
 } from "./run";
+import type { WorkspaceFolderSummary } from "./common";
+
+export type ConversationTurnAttachment = {
+  readonly attachmentId: string;
+  readonly kind: "workspace" | "file" | "project" | "web";
+  readonly title: string;
+  readonly summary?: string;
+  readonly readonlyPreviewMeta?: {
+    readonly available?: boolean;
+    readonly title?: string;
+    readonly byteLength?: number;
+    readonly mimeType?: string;
+    readonly truncated?: boolean;
+  };
+  readonly mediaPreview?: {
+    readonly kind: "image";
+    readonly url: string;
+    readonly mimeType: string;
+    readonly byteLength?: number;
+  };
+};
 
 export type ConversationTurn = {
   readonly turnId: string;
@@ -9,6 +30,7 @@ export type ConversationTurn = {
   readonly content: string;
   readonly status: string;
   readonly runId?: string;
+  readonly attachments?: readonly ConversationTurnAttachment[];
   readonly responseModel?: {
     readonly profileId: string;
     readonly label?: string;
@@ -27,6 +49,7 @@ export type Conversation = {
   readonly activeRunId?: string;
   readonly latestRunId?: string;
   readonly currentRun?: BasicAgentRunView;
+  readonly workspaceFolder?: WorkspaceFolderSummary;
   readonly queuedRunIds?: readonly string[];
   readonly pinnedAt?: string;
   readonly updatedAt?: string;
@@ -42,6 +65,7 @@ export type ConversationSummary = {
   readonly status?: string;
   readonly activeRunId?: string;
   readonly latestRunId?: string;
+  readonly workspaceFolder?: WorkspaceFolderSummary;
   readonly queuedRunIds?: readonly string[];
   readonly queuedRunCount?: number;
   readonly pinnedAt?: string;

@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   turnModelFromConfig,
+  type PanelConversationTurnAttachment,
   type PanelConversationReadModel,
   type PanelConversationSummaryReadModel,
 } from "../panel-conversations.js";
+import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import { restorePersistedPanelConversation } from "./conversation-restore.js";
@@ -22,6 +24,11 @@ import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
 import { syncConversationPreviewsForRunningJobs } from "./conversation-sync.js";
 import { createConversationCurrentRunReadModel } from "./conversation-current-run.js";
 import type { PanelRuntime } from "./runtime.js";
+import type { PanelContextAttachmentMediaEntry } from "./types.js";
+import {
+  workspaceFolderSummaryFromPath,
+  type WorkspaceFolderSummary,
+} from "../workspace-folder-summary.js";
 
 export async function handlePanelConversationRoute(
   runtime: PanelRuntime,
@@ -142,7 +149,10 @@ export async function getPanelConversation(
     const currentRun = currentRunId === undefined
       ? undefined
       : await createConversationCurrentRunReadModel(runtime, currentRunId);
-    return runtime.conversations.getReadModelWithCurrentRun(conversationId, currentRun);
+    const readModel = runtime.conversations.getReadModelWithCurrentRun(conversationId, currentRun);
+    return readModel === undefined
+      ? undefined
+      : enrichPanelConversationWorkspaceFolder(runtime, readModel);
   }
   const persisted = await runtime.runtimeDatabase?.getConversation(conversationId);
   if (persisted === undefined) {
@@ -172,12 +182,17 @@ async function handleConversationMessageRequest(
   const runAfterRunId = runtime.conversations.nextQueuePredecessor(conversationId);
   const shouldQueue = runAfterRunId !== undefined;
   const mergedTaskSoilInput = runInput.taskSoilInput;
+  const userTurnAttachments = conversationTurnAttachmentsFromTaskSoilInput(
+    mergedTaskSoilInput,
+    runtime.contextAttachmentMedia
+  );
 
   let started;
   try {
     started = runtime.conversations.startDesktopMessage({
       goal: runInput.goal,
       taskSoilInput: mergedTaskSoilInput,
+      attachments: userTurnAttachments,
       conversationId,
       queueBehindRunId: runAfterRunId,
     });
@@ -194,6 +209,7 @@ async function handleConversationMessageRequest(
     assistantTurnId: started.assistantTurn.turnId,
     runAfterRunId,
     taskSoilInput: mergedTaskSoilInput,
+    workspaceDirectory: runInput.workspaceDirectory,
     reasoningEffort: runInput.reasoningEffort,
     toolConfirmationPolicy: runInput.toolConfirmationPolicy,
     modelOverride: runInput.modelOverride,
@@ -229,6 +245,80 @@ async function handleConversationMessageRequest(
   }
 }
 
+function conversationTurnAttachmentsFromTaskSoilInput(
+  taskSoilInput: DesktopTaskSoilInput | undefined,
+  mediaEntries: ReadonlyMap<string, PanelContextAttachmentMediaEntry>
+): readonly PanelConversationTurnAttachment[] | undefined {
+  const contextRefs = taskSoilInput?.contextRefs ?? [];
+  if (contextRefs.length === 0) {
+    return undefined;
+  }
+  const attachments: PanelConversationTurnAttachment[] = [];
+  for (const ref of contextRefs) {
+    const attachmentId = ref.attachmentId?.trim();
+    if (attachmentId === undefined || attachmentId.length === 0) {
+      continue;
+    }
+    const mediaEntry = mediaEntries.get(attachmentId);
+    attachments.push({
+      attachmentId,
+      kind: ref.kind,
+      title: ref.title ?? mediaEntry?.title ?? ref.summary ?? "附件",
+      summary: conversationTurnAttachmentSummary(ref),
+      readonlyPreviewMeta: {
+        available: ref.metadata?.available,
+        title: ref.title,
+        byteLength: ref.metadata?.byteLength,
+        mimeType: ref.metadata?.mimeType,
+        truncated: ref.metadata?.truncated,
+      },
+      mediaPreview: mediaEntry === undefined
+        ? undefined
+        : {
+            kind: "image",
+            url: contextAttachmentMediaPreviewUrl(mediaEntry.attachmentId),
+            mimeType: mediaEntry.mimeType,
+            byteLength: mediaEntry.byteLength,
+          },
+    });
+  }
+  return attachments.length === 0 ? undefined : attachments;
+}
+
+function contextAttachmentMediaPreviewUrl(attachmentId: string): string {
+  return `/api/context/attachments/media/${encodeURIComponent(attachmentId)}`;
+}
+
+function conversationTurnAttachmentSummary(
+  ref: NonNullable<DesktopTaskSoilInput["contextRefs"]>[number]
+): string | undefined {
+  const parts = [ref.metadata?.mimeType, byteSizeLabel(ref.metadata?.byteLength)]
+    .filter((value): value is string => value !== undefined);
+  if (parts.length > 0) {
+    return parts.join(" · ");
+  }
+  if (ref.ref.startsWith("local-file:")) {
+    return "本地文件";
+  }
+  if (ref.ref.startsWith("local-project:")) {
+    return "本地文件夹";
+  }
+  return ref.summary;
+}
+
+function byteSizeLabel(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${value} bytes`;
+}
+
 function queuedRunCanStartNow(runtime: PanelRuntime, predecessorRunId: string | undefined): boolean {
   if (predecessorRunId === undefined) {
     return true;
@@ -260,7 +350,55 @@ async function listPanelConversations(
     jobs: runtime.runJobs.list(),
     createResponse: (job) => createPanelRunJobResponse(runtime, job),
   });
-  return runtime.conversations.list().slice(0, Math.max(0, Math.floor(limit)));
+  return enrichPanelConversationSummaries(
+    runtime,
+    runtime.conversations.list().slice(0, Math.max(0, Math.floor(limit)))
+  );
+}
+
+async function enrichPanelConversationSummaries(
+  runtime: PanelRuntime,
+  conversations: readonly PanelConversationSummaryReadModel[]
+): Promise<readonly PanelConversationSummaryReadModel[]> {
+  return Promise.all(
+    conversations.map((conversation) => enrichPanelConversationWorkspaceFolder(runtime, conversation))
+  );
+}
+
+async function enrichPanelConversationWorkspaceFolder<T extends PanelConversationSummaryReadModel>(
+  runtime: PanelRuntime,
+  conversation: T
+): Promise<T> {
+  const workspaceFolder = await workspaceFolderForConversation(runtime, conversation.conversationId);
+  return workspaceFolder === undefined
+    ? conversation
+    : {
+        ...conversation,
+        workspaceFolder,
+      };
+}
+
+async function workspaceFolderForConversation(
+  runtime: PanelRuntime,
+  conversationId: string
+): Promise<WorkspaceFolderSummary | undefined> {
+  const firstRunId = firstAssistantRunId(runtime, conversationId);
+  if (firstRunId === undefined) {
+    return undefined;
+  }
+  const liveRunWorkspace = runtime.runJobs.get(firstRunId)?.capabilitySnapshot?.workspace.workspaceDirectory;
+  if (liveRunWorkspace !== undefined) {
+    return workspaceFolderSummaryFromPath(liveRunWorkspace);
+  }
+  const persistedRun = await runtime.runtimeDatabase?.getRun(firstRunId);
+  return workspaceFolderSummaryFromPath(
+    persistedRun?.run.workspacePath ?? persistedRun?.run.capabilitySnapshot?.workspace.workspaceDirectory
+  );
+}
+
+function firstAssistantRunId(runtime: PanelRuntime, conversationId: string): string | undefined {
+  const conversation = runtime.conversations.get(conversationId);
+  return conversation?.turns.find((turn) => turn.role === "assistant" && turn.runId !== undefined)?.runId;
 }
 
 async function ensurePanelConversationLoaded(

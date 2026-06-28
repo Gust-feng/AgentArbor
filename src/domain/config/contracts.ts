@@ -14,6 +14,7 @@ export type ConfiguredWebSearchProvider =
   | "tavily"
   | "exa"
   | "zai"
+  | "metaso"
   | "google"
   | "bing"
   | "model_builtin"
@@ -665,6 +666,7 @@ export type InformationAccessSettings = {
   readonly tavily: WebSearchProviderSettings & { readonly providerKind: "tavily" };
   readonly exa: WebSearchProviderSettings & { readonly providerKind: "exa" };
   readonly zai: WebSearchProviderSettings & { readonly providerKind: "zai" };
+  readonly metaso: WebSearchProviderSettings & { readonly providerKind: "metaso" };
   readonly google: WebSearchProviderSettings & { readonly providerKind: "google" };
   readonly bing: WebSearchProviderSettings & { readonly providerKind: "bing" };
 };

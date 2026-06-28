@@ -357,6 +357,7 @@ function webSearchProviderFromEnv(env: Readonly<Record<string, string | undefine
     provider === "tavily" ||
     provider === "exa" ||
     provider === "zai" ||
+    provider === "metaso" ||
     provider === "google" ||
     provider === "bing" ||
     provider === "none"
@@ -365,6 +366,7 @@ function webSearchProviderFromEnv(env: Readonly<Record<string, string | undefine
   }
   if (firstNonBlank(env.AGENTARBOR_EXA_API_KEY) !== undefined) return "exa";
   if (firstNonBlank(env.AGENTARBOR_ZAI_API_KEY) !== undefined) return "zai";
+  if (firstNonBlank(env.AGENTARBOR_METASO_API_KEY, env.METASO_API_KEY) !== undefined) return "metaso";
   if (firstNonBlank(env.AGENTARBOR_GOOGLE_API_KEY) !== undefined) return "google";
   if (firstNonBlank(env.AGENTARBOR_BING_API_KEY) !== undefined) return "bing";
   return "tavily";
@@ -380,6 +382,7 @@ function webSearchApiKeyFromEnv(
   const generic = env.AGENTARBOR_WEB_SEARCH_API_KEY;
   if (provider === "exa") return firstNonBlank(generic, env.AGENTARBOR_EXA_API_KEY, env.EXA_API_KEY);
   if (provider === "zai") return firstNonBlank(generic, env.AGENTARBOR_ZAI_API_KEY, env.ZAI_API_KEY, env.ZHIPUAI_API_KEY);
+  if (provider === "metaso") return firstNonBlank(generic, env.AGENTARBOR_METASO_API_KEY, env.METASO_API_KEY);
   if (provider === "google") return firstNonBlank(generic, env.AGENTARBOR_GOOGLE_API_KEY, env.GOOGLE_API_KEY);
   if (provider === "bing") return firstNonBlank(generic, env.AGENTARBOR_BING_API_KEY, env.BING_API_KEY);
   return firstNonBlank(generic, env.AGENTARBOR_TAVILY_API_KEY, env.TAVILY_API_KEY);

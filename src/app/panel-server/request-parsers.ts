@@ -499,6 +499,7 @@ function parseOptionalWebSearchProvider(value: unknown): UpdateWebSearchConfigIn
     value === "tavily" ||
     value === "exa" ||
     value === "zai" ||
+    value === "metaso" ||
     value === "google" ||
     value === "bing" ||
     value === "model_builtin" ||

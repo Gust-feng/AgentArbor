@@ -25,7 +25,7 @@ test("default ToolCenter exposes model-visible search and read tools", async () 
   const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
   const names = center.list().map((tool) => tool.name);
 
-  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "http_request", "browser_snapshot"]);
+  assertCoreDesktopToolNames(names);
   assert.equal(center.has("web_search"), false);
 
   const search = await center.execute(
@@ -582,7 +582,7 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "http_request", "browser_snapshot"]);
+    assertCoreDesktopToolNames(names);
     assert.equal(search.status, "completed");
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
@@ -639,6 +639,68 @@ test("configured ToolCenter reads Exa web search config and routes search throug
   }
 });
 
+test("configured ToolCenter reads Metaso web search config and routes search through Metaso", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-metaso-"));
+  const calls: { readonly url: string; readonly headers: Record<string, string>; readonly body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    calls.push({
+      url,
+      headers: init.headers,
+      body: JSON.parse(init.body ?? "{}") as Record<string, unknown>,
+    });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          resultId: "configured-metaso-result",
+          text: "Configured Metaso answer",
+          references: [
+            {
+              title: "Configured Metaso",
+              url: "https://example.test/metaso",
+              summary: "configured metaso snippet",
+              siteName: "Example",
+            },
+          ],
+        },
+      }),
+    };
+  };
+  try {
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    await configCenter.updateWebSearchConfig({
+      provider: "metaso",
+      apiKey: "metaso-configured-tool-secret",
+      maxResults: 2,
+    });
+
+    const center = await createConfiguredToolCenter(configCenter, { fetch, playwrightAvailable: true });
+    const search = await center.execute(
+      { callId: "call-search-metaso", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
+    );
+    const output = search.output as {
+      readonly results?: readonly { readonly metadata?: Readonly<Record<string, unknown>>; readonly snippet?: string }[];
+    };
+
+    assert.equal(search.status, "completed");
+    assert.match(calls[0]?.url ?? "", /metaso\.cn\/api\/open\/search\/v2/);
+    assert.equal(calls[0]?.headers.authorization, "Bearer metaso-configured-tool-secret");
+    assert.equal(calls[0]?.body.question, "AgentArbor");
+    assert.equal(calls[0]?.body.lang, "zh");
+    assert.equal(output.results?.[0]?.metadata?.provider, "metaso");
+    assert.equal(output.results?.[0]?.snippet, "configured metaso snippet");
+    assert.equal(JSON.stringify(search.output).includes("metaso-configured-tool-secret"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("configured ToolCenter still registers search/read and degrades web search without Tavily key", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-nokey-"));
   try {
@@ -654,7 +716,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "http_request", "browser_snapshot"]);
+    assertCoreDesktopToolNames(names);
     assert.equal(search.status, "completed");
     assert.equal((search.output as { status?: string }).status, "no-provider");
   } finally {
@@ -776,6 +838,26 @@ function fixedResearchRuntime(overrides: {
       defaultSearchSources: ["web", "codebase"],
     }),
   };
+}
+
+function assertCoreDesktopToolNames(names: readonly string[]): void {
+  for (const expected of [
+    "search",
+    "read",
+    "read_file",
+    "list_dir",
+    "grep_files",
+    "create_file",
+    "write_file",
+    "edit_file",
+    "delete_file",
+    "shell_command",
+    "http_request",
+    "browser_snapshot",
+  ]) {
+    assert.equal(names.includes(expected), true, `expected ToolCenter to include ${expected}`);
+  }
+  assert.equal(names.includes("web_search"), false);
 }
 
 function fixedSearchResult(query: InformationQuery): InformationSearchResult {

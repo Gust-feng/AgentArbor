@@ -102,6 +102,7 @@ function WebSearchSettings(props: {
               { value: "tavily", label: "Tavily" },
               { value: "exa", label: "Exa" },
               { value: "zai", label: "Z.AI" },
+              { value: "metaso", label: "秘塔搜索" },
               { value: "google", label: "Google" },
               { value: "bing", label: "Bing Legacy" },
               { value: "model_builtin", label: "模型内置" },
@@ -169,6 +170,7 @@ function WebSearchSettings(props: {
 function webSearchApiKeyLabel(provider: string): string {
   if (provider === "exa") return "Exa Key";
   if (provider === "zai") return "Z.AI Key";
+  if (provider === "metaso") return "秘塔 Key";
   if (provider === "google") return "Google Key";
   if (provider === "bing") return "Bing Key";
   return "Tavily Key";

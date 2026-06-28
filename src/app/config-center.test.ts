@@ -835,6 +835,41 @@ test("ConfigCenter stores Exa web search keys under provider-scoped secrets", as
   }
 });
 
+test("ConfigCenter stores Metaso web search keys under provider-scoped secrets", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-web-search-metaso-"));
+  const metasoSecret = "metaso-web-search-secret";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const updated = await configCenter.updateWebSearchConfig({
+      provider: "metaso",
+      apiKey: metasoSecret,
+      maxResults: 6,
+    });
+    const env = await configCenter.createModelRuntimeEnvironment();
+    const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
+    const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
+
+    assert.equal(updated.provider, "metaso");
+    assert.equal(updated.providerKind, "metaso");
+    assert.equal(updated.status, "ready");
+    assert.equal(updated.secretConfigured, true);
+    assert.equal(updated.maxResults, 6);
+    assert.equal(JSON.stringify(updated).includes(metasoSecret), false);
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_PROVIDER, "metaso");
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_API_KEY, metasoSecret);
+    assert.equal(env.AGENTARBOR_METASO_API_KEY, metasoSecret);
+    assert.equal(env.METASO_API_KEY, metasoSecret);
+    assert.equal(env.AGENTARBOR_TAVILY_API_KEY, undefined);
+    assert.equal(settingsRaw.includes(metasoSecret), false);
+    assert.equal(secretsRaw.includes(metasoSecret), true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("ConfigCenter requires Google engine id before reporting web search ready", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-web-search-google-"));
   const googleSecret = "google-web-search-secret";

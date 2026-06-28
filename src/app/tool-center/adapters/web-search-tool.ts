@@ -17,7 +17,7 @@ export type FetchLikeResponse = {
   readonly text?: () => Promise<string>;
 };
 
-export type WebSearchProvider = "tavily" | "exa" | "zai" | "google" | "bing" | "none";
+export type WebSearchProvider = "tavily" | "exa" | "zai" | "metaso" | "google" | "bing" | "none";
 
 export type WebSearchToolOptions = {
   readonly provider?: WebSearchProvider;
@@ -50,6 +50,7 @@ export type WebSearchToolOutput = {
 const TAVILY_SEARCH_ENDPOINT = "https://api.tavily.com/search";
 const EXA_SEARCH_ENDPOINT = "https://api.exa.ai/search";
 const ZAI_SEARCH_ENDPOINT = "https://api.z.ai/api/paas/v4/web_search";
+const METASO_SEARCH_ENDPOINT = "https://metaso.cn/api/open/search/v2";
 const GOOGLE_CUSTOM_SEARCH_ENDPOINT = "https://www.googleapis.com/customsearch/v1";
 const BING_WEB_SEARCH_ENDPOINT = "https://api.bing.microsoft.com/v7.0/search";
 const DEFAULT_MAX_RESULTS = 5;
@@ -177,6 +178,9 @@ async function executeProviderSearch(input: {
   if (input.provider === "zai") {
     return searchZai(input);
   }
+  if (input.provider === "metaso") {
+    return searchMetaso(input);
+  }
   if (input.provider === "google") {
     return searchGoogle(input);
   }
@@ -264,6 +268,32 @@ async function searchZai(input: ProviderSearchInput): Promise<WebSearchToolOutpu
     searched: true,
     query: input.query,
     results: resultsFromZai(raw).slice(0, input.maxResults),
+  };
+}
+
+async function searchMetaso(input: ProviderSearchInput): Promise<WebSearchToolOutput> {
+  const response = await input.fetch(input.options.endpoint ?? METASO_SEARCH_ENDPOINT, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${input.apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      question: input.query,
+      lang: "zh",
+    }),
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    return providerFailed(input, response.status);
+  }
+  const raw = await response.json();
+  return {
+    provider: input.provider,
+    status: "completed",
+    searched: true,
+    query: input.query,
+    results: resultsFromMetaso(raw).slice(0, input.maxResults),
   };
 }
 
@@ -396,6 +426,36 @@ function resultsFromZai(raw: unknown): WebSearchToolOutput["results"] {
   });
 }
 
+function resultsFromMetaso(raw: unknown): WebSearchToolOutput["results"] {
+  const record = asRecord(raw);
+  const data = asRecord(record?.data) ?? record;
+  const directResults = firstArray(data?.webpages, data?.results, data?.references, data?.searchResults);
+  if (directResults.length > 0) {
+    return directResults.map((item, index) => metasoReferenceResult(item, index));
+  }
+  return [];
+}
+
+function metasoReferenceResult(item: unknown, index: number): WebSearchToolOutput["results"][number] {
+  const result = asRecord(item);
+  const title = stringOrFallback(
+    result?.title ?? result?.name ?? result?.siteName ?? result?.source,
+    `秘塔搜索结果 ${index + 1}`
+  );
+  const url = stringOrFallback(result?.url ?? result?.link ?? result?.href ?? result?.originUrl, "");
+  const snippet = stringOrFallback(
+    result?.snippet ?? result?.summary ?? result?.content ?? result?.text ?? result?.description,
+    ""
+  );
+  return compactSearchResult({
+    title,
+    url,
+    snippet,
+    source: stringOrUndefined(result?.source ?? result?.siteName ?? result?.media),
+    publishedAt: stringOrUndefined(result?.publishedAt ?? result?.publishTime ?? result?.date),
+  });
+}
+
 function resultsFromGoogle(raw: unknown): WebSearchToolOutput["results"] {
   const record = asRecord(raw);
   const results = Array.isArray(record?.items) ? record.items : [];
@@ -453,6 +513,7 @@ function normalizeProvider(value: WebSearchProvider | undefined): WebSearchProvi
     value === "tavily" ||
     value === "exa" ||
     value === "zai" ||
+    value === "metaso" ||
     value === "google" ||
     value === "bing"
   ) {
@@ -479,7 +540,7 @@ function maxResultsForProvider(provider: Exclude<WebSearchProvider, "none">, val
   if (provider === "tavily") {
     return Math.min(20, requested);
   }
-  if (provider === "zai" || provider === "bing") {
+  if (provider === "zai" || provider === "metaso" || provider === "bing") {
     return Math.min(50, requested);
   }
   return Math.min(100, requested);
@@ -488,6 +549,7 @@ function maxResultsForProvider(provider: Exclude<WebSearchProvider, "none">, val
 function providerLabel(provider: WebSearchProvider): string {
   if (provider === "exa") return "Exa";
   if (provider === "zai") return "Z.AI";
+  if (provider === "metaso") return "秘塔搜索";
   if (provider === "google") return "Google Custom Search";
   if (provider === "bing") return "Bing Web Search";
   if (provider === "none") return "configured";
@@ -504,6 +566,15 @@ function stringOrFallback(value: unknown, fallback: string): string {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function firstArray(...values: readonly unknown[]): readonly unknown[] {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+  return [];
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {

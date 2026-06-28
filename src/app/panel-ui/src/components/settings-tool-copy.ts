@@ -17,6 +17,7 @@ export function providerName(value: string): string {
   if (value === "tavily") return "Tavily";
   if (value === "exa") return "Exa";
   if (value === "zai") return "Z.AI";
+  if (value === "metaso") return "秘塔搜索";
   if (value === "google") return "Google";
   if (value === "bing") return "Bing Legacy";
   if (value === "model_builtin") return "模型内置";

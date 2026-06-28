@@ -136,6 +136,53 @@ test("web_search maps Z.AI web search results", async () => {
   assert.equal(calls[0]?.body.search_query, "AgentArbor ZAI");
 });
 
+test("web_search maps Metaso search references and authenticates with bearer token", async () => {
+  const calls: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    calls.push({
+      url,
+      headers: init.headers,
+      body: JSON.parse(init.body ?? "{}") as Record<string, unknown>,
+    });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          resultId: "metaso-result-1",
+          text: "Metaso answer text",
+          references: [
+            {
+              title: "Metaso Result",
+              url: "https://example.test/metaso",
+              summary: "Metaso snippet",
+              siteName: "Example",
+            },
+          ],
+        },
+      }),
+    };
+  };
+  const tool = createWebSearchTool({ provider: "metaso", apiKey: "metaso-test-secret", maxResults: 2, fetch });
+
+  const output = await tool.execute(
+    { query: "AgentArbor Metaso" },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  ) as WebSearchToolOutput;
+
+  assert.equal(output.provider, "metaso");
+  assert.deepEqual(output.results, [{
+    title: "Metaso Result",
+    url: "https://example.test/metaso",
+    snippet: "Metaso snippet",
+    source: "Example",
+  }]);
+  assert.match(calls[0]?.url ?? "", /metaso\.cn\/api\/open\/search\/v2/);
+  assert.equal(calls[0]?.headers.authorization, "Bearer metaso-test-secret");
+  assert.equal(calls[0]?.body.question, "AgentArbor Metaso");
+  assert.equal(calls[0]?.body.lang, "zh");
+});
+
 test("web_search maps Google Custom Search results and requires cx", async () => {
   const urls: string[] = [];
   const fetch: FetchLike = async (url, init) => {

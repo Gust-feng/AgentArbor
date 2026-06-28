@@ -82,6 +82,7 @@ export { parseMcpCommandLine, sanitizeMcpArgs } from "./tool-mcp-settings.js";
 export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
 export const INFORMATION_EXA_SECRET_REF = "secret://local-dev/information-source/exa/default/api-key";
 export const INFORMATION_ZAI_SECRET_REF = "secret://local-dev/information-source/zai/default/api-key";
+export const INFORMATION_METASO_SECRET_REF = "secret://local-dev/information-source/metaso/default/api-key";
 export const INFORMATION_GOOGLE_SECRET_REF = "secret://local-dev/information-source/google/default/api-key";
 export const INFORMATION_BING_SECRET_REF = "secret://local-dev/information-source/bing/default/api-key";
 const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourceKind[] = [
@@ -96,6 +97,7 @@ const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourc
 const DEFAULT_TAVILY_MAX_RESULTS = 5;
 const DEFAULT_EXA_MAX_RESULTS = 5;
 const DEFAULT_ZAI_MAX_RESULTS = 5;
+const DEFAULT_METASO_MAX_RESULTS = 5;
 const DEFAULT_GOOGLE_MAX_RESULTS = 5;
 const DEFAULT_BING_MAX_RESULTS = 5;
 
@@ -130,6 +132,7 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
   const tavily = asRecord(informationAccess.tavily);
   const exa = asRecord(informationAccess.exa);
   const zai = asRecord(informationAccess.zai);
+  const metaso = asRecord(informationAccess.metaso);
   const google = asRecord(informationAccess.google);
   const bing = asRecord(informationAccess.bing);
   return normalizeLocalSettings({
@@ -184,6 +187,13 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
               endpoint: optionalString(zai.endpoint),
               searchEngine: optionalString(zai.searchEngine) ?? "search-prime",
               updatedAt: optionalString(zai.updatedAt) ?? updatedAt,
+            },
+            metaso: {
+              providerKind: "metaso",
+              maxResults: positiveIntegerFromUnknown(metaso.maxResults) ?? DEFAULT_METASO_MAX_RESULTS,
+              secretRef: optionalString(metaso.secretRef) ?? INFORMATION_METASO_SECRET_REF,
+              endpoint: optionalString(metaso.endpoint),
+              updatedAt: optionalString(metaso.updatedAt) ?? updatedAt,
             },
             google: {
               providerKind: "google",
@@ -334,6 +344,12 @@ export function createDefaultInformationAccessSettings(now: string): Information
       searchEngine: "search-prime",
       updatedAt: now,
     },
+    metaso: {
+      providerKind: "metaso",
+      maxResults: DEFAULT_METASO_MAX_RESULTS,
+      secretRef: INFORMATION_METASO_SECRET_REF,
+      updatedAt: now,
+    },
     google: {
       providerKind: "google",
       maxResults: DEFAULT_GOOGLE_MAX_RESULTS,
@@ -385,6 +401,12 @@ export function normalizeInformationAccessSettings(
       searchEngine: "search-prime",
       updatedAt: now,
     }),
+    metaso: normalizeWebSearchProviderSettings(settings.metaso, {
+      providerKind: "metaso",
+      maxResults: DEFAULT_METASO_MAX_RESULTS,
+      secretRef: INFORMATION_METASO_SECRET_REF,
+      updatedAt: now,
+    }),
     google: normalizeWebSearchProviderSettings(settings.google, {
       providerKind: "google",
       maxResults: DEFAULT_GOOGLE_MAX_RESULTS,
@@ -413,6 +435,7 @@ export function isWebSearchProvider(value: unknown): value is ConfiguredWebSearc
   return value === "tavily" ||
     value === "exa" ||
     value === "zai" ||
+    value === "metaso" ||
     value === "google" ||
     value === "bing" ||
     value === "model_builtin" ||
@@ -423,6 +446,7 @@ export function isWebSearchProviderKind(value: unknown): value is ConfiguredWebS
   return value === "tavily" ||
     value === "exa" ||
     value === "zai" ||
+    value === "metaso" ||
     value === "google" ||
     value === "bing";
 }

@@ -558,6 +558,7 @@ export class ConfigCenter {
       tavily: currentInformation.tavily,
       exa: currentInformation.exa,
       zai: currentInformation.zai,
+      metaso: currentInformation.metaso,
       google: currentInformation.google,
       bing: currentInformation.bing,
     };
@@ -600,6 +601,7 @@ export class ConfigCenter {
       tavily: currentInformation.tavily,
       exa: currentInformation.exa,
       zai: currentInformation.zai,
+      metaso: currentInformation.metaso,
       google: currentInformation.google,
       bing: currentInformation.bing,
     };
@@ -715,6 +717,8 @@ export class ConfigCenter {
       AGENTARBOR_TAVILY_MAX_RESULTS: externalWebProvider === "tavily" ? String(webMaxResults) : undefined,
       AGENTARBOR_EXA_API_KEY: externalWebProvider === "exa" ? webApiKey : undefined,
       AGENTARBOR_ZAI_API_KEY: externalWebProvider === "zai" ? webApiKey : undefined,
+      AGENTARBOR_METASO_API_KEY: externalWebProvider === "metaso" ? webApiKey : undefined,
+      METASO_API_KEY: externalWebProvider === "metaso" ? webApiKey : undefined,
       AGENTARBOR_GOOGLE_API_KEY: externalWebProvider === "google" ? webApiKey : undefined,
       AGENTARBOR_GOOGLE_CSE_ID: externalWebProvider === "google" ? googleEngineId : undefined,
       AGENTARBOR_BING_API_KEY: externalWebProvider === "bing" ? webApiKey : undefined,

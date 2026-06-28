@@ -1,13 +1,10 @@
 import React, { useEffect, useRef } from "react";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import type { CommandShellConfig, ConfiguredCommandShellKind } from "../contracts/config";
+import { CommandShellSelection } from "./command-shell-selection";
 import { RuntimeEnvironmentSettings } from "./runtime-environment-settings";
 import { SettingRow } from "./workspace-common";
 
-const LazyCommandShellSelection = React.lazy(async () => {
-  const module = await import("./command-shell-selection");
-  return { default: module.CommandShellSelection };
-});
 
 export function WorkspaceSettings(props: {
   readonly commandShell?: CommandShellConfig;
@@ -91,30 +88,12 @@ export function WorkspaceSettings(props: {
           </div>
         </SettingRow>
       </section>
-      <React.Suspense fallback={<CommandShellSelectionFallback />}>
-        <LazyCommandShellSelection
-          commandShell={props.commandShell}
-          savingCommandShell={props.savingCommandShell}
-          onSaveCommandShell={props.onSaveCommandShell}
-        />
-      </React.Suspense>
+      <CommandShellSelection
+        commandShell={props.commandShell}
+        savingCommandShell={props.savingCommandShell}
+        onSaveCommandShell={props.onSaveCommandShell}
+      />
       <RuntimeEnvironmentSettings tools={props.commandShell?.runtimeTools} />
     </div>
-  );
-}
-
-function CommandShellSelectionFallback(): React.ReactElement {
-  return (
-    <section className="settings-card" aria-busy="true">
-      <h3>命令 Shell</h3>
-      <SettingRow label="运行环境">
-        <select value="" disabled aria-label="命令 Shell 选择加载中">
-          <option value="">正在载入</option>
-        </select>
-      </SettingRow>
-      <SettingRow label="当前执行">
-        <span className="settings-value">正在载入 Shell 选择</span>
-      </SettingRow>
-    </section>
   );
 }

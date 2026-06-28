@@ -180,6 +180,7 @@ export type BasicAgentRunStartInput = {
   readonly assistantTurnId?: string;
   readonly runAfterRunId?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
+  readonly workspaceDirectory?: string;
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly modelOverride?: {

@@ -223,7 +223,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(multiAgentWorkspace.includes("intakeStatus={props.intakeStatus}"), true);
   assert.equal(multiAgentWorkspace.includes("ChatInputBar"), true);
   assert.equal(multiAgentWorkspace.includes('aria-label="多 Agent 工作区"'), true);
-  assert.equal(multiAgentWorkspace.includes("准备新的多 Agent 任务"), true);
+  assert.equal(multiAgentWorkspace.includes("准备新的多 Agent 任务"), false);
+  assert.equal(multiAgentWorkspace.includes("multi-agent-missionbar"), false);
   assert.equal(multiAgentWorkspace.includes("最近任务"), false);
   assert.equal(multiAgentWorkspace.includes("暂无历史"), false);
   assert.equal(multiAgentWorkspace.includes("props.runs"), true);
@@ -233,6 +234,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(multiAgentWorkspace.includes("with-side-panel"), true);
   assert.equal(multiAgentWorkspace.includes("with-child-inspector"), true);
   assert.equal(multiAgentWorkspace.includes("<DeepCollaborationIndex"), true);
+  assert.equal(multiAgentWorkspace.includes("runStatusLabel={statusLabel"), true);
   assert.equal(multiAgentWorkspace.includes('className="multi-agent-reading-shell"'), true);
   assert.equal(
     multiAgentWorkspace.indexOf('className="multi-agent-commandbar"') >
@@ -765,7 +767,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(shellStyles.includes(".sidebar-folder-heading"), true);
   assert.equal(shellStyles.includes(".sidebar-folder-more-button"), true);
   assert.equal(deepStyles.includes(".multi-agent-workspace"), true);
-  assert.equal(deepStyles.includes(".multi-agent-missionbar"), true);
+  assert.equal(deepStyles.includes(".multi-agent-missionbar"), false);
   assert.equal(deepStyles.includes(".multi-agent-body"), true);
   assert.equal(deepStyles.includes(".multi-agent-primary"), true);
   assert.equal(deepStyles.includes(".multi-agent-reading-shell"), true);
@@ -782,6 +784,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(deepStyles.includes(".deep-run-counters"), false);
   assert.equal(deepStyles.includes(".deep-progress-log"), false);
   assert.equal(deepStyles.includes(".deep-collaboration-index"), true);
+  assert.equal(deepStyles.includes(".deep-collaboration-index-runmeta"), true);
   assert.equal(deepStyles.includes(".deep-collaboration-index-list"), true);
   assert.equal(deepStyles.includes(".deep-workboard-result"), false);
   assert.equal(deepStyles.includes(".deep-workboard-objective"), false);

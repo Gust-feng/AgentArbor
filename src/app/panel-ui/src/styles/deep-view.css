@@ -3269,20 +3269,8 @@
   }
 }
 
-@keyframes multi-agent-missionbar-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .multi-agent-workspace,
-  .multi-agent-missionbar {
+  .multi-agent-workspace {
     animation: none;
   }
 }
@@ -3314,24 +3302,8 @@
     min-height: 0;
   }
 
-  .multi-agent-missionbar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: 10px 14px;
-  }
-
-  .multi-agent-title-stack {
-    display: grid;
-    gap: 1px;
-  }
-
-  .multi-agent-missionbar-meta {
-    flex-wrap: wrap;
-  }
-
   .deep-chat-view {
-    padding: 28px 18px 30px;
+    padding: 24px 18px 28px;
   }
 
   .deep-chat-thread {
@@ -3344,6 +3316,6 @@
   }
 
   .multi-agent-commandbar .chat-input-floating {
-    padding: 10px 12px 14px;
+    padding: var(--space-2) 18px var(--space-3);
   }
 }

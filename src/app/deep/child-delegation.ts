@@ -7,43 +7,35 @@
  *   - {@link assertOneLayerChildDepth}：Guard 确定性硬约束，强制 depth=1（复用
  *     AGENT_FABRIC_MVP_MAX_DEPTH + domain/underground/guard.ts），递归派生子 child 在
  *     写入前拒绝（FR-004 硬约束，可观察触发）。
- *   - {@link exploreDeepChild}：child 工具调用经 ToolCenter/Confirmation Gate（复用
- *     AgentTurnRuntime 的 toolCenter），产出局部材料（来源/证据/置信度/适用条件）。
+ *   - {@link exploreDeepChild}：兼容入口，委托给 DeepChildAgentRunner，让 child 作为标准
+ *     Agent run 执行 autonomous model-tool-model loop。
  *   - 数量上限：超出 {@link DEEP_MAX_CHILDREN} 的 childSpecs 不派生（overflowCount 可观察），
  *     由 manager 在下一 step 据此收束或 ask_user（AI-first 边界，不伪装派生成功）。
  *
  * 复用边界：不 import cognitive-work-session-fabric.ts（legacy），AgentSpec 构建在本文件
  * 本地实现；guard 复用 domain/underground/guard.ts；tool 执行复用 AgentTurnRuntime。
  */
-import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
-import type { ObservationRef } from "../../domain/observation/contracts.js";
 import type { AgentSpec, ChildAgentRun } from "../../domain/underground/agent-fabric.js";
 import {
   AGENT_FABRIC_MVP_MAX_DEPTH,
   createChildAgentRun,
-  completeChildAgentRun,
-  startChildAgentRun,
-  failChildAgentRun,
 } from "../../domain/underground/agent-fabric.js";
 import {
   createGuardResult,
   createGuardViolation,
   type GuardResult,
 } from "../../domain/underground/guard.js";
-import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
 import { createId, nowIso } from "../../kernel/id.js";
-// P6：可用工具能力声明——child 探索消息投影 run 冻结的 capabilitySnapshot 中本 child 被授权
-// 的工具能力简述，帮助 child 知道能用什么收集一手证据。仅作能力声明；实际调用仍经确认门。
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
+import { DEEP_CHILD_MATERIAL_CONTRACT_ID } from "./deep-model-io.js";
 import {
-  deepChildMaterialMessages,
-  deepChildMaterialOutputContract,
-  DEEP_CHILD_MATERIAL_CONTRACT_ID,
-  extractStructuredOutput,
-  parseDeepChildMaterial,
-} from "./deep-model-io.js";
-import { executeDeepTurn } from "./deep-turn.js";
+  buildFailedDeepChildAgentRun,
+  runDeepChildAgent,
+  type DeepChildAgentRunInput,
+  type DeepChildAgentExecutionStats,
+  type DeepChildAgentPrompt,
+  type DeepChildAgentRuntimeContinuation,
+} from "./deep-child-agent-runner.js";
 
 /** deep 一期默认 child 数量上限（FR-004）。 */
 export const DEEP_MAX_CHILDREN = 4;
@@ -91,8 +83,9 @@ export function assertOneLayerChildDepth(input: {
 /**
  * 按 DeepChildSpec 补全为完整 domain AgentSpec（child 角度探索用）。
  *
- * DeepChildSpec 是 manager 决策语义层的轻量派生请求；本函数补全 protocol/permissions/
- * budget 等完整字段后写入 AgentRunTree（contracts.ts DeepChildSpec 注释边界）。
+ * DeepChildSpec 是 manager 决策语义层的轻量派生请求；本函数补全 protocol/permissions
+ * 等完整字段后写入 AgentRunTree。预算只接收父 Agent 显式派生的可选轮次字段，
+ * 不注入工程默认预算。
  */
 export function createDeepChildAgentSpec(input: {
   readonly childSpec: DeepChildSpec;
@@ -105,9 +98,13 @@ export function createDeepChildAgentSpec(input: {
   return {
     specId: childSpec.specId,
     agentId: safeToken(childSpec.role, `deep-child-${index + 1}`),
-    displayName: safeText(childSpec.displayName, 80) || `Deep Child ${index + 1}`,
+    displayName: safeText(childSpec.displayName, 80) || `子 Agent ${index + 1}`,
     agentKind: "child",
     role: safeToken(childSpec.role, "deep_child"),
+    instructions: {
+      objective: childSpec.objective,
+      systemPromptRef: "prompt:deep.child.agent.standard.v1",
+    },
     protocol: {
       inputs: [{ source: "workspace", key: "task_soil_goal", required: true }],
       outputs: [{ type: "material", payloadSchema: DEEP_CHILD_MATERIAL_CONTRACT_ID }],
@@ -117,15 +114,11 @@ export function createDeepChildAgentSpec(input: {
     permissions: {
       allowModel: true,
       allowedTools: [...childSpec.allowedTools],
-      maxModelRounds: 2,
-      maxToolRounds: 2,
+      maxModelRounds: normalizeOptionalRoundLimit(childSpec.maxModelRounds),
+      maxToolRounds: normalizeOptionalRoundLimit(childSpec.maxToolRounds),
       fallback: "disabled",
     },
-    budget: {
-      maxModelRounds: 2,
-      maxToolRounds: 2,
-      maxOutputRefs: 6,
-    },
+    budget: buildChildAgentSpecBudget(childSpec),
     inputRefs: unique([
       `goal:${input.goalId}`,
       `trace:${input.traceId}`,
@@ -199,26 +192,16 @@ export function deriveDeepChildren(input: DeriveDeepChildrenInput): DeriveDeepCh
 // child 探索（经 ToolCenter/Confirmation Gate 产出局部材料）
 // ---------------------------------------------------------------------------
 
-export type ExploreDeepChildInput = {
-  readonly childRun: ChildAgentRun;
-  readonly goal: string;
-  readonly permissionBoundaryRefs: readonly string[];
-  readonly turnRuntime: AgentTurnRuntime;
-  readonly traceId: string;
-  readonly goalId: string;
-  readonly confirmationPolicy?: ToolConfirmationPolicy;
-  /**
-   * P6：run 启动时冻结的能力快照。携带时 child 探索消息会投影「本 child 被授权可用工具」段
-   * （childSpec.allowedTools ∩ 可用工具）及其能力简述，帮助 child 知道能用什么收集一手证据。
-   * 仅作能力声明；模型实际工具调用仍经 ToolCenter/确认门。
-   */
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
-};
+export type ExploreDeepChildInput = DeepChildAgentRunInput;
 
 export type ExploreDeepChildResult = {
   readonly summary: DeepChildSummary;
-  /** 探索完成后的 child run（status=completed，携带 outputRefs/evidenceRefs/confidence）。 */
+  /** child Agent 本轮终态 run（completed/blocked/failed 等，携带安全 refs/uncertainty）。 */
   readonly completedRun: ChildAgentRun;
+  readonly prompt?: DeepChildAgentPrompt;
+  readonly execution?: DeepChildAgentExecutionStats;
+  /** Runtime-only approval continuation for blocked child runs. Never persist this object. */
+  readonly pendingContinuation?: DeepChildAgentRuntimeContinuation;
 };
 
 /**
@@ -233,53 +216,7 @@ export type ExploreDeepChildResult = {
  * 还是 ask_user（AI-first 边界）。
  */
 export async function exploreDeepChild(input: ExploreDeepChildInput): Promise<ExploreDeepChildResult> {
-  const childSpec = deepChildSpecFromRun(input.childRun);
-  const startedRun = startChildAgentRun(input.childRun, input.childRun.startedAt);
-  const callerRef: ObservationRef = {
-    kind: "agent_run",
-    id: input.childRun.childRunId,
-    label: `deep_child:${childSpec.role}`,
-  };
-  const turn = await executeDeepTurn({
-    turnRuntime: input.turnRuntime,
-    traceId: input.traceId,
-    goalId: input.goalId,
-    callerAgentId: input.childRun.spec.agentId,
-    callerRef,
-    purpose: "deep_child_material",
-    outputContract: deepChildMaterialOutputContract(),
-    inputRefs: dedupeObservationRefs([
-      { kind: "trace", id: input.traceId },
-      { kind: "goal", id: input.goalId },
-      ...input.childRun.inputRefs.map((ref) => observationRefFromString(ref)),
-    ]),
-    messages: deepChildMaterialMessages({
-      goal: input.goal,
-      childSpec,
-      permissionBoundaryRefs: input.permissionBoundaryRefs,
-      // P6：传入 run 冻结的 capabilitySnapshot，投影本 child 被授权可用工具的能力简述。
-      capabilitySnapshot: input.capabilitySnapshot,
-    }),
-    allowedTools: [...childSpec.allowedTools],
-    maxModelRounds: input.childRun.spec.budget.maxModelRounds,
-    maxToolRounds: input.childRun.spec.budget.maxToolRounds,
-    confirmationPolicy: input.confirmationPolicy,
-  });
-  const structured = extractStructuredOutput(turn.finalOutput);
-  const summary = parseDeepChildMaterial({
-    value: structured,
-    childSpec,
-    childRunId: input.childRun.childRunId,
-  });
-  const completedRun = completeChildAgentRun({
-    run: startedRun,
-    outputRefs: summary.evidenceRefs.slice(0, 6),
-    evidenceRefs: summary.evidenceRefs,
-    confidence: summary.confidence,
-    uncertainty: summary.uncertainty,
-    completedAt: nowIso(),
-  });
-  return { summary, completedRun };
+  return runDeepChildAgent(input);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,41 +238,11 @@ export async function exploreDeepChild(input: ExploreDeepChildInput): Promise<Ex
  */
 export function buildFailedChildExploration(input: {
   readonly childRun: ChildAgentRun;
+  readonly childSpec?: DeepChildSpec;
   readonly reason: string;
   readonly failedAt: string;
 }): ExploreDeepChildResult {
-  const childSpec = deepChildSpecFromRun(input.childRun);
-  const failedRun = failChildAgentRun(input.childRun, input.reason, input.failedAt);
-  const trimmedReason = input.reason.trim().length > 0 ? input.reason.trim() : "unknown exploration error";
-  const summary: DeepChildSummary = {
-    childRunId: input.childRun.childRunId,
-    spec: childSpec,
-    status: "failed",
-    summary: `Child exploration failed: ${trimmedReason}`,
-    findings: [],
-    evidenceRefs: [],
-    confidence: 0,
-    uncertainty: `This child's exploration failed (${trimmedReason}); no usable evidence collected.`,
-  };
-  return { summary, completedRun: failedRun };
-}
-
-// ---------------------------------------------------------------------------
-// 本地辅助函数
-// ---------------------------------------------------------------------------
-
-/** 从 ChildAgentRun.spec 还原 DeepChildSpec（用于消息装配与材料解析）。 */
-function deepChildSpecFromRun(run: ChildAgentRun): DeepChildSpec {
-  return {
-    specId: run.spec.specId,
-    displayName: run.spec.displayName,
-    role: run.spec.role,
-    objective: run.spec.protocol.outputs[0]?.payloadSchema === DEEP_CHILD_MATERIAL_CONTRACT_ID
-      ? `Explore from angle: ${run.spec.role}`
-      : run.spec.role,
-    allowedTools: [...run.spec.permissions.allowedTools],
-    inputRefs: [...run.spec.inputRefs],
-  };
+  return buildFailedDeepChildAgentRun(input);
 }
 
 function safeToken(value: string | undefined, fallback: string): string {
@@ -361,52 +268,18 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
-/**
- * ObservationRef 合法 kind 集合（与 domain/observation/contracts.ts 对齐）。
- * 用于把 "kind:id" 形式的字符串引用安全解析为 ObservationRef，避免误用未登记的 kind。
- */
-const OBSERVATION_REF_KINDS: ReadonlySet<string> = new Set<string>([
-  "trace", "goal", "event", "task", "artifact", "direction_handoff",
-  "direction_package", "growth_plan", "workflow", "rootlet", "candidate",
-  "candidate_pool", "autonomy_decision", "convergence_review", "model_call",
-  "tool_call", "agent_spec", "agent_run", "agent_delegation",
-  "parent_synthesis", "user_clarification", "verification", "fruit",
-  "run_memory", "experience_candidate", "path_bias",
-]);
-
-/**
- * 把 "kind:id" 形式的字符串引用解析为 ObservationRef。
- *
- * - 已登记前缀（goal/trace/artifact/...）按前缀拆分；
- * - 未知前缀或无冒号时整体作为 id，kind 归入 artifact（保底可观察引用，不丢信息）。
- */
-function observationRefFromString(ref: string): ObservationRef {
-  const trimmed = ref.trim();
-  const index = trimmed.indexOf(":");
-  if (index <= 0) {
-    return { kind: "artifact", id: trimmed };
+function normalizeOptionalRoundLimit(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
   }
-  const kind = trimmed.slice(0, index);
-  const id = trimmed.slice(index + 1);
-  if (id.length === 0) {
-    return { kind: "artifact", id: trimmed };
-  }
-  if (OBSERVATION_REF_KINDS.has(kind)) {
-    return { kind: kind as ObservationRef["kind"], id };
-  }
-  return { kind: "artifact", id: trimmed };
+  return Math.max(0, Math.floor(value));
 }
 
-/** 按 kind+id 去重 ObservationRef（避免 childRun.inputRefs 与显式 trace/goal 重复）。 */
-function dedupeObservationRefs(refs: readonly ObservationRef[]): ObservationRef[] {
-  const seen = new Set<string>();
-  const result: ObservationRef[] = [];
-  for (const ref of refs) {
-    const key = `${ref.kind}:${ref.id}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(ref);
-    }
-  }
-  return result;
+function buildChildAgentSpecBudget(childSpec: DeepChildSpec): AgentSpec["budget"] {
+  const maxModelRounds = normalizeOptionalRoundLimit(childSpec.maxModelRounds);
+  const maxToolRounds = normalizeOptionalRoundLimit(childSpec.maxToolRounds);
+  return {
+    ...(maxModelRounds === undefined ? {} : { maxModelRounds }),
+    ...(maxToolRounds === undefined ? {} : { maxToolRounds }),
+  };
 }

@@ -16,12 +16,64 @@ import type { ModelRequest } from "../../domain/intelligence/index.js";
 import {
   fakeGoalAnchorFromRequest,
   fakeRequestContent,
+  includesAny,
   isLightweightQuestion,
   looksLikeComplexDesktopTask,
+  matchLineValue,
 } from "./fake-model-provider-common.js";
 
 /** 无 child 材料标记（与 deepDecisionMessages 的空 child 区段文案对齐）。 */
 const NO_CHILD_MATERIALS_MARKER = "(暂无已完成的 child 探索材料)";
+
+/**
+ * deep.intake.v1 输出。测试模型只提供稳定 fixture，用于验证入口不会提交即 run：
+ *   - 低信息量输入 → ask_user；
+ *   - 轻量问题 → direct_answer；
+ *   - 复杂目标 → start_collaboration。
+ */
+export function fakeDeepIntakeOutput(request: ModelRequest): Record<string, unknown> {
+  const message = fakeGoalAnchorFromRequest(request);
+  const content = fakeRequestContent(request);
+  const normalized = message.toLowerCase().trim().replace(/[。.!！?？]+$/u, "");
+  if (
+    normalized.length <= 3 ||
+    includesAny(normalized, ["随便", "无用", "嗯", "额", "谢谢", "thanks"])
+  ) {
+    return {
+      action: "ask_user",
+      assistantMessage: "我还需要知道你想解决什么问题、希望得到什么结果，或有哪些范围限制。",
+      uncertainty: "用户输入的信息量不足，无法判断是否需要协作。",
+      confidence: 0.78,
+    };
+  }
+  if (looksLikeIntakeCollaborationGoal(message)) {
+    const normalizedObjective = continuousIntakeObjective(message, content);
+    return {
+      action: "start_collaboration",
+      assistantMessage: "我会先收窄目标，再并行查看关键角度，最后把结论合并成一个可执行建议。",
+      normalizedObjective,
+      plan: "先明确目标与范围；再从风险、现有资产契合度两个角度探索；最后综合成结论。",
+      uncertainty: "测试模型会启动固定的两角度协作 fixture。",
+      confidence: 0.76,
+    };
+  }
+  if (isLightweightQuestion(message)) {
+    return {
+      action: "direct_answer",
+      assistantMessage: `这是一个可以直接回答的问题：${message}`,
+      normalizedObjective: message,
+      uncertainty: "测试模型只提供简短 fixture 回答。",
+      confidence: 0.82,
+    };
+  }
+  return {
+    action: "direct_answer",
+    assistantMessage: `我可以直接回答：${message}`,
+    normalizedObjective: message,
+    uncertainty: "测试模型默认把普通明确问题作为直接回答处理。",
+    confidence: 0.72,
+  };
+}
 
 /**
  * deep.decision.v1 输出（manager 决策）。goal/content-aware 稳定默认：
@@ -190,6 +242,53 @@ function fakeDeepChildSpecs(goalAnchor: string): readonly Record<string, unknown
   ];
 }
 
+function looksLikeIntakeCollaborationGoal(goalAnchor: string): boolean {
+  const normalized = goalAnchor.toLowerCase().trim();
+  return looksLikeComplexDesktopTask(goalAnchor) ||
+    includesAny(normalized, [
+      "调研",
+      "研究",
+      "分析",
+      "优化方案",
+      "形成方案",
+      "产出方案",
+      "前端交互",
+      "多 agent",
+      "multi agent",
+    ]);
+}
+
+function continuousIntakeObjective(message: string, content: string): string {
+  const topic = currentIntakeTopic(content);
+  if (topic === undefined || topic === message) {
+    return message;
+  }
+  return `${topic}；继续补充：${message}`;
+}
+
+function currentIntakeTopic(content: string): string | undefined {
+  const currentObjective = usefulContextValue(matchLineValue(content, "Current objective:"));
+  if (currentObjective !== undefined) {
+    return currentObjective;
+  }
+  const terminalSummary = usefulContextValue(matchLineValue(content, "Terminal run summary:"));
+  const previousGoal = terminalSummary?.match(/上一轮目标：([^;；]+)/u)?.[1]?.trim();
+  if (previousGoal !== undefined && previousGoal.length > 0) {
+    return previousGoal;
+  }
+  return usefulContextValue(matchLineValue(content, "Conversation goal:"));
+}
+
+function usefulContextValue(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 || trimmed === "(none)" || trimmed === "(new conversation)"
+    ? undefined
+    : trimmed;
+}
+
 /** 从决策/综合消息内容解析已完成的 child run id（用于 candidateDispositions）。 */
 function parseChildRunIds(content: string): string[] {
   const matches = content.match(/\[([a-z0-9-]+)\]/g);
@@ -198,18 +297,7 @@ function parseChildRunIds(content: string): string[] {
   }
   return matches
     .map((match) => match.slice(1, -1))
-    .filter((id) => id.includes("child"));
-}
-
-function matchLineValue(content: string, prefix: string): string | undefined {
-  const line = content
-    .split("\n")
-    .map((segment) => segment.trim())
-    .find((segment) => segment.startsWith(prefix));
-  if (!line) {
-    return undefined;
-  }
-  return line.slice(prefix.length).trim();
+      .filter((id) => id.includes("child"));
 }
 
 function truncate(value: string, maxLength: number): string {

@@ -28,6 +28,7 @@ import type { ObservationRef } from "../../domain/observation/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type {
   ChildAgentRun,
+  ParentSynthesisChildReview,
   ParentSynthesisResult,
   ParentSynthesisNextAction,
 } from "../../domain/underground/agent-fabric.js";
@@ -35,6 +36,7 @@ import { assertNoDirectChildOutputHandoff } from "../../domain/underground/agent
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type {
+  CandidateDisposition,
   DeepChildSummary,
   SynthesizedConclusion,
 } from "./contracts.js";
@@ -131,6 +133,7 @@ export async function synthesizeDeepConclusion(
       goal: input.goal,
       taskSoil: input.taskSoil,
       childSummaries: input.childSummaries,
+      childRuns: input.completedChildRuns,
       evidenceRefs: input.evidenceRefs,
     }),
     allowedTools: [],
@@ -194,6 +197,7 @@ export function buildParentSynthesisRecord(input: {
     retainedMaterialRefs: retained.map((disposition) => disposition.candidateId),
     rejectedMaterialRefs: rejected.map((disposition) => disposition.candidateId),
     conflictRefs: [],
+    childReviews: buildParentSynthesisChildReviews(input.conclusion, input.childRuns),
     outputRefs: [...input.conclusion.outputRefs],
     nextAction,
     decisionSummary: input.conclusion.oneLineRationale,
@@ -203,6 +207,48 @@ export function buildParentSynthesisRecord(input: {
     reasoningTraceRefs: [...input.conclusion.keyEvidenceRefs],
     createdAt: input.createdAt,
   };
+}
+
+function buildParentSynthesisChildReviews(
+  conclusion: SynthesizedConclusion,
+  childRuns: readonly ChildAgentRun[],
+): readonly ParentSynthesisChildReview[] {
+  return childRuns.map((run) => {
+    const disposition = findDispositionForChildRun(conclusion.candidateDispositions, run);
+    if (disposition === undefined) {
+      return {
+        childRunId: run.childRunId,
+        decision: "needs_followup",
+        reason: "父层综合未给出该子 Agent 材料的明确采纳或拒绝理由。",
+        evidenceRefs: [...run.evidenceRefs],
+        confidence: run.confidence,
+      };
+    }
+    return {
+      childRunId: run.childRunId,
+      decision: disposition.selected ? "accepted" : "rejected",
+      reason: disposition.reason,
+      evidenceRefs: [...run.evidenceRefs],
+      sourceCandidateId: disposition.candidateId,
+      confidence: run.confidence,
+    };
+  });
+}
+
+function findDispositionForChildRun(
+  dispositions: readonly CandidateDisposition[],
+  run: ChildAgentRun,
+): CandidateDisposition | undefined {
+  const candidateKeys = new Set<string>([
+    run.childRunId,
+    run.spec.specId,
+    run.spec.displayName,
+    run.spec.role,
+    ...run.outputRefs,
+  ]);
+  return dispositions.find((disposition) =>
+    candidateKeys.has(disposition.candidateId) || candidateKeys.has(disposition.label)
+  );
 }
 
 // ---------------------------------------------------------------------------

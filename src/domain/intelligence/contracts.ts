@@ -43,6 +43,7 @@ export type ModelPurpose =
   | "work_session_synthesis"
   | "work_session_direct_answer"
   // DeepRuntime（deep 一期，ADR-0025）manager 决策循环与 child 派生/父层综合用途。
+  | "deep_intake"
   | "deep_decision"
   | "deep_direct_answer"
   | "deep_child_material"

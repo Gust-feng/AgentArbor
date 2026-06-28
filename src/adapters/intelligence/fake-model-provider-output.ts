@@ -20,6 +20,7 @@ import {
   fakeDeepChildMaterialOutput,
   fakeDeepDecisionOutput,
   fakeDeepDirectAnswerOutput,
+  fakeDeepIntakeOutput,
   fakeDeepSynthesisOutput,
 } from "./fake-model-provider-deep.js";
 import { fakeGoalAnchorFromRequest } from "./fake-model-provider-common.js";
@@ -80,6 +81,10 @@ export function defaultFakeOutput(request: ModelRequest): unknown {
 
   if (request.outputContract.contractId === "deep.decision.v1") {
     return fakeDeepDecisionOutput(request);
+  }
+
+  if (request.outputContract.contractId === "deep.intake.v1") {
+    return fakeDeepIntakeOutput(request);
   }
 
   if (request.outputContract.contractId === "deep.direct_answer.v1") {

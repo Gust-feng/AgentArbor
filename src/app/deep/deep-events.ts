@@ -1,13 +1,19 @@
 /**
- * deep-events.ts —— deep 运行事件发布器（T3-2/T3-3，design §6.2）。
+ * deep-events.ts —— deep 运行事件发布器（T3-2/T3-3，design §6.2 / §3.4）。
  *
  * 职责边界：
- *   - 发布 10 个 `deep.*` 事件类型到 message bus（EP2 路径①）；
+ *   - 发布 `deep.*` 事件类型到 message bus（EP2 路径①）；
  *   - 同时累积安全投影 {@link DeepRunStreamEvent} 序列（EP3），供 SSE 轮询与 replay；
  *   - 安全投影口径（FR-007 / design §6.2）：每事件含
  *     id/runId/sequence/type/title/summary/status/timestamp/refs/visibility，
  *     **不含 raw prompt/response/output**；DeepRuntime 内部上下文（AgentRunTree /
  *     childSummaries / synthesisRecords / conclusion）保留完整材料，SSE 仅为可观察投影。
+ *
+ * 实时事件（T2-2，FR-PROJ-02 事件侧）：`deep.child.started`/`deep.child.completed`/
+ * `deep.child.blocked`/`deep.child.interrupted`/`deep.child.failed` 由 DeepRuntime 装配的 scheduler 生命周期
+ * 回调（onChildStarted/onChildTerminal）在真实状态变化时驱动发布，而非 run 结束后由
+ * buildAndPublishRunTree 倒序重建。publisher 本身只提供发布能力，"实时 vs 事后重建"
+ * 由调用方装配决定。
  *
  * 复用边界：复用 {@link safeAgentRunTreeRef}（underground-events）的 tree 投影语义。
  * 旧 `underground-events.ts` 的 `agent.*` publisher 仍服务旧 underground cluster 兼容链，
@@ -30,16 +36,26 @@ import type { SynthesizedConclusion } from "./contracts.js";
 import { DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";
 
 // ---------------------------------------------------------------------------
-// deep.* 事件类型（10 个，T3-2 / design §6.2）
+// deep.* 事件类型（T3-2 / design §6.2）
 // ---------------------------------------------------------------------------
 
-/** deep 运行 SSE 流式事件类型全集（10 个 deep.* 类型）。 */
+/**
+ * deep 运行 SSE 流式事件类型全集。
+ *
+ * T2-2（FR-PROJ-02 事件侧）补齐 `deep.child.blocked` / `deep.child.interrupted` / `deep.child.failed`：
+ * child 标准 Agent run 暂停或失败时，由 scheduler 的 onChildTerminal 回调在真实状态
+ * 变化时发布（非 run 结束后重建）。
+ */
 export type DeepEventType =
   | "deep.goal_received"
   | "deep.manager.decided"
   | "deep.child.started"
   | "deep.child.waiting"
+  | "deep.child.instruction_queued"
   | "deep.child.completed"
+  | "deep.child.blocked"
+  | "deep.child.interrupted"
+  | "deep.child.failed"
   | "deep.parent_synthesis.completed"
   | "deep.interrupted"
   | "deep.corrected"
@@ -52,6 +68,7 @@ export type DeepRunStreamEventRef = {
     | "conversation"
     | "delegation_decision"
     | "child_run"
+    | "child_instruction"
     | "parent_synthesis"
     | "control"
     | "conclusion"
@@ -110,8 +127,45 @@ export interface DeepEventPublisher {
   /** child 探索等待中（manager 等待 child 完成的概念相位）。 */
   publishChildWaiting(input: { readonly childRun: ChildAgentRun; readonly agentRunTree: AgentRunTree }): void;
 
+  /** 父层已为运行中 child 追加继续指令（只发布安全队列事实，不包含 raw 指令）。 */
+  publishChildInstructionQueued(input: {
+    readonly childRunId: string;
+    readonly displayName: string;
+    readonly role: string;
+    readonly instructionId: string;
+    readonly messageRef: string;
+    readonly queuedCount: number;
+    readonly agentRunTree: AgentRunTree;
+  }): void;
+
   /** child 探索已完成。 */
   publishChildCompleted(input: { readonly childRun: ChildAgentRun; readonly agentRunTree: AgentRunTree }): void;
+
+  /** child 探索暂停，需要确认/预算/上下文等外部条件。 */
+  publishChildBlocked(input: {
+    readonly childRun: ChildAgentRun;
+    readonly reason?: string;
+    readonly agentRunTree: AgentRunTree;
+  }): void;
+
+  /** child 探索中断或异常停止，父层可审查后继续同一个 child run。 */
+  publishChildInterrupted(input: {
+    readonly childRun: ChildAgentRun;
+    readonly reason?: string;
+    readonly agentRunTree: AgentRunTree;
+  }): void;
+
+  /**
+   * child 探索失败（T2-2，FR-PROJ-02 事件侧）。child 抛错经 scheduler 降级为 failed task 时，
+   * 由 onChildTerminal 回调在真实状态变化时发布（非 run 结束后重建）。载荷为安全字段：
+   * failure 为短失败原因（来自 task.failure / buildFailedChildExploration 的 reason），
+   * 不含 raw prompt/response/output。
+   */
+  publishChildFailed(input: {
+    readonly childRun: ChildAgentRun;
+    readonly failure?: string;
+    readonly agentRunTree: AgentRunTree;
+  }): void;
 
   /** 父层综合已完成（synthesize / direct_answer 收口 step）。 */
   publishParentSynthesisCompleted(input: {
@@ -184,7 +238,7 @@ export function createDeepEventPublisher(options: {
       record(
         "deep.goal_received",
         {
-          title: "Goal received",
+          title: "已接收目标",
           summary: input.goal,
           status: "received",
           refs: [{ kind: "conversation", refId: input.conversationId }],
@@ -197,7 +251,7 @@ export function createDeepEventPublisher(options: {
       record(
         "deep.manager.decided",
         {
-          title: `Manager decided: ${input.decision.action}`,
+          title: `已生成计划：${input.decision.action}`,
           summary: input.decision.rationale,
           status: "decided",
           refs: [
@@ -221,7 +275,7 @@ export function createDeepEventPublisher(options: {
       record(
         "deep.child.started",
         {
-          title: `Child started: ${input.childRun.spec.displayName}`,
+          title: `探索开始：${input.childRun.spec.displayName}`,
           summary: input.childRun.spec.role,
           status: "running",
           refs: [
@@ -242,8 +296,8 @@ export function createDeepEventPublisher(options: {
       record(
         "deep.child.waiting",
         {
-          title: `Child waiting: ${input.childRun.spec.displayName}`,
-          summary: "Manager is waiting for delegated child agents to complete.",
+          title: `等待探索：${input.childRun.spec.displayName}`,
+          summary: "正在等待子任务返回材料。",
           status: "waiting",
           refs: [
             { kind: "child_run", refId: input.childRun.childRunId },
@@ -257,11 +311,36 @@ export function createDeepEventPublisher(options: {
       );
     },
 
+    publishChildInstructionQueued(input) {
+      record(
+        "deep.child.instruction_queued",
+        {
+          title: `已追加子任务：${input.displayName}`,
+          summary: "父层已要求同一个子 Agent 继续；当前轮完成后会按队列执行。",
+          status: "queued",
+          refs: [
+            { kind: "child_run", refId: input.childRunId },
+            { kind: "child_instruction", refId: input.messageRef },
+            treeRef(input.agentRunTree),
+          ],
+        },
+        {
+          childRunId: input.childRunId,
+          displayName: input.displayName,
+          role: input.role,
+          instructionId: input.instructionId,
+          messageRef: input.messageRef,
+          queuedCount: input.queuedCount,
+          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+        },
+      );
+    },
+
     publishChildCompleted(input) {
       record(
         "deep.child.completed",
         {
-          title: `Child completed: ${input.childRun.spec.displayName}`,
+          title: `探索完成：${input.childRun.spec.displayName}`,
           summary: input.childRun.spec.role,
           status: "completed",
           refs: [
@@ -277,12 +356,76 @@ export function createDeepEventPublisher(options: {
       );
     },
 
+    publishChildBlocked(input) {
+      record(
+        "deep.child.blocked",
+        {
+          title: `探索受阻：${input.childRun.spec.displayName}`,
+          summary: input.reason ?? input.childRun.failureReason ?? "子 Agent 需要确认或外部条件后才能继续。",
+          status: "blocked",
+          refs: [
+            { kind: "child_run", refId: input.childRun.childRunId },
+            treeRef(input.agentRunTree),
+          ],
+        },
+        {
+          childRunId: input.childRun.childRunId,
+          displayName: input.childRun.spec.displayName,
+          reason: input.reason ?? input.childRun.failureReason,
+          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+        },
+      );
+    },
+
+    publishChildInterrupted(input) {
+      record(
+        "deep.child.interrupted",
+        {
+          title: `探索中断：${input.childRun.spec.displayName}`,
+          summary: input.reason ?? input.childRun.failureReason ?? "子 Agent 已中断，可由父层审查后继续。",
+          status: "interrupted",
+          refs: [
+            { kind: "child_run", refId: input.childRun.childRunId },
+            treeRef(input.agentRunTree),
+          ],
+        },
+        {
+          childRunId: input.childRun.childRunId,
+          displayName: input.childRun.spec.displayName,
+          reason: input.reason ?? input.childRun.failureReason,
+          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+        },
+      );
+    },
+
+    publishChildFailed(input) {
+      // T2-2（FR-PROJ-02 事件侧）：安全字段投影，failure 为短失败原因，不含 raw 材料。
+      record(
+        "deep.child.failed",
+        {
+          title: `探索失败：${input.childRun.spec.displayName}`,
+          summary: input.failure ?? input.childRun.spec.role,
+          status: "failed",
+          refs: [
+            { kind: "child_run", refId: input.childRun.childRunId },
+            treeRef(input.agentRunTree),
+          ],
+        },
+        {
+          childRunId: input.childRun.childRunId,
+          displayName: input.childRun.spec.displayName,
+          failure: input.failure,
+          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+        },
+      );
+    },
+
     publishParentSynthesisCompleted(input) {
       record(
         "deep.parent_synthesis.completed",
         {
-          title: "Parent synthesis completed",
-          summary: "Manager synthesized delegated child material.",
+          title: "综合完成",
+          summary: "已综合子任务材料。",
           status: "synthesized",
           refs: [
             { kind: "parent_synthesis", refId: input.parentSynthesis.synthesisId },
@@ -301,8 +444,8 @@ export function createDeepEventPublisher(options: {
       record(
         "deep.conclusion.produced",
         {
-          title: "Conclusion produced",
-          summary: "Deep run produced a synthesized conclusion.",
+          title: "结论生成",
+          summary: "多 Agent 已生成综合结论。",
           status: "concluded",
           refs: [{ kind: "conclusion", refId: input.conclusion.conclusionId }],
         },
@@ -316,8 +459,8 @@ export function createDeepEventPublisher(options: {
         record(
           "deep.interrupted",
           {
-            title: "Run interrupted",
-            summary: ce.reason ?? "Deep run was interrupted by the user.",
+            title: "运行打断",
+            summary: ce.reason ?? "多 Agent 运行已被打断。",
             status: "interrupted",
             refs: [
                 { kind: "control", refId: `${ce.kind}-${ce.recordedAt}` },
@@ -330,8 +473,8 @@ export function createDeepEventPublisher(options: {
           record(
             "deep.corrected",
             {
-              title: "Run corrected",
-              summary: ce.reason ?? "User supplied correction context.",
+              title: "收到补充",
+              summary: ce.reason ?? "用户已补充要求。",
               status: "corrected",
               refs: [
                 { kind: "control", refId: `${ce.kind}-${ce.recordedAt}` },
@@ -344,8 +487,8 @@ export function createDeepEventPublisher(options: {
           record(
             "deep.stopped",
             {
-              title: "Run stopped",
-              summary: ce.reason ?? "Deep run was stopped by the user.",
+              title: "运行停止",
+              summary: ce.reason ?? "多 Agent 运行已停止。",
               status: "stopped",
               refs: [
                 { kind: "control", refId: `${ce.kind}-${ce.recordedAt}` },

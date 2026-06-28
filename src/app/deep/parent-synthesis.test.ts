@@ -208,6 +208,29 @@ test("synthesizeDeepConclusion：消费 child 材料产出 SynthesizedConclusion
   assert.equal(record.source, "ai", "run-tree 记录 source 跟随 conclusion.source");
   assert.equal(record.parentAgentId, DEEP_MANAGER_AGENT_ID);
   assert.ok(record.outputRefs.length > 0, "综合产出 outputRefs 非空");
+  assert.deepEqual(
+    record.childReviews?.map((review) => ({
+      childRunId: review.childRunId,
+      decision: review.decision,
+      reason: review.reason,
+      sourceCandidateId: review.sourceCandidateId,
+    })),
+    [
+      {
+        childRunId: "child-run-risk",
+        decision: "accepted",
+        reason: "风险材料与结论方向一致，采纳为主线约束。",
+        sourceCandidateId: "child-run-risk",
+      },
+      {
+        childRunId: "child-run-asset",
+        decision: "rejected",
+        reason: "作为补充验证，不作为主线。",
+        sourceCandidateId: "child-run-asset",
+      },
+    ],
+    "childReviews 应逐 child 记录父层采纳/拒绝理由",
+  );
 
   // 验收点 3：冲突材料带理由（reason 保留）
   const retained = conclusion.candidateDispositions.find((c) => c.selected);
@@ -319,4 +342,24 @@ test("buildParentSynthesisRecord：candidateDispositions selected=true/false 分
   assert.equal(record.decisionSummary, "一句话理由。");
   assert.equal(record.uncertainty, "主要不确定性。");
   assert.deepEqual(record.outputRefs, ["synthesis:结论正文。"]);
+  assert.deepEqual(
+    record.childReviews?.map((review) => ({
+      childRunId: review.childRunId,
+      decision: review.decision,
+      reason: review.reason,
+    })),
+    [
+      {
+        childRunId: "child-a",
+        decision: "needs_followup",
+        reason: "父层综合未给出该子 Agent 材料的明确采纳或拒绝理由。",
+      },
+      {
+        childRunId: "child-b",
+        decision: "needs_followup",
+        reason: "父层综合未给出该子 Agent 材料的明确采纳或拒绝理由。",
+      },
+    ],
+    "未能匹配到 childRunId 的 candidateDisposition 应显式暴露为 needs_followup",
+  );
 });

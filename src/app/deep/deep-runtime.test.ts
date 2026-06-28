@@ -5,16 +5,39 @@ import type { FakeModelProviderResponse } from "../../adapters/intelligence/fake
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import { NativeIntelligenceChannel } from "../../kernel/intelligence/channel.js";
+import type {
+  ModelOutputDelta,
+  ModelProvider,
+  ModelRequest,
+  ModelRequestOptions,
+  ModelResponse,
+} from "../../domain/intelligence/index.js";
 import { createTaskSoil } from "../../domain/soil/task-soil.js";
+import { resetIdsForTests } from "../../kernel/id.js";
+import type {
+  ToolCallRequest,
+  ToolCallResult,
+  ToolDefinition,
+  ToolExecutionBroker,
+  ToolExecutionContext,
+  ToolPermissionCheck,
+} from "../../domain/tools/index.js";
 import { createMinimalRuntime } from "../runtime.js";
 import { createDeepTurnRuntime } from "./deep-turn.js";
 import { createDeepConversationIsolationMark } from "./deep-conversation.js";
 import {
   executeDeepRun,
   InMemoryDeepRunRecordStore,
+  type DeepChildInstructionQueueRegistry,
   type DeepRuntimeConfig,
   type StartDeepRuntimeInput,
 } from "./deep-runtime.js";
+import {
+  InMemoryDeepChildMessageStore,
+  type DeepChildMessageStore,
+} from "./deep-child-messages.js";
+import { DeepChildPendingContinuationStore } from "./deep-child-continuations.js";
+import type { DeepChildInstructionQueueHandle } from "./deep-child-scheduler.js";
 import type { DeepRunControlHandle, DeepRunControlSignal } from "./deep-run-executor.js";
 import { DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";
 import { DEEP_RUN_KIND, DEEP_RUN_MODE, type DeepConversation } from "./contracts.js";
@@ -65,8 +88,17 @@ function makeRuntimeInput(goal: string, modelAvailable: boolean): StartDeepRunti
 function makeConfig(options: {
   responses?: readonly FakeModelProviderResponse[];
   controlHandle?: DeepRunControlHandle;
+  toolCenter?: ToolExecutionBroker;
+  childContinuations?: DeepChildPendingContinuationStore;
+  childInstructionQueues?: DeepChildInstructionQueueRegistry;
+  childMessageStore?: DeepChildMessageStore;
+  onOutputDelta?: (delta: ModelOutputDelta) => void;
+  provider?: ModelProvider;
 }): { config: DeepRuntimeConfig; eventLog: InMemoryEventLog } {
-  const provider = new FakeModelProvider({ responses: options.responses });
+  const provider = options.provider ?? new FakeModelProvider({
+    responses: options.responses,
+    onOutputDelta: options.onOutputDelta,
+  });
   const runtime = createMinimalRuntime();
   // channel 独立 bus：模型调用事件不混入 deep 事件序列断言。
   const channel = new NativeIntelligenceChannel({
@@ -74,12 +106,71 @@ function makeConfig(options: {
     bus: new InMemoryMessageBus(new InMemoryEventLog()),
   });
   const config: DeepRuntimeConfig = {
-    turnRuntime: createDeepTurnRuntime({ intelligenceChannel: channel }),
+    turnRuntime: createDeepTurnRuntime({ intelligenceChannel: channel, toolCenter: options.toolCenter }),
     runtime,
     store: new InMemoryDeepRunRecordStore(),
     controlHandle: options.controlHandle,
+    childContinuations: options.childContinuations,
+    childInstructionQueues: options.childInstructionQueues,
+    childMessageStore: options.childMessageStore,
   };
   return { config, eventLog: runtime.eventLog };
+}
+
+function createInstructionQueueRegistry(): DeepChildInstructionQueueRegistry & {
+  readonly get: (runId: string) => DeepChildInstructionQueueHandle | undefined;
+} {
+  const handles = new Map<string, DeepChildInstructionQueueHandle>();
+  return {
+    register(runId, handle): void {
+      handles.set(runId, handle);
+    },
+    unregister(runId, handle): void {
+      if (handles.get(runId) === handle) {
+        handles.delete(runId);
+      }
+    },
+    get(runId): DeepChildInstructionQueueHandle | undefined {
+      return handles.get(runId);
+    },
+  };
+}
+
+class PurposeFakeModelProvider implements ModelProvider {
+  readonly providerId = "purpose-fake-model-provider";
+  readonly providerKind = "fake" as const;
+  readonly protocolKind = "openai_compatible_chat_completions" as const;
+  readonly model = "fake-deterministic-model";
+  private readonly responsesByPurpose = new Map<string, FakeModelProviderResponse[]>();
+  private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
+  private readonly onRequest?: (request: ModelRequest) => void;
+
+  constructor(input: {
+    readonly responsesByPurpose: Readonly<Record<string, readonly FakeModelProviderResponse[]>>;
+    readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
+    readonly onRequest?: (request: ModelRequest) => void;
+  }) {
+    for (const [purpose, responses] of Object.entries(input.responsesByPurpose)) {
+      this.responsesByPurpose.set(purpose, [...responses]);
+    }
+    this.onOutputDelta = input.onOutputDelta;
+    this.onRequest = input.onRequest;
+  }
+
+  complete(request: ModelRequest, _options?: ModelRequestOptions): Promise<ModelResponse> {
+    this.onRequest?.(request);
+    const queue = this.responsesByPurpose.get(request.purpose);
+    const next = queue?.shift();
+    if (next === undefined) {
+      throw new Error(`Missing fake model response for purpose: ${request.purpose}`);
+    }
+    return new FakeModelProvider({
+      providerId: this.providerId,
+      model: this.model,
+      responses: [next],
+      onOutputDelta: this.onOutputDelta,
+    }).complete(request);
+  }
 }
 
 /**
@@ -105,6 +196,57 @@ function scriptedControlHandle(signals: readonly DeepRunControlSignal[]): DeepRu
       /* no-op */
     },
   };
+}
+
+function countOccurrences(content: string, needle: string): number {
+  return content.split(needle).length - 1;
+}
+
+class ApprovalRequiredToolBroker implements ToolExecutionBroker {
+  list(): ToolDefinition[] {
+    return [{
+      name: "write_file",
+      description: "Test write tool requiring confirmation.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: true },
+    }];
+  }
+
+  has(name: string): boolean {
+    return name === "write_file";
+  }
+
+  async execute(
+    request: ToolCallRequest,
+    _context: ToolExecutionContext,
+    _permission: ToolPermissionCheck,
+  ): Promise<ToolCallResult> {
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: undefined,
+      status: "approval_required",
+      durationMs: 1,
+      confirmationRequest: {
+        confirmationId: `confirm-${request.callId}`,
+        runId: "deep-child-run-test",
+        title: "需要确认工具调用",
+        actionSummary: `运行 ${request.toolName}`,
+        affectedResources: [request.toolName],
+        riskLevel: "medium",
+        requestedAt: "2026-05-01T00:00:00.000Z",
+        sourceRefs: [request.callId],
+      },
+    };
+  }
+
+  resetCallCount(): void {
+    // no-op
+  }
+
+  getCallCount(): number {
+    return 0;
+  }
 }
 
 // spawn_children 决策响应（派生 2 个 child）。
@@ -133,6 +275,29 @@ function spawnChildrenDecisionResponse(): FakeModelProviderResponse {
       decisionSummary: "目标复杂，证据不足，需多角度派生 child 分头探索。",
       rationale: "manager 经语义推理判定需要多角度证据后再收束。",
       uncertainty: "child 探索材料未到位前无法直接结论。",
+      confidence: 0.7,
+      reasoningRefs: [],
+    },
+  };
+}
+
+function spawnApprovalChildDecisionResponse(): FakeModelProviderResponse {
+  return {
+    output: {
+      action: "spawn_children",
+      childSpecs: [
+        {
+          specId: "child-spec-write",
+          displayName: "文件核查",
+          role: "file_review",
+          objective: "尝试写入核查笔记，必要时等待确认。",
+          allowedTools: ["write_file"],
+          inputRefs: ["goal:goal-runtime-test"],
+        },
+      ],
+      decisionSummary: "需要一个会使用工具的 child 核查文件侧影响。",
+      rationale: "manager 派生具备写入工具授权的 child。",
+      uncertainty: "child 可能需要用户确认后继续。",
       confidence: 0.7,
       reasoningRefs: [],
     },
@@ -214,7 +379,7 @@ test("executeDeepRun direct_answer：产出 AgentRunTree（root+parentSynthesis�
   const result = await executeDeepRun(input, config);
 
   // run 终态
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "completed", result.failure);
   assert.equal(result.stopReason, "direct_answer");
 
   // AgentRunTree：root manager + 单 parentSynthesis（direct_answer 收口），无 child
@@ -235,6 +400,9 @@ test("executeDeepRun direct_answer：产出 AgentRunTree（root+parentSynthesis�
   assert.ok(persisted !== undefined, "deep run 应持久化进 DeepRunRecordStore");
   assert.equal(persisted!.agentRunTree.treeId, tree.treeId);
   assert.ok(persisted!.report !== undefined);
+  assert.equal(persisted!.liveProjection?.phase, "completed");
+  assert.equal(persisted!.liveProjection?.activeNodeId, "conclusion");
+  assert.equal(persisted!.liveProjection?.conclusion?.conclusionId, result.report!.conclusion.conclusionId);
   assert.equal(persisted!.run.isolation.runKind, DEEP_RUN_KIND);
   assert.equal(persisted!.run.isolation.runMode, DEEP_RUN_MODE);
 
@@ -258,6 +426,88 @@ test("executeDeepRun direct_answer：产出 AgentRunTree（root+parentSynthesis�
   );
 });
 
+test("executeDeepRun follow-up context is projected into manager decision input", async () => {
+  resetIdsForTests();
+  let decisionRequestContent = "";
+  const provider = new PurposeFakeModelProvider({
+    responsesByPurpose: {
+      deep_decision: [
+        {
+          output: {
+            action: "direct_answer",
+            childSpecs: [],
+            decisionSummary: "续聊上下文足够，直接补充回答。",
+            rationale: "用户是在同一任务链上补充范围。",
+            uncertainty: "无需新增探索。",
+            confidence: 0.82,
+            reasoningRefs: [],
+          },
+        },
+      ],
+      deep_direct_answer: [
+        {
+          output: {
+            conclusion: "已结合上一轮结论补充成本和失败恢复路径。",
+            oneLineRationale: "续聊上下文提供了上一轮结论与探索摘要。",
+            keyEvidenceRefs: ["child:previous:evidence"],
+            candidateDispositions: [],
+            mainUncertainty: "仍需在实施阶段验证。",
+            confidence: 0.8,
+          },
+        },
+      ],
+    },
+    onRequest: (request) => {
+      if (request.purpose === "deep_decision") {
+        decisionRequestContent = request.sanitizedMessages.map((message) => message.content).join("\n");
+      }
+    },
+  });
+  const { config } = makeConfig({ provider });
+  const input: StartDeepRuntimeInput = {
+    ...makeRuntimeInput("评估续聊上下文传递", true),
+    runId: "deep-run-follow-up",
+    parentRunId: "deep-run-previous",
+    rootRunId: "deep-run-root",
+    turnOrdinal: 2,
+    followUpContext: {
+      message: "继续补充成本和失败恢复路径。",
+      previousRunId: "deep-run-previous",
+      previousGoal: "评估多 Agent 协作体验",
+      previousStatus: "completed",
+      previousConclusion: "上一轮结论：方案可行。",
+      previousOneLineRationale: "多角度材料一致。",
+      synthesisSummary: "上一轮已综合风险与收益。",
+      childSummaries: [
+        {
+          childRunId: "deep-child-previous",
+          displayName: "风险角度",
+          role: "risk",
+          status: "completed",
+          summary: "风险可控，但恢复路径需要补充。",
+          findings: ["需要回滚计划"],
+          evidenceRefs: ["child:previous:evidence"],
+          confidence: 0.7,
+          uncertainty: "恢复演练未验证。",
+        },
+      ],
+    },
+  };
+
+  const result = await executeDeepRun(input, config);
+
+  assert.equal(result.run.parentRunId, "deep-run-previous");
+  assert.equal(result.run.rootRunId, "deep-run-root");
+  assert.equal(result.run.turnOrdinal, 2);
+  assert.match(decisionRequestContent, /Follow-up context/);
+  assert.match(decisionRequestContent, /继续补充成本和失败恢复路径/);
+  assert.match(decisionRequestContent, /上一轮结论：方案可行/);
+  assert.match(decisionRequestContent, /风险可控，但恢复路径需要补充/);
+  assert.equal(decisionRequestContent.includes("raw prompt"), false);
+  assert.equal(decisionRequestContent.includes("raw response"), false);
+  assert.equal(decisionRequestContent.includes("raw tool"), false);
+});
+
 // ---------------------------------------------------------------------------
 // T2-6 测试 2：spawn_children→synthesize → 完整 AgentRunTree + 复盘重建推理路径 + 事件序列顺序
 // ---------------------------------------------------------------------------
@@ -274,7 +524,7 @@ test("executeDeepRun spawn_children→synthesize：完整 tree（root+children+s
 
   const result = await executeDeepRun(input, config);
 
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "completed", result.failure);
   assert.equal(result.stopReason, "synthesized");
 
   const tree = result.agentRunTree;
@@ -291,25 +541,38 @@ test("executeDeepRun spawn_children→synthesize：完整 tree（root+children+s
   for (const refId of synthesis.childRunIds) {
     assert.equal(treeChildRunIds.has(refId), true, `synthesis childRunId ${refId} 应在 tree childRuns 中`);
   }
+  const spawnDecision = tree.delegationDecisions.find((decision) => decision.action === "spawn_children");
+  assert.ok(spawnDecision !== undefined, "spawn_children delegation decision 应存在");
+  assert.equal(
+    spawnDecision.childRunIds.some((id) => id.startsWith("derived:")),
+    false,
+    "delegation.childRunIds 不应再使用 derived 占位 id",
+  );
+  assert.deepEqual(new Set(spawnDecision.childRunIds), treeChildRunIds);
 
   // report 承载完整可复盘证据链：childSummaries + synthesisRecords + conclusion
   assert.ok(result.report !== undefined);
   assert.equal(result.report!.childSummaries.length, 2);
   assert.equal(result.report!.synthesisRecords.length, 1);
   assert.equal(result.report!.conclusion.candidateDispositions.length, 2);
+  const persisted = await config.store.get(result.run.runId);
+  assert.equal(persisted?.liveProjection?.phase, "completed");
+  assert.equal(persisted?.liveProjection?.children.length, 2);
+  assert.equal(persisted?.liveProjection?.children[0]?.displayName, "风险角度");
+  assert.equal(persisted?.liveProjection?.children[0]?.objective, "从风险角度探查目标可行性");
 
-  // 事件序列顺序：goal_received → manager.decided → child.started → child.waiting → child.completed → parent_synthesis.completed → conclusion.produced
+  // 事件序列顺序：goal_received → manager.decided → child.started → child.completed → parent_synthesis.completed → conclusion.produced
+  // T2-1 投影权威化：child.started/child.completed 由 scheduler 回调在真实 board 状态变化时实时发布，
+  // 不再事后重建 child.waiting（该事件无对应 board 状态转移）。
   const types = eventLog.types();
   const delegationIdx = types.indexOf("deep.manager.decided");
   const childStartedIdx = types.indexOf("deep.child.started");
-  const childWaitingIdx = types.indexOf("deep.child.waiting");
   const childCompletedIdx = types.indexOf("deep.child.completed");
   const synthesisIdx = types.indexOf("deep.parent_synthesis.completed");
   const conclusionIdx = types.indexOf("deep.conclusion.produced");
   assert.ok(types.includes("deep.goal_received"), "应发布 goal_received");
   assert.ok(delegationIdx >= 0, "应发布 manager.decided");
   assert.ok(childStartedIdx >= 0, "应发布 child.started");
-  assert.ok(childWaitingIdx >= 0, "应发布 child.waiting");
   assert.ok(childCompletedIdx >= 0, "应发布 child.completed");
   assert.ok(synthesisIdx >= 0, "应发布 parent_synthesis.completed");
   assert.ok(conclusionIdx >= 0, "应发布 conclusion.produced");
@@ -317,12 +580,689 @@ test("executeDeepRun spawn_children→synthesize：完整 tree（root+children+s
     delegationIdx < childStartedIdx && childStartedIdx < childCompletedIdx && childCompletedIdx < synthesisIdx,
     "事件序列应按 manager.decided→child.started→child.completed→synthesis 顺序发布",
   );
+  const childStartedIndices = types
+    .map((type, index) => ({ type, index }))
+    .filter((item) => item.type === "deep.child.started")
+    .map((item) => item.index);
+  assert.ok(childStartedIndices.length >= 2, "并发 child 应至少发布两个 child.started");
+  assert.ok(
+    childStartedIndices.every((index) => index < childCompletedIdx),
+    "多个 child.started 应先于任何 child.completed，证明不是串行成对完成",
+  );
 
   // eventSequence 安全投影（EP3）：事件序列有序递增，含 refs，不含 raw
   assert.ok(result.eventSequence.length >= 7, "spawn_children→synthesize eventSequence 应含完整事件链");
   assert.ok(
     result.eventSequence.every((e) => e.refs.length > 0),
     "每条事件应含 refs（安全投影引用）",
+  );
+});
+
+test("executeDeepRun continue_child：父层继续同一个 child run，并在 tree 中记录 resume_child + 真实 childRunId", async () => {
+  resetIdsForTests();
+  const responses: FakeModelProviderResponse[] = [
+    {
+      output: {
+        action: "spawn_children",
+        childSpecs: [
+          {
+            specId: "child-spec-risk",
+            displayName: "风险角度",
+            role: "risk",
+            objective: "先识别 OAuth2 迁移风险。",
+            allowedTools: [],
+            inputRefs: ["goal:goal-runtime-test"],
+          },
+        ],
+        decisionSummary: "需要风险 child 初步探索。",
+        rationale: "父层需要先得到一份局部材料。",
+        uncertainty: "回滚证据未知。",
+        confidence: 0.68,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        summary: "风险角度：初步材料完成，但回滚证据不足。",
+        findings: ["回调兼容性需要验证"],
+        evidenceRefs: ["child:risk:initial"],
+        uncertainty: "缺少回滚路径证据。",
+        confidence: 0.42,
+      },
+    },
+    {
+      output: {
+        action: "continue_child",
+        childSpecs: [],
+        childOperations: [
+          {
+            childRunId: "deep-child-run-0001",
+            instruction: "继续沿用风险角度，补齐回滚路径证据后重新输出 child material JSON。",
+          },
+        ],
+        decisionSummary: "同一个风险 child 材料不足，需要继续补齐。",
+        rationale: "父层审查发现无需重复派生，只需让原 child 继续。",
+        uncertainty: "回滚证据仍缺失。",
+        confidence: 0.71,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        summary: "风险角度：补齐回滚证据，确认保留旧入口可降低风险。",
+        findings: ["保留旧入口是关键回滚措施"],
+        evidenceRefs: ["child:risk:rollback"],
+        uncertainty: "仍需执行验证。",
+        confidence: 0.74,
+      },
+    },
+    {
+      output: {
+        action: "synthesize",
+        childSpecs: [],
+        decisionSummary: "风险 child 已补齐，可以综合。",
+        rationale: "父层审查后的追加工作已完成。",
+        uncertainty: "仍需执行验证。",
+        confidence: 0.77,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        conclusion: "OAuth2 迁移可推进，但必须保留旧入口作为回滚路径。",
+        oneLineRationale: "同一个风险 child 补齐后证明回滚措施可行。",
+        keyEvidenceRefs: ["child:risk:rollback"],
+        candidateDispositions: [
+          { candidateId: "risk", label: "风险角度", selected: true, reason: "补齐后的材料可采纳。" },
+        ],
+        mainUncertainty: "仍需执行阶段验证。",
+        confidence: 0.78,
+      },
+    },
+  ];
+  const childMessageStore = new InMemoryDeepChildMessageStore();
+  const { config } = makeConfig({ responses, childMessageStore });
+  const input = makeRuntimeInput("评估 OAuth2 迁移风险并补齐回滚证据", true);
+
+  const result = await executeDeepRun(input, config);
+  const tree = result.agentRunTree;
+
+  assert.equal(result.run.status, "completed", result.failure);
+  assert.equal(tree.childRuns.length, 1, "继续同一个 child 不应增加新的 child run");
+  assert.equal(tree.childRuns[0]?.childRunId, "deep-child-run-0001");
+  assert.deepEqual(tree.childRuns[0]?.evidenceRefs, ["child:risk:rollback"]);
+  assert.equal(tree.childRuns[0]?.executionHistory?.length, 2);
+  assert.deepEqual(
+    tree.childRuns[0]?.executionHistory?.map((segment) => segment.outcome),
+    ["completed", "completed"],
+  );
+  assert.equal(tree.childRuns[0]?.parentInstructions?.length, 1);
+  assert.equal(tree.childRuns[0]?.parentInstructions?.[0]?.source, "manager");
+  assert.equal(tree.childRuns[0]?.parentInstructions?.[0]?.status, "executed");
+  assert.equal(tree.childRuns[0]?.parentInstructions?.[0]?.messageRef?.startsWith("child_message:"), true);
+  const managerMessage = await childMessageStore.getByRef(
+    result.run.runId,
+    tree.childRuns[0]?.parentInstructions?.[0]?.messageRef ?? "",
+  );
+  assert.equal(managerMessage?.source, "manager");
+  assert.equal(managerMessage?.status, "executed");
+  assert.equal(
+    managerMessage?.content,
+    "继续沿用风险角度，补齐回滚路径证据后重新输出 child material JSON。",
+  );
+  const resumeDecision = tree.delegationDecisions.find((decision) => decision.action === "resume_child");
+  assert.ok(resumeDecision !== undefined, "continue_child 应映射为 domain resume_child");
+  assert.deepEqual(resumeDecision.childRunIds, ["deep-child-run-0001"]);
+  assert.equal(resumeDecision.childRunIds.some((id) => id.startsWith("derived:")), false);
+  assert.equal(result.report?.childSummaries.length, 1);
+  assert.deepEqual(result.report?.childSummaries[0]?.evidenceRefs, ["child:risk:rollback"]);
+  const persisted = await config.store.get(result.run.runId);
+  assert.equal(persisted?.liveProjection?.children.length, 1);
+  assert.equal(persisted?.liveProjection?.children[0]?.childRunId, "deep-child-run-0001");
+  assert.deepEqual(persisted?.report?.agentRunTree.delegationDecisions.map((decision) => decision.action), [
+    "spawn_children",
+    "resume_child",
+    "request_parent_synthesis",
+  ]);
+});
+
+test("executeDeepRun interrupted child：真实 child loop 中断后父层继续同一个 child run", async () => {
+  resetIdsForTests();
+  const childRunId = "deep-child-run-0001";
+  const provider = new PurposeFakeModelProvider({
+    responsesByPurpose: {
+      deep_decision: [
+        {
+          output: {
+            action: "spawn_children",
+            childSpecs: [
+              {
+                specId: "child-spec-recovery",
+                displayName: "恢复路径",
+                role: "recovery",
+                objective: "检查异常停止后的恢复路径。",
+                allowedTools: [],
+                inputRefs: ["goal:goal-runtime-test"],
+              },
+            ],
+            decisionSummary: "需要子 Agent 先检查恢复路径。",
+            rationale: "父层需要独立材料后再审查。",
+            uncertainty: "恢复路径尚未确认。",
+            confidence: 0.68,
+            reasoningRefs: [],
+          },
+        },
+        {
+          output: {
+            action: "continue_child",
+            childSpecs: [],
+            childOperations: [
+              {
+                childRunId,
+                instruction: "同一个子 Agent 刚才异常中断，请继续检查恢复路径并输出材料。",
+                review: {
+                  decision: "needs_followup",
+                  reason: "父层审查发现 child 没有产出可治理材料，但 run 可继续。",
+                  evidenceRefs: [`child_run:${childRunId}`],
+                  confidence: 0.6,
+                },
+              },
+            ],
+            decisionSummary: "子 Agent 中断，需要继续同一个 run。",
+            rationale: "继续同一个 child 比重新派生更能保留上下文和审计链。",
+            uncertainty: "需确认第二段能否产出材料。",
+            confidence: 0.72,
+            reasoningRefs: [],
+          },
+        },
+        {
+          output: {
+            action: "synthesize",
+            childSpecs: [],
+            decisionSummary: "同一个子 Agent 续跑后已补齐材料，可以综合。",
+            rationale: "父层审查最新材料后收口。",
+            uncertainty: "仍需执行侧验证。",
+            confidence: 0.78,
+            reasoningRefs: [],
+          },
+        },
+      ],
+      deep_child_material: [
+        {
+          fail: true,
+          failureMessage: "provider stopped before child material was produced",
+        },
+        {
+          output: {
+            summary: "恢复路径：续跑后确认可以从同一 child run 补齐材料。",
+            findings: ["异常停止后继续同一 child run 可保留审计链"],
+            evidenceRefs: ["child:recovery:continued"],
+            uncertainty: "仍需执行验证。",
+            confidence: 0.73,
+          },
+        },
+      ],
+      deep_synthesis: [
+        {
+          output: {
+            conclusion: "异常停止后的子 Agent 可以由父层审查并继续同一个 run。",
+            oneLineRationale: "child 中断被保留为可审查材料，续跑后补齐证据。",
+            keyEvidenceRefs: ["child:recovery:continued"],
+            candidateDispositions: [
+              { candidateId: "recovery", label: "恢复路径", selected: true, reason: "续跑后的同一 child 材料可采纳。" },
+            ],
+            mainUncertainty: "执行侧验证仍需跟进。",
+            confidence: 0.79,
+          },
+        },
+      ],
+    },
+  });
+  const { config } = makeConfig({ provider });
+
+  const result = await executeDeepRun(
+    makeRuntimeInput("验证子 Agent 异常停止后的父层继续能力", true),
+    config,
+  );
+
+  assert.equal(result.run.status, "completed", result.failure);
+  assert.equal(result.eventSequence.some((event) => event.type === "deep.child.interrupted"), true);
+  assert.equal(result.eventSequence.some((event) => event.type === "deep.child.failed"), false);
+  assert.equal(result.agentRunTree.childRuns.length, 1);
+  assert.equal(result.agentRunTree.childRuns[0]?.childRunId, childRunId);
+  assert.equal(result.agentRunTree.childRuns[0]?.status, "completed");
+  assert.deepEqual(result.agentRunTree.childRuns[0]?.evidenceRefs, ["child:recovery:continued"]);
+  assert.deepEqual(
+    result.agentRunTree.childRuns[0]?.executionHistory?.map((segment) => segment.outcome),
+    ["interrupted", "completed"],
+  );
+  const resumeDecision = result.agentRunTree.delegationDecisions.find((decision) => decision.action === "resume_child");
+  assert.ok(resumeDecision !== undefined, "中断后的 continue_child 应记录 resume_child");
+  assert.deepEqual(resumeDecision.childRunIds, [childRunId]);
+});
+
+test("executeDeepRun consecutive continue_child：child 续跑读取已执行父子消息历史但不重复当前指令", async () => {
+  resetIdsForTests();
+  const childRunId = "deep-child-run-0001";
+  const firstInstruction = "第一次父层补充：补齐回滚证据。";
+  const secondInstruction = "第二次父层补充：核对灰度发布证据。";
+  const childPrompts: string[] = [];
+  const provider = new PurposeFakeModelProvider({
+    responsesByPurpose: {
+      deep_decision: [
+        {
+          output: {
+            action: "spawn_children",
+            childSpecs: [
+              {
+                specId: "child-spec-risk-history",
+                displayName: "风险续查",
+                role: "risk",
+                objective: "先识别迁移风险，再按父层审查持续补齐证据。",
+                allowedTools: [],
+                inputRefs: ["goal:goal-runtime-test"],
+              },
+            ],
+            decisionSummary: "需要风险 child 先探索。",
+            rationale: "父层需要局部材料后审查。",
+            uncertainty: "证据尚未成形。",
+            confidence: 0.68,
+            reasoningRefs: [],
+          },
+        },
+        {
+          output: {
+            action: "continue_child",
+            childSpecs: [],
+            childOperations: [{ childRunId, instruction: firstInstruction }],
+            decisionSummary: "需要同一个 child 先补齐回滚证据。",
+            rationale: "材料缺少回滚证据。",
+            uncertainty: "回滚路径未知。",
+            confidence: 0.7,
+            reasoningRefs: [],
+          },
+        },
+        {
+          output: {
+            action: "continue_child",
+            childSpecs: [],
+            childOperations: [{ childRunId, instruction: secondInstruction }],
+            decisionSummary: "同一个 child 还需要核对灰度发布证据。",
+            rationale: "第一次补充后仍缺灰度证据。",
+            uncertainty: "灰度风险未知。",
+            confidence: 0.72,
+            reasoningRefs: [],
+          },
+        },
+        {
+          output: {
+            action: "synthesize",
+            childSpecs: [],
+            decisionSummary: "同一个 child 已完成两次补充，可以综合。",
+            rationale: "父层审查后的追加材料已经足够。",
+            uncertainty: "仍需执行验证。",
+            confidence: 0.78,
+            reasoningRefs: [],
+          },
+        },
+      ],
+      deep_child_material: [
+        {
+          output: {
+            summary: "风险续查：初步材料完成。",
+            findings: ["发现回滚证据缺口"],
+            evidenceRefs: ["child:history:initial"],
+            uncertainty: "缺少回滚证据。",
+            confidence: 0.45,
+          },
+        },
+        {
+          output: {
+            summary: "风险续查：第一次父层补充后回滚证据已补齐。",
+            findings: ["回滚证据已补齐"],
+            evidenceRefs: ["child:history:first"],
+            uncertainty: "缺少灰度证据。",
+            confidence: 0.67,
+          },
+        },
+        {
+          output: {
+            summary: "风险续查：第二次父层补充后灰度证据也已核对。",
+            findings: ["灰度证据已核对"],
+            evidenceRefs: ["child:history:second"],
+            uncertainty: "仍需执行验证。",
+            confidence: 0.77,
+          },
+        },
+      ],
+      deep_synthesis: [
+        {
+          output: {
+            conclusion: "迁移可以推进，但需保留回滚路径并分阶段灰度。",
+            oneLineRationale: "同一个 child 两次续跑后补齐了回滚与灰度证据。",
+            keyEvidenceRefs: ["child:history:second"],
+            candidateDispositions: [
+              { candidateId: "risk", label: "风险续查", selected: true, reason: "续跑后的材料可采纳。" },
+            ],
+            mainUncertainty: "执行验证仍需跟进。",
+            confidence: 0.8,
+          },
+        },
+      ],
+    },
+    onRequest: (request) => {
+      if (request.purpose === "deep_child_material") {
+        childPrompts.push(request.sanitizedMessages.map((message) => message.content).join("\n"));
+      }
+    },
+  });
+  const childMessageStore = new InMemoryDeepChildMessageStore();
+  const { config } = makeConfig({ provider, childMessageStore });
+
+  const result = await executeDeepRun(
+    makeRuntimeInput("连续审查同一个子 Agent 并追加两轮证据要求", true),
+    config,
+  );
+
+  assert.equal(result.run.status, "completed", result.failure);
+  assert.equal(childPrompts.length, 3, "应有初始 child loop + 两次 continuation loop");
+  assert.equal(countOccurrences(childPrompts[1]!, firstInstruction), 1);
+  assert.match(childPrompts[1]!, /Parent message history: \(none\)/);
+  assert.equal(countOccurrences(childPrompts[2]!, firstInstruction) >= 1, true);
+  assert.equal(countOccurrences(childPrompts[2]!, secondInstruction), 1);
+  assert.match(childPrompts[2]!, /Parent message history \(internal, raw parent-to-child messages\):/);
+  assert.equal(result.agentRunTree.childRuns[0]?.executionHistory?.length, 3);
+  assert.deepEqual(
+    result.agentRunTree.childRuns[0]?.parentInstructions?.map((instruction) => instruction.source),
+    ["manager", "manager"],
+  );
+  const storedMessages = await childMessageStore.listForChild(result.run.runId, childRunId);
+  assert.deepEqual(storedMessages.map((message) => message.content), [firstInstruction, secondInstruction]);
+  assert.equal(storedMessages.every((message) => message.status === "executed"), true);
+});
+
+test("executeDeepRun running child control message：运行中追加消息续跑同一个 child，并补齐 resume_child 审计", async () => {
+  resetIdsForTests();
+  const runId = "deep-run-queued-control-test";
+  const childRunId = "deep-child-run-0001";
+  const rawInstruction = "追加一句只有测试能识别的原文：继续核对失败路径。";
+  const queueRegistry = createInstructionQueueRegistry();
+  const childMessageStore = new InMemoryDeepChildMessageStore();
+  let queuedStatus: string | undefined;
+  let queuedChildStatus: string | undefined;
+  const responses: FakeModelProviderResponse[] = [
+    {
+      output: {
+        action: "spawn_children",
+        childSpecs: [
+          {
+            specId: "child-spec-recovery",
+            displayName: "恢复路径",
+            role: "recovery",
+            objective: "先核对失败路径。当前材料不足时可由父层追加消息继续。",
+            allowedTools: [],
+            inputRefs: ["goal:goal-runtime-test"],
+          },
+        ],
+        decisionSummary: "需要子 Agent 先检查失败路径。",
+        rationale: "父层需要独立材料后审查。",
+        uncertainty: "失败路径尚未确认。",
+        confidence: 0.69,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        action: "wait_children",
+        childSpecs: [],
+        decisionSummary: "子 Agent 仍在运行，等待其完成后再审查。",
+        rationale: "父层不应在 child 材料返回前综合。",
+        uncertainty: "等待运行中材料。",
+        confidence: 0.7,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        summary: "恢复路径：初步材料完成，但失败路径证据不足。",
+        findings: ["发现失败路径未覆盖"],
+        evidenceRefs: ["child:control:initial"],
+        uncertainty: "缺少失败路径复核。",
+        confidence: 0.43,
+      },
+    },
+    {
+      output: {
+        summary: "恢复路径：按父层追加消息复核失败路径后完成。",
+        findings: ["失败路径已补齐"],
+        evidenceRefs: ["child:control:continued"],
+        uncertainty: "仍需执行侧验证。",
+        confidence: 0.76,
+      },
+    },
+    {
+      output: {
+        action: "synthesize",
+        childSpecs: [],
+        decisionSummary: "子 Agent 已按追加消息补齐失败路径，可以综合。",
+        rationale: "父层审查材料完整后收口。",
+        uncertainty: "仍需执行验证。",
+        confidence: 0.78,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        conclusion: "失败路径已由同一个子 Agent 补齐，可进入后续执行验证。",
+        oneLineRationale: "运行中追加消息没有新建 child，而是让原 child 继续完成材料。",
+        keyEvidenceRefs: ["child:control:continued"],
+        candidateDispositions: [
+          { candidateId: "recovery", label: "恢复路径", selected: true, reason: "同一 child 续跑后的材料可采纳。" },
+        ],
+        mainUncertainty: "执行侧验证仍需跟进。",
+        confidence: 0.79,
+      },
+    },
+  ];
+  const provider = new PurposeFakeModelProvider({
+    responsesByPurpose: {
+      deep_decision: [responses[0]!, responses[1]!, responses[4]!],
+      deep_child_material: [responses[2]!, responses[3]!],
+      deep_synthesis: [responses[5]!],
+    },
+    onOutputDelta: (delta) => {
+      if (queuedStatus !== undefined || delta.purpose !== "deep_child_material") {
+        return;
+      }
+      const queued = queueRegistry.get(runId)?.queueChildInstruction({
+        childRunId,
+        instruction: rawInstruction,
+      });
+      queuedStatus = queued?.status;
+      queuedChildStatus = queued?.status === "queued" ? queued.childStatus : queued?.childStatus;
+    },
+  });
+  const { config } = makeConfig({
+    provider,
+    childInstructionQueues: queueRegistry,
+    childMessageStore,
+  });
+  const input = { ...makeRuntimeInput("检查失败路径并允许父层追加消息继续子 Agent", true), runId };
+
+  const result = await executeDeepRun(input, config);
+  const tree = result.agentRunTree;
+
+  assert.equal(queuedStatus, "queued");
+  assert.equal(queuedChildStatus, "running");
+  assert.equal(result.run.status, "completed", result.failure);
+  const queuedEvent = result.eventSequence.find((event) => event.type === "deep.child.instruction_queued");
+  assert.ok(queuedEvent !== undefined, "运行中追加消息应实时发布排队事件");
+  assert.equal(queuedEvent.refs.some((ref) => ref.kind === "child_run" && ref.refId === childRunId), true);
+  assert.equal(queuedEvent.refs.some((ref) => ref.kind === "child_instruction" && ref.refId.startsWith("child_message:")), true);
+  assert.equal(JSON.stringify(queuedEvent).includes(rawInstruction), false);
+  assert.ok(
+    result.eventSequence.findIndex((event) => event.type === "deep.child.instruction_queued") >
+      result.eventSequence.findIndex((event) => event.type === "deep.child.started"),
+    "排队事件应发生在 child.started 之后",
+  );
+  assert.equal(tree.childRuns.length, 1, "运行中追加消息不应新建 child run");
+  assert.equal(tree.childRuns[0]?.childRunId, childRunId);
+  assert.deepEqual(tree.childRuns[0]?.evidenceRefs, ["child:control:continued"]);
+  assert.equal(tree.childRuns[0]?.executionHistory?.length, 2);
+  assert.deepEqual(
+    tree.childRuns[0]?.executionHistory?.map((segment) => segment.outcome),
+    ["completed", "completed"],
+  );
+  assert.equal(tree.childRuns[0]?.parentInstructions?.length, 1);
+  assert.equal(tree.childRuns[0]?.parentInstructions?.[0]?.source, "control_api");
+  assert.equal(tree.childRuns[0]?.parentInstructions?.[0]?.status, "executed");
+  assert.equal(tree.childRuns[0]?.parentInstructions?.[0]?.messageRef?.startsWith("child_message:"), true);
+  assert.equal(tree.childRuns[0]?.parentInstructions?.[0]?.instructionSummary.includes("继续核对"), true);
+  const childMessage = await childMessageStore.getByRef(
+    runId,
+    tree.childRuns[0]?.parentInstructions?.[0]?.messageRef ?? "",
+  );
+  assert.equal(childMessage?.content, rawInstruction);
+  assert.equal(childMessage?.status, "executed");
+  assert.equal(childMessage?.childRunId, childRunId);
+  assert.deepEqual(tree.delegationDecisions.map((decision) => decision.action), [
+    "spawn_children",
+    "wait_for_children",
+    "resume_child",
+    "request_parent_synthesis",
+  ]);
+  const resumeDecision = tree.delegationDecisions.find((decision) => decision.action === "resume_child");
+  assert.ok(resumeDecision !== undefined, "控制 API 排队续跑应补齐 resume_child 审计");
+  assert.equal(resumeDecision.source, "control_api");
+  assert.deepEqual(resumeDecision.childRunIds, [childRunId]);
+  assert.ok(
+    resumeDecision.inputRefs.some((ref) => ref.startsWith("child_message:")),
+    "resume_child 应通过 child_message ref 追踪控制消息，不写 raw 指令",
+  );
+  assert.equal(JSON.stringify(resumeDecision).includes(rawInstruction), false);
+  const persisted = await config.store.get(runId);
+  assert.deepEqual(persisted?.report?.agentRunTree.childRuns[0]?.evidenceRefs, ["child:control:continued"]);
+  assert.equal(persisted?.liveProjection?.children[0]?.parentOperation?.status, "executed");
+  assert.equal(
+    persisted?.liveProjection?.children[0]?.parentOperation?.messageRef?.startsWith("child_message:"),
+    true,
+  );
+  assert.equal(JSON.stringify(persisted?.liveProjection?.children[0]?.parentOperation).includes(rawInstruction), false);
+});
+
+// ---------------------------------------------------------------------------
+// 闭环2 投影权威化：DeepRunRecord 携带 DeepResearchBrief + liveProjection 由 board
+// terminalSnapshot 派生并与 AgentRunTree 一致（board 单一事实源，最终树≡终端快照）。
+// ---------------------------------------------------------------------------
+test("executeDeepRun 投影权威化：DeepRunRecord 携带 brief，liveProjection.children ≡ AgentRunTree.childRuns（board terminalSnapshot 单一事实源）", async () => {
+  const responses: FakeModelProviderResponse[] = [
+    spawnChildrenDecisionResponse(),
+    ...childMaterialResponses(),
+    synthesizeDecisionResponse(),
+    synthesisConclusionResponse(),
+  ];
+  const { config } = makeConfig({ responses });
+  const input = makeRuntimeInput("评估某技术方案的可行性与风险，需多角度证据", true);
+
+  const result = await executeDeepRun(input, config);
+  const persisted = await config.store.get(result.run.runId);
+  assert.ok(persisted !== undefined, "deep run 应持久化");
+
+  // T2-1：DeepRunRecord 携带 DeepResearchBrief（spawn_children 装配的研究简报，FR-BRIEF-02）。
+  assert.ok(persisted.brief !== undefined, "DeepRunRecord 应携带 DeepResearchBrief");
+  assert.equal(persisted.brief!.plannedAngles.length, 2, "brief.plannedAngles 应承载 spawn 派生的 2 个角度");
+  assert.equal(persisted.brief!.needsUserApproval, false, "默认不强制用户批准计划");
+  assert.equal(persisted.brief!.goal, input.conversation.goal, "brief.goal 应承载原始目标");
+
+  // T2-1 投影权威化：liveProjection.children 由 board terminalSnapshot.tasks 派生，
+  // 其 childRunId 集合 ≡ AgentRunTree.childRuns（单一事实源：最终树与终端快照一致）。
+  const treeChildRunIds = new Set(result.agentRunTree.childRuns.map((c) => c.childRunId));
+  const projectionChildRunIds = new Set(
+    (persisted.liveProjection?.children ?? []).map((c) => c.childRunId),
+  );
+  assert.equal(treeChildRunIds.size, 2, "AgentRunTree 应含 2 个 child");
+  assert.equal(projectionChildRunIds.size, 2, "liveProjection 应投影 2 个 child");
+  for (const id of treeChildRunIds) {
+    assert.equal(
+      projectionChildRunIds.has(id),
+      true,
+      `liveProjection child ${id} 应来自 board terminalSnapshot（与 tree 同源）`,
+    );
+  }
+
+  // liveProjection child 状态由 board 终态映射（成功 run 下 board 任务全为 completed → 投影 completed）。
+  assert.equal(
+    persisted.liveProjection?.children.every((c) => c.status === "completed"),
+    true,
+    "成功 run 下 board 终态全 completed，投影 child 状态应全为 completed",
+  );
+
+  // liveProjection child 承载 board 终态回填的 summary（证明从 board 派生而非事后伪造）。
+  assert.ok(
+    persisted.liveProjection?.children.every((c) => c.summary !== undefined && c.summary!.length > 0),
+    "投影 child 应承载 board 终态回填的 summary",
+  );
+
+  // liveProjection 终态相位 ≡ board 终态相位（completed）。
+  assert.equal(persisted.liveProjection?.phase, "completed");
+});
+
+test("executeDeepRun child approval_required 投影为 blocked child run，不误报 failed", async () => {
+  const childContinuations = new DeepChildPendingContinuationStore();
+  const { config } = makeConfig({
+    responses: [
+      spawnApprovalChildDecisionResponse(),
+      {
+        toolCalls: [
+          {
+            callId: "call-write-approval",
+            toolName: "write_file",
+            input: { path: "notes.md" },
+          },
+        ],
+      },
+      synthesizeDecisionResponse(),
+      synthesisConclusionResponse(),
+    ],
+    toolCenter: new ApprovalRequiredToolBroker(),
+    childContinuations,
+  });
+
+  const result = await executeDeepRun(
+    makeRuntimeInput("需要文件核查的迁移评估", true),
+    config,
+  );
+  const persisted = await config.store.get(result.run.runId);
+
+  const child = result.report?.agentRunTree.childRuns[0];
+  assert.equal(child?.status, "blocked");
+  assert.equal(child?.failureReason, "waiting for tool confirmation");
+  assert.equal(child?.pendingApproval?.confirmationId, "confirm-call-write-approval");
+  assert.equal(child?.pendingApproval?.toolCallId, "call-write-approval");
+  assert.equal(child?.pendingApproval?.toolName, "write_file");
+  assert.equal(child?.pendingApproval?.actionSummary, "运行 write_file");
+  assert.deepEqual(child?.pendingApproval?.affectedResources, ["write_file"]);
+  assert.equal(child?.pendingApproval?.riskLevel, "medium");
+  assert.equal(result.report?.childSummaries[0]?.status, "blocked");
+  assert.equal(result.eventSequence.some((event) => event.type === "deep.child.blocked"), true);
+  assert.equal(result.eventSequence.some((event) => event.type === "deep.child.failed"), false);
+  assert.equal(persisted?.liveProjection?.children[0]?.status, "blocked");
+  assert.equal(
+    persisted?.liveProjection?.children[0]?.pendingApproval?.confirmationId,
+    "confirm-call-write-approval",
+  );
+  assert.equal(
+    persisted?.liveProjection?.children[0]?.pendingApproval?.toolName,
+    "write_file",
+  );
+  assert.equal(
+    persisted?.report?.agentRunTree.childRuns[0]?.pendingApproval?.confirmationId,
+    "confirm-call-write-approval",
+  );
+  assert.ok(child !== undefined);
+  assert.ok(
+    childContinuations.get(result.run.runId, child!.childRunId, "confirm-call-write-approval") !== undefined,
+    "blocked child pending continuation should be retained in the runtime-only store",
   );
 });
 

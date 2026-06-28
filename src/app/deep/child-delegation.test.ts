@@ -159,9 +159,10 @@ test("deriveDeepChildren：parentDepth=1 时递归派生子 child 被 depth guar
 // 3. createDeepChildAgentSpec：DeepChildSpec 补全为完整 domain AgentSpec
 // ---------------------------------------------------------------------------
 
-test("createDeepChildAgentSpec：DeepChildSpec 补全为完整 AgentSpec（含 permissions/budget/protocol）", () => {
+test("createDeepChildAgentSpec：DeepChildSpec 补全为完整 AgentSpec（不注入默认预算）", () => {
+  const childSpec = makeChildSpec("risk", 0);
   const spec = createDeepChildAgentSpec({
-    childSpec: makeChildSpec("risk", 0),
+    childSpec,
     index: 0,
     goalId: "goal-test",
     traceId: "trace-test",
@@ -170,19 +171,62 @@ test("createDeepChildAgentSpec：DeepChildSpec 补全为完整 AgentSpec（含 p
 
   assert.equal(spec.agentKind, "child");
   assert.equal(spec.role, "risk");
+  assert.equal(spec.instructions?.objective, childSpec.objective);
+  assert.equal(spec.instructions?.systemPromptRef, "prompt:deep.child.agent.standard.v1");
   assert.ok(spec.permissions.allowModel === true);
-  assert.ok(spec.budget.maxModelRounds > 0);
+  assert.equal(spec.permissions.maxModelRounds, undefined);
+  assert.equal(spec.permissions.maxToolRounds, undefined);
+  assert.equal(spec.budget.maxModelRounds, undefined);
+  assert.equal(spec.budget.maxToolRounds, undefined);
+  assert.equal(spec.budget.maxChildRuns, undefined);
+  assert.equal(spec.budget.maxOutputRefs, undefined);
+  assert.deepEqual(spec.budget, {});
   assert.ok(spec.protocol.outputs.length > 0);
   // inputRefs 含 goal/trace 引用（child 工作所需上下文）
   assert.ok(spec.inputRefs.some((ref) => ref.startsWith("goal:")));
   assert.ok(spec.inputRefs.some((ref) => ref.startsWith("trace:")));
 });
 
+test("createDeepChildAgentSpec：父 Agent 显式派生预算时写入 child run spec", () => {
+  const spec = createDeepChildAgentSpec({
+    childSpec: {
+      ...makeChildSpec("risk", 0),
+      maxModelRounds: 5,
+      maxToolRounds: 3,
+    },
+    index: 0,
+    goalId: "goal-test",
+    traceId: "trace-test",
+    createdAt: "2026-05-01T00:00:00.000Z",
+  });
+
+  assert.equal(spec.permissions.maxModelRounds, 5);
+  assert.equal(spec.permissions.maxToolRounds, 3);
+  assert.equal(spec.budget.maxModelRounds, 5);
+  assert.equal(spec.budget.maxToolRounds, 3);
+});
+
+test("createDeepChildAgentSpec：空展示名 fallback 使用用户可见的子 Agent 命名", () => {
+  const spec = createDeepChildAgentSpec({
+    childSpec: {
+      ...makeChildSpec("risk", 0),
+      displayName: "",
+    },
+    index: 0,
+    goalId: "goal-test",
+    traceId: "trace-test",
+    createdAt: "2026-05-01T00:00:00.000Z",
+  });
+
+  assert.equal(spec.displayName, "子 Agent 1");
+  assert.equal(spec.displayName.includes("Deep"), false);
+});
+
 // ---------------------------------------------------------------------------
-// 4. exploreDeepChild：child 经 AgentTurnRuntime 调模型产出 DeepChildSummary（来源/证据/置信度）
+// 4. exploreDeepChild：兼容入口经 child Agent runner 产出 DeepChildSummary（来源/证据/置信度）
 // ---------------------------------------------------------------------------
 
-test("exploreDeepChild：经 AgentTurnRuntime 调模型产出 DeepChildSummary，含 summary/findings/evidenceRefs/confidence", async () => {
+test("exploreDeepChild：经 child Agent runner 调模型产出 DeepChildSummary，含 summary/findings/evidenceRefs/confidence", async () => {
   const childSpec = makeChildSpec("risk", 0);
   const spec = createDeepChildAgentSpec({
     childSpec,

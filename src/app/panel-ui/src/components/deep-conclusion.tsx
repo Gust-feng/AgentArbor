@@ -1,5 +1,5 @@
 /**
- * Deep 可解释结论区组件（T3-4d）。
+ * 多 Agent 可解释结论区组件（T3-4d）。
  *
  * 渲染 [`DeepConclusionView`](src/app/panel-ui/src/contracts/deep.ts:195)，
  * 落地 FR-006（可解释结论展示）：结论 + 核心理由，可展开"为什么选 A / 为什么不选 B /
@@ -24,13 +24,13 @@ type DeepConclusionProps = {
 };
 
 /**
- * Deep 可解释结论区入口。
+ * 多 Agent 可解释结论区入口。
  */
 export function DeepConclusion(props: DeepConclusionProps): React.ReactElement {
   const { conclusion } = props;
   const confidence = confidencePercent(conclusion.confidence);
   return (
-    <section className="deep-conclusion" aria-label="deep 可解释结论">
+    <section className="deep-conclusion" aria-label="多 Agent 可解释结论">
       <header className="deep-conclusion-head">
         <Lightbulb className="deep-conclusion-icon" aria-hidden="true" />
         <h3 className="deep-conclusion-title">综合结论</h3>

@@ -4,16 +4,25 @@ import { createAgentRunTree, type AgentSpec } from "../../domain/underground/age
 import {
   AGENT_FABRIC_MVP_MAX_DEPTH,
   assertNoDirectChildOutputHandoff,
+  DEEP_CHILD_STATUSES,
   DEEP_DELEGATION_ACTIONS,
   DEEP_RUN_KIND,
   DEEP_RUN_MODE,
+  DEEP_TASK_BOARD_PHASES,
   type CandidateDisposition,
   type DeepChildSpec,
+  type DeepChildStatus,
+  type DeepChildStatusProjectionMap,
+  type DeepChildTask,
+  type DeepChildTaskSeed,
   type DeepConversation,
   type DeepDelegationAction,
   type DeepDelegationDecision,
   type DeepExplorationReport,
+  type DeepResearchBrief,
   type DeepRun,
+  type DeepTaskBoardPhase,
+  type DeepTaskBoardSnapshot,
   type SynthesizedConclusion,
 } from "./contracts.js";
 import {
@@ -23,7 +32,7 @@ import {
 
 // ---------------------------------------------------------------------------
 // T2-1 测试点（task.md）：
-//   1. DelegationDecision 六动作枚举完备
+//   1. DelegationDecision 动作枚举完备
 //   2. SynthesizedConclusion 五要素字段完整
 //   3. domain/underground 契约复用而非重定义
 // 另覆盖命名红线自检：产物类型不出现 Plan/directionHandoffPackage/artifact/Fruits 字段。
@@ -52,10 +61,11 @@ function makeManagerSpec(): AgentSpec {
   };
 }
 
-test("DEEP_DELEGATION_ACTIONS 覆盖六动作且仅六动作", () => {
-  assert.equal(DEEP_DELEGATION_ACTIONS.length, 6);
+test("DEEP_DELEGATION_ACTIONS 覆盖多 Agent manager 动作且不含普通工具/产物动作", () => {
+  assert.equal(DEEP_DELEGATION_ACTIONS.length, 7);
   assert.deepEqual([...DEEP_DELEGATION_ACTIONS].sort(), [
     "ask_user",
+    "continue_child",
     "direct_answer",
     "spawn_children",
     "stop",
@@ -69,7 +79,7 @@ test("DEEP_DELEGATION_ACTIONS 覆盖六动作且仅六动作", () => {
   assert.ok(!actions.includes("produce_artifact"));
 });
 
-test("DeepDelegationDecision 可承载六动作中任一动作", () => {
+test("DeepDelegationDecision 可承载多 Agent manager 动作中任一动作", () => {
   const baseDecision: DeepDelegationDecision = {
     decisionId: "decision-1",
     parentAgentId: "manager",
@@ -84,6 +94,7 @@ test("DeepDelegationDecision 可承载六动作中任一动作", () => {
         inputRefs: ["goal:1"],
       },
     ],
+    childOperations: [],
     decisionSummary: "需要多角度探查",
     rationale: "证据不足以直接结论",
     uncertainty: "候选 A 的长期维护成本未知",
@@ -96,10 +107,9 @@ test("DeepDelegationDecision 可承载六动作中任一动作", () => {
   assert.equal(baseDecision.childSpecs.length, 1);
   assert.equal(baseDecision.source, "ai");
 
-  // 六动作均可赋值（类型层面覆盖，运行时抽样校验）
   const allActions: readonly DeepDelegationAction[] = DEEP_DELEGATION_ACTIONS;
   for (const action of allActions) {
-    const decision: DeepDelegationDecision = { ...baseDecision, action, childSpecs: [] };
+    const decision: DeepDelegationDecision = { ...baseDecision, action, childSpecs: [], childOperations: [] };
     assert.equal(decision.action, action);
   }
 });
@@ -270,5 +280,157 @@ test("命名红线：产物类型字段不出现 Plan/directionHandoffPackage/ar
       !childSpecKeys.includes(key),
       `DeepChildSpec 不应包含禁用产物字段 ${key}`,
     );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// T1-1 测试点（tasks.md）：DeepChildStatus 七态完备，DeepChildTask /
+// DeepTaskBoardSnapshot / DeepResearchBrief 字段完整，复用既有契约而非重定义，
+// 不出现 Plan/directionHandoffPackage/artifact/Fruits 产物字段。
+// ---------------------------------------------------------------------------
+
+test("DeepChildStatus 覆盖七态且仅七态", () => {
+  assert.equal(DEEP_CHILD_STATUSES.length, 7);
+  assert.deepEqual([...DEEP_CHILD_STATUSES].sort(), [
+    "blocked",
+    "cancelled",
+    "completed",
+    "failed",
+    "interrupted",
+    "pending",
+    "running",
+  ]);
+  // 七态均可赋值（类型层面覆盖 + 运行时抽样）
+  const all: readonly DeepChildStatus[] = DEEP_CHILD_STATUSES;
+  for (const status of all) {
+    const task: Pick<DeepChildTask, "status"> = { status };
+    assert.equal(task.status, status);
+  }
+});
+
+test("DeepChildTask 含安全结构化字段且复用 DeepChildSpec/DeepChildSummary", () => {
+  const sampleChildSpec: DeepChildSpec = {
+    specId: "child-spec-1",
+    displayName: "风险探查",
+    role: "risk",
+    objective: "评估风险",
+    allowedTools: ["search"],
+    inputRefs: ["goal:1"],
+  };
+  const task: DeepChildTask = {
+    taskId: "deep-task-0001",
+    childRunId: "deep-child-run-0001",
+    spec: sampleChildSpec,
+    status: "pending",
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  };
+  // 关键字段完备
+  assert.equal(task.taskId, "deep-task-0001");
+  assert.equal(task.childRunId, "deep-child-run-0001");
+  assert.equal(task.spec, sampleChildSpec); // spec 复用 DeepChildSpec（同引用）
+  assert.equal(task.status, "pending");
+  assert.equal(task.startedAt, undefined);
+  assert.equal(task.completedAt, undefined);
+  assert.equal(task.summary, undefined);
+  assert.equal(task.failure, undefined);
+  assert.equal(task.pendingApproval, undefined);
+
+  // 不含 raw prompt/response/工具原始输出字段（FR-TB-01 安全结构化边界）
+  const forbiddenRaw = [
+    "prompt",
+    "response",
+    "rawprompt",
+    "rawresponse",
+    "tooloutput",
+    "toolresult",
+    "stdout",
+    "stderr",
+  ];
+  const keys = Object.keys(task).map((k) => k.toLowerCase());
+  for (const key of forbiddenRaw) {
+    assert.ok(!keys.includes(key), `DeepChildTask 不应包含 raw 材料字段 ${key}`);
+  }
+
+  // seed 字段完备（scheduler 入板种子）
+  const seed: DeepChildTaskSeed = {
+    childRunId: task.childRunId,
+    spec: sampleChildSpec,
+  };
+  assert.equal(seed.childRunId, task.childRunId);
+  assert.equal(seed.spec, sampleChildSpec);
+});
+
+test("DeepTaskBoardSnapshot 含 runId/phase/tasks/updatedAt 且 phase 九态完备", () => {
+  assert.equal(DEEP_TASK_BOARD_PHASES.length, 9);
+  assert.deepEqual([...DEEP_TASK_BOARD_PHASES].sort(), [
+    "completed",
+    "deciding",
+    "exploring",
+    "failed",
+    "needs_input",
+    "planning",
+    "stopped",
+    "synthesizing",
+    "waiting",
+  ]);
+  // phase 九态均可赋值
+  const all: readonly DeepTaskBoardPhase[] = DEEP_TASK_BOARD_PHASES;
+  for (const phase of all) {
+    const snap: Pick<DeepTaskBoardSnapshot, "phase"> = { phase };
+    assert.equal(snap.phase, phase);
+  }
+
+  const snapshot: DeepTaskBoardSnapshot = {
+    runId: "deep-run-1",
+    phase: "exploring",
+    tasks: [],
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  };
+  assert.equal(snapshot.runId, "deep-run-1");
+  assert.equal(snapshot.phase, "exploring");
+  assert.equal(snapshot.tasks.length, 0);
+});
+
+test("DeepResearchBrief 字段完整且不出现 Plan 语义", () => {
+  const brief: DeepResearchBrief = {
+    briefId: "brief-1",
+    goal: "分析项目可行性",
+    scopeSummary: "聚焦成本与风险两个角度",
+    sourcePolicySummary: "优先 workspace 上下文与一手证据",
+    plannedAngles: ["成本角度", "风险角度"],
+    needsUserApproval: false,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  };
+  assert.equal(brief.goal, "分析项目可行性");
+  assert.equal(brief.scopeSummary.length > 0, true);
+  assert.equal(brief.plannedAngles.length, 2);
+  // FR-BRIEF-02：本轮固定 false（不强制审批流程）
+  assert.equal(brief.needsUserApproval, false);
+
+  // 命名红线：brief 字段不出现 Plan / directionHandoffPackage / artifact / Fruits
+  const forbidden = ["plan", "planpackage", "directionhandoffpackage", "artifact", "fruit", "fruits"];
+  const keys = Object.keys(brief).map((k) => k.toLowerCase());
+  for (const key of forbidden) {
+    assert.ok(!keys.includes(key), `DeepResearchBrief 不应包含禁用产物字段 ${key}`);
+  }
+});
+
+test("DeepChildStatusProjectionMap 为 DeepChildStatus → 展示状态的映射类型位预留", () => {
+  // 类型位预留：映射实现归 T2-1 runtime 派生；此处只校验类型可承载七态 → 展示状态映射。
+  // ChildAgentRun["status"] 的合法值为 planned/running/blocked/completed/failed/interrupted/resumed
+  // （DeepChildSummary.status 复用之）。pending/cancelled 等任务板专用态由 T2-1
+  // 映射为最接近的展示态，blocked/interrupted 作为 child 自身状态保留。
+  const sampleMap: DeepChildStatusProjectionMap = {
+    pending: "planned",
+    running: "running",
+    completed: "completed",
+    failed: "failed",
+    interrupted: "interrupted",
+    cancelled: "interrupted",
+    blocked: "blocked",
+  };
+  // 每个任务态都有展示态映射（完备性）
+  for (const status of DEEP_CHILD_STATUSES) {
+    assert.equal(typeof sampleMap[status], "string");
   }
 });

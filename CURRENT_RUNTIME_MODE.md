@@ -10,10 +10,11 @@
 - 默认运行模式：`agent`
 - 默认执行主线：`用户消息 -> Task Soil -> 普通 Agent 主循环 -> 工具调用/命令确认 -> 结果投影`
 - 默认交互形态：线性会话驱动；用户在同一个 conversation 中一轮接一轮补充上下文、要求和判断
-- 当前已暴露显式 `deep` 入口：用户可通过 `/api/deep/*` 显式选择 deep 会话（一期为 Underground Cognitive Runtime 一层 child 最小闭环，见 ADR-0025）
-- 默认仍为普通 `agent`，仍不自动把普通请求升级为 `deep`；`deep` 只能由用户显式触发，不存在自动升级
+- 当前已暴露显式“多 Agent”模块：Panel 顶部栏以“桌面 Agent / 多 Agent”切换两个模块，正式后端入口为 `/api/deep/*`；内部仍沿用 `deep` / `DeepRuntime` 命名（当前为 manager 自由决策循环 + 一层 child 的最小协作闭环，见 ADR-0025）
+- 默认仍为普通 `agent`，仍不自动把普通请求升级为多 Agent；`deep` 只能由用户显式触发，不存在自动升级
 - `/api/conversations` 与 `/api/desktop/runs` 当前都只接受普通 `agent` 运行
-- 正式 `deep` 产品入口为 `/api/deep/*`；旧 `/api/underground/*` 仅作为兼容/废弃候选路径保留，不与 `/api/deep/*` 并列为正式入口
+- Panel 普通输入栏可选择“当前工作区”作为本轮普通 `agent` 运行的工作根目录；该选择只作为前端会话内的显式覆盖，不写入设置。未选择当前工作区时，新 run 使用设置页保存的工作区作为默认工作区
+- 正式多 Agent 产品入口为 `/api/deep/*`；旧 `/api/underground/*` 仅作为兼容/废弃候选路径保留，不与 `/api/deep/*` 并列为正式入口
 
 ## 当前真实工作方式
 
@@ -38,7 +39,19 @@
 - 默认普通 Agent 当前不设置固定模型/工具轮次上限；若未来某个普通 Agent 需要轮次边界，必须由 `AgentDefinition.turnPolicy` 显式冻结并进入 run ref，而不是由前端、route helper 或临时执行参数私自决定
 - 普通主循环消费的 `AgentDefinition.turnPolicy.purpose` 必须是 `desktop_agent`；历史 `desktop_chat` 与 `work_session_*` 只能作为兼容 purpose 读取，不能成为默认普通 AgentDefinition 或普通主循环的执行定义
 
-### 2. 前后端分离
+### 2. 一个显式多 Agent 最小协作闭环
+
+当前软件除了默认普通 Agent 外，还提供一个显式多 Agent 运行路径；它不是默认入口，而是用户主动切换后才会启动的独立 deep conversation / run。
+
+- 编排边界：`DeepRunExecutor` 维持 manager 动作循环（`direct_answer / spawn_children / wait_children / continue_child / synthesize / ask_user / stop`），其中 `spawn_children` 会把 child 放入 `DeepTaskBoard` 后经 `DeepChildScheduler` 真实并发启动；`wait_children` 会真实等待在途 child；`continue_child` 表示父层审查或操作已有 child，并给同一个 child run 追加指令继续标准 Agent loop；若目标 child 仍是 `pending / running`，追加指令先进入 scheduler FIFO 队列，等当前 child loop 到达材料边界后以同一 `childRunId` 续跑，不抢占当前模型/工具调用；`synthesize` 前会先启动并等待 pending / running child 清场，且只在已有 child 材料时由父层综合产出 `SynthesizedConclusion`。
+- 当前协作边界：只允许 manager + 一层 child（`depth = 1`）；child 由 `DeepChildAgentRunner` 作为显式 child Agent run 执行，父 Agent 派生 `DeepChildSpec`（目标、角色、工具授权、可选轮次预算），派生时把父层生成的 objective 冻结到 child `AgentSpec.instructions` 作为 run 出生事实，child 复用 `AgentTurnRuntime.executeAutonomous -> ToolCenter -> Confirmation Gate` 的标准模型-工具-模型循环，并在 `/api/deep/*` 路由中复用普通桌面 Agent 的模型环境、ToolCenter、MCP 与命令 shell 能力。未由父 Agent 显式设置 `maxModelRounds / maxToolRounds` 时，child 不设固定轮次上限；child 模型请求也不写入固定输出/延迟预算，避免工程默认预算替代父 Agent 判断。child 若遇到 `approval_required`、`out_of_fuel` 或 `context_overflow`，会进入 `blocked` child run，而不是误报 failed；child 自身中断或异常停止会进入 `interrupted` child run，不再被任务板误投影为 completed。
+- 子 Agent 可续跑边界：`approval_required` 会在 `ChildAgentRun.pendingApproval` 中保留安全确认投影（confirmationId、tool call、工具名、动作摘要、影响资源、风险等级、恢复可用性和 source refs），不保存 raw prompt、raw response、工具原始输出或完整 tool loop；运行进程内同时保留 runtime-only continuation，确认决策可通过 `POST /api/deep/runs/:runId/children/:childRunId/confirmations/:confirmationId/decision` 恢复同一个 child 标准 loop。父层既可以在 manager 决策中通过 `continue_child` 操作同一个 child run，也可以通过 `POST /api/deep/runs/:runId/children/:childRunId/messages` 给已有 child 追加继续指令，使异常停止、受阻或材料不足后的同一个 child 继续工作；运行中 child 的追加会先排队；已完成/失败/blocked/interrupted child 只有在进入可审查材料/持久化投影后，才由 live scheduler 的即时继续能力恢复同一个 child loop。只有 scheduler 对排队或即时继续都明确拒绝时，路由才返回明确 409/404，不能绕过 scheduler 另起恢复路径。这两类继续都会在 `AgentRunTree.delegationDecisions` 中记录 `resume_child` 和真实 `childRunId`，并更新 child 投影。控制 API 只刷新该 child 材料和审计链，不自动重写已完成的父层综合结论；如果已存在结论，后端会把 `liveProjection.synthesis.status` 标为 `pending` 并高亮综合节点，表示当前结论落后于最新 child 材料。后续若需要把新材料纳入最终结论，必须通过 `POST /api/deep/runs/:runId/resynthesize` 显式触发父层重新综合，由父层基于当前 child 材料再产出新的 synthesis 与 conclusion，重新综合事件会安全引用参与审查的 `child_run`。若进程重启导致 confirmation continuation 丢失，后端返回明确 409，不伪造恢复。外部 stop / interrupt 仍可收口。当前已具备真实并发 child、真实 `wait_children`、父层审查后继续同一 child、单 child 失败隔离、parent synthesize；外部 `stop / interrupt` 与模型主动 `stop` 复用同一停止收口语义：取消 pending、清空尚未执行的父层追加指令、保留已完成/受阻/中断材料、等待或保留 running child 当前 loop 自然收尾后的材料，并尝试部分综合，但不再触发继续探索。
+- 子 Agent 执行与父层操作事实：`ChildAgentRun.execution` 继续表示最近一次标准模型-工具 loop；同一个 child 被父层 `continue_child`、控制 API 追加消息或确认恢复后，`ChildAgentRun.executionHistory` 会追加每段安全执行事实（轮次、模型请求/响应引用、工具调用状态、结果与记录时间），用于父层审查和运行树复盘；该历史不保存 raw prompt、raw response 或工具原始输出。父层对同一个 child 的追加/续跑操作单独记录在 `ChildAgentRun.parentInstructions`，只保存 instructionId、安全 `messageRef`、来源、排队/执行/取消状态、短摘要和时间戳，不保存 raw 指令正文；manager 自主 `continue_child` 还可以在该操作上记录安全 `review`（审查决策、理由、证据引用和置信度），作为“为什么继续这个 child”的父层判断证据，控制 API 的用户补充消息不要求该字段。manager `continue_child` 与控制 API 追加给 child 的 raw 父子消息都会进入内部 `DeepChildMessageStore`，通过同一个 `messageRef` 与 `parentInstructions` 关联，用于后续恢复、审计和模型上下文，不进入默认事件、实时流程投影或安全 run tree 摘要。运行中的 manager 指令会先进入本 run 内部缓冲，child 续跑读取时合并缓冲与持久层，run 收口前再按顺序落盘，避免把续跑上下文依赖异步投影回调。child 续跑时，已执行过的父子消息历史会以内部上下文进入 continuation prompt；本轮新追加内容仍作为当前 `Parent instruction` 单独传入，并从历史操作列表中排除当前 `messageRef`，避免把当前指令重复放入历史；queued 但尚未执行的消息不能被当作历史事实；若本轮有当前父层 `review`，它会作为当前审查上下文单独进入 continuation prompt。`parentInstructions` 与 `executionHistory` 正交，避免把“父层要求了什么”和“子 Agent loop 如何执行”混成一条流水。manager 后续决策与父层 synthesis 的模型上下文会消费这些 child run fact 安全投影，包括执行段数、最近执行段 outcome、工具状态摘要、父层操作摘要和父层审查摘要，使父层能基于“同一个 child 已经被如何续接、执行了哪些段、是否仍有父层操作残留”继续判断，而不是只看最终 child summary；同一个 child 被继续执行时，child 自己的 continuation prompt 也会包含执行段历史、最近 loop 工具状态、父层操作摘要、当前审查摘要和已执行父子消息历史，避免把续跑退化成只看上一轮 summary 的新任务。
+- 运行中单一事实源：每个多 Agent run 都创建 manager-owned `DeepTaskBoard`；运行中的 child 状态、任务板相位与研究 brief 先进入 board / record，再由 `liveProjectionFromBoard(...)` 派生 `liveProjection.children` 与展示相位；父层追加 child 指令时，scheduler 只把 instructionId / messageRef / 排队数量 / 状态这类安全短事实叠加到对应 `liveProjection.children[].parentOperation`，不把 raw 指令正文放进默认流程投影；`deep.child.started / instruction_queued / completed / blocked / interrupted / failed` 事件也在 scheduler 生命周期回调处实时发布；最终 `AgentRunTree` 的 child 状态与 `board.terminalSnapshot()` 对齐。有 `runtimeHome` 时，deep conversation 写入 `deep-conversations/`，deep run record 写入 `deep-runs/<runId>/record.json`，父子 raw 消息写入 `deep-runs/<runId>/child-messages/<messageRef>.json`，与普通 conversation / run 物理隔离；run record 持久化本次 `aiMode` 与冻结能力快照，使进程重启后仍能读取同一 run tree，并在用户追加消息时基于持久化 childRun 继续同一个 child loop。
+- 当前 UI / 投影路径：executor 首次 `spawn_children` 后装配 `DeepResearchBrief`；Panel 顶部栏负责“桌面 Agent / 多 Agent”模块切换，侧栏只负责当前模块的新任务与历史列表，不再承担多 Agent 模式入口。普通 Agent 与多 Agent 各自保留当前状态，切回普通模块不会清空普通会话，切到多 Agent 模块会恢复当前或最近的多 Agent 任务；没有任务时进入多 Agent 空状态。多 Agent 默认界面采用接近普通 Agent 的聊天态：用户看到助手回复、动态协作进展、探索结果、综合结论，不默认暴露“父 Agent / 子 Agent”、runId、API path、raw event type 或固定阶段编排；完整 eventSequence、run tree、确认恢复和长材料只按需折叠在“协作记录”中，默认主视觉不展示运行 ID 引用和五阶段复盘。默认输入语义按状态分流：无 active run 或 active run 已终态时，提交先进入 `POST /api/deep/intake`，由模型判断 `ask_user / direct_answer / start_collaboration`；`ask_user` 与 `direct_answer` 只写入 `DeepConversation.intakeTurns` 并展示自然助手消息，不创建协作 run、不显示协作进展；只有 `start_collaboration` 才启动后台 deep run，首轮写入 `currentObjective`，终态后则在同一 `rootRunId` 任务链上创建 follow-up run。active run 运行中时提交 `POST /api/deep/runs/:runId/correct` 作为补充要求；只有点击“新任务”才清空当前多 Agent 会话/任务，下一次输入才创建全新多 Agent 会话。follow-up run 会写入 `parentRunId / rootRunId / turnOrdinal`，manager 输入包含 intake 的标准化目标、短计划和上一轮安全结构化上下文（用户补充、上一轮目标、结论、child 摘要、综合摘要），不暴露 raw prompt、raw response 或 raw tool output。后端 read-model 经 `DeepRunRecordStore` 持久化，由 `/api/deep/runs/:id/events` 作为 SSE 即时触发信号，再拉取 `/api/deep/runs/:id/view` 获取权威 run 快照与 conversation 投影；前端不从 SSE 自行重建 child 事实，并用 view 中的 conversation 保持终态续聊的同一主题身份。`GET /api/deep/runs?limit=50` 提供跨会话最近 run 摘要，并按 `rootRunId` 聚合为任务链最新一轮，Panel 启动时加载该列表；若存在未终态 run，会自动进入多 Agent 工作区并打开最新未终态 run，否则普通 Agent 默认体验不被抢占。
+- 当前仍未做：普通 agent 自动升级多 Agent、多层递归 child、child 互聊 / team mailbox、用户直接接管单个 child 的完整对话面、跨进程持久恢复 child runtime continuation、Plan / Aboveground / Governance / Global Soil 回流、完整 Agent Team 协作面。当前交付只是显式多 Agent 的最小协作闭环，不是完整团队运行时。
+
+### 3. 前后端分离
 
 当前软件采用前后端分离：
 
@@ -56,7 +69,7 @@
 
 前端不是 Agent 引擎，也不负责推导任务状态、补全工具语义或重建运行事实。
 
-### 3. 工具属于后端设施能力
+### 4. 工具属于后端设施能力
 
 当前工具能力属于后端设施，不属于前端，也不属于 prompt 自由扩展范围。
 
@@ -65,6 +78,8 @@
 - 普通 `agent` 只有在后端已经冻结 `capabilitySnapshot` 后，才会把工具暴露给模型；裸 `ToolCenter` 只负责执行，不再单独决定模型可见工具
 - 普通 `agent` 的本轮模型配置事实来自 run 创建时冻结的 `capabilitySnapshot.activeModel`；执行、持久化、恢复和用户可见 read-model 不能再用当前全局模型配置覆盖它
 - 普通 `agent` 的本轮模型能力事实来自 run 创建时冻结的 `capabilitySnapshot.modelCapabilities`；直接调用参数里的临时 `modelCapabilities` 只能服务没有冻结快照的测试或兼容调用，不能覆盖已创建 run 的上下文窗口、输出预算、工具调用能力或流式能力
+- 普通 `agent` 的附件读图工具只在本轮模型能力支持视觉输入时进入可用工具集合；工具读取的图片字节只作为临时 `ModelMessage.attachments` 进入下一轮模型请求，不进入事件、run record 或 Panel read-model，工具 JSON 结果只保留图片元数据和本轮模型输入状态
+- 普通 `agent` 的本轮工作区事实来自 run 创建时冻结的 `capabilitySnapshot.workspace`；请求显式传入的当前工作区只影响该 run 的工作根目录，不能回写或覆盖设置页保存的默认工作区
 - 普通 `agent` 在请求未显式指定 `aiMode` 时，默认 `aiMode` 也从本轮 `capabilitySnapshot.activeModel.defaultAiMode` 派生；入口层不得为了默认值提前读取当前全局模型配置
 - 普通 `agent` 执行阶段只能消费 run 创建时冻结的 `capabilitySnapshot`；执行资源不得在运行中重新向 `CapabilityCenter` 获取当前快照来替代本轮事实
 - 普通 `agent` 的本轮 ToolCenter 执行器全集也必须从 `capabilitySnapshot.toolCatalog.tools` 派生；当前代码新增、删除或启停工具只能影响新 run，不能扩张已创建 run 的可执行工具集合
@@ -82,13 +97,15 @@
 - 模型只能在本轮可见工具集合内自主选择
 - 模型不能绕过 ToolCenter、权限、命令确认和本地策略沙箱；但普通回答、工具结果和错误信息不得被脱敏或安全投影链路吞掉
 
-### 4. 当前默认产品边界
+### 5. 当前默认产品边界
 
 当前默认产品的默认入口仍是普通桌面 Agent；在基础 Agent 路线稳定后，已重启 `deep` 作为显式并行入口，但 deep 不混入默认路径。
 
 - 保留长期 `deep / Agent cluster` 架构方向
-- 默认入口仍为普通 `agent`；`deep` 入口已暴露为显式选择（`/api/deep/*`），但不自动触发、不自动升级，不把普通请求自动转为 deep
+- 默认入口仍为普通 `agent`；多 Agent 入口已暴露为显式选择（正式后端路径 `/api/deep/*`，内部 `runMode: "deep"`），但不自动触发、不自动升级，不把普通请求自动转为 deep
+- 当前显式多 Agent 已落地 manager 自由决策循环、一层 child、`DeepTaskBoard` 单一事实源、`DeepChildScheduler` 实时并发、`DeepResearchBrief`、聊天态动态协作投影、专属工作区壳层、跨会话历史恢复与 parent synthesize，但仍不是完整 Agent Team
 - deep 后端扩展按显式 deep 项目推进（一期决策由 ADR-0025 承接），且必须先证明不改变普通模式的工具可见性、事件投影、确认语义和首屏文案
+- 当前不包含多层递归、child 互聊、team mailbox、Plan 交接、Aboveground Execution Runtime、Governance Pipeline 或 Global Soil 回流
 - 普通文件编辑、读写、命令、搜索等动作必须使用朴素命名，不能包装成过重概念
 
 ## 当前应如何理解代码
@@ -114,6 +131,6 @@
 - 普通 Agent 完成语义变化
 - 前后端职责边界变化
 - 工具暴露与执行边界变化
-- 默认是否暴露 `deep` 的产品策略变化
+- 默认或显式多 Agent 暴露策略变化
 
 如果代码实现已经变化，但本文件未更新，应视为文档失效，需要先补齐文档再继续演进。

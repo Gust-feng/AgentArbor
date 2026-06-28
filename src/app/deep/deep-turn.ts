@@ -1,9 +1,10 @@
 /**
  * DeepRuntime 模型 turn 执行助手（deep 一期，ADR-0025）。
  *
- * 为 DeepRunExecutor（manager 决策/直接回答/父层综合）与 Child Delegation（child 探索）
- * 提供统一的 AgentTurnRuntime 执行入口。吸收 cognitive-work-session-runtime.ts 的
- * executeRequiredTurn 形态作为设计输入，但本文件是 deep 正式实现，不 import legacy 模块。
+ * 为 DeepRunExecutor（manager 决策/直接回答/父层综合）提供统一的 AgentTurnRuntime
+ * 执行入口。child 探索已收口到 DeepChildAgentRunner，避免复用本 helper 的固定
+ * manager turn 预算。吸收 cognitive-work-session-runtime.ts 的 executeRequiredTurn
+ * 形态作为设计输入，但本文件是 deep 正式实现，不 import legacy 模块。
  *
  * AI-first 边界：fallback 固定 "disabled"——模型不可用或 turn 失败时直接抛错，
  * 不 fallback 伪装成已完成判断（需求 A3）。调用方据此做业务决策（拒绝 run / 标记 child 失败）。
@@ -21,9 +22,9 @@ export type ExecuteDeepTurnInput = {
   readonly callerAgentId: string;
   readonly callerRef: ObservationRef;
   readonly purpose:
+    | "deep_intake"
     | "deep_decision"
     | "deep_direct_answer"
-    | "deep_child_material"
     | "deep_synthesis";
   readonly outputContract: ModelOutputContract;
   readonly inputRefs: readonly ObservationRef[];

@@ -15,6 +15,7 @@ import {
   writeSseEvent,
 } from "./http-utils.js";
 import { createPersistedPanelRunResponse } from "./persisted-run-response.js";
+import { createPanelUsageStatistics } from "../panel-usage-statistics.js";
 import { parseRunInput } from "./request-parsers.js";
 import {
   createPanelRunResponse,
@@ -77,6 +78,11 @@ export async function handlePanelRunRoute(
       ok: true,
       runs: (await runtime.runtimeDatabase?.listRuns(Number.isFinite(limit) ? limit : 50)) ?? [],
     });
+    return true;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/runtime/usage-statistics") {
+    writeJson(response, 200, await createPanelUsageStatistics({ runtimeDatabase: runtime.runtimeDatabase }));
     return true;
   }
 

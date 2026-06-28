@@ -1,0 +1,228 @@
+.usage-settings {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.usage-heatmap-card {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.usage-range-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.usage-range-row span,
+.usage-range-row time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-refresh-button {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  color: var(--muted);
+  padding: 0 var(--space-3);
+  font-size: 12px;
+  font-weight: var(--weight-label);
+  transition:
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard);
+}
+
+.usage-refresh-button:hover {
+  border-color: var(--accent);
+  background: var(--row-hover-bg);
+  color: var(--fg);
+}
+
+.usage-heatmap-wrap {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.usage-heatmap-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 12px;
+  grid-template-rows: repeat(7, 12px);
+  gap: 4px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-pane-thumb) transparent;
+}
+
+.usage-heatmap-cell {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--muted) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 65%, transparent);
+}
+
+.usage-heatmap-cell[data-level="1"] {
+  background: color-mix(in oklch, var(--accent) 20%, var(--surface-panel));
+}
+
+.usage-heatmap-cell[data-level="2"] {
+  background: color-mix(in oklch, var(--accent) 35%, var(--surface-panel));
+}
+
+.usage-heatmap-cell[data-level="3"] {
+  background: color-mix(in oklch, var(--accent) 52%, var(--surface-panel));
+}
+
+.usage-heatmap-cell[data-level="4"] {
+  background: color-mix(in oklch, var(--accent-strong) 68%, var(--surface-panel));
+}
+
+.usage-heatmap-cell[data-level="5"] {
+  background: color-mix(in oklch, var(--accent-strong) 88%, var(--surface-panel));
+}
+
+.usage-heatmap-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.usage-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.usage-stat-card {
+  display: grid;
+  min-height: 132px;
+  align-content: space-between;
+  gap: var(--space-3);
+  border: var(--border-width-thin) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  padding: var(--space-5);
+}
+
+.usage-stat-card.wide {
+  grid-column: 1 / -1;
+  min-height: 150px;
+}
+
+.usage-stat-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-strong);
+}
+
+.usage-stat-card strong {
+  color: var(--fg);
+  font-size: 36px;
+  font-weight: var(--weight-body);
+  line-height: 1;
+}
+
+.usage-stat-card > span:last-child {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.usage-empty-state,
+.usage-settings-error p {
+  margin: 0;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--surface-panel) 60%, transparent);
+  color: var(--muted);
+  padding: var(--space-5);
+  font-size: 13px;
+}
+
+.usage-heatmap-skeleton,
+.usage-stat-card.loading {
+  position: relative;
+  overflow: hidden;
+  min-height: 132px;
+  border: var(--border-width-thin) solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--surface-panel) 70%, var(--muted) 8%);
+}
+
+.usage-heatmap-skeleton::after,
+.usage-stat-card.loading::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--surface-panel) 70%, white 18%),
+    transparent
+  );
+  content: "";
+  transform: translateX(-100%);
+  animation: usage-loading-sweep 1.4s var(--motion-ease-standard) infinite;
+}
+
+@keyframes usage-loading-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (max-width: 620px) {
+  .usage-stat-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .usage-stat-card,
+  .usage-stat-card.wide {
+    grid-column: auto;
+    min-height: 118px;
+    padding: var(--space-4);
+  }
+
+  .usage-stat-card strong {
+    font-size: 30px;
+  }
+
+  .usage-range-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .usage-heatmap-grid {
+    grid-auto-columns: 10px;
+    grid-template-rows: repeat(7, 10px);
+    gap: 3px;
+  }
+
+  .usage-heatmap-cell {
+    width: 10px;
+    height: 10px;
+  }
+}

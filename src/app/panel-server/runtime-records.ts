@@ -146,6 +146,7 @@ export function toRuntimeModelCallRecord(
     validationStatus: call.validationStatus,
     failureKind: call.failureKind,
     retryable: call.retryable,
+    usage: call.usage,
     eventRefs: call.eventRefs,
   };
 }

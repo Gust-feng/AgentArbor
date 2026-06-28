@@ -132,6 +132,7 @@ export function createPersistedPanelRunResponse(input: {
         validationStatus: call.validationStatus,
         failureKind: call.failureKind,
         retryable: call.retryable,
+        usage: call.usage,
         candidateRefs: [],
         eventRefs: [...call.eventRefs],
       })),

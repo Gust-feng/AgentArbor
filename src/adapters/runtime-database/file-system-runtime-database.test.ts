@@ -100,6 +100,12 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         purpose: "desktop_agent",
         outputContractId: "desktop.agent_response.v1",
         model: "fake",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 4,
+          totalTokens: 16,
+          cachedInputTokens: 3,
+        },
         eventRefs: ["event:msg-0001"],
       },
     ]);
@@ -163,6 +169,12 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     assert.equal(snapshot?.workspace?.workspaceId, "workspace:current");
     assert.equal(snapshot?.events[0]?.type, "goal.received");
     assert.equal(snapshot?.modelCalls[0]?.requestId, "model-request-0001");
+    assert.deepEqual(snapshot?.modelCalls[0]?.usage, {
+      inputTokens: 12,
+      outputTokens: 4,
+      totalTokens: 16,
+      cachedInputTokens: 3,
+    });
     assert.equal(snapshot?.toolCalls[0]?.toolName, "read_file");
     assert.equal(snapshot?.toolCalls[0]?.path, "README.md");
     assert.equal(snapshot?.artifacts[0]?.ref.id, "artifact-0001");

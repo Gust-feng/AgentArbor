@@ -1,4 +1,4 @@
-import type { ModelReasoningOutputProjection, ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
+import type { ModelReasoningOutputProjection, ModelUsage, ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { RootletClusterKind } from "../domain/underground/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { PanelRunSummary } from "./panel-run-summary.js";
@@ -20,6 +20,7 @@ export type PanelTranscriptModelCall = {
   readonly sanitizedErrorRef?: string;
   readonly visibleOutput?: ModelVisibleOutputProjection;
   readonly reasoningOutput?: ModelReasoningOutputProjection;
+  readonly usage?: ModelUsage;
   readonly candidateRefs: readonly string[];
   readonly eventRefs: readonly string[];
 };
@@ -68,6 +69,7 @@ export function createPanelTranscriptModelCalls(
         modelVisibleOutputOrUndefined(payload.visibleOutput) ?? existing?.visibleOutput ?? summaryCall?.visibleOutput,
       reasoningOutput:
         modelReasoningOutputOrUndefined(payload.reasoningOutput) ?? existing?.reasoningOutput,
+      usage: modelUsageOrUndefined(payload.usage) ?? existing?.usage,
       candidateRefs: summaryCall?.candidateRefs ?? existing?.candidateRefs ?? [],
       eventRefs: unique([...(existing?.eventRefs ?? []), entry.message.id]),
     };
@@ -134,6 +136,25 @@ export function safeReasoningOutputForPanel(value: unknown): ModelReasoningOutpu
   return output;
 }
 
+export function modelUsageOrUndefined(value: unknown): ModelUsage | undefined {
+  const record = asRecord(value);
+  const usage: ModelUsage = {
+    inputTokens: nonNegativeNumber(record.inputTokens),
+    outputTokens: nonNegativeNumber(record.outputTokens),
+    totalTokens: nonNegativeNumber(record.totalTokens),
+    cachedInputTokens: nonNegativeNumber(record.cachedInputTokens),
+    uncachedInputTokens: nonNegativeNumber(record.uncachedInputTokens),
+    reasoningOutputTokens: nonNegativeNumber(record.reasoningOutputTokens),
+    estimatedCostUsd: nonNegativeNumber(record.estimatedCostUsd),
+    latencyMs: nonNegativeNumber(record.latencyMs),
+    firstTokenLatencyMs: nonNegativeNumber(record.firstTokenLatencyMs),
+    outputDurationMs: nonNegativeNumber(record.outputDurationMs),
+    outputTokensPerSecond: nonNegativeNumber(record.outputTokensPerSecond),
+  };
+  const compact = Object.fromEntries(Object.entries(usage).filter(([, item]) => item !== undefined)) as ModelUsage;
+  return Object.keys(compact).length === 0 ? undefined : compact;
+}
+
 function isRootletClusterKind(value: string | undefined): value is RootletClusterKind {
   return (
     value === "option" ||
@@ -154,6 +175,10 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function nonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function unique<T>(values: readonly T[]): T[] {

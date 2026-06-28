@@ -4,6 +4,10 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import {
+  FileSystemRuntimeDatabase,
+  resolveAgentArborRuntimeDatabasePaths,
+} from "../adapters/runtime-database/index.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 import { ConfigCenter } from "./config-center.js";
 import { resolveDefaultPanelSkillRoots } from "./panel-server/runtime.js";
@@ -62,6 +66,99 @@ test("panel config route returns product runtime metadata for settings about pag
     assert.equal(response.body.product.runtimeModeLabel, "普通 agent");
     assert.equal(response.body.product.configDirectory, directory);
     assert.equal(response.body.product.runtimeDirectory, path.join(directory, "runtime"));
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel usage statistics route returns local runtime totals and empty storage-safe defaults", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-usage-statistics-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const empty = await requestJson(server.url, "/api/runtime/usage-statistics");
+    assert.equal(empty.status, 200);
+    assert.equal(empty.body.statistics.storageAvailable, true);
+    assert.equal(empty.body.statistics.totals.conversationCount, 0);
+    assert.equal(empty.body.statistics.totals.messageCount, 0);
+    assert.equal(empty.body.statistics.totals.inputTokens, 0);
+
+    const paths = resolveAgentArborRuntimeDatabasePaths(directory);
+    const database = new FileSystemRuntimeDatabase(paths);
+    await database.upsertConversation({
+      conversationId: "conversation-usage-1",
+      title: "统计测试",
+      preview: "统计测试",
+      status: "completed",
+      latestRunId: "run-usage-1",
+      queuedRunIds: [],
+      queuedRunCount: 0,
+      createdAt: "2026-06-28T01:00:00.000Z",
+      updatedAt: "2026-06-28T01:00:02.000Z",
+      turns: [
+        {
+          turnId: "turn-usage-user",
+          role: "user",
+          title: "你的消息",
+          content: "统计测试",
+          status: "completed",
+          createdAt: "2026-06-28T01:00:00.000Z",
+          updatedAt: "2026-06-28T01:00:00.000Z",
+        },
+        {
+          turnId: "turn-usage-assistant",
+          role: "assistant",
+          title: "已完成",
+          content: "已统计。",
+          status: "completed",
+          runId: "run-usage-1",
+          createdAt: "2026-06-28T01:00:02.000Z",
+          updatedAt: "2026-06-28T01:00:02.000Z",
+        },
+      ],
+    });
+    await database.upsertRun({
+      runId: "run-usage-1",
+      profile: "lite",
+      runKind: "desktop",
+      runMode: "agent",
+      status: "completed",
+      goalSummary: "统计测试",
+      aiMode: "fake",
+      appHome: paths.appHome,
+      runHome: path.join(paths.runtimeHome, "runs", encodeURIComponent("run-usage-1")),
+      createdAt: "2026-06-28T01:00:01.000Z",
+      updatedAt: "2026-06-28T01:00:02.000Z",
+      completedAt: "2026-06-28T01:00:02.000Z",
+    });
+    await database.replaceModelCalls("run-usage-1", [
+      {
+        requestId: "usage-model-request",
+        runId: "run-usage-1",
+        responseId: "usage-model-response",
+        status: "completed",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 25,
+          totalTokens: 125,
+          cachedInputTokens: 40,
+        },
+        eventRefs: [],
+      },
+    ]);
+
+    const usage = await requestJson(server.url, "/api/runtime/usage-statistics");
+    assert.equal(usage.status, 200);
+    assert.equal(usage.body.ok, true);
+    assert.equal(usage.body.status, "completed");
+    assert.equal(usage.body.statistics.totals.conversationCount, 1);
+    assert.equal(usage.body.statistics.totals.messageCount, 2);
+    assert.equal(usage.body.statistics.totals.runCount, 1);
+    assert.equal(usage.body.statistics.totals.modelCallCount, 1);
+    assert.equal(usage.body.statistics.totals.inputTokens, 100);
+    assert.equal(usage.body.statistics.totals.outputTokens, 25);
+    assert.equal(usage.body.statistics.totals.cacheSavedTokens, 40);
+    assert.equal(JSON.stringify(usage.body).includes("统计测试"), false);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

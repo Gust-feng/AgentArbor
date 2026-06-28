@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   CheckCircle2,
+  ChartColumn,
   CloudCog,
   Database,
   FileText,
@@ -24,6 +25,7 @@ import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-sett
 import { ModelSettings } from "./model-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { SkillSettings } from "./skill-settings";
+import { UsageStatisticsSettings } from "./usage-statistics-settings";
 import { WorkspaceSettings } from "./workspace-settings";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
@@ -188,6 +190,7 @@ export function SettingsDialog(props: {
               />
             )}
             {activeGroup === "appearance" && <AppearanceSettings />}
+            {activeGroup === "statistics" && <UsageStatisticsSettings />}
             {activeGroup === "about" && <AboutSettings config={props.config} />}
           </div>
         </div>
@@ -203,6 +206,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
+  { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 

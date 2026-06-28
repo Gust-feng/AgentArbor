@@ -4,6 +4,8 @@ import type { ObservationRef } from "../observation/contracts.js";
 import type { ToolCallRequest, ToolDefinition } from "../tools/contracts.js";
 export type { ModelOutputKind } from "./model-output-contracts.js";
 import type { ModelOutputKind } from "./model-output-contracts.js";
+export type { ModelInputAttachment, ModelInputAttachmentSource } from "./model-input-attachments.js";
+import type { ModelInputAttachment } from "./model-input-attachments.js";
 export type { ModelCallRef } from "./model-call-ref.js";
 
 export const MODEL_PROTOCOL_KINDS = [
@@ -48,41 +50,6 @@ export type ModelPurpose =
   | "deep_direct_answer"
   | "deep_child_material"
   | "deep_synthesis";
-
-export type ModelInputAttachmentSource =
-  | {
-      readonly kind: "data";
-      readonly mimeType: string;
-      readonly data: string;
-    }
-  | {
-      readonly kind: "url";
-      readonly url: string;
-    }
-  | {
-      readonly kind: "file_id";
-      readonly fileId: string;
-    };
-
-export type ModelInputAttachment =
-  | {
-      readonly kind: "image";
-      readonly source: ModelInputAttachmentSource;
-      readonly attachmentId?: string;
-      readonly inputRef?: string;
-      readonly filename?: string;
-      readonly detail?: "auto" | "low" | "high" | "original";
-      readonly byteLength?: number;
-    }
-  | {
-      readonly kind: "file";
-      readonly source: ModelInputAttachmentSource;
-      readonly attachmentId?: string;
-      readonly inputRef?: string;
-      readonly filename: string;
-      readonly detail?: "low" | "high";
-      readonly byteLength?: number;
-    };
 
 export type ModelMessage = {
   readonly role: "system" | "user" | "assistant" | "tool";

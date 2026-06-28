@@ -309,8 +309,9 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptDisplay.includes("TranscriptChain"), true);
   assert.equal(chatTranscriptChain.includes("export function TranscriptChain"), true);
   assert.equal(chatTranscriptChain.includes("export function AssistantMessage"), true);
-  assert.equal(chatTranscriptChain.includes("export function AssistantAvatar"), true);
+  assert.equal(chatTranscriptChain.includes("export function AssistantAvatar"), false);
   assert.equal(chatTranscriptChain.includes("export function TypingDots"), true);
+  assert.equal(chatActive.includes("session-placeholder"), false);
   assert.equal(chatTranscriptChain.includes("collapseTimeline"), false);
   assert.equal(chatTranscriptChain.includes("assistant-workline-collapsed"), true);
   assert.equal(chatActive.includes("shouldCollapseStandaloneTimeline"), false);

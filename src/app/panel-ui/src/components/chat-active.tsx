@@ -26,10 +26,6 @@ import {
 } from "../panel-ui-transcript-store";
 import { transcriptNodesFrom } from "../app-run-projection";
 import { ordinaryWorkViewFromRunView, safeBasicRunView } from "../runtime";
-import {
-  AssistantAvatar,
-  TypingDots,
-} from "./chat-transcript-chain";
 import { ChatTranscriptDisplay } from "./chat-transcript-display";
 import type { ConfirmationProjection } from "./transcript-confirmation";
 import type { QueuedChatMessage } from "./chat-empty";
@@ -274,12 +270,7 @@ export function ChatActive(props: ChatInputProps & {
                 />
                 {view.statusNotice !== undefined && <StatusNotice {...view.statusNotice} />}
               </>
-            ) : (
-              <div className="session-placeholder">
-                <AssistantAvatar />
-                <TypingDots />
-              </div>
-            )}
+            ) : null}
           </main>
         </div>
       </div>

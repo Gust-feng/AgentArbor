@@ -360,20 +360,6 @@ function AssistantMessageLabel({ model }: { readonly model?: AssistantModelBadge
   );
 }
 
-export function AssistantAvatar({ model }: { readonly model?: AssistantModelBadge }): React.ReactElement {
-  return <MemoAssistantAvatar model={model} />;
-}
-
-const MemoAssistantAvatar = React.memo(function AssistantAvatarContent({ model }: { readonly model?: AssistantModelBadge }): React.ReactElement {
-  return (
-    <div className="assistant-avatar" aria-label={model === undefined ? "助手" : `${model.providerLabel} ${model.modelName}`}>
-      {model?.iconSvg === undefined
-        ? <span className="assistant-avatar-initial" aria-hidden="true">{assistantAvatarInitial(model)}</span>
-        : <span className="assistant-avatar-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: model.iconSvg }} />}
-    </div>
-  );
-}, (left, right) => assistantModelBadgesEqual(left.model, right.model));
-
 export function TypingDots(): React.ReactElement {
   return <MemoTypingDots />;
 }
@@ -423,10 +409,6 @@ function workflowHasCollapsedActivity(
   workflow: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection> | undefined,
 ): boolean {
   return workflow?.segments.some((segment) => segment.kind === "activity" && segment.collapsed) === true;
-}
-
-function assistantAvatarInitial(model: AssistantModelBadge | undefined): string {
-  return (model?.providerLabel.trim() || model?.modelName.trim() || "A").slice(0, 1).toUpperCase();
 }
 
 function assistantModelLabel(model: AssistantModelBadge | undefined): string | undefined {

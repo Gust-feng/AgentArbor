@@ -256,8 +256,7 @@ html[data-desktop-shell="true"] .app-window-control {
   width: var(--sidebar-compact-width);
 }
 
-.icon-tile,
-.assistant-avatar {
+.icon-tile {
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -110,11 +110,6 @@
   line-height: 1.35;
 }
 
-.session-placeholder {
-  color: var(--muted);
-  font-size: 13px;
-}
-
 .typing-dots {
   display: flex;
   align-items: center;

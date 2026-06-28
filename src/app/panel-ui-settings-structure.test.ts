@@ -14,6 +14,7 @@ test("panel UI settings and model modules stay split", async () => {
     commandShellSelection,
     runtimeEnvironmentSettings,
     appearanceSettings,
+    usageStatisticsSettings,
     modelSettings,
     modelCatalogPanel,
     modelProviderForm,
@@ -30,6 +31,7 @@ test("panel UI settings and model modules stay split", async () => {
     settingsProviderStyles,
     settingsModelListStyles,
     settingsFormStyles,
+    settingsUsageStyles,
     workspaceStyles,
     glassStyle,
   ] = await Promise.all([
@@ -42,6 +44,7 @@ test("panel UI settings and model modules stay split", async () => {
     readPanelUiSource(path.join("components", "command-shell-selection.tsx")),
     readPanelUiSource(path.join("components", "runtime-environment-settings.tsx")),
     readPanelUiSource(path.join("components", "appearance-settings.tsx")),
+    readPanelUiSource(path.join("components", "usage-statistics-settings.tsx")),
     readPanelUiSource(path.join("components", "model-settings.tsx")),
     readPanelUiSource(path.join("components", "model-catalog-panel.tsx")),
     readPanelUiSource(path.join("components", "model-provider-form.tsx")),
@@ -58,6 +61,7 @@ test("panel UI settings and model modules stay split", async () => {
     readPanelUiStyle("settings-provider.css"),
     readPanelUiStyle("settings-model-list.css"),
     readPanelUiStyle("settings-forms.css"),
+    readPanelUiStyle("settings-usage.css"),
     readPanelUiStyle("workspace.css"),
     readPanelUiStyle("style-glass.css"),
   ]);
@@ -71,6 +75,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes('from "./settings-types"'), true);
   assert.equal(settingsDialog.includes('from "./workspace-settings"'), true);
   assert.equal(settingsDialog.includes('from "./appearance-settings"'), true);
+  assert.equal(settingsDialog.includes('from "./usage-statistics-settings"'), true);
   assert.equal(settingsDialog.includes("React.lazy"), false);
   assert.equal(settingsDialog.includes("React.Suspense"), false);
   assert.equal(settingsDialog.includes('import("./model-settings")'), false);
@@ -90,7 +95,10 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes('label: "工作区"'), true);
   assert.equal(settingsDialog.includes('label: "命令确认"'), false);
   assert.equal(settingsDialog.includes('label: "外观"'), true);
+  assert.equal(settingsDialog.includes('label: "使用统计"'), true);
   assert.equal(settingsDialog.includes('label: "关于"'), true);
+  assert.equal(settingsDialog.indexOf('label: "外观"') < settingsDialog.indexOf('label: "使用统计"'), true);
+  assert.equal(settingsDialog.indexOf('label: "使用统计"') < settingsDialog.indexOf('label: "关于"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
   assert.equal(settingsDialog.includes("<ModelSettings"), true);
   assert.equal(settingsDialog.includes("<BasicCapabilitiesSettings"), true);
@@ -103,12 +111,14 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("<LazySkillSettings"), false);
   assert.equal(settingsDialog.includes("<LazyWorkspaceSettings"), false);
   assert.equal(settingsDialog.includes("<ConfirmationSettings"), false);
+  assert.equal(settingsDialog.includes("<UsageStatisticsSettings"), true);
   assert.equal(settingsDialog.includes("function Capability"), false);
   assert.equal(settingsDialog.includes("function WorkspaceSettings"), false);
   assert.equal(settingsDialog.includes("function ConfirmationSettings"), false);
   assert.equal(settingsDialog.includes("function AppearanceSettings"), false);
   assert.equal(settingsDialog.includes("function AboutSettings"), true);
   assert.equal(settingsDialog.includes("<AppearanceSettings />"), true);
+  assert.equal(settingsDialog.includes("<UsageStatisticsSettings />"), true);
   assert.equal(settingsDialog.includes("<LazyAppearanceSettings"), false);
   assert.equal(settingsDialog.includes("<AboutSettings config={props.config} />"), true);
   assert.equal(settingsDialog.includes("useBrowserAppearanceSnapshot"), false);
@@ -140,7 +150,10 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsTypes.includes('export type { ModelForm } from "./model-settings"'), true);
   assert.equal(settingsTypes.includes("export type ToolForm"), true);
   assert.equal(settingsTypes.includes("export type McpServerForm"), true);
-  assert.equal(settingsTypes.includes('export type SettingsGroup = "models" | "basicCapabilities" | "mcp" | "skills" | "workspace" | "appearance" | "about";'), true);
+  assert.equal(settingsTypes.includes('"appearance"'), true);
+  assert.equal(settingsTypes.includes('"statistics"'), true);
+  assert.equal(settingsTypes.indexOf('"appearance"') < settingsTypes.indexOf('"statistics"'), true);
+  assert.equal(settingsTypes.indexOf('"statistics"') < settingsTypes.indexOf('"about"'), true);
   assert.equal(settingsToolCopy.includes("export function toolTitle"), false);
   assert.equal(settingsToolCopy.includes("export function toolDescription"), false);
   assert.equal(settingsToolCopy.includes("export function toolMeta"), false);
@@ -162,12 +175,19 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(skillSettings.includes("按任务触发的工作流说明"), false);
   assert.equal(skillSettings.includes("暂无技能"), true);
   assert.equal(skillSettings.includes('aria-label="技能列表"'), true);
-  assert.equal(skillSettings.includes("SKILL.md"), true);
+  assert.equal(skillSettings.includes("SKILL.md"), false);
+  assert.equal(skillSettings.includes("sourcePath"), false);
+  assert.equal(skillSettings.includes("按任务匹配"), false);
+  assert.equal(skillSettings.includes("最近使用"), true);
   assert.equal(appearanceSettings.includes("export function AppearanceSettings"), true);
   assert.equal(appearanceSettings.includes("useBrowserAppearanceSnapshot"), false);
   assert.equal(appearanceSettings.includes("<ThemeSwitcher"), true);
   assert.equal(appearanceSettings.includes("当前环境"), false);
+  assert.equal(usageStatisticsSettings.includes("export function UsageStatisticsSettings"), true);
+  assert.equal(usageStatisticsSettings.includes("/api/runtime/usage-statistics"), true);
+  assert.equal(usageStatisticsSettings.includes("<ThemeSwitcher"), false);
   assert.equal(capabilitySettings.includes("网络搜索"), true);
+  assert.equal(capabilitySettings.includes("秘塔搜索"), true);
   assert.equal(capabilitySettings.includes("网页查证"), false);
   assert.equal(capabilitySettings.includes("McpReferencePanel"), true);
   assert.equal(workspaceStyles.includes(".service-settings-card"), true);
@@ -211,6 +231,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(modelSettings.includes('from "./model-provider-form"'), true);
   assert.equal(modelSettings.includes('from "./model-provider-list"'), true);
   assert.equal(modelSettings.includes('from "./model-settings-icons"'), true);
+  assert.equal(modelSettings.includes('from "../model-capability-display"'), true);
   assert.equal(modelSettings.includes('from "./model-catalog-state"'), true);
   assert.equal(modelSettings.includes('from "./model-settings-list-equality"'), true);
   assert.equal(modelSettings.includes("function sameStringList"), false);
@@ -227,6 +248,8 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(modelCatalogPanel.includes("export function ModelCatalogPanel"), true);
   assert.equal(modelCatalogPanel.includes("function SavedModels"), true);
   assert.equal(modelCatalogPanel.includes("function FetchedModels"), true);
+  assert.equal(modelCatalogPanel.includes("modelMeta"), true);
+  assert.equal(modelCatalogPanel.includes("modelRowMeta"), true);
   assert.equal(modelCatalogPanel.includes("className=\"model-list-panel\""), true);
   assert.equal(modelCatalogPanel.includes("formatModelCount"), true);
   assert.equal(modelProviderForm.includes("export function ModelProviderForm"), true);
@@ -283,6 +306,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(styleEntry.includes('@import "./styles/settings-provider.css"'), true);
   assert.equal(styleEntry.includes('@import "./styles/settings-model-list.css"'), true);
   assert.equal(styleEntry.includes('@import "./styles/settings-forms.css"'), true);
+  assert.equal(styleEntry.includes('@import "./styles/settings-usage.css"'), true);
   assert.equal(settingsShellStyles.includes(".settings-dialog"), true);
   assert.equal(settingsShellStyles.includes(".settings-provider-manager"), false);
   assert.equal(settingsProviderStyles.includes(".settings-provider-manager"), true);
@@ -290,7 +314,10 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsProviderStyles.includes(".model-list-panel"), false);
   assert.equal(settingsModelListStyles.includes(".model-list-panel"), true);
   assert.equal(settingsModelListStyles.includes(".model-row-icon"), true);
+  assert.equal(settingsModelListStyles.includes(".model-candidate-copy small"), true);
   assert.equal(settingsModelListStyles.includes(".settings-row"), false);
   assert.equal(settingsFormStyles.includes(".settings-row"), true);
   assert.equal(settingsFormStyles.includes(".model-catalog-grid"), true);
+  assert.equal(settingsUsageStyles.includes(".usage-stat-grid"), true);
+  assert.equal(settingsUsageStyles.includes(".usage-heatmap-grid"), true);
 });

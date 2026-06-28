@@ -104,7 +104,6 @@ export function UsageStatisticsSettings(): React.ReactElement {
         <button
           type="button"
           className="usage-refresh-button"
-          title={state.loading ? "刷新中" : "刷新使用统计"}
           aria-label={state.loading ? "刷新中" : "刷新使用统计"}
           onClick={() => void loadStatistics({ force: true })}
         >
@@ -174,7 +173,6 @@ function UsageHeatmap(props: { readonly days: readonly UsageStatisticsDailyActiv
             key={day.date}
             className="usage-heatmap-cell"
             data-level={day.level}
-            title={`${day.date} · ${day.messageCount} 条消息`}
             aria-label={`${day.date}，${day.messageCount} 条消息`}
           />
         ))}

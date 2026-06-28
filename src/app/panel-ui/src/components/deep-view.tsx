@@ -767,7 +767,6 @@ function DeepChildActivityCard(props: {
   return (
     <section
       className={`deep-chat-child-card deep-chat-child-${props.child.status} ${props.active ? "active" : ""}`}
-      title={props.child.objective}
     >
       <div className="deep-chat-child-head">
         <ChildStatusIcon status={props.child.status} />
@@ -778,7 +777,6 @@ function DeepChildActivityCard(props: {
         {props.child.parentOperation && (
           <span
             className={`deep-child-node-parent-op deep-child-node-parent-op-${props.child.parentOperation.status}`}
-            title={props.child.parentOperation.messageRef}
           >
             {parentOperationLabel(props.child.parentOperation)}
           </span>

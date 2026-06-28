@@ -67,7 +67,6 @@ export function WorkspaceSettings(props: {
               <button
                 type="button"
                 className="page-action-button"
-                title="选择文件夹"
                 onClick={props.onSelectDirectory}
                 disabled={props.savingCommandShell}
               >
@@ -77,7 +76,6 @@ export function WorkspaceSettings(props: {
               <button
                 type="button"
                 className="page-action-button"
-                title="使用默认目录"
                 onClick={() => saveWorkspaceNow("")}
                 disabled={props.savingCommandShell}
               >

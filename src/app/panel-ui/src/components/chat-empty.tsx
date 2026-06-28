@@ -507,7 +507,6 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
               }}
               disabled={props.contextBusy === true}
               aria-label={hasTaskWorkspace ? "更换当前工作空间" : "选择工作空间"}
-              title={props.selectedWorkspaceDirectory ?? "选择工作空间"}
             >
               <FolderOpen size={18} aria-hidden="true" />
               <span className="composer-workspace-label">

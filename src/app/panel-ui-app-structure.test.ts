@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
@@ -744,6 +745,38 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(workspaceStyles.includes(".service-config-grid"), true);
 });
 
+test("panel UI native title tooltips stay limited to context usage ring", async () => {
+  const sourceRoot = path.join(process.cwd(), "src", "app", "panel-ui", "src");
+  const files = await listPanelUiSourceFiles(sourceRoot);
+  const nativeTitlePattern = /<([a-z][\w.-]*)(?=[\s>/])[^>]*\btitle\s*=/gms;
+  const findings: {
+    file: string;
+    tag: string;
+    tagSource: string;
+  }[] = [];
+
+  await Promise.all(files.map(async (file) => {
+    const source = await fs.readFile(file, "utf8");
+    let match: RegExpExecArray | null;
+    while ((match = nativeTitlePattern.exec(source)) !== null) {
+      findings.push({
+        file: path.relative(sourceRoot, file).replaceAll("\\", "/"),
+        tag: match[1],
+        tagSource: match[0],
+      });
+    }
+  }));
+
+  assert.deepEqual(
+    findings.filter((finding) =>
+      finding.file !== "components/chat-empty.tsx" ||
+      finding.tag !== "span" ||
+      !finding.tagSource.includes('className="composer-context-usage"')
+    ),
+    [],
+  );
+});
+
 test("multi Agent run tree exposes child Agent frozen instructions in details", async () => {
   const [deepContract, deepRunTree, deepStyles] = await Promise.all([
     readPanelUiSource(path.join("contracts", "deep.ts")),
@@ -793,8 +826,8 @@ test("multi Agent run tree exposes child Agent frozen instructions in details", 
   assert.equal(deepRunTree.includes("run.executionHistory.length"), true);
   assert.equal(deepRunTree.includes("执行段 {run.executionHistory.length}"), true);
   assert.equal(deepRunTree.includes("run.parentInstructions.length"), true);
-  assert.equal(deepRunTree.includes("instruction.messageRef ?? instruction.instructionId"), true);
-  assert.equal(deepRunTree.includes("parentInstructionReviewTitle"), true);
+  assert.equal(deepRunTree.includes("instruction.messageRef ?? instruction.instructionId"), false);
+  assert.equal(deepRunTree.includes("parentInstructionReviewTitle"), false);
   assert.equal(deepRunTree.includes("跟进 {run.parentInstructions.length}"), true);
   assert.equal(deepRunTree.includes("SYNTHESIS_CHILD_REVIEW_LABEL"), true);
   assert.equal(deepRunTree.includes("synthesis.childReviews.map"), true);
@@ -815,6 +848,21 @@ test("multi Agent run tree exposes child Agent frozen instructions in details", 
   assert.equal(deepStyles.includes("--success-text"), false);
   assert.equal(deepStyles.includes("--success-soft"), false);
 });
+
+async function listPanelUiSourceFiles(root: string): Promise<readonly string[]> {
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      return listPanelUiSourceFiles(fullPath);
+    }
+    if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
+      return [fullPath];
+    }
+    return [];
+  }));
+  return nested.flat();
+}
 
 function hasPanelUiModuleReference(source: string, modulePath: string): boolean {
   return source.includes(`from "${modulePath}"`) || source.includes(`import("${modulePath}")`);

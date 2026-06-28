@@ -29,7 +29,7 @@ export function RuntimeEnvironmentSettings(props: {
               <RuntimeToolIcon toolId={tool.id} />
               <span className="settings-runtime-name">{tool.label}</span>
             </span>
-            <span className="settings-runtime-description" title={tool.executable ?? tool.reason}>
+            <span className="settings-runtime-description">
               {tool.description}
             </span>
           </div>

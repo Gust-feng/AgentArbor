@@ -62,7 +62,7 @@ function SkillRow(props: {
           <div className="skills-row-meta">
             {hasCategory && <span>{props.skill.category}</span>}
             {lastUsed !== undefined && (
-              <span className={lastUsed.kind === "invalid" ? "muted" : undefined} title={lastUsed.title}>
+              <span className={lastUsed.kind === "invalid" ? "muted" : undefined}>
                 最近使用：{lastUsed.dateTime === undefined ? (
                   lastUsed.label
                 ) : (

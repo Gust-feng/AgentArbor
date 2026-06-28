@@ -88,19 +88,6 @@ const SYNTHESIS_CHILD_REVIEW_LABEL: Record<NonNullable<DeepParentSynthesisView["
   needs_followup: "需跟进",
 };
 
-const EXECUTION_OUTCOME_LABEL: Record<NonNullable<DeepChildAgentRunView["executionHistory"]>[number]["outcome"], string> = {
-  completed: "完成",
-  blocked: "受阻",
-  failed: "失败",
-  interrupted: "中断",
-};
-
-const PARENT_INSTRUCTION_STATUS_LABEL: Record<NonNullable<DeepChildAgentRunView["parentInstructions"]>[number]["status"], string> = {
-  queued: "已排队",
-  executed: "已执行",
-  cancelled: "已取消",
-};
-
 /** 置信度渲染为百分比字符串（0..1 → 0%..100%）。 */
 function confidencePercent(value: number | undefined): string | undefined {
   if (value === undefined || Number.isNaN(value)) return undefined;
@@ -236,16 +223,16 @@ function LiveChildRunNode(props: {
         <span className="deep-child-role">{child.role}</span>
         <span className={`deep-status-badge deep-status-${child.status}`}>{CHILD_STATUS_LABEL[child.status]}</span>
       </div>
-      <p className="deep-child-objective" title={child.objective}>{child.objective}</p>
+      <p className="deep-child-objective">{child.objective}</p>
       {child.summary && <p className="deep-child-summary">{child.summary}</p>}
       <div className="deep-child-meta">
         {confidence && (
-          <span className="deep-child-confidence" title="置信度">
+          <span className="deep-child-confidence">
             置信度 {confidence}
           </span>
         )}
         {child.uncertainty && (
-          <span className="deep-child-uncertainty" title="主要不确定性">
+          <span className="deep-child-uncertainty">
             {child.uncertainty}
           </span>
         )}
@@ -421,7 +408,7 @@ function ChildRunNode(props: ChildRunNodeProps): React.ReactElement {
         <span className="deep-child-role">{run.spec.role}</span>
         <span className={`deep-status-badge deep-status-${run.status}`}>{CHILD_STATUS_LABEL[run.status]}</span>
       </div>
-      {objective && <p className="deep-child-objective" title={objective}>{objective}</p>}
+      {objective && <p className="deep-child-objective">{objective}</p>}
       {summary?.summary && <p className="deep-child-summary">{summary.summary}</p>}
       {summary && summary.findings.length > 0 && (
         <ul className="deep-child-findings">
@@ -432,12 +419,12 @@ function ChildRunNode(props: ChildRunNodeProps): React.ReactElement {
       )}
       <div className="deep-child-meta">
         {confidence && (
-          <span className="deep-child-confidence" title="置信度">
+          <span className="deep-child-confidence">
             置信度 {confidence}
           </span>
         )}
         {(summary?.uncertainty ?? run.uncertainty) && (
-          <span className="deep-child-uncertainty" title="主要不确定性">
+          <span className="deep-child-uncertainty">
             {(summary?.uncertainty ?? run.uncertainty) as string}
           </span>
         )}
@@ -448,31 +435,13 @@ function ChildRunNode(props: ChildRunNodeProps): React.ReactElement {
           <span>模型 {run.execution.modelRounds} 轮</span>
           <span>工具 {run.execution.toolRounds} 轮</span>
           {run.execution.toolCalls.length > 0 && (
-            <span title={run.execution.toolCalls.map((call) => `${call.toolName}:${call.status}`).join(", ")}>
-              工具调用 {run.execution.toolCalls.length}
-            </span>
+            <span>工具调用 {run.execution.toolCalls.length}</span>
           )}
           {run.executionHistory && run.executionHistory.length > 1 && (
-            <span
-              title={run.executionHistory
-                .map((segment, index) =>
-                  `${index + 1}. ${EXECUTION_OUTCOME_LABEL[segment.outcome]}: 模型 ${segment.modelRounds} 轮 / 工具 ${segment.toolRounds} 轮`,
-                )
-                .join("\n")}
-            >
-              执行段 {run.executionHistory.length}
-            </span>
+            <span>执行段 {run.executionHistory.length}</span>
           )}
           {run.parentInstructions && run.parentInstructions.length > 0 && (
-            <span
-              title={run.parentInstructions
-                .map((instruction, index) =>
-                  `${index + 1}. ${PARENT_INSTRUCTION_STATUS_LABEL[instruction.status]} (${instruction.messageRef ?? instruction.instructionId}): ${instruction.instructionSummary}${parentInstructionReviewTitle(instruction)}`,
-                )
-                .join("\n")}
-            >
-              跟进 {run.parentInstructions.length}
-            </span>
+            <span>跟进 {run.parentInstructions.length}</span>
           )}
         </div>
       )}
@@ -499,18 +468,6 @@ function ChildRunNode(props: ChildRunNodeProps): React.ReactElement {
       )}
     </li>
   );
-}
-
-function parentInstructionReviewTitle(
-  instruction: NonNullable<DeepChildAgentRunView["parentInstructions"]>[number],
-): string {
-  if (instruction.review === undefined) {
-    return "";
-  }
-  const evidenceRefs = instruction.review.evidenceRefs.length === 0
-    ? "(none)"
-    : instruction.review.evidenceRefs.join(", ");
-  return ` | 审查：${SYNTHESIS_CHILD_REVIEW_LABEL[instruction.review.decision]}；${instruction.review.reason}；证据 ${evidenceRefs}`;
 }
 
 function ChildMessageControls(props: {
@@ -761,7 +718,7 @@ function RefChips(props: RefChipsProps): React.ReactElement {
   return (
     <ul className="deep-ref-chips">
       {props.refs.map((ref) => (
-        <li key={ref} className="deep-ref-chip" title={`引用 ${ref}`}>
+        <li key={ref} className="deep-ref-chip">
           {ref}
         </li>
       ))}

@@ -35,12 +35,12 @@ export function DeepConclusion(props: DeepConclusionProps): React.ReactElement {
         <Lightbulb className="deep-conclusion-icon" aria-hidden="true" />
         <h3 className="deep-conclusion-title">综合结论</h3>
         {confidence && (
-          <span className="deep-conclusion-confidence" title="综合置信度">
+          <span className="deep-conclusion-confidence">
             置信度 {confidence}
           </span>
         )}
         {conclusion.source === "deterministic_fallback" && (
-          <span className="deep-source-badge deep-source-fallback" title="结论由确定性兜底产出，非 AI 综合结果">
+          <span className="deep-source-badge deep-source-fallback">
             兜底产出
           </span>
         )}
@@ -169,7 +169,7 @@ function RefChips(props: RefChipsProps): React.ReactElement {
   return (
     <ul className="deep-ref-chips">
       {props.refs.map((ref) => (
-        <li key={ref} className="deep-ref-chip" title={`引用 ${ref}`}>
+        <li key={ref} className="deep-ref-chip">
           {ref}
         </li>
       ))}

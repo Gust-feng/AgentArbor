@@ -357,7 +357,7 @@ function SidebarFolderHeading(props: {
   readonly titlePath?: string;
 }): React.ReactElement {
   return (
-    <div className="sidebar-list-heading sidebar-folder-heading" title={props.titlePath ?? props.title}>
+    <div className="sidebar-list-heading sidebar-folder-heading">
       <Folder size={15} aria-hidden="true" />
       <span>{props.title}</span>
     </div>

@@ -419,7 +419,7 @@ const AssistantModelUsageLine = React.memo(function AssistantModelUsageLine(prop
   return (
     <div className="assistant-model-usage" aria-label="模型 token 信息">
       {items.map((item) => (
-        <span key={item.key} title={item.title}>
+        <span key={item.key}>
           <item.icon size={13} strokeWidth={2.2} aria-hidden="true" />
           {item.text}
         </span>

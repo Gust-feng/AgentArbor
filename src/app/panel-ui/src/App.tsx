@@ -1232,7 +1232,6 @@ function WorkbenchHeader(props: {
             type="button"
             className="app-workbench-sidebar-toggle"
             aria-label={toggleLabel}
-            title={toggleLabel}
             onClick={props.onToggleSidebar}
           >
             {props.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
@@ -1297,7 +1296,6 @@ function DesktopWindowControls(): React.ReactElement {
         type="button"
         className="app-window-control"
         aria-label="最小化窗口"
-        title="最小化"
         onClick={() => window.agentarborDesktop?.minimizeWindow()}
       >
         <Minus size={14} />
@@ -1309,7 +1307,6 @@ function DesktopWindowControls(): React.ReactElement {
         aria-pressed={windowState.maximized}
         data-window-state={windowState.maximized ? "maximized" : "normal"}
         data-window-animating={windowState.animating ? "true" : "false"}
-        title={maximizeLabel}
         onClick={() => window.agentarborDesktop?.toggleMaximizeWindow()}
       >
         <MaximizeIcon size={14} />
@@ -1318,7 +1315,6 @@ function DesktopWindowControls(): React.ReactElement {
         type="button"
         className="app-window-control app-window-control-close"
         aria-label="关闭窗口"
-        title="关闭"
         onClick={() => window.agentarborDesktop?.closeWindow()}
       >
         <X size={15} />

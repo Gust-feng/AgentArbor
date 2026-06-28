@@ -12,6 +12,8 @@ import {
 import { compact } from "../text";
 import type { AgentMode, ComposerToolConfirmationPolicy } from "../app-config-projection";
 import type { ContextAttachment } from "../contracts/context";
+import type { ModelCapabilities } from "../contracts/config";
+import { modelCapabilitySummary } from "../model-capability-display";
 import type { ModelProviderIdentity } from "../model-provider-logos";
 
 type ComposerChipFeedback = "model" | "reasoning" | "access";
@@ -30,6 +32,7 @@ export type ChatModelOption = {
   readonly providerIdentity: ModelProviderIdentity;
   readonly profileId: string;
   readonly modelId: string;
+  readonly capabilities?: ModelCapabilities;
   readonly iconSvg?: string;
 };
 
@@ -385,27 +388,31 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
                   {modelGroups.map((group) => (
                     <section key={group.label}>
                       <h3>{group.label}</h3>
-                      {group.items.map((model) => (
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={model.id === props.selectedModelId}
-                          className={model.id === props.selectedModelId ? "selected" : ""}
-                          key={model.id}
-                          onClick={() => void selectModel(model.id)}
-                        >
-                          <span className="model-option-icon" aria-hidden="true">
-                            {model.iconSvg === undefined ? (
-                              <span className="model-option-initial">{modelOptionInitial(model)}</span>
-                            ) : (
-                              <span dangerouslySetInnerHTML={{ __html: model.iconSvg }} />
-                            )}
-                          </span>
-                          <span className="model-option-copy">
-                            <strong>{model.name}</strong>
-                          </span>
-                        </button>
-                      ))}
+                      {group.items.map((model) => {
+                        const capabilitySummary = modelCapabilitySummary(model.capabilities);
+                        return (
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={model.id === props.selectedModelId}
+                            className={model.id === props.selectedModelId ? "selected" : ""}
+                            key={model.id}
+                            onClick={() => void selectModel(model.id)}
+                          >
+                            <span className="model-option-icon" aria-hidden="true">
+                              {model.iconSvg === undefined ? (
+                                <span className="model-option-initial">{modelOptionInitial(model)}</span>
+                              ) : (
+                                <span dangerouslySetInnerHTML={{ __html: model.iconSvg }} />
+                              )}
+                            </span>
+                            <span className="model-option-copy">
+                              <strong>{model.name}</strong>
+                              {capabilitySummary !== undefined && <small>{capabilitySummary}</small>}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </section>
                   ))}
                 </div>

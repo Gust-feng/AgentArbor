@@ -298,7 +298,16 @@ export function createAppSettingsController(options: AppSettingsControllerOption
           options.setModelCatalogs(catalogRecordFromList(catalogs));
           options.setApp((previous) => ({
             ...previous,
-            config: mergeCatalogsIntoConfig(previous.config, catalogs),
+            config: mergeConfigResponse(mergeCatalogsIntoConfig(previous.config, catalogs), {
+              modelCapabilityProfiles: response.modelCapabilityProfiles,
+            }),
+          }));
+        } else if (response.modelCapabilityProfiles !== undefined) {
+          options.setApp((previous) => ({
+            ...previous,
+            config: mergeConfigResponse(previous.config, {
+              modelCapabilityProfiles: response.modelCapabilityProfiles,
+            }),
           }));
         }
       }

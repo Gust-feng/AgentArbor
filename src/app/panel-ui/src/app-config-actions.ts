@@ -164,14 +164,17 @@ export async function selectModelProviderModel(input: {
 export async function fetchModelProviderCatalog(profileId: string): Promise<{
   readonly catalog: ModelProviderModelCatalog;
   readonly catalogs?: readonly ModelProviderModelCatalog[];
+  readonly modelCapabilityProfiles?: ConfigResponse["modelCapabilityProfiles"];
 }> {
   const response = await getJson<{
     readonly catalog: ModelProviderModelCatalog;
     readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
+    readonly modelCapabilityProfiles?: ConfigResponse["modelCapabilityProfiles"];
   }>(`/api/config/model-profiles/${encodeURIComponent(profileId)}/models`);
   return {
     catalog: response.catalog,
     catalogs: response.modelCatalogs,
+    modelCapabilityProfiles: response.modelCapabilityProfiles,
   };
 }
 

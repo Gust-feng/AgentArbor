@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
-import type { SanitizedWebSearchConfig } from "../../domain/config/index.js";
+import type { ModelCapabilities, ModelProviderModelCatalog, SanitizedWebSearchConfig } from "../../domain/config/index.js";
 import { listBuiltinMcpServerPresets, listBuiltinModelProviderPresets, listBuiltinProviderProtocolProfiles } from "../../domain/config/index.js";
 import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
 import { resolveModelCapabilities } from "../model-capability-registry.js";
@@ -52,6 +52,14 @@ type PanelToolsConfig = {
   readonly catalog: ToolCatalogSnapshot;
 };
 
+type PanelModelCapabilityProfile = {
+  readonly profileId: string;
+  readonly providerKind: SanitizedModelProviderConfig["providerKind"];
+  readonly protocolKind: SanitizedModelProviderConfig["protocolKind"];
+  readonly model: string;
+  readonly capabilities: ModelCapabilities;
+};
+
 export async function handlePanelConfigRoute(
   runtime: PanelConfigRouteRuntime,
   request: IncomingMessage,
@@ -68,6 +76,7 @@ export async function handlePanelConfigRoute(
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+      modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
       modelProviderMarket: modelProviderMarketPayload(),
       product: productInfoPayload(runtime),
       capabilities,
@@ -96,6 +105,7 @@ export async function handlePanelConfigRoute(
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
       modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+      modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
       modelProviderMarket: modelProviderMarketPayload(),
     });
     return true;
@@ -111,6 +121,7 @@ export async function handlePanelConfigRoute(
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
       modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+      modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
     });
     return true;
   }
@@ -127,6 +138,7 @@ export async function handlePanelConfigRoute(
         profiles: await runtime.configCenter.listModelProviderProfiles(),
         modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
         modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await modelCapabilitiesPayload(runtime),
       });
@@ -147,6 +159,7 @@ export async function handlePanelConfigRoute(
       modelProviderOrder,
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+      modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
       modelProviderMarket: modelProviderMarketPayload(),
       capabilities: await modelCapabilitiesPayload(runtime),
     });
@@ -170,6 +183,7 @@ export async function handlePanelConfigRoute(
         profiles: await runtime.configCenter.listModelProviderProfiles(),
         modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
         modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await modelCapabilitiesPayload(runtime),
       });
@@ -211,6 +225,7 @@ export async function handlePanelConfigRoute(
         modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         catalog,
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime, { extraCatalog: catalog }),
         capabilities: await modelCapabilitiesPayload(runtime),
       });
       return true;
@@ -248,6 +263,7 @@ export async function handlePanelConfigRoute(
         modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         catalog,
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
         capabilities: await modelCapabilitiesPayload(runtime),
       });
       return true;
@@ -286,6 +302,7 @@ export async function handlePanelConfigRoute(
         config: profile,
         modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
         modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await modelCapabilitiesPayload(runtime),
       });
@@ -308,6 +325,7 @@ export async function handlePanelConfigRoute(
         profiles,
         modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
         modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await modelCapabilitiesPayload(runtime),
       });
@@ -344,6 +362,7 @@ export async function handlePanelConfigRoute(
         profiles: await runtime.configCenter.listModelProviderProfiles(),
         modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
         modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await modelCapabilitiesPayload(runtime),
         informationAccess: await runtime.configCenter.getInformationAccessConfig(),
@@ -381,6 +400,7 @@ export async function handlePanelConfigRoute(
       config: await runtime.configCenter.getModelProviderConfig(),
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+      modelCapabilityProfiles: await modelCapabilityProfilesPayload(runtime),
       capabilities: await runtime.capabilityCenter.snapshot(),
     });
     return true;
@@ -819,6 +839,57 @@ async function modelCapabilitiesPayload(runtime: PanelConfigRouteRuntime): Promi
     modelCapabilities: resolveModelCapabilities({ profile: activeModel, overrides }),
     warnings: modelCapabilityWarnings(activeModel),
   };
+}
+
+async function modelCapabilityProfilesPayload(
+  runtime: PanelConfigRouteRuntime,
+  options: { readonly extraCatalog?: ModelProviderModelCatalog } = {}
+): Promise<readonly PanelModelCapabilityProfile[]> {
+  const [profiles, savedCatalogs, overrides] = await Promise.all([
+    runtime.configCenter.listModelProviderProfiles(),
+    runtime.configCenter.listModelProviderModelCatalogs(),
+    runtime.configCenter.listModelCapabilityOverrides(),
+  ]);
+  const catalogsByProfileId = new Map<string, ModelProviderModelCatalog>();
+  for (const catalog of savedCatalogs) {
+    catalogsByProfileId.set(catalog.profileId, catalog);
+  }
+  if (options.extraCatalog !== undefined) {
+    catalogsByProfileId.set(options.extraCatalog.profileId, options.extraCatalog);
+  }
+
+  const projections: PanelModelCapabilityProfile[] = [];
+  for (const profile of profiles) {
+    for (const model of modelNamesForCapabilityProjection(profile, catalogsByProfileId.get(profile.profileId))) {
+      const profileForModel: SanitizedModelProviderConfig = { ...profile, model };
+      projections.push({
+        profileId: profile.profileId,
+        providerKind: profile.providerKind,
+        protocolKind: profile.protocolKind,
+        model,
+        capabilities: resolveModelCapabilities({ profile: profileForModel, overrides }),
+      });
+    }
+  }
+  return projections;
+}
+
+function modelNamesForCapabilityProjection(
+  profile: SanitizedModelProviderConfig,
+  catalog: ModelProviderModelCatalog | undefined
+): readonly string[] {
+  const models = new Set<string>();
+  const configuredModel = profile.model?.trim();
+  if (configuredModel !== undefined && configuredModel.length > 0) {
+    models.add(configuredModel);
+  }
+  for (const model of catalog?.models ?? []) {
+    const id = model.id.trim();
+    if (id.length > 0) {
+      models.add(id);
+    }
+  }
+  return [...models];
 }
 
 function modelCapabilityWarnings(activeModel: SanitizedModelProviderConfig): readonly string[] {

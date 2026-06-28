@@ -28,6 +28,7 @@ export function mergeConfigResponse(previous: ConfigResponse | undefined, incomi
     modelProviderOrder: incoming.modelProviderOrder ?? previous?.modelProviderOrder,
     modelProviderMarket: incoming.modelProviderMarket ?? previous?.modelProviderMarket,
     modelCatalogs: incoming.modelCatalogs ?? previous?.modelCatalogs,
+    modelCapabilityProfiles: incoming.modelCapabilityProfiles ?? previous?.modelCapabilityProfiles,
     workspace: incoming.workspace ?? previous?.workspace,
     commandShell: incoming.commandShell ?? previous?.commandShell,
     toolConfirmation: incoming.toolConfirmation ?? previous?.toolConfirmation,

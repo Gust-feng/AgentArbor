@@ -1,7 +1,7 @@
 import type { ChatModelOption } from "./components/chat-empty";
 import { resolveModelIconSvgForModel } from "./model-icons";
 import { modelProviderSortRank, resolveModelProviderIdentity } from "./model-provider-logos";
-import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
+import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog } from "./contracts/config";
 
 type ConfigModelProfile = NonNullable<ConfigResponse["profiles"]>[number];
 type ConfigModelProfileWithId = ConfigModelProfile & { readonly profileId: string };
@@ -11,6 +11,7 @@ export function modelOptionsFromConfig(
   catalogs: Readonly<Record<string, ModelProviderModelCatalog>>
 ): readonly ChatModelOption[] {
   const order = config?.modelProviderOrder ?? [];
+  const capabilityLookup = modelCapabilityLookup(config);
   return (config?.profiles ?? [])
     .filter(modelProfileHasId)
     .map((profile, index) => ({ profile, index }))
@@ -52,11 +53,23 @@ export function modelOptionsFromConfig(
           providerIdentity: identity,
           profileId: profile.profileId,
           modelId: model.id,
+          capabilities: capabilityLookup.get(modelOptionId(profile.profileId, model.id)),
           iconSvg: shouldShowProviderIcon(profile)
             ? resolveModelIconSvgForModel({ providerIdentity: identity, modelId: model.id, displayName: model.displayName })
             : undefined,
         }));
     });
+}
+
+export function modelCapabilitiesForProfileModel(
+  config: ConfigResponse | undefined,
+  profileId: string | undefined,
+  modelId: string
+): ModelCapabilities | undefined {
+  if (profileId === undefined || profileId.trim().length === 0 || modelId.trim().length === 0) {
+    return undefined;
+  }
+  return modelCapabilityLookup(config).get(modelOptionId(profileId, modelId));
 }
 
 export function selectedModelOptionId(config: ConfigResponse | undefined, options: readonly ChatModelOption[]): string {
@@ -103,6 +116,26 @@ function shouldShowProviderIcon(profile: ConfigModelProfile): boolean {
   return profile.secretConfigured === true &&
     profile.defaultAiMode !== "fake" &&
     profile.defaultAiMode !== "none";
+}
+
+function modelCapabilityLookup(config: ConfigResponse | undefined): ReadonlyMap<string, ModelCapabilities> {
+  const lookup = new Map<string, ModelCapabilities>();
+  for (const item of config?.modelCapabilityProfiles ?? []) {
+    if (item.profileId.trim().length === 0 || item.model.trim().length === 0) continue;
+    lookup.set(modelOptionId(item.profileId, item.model), item.capabilities);
+  }
+  const activeProfileId = config?.config?.profileId;
+  const activeModel = config?.config?.model;
+  const activeCapabilities = config?.capabilities?.modelCapabilities;
+  if (
+    activeProfileId !== undefined &&
+    activeModel !== undefined &&
+    activeCapabilities !== undefined &&
+    !lookup.has(modelOptionId(activeProfileId, activeModel))
+  ) {
+    lookup.set(modelOptionId(activeProfileId, activeModel), activeCapabilities);
+  }
+  return lookup;
 }
 
 function modelCatalogItemsWithConfiguredModel(

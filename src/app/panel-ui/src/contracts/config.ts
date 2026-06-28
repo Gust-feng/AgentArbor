@@ -16,6 +16,7 @@ export type ConfigResponse = {
   readonly profiles?: readonly ModelProviderProfile[];
   readonly modelProviderOrder?: readonly string[];
   readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
+  readonly modelCapabilityProfiles?: readonly ModelCapabilityProfile[];
   readonly modelProviderMarket?: {
     readonly presets?: readonly ModelProviderPreset[];
   };
@@ -33,6 +34,14 @@ export type ConfigResponse = {
 };
 
 export type ModelProviderProfile = NonNullable<ConfigResponse["config"]>;
+
+export type ModelCapabilityProfile = {
+  readonly profileId: string;
+  readonly providerKind?: string;
+  readonly protocolKind?: string;
+  readonly model: string;
+  readonly capabilities: ModelCapabilities;
+};
 
 export type ModelCapabilities = {
   readonly contextWindowTokens?: number;

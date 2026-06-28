@@ -4,6 +4,8 @@ import type {
   ModelProviderModelCatalog,
 } from "../contracts/config";
 import { resolveModelIconSvgForModel } from "../model-icons";
+import { modelCapabilitySummary } from "../model-capability-display";
+import { modelCapabilitiesForProfileModel } from "../model-options";
 import { resolveModelProviderIdentity } from "../model-provider-logos";
 import { EmptyBlock } from "./workspace-common";
 import { ModelCatalogPanel } from "./model-catalog-panel";
@@ -500,6 +502,8 @@ export function ModelSettings(props: {
             modelId: model.id,
             displayName: model.displayName,
           })}
+          modelMeta={(model) =>
+            modelCapabilitySummary(modelCapabilitiesForProfileModel(projectedConfig, selectedProfileId, model.id))}
           saving={props.saving}
           modelsFetchBusy={modelsFetchBusy}
           onModelQueryChange={catalogState.setModelQuery}

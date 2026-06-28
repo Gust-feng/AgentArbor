@@ -34,7 +34,11 @@ export function validateModelRequest(request: ModelRequest): ModelRequestValidat
     );
   }
   if (!isBudget(record.budget)) {
-    issues.push(issue("MODEL_BUDGET_REQUIRED", "ModelRequest.budget must declare at least one positive limit.", "budget"));
+    issues.push(issue(
+      "MODEL_BUDGET_REQUIRED",
+      "ModelRequest.budget must be an object; declared budget limits must be positive numbers.",
+      "budget",
+    ));
   }
   if (!Array.isArray(record.inputRefs)) {
     issues.push(issue("MODEL_INPUT_REFS_REQUIRED", "ModelRequest.inputRefs must be an array.", "inputRefs"));
@@ -162,9 +166,10 @@ function isBudget(value: unknown): boolean {
   if (record === undefined) {
     return false;
   }
-  return ["maxInputTokens", "maxOutputTokens", "maxTotalTokens", "maxLatencyMs", "maxCostUsd"].some((field) => {
+  return ["maxInputTokens", "maxOutputTokens", "maxTotalTokens", "maxLatencyMs", "maxCostUsd"].every((field) => {
     const budgetValue = record[field];
-    return typeof budgetValue === "number" && Number.isFinite(budgetValue) && budgetValue > 0;
+    return budgetValue === undefined ||
+      (typeof budgetValue === "number" && Number.isFinite(budgetValue) && budgetValue > 0);
   });
 }
 

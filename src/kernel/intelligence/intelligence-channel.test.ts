@@ -39,6 +39,20 @@ test("IntelligenceChannel completed provider path emits model.requested then mod
   assert.deepEqual(eventLog.types(), ["model.requested", "model.completed"]);
 });
 
+test("IntelligenceChannel accepts an empty budget object and lets model defaults apply", async () => {
+  const { channel } = createTestChannel({
+    output: { summary: "Candidate advice from fake provider." },
+  });
+
+  const response = await channel.request({
+    ...createValidModelRequest(),
+    budget: {},
+  });
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.validation.status, "passed");
+});
+
 test("IntelligenceChannel failed provider path emits model.requested then model.failed", async () => {
   const { channel, eventLog } = createTestChannel({ fail: true });
 

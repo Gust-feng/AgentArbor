@@ -381,6 +381,26 @@ function createAgentRunTreeView(
       evidenceRefs: [...run.evidenceRefs],
       uncertainty: run.uncertainty,
       confidence: run.confidence,
+      execution:
+        run.execution === undefined
+          ? undefined
+          : {
+              ...run.execution,
+              toolCalls: run.execution.toolCalls.map((call) => ({ ...call })),
+            },
+      executionHistory: run.executionHistory?.map((segment) => ({
+        ...segment,
+        toolCalls: segment.toolCalls.map((call) => ({ ...call })),
+      })),
+      parentInstructions: run.parentInstructions?.map((instruction) => ({ ...instruction })),
+      pendingApproval:
+        run.pendingApproval === undefined
+          ? undefined
+          : {
+              ...run.pendingApproval,
+              affectedResources: [...run.pendingApproval.affectedResources],
+              sourceRefs: [...run.pendingApproval.sourceRefs],
+            },
       startedAt: run.startedAt,
       completedAt: run.completedAt,
       failureReason: run.failureReason,
@@ -405,6 +425,10 @@ function createAgentRunTreeView(
       retainedMaterialRefs: [...synthesis.retainedMaterialRefs],
       rejectedMaterialRefs: [...synthesis.rejectedMaterialRefs],
       conflictRefs: [...synthesis.conflictRefs],
+      childReviews: synthesis.childReviews?.map((review) => ({
+        ...review,
+        evidenceRefs: [...review.evidenceRefs],
+      })),
       outputRefs: [...synthesis.outputRefs],
       nextAction: synthesis.nextAction,
       decisionSummary: synthesis.decisionSummary,

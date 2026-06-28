@@ -52,8 +52,8 @@ export async function executeRequiredTurn(input: {
   readonly inputRefs: readonly ObservationRef[];
   readonly messages: readonly { readonly role: "system" | "user"; readonly content: string; readonly ref?: string }[];
   readonly allowedTools: readonly string[];
-  readonly maxModelRounds: number;
-  readonly maxToolRounds: number;
+  readonly maxModelRounds?: number;
+  readonly maxToolRounds?: number;
 }): Promise<AgentTurnRuntimeResult> {
   const result = await input.turnRuntime.execute({
     policy: {

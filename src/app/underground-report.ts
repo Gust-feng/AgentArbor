@@ -106,6 +106,35 @@ function cloneAgentRunTree(
       inputRefs: [...run.inputRefs],
       outputRefs: [...run.outputRefs],
       evidenceRefs: [...run.evidenceRefs],
+      execution:
+        run.execution === undefined
+          ? undefined
+          : {
+              ...run.execution,
+              toolCalls: run.execution.toolCalls.map((call) => ({ ...call })),
+            },
+      executionHistory: run.executionHistory?.map((segment) => ({
+        ...segment,
+        toolCalls: segment.toolCalls.map((call) => ({ ...call })),
+      })),
+      parentInstructions: run.parentInstructions?.map((instruction) => ({
+        ...instruction,
+        review:
+          instruction.review === undefined
+            ? undefined
+            : {
+                ...instruction.review,
+                evidenceRefs: [...instruction.review.evidenceRefs],
+              },
+      })),
+      pendingApproval:
+        run.pendingApproval === undefined
+          ? undefined
+          : {
+              ...run.pendingApproval,
+              affectedResources: [...run.pendingApproval.affectedResources],
+              sourceRefs: [...run.pendingApproval.sourceRefs],
+            },
     })),
     delegationDecisions: tree.delegationDecisions.map((decision) => ({
       ...decision,
@@ -121,6 +150,10 @@ function cloneAgentRunTree(
       retainedMaterialRefs: [...synthesis.retainedMaterialRefs],
       rejectedMaterialRefs: [...synthesis.rejectedMaterialRefs],
       conflictRefs: [...synthesis.conflictRefs],
+      childReviews: synthesis.childReviews?.map((review) => ({
+        ...review,
+        evidenceRefs: [...review.evidenceRefs],
+      })),
       outputRefs: [...synthesis.outputRefs],
       reasoningTraceRefs: [...synthesis.reasoningTraceRefs],
     })),

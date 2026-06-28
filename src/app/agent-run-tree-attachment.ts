@@ -22,11 +22,60 @@ export type AgentRunTreeSpecAttachment = {
     readonly allowedTools: readonly string[];
   };
   readonly budget: {
-    readonly maxModelRounds: number;
-    readonly maxToolRounds: number;
+    readonly maxModelRounds?: number;
+    readonly maxToolRounds?: number;
     readonly maxChildRuns?: number;
     readonly maxOutputRefs?: number;
   };
+};
+
+export type AgentRunTreeChildExecutionAttachment = {
+  readonly modelRounds: number;
+  readonly toolRounds: number;
+  readonly modelRequestId?: string;
+  readonly modelResponseId?: string;
+  readonly toolCalls: readonly {
+    readonly callId: string;
+    readonly toolName: string;
+    readonly status: "completed" | "failed" | "approval_required" | "cancelled";
+  }[];
+};
+
+export type AgentRunTreeChildExecutionSegmentAttachment = AgentRunTreeChildExecutionAttachment & {
+  readonly outcome: "completed" | "blocked" | "failed" | "interrupted";
+  readonly recordedAt: string;
+};
+
+export type AgentRunTreeChildPendingApprovalAttachment = {
+  readonly confirmationId: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly title: string;
+  readonly actionSummary: string;
+  readonly affectedResources: readonly string[];
+  readonly riskLevel: "low" | "medium" | "high";
+  readonly resumeAvailability?: "live" | "lost_after_restart";
+  readonly requestedAt: string;
+  readonly expiresAt?: string;
+  readonly sourceRefs: readonly string[];
+};
+
+export type AgentRunTreeChildParentInstructionAttachment = {
+  readonly instructionId: string;
+  readonly messageRef?: string;
+  readonly source: "manager" | "control_api";
+  readonly status: "queued" | "executed" | "cancelled";
+  readonly instructionSummary: string;
+  readonly review?: {
+    readonly decision: "accepted" | "rejected" | "needs_followup";
+    readonly reason: string;
+    readonly evidenceRefs: readonly string[];
+    readonly confidence?: number;
+  };
+  readonly requestedAt: string;
+  readonly queuedAt?: string;
+  readonly executedAt?: string;
+  readonly cancelledAt?: string;
 };
 
 export type AgentRunTreeAttachment = {
@@ -45,6 +94,10 @@ export type AgentRunTreeAttachment = {
     readonly failureReason?: string;
     readonly uncertainty?: string;
     readonly confidence?: number;
+    readonly execution?: AgentRunTreeChildExecutionAttachment;
+    readonly executionHistory?: readonly AgentRunTreeChildExecutionSegmentAttachment[];
+    readonly parentInstructions?: readonly AgentRunTreeChildParentInstructionAttachment[];
+    readonly pendingApproval?: AgentRunTreeChildPendingApprovalAttachment;
     readonly startedAt: string;
     readonly completedAt?: string;
   }[];
@@ -68,6 +121,14 @@ export type AgentRunTreeAttachment = {
     readonly retainedMaterialRefs: readonly string[];
     readonly rejectedMaterialRefs: readonly string[];
     readonly conflictRefs: readonly string[];
+    readonly childReviews?: readonly {
+      readonly childRunId: string;
+      readonly decision: "accepted" | "rejected" | "needs_followup";
+      readonly reason: string;
+      readonly evidenceRefs: readonly string[];
+      readonly sourceCandidateId?: string;
+      readonly confidence?: number;
+    }[];
     readonly outputRefs: readonly string[];
     readonly nextAction: string;
     readonly decisionSummary: string;

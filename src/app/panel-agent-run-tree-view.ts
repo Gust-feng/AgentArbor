@@ -16,8 +16,8 @@ export type SafeAgentRunTreeView = {
     readonly allowedTools: readonly string[];
     readonly allowModel: boolean;
     readonly budget: {
-      readonly maxModelRounds: number;
-      readonly maxToolRounds: number;
+      readonly maxModelRounds?: number;
+      readonly maxToolRounds?: number;
       readonly maxChildRuns?: number;
       readonly maxOutputRefs?: number;
     };
@@ -37,8 +37,8 @@ export type SafeAgentRunTreeView = {
     readonly allowModel: boolean;
     readonly allowedTools: readonly string[];
     readonly budget: {
-      readonly maxModelRounds: number;
-      readonly maxToolRounds: number;
+      readonly maxModelRounds?: number;
+      readonly maxToolRounds?: number;
       readonly maxChildRuns?: number;
       readonly maxOutputRefs?: number;
     };
@@ -47,6 +47,60 @@ export type SafeAgentRunTreeView = {
     readonly evidenceRefs: readonly string[];
     readonly uncertainty?: string;
     readonly confidence?: number;
+    readonly execution?: {
+      readonly modelRounds: number;
+      readonly toolRounds: number;
+      readonly modelRequestId?: string;
+      readonly modelResponseId?: string;
+      readonly toolCalls: readonly {
+        readonly callId: string;
+        readonly toolName: string;
+        readonly status: "completed" | "failed" | "approval_required" | "cancelled";
+      }[];
+    };
+    readonly executionHistory?: readonly {
+      readonly modelRounds: number;
+      readonly toolRounds: number;
+      readonly modelRequestId?: string;
+      readonly modelResponseId?: string;
+      readonly toolCalls: readonly {
+        readonly callId: string;
+        readonly toolName: string;
+        readonly status: "completed" | "failed" | "approval_required" | "cancelled";
+      }[];
+      readonly outcome: "completed" | "blocked" | "failed" | "interrupted";
+      readonly recordedAt: string;
+    }[];
+    readonly parentInstructions?: readonly {
+      readonly instructionId: string;
+      readonly messageRef?: string;
+      readonly source: "manager" | "control_api";
+      readonly status: "queued" | "executed" | "cancelled";
+      readonly instructionSummary: string;
+      readonly review?: {
+        readonly decision: "accepted" | "rejected" | "needs_followup";
+        readonly reason: string;
+        readonly evidenceRefs: readonly string[];
+        readonly confidence?: number;
+      };
+      readonly requestedAt: string;
+      readonly queuedAt?: string;
+      readonly executedAt?: string;
+      readonly cancelledAt?: string;
+    }[];
+    readonly pendingApproval?: {
+      readonly confirmationId: string;
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly title: string;
+      readonly actionSummary: string;
+      readonly affectedResources: readonly string[];
+      readonly riskLevel: "low" | "medium" | "high";
+      readonly resumeAvailability?: "live" | "lost_after_restart";
+      readonly requestedAt: string;
+      readonly expiresAt?: string;
+      readonly sourceRefs: readonly string[];
+    };
     readonly startedAt: string;
     readonly completedAt?: string;
     readonly failureReason?: string;
@@ -71,6 +125,14 @@ export type SafeAgentRunTreeView = {
     readonly retainedMaterialRefs: readonly string[];
     readonly rejectedMaterialRefs: readonly string[];
     readonly conflictRefs: readonly string[];
+    readonly childReviews?: readonly {
+      readonly childRunId: string;
+      readonly decision: "accepted" | "rejected" | "needs_followup";
+      readonly reason: string;
+      readonly evidenceRefs: readonly string[];
+      readonly sourceCandidateId?: string;
+      readonly confidence?: number;
+    }[];
     readonly outputRefs: readonly string[];
     readonly nextAction: string;
     readonly decisionSummary: string;
@@ -120,6 +182,35 @@ export function createSafeAgentRunTreeView(tree: AgentRunTreeAttachment): SafeAg
       evidenceRefs: [...run.evidenceRefs],
       uncertainty: run.uncertainty,
       confidence: run.confidence,
+      execution:
+        run.execution === undefined
+          ? undefined
+          : {
+              ...run.execution,
+              toolCalls: run.execution.toolCalls.map((call) => ({ ...call })),
+            },
+      executionHistory: run.executionHistory?.map((segment) => ({
+        ...segment,
+        toolCalls: segment.toolCalls.map((call) => ({ ...call })),
+      })),
+      parentInstructions: run.parentInstructions?.map((instruction) => ({
+        ...instruction,
+        review:
+          instruction.review === undefined
+            ? undefined
+            : {
+                ...instruction.review,
+                evidenceRefs: [...instruction.review.evidenceRefs],
+              },
+      })),
+      pendingApproval:
+        run.pendingApproval === undefined
+          ? undefined
+          : {
+              ...run.pendingApproval,
+              affectedResources: [...run.pendingApproval.affectedResources],
+              sourceRefs: [...run.pendingApproval.sourceRefs],
+            },
       startedAt: run.startedAt,
       completedAt: run.completedAt,
       failureReason: run.failureReason,
@@ -144,6 +235,10 @@ export function createSafeAgentRunTreeView(tree: AgentRunTreeAttachment): SafeAg
       retainedMaterialRefs: [...synthesis.retainedMaterialRefs],
       rejectedMaterialRefs: [...synthesis.rejectedMaterialRefs],
       conflictRefs: [...synthesis.conflictRefs],
+      childReviews: synthesis.childReviews?.map((review) => ({
+        ...review,
+        evidenceRefs: [...review.evidenceRefs],
+      })),
       outputRefs: [...synthesis.outputRefs],
       nextAction: synthesis.nextAction,
       decisionSummary: synthesis.decisionSummary,

@@ -36,8 +36,8 @@ export type AgentLayer =
 export type AgentTurnPermissionPolicy = {
   readonly allowModel: boolean;
   readonly allowedTools: readonly string[];
-  readonly maxModelRounds: number;
-  readonly maxToolRounds: number;
+  readonly maxModelRounds?: number;
+  readonly maxToolRounds?: number;
   readonly fallback: "deterministic" | "disabled";
 };
 
@@ -67,7 +67,11 @@ export const ARBOR_MESSAGE_TYPES = [
   "deep.manager.decided",
   "deep.child.started",
   "deep.child.waiting",
+  "deep.child.instruction_queued",
   "deep.child.completed",
+  "deep.child.blocked",
+  "deep.child.interrupted",
+  "deep.child.failed",
   "deep.parent_synthesis.completed",
   "deep.interrupted",
   "deep.corrected",

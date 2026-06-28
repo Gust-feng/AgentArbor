@@ -44,6 +44,7 @@ export function createIntelligenceChannelFromOptions(
     modelProvider: options.capabilitySnapshot?.activeModel,
     fetch: options.providerFetch,
     onModelOutputDelta: options.onModelOutputDelta,
+    onContextWindowExceeded: options.onContextWindowExceeded,
     streamingMode: options.onModelOutputDelta === undefined ? "respect_profile" : "force_live",
   });
   if (!config.enabled) {

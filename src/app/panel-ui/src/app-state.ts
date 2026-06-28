@@ -13,10 +13,12 @@ import type {
 import type { DeepConversationView, DeepIntakeStatus, DeepRunSummary, DeepRunView } from "./contracts/deep";
 import type { SkillDefinition } from "./contracts/skills";
 import type { ToolsResponse } from "./contracts/tools";
+import type { AppUpdateInfo } from "./contracts/app-update";
 
 export type AppState = {
   readonly config?: ConfigResponse;
   readonly tools?: ToolsResponse;
+  readonly appUpdate?: AppUpdateInfo;
   readonly skills: readonly SkillDefinition[];
   readonly conversations: readonly ConversationSummary[];
   readonly conversation?: Conversation;

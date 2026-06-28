@@ -17,7 +17,6 @@ export function ModelCatalogPanel(props: {
   readonly selectedModelRowId?: string;
   readonly modelNameDrafts: Readonly<Record<string, string>>;
   readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
-  readonly modelMeta: (model: ModelProviderModelItem) => string | undefined;
   readonly saving?: boolean;
   readonly modelsFetchBusy?: boolean;
   readonly onModelQueryChange: (value: string) => void;
@@ -74,7 +73,6 @@ function SavedModels(props: {
   readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
   readonly selectedModelRowId?: string;
   readonly saving?: boolean;
-  readonly modelMeta: (model: ModelProviderModelItem) => string | undefined;
   readonly onSelectCatalogModel: (modelId: string) => void;
   readonly onModelNameDraftChange: (modelId: string, value: string) => void;
   readonly onCommitModelDisplayName: (modelId: string, value: string) => Promise<void>;
@@ -91,7 +89,6 @@ function SavedModels(props: {
               <SavedModelRow
                 key={model.id}
                 model={model}
-                meta={props.modelMeta(model)}
                 selected={model.id === props.selectedModelRowId}
                 saving={props.saving}
                 nameDraft={props.modelNameDrafts[model.id] ?? model.displayName ?? model.id}
@@ -111,7 +108,6 @@ function SavedModels(props: {
 
 function SavedModelRow(props: {
   readonly model: ModelProviderModelItem;
-  readonly meta: string | undefined;
   readonly selected: boolean;
   readonly saving?: boolean;
   readonly nameDraft: string;
@@ -155,7 +151,7 @@ function SavedModelRow(props: {
             }
           }}
         />
-        <small>{modelRowMeta(props.model.id, props.meta)}</small>
+        <small>{props.model.id}</small>
       </div>
       <button
         type="button"
@@ -181,7 +177,6 @@ function FetchedModels(props: {
   readonly visibleFetchedCandidates: readonly ModelProviderModelItem[];
   readonly hasModelQuery: boolean;
   readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
-  readonly modelMeta: (model: ModelProviderModelItem) => string | undefined;
   readonly saving?: boolean;
   readonly onAddCatalogModel: (model: ModelProviderModelItem) => Promise<void>;
 }): React.ReactElement {
@@ -198,13 +193,12 @@ function FetchedModels(props: {
       ) : (
         <div className="model-list">
           {props.visibleFetchedCandidates.map((model) => {
-            const meta = modelRowMeta(model.displayName !== model.id ? model.id : undefined, props.modelMeta(model));
             return (
               <div className="model-list-row" key={model.id}>
                 <ModelIcon svg={props.modelIconSvg(model)} />
                 <div className="model-candidate-copy">
                   <strong>{model.displayName === model.id ? model.id : model.displayName}</strong>
-                  {meta.length > 0 && <small>{meta}</small>}
+                  {model.displayName !== model.id && <small>{model.id}</small>}
                 </div>
                 <button
                   type="button"
@@ -221,9 +215,4 @@ function FetchedModels(props: {
       )}
     </div>
   );
-}
-
-function modelRowMeta(modelId: string | undefined, meta: string | undefined): string {
-  const parts = [modelId, meta].filter((value): value is string => value !== undefined && value.length > 0);
-  return parts.join(" · ");
 }

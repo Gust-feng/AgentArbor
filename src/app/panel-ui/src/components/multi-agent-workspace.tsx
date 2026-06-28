@@ -1,8 +1,7 @@
 import React from "react";
-import { Clock3, Network, Zap } from "lucide-react";
 import type { ChatInputProps } from "./chat-empty";
 import { ChatInputBar } from "./chat-empty";
-import { DeepView } from "./deep-view";
+import { DeepChildInspector, DeepCollaborationIndex, DeepView } from "./deep-view";
 import type {
   DeepConversationView,
   DeepIntakeStatus,
@@ -34,66 +33,70 @@ type MultiAgentWorkspaceProps = {
 };
 
 export function MultiAgentWorkspace(props: MultiAgentWorkspaceProps): React.ReactElement {
+  const [selectedChildRunId, setSelectedChildRunId] = React.useState<string | undefined>(undefined);
   const activeSummary = selectedRun(props.runs, props.activeRunId);
-  const currentGoal =
-    props.view?.run.goal ??
-    props.conversation?.currentObjective ??
-    props.conversation?.goal ??
-    props.pendingGoal ??
-    activeSummary?.goal;
   const status = props.view?.run.status ?? activeSummary?.status ?? (props.busy ? "running" : undefined);
   const updatedAt = props.view?.run.updatedAt ?? props.conversation?.updatedAt ?? activeSummary?.updatedAt;
+  const collaborationChildren = props.view?.liveProjection.children ?? [];
+  const selectedChildExists =
+    selectedChildRunId !== undefined &&
+    collaborationChildren.some((child) => child.childRunId === selectedChildRunId) === true;
+  const hasSidePanel = props.view !== undefined && collaborationChildren.length > 0;
+  React.useEffect(() => {
+    if (selectedChildRunId === undefined) {
+      return;
+    }
+    if (props.view === undefined || !props.view.liveProjection.children.some((child) => child.childRunId === selectedChildRunId)) {
+      setSelectedChildRunId(undefined);
+    }
+  }, [props.view, selectedChildRunId]);
   return (
     <section className="multi-agent-workspace" aria-label="多 Agent 工作区">
-      <header className="multi-agent-missionbar">
-        <div className="multi-agent-missionbar-main">
-          <span className="multi-agent-mark" aria-hidden="true">
-            <Network size={16} />
-          </span>
-          <div className="multi-agent-title-stack">
-            <span className="multi-agent-kicker">多 Agent</span>
-            <h1>{currentGoal === undefined ? "准备新的多 Agent 任务" : currentGoal}</h1>
+      <div className={`multi-agent-body ${hasSidePanel ? "with-side-panel" : ""} ${selectedChildExists ? "with-child-inspector" : ""}`}>
+        <div className="multi-agent-primary">
+          <div className="multi-agent-reading-shell">
+            <main className="multi-agent-stage" aria-label="多 Agent 当前运行">
+              <DeepView
+                view={props.view}
+                conversation={props.conversation}
+                intakeStatus={props.intakeStatus}
+                busy={props.busy}
+                pendingGoal={props.pendingGoal}
+                selectedChildRunId={selectedChildRunId}
+                onSelectChild={setSelectedChildRunId}
+                childOperationBusyId={props.childOperationBusyId}
+                resynthesisBusy={props.resynthesisBusy}
+                onChildMessage={props.onChildMessage}
+                onChildConfirmation={props.onChildConfirmation}
+                onResynthesize={props.onResynthesize}
+              />
+            </main>
+            {props.error && <div className="multi-agent-error system-error-line">{props.error}</div>}
+            <div className="multi-agent-commandbar">
+              <ChatInputBar {...props.inputProps} variant="floating" />
+            </div>
           </div>
         </div>
-        <div className="multi-agent-missionbar-meta" aria-label="运行状态">
-          <span className={`multi-agent-status multi-agent-status-${status ?? "idle"}`}>
-            {statusLabel(status, props.busy, props.intakeStatus)}
-          </span>
-          {updatedAt !== undefined && (
-            <span className="multi-agent-updated">
-              <Clock3 size={13} aria-hidden="true" />
-              {formatRelativeTime(updatedAt)}
-            </span>
-          )}
-          {props.busy && (
-            <span className="multi-agent-live">
-              <Zap size={13} aria-hidden="true" />
-              实时
-            </span>
-          )}
-        </div>
-      </header>
-
-      <div className="multi-agent-body">
-        <main className="multi-agent-stage" aria-label="多 Agent 当前运行">
-          <DeepView
+        {props.view !== undefined && selectedChildExists ? (
+          <DeepChildInspector
             view={props.view}
-            conversation={props.conversation}
-            intakeStatus={props.intakeStatus}
+            selectedChildRunId={selectedChildRunId}
             busy={props.busy}
-            pendingGoal={props.pendingGoal}
             childOperationBusyId={props.childOperationBusyId}
-            resynthesisBusy={props.resynthesisBusy}
+            onClose={() => setSelectedChildRunId(undefined)}
             onChildMessage={props.onChildMessage}
             onChildConfirmation={props.onChildConfirmation}
-            onResynthesize={props.onResynthesize}
           />
-        </main>
-      </div>
-
-      {props.error && <div className="multi-agent-error system-error-line">{props.error}</div>}
-      <div className="multi-agent-commandbar">
-        <ChatInputBar {...props.inputProps} variant="floating" />
+        ) : props.view !== undefined && hasSidePanel ? (
+          <DeepCollaborationIndex
+            children={collaborationChildren}
+            activeChildRunId={props.view.liveProjection.activeNodeId}
+            selectedChildRunId={selectedChildRunId}
+            runStatusLabel={statusLabel(status, props.busy, props.intakeStatus)}
+            updatedLabel={updatedAt === undefined ? undefined : formatRelativeTime(updatedAt)}
+            onSelectChild={setSelectedChildRunId}
+          />
+        ) : null}
       </div>
     </section>
   );

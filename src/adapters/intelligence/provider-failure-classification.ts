@@ -1,6 +1,11 @@
 import type { ModelFailureKind } from "../../domain/intelligence/index.js";
 import { asRecord } from "./provider-value-utils.js";
 
+export type ProviderContextWindowExceededHandler = (input: {
+  readonly message: string;
+  readonly status?: number;
+}) => void | Promise<void>;
+
 /**
  * 适配器层共享的失败分类逻辑。
  *
@@ -55,4 +60,19 @@ export function isTimeoutLikeError(error: unknown): boolean {
   const name = typeof record.name === "string" ? record.name.toLowerCase() : "";
   const message = typeof record.message === "string" ? record.message.toLowerCase() : "";
   return name.includes("timeout") || message.includes("timeout") || message.includes("timed out");
+}
+
+export function isContextWindowExceededMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("context_length_exceeded") ||
+    normalized.includes("maximum context length") ||
+    normalized.includes("context window") ||
+    normalized.includes("context length") ||
+    normalized.includes("prompt is too long") ||
+    normalized.includes("input is too long") ||
+    normalized.includes("too many tokens") ||
+    /tokens?\s+(?:exceed|exceeded|exceeds)\b/.test(normalized) ||
+    /(?:exceed|exceeded|exceeds)\s+[^.]{0,80}\btokens?\b/.test(normalized)
+  );
 }

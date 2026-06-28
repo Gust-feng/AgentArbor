@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type {
+  BasicAgentCapabilitySnapshot,
+  CapabilityToolCatalogItem,
+} from "../../domain/config/contracts.js";
 import { createTaskSoil } from "../../domain/soil/task-soil.js";
 import type { ChildAgentRun } from "../../domain/underground/agent-fabric.js";
-import { deepDecisionMessages, deepSynthesisMessages, parseDeepDecision } from "./deep-model-io.js";
+import {
+  deepDecisionMessages,
+  deepIntakeMessages,
+  deepSynthesisMessages,
+  parseDeepDecision,
+} from "./deep-model-io.js";
 
 test("parseDeepDecision keeps child budgets optional and only records parent-provided limits", () => {
   const decision = parseDeepDecision({
@@ -127,6 +136,46 @@ test("deepDecisionMessages explains child budgets as optional without showing a 
   assert.match(prompt, /continue_child/);
   assert.equal(prompt.includes('"maxModelRounds": 4'), false);
   assert.equal(prompt.includes('"maxToolRounds": 4'), false);
+});
+
+test("deepIntakeMessages projects executable tools and routes workspace operations to collaboration", () => {
+  const messages = deepIntakeMessages({
+    message: "你可以操控文件夹吗",
+    capabilitySnapshot: capabilitySnapshotWithTools(["read_file", "shell_command"]),
+  });
+  const prompt = messages.map((message) => message.content).join("\n");
+
+  assert.match(prompt, /可用工具清单/);
+  assert.match(prompt, /read_file/);
+  assert.match(prompt, /shell_command/);
+  assert.match(prompt, /列目录、读取\/修改文件、查看当前工作区、执行命令/);
+  assert.match(prompt, /不得声称没有文件、终端、工作区或底层工具/);
+  assert.match(prompt, /start_collaboration/);
+});
+
+test("deepDecisionMessages instructs manager to spawn children for file and terminal evidence", () => {
+  const messages = deepDecisionMessages({
+    goal: "查看当前工作区并告诉我文件夹结构",
+    taskSoil: createTaskSoil({
+      rawGoal: "查看当前工作区并告诉我文件夹结构",
+      createdAt: "2026-05-01T00:00:00.000Z",
+    }),
+    stepIndex: 0,
+    stepLimit: 4,
+    childSummaries: [],
+    priorDecisionSummaries: [],
+    evidenceRefs: [],
+    permissionBoundaryRefs: [],
+    maxChildren: 4,
+    capabilitySnapshot: capabilitySnapshotWithTools(["read_file", "shell_command"]),
+  });
+  const prompt = messages.map((message) => message.content).join("\n");
+
+  assert.match(prompt, /查看工作区或收集一手文件\/终端证据/);
+  assert.match(prompt, /不能声称没有工具/);
+  assert.match(prompt, /childSpec.allowedTools/);
+  assert.match(prompt, /read_file/);
+  assert.match(prompt, /shell_command/);
 });
 
 test("deepDecisionMessages projects recent blocked child reason for parent review", () => {
@@ -316,5 +365,73 @@ function childRunWithParentInstruction(input: {
     ],
     startedAt: "2026-05-01T00:00:00.000Z",
     completedAt: "2026-05-01T00:00:02.000Z",
+  };
+}
+
+function capabilitySnapshotWithTools(toolNames: readonly string[]): BasicAgentCapabilitySnapshot {
+  const tools = toolNames.map((name) => capabilityTool(name));
+  return {
+    snapshotId: "snapshot-test",
+    createdAt: "2026-05-01T00:00:00.000Z",
+    activeModel: {
+      profileId: "fake",
+      providerKind: "local",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "http://localhost",
+      defaultAiMode: "fake",
+      secretRef: "secret:test",
+      secretConfigured: true,
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    },
+    modelCapabilities: {
+      contextWindowTokens: 128000,
+      maxOutputTokens: 4096,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: true,
+      supportsStructuredOutputs: true,
+      supportsStreaming: true,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "openai_compatible",
+      stability: "stable",
+    },
+    toolCatalog: {
+      scope: "desktop-basic",
+      tools,
+      allowedTools: toolNames,
+    },
+    skillCatalog: [],
+    mcpCatalog: [],
+    workspace: {
+      workspaceDirectory: "Z:\\AgentArbor",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    },
+    securitySummary: "test",
+    warnings: [],
+  };
+}
+
+function capabilityTool(name: string): CapabilityToolCatalogItem {
+  return {
+    name,
+    displayName: name,
+    displayDescription: `${name} tool`,
+    description: `${name} tool`,
+    category: "workspace",
+    categoryLabel: "Workspace",
+    riskLevel: "low",
+    riskLabel: "Low",
+    operationType: name === "shell_command" ? "execute" : "read-only",
+    operationLabel: name === "shell_command" ? "Execute command" : "Read file",
+    requiresConfirmation: name === "shell_command",
+    confirmationLabel: name === "shell_command" ? "Requires confirmation" : "No confirmation required",
+    visibleResultPolicy: {
+      userVisible: "safe-preview",
+      maxPreviewChars: 2000,
+      omitRawOutput: false,
+    },
+    scopes: ["desktop-basic"],
+    enabled: true,
+    availability: "available",
   };
 }

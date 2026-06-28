@@ -2,7 +2,7 @@
  * 多 Agent 默认视图。
  *
  * 默认层只把 `/api/deep/*` 的安全 read-model 投影成助手回复流和轻量协作进展；
- * 事件、运行树和长材料只在按需打开的协作记录里出现。这里不重建运行事实，
+ * 事件、运行树和长材料不进入默认聊天主线；协作项细节由右侧详情分栏承接。这里不重建运行事实，
  * 也不改普通 agent 主线。
  */
 import React from "react";
@@ -10,32 +10,26 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
-  ChevronDown,
-  CircleDot,
   Clock3,
   HelpCircle,
   Loader2,
-  MessageSquarePlus,
-  RefreshCw,
   Send,
-  Sparkles,
   User,
-  XCircle,
+  X,
 } from "lucide-react";
 import type {
+  DeepChildAgentRunView,
   DeepConversationView,
   DeepChildRunStatus,
+  DeepChildSummaryView,
   DeepConclusionView,
   DeepIntakeStatus,
   DeepIntakeTurn,
   DeepLiveChildProjection,
-  DeepLivePhase,
-  DeepRunStatus,
+  DeepLiveChildWorkflowItem,
+  DeepParentSynthesisChildReviewView,
   DeepRunView,
-  DeepStreamEvent,
 } from "../contracts/deep";
-import { DeepConclusion } from "./deep-conclusion";
-import { DeepRunTree } from "./deep-run-tree";
 
 type DeepViewProps = {
   /** 当前多 Agent run 投影；未发起或尚未拿到首轮时为 undefined。 */
@@ -47,8 +41,10 @@ type DeepViewProps = {
   readonly busy: boolean;
   /** 首轮 view 到达前保留的本地提交目标，不作为后端运行事实使用。 */
   readonly pendingGoal?: string;
+  readonly selectedChildRunId?: string;
   readonly childOperationBusyId?: string;
   readonly resynthesisBusy?: boolean;
+  readonly onSelectChild?: (childRunId: string) => void;
   readonly onChildMessage?: (childRunId: string, message: string) => void | Promise<void>;
   readonly onChildConfirmation?: (
     childRunId: string,
@@ -71,7 +67,6 @@ type DeepChatItem =
       readonly label: string;
       readonly text: string;
       readonly tone: "current" | "complete" | "waiting" | "problem";
-      readonly children?: readonly DeepLiveChildProjection[];
     }
   | {
       readonly kind: "system_notice";
@@ -80,11 +75,32 @@ type DeepChatItem =
       readonly tone: "waiting" | "problem" | "complete";
     };
 
-type DeepWorkflowItem = {
-  readonly id: string;
-  readonly label: string;
-  readonly detail?: string;
-  readonly tone: "active" | "complete" | "waiting" | "problem";
+export type DeepChildInspectorViewModel = {
+  readonly childRunId: string;
+  readonly displayName: string;
+  readonly status: DeepChildRunStatus;
+  readonly objective: string;
+  readonly latestResult?: string;
+  readonly updatedAt: string;
+  readonly workflowItems: readonly DeepLiveChildWorkflowItem[];
+  readonly execution?: DeepLiveChildProjection["execution"];
+  readonly parentInstructions?: DeepLiveChildProjection["parentInstructions"];
+  readonly pendingApproval?: DeepLiveChildProjection["pendingApproval"];
+  readonly synthesisReview?: DeepParentSynthesisChildReviewView;
+};
+
+export type DeepCollaborationIndexItemViewModel = {
+  readonly childRunId: string;
+  readonly displayName: string;
+  readonly status: DeepChildRunStatus;
+  readonly statusLabel: string;
+  readonly role: string;
+  readonly objective: string;
+  readonly latestResult: string;
+  readonly selected: boolean;
+  readonly active: boolean;
+  readonly needsAttention: boolean;
+  readonly executionSummary?: string;
 };
 
 export function DeepView(props: DeepViewProps): React.ReactElement {
@@ -107,12 +123,6 @@ export function DeepView(props: DeepViewProps): React.ReactElement {
   return (
     <DeepChatView
       view={props.view}
-      busy={props.busy}
-      childOperationBusyId={props.childOperationBusyId}
-      resynthesisBusy={props.resynthesisBusy}
-      onChildMessage={props.onChildMessage}
-      onChildConfirmation={props.onChildConfirmation}
-      onResynthesize={props.onResynthesize}
     />
   );
 }
@@ -128,17 +138,6 @@ function DeepIntakeChatView(props: {
   return (
     <div className="deep-view deep-chat-view deep-intake-chat-view">
       <section className="deep-chat-thread" aria-label="助手回复">
-        <div className="deep-chat-live-status" aria-label="多 Agent 当前状态">
-          <span className={`deep-phase-chip deep-phase-${intakePhaseClass(props.intakeStatus, props.busy)}`}>
-            {intakeStatusLabel(props.intakeStatus, props.busy)}
-          </span>
-          {props.busy && (
-            <span className="deep-chat-live-dot">
-              <Loader2 aria-hidden="true" />
-              实时
-            </span>
-          )}
-        </div>
         {items.map((item) => {
           if (item.kind === "user_goal") {
             return <DeepUserMessage key={item.id} item={item} />;
@@ -150,7 +149,6 @@ function DeepIntakeChatView(props: {
             <DeepParentMessage
               key={item.id}
               item={item}
-              activeChildRunId=""
             />
           );
         })}
@@ -208,28 +206,13 @@ function deepIntakeChatItems(
 
 function DeepChatView(props: {
   readonly view: DeepRunView;
-  readonly busy: boolean;
-  readonly childOperationBusyId?: string;
-  readonly resynthesisBusy?: boolean;
-  readonly onChildMessage?: DeepViewProps["onChildMessage"];
-  readonly onChildConfirmation?: DeepViewProps["onChildConfirmation"];
-  readonly onResynthesize?: DeepViewProps["onResynthesize"];
 }): React.ReactElement {
-  const { view, busy } = props;
+  const { view } = props;
   const items = deepChatItems(view);
-  const conclusion = view.report?.conclusion;
-  const needsResynthesis = conclusion !== undefined && view.liveProjection.synthesis?.status === "pending";
-  const canResynthesize =
-    props.onResynthesize !== undefined &&
-    view.report !== undefined &&
-    view.report.childSummaries.length > 0;
-  const showCollaborationRecord = hasCollaborationRecord(view);
 
   return (
     <div className="deep-view deep-chat-view" data-run-status={view.run.status}>
       <section className="deep-chat-thread" aria-label="助手回复">
-        <DeepLiveStatus view={view} busy={busy} />
-        <DeepWorkflowStrip view={view} busy={busy} />
         {items.map((item) => {
           if (item.kind === "user_goal") {
             return <DeepUserMessage key={item.id} item={item} />;
@@ -241,96 +224,11 @@ function DeepChatView(props: {
             <DeepParentMessage
               key={item.id}
               item={item}
-              activeChildRunId={view.liveProjection.activeNodeId}
-              childOperationBusyId={props.childOperationBusyId}
-              onChildMessage={props.onChildMessage}
-              onChildConfirmation={props.onChildConfirmation}
             />
           );
         })}
       </section>
-
-      {showCollaborationRecord && (
-        <DeepCollaborationRecord
-          view={view}
-          busy={busy}
-          needsResynthesis={needsResynthesis}
-          canResynthesize={canResynthesize}
-          resynthesisBusy={props.resynthesisBusy}
-          childOperationBusyId={props.childOperationBusyId}
-          onChildMessage={props.onChildMessage}
-          onChildConfirmation={props.onChildConfirmation}
-          onResynthesize={props.onResynthesize}
-        />
-      )}
     </div>
-  );
-}
-
-function DeepCollaborationRecord(props: {
-  readonly view: DeepRunView;
-  readonly busy: boolean;
-  readonly needsResynthesis: boolean;
-  readonly canResynthesize: boolean;
-  readonly resynthesisBusy?: boolean;
-  readonly childOperationBusyId?: string;
-  readonly onChildMessage?: DeepViewProps["onChildMessage"];
-  readonly onChildConfirmation?: DeepViewProps["onChildConfirmation"];
-  readonly onResynthesize?: DeepViewProps["onResynthesize"];
-}): React.ReactElement {
-  const { view } = props;
-  const conclusion = view.report?.conclusion;
-  return (
-    <details className="deep-record-section">
-      <summary>
-        <ChevronDown size={14} aria-hidden="true" />
-        <span>协作记录</span>
-      </summary>
-      <div className="deep-detail-body">
-        <div className="deep-detail-meta">
-          <span className={`deep-status-badge deep-status-${view.run.status}`}>
-            {runStatusLabel(view.run.status)}
-          </span>
-          <span>更新 {formatShortTime(view.liveProjection.updatedAt)}</span>
-          {props.canResynthesize && (
-            <button
-              type="button"
-              className="deep-resynthesis-button"
-              disabled={props.busy || props.resynthesisBusy === true}
-              onClick={() => void props.onResynthesize?.()}
-              aria-label="重新综合"
-              title={props.needsResynthesis ? "当前协作材料已更新，需要重新综合" : "重新综合当前协作材料"}
-            >
-              <RefreshCw size={13} aria-hidden="true" />
-              <span>{props.resynthesisBusy === true ? "综合中" : "重新综合"}</span>
-            </button>
-          )}
-          {props.needsResynthesis && <span className="deep-resynthesis-state">待重新综合</span>}
-        </div>
-        {view.brief && <DeepBriefDetails brief={view.brief} />}
-        {conclusion && <DeepConclusion conclusion={conclusion} />}
-        <DeepEventTimeline events={view.eventSequence} busy={props.busy} />
-        <DeepRunTree
-          view={view}
-          busy={props.busy}
-          childOperationBusyId={props.childOperationBusyId}
-          onChildMessage={props.onChildMessage}
-          onChildConfirmation={props.onChildConfirmation}
-        />
-      </div>
-    </details>
-  );
-}
-
-function hasCollaborationRecord(view: DeepRunView): boolean {
-  return (
-    view.brief !== undefined ||
-    view.liveProjection.children.length > 0 ||
-    view.report !== undefined ||
-    view.eventSequence.length > 1 ||
-    view.run.status === "failed" ||
-    view.run.status === "stopped" ||
-    view.run.status === "interrupted"
   );
 }
 
@@ -361,7 +259,6 @@ function deepChatItems(view: DeepRunView): readonly DeepChatItem[] {
       label: "助手",
       text: childActivityIntro(view.liveProjection.children),
       tone: childActivityTone(view.liveProjection.children),
-      children: view.liveProjection.children,
     });
   }
 
@@ -483,196 +380,6 @@ function parentNotice(view: DeepRunView): DeepChatItem | undefined {
   return undefined;
 }
 
-function DeepLiveStatus(props: { readonly view: DeepRunView; readonly busy: boolean }): React.ReactElement {
-  const { view, busy } = props;
-  const childCount = view.liveProjection.children.length;
-  const runningChildCount = view.liveProjection.children.filter(
-    (child) => child.status === "running" || child.status === "resumed",
-  ).length;
-  return (
-    <div className="deep-chat-live-status" aria-label="多 Agent 当前状态">
-      <span className={`deep-phase-chip deep-phase-${view.liveProjection.phase}`}>
-        {compactPhaseLabel(view.liveProjection.phase, view.run.status, childCount, runningChildCount)}
-      </span>
-      {(busy || view.run.status === "running") && (
-        <span className="deep-chat-live-dot">
-          <Loader2 aria-hidden="true" />
-          实时
-        </span>
-      )}
-    </div>
-  );
-}
-
-function intakePhaseClass(
-  status: DeepIntakeStatus | undefined,
-  busy: boolean,
-): DeepLivePhase {
-  if (busy || status === "running") {
-    return "deciding";
-  }
-  if (status === "needs_input") {
-    return "needs_input";
-  }
-  if (status === "answered") {
-    return "completed";
-  }
-  return "starting";
-}
-
-function intakeStatusLabel(
-  status: DeepIntakeStatus | undefined,
-  busy: boolean,
-): string {
-  if (busy || status === "running") {
-    return "理解中";
-  }
-  if (status === "needs_input") {
-    return "等待补充";
-  }
-  if (status === "answered") {
-    return "已回答";
-  }
-  return "未开始";
-}
-
-function DeepWorkflowStrip(props: { readonly view: DeepRunView; readonly busy: boolean }): React.ReactElement | null {
-  const items = workflowItemsForView(props.view, props.busy);
-  if (items.length === 0) {
-    return null;
-  }
-  return (
-    <section className="deep-workflow-strip" aria-label="协作进展">
-      <ol className="deep-workflow-list">
-        {items.map((item) => (
-          <li key={item.id} className={`deep-workflow-item deep-workflow-${item.tone}`}>
-            <span className="deep-workflow-marker" aria-hidden="true">
-              {item.tone === "active" ? (
-                <Loader2 />
-              ) : item.tone === "complete" ? (
-                <CheckCircle2 />
-              ) : item.tone === "problem" ? (
-                <AlertTriangle />
-              ) : (
-                <Clock3 />
-              )}
-            </span>
-            <span className="deep-workflow-copy">
-              <span className="deep-workflow-label">{item.label}</span>
-              {item.detail !== undefined && <span className="deep-workflow-detail">{item.detail}</span>}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-function workflowItemsForView(view: DeepRunView, busy: boolean): readonly DeepWorkflowItem[] {
-  const items: DeepWorkflowItem[] = [];
-  const phase = view.liveProjection.phase;
-  const decision = view.liveProjection.decision?.summary ?? view.brief?.scopeSummary;
-  const children = view.liveProjection.children;
-  const synthesis = view.liveProjection.synthesis?.summary ?? view.report?.synthesisRecords.at(-1)?.decisionSummary;
-  const conclusion = parentConclusionText(view.report?.conclusion, view.liveProjection.conclusion);
-
-  if (phase === "needs_input") {
-    items.push({
-      id: `needs-input:${view.run.runId}`,
-      label: "等待补充",
-      detail: "补充范围后继续。",
-      tone: "waiting",
-    });
-  } else if (decision !== undefined) {
-    items.push({
-      id: `decision:${view.liveProjection.decision?.decisionId ?? view.run.runId}`,
-      label: "方向已明确",
-      detail: decision,
-      tone: phase === "deciding" ? "active" : "complete",
-    });
-  } else if (busy || phase === "starting" || phase === "deciding" || view.run.status === "running") {
-    items.push({
-      id: `planning:${view.run.runId}`,
-      label: "规划中",
-      tone: "active",
-    });
-  }
-
-  if (children.length > 0) {
-    items.push({
-      id: `children:${view.run.runId}:${children.length}`,
-      label: childWorkflowLabel(children),
-      detail: childWorkflowDetail(children),
-      tone: workflowToneFromChildren(children, phase),
-    });
-  }
-
-  if (synthesis !== undefined || phase === "synthesizing") {
-    items.push({
-      id: `synthesis:${view.liveProjection.synthesis?.synthesisId ?? view.report?.reportId ?? view.run.runId}`,
-      label: phase === "synthesizing" ? "整理中" : "已整理",
-      detail: synthesis,
-      tone: phase === "synthesizing" || view.liveProjection.synthesis?.status === "pending" ? "active" : "complete",
-    });
-  }
-
-  if (conclusion !== undefined) {
-    items.push({
-      id: `conclusion:${view.report?.conclusion.conclusionId ?? view.liveProjection.conclusion?.conclusionId ?? view.run.runId}`,
-      label: "已形成结论",
-      detail: conclusion,
-      tone: "complete",
-    });
-  }
-
-  if (view.run.status === "failed") {
-    items.push({
-      id: `failed:${view.run.runId}`,
-      label: "未完成",
-      tone: "problem",
-    });
-  }
-
-  return items;
-}
-
-function childWorkflowLabel(children: readonly DeepLiveChildProjection[]): string {
-  const running = children.filter((child) => child.status === "running" || child.status === "resumed").length;
-  const completed = children.filter((child) => child.status === "completed").length;
-  const blocked = children.filter((child) => child.status === "blocked").length;
-  if (running > 0) {
-    return `${running} 项进行中`;
-  }
-  if (blocked > 0) {
-    return `${blocked} 项待处理`;
-  }
-  if (completed === children.length) {
-    return `${completed} 项已返回`;
-  }
-  return `${children.length} 项已安排`;
-}
-
-function childWorkflowDetail(children: readonly DeepLiveChildProjection[]): string | undefined {
-  const active = children.find((child) => child.status === "running" || child.status === "resumed" || child.status === "blocked");
-  const completed = children.find((child) => child.status === "completed" && child.summary !== undefined);
-  const child = active ?? completed ?? children[0];
-  const result = childResultText(child);
-  return result ?? child.objective;
-}
-
-function workflowToneFromChildren(
-  children: readonly DeepLiveChildProjection[],
-  phase: DeepLivePhase,
-): DeepWorkflowItem["tone"] {
-  if (children.some((child) => child.status === "failed" || child.status === "interrupted" || child.status === "blocked")) {
-    return "problem";
-  }
-  if (children.length > 0 && children.every((child) => child.status === "completed")) {
-    return phase === "exploring" ? "active" : "complete";
-  }
-  return "active";
-}
-
 function DeepUserMessage(props: {
   readonly item: Extract<DeepChatItem, { readonly kind: "user_goal" }>;
 }): React.ReactElement {
@@ -690,10 +397,6 @@ function DeepUserMessage(props: {
 
 function DeepParentMessage(props: {
   readonly item: Extract<DeepChatItem, { readonly kind: "parent_message" }>;
-  readonly activeChildRunId: string;
-  readonly childOperationBusyId?: string;
-  readonly onChildMessage?: DeepViewProps["onChildMessage"];
-  readonly onChildConfirmation?: DeepViewProps["onChildConfirmation"];
 }): React.ReactElement {
   return (
     <article className={`deep-chat-message deep-chat-parent-message deep-chat-parent-${props.item.tone}`}>
@@ -707,15 +410,6 @@ function DeepParentMessage(props: {
         <div className="deep-chat-parent-answer">
           <p>{props.item.text}</p>
         </div>
-        {props.item.children !== undefined && props.item.children.length > 0 && (
-          <DeepChildActivityStrip
-            children={props.item.children}
-            activeChildRunId={props.activeChildRunId}
-            childOperationBusyId={props.childOperationBusyId}
-            onChildMessage={props.onChildMessage}
-            onChildConfirmation={props.onChildConfirmation}
-          />
-        )}
       </div>
     </article>
   );
@@ -733,124 +427,71 @@ function DeepSystemNotice(props: {
   );
 }
 
-function DeepChildActivityStrip(props: {
+export function DeepCollaborationIndex(props: {
   readonly children: readonly DeepLiveChildProjection[];
-  readonly activeChildRunId: string;
-  readonly childOperationBusyId?: string;
-  readonly onChildMessage?: DeepViewProps["onChildMessage"];
-  readonly onChildConfirmation?: DeepViewProps["onChildConfirmation"];
-}): React.ReactElement {
+  readonly selectedChildRunId?: string;
+  readonly activeChildRunId?: string;
+  readonly runStatusLabel?: string;
+  readonly updatedLabel?: string;
+  readonly onSelectChild?: (childRunId: string) => void;
+}): React.ReactElement | null {
+  if (props.children.length === 0) {
+    return null;
+  }
+  const items: DeepCollaborationIndexItemViewModel[] = props.children.map((child) => ({
+    childRunId: child.childRunId,
+    displayName: displayAgentName(child.displayName),
+    status: child.status,
+    statusLabel: childStatusLabel(child.status),
+    role: child.role,
+    objective: child.objective,
+    latestResult: childResultText(child) ?? childStatusLabel(child.status),
+    selected: props.selectedChildRunId === child.childRunId,
+    active: props.activeChildRunId === child.childRunId,
+    needsAttention: child.status === "blocked" || child.pendingApproval !== undefined,
+    executionSummary: childExecutionSummary(child),
+  }));
   return (
-    <div className="deep-chat-child-strip" aria-label="协作进展">
-      {props.children.map((child) => (
-        <DeepChildActivityCard
-          key={child.childRunId}
-          child={child}
-          active={props.activeChildRunId === child.childRunId}
-          busy={props.childOperationBusyId === child.childRunId}
-          onChildMessage={props.onChildMessage}
-          onChildConfirmation={props.onChildConfirmation}
-        />
-      ))}
-    </div>
-  );
-}
-
-function DeepChildActivityCard(props: {
-  readonly child: DeepLiveChildProjection;
-  readonly active: boolean;
-  readonly busy: boolean;
-  readonly onChildMessage?: DeepViewProps["onChildMessage"];
-  readonly onChildConfirmation?: DeepViewProps["onChildConfirmation"];
-}): React.ReactElement {
-  const result = childResultText(props.child);
-  return (
-    <section
-      className={`deep-chat-child-card deep-chat-child-${props.child.status} ${props.active ? "active" : ""}`}
-    >
-      <div className="deep-chat-child-head">
-        <ChildStatusIcon status={props.child.status} />
-        <span className="deep-chat-child-name">{displayAgentName(props.child.displayName)}</span>
-        <span className={`deep-chat-child-status deep-status-${props.child.status}`}>
-          {childStatusLabel(props.child.status)}
-        </span>
-        {props.child.parentOperation && (
-          <span
-            className={`deep-child-node-parent-op deep-child-node-parent-op-${props.child.parentOperation.status}`}
-          >
-            {parentOperationLabel(props.child.parentOperation)}
-          </span>
+    <section className="deep-collaboration-index" aria-label="协作项索引">
+      <div className="deep-collaboration-index-head">
+        <div className="deep-section-heading">
+          <span>协作概览</span>
+          <small>{collaborationSummary(props.children)}</small>
+        </div>
+        {(props.runStatusLabel !== undefined || props.updatedLabel !== undefined) && (
+          <div className="deep-collaboration-index-runmeta" aria-label="运行状态">
+            {props.runStatusLabel !== undefined && <span>{props.runStatusLabel}</span>}
+            {props.updatedLabel !== undefined && <small>{props.updatedLabel}</small>}
+          </div>
         )}
       </div>
-      <p className="deep-chat-child-objective">{props.child.objective}</p>
-      {result && <p className="deep-chat-child-result">{result}</p>}
-      <div className="deep-chat-child-actions">
-        {props.child.pendingApproval && (
-          <ChildNodeApproval
-            childRunId={props.child.childRunId}
-            pendingApproval={props.child.pendingApproval}
-            busy={props.busy}
-            onDecision={props.onChildConfirmation}
-          />
-        )}
-        {props.onChildMessage && (
-          <ChildNodeFollowup
-            childRunId={props.child.childRunId}
-            busy={props.busy}
-            onSubmit={props.onChildMessage}
-          />
-        )}
+      <div className="deep-collaboration-index-list">
+        {items.map((item) => (
+          <button
+            type="button"
+            key={item.childRunId}
+            className={`deep-collaboration-index-item deep-collaboration-${item.status} ${item.selected ? "selected" : ""} ${item.active ? "active" : ""}`}
+            aria-pressed={item.selected}
+            onClick={() => props.onSelectChild?.(item.childRunId)}
+          >
+            <span className={`deep-collaboration-index-dot deep-collaboration-dot-${item.status}`} aria-hidden="true" />
+            <span className="deep-collaboration-index-copy">
+              <span className="deep-collaboration-index-item-head">
+                <strong>{item.displayName}</strong>
+                <span className={`deep-chat-child-status deep-status-${item.status}`}>{item.statusLabel}</span>
+              </span>
+              <span className="deep-collaboration-index-role">{item.role}</span>
+              <span className="deep-collaboration-index-result">{item.latestResult}</span>
+              <span className="deep-collaboration-index-objective">{item.objective}</span>
+              <span className="deep-collaboration-index-meta">
+                {item.executionSummary && <small>{item.executionSummary}</small>}
+                {item.needsAttention && <small className="attention">待处理</small>}
+              </span>
+            </span>
+          </button>
+        ))}
       </div>
     </section>
-  );
-}
-
-function ChildNodeFollowup(props: {
-  readonly childRunId: string;
-  readonly busy: boolean;
-  readonly onSubmit: NonNullable<DeepViewProps["onChildMessage"]>;
-}): React.ReactElement {
-  const [message, setMessage] = React.useState("");
-  const [expanded, setExpanded] = React.useState(false);
-  const trimmed = message.trim();
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        className="deep-child-node-followup-toggle"
-        disabled={props.busy}
-        title="继续这个协作项"
-        aria-label="继续这个协作项"
-        onClick={() => setExpanded(true)}
-      >
-        <MessageSquarePlus size={13} aria-hidden="true" />
-      </button>
-    );
-  }
-  return (
-    <div className="deep-child-node-followup">
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (trimmed.length === 0 || props.busy) return;
-          Promise.resolve(props.onSubmit(props.childRunId, trimmed)).then(() => {
-            setMessage("");
-            setExpanded(false);
-          });
-        }}
-      >
-        <input
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          disabled={props.busy}
-          placeholder="补充给这个协作项..."
-          aria-label="补充给这个协作项"
-        />
-        <button type="submit" disabled={props.busy || trimmed.length === 0} aria-label="继续协作项">
-          <Send size={12} aria-hidden="true" />
-        </button>
-      </form>
-    </div>
   );
 }
 
@@ -915,97 +556,11 @@ function ChildNodeApproval(props: {
   );
 }
 
-function ChildStatusIcon(props: { readonly status: DeepChildRunStatus }): React.ReactElement {
-  if (props.status === "completed") {
-    return <CheckCircle2 className="deep-child-node-status complete" aria-label="已完成" />;
-  }
-  if (props.status === "blocked") {
-    return <AlertTriangle className="deep-child-node-status blocked" aria-label="受阻" />;
-  }
-  if (props.status === "failed" || props.status === "interrupted") {
-    return <XCircle className="deep-child-node-status problem" aria-label="未完成" />;
-  }
-  if (props.status === "running" || props.status === "resumed") {
-    return <Loader2 className="deep-child-node-status running" aria-label="进行中" />;
-  }
-  return <CircleDot className="deep-child-node-status pending" aria-label="等待中" />;
-}
-
-function DeepBriefDetails(props: {
-  readonly brief: NonNullable<DeepRunView["brief"]>;
-}): React.ReactElement {
-  const { brief } = props;
-  return (
-    <section className="deep-brief-details" aria-label="计划详情">
-      <header className="deep-panel-head">
-        <Sparkles className="deep-panel-icon" aria-hidden="true" />
-        <h3 className="deep-panel-title">计划详情</h3>
-      </header>
-      <dl className="deep-brief-detail-list">
-        <div>
-          <dt>范围</dt>
-          <dd>{brief.scopeSummary}</dd>
-        </div>
-        <div>
-          <dt>来源</dt>
-          <dd>{brief.sourcePolicySummary}</dd>
-        </div>
-        {brief.plannedAngles.length > 0 && (
-          <div>
-            <dt>角度</dt>
-            <dd>{brief.plannedAngles.join(" / ")}</dd>
-          </div>
-        )}
-      </dl>
-    </section>
-  );
-}
-
-function DeepEventTimeline(props: {
-  readonly events: readonly DeepStreamEvent[];
-  readonly busy: boolean;
-}): React.ReactElement {
-  const events = props.events.slice(-5);
-  return (
-    <section className="deep-event-timeline" aria-label="关键事件">
-      <header className="deep-panel-head">
-        <Clock3 className="deep-panel-icon" aria-hidden="true" />
-        <h3 className="deep-panel-title">关键事件</h3>
-      </header>
-      {events.length === 0 ? (
-        <p className="deep-event-empty">{props.busy ? "等待事件返回。" : "暂无事件。"}</p>
-      ) : (
-        <ol className="deep-event-list">
-          {events.map((event) => (
-            <li key={event.id} className={`deep-event deep-event-${event.status}`}>
-              <span className="deep-event-marker" aria-hidden="true" />
-              <div className="deep-event-body">
-                <div className="deep-event-head">
-                  <span className="deep-event-title">{eventTitle(event)}</span>
-                  <span className="deep-event-time">{formatShortTime(event.timestamp)}</span>
-                </div>
-                <p className="deep-event-summary">{event.summary}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  );
-}
-
 function DeepViewPending(props: { readonly pendingGoal?: string }): React.ReactElement {
   const pendingGoal = props.pendingGoal?.trim();
   return (
     <div className="deep-view deep-chat-view deep-view-pending" role="status" aria-live="polite">
       <section className="deep-chat-thread" aria-label="助手回复">
-        <div className="deep-chat-live-status" aria-label="多 Agent 当前状态">
-          <span className="deep-phase-chip deep-phase-deciding">理解中</span>
-          <span className="deep-chat-live-dot">
-            <Loader2 aria-hidden="true" />
-            实时
-          </span>
-        </div>
         {pendingGoal && (
           <DeepUserMessage
             item={{
@@ -1029,95 +584,6 @@ function DeepViewEmpty(): React.ReactElement {
       </section>
     </div>
   );
-}
-
-function eventTitle(event: DeepStreamEvent): string {
-  switch (event.type) {
-    case "deep.goal_received":
-      return "已接收目标";
-    case "deep.manager.decided":
-      return "已规划";
-    case "deep.child.started":
-      return "探索开始";
-    case "deep.child.waiting":
-      return "等待探索";
-    case "deep.child.instruction_queued":
-      return "已追加要求";
-    case "deep.child.completed":
-      return "探索完成";
-    case "deep.child.blocked":
-      return "探索受阻";
-    case "deep.child.interrupted":
-      return "探索中断";
-    case "deep.child.failed":
-      return "探索失败";
-    case "deep.parent_synthesis.completed":
-      return "已综合";
-    case "deep.interrupted":
-      return "运行打断";
-    case "deep.corrected":
-      return "收到补充";
-    case "deep.stopped":
-      return "运行停止";
-    case "deep.conclusion.produced":
-      return "结论生成";
-    default:
-      return event.title;
-  }
-}
-
-function compactPhaseLabel(
-  phase: DeepLivePhase,
-  status: DeepRunStatus,
-  childCount: number,
-  runningChildCount: number,
-): string {
-  if (status === "failed") {
-    return "运行失败";
-  }
-  switch (phase) {
-    case "starting":
-      return "规划中";
-    case "deciding":
-      return "规划中";
-    case "exploring":
-      return runningChildCount > 0
-        ? `${runningChildCount} 个协作项进行中`
-        : `${childCount} 个协作项已安排`;
-    case "synthesizing":
-      return "综合中";
-    case "completed":
-      return "已完成";
-    case "needs_input":
-      return "等待补充";
-    case "stopped":
-      return "已停止";
-    case "failed":
-      return "运行失败";
-    default:
-      return runStatusLabel(status);
-  }
-}
-
-function runStatusLabel(status: DeepRunStatus): string {
-  switch (status) {
-    case "pending":
-      return "待启动";
-    case "running":
-      return "运行中";
-    case "interrupted":
-      return "已打断";
-    case "corrected":
-      return "已纠正";
-    case "stopped":
-      return "已停止";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "已失败";
-    default:
-      return status;
-  }
 }
 
 function formatShortTime(timestamp: string): string {
@@ -1163,6 +629,9 @@ function childStateNote(status: DeepChildRunStatus): string | undefined {
 }
 
 function childResultText(child: DeepLiveChildProjection): string | undefined {
+  if (child.latestResult) {
+    return child.latestResult;
+  }
   if (child.summary) {
     return child.summary;
   }
@@ -1170,6 +639,48 @@ function childResultText(child: DeepLiveChildProjection): string | undefined {
     return childFailureText(child);
   }
   return childStateNote(child.status);
+}
+
+function childExecutionSummary(child: DeepLiveChildProjection): string | undefined {
+  const execution = child.execution;
+  if (execution === undefined) {
+    return undefined;
+  }
+  return `模型 ${execution.modelRounds} / 工具 ${execution.toolRounds}`;
+}
+
+function collaborationSummary(children: readonly DeepLiveChildProjection[]): string {
+  const running = children.filter((child) => child.status === "running" || child.status === "resumed").length;
+  const blocked = children.filter((child) => child.status === "blocked" || child.pendingApproval !== undefined).length;
+  const completed = children.filter((child) => child.status === "completed").length;
+  if (blocked > 0) {
+    return `${blocked} 项待处理 / 共 ${children.length} 项`;
+  }
+  if (running > 0) {
+    return `${running} 项进行中 / 共 ${children.length} 项`;
+  }
+  return `${completed} 项已返回 / 共 ${children.length} 项`;
+}
+
+function runStatusLabel(status: DeepRunView["run"]["status"]): string {
+  switch (status) {
+    case "pending":
+      return "待启动";
+    case "running":
+      return "运行中";
+    case "interrupted":
+      return "已打断";
+    case "corrected":
+      return "已修正";
+    case "stopped":
+      return "已停止";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    default:
+      return status;
+  }
 }
 
 function childStatusLabel(status: DeepChildRunStatus): string {
@@ -1192,16 +703,312 @@ function childStatusLabel(status: DeepChildRunStatus): string {
   }
 }
 
-function parentOperationLabel(
-  operation: NonNullable<DeepLiveChildProjection["parentOperation"]>,
-): string {
-  if (operation.status === "queued") {
-    return operation.queuedCount !== undefined && operation.queuedCount > 1
-      ? `已追加 ${operation.queuedCount}`
-      : "已追加";
+function workflowItemStatusLabel(status: DeepLiveChildWorkflowItem["status"]): string {
+  switch (status) {
+    case "pending":
+      return "等待";
+    case "running":
+      return "进行中";
+    case "completed":
+      return "完成";
+    case "blocked":
+      return "待处理";
+    case "failed":
+      return "失败";
+    case "interrupted":
+      return "中断";
+    case "cancelled":
+      return "取消";
+    default:
+      return status;
   }
-  if (operation.status === "cancelled") {
-    return "已取消";
+}
+
+function workflowItemTone(status: DeepLiveChildWorkflowItem["status"]): "active" | "complete" | "waiting" | "problem" {
+  switch (status) {
+    case "running":
+      return "active";
+    case "blocked":
+    case "pending":
+      return "waiting";
+    case "failed":
+    case "interrupted":
+    case "cancelled":
+      return "problem";
+    case "completed":
+    default:
+      return "complete";
   }
-  return "已跟进";
+}
+
+function childInspectorViewModel(
+  view: DeepRunView,
+  childRunId: string | undefined,
+): DeepChildInspectorViewModel | undefined {
+  if (childRunId === undefined) {
+    return undefined;
+  }
+  const liveChild = view.liveProjection.children.find((child) => child.childRunId === childRunId);
+  const childRun = view.report?.agentRunTree.childRuns.find((child) => child.childRunId === childRunId);
+  const childSummary = view.report?.childSummaries.find((child) => child.childRunId === childRunId);
+  if (liveChild === undefined && childRun === undefined && childSummary === undefined) {
+    return undefined;
+  }
+  const synthesisReview = view.report?.synthesisRecords
+    .flatMap((record) => record.childReviews ?? [])
+    .find((review) => review.childRunId === childRunId);
+  return {
+    childRunId,
+    displayName: liveChild?.displayName ?? childRun?.spec.displayName ?? childSummary?.spec.displayName ?? `协作项 ${childRunId}`,
+    status: liveChild?.status ?? childRun?.status ?? childSummary?.status ?? "planned",
+    objective: liveChild?.objective ?? childRun?.spec.instructions?.objective ?? childSummary?.spec.objective ?? "",
+    latestResult: liveChild?.latestResult ?? liveChild?.summary ?? childSummary?.summary,
+    updatedAt: liveChild?.updatedAt ?? childRun?.completedAt ?? childRun?.startedAt ?? view.liveProjection.updatedAt,
+    workflowItems: liveChild?.workflowItems ?? childSummaryWorkflowItems(childRun, childSummary, view.liveProjection.updatedAt),
+    execution: liveChild?.execution ?? childRunExecutionProjection(childRun),
+    parentInstructions: liveChild?.parentInstructions ?? childRunParentInstructionProjection(childRun),
+    pendingApproval: liveChild?.pendingApproval ?? childRun?.pendingApproval,
+    synthesisReview,
+  };
+}
+
+function childSummaryWorkflowItems(
+  childRun: DeepChildAgentRunView | undefined,
+  childSummary: DeepChildSummaryView | undefined,
+  updatedAt: string,
+): readonly DeepLiveChildWorkflowItem[] {
+  if (childRun === undefined && childSummary === undefined) {
+    return [];
+  }
+  const childRunId = childRun?.childRunId ?? childSummary?.childRunId ?? "child";
+  const objective = childRun?.spec.instructions?.objective ?? childSummary?.spec.objective ?? "";
+  const summary = childSummary?.summary;
+  return [
+    {
+      itemId: `objective:${childRunId}`,
+      kind: "objective_set",
+      title: "目标已明确",
+      detail: objective,
+      status: "completed",
+      timestamp: childRun?.startedAt ?? updatedAt,
+    },
+    {
+      itemId: `status:${childRunId}:${childRun?.status ?? childSummary?.status ?? "completed"}`,
+      kind: childRun?.status === "blocked" || childRun?.status === "failed" || childRun?.status === "interrupted"
+        ? childRun.status
+        : "completed",
+      title: childRun?.status === "blocked" ? "等待处理" : childRun?.status === "failed" ? "未完成" : "结果已返回",
+      detail: childRun?.failureReason ?? summary,
+      status: childRun?.status === "blocked" || childRun?.status === "failed" || childRun?.status === "interrupted"
+        ? childRun.status
+        : "completed",
+      timestamp: childRun?.completedAt ?? updatedAt,
+    },
+  ];
+}
+
+function childRunExecutionProjection(
+  childRun: DeepChildAgentRunView | undefined,
+): DeepChildInspectorViewModel["execution"] {
+  if (childRun === undefined) {
+    return undefined;
+  }
+  const latest = childRun.executionHistory?.at(-1);
+  const execution = latest ?? childRun.execution;
+  if (execution === undefined) {
+    return undefined;
+  }
+  return {
+    modelRounds: execution.modelRounds,
+    toolRounds: execution.toolRounds,
+    segmentCount: childRun.executionHistory?.length ?? 1,
+    latestOutcome: latest?.outcome,
+  };
+}
+
+function childRunParentInstructionProjection(
+  childRun: DeepChildAgentRunView | undefined,
+): DeepChildInspectorViewModel["parentInstructions"] {
+  return childRun?.parentInstructions;
+}
+
+export function DeepChildInspector(props: {
+  readonly view: DeepRunView;
+  readonly selectedChildRunId?: string;
+  readonly busy: boolean;
+  readonly childOperationBusyId?: string;
+  readonly onClose: () => void;
+  readonly onChildMessage?: DeepViewProps["onChildMessage"];
+  readonly onChildConfirmation?: DeepViewProps["onChildConfirmation"];
+}): React.ReactElement | null {
+  const model = childInspectorViewModel(props.view, props.selectedChildRunId);
+  const [message, setMessage] = React.useState("");
+  React.useEffect(() => {
+    setMessage("");
+  }, [props.selectedChildRunId]);
+  if (model === undefined) {
+    return null;
+  }
+  const childBusy = props.childOperationBusyId === model.childRunId;
+  const trimmed = message.trim();
+  return (
+    <aside className="deep-child-inspector" aria-label="协作项详情">
+      <div className="deep-child-inspector-inner">
+        <header className="deep-child-inspector-header">
+          <div className="deep-child-inspector-title">
+            <span className="deep-child-inspector-kicker">协作项详情</span>
+            <h2>{displayAgentName(model.displayName)}</h2>
+          </div>
+          <div className="deep-child-inspector-meta">
+            <span className={`deep-chat-child-status deep-status-${model.status}`}>{childStatusLabel(model.status)}</span>
+            <button
+              type="button"
+              className="deep-child-inspector-close"
+              onClick={props.onClose}
+              aria-label="关闭协作项详情"
+            >
+              <X size={15} aria-hidden="true" />
+            </button>
+          </div>
+        </header>
+
+        <div className="deep-child-inspector-scrollbody">
+          <div className="deep-child-inspector-summary">
+            <div className="deep-child-inspector-section">
+              <span className="deep-child-inspector-label">目标</span>
+              <p>{model.objective}</p>
+            </div>
+
+            {model.latestResult && (
+              <div className="deep-child-inspector-section">
+                <span className="deep-child-inspector-label">当前结果</span>
+                <p>{model.latestResult}</p>
+              </div>
+            )}
+
+            <div className="deep-child-inspector-section">
+              <span className="deep-child-inspector-label">更新时间</span>
+              <p>{formatShortTime(model.updatedAt)}</p>
+            </div>
+          </div>
+
+          {model.execution && (
+            <div className="deep-child-inspector-metrics" aria-label="执行统计">
+              <div>
+                <span>模型轮次</span>
+                <strong>{model.execution.modelRounds}</strong>
+              </div>
+              <div>
+                <span>工具轮次</span>
+                <strong>{model.execution.toolRounds}</strong>
+              </div>
+              <div>
+                <span>执行段</span>
+                <strong>{model.execution.segmentCount}</strong>
+              </div>
+            </div>
+          )}
+
+          <section className="deep-child-inspector-timeline" aria-label="协作项工作流程">
+            <h3>工作流程</h3>
+            <ol className="deep-child-inspector-timeline-list">
+              {model.workflowItems.map((item) => (
+                <li key={item.itemId} className={`deep-child-inspector-timeline-item deep-child-inspector-${workflowItemTone(item.status)}`}>
+                  <span className="deep-child-inspector-timeline-marker" aria-hidden="true">
+                    {workflowItemTone(item.status) === "active" ? (
+                      <Loader2 />
+                    ) : workflowItemTone(item.status) === "complete" ? (
+                      <CheckCircle2 />
+                    ) : workflowItemTone(item.status) === "problem" ? (
+                      <AlertTriangle />
+                    ) : (
+                      <Clock3 />
+                    )}
+                  </span>
+                  <div className="deep-child-inspector-timeline-copy">
+                    <div className="deep-child-inspector-timeline-head">
+                      <span>{item.title}</span>
+                      <small>{workflowItemStatusLabel(item.status)}</small>
+                    </div>
+                    {item.detail && <p>{item.detail}</p>}
+                    <time>{formatShortTime(item.timestamp)}</time>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          {model.synthesisReview && (
+            <div className="deep-child-inspector-section">
+              <span className="deep-child-inspector-label">综合采纳</span>
+              <p>{synthesisReviewLabel(model.synthesisReview)}</p>
+            </div>
+          )}
+
+          {model.parentInstructions && model.parentInstructions.length > 0 && (
+            <section className="deep-child-inspector-section" aria-label="跟进记录">
+              <span className="deep-child-inspector-label">跟进记录</span>
+              <ul className="deep-child-inspector-followups">
+                {model.parentInstructions.map((instruction) => (
+                  <li key={instruction.instructionId}>
+                    <div>
+                      <strong>{instruction.instructionSummary}</strong>
+                      <span>{workflowItemStatusLabel(instruction.status === "queued" ? "pending" : instruction.status === "cancelled" ? "cancelled" : "completed")}</span>
+                    </div>
+                    {instruction.review && <p>{instruction.review.reason}</p>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+
+        {(model.pendingApproval && props.onChildConfirmation || props.onChildMessage) && (
+          <div className="deep-child-inspector-actionbar">
+            {model.pendingApproval && props.onChildConfirmation && (
+              <ChildNodeApproval
+                childRunId={model.childRunId}
+                pendingApproval={model.pendingApproval}
+                busy={childBusy}
+                onDecision={props.onChildConfirmation}
+              />
+            )}
+
+            {props.onChildMessage && (
+              <form
+                className="deep-child-inspector-composer"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (trimmed.length === 0 || childBusy) return;
+                  Promise.resolve(props.onChildMessage?.(model.childRunId, trimmed)).then(() => setMessage(""));
+                }}
+              >
+                <input
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  disabled={childBusy}
+                  placeholder="补充给这个协作项..."
+                  aria-label="补充给这个协作项"
+                />
+                <button type="submit" disabled={childBusy || trimmed.length === 0}>
+                  <Send size={13} aria-hidden="true" />
+                  <span>继续</span>
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function synthesisReviewLabel(review: DeepParentSynthesisChildReviewView): string {
+  if (review.decision === "accepted") {
+    return `已采纳：${review.reason}`;
+  }
+  if (review.decision === "rejected") {
+    return `未采纳：${review.reason}`;
+  }
+  return `待继续跟进：${review.reason}`;
 }

@@ -6,7 +6,7 @@ import {
   type VisibleAiMode,
 } from "./app-config-projection";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
-import type { CommandShellKind, ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
+import type { CommandShellKind, ConfigResponse, ModelCapabilities, ModelProviderModelCatalog, SkillTriggerMode } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerPreset, ToolsResponse } from "./contracts/tools";
 import { parseModelOptionId } from "./model-options";
@@ -198,6 +198,22 @@ export async function saveModelProviderCatalog(input: {
   };
 }
 
+export type ModelCapabilityUpdateForm = {
+  readonly profileId: string;
+  readonly providerKind?: string;
+  readonly model: string;
+  readonly capabilities: ModelCapabilities;
+};
+
+export async function saveModelCapabilityConfig(input: ModelCapabilityUpdateForm): Promise<ConfigResponse> {
+  return postJson<ConfigResponse>("/api/config/model-capabilities", {
+    profileId: input.profileId,
+    providerKind: input.providerKind,
+    model: input.model,
+    capabilities: input.capabilities,
+  });
+}
+
 export async function saveWorkspaceDirectory(workspaceDirectory?: string): Promise<{ readonly workspaceDirectory?: string }> {
   const response = await postJson<{ readonly workspace: { readonly workspaceDirectory?: string } }>("/api/config/workspace", {
     workspaceDirectory: workspaceDirectory ?? "",
@@ -219,6 +235,18 @@ export async function saveCommandShellConfig(kind: CommandShellKind | "auto"): P
 
 export async function saveToolConfirmationConfig(policy: ComposerToolConfirmationPolicy): Promise<ConfigResponse> {
   return postJson<ConfigResponse>("/api/config/tool-confirmation", { policy });
+}
+
+export async function saveDesktopAgentSystemPrompt(systemPrompt: string): Promise<ConfigResponse> {
+  return postJson<ConfigResponse>("/api/config/desktop-agent", { systemPrompt });
+}
+
+export async function resetDesktopAgentSystemPrompt(): Promise<ConfigResponse> {
+  return postJson<ConfigResponse>("/api/config/desktop-agent", { resetSystemPrompt: true });
+}
+
+export async function saveSkillTriggerConfig(mode: SkillTriggerMode): Promise<ConfigResponse> {
+  return postJson<ConfigResponse>("/api/config/skill-trigger", { mode });
 }
 
 export async function saveToolSettings(form: ToolForm): Promise<ToolsResponse> {

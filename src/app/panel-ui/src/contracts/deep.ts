@@ -170,6 +170,7 @@ export type DeepEventType =
   | "deep.child.interrupted"
   | "deep.child.failed"
   | "deep.parent_synthesis.completed"
+  | "deep.failed"
   | "deep.interrupted"
   | "deep.corrected"
   | "deep.stopped"
@@ -296,6 +297,57 @@ export type DeepLiveChildParentOperationProjection = {
   readonly updatedAt: string;
 };
 
+export type DeepLiveChildWorkflowItemKind =
+  | "objective_set"
+  | "running"
+  | "tool_waiting"
+  | "tool_completed"
+  | "parent_message_queued"
+  | "parent_message_applied"
+  | "blocked"
+  | "interrupted"
+  | "completed"
+  | "failed";
+
+export type DeepLiveChildWorkflowItemStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "blocked"
+  | "failed"
+  | "interrupted"
+  | "cancelled";
+
+export type DeepLiveChildWorkflowItem = {
+  readonly itemId: string;
+  readonly kind: DeepLiveChildWorkflowItemKind;
+  readonly title: string;
+  readonly detail?: string;
+  readonly status: DeepLiveChildWorkflowItemStatus;
+  readonly timestamp: string;
+};
+
+export type DeepLiveChildExecutionProjection = {
+  readonly modelRounds: number;
+  readonly toolRounds: number;
+  readonly segmentCount: number;
+  readonly latestOutcome?: "completed" | "blocked" | "failed" | "interrupted";
+};
+
+export type DeepLiveChildParentReviewProjection = {
+  readonly decision: "accepted" | "rejected" | "needs_followup";
+  readonly reason: string;
+  readonly confidence?: number;
+};
+
+export type DeepLiveChildParentInstructionProjection = {
+  readonly instructionId: string;
+  readonly status: "queued" | "executed" | "cancelled";
+  readonly instructionSummary: string;
+  readonly requestedAt: string;
+  readonly review?: DeepLiveChildParentReviewProjection;
+};
+
 export type DeepLiveChildProjection = {
   readonly childRunId: string;
   readonly displayName: string;
@@ -304,8 +356,12 @@ export type DeepLiveChildProjection = {
   readonly status: DeepChildRunStatus;
   readonly updatedAt: string;
   readonly summary?: string;
+  readonly latestResult?: string;
   readonly confidence?: number;
   readonly uncertainty?: string;
+  readonly workflowItems?: readonly DeepLiveChildWorkflowItem[];
+  readonly execution?: DeepLiveChildExecutionProjection;
+  readonly parentInstructions?: readonly DeepLiveChildParentInstructionProjection[];
   readonly pendingApproval?: DeepChildAgentRunPendingApprovalView;
   readonly parentOperation?: DeepLiveChildParentOperationProjection;
 };

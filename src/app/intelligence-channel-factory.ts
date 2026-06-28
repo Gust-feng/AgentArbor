@@ -47,6 +47,14 @@ export type ModelRuntimeSummaryInput = {
   };
 };
 
+export type ModelRuntimeContextWindowExceededEvent = {
+  readonly profileId?: string;
+  readonly providerKind: "openai_compatible";
+  readonly protocolKind: "openai_compatible_chat_completions" | "openai_responses";
+  readonly model?: string;
+  readonly message: string;
+};
+
 export type ModelRuntimeConfig =
   | {
       readonly enabled: false;
@@ -102,6 +110,7 @@ export function createModelRuntimeConfig(input: {
   >;
   readonly fetch?: ModelRuntimeProviderFetch;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  readonly onContextWindowExceeded?: (event: ModelRuntimeContextWindowExceededEvent) => void | Promise<void>;
   readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
   const mode = input.mode ?? modelRuntimeModeForProfile(input.modelProvider) ?? "none";
@@ -144,6 +153,7 @@ export function createModelRuntimeConfig(input: {
       modelProvider: input.modelProvider,
       fetch: input.fetch,
       onModelOutputDelta: input.onModelOutputDelta,
+      onContextWindowExceeded: input.onContextWindowExceeded,
       streamingMode: input.streamingMode,
     });
   }
@@ -153,6 +163,7 @@ export function createModelRuntimeConfig(input: {
     modelProvider: input.modelProvider,
     fetch: input.fetch,
     onModelOutputDelta: input.onModelOutputDelta,
+    onContextWindowExceeded: input.onContextWindowExceeded,
     streamingMode: input.streamingMode,
   });
 }
@@ -174,6 +185,7 @@ function createOpenAICompatibleConfig(input: {
   readonly modelProvider?: Pick<SanitizedModelProviderConfig, "profileId" | "baseUrl" | "model" | "openAI">;
   readonly fetch?: ModelRuntimeProviderFetch;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  readonly onContextWindowExceeded?: (event: ModelRuntimeContextWindowExceededEvent) => void | Promise<void>;
   readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
   const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
@@ -224,6 +236,14 @@ function createOpenAICompatibleConfig(input: {
           stream: input.onModelOutputDelta !== undefined,
           forceStreaming: input.streamingMode === "force_live" && input.onModelOutputDelta !== undefined,
           requestSettings: input.modelProvider?.openAI,
+          onContextWindowExceeded: (event) =>
+            input.onContextWindowExceeded?.({
+              profileId: input.modelProvider?.profileId,
+              providerKind: "openai_compatible",
+              protocolKind: OPENAI_COMPATIBLE_PROTOCOL,
+              model,
+              message: event.message,
+            }),
           onOutputDelta: input.onModelOutputDelta,
         }),
         bus: runtime.bus,
@@ -234,9 +254,10 @@ function createOpenAICompatibleConfig(input: {
 
 function createOpenAIResponsesConfig(input: {
   readonly env: ModelRuntimeEnvironment;
-  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "baseUrl" | "model" | "openAI">;
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "profileId" | "baseUrl" | "model" | "openAI">;
   readonly fetch?: ModelRuntimeProviderFetch;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  readonly onContextWindowExceeded?: (event: ModelRuntimeContextWindowExceededEvent) => void | Promise<void>;
   readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
   const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
@@ -287,6 +308,14 @@ function createOpenAIResponsesConfig(input: {
           forceStreaming: input.streamingMode === "force_live" && input.onModelOutputDelta !== undefined,
           requestSettings: input.modelProvider?.openAI,
           enableWebSearch: enabledFlag(input.env.AGENTARBOR_MODEL_BUILTIN_WEB_SEARCH),
+          onContextWindowExceeded: (event) =>
+            input.onContextWindowExceeded?.({
+              profileId: input.modelProvider?.profileId,
+              providerKind: "openai_compatible",
+              protocolKind: OPENAI_RESPONSES_PROTOCOL,
+              model,
+              message: event.message,
+            }),
           onOutputDelta: input.onModelOutputDelta,
         }),
         bus: runtime.bus,
@@ -417,6 +446,7 @@ function providerProfileIdFromConfig(value: string | undefined): ProviderProtoco
   if (
     value === "openai" ||
     value === "anthropic" ||
+    value === "gemini" ||
     value === "deepseek" ||
     value === "moonshot" ||
     value === "glm" ||

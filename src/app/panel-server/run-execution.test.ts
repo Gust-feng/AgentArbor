@@ -175,6 +175,7 @@ test("panel run execution rejects agent definition drift before running a restor
     () =>
       executeBasicPanelRun({
         agentDefinitions: new AgentDefinitionRegistry([DESKTOP_ROOT_AGENT]),
+        agentDefinitionOverrides: new Map(),
       } as unknown as PanelRuntime, {
         job: {
           ...panelRunJob(),
@@ -200,6 +201,7 @@ test("panel run execution rejects ordinary desktop jobs without a frozen agent d
     () =>
       executeBasicPanelRun({
         agentDefinitions: new AgentDefinitionRegistry([DESKTOP_ROOT_AGENT]),
+        agentDefinitionOverrides: new Map(),
       } as unknown as PanelRuntime, {
         job: panelRunJob(),
         abortSignal: new AbortController().signal,

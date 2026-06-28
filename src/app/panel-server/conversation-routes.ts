@@ -382,23 +382,75 @@ async function workspaceFolderForConversation(
   runtime: PanelRuntime,
   conversationId: string
 ): Promise<WorkspaceFolderSummary | undefined> {
+  const conversation = runtime.conversations.get(conversationId);
   const firstRunId = firstAssistantRunId(runtime, conversationId);
-  if (firstRunId === undefined) {
-    return undefined;
+  if (firstRunId !== undefined) {
+    const liveRunWorkspace = runtime.runJobs.get(firstRunId)?.capabilitySnapshot?.workspace.workspaceDirectory;
+    if (liveRunWorkspace !== undefined) {
+      return workspaceFolderSummaryFromPath(liveRunWorkspace);
+    }
+    const persistedRun = await runtime.runtimeDatabase?.getRun(firstRunId);
+    const runWorkspace = workspaceFolderSummaryFromPath(
+      persistedRun?.run.workspacePath ?? persistedRun?.run.capabilitySnapshot?.workspace.workspaceDirectory
+    );
+    if (runWorkspace !== undefined) {
+      return runWorkspace;
+    }
   }
-  const liveRunWorkspace = runtime.runJobs.get(firstRunId)?.capabilitySnapshot?.workspace.workspaceDirectory;
-  if (liveRunWorkspace !== undefined) {
-    return workspaceFolderSummaryFromPath(liveRunWorkspace);
-  }
-  const persistedRun = await runtime.runtimeDatabase?.getRun(firstRunId);
-  return workspaceFolderSummaryFromPath(
-    persistedRun?.run.workspacePath ?? persistedRun?.run.capabilitySnapshot?.workspace.workspaceDirectory
-  );
+  return workspaceFolderFromConversationContext(conversation);
 }
 
 function firstAssistantRunId(runtime: PanelRuntime, conversationId: string): string | undefined {
   const conversation = runtime.conversations.get(conversationId);
   return conversation?.turns.find((turn) => turn.role === "assistant" && turn.runId !== undefined)?.runId;
+}
+
+function workspaceFolderFromConversationContext(
+  conversation: ReturnType<PanelRuntime["conversations"]["get"]>
+): WorkspaceFolderSummary | undefined {
+  const userTurn = conversation?.turns.find((turn) => turn.role === "user");
+  const contextWorkspace = workspacePathFromTaskSoilInput(userTurn?.taskSoilInput);
+  if (contextWorkspace !== undefined) {
+    return workspaceFolderSummaryFromPath(contextWorkspace);
+  }
+  const attachmentWorkspace = userTurn?.attachments
+    ?.map(workspacePathFromTurnAttachment)
+    .find((workspacePath): workspacePath is string => workspacePath !== undefined);
+  return workspaceFolderSummaryFromPath(attachmentWorkspace);
+}
+
+function workspacePathFromTaskSoilInput(taskSoilInput: DesktopTaskSoilInput | undefined): string | undefined {
+  return taskSoilInput?.contextRefs
+    ?.filter((ref) => ref.kind === "workspace" || ref.kind === "project")
+    .map((ref) => workspacePathFromLocalRef(ref.ref))
+    .find((workspacePath): workspacePath is string => workspacePath !== undefined);
+}
+
+function workspacePathFromTurnAttachment(attachment: PanelConversationTurnAttachment): string | undefined {
+  if (attachment.kind !== "workspace" && attachment.kind !== "project") {
+    return undefined;
+  }
+  return workspacePathFromLocalRef(attachment.attachmentId);
+}
+
+function workspacePathFromLocalRef(ref: string | undefined): string | undefined {
+  const prefix = ref?.startsWith("local-project:")
+    ? "local-project:"
+    : ref?.startsWith("local-workspace:")
+      ? "local-workspace:"
+      : undefined;
+  if (prefix === undefined) {
+    return undefined;
+  }
+  const value = ref?.slice(prefix.length).trim();
+  if (value === undefined || value.length === 0) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 async function ensurePanelConversationLoaded(

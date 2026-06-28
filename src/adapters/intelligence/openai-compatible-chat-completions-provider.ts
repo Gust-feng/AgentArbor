@@ -29,8 +29,10 @@ import { normalizeOpenAICompatibleStreamResponse } from "./openai-compatible-cha
 import { providerErrorMessage } from "./provider-error-message.js";
 import {
   classifyProviderFailureKind,
+  isContextWindowExceededMessage,
   isRetryableProviderFailureStatus,
   isTimeoutLikeError,
+  type ProviderContextWindowExceededHandler,
 } from "./provider-failure-classification.js";
 
 export type { FetchLike, FetchLikeResponse } from "./openai-fetch-bridge.js";
@@ -45,6 +47,7 @@ export type OpenAICompatibleChatCompletionsProviderOptions = {
   readonly stream?: boolean;
   readonly forceStreaming?: boolean;
   readonly requestSettings?: OpenAIModelRequestSettings;
+  readonly onContextWindowExceeded?: ProviderContextWindowExceededHandler;
   readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
@@ -61,6 +64,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
   private readonly stream: boolean;
   private readonly forceStreaming: boolean;
   private readonly requestSettings?: OpenAIModelRequestSettings;
+  private readonly onContextWindowExceeded?: ProviderContextWindowExceededHandler;
   private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 
   constructor(options: OpenAICompatibleChatCompletionsProviderOptions) {
@@ -77,6 +81,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
     this.forceStreaming = options.forceStreaming === true;
     this.stream = (options.stream ?? false) && (this.dialect.supportsStreaming || this.forceStreaming);
     this.requestSettings = options.requestSettings;
+    this.onContextWindowExceeded = options.onContextWindowExceeded;
     this.onOutputDelta = options.onOutputDelta;
   }
 
@@ -194,6 +199,8 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
       }
       const status = statusFromError(error);
       if (status !== undefined) {
+        const message = providerErrorMessage(error, `HTTP ${status}`);
+        await notifyContextWindowExceeded(this.onContextWindowExceeded, { message, status });
         return createFailedModelResponse({
           requestId: request.requestId,
           providerId: this.providerId,
@@ -203,7 +210,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           outputKind: request.outputContract.outputKind,
           failureKind: classifyProviderFailureKind(status),
           retryable: isRetryableProviderFailureStatus(status),
-          message: providerErrorMessage(error, `HTTP ${status}`),
+          message,
         });
       }
       const timeoutLike = isTimeoutLikeError(lastTransportError ?? error);
@@ -223,6 +230,19 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
       });
     }
   }
+}
+
+async function notifyContextWindowExceeded(
+  handler: ProviderContextWindowExceededHandler | undefined,
+  input: {
+    readonly message: string;
+    readonly status?: number;
+  }
+): Promise<void> {
+  if (handler === undefined || !isContextWindowExceededMessage(input.message)) {
+    return;
+  }
+  await handler(input);
 }
 
 function trimTrailingSlashes(value: string): string {

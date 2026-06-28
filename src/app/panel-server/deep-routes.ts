@@ -55,10 +55,9 @@ import {
   PanelHttpError,
   readJsonBody,
   writeJson,
-  writeSseEvent,
   writePanelError,
-  parseStreamCursor,
 } from "./http-utils.js";
+import { serveRunEventSse } from "./run-event-sse.js";
 import type { PanelRuntime } from "./runtime.js";
 import {
   InMemoryDeepConversationStore,
@@ -132,6 +131,9 @@ import {
   type DeepFollowUpContext,
   type DeepIntakeContext,
   type DeepIntakeTurn,
+  type DeepLiveChildExecutionProjection,
+  type DeepLiveChildParentInstructionProjection,
+  type DeepLiveChildWorkflowItem,
   type DeepLiveProjection,
   type DeepRunStatus,
   type SynthesizedConclusion,
@@ -144,11 +146,14 @@ import {
   recordChildAgentRunParentInstruction,
   replaceChildRunInTree,
   type ChildAgentRun,
+  type ChildAgentRunParentInstructionStatus,
   type ParentSynthesisResult,
 } from "../../domain/underground/agent-fabric.js";
 import type { ObservationRef } from "../../domain/observation/contracts.js";
 import { parseConfirmationDecision } from "./request-parsers.js";
 import { parseDeepRunListLimit } from "./deep-route-helpers.js";
+import { resolveRunToolBoundary } from "../run-tool-boundary.js";
+import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 // ---------------------------------------------------------------------------
 // 路由状态（EP4 注册表 + 隔离 store + 后台 run 追踪）
 // ---------------------------------------------------------------------------
@@ -679,7 +684,7 @@ async function startDeepRunBackground(input: {
     permissionBoundaryRefs: conversation.permissionBoundaryRefs,
     confirmationPolicy: toolConfirmation.policy,
     aiMode,
-    capabilitySnapshot,
+    capabilitySnapshot: deepRuntime.capabilitySnapshot,
     modelAvailable: aiMode !== "none",
     traceId,
     goalId,
@@ -852,67 +857,26 @@ function handleDeepRunEventsSse(
   response: ServerResponse,
   url: URL,
 ): void {
-  let lastSequence = parseStreamCursor(
-    url.searchParams.get("cursor"),
-    request.headers["last-event-id"],
-  );
-  let closed = false;
-  let flushing = false;
-
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-store, no-cache",
-    connection: "keep-alive",
-    "x-accel-buffering": "no",
+  serveRunEventSse<DeepRunStreamEvent>({
+    request,
+    response,
+    url,
+    comment: `AgentArbor multi-agent run stream ${runId}`,
+    poll: async () => {
+      const record = await state.runRecordStore.get(runId);
+      if (record === undefined) {
+        // run 仍在进行中：record 尚未写入，保持连接（无事件可推）。
+        return { events: [], terminal: false };
+      }
+      return {
+        events: record.eventSequence,
+        terminal: isTerminalDeepRunStatus(record.run.status),
+      };
+    },
+    onPollError: () => {
+      /* 读取失败不中断流；下一轮 flush 重试。 */
+    },
   });
-  response.write(`: AgentArbor multi-agent run stream ${runId}\n\n`);
-
-  const cleanup = (): void => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    clearInterval(interval);
-    response.end();
-  };
-
-  const flush = (): void => {
-    if (closed || flushing) {
-      return;
-    }
-    flushing = true;
-    state.runRecordStore
-      .get(runId)
-      .then((record) => {
-        if (closed) {
-          return;
-        }
-        if (record === undefined) {
-          // run 仍在进行中：record 尚未写入，保持连接（无事件可推）。
-          return;
-        }
-        for (const event of record.eventSequence) {
-          if (event.sequence <= lastSequence) {
-            continue;
-          }
-          writeSseEvent(response, event);
-          lastSequence = event.sequence;
-        }
-        if (isTerminalDeepRunStatus(record.run.status)) {
-          cleanup();
-        }
-      })
-      .catch(() => {
-        /* 读取失败不中断流；下一轮 flush 重试。 */
-      })
-      .finally(() => {
-        flushing = false;
-      });
-  };
-
-  const interval = setInterval(flush, 100);
-  request.on("close", cleanup);
-  flush();
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,7 +1062,7 @@ async function handleDeepChildParentMessage(
       traceId: runId,
       goalId: record.run.conversationId,
       confirmationPolicy: state.runFacts.get(runId)?.confirmationPolicy ?? "prompt",
-      capabilitySnapshot: record.run.capabilitySnapshot,
+      capabilitySnapshot: childRuntime.capabilitySnapshot,
     });
     await recordDeepChildMessage(state, {
       runId,
@@ -1244,6 +1208,31 @@ async function executeDeepIntakeTurn(input: {
     });
     const traceId = createId("trace");
     const goalId = createId("goal");
+    const taskSoil = createTaskSoilFromDesktopInput({
+      goal: input.message,
+      goalId,
+      traceId,
+      aiMode: input.aiMode,
+      constraints: input.state.minimalRuntime.constraints,
+      soilStore: input.state.minimalRuntime.soilStore,
+      taskSoilInput: input.conversation.taskSoilInput,
+    });
+    const toolCenter = createDesktopToolCenterFactory(input.runtime.providerFetch, resources)(
+      input.state.minimalRuntime,
+      {
+        runtime: input.state.minimalRuntime,
+        traceId,
+        goalId,
+        skillContexts: [],
+        taskSoil,
+      },
+    );
+    const effectiveCapabilitySnapshot = deepCapabilitySnapshotWithExecutableTools({
+      runtime: input.runtime,
+      snapshot: resources.capabilitySnapshot,
+      taskSoil,
+      toolCenter,
+    });
     const callerRef: ObservationRef = {
       kind: "agent_run",
       id: `deep-intake:${input.conversation.conversationId}`,
@@ -1270,6 +1259,7 @@ async function executeDeepIntakeTurn(input: {
           ? undefined
           : summarizeTerminalDeepRunForIntake(input.terminalRun),
         taskSoilSummary: summarizeTaskSoilInputForIntake(input.conversation.taskSoilInput),
+        capabilitySnapshot: effectiveCapabilitySnapshot,
       }),
       allowedTools: [],
       maxModelRounds: 1,
@@ -1366,7 +1356,11 @@ async function buildDeepRuntimeConfigForRun(input: {
   readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
   readonly capabilitySnapshot: NonNullable<StartDeepRuntimeInput["capabilitySnapshot"]>;
   readonly informationAccess: Awaited<ReturnType<PanelRuntime["configCenter"]["getInformationAccessConfig"]>>;
-}): Promise<{ readonly config: DeepRuntimeConfig; readonly releaseResources: () => void }> {
+}): Promise<{
+  readonly config: DeepRuntimeConfig;
+  readonly capabilitySnapshot: NonNullable<StartDeepRuntimeInput["capabilitySnapshot"]>;
+  readonly releaseResources: () => void;
+}> {
   const { runtime, state, aiMode, controlHandle } = input;
   if (aiMode === "none") {
     // AI-first 边界（需求 A3）：显式 none 模式 = 无可用模型，拒绝启动 deep run，
@@ -1402,6 +1396,12 @@ async function buildDeepRuntimeConfigForRun(input: {
       taskSoil: input.taskSoil,
     },
   );
+  const capabilitySnapshot = deepCapabilitySnapshotWithExecutableTools({
+    runtime,
+    snapshot: resources.capabilitySnapshot,
+    taskSoil: input.taskSoil,
+    toolCenter,
+  });
   const intelligenceChannel = resources.aiConfig.createIntelligenceChannel(state.minimalRuntime);
   const turnRuntime = createDeepTurnRuntime({ intelligenceChannel, toolCenter });
   return {
@@ -1414,6 +1414,7 @@ async function buildDeepRuntimeConfigForRun(input: {
       childInstructionQueues: state.childInstructionQueues,
       childMessageStore: state.childMessageStore,
     },
+    capabilitySnapshot,
     releaseResources: () => {
       void resources.mcpManager?.disconnectAll?.().catch(() => undefined);
     },
@@ -1427,6 +1428,7 @@ async function createTurnRuntimeForExistingDeepRun(
 ): Promise<{
   readonly turnRuntime: ReturnType<typeof createDeepTurnRuntime>;
   readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
+  readonly capabilitySnapshot: NonNullable<StartDeepRuntimeInput["capabilitySnapshot"]>;
   readonly releaseResources: () => void;
 }> {
   const capabilitySnapshot = record.run.capabilitySnapshot;
@@ -1462,14 +1464,43 @@ async function createTurnRuntimeForExistingDeepRun(
       taskSoil,
     },
   );
+  const effectiveCapabilitySnapshot = deepCapabilitySnapshotWithExecutableTools({
+    runtime,
+    snapshot: resources.capabilitySnapshot,
+    taskSoil,
+    toolCenter,
+  });
   return {
     turnRuntime: createDeepTurnRuntime({
       intelligenceChannel: resources.aiConfig.createIntelligenceChannel(state.minimalRuntime),
       toolCenter,
     }),
     taskSoil,
+    capabilitySnapshot: effectiveCapabilitySnapshot,
     releaseResources: () => {
       void resources.mcpManager?.disconnectAll?.().catch(() => undefined);
+    },
+  };
+}
+
+function deepCapabilitySnapshotWithExecutableTools(input: {
+  readonly runtime: PanelRuntime;
+  readonly snapshot: BasicAgentCapabilitySnapshot;
+  readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
+  readonly toolCenter: Parameters<typeof resolveRunToolBoundary>[0]["toolCenter"];
+}): BasicAgentCapabilitySnapshot {
+  const toolBoundary = resolveRunToolBoundary({
+    agentDefinition: input.runtime.desktopAgentDefinition,
+    snapshot: input.snapshot,
+    goal: input.taskSoil.rawGoal,
+    taskSoil: input.taskSoil,
+    toolCenter: input.toolCenter,
+  });
+  return {
+    ...input.snapshot,
+    toolCatalog: {
+      ...input.snapshot.toolCatalog,
+      allowedTools: toolBoundary.allowedTools,
     },
   };
 }
@@ -1904,8 +1935,12 @@ function updateLiveProjectionForChild(
     status: result.completedRun.status,
     updatedAt,
     summary: result.summary.summary,
+    latestResult: result.summary.summary,
     confidence: result.summary.confidence,
     uncertainty: result.summary.uncertainty,
+    workflowItems: liveChildWorkflowItemsForControlResult(result, updatedAt),
+    execution: liveChildExecutionForControlResult(result.completedRun),
+    parentInstructions: liveChildParentInstructionsForControlResult(result.completedRun),
     pendingApproval: result.completedRun.pendingApproval,
     parentOperation: liveParentOperationFromInstruction(
       result.completedRun.parentInstructions?.at(-1),
@@ -1937,6 +1972,144 @@ function updateLiveProjectionForChild(
     synthesis,
     updatedAt,
   };
+}
+
+function liveChildWorkflowItemsForControlResult(
+  result: DeepChildAgentRunResult,
+  updatedAt: string,
+): readonly DeepLiveChildWorkflowItem[] {
+  const childRun = result.completedRun;
+  const items: DeepLiveChildWorkflowItem[] = [
+    {
+      itemId: `objective:${childRun.childRunId}`,
+      kind: "objective_set",
+      title: "目标已明确",
+      detail: result.summary.spec.objective,
+      status: "completed",
+      timestamp: childRun.startedAt,
+    },
+  ];
+  for (const instruction of childRun.parentInstructions ?? []) {
+    const timestamp = instruction.executedAt ?? instruction.cancelledAt ?? instruction.queuedAt ?? instruction.requestedAt;
+    items.push({
+      itemId: `parent-instruction:${childRun.childRunId}:${instruction.instructionId}`,
+      kind: instruction.status === "queued" ? "parent_message_queued" : "parent_message_applied",
+      title: instruction.status === "queued" ? "已追加要求" : instruction.status === "cancelled" ? "跟进已取消" : "已跟进",
+      detail: safeParentInstructionProjectionSummary(instruction.status),
+      status: instruction.status === "queued" ? "pending" : instruction.status === "cancelled" ? "cancelled" : "completed",
+      timestamp,
+    });
+  }
+  for (const [index, segment] of (childRun.executionHistory ?? []).entries()) {
+    for (const [callIndex, call] of segment.toolCalls.entries()) {
+      items.push({
+        itemId: `tool:${childRun.childRunId}:${index}:${call.callId || callIndex}`,
+        kind: call.status === "approval_required" ? "tool_waiting" : "tool_completed",
+        title: call.status === "approval_required" ? "等待工具确认" : "工具调用完成",
+        detail: `${call.toolName}：${call.status}`,
+        status: call.status === "approval_required"
+          ? "blocked"
+          : call.status === "completed"
+            ? "completed"
+            : call.status === "cancelled"
+              ? "cancelled"
+              : "failed",
+        timestamp: segment.recordedAt,
+      });
+    }
+    items.push({
+      itemId: `segment:${childRun.childRunId}:${index}`,
+      kind: segment.outcome === "completed" ? "completed" : segment.outcome,
+      title: segment.outcome === "completed" ? "阶段结果已返回" : "执行未完成",
+      detail: `模型 ${segment.modelRounds} 轮，工具 ${segment.toolRounds} 轮`,
+      status: segment.outcome,
+      timestamp: segment.recordedAt,
+    });
+  }
+  if (childRun.pendingApproval !== undefined) {
+    items.push({
+      itemId: `tool-waiting:${childRun.childRunId}:${childRun.pendingApproval.confirmationId}`,
+      kind: "tool_waiting",
+      title: "等待确认",
+      detail: `${childRun.pendingApproval.toolName}：${childRun.pendingApproval.actionSummary}`,
+      status: "blocked",
+      timestamp: childRun.pendingApproval.requestedAt,
+    });
+  }
+  items.push({
+    itemId: `status:${childRun.childRunId}:${childRun.status}`,
+    kind: childRun.status === "blocked" || childRun.status === "failed" || childRun.status === "interrupted"
+      ? childRun.status
+      : "completed",
+    title: childRun.status === "completed" ? "结果已返回" : childRun.status === "blocked" ? "等待处理" : "未完成",
+    detail: childRun.failureReason ?? result.summary.summary,
+    status: childRun.status === "planned" || childRun.status === "running" || childRun.status === "resumed"
+      ? "running"
+      : childRun.status,
+    timestamp: childRun.completedAt ?? updatedAt,
+  });
+  return mergeLiveChildWorkflowItems(items);
+}
+
+function liveChildExecutionForControlResult(
+  childRun: ChildAgentRun,
+): DeepLiveChildExecutionProjection | undefined {
+  const history = childRun.executionHistory ?? [];
+  const latest = history.at(-1);
+  const execution = latest ?? childRun.execution;
+  if (execution === undefined) {
+    return undefined;
+  }
+  return {
+    modelRounds: execution.modelRounds,
+    toolRounds: execution.toolRounds,
+    segmentCount: history.length === 0 ? 1 : history.length,
+    latestOutcome: latest?.outcome,
+  };
+}
+
+function liveChildParentInstructionsForControlResult(
+  childRun: ChildAgentRun,
+): readonly DeepLiveChildParentInstructionProjection[] | undefined {
+  if (childRun.parentInstructions === undefined || childRun.parentInstructions.length === 0) {
+    return undefined;
+  }
+  return childRun.parentInstructions.map((instruction) => ({
+    instructionId: instruction.instructionId,
+    status: instruction.status,
+    instructionSummary: safeParentInstructionProjectionSummary(instruction.status),
+    requestedAt: instruction.requestedAt,
+    review: instruction.review === undefined
+      ? undefined
+      : {
+          decision: instruction.review.decision,
+          reason: instruction.review.reason,
+          confidence: instruction.review.confidence,
+        },
+  }));
+}
+
+function safeParentInstructionProjectionSummary(
+  status: ChildAgentRunParentInstructionStatus,
+): string {
+  switch (status) {
+    case "queued":
+      return "父层追加了跟进要求，等待子 Agent 处理。";
+    case "cancelled":
+      return "父层追加的跟进要求已取消。";
+    default:
+      return "父层追加了跟进要求，子 Agent 已处理。";
+  }
+}
+
+function mergeLiveChildWorkflowItems(
+  items: readonly DeepLiveChildWorkflowItem[],
+): readonly DeepLiveChildWorkflowItem[] {
+  const byId = new Map<string, DeepLiveChildWorkflowItem>();
+  for (const item of items) {
+    byId.set(item.itemId, item);
+  }
+  return [...byId.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
 function appendChildOperationEvent(
@@ -2153,8 +2326,8 @@ async function writeFailureRecord(
         {
           id: createId("deep-event"),
           runId,
-          sequence: 0,
-          type: "deep.stopped",
+          sequence: 1,
+          type: "deep.failed",
           title: "运行失败",
           summary: errorMessage(error),
           status: "failed",

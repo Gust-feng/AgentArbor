@@ -133,8 +133,9 @@ MCP 不需要从零实现协议层。要做的是把已有 SDK adapter 接入 ru
 - 宿主可显式通过 `additionalSkillRoots` 追加 admin/plugin 等受管来源；这只是显式 root 接入，不是 marketplace、installer、自动更新或回滚。`skillRoots` 仍作为完整覆盖入口服务测试或自定义宿主。
 - skill 启停状态和 `markUsed` 使用 source-qualified `stateKey`；旧 `skillId` 状态只在没有多来源同 id 歧义时兼容读取。
 - `resolveTriggeredSkillContexts` 只消费 run 创建时冻结的 skill catalog；当前 skill 文件或启停状态只能影响新 run。
-- 正式选择路径由 `skill-router.ts` 通过 `skill_routing` 模型调用完成；显式 `$skill` 是强信号，keyword 只做候选召回和 fallback。
-- router 输出必须经工程层校验：只能选择本轮 frozen catalog 内 enabled / valid skill，不能凭空引用不存在的 skill，不能扩大工具边界。
+- 默认选择路径由 `resolveTriggeredSkillContexts` 基于本轮 frozen catalog 做显式 `$skill` 与关键词/触发器选择；默认不发起 `skill_routing` 前置模型调用。
+- 设置页“基础能力 -> Skills 触发方式”可以把新 run 的冻结 `skillTrigger.mode` 切为 `model`；只有此时普通 agent 才使用 `skill-router.ts` 发起 `skill_routing` 前置模型路由。
+- `skill-router.ts` 保留为显式 opt-in 的内部评测或后续高级模式能力；router 输出必须经工程层校验：只能选择本轮 frozen catalog 内 enabled / valid skill，不能凭空引用不存在的 skill，不能扩大工具边界。
 - 被选中 skill 的正文加载会校验冻结 `contentHash/bodyHash`，hash 不一致时 fail closed 且不注入正文。
 - 选中且成功加载的 skill 的 indexed `references/assets/scripts` 可通过普通只读工具 `read_skill_resource` 按需读取；reference 内容作为 tool result 回到模型，asset/script 不返回 raw body，script 不自动执行。
 - `evals/` 已作为本地质量 artifact 被 loader/doctor 索引和统计；它不属于运行时资源，不进入 frozen runtime resource index，不进入 Context Ledger / Context Pack，也不能通过 `read_skill_resource` 读取。doctor 默认做确定性 JSON 结构、case 数、routing 断言、quality/regression 的 `qualityBaseline` with/without skill 记录和字面量质量检查；显式传入模型通道时可复用正式 `skill_routing` 路径执行 routing eval。
@@ -175,7 +176,7 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 - MCP tool 执行继续经过 `allowedTools`、ToolCenter 和运行投影；MCP 默认不额外确认，命令工具仍走命令确认。
 - Skills snapshot 表达 enabled / disabled 全量技能。
 - run 创建后冻结本轮可触发 skill 集合。
-- 执行时通过 `skill_routing` 模型路由选择 skill；显式 `$skill` 是强信号，keyword 只作为候选召回和 fallback，选中后加载正文注入 Context Ledger。
+- 执行时默认通过显式 `$skill` 与关键词/触发器选择 skill，选中后加载正文注入 Context Ledger；`skill_routing` 只在设置页“基础能力 -> Skills 触发方式”切为语义路由或内部评测显式 opt-in 时使用。
 - 成功注入后记录 `markUsed`。
 - run view 展示本轮使用过的 skill 名称、触发原因、运行摘要。
 
@@ -284,11 +285,11 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 - `CapabilityCenter` 不再过滤 disabled skills；snapshot 保存全量技能安全元数据。
 - `resolveRunCapabilities.enabledSkills` 仍只包含 enabled skills，并且不携带 `sourcePath`。
 - `resolveTriggeredSkillContexts` 必须只消费 run snapshot 的 skill catalog，不读取当前 skill state。
-- 触发策略不再以 keyword 为主判断：普通 agent 应在 runtime / trace 出生后，用本轮 frozen skill catalog 的安全 metadata 调用 `skill_routing` 模型路由。
-- skill 来源必须作为冻结事实保留：默认用户级 `$HOME/.agents/skills` 与项目级 `$CWD/.agents/skills` 都可发现，项目级 precedence 更高；router 候选只接收 `sourceKind/sourceRootId/sourcePrecedence`，不得接收绝对 `sourcePath`。
+- 默认触发策略采用 progressive disclosure：普通 agent 在 runtime / trace 出生后，用本轮 frozen skill catalog 做显式 `$skill` 与关键词/触发器选择；默认不调用 `skill_routing`。设置页“基础能力 -> Skills 触发方式”只影响新 run 的 frozen `skillTrigger.mode`。
+- skill 来源必须作为冻结事实保留：默认用户级 `$HOME/.agents/skills` 与项目级 `$CWD/.agents/skills` 都可发现，项目级 precedence 更高；显式 opt-in 的 router 候选只接收 `sourceKind/sourceRootId/sourcePrecedence`，不得接收绝对 `sourcePath`。
 - skill state store 必须以 `stateKey` 写入启停和 `markUsed`；API/UI 更新多来源同 id skill 时必须传 `stateKey`，未传且有歧义时应失败而不是猜测。
-- 显式 `$skill` 是强信号；keyword 只作为候选召回和模型不可用/输出非法时的 fallback。
-- router 输出必须经工程层校验：只能选择本轮 frozen catalog 内 enabled / valid / loaded 的 skill，不能凭空引用不存在的 skill，不能扩大工具边界。
+- 显式 `$skill` 是确定性选择信号；keyword / triggers 是默认自动触发边界。
+- 显式 opt-in 的 router 输出必须经工程层校验：只能选择本轮 frozen catalog 内 enabled / valid / loaded 的 skill，不能凭空引用不存在的 skill，不能扩大工具边界。
 - 触发后加载正文，注入 Context Ledger / Context Pack。
 - 选中且成功加载的 skill 若声明 `allowed-tools`，普通 agent 必须冻结和审计这些声明；声明不能扩张 capability snapshot、AgentDefinition profile、Task Soil permission 或 ToolCenter executable restriction，也不能作为全局白名单隐藏普通 agent 原本可见的工具。当前不实现 skill 级免确认授权。
 - 正文只进入模型上下文，不进入默认 UI raw 展示。
@@ -373,11 +374,11 @@ MCP tests：
 Skills tests：
 
 - disabled skill 不触发，但 snapshot / 管理视图可见。
-- enabled skill 被 model router 选中后正文进入 Context Pack；keyword 只作为候选召回和 fallback。
+- enabled skill 被显式 `$skill` 或关键词/触发器选中后正文进入 Context Pack；默认不调用 model router。
 - 触发 skill 后更新 lastUsedAt。
 - run view 显示本轮使用 skill 的名称、触发原因和运行摘要。
 - run 创建后，后续 skill 启停不影响已创建 run。
-- `llm` candidate strategy 不直接决定选择；正式运行路径通过 `skill-router.ts` 的 `skill_routing` 模型路由选择 skill，并在失败时降级 keyword fallback。
+- `llm` candidate strategy 不直接决定默认选择；`skill-router.ts` 的 `skill_routing` 只在显式 opt-in 时使用，普通运行路径默认不产生前置模型路由请求。
 - 选中 skill 的 reference 不在首次 model request 中预注入；模型调用 `read_skill_resource` 后，reference 内容才作为 tool result 进入下一轮模型上下文。
 - 未选中、omitted、未索引或 hash 已变化的 skill resource 不能读取。
 - `scripts/*` 通过 `read_skill_resource` 只返回 metadata，不执行；`assets/*` 不返回 raw body。

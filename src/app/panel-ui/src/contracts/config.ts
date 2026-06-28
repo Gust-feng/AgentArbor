@@ -25,9 +25,12 @@ export type ConfigResponse = {
   };
   readonly commandShell?: CommandShellConfig;
   readonly toolConfirmation?: ToolConfirmationConfig;
+  readonly desktopAgent?: DesktopAgentConfig;
+  readonly skillTrigger?: SkillTriggerConfig;
   readonly capabilities?: {
     readonly activeModel?: ModelProviderProfile;
     readonly toolConfirmation?: ToolConfirmationConfig;
+    readonly skillTrigger?: SkillTriggerConfig;
     readonly modelCapabilities?: ModelCapabilities;
     readonly warnings?: readonly string[];
   };
@@ -89,6 +92,23 @@ export type ToolConfirmationConfig = {
   readonly shellCommandRequiresConfirmation?: boolean;
   readonly summary?: string;
   readonly riskDisclosure?: string;
+  readonly updatedAt?: string;
+};
+
+export type DesktopAgentConfig = {
+  readonly systemPrompt?: string;
+  readonly updatedAt?: string;
+  readonly isDefault?: boolean;
+  readonly maxSystemPromptChars?: number;
+};
+
+export type SkillTriggerMode = "keyword" | "model";
+
+export type SkillTriggerConfig = {
+  readonly mode?: SkillTriggerMode;
+  readonly label?: string;
+  readonly modelRouterEnabled?: boolean;
+  readonly summary?: string;
   readonly updatedAt?: string;
 };
 

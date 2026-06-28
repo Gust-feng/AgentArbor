@@ -18,6 +18,17 @@ export function runAgentDefinitionRef(definition: AgentDefinition): RunAgentDefi
   };
 }
 
+export function runAgentDefinitionRefCacheKey(ref: RunAgentDefinitionRef): string {
+  return [
+    ref.agentId,
+    ref.promptRef,
+    ref.promptVersion,
+    ref.outputContractId,
+    ref.toolVisibilityProfileId,
+    ref.definitionHash ?? "",
+  ].join("\u001f");
+}
+
 export function isCompleteRunAgentDefinitionRef(ref: unknown): ref is CompleteRunAgentDefinitionRef {
   if (!isRecord(ref)) {
     return false;

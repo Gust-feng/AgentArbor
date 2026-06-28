@@ -19,6 +19,7 @@ import type { DesktopAgentToolCenterContext } from "../desktop-agent-session-con
 import type { DesktopRunResources, PanelRunExecutionOptions } from "./run-execution-contracts.js";
 import { effectiveDesktopCapabilitySnapshotForRun } from "./desktop-run-model-settings.js";
 import type { ToolRegistryScope } from "../basic-agent-runtime/tool-registry.js";
+import { persistContextWindowFallback } from "../model-context-window-fallback.js";
 
 function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly ToolStateSettings[] {
   return snapshot.toolCatalog.tools.map((tool) => ({
@@ -93,6 +94,11 @@ export async function prepareDesktopRunResources(
           modelProvider: capabilitySnapshot.activeModel,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
+          onContextWindowExceeded: (event) =>
+            persistContextWindowFallback({
+              configCenter: runtime.configCenter,
+              event,
+            }),
           streamingMode: capabilitySnapshot.modelCapabilities.supportsStreaming ? "force_live" : "respect_profile",
         });
 

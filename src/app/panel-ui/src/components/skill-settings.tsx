@@ -48,7 +48,8 @@ function SkillRow(props: {
 }): React.ReactElement {
   const lastUsed = skillLastUsedView(props.skill.lastUsedAt);
   const hasCategory = props.skill.category !== undefined && props.skill.category.length > 0;
-  const hasMeta = hasCategory || lastUsed !== undefined;
+  const sourceLabel = skillSourceLabel(props.skill);
+  const hasMeta = hasCategory || sourceLabel !== undefined || lastUsed !== undefined;
   const toggleActionLabel = props.skill.enabled ? "停用" : "启用";
   return (
     <article className={`skills-row ${props.skill.enabled ? "" : "disabled"}`}>
@@ -60,6 +61,11 @@ function SkillRow(props: {
         <p>{skillSummary(props.skill)}</p>
         {hasMeta && (
           <div className="skills-row-meta">
+            {sourceLabel !== undefined && (
+              <span className="source">
+                {sourceLabel}
+              </span>
+            )}
             {hasCategory && <span>{props.skill.category}</span>}
             {lastUsed !== undefined && (
               <span className={lastUsed.kind === "invalid" ? "muted" : undefined}>
@@ -92,6 +98,23 @@ function SkillRow(props: {
 
 function skillSummary(skill: SkillDefinition): string {
   return skill.summary?.trim() || skill.description?.trim() || "未填写描述";
+}
+
+function skillSourceLabel(skill: SkillDefinition): string | undefined {
+  switch (skill.sourceKind) {
+    case "project":
+      return "项目";
+    case "user":
+      return "全局";
+    case "plugin":
+      return "插件";
+    case "admin":
+      return "管理员";
+    case "custom":
+      return "自定义";
+    default:
+      return undefined;
+  }
 }
 
 type SkillLastUsedView = {

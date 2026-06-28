@@ -38,6 +38,19 @@ import {
   toSanitizedToolConfirmationConfig,
 } from "./tool-confirmation-settings.js";
 import {
+  normalizeSkillTriggerSettings,
+  normalizeSkillTriggerUpdate,
+  parseSkillTriggerSettings,
+  toSanitizedSkillTriggerConfig,
+} from "./skill-trigger-settings.js";
+import {
+  createDefaultDesktopAgentSettings,
+  normalizeDesktopAgentSettings,
+  normalizeDesktopAgentUpdate,
+  parseDesktopAgentSettings,
+  toSanitizedDesktopAgentConfig,
+} from "./desktop-agent-settings.js";
+import {
   ConfigSchemaValidationError,
   asRecord,
   normalizeRequiredConfigString,
@@ -77,6 +90,19 @@ export {
   normalizeToolConfirmationUpdate,
   toSanitizedToolConfirmationConfig,
 } from "./tool-confirmation-settings.js";
+export {
+  normalizeSkillTriggerSettings,
+  normalizeSkillTriggerUpdate,
+  normalizeSkillTriggerMode,
+  toSanitizedSkillTriggerConfig,
+} from "./skill-trigger-settings.js";
+export {
+  DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS,
+  DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT,
+  normalizeDesktopAgentSettings,
+  normalizeDesktopAgentUpdate,
+  toSanitizedDesktopAgentConfig,
+} from "./desktop-agent-settings.js";
 export { parseMcpCommandLine, sanitizeMcpArgs } from "./tool-mcp-settings.js";
 
 export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
@@ -148,6 +174,8 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
       record.toolConfirmation ?? record.toolConfirmationPolicy,
       updatedAt
     ),
+    desktopAgent: parseDesktopAgentSettings(record.desktopAgent, updatedAt),
+    skillTrigger: parseSkillTriggerSettings(record.skillTrigger, updatedAt),
     commandShell: parseCommandShellSettings(record.commandShell, updatedAt),
     mcpServers: parseMcpServers(record.mcpServers, updatedAt),
     informationAccess:
@@ -229,6 +257,8 @@ export function createDefaultLocalSettings(now: string = new Date().toISOString(
     modelCapabilityOverrides: [],
     toolStates: [],
     toolConfirmation: normalizeToolConfirmationSettings(undefined, now),
+    desktopAgent: createDefaultDesktopAgentSettings(now),
+    skillTrigger: normalizeSkillTriggerSettings(undefined, now),
     commandShell: normalizeCommandShellSettings(undefined, now),
     mcpServers: [],
     informationAccess: createDefaultInformationAccessSettings(now),
@@ -272,6 +302,8 @@ export function normalizeLocalSettings(settings: AgentArborLocalSettings): Agent
     modelCapabilityOverrides: normalizeModelCapabilityOverrides(settings.modelCapabilityOverrides ?? [], now),
     toolStates: normalizeToolStates(settings.toolStates ?? [], now),
     toolConfirmation: normalizeToolConfirmationSettings(settings.toolConfirmation, now),
+    desktopAgent: normalizeDesktopAgentSettings(settings.desktopAgent, now),
+    skillTrigger: normalizeSkillTriggerSettings(settings.skillTrigger, now),
     commandShell: normalizeCommandShellSettings(settings.commandShell, now),
     mcpServers: normalizeMcpServers(settings.mcpServers ?? [], now),
     informationAccess: normalizeInformationAccessSettings(settings.informationAccess, now),

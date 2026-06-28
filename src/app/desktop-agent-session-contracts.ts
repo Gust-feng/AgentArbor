@@ -6,6 +6,7 @@ import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import type { BasicAgentContextPack } from "./basic-agent-runtime/context-pack.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 import type {
+  ModelRuntimeContextWindowExceededEvent,
   ModelRuntimeEnvironment,
   ModelRuntimeMode,
   ModelRuntimeProviderFetch,
@@ -148,6 +149,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly createToolCenter?: DesktopAgentToolCenterFactory;
   readonly onRuntimeReady?: (context: DesktopAgentSessionRuntimeContext) => void;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  readonly onContextWindowExceeded?: (event: ModelRuntimeContextWindowExceededEvent) => void | Promise<void>;
 };
 
 export type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";

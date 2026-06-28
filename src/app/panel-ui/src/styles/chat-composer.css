@@ -304,6 +304,60 @@
   padding-inline: 8px;
 }
 
+.composer-context-usage {
+  --context-usage-color: color-mix(in oklch, var(--accent) 76%, var(--fg));
+  --context-usage-track: color-mix(in oklch, var(--fg) 16%, transparent);
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
+  cursor: help;
+  opacity: 0.92;
+  transition: opacity var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.composer-context-usage:hover {
+  opacity: 1;
+}
+
+.composer-context-usage[data-tone="warning"] {
+  --context-usage-color: var(--status-warning);
+}
+
+.composer-context-usage[data-tone="danger"] {
+  --context-usage-color: var(--status-danger);
+}
+
+.composer-context-usage[data-tone="muted"] {
+  --context-usage-color: color-mix(in oklch, var(--fg) 22%, transparent);
+  --context-usage-track: color-mix(in oklch, var(--fg) 14%, transparent);
+}
+
+.composer-context-usage-svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+}
+
+.composer-context-usage-track,
+.composer-context-usage-meter {
+  fill: none;
+  stroke-width: 2.2;
+}
+
+.composer-context-usage-track {
+  stroke: var(--context-usage-track);
+}
+
+.composer-context-usage-meter {
+  stroke: var(--context-usage-color);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 10px 10px;
+}
+
 .composer-reasoning-chip {
   gap: 4px;
   padding-inline: 9px 7px;

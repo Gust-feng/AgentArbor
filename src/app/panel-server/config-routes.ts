@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
 import type { ModelCapabilities, ModelProviderModelCatalog, SanitizedWebSearchConfig } from "../../domain/config/index.js";
 import { listBuiltinMcpServerPresets, listBuiltinModelProviderPresets, listBuiltinProviderProtocolProfiles } from "../../domain/config/index.js";
 import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
@@ -20,6 +19,7 @@ import {
   parseConfigUpdate,
   parseCommandShellUpdate,
   parseCreateModelProfile,
+  parseDesktopAgentConfigUpdate,
   parseInformationAccessUpdate,
   parseModelCapabilityUpdate,
   parseModelCatalogUpdate,
@@ -27,6 +27,7 @@ import {
   parseMcpServerSecretValue,
   parseMcpServerImport,
   parseMcpServerUpdate,
+  parseSkillTriggerUpdate,
   parseToolConfirmationUpdate,
   parseToolStateUpdate,
   parseWebSearchUpdate,
@@ -34,6 +35,7 @@ import {
 } from "./request-parsers.js";
 import { checkPanelMcpEnvironment, installPanelMcpEnvironment, listPanelMcpReferences, testPanelMcpServer } from "./mcp-management-service.js";
 import type { PanelModelCatalogFetch, PanelProviderFetch } from "./types.js";
+import { readAgentArborPackageVersion } from "../product-info.js";
 
 export type PanelConfigRouteRuntime = {
   readonly configCenter: ConfigCenter;
@@ -60,6 +62,8 @@ type PanelModelCapabilityProfile = {
   readonly capabilities: ModelCapabilities;
 };
 
+const MODEL_PROVIDER_CONFIG_BODY_MAX_CHARS = 4_500_000;
+
 export async function handlePanelConfigRoute(
   runtime: PanelConfigRouteRuntime,
   request: IncomingMessage,
@@ -84,6 +88,8 @@ export async function handlePanelConfigRoute(
       workspace: await runtime.configCenter.getWorkspaceConfig(),
       commandShell: await runtime.configCenter.getCommandShellConfig(),
       toolConfirmation: await runtime.configCenter.getToolConfirmationConfig(),
+      desktopAgent: await runtime.configCenter.getDesktopAgentConfig(),
+      skillTrigger: await runtime.configCenter.getSkillTriggerConfig(),
     });
     return true;
   }
@@ -127,7 +133,7 @@ export async function handlePanelConfigRoute(
   }
 
   if (request.method === "POST" && url.pathname === "/api/config/model-profiles") {
-    const body = await readJsonBody(request);
+    const body = await readJsonBody(request, { maxChars: MODEL_PROVIDER_CONFIG_BODY_MAX_CHARS });
     try {
       const profile = await runtime.configCenter.createModelProviderProfile(parseCreateModelProfile(body));
       invalidateCapabilityCache(runtime);
@@ -168,7 +174,7 @@ export async function handlePanelConfigRoute(
 
   const modelProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)$/.exec(url.pathname);
   if (request.method === "POST" && modelProfileMatch !== null) {
-    const body = await readJsonBody(request);
+    const body = await readJsonBody(request, { maxChars: MODEL_PROVIDER_CONFIG_BODY_MAX_CHARS });
     try {
       const profileId = decodeURIComponent(modelProfileMatch[1] ?? "");
       const profile = await runtime.configCenter.updateModelProviderConfig({
@@ -351,7 +357,7 @@ export async function handlePanelConfigRoute(
   }
 
   if (request.method === "POST" && url.pathname === "/api/config/model-provider") {
-    const body = await readJsonBody(request);
+    const body = await readJsonBody(request, { maxChars: MODEL_PROVIDER_CONFIG_BODY_MAX_CHARS });
     try {
       const config = await runtime.configCenter.updateModelProviderConfig(parseConfigUpdate(body));
       invalidateCapabilityCache(runtime);
@@ -701,7 +707,7 @@ export async function handlePanelConfigRoute(
       return true;
     } catch (error) {
       if (error instanceof WorkspaceDirectoryValidationError) {
-        throw new PanelHttpError(400, "invalid_workspace_directory", "工作目录必须是已存在的文件夹。");
+        throw new PanelHttpError(400, "invalid_workspace_directory", "默认文件夹必须是有效文件夹。");
       }
       throw error;
     }
@@ -741,9 +747,41 @@ export async function handlePanelConfigRoute(
     }
   }
 
+  if (request.method === "POST" && url.pathname === "/api/config/desktop-agent") {
+    const body = await readJsonBody(request);
+    try {
+      const desktopAgent = await runtime.configCenter.updateDesktopAgentConfig(parseDesktopAgentConfigUpdate(body));
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        desktopAgent,
+      });
+      return true;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/skill-trigger") {
+    const body = await readJsonBody(request);
+    try {
+      const skillTrigger = await runtime.configCenter.updateSkillTriggerConfig(parseSkillTriggerUpdate(body));
+      invalidateCapabilityCache(runtime);
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        skillTrigger,
+        capabilities: await runtime.capabilityCenter.snapshot(),
+      });
+      return true;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
+  }
+
   if (request.method === "POST" && url.pathname === "/api/config/workspace/select-directory") {
     if (runtime.workspaceDirectoryPicker === undefined) {
-      throw new PanelHttpError(501, "workspace_picker_unavailable", "当前环境不支持系统文件夹选择器，请手动输入工作文件夹路径。");
+      throw new PanelHttpError(501, "workspace_picker_unavailable", "当前环境不支持系统文件夹选择器，请手动输入默认文件夹路径。");
     }
     const selectedDirectory = await runtime.workspaceDirectoryPicker();
     if (selectedDirectory === undefined) {
@@ -766,7 +804,7 @@ export async function handlePanelConfigRoute(
       return true;
     } catch (error) {
       if (error instanceof WorkspaceDirectoryValidationError) {
-        throw new PanelHttpError(400, "invalid_workspace_directory", "工作目录必须是已存在的文件夹。");
+        throw new PanelHttpError(400, "invalid_workspace_directory", "默认文件夹必须是有效文件夹。");
       }
       throw error;
     }
@@ -796,33 +834,13 @@ function productInfoPayload(runtime: PanelConfigRouteRuntime): {
 } {
   return {
     name: "AgentArbor",
-    version: agentArborPackageVersion(),
+    version: readAgentArborPackageVersion(),
     defaultEntry: "Desktop Shell / Panel",
     runtimeMode: "agent",
     runtimeModeLabel: "普通 agent",
     configDirectory: runtime.configDirectory,
     runtimeDirectory: runtime.runtimePaths?.runtimeHome,
   };
-}
-
-let cachedAgentArborPackageVersion: string | undefined;
-
-function agentArborPackageVersion(): string {
-  if (cachedAgentArborPackageVersion !== undefined) {
-    return cachedAgentArborPackageVersion;
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as {
-      readonly version?: unknown;
-    };
-    cachedAgentArborPackageVersion =
-      typeof parsed.version === "string" && parsed.version.trim().length > 0
-        ? parsed.version
-        : "unknown";
-  } catch {
-    cachedAgentArborPackageVersion = "unknown";
-  }
-  return cachedAgentArborPackageVersion;
 }
 
 async function modelCapabilitiesPayload(runtime: PanelConfigRouteRuntime): Promise<{

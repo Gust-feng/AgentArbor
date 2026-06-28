@@ -81,6 +81,7 @@ export type RunStage =
   | "deep_child_interrupted"
   | "deep_child_failed"
   | "deep_parent_synthesis_completed"
+  | "deep_failed"
   | "deep_interrupted"
   | "deep_corrected"
   | "deep_stopped"

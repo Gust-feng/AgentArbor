@@ -9,7 +9,10 @@ import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import { createRuntimeAgentDefinitionCatalog } from "../agent-definition-catalog.js";
 import type { AgentDefinitionRegistry } from "../agent-definition-registry.js";
 import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
+import { runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
+import { desktopAgentDefinitionFromConfig } from "../agent-prompts/desktop-agent-configured-definition.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import { createAppUpdateService, type AppUpdateService } from "../app-update-service.js";
 import {
   BasicAgentRunExecutor,
   type BasicAgentRunExecutionInput,
@@ -53,6 +56,7 @@ export type PanelRuntime = {
   readonly capabilityCenter: CapabilityCenter;
   readonly desktopAgentDefinition: AgentDefinition;
   readonly agentDefinitions: AgentDefinitionRegistry;
+  readonly agentDefinitionOverrides: Map<string, AgentDefinition>;
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
@@ -71,6 +75,11 @@ export type PanelRuntime = {
   readonly processTerminator: ProcessTerminator;
   readonly skillRoots: readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
+  readonly appUpdateService: AppUpdateService;
+};
+
+type PanelSkillRootsInput = {
+  readonly workspaceDirectory?: string;
 };
 
 export type PanelRuntimeHooks = {
@@ -96,8 +105,13 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
       workspaceDirectoryPicker: options.workspaceDirectoryPicker,
       contextAttachmentPicker: options.contextAttachmentPicker,
       skillRoots: resolveSkillRoots(options),
+      resolveSkillRoots: (input) => resolveSkillRoots(options, input),
       skillStateStore: resolveSkillStateStore(options.configDirectory),
       processTerminator: options.processTerminator,
+      appUpdateService: createAppUpdateService({
+        manifestUrl: options.updateManifestUrl ?? process.env.AGENTARBOR_UPDATE_MANIFEST_URL,
+        fetch: options.updateManifestFetch,
+      }),
       hooks,
       ...runtimePersistence,
     });
@@ -114,8 +128,13 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
     workspaceDirectoryPicker: options.workspaceDirectoryPicker,
     contextAttachmentPicker: options.contextAttachmentPicker,
     skillRoots: resolveSkillRoots(options),
+    resolveSkillRoots: (input) => resolveSkillRoots(options, input),
     skillStateStore: resolveSkillStateStore(local.configDirectory),
     processTerminator: options.processTerminator,
+    appUpdateService: createAppUpdateService({
+      manifestUrl: options.updateManifestUrl ?? process.env.AGENTARBOR_UPDATE_MANIFEST_URL,
+      fetch: options.updateManifestFetch,
+    }),
     hooks,
     ...runtimePersistence,
   });
@@ -143,8 +162,10 @@ function assemblePanelRuntime(input: {
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
   readonly skillRoots: readonly SkillRootInput[];
+  readonly resolveSkillRoots?: (input: PanelSkillRootsInput) => readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly processTerminator?: ProcessTerminator;
+  readonly appUpdateService: AppUpdateService;
   readonly hooks: PanelRuntimeHooks;
 }): PanelRuntime {
   const runJobs = new PanelRunJobStore();
@@ -152,12 +173,14 @@ function assemblePanelRuntime(input: {
   const abortControllers = new Map<string, AbortController>();
   const persistenceChains = new Map<string, Promise<void>>();
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
+  const agentDefinitionOverrides = new Map<string, AgentDefinition>();
   const conversations = new PanelConversationStore();
   const processRegistry = new InMemoryProcessRegistry();
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
     skillRoots: input.skillRoots,
+    resolveSkillRoots: input.resolveSkillRoots,
     skillStateStore: input.skillStateStore,
     fetch: input.providerFetch,
   });
@@ -166,6 +189,7 @@ function assemblePanelRuntime(input: {
     capabilityCenter,
     desktopAgentDefinition: input.desktopAgentDefinition,
     agentDefinitions: input.agentDefinitions,
+    agentDefinitionOverrides,
     configDirectory: input.configDirectory,
     providerFetch: input.providerFetch,
     modelCatalogFetch: input.modelCatalogFetch,
@@ -183,6 +207,7 @@ function assemblePanelRuntime(input: {
     processTerminator,
     skillRoots: input.skillRoots,
     skillStateStore: input.skillStateStore,
+    appUpdateService: input.appUpdateService,
   };
   runtime.runExecutor = new BasicAgentRunExecutor({
     prepareRunStart: (startInput) => preparePanelBasicRunStart(runtime as PanelRuntime, startInput),
@@ -252,25 +277,33 @@ async function preparePanelBasicRunStart(
     };
   }
 
-  const baseCapabilitySnapshot = await capabilitySnapshotForRun(
-    runtime,
-    input.modelOverride,
-    input.workspaceDirectory
-  );
+  const [baseCapabilitySnapshot, desktopAgentConfig] = await Promise.all([
+    capabilitySnapshotForRun(
+      runtime,
+      input.modelOverride,
+      input.workspaceDirectory
+    ),
+    runtime.configCenter.getDesktopAgentConfig(),
+  ]);
   const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
     baseCapabilitySnapshot,
     input.reasoningEffort
   );
   const config = capabilitySnapshot.activeModel;
+  const agentDefinition = resolvePanelRunMode(input.runKind, input.runMode) === "agent"
+    ? desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig)
+    : undefined;
+  const agentDefinitionRef = agentDefinition === undefined ? undefined : runAgentDefinitionRef(agentDefinition);
+  if (agentDefinition !== undefined && agentDefinitionRef !== undefined) {
+    runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), agentDefinition);
+  }
   return {
     aiMode: input.aiMode ?? config.defaultAiMode,
     config,
     informationAccess,
     capabilitySnapshot,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
-    agentDefinitionRef: resolvePanelRunMode(input.runKind, input.runMode) === "agent"
-      ? runAgentDefinitionRef(runtime.desktopAgentDefinition)
-      : undefined,
+    agentDefinitionRef,
   };
 }
 
@@ -312,12 +345,15 @@ async function capabilitySnapshotForRun(
   };
 }
 
-function resolveSkillRoots(options: PanelServerOptions): readonly SkillRootInput[] {
+function resolveSkillRoots(
+  options: PanelServerOptions,
+  input: PanelSkillRootsInput = {}
+): readonly SkillRootInput[] {
   if (options.skillRoots !== undefined) {
     return options.skillRoots;
   }
   return [
-    ...resolveDefaultPanelSkillRoots(),
+    ...resolveDefaultPanelSkillRoots({ workspaceDirectory: input.workspaceDirectory }),
     ...(options.additionalSkillRoots ?? []),
   ];
 }
@@ -325,8 +361,10 @@ function resolveSkillRoots(options: PanelServerOptions): readonly SkillRootInput
 export function resolveDefaultPanelSkillRoots(input: {
   readonly cwd?: string;
   readonly home?: string;
+  readonly workspaceDirectory?: string;
 } = {}): readonly SkillRootInput[] {
-  const projectRoot = path.join(input.cwd ?? process.cwd(), ".agents", "skills");
+  const projectBase = input.workspaceDirectory ?? input.cwd ?? process.cwd();
+  const projectRoot = path.join(projectBase, ".agents", "skills");
   const userRoot = path.join(input.home ?? homeDirectory(), ".agents", "skills");
   if (path.resolve(projectRoot) === path.resolve(userRoot)) {
     return [{

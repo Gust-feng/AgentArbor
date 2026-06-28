@@ -19,15 +19,19 @@ import type {
   ModelProviderProfileSettings,
   NormalSettingsStore,
   SanitizedCommandShellConfig,
+  SanitizedDesktopAgentConfig,
   SanitizedMcpServerSecretMetadata,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
+  SanitizedSkillTriggerConfig,
   SanitizedToolConfirmationConfig,
   SanitizedWorkspaceConfig,
   SanitizedWebSearchConfig,
   UpdateInformationAccessConfigInput,
   UpdateCommandShellConfigInput,
+  UpdateDesktopAgentConfigInput,
   UpdateModelProviderConfigInput,
+  UpdateSkillTriggerConfigInput,
   UpdateToolConfirmationConfigInput,
   UpdateToolStateInput,
   UpsertMcpServerInput,
@@ -52,8 +56,11 @@ import {
   normalizeRequiredConfigString,
   normalizeSourcePreference,
   normalizeCommandShellUpdate,
+  normalizeDesktopAgentUpdate,
   normalizeToolConfirmationUpdate,
+  normalizeSkillTriggerUpdate,
   toSanitizedCommandShellConfig,
+  toSanitizedSkillTriggerConfig,
   toSanitizedToolConfirmationConfig,
   normalizeWebSearchProvider,
   parseLocalSettingsFile,
@@ -64,6 +71,7 @@ import {
 } from "./config-center/settings-schema.js";
 import {
   toSanitizedInformationAccessConfig,
+  toSanitizedDesktopAgentConfig,
   toSanitizedModelProfile,
   toSanitizedModelProviderConfig,
   toSanitizedWebSearchConfig,
@@ -644,6 +652,16 @@ export class ConfigCenter {
     return toSanitizedToolConfirmationConfig(settings.toolConfirmation, { now: settings.updatedAt });
   }
 
+  async getDesktopAgentConfig(): Promise<SanitizedDesktopAgentConfig> {
+    const settings = await this.readOrCreateSettings();
+    return toSanitizedDesktopAgentConfig(settings);
+  }
+
+  async getSkillTriggerConfig(): Promise<SanitizedSkillTriggerConfig> {
+    const settings = await this.readOrCreateSettings();
+    return toSanitizedSkillTriggerConfig(settings.skillTrigger, { now: settings.updatedAt });
+  }
+
   async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput): Promise<SanitizedWorkspaceConfig> {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
@@ -684,6 +702,34 @@ export class ConfigCenter {
     };
     await this.options.settingsStore.writeSettings(next);
     return toSanitizedToolConfirmationConfig(toolConfirmation, { now });
+  }
+
+  async updateDesktopAgentConfig(input: UpdateDesktopAgentConfigInput): Promise<SanitizedDesktopAgentConfig> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const desktopAgent = normalizeDesktopAgentUpdate(input, current.desktopAgent, now);
+    const next = normalizeLocalSettings({
+      ...current,
+      version: 3,
+      desktopAgent,
+      updatedAt: now,
+    });
+    await this.options.settingsStore.writeSettings(next);
+    return toSanitizedDesktopAgentConfig(next);
+  }
+
+  async updateSkillTriggerConfig(input: UpdateSkillTriggerConfigInput): Promise<SanitizedSkillTriggerConfig> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const skillTrigger = normalizeSkillTriggerUpdate(input, now);
+    const next: AgentArborLocalSettings = {
+      ...current,
+      version: 3,
+      skillTrigger,
+      updatedAt: now,
+    };
+    await this.options.settingsStore.writeSettings(next);
+    return toSanitizedSkillTriggerConfig(skillTrigger, { now });
   }
 
   async createModelRuntimeEnvironment(

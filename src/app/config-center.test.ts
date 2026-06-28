@@ -7,6 +7,7 @@ import type { McpCachedToolInfo, ModelCapabilities } from "../domain/config/inde
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAgentArborConfigDirectory } from "../adapters/config/index.js";
 import { ConfigCenter, ConfigCenterValidationError } from "./config-center.js";
 import { toSanitizedCommandShellConfig } from "./config-center/command-shell-settings.js";
+import { DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT } from "./config-center/desktop-agent-settings.js";
 
 test("config settings schema keeps OpenAI request settings split", async () => {
   const [settingsSchema, openAIRequestSettings] = await Promise.all([
@@ -187,7 +188,7 @@ test("command shell auto mode prefers Windows shells that avoid cmd quoting trap
     assert.equal(explicitCmd.configuredKind, "cmd");
     assert.equal(explicitCmd.kind, "cmd");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -212,6 +213,60 @@ test("ConfigCenter persists tool confirmation policy and defaults shell commands
     assert.equal(updated.riskDisclosure.includes("sandbox"), true);
     assert.equal(reloaded.policy, "full_access");
     assert.equal(settingsRaw.toolConfirmation?.policy, "full_access");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter persists skill trigger mode and defaults to keyword", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-skill-trigger-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const initial = await configCenter.getSkillTriggerConfig();
+    const updated = await configCenter.updateSkillTriggerConfig({ mode: "model" });
+    const reloaded = await new ConfigCenter({ settingsStore, secretStore }).getSkillTriggerConfig();
+    const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
+      readonly skillTrigger?: { readonly mode?: string };
+    };
+
+    assert.equal(initial.mode, "keyword");
+    assert.equal(initial.modelRouterEnabled, false);
+    assert.equal(updated.mode, "model");
+    assert.equal(updated.modelRouterEnabled, true);
+    assert.equal(reloaded.mode, "model");
+    assert.equal(settingsRaw.skillTrigger?.mode, "model");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter persists Desktop Agent system prompt settings", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-desktop-agent-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    const customPrompt = "You are a user configured Desktop Agent prompt.";
+
+    const initial = await configCenter.getDesktopAgentConfig();
+    const updated = await configCenter.updateDesktopAgentConfig({ systemPrompt: customPrompt });
+    const reloaded = await new ConfigCenter({ settingsStore, secretStore }).getDesktopAgentConfig();
+    const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
+      readonly desktopAgent?: { readonly systemPrompt?: string };
+    };
+    const reset = await configCenter.updateDesktopAgentConfig({ resetSystemPrompt: true });
+
+    assert.equal(initial.systemPrompt, DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT);
+    assert.equal(initial.isDefault, true);
+    assert.equal(updated.systemPrompt, customPrompt);
+    assert.equal(updated.isDefault, false);
+    assert.equal(reloaded.systemPrompt, customPrompt);
+    assert.equal(settingsRaw.desktopAgent?.systemPrompt, customPrompt);
+    assert.equal(reset.systemPrompt, DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT);
+    assert.equal(reset.isDefault, true);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
@@ -328,6 +383,7 @@ test("ConfigCenter clears saved model provider API keys explicitly", async () =>
 test("ConfigCenter persists custom model provider label and logo", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-model-provider-logo-"));
   const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  const largeLogoDataUrl = `data:image/png;base64,${Buffer.alloc(3 * 1024 * 1024).toString("base64")}`;
   try {
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
@@ -341,6 +397,10 @@ test("ConfigCenter persists custom model provider label and logo", async () => {
       defaultAiMode: "openai-compatible",
     });
     const reloaded = await new ConfigCenter({ settingsStore, secretStore }).getModelProviderConfig();
+    const savedLargeLogo = await configCenter.updateModelProviderConfig({
+      logoDataUrl: largeLogoDataUrl,
+    });
+    const reloadedLargeLogo = await new ConfigCenter({ settingsStore, secretStore }).getModelProviderConfig();
     const ignoredInvalidLogo = await configCenter.updateModelProviderConfig({
       logoDataUrl: "data:text/plain;base64,Zm9v",
     });
@@ -353,9 +413,122 @@ test("ConfigCenter persists custom model provider label and logo", async () => {
     assert.equal(saved.baseUrl, "https://openrouter.ai/api/v1");
     assert.equal(reloaded.label, "OpenAI Router");
     assert.equal(reloaded.logoDataUrl, logoDataUrl);
-    assert.equal(ignoredInvalidLogo.logoDataUrl, logoDataUrl);
+    assert.equal(savedLargeLogo.logoDataUrl, largeLogoDataUrl);
+    assert.equal(reloadedLargeLogo.logoDataUrl, largeLogoDataUrl);
+    assert.equal(ignoredInvalidLogo.logoDataUrl, largeLogoDataUrl);
     assert.equal(cleared.label, "OpenAI Router");
     assert.equal(cleared.logoDataUrl, undefined);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter scopes model provider logos to the updated profile", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-profile-logo-scope-"));
+  const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.createModelProviderProfile({
+      profileId: "router-one",
+      label: "Router One",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://router-one.example/v1",
+      model: "router-one-model",
+      defaultAiMode: "openai-compatible",
+    });
+    await configCenter.createModelProviderProfile({
+      profileId: "router-two",
+      label: "Router Two",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://router-two.example/v1",
+      model: "router-two-model",
+      defaultAiMode: "openai-compatible",
+    });
+
+    const saved = await configCenter.updateModelProviderConfig({
+      profileId: "router-one",
+      logoDataUrl,
+    });
+    const profiles = await new ConfigCenter({ settingsStore, secretStore }).listModelProviderProfiles();
+
+    assert.equal(saved.profileId, "router-one");
+    assert.equal(saved.logoDataUrl, logoDataUrl);
+    assert.equal(profiles.find((profile) => profile.profileId === "router-one")?.logoDataUrl, logoDataUrl);
+    assert.equal(profiles.find((profile) => profile.profileId === "router-two")?.logoDataUrl, undefined);
+    assert.equal(profiles.find((profile) => profile.profileId === "default")?.logoDataUrl, undefined);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter repairs logo pollution on built-in model provider profiles", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-builtin-logo-repair-"));
+  const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  const now = "2026-06-28T00:00:00.000Z";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const customProfile = {
+      profileId: "custom-router",
+      label: "Gen.GPT",
+      logoDataUrl,
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.gustfeng.dev/v1",
+      defaultAiMode: "openai-compatible",
+      secretRef: "secret://local-dev/model-provider/custom-router/api-key",
+      enabled: true,
+      updatedAt: now,
+    };
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(settingsStore.settingsPath, JSON.stringify({
+      version: 3,
+      activeModelProfileId: "custom-router",
+      modelProvider: customProfile,
+      modelProfiles: [
+        {
+          profileId: "default",
+          label: "OpenAI",
+          logoDataUrl,
+          providerKind: "openai_compatible",
+          protocolKind: "openai_responses",
+          baseUrl: "https://api.openai.com/v1",
+          defaultAiMode: "openai-responses",
+          secretRef: "secret://local-dev/model-provider/default/api-key",
+          enabled: true,
+          updatedAt: now,
+        },
+        {
+          profileId: "deepseek",
+          label: "DeepSeek",
+          logoDataUrl,
+          providerKind: "openai_compatible",
+          protocolKind: "openai_compatible_chat_completions",
+          baseUrl: "https://api.deepseek.com",
+          defaultAiMode: "openai-compatible",
+          secretRef: "secret://local-dev/model-provider/deepseek/api-key",
+          enabled: true,
+          updatedAt: now,
+        },
+        customProfile,
+      ],
+      updatedAt: now,
+    }, null, 2), "utf8");
+
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    const active = await configCenter.getModelProviderConfig();
+    const profiles = await configCenter.listModelProviderProfiles();
+
+    assert.equal(active.profileId, "custom-router");
+    assert.equal(active.logoDataUrl, logoDataUrl);
+    assert.equal(profiles.find((profile) => profile.profileId === "default")?.logoDataUrl, undefined);
+    assert.equal(profiles.find((profile) => profile.profileId === "deepseek")?.logoDataUrl, undefined);
+    assert.equal(profiles.find((profile) => profile.profileId === "custom-router")?.logoDataUrl, logoDataUrl);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

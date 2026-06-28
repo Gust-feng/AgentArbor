@@ -14,12 +14,14 @@ test("panel UI app shell delegates data and control work", async () => {
     appAttachments,
     appBootstrap,
     appConfigActions,
+    appUpdateActions,
     appConfigProjection,
     appConversationRefresh,
     conversationRefresh,
     submitFlow,
     appObservedRunReadModel,
     appRunProjection,
+    panelContextWindowUsage,
     appRunController,
     appConversationSession,
     appTaskSubmission,
@@ -57,12 +59,14 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource("app-attachments.ts"),
     readPanelUiSource("app-bootstrap.ts"),
     readPanelUiSource("app-config-actions.ts"),
+    readPanelUiSource("app-update-actions.ts"),
     readPanelUiSource("app-config-projection.ts"),
     readPanelUiSource("app-conversation-refresh.ts"),
     readAppSource("panel-conversation-refresh.ts"),
     readAppSource("panel-ui-submit-flow.ts"),
     readPanelUiSource("app-observed-run-read-model.ts"),
     readPanelUiSource("app-run-projection.ts"),
+    readAppSource("panel-context-window-usage.ts"),
     readPanelUiSource("app-run-controller.ts"),
     readPanelUiSource("app-conversation-session.ts"),
     readPanelUiSource("app-task-submission.ts"),
@@ -108,10 +112,23 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("transcriptNodesByRunId"), false);
   assert.equal(app.includes("loadConversationTranscriptNodesByRunId"), false);
   assert.equal(app.includes('from "./app-run-projection"'), true);
+  assert.equal(app.includes('from "../../panel-context-window-usage"'), true);
+  assert.equal(app.includes("contextWindowUsageFrom({"), true);
+  assert.equal(app.includes("latestModelUsageFromEvents(currentRun.events)"), true);
+  assert.equal(app.includes("latestModelUsageFromTranscript(currentRun.transcriptNodes)"), true);
+  assert.equal(app.includes("contextUsage,"), true);
+  assert.equal(panelContextWindowUsage.includes("export function contextWindowUsageFrom"), true);
+  assert.equal(panelContextWindowUsage.includes("export function latestModelUsageFromTranscript"), true);
+  assert.equal(panelContextWindowUsage.includes("isTokenSourceUsableForContextUsage"), true);
+  assert.equal(chatEmpty.includes("readonly contextUsage?: ContextWindowUsage"), true);
+  assert.equal(chatEmpty.includes('className="composer-context-usage"'), true);
+  assert.equal(chatComposerStyles.includes(".composer-context-usage-svg"), true);
+  assert.equal(chatComposerStyles.includes(".composer-context-usage-meter"), true);
   assert.equal(app.includes('from "./app-runtime-controls"'), true);
   assert.equal(app.includes('from "./app-attachments"'), true);
   assert.equal(app.includes('from "./app-bootstrap"'), true);
   assert.equal(app.includes('from "./app-config-actions"'), false);
+  assert.equal(app.includes('from "./app-update-actions"'), false);
   assert.equal(app.includes('from "./app-config-projection"'), true);
   assert.equal(app.includes('from "./app-conversation-refresh"'), true);
   assert.equal(app.includes('from "./app-run-controller"'), true);
@@ -119,6 +136,17 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes('from "./app-state"'), true);
   assert.equal(app.includes('from "./app-skill-actions"'), false);
   assert.equal(app.includes("function refreshBootstrap"), false);
+  assert.equal(app.includes("checkAppUpdate,"), true);
+  assert.equal(app.includes("saveModelCapabilities,"), true);
+  assert.equal(app.includes("saveSkillTriggerMode,"), true);
+  assert.equal(app.includes("appUpdate={app.appUpdate}"), true);
+  assert.equal(app.includes("onCheckAppUpdate={() => void checkAppUpdate()}"), true);
+  assert.equal(app.includes("onSaveModelCapabilities={saveModelCapabilities}"), true);
+  assert.equal(app.includes("onSaveSkillTriggerMode={(mode) => void saveSkillTriggerMode(mode)}"), true);
+  assert.equal(appConfigActions.includes("export async function saveModelCapabilityConfig"), true);
+  assert.equal(appConfigActions.includes('postJson<ConfigResponse>("/api/config/model-capabilities"'), true);
+  assert.equal(appConfigActions.includes("export async function saveSkillTriggerConfig"), true);
+  assert.equal(appConfigActions.includes('postJson<ConfigResponse>("/api/config/skill-trigger"'), true);
   assert.equal(app.includes("function persistModelConfig"), false);
   assert.equal(app.includes("function saveModelConfig"), false);
   assert.equal(app.includes("function createCustomModelProfile"), false);
@@ -145,9 +173,14 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes('const chatScreen = app.agentMode === "deep"'), true);
   assert.equal(app.includes("function openNormalTaskEntry"), true);
   assert.equal(app.includes('changeAgentMode("normal");\n    setSelectedWorkspaceDirectory(undefined);\n    resetChat();'), true);
+  assert.equal(app.includes("function openNormalAgentEntry"), true);
+  assert.equal(app.includes("deepRunUpdateController.stopPolling();"), true);
+  assert.equal(app.includes('setScreen(app.conversation !== undefined || app.run !== undefined ? "chat-active" : "chat-empty");'), true);
   assert.equal(app.includes("app.conversation.workspaceFolder?.path"), true);
   assert.equal(app.includes("app.conversation?.workspaceFolder?.path"), true);
-  assert.equal(app.includes("summary?.workspaceFolder?.path"), true);
+  assert.equal(app.includes("app.deep.run.workspaceFolder?.path"), true);
+  assert.equal(app.includes("app.deep?.run.workspaceFolder?.path"), true);
+  assert.equal(app.includes("summary?.workspaceFolder?.path") || app.includes("view.run.workspaceFolder?.path"), true);
   assert.equal(app.includes("function openAgentClusterEntry"), true);
   assert.equal(app.includes("function openCurrentModeTaskEntry"), true);
   assert.equal(app.includes('agentMode: "deep"'), true);
@@ -176,6 +209,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("onChildMessage={sendDeepChildMessage}"), true);
   assert.equal(app.includes("onChildConfirmation={decideDeepChild}"), true);
   assert.equal(app.includes("onResynthesize={resynthesizeDeepRun}"), true);
+  assert.equal(app.includes("selectedWorkspaceDirectory: undefined"), false);
+  assert.equal(app.includes("onSelectWorkspaceDirectory: undefined"), false);
   assert.equal(app.includes("agentClusterDisabled="), false);
   assert.equal(app.includes("onOpenAgentCluster="), false);
   assert.equal(app.includes('agentMode={app.agentMode}'), true);
@@ -193,31 +228,58 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(multiAgentWorkspace.includes("暂无历史"), false);
   assert.equal(multiAgentWorkspace.includes("props.runs"), true);
   assert.equal(multiAgentWorkspace.includes("key={run.runId}"), false);
+  assert.equal(multiAgentWorkspace.includes("selectedChildRunId"), true);
+  assert.equal(multiAgentWorkspace.includes("setSelectedChildRunId"), true);
+  assert.equal(multiAgentWorkspace.includes("with-side-panel"), true);
+  assert.equal(multiAgentWorkspace.includes("with-child-inspector"), true);
+  assert.equal(multiAgentWorkspace.includes("<DeepCollaborationIndex"), true);
+  assert.equal(multiAgentWorkspace.includes('className="multi-agent-reading-shell"'), true);
+  assert.equal(
+    multiAgentWorkspace.indexOf('className="multi-agent-commandbar"') >
+      multiAgentWorkspace.indexOf('className="multi-agent-reading-shell"'),
+    true,
+  );
+  assert.equal(multiAgentWorkspace.includes("<DeepChildInspector"), true);
   assert.equal(multiAgentWorkspace.includes("API path"), false);
   assert.equal(multiAgentWorkspace.includes("raw event type"), false);
   assert.equal(multiAgentWorkspace.includes("Deep 模式"), false);
   assert.equal(deepView.includes("export function DeepView"), true);
   assert.equal(deepView.includes("function DeepChatView"), true);
+  assert.equal(deepView.includes("function DeepPanelView"), false);
+  assert.equal(deepView.includes("function DeepResultCanvas"), false);
+  assert.equal(deepView.includes("function DeepPlanSummary"), false);
+  assert.equal(deepView.includes("function DeepRunCounters"), false);
   assert.equal(deepView.includes("function DeepIntakeChatView"), true);
   assert.equal(deepView.includes("deepIntakeChatItems"), true);
   assert.equal(deepView.includes("type DeepChatItem"), true);
-  assert.equal(deepView.includes("DeepRunTree"), true);
-  assert.equal(deepView.includes("DeepConclusion"), true);
+  assert.equal(deepView.includes("<DeepRunTree"), false);
+  assert.equal(deepView.includes("<DeepConclusion"), false);
+  assert.equal(deepView.includes('from "./deep-run-tree"'), false);
+  assert.equal(deepView.includes('from "./deep-conclusion"'), false);
+  assert.equal(deepView.includes("export type DeepChildInspectorViewModel"), true);
+  assert.equal(deepView.includes("export type DeepCollaborationIndexItemViewModel"), true);
+  assert.equal(deepView.includes("export function DeepChildInspector"), true);
+  assert.equal(deepView.includes("export function DeepCollaborationIndex"), true);
+  assert.equal(deepView.includes("childInspectorViewModel"), true);
+  assert.equal(deepView.includes("DeepLiveChildWorkflowItem"), true);
   assert.equal(deepView.includes("DeepStageNavigator"), false);
   assert.equal(deepView.includes("DeepFocusOutput"), false);
   assert.equal(deepView.includes("DeepModelOutputPanel"), false);
   assert.equal(deepView.includes("DeepChildWorklist"), false);
-  assert.equal(deepView.includes("DeepWorkflowStrip"), true);
-  assert.equal(deepView.includes('className="deep-workflow-strip"'), true);
+  assert.equal(deepView.includes("DeepWorkflowStrip"), false);
+  assert.equal(deepView.includes('className="deep-workflow-strip"'), false);
   assert.equal(deepView.includes("deep-workflow-pending"), false);
-  assert.equal(deepView.includes("DeepChildActivityStrip"), true);
-  assert.equal(deepView.includes("DeepChildActivityCard"), true);
+  assert.equal(deepView.includes("DeepChildActivityStrip"), false);
+  assert.equal(deepView.includes("DeepChildActivityCard"), false);
   assert.equal(deepView.includes("CompactConclusion"), false);
-  assert.equal(deepView.includes("DeepBriefDetails"), true);
+  assert.equal(deepView.includes("DeepBriefDetails"), false);
   assert.equal(deepView.includes("DeepDetailStageRail"), false);
   assert.equal(deepView.includes("DeepRunRefs"), false);
   assert.equal(deepView.includes('aria-label="助手回复"'), true);
-  assert.equal(deepView.includes('aria-label="协作进展"'), true);
+  assert.equal(deepView.includes('aria-label="协作进展"'), false);
+  assert.equal(deepView.includes('aria-label="协作项索引"'), true);
+  assert.equal(deepView.includes('aria-label="协作项详情"'), true);
+  assert.equal(deepView.includes('aria-label="协作项工作流程"'), true);
   assert.equal(deepView.includes('className="deep-flow-canvas"'), false);
   assert.equal(deepView.includes("deep-stage-navigator"), false);
   assert.equal(deepView.includes("deep-process-node"), false);
@@ -239,53 +301,64 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(deepView.includes('kind: "parent_message"'), true);
   assert.equal(deepView.includes('kind: "system_notice"'), true);
   assert.equal(deepView.includes("view.brief"), true);
+  assert.equal(deepView.includes("DeepResultCanvas"), false);
+  assert.equal(deepView.includes("resultCanvasState"), false);
+  assert.equal(deepView.includes("DeepRunCounters"), false);
+  assert.equal(deepView.includes("workboardSummary"), false);
+  assert.equal(deepView.includes("collaborationSummary"), true);
   assert.equal(deepView.includes("deep-brief-chips"), false);
   assert.equal(deepView.includes("modelOutputEntries"), false);
   assert.equal(deepView.includes("childOutputEntries"), false);
   assert.equal(deepView.includes("view.liveProjection.decision?.summary"), true);
-  assert.equal(deepView.includes("view.report.childSummaries"), true);
+  assert.equal(deepView.includes("view.report?.childSummaries"), true);
   assert.equal(deepView.includes("view.report?.synthesisRecords.at(-1)"), true);
   assert.equal(deepView.includes("view.report?.conclusion"), true);
+  assert.equal(deepView.includes("liveChild?.workflowItems"), true);
+  assert.equal(deepView.includes("liveChild?.latestResult"), true);
+  assert.equal(deepView.includes("model.workflowItems.map"), true);
   assert.equal(deepView.includes("deep-child-node-confidence"), false);
   assert.equal(deepView.includes("deep-child-node-uncertainty"), false);
-  assert.equal(deepView.includes("child.parentOperation"), true);
-  assert.equal(deepView.includes("parentOperationLabel"), true);
-  assert.equal(deepView.includes("deep-child-node-parent-op"), true);
+  assert.equal(deepView.includes("child.parentOperation"), false);
+  assert.equal(deepView.includes("parentOperationLabel"), false);
+  assert.equal(deepView.includes("deep-child-node-parent-op"), false);
   assert.equal(deepView.includes("DeepUserMessage"), true);
   assert.equal(deepView.includes("DeepParentMessage"), true);
   assert.equal(deepView.includes("DeepSystemNotice"), true);
-  assert.equal(deepView.includes("ChildNodeFollowup"), true);
-  assert.equal(deepView.includes("deep-child-node-followup"), true);
-  assert.equal(deepView.includes("deep-child-node-followup-toggle"), true);
+  assert.equal(deepView.includes("ChildNodeFollowup"), false);
+  assert.equal(deepView.includes("deep-child-node-followup"), false);
+  assert.equal(deepView.includes("deep-child-node-followup-toggle"), false);
+  assert.equal(deepView.includes("deep-child-inspector-scrollbody"), true);
+  assert.equal(deepView.includes("deep-child-inspector-actionbar"), true);
+  assert.equal(deepView.includes("deep-child-inspector-composer"), true);
   assert.equal(deepView.includes("ChildNodeApproval"), true);
   assert.equal(deepView.includes("deep-child-node-approval"), true);
-  assert.equal(deepView.includes("child.pendingApproval"), true);
+  assert.equal(deepView.includes("model.pendingApproval"), true);
   assert.equal(deepView.includes("props.onChildMessage &&"), true);
   assert.equal(deepView.includes("补充给这个协作项"), true);
   assert.equal(deepView.includes("补充给这个子 Agent"), false);
   assert.equal(deepView.includes("busy={props.childOperationBusyId !== undefined}"), false);
-  assert.equal(deepView.includes("busy={props.childOperationBusyId === child.childRunId}"), true);
+  assert.equal(deepView.includes("busy={props.childOperationBusyId === child.childRunId}"), false);
   assert.equal(deepView.includes("busy={props.busy}"), true);
   assert.equal(deepView.includes("busy={busy || props.childOperationBusyId === child.childRunId}"), false);
   assert.equal(deepView.includes("childStatusLabel"), true);
   assert.equal(deepView.includes("phase === \"needs_input\""), true);
   assert.equal(deepView.includes("运行细节"), false);
   assert.equal(deepView.includes("我正在接手这个目标"), false);
-  assert.equal(deepView.includes("协作记录"), true);
-  assert.equal(deepView.includes("deep-record-section"), true);
-  assert.equal(deepView.includes("deep-resynthesis-button"), true);
-  assert.equal(deepView.includes("needsResynthesis"), true);
-  assert.equal(deepView.includes("deep-resynthesis-state"), true);
-  assert.equal(deepView.includes("待重新综合"), true);
-  assert.equal(deepView.includes("重新综合"), true);
+  assert.equal(deepView.includes("协作记录"), false);
+  assert.equal(deepView.includes("deep-record-section"), false);
+  assert.equal(deepView.includes("deep-resynthesis-button"), false);
+  assert.equal(deepView.includes("needsResynthesis"), false);
+  assert.equal(deepView.includes("deep-resynthesis-state"), false);
+  assert.equal(deepView.includes("待重新综合"), false);
+  assert.equal(deepView.includes("重新综合"), false);
   assert.equal(deepView.includes("父层重新综合"), false);
   assert.equal(deepView.includes("raw prompt"), false);
   assert.equal(deepView.includes("raw response"), false);
   assert.equal(deepView.includes("API path"), false);
-  assert.equal(deepView.includes('"deep.child.instruction_queued"'), true);
-  assert.equal(deepView.includes('"deep.child.blocked"'), true);
-  assert.equal(deepView.includes('"deep.child.interrupted"'), true);
-  assert.equal(deepView.includes('"deep.child.failed"'), true);
+  assert.equal(deepView.includes('"deep.child.instruction_queued"'), false);
+  assert.equal(deepView.includes('"deep.child.blocked"'), false);
+  assert.equal(deepView.includes('"deep.child.interrupted"'), false);
+  assert.equal(deepView.includes('"deep.child.failed"'), false);
   assert.equal(deepRunTree.includes("export function DeepRunTree"), true);
   assert.equal(deepRunTree.includes("busy={props.childOperationBusyId !== undefined}"), true);
   assert.equal(deepRunTree.includes("busy={props.busy || props.childOperationBusyId ==="), false);
@@ -364,7 +437,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appBootstrap.includes("/api/skills"), true);
   assert.equal(appBootstrap.includes('/api/conversations'), true);
   assert.equal(appBootstrap.includes('getJson<ListDeepRunSummariesResponse>("/api/deep/runs?limit=50")'), true);
-  assert.equal(appBootstrap.includes('Pick<AppState, "config" | "tools" | "skills" | "conversations" | "deepRuns">'), true);
+  assert.equal(appBootstrap.includes('Pick<AppState, "config" | "tools" | "appUpdate" | "skills" | "conversations" | "deepRuns">'), true);
   assert.equal(appState.includes("readonly deepRuns: readonly DeepRunSummary[]"), true);
   assert.equal(appState.includes("readonly deepSelectedRunId?: string"), true);
   assert.equal(appState.includes("deepRuns: []"), true);
@@ -388,6 +461,14 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appConfigActions.includes('postJson<ConfigResponse>("/api/config/model-provider"'), true);
   assert.equal(appConfigActions.includes('postJson<ToolsResponse>("/api/config/tools/web-search"'), true);
   assert.equal(appConfigActions.includes('postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp"'), true);
+  assert.equal(appUpdateActions.includes("export function loadAppUpdateStatus"), true);
+  assert.equal(appUpdateActions.includes("export function checkAppUpdate"), true);
+  assert.equal(appUpdateActions.includes('getJson<AppUpdateInfo>("/api/app/update")'), true);
+  assert.equal(appUpdateActions.includes('postJson<AppUpdateInfo>("/api/app/update/check"'), true);
+  assert.equal(appBootstrap.includes("/api/app/update"), true);
+  assert.equal(appSettingsController.includes("requestAppUpdateCheck"), true);
+  assert.equal(appSettingsController.includes("readonly checkAppUpdate"), true);
+  assert.equal(appState.includes("readonly appUpdate?: AppUpdateInfo"), true);
   assert.equal(appConfigProjection.includes("export function mergeConfigResponse"), true);
   assert.equal(appConfigProjection.includes("export function runReasoningSettings"), true);
   assert.equal(appConversationRefresh.includes('from "../../panel-conversation-refresh"'), true);
@@ -489,6 +570,11 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appSettingsController.includes("export function createAppSettingsController"), true);
   assert.equal(appSettingsController.includes("async function persistModelConfig"), true);
   assert.equal(appSettingsController.includes("async function saveModelConfig"), true);
+  assert.equal(appSettingsController.includes("readonly saveModelCapabilities"), true);
+  assert.equal(appSettingsController.includes("async function saveModelCapabilities"), true);
+  assert.equal(appSettingsController.includes("async function persistModelCapabilities"), true);
+  assert.equal(appSettingsController.includes("readonly saveSkillTriggerMode"), true);
+  assert.equal(appSettingsController.includes("async function saveSkillTriggerMode"), true);
   assert.equal(appSettingsController.includes("async function createCustomModelProfile"), true);
   assert.equal(appSettingsController.includes("async function fetchModelsForProfile"), true);
   assert.equal(appSettingsController.includes("async function saveWorkspace"), true);
@@ -498,6 +584,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appSettingsController.includes("async function refreshSkills"), true);
   assert.equal(appSettingsController.includes("async function updateSkill"), true);
   assert.equal(appSettingsController.includes("saveModelProviderConfig"), true);
+  assert.equal(appSettingsController.includes("saveModelCapabilityConfig"), true);
+  assert.equal(appSettingsController.includes("saveSkillTriggerConfig"), true);
   assert.equal(appSettingsController.includes("saveWorkspaceDirectory"), true);
   assert.equal(appSettingsController.includes("saveToolSettings"), true);
   assert.equal(appSettingsController.includes("saveMcpServerSettings"), true);
@@ -548,10 +636,15 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(settingsDialog.includes('label: "外观"'), true);
   assert.equal(settingsDialog.includes('label: "关于"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
+  assert.equal(settingsDialog.includes("onSaveModelCapabilities"), true);
   assert.equal(capabilitySettings.includes("export function BasicCapabilitiesSettings"), true);
   assert.equal(capabilitySettings.includes("export function McpServiceSettings"), true);
+  assert.equal(capabilitySettings.includes("function ModelInformationSettings"), true);
   assert.equal(capabilitySettings.includes("function WebSearchSettings"), true);
   assert.equal(capabilitySettings.includes("function McpServiceBoard"), true);
+  assert.equal(capabilitySettings.includes("modelCapabilityTargets"), true);
+  assert.equal(capabilitySettings.includes("model-info-card"), true);
+  assert.equal(capabilitySettings.includes("模型信息"), true);
   assert.equal(capabilitySettings.includes("McpReferencePanel"), true);
   assert.equal(capabilitySettings.includes("onLoadMcpReferences"), true);
   assert.equal(capabilitySettings.includes("网络搜索"), true);
@@ -608,6 +701,10 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(sidebar.includes("activeDeepRunId"), true);
   assert.equal(sidebar.includes("onOpenDeepRun"), true);
   assert.equal(sidebar.includes("DeepRunGroup"), true);
+  assert.equal(sidebar.includes("DeepRunFolderGroup"), true);
+  assert.equal(sidebar.includes("expandedRunGroupKeys"), true);
+  assert.equal(sidebar.includes("props.runs.slice(0, 24)"), false);
+  assert.equal(sidebar.includes("props.runs.slice(0, DEFAULT_FOLDER_CONVERSATION_LIMIT)"), true);
   assert.equal(sidebar.includes("DeepRunListItem"), true);
   assert.equal(sidebar.includes("暂无多 Agent 任务"), true);
   assert.equal(sidebar.includes("!props.agentClusterActive && props.pendingCount > 0"), true);
@@ -670,21 +767,43 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(deepStyles.includes(".multi-agent-workspace"), true);
   assert.equal(deepStyles.includes(".multi-agent-missionbar"), true);
   assert.equal(deepStyles.includes(".multi-agent-body"), true);
+  assert.equal(deepStyles.includes(".multi-agent-primary"), true);
+  assert.equal(deepStyles.includes(".multi-agent-reading-shell"), true);
   assert.equal(deepStyles.includes(".multi-agent-stage"), true);
   assert.equal(deepStyles.includes(".multi-agent-commandbar"), true);
   assert.equal(deepStyles.includes(".multi-agent-inspector"), false);
+  assert.equal(deepStyles.includes(".with-side-panel"), true);
+  assert.equal(deepStyles.includes(".with-child-inspector"), true);
+  assert.equal(deepStyles.includes("grid-template-columns: minmax(0, 1fr) clamp"), true);
+  assert.equal(deepStyles.includes(".deep-panel-view"), false);
+  assert.equal(deepStyles.includes(".deep-panel-scroll"), false);
+  assert.equal(deepStyles.includes(".deep-result-canvas"), false);
+  assert.equal(deepStyles.includes(".deep-result-head"), false);
+  assert.equal(deepStyles.includes(".deep-run-counters"), false);
+  assert.equal(deepStyles.includes(".deep-progress-log"), false);
+  assert.equal(deepStyles.includes(".deep-collaboration-index"), true);
+  assert.equal(deepStyles.includes(".deep-collaboration-index-list"), true);
+  assert.equal(deepStyles.includes(".deep-workboard-result"), false);
+  assert.equal(deepStyles.includes(".deep-workboard-objective"), false);
+  assert.equal(deepStyles.includes(".deep-collaboration-index-result"), true);
+  assert.equal(deepStyles.includes(".deep-collaboration-index-objective"), true);
+  assert.equal(deepStyles.includes(".deep-child-inspector"), true);
+  assert.equal(deepStyles.includes(".deep-child-inspector-scrollbody"), true);
+  assert.equal(deepStyles.includes(".deep-child-inspector-actionbar"), true);
+  assert.equal(deepStyles.includes(".deep-child-inspector-timeline"), true);
+  assert.equal(deepStyles.includes(".deep-child-inspector-composer"), true);
   assert.equal(deepStyles.includes(".multi-agent-history-list"), false);
   assert.equal(deepStyles.includes(".multi-agent-run-facts"), false);
   assert.equal(deepStyles.includes("flex: 0 0 280px"), false);
   assert.equal(deepStyles.includes(".deep-chat-view"), true);
   assert.equal(deepStyles.includes(".deep-chat-thread"), true);
   assert.equal(deepStyles.includes(".deep-chat-parent-message"), true);
-  assert.equal(deepStyles.includes(".deep-chat-child-strip"), true);
-  assert.equal(deepStyles.includes(".deep-chat-child-card"), true);
+  assert.equal(deepStyles.includes(".deep-chat-child-strip"), false);
+  assert.equal(deepStyles.includes(".deep-chat-child-card"), false);
   assert.equal(deepStyles.includes(".deep-flow-canvas"), false);
   assert.equal(deepStyles.includes(".deep-focus-output"), false);
   assert.equal(deepStyles.includes(".deep-stage-navigator"), false);
-  assert.equal(deepStyles.includes(".deep-child-node-followup-toggle"), true);
+  assert.equal(deepStyles.includes(".deep-child-node-followup-toggle"), false);
   assert.equal(deepStyles.includes("min-height: 0"), true);
   assert.equal(deepStyles.includes("overflow-y: auto"), true);
   assert.equal(deepStyles.includes("flex-direction: column"), true);
@@ -737,6 +856,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(workspaceStyles.includes(".workspace-tabs"), false);
   assert.equal(workspaceStyles.includes(".workspace-search"), false);
   assert.equal(workspaceStyles.includes(".service-settings-stack"), true);
+  assert.equal(workspaceStyles.includes(".model-info-card"), true);
+  assert.equal(workspaceStyles.includes(".model-info-grid"), true);
   assert.equal(workspaceStyles.includes(".capability-settings-stack"), false);
   assert.equal(workspaceStyles.includes(".capability-toggle"), true);
   assert.equal(workspaceStyles.includes(".mcp-service-card"), true);
@@ -826,16 +947,18 @@ test("multi Agent run tree exposes child Agent frozen instructions in details", 
   assert.equal(deepRunTree.includes("run.executionHistory.length"), true);
   assert.equal(deepRunTree.includes("执行段 {run.executionHistory.length}"), true);
   assert.equal(deepRunTree.includes("run.parentInstructions.length"), true);
+  assert.equal(deepRunTree.includes("跟进 {run.parentInstructions.length}"), true);
   assert.equal(deepRunTree.includes("instruction.messageRef ?? instruction.instructionId"), false);
   assert.equal(deepRunTree.includes("parentInstructionReviewTitle"), false);
-  assert.equal(deepRunTree.includes("跟进 {run.parentInstructions.length}"), true);
   assert.equal(deepRunTree.includes("SYNTHESIS_CHILD_REVIEW_LABEL"), true);
   assert.equal(deepRunTree.includes("synthesis.childReviews.map"), true);
   assert.equal(deepRunTree.includes('aria-label="协作审查"'), true);
   assert.equal(deepRunTree.includes('className="deep-synthesis-review-reason"'), true);
   assert.equal(deepStyles.includes(".deep-child-objective"), true);
   assert.equal(deepStyles.includes(".deep-child-execution"), true);
-  assert.equal(deepStyles.includes(".deep-child-node-parent-op"), true);
+  assert.equal(deepStyles.includes(".deep-child-node-parent-op"), false);
+  assert.equal(deepStyles.includes(".deep-collaboration-index"), true);
+  assert.equal(deepStyles.includes(".deep-child-inspector-actionbar"), true);
   assert.equal(deepStyles.includes(".deep-child-approval"), true);
   assert.equal(deepStyles.includes(".deep-child-followup"), true);
   assert.equal(deepStyles.includes(".deep-child-approval-actions"), true);
@@ -843,11 +966,19 @@ test("multi Agent run tree exposes child Agent frozen instructions in details", 
   assert.equal(deepStyles.includes(".deep-synthesis-review"), true);
   assert.equal(deepStyles.includes(".deep-synthesis-review-decision.accepted"), true);
   assert.equal(deepStyles.includes(".deep-synthesis-review-reason"), true);
-  assert.equal(deepStyles.includes(".deep-resynthesis-state"), true);
+  assert.equal(deepStyles.includes(".deep-resynthesis-state"), false);
   assert.equal(deepStyles.includes(".deep-compact-conclusion.needs-resynthesis"), true);
   assert.equal(deepStyles.includes("--success-text"), false);
   assert.equal(deepStyles.includes("--success-soft"), false);
 });
+
+function hasPanelUiModuleReference(source: string, modulePath: string): boolean {
+  return source.includes(`from "${modulePath}"`) || source.includes(`import("${modulePath}")`);
+}
+
+function hasJsxComponentReference(source: string, componentName: string): boolean {
+  return source.includes(`<${componentName}`) || source.includes(`<Lazy${componentName}`);
+}
 
 async function listPanelUiSourceFiles(root: string): Promise<readonly string[]> {
   const entries = await fs.readdir(root, { withFileTypes: true });
@@ -862,12 +993,4 @@ async function listPanelUiSourceFiles(root: string): Promise<readonly string[]> 
     return [];
   }));
   return nested.flat();
-}
-
-function hasPanelUiModuleReference(source: string, modulePath: string): boolean {
-  return source.includes(`from "${modulePath}"`) || source.includes(`import("${modulePath}")`);
-}
-
-function hasJsxComponentReference(source: string, componentName: string): boolean {
-  return source.includes(`<${componentName}`) || source.includes(`<Lazy${componentName}`);
 }

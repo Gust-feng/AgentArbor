@@ -117,6 +117,11 @@ test("resolveTriggeredSkillContexts records explicit selector trigger reasons", 
       triggers: [],
     };
     const facts = await loadSkillBodyFacts(skill);
+    const channel = new TestSkillRouterChannel({
+      selectedSkillIds: [],
+      reasons: [],
+      confidence: 0.1,
+    });
     const usedSkillIds: string[] = [];
     const runtime: PanelSkillRuntime = {
       skillRoots: [],
@@ -135,11 +140,16 @@ test("resolveTriggeredSkillContexts records explicit selector trigger reasons", 
       },
     };
 
-    const contexts = await resolveTriggeredSkillContexts(runtime, "please use $explicit-skill here", [{
-      ...skill,
-      contentHash: facts.contentHash,
-      bodyHash: facts.bodyHash,
-    }]);
+    const contexts = await resolveTriggeredSkillContexts(
+      runtime,
+      "please use $explicit-skill here",
+      [{
+        ...skill,
+        contentHash: facts.contentHash,
+        bodyHash: facts.bodyHash,
+      }],
+      { intelligenceChannel: channel }
+    );
 
     assert.equal(contexts.length, 1);
     assert.equal(contexts[0]?.skill.id, "explicit-skill");
@@ -148,12 +158,42 @@ test("resolveTriggeredSkillContexts records explicit selector trigger reasons", 
     assert.match(contexts[0]?.summary ?? "", /显式调用：\$explicit-skill/);
     assert.equal(contexts[0]?.warning, undefined);
     assert.deepEqual(usedSkillIds, ["source:legacy:explicit-skill"]);
+    assert.equal(channel.requests.length, 0);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
-test("resolveTriggeredSkillContexts uses the model router with safe frozen metadata", async () => {
+test("resolveTriggeredSkillContexts defaults to keyword routing even when a model channel is provided", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-skill-router-default-"));
+  try {
+    const writer = await frozenCatalogSkill(root, "writer", {
+      name: "Writer",
+      description: "Writes release notes.",
+      triggers: [],
+      body: "Use writer instructions.",
+    });
+    const channel = new TestSkillRouterChannel({
+      selectedSkillIds: ["writer"],
+      reasons: [{ skillId: "writer", reason: "The model router would select this.", confidence: 0.9 }],
+      confidence: 0.9,
+    });
+
+    const contexts = await resolveTriggeredSkillContexts(
+      { skillRoots: [] },
+      "111222",
+      [writer],
+      { intelligenceChannel: channel }
+    );
+
+    assert.deepEqual(contexts, []);
+    assert.equal(channel.requests.length, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveTriggeredSkillContexts uses the opt-in model router with safe frozen metadata", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-skill-router-model-"));
   try {
     const writer = await frozenCatalogSkill(root, "writer", {
@@ -185,6 +225,7 @@ test("resolveTriggeredSkillContexts uses the model router with safe frozen metad
       {
         intelligenceChannel: channel,
         historySummary: "user: previous request mentioned release notes",
+        routingMode: "model",
         requestId: "skill-router-request-model",
         traceId: "trace-skill-router-model",
         callerRef: "skill-router:goal-model",
@@ -249,7 +290,7 @@ test("resolveTriggeredSkillContexts rejects model selections outside the frozen 
       { skillRoots: [] },
       "please review this patch",
       [valid, disabled, invalid],
-      { intelligenceChannel: channel }
+      { intelligenceChannel: channel, routingMode: "model" }
     );
 
     assert.deepEqual(contexts.map((context) => context.skill.id), ["valid"]);
@@ -313,7 +354,7 @@ test("resolveTriggeredSkillContexts keeps router facts when model-selected skill
       { skillRoots: [] },
       "check hash behavior",
       [{ ...frozenSkill, contentHash: facts.contentHash, bodyHash: facts.bodyHash }],
-      { intelligenceChannel: channel }
+      { intelligenceChannel: channel, routingMode: "model" }
     );
 
     assert.equal(contexts.length, 1);

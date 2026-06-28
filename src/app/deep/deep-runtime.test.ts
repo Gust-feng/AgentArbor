@@ -1147,6 +1147,16 @@ test("executeDeepRun running child control message：运行中追加消息续跑
     persisted?.liveProjection?.children[0]?.parentOperation?.messageRef?.startsWith("child_message:"),
     true,
   );
+  assert.equal(
+    persisted?.liveProjection?.children[0]?.workflowItems?.some((item) => item.kind === "parent_message_applied"),
+    true,
+    "控制 API 续跑后 liveProjection 应投影已应用的协作项跟进流程",
+  );
+  assert.equal(
+    persisted?.liveProjection?.children[0]?.parentInstructions?.[0]?.instructionSummary.includes("继续核对"),
+    true,
+    "liveProjection 应携带安全跟进摘要供右侧流程分栏展示",
+  );
   assert.equal(JSON.stringify(persisted?.liveProjection?.children[0]?.parentOperation).includes(rawInstruction), false);
 });
 
@@ -1256,9 +1266,24 @@ test("executeDeepRun child approval_required 投影为 blocked child run，不�
     "write_file",
   );
   assert.equal(
+    persisted?.liveProjection?.children[0]?.workflowItems?.some((item) => item.kind === "tool_waiting"),
+    true,
+    "pending approval 应进入协作项工作流程",
+  );
+  assert.equal(
+    persisted?.liveProjection?.children[0]?.execution?.latestOutcome,
+    "blocked",
+    "blocked child 的最近执行段应进入 live execution 投影",
+  );
+  assert.equal(
     persisted?.report?.agentRunTree.childRuns[0]?.pendingApproval?.confirmationId,
     "confirm-call-write-approval",
   );
+  const liveChildJson = JSON.stringify(persisted?.liveProjection?.children[0]);
+  assert.equal(liveChildJson.includes("raw prompt"), false);
+  assert.equal(liveChildJson.includes("raw response"), false);
+  assert.equal(liveChildJson.includes("stdout"), false);
+  assert.equal(liveChildJson.includes("stderr"), false);
   assert.ok(child !== undefined);
   assert.ok(
     childContinuations.get(result.run.runId, child!.childRunId, "confirm-call-write-approval") !== undefined,

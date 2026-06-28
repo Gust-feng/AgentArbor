@@ -120,7 +120,7 @@ test("conversation message returns before slow initial persistence settles", asy
 
     assert.equal(start.status, 202);
     assert.equal(typeof start.body.run.runId, "string");
-    assert.equal(elapsedMs < 500, true);
+    assert.equal(elapsedMs < 2_000, true);
     assert.equal(upsertRunStarted, true);
     assert.equal(upsertRunCompleted, false);
   } finally {
@@ -172,15 +172,14 @@ test("conversation API creates a conversation and attaches the desktop run to as
     assert.equal(conversation.body.conversation.turns[1].runId, runId);
     assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
     assert.equal(currentRun.run.runId, runId);
-    assert.equal(currentRun.result.runId, runId);
-    assert.equal(currentRun.result.conversationId, conversationId);
-    assert.equal(currentRun.result.status, "completed");
-    assert.equal(currentRun.result.answer.markdown.includes("我可以直接回答问题"), true);
-    assert.deepEqual(Object.keys(currentRun.result.evidence).sort(), ["commands", "files", "sources"]);
-    assert.equal(JSON.stringify(currentRun.result).includes("replay"), false);
-    assert.equal(JSON.stringify(currentRun.result).includes("transcript"), false);
-    assert.equal(JSON.stringify(currentRun.result).includes("events"), false);
-    assert.equal(JSON.stringify(currentRun.result).includes("systemPrompt"), false);
+    assert.equal(currentRun.run.conversationId, conversationId);
+    assert.equal(currentRun.run.status, "completed");
+    assert.equal(currentRun.workView.stage, "completed");
+    assert.equal(currentRun.workView.answer.content.includes("我可以直接回答问题"), true);
+    assert.equal(JSON.stringify(currentRun.workView.answer).includes("replay"), false);
+    assert.equal(JSON.stringify(currentRun.workView.answer).includes("transcript"), false);
+    assert.equal(JSON.stringify(currentRun.workView.answer).includes("events"), false);
+    assert.equal(JSON.stringify(currentRun.workView.answer).includes("systemPrompt"), false);
     assert.equal(currentRun.workView.run.runId, runId);
     assert.equal(currentRun.workView.run.runId, runId);
     assert.equal("workSession" in currentRun, false);

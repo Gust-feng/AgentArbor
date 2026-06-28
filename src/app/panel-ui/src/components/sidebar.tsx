@@ -284,28 +284,83 @@ function DeepRunGroup(props: {
   readonly collapsed: boolean;
   readonly onOpen: (runId: string) => void;
 }): React.ReactElement {
-  const visibleRuns = props.runs.slice(0, 24);
-  if (visibleRuns.length === 0) {
+  const [expandedRunGroupKeys, setExpandedRunGroupKeys] = React.useState<ReadonlySet<string>>(() => new Set());
+  if (props.runs.length === 0) {
     return <SidebarEmptyState label="暂无多 Agent 任务" />;
   }
-  const groups = groupSidebarItemsByWorkspaceFolder(visibleRuns, sidebarDeepRunTime);
+  function toggleRunGroupExpanded(groupKey: string): void {
+    setExpandedRunGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  }
+  const groups = groupSidebarItemsByWorkspaceFolder(props.runs, sidebarDeepRunTime);
   return (
     <>
       {groups.map((group) => (
-        <div className="sidebar-conversation-group sidebar-deep-run-group" key={group.key}>
-          <SidebarFolderHeading title={group.label} titlePath={group.path} />
-          {group.items.map((run) => (
-            <DeepRunListItem
-              key={run.runId}
-              run={run}
-              active={run.runId === props.activeDeepRunId}
-              collapsed={props.collapsed}
-              onOpen={props.onOpen}
-            />
-          ))}
-        </div>
+        <DeepRunFolderGroup
+          key={group.key}
+          groupKey={group.key}
+          label={group.label}
+          path={group.path}
+          runs={group.items}
+          expanded={expandedRunGroupKeys.has(group.key)}
+          activeDeepRunId={props.activeDeepRunId}
+          collapsed={props.collapsed}
+          onOpen={props.onOpen}
+          onToggleExpanded={toggleRunGroupExpanded}
+        />
       ))}
     </>
+  );
+}
+
+function DeepRunFolderGroup(props: {
+  readonly groupKey: string;
+  readonly label: string;
+  readonly path?: string;
+  readonly runs: readonly DeepRunSummary[];
+  readonly expanded: boolean;
+  readonly activeDeepRunId?: string;
+  readonly collapsed: boolean;
+  readonly onOpen: (runId: string) => void;
+  readonly onToggleExpanded: (groupKey: string) => void;
+}): React.ReactElement {
+  const canExpand = props.runs.length > DEFAULT_FOLDER_CONVERSATION_LIMIT;
+  const visibleRuns = canExpand && !props.expanded
+    ? props.runs.slice(0, DEFAULT_FOLDER_CONVERSATION_LIMIT)
+    : props.runs;
+  const hiddenCount = props.runs.length - visibleRuns.length;
+  return (
+    <div className="sidebar-conversation-group sidebar-deep-run-group">
+      <SidebarFolderHeading title={props.label} titlePath={props.path} />
+      {visibleRuns.map((run) => (
+        <DeepRunListItem
+          key={run.runId}
+          run={run}
+          active={run.runId === props.activeDeepRunId}
+          collapsed={props.collapsed}
+          onOpen={props.onOpen}
+        />
+      ))}
+      {canExpand && (
+        <button
+          type="button"
+          className="sidebar-folder-more-button"
+          aria-expanded={props.expanded}
+          tabIndex={props.collapsed ? -1 : 0}
+          onClick={() => props.onToggleExpanded(props.groupKey)}
+        >
+          {props.expanded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+          <span>{props.expanded ? "收起" : `展开 ${hiddenCount} 个`}</span>
+        </button>
+      )}
+    </div>
   );
 }
 

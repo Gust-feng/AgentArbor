@@ -15,6 +15,7 @@ export {
 export type {
   ModelRuntimeConfig,
   ModelRuntimeConfigurationIssueCode,
+  ModelRuntimeContextWindowExceededEvent,
   ModelRuntimeEnvironment,
   ModelRuntimeModelCatalogFetch,
   ModelRuntimeMode,

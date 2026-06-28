@@ -24,7 +24,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { startLocalPanelServer } from "./panel-server.js";
+import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 import { createFileSystemDeepChildMessageStore } from "./deep/deep-child-messages.js";
 import { deepChildInstructionQueueRejectionError } from "./panel-server/deep-routes.js";
 import {
@@ -32,6 +32,7 @@ import {
   readSseUntil,
   removeTemporaryTree,
   requestJson,
+  requestSse,
 } from "./panel-server-test-utils.js";
 
 /** 复杂桌面任务目标：触发 fake provider 的 spawn_children 分支（多角度探索→综合）。 */
@@ -574,6 +575,47 @@ test("deep SSE streams child activity without raw prompt/response and includes r
     assert.equal(viewEventTypes.includes("deep.goal_received"), true);
     assert.equal(viewEventTypes.includes("deep.manager.decided"), true);
     assertSafePanelJsonText(view.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("deep failed run streams its first positive-sequence event from cursor zero", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-deep-failure-sse-"));
+  let fetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    fetchCalls += 1;
+    throw new Error("simulated provider failure after deep run start");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "broken-deep-model",
+        apiKey: "sk-deep-failure-test",
+      },
+    });
+    const conversation = await createDeepConversation(server.url, COMPLEX_GOAL, "openai-compatible");
+    const run = await startDeepRun(server.url, conversation.conversationId, "openai-compatible");
+    const view = await waitForDeepRunView(server.url, run.runId);
+    const firstEvent = view.body.view.eventSequence[0];
+
+    assert.equal(fetchCalls > 0, true);
+    assert.equal(view.body.view.run.status, "failed");
+    assert.equal(firstEvent.sequence > 0, true);
+    assert.equal(view.body.view.eventSequence.some((event: { type?: string }) => event.type === "deep.failed"), true);
+
+    const stream = await requestSse(
+      server.url,
+      `/api/deep/runs/${encodeURIComponent(run.runId)}/events?cursor=0`,
+    );
+    assert.equal(stream.status, 200);
+    assert.equal(stream.events.length > 0, true);
+    assert.equal(stream.events[0].sequence > 0, true);
+    assert.equal(stream.events.some((event: { type?: string }) => event.type === "deep.failed"), true);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

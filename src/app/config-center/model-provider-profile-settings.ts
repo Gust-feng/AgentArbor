@@ -30,6 +30,8 @@ const BUILTIN_PROFILE_PRESET_ALIASES = new Map<string, string>([
   ["openai", "openai"],
   ["claude", "claude"],
   ["anthropic", "claude"],
+  ["gemini", "gemini"],
+  ["google", "gemini"],
   ["deepseek", "deepseek"],
   ["moonshot", "moonshot"],
   ["kimi", "moonshot"],
@@ -39,7 +41,9 @@ const BUILTIN_PROFILE_PRESET_ALIASES = new Map<string, string>([
   ["minimax", "minimax"],
 ]);
 
-const MODEL_PROVIDER_LOGO_DATA_URL_MAX_LENGTH = 240_000;
+const MODEL_PROVIDER_LOGO_FILE_MAX_BYTES = 3 * 1024 * 1024;
+const MODEL_PROVIDER_LOGO_DATA_URL_MAX_LENGTH =
+  "data:image/svg+xml;base64,".length + Math.ceil(MODEL_PROVIDER_LOGO_FILE_MAX_BYTES / 3) * 4;
 const MODEL_PROVIDER_LOGO_DATA_URL_PATTERN = /^data:image\/(?:png|jpeg|jpg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/u;
 
 export function createDefaultModelProviderProfile(now: string): ModelProviderProfileSettings {
@@ -144,8 +148,10 @@ export function normalizeBuiltInModelProviderProfiles(
     const model = shouldClearBuiltInProfileModel(profile, preset.presetId, catalogs)
       ? undefined
       : profile.model;
+    const clearBuiltInLogo = shouldClearBuiltInProfileLogo(profile, preset.presetId);
     const next: ModelProviderProfileSettings = {
       ...profile,
+      logoDataUrl: clearBuiltInLogo ? undefined : profile.logoDataUrl,
       providerKind,
       protocolKind,
       baseUrl,
@@ -154,6 +160,17 @@ export function normalizeBuiltInModelProviderProfiles(
     };
     return sameModelProfile(profile, next) ? profile : { ...next, updatedAt: now };
   });
+}
+
+function shouldClearBuiltInProfileLogo(
+  profile: ModelProviderProfileSettings,
+  presetId: string
+): boolean {
+  const baseUrl = normalizeBaseUrl(profile.baseUrl);
+  if (baseUrl === undefined) {
+    return BUILTIN_PROFILE_PRESET_ALIASES.get(profile.profileId) === presetId;
+  }
+  return builtInPresetIdForCanonicalBaseUrl(baseUrl) === presetId;
 }
 
 function parseModelProviderKind(value: unknown): AgentArborLocalSettings["modelProvider"]["providerKind"] {
@@ -321,6 +338,7 @@ function builtInPresetIdForModelSignal(model: string): string | undefined {
   const normalized = model.trim().toLowerCase();
   if (normalized.includes("deepseek")) return "deepseek";
   if (normalized.includes("claude") || normalized.includes("anthropic")) return "claude";
+  if (normalized.includes("gemini") || normalized.includes("google")) return "gemini";
   if (normalized.includes("kimi") || normalized.includes("moonshot")) return "moonshot";
   if (normalized.includes("glm") || normalized.includes("zhipu") || normalized.includes("bigmodel")) return "glm";
   if (normalized.includes("minimax")) return "minimax";

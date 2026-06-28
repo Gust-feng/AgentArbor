@@ -237,6 +237,14 @@ export const EVENT_OBSERVATION_METADATA = {
     phase: "underground",
     stage: "deep_parent_synthesis_completed",
   }),
+  "deep.failed": metadata({
+    summary: "Deep run failed before producing a synthesized conclusion.",
+    scope: "underground",
+    severity: "error",
+    progressStatus: "failed",
+    phase: "underground",
+    stage: "deep_failed",
+  }),
   "deep.interrupted": metadata({
     summary: "Deep run was interrupted by the user; produced materials are retained.",
     scope: "underground",

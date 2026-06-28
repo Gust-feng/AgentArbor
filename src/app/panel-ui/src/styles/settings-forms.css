@@ -65,6 +65,7 @@
   width: 100%;
   max-width: 100%;
   align-items: center;
+  gap: var(--space-3);
   min-width: 0;
   overflow: hidden;
 }
@@ -123,6 +124,35 @@
   overflow-wrap: anywhere;
 }
 
+.about-product-github-link {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-lg);
+  background: var(--field-bg);
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  text-decoration: none;
+  transition:
+    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard);
+}
+
+.about-product-github-link:hover {
+  border-color: var(--field-hover-border);
+  background: var(--field-hover-bg);
+  color: var(--fg);
+}
+
+.about-product-github-link:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 72%, transparent);
+  outline-offset: 2px;
+}
+
 .about-fact-grid {
   display: grid;
   width: 100%;
@@ -165,6 +195,106 @@
   min-width: 0;
   gap: var(--space-3);
   overflow: hidden;
+}
+
+.about-update-card {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.about-update-check-button,
+.about-update-download-link {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-lg);
+  background: var(--field-bg);
+  padding: 0 11px;
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  font-size: 12px;
+  font-weight: var(--weight-label);
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.about-update-check-button:hover:not(:disabled),
+.about-update-download-link:hover {
+  border-color: var(--field-hover-border);
+  background: var(--field-hover-bg);
+  color: var(--fg);
+}
+
+.about-update-check-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.about-update-status-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: color-mix(in oklch, var(--fg) 82%, var(--muted));
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.about-update-status-row > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.about-update-pill {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--content-border);
+  border-radius: var(--radius-lg);
+  background: var(--content-surface-muted);
+  padding: 3px 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: var(--weight-label);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.about-update-pill.success {
+  border-color: color-mix(in oklch, var(--status-success) 34%, var(--border));
+  background: color-mix(in oklch, var(--status-success) 12%, var(--surface));
+  color: color-mix(in oklch, var(--status-success) 70%, var(--fg));
+}
+
+.about-update-pill.warning {
+  border-color: color-mix(in oklch, var(--status-warning) 32%, var(--border));
+  background: color-mix(in oklch, var(--status-warning) 8%, var(--surface));
+  color: var(--amber-text);
+}
+
+.about-update-pill.danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--status-danger);
+}
+
+.about-update-pill.neutral {
+  color: color-mix(in oklch, var(--muted) 88%, var(--fg));
+}
+
+.about-update-download-link {
+  justify-self: start;
+}
+
+.about-update-checked-at {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .about-path-list {
@@ -222,6 +352,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .about-update-status-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
   .about-path-row {
     grid-template-columns: 28px minmax(0, 1fr);
     align-items: start;
@@ -243,6 +378,11 @@
     width: 48px;
     height: 48px;
     padding: 7px;
+  }
+
+  .about-product-github-link {
+    width: 36px;
+    height: 36px;
   }
 
   .about-path-row {

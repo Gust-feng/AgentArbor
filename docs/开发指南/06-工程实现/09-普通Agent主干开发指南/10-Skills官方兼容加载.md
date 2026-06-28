@@ -33,11 +33,11 @@ Skills 是能力包：它提供可复用说明、参考资料、脚本和资产�
 
 - `<skill-name>` 必须和 `SKILL.md` frontmatter 的 `name` 完全一致。
 - `SKILL.md` frontmatter 必须包含 `name` 和 `description`。
-- `when_to_use` 可补充自动路由上下文；它进入 skill router 的安全 metadata，但不由工程层做确定性语义判断。
+- `when_to_use` 可补充自动选择上下文；它进入 frozen skill catalog 的安全 metadata。当前默认确定性选择只按 id/name/description/triggers 匹配，`when_to_use` 主要供显式 opt-in 的模型路由或后续策略使用。
 - `disable-model-invocation: true` 表示普通 agent 不应自动选择该 skill；显式 `$skill` 仍可调用。
-- `user-invocable: false` 表示不接受用户显式 `$skill` 调用；它仍可作为模型自动路由候选。
+- `user-invocable: false` 表示不接受用户显式 `$skill` 调用；它仍可被自动选择策略考虑。
 - `version` 和 `provenance` 用于记录本地包版本、来源、插件名、registry、revision 等分发事实；它们会进入 frozen skill catalog 的安全投影，但敏感 key（如 path/source/resource/secret/token/key）会被过滤。
-- `sourceKind`、`sourceRootId`、`sourcePrecedence` 由加载器根据发现 root 生成，并进入 frozen skill catalog / run capability 投影；模型路由只接收这些安全来源字段，不接收 `sourcePath`。
+- `sourceKind`、`sourceRootId`、`sourcePrecedence` 由加载器根据发现 root 生成，并进入 frozen skill catalog / run capability 投影；显式 opt-in 的模型路由只接收这些安全来源字段，不接收 `sourcePath`。
 - `stateKey` 是 skill 启停与 `markUsed` 的 source-qualified 状态键；旧 `skillId` 状态只在没有多来源同 id 歧义时作为兼容回退。
 - `license`、`compatibility`、`metadata` 等兼容元数据只作为包级说明，不能变成 AgentArbor 产品事实源。
 - `allowed-tools` 是 skill 级工具意图声明：它不能扩张本轮工具边界，也不能替代普通 `agent` 的工具选择。AgentArbor 当前只冻结和审计该声明，不把它当作全 run 工具白名单，也不把它当作 Claude Code 风格免确认授权；未来若实现免确认能力，必须新增 per-tool grant 契约，不能复用全局 `full_access`。
@@ -51,7 +51,7 @@ Skills 是能力包：它提供可复用说明、参考资料、脚本和资产�
 
 1. metadata 常驻：发现阶段只读取安全元数据，例如 `name`、`description`、启停状态和摘要。run snapshot 可以冻结这些安全元数据。
 2. 来源、precedence 与状态：默认 root 为用户级 `$HOME/.agents/skills` 和项目级 `$CWD/.agents/skills`；项目级 precedence 高于用户级。当前同 id/name skill 不 merge，选择前会按 precedence 排序并记录 duplicate omitted reason。启停和 `markUsed` 写入 source-qualified `stateKey`，避免用户级和项目级同 id skill 互相串状态。
-3. 模型路由选择：普通 agent 在 runtime / trace 出生后，基于本轮 frozen skill catalog 的安全 metadata 调用 `skill_routing` 模型路由；显式 `$skill` 是强信号，keyword 只作为候选召回和 fallback。`when_to_use`、`sourceKind/sourceRootId/sourcePrecedence` 进入候选 metadata，`disable-model-invocation` 和 `user-invocable` 控制自动/显式调用入口。
+3. 默认选择：普通 agent 在 runtime / trace 出生后，基于本轮 frozen skill catalog 做确定性 progressive disclosure；显式 `$skill` 直接选择，关键词/触发器命中才加载正文。默认不调用 `skill_routing`，也不把全量 skill 候选发给模型。设置页“基础能力 -> Skills 触发方式”可显式切为语义路由；只有新 run 冻结 `skillTrigger.mode = "model"` 后，`skill_routing` 才作为普通路径的 opt-in 前置路由使用。内部评测仍可显式使用该 router。
 4. body 选中后加载：只有本轮普通 agent 选中某个 skill 后，才读取 `SKILL.md` 正文并注入 Context Ledger / Context Pack。
 5. `allowed-tools` 声明审计：若选中的 loaded skill 声明了 `allowed-tools`，普通 agent 只记录和校验这些工具是否存在于本轮 capability / tool / profile / permission / executable 边界内；声明不能让不可见工具变可见，也不能把普通 agent 原本可见的工具隐藏掉。当前不提供 skill 级免确认授权。
 6. `references/` 按需读取：只有本轮已选中且成功加载的 skill，才允许模型通过普通只读工具 `read_skill_resource` 读取其 indexed `references/*`。读取结果作为 tool result 回到模型，不在初始 Context Pack 中预注入。

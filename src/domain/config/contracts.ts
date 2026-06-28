@@ -39,6 +39,7 @@ export type ConfiguredModelProtocolKind =
 export type ProviderProtocolProfileId =
   | "openai"
   | "anthropic"
+  | "gemini"
   | "deepseek"
   | "moonshot"
   | "glm"
@@ -204,6 +205,18 @@ export type ToolConfirmationSettings = {
   readonly updatedAt: string;
 };
 
+export type DesktopAgentSettings = {
+  readonly systemPrompt: string;
+  readonly updatedAt: string;
+};
+
+export type SkillTriggerMode = "keyword" | "model";
+
+export type SkillTriggerSettings = {
+  readonly mode: SkillTriggerMode;
+  readonly updatedAt: string;
+};
+
 export type McpServerTransportKind = "stdio" | "http";
 
 export type McpConfirmationMode = "always" | "unsafe_only" | "never";
@@ -314,6 +327,8 @@ export type AgentArborLocalSettings = {
   readonly modelCapabilityOverrides?: readonly ModelCapabilityOverrideSettings[];
   readonly toolStates?: readonly ToolStateSettings[];
   readonly toolConfirmation?: ToolConfirmationSettings;
+  readonly desktopAgent?: DesktopAgentSettings;
+  readonly skillTrigger?: SkillTriggerSettings;
   readonly commandShell?: CommandShellSettings;
   readonly mcpServers?: readonly McpServerSettings[];
   readonly informationAccess?: InformationAccessSettings;
@@ -377,6 +392,30 @@ export type SanitizedToolConfirmationConfig = {
 
 export type UpdateToolConfirmationConfigInput = {
   readonly policy: ToolConfirmationPolicy;
+};
+
+export type SanitizedDesktopAgentConfig = {
+  readonly systemPrompt: string;
+  readonly updatedAt: string;
+  readonly isDefault: boolean;
+  readonly maxSystemPromptChars: number;
+};
+
+export type UpdateDesktopAgentConfigInput = {
+  readonly systemPrompt?: string;
+  readonly resetSystemPrompt?: boolean;
+};
+
+export type SanitizedSkillTriggerConfig = {
+  readonly mode: SkillTriggerMode;
+  readonly label: string;
+  readonly modelRouterEnabled: boolean;
+  readonly summary: string;
+  readonly updatedAt: string;
+};
+
+export type UpdateSkillTriggerConfigInput = {
+  readonly mode: SkillTriggerMode;
 };
 
 export type UpsertMcpServerInput = {
@@ -548,6 +587,7 @@ export type BasicAgentCapabilitySnapshot = {
     readonly allowedTools: readonly string[];
   };
   readonly skillCatalog: readonly CapabilitySkillCatalogItem[];
+  readonly skillTrigger?: SanitizedSkillTriggerConfig;
   readonly mcpCatalog: readonly CapabilityMcpCatalogItem[];
   readonly workspace: SanitizedWorkspaceConfig;
   readonly commandShell?: SanitizedCommandShellConfig;

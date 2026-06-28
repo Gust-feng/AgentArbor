@@ -270,6 +270,37 @@ test("OpenAI-compatible Chat adapter classifies 504 response as provider_timeout
   assert.equal(response.failure?.message, "Gateway Timeout");
 });
 
+test("OpenAI-compatible Chat adapter notifies context window overflow", async () => {
+  const events: Array<{ readonly message: string; readonly status?: number }> = [];
+  const fetch: FetchLike = async () => ({
+    ok: false,
+    status: 400,
+    json: async () => ({
+      error: {
+        code: "context_length_exceeded",
+        message: "This model's maximum context length is 128000 tokens. Your messages resulted in 180000 tokens.",
+      },
+    }),
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+    onContextWindowExceeded: (event) => {
+      events.push(event);
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_response");
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.status, 400);
+  assert.equal(events[0]?.message.includes("maximum context length"), true);
+});
+
 test("OpenAI-compatible Chat adapter normalizes timeout-like transport error as provider_timeout", async () => {
   const fetch: FetchLike = async () => {
     throw new Error("Request timed out after 30000ms");

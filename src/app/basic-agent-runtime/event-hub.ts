@@ -1,78 +1,45 @@
 import type { AgentTaskStatus, RunEvent } from "../../domain/basic-agent/index.js";
+import {
+  AppRunEventHub,
+  type AppRunEventCursor,
+  type AppRunEventReplay,
+} from "../run-runtime-core/event-stream.js";
 
-export type BasicAgentRunCursor = {
-  readonly runId: string;
-  readonly lastSequence: number;
-  readonly eventCount: number;
-};
+export type BasicAgentRunCursor = AppRunEventCursor;
 
-export type BasicAgentRunReplay = {
-  readonly cursor: BasicAgentRunCursor;
-  readonly events: readonly RunEvent[];
-};
+export type BasicAgentRunReplay = AppRunEventReplay<RunEvent>;
 
 export class BasicAgentRunEventHub {
-  private readonly eventsByRunId = new Map<string, RunEvent[]>();
-  private readonly eventIdsByRunId = new Map<string, Set<string>>();
+  private readonly events = new AppRunEventHub<RunEvent>();
   private readonly statusesByRunId = new Map<string, AgentTaskStatus>();
 
   publish(event: Omit<RunEvent, "sequence"> & { readonly sequence?: number }): RunEvent {
-    const events = this.eventsByRunId.get(event.runId) ?? [];
-    const ids = this.eventIdsByRunId.get(event.runId) ?? new Set<string>();
-    const existing = ids.has(event.id) ? events.find((item) => item.id === event.id) : undefined;
-    if (existing !== undefined) {
-      return existing;
-    }
-    const next: RunEvent = {
-      ...event,
-      sequence: event.sequence ?? nextSequence(events),
-    };
-    events.push(next);
-    events.sort((left, right) => left.sequence - right.sequence);
-    ids.add(next.id);
-    this.eventsByRunId.set(event.runId, events);
-    this.eventIdsByRunId.set(event.runId, ids);
-    this.statusesByRunId.set(event.runId, latestStatus(events));
-    return next;
+    const published = this.events.publish(event);
+    this.refreshStatus(event.runId);
+    return published;
   }
 
   replace(event: RunEvent): RunEvent {
-    const events = this.eventsByRunId.get(event.runId) ?? [];
-    const index = events.findIndex((item) => item.id === event.id);
-    if (index < 0) {
-      return this.publish(event);
-    }
-    events[index] = event;
-    events.sort((left, right) => left.sequence - right.sequence);
-    this.eventsByRunId.set(event.runId, events);
-    this.statusesByRunId.set(event.runId, latestStatus(events));
-    return event;
+    const replaced = this.events.replace(event);
+    this.refreshStatus(event.runId);
+    return replaced;
   }
 
   replay(runId: string, afterSequence = 0): BasicAgentRunReplay {
-    const events = this.eventsByRunId.get(runId) ?? [];
-    return {
-      cursor: this.cursor(runId),
-      events: events.filter((event) => event.sequence > afterSequence),
-    };
+    return this.events.replay(runId, afterSequence);
   }
 
   cursor(runId: string): BasicAgentRunCursor {
-    const events = this.eventsByRunId.get(runId) ?? [];
-    return {
-      runId,
-      lastSequence: events.at(-1)?.sequence ?? 0,
-      eventCount: events.length,
-    };
+    return this.events.cursor(runId);
   }
 
   status(runId: string): AgentTaskStatus | undefined {
     return this.statusesByRunId.get(runId);
   }
-}
 
-function nextSequence(events: readonly RunEvent[]): number {
-  return (events.at(-1)?.sequence ?? 0) + 1;
+  private refreshStatus(runId: string): void {
+    this.statusesByRunId.set(runId, latestStatus(this.events.all(runId)));
+  }
 }
 
 function latestStatus(events: readonly RunEvent[]): AgentTaskStatus {

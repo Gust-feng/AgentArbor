@@ -166,7 +166,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptChain.includes("panel-assistant-message-view"), false);
   assert.equal(chatTranscriptChain.includes("panel-transcript-turn-projection"), true);
   assert.equal(chatTranscriptChain.includes("projectAssistantTranscriptTurn"), false);
-  assert.equal(chatActive.includes('from "./chat-transcript-chain"'), true);
+  assert.equal(chatActive.includes('from "./chat-transcript-display"'), true);
   assert.equal(chatActive.includes('data-display="command"'), false);
   assert.equal(chatTranscriptChain.includes('data-display="command"'), false);
   assert.equal(transcriptTimeline.includes('data-display="command"'), false);

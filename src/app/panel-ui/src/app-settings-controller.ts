@@ -10,11 +10,15 @@ import {
   mergeCatalogsIntoConfig,
   revealModelProviderApiKey,
   refreshSkillCatalog,
+  resetDesktopAgentSystemPrompt as requestResetDesktopAgentSystemPrompt,
   saveCommandShellConfig,
+  saveDesktopAgentSystemPrompt as requestSaveDesktopAgentSystemPrompt,
   saveMcpServerSettings,
+  saveModelCapabilityConfig,
   saveModelProviderCatalog,
   saveModelProviderConfig,
   saveModelProviderOrder,
+  saveSkillTriggerConfig,
   saveToolConfirmationConfig,
   saveToolSettings,
   saveWorkspaceDirectory,
@@ -25,11 +29,13 @@ import {
   installMcpEnvironment,
   updateMcpToolState,
   updateSkillState,
+  type ModelCapabilityUpdateForm,
 } from "./app-config-actions";
+import { checkAppUpdate as requestAppUpdateCheck } from "./app-update-actions";
 import { mergeConfigResponse, type ComposerToolConfirmationPolicy, type VisibleAiMode } from "./app-config-projection";
 import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
-import type { CommandShellKind, ModelProviderModelCatalog } from "./contracts/config";
+import type { CommandShellKind, ConfigResponse, ModelProviderModelCatalog, SkillTriggerMode } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
 
@@ -42,10 +48,14 @@ export type AppSettingsController = {
   readonly selectComposerModel: (modelOptionId: string) => Promise<void>;
   readonly fetchModelsForProfile: (profileId?: string) => Promise<ModelProviderModelCatalog | undefined>;
   readonly saveModelCatalog: (profileId: string, catalog: ModelProviderModelCatalog) => Promise<void>;
+  readonly saveModelCapabilities: (form: ModelCapabilityUpdateForm) => Promise<void>;
   readonly saveWorkspace: (nextWorkspaceDirectory?: string) => Promise<void>;
   readonly selectWorkspace: () => Promise<void>;
   readonly saveCommandShell: (kind: CommandShellKind | "auto") => Promise<void>;
   readonly saveToolConfirmationPolicy: (policy: ComposerToolConfirmationPolicy) => Promise<void>;
+  readonly saveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
+  readonly resetDesktopAgentSystemPrompt: () => Promise<void>;
+  readonly saveSkillTriggerMode: (mode: SkillTriggerMode) => Promise<void>;
   readonly saveTools: (nextToolForm?: ToolForm) => Promise<void>;
   readonly saveMcpServer: (nextMcpServerForm?: McpServerForm) => Promise<void>;
   readonly loadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
@@ -55,6 +65,7 @@ export type AppSettingsController = {
   readonly installMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly deleteMcpServer: (serverId: string) => Promise<void>;
   readonly updateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => Promise<void>;
+  readonly checkAppUpdate: () => Promise<void>;
   readonly refreshSkills: () => Promise<void>;
   readonly updateSkill: (skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean) => Promise<void>;
 };
@@ -67,6 +78,7 @@ export type AppSettingsControllerOptions = {
   readonly setModelForm: React.Dispatch<React.SetStateAction<ModelForm>>;
   readonly setModelCatalogs: React.Dispatch<React.SetStateAction<Record<string, ModelProviderModelCatalog>>>;
   readonly workspaceDirectory: string;
+  readonly setDesktopAgentSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
   readonly toolForm: ToolForm;
   readonly setToolForm: React.Dispatch<React.SetStateAction<ToolForm>>;
   readonly mcpServerForm: McpServerForm;
@@ -79,6 +91,7 @@ export type AppSettingsControllerOptions = {
   readonly mcpToolCatalogDraftRef: React.MutableRefObject<readonly McpServerCatalogItem[] | undefined>;
   readonly setSavingModel: React.Dispatch<React.SetStateAction<boolean>>;
   readonly setSavingWorkspace: React.Dispatch<React.SetStateAction<boolean>>;
+  readonly setSavingDesktopAgent: React.Dispatch<React.SetStateAction<boolean>>;
   readonly setSavingTools: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
@@ -101,12 +114,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       });
       if (options.mountedRef.current) {
         options.setApp((previous) => ({ ...previous, config: mergeConfigResponse(previous.config, response) }));
-        options.setModelForm((previous) => ({
-          ...previous,
-          apiKey: nextModelForm.apiKeyCleared ? "" : previous.apiKey,
-          apiKeyCleared: false,
-          logoCleared: false,
-        }));
+        options.setModelForm((previous) => mergeSavedModelForm(previous, nextModelForm, response));
       }
     } catch (error) {
       if (options.mountedRef.current) {
@@ -356,18 +364,62 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function saveWorkspace(nextWorkspaceDirectory: string = options.workspaceDirectory): Promise<void> {
-    options.setSavingWorkspace(true);
+  async function saveModelCapabilities(form: ModelCapabilityUpdateForm): Promise<void> {
+    const save = options.modelSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistModelCapabilities(form));
+    options.modelSaveQueueRef.current = save.catch(() => undefined);
+    await save;
+  }
+
+  async function persistModelCapabilities(form: ModelCapabilityUpdateForm): Promise<void> {
+    options.setSavingModel(true);
     try {
-      const workspace = await saveWorkspaceDirectory(nextWorkspaceDirectory);
+      const response = await saveModelCapabilityConfig(form);
       if (options.mountedRef.current) {
-        options.setApp((previous) => ({ ...previous, config: { ...previous.config, workspace } }));
+        const catalogs = response.modelCatalogs ?? options.app.config?.modelCatalogs ?? [];
+        if (response.modelCatalogs !== undefined) {
+          options.setModelCatalogs(catalogRecordFromList(response.modelCatalogs));
+        }
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(
+            catalogs.length === 0 ? previous.config : mergeCatalogsIntoConfig(previous.config, catalogs),
+            response
+          ),
+          error: undefined,
+        }));
       }
     } catch (error) {
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: error instanceof Error ? error.message : "工作目录保存失败。",
+          error: error instanceof Error ? error.message : "模型信息保存失败。",
+        }));
+      }
+      throw error;
+    } finally {
+      if (options.mountedRef.current) options.setSavingModel(false);
+    }
+  }
+
+  async function saveWorkspace(nextWorkspaceDirectory: string = options.workspaceDirectory): Promise<void> {
+    options.setSavingWorkspace(true);
+    try {
+      const workspace = await saveWorkspaceDirectory(nextWorkspaceDirectory);
+      const skills = await refreshSkillCatalog().catch(() => undefined);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: { ...previous.config, workspace },
+          skills: skills ?? previous.skills,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "默认文件夹保存失败。",
         }));
       }
     } finally {
@@ -379,14 +431,19 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     options.setSavingWorkspace(true);
     try {
       const workspace = await selectWorkspaceDirectory();
+      const skills = await refreshSkillCatalog().catch(() => undefined);
       if (options.mountedRef.current) {
-        options.setApp((previous) => ({ ...previous, config: { ...previous.config, workspace } }));
+        options.setApp((previous) => ({
+          ...previous,
+          config: { ...previous.config, workspace },
+          skills: skills ?? previous.skills,
+        }));
       }
     } catch (error) {
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: error instanceof Error ? error.message : "工作目录选择失败。",
+          error: error instanceof Error ? error.message : "默认文件夹选择失败。",
         }));
       }
     } finally {
@@ -435,6 +492,80 @@ export function createAppSettingsController(options: AppSettingsControllerOption
         }));
       }
       throw error;
+    }
+  }
+
+  async function saveDesktopAgentSystemPrompt(systemPrompt: string): Promise<void> {
+    options.setSavingDesktopAgent(true);
+    try {
+      const response = await requestSaveDesktopAgentSystemPrompt(systemPrompt);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, response),
+          error: undefined,
+        }));
+        options.setDesktopAgentSystemPrompt(response.desktopAgent?.systemPrompt ?? systemPrompt);
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "系统提示词保存失败。",
+        }));
+      }
+      throw error;
+    } finally {
+      if (options.mountedRef.current) options.setSavingDesktopAgent(false);
+    }
+  }
+
+  async function resetDesktopAgentSystemPrompt(): Promise<void> {
+    options.setSavingDesktopAgent(true);
+    try {
+      const response = await requestResetDesktopAgentSystemPrompt();
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, response),
+          error: undefined,
+        }));
+        options.setDesktopAgentSystemPrompt(response.desktopAgent?.systemPrompt ?? "");
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "系统提示词恢复失败。",
+        }));
+      }
+      throw error;
+    } finally {
+      if (options.mountedRef.current) options.setSavingDesktopAgent(false);
+    }
+  }
+
+  async function saveSkillTriggerMode(mode: SkillTriggerMode): Promise<void> {
+    options.setSavingTools(true);
+    try {
+      const response = await saveSkillTriggerConfig(mode);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, response),
+          error: undefined,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "Skills 触发方式保存失败。",
+        }));
+      }
+      throw error;
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
     }
   }
 
@@ -701,6 +832,22 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
+  async function checkAppUpdate(): Promise<void> {
+    try {
+      const appUpdate = await requestAppUpdateCheck();
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({ ...previous, appUpdate, error: undefined }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "更新检查失败。",
+        }));
+      }
+    }
+  }
+
   async function refreshSkills(): Promise<void> {
     options.setSavingTools(true);
     try {
@@ -729,10 +876,14 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     selectComposerModel,
     fetchModelsForProfile,
     saveModelCatalog,
+    saveModelCapabilities,
     saveWorkspace,
     selectWorkspace,
     saveCommandShell,
     saveToolConfirmationPolicy,
+    saveDesktopAgentSystemPrompt,
+    resetDesktopAgentSystemPrompt,
+    saveSkillTriggerMode,
     saveTools,
     saveMcpServer,
     loadMcpReferences,
@@ -742,6 +893,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     installMcpEnvironment: installSelectedMcpEnvironment,
     deleteMcpServer: deleteSelectedMcpServer,
     updateMcpTool,
+    checkAppUpdate,
     refreshSkills,
     updateSkill,
   };
@@ -769,6 +921,43 @@ function updateLocalMcpCatalogServer(
       exposedTools,
     };
   });
+}
+
+function mergeSavedModelForm(
+  current: ModelForm,
+  submitted: ModelForm,
+  response: ConfigResponse
+): ModelForm {
+  const savedProfile = response.profile ?? response.config;
+  const savedProfileId = savedProfile?.profileId ?? submitted.profileId;
+  if (current.profileId !== submitted.profileId && current.profileId !== savedProfileId) {
+    return {
+      ...current,
+      apiKeyCleared: false,
+      logoCleared: false,
+    };
+  }
+  if (savedProfile === undefined) {
+    return {
+      ...current,
+      ...submitted,
+      apiKey: submitted.apiKeyCleared ? "" : current.apiKey,
+      apiKeyCleared: false,
+      logoCleared: false,
+    };
+  }
+  return {
+    ...current,
+    profileId: savedProfileId,
+    label: savedProfile.label ?? submitted.label,
+    logoDataUrl: savedProfile.logoDataUrl ?? "",
+    baseUrl: savedProfile.baseUrl ?? submitted.baseUrl,
+    protocolKind: savedProfile.protocolKind ?? submitted.protocolKind,
+    model: savedProfile.model ?? "",
+    apiKey: submitted.apiKeyCleared ? "" : current.apiKey,
+    apiKeyCleared: false,
+    logoCleared: false,
+  };
 }
 
 function mcpToolPatchFromCatalog(

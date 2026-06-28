@@ -47,6 +47,11 @@ import {
   currentRunProjectionDeps,
   projectCurrentRun,
 } from "./app-run-projection";
+import {
+  contextWindowUsageFrom,
+  latestModelUsageFromEvents,
+  latestModelUsageFromTranscript,
+} from "../../panel-context-window-usage";
 import { createAppRunController } from "./app-run-controller";
 import {
   shouldKeepRefreshing,
@@ -118,6 +123,7 @@ export function App(): React.ReactElement {
   const [composerSelectedModelId, setComposerSelectedModelId] = useState<string | undefined>(undefined);
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, ModelProviderModelCatalog>>({});
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
+  const [desktopAgentSystemPrompt, setDesktopAgentSystemPrompt] = useState("");
   const [toolForm, setToolForm] = useState<ToolForm>({
     provider: "tavily",
     apiKey: "",
@@ -159,6 +165,7 @@ export function App(): React.ReactElement {
   const [queuedMessages, setQueuedMessages] = useState<readonly { readonly id: string; readonly content: string }[]>([]);
   const [savingModel, setSavingModel] = useState(false);
   const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const [savingDesktopAgent, setSavingDesktopAgent] = useState(false);
   const [savingTools, setSavingTools] = useState(false);
   const mountedRef = useRef(true);
   const pollTimer = useRef<number | undefined>(undefined);
@@ -241,6 +248,9 @@ export function App(): React.ReactElement {
     if (app.config?.workspace !== undefined) {
       setWorkspaceDirectory(app.config.workspace.workspaceDirectory ?? "");
     }
+    if (app.config?.desktopAgent?.systemPrompt !== undefined) {
+      setDesktopAgentSystemPrompt(app.config.desktopAgent.systemPrompt);
+    }
   }, [app.config]);
 
   useEffect(() => {
@@ -299,10 +309,40 @@ export function App(): React.ReactElement {
     () => modelOptionSupportsReasoningEffort(app.config, selectedModelId),
     [app.config, selectedModelId]
   );
+  const selectedModel = useMemo(
+    () => modelOptions.find((model) => model.id === selectedModelId),
+    [modelOptions, selectedModelId]
+  );
   const chatScreen = app.agentMode === "deep"
     ? screen
     : screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = useMemo(() => projectCurrentRun(app), currentRunProjectionDeps(app));
+  const hasNormalConversationContext = app.agentMode === "normal" && (app.conversation !== undefined || currentRun.run !== undefined);
+  const latestModelUsage = useMemo(
+    () => latestModelUsageFromEvents(currentRun.events) ?? latestModelUsageFromTranscript(currentRun.transcriptNodes),
+    [currentRun.events, currentRun.transcriptNodes]
+  );
+  const contextUsage = useMemo(
+    () => {
+      if (!hasNormalConversationContext) {
+        return undefined;
+      }
+      return contextWindowUsageFrom({
+        contextWindowTokens:
+          selectedModel?.capabilities?.contextWindowTokens ??
+          currentRun.capabilityResolution?.capabilityPlan.modelCapabilities.contextWindowTokens,
+        modelUsage: latestModelUsage,
+        ledgerBudget: currentRun.workView?.contextLedger.budget,
+      });
+    },
+    [
+      currentRun.capabilityResolution?.capabilityPlan.modelCapabilities.contextWindowTokens,
+      currentRun.workView?.contextLedger.budget,
+      hasNormalConversationContext,
+      latestModelUsage,
+      selectedModel?.capabilities?.contextWindowTokens,
+    ]
+  );
   const modelResponding = currentRun.run !== undefined && shouldKeepRefreshing(currentRun.run.status);
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
   const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
@@ -352,6 +392,10 @@ export function App(): React.ReactElement {
     if (app.agentMode !== "normal" || app.conversation === undefined) return;
     setSelectedWorkspaceDirectory(app.conversation.workspaceFolder?.path);
   }, [app.agentMode, app.conversation?.conversationId, app.conversation?.workspaceFolder?.path]);
+  useEffect(() => {
+    if (app.agentMode !== "deep" || app.deep === undefined) return;
+    setSelectedWorkspaceDirectory(app.deep.run.workspaceFolder?.path);
+  }, [app.agentMode, app.deep?.run.runId, app.deep?.run.workspaceFolder?.path]);
   const deepRunUpdateController = useMemo(
     () => createDeepRunUpdateController({
       setApp,
@@ -369,6 +413,7 @@ export function App(): React.ReactElement {
     setModelForm,
     setModelCatalogs,
     workspaceDirectory,
+    setDesktopAgentSystemPrompt,
     toolForm,
     setToolForm,
     mcpServerForm,
@@ -381,6 +426,7 @@ export function App(): React.ReactElement {
     mcpToolCatalogDraftRef,
     setSavingModel,
     setSavingWorkspace,
+    setSavingDesktopAgent,
     setSavingTools,
   });
   const {
@@ -392,10 +438,14 @@ export function App(): React.ReactElement {
     selectComposerModel,
     fetchModelsForProfile,
     saveModelCatalog,
+    saveModelCapabilities,
     saveWorkspace,
     selectWorkspace,
     saveCommandShell,
     saveToolConfirmationPolicy,
+    saveDesktopAgentSystemPrompt,
+    resetDesktopAgentSystemPrompt,
+    saveSkillTriggerMode,
     saveTools,
     saveMcpServer,
     loadMcpReferences,
@@ -405,6 +455,7 @@ export function App(): React.ReactElement {
     installMcpEnvironment,
     deleteMcpServer,
     updateMcpTool,
+    checkAppUpdate,
     refreshSkills,
     updateSkill,
   } = settingsController;
@@ -539,6 +590,15 @@ export function App(): React.ReactElement {
       openAgentClusterEntry();
       return;
     }
+    openNormalAgentEntry();
+  }
+
+  function openNormalAgentEntry(): void {
+    deepRunUpdateController.stopPolling();
+    setInputCloseSignal((value) => value + 1);
+    setGoal("");
+    setAttachments([]);
+    setScreen(app.conversation !== undefined || app.run !== undefined ? "chat-active" : "chat-empty");
     changeAgentMode("normal");
   }
 
@@ -580,6 +640,7 @@ export function App(): React.ReactElement {
       if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
       const terminal = isTerminalDeepRunStatus(view.run.status);
       const summary = deepRunSummaryFromView(view);
+      setSelectedWorkspaceDirectory(view.run.workspaceFolder?.path);
       setApp((previous) => ({
         ...previous,
         agentMode: "deep",
@@ -1007,6 +1068,7 @@ export function App(): React.ReactElement {
     busy: app.busy,
     models: modelOptions,
     selectedModelId,
+    contextUsage,
     reasoningEffort: composerReasoningEffort,
     reasoningEffortEnabled: selectedModelSupportsReasoningEffort,
     onReasoningEffortChange: setComposerReasoningEffort,
@@ -1034,8 +1096,6 @@ export function App(): React.ReactElement {
   };
   const deepInputProps = {
     ...inputProps,
-    selectedWorkspaceDirectory: undefined,
-    onSelectWorkspaceDirectory: undefined,
     busy: app.deepBusy && app.deep === undefined && app.deepActiveRunId === undefined,
     running: app.deepBusy && (app.deep !== undefined || app.deepActiveRunId !== undefined),
     queuedMessages: undefined,
@@ -1165,24 +1225,31 @@ export function App(): React.ReactElement {
           onClose={() => setSettingsOpen(false)}
           initialGroup={settingsGroup}
           config={app.config}
+          appUpdate={app.appUpdate}
           modelForm={modelForm}
           setModelForm={setModelForm}
           workspaceDirectory={workspaceDirectory}
           setWorkspaceDirectory={setWorkspaceDirectory}
+          desktopAgentSystemPrompt={desktopAgentSystemPrompt}
+          setDesktopAgentSystemPrompt={setDesktopAgentSystemPrompt}
           savingModel={savingModel}
           savingWorkspace={savingWorkspace}
+          savingDesktopAgent={savingDesktopAgent}
           onSaveModel={saveModelConfig}
           onCreateCustomProfile={createCustomModelProfile}
           onReorderModelProviders={reorderModelProviders}
           onDeleteModelProvider={deleteModelProvider}
           onFetchModels={fetchModelsForProfile}
           onSaveModelCatalog={saveModelCatalog}
+          onSaveModelCapabilities={saveModelCapabilities}
           onRevealModelApiKey={revealModelApiKey}
           modelCatalogs={modelCatalogs}
           skills={app.skills}
           onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
           onSelectWorkspaceDirectory={() => void selectWorkspace()}
           onSaveCommandShell={saveCommandShell}
+          onSaveDesktopAgentSystemPrompt={saveDesktopAgentSystemPrompt}
+          onResetDesktopAgentSystemPrompt={resetDesktopAgentSystemPrompt}
           tools={app.tools}
           toolForm={toolForm}
           setToolForm={setToolForm}
@@ -1190,6 +1257,7 @@ export function App(): React.ReactElement {
           setMcpServerForm={setMcpServerForm}
           savingTools={savingTools}
           onSaveTools={(nextToolForm) => void saveTools(nextToolForm)}
+          onSaveSkillTriggerMode={(mode) => void saveSkillTriggerMode(mode)}
           onSaveMcpServer={saveMcpServer}
           onLoadMcpReferences={loadMcpReferences}
           onImportMcpConfig={(config) => void importMcpConfig(config)}
@@ -1198,6 +1266,7 @@ export function App(): React.ReactElement {
           onInstallMcpEnvironment={installMcpEnvironment}
           onDeleteMcpServer={(serverId) => void deleteMcpServer(serverId)}
           onUpdateMcpTool={(serverId, toolName, enabled, autoApproved) => void updateMcpTool(serverId, toolName, enabled, autoApproved)}
+          onCheckAppUpdate={() => void checkAppUpdate()}
           onRefreshSkills={() => void refreshSkills()}
           onUpdateSkill={(skill, enabled) => void updateSkill(skill, enabled)}
         />

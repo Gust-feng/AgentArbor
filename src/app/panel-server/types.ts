@@ -1,5 +1,6 @@
 import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import type { AppUpdateFetch } from "../app-update-service.js";
 import type { ConfigCenter } from "../config-center.js";
 import type { ProcessTerminator } from "../runtime-guard/index.js";
 import type { SkillRootInput } from "../skills/index.js";
@@ -19,6 +20,8 @@ export type PanelServerOptions = {
   readonly desktopAgentDefinition?: AgentDefinition;
   readonly agentDefinitions?: readonly AgentDefinition[];
   readonly processTerminator?: ProcessTerminator;
+  readonly updateManifestUrl?: string;
+  readonly updateManifestFetch?: AppUpdateFetch;
 };
 
 export type PanelContextAttachmentSelection = {

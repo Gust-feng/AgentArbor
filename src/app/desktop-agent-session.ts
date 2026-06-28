@@ -135,7 +135,7 @@ export async function runDesktopAgentSession(
   const modelMessages = await attachDesktopFileInputsToModelMessages({
     messages: loop.contextPack.messages,
     taskSoil,
-    modelCapabilities: options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities,
+    modelCapabilities: loop.modelCapabilities,
     workspaceRoot: options.workspaceRoot,
   });
   const turn = await loop.turnRuntime.executeAutonomous({

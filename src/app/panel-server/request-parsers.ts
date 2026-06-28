@@ -11,7 +11,9 @@ import type {
   ToolStateSettings,
   UpdateInformationAccessConfigInput,
   UpdateCommandShellConfigInput,
+  UpdateDesktopAgentConfigInput,
   UpdateModelProviderConfigInput,
+  UpdateSkillTriggerConfigInput,
   UpdateToolConfirmationConfigInput,
   UpdateWebSearchConfigInput,
   UpdateWorkspaceConfigInput,
@@ -23,6 +25,7 @@ import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import { TaskSoilInputValidationError, parseDesktopTaskSoilInput, type DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { PanelRunMode } from "../panel-run-jobs.js";
+import { DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS } from "../config-center/desktop-agent-settings.js";
 import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import { PanelHttpError } from "./http-utils.js";
@@ -227,6 +230,33 @@ export function parseToolConfirmationUpdate(raw: unknown): UpdateToolConfirmatio
     throw new PanelHttpError(400, "invalid_tool_confirmation_policy", "工具确认策略无效。");
   }
   return { policy };
+}
+
+export function parseDesktopAgentConfigUpdate(raw: unknown): UpdateDesktopAgentConfigInput {
+  const record = asRecord(raw);
+  if (booleanOrUndefined(record.resetSystemPrompt) === true) {
+    return { resetSystemPrompt: true };
+  }
+  if (typeof record.systemPrompt !== "string") {
+    throw new PanelHttpError(400, "missing_desktop_agent_system_prompt", "系统提示词不能为空。");
+  }
+  const systemPrompt = record.systemPrompt.trim();
+  if (systemPrompt.length === 0) {
+    throw new PanelHttpError(400, "missing_desktop_agent_system_prompt", "系统提示词不能为空。");
+  }
+  if (systemPrompt.length > DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS) {
+    throw new PanelHttpError(400, "desktop_agent_system_prompt_too_large", "系统提示词过长。");
+  }
+  return { systemPrompt };
+}
+
+export function parseSkillTriggerUpdate(raw: unknown): UpdateSkillTriggerConfigInput {
+  const record = asRecord(raw);
+  const mode = parseSkillTriggerMode(record.mode);
+  if (mode === undefined) {
+    throw new PanelHttpError(400, "invalid_skill_trigger_mode", "Skills 触发方式无效。");
+  }
+  return { mode };
 }
 
 export function parseMcpServerUpdate(raw: unknown): UpsertMcpServerInput {
@@ -528,6 +558,16 @@ function parseToolConfirmationPolicy(value: unknown): ToolConfirmationPolicy | u
     return value;
   }
   throw new PanelHttpError(400, "invalid_tool_confirmation_policy", "工具确认策略无效。");
+}
+
+function parseSkillTriggerMode(value: unknown): UpdateSkillTriggerConfigInput["mode"] | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (value === "keyword" || value === "model") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_skill_trigger_mode", "Skills 触发方式无效。");
 }
 
 function parseModelOverride(value: unknown): PanelRunInput["modelOverride"] {

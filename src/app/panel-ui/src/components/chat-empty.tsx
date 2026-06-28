@@ -15,6 +15,7 @@ import type { ContextAttachment } from "../contracts/context";
 import type { ModelCapabilities } from "../contracts/config";
 import { modelCapabilitySummary } from "../model-capability-display";
 import type { ModelProviderIdentity } from "../model-provider-logos";
+import type { ContextWindowUsage } from "../../../panel-context-window-usage";
 
 type ComposerChipFeedback = "model" | "reasoning" | "access";
 
@@ -58,6 +59,7 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly allowInputWhileBusy?: boolean;
   readonly models: readonly ChatModelOption[];
   readonly selectedModelId: string;
+  readonly contextUsage?: ContextWindowUsage;
   readonly reasoningEffort: "" | "low" | "medium" | "high";
   readonly reasoningEffortEnabled: boolean;
   readonly onReasoningEffortChange: (value: "" | "low" | "medium" | "high") => void;
@@ -304,7 +306,6 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
                       alt=""
                       loading="lazy"
                       decoding="async"
-                      draggable={false}
                     />
                   </span>
                   <span className="attachment-image-copy">
@@ -495,6 +496,28 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
               </div>
             )}
           </div>
+          {props.contextUsage !== undefined && (
+            <span
+              className="composer-context-usage"
+              data-source={props.contextUsage.source}
+              data-tone={props.contextUsage.tone}
+              role="img"
+              aria-label={props.contextUsage.label}
+              title={props.contextUsage.label}
+            >
+              <svg className="composer-context-usage-svg" viewBox="0 0 20 20" aria-hidden="true">
+                <circle className="composer-context-usage-track" cx="10" cy="10" r="7" />
+                <circle
+                  className="composer-context-usage-meter"
+                  cx="10"
+                  cy="10"
+                  r="7"
+                  pathLength={100}
+                  strokeDasharray={contextUsageDashArray(props.contextUsage)}
+                />
+              </svg>
+            </span>
+          )}
         </div>
         <div className="chat-input-right">
           {props.onSelectWorkspaceDirectory !== undefined && (
@@ -743,6 +766,10 @@ function toolAccessPolicyLabel(value: ComposerToolConfirmationPolicy): string {
 
 function modelOptionInitial(model: ChatModelOption): string {
   return (model.providerLabel.trim() || model.name.trim() || "M").slice(0, 1).toUpperCase();
+}
+
+function contextUsageDashArray(usage: ContextWindowUsage): string {
+  return `${usage.ringPercent} 100`;
 }
 
 function dragHasFiles(dataTransfer: DataTransfer): boolean {

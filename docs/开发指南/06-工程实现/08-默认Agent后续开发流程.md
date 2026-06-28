@@ -58,7 +58,7 @@
 
 ### 6. Skills 与配置中心
 
-- Skills 作为官方兼容能力包加载：`SKILL.md` 元数据进入 run-created frozen catalog，普通 agent 通过 `skill_routing` 模型路由选择，显式 `$skill` 是强信号，keyword 只做候选召回和 fallback。
+- Skills 作为官方兼容能力包加载：`SKILL.md` 元数据进入 run-created frozen catalog；普通 agent 默认通过显式 `$skill` 与本地关键词/触发器选择 skill，不发起 `skill_routing` 前置模型请求。用户可在设置页“基础能力 -> Skills 触发方式”显式切换为语义路由；只有该设置冻结到新 run 后，`skill_routing` 才作为 opt-in 前置路由使用。内部评测仍可显式使用该 router。
 - 默认发现用户级和项目级 `.agents/skills`；宿主可以显式追加 admin/plugin skill roots，但这是受管来源接入，不是 marketplace、installer、自动更新或回滚；当前不自动扫描 marketplace 或 managed skills。
 - 被选中 skill 的 body 按需注入 Context Ledger；正文和 resource 读取都校验冻结 hash，hash 不一致 fail closed。
 - `references/`、`assets/`、`scripts/` 只通过 `read_skill_resource` 按需读取；reference 内容作为 tool result 回到模型，asset/script 不返回 raw body，script 不自动执行。

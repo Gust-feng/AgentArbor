@@ -1,5 +1,6 @@
 import React from "react";
-import { Link2, Plus, Save, Trash2, X } from "lucide-react";
+import { Link2, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
+import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog, SkillTriggerMode } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import type { McpServerForm, ToolForm } from "./settings-types";
 
@@ -9,16 +10,80 @@ type SettingsSelectOption = {
   readonly value: string;
   readonly label: string;
 };
+type ModelCapabilityTarget = {
+  readonly key: string;
+  readonly profileId: string;
+  readonly providerKind?: string;
+  readonly model: string;
+  readonly label: string;
+  readonly capabilities?: ModelCapabilities;
+};
+type ModelCapabilityDraft = {
+  readonly contextWindowTokens: string;
+  readonly maxOutputTokens: string;
+  readonly supportsToolCalling: boolean;
+  readonly supportsParallelToolCalls: boolean;
+  readonly supportsStructuredOutputs: boolean;
+  readonly supportsStreaming: boolean;
+  readonly supportsVisionInput: boolean;
+  readonly supportsReasoningEffort: boolean;
+  readonly supportsReasoningOutput: boolean;
+  readonly preferredApiStyle: string;
+  readonly stability: string;
+  readonly lastVerifiedAt: string;
+};
+type ModelCapabilityToggleKey =
+  | "supportsToolCalling"
+  | "supportsParallelToolCalls"
+  | "supportsStructuredOutputs"
+  | "supportsStreaming"
+  | "supportsVisionInput"
+  | "supportsReasoningEffort"
+  | "supportsReasoningOutput";
 
 export function BasicCapabilitiesSettings(props: {
+  readonly config?: ConfigResponse;
+  readonly modelCatalogs?: Readonly<Record<string, ModelProviderModelCatalog>>;
+  readonly savingModel?: boolean;
+  readonly onSaveModelCapabilities: (form: {
+    readonly profileId: string;
+    readonly providerKind?: string;
+    readonly model: string;
+    readonly capabilities: ModelCapabilities;
+  }) => Promise<void>;
+  readonly desktopAgentSystemPrompt: string;
+  readonly setDesktopAgentSystemPrompt: (value: string) => void;
+  readonly savingDesktopAgent?: boolean;
+  readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
+  readonly onResetDesktopAgentSystemPrompt: () => Promise<void>;
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
   readonly savingTools?: boolean;
   readonly onSaveTools: (form: ToolForm) => void;
+  readonly onSaveSkillTriggerMode: (mode: SkillTriggerMode) => void;
 }): React.ReactElement {
   return (
     <div className="service-settings-stack">
+      <ModelInformationSettings
+        config={props.config}
+        modelCatalogs={props.modelCatalogs}
+        saving={props.savingModel}
+        onSave={props.onSaveModelCapabilities}
+      />
+      <SkillTriggerSettings
+        config={props.config}
+        saving={props.savingTools}
+        onSave={props.onSaveSkillTriggerMode}
+      />
+      <DesktopAgentPromptSettings
+        config={props.config}
+        systemPrompt={props.desktopAgentSystemPrompt}
+        setSystemPrompt={props.setDesktopAgentSystemPrompt}
+        saving={props.savingDesktopAgent}
+        onSave={props.onSaveDesktopAgentSystemPrompt}
+        onReset={props.onResetDesktopAgentSystemPrompt}
+      />
       <WebSearchSettings
         tools={props.tools}
         toolForm={props.toolForm}
@@ -28,6 +93,395 @@ export function BasicCapabilitiesSettings(props: {
       />
     </div>
   );
+}
+
+function SkillTriggerSettings(props: {
+  readonly config?: ConfigResponse;
+  readonly saving?: boolean;
+  readonly onSave: (mode: SkillTriggerMode) => void;
+}): React.ReactElement {
+  const persistedMode = props.config?.skillTrigger?.mode ?? "keyword";
+  const [draftMode, setDraftMode] = React.useState<SkillTriggerMode>(persistedMode);
+
+  React.useEffect(() => {
+    setDraftMode(persistedMode);
+  }, [persistedMode]);
+
+  const updateMode = (value: string): void => {
+    const mode = skillTriggerModeFromValue(value);
+    setDraftMode(mode);
+    props.onSave(mode);
+  };
+
+  return (
+    <section className="settings-card service-settings-card" aria-busy={props.saving === true}>
+      <h3>Skills 触发方式</h3>
+      <div className="service-config-grid">
+        <label>
+          触发方式
+          <SettingsSelectControl
+            id="skill-trigger-mode"
+            ariaLabel="Skills 触发方式"
+            value={draftMode}
+            options={[
+              { value: "keyword", label: "显式/关键词触发" },
+              { value: "model", label: "语义路由" },
+            ]}
+            onChange={updateMode}
+            disabled={props.saving === true}
+          />
+        </label>
+      </div>
+    </section>
+  );
+}
+
+function DesktopAgentPromptSettings(props: {
+  readonly config?: ConfigResponse;
+  readonly systemPrompt: string;
+  readonly setSystemPrompt: (value: string) => void;
+  readonly saving?: boolean;
+  readonly onSave: (systemPrompt: string) => Promise<void>;
+  readonly onReset: () => Promise<void>;
+}): React.ReactElement {
+  const maxChars = props.config?.desktopAgent?.maxSystemPromptChars ?? 20_000;
+  const normalized = props.systemPrompt.trim();
+  const persistedPrompt = props.config?.desktopAgent?.systemPrompt;
+  const configLoaded = props.config?.desktopAgent !== undefined;
+  const dirty = persistedPrompt === undefined ? normalized.length > 0 : normalized !== persistedPrompt.trim();
+  const canSave = configLoaded && dirty && normalized.length > 0 && normalized.length <= maxChars && props.saving !== true;
+  const canReset = props.saving !== true && (dirty || props.config?.desktopAgent?.isDefault !== true);
+  const stateLabel = configLoaded
+    ? dirty
+      ? "未保存"
+      : props.config?.desktopAgent?.isDefault === true
+        ? "默认"
+        : "自定义"
+    : "加载中";
+  return (
+    <section className="settings-card service-settings-card desktop-agent-prompt-card" aria-busy={props.saving === true}>
+      <div className="settings-card-title-row">
+        <h3>系统提示词</h3>
+        <div className="desktop-agent-prompt-actions">
+          <button
+            type="button"
+            className="model-info-save-button"
+            onClick={() => void props.onReset()}
+            disabled={!canReset}
+          >
+            <RotateCcw size={14} />
+            <span>恢复默认</span>
+          </button>
+          <button
+            type="button"
+            className="model-info-save-button"
+            onClick={() => void props.onSave(props.systemPrompt)}
+            disabled={!canSave}
+          >
+            <Save size={14} />
+            <span>{props.saving ? "保存中" : "保存"}</span>
+          </button>
+        </div>
+      </div>
+      <label className="desktop-agent-prompt-field">
+        Desktop Agent
+        <textarea
+          value={props.systemPrompt}
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          maxLength={maxChars}
+          onChange={(event) => props.setSystemPrompt(event.target.value)}
+          placeholder="输入系统提示词"
+        />
+      </label>
+      <div className="desktop-agent-prompt-meta">
+        <span>{normalized.length}/{maxChars}</span>
+        <span>{stateLabel}</span>
+      </div>
+    </section>
+  );
+}
+
+function ModelInformationSettings(props: {
+  readonly config?: ConfigResponse;
+  readonly modelCatalogs?: Readonly<Record<string, ModelProviderModelCatalog>>;
+  readonly saving?: boolean;
+  readonly onSave: (form: {
+    readonly profileId: string;
+    readonly providerKind?: string;
+    readonly model: string;
+    readonly capabilities: ModelCapabilities;
+  }) => Promise<void>;
+}): React.ReactElement {
+  const targets = React.useMemo(
+    () => modelCapabilityTargets(props.config, props.modelCatalogs),
+    [props.config, props.modelCatalogs]
+  );
+  const [selectedKey, setSelectedKey] = React.useState("");
+  const selectedTarget = targets.find((target) => target.key === selectedKey) ?? targets[0];
+  const [draft, setDraft] = React.useState<ModelCapabilityDraft>(() => modelCapabilityDraftFrom(undefined));
+
+  React.useEffect(() => {
+    if (targets.length === 0) {
+      setSelectedKey("");
+      return;
+    }
+    if (selectedKey.length > 0 && targets.some((target) => target.key === selectedKey)) {
+      return;
+    }
+    const activeProfileId = props.config?.config?.profileId;
+    const activeModel = props.config?.config?.model;
+    const active = targets.find((target) => target.profileId === activeProfileId && target.model === activeModel);
+    setSelectedKey((active ?? targets[0])!.key);
+  }, [props.config?.config?.model, props.config?.config?.profileId, selectedKey, targets]);
+
+  React.useEffect(() => {
+    setDraft(modelCapabilityDraftFrom(selectedTarget?.capabilities));
+  }, [selectedTarget?.key]);
+
+  const updateDraft = (patch: Partial<ModelCapabilityDraft>): void => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const save = async (): Promise<void> => {
+    if (selectedTarget === undefined) return;
+    await props.onSave({
+      profileId: selectedTarget.profileId,
+      providerKind: selectedTarget.providerKind,
+      model: selectedTarget.model,
+      capabilities: modelCapabilitiesFromDraft(draft),
+    });
+  };
+
+  return (
+    <section className="settings-card service-settings-card model-info-card" aria-busy={props.saving === true}>
+      <div className="settings-card-title-row">
+        <h3>模型信息</h3>
+        <button
+          type="button"
+          className="model-info-save-button"
+          onClick={() => void save()}
+          disabled={selectedTarget === undefined || props.saving === true}
+        >
+          <Save size={14} />
+          <span>{props.saving ? "保存中" : "保存"}</span>
+        </button>
+      </div>
+      {selectedTarget === undefined ? (
+        <div className="capability-empty">暂无可配置模型。请先在模型服务中添加模型。</div>
+      ) : (
+        <>
+          <div className="model-info-grid">
+            <label className="model-info-field model-info-field-wide">
+              模型
+              <select value={selectedTarget.key} onChange={(event) => setSelectedKey(event.target.value)}>
+                {targets.map((target) => (
+                  <option key={target.key} value={target.key}>{target.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="model-info-field">
+              上下文窗口
+              <input
+                type="number"
+                min={1}
+                value={draft.contextWindowTokens}
+                onChange={(event) => updateDraft({ contextWindowTokens: event.target.value })}
+                placeholder="128000"
+              />
+            </label>
+            <label className="model-info-field">
+              最大输出
+              <input
+                type="number"
+                min={1}
+                value={draft.maxOutputTokens}
+                onChange={(event) => updateDraft({ maxOutputTokens: event.target.value })}
+                placeholder="4096"
+              />
+            </label>
+            <label className="model-info-field">
+              API 风格
+              <select
+                value={draft.preferredApiStyle}
+                onChange={(event) => updateDraft({ preferredApiStyle: event.target.value })}
+              >
+                <option value="">自动</option>
+                <option value="responses">Responses</option>
+                <option value="chat_completions">Chat Completions</option>
+                <option value="messages">Messages</option>
+                <option value="gemini_generate_content">Gemini Generate Content</option>
+                <option value="openai_compatible">OpenAI Compatible</option>
+              </select>
+            </label>
+            <label className="model-info-field">
+              稳定性
+              <select
+                value={draft.stability}
+                onChange={(event) => updateDraft({ stability: event.target.value })}
+              >
+                <option value="">自动</option>
+                <option value="stable">Stable</option>
+                <option value="preview">Preview</option>
+                <option value="deprecated">Deprecated</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </label>
+            <label className="model-info-field">
+              验证日期
+              <input
+                value={draft.lastVerifiedAt}
+                onChange={(event) => updateDraft({ lastVerifiedAt: event.target.value })}
+                placeholder="2026-06-28"
+                spellCheck={false}
+              />
+            </label>
+          </div>
+          <div className="model-info-toggle-grid" aria-label="模型信息开关">
+            {MODEL_CAPABILITY_TOGGLES.map((item) => (
+              <div className="model-info-toggle-row" key={item.key}>
+                <span>{item.label}</span>
+                <button
+                  type="button"
+                  className="capability-toggle"
+                  aria-pressed={draft[item.key]}
+                  onClick={() => updateDraft({ [item.key]: !draft[item.key] })}
+                >
+                  {draft[item.key] ? "开启" : "关闭"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+const MODEL_CAPABILITY_TOGGLES: readonly {
+  readonly key: ModelCapabilityToggleKey;
+  readonly label: string;
+}[] = [
+  { key: "supportsToolCalling", label: "工具调用" },
+  { key: "supportsParallelToolCalls", label: "并行工具" },
+  { key: "supportsStructuredOutputs", label: "结构化输出" },
+  { key: "supportsStreaming", label: "流式输出" },
+  { key: "supportsVisionInput", label: "视觉输入" },
+  { key: "supportsReasoningEffort", label: "思考强度" },
+  { key: "supportsReasoningOutput", label: "推理输出" },
+];
+
+function modelCapabilityTargets(
+  config: ConfigResponse | undefined,
+  modelCatalogs: Readonly<Record<string, ModelProviderModelCatalog>> | undefined
+): readonly ModelCapabilityTarget[] {
+  const targets: ModelCapabilityTarget[] = [];
+  for (const profile of config?.profiles ?? []) {
+    const profileId = profile.profileId?.trim();
+    if (profileId === undefined || profileId.length === 0) {
+      continue;
+    }
+    const modelIds = new Set<string>();
+    const configuredModel = profile.model?.trim();
+    if (configuredModel !== undefined && configuredModel.length > 0) {
+      modelIds.add(configuredModel);
+    }
+    for (const model of modelCatalogs?.[profileId]?.models ?? []) {
+      const id = model.id.trim();
+      if (id.length > 0) {
+        modelIds.add(id);
+      }
+    }
+    for (const item of config?.modelCapabilityProfiles ?? []) {
+      if (item.profileId === profileId && item.model.trim().length > 0) {
+        modelIds.add(item.model);
+      }
+    }
+    for (const model of modelIds) {
+      targets.push({
+        key: modelCapabilityTargetKey(profileId, model),
+        profileId,
+        providerKind: profile.providerKind,
+        model,
+        label: `${profile.label ?? profileId} / ${model}`,
+        capabilities: modelCapabilitiesForTarget(config, profileId, model),
+      });
+    }
+  }
+  return targets.sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function modelCapabilitiesForTarget(
+  config: ConfigResponse | undefined,
+  profileId: string,
+  model: string
+): ModelCapabilities | undefined {
+  const projected = config?.modelCapabilityProfiles?.find((item) => item.profileId === profileId && item.model === model);
+  if (projected !== undefined) {
+    return projected.capabilities;
+  }
+  if (config?.config?.profileId === profileId && config.config.model === model) {
+    return config.capabilities?.modelCapabilities;
+  }
+  return undefined;
+}
+
+function modelCapabilityTargetKey(profileId: string, model: string): string {
+  return JSON.stringify([profileId, model]);
+}
+
+function modelCapabilityDraftFrom(capabilities: ModelCapabilities | undefined): ModelCapabilityDraft {
+  return {
+    contextWindowTokens: integerFieldValue(capabilities?.contextWindowTokens),
+    maxOutputTokens: integerFieldValue(capabilities?.maxOutputTokens),
+    supportsToolCalling: capabilities?.supportsToolCalling === true,
+    supportsParallelToolCalls: capabilities?.supportsParallelToolCalls === true,
+    supportsStructuredOutputs: capabilities?.supportsStructuredOutputs === true,
+    supportsStreaming: capabilities?.supportsStreaming === true,
+    supportsVisionInput: capabilities?.supportsVisionInput === true,
+    supportsReasoningEffort: capabilities?.supportsReasoningEffort === true,
+    supportsReasoningOutput: capabilities?.supportsReasoningOutput === true,
+    preferredApiStyle: capabilities?.preferredApiStyle ?? "",
+    stability: capabilities?.stability ?? "",
+    lastVerifiedAt: capabilities?.lastVerifiedAt ?? "",
+  };
+}
+
+function modelCapabilitiesFromDraft(draft: ModelCapabilityDraft): ModelCapabilities {
+  return {
+    contextWindowTokens: positiveIntegerFromDraft(draft.contextWindowTokens),
+    maxOutputTokens: positiveIntegerFromDraft(draft.maxOutputTokens),
+    supportsToolCalling: draft.supportsToolCalling,
+    supportsParallelToolCalls: draft.supportsParallelToolCalls,
+    supportsStructuredOutputs: draft.supportsStructuredOutputs,
+    supportsStreaming: draft.supportsStreaming,
+    supportsVisionInput: draft.supportsVisionInput,
+    supportsReasoningEffort: draft.supportsReasoningEffort,
+    supportsReasoningOutput: draft.supportsReasoningOutput,
+    preferredApiStyle: trimmedOrUndefined(draft.preferredApiStyle),
+    stability: trimmedOrUndefined(draft.stability),
+    lastVerifiedAt: trimmedOrUndefined(draft.lastVerifiedAt),
+  };
+}
+
+function integerFieldValue(value: number | undefined): string {
+  return value === undefined || !Number.isFinite(value) || value <= 0 ? "" : String(Math.floor(value));
+}
+
+function positiveIntegerFromDraft(value: string): number | undefined {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function trimmedOrUndefined(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
 }
 
 export function McpServiceSettings(props: {
@@ -181,6 +635,10 @@ function webSearchMaxResults(provider: string): number {
   if (provider === "tavily") return 20;
   if (provider === "exa") return 100;
   return 50;
+}
+
+function skillTriggerModeFromValue(value: string): SkillTriggerMode {
+  return value === "model" ? "model" : "keyword";
 }
 
 function McpServiceBoard(props: {
@@ -1251,7 +1709,7 @@ function mcpToolDisplayMeta(tool: NonNullable<ToolsResponse["mcpCatalog"]>[numbe
   ].filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
-function mcpStatusTone(status: string): "success" | "danger" | "warning" | "neutral" {
+function mcpStatusTone(status: string): "success" | "danger" | "warning" | "info" | "neutral" {
   switch (status) {
     case "connected":
       return "success";
@@ -1259,8 +1717,9 @@ function mcpStatusTone(status: string): "success" | "danger" | "warning" | "neut
     case "unavailable":
       return "danger";
     case "connecting":
-    case "configured":
       return "warning";
+    case "configured":
+      return "info";
     default:
       return "neutral";
   }

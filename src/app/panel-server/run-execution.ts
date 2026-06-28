@@ -35,6 +35,7 @@ import { executeOrdinaryDesktopRunForPanel } from "./desktop-agent-execution.js"
 import { prepareDesktopRunResources } from "./desktop-run-resources.js";
 import { runUndergroundForPanel } from "./underground-compat-execution.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import { runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
 import { assertRunModeForKind, RunModePolicyError } from "../run-mode-policy.js";
 import type {
   PanelRunExecutionOptions,
@@ -257,6 +258,10 @@ function resolveExecutionAgentDefinition(
       "agent_definition_ref_required",
       "普通 Desktop Agent 运行缺少创建时冻结的 Agent 定义引用。"
     );
+  }
+  const dynamicDefinition = runtime.agentDefinitionOverrides.get(runAgentDefinitionRefCacheKey(job.agentDefinitionRef));
+  if (dynamicDefinition !== undefined) {
+    return dynamicDefinition;
   }
   const definition = runtime.agentDefinitions.resolve(job.agentDefinitionRef);
   if (definition === undefined) {

@@ -8,14 +8,14 @@ import { getPanelConversation } from "./conversation-routes.js";
 import { syncConversationTurnForJob } from "./conversation-sync.js";
 import {
   PanelHttpError,
-  parseStreamCursor,
   readJsonBody,
   writeJson,
   writePanelError,
-  writeSseEvent,
 } from "./http-utils.js";
+import { serveRunEventSse } from "./run-event-sse.js";
 import { createPersistedPanelRunResponse } from "./persisted-run-response.js";
 import { createPanelUsageStatistics } from "../panel-usage-statistics.js";
+import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
 import { parseRunInput } from "./request-parsers.js";
 import {
   createPanelRunResponse,
@@ -257,63 +257,39 @@ function handleGetRunStreamRequest(
     throw new PanelHttpError(404, "run_not_found", runNotFoundMessage());
   }
 
-  let lastSequence = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
-  let closed = false;
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-store, no-cache",
-    connection: "keep-alive",
-    "x-accel-buffering": "no",
-  });
-  response.write(`: AgentArbor panel run stream ${runId}\n\n`);
-
-  const flush = (): void => {
-    if (closed) {
-      return;
-    }
-    const current = runtime.runJobs.get(runId);
-    if (current === undefined) {
-      writeSseEvent(response, {
-        eventId: `${runId}:run.failed:not-found`,
-        runId,
-        sequence: lastSequence + 1,
-        type: "run.failed",
-        createdAt: new Date().toISOString(),
-        agentLabel: "AgentArbor Runtime",
-        summary: "运行已不存在。",
-        status: "failed",
-        sourceRefs: [],
-        modelCallRefs: [],
-        toolCallRefs: [],
-      });
-      cleanup();
-      return;
-    }
-    const events = syncPanelRunStreamEventsForJob(runtime, current);
-    for (const event of events) {
-      if (event.sequence <= lastSequence) {
-        continue;
+  serveRunEventSse<PanelRunStreamEvent>({
+    request,
+    response,
+    url,
+    comment: `AgentArbor panel run stream ${runId}`,
+    poll: (lastSequence) => {
+      const current = runtime.runJobs.get(runId);
+      if (current === undefined) {
+        return {
+          terminal: true,
+          events: [
+            {
+              eventId: `${runId}:run.failed:not-found`,
+              runId,
+              sequence: lastSequence + 1,
+              type: "run.failed",
+              createdAt: new Date().toISOString(),
+              agentLabel: "AgentArbor Runtime",
+              summary: "运行已不存在。",
+              status: "failed",
+              sourceRefs: [],
+              modelCallRefs: [],
+              toolCallRefs: [],
+            },
+          ],
+        };
       }
-      writeSseEvent(response, event);
-      lastSequence = event.sequence;
-    }
-    if (isTerminalPanelRunStatus(current.status)) {
-      cleanup();
-    }
-  };
-
-  const cleanup = (): void => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    clearInterval(interval);
-    response.end();
-  };
-
-  const interval = setInterval(flush, 100);
-  request.on("close", cleanup);
-  flush();
+      return {
+        events: syncPanelRunStreamEventsForJob(runtime, current),
+        terminal: isTerminalPanelRunStatus(current.status),
+      };
+    },
+  });
 }
 
 async function createPersistedRunResponse(

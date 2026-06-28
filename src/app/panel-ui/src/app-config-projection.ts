@@ -32,6 +32,8 @@ export function mergeConfigResponse(previous: ConfigResponse | undefined, incomi
     workspace: incoming.workspace ?? previous?.workspace,
     commandShell: incoming.commandShell ?? previous?.commandShell,
     toolConfirmation: incoming.toolConfirmation ?? previous?.toolConfirmation,
+    desktopAgent: incoming.desktopAgent ?? previous?.desktopAgent,
+    skillTrigger: incoming.skillTrigger ?? previous?.skillTrigger,
     capabilities: incoming.capabilities ?? previous?.capabilities,
   };
 }

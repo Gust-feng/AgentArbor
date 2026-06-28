@@ -800,6 +800,37 @@ test("OpenAI Responses adapter classifies 504 response as provider_timeout", asy
   assert.equal(response.failure?.message, "Gateway Timeout");
 });
 
+test("OpenAI Responses adapter notifies context window overflow", async () => {
+  const events: Array<{ readonly message: string; readonly status?: number }> = [];
+  const fetch: FetchLike = async () => ({
+    ok: false,
+    status: 400,
+    json: async () => ({
+      error: {
+        code: "context_length_exceeded",
+        message: "Input is too long. Tokens exceed the model context window.",
+      },
+    }),
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+    onContextWindowExceeded: (event) => {
+      events.push(event);
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_response");
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.status, 400);
+  assert.equal(events[0]?.message.includes("Input is too long"), true);
+});
+
 test("OpenAI Responses adapter normalizes timeout-like transport error as provider_timeout", async () => {
   const fetch: FetchLike = async () => {
     throw new Error("The user aborted a request, Request timed out.");

@@ -205,6 +205,11 @@ export type DeepIntakeMessagesInput = {
   readonly intakeTurns?: readonly DeepIntakeTurn[];
   readonly terminalRunSummary?: string;
   readonly taskSoilSummary?: string;
+  /**
+   * 可用工具能力声明：入口理解阶段不能直接执行工具，但必须知道 child 后续能委派哪些
+   * 标准工具。否则会把“需要文件/终端证据”的请求误判为不能处理或直接回答。
+   */
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly priorParseError?: string;
 };
 
@@ -259,6 +264,7 @@ export function deepDecisionMessages(input: DeepDecisionMessagesInput): readonly
       "- direct_answer：目标明确、答案单一、已有证据足以支撑结论时直接产出结论。",
       "  注意：除非目标确实简单，否则不要在 step 0 就急于 direct_answer；证据不足时禁止伪装完成。",
       "- spawn_children：需要多角度验证、多来源证据，或目标存在分歧/不确定性时，派生多个 child 分头探索。",
+      "- spawn_children：目标需要列目录、读/改文件、执行命令、查看工作区或收集一手文件/终端证据时，派生 child 使用授权工具；manager 不直接执行工具。",
       "- wait_children：已派生的 child 仍在进行中，本轮等待其结果。",
       "- continue_child：父层审查发现某个已有 child 的材料不足、受阻或异常停止时，给同一个 childRunId 追加指令，",
       "  让该 child 作为同一个标准 Agent run 继续工作；不要为同一目标重复 spawn 新 child。",
@@ -280,6 +286,7 @@ export function deepDecisionMessages(input: DeepDecisionMessagesInput): readonly
       "",
       "AI-first 边界：你的决策由语义推理产出。当证据不足时，必须选择 spawn_children",
       "（继续探索）或 ask_user（向用户澄清），不得选择 direct_answer/synthesize 伪装完成。",
+      "如果下方「可用工具清单」非空，不能声称没有工具；需要工具的一手操作应通过 childSpec.allowedTools 委派给 child。",
       "若用户在中途给出纠正/补充上下文，你必须据此调整本轮派生与综合方向，不能忽略。",
       "若存在续聊上下文，你必须把用户的新补充视为同一任务链的新一轮目标修订，",
       "结合上一轮结论与结构化探索材料判断是否继续探索、重新综合或追问。",
@@ -368,6 +375,7 @@ export function deepDecisionMessages(input: DeepDecisionMessagesInput): readonly
 }
 
 export function deepIntakeMessages(input: DeepIntakeMessagesInput): readonly DeepTurnMessage[] {
+  const toolSection = formatCapabilityToolSection(input.capabilitySnapshot);
   const previousTurns = input.intakeTurns === undefined || input.intakeTurns.length === 0
     ? "(暂无多 Agent 入口对话历史)"
     : input.intakeTurns
@@ -390,13 +398,18 @@ export function deepIntakeMessages(input: DeepIntakeMessagesInput): readonly Dee
       "- ask_user：输入低信息量且无法结合当前主题判断意图，或范围/产出/约束仍缺失时，向用户自然追问。",
       "- direct_answer：用户是在追问、解释、展开或澄清当前结论，且无需新的协作探索时，直接给出有用回答。",
       "- start_collaboration：用户明确要求继续研究、补充新角度、比较、证据收集或综合时，给出短计划并启动协作。",
+      "- start_collaboration：用户要求列目录、读取/修改文件、查看当前工作区、执行命令、检查项目状态，或其他需要一手文件/终端证据的任务时，启动协作并由 child 使用授权工具。",
       "",
       "边界：",
       "- 不要因为用户提交了消息就默认启动协作。",
+      "- 入口助手本身不直接执行工具；需要工具时应选择 start_collaboration，由 manager 派生 child 通过标准工具循环执行。",
+      "- 当下方「可用工具清单」存在工具时，不得声称没有文件、终端、工作区或底层工具；只有清单明确为空时才可说明当前无可执行工具。",
       "- 若选择 start_collaboration，normalizedObjective 必须合并当前主题与用户新补充，不能只复述本轮短消息。",
       "- 不要使用固定工作流话术；只解释用户此刻需要知道的内容。",
       "- 计划要短，面向大众用户，避免内部术语。",
       "- 输出只使用结构化 JSON，不要暴露 raw prompt、raw response 或工具原始输出。",
+      "",
+      toolSection,
       "",
       "期望输出 JSON：",
       "{",

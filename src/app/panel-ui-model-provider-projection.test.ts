@@ -11,13 +11,14 @@ test("configured builtin providers do not repopulate cleared models from preset 
 });
 
 test("configured provider projection keeps user display identity editable", async () => {
-  const [projection, settings, form, icons, logos, appConfigProjection, modelOptions] = await Promise.all([
+  const [projection, settings, form, icons, logos, appConfigProjection, appSettingsController, modelOptions] = await Promise.all([
     readPanelUiSource(path.join("components", "model-settings-projection.ts")),
     readPanelUiSource(path.join("components", "model-settings.tsx")),
     readPanelUiSource(path.join("components", "model-provider-form.tsx")),
     readPanelUiSource(path.join("components", "model-settings-icons.tsx")),
     readPanelUiSource("model-provider-logos.ts"),
     readPanelUiSource("app-config-projection.ts"),
+    readPanelUiSource("app-settings-controller.ts"),
     readPanelUiSource("model-options.ts"),
   ]);
 
@@ -26,14 +27,27 @@ test("configured provider projection keeps user display identity editable", asyn
   assert.equal(projection.includes("if (identity !== \"unknown\") return modelProviderDisplayName(identity);"), false);
   assert.equal(settings.includes("provider-detail-logo-edit"), true);
   assert.equal(settings.includes("aria-label=\"供应商名称\""), true);
-  assert.equal(settings.includes("LOGO_FILE_MAX_BYTES"), true);
+  assert.equal(settings.includes("const LOGO_FILE_MAX_BYTES = 3 * 1024 * 1024;"), true);
   assert.equal(settings.includes("LOGO_FILE_MIME_BY_EXTENSION"), true);
   assert.equal(settings.includes("logoDataUrlFromFileReaderResult"), true);
+  assert.equal(settings.includes("readonly editedProfiles"), true);
+  assert.equal(settings.includes("modelFormForProviderItem({ ...targetForm, logoDataUrl, logoCleared: false }, targetItem)"), true);
+  assert.equal(settings.includes("function setSelectedModelForm(form: ModelForm): void"), true);
+  assert.equal(settings.includes("function scheduleSelectedModelSave(form: ModelForm): void"), true);
+  assert.equal(settings.includes("function modelFormForProviderItem(form: ModelForm, item: ModelProviderListItem): ModelForm"), true);
+  assert.equal(settings.includes("upsertModelFormDraft(nextForm)"), true);
+  assert.equal(settings.includes("void saveModelImmediately(nextForm).catch(() => undefined);"), true);
+  assert.equal(settings.includes("flushScheduledModelSave();"), true);
+  assert.equal(settings.includes("lastActiveProfileIdRef"), true);
+  assert.equal(settings.includes("selectedForm.logoDataUrl || selectedItem.logoDataUrl"), true);
+  assert.equal(settings.includes("value={selectedForm.label}"), true);
+  assert.equal(appConfigProjection.includes("return config.label ?? \"\";"), true);
+  assert.equal(appSettingsController.includes("mergeSavedModelForm(previous, nextModelForm, response)"), true);
+  assert.equal(appSettingsController.includes("logoDataUrl: savedProfile.logoDataUrl ?? \"\""), true);
   assert.equal(form.includes("供应商名称"), false);
   assert.equal(icons.includes("provider-logo-image"), true);
   assert.equal(logos.includes("readonly logoDataUrl?: string"), true);
   assert.equal(logos.includes("return { imageSrc: input.logoDataUrl, tone: \"custom\" };"), true);
-  assert.equal(appConfigProjection.includes("return config.label ?? \"\";"), true);
   assert.equal(modelOptions.includes("const label = profile.label ?? catalog?.label ?? profile.profileId;"), true);
 });
 

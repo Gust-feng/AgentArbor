@@ -10,6 +10,7 @@ import {
   createUndergroundDemoSummary,
 } from "../underground-demo-summary.js";
 import { runUndergroundDirectionSessionWithIntelligence } from "../underground-direction-session.js";
+import { persistContextWindowFallback } from "../model-context-window-fallback.js";
 import type { PanelRuntime } from "./runtime.js";
 import { createDesktopToolCenterFactory, desktopRuntimeMode } from "./desktop-run-resources.js";
 import type {
@@ -125,6 +126,11 @@ export async function runUndergroundForPanel(
           modelProvider: activeModel,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
+          onContextWindowExceeded: (event) =>
+            persistContextWindowFallback({
+              configCenter: runtime.configCenter,
+              event,
+            }),
           streamingMode: "force_live",
         });
 

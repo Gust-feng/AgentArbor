@@ -24,6 +24,7 @@
 import type { MinimalRuntime } from "../runtime.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import { createId, nowIso } from "../../kernel/id.js";
+import { AppRunEventHub } from "../run-runtime-core/event-stream.js";
 import type {
   AgentRunTree,
   ChildAgentRun,
@@ -57,6 +58,7 @@ export type DeepEventType =
   | "deep.child.interrupted"
   | "deep.child.failed"
   | "deep.parent_synthesis.completed"
+  | "deep.failed"
   | "deep.interrupted"
   | "deep.corrected"
   | "deep.stopped"
@@ -103,7 +105,8 @@ export type DeepRunStreamEvent = {
  * deep 事件发布器。每个方法既发布 `deep.*` message 到 bus（可观察投影 / 审计），
  * 又追加一条安全投影 {@link DeepRunStreamEvent} 到内部序列（SSE 轮询源 + replay）。
  *
- * 一次 deep run 创建一个 publisher 实例；序列号从 0 递增，保证 SSE cursor 恢复语义。
+ * 一次 deep run 创建一个 publisher 实例；序列号由共享 event stream 机制分配，
+ * 保证 SSE cursor 恢复语义。
  * 运行结束后通过 {@link DeepEventPublisher.events} 取出完整序列，写入
  * {@link DeepRunRecord.eventSequence}。
  */
@@ -177,32 +180,32 @@ export interface DeepEventPublisher {
   /** 结论已产出（结论存在时，在综合收口后发布）。 */
   publishConclusionProduced(input: { readonly conclusion: SynthesizedConclusion }): void;
 
+  /** deep run 失败收口。 */
+  publishFailed(input: { readonly summary: string; readonly agentRunTree: AgentRunTree }): void;
+
   /** T2-7 control 事件（interrupt / correct / stop），承载可观察打断/纠正/停止记录。 */
   publishControlEvent(controlEvent: DeepRunControlEvent, agentRunTree: AgentRunTree): void;
 }
 
 /**
- * 创建 deep 事件发布器。序列号从 0 递增；每条事件同时落入 bus + 安全投影序列。
+ * 创建 deep 事件发布器。序列号由共享 event stream 机制分配；
+ * 每条事件同时落入 bus + 安全投影序列。
  */
 export function createDeepEventPublisher(options: {
   readonly runtime: MinimalRuntime;
   readonly traceId: string;
   readonly runId: string;
 }): DeepEventPublisher {
-  const events: DeepRunStreamEvent[] = [];
-  // sequence 从 1 开始：与桌面 run stream 一致；parseStreamCursor 无 cursor 时返回 0，
-  // flush 循环 `sequence > lastSequence(0)` 正确包含首个事件（sequence=1），不漏 goal_received。
-  let sequence = 1;
+  const events = new AppRunEventHub<DeepRunStreamEvent>();
 
   function record(
     type: DeepEventType,
     projection: Pick<DeepRunStreamEvent, "title" | "summary" | "status" | "refs">,
     busPayload: unknown,
   ): void {
-    const event: DeepRunStreamEvent = {
+    events.publish({
       id: createId("deep-evt"),
       runId: options.runId,
-      sequence,
       type,
       title: projection.title,
       summary: projection.summary,
@@ -210,9 +213,7 @@ export function createDeepEventPublisher(options: {
       timestamp: nowIso(),
       refs: projection.refs,
       visibility: "public",
-    };
-    sequence += 1;
-    events.push(event);
+    });
     options.runtime.bus.publish(
       createMessage({
         traceId: options.traceId,
@@ -231,7 +232,7 @@ export function createDeepEventPublisher(options: {
 
   return {
     get events(): readonly DeepRunStreamEvent[] {
-      return events;
+      return events.all(options.runId);
     },
 
     publishGoalReceived(input) {
@@ -450,6 +451,23 @@ export function createDeepEventPublisher(options: {
           refs: [{ kind: "conclusion", refId: input.conclusion.conclusionId }],
         },
         { conclusionId: input.conclusion.conclusionId },
+      );
+    },
+
+    publishFailed(input) {
+      record(
+        "deep.failed",
+        {
+          title: "运行失败",
+          summary: input.summary,
+          status: "failed",
+          refs: [treeRef(input.agentRunTree)],
+        },
+        {
+          runId: options.runId,
+          error: input.summary,
+          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+        },
       );
     },
 

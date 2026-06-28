@@ -95,6 +95,154 @@
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.model-info-card {
+  gap: var(--space-4);
+}
+
+.model-info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  border-top: var(--border-width-thin) solid color-mix(in oklch, var(--border) 76%, transparent);
+  padding-top: var(--space-3);
+}
+
+.model-info-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.model-info-field-wide {
+  grid-column: 1 / -1;
+}
+
+.model-info-field input:not([type="checkbox"]),
+.model-info-field select {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-lg);
+  background: var(--field-bg);
+  padding: 0 12px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+
+.model-info-field input::placeholder {
+  color: color-mix(in oklch, var(--muted) 68%, transparent);
+}
+
+.model-info-field input:not([type="checkbox"]):hover,
+.model-info-field select:hover {
+  border-color: var(--field-hover-border);
+  background-color: var(--field-hover-bg);
+}
+
+.model-info-field input:not([type="checkbox"]):focus,
+.model-info-field select:focus {
+  border-color: var(--field-focus-border);
+  box-shadow: var(--field-focus-ring);
+  outline: none;
+}
+
+.model-info-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.model-info-toggle-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--row-border);
+  border-radius: var(--radius-lg);
+  background: var(--row-bg);
+  padding: 8px 10px;
+}
+
+.model-info-toggle-row > span {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-info-save-button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-lg);
+  background: var(--field-bg);
+  padding: 0 10px;
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  font-size: 12px;
+  font-weight: var(--weight-label);
+  white-space: nowrap;
+}
+
+.model-info-save-button:hover:not(:disabled) {
+  border-color: var(--field-hover-border);
+  background: var(--field-hover-bg);
+  color: var(--fg);
+}
+
+.model-info-save-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.desktop-agent-prompt-card {
+  gap: var(--space-3);
+}
+
+.desktop-agent-prompt-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.desktop-agent-prompt-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  border-top: var(--border-width-thin) solid color-mix(in oklch, var(--border) 76%, transparent);
+  padding-top: var(--space-3);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.desktop-agent-prompt-field textarea {
+  min-height: 190px;
+  max-height: 420px;
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.desktop-agent-prompt-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  color: color-mix(in oklch, var(--muted) 88%, var(--fg));
+  font-size: 12px;
+}
+
 .mcp-board {
   display: grid;
   gap: var(--space-3);
@@ -366,6 +514,12 @@
   border-color: color-mix(in oklch, var(--status-warning) 32%, var(--border));
   background: var(--amber-soft);
   color: var(--amber-text);
+}
+
+.mcp-status-pill.info {
+  border-color: color-mix(in oklch, #4f79a7 30%, var(--border));
+  background: color-mix(in oklch, #4f79a7 10%, var(--surface));
+  color: color-mix(in oklch, #315e83 70%, var(--fg));
 }
 
 .mcp-status-pill.neutral {
@@ -1568,6 +1722,12 @@
   color: color-mix(in oklch, var(--muted) 72%, transparent);
 }
 
+.skills-row-meta span.source {
+  border-color: color-mix(in oklch, var(--accent) 32%, var(--border));
+  background: color-mix(in oklch, var(--accent-soft) 64%, transparent);
+  color: color-mix(in oklch, var(--accent) 76%, var(--fg));
+}
+
 .skills-row-error {
   border: 1px solid color-mix(in oklch, var(--status-danger) 38%, var(--border));
   border-radius: var(--radius-md);
@@ -1603,6 +1763,7 @@
   .mcp-form-grid,
   .mcp-identity-grid,
   .mcp-transport-params-grid,
+  .model-info-grid,
   .service-config-grid {
     grid-template-columns: 1fr;
   }

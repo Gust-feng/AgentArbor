@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 import type { BasicAgentRunExecutionResult } from "../basic-agent-runtime/index.js";
-import { createPanelRuntime } from "./runtime.js";
+import { createPanelRuntime, resolveDefaultPanelSkillRoots } from "./runtime.js";
 
 test("panel runtime appends explicit additional skill roots without replacing default roots", () => {
   const runtime = createPanelRuntime({
@@ -16,6 +16,29 @@ test("panel runtime appends explicit additional skill roots without replacing de
   assert.deepEqual(runtime.skillRoots.slice(2), [
     { rootPath: path.join("C:", "managed", "skills"), sourceKind: "admin", sourceRootId: "admin", precedence: 1_000 },
     { rootPath: path.join("Z:", "plugin", "skills"), sourceKind: "plugin", sourceRootId: "plugin:repo-tools", precedence: 500 },
+  ]);
+});
+
+test("default panel skill roots use the workspace directory for project scope", () => {
+  const roots = resolveDefaultPanelSkillRoots({
+    cwd: path.join("Z:", "process-cwd"),
+    home: path.join("C:", "Users", "developer"),
+    workspaceDirectory: path.join("Z:", "AgentArbor"),
+  });
+
+  assert.deepEqual(roots, [
+    {
+      rootPath: path.join("C:", "Users", "developer", ".agents", "skills"),
+      sourceKind: "user",
+      sourceRootId: "user",
+      precedence: 10,
+    },
+    {
+      rootPath: path.join("Z:", "AgentArbor", ".agents", "skills"),
+      sourceKind: "project",
+      sourceRootId: "project",
+      precedence: 100,
+    },
   ]);
 });
 
@@ -49,7 +72,7 @@ test("panel runtime records process residue summaries when ordinary runs reach t
     goal: "complete with residue inspection",
     aiMode: "fake",
   });
-  await waitUntil(() => runtime.runJobs.get(run.runId)?.status === "completed");
+  await waitUntil(() => runtime.runJobs.get(run.runId)?.status === "completed", 5_000);
 
   const summaries = runtime.processRegistry.listRunResidueSummaries(run.runId);
   assert.equal(summaries.length, 1);

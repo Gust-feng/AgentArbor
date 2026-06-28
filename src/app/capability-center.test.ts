@@ -6,6 +6,7 @@ import test from "node:test";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../adapters/config/index.js";
 import { CapabilityCenter } from "./capability-center.js";
 import { ConfigCenter } from "./config-center.js";
+import type { SkillRootInput } from "./skills/index.js";
 
 test("CapabilityCenter freezes transient run workspace without changing the default workspace", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-"));
@@ -32,6 +33,55 @@ test("CapabilityCenter freezes transient run workspace without changing the defa
     await fs.rm(directory, { force: true, recursive: true });
     await fs.rm(defaultWorkspace, { force: true, recursive: true });
     await fs.rm(runWorkspace, { force: true, recursive: true });
+  }
+});
+
+test("CapabilityCenter discovers project skills from the effective workspace", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-skills-"));
+  const userSkillRoot = path.join(directory, "user-skills");
+  const defaultWorkspace = path.join(directory, "default-workspace");
+  const runWorkspace = path.join(directory, "run-workspace");
+  try {
+    await writeTestSkillPackage(userSkillRoot, "global-helper", "Global helper skill.");
+    await writeTestSkillPackage(
+      path.join(defaultWorkspace, ".agents", "skills"),
+      "default-helper",
+      "Default workspace skill."
+    );
+    await writeTestSkillPackage(
+      path.join(runWorkspace, ".agents", "skills"),
+      "run-helper",
+      "Run workspace skill."
+    );
+
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.updateWorkspaceConfig({ workspaceDirectory: defaultWorkspace });
+    const center = new CapabilityCenter({
+      configCenter,
+      skillRoots: skillRootsForWorkspace(userSkillRoot, defaultWorkspace),
+      resolveSkillRoots: (input) => skillRootsForWorkspace(
+        userSkillRoot,
+        input.workspaceDirectory ?? defaultWorkspace
+      ),
+    });
+
+    const defaultSkills = await center.listSkills();
+    const runSnapshot = await center.snapshot({ workspaceDirectory: runWorkspace });
+
+    assert.deepEqual(defaultSkills.map((skill) => `${skill.name}:${skill.sourceKind}`).sort(), [
+      "default-helper:project",
+      "global-helper:user",
+    ]);
+    assert.deepEqual(runSnapshot.skillCatalog.map((skill) => `${skill.name}:${skill.sourceKind}`).sort(), [
+      "global-helper:user",
+      "run-helper:project",
+    ]);
+    assert.equal(runSnapshot.skillCatalog.some((skill) => skill.name === "default-helper"), false);
+    assert.equal(runSnapshot.skillCatalog.find((skill) => skill.name === "run-helper")?.sourceRootId, "project");
+  } finally {
+    await fs.rm(directory, { force: true, recursive: true });
   }
 });
 
@@ -211,6 +261,8 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.toolCatalog.allowedTools.includes("docs__lookup"), true);
     assert.equal(snapshot.toolConfirmation?.policy, "prompt");
     assert.equal(snapshot.toolConfirmation?.shellCommandRequiresConfirmation, true);
+    assert.equal(snapshot.skillTrigger?.mode, "keyword");
+    assert.equal(snapshot.skillTrigger?.modelRouterEnabled, false);
     assert.equal(snapshot.securitySummary, "本轮模型、工具、技能和工作区能力快照。确认策略：标准访问。");
     assert.equal(snapshot.securitySummary.includes("prompt"), false);
     assert.equal(snapshot.securitySummary.includes("raw"), false);
@@ -444,3 +496,30 @@ test("CapabilityCenter keeps MCP connection error summaries in snapshot without 
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+function skillRootsForWorkspace(userSkillRoot: string, workspaceDirectory: string): readonly SkillRootInput[] {
+  return [
+    {
+      rootPath: userSkillRoot,
+      sourceKind: "user",
+      sourceRootId: "user",
+      precedence: 10,
+    },
+    {
+      rootPath: path.join(workspaceDirectory, ".agents", "skills"),
+      sourceKind: "project",
+      sourceRootId: "project",
+      precedence: 100,
+    },
+  ];
+}
+
+async function writeTestSkillPackage(root: string, packageName: string, description: string): Promise<void> {
+  const skillDir = path.join(root, packageName);
+  await fs.mkdir(skillDir, { recursive: true });
+  await fs.writeFile(
+    path.join(skillDir, "SKILL.md"),
+    `---\nname: ${packageName}\ndescription: ${description}\n---\n\n${description}`,
+    "utf8"
+  );
+}

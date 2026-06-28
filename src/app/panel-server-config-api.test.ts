@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { FileSystemNormalSettingsStore } from "../adapters/config/index.js";
+import type { AppUpdateFetch } from "./app-update-service.js";
 import { startLocalPanelServer, type PanelModelCatalogFetch } from "./panel-server.js";
 import { removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
 
@@ -92,6 +93,194 @@ test("panel config API keeps model provider and search keys out of ordinary resp
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
+  }
+});
+
+test("panel config API updates Desktop Agent system prompt", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-desktop-agent-config-"));
+  const customPrompt = "You are configured from the settings panel.";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const initial = await requestJson(server.url, "/api/config");
+    const update = await requestJson(server.url, "/api/config/desktop-agent", {
+      method: "POST",
+      body: { systemPrompt: customPrompt },
+    });
+    const config = await requestJson(server.url, "/api/config");
+    const reset = await requestJson(server.url, "/api/config/desktop-agent", {
+      method: "POST",
+      body: { resetSystemPrompt: true },
+    });
+
+    assert.equal(initial.status, 200);
+    assert.equal(typeof initial.body.desktopAgent.systemPrompt, "string");
+    assert.equal(initial.body.desktopAgent.isDefault, true);
+    assert.equal(update.status, 200);
+    assert.equal(update.body.desktopAgent.systemPrompt, customPrompt);
+    assert.equal(update.body.desktopAgent.isDefault, false);
+    assert.equal(config.body.desktopAgent.systemPrompt, customPrompt);
+    assert.equal(reset.status, 200);
+    assert.equal(reset.body.desktopAgent.isDefault, true);
+    assert.notEqual(reset.body.desktopAgent.systemPrompt, customPrompt);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel config API persists 3MiB model provider logos", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-large-provider-logo-"));
+  const largeLogoDataUrl = `data:image/png;base64,${Buffer.alloc(3 * 1024 * 1024).toString("base64")}`;
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const update = await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        label: "Large Logo Router",
+        logoDataUrl: largeLogoDataUrl,
+        baseUrl: "https://provider.example/v1",
+        model: "panel-model",
+        defaultAiMode: "openai-compatible",
+      },
+    });
+    const config = await requestJson(server.url, "/api/config");
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.config.logoDataUrl, largeLogoDataUrl);
+    assert.equal(config.status, 200);
+    assert.equal(config.body.config.logoDataUrl, largeLogoDataUrl);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel config API scopes model provider logos to one profile", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-provider-logo-scope-"));
+  const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    await requestJson(server.url, "/api/config/model-profiles", {
+      method: "POST",
+      body: {
+        profileId: "router-one",
+        label: "Router One",
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
+        baseUrl: "https://router-one.example/v1",
+        model: "router-one-model",
+        defaultAiMode: "openai-compatible",
+      },
+    });
+    await requestJson(server.url, "/api/config/model-profiles", {
+      method: "POST",
+      body: {
+        profileId: "router-two",
+        label: "Router Two",
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
+        baseUrl: "https://router-two.example/v1",
+        model: "router-two-model",
+        defaultAiMode: "openai-compatible",
+      },
+    });
+    const update = await requestJson(server.url, "/api/config/model-profiles/router-one", {
+      method: "POST",
+      body: { logoDataUrl },
+    });
+    const config = await requestJson(server.url, "/api/config");
+    const profiles = config.body.profiles as readonly { readonly profileId: string; readonly logoDataUrl?: string }[];
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.profile.logoDataUrl, logoDataUrl);
+    assert.equal(profiles.find((profile) => profile.profileId === "router-one")?.logoDataUrl, logoDataUrl);
+    assert.equal(profiles.find((profile) => profile.profileId === "router-two")?.logoDataUrl, undefined);
+    assert.equal(profiles.find((profile) => profile.profileId === "default")?.logoDataUrl, undefined);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel app update API reports status and checks configured manifest", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-update-api-"));
+  const calls: string[] = [];
+  const updateFetch: AppUpdateFetch = async (url) => {
+    calls.push(url);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        version: "9.9.9",
+        releaseDate: "2026-06-28T00:00:00.000Z",
+        releasePageUrl: "https://updates.example/releases/9.9.9",
+        downloadUrl: "https://updates.example/downloads/agentarbor-9.9.9.exe",
+      }),
+    };
+  };
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    updateManifestUrl: "https://updates.example/agentarbor.json",
+    updateManifestFetch: updateFetch,
+  });
+  try {
+    const initial = await requestJson(server.url, "/api/app/update");
+    const checked = await requestJson(server.url, "/api/app/update/check", { method: "POST" });
+    const after = await requestJson(server.url, "/api/app/update");
+
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.status, "idle");
+    assert.equal(initial.body.manifestUrlConfigured, true);
+    assert.equal(checked.status, 200);
+    assert.equal(checked.body.ok, true);
+    assert.equal(checked.body.status, "available");
+    assert.equal(checked.body.latest.version, "9.9.9");
+    assert.equal(checked.body.latest.releasePageUrl, "https://updates.example/releases/9.9.9");
+    assert.equal(checked.body.latest.downloadUrl, "https://updates.example/downloads/agentarbor-9.9.9.exe");
+    assert.equal(after.body.status, "available");
+    assert.deepEqual(calls, ["https://updates.example/agentarbor.json"]);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel app update API stays usable when update source is missing or invalid", async () => {
+  const unconfiguredDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-update-none-"));
+  const invalidDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-update-invalid-"));
+  const invalidFetch: AppUpdateFetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ version: "not valid" }),
+  });
+  const unconfiguredServer = await startLocalPanelServer({
+    port: 0,
+    configDirectory: unconfiguredDirectory,
+  });
+  const invalidServer = await startLocalPanelServer({
+    port: 0,
+    configDirectory: invalidDirectory,
+    updateManifestUrl: "https://updates.example/agentarbor.json",
+    updateManifestFetch: invalidFetch,
+  });
+  try {
+    const unconfigured = await requestJson(unconfiguredServer.url, "/api/app/update/check", { method: "POST" });
+    const failed = await requestJson(invalidServer.url, "/api/app/update/check", { method: "POST" });
+
+    assert.equal(unconfigured.status, 200);
+    assert.equal(unconfigured.body.ok, true);
+    assert.equal(unconfigured.body.status, "unconfigured");
+    assert.equal(unconfigured.body.manifestUrlConfigured, false);
+    assert.equal(failed.status, 200);
+    assert.equal(failed.body.ok, false);
+    assert.equal(failed.body.status, "failed");
+    assert.equal(failed.body.errorSummary, "更新清单版本号无效。");
+  } finally {
+    await unconfiguredServer.close();
+    await invalidServer.close();
+    await removeTemporaryTree(unconfiguredDirectory);
+    await removeTemporaryTree(invalidDirectory);
   }
 });
 
@@ -241,6 +430,35 @@ test("panel config API persists tool confirmation policy into capability snapsho
   }
 });
 
+test("panel config API persists skill trigger mode into capability snapshots", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-skill-trigger-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const initial = await requestJson(server.url, "/api/config");
+    const update = await requestJson(server.url, "/api/config/skill-trigger", {
+      method: "POST",
+      body: {
+        mode: "model",
+      },
+    });
+    const after = await requestJson(server.url, "/api/config");
+
+    assert.equal(initial.status, 200);
+    assert.equal(update.status, 200);
+    assert.equal(after.status, 200);
+    assert.equal(initial.body.skillTrigger.mode, "keyword");
+    assert.equal(initial.body.capabilities.skillTrigger.mode, "keyword");
+    assert.equal(update.body.skillTrigger.mode, "model");
+    assert.equal(update.body.skillTrigger.modelRouterEnabled, true);
+    assert.equal(update.body.capabilities.skillTrigger.mode, "model");
+    assert.equal(after.body.skillTrigger.mode, "model");
+    assert.equal(after.body.capabilities.skillTrigger.mode, "model");
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel capability and profile APIs expose safe unified capability projections", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-capabilities-"));
   const secret = "sk-panel-capability-secret";
@@ -284,7 +502,7 @@ test("panel capability and profile APIs expose safe unified capability projectio
       assert.equal(capabilities.status, 200);
       assert.equal(capabilityUpdate.status, 200);
       assert.equal(capabilities.body.capabilities.activeModel.profileId, "custom");
-      assert.equal(capabilities.body.capabilities.modelCapabilities.contextWindowTokens, 16_000);
+      assert.equal(capabilities.body.capabilities.modelCapabilities.contextWindowTokens, 256_000);
       assert.equal(capabilities.body.capabilities.modelCapabilities.supportsToolCalling, true);
       assert.equal(capabilityUpdate.body.capabilities.activeModel.profileId, "custom");
       assert.equal(capabilityUpdate.body.capabilities.modelCapabilities.contextWindowTokens, 32_000);
@@ -911,7 +1129,7 @@ test("panel workspace picker route handles success cancellation and unavailable 
     assert.equal(typeof cancelled.body.workspace.workspaceDirectory, "string");
     assert.equal(unavailable.status, 501);
     assert.equal(unavailable.body.error.code, "workspace_picker_unavailable");
-    assert.equal(unavailable.body.error.message.includes("手动输入工作文件夹路径"), true);
+    assert.equal(unavailable.body.error.message.includes("手动输入默认文件夹路径"), true);
   } finally {
     await server.close();
     await cancelServer.close();

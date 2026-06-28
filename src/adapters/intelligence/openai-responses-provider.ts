@@ -25,8 +25,10 @@ import {
 import { providerErrorMessage } from "./provider-error-message.js";
 import {
   classifyProviderFailureKind,
+  isContextWindowExceededMessage,
   isRetryableProviderFailureStatus,
   isTimeoutLikeError,
+  type ProviderContextWindowExceededHandler,
 } from "./provider-failure-classification.js";
 import { asRecord } from "./provider-value-utils.js";
 
@@ -40,6 +42,7 @@ export type OpenAIResponsesProviderOptions = {
   readonly forceStreaming?: boolean;
   readonly requestSettings?: OpenAIModelRequestSettings;
   readonly enableWebSearch?: boolean;
+  readonly onContextWindowExceeded?: ProviderContextWindowExceededHandler;
   readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
@@ -56,6 +59,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
   private readonly forceStreaming: boolean;
   private readonly requestSettings?: OpenAIModelRequestSettings;
   private readonly enableWebSearch: boolean;
+  private readonly onContextWindowExceeded?: ProviderContextWindowExceededHandler;
   private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 
   constructor(options: OpenAIResponsesProviderOptions) {
@@ -68,6 +72,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
     this.forceStreaming = options.forceStreaming === true;
     this.requestSettings = options.requestSettings;
     this.enableWebSearch = options.enableWebSearch === true;
+    this.onContextWindowExceeded = options.onContextWindowExceeded;
     this.onOutputDelta = options.onOutputDelta;
   }
 
@@ -141,6 +146,8 @@ export class OpenAIResponsesProvider implements ModelProvider {
 
       const status = statusFromError(error);
       if (status !== undefined) {
+        const message = providerErrorMessage(error, `HTTP ${status}`);
+        await notifyContextWindowExceeded(this.onContextWindowExceeded, { message, status });
         return createFailedModelResponse({
           requestId: request.requestId,
           providerId: this.providerId,
@@ -150,7 +157,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
           outputKind: request.outputContract.outputKind,
           failureKind: classifyProviderFailureKind(status),
           retryable: isRetryableProviderFailureStatus(status),
-          message: providerErrorMessage(error, `HTTP ${status}`),
+          message,
         });
       }
 
@@ -171,6 +178,19 @@ export class OpenAIResponsesProvider implements ModelProvider {
       });
     }
   }
+}
+
+async function notifyContextWindowExceeded(
+  handler: ProviderContextWindowExceededHandler | undefined,
+  input: {
+    readonly message: string;
+    readonly status?: number;
+  }
+): Promise<void> {
+  if (handler === undefined || !isContextWindowExceededMessage(input.message)) {
+    return;
+  }
+  await handler(input);
 }
 
 function cancelledResponse(input: {

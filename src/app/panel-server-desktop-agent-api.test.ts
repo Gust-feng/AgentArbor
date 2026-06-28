@@ -17,6 +17,7 @@ import {
   createOpenAiReadFileToolCallResponse,
   createOpenAiSearchToolCallResponse,
   createOpenAiTextResponse,
+  extractResponsesMessages,
   hasResponsesToolDefinition,
   hasResponsesToolOutput,
   parseResponsesRequestBody,
@@ -173,6 +174,60 @@ test("desktop ordinary run executes with the same AgentDefinition used for its r
     assert.equal(JSON.stringify(runtimeRun.body.snapshot.run.agentDefinitionRef).includes(customAgent.prompt.systemPrompt), false);
     assert.equal(JSON.stringify(completed.body.capabilityResolution).includes(customAgent.prompt.systemPrompt), false);
     assertSafePanelJsonText(runtimeRun.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("desktop ordinary run uses the configured Desktop Agent system prompt", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-configured-system-prompt-"));
+  const secret = "sk-desktop-configured-system-prompt";
+  const model = "configured-system-prompt-model";
+  const customPrompt = "You are configured by the user from Basic Capabilities settings.";
+  let requestBody: ReturnType<typeof parseResponsesRequestBody> | undefined;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    requestBody = parseResponsesRequestBody(init.body);
+    return createOpenAiTextResponse(model, "已使用设置中的系统提示词。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example/v1",
+        model,
+        defaultAiMode: "openai-compatible",
+        apiKey: secret,
+      },
+    });
+    await requestJson(server.url, "/api/config/desktop-agent", {
+      method: "POST",
+      body: { systemPrompt: customPrompt },
+    });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "检查设置中的系统提示词", aiMode: "openai-compatible" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const messages = extractResponsesMessages(requestBody);
+
+    assert.equal(start.status, 202);
+    assert.equal(completed.body.status, "completed");
+    assert.equal(messages[0]?.role, "system");
+    assert.equal(messages[0]?.content, customPrompt);
+    assert.equal(start.body.agentDefinitionRef.promptRef, "prompt:desktop-root-agent:user-configured");
+    assert.equal(start.body.agentDefinitionRef.definitionHash.startsWith("sha256:"), true);
+    assert.equal(start.text.includes(customPrompt), false);
+    assert.equal(completed.text.includes(customPrompt), false);
+    assertSafePanelJsonText(`${start.text}\n${completed.text}`);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

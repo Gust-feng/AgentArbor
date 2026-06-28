@@ -1,11 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ConfigResponse,
-  ModelCapabilities,
   ModelProviderModelCatalog,
 } from "../contracts/config";
 import { resolveModelIconSvgForModel } from "../model-icons";
-import { modelCapabilitySummary } from "../model-capability-display";
 import { resolveModelProviderIdentity } from "../model-provider-logos";
 import { EmptyBlock } from "./workspace-common";
 import { ModelCatalogPanel } from "./model-catalog-panel";
@@ -25,7 +23,7 @@ import {
 } from "./model-settings-projection";
 export type { ModelForm } from "./model-settings-projection";
 
-const LOGO_FILE_MAX_BYTES = 150_000;
+const LOGO_FILE_MAX_BYTES = 3 * 1024 * 1024;
 const LOGO_FILE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
 const LOGO_FILE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".gif": "image/gif",
@@ -38,6 +36,7 @@ const LOGO_FILE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
 
 type ModelProviderProjectionDraft = {
   readonly createdProfiles: readonly ModelProviderProfileItem[];
+  readonly editedProfiles: readonly ModelProviderProfileItem[];
   readonly removedProfileIds: readonly string[];
   readonly activeProfile?: ModelProviderProfileItem;
   readonly order?: readonly string[];
@@ -59,19 +58,25 @@ export function ModelSettings(props: {
 }): React.ReactElement {
   const [providerDraft, setProviderDraft] = useState<ModelProviderProjectionDraft>({
     createdProfiles: [],
+    editedProfiles: [],
     removedProfileIds: [],
   });
   const [query, setQuery] = useState("");
   const [revealed, setRevealed] = useState(false);
   const [fetchBusy, setFetchBusy] = useState(false);
   const [modelsFetchBusy, setModelsFetchBusy] = useState(false);
+  const [selectedKey, setSelectedKey] = useState("");
   const saveTimerRef = useRef<number | undefined>(undefined);
+  const pendingModelSaveRef = useRef<ModelForm | undefined>(undefined);
   const fetchSeqRef = useRef(0);
   const providerOrderRef = useRef<readonly string[]>([]);
+  const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
+  const selectedKeyRef = useRef(selectedKey);
+  const saveRef = useRef(props.onSave);
+  saveRef.current = props.onSave;
   const revealRef = useRef(props.onRevealModelApiKey);
   revealRef.current = props.onRevealModelApiKey;
   const modelFormRef = useRef(props.modelForm);
-  modelFormRef.current = props.modelForm;
   const projectedConfig = useMemo(
     () => applyModelProviderProjectionDraft(props.config, providerDraft),
     [props.config, providerDraft]
@@ -80,7 +85,6 @@ export function ModelSettings(props: {
   const providerItems = useMemo(() => modelProviderItems(projectedConfig), [projectedConfig]);
   const items = useMemo(() => providerItems.filter((item) => item.configured), [providerItems]);
   providerOrderRef.current = items.map((item) => item.key);
-  const [selectedKey, setSelectedKey] = useState("");
   const filteredItems = items.filter((item) => {
     const normalized = query.trim().toLowerCase();
     if (normalized.length === 0) return true;
@@ -90,19 +94,21 @@ export function ModelSettings(props: {
     items.find((item) => item.key === selectedKey) ??
     items.find((item) => item.profileId === activeProfileId) ??
     items[0];
+  const selectedForm =
+    selectedItem === undefined || props.modelForm.profileId === modelProviderFormId(selectedItem)
+      ? props.modelForm
+      : modelFormFromProviderItem(selectedItem);
   const selectedActive = selectedItem?.profileId !== undefined && selectedItem.profileId === activeProfileId;
   const selectedSecretConfigured = selectedItem?.profile?.secretConfigured === true || (selectedActive && projectedConfig?.config?.secretConfigured === true);
   const selectedCatalog = selectedItem?.profileId === undefined ? undefined : props.modelCatalogs?.[selectedItem.profileId];
   const catalogState = useModelCatalogState({ selectedItem, selectedCatalog });
   const selectedProfileId = selectedItem?.profileId;
-  const selectedModelCapabilities = useMemo(
-    () => modelCapabilitiesById(projectedConfig, selectedProfileId),
-    [projectedConfig, selectedProfileId]
-  );
   const selectedProviderIdentity = selectedItem === undefined ? "unknown" : resolveModelProviderIdentity(selectedItem);
   const selectedBuiltinLocked = selectedItem?.protectedBuiltin === true;
-  const hasKey = props.modelForm.apiKey.length > 0;
+  const hasKey = selectedForm.apiKey.length > 0;
   const hasApiKeyAction = hasKey || selectedSecretConfigured;
+  modelFormRef.current = selectedForm;
+  selectedKeyRef.current = selectedKey;
 
   useEffect(() => {
     setProviderDraft((previous) => reconcileModelProviderProjectionDraft(previous, props.config));
@@ -110,8 +116,14 @@ export function ModelSettings(props: {
 
   useEffect(() => {
     if (items.length === 0) return;
+    const activeKey = items.find((item) => item.profileId === activeProfileId)?.key;
+    if (activeProfileId !== lastActiveProfileIdRef.current) {
+      lastActiveProfileIdRef.current = activeProfileId;
+      setSelectedKey(activeKey ?? items[0]!.key);
+      return;
+    }
     if (selectedKey.length > 0 && items.some((item) => item.key === selectedKey)) return;
-    setSelectedKey(items.find((item) => item.profileId === activeProfileId)?.key ?? items[0]!.key);
+    setSelectedKey(activeKey ?? items[0]!.key);
   }, [activeProfileId, items, selectedKey]);
 
   useEffect(() => {
@@ -148,16 +160,26 @@ export function ModelSettings(props: {
       if (saveTimerRef.current !== undefined) {
         window.clearTimeout(saveTimerRef.current);
       }
+      const pending = pendingModelSaveRef.current;
+      pendingModelSaveRef.current = undefined;
+      if (pending !== undefined) {
+        void saveRef.current(pending).catch(() => undefined);
+      }
     };
   }, []);
 
   function scheduleModelSave(nextForm: ModelForm): void {
+    pendingModelSaveRef.current = nextForm;
     if (saveTimerRef.current !== undefined) {
       window.clearTimeout(saveTimerRef.current);
     }
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = undefined;
-      void props.onSave(nextForm).catch(() => undefined);
+      const pending = pendingModelSaveRef.current;
+      pendingModelSaveRef.current = undefined;
+      if (pending !== undefined) {
+        void saveRef.current(pending).catch(() => undefined);
+      }
     }, 700);
   }
 
@@ -166,14 +188,29 @@ export function ModelSettings(props: {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = undefined;
     }
-    await props.onSave(nextForm);
+    pendingModelSaveRef.current = undefined;
+    await saveRef.current(nextForm);
+  }
+
+  function flushScheduledModelSave(): void {
+    if (saveTimerRef.current !== undefined) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = undefined;
+    }
+    const pending = pendingModelSaveRef.current;
+    pendingModelSaveRef.current = undefined;
+    if (pending !== undefined) {
+      void saveRef.current(pending).catch(() => undefined);
+    }
   }
 
   function selectItem(item: ModelProviderListItem): void {
+    flushScheduledModelSave();
     setSelectedKey(item.key);
   }
 
   async function addCustomProvider(): Promise<void> {
+    flushScheduledModelSave();
     const profileId = `custom_${Date.now().toString(36)}`;
     const nextForm: ModelForm = {
       profileId,
@@ -227,6 +264,7 @@ export function ModelSettings(props: {
 
   async function deleteProvider(item: ModelProviderListItem): Promise<void> {
     if (item.profileId === undefined) return;
+    flushScheduledModelSave();
     const deletingActive = item.profileId === activeProfileId;
     const fallbackItem = items.find((candidate) => candidate.key !== item.key);
     const fallbackProfile = deletingActive ? fallbackItem?.profile : undefined;
@@ -245,6 +283,7 @@ export function ModelSettings(props: {
     setProviderDraft((previous) => ({
       ...previous,
       createdProfiles: previous.createdProfiles.filter((profile) => profile.profileId !== item.profileId),
+      editedProfiles: previous.editedProfiles.filter((profile) => profile.profileId !== item.profileId),
       removedProfileIds: [...new Set([...previous.removedProfileIds, item.profileId!])],
       activeProfile: deletingActive
         ? fallbackProfile
@@ -274,13 +313,18 @@ export function ModelSettings(props: {
   }
 
   function updateModelForm(patch: Partial<ModelForm>): void {
-    const nextForm = { ...props.modelForm, ...patch };
+    if (selectedItem === undefined) return;
+    const nextForm = modelFormForProviderItem({ ...selectedForm, ...patch }, selectedItem);
     props.setModelForm(nextForm);
+    upsertModelFormDraft(nextForm);
     scheduleModelSave(nextForm);
   }
 
   function updateProviderLogo(file: File | undefined): void {
-    if (file === undefined) return;
+    if (file === undefined || selectedItem === undefined) return;
+    const targetItem = selectedItem;
+    const targetForm = selectedForm;
+    const targetSecretConfigured = selectedSecretConfigured;
     const mimeType = supportedLogoMimeType(file);
     if (mimeType === undefined || file.size > LOGO_FILE_MAX_BYTES) {
       return;
@@ -289,20 +333,54 @@ export function ModelSettings(props: {
     reader.addEventListener("load", () => {
       const logoDataUrl = logoDataUrlFromFileReaderResult(reader.result, mimeType);
       if (logoDataUrl === undefined) return;
-      updateModelForm({ logoDataUrl, logoCleared: false });
+      const nextForm = modelFormForProviderItem({ ...targetForm, logoDataUrl, logoCleared: false }, targetItem);
+      if (selectedKeyRef.current === targetItem.key) {
+        props.setModelForm(nextForm);
+      }
+      upsertModelFormDraftForItem(nextForm, targetItem, targetSecretConfigured);
+      void saveModelImmediately(nextForm).catch(() => undefined);
     });
     reader.readAsDataURL(file);
+  }
+
+  function upsertModelFormDraft(form: ModelForm): void {
+    if (selectedItem?.profileId === undefined) return;
+    upsertModelFormDraftForItem(form, selectedItem, selectedSecretConfigured);
+  }
+
+  function upsertModelFormDraftForItem(
+    form: ModelForm,
+    item: ModelProviderListItem,
+    secretConfigured: boolean
+  ): void {
+    if (item.profileId === undefined) return;
+    const nextProfile = profileDraftFromModelForm(modelFormForProviderItem(form, item), item, secretConfigured);
+    setProviderDraft((previous) => {
+      const isCreatedProfile = previous.createdProfiles.some((profile) => profile.profileId === nextProfile.profileId);
+      return {
+        ...previous,
+        createdProfiles: isCreatedProfile
+          ? upsertProfileDraft(previous.createdProfiles, nextProfile)
+          : previous.createdProfiles,
+        editedProfiles: isCreatedProfile
+            ? previous.editedProfiles.filter((profile) => profile.profileId !== nextProfile.profileId)
+            : upsertProfileDraft(previous.editedProfiles, nextProfile),
+        activeProfile:
+          previous.activeProfile?.profileId === nextProfile.profileId || activeProfileId === nextProfile.profileId
+            ? nextProfile
+            : previous.activeProfile,
+      };
+    });
   }
 
   async function clearApiKey(): Promise<void> {
     if (selectedItem === undefined) return;
     fetchSeqRef.current += 1;
-    const nextForm = {
-      ...props.modelForm,
-      profileId: modelProviderFormId(selectedItem),
+    const nextForm = modelFormForProviderItem({
+      ...selectedForm,
       apiKey: "",
       apiKeyCleared: selectedSecretConfigured || hasKey,
-    };
+    }, selectedItem);
     setRevealed(false);
     props.setModelForm(nextForm);
     if (selectedItem.profileId !== undefined || selectedSecretConfigured) {
@@ -317,7 +395,7 @@ export function ModelSettings(props: {
     setModelsFetchBusy(true);
     try {
       if (selectedItem.profileId === undefined) {
-        await props.onSave(props.modelForm);
+        await saveRef.current(modelFormForProviderItem(selectedForm, selectedItem));
       }
       const catalog = await props.onFetchModels(profileId);
       if (catalog !== undefined) {
@@ -374,8 +452,12 @@ export function ModelSettings(props: {
 
   async function removeCatalogModel(modelId: string): Promise<void> {
     const nextModels = (selectedCatalog?.models ?? catalogState.catalogModels).filter((model) => model.id !== modelId);
-    if (props.modelForm.model === modelId || selectedItem?.model === modelId) {
-      props.setModelForm({ ...props.modelForm, model: "" });
+    if (selectedForm.model === modelId || selectedItem?.model === modelId) {
+      const nextForm = selectedItem === undefined
+        ? { ...selectedForm, model: "" }
+        : modelFormForProviderItem({ ...selectedForm, model: "" }, selectedItem);
+      props.setModelForm(nextForm);
+      upsertModelFormDraft(nextForm);
       catalogState.setSelectedModelRowId(undefined);
     }
     catalogState.setModelNameDrafts((previous) => removeRecordKey(previous, modelId));
@@ -388,10 +470,27 @@ export function ModelSettings(props: {
 
   function selectCatalogModel(modelId: string): void {
     catalogState.setSelectedModelRowId(modelId);
-    if (props.modelForm.model === modelId) return;
-    const nextForm = { ...props.modelForm, model: modelId };
+    if (selectedForm.model === modelId) return;
+    if (selectedItem === undefined) return;
+    const nextForm = modelFormForProviderItem({ ...selectedForm, model: modelId }, selectedItem);
     props.setModelForm(nextForm);
+    upsertModelFormDraft(nextForm);
     void saveModelImmediately(nextForm).catch(() => undefined);
+  }
+
+  function setSelectedModelForm(form: ModelForm): void {
+    if (selectedItem === undefined) {
+      props.setModelForm(form);
+      return;
+    }
+    props.setModelForm(modelFormForProviderItem(form, selectedItem));
+  }
+
+  function scheduleSelectedModelSave(form: ModelForm): void {
+    if (selectedItem === undefined) return;
+    const nextForm = modelFormForProviderItem(form, selectedItem);
+    upsertModelFormDraftForItem(nextForm, selectedItem, selectedSecretConfigured);
+    scheduleModelSave(nextForm);
   }
 
   async function commitModelDisplayName(modelId: string, value: string): Promise<void> {
@@ -445,7 +544,7 @@ export function ModelSettings(props: {
           ) : (
             <>
               <label className="provider-detail-logo-edit" aria-label="替换供应商 logo">
-                <ProviderLogo item={{ ...selectedItem, logoDataUrl: props.modelForm.logoDataUrl || selectedItem.logoDataUrl }} large />
+                <ProviderLogo item={{ ...selectedItem, logoDataUrl: selectedForm.logoDataUrl || selectedItem.logoDataUrl }} large />
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
@@ -458,7 +557,7 @@ export function ModelSettings(props: {
               </label>
               <div className="provider-detail-title-field">
                 <input
-                  value={props.modelForm.label}
+                  value={selectedForm.label}
                   onChange={(event) => updateModelForm({ label: event.target.value })}
                   aria-label="供应商名称"
                   placeholder="自定义厂商"
@@ -476,7 +575,7 @@ export function ModelSettings(props: {
 
         <ModelProviderForm
           item={selectedItem}
-          modelForm={props.modelForm}
+          modelForm={selectedForm}
           revealed={revealed}
           fetchBusy={fetchBusy}
           saving={props.saving}
@@ -484,9 +583,9 @@ export function ModelSettings(props: {
           selectedSecretConfigured={selectedSecretConfigured}
           onSetRevealed={setRevealed}
           onUpdateModelForm={updateModelForm}
-          onSetModelForm={props.setModelForm}
+          onSetModelForm={setSelectedModelForm}
           onClearApiKey={clearApiKey}
-          onScheduleModelSave={scheduleModelSave}
+          onScheduleModelSave={scheduleSelectedModelSave}
         />
 
         <ModelCatalogPanel
@@ -506,8 +605,6 @@ export function ModelSettings(props: {
             modelId: model.id,
             displayName: model.displayName,
           })}
-          modelMeta={(model) =>
-            modelCapabilitySummary(selectedModelCapabilities.get(model.id))}
           saving={props.saving}
           modelsFetchBusy={modelsFetchBusy}
           onModelQueryChange={catalogState.setModelQuery}
@@ -530,6 +627,7 @@ function applyModelProviderProjectionDraft(
   if (
     config === undefined ||
     (draft.createdProfiles.length === 0 &&
+      draft.editedProfiles.length === 0 &&
       draft.removedProfileIds.length === 0 &&
       draft.activeProfile === undefined &&
       draft.order === undefined)
@@ -548,12 +646,17 @@ function applyModelProviderProjectionDraft(
       profiles.set(profile.profileId, profile);
     }
   }
+  for (const profile of draft.editedProfiles) {
+    if (profile.profileId !== undefined && !removedProfileIds.has(profile.profileId)) {
+      profiles.set(profile.profileId, profile);
+    }
+  }
   const nextProfiles = [...profiles.values()];
   const currentProfileId = config.config?.profileId;
   const currentConfigRemoved = currentProfileId !== undefined && removedProfileIds.has(currentProfileId);
   const activeProfile =
     draft.activeProfile ??
-    (currentConfigRemoved ? nextProfiles[0] : config.config) ??
+    (currentConfigRemoved ? nextProfiles[0] : currentProfileId === undefined ? config.config : profiles.get(currentProfileId) ?? config.config) ??
     nextProfiles[0];
   return {
     ...config,
@@ -571,12 +674,21 @@ function reconcileModelProviderProjectionDraft(
 ): ModelProviderProjectionDraft {
   if (config === undefined) return draft;
   const serverProfileIds = new Set((config.profiles ?? []).map((profile) => profile.profileId).filter(isDefinedString));
+  const serverProfilesById = new Map((config.profiles ?? [])
+    .filter((profile): profile is ModelProviderProfileItem & { readonly profileId: string } => profile.profileId !== undefined)
+    .map((profile) => [profile.profileId, profile]));
   const nextCreatedProfiles = draft.createdProfiles.filter((profile) => profile.profileId === undefined || !serverProfileIds.has(profile.profileId));
+  const nextEditedProfiles = draft.editedProfiles.filter((profile) => {
+    if (profile.profileId === undefined) return false;
+    const serverProfile = serverProfilesById.get(profile.profileId);
+    return serverProfile === undefined || !sameProjectedProfile(serverProfile, profile);
+  });
   const nextRemovedProfileIds = draft.removedProfileIds.filter((profileId) => serverProfileIds.has(profileId));
   const nextActiveProfile = draft.activeProfile?.profileId === config.config?.profileId ? undefined : draft.activeProfile;
   const nextOrder = sameStringList(draft.order, config.modelProviderOrder) ? undefined : draft.order;
   if (
     sameProfileList(nextCreatedProfiles, draft.createdProfiles) &&
+    sameProfileList(nextEditedProfiles, draft.editedProfiles) &&
     sameStringList(nextRemovedProfileIds, draft.removedProfileIds) &&
     nextActiveProfile === draft.activeProfile &&
     nextOrder === draft.order
@@ -585,6 +697,7 @@ function reconcileModelProviderProjectionDraft(
   }
   return {
     createdProfiles: nextCreatedProfiles,
+    editedProfiles: nextEditedProfiles,
     removedProfileIds: nextRemovedProfileIds,
     activeProfile: nextActiveProfile,
     order: nextOrder,
@@ -599,7 +712,7 @@ function profileFromModelForm(
   return {
     profileId: form.profileId,
     label: form.label.trim() || form.profileId,
-    logoDataUrl: form.logoDataUrl.trim().length > 0 ? form.logoDataUrl : undefined,
+    logoDataUrl: logoDataUrlFromModelForm(form),
     providerKind,
     protocolKind: form.protocolKind || "openai_compatible_chat_completions",
     baseUrl: form.baseUrl,
@@ -607,6 +720,35 @@ function profileFromModelForm(
     defaultAiMode,
     secretConfigured: form.apiKey.length > 0 ? true : undefined,
   };
+}
+
+function profileDraftFromModelForm(
+  form: ModelForm,
+  item: ModelProviderListItem,
+  selectedSecretConfigured: boolean
+): ModelProviderProfileItem {
+  const fallback = item.profile;
+  const profileId = item.profileId || modelProviderFormId(item);
+  return {
+    profileId,
+    label: form.label.trim() || fallback?.label || item.title || profileId,
+    logoDataUrl: item.protectedBuiltin ? item.logoDataUrl : logoDataUrlFromModelForm(form),
+    providerKind: fallback?.providerKind ?? item.preset?.providerKind ?? "openai_compatible",
+    protocolKind: form.protocolKind || fallback?.protocolKind || item.protocolKind,
+    baseUrl: form.baseUrl || fallback?.baseUrl || item.baseUrl,
+    model: form.model,
+    defaultAiMode: fallback?.defaultAiMode,
+    secretConfigured: form.apiKeyCleared ? false : form.apiKey.length > 0 ? true : fallback?.secretConfigured ?? selectedSecretConfigured,
+  };
+}
+
+function logoDataUrlFromModelForm(form: ModelForm): string | undefined {
+  if (form.logoCleared) return undefined;
+  return form.logoDataUrl.trim().length > 0 ? form.logoDataUrl : undefined;
+}
+
+function modelFormForProviderItem(form: ModelForm, item: ModelProviderListItem): ModelForm {
+  return form.profileId === modelProviderFormId(item) ? form : modelFormFromProviderItem(item);
 }
 
 function upsertProfileDraft(
@@ -628,6 +770,7 @@ function removeCreatedProfileDraft(
   return {
     ...draft,
     createdProfiles: draft.createdProfiles.filter((profile) => profile.profileId !== profileId),
+    editedProfiles: draft.editedProfiles.filter((profile) => profile.profileId !== profileId),
     activeProfile: draft.activeProfile?.profileId === profileId ? undefined : draft.activeProfile,
     order: order === undefined || order.length === 0 ? undefined : order,
   };
@@ -642,37 +785,22 @@ function addProviderKey(
   return [...withoutAddedKey, nextKey];
 }
 
-function modelCapabilitiesById(
-  config: ConfigResponse | undefined,
-  profileId: string | undefined
-): ReadonlyMap<string, ModelCapabilities> {
-  const map = new Map<string, ModelCapabilities>();
-  if (profileId === undefined || profileId.trim().length === 0) {
-    return map;
-  }
-  for (const item of config?.modelCapabilityProfiles ?? []) {
-    if (item.profileId === profileId && item.model.trim().length > 0) {
-      map.set(item.model, item.capabilities);
-    }
-  }
-  const activeModel = config?.config?.model;
-  const activeCapabilities = config?.capabilities?.modelCapabilities;
-  if (
-    config?.config?.profileId === profileId &&
-    activeModel !== undefined &&
-    activeCapabilities !== undefined &&
-    !map.has(activeModel)
-  ) {
-    map.set(activeModel, activeCapabilities);
-  }
-  return map;
-}
-
 function sameProfileList(
   left: readonly ModelProviderProfileItem[],
   right: readonly ModelProviderProfileItem[]
 ): boolean {
   return left.length === right.length && left.every((profile, index) => profile === right[index]);
+}
+
+function sameProjectedProfile(left: ModelProviderProfileItem, right: ModelProviderProfileItem): boolean {
+  return left.profileId === right.profileId &&
+    left.label === right.label &&
+    left.logoDataUrl === right.logoDataUrl &&
+    left.providerKind === right.providerKind &&
+    left.protocolKind === right.protocolKind &&
+    left.baseUrl === right.baseUrl &&
+    left.model === right.model &&
+    left.defaultAiMode === right.defaultAiMode;
 }
 
 function isDefinedString(value: string | undefined): value is string {

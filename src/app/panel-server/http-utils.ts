@@ -11,11 +11,15 @@ export class PanelHttpError extends Error {
   }
 }
 
-export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+export async function readJsonBody(
+  request: IncomingMessage,
+  options: { readonly maxChars?: number } = {}
+): Promise<unknown> {
+  const maxChars = options.maxChars ?? 128_000;
   let raw = "";
   for await (const chunk of request) {
     raw += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-    if (raw.length > 128_000) {
+    if (raw.length > maxChars) {
       throw new PanelHttpError(413, "request_body_too_large", "面板请求体过大。");
     }
   }

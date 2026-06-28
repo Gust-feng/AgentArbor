@@ -21,6 +21,9 @@ test("panel server source keeps conversation restore and persistence split", asy
     runRoutes,
     requestParsers,
     runModeRouting,
+    deepRoutes,
+    deepReadModel,
+    deepModelIo,
     liveModelStream,
     runJobResponse,
     panelRunJobs,
@@ -57,6 +60,9 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-server", "run-routes.ts")),
     readAppSource(path.join("panel-server", "request-parsers.ts")),
     readAppSource(path.join("panel-server", "run-mode-routing.ts")),
+    readAppSource(path.join("panel-server", "deep-routes.ts")),
+    readAppSource(path.join("deep", "deep-read-model.ts")),
+    readAppSource(path.join("deep", "deep-model-io.ts")),
     readAppSource(path.join("panel-server", "live-model-stream.ts")),
     readAppSource(path.join("panel-server", "run-job-response.ts")),
     readAppSource("panel-run-jobs.ts"),
@@ -107,6 +113,10 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationRoutes.includes("async function handleConversationRollbackRequest"), true);
   assert.equal(conversationRoutes.includes("async function ensurePanelConversationLoaded"), true);
   assert.equal(conversationRoutes.includes("async function listPanelConversations"), true);
+  assert.equal(conversationRoutes.includes("async function workspaceFolderForConversation"), true);
+  assert.equal(conversationRoutes.includes("function workspaceFolderFromConversationContext"), true);
+  assert.equal(conversationRoutes.includes("function workspacePathFromTaskSoilInput"), true);
+  assert.equal(conversationRoutes.includes("local-project:"), true);
   assert.equal(conversationRestore.includes("export async function restorePersistedPanelConversation"), true);
   assert.equal(conversationSync.includes("export function syncConversationTurnForJob"), true);
   assert.notEqual(
@@ -143,7 +153,8 @@ test("panel server source keeps conversation restore and persistence split", asy
     assert.equal(source.includes('from "../agent-prompts/contracts.js"'), false, `${sourceName} must not import full AgentDefinition`);
     assert.equal(source.includes('from "./agent-prompts/contracts.js"'), false, `${sourceName} must not import full AgentDefinition`);
     assert.equal(source.includes("readonly agentDefinition?: AgentDefinition"), false, `${sourceName} should expose RunAgentDefinitionRef only`);
-    assert.equal(source.includes("AgentDefinition;"), false, `${sourceName} should not carry full AgentDefinition values`);
+    assert.equal(source.includes("readonly agentDefinition?: AgentDefinition;"), false, `${sourceName} should not carry full AgentDefinition values`);
+    assert.equal(source.includes("agentDefinition: AgentDefinition;"), false, `${sourceName} should not carry full AgentDefinition values`);
     assert.equal(source.includes("systemPrompt"), false, `${sourceName} must not reference prompt body fields`);
     assert.equal(source.includes("sourcePath"), false, `${sourceName} must not expose agent definition source paths`);
   }
@@ -288,6 +299,17 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationRoutes.includes("resolvePanelRouteRunMode({"), true);
   assert.equal(conversationRoutes.includes('runKind: "desktop"'), true);
   assert.equal(conversationRoutes.includes("conversation_run_mode_not_supported"), true);
+  assert.equal(deepRoutes.includes('from "../run-tool-boundary.js"'), true);
+  assert.equal(deepRoutes.includes("function deepCapabilitySnapshotWithExecutableTools"), true);
+  assert.equal(deepRoutes.includes("resolveRunToolBoundary({"), true);
+  assert.equal(deepRoutes.includes("allowedTools: toolBoundary.allowedTools"), true);
+  assert.equal(deepRoutes.includes("capabilitySnapshot: effectiveCapabilitySnapshot"), true);
+  assert.equal(deepModelIo.includes("readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot"), true);
+  assert.equal(deepModelIo.includes("不得声称没有文件、终端、工作区或底层工具"), true);
+  assert.equal(deepModelIo.includes("需要列目录、读/改文件、执行命令、查看工作区"), true);
+  assert.equal(deepReadModel.includes("function workspaceFolderForDeepConversation"), true);
+  assert.equal(deepReadModel.includes("workspaceFolderForDeepRecord(record) ??"), true);
+  assert.equal(deepReadModel.includes("workspaceFolderForDeepConversation(conversation)"), true);
   assert.equal(liveModelStream.includes("export function appendLiveModelOutputDelta"), true);
   assert.equal(runJobResponse.includes("export function createPanelRunJobResponse"), true);
   assert.equal(runJobResponse.includes("type PanelDesktopRouteReadModel"), false);
@@ -313,12 +335,13 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(panelRuntime.includes("async function preparePanelBasicRunStart"), true);
   assert.equal(panelRuntime.includes("readonly desktopAgentDefinition"), true);
   assert.equal(panelRuntime.includes("desktopAgentDefinition: agentDefinitionCatalog.desktopAgentDefinition"), true);
-  assert.equal(panelRuntime.includes("runAgentDefinitionRef(runtime.desktopAgentDefinition)"), true);
+  assert.equal(panelRuntime.includes("desktopAgentDefinitionFromConfig"), true);
   const panelRunStartPreparationSource = sourceBetween(
     panelRuntime,
     "async function preparePanelBasicRunStart",
     "function resolveSkillRoots"
   );
+  assert.equal(panelRunStartPreparationSource.includes("runtime.desktopAgentDefinition, desktopAgentConfig"), true);
   assert.equal(panelRunStartPreparationSource.includes("runtime.configCenter.getInformationAccessConfig()"), true);
   assert.equal(panelRunStartPreparationSource.includes('if (input.runKind !== "desktop")'), true);
   assert.equal(panelRunStartPreparationSource.includes("runtime.configCenter.getModelProviderConfig()"), true);
@@ -327,6 +350,10 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(panelRunStartPreparationSource.includes("aiMode: input.aiMode ?? config.defaultAiMode"), true);
   assert.equal(panelRuntime.includes('resolvePanelRunMode, type PanelRunJob'), true);
   assert.equal(panelRunStartPreparationSource.includes("resolvePanelRunMode(input.runKind, input.runMode) === \"agent\""), true);
+  assert.equal(panelRunStartPreparationSource.includes("runtime.configCenter.getDesktopAgentConfig()"), true);
+  assert.equal(panelRunStartPreparationSource.includes("const agentDefinitionRef = agentDefinition === undefined"), true);
+  assert.equal(panelRunStartPreparationSource.includes(": runAgentDefinitionRef(agentDefinition)"), true);
+  assert.equal(panelRunStartPreparationSource.includes("agentDefinitionRef,"), true);
   assert.equal(panelRunStartPreparationSource.includes('input.runMode ?? "agent"'), false);
   assert.equal(panelRuntime.includes('from "./desktop-run-model-settings.js"'), true);
   assert.equal(panelRuntime.includes('from "./desktop-run-resources.js"'), false);
@@ -373,6 +400,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecution.includes("function resolveExecutionAgentDefinition"), true);
   assert.equal(runExecution.includes("agentDefinition: resolveExecutionAgentDefinition(runtime, job)"), true);
   assert.equal(runExecution.includes("agentDefinitionRef: job.agentDefinitionRef"), true);
+  assert.equal(runExecution.includes("runtime.agentDefinitionOverrides.get(runAgentDefinitionRefCacheKey(job.agentDefinitionRef))"), true);
   assert.equal(runExecution.includes("runtime.agentDefinitions.resolve(job.agentDefinitionRef)"), true);
   assert.equal(runExecution.includes("job.agentDefinitionRef.agentId !== expectedRef.agentId"), false);
   assert.equal(runExecution.includes("completed artifact"), false);
@@ -437,10 +465,10 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopAgentExecution.includes("function assertAgentDefinitionRefMatchesDefinition"), false);
   assert.equal(desktopAgentExecution.includes("agentDefinitionRef: runAgentDefinitionRef(agentDefinition)"), false);
   assert.equal(desktopAgentExecution.includes("agentDefinitionRef,"), true);
-  assert.equal(
-    desktopAgentExecution.includes("resolveTriggeredSkillContexts(runtime, goal, resources.capabilitySnapshot.skillCatalog, {"),
-    true
-  );
+  assert.equal(desktopAgentExecution.includes("skillTriggerOptions(resources.capabilitySnapshot.skillTrigger?.mode ?? \"keyword\", context)"), true);
+  assert.equal(desktopAgentExecution.includes('routingMode: "keyword"'), true);
+  assert.equal(desktopAgentExecution.includes('routingMode: "model"'), true);
+  assert.equal(desktopAgentExecution.includes("intelligenceChannel: context.intelligenceChannel"), true);
   assert.equal(desktopAgentExecution.includes("historySummary: skillRouterHistorySummary(context.conversationHistory)"), true);
   assert.equal(desktopAgentExecution.includes("callerRef: `skill-router:${context.goalId}`"), true);
   assert.equal(desktopAgentExecution.includes("config: resources.capabilitySnapshot.activeModel"), true);

@@ -73,6 +73,7 @@ export const ARBOR_MESSAGE_TYPES = [
   "deep.child.interrupted",
   "deep.child.failed",
   "deep.parent_synthesis.completed",
+  "deep.failed",
   "deep.interrupted",
   "deep.corrected",
   "deep.stopped",

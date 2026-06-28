@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type {
   BasicAgentCapabilitySnapshot,
+  CapabilitySkillCatalogItem,
   CapabilityToolCatalogItem,
   RunAgentDefinitionRef,
   SanitizedInformationAccessConfig,
@@ -57,6 +58,97 @@ test("ordinary desktop execution keeps frozen run facts on failed agent results"
   assert.deepEqual(result.capabilityResolution?.allowedTools, []);
   assert.equal(result.canvas?.kind, "desktop_agent_canvas");
   assert.equal(result.canvas.kind === "desktop_agent_canvas" ? result.canvas.agent.status : undefined, "failed");
+});
+
+test("ordinary desktop execution does not run skill routing for unmatched input", async () => {
+  const snapshot = capabilitySnapshot({
+    skillCatalog: [
+      capabilitySkill("defuddle", {
+        name: "defuddle",
+        description: "Extract clean markdown content from web pages.",
+        triggers: ["url", "web page"],
+      }),
+    ],
+  });
+  const channel = sequenceChannel([
+    {
+      kind: "text",
+      answer: "收到 111222。",
+    },
+  ]);
+  const resources = desktopRunResources({
+    capabilitySnapshot: snapshot,
+    informationAccess: informationAccess(),
+    channel,
+  });
+
+  const result = await runOrdinaryDesktopForPanel(
+    runtime(),
+    "111222",
+    "fake",
+    undefined,
+    resources,
+    {
+      agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT),
+    }
+  );
+
+  assert.equal(result.failed, undefined);
+  assert.equal(result.completed, true);
+  assert.deepEqual(channel.requests.map((request) => request.purpose), ["desktop_agent"]);
+  assert.equal(channel.requests.some((request) => request.purpose === "skill_routing"), false);
+  assert.deepEqual(result.capabilityResolution?.enabledSkills.map((skill) => skill.id), ["defuddle"]);
+  assert.equal(
+    result.canvas?.kind === "desktop_agent_canvas"
+      ? result.canvas.agent.context?.items.some((item) => item.sourceKind === "skill")
+      : true,
+    false
+  );
+});
+
+test("ordinary desktop execution runs skill routing only when the frozen trigger mode opts in", async () => {
+  const snapshot = capabilitySnapshot({
+    skillTrigger: {
+      mode: "model",
+      label: "语义路由",
+      modelRouterEnabled: true,
+      summary: "test opt-in",
+      updatedAt: "2026-06-06T00:00:00.000Z",
+    },
+    skillCatalog: [
+      capabilitySkill("defuddle", {
+        name: "defuddle",
+        description: "Extract clean markdown content from web pages.",
+        triggers: [],
+      }),
+    ],
+  });
+  const channel = modelRouterThenTextChannel({
+    selectedSkillIds: ["defuddle"],
+    answer: "收到 111222。",
+  });
+  const resources = desktopRunResources({
+    capabilitySnapshot: snapshot,
+    informationAccess: informationAccess(),
+    channel,
+  });
+
+  const result = await runOrdinaryDesktopForPanel(
+    runtime(),
+    "111222",
+    "fake",
+    undefined,
+    resources,
+    {
+      agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT),
+    }
+  );
+
+  assert.equal(result.failed, undefined);
+  assert.equal(result.completed, true);
+  assert.deepEqual(channel.requests.map((request) => request.purpose), ["skill_routing", "desktop_agent"]);
+  assert.equal(channel.requests[0]?.toolChoice, "none");
+  assert.deepEqual(channel.requests[0]?.tools, []);
 });
 
 test("ordinary desktop execution requires a run-created agent ref", async () => {
@@ -120,6 +212,42 @@ test("ordinary desktop execution preserves the run-created agent ref after displ
   assert.equal(result.capabilityResolution?.toolVisibilityProfileId, frozenRef.toolVisibilityProfileId);
   assert.equal(result.capabilityResolution?.snapshotId, snapshot.snapshotId);
   assert.equal(JSON.stringify(result.agentDefinitionRef).includes(renamedAgent.prompt.systemPrompt), false);
+});
+
+test("ordinary desktop execution uses the frozen user-configured system prompt", async () => {
+  const customSystemPrompt = "You are the user configured Desktop Agent system prompt.";
+  const configuredAgent: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    prompt: {
+      ...DESKTOP_ROOT_AGENT.prompt,
+      promptRef: "prompt:desktop-root-agent:user-configured",
+      version: "user-test",
+      systemPrompt: customSystemPrompt,
+    },
+  };
+  const channel = sequenceChannel([{ kind: "text", answer: "已使用自定义系统提示词。" }]);
+  const resources = desktopRunResources({
+    capabilitySnapshot: capabilitySnapshot(),
+    informationAccess: informationAccess(),
+    channel,
+  });
+
+  const result = await runOrdinaryDesktopForPanel(
+    runtime(),
+    "检查系统提示词",
+    "fake",
+    undefined,
+    resources,
+    {
+      agentDefinition: configuredAgent,
+      agentDefinitionRef: runAgentDefinitionRef(configuredAgent),
+    }
+  );
+
+  assert.equal(result.completed, true);
+  assert.equal(channel.requests[0]?.sanitizedMessages[0]?.role, "system");
+  assert.equal(channel.requests[0]?.sanitizedMessages[0]?.content, customSystemPrompt);
+  assert.equal(JSON.stringify(result.agentDefinitionRef).includes(customSystemPrompt), false);
 });
 
 test("ordinary desktop execution cannot expose tools outside the frozen capability snapshot", async () => {
@@ -383,6 +511,21 @@ function capabilityTool(
   };
 }
 
+function capabilitySkill(
+  id: string,
+  overrides: Partial<CapabilitySkillCatalogItem> = {}
+): CapabilitySkillCatalogItem {
+  return {
+    id,
+    name: id,
+    description: `${id} skill`,
+    enabled: true,
+    sourcePath: `Z:/AgentArbor/.agents/skills/${id}/SKILL.md`,
+    triggers: [],
+    ...overrides,
+  };
+}
+
 function desktopRunResources(input: {
   readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
   readonly informationAccess: SanitizedInformationAccessConfig;
@@ -587,6 +730,38 @@ function sequenceChannel(
   };
 }
 
+function modelRouterThenTextChannel(input: {
+  readonly selectedSkillIds: readonly string[];
+  readonly answer: string;
+}): IntelligenceChannel & { readonly requests: ModelRequest[] } {
+  const requests: ModelRequest[] = [];
+  return {
+    requests,
+    async request(request) {
+      requests.push(request);
+      if (request.purpose === "skill_routing") {
+        return {
+          ...textResponse(request, ""),
+          responseId: `${request.requestId}-skill-routing-response`,
+          structuredOutput: {
+            selectedSkillIds: input.selectedSkillIds,
+            reasons: input.selectedSkillIds.map((skillId) => ({
+              skillId,
+              reason: "Test opt-in model route.",
+              confidence: 0.8,
+            })),
+            confidence: 0.8,
+          },
+        };
+      }
+      return textResponse(request, input.answer);
+    },
+    validateResponse(_request, response) {
+      return response.validation;
+    },
+  };
+}
+
 function failedModelResponse(request: ModelRequest, message: string): ModelResponse {
   return {
     responseId: `${request.requestId}-failed`,
@@ -621,6 +796,14 @@ function mcpToolCenter(input: {
       name: input.name,
       description: "Fake MCP lookup tool.",
       inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      modelContract: {
+        purpose: "Fake MCP lookup tool.",
+        whenToUse: ["Use this test MCP tool when the task needs the fake docs lookup."],
+        inputNotes: ["query: search text for the fake docs lookup."],
+        outputNotes: ["Returns a structured fake MCP lookup result."],
+        runtimeHints: [{ label: "scope", value: "test" }],
+        examples: [{ input: { query: "AgentArbor MCP" } }],
+      },
       metadata: {
         category: "mcp",
         riskLevel: "low",
@@ -692,6 +875,8 @@ function noToolBroker(): ToolExecutionBroker {
 
 function capabilitySnapshot(input: {
   readonly tools?: BasicAgentCapabilitySnapshot["toolCatalog"]["tools"];
+  readonly skillCatalog?: BasicAgentCapabilitySnapshot["skillCatalog"];
+  readonly skillTrigger?: BasicAgentCapabilitySnapshot["skillTrigger"];
   readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
 } = {}): BasicAgentCapabilitySnapshot {
   const activeModel = modelConfig();
@@ -717,7 +902,8 @@ function capabilitySnapshot(input: {
       tools,
       allowedTools: tools.map((tool) => tool.name),
     },
-    skillCatalog: [],
+    skillCatalog: input.skillCatalog ?? [],
+    skillTrigger: input.skillTrigger,
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: process.cwd(),

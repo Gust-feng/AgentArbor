@@ -9,8 +9,9 @@ import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
-import { resolveTriggeredSkillContexts } from "./skill-service.js";
+import { resolveTriggeredSkillContexts, type ResolveTriggeredSkillContextsOptions } from "./skill-service.js";
 import { createDesktopToolCenterFactory } from "./desktop-run-resources.js";
+import type { DesktopAgentConversationMessage, DesktopAgentSkillResolverContext } from "../desktop-agent-session-contracts.js";
 import type {
   DesktopRunResources,
   PanelRunExecutionOptions,
@@ -57,13 +58,12 @@ export async function executeOrdinaryDesktopRunForPanel(
     agentDefinition,
     conversationHistory: options.conversationHistory,
     resolveSkillContexts: (context) =>
-      resolveTriggeredSkillContexts(runtime, goal, resources.capabilitySnapshot.skillCatalog, {
-        intelligenceChannel: context.intelligenceChannel,
-        historySummary: skillRouterHistorySummary(context.conversationHistory),
-        traceId: context.traceId,
-        callerRef: `skill-router:${context.goalId}`,
-        abortSignal: context.abortSignal,
-      }),
+      resolveTriggeredSkillContexts(
+        runtime,
+        goal,
+        resources.capabilitySnapshot.skillCatalog,
+        skillTriggerOptions(resources.capabilitySnapshot.skillTrigger?.mode ?? "keyword", context)
+      ),
     modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
     capabilitySnapshot: resources.capabilitySnapshot,
     workspaceRoot: resources.workspaceRoot,
@@ -79,6 +79,47 @@ export async function executeOrdinaryDesktopRunForPanel(
     capabilitySnapshot: resources.capabilitySnapshot,
     agentDefinitionRef,
   }, options.reasoningEffort, releaseResources);
+}
+
+function skillTriggerOptions(
+  mode: "keyword" | "model",
+  context: DesktopAgentSkillResolverContext
+): ResolveTriggeredSkillContextsOptions {
+  if (mode !== "model") {
+    return {
+      routingMode: "keyword",
+      abortSignal: context.abortSignal,
+    };
+  }
+  return {
+    routingMode: "model",
+    intelligenceChannel: context.intelligenceChannel,
+    historySummary: skillRouterHistorySummary(context.conversationHistory),
+    traceId: context.traceId,
+    callerRef: `skill-router:${context.goalId}`,
+    abortSignal: context.abortSignal,
+  };
+}
+
+function skillRouterHistorySummary(
+  history: readonly DesktopAgentConversationMessage[]
+): string | undefined {
+  const recent = history.slice(-6);
+  if (recent.length === 0) {
+    return undefined;
+  }
+  const summary = recent
+    .map((message) => `${message.role}: ${compactSkillRouterHistoryText(message.content, 700)}`)
+    .join("\n");
+  return summary.length === 0 ? undefined : compactSkillRouterHistoryText(summary, 2_400);
+}
+
+function compactSkillRouterHistoryText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 /**
@@ -101,21 +142,6 @@ export async function runOrdinaryDesktopForPanel(
     resources,
     options,
   });
-}
-
-function skillRouterHistorySummary(history: readonly { readonly role: "user" | "assistant"; readonly content: string }[]): string | undefined {
-  const recent = history.slice(-6);
-  if (recent.length === 0) {
-    return undefined;
-  }
-  return recent
-    .map((message) => `${message.role}: ${safeHistorySummaryText(message.content, 260)}`)
-    .join("\n");
-}
-
-function safeHistorySummaryText(value: string, maxLength: number): string {
-  const text = value.replace(/\s+/g, " ").trim();
-  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 3))}...` : text;
 }
 
 type OrdinaryDesktopPanelFacts = {

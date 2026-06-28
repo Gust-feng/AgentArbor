@@ -32,6 +32,7 @@ export type DesktopAgentLoopPreparation = {
   readonly contextPack: BasicAgentContextPack;
   readonly turnRuntime: AgentTurnRuntime;
   readonly turnPolicy: AgentTurnPolicy;
+  readonly modelCapabilities?: ModelCapabilities;
   readonly capabilityResolution?: RunCapabilityResolution;
 };
 
@@ -108,6 +109,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     contextPack,
     turnRuntime,
     turnPolicy,
+    modelCapabilities,
     capabilityResolution: toolBoundary.capabilityResolution,
   };
 }

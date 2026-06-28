@@ -19,6 +19,8 @@ import {
   type DeepDelegationAction,
   type DeepDelegationDecision,
   type DeepExplorationReport,
+  type DeepLiveChildProjection,
+  type DeepLiveChildWorkflowItem,
   type DeepResearchBrief,
   type DeepRun,
   type DeepTaskBoardPhase,
@@ -358,6 +360,50 @@ test("DeepChildTask 含安全结构化字段且复用 DeepChildSpec/DeepChildSum
   };
   assert.equal(seed.childRunId, task.childRunId);
   assert.equal(seed.spec, sampleChildSpec);
+});
+
+test("DeepLiveChildProjection 支持协作项右侧工作流安全投影", () => {
+  const workflowItem: DeepLiveChildWorkflowItem = {
+    itemId: "workflow-1",
+    kind: "tool_waiting",
+    title: "等待确认",
+    detail: "write_file：运行 write_file",
+    status: "blocked",
+    timestamp: "2026-05-01T00:00:00.000Z",
+  };
+  const child: DeepLiveChildProjection = {
+    childRunId: "deep-child-run-0001",
+    displayName: "风险探查",
+    objective: "评估风险",
+    role: "risk",
+    status: "blocked",
+    updatedAt: "2026-05-01T00:00:00.000Z",
+    latestResult: "等待工具确认",
+    workflowItems: [workflowItem],
+    execution: {
+      modelRounds: 1,
+      toolRounds: 1,
+      segmentCount: 1,
+      latestOutcome: "blocked",
+    },
+    parentInstructions: [
+      {
+        instructionId: "instruction-1",
+        status: "queued",
+        instructionSummary: "继续补齐边界条件。",
+        requestedAt: "2026-05-01T00:00:00.000Z",
+      },
+    ],
+  };
+  assert.equal(child.workflowItems?.[0]?.kind, "tool_waiting");
+  assert.equal(child.execution?.latestOutcome, "blocked");
+  assert.equal(child.parentInstructions?.[0]?.status, "queued");
+
+  const forbiddenRaw = ["rawPrompt", "rawResponse", "toolOutput", "stdout", "stderr"];
+  const keys = Object.keys(child).join(" ").toLowerCase();
+  for (const key of forbiddenRaw) {
+    assert.equal(keys.includes(key.toLowerCase()), false);
+  }
 });
 
 test("DeepTaskBoardSnapshot 含 runId/phase/tasks/updatedAt 且 phase 九态完备", () => {

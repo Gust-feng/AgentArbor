@@ -25,12 +25,17 @@ import {
 } from "./basic-agent-runtime/builtin-tool-runtime.js";
 import { normalizeWorkspaceDirectory } from "./config-center/workspace-settings.js";
 import type { ToolCatalogItem } from "./basic-agent-runtime/tool-registry.js";
-import { discoverSkills, parseSkillMarkdown, type SkillRootInput } from "./skills/skill-loader.js";
+import { discoverSkills, normalizeSkillRoots, parseSkillMarkdown, type SkillRootInput } from "./skills/skill-loader.js";
 import type { SkillStateStore } from "./skills/skill-state-store.js";
+
+export type CapabilitySkillRootsInput = {
+  readonly workspaceDirectory?: string;
+};
 
 export type CapabilityCenterOptions = {
   readonly configCenter: ConfigCenter;
   readonly skillRoots: readonly SkillRootInput[];
+  readonly resolveSkillRoots?: (input: CapabilitySkillRootsInput) => readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly fetch?: ToolRegistryFetchLike;
   readonly playwrightAvailable?: boolean;
@@ -41,30 +46,38 @@ export type CapabilityCenterSnapshotInput = {
 };
 
 export class CapabilityCenter {
-  private skillsPromise?: Promise<readonly SkillDefinition[]>;
+  private skillsPromises = new Map<string, Promise<readonly SkillDefinition[]>>();
   private snapshotPromise?: Promise<BasicAgentCapabilitySnapshot>;
 
   constructor(private readonly options: CapabilityCenterOptions) {}
 
   invalidate(): void {
-    this.skillsPromise = undefined;
+    this.skillsPromises.clear();
     this.snapshotPromise = undefined;
   }
 
-  async listSkills(): Promise<readonly SkillDefinition[]> {
-    if (this.skillsPromise === undefined) {
+  async listSkills(input: CapabilitySkillRootsInput = {}): Promise<readonly SkillDefinition[]> {
+    const effectiveInput = await this.effectiveSkillRootInput(input);
+    const roots = this.skillRootsFor(effectiveInput);
+    const cacheKey = skillRootCacheKey(roots);
+    const existing = this.skillsPromises.get(cacheKey);
+    if (existing !== undefined) {
+      return existing;
+    }
+    {
       const current = discoverSkills({
-        roots: this.options.skillRoots,
+        roots,
         stateStore: this.options.skillStateStore,
       });
-      this.skillsPromise = current.catch((error) => {
-        if (this.skillsPromise === current) {
-          this.skillsPromise = undefined;
+      const cached = current.catch((error) => {
+        if (this.skillsPromises.get(cacheKey) === cached) {
+          this.skillsPromises.delete(cacheKey);
         }
         throw error;
       });
+      this.skillsPromises.set(cacheKey, cached);
     }
-    return this.skillsPromise;
+    return this.skillsPromises.get(cacheKey)!;
   }
 
   async snapshot(input: CapabilityCenterSnapshotInput = {}): Promise<BasicAgentCapabilitySnapshot> {
@@ -84,16 +97,16 @@ export class CapabilityCenter {
   }
 
   private async buildSnapshot(input: CapabilityCenterSnapshotInput = {}): Promise<BasicAgentCapabilitySnapshot> {
-    const [activeModel, overrides, toolStates, toolConfirmation, configuredWorkspace, mcpServers, commandShell, env, skills] = await Promise.all([
+    const [activeModel, overrides, toolStates, toolConfirmation, skillTrigger, configuredWorkspace, mcpServers, commandShell, env] = await Promise.all([
       this.options.configCenter.getModelProviderConfig(),
       this.options.configCenter.listModelCapabilityOverrides(),
       this.options.configCenter.listToolStates(),
       this.options.configCenter.getToolConfirmationConfig(),
+      this.options.configCenter.getSkillTriggerConfig(),
       this.options.configCenter.getWorkspaceConfig(),
       this.options.configCenter.listMcpServers(),
       this.options.configCenter.getCommandShellConfig(),
       this.options.configCenter.createModelRuntimeEnvironment(),
-      this.listSkills(),
     ]);
     const workspace = input.workspaceDirectory === undefined
       ? configuredWorkspace
@@ -102,6 +115,7 @@ export class CapabilityCenter {
           workspaceDirectory: await normalizeWorkspaceDirectory(input.workspaceDirectory),
           updatedAt: nowIso(),
     };
+    const skills = await this.listSkills({ workspaceDirectory: workspace.workspaceDirectory });
     const connectableMcpServers = mcpServers.filter(isMcpServerConnectable);
     const cachedMcpServers = connectableMcpServers.filter(hasUsableMcpToolCache);
     const mcpToolProvider = cachedMcpServers.length === 0
@@ -152,6 +166,7 @@ export class CapabilityCenter {
         allowedTools: allAllowedTools,
       },
       skillCatalog,
+      skillTrigger,
       mcpCatalog: mcpServers.map((server): CapabilityMcpCatalogItem =>
         mcpCatalogItemForServer(server, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
       ),
@@ -162,6 +177,22 @@ export class CapabilityCenter {
       warnings,
     };
   }
+
+  private async effectiveSkillRootInput(input: CapabilitySkillRootsInput): Promise<CapabilitySkillRootsInput> {
+    if (input.workspaceDirectory !== undefined || this.options.resolveSkillRoots === undefined) {
+      return input;
+    }
+    const workspace = await this.options.configCenter.getWorkspaceConfig();
+    return { workspaceDirectory: workspace.workspaceDirectory };
+  }
+
+  private skillRootsFor(input: CapabilitySkillRootsInput): readonly SkillRootInput[] {
+    return this.options.resolveSkillRoots?.(input) ?? this.options.skillRoots;
+  }
+}
+
+function skillRootCacheKey(roots: readonly SkillRootInput[]): string {
+  return JSON.stringify(normalizeSkillRoots(roots));
 }
 
 async function projectSkillCatalogItem(skill: SkillDefinition): Promise<CapabilitySkillCatalogItem> {

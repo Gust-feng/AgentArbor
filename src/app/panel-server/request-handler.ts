@@ -39,6 +39,7 @@ import {
 import { handlePanelRunRoute } from "./run-routes.js";
 import { handlePanelDeepRoute } from "./deep-routes.js";
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
+import { handlePanelAppUpdateRoute } from "./app-update-routes.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 export async function startLocalPanelServer(options: PanelServerOptions = {}): Promise<StartedPanelServer> {
@@ -130,6 +131,10 @@ async function handlePanelRequest(
 
   // /api/deep/* —— deep 产品 API 端点族（T3-1/T3-2/T3-3）。前缀明确，置于分发链靠前。
   if (await handlePanelDeepRoute(runtime, request, response, url)) {
+    return;
+  }
+
+  if (await handlePanelAppUpdateRoute(runtime, request, response, url)) {
     return;
   }
 

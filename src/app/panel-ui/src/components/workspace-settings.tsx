@@ -5,7 +5,6 @@ import { CommandShellSelection } from "./command-shell-selection";
 import { RuntimeEnvironmentSettings } from "./runtime-environment-settings";
 import { SettingRow } from "./workspace-common";
 
-
 export function WorkspaceSettings(props: {
   readonly commandShell?: CommandShellConfig;
   readonly workspaceDirectory: string;
@@ -47,12 +46,12 @@ export function WorkspaceSettings(props: {
   return (
     <div className="workspace-settings-stack">
       <section className="settings-card">
-        <h3>工作目录</h3>
-        <SettingRow label="文件夹">
+        <h3>默认文件夹</h3>
+        <SettingRow label="路径">
           <div className="workspace-directory-field">
             <input
               value={props.workspaceDirectory}
-              placeholder="未选择时使用默认目录"
+              placeholder="留空使用默认文件夹"
               spellCheck={false}
               autoComplete="off"
               autoCorrect="off"

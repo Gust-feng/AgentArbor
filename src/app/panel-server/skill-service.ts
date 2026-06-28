@@ -53,6 +53,7 @@ export type ResolveTriggeredSkillContextsOptions = {
   readonly intelligenceChannel?: IntelligenceChannel;
   readonly historySummary?: string;
   readonly limit?: number;
+  readonly routingMode?: "keyword" | "model";
   readonly requestId?: string;
   readonly traceId?: string;
   readonly callerRef?: string;
@@ -150,7 +151,8 @@ async function resolveSkillSelection(
   options: ResolveTriggeredSkillContextsOptions
 ): Promise<ResolvedSkillSelection> {
   const limit = options.limit ?? 4;
-  if (options.intelligenceChannel === undefined) {
+  const routingMode = options.routingMode ?? "keyword";
+  if (routingMode !== "model" || options.intelligenceChannel === undefined) {
     const keywordSelection = selectSkillsForGoal(goal, skills, { strategy: "keyword", limit });
     return {
       selectedSkills: keywordSelection.selectedSkills,

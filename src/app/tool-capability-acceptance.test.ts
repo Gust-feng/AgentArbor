@@ -41,6 +41,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       "list_context_attachments",
       "read_context_attachment_text",
       "read_context_attachment_pdf_text",
+      "read_context_attachment_image",
       "inspect_context_attachment_table",
       "read_context_attachment_table",
       "inspect_context_attachment_archive",

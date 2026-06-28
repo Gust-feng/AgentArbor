@@ -3,6 +3,7 @@ import test from "node:test";
 import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
 import {
   BUILTIN_MODEL_DEFINITIONS,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
   PROTOCOL_BASELINE_MODEL_CAPABILITIES,
   hasModelCapabilityOverride,
   resolveModelCapabilities,
@@ -141,12 +142,13 @@ test("model capability override can still close protocol tool support", () => {
   assert.equal(resolved.supportsParallelToolCalls, false);
 });
 
-test("all built-in model definitions support vision input by default", () => {
-  const nonVisionDefinitions = BUILTIN_MODEL_DEFINITIONS
-    .filter((definition) => definition.capabilities.supportsVisionInput !== true)
+test("all built-in model definitions declare positive context windows", () => {
+  const invalidDefinitions = BUILTIN_MODEL_DEFINITIONS
+    .filter((definition) => definition.capabilities.contextWindowTokens <= 0)
     .map((definition) => definition.label);
 
-  assert.deepEqual(nonVisionDefinitions, []);
+  assert.deepEqual(invalidDefinitions, []);
+  assert.equal(PROTOCOL_BASELINE_MODEL_CAPABILITIES.contextWindowTokens, DEFAULT_CONTEXT_WINDOW_TOKENS);
 });
 
 test("model capability registry resolves current OpenAI-compatible model families", () => {
@@ -183,8 +185,64 @@ test("model capability registry enables tools for current DeepSeek V4 OpenAI-com
   assert.equal(capabilities.supportsToolCalling, true);
   assert.equal(capabilities.supportsParallelToolCalls, false);
   assert.equal(capabilities.supportsStructuredOutputs, true);
-  assert.equal(capabilities.supportsVisionInput, true);
+  assert.equal(capabilities.supportsVisionInput, false);
   assert.equal(capabilities.preferredApiStyle, "openai_compatible");
+});
+
+test("model capability registry resolves native Anthropic and Gemini context and vision metadata", () => {
+  const claude = resolveModelCapabilities({
+    profile: profile("claude-fable-5", {
+      profileId: "claude",
+      label: "Anthropic",
+      providerKind: "anthropic",
+      protocolKind: "anthropic_messages",
+      baseUrl: "https://api.anthropic.com",
+    }),
+  });
+  const gemini = resolveModelCapabilities({
+    profile: profile("gemini-3.5-flash", {
+      profileId: "gemini",
+      label: "Google Gemini",
+      providerKind: "gemini",
+      protocolKind: "gemini_generate_content",
+      baseUrl: "https://generativelanguage.googleapis.com",
+    }),
+  });
+
+  assert.equal(claude.contextWindowTokens, 1_000_000);
+  assert.equal(claude.supportsVisionInput, true);
+  assert.equal(claude.supportsToolCalling, false);
+  assert.equal(claude.protocolProfileId, "anthropic");
+  assert.equal(gemini.contextWindowTokens, 1_048_576);
+  assert.equal(gemini.maxOutputTokens, 65_536);
+  assert.equal(gemini.supportsVisionInput, true);
+  assert.equal(gemini.supportsToolCalling, false);
+  assert.equal(gemini.protocolProfileId, "gemini");
+});
+
+test("model capability registry resolves legacy DeepSeek context windows explicitly", () => {
+  const chat = resolveModelCapabilities({
+    profile: profile("deepseek-chat", {
+      profileId: "deepseek",
+      label: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+    }),
+  });
+  const reasoner = resolveModelCapabilities({
+    profile: profile("deepseek-reasoner", {
+      profileId: "deepseek",
+      label: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+    }),
+  });
+
+  assert.equal(chat.contextWindowTokens, 64_000);
+  assert.equal(chat.maxOutputTokens, 8_000);
+  assert.equal(chat.supportsVisionInput, false);
+  assert.equal(reasoner.contextWindowTokens, 64_000);
+  assert.equal(reasoner.maxOutputTokens, 64_000);
+  assert.equal(reasoner.supportsToolCalling, false);
+  assert.equal(reasoner.supportsReasoningOutput, true);
 });
 
 test("model capability registry does not infer provider ownership from shared model ids", () => {
@@ -248,6 +306,9 @@ test("model capability registry keeps provider-specific reasoning controls conse
   assert.equal(kimi.supportsReasoningEffort, false);
   assert.equal(kimi.supportsReasoningOutput, true);
   assert.equal(kimi.supportsStreaming, true);
+  assert.equal(kimi.contextWindowTokens, 256_000);
+  assert.equal(kimi.maxOutputTokens, 32_768);
+  assert.equal(kimi.supportsVisionInput, true);
   assert.equal(glm.reasoningControl, "thinking_disabled");
   assert.equal(glm.supportsReasoningEffort, false);
   assert.equal(glm.supportsReasoningOutput, false);
@@ -256,15 +317,15 @@ test("model capability registry keeps provider-specific reasoning controls conse
   assert.equal(glm51.supportsReasoningEffort, false);
   assert.equal(glm51.supportsReasoningOutput, true);
   assert.equal(glm51.supportsStreaming, true);
-  assert.equal(glm51.supportsVisionInput, true);
+  assert.equal(glm51.supportsVisionInput, false);
   assert.equal(minimax.reasoningControl, "reasoning_split");
   assert.equal(minimax.supportsReasoningEffort, false);
   assert.equal(minimax.supportsReasoningOutput, true);
   assert.equal(minimax.supportsStreaming, true);
-  assert.equal(minimax.supportsVisionInput, true);
+  assert.equal(minimax.supportsVisionInput, false);
 });
 
-test("model capability registry enables vision for both MiniMax-M2 and MiniMax-M3", () => {
+test("model capability registry keeps MiniMax M2 and M3 multimodal metadata separate", () => {
   const minimaxM2 = resolveModelCapabilities({
     profile: profile("MiniMax-M2", {
       profileId: "minimax",
@@ -280,9 +341,12 @@ test("model capability registry enables vision for both MiniMax-M2 and MiniMax-M
     }),
   });
 
-  assert.equal(minimaxM2.supportsVisionInput, true);
+  assert.equal(minimaxM2.contextWindowTokens, 204_800);
+  assert.equal(minimaxM2.maxOutputTokens, 204_800);
+  assert.equal(minimaxM2.supportsVisionInput, false);
   assert.equal(minimaxM3.protocolProfileId, "minimax");
   assert.equal(minimaxM3.contextWindowTokens, 1_000_000);
+  assert.equal(minimaxM3.maxOutputTokens, 524_288);
   assert.equal(minimaxM3.supportsVisionInput, true);
   assert.equal(minimaxM3.preferredApiStyle, "chat_completions");
 });
@@ -407,6 +471,43 @@ test("model capability registry scopes overrides to the selected profile before 
   assert.equal(first.contextWindowTokens, 64_000);
   assert.equal(second.supportsToolCalling, false);
   assert.equal(second.contextWindowTokens, 8_000);
+});
+
+test("model capability registry merges profile context fallback with provider-level model overrides", () => {
+  const selectedProfile = profile("shared-route-model", {
+    profileId: "custom-a",
+    label: "Custom A",
+    baseUrl: "https://a.example/v1",
+  });
+  const resolved = resolveModelCapabilities({
+    profile: selectedProfile,
+    overrides: [
+      {
+        providerKind: "openai_compatible" as const,
+        model: "shared-route-model",
+        capabilities: {
+          supportsToolCalling: false,
+          supportsVisionInput: false,
+          maxOutputTokens: 12_000,
+        },
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+      {
+        profileId: "custom-a",
+        providerKind: "openai_compatible" as const,
+        model: "shared-route-model",
+        capabilities: {
+          contextWindowTokens: 128_000,
+        },
+        updatedAt: "2026-06-20T00:01:00.000Z",
+      },
+    ],
+  });
+
+  assert.equal(resolved.contextWindowTokens, 128_000);
+  assert.equal(resolved.maxOutputTokens, 12_000);
+  assert.equal(resolved.supportsToolCalling, false);
+  assert.equal(resolved.supportsVisionInput, false);
 });
 
 test("model capability registry does not let stale profile overrides cross provider kinds", () => {

@@ -1,4 +1,4 @@
-import type { ChildAgentRunParentInstruction } from "../../domain/underground/agent-fabric.js";
+import type { ChildAgentRun, ChildAgentRunParentInstruction } from "../../domain/underground/agent-fabric.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { WorkspaceFolderSummary } from "../workspace-folder-summary.js";
 import { workspaceFolderSummaryFromPath } from "../workspace-folder-summary.js";
@@ -6,7 +6,10 @@ import { safeAgentRunTreeRef } from "../underground-events.js";
 import type {
   DeepConversation,
   DeepFollowUpContext,
+  DeepLiveChildExecutionProjection,
   DeepLiveChildParentOperationProjection,
+  DeepLiveChildParentInstructionProjection,
+  DeepLiveChildWorkflowItem,
   DeepLiveProjection,
   DeepRunStatus,
 } from "./contracts.js";
@@ -77,6 +80,10 @@ function workspaceFolderForDeepRecord(record: DeepRunRecord): WorkspaceFolderSum
   return workspaceFolderSummaryFromPath(workspaceDirectoryFromDeepRunRecord(record));
 }
 
+function workspaceFolderForDeepConversation(conversation: DeepConversation | undefined): WorkspaceFolderSummary | undefined {
+  return workspaceFolderSummaryFromPath(conversation?.birthWorkspaceDirectory);
+}
+
 export function workspaceDirectoryFromDeepRunRecord(record: DeepRunRecord): string | undefined {
   return record.run.capabilitySnapshot?.workspace.workspaceDirectory;
 }
@@ -115,6 +122,8 @@ export function projectDeepRunView(
   record: DeepRunRecord,
   conversation?: DeepConversation,
 ): Record<string, unknown> {
+  const workspaceFolder = workspaceFolderForDeepRecord(record) ??
+    workspaceFolderForDeepConversation(conversation);
   return {
     run: {
       runId: record.run.runId,
@@ -128,7 +137,7 @@ export function projectDeepRunView(
       runMode: record.run.isolation.runMode,
       startedAt: record.run.startedAt,
       updatedAt: record.run.updatedAt,
-      workspaceFolder: workspaceFolderForDeepRecord(record),
+      workspaceFolder,
     },
     agentRunTree: safeAgentRunTreeRef(record.agentRunTree),
     report: record.report,
@@ -151,8 +160,14 @@ export function fallbackLiveProjectionForRecord(record: DeepRunRecord): DeepLive
         role: summary.spec.role,
         status: summary.status,
         summary: summary.summary,
+        latestResult: summary.summary,
         confidence: summary.confidence,
         uncertainty: summary.uncertainty,
+        workflowItems: childRun === undefined
+          ? fallbackWorkflowItemsForSummary(summary.childRunId, summary.spec.objective, summary.summary, updatedAt)
+          : fallbackWorkflowItemsForChildRun(childRun, summary.summary, updatedAt),
+        execution: childRun === undefined ? undefined : fallbackExecutionFromChildRun(childRun),
+        parentInstructions: childRun === undefined ? undefined : fallbackParentInstructionsFromChildRun(childRun),
         parentOperation: liveParentOperationFromInstruction(childRun?.parentInstructions?.at(-1)),
         updatedAt,
       };
@@ -185,6 +200,157 @@ export function fallbackLiveProjectionForRecord(record: DeepRunRecord): DeepLive
     conclusion,
     updatedAt,
   };
+}
+
+function fallbackWorkflowItemsForSummary(
+  childRunId: string,
+  objective: string,
+  summary: string,
+  updatedAt: string,
+): readonly DeepLiveChildWorkflowItem[] {
+  return [
+    {
+      itemId: `objective:${childRunId}`,
+      kind: "objective_set",
+      title: "目标已明确",
+      detail: objective,
+      status: "completed",
+      timestamp: updatedAt,
+    },
+    {
+      itemId: `status:${childRunId}:completed`,
+      kind: "completed",
+      title: "结果已返回",
+      detail: summary,
+      status: "completed",
+      timestamp: updatedAt,
+    },
+  ];
+}
+
+function fallbackWorkflowItemsForChildRun(
+  childRun: ChildAgentRun,
+  summary: string,
+  updatedAt: string,
+): readonly DeepLiveChildWorkflowItem[] {
+  const items: DeepLiveChildWorkflowItem[] = [
+    {
+      itemId: `objective:${childRun.childRunId}`,
+      kind: "objective_set",
+      title: "目标已明确",
+      detail: childRun.spec.instructions?.objective,
+      status: "completed",
+      timestamp: childRun.startedAt,
+    },
+  ];
+  for (const instruction of childRun.parentInstructions ?? []) {
+    const timestamp = instruction.executedAt ?? instruction.cancelledAt ?? instruction.queuedAt ?? instruction.requestedAt;
+    items.push({
+      itemId: `parent-instruction:${childRun.childRunId}:${instruction.instructionId}`,
+      kind: instruction.status === "queued" ? "parent_message_queued" : "parent_message_applied",
+      title: instruction.status === "queued" ? "已追加要求" : instruction.status === "cancelled" ? "跟进已取消" : "已跟进",
+      detail: instruction.instructionSummary,
+      status: instruction.status === "queued" ? "pending" : instruction.status === "cancelled" ? "cancelled" : "completed",
+      timestamp,
+    });
+  }
+  for (const [index, segment] of (childRun.executionHistory ?? []).entries()) {
+    for (const [callIndex, call] of segment.toolCalls.entries()) {
+      items.push({
+        itemId: `tool:${childRun.childRunId}:${index}:${call.callId || callIndex}`,
+        kind: call.status === "approval_required" ? "tool_waiting" : "tool_completed",
+        title: call.status === "approval_required" ? "等待工具确认" : "工具调用完成",
+        detail: `${call.toolName}：${call.status}`,
+        status: call.status === "approval_required"
+          ? "blocked"
+          : call.status === "completed"
+            ? "completed"
+            : call.status === "cancelled"
+              ? "cancelled"
+              : "failed",
+        timestamp: segment.recordedAt,
+      });
+    }
+    items.push({
+      itemId: `segment:${childRun.childRunId}:${index}`,
+      kind: segment.outcome === "completed" ? "completed" : segment.outcome,
+      title: segment.outcome === "completed" ? "阶段结果已返回" : "执行未完成",
+      detail: `模型 ${segment.modelRounds} 轮，工具 ${segment.toolRounds} 轮`,
+      status: segment.outcome,
+      timestamp: segment.recordedAt,
+    });
+  }
+  if (childRun.pendingApproval !== undefined) {
+    items.push({
+      itemId: `tool-waiting:${childRun.childRunId}:${childRun.pendingApproval.confirmationId}`,
+      kind: "tool_waiting",
+      title: "等待确认",
+      detail: `${childRun.pendingApproval.toolName}：${childRun.pendingApproval.actionSummary}`,
+      status: "blocked",
+      timestamp: childRun.pendingApproval.requestedAt,
+    });
+  }
+  items.push({
+    itemId: `status:${childRun.childRunId}:${childRun.status}`,
+    kind: childRun.status === "blocked" || childRun.status === "failed" || childRun.status === "interrupted"
+      ? childRun.status
+      : "completed",
+    title: childRun.status === "completed" ? "结果已返回" : childRun.status === "blocked" ? "等待处理" : "未完成",
+    detail: childRun.failureReason ?? summary,
+    status: childRun.status === "resumed" || childRun.status === "planned" || childRun.status === "running"
+      ? "running"
+      : childRun.status,
+    timestamp: childRun.completedAt ?? updatedAt,
+  });
+  return mergeWorkflowItems(items);
+}
+
+function fallbackExecutionFromChildRun(
+  childRun: ChildAgentRun,
+): DeepLiveChildExecutionProjection | undefined {
+  const history = childRun.executionHistory ?? [];
+  const latest = history.at(-1);
+  const execution = latest ?? childRun.execution;
+  if (execution === undefined) {
+    return undefined;
+  }
+  return {
+    modelRounds: execution.modelRounds,
+    toolRounds: execution.toolRounds,
+    segmentCount: history.length === 0 ? 1 : history.length,
+    latestOutcome: latest?.outcome,
+  };
+}
+
+function fallbackParentInstructionsFromChildRun(
+  childRun: ChildAgentRun,
+): readonly DeepLiveChildParentInstructionProjection[] | undefined {
+  if (childRun.parentInstructions === undefined || childRun.parentInstructions.length === 0) {
+    return undefined;
+  }
+  return childRun.parentInstructions.map((instruction) => ({
+    instructionId: instruction.instructionId,
+    status: instruction.status,
+    instructionSummary: instruction.instructionSummary,
+    requestedAt: instruction.requestedAt,
+    review: instruction.review === undefined
+      ? undefined
+      : {
+          decision: instruction.review.decision,
+          reason: instruction.review.reason,
+          confidence: instruction.review.confidence,
+        },
+  }));
+}
+
+function mergeWorkflowItems(
+  items: readonly DeepLiveChildWorkflowItem[],
+): readonly DeepLiveChildWorkflowItem[] {
+  const byId = new Map<string, DeepLiveChildWorkflowItem>();
+  for (const item of items) {
+    byId.set(item.itemId, item);
+  }
+  return [...byId.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
 export function liveParentOperationFromInstruction(

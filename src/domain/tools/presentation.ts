@@ -71,6 +71,10 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayName: "读取附件 PDF 文本",
     displayDescription: "按附件引用从文本型 PDF 中尽力抽取正文，不处理 OCR。",
   },
+  read_context_attachment_image: {
+    displayName: "读取附件图片",
+    displayDescription: "按附件引用把图片作为本轮模型视觉输入读取。",
+  },
   inspect_context_attachment_table: {
     displayName: "检查附件表格",
     displayDescription: "按附件引用识别 CSV/TSV/XLSX 表格列、行数、sheet 和样例行。",

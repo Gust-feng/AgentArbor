@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ArborMessage, ArborMessageType } from "../../domain/common.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
-import { createToolFailedMessage } from "../../kernel/intelligence/tool-events.js";
+import { createToolCompletedMessage, createToolFailedMessage } from "../../kernel/intelligence/tool-events.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import { createPanelRunTranscript } from "../panel-run-read-model.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
@@ -766,6 +766,87 @@ test("runtime record mapper preserves projected failure facts from real tool.fai
   assert.deepEqual(call?.errorFacts?.args, ["missing"]);
   assert.equal(call?.envelope?.errorDomain, "process_error");
   assert.equal(call?.envelope?.errorFacts?.command, "pnpm");
+});
+
+test("runtime record mapper omits ephemeral tool model attachments", () => {
+  const attachmentData = "BASE64_IMAGE_SENTINEL";
+  const result: ToolCallResult = {
+    callId: "tool-read-image",
+    toolName: "read_context_attachment_image",
+    input: { attachmentId: "ctx-image" },
+    output: {
+      action: "read_context_attachment_image",
+      status: "completed",
+      result: {
+        attachmentId: "ctx-image",
+        mimeType: "image/png",
+        bytes: 12,
+        readable: true,
+        modelInput: { attached: true, detail: "auto" },
+      },
+    },
+    status: "completed",
+    durationMs: 5,
+    projection: {
+      agentContent: {
+        summary: "image metadata returned",
+        attachmentId: "ctx-image",
+        modelInput: { attached: true, detail: "auto" },
+      },
+      modelAttachments: [{
+        kind: "image",
+        attachmentId: "ctx-image",
+        inputRef: "local-file:C:/secret/screenshot.png",
+        filename: "screenshot.png",
+        detail: "auto",
+        byteLength: 12,
+        source: { kind: "data", mimeType: "image/png", data: attachmentData },
+      }],
+      uiSummary: "Image attached for model input.",
+      display: {
+        kind: "generic_tool_summary",
+        action: "read_context_attachment_image",
+        summary: "Image attached for model input.",
+      },
+      truncated: false,
+      redacted: false,
+    },
+  };
+  const message = createToolCompletedMessage({
+    result,
+    context: {
+      callerAgentId: "agent-test",
+      traceId: "trace-runtime-records",
+      goalId: "goal-test",
+    },
+  });
+  const eventEntries: readonly EventLogEntry[] = [
+    {
+      sequence: 1,
+      type: message.type,
+      message,
+      recordedAt: "2026-05-31T00:00:01.000Z",
+    },
+  ];
+  const transcript = createPanelRunTranscript({
+    runId: "run-1",
+    status: "completed",
+    eventEntries,
+    desktopMode: "agent",
+    createdAt: "2026-05-31T00:00:00.000Z",
+    updatedAt: "2026-05-31T00:00:10.000Z",
+  });
+  const toolCalls = toRuntimeToolCallRecords("run-1", transcript.events, eventEntries);
+  const serialized = JSON.stringify({ payload: message.payload, events: transcript.events, toolCalls });
+  const call = toolCalls.find((item) => item.callId === "tool-read-image");
+
+  assert.equal(call?.toolName, "read_context_attachment_image");
+  assert.equal(call?.display?.kind, "generic_tool_summary");
+  assert.equal(serialized.includes("Image attached for model input."), true);
+  assert.equal(serialized.includes("BASE64_IMAGE_SENTINEL"), false);
+  assert.equal(serialized.includes("modelAttachments"), false);
+  assert.equal(serialized.includes("local-file:"), false);
+  assert.equal(serialized.includes("C:/secret/screenshot.png"), false);
 });
 
 test("runtime record mapper persists completed read provider failure facts", () => {

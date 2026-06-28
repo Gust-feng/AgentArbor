@@ -244,10 +244,17 @@ html[data-style="glass"] {
       transparent 74%
     ),
     linear-gradient(180deg, color-mix(in oklch, white 18%, var(--bg)), color-mix(in oklch, var(--shadow-ink) 4%, var(--bg)));
-  --composer-bg: var(--liquid-glass-bg-strong);
-  --composer-border: var(--liquid-glass-border);
+  --composer-bg:
+    linear-gradient(180deg, color-mix(in oklch, white 48%, transparent), color-mix(in oklch, white 12%, transparent) 46%, transparent 100%),
+    radial-gradient(120% 140% at 12% 0%, color-mix(in oklch, white 26%, transparent), transparent 54%),
+    color-mix(in oklch, var(--surface) 54%, var(--glass-shell-tone-strong));
+  --composer-border: color-mix(in oklch, white 34%, var(--border));
   --composer-radius: var(--radius-xl);
-  --composer-shadow: var(--liquid-glass-shadow-raised);
+  --composer-shadow:
+    0 2px 4px color-mix(in oklch, var(--shadow-ink) 7%, transparent),
+    0 18px 46px color-mix(in oklch, var(--shadow-ink) 10%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 72%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--shadow-ink) 6%, transparent);
   --composer-backdrop-filter: var(--glass-backdrop-filter);
   --message-user-bg:
     linear-gradient(180deg, color-mix(in oklch, white 20%, transparent), transparent 58%),
@@ -596,10 +603,8 @@ html[data-style="glass"] .sidebar-new-button.active .sidebar-icon-slot {
 /* -------------------------------------------------------------------------- */
 
 html[data-style="glass"] .chat-input-floating {
-  border-top: 1px solid color-mix(in oklch, white 18%, var(--border));
-  background:
-    linear-gradient(180deg, transparent, color-mix(in oklch, var(--bg) 32%, transparent) 42%, color-mix(in oklch, var(--bg) 58%, transparent));
-  padding: var(--space-3) 72px var(--space-4);
+  border-top-color: transparent;
+  background: transparent;
 }
 
 html[data-style="glass"] .chat-empty-heading {
@@ -618,10 +623,10 @@ html[data-style="glass"] .chat-input-card {
 }
 
 html[data-style="glass"] .chat-input-card.focused {
-  border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+  border-color: color-mix(in oklch, var(--accent) 28%, white);
   box-shadow:
     var(--composer-shadow),
-    0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
+    0 0 0 3px color-mix(in oklch, var(--accent) 13%, transparent);
 }
 
 html[data-style="glass"] .chat-input-card::before {
@@ -656,7 +661,7 @@ html[data-style="glass"] .chat-input-floating .chat-input-textarea {
 }
 
 html[data-style="glass"] .chat-input-toolbar {
-  border-top-color: color-mix(in oklch, white 16%, var(--border));
+  border-top-color: color-mix(in oklch, white 18%, var(--border));
   margin-inline: var(--space-3);
 }
 

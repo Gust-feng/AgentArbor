@@ -55,9 +55,10 @@ html[data-style="default"] {
   --composer-border: color-mix(in oklch, var(--border) 88%, var(--fg));
   --composer-radius: var(--radius-xl);
   --composer-shadow:
-    0 1px 2px color-mix(in oklch, var(--shadow-ink) 4%, transparent),
-    0 12px 30px color-mix(in oklch, var(--shadow-ink) 7%, transparent),
-    inset 0 1px 0 color-mix(in oklch, white 46%, transparent);
+    0 2px 3px color-mix(in oklch, var(--shadow-ink) 7%, transparent),
+    0 18px 42px color-mix(in oklch, var(--shadow-ink) 9%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 62%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--shadow-ink) 5%, transparent);
   --composer-backdrop-filter: none;
   --popover-bg: var(--surface-overlay);
   --popover-border: color-mix(in oklch, var(--border) 88%, transparent);
@@ -455,24 +456,27 @@ html[data-style="default"] .system-error-line {
 }
 
 html[data-style="default"] .chat-input-floating {
-  border-top: 1px solid color-mix(in oklch, var(--border) 82%, transparent);
-  background:
-    linear-gradient(180deg, transparent, color-mix(in oklch, var(--bg) 78%, transparent) 40%, var(--bg));
+  border-top-color: transparent;
+  background: transparent;
 }
 
 html[data-style="default"] .chat-input-card {
+  border-color: color-mix(in oklch, var(--border) 88%, var(--fg));
+  border-radius: var(--composer-radius);
   background:
-    linear-gradient(180deg, color-mix(in oklch, var(--surface-highlight) 34%, transparent), transparent 28%),
-    var(--composer-bg);
+    linear-gradient(180deg, color-mix(in oklch, white 68%, var(--surface)) 0%, var(--surface) 46%, color-mix(in oklch, var(--surface-subtle) 34%, var(--surface)) 100%);
   box-shadow: var(--composer-shadow);
 }
 
 html[data-style="default"] .chat-input-card.focused {
-  border-color: color-mix(in oklch, var(--accent) 34%, var(--border));
+  border-color: color-mix(in oklch, var(--accent) 36%, var(--border));
+  box-shadow:
+    var(--composer-shadow),
+    0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
 }
 
 html[data-style="default"] .chat-input-toolbar {
-  border-top-color: color-mix(in oklch, var(--border) 86%, transparent);
+  border-top-color: color-mix(in oklch, var(--border) 84%, transparent);
 }
 
 html[data-style="default"] .attachment-pill {

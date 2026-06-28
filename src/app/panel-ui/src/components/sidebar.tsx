@@ -1,5 +1,7 @@
 import React from "react";
 import {
+  ChevronDown,
+  ChevronUp,
   Check,
   EllipsisVertical,
   Folder,
@@ -14,6 +16,8 @@ import {
 import { compact } from "../text";
 import type { ConversationSummary } from "../contracts/conversation";
 import type { DeepRunStatus, DeepRunSummary } from "../contracts/deep";
+
+const DEFAULT_FOLDER_CONVERSATION_LIMIT = 5;
 
 export type Screen = "chat-empty" | "chat-active";
 
@@ -37,13 +41,16 @@ export function Sidebar(props: {
   const [editingConversationId, setEditingConversationId] = React.useState<string | undefined>();
   const [editingTitle, setEditingTitle] = React.useState("");
   const [openMenuConversationId, setOpenMenuConversationId] = React.useState<string | undefined>();
+  const [expandedConversationGroupKeys, setExpandedConversationGroupKeys] = React.useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const newTaskActive = props.agentClusterActive
     ? props.currentScreen === "chat-empty" && props.activeDeepRunId === undefined
     : props.currentScreen === "chat-empty" && props.activeConversationId === undefined;
   const pendingConversations = props.conversations.filter(isConversationWaitingForUser);
   const visibleConversations = [...props.conversations].sort(
     compareSidebarConversations
-  ).slice(0, 24);
+  );
   const pinnedConversations = visibleConversations.filter((conversation) => conversation.pinnedAt !== undefined);
   const recentConversations = visibleConversations.filter((conversation) => conversation.pinnedAt === undefined);
   const recentConversationGroups = groupSidebarItemsByWorkspaceFolder(
@@ -131,6 +138,18 @@ export function Sidebar(props: {
     props.onDelete(conversation.conversationId);
   }
 
+  function toggleConversationGroupExpanded(groupKey: string): void {
+    setExpandedConversationGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  }
+
   return (
     <aside
       className="app-sidebar"
@@ -213,10 +232,13 @@ export function Sidebar(props: {
               {recentConversationGroups.map((group) => (
                 <ConversationGroup
                   key={group.key}
+                  groupKey={group.key}
                   title={group.label}
                   titlePath={group.path}
                   folderHeading
                   conversations={group.items}
+                  defaultVisibleCount={DEFAULT_FOLDER_CONVERSATION_LIMIT}
+                  expanded={expandedConversationGroupKeys.has(group.key)}
                   activeConversationId={props.activeConversationId}
                   collapsed={props.collapsed}
                   editingConversationId={editingConversationId}
@@ -231,6 +253,7 @@ export function Sidebar(props: {
                   onMenuToggle={toggleMenu}
                   onTogglePinned={togglePinned}
                   onDelete={deleteConversation}
+                  onToggleExpanded={toggleConversationGroupExpanded}
                 />
               ))}
             </>
@@ -342,11 +365,14 @@ function SidebarFolderHeading(props: {
 }
 
 function ConversationGroup(props: {
+  readonly groupKey?: string;
   readonly title: string;
   readonly titlePath?: string;
   readonly folderHeading?: boolean;
   readonly hideTitle?: boolean;
   readonly conversations: readonly ConversationSummary[];
+  readonly defaultVisibleCount?: number;
+  readonly expanded?: boolean;
   readonly activeConversationId?: string;
   readonly collapsed: boolean;
   readonly editingConversationId?: string;
@@ -361,10 +387,19 @@ function ConversationGroup(props: {
   readonly onMenuToggle: (conversationId: string) => void;
   readonly onTogglePinned: (conversation: ConversationSummary) => void;
   readonly onDelete: (conversation: ConversationSummary) => void;
+  readonly onToggleExpanded?: (groupKey: string) => void;
 }): React.ReactElement | null {
   if (props.conversations.length === 0) {
     return null;
   }
+  const defaultVisibleCount = props.defaultVisibleCount ?? props.conversations.length;
+  const canExpand = props.groupKey !== undefined
+    && props.onToggleExpanded !== undefined
+    && props.conversations.length > defaultVisibleCount;
+  const visibleConversations = canExpand && !props.expanded
+    ? props.conversations.slice(0, defaultVisibleCount)
+    : props.conversations;
+  const hiddenCount = props.conversations.length - visibleConversations.length;
   return (
     <div className="sidebar-conversation-group">
       {!props.hideTitle && (
@@ -376,7 +411,7 @@ function ConversationGroup(props: {
               </div>
             )
       )}
-      {props.conversations.map((conversation) => (
+      {visibleConversations.map((conversation) => (
         <ConversationListItem
           key={conversation.conversationId}
           conversation={conversation}
@@ -396,6 +431,22 @@ function ConversationGroup(props: {
           onDelete={props.onDelete}
         />
       ))}
+      {canExpand && (
+        <button
+          type="button"
+          className="sidebar-folder-more-button"
+          aria-expanded={props.expanded === true}
+          tabIndex={props.collapsed ? -1 : 0}
+          onClick={() => {
+            if (props.groupKey !== undefined) {
+              props.onToggleExpanded?.(props.groupKey);
+            }
+          }}
+        >
+          {props.expanded === true ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+          <span>{props.expanded === true ? "收起" : `展开 ${hiddenCount} 个`}</span>
+        </button>
+      )}
     </div>
   );
 }

@@ -560,6 +560,42 @@ html[data-desktop-shell="true"] .app-window-control {
   margin-bottom: var(--space-3);
 }
 
+.sidebar-folder-more-button {
+  display: inline-flex;
+  min-width: 0;
+  width: fit-content;
+  max-width: calc(100% - 16px);
+  align-items: center;
+  gap: 5px;
+  margin: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: transparent;
+  color: color-mix(in oklch, var(--fg) 54%, var(--bg));
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.sidebar-folder-more-button svg {
+  flex: 0 0 auto;
+}
+
+.sidebar-folder-more-button span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-folder-more-button:hover,
+.sidebar-folder-more-button:focus-visible {
+  background: color-mix(in oklch, var(--fg) 6%, transparent);
+  color: var(--fg);
+}
+
 .sidebar-recent-item {
   position: relative;
   display: grid;

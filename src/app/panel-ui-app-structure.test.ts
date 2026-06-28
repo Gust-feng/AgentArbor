@@ -589,6 +589,11 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(sidebar.includes("SidebarFolderHeading"), true);
   assert.equal(sidebar.includes("workspaceFolder"), true);
   assert.equal(sidebar.includes("未归类"), true);
+  assert.equal(sidebar.includes("DEFAULT_FOLDER_CONVERSATION_LIMIT = 5"), true);
+  assert.equal(sidebar.includes("expandedConversationGroupKeys"), true);
+  assert.equal(sidebar.includes("defaultVisibleCount={DEFAULT_FOLDER_CONVERSATION_LIMIT}"), true);
+  assert.equal(sidebar.includes("props.conversations.slice(0, defaultVisibleCount)"), true);
+  assert.equal(sidebar.includes("sidebar-folder-more-button"), true);
   assert.equal(sidebar.includes("createPortal"), false);
   assert.equal(sidebar.includes("MoreHorizontal"), false);
   assert.equal(sidebar.includes("PencilLine"), false);
@@ -660,6 +665,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(shellStyles.includes(".sidebar-deep-run-status"), true);
   assert.equal(shellStyles.includes(".sidebar-deep-run-copy"), true);
   assert.equal(shellStyles.includes(".sidebar-folder-heading"), true);
+  assert.equal(shellStyles.includes(".sidebar-folder-more-button"), true);
   assert.equal(deepStyles.includes(".multi-agent-workspace"), true);
   assert.equal(deepStyles.includes(".multi-agent-missionbar"), true);
   assert.equal(deepStyles.includes(".multi-agent-body"), true);

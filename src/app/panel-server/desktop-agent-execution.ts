@@ -69,6 +69,7 @@ export async function executeOrdinaryDesktopRunForPanel(
     workspaceRoot: resources.workspaceRoot,
     toolConfirmationPolicy: options.toolConfirmationPolicy,
     platform: process.platform,
+    subAgentRoots: runtime.subAgentRoots,
     abortSignal: options.abortSignal,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,

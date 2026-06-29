@@ -500,6 +500,7 @@ function capabilitySnapshot(
     },
     toolCatalog: overrides.toolCatalog ?? { scope: "desktop-basic", tools: [], allowedTools: [] },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: overrides.mcpCatalog ?? [],
     workspace: {
       workspaceDirectory: process.cwd(),

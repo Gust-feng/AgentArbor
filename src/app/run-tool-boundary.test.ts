@@ -196,6 +196,7 @@ function capabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]): BasicA
       allowedTools: tools.filter((item) => item.enabled && item.availability === "available").map((item) => item.name),
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:/AgentArbor",

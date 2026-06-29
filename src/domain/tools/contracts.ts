@@ -396,4 +396,5 @@ export interface ToolExecutionBroker {
   ): Promise<ToolCallResult>;
   resetCallCount(): void;
   getCallCount(): number;
+  register?(executor: ToolExecutor): void;
 }

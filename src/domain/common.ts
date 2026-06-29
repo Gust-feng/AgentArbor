@@ -115,6 +115,10 @@ export const ARBOR_MESSAGE_TYPES = [
   "governance.review.requested",
   "governance.review.completed",
   "error.raised",
+  "sub_agent.started",
+  "sub_agent.completed",
+  "sub_agent_batch.started",
+  "sub_agent_batch.completed",
 ] as const;
 
 export type ArborMessageType = (typeof ARBOR_MESSAGE_TYPES)[number];

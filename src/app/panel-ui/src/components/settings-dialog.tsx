@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
+  Bot,
   CheckCircle2,
   ChartColumn,
   CloudCog,
@@ -26,12 +27,14 @@ import type {
 } from "../contracts/config";
 import type { AppUpdateInfo, AppUpdateStatus } from "../contracts/app-update";
 import type { SkillDefinition } from "../contracts/skills";
+import type { SubAgentDefinition } from "../contracts/sub-agents";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { AppearanceSettings } from "./appearance-settings";
 import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-settings";
 import { ModelSettings } from "./model-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { SkillSettings } from "./skill-settings";
+import { SubAgentSettings } from "./sub-agent-settings";
 import { UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
 import { WorkspaceSettings } from "./workspace-settings";
 
@@ -68,6 +71,7 @@ export function SettingsDialog(props: {
   readonly onRevealModelApiKey: (profileId: string) => Promise<string | undefined>;
   readonly modelCatalogs?: Readonly<Record<string, ModelProviderModelCatalog>>;
   readonly skills: readonly SkillDefinition[];
+  readonly subAgents: readonly SubAgentDefinition[];
   readonly onSaveWorkspace: (workspaceDirectory?: string) => void;
   readonly onSelectWorkspaceDirectory: () => void;
   readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
@@ -90,6 +94,7 @@ export function SettingsDialog(props: {
   readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
   readonly onCheckAppUpdate: () => Promise<void> | void;
   readonly onRefreshSkills: () => void;
+  readonly onRefreshSubAgents: () => void;
   readonly onUpdateSkill: (skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean) => void;
 }): React.ReactElement | null {
   const [activeGroup, setActiveGroup] = useState<SettingsGroup>("models");
@@ -216,6 +221,13 @@ export function SettingsDialog(props: {
                 onUpdateSkill={props.onUpdateSkill}
               />
             )}
+            {activeGroup === "subAgents" && (
+              <SubAgentSettings
+                subAgents={props.subAgents}
+                refreshing={props.savingTools}
+                onRefresh={props.onRefreshSubAgents}
+              />
+            )}
             {activeGroup === "workspace" && (
               <WorkspaceSettings
                 commandShell={props.config?.commandShell}
@@ -248,6 +260,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "basicCapabilities", label: "基础能力", icon: <SlidersHorizontal size={15} /> },
   { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
+  { id: "subAgents", label: "子 Agent", icon: <Bot size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },

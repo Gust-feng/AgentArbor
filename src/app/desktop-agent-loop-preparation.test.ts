@@ -81,6 +81,7 @@ function capabilitySnapshot(modelCapabilities: ModelCapabilities): BasicAgentCap
       allowedTools: [],
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: process.cwd(),

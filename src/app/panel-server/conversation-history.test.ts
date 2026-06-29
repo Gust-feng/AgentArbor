@@ -232,6 +232,7 @@ function capabilitySnapshot(): BasicAgentCapabilitySnapshot {
       tools: [],
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: process.cwd(),

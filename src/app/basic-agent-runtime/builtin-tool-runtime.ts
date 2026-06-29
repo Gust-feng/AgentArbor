@@ -6,7 +6,9 @@ import type {
 } from "../../domain/config/index.js";
 import type { InformationSourceKind } from "../../domain/research/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
+import type { ToolCategory, ToolDefinition, ToolExecutor } from "../../domain/tools/index.js";
+import { getSubAgentToolDefinitions } from "../sub-agents/sub-agent-tools.js";
+import type { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
 import {
   createBrowserSnapshotTool,
 } from "../tool-center/adapters/browser-tool.js";
@@ -72,6 +74,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly includeSkillResourceToolCatalog?: boolean;
   readonly taskSoil?: TaskSoil;
   readonly modelCapabilities?: ModelCapabilities;
+  readonly subAgentRegistry?: SubAgentRegistry;
 };
 
 export type ToolRegistryFetchLike = (
@@ -170,6 +173,25 @@ export function createDesktopBasicToolRegistry(
       registry.register({
         executor,
         scopes: ["mcp"],
+        enabledByDefault: true,
+      });
+    }
+  }
+  if (options.subAgentRegistry !== undefined) {
+    const subAgentToolDefs = getSubAgentToolDefinitions({ includeSpawnTool: true });
+    for (const definition of subAgentToolDefs) {
+      if (toolCatalogNames !== undefined && !toolCatalogNames.has(definition.name)) {
+        continue;
+      }
+      const stubExecutor: ToolExecutor = {
+        definition,
+        execute: async () => {
+          throw new Error("Sub-agent tools not initialized in current runtime context.");
+        },
+      };
+      registry.register({
+        executor: stubExecutor,
+        scopes: ["desktop-basic"],
         enabledByDefault: true,
       });
     }

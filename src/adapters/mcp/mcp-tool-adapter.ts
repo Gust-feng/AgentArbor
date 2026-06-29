@@ -81,6 +81,7 @@ function createMcpToolDefinition(
 ): ToolExecutor["definition"] {
   const namespacedName = `${serverId}__${tool.name}`;
   const inputSchema = toolInputSchema(tool);
+  const compactDescription = compactMcpToolDescription(tool, serverId);
   const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, {
     serverId,
     toolName: tool.name,
@@ -88,13 +89,14 @@ function createMcpToolDefinition(
   }) as ToolDefinitionMetadata;
   return {
     name: namespacedName,
-    description: tool.description ?? tool.title ?? `MCP tool: ${tool.name} from ${serverId}`,
+    description: compactDescription,
     inputSchema,
     modelContract: createMcpToolModelContract({
       serverId,
       tool,
       inputSchema,
       metadata,
+      compactDescription,
     }),
     metadata,
   };
@@ -116,6 +118,7 @@ function createMcpToolModelContract(input: {
   readonly tool: McpToolInfo;
   readonly inputSchema: ToolInputSchema;
   readonly metadata: ToolDefinitionMetadata;
+  readonly compactDescription: string;
 }): ToolModelContract {
   const propertyNames = Object.keys(input.inputSchema.properties);
   const required = new Set(input.inputSchema.required ?? []);
@@ -132,7 +135,7 @@ function createMcpToolModelContract(input: {
       : "Additional fields may be accepted only if the MCP server supports them.",
   ].filter(isString);
   return {
-    purpose: input.tool.description?.trim() ?? input.tool.title?.trim() ?? `Call MCP tool ${input.tool.name} on server ${input.serverId}.`,
+    purpose: input.compactDescription,
     whenToUse: [
       `Use when the task needs the ${input.tool.name} capability exposed by MCP server ${input.serverId}.`,
       "Use only for the operation described by the MCP tool description and input schema.",
@@ -163,6 +166,53 @@ function createMcpToolModelContract(input: {
       },
     ],
   };
+}
+
+function compactMcpToolDescription(tool: McpToolInfo, serverId: string): string {
+  const primary = compactTextBlock(tool.description);
+  if (primary !== undefined) {
+    return primary;
+  }
+  const title = compactTextBlock(tool.title);
+  if (title !== undefined) {
+    return title;
+  }
+  return `Call MCP tool ${tool.name} on server ${serverId}.`;
+}
+
+function compactTextBlock(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = value
+    .replace(/\r\n/g, "\n")
+    .split(/\n\s*\n/u)[0]
+    ?.replace(/\s+/g, " ")
+    .trim();
+  if (normalized === undefined || normalized.length === 0) {
+    return undefined;
+  }
+  const limitedSentences = firstSentences(normalized, 2);
+  return truncateAtWordBoundary(limitedSentences, 220);
+}
+
+function firstSentences(value: string, limit: number): string {
+  const matches = value.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/gu) ?? [];
+  const selected = matches
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .slice(0, limit);
+  return selected.length === 0 ? value : selected.join(" ");
+}
+
+function truncateAtWordBoundary(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  const slice = value.slice(0, maxChars - 1).trimEnd();
+  const cutoff = slice.lastIndexOf(" ");
+  const trimmed = (cutoff >= 80 ? slice.slice(0, cutoff) : slice).trimEnd();
+  return `${trimmed}\u2026`;
 }
 
 function extractTextContent(content: readonly McpContentPart[]): string {

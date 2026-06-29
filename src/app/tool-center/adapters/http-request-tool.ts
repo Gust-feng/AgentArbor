@@ -97,18 +97,18 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
   return {
     definition: {
       name: "http_request",
-      description: "Send a bounded HTTP or HTTPS request and return status, headers, response body, duration, and truncation state.",
+      description: "Send a bounded stateless HTTP or HTTPS request and return status, headers, response body, duration, and truncation state.",
       modelContract: {
-        purpose: "Send a direct HTTP or HTTPS request for API inspection, local dev server checks, and simple endpoint debugging.",
+        purpose: "Send a stateless HTTP or HTTPS request for API inspection, local dev server checks, and simple endpoint debugging.",
         whenToUse: [
           "Use for JSON or text API endpoints when raw HTTP status, headers, and body are needed.",
           "Use for local development servers or external HTTP resources that do not require browser rendering.",
           "Use HEAD when only status and headers are needed.",
         ],
         whenNotToUse: [
-          "Do not use for OAuth flows, cookie-jar sessions, file uploads, file downloads, or browser-only pages.",
+          "Do not use for rendered page inspection, logged-in browser sessions, OAuth flows, or browser-only pages; use browser_snapshot when the current rendered page text matters.",
           "Do not use for non-HTTP URLs.",
-          "Do not use when a rendered page snapshot is needed; use browser_snapshot if available.",
+          "Do not use for file uploads or file downloads.",
         ],
         inputNotes: [
           "url is required and must use http or https.",
@@ -130,9 +130,9 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
           "result.durationMs is measured inside the HTTP tool and may differ slightly from the outer tool event duration.",
         ],
         runtimeHints: [
+          { label: "session state", value: "no OAuth flow, no cookie jar, no upload or download handling" },
           { label: "default timeoutMs", value: String(DEFAULT_TIMEOUT_MS) },
           { label: "max body chars", value: String(maxBodyChars) },
-          { label: "session state", value: "no OAuth flow, no cookie jar, no upload or download handling" },
         ],
         examples: [
           { title: "GET JSON", input: { url: "https://api.example.test/status" } },

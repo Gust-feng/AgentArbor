@@ -35,6 +35,7 @@ import {
 } from "../tool-center/adapters/local-workspace-command-tools.js";
 import {
   createReadSkillResourceTool,
+  hasReadableSelectedSkillResources,
 } from "../tool-center/adapters/skill-resource-tool.js";
 import {
   createLocalWorkspaceSandboxPolicy,
@@ -110,8 +111,9 @@ export function createDesktopBasicToolRegistry(
   const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
   const commandShell = options.commandShell ?? createDefaultCommandShellConfig(process.platform, env);
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
+  const includeLegacyRunCommand = options.toolCatalogNames?.includes("run_command") === true;
   const skillResourceTool =
-    options.includeSkillResourceToolCatalog || hasLoadedSkillResources(options.skillContexts ?? [])
+    options.includeSkillResourceToolCatalog || hasReadableSelectedSkillResources(options.skillContexts ?? [])
       ? [createReadSkillResourceTool(options.skillContexts ?? [])]
       : [];
   const executors: readonly ToolExecutor[] = [
@@ -125,7 +127,9 @@ export function createDesktopBasicToolRegistry(
     createLocalEditFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
-    createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
+    ...(includeLegacyRunCommand
+      ? [createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry })]
+      : []),
     ...createContextAttachmentTools({
       taskSoil: options.taskSoil,
       workspaceRoot,
@@ -197,31 +201,6 @@ function toolScopeFor(category: ToolCategory | undefined): ToolRegistryScope {
     return "workspace";
   }
   return "desktop-basic";
-}
-
-function hasLoadedSkillResources(skillContexts: readonly DesktopAgentSkillContext[]): boolean {
-  return skillContexts.some((context) => {
-    if ((context.loadStatus ?? "loaded") !== "loaded" || context.omitted === true) {
-      return false;
-    }
-    return hasDiscoveredResourceIndex(context.skill.resourceIndex) ||
-      hasFrozenCatalogResources(context.skill.resources);
-  });
-}
-
-function hasDiscoveredResourceIndex(
-  resources: DesktopAgentSkillContext["skill"]["resourceIndex"] | undefined
-): boolean {
-  return (resources ?? []).some((resource) => resource.exists === true);
-}
-
-function hasFrozenCatalogResources(
-  resources: DesktopAgentSkillContext["skill"]["resources"] | undefined
-): boolean {
-  return (resources ?? []).some((resource) =>
-    resource.loadError === undefined &&
-    (resource.kind === "reference" || resource.kind === "asset" || resource.kind === "script")
-  );
 }
 
 function parseInformationSourcePreference(value: string | undefined): readonly InformationSourceKind[] | undefined {

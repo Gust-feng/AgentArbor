@@ -5,6 +5,7 @@ import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 import { createRunCapabilityPlan } from "./model-capability-registry.js";
+import { hasReadableSelectedSkillResources } from "./tool-center/adapters/skill-resource-tool.js";
 
 export type ResolveRunToolBoundaryInput = {
   readonly agentDefinition: AgentDefinition;
@@ -35,16 +36,22 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
     modelCapabilities: input.modelCapabilities ?? input.snapshot.modelCapabilities,
   });
   const capabilityResolution = addSelectedSkillToolDeclarationWarnings(
-    restrictRunCapabilityResolutionToExecutableTools(
-      resolveRunCapabilities({
-        snapshot: input.snapshot,
-        goal: input.goal,
-        agentDefinition: input.agentDefinition,
-        taskSoil: input.taskSoil,
-        platform: input.platform,
-        capabilityPlan,
-      }),
-      input.toolCenter
+    reconcileRunCapabilityResolutionForSelectedSkillResources(
+      restrictRunCapabilityResolutionToExecutableTools(
+        resolveRunCapabilities({
+          snapshot: input.snapshot,
+          goal: input.goal,
+          agentDefinition: input.agentDefinition,
+          taskSoil: input.taskSoil,
+          platform: input.platform,
+          capabilityPlan,
+        }),
+        input.toolCenter
+      ),
+      {
+        toolCenter: input.toolCenter,
+        skillContexts: input.skillContexts ?? [],
+      }
     ),
     input.skillContexts ?? []
   );
@@ -85,6 +92,50 @@ export function restrictRunCapabilityResolutionToExecutableTools(
   const toolExposures = resolution.toolExposures.map((tool) =>
       tool.modelVisible && !executableTools.has(tool.name)
         ? { ...tool, modelVisible: false, reason: "工具执行器当前未提供该工具。" }
+        : tool
+    );
+  return capabilityResolutionWithVisibleTools({ resolution, allowedTools, toolExposures, warnings });
+}
+
+export function reconcileRunCapabilityResolutionForSelectedSkillResources(
+  resolution: RunCapabilityResolution,
+  input: {
+    readonly toolCenter?: ToolExecutionBroker;
+    readonly skillContexts: readonly DesktopAgentSkillContext[];
+  }
+): RunCapabilityResolution {
+  const selectedSkillResources = hasReadableSelectedSkillResources(input.skillContexts);
+  const readSkillResourceExecutable = input.toolCenter?.has("read_skill_resource") === true;
+  const exposure = resolution.toolExposures.find((tool) => tool.name === "read_skill_resource");
+  if (exposure === undefined) {
+    return resolution;
+  }
+  if (selectedSkillResources && readSkillResourceExecutable && exposure.reason === "不在本轮可用范围内。") {
+    const allowedTools = [...resolution.allowedTools, "read_skill_resource"];
+    const toolExposures = resolution.toolExposures.map((tool) =>
+        tool.name === "read_skill_resource"
+          ? { ...tool, modelVisible: true, reason: "当前已选中技能提供可读资源。" }
+          : tool
+      );
+    const warnings = capabilityWarningsAfterSkillResourceRestriction({
+      warnings: resolution.warnings,
+      hiddenSkillResourceTool: false,
+      noModelVisibleTools: false,
+    });
+    return capabilityResolutionWithVisibleTools({ resolution, allowedTools, toolExposures, warnings });
+  }
+  if (selectedSkillResources || exposure.reason !== "不在本轮可用范围内。" && !exposure.modelVisible) {
+    return resolution;
+  }
+  const allowedTools = resolution.allowedTools.filter((toolName) => toolName !== "read_skill_resource");
+  const warnings = capabilityWarningsAfterSkillResourceRestriction({
+    warnings: resolution.warnings,
+    hiddenSkillResourceTool: exposure.modelVisible || exposure.reason === "不在本轮可用范围内。",
+    noModelVisibleTools: allowedTools.length === 0,
+  });
+  const toolExposures = resolution.toolExposures.map((tool) =>
+      tool.name === "read_skill_resource"
+        ? { ...tool, modelVisible: false, reason: "当前没有已选中且可读的技能资源。" }
         : tool
     );
   return capabilityResolutionWithVisibleTools({ resolution, allowedTools, toolExposures, warnings });
@@ -138,6 +189,11 @@ function capabilityResolutionWithVisibleTools(input: {
   readonly toolExposures: RunCapabilityResolution["toolExposures"];
   readonly warnings: readonly string[];
 }): RunCapabilityResolution {
+  const warnings = normalizeCapabilityWarnings({
+    warnings: input.warnings,
+    allowedTools: input.allowedTools,
+    toolExposures: input.toolExposures,
+  });
   const visibleTools = input.toolExposures.filter((tool) => tool.modelVisible);
   const visibleToolNames = visibleTools.map((tool) => tool.name);
   return {
@@ -169,10 +225,10 @@ function capabilityResolutionWithVisibleTools(input: {
         visibleToolNames,
       },
       allowedTools: input.allowedTools,
-      warnings: input.warnings,
+      warnings,
     },
     toolExposures: input.toolExposures,
-    warnings: input.warnings,
+    warnings,
   };
 }
 
@@ -198,6 +254,41 @@ function capabilityWarningsAfterSkillToolDeclarations(input: {
   const next = [...input.warnings];
   if (input.unavailableDeclaredToolCount > 0 && !next.some((warning) => warning.includes("声明了当前运行不可用工具"))) {
     next.push(`选中技能声明了 ${input.unavailableDeclaredToolCount} 个当前运行不可用工具。`);
+  }
+  return next;
+}
+
+function capabilityWarningsAfterSkillResourceRestriction(input: {
+  readonly warnings: readonly string[];
+  readonly hiddenSkillResourceTool: boolean;
+  readonly noModelVisibleTools: boolean;
+}): readonly string[] {
+  const next = input.warnings.filter((warning) =>
+    warning !== "当前没有已选中且可读的技能资源，已隐藏 read_skill_resource。"
+  );
+  if (
+    input.hiddenSkillResourceTool &&
+    !next.includes("当前没有已选中且可读的技能资源，已隐藏 read_skill_resource。")
+  ) {
+    next.push("当前没有已选中且可读的技能资源，已隐藏 read_skill_resource。");
+  }
+  return next;
+}
+
+function normalizeCapabilityWarnings(input: {
+  readonly warnings: readonly string[];
+  readonly allowedTools: readonly string[];
+  readonly toolExposures: RunCapabilityResolution["toolExposures"];
+}): readonly string[] {
+  const next = input.warnings.filter((warning) =>
+    warning !== "本轮没有可用工具。" && !/^已隐藏 \d+ 个不可用工具。$/u.test(warning)
+  );
+  if (input.allowedTools.length === 0) {
+    next.push("本轮没有可用工具。");
+  }
+  const hiddenCount = input.toolExposures.filter((tool) => tool.enabled && !tool.modelVisible).length;
+  if (hiddenCount > 0) {
+    next.push(`已隐藏 ${hiddenCount} 个不可用工具。`);
   }
   return next;
 }

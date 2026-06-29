@@ -161,7 +161,105 @@ test("run tool boundary ignores failed or omitted skill contexts for tool restri
   assert.deepEqual(boundary.allowedTools, ["search", "read_file"]);
 });
 
-function capabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]): BasicAgentCapabilitySnapshot {
+test("run tool boundary hides read_skill_resource when no selected skill resource is readable", () => {
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot([
+      tool("search", "read-only"),
+      tool("read_skill_resource", "read-only"),
+    ]),
+    goal: "use skill resources",
+    taskSoil: createTaskSoil({ rawGoal: "use skill resources" }),
+    toolCenter: executableToolBroker(["search", "read_skill_resource"]),
+    skillContexts: [skillContext("repo-review")],
+  });
+
+  assert.deepEqual(boundary.allowedTools, ["search"]);
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_skill_resource")?.modelVisible,
+    false
+  );
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_skill_resource")?.reason,
+    "当前没有已选中且可读的技能资源。"
+  );
+  assert.equal(
+    boundary.capabilityResolution?.warnings.includes("当前没有已选中且可读的技能资源，已隐藏 read_skill_resource。"),
+    true
+  );
+});
+
+test("run tool boundary keeps read_skill_resource when selected skills expose readable resources", () => {
+  const selectedSkill = skillContext("repo-review");
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot([
+      tool("search", "read-only"),
+      tool("read_skill_resource", "read-only"),
+    ]),
+    goal: "use skill resources",
+    taskSoil: createTaskSoil({ rawGoal: "use skill resources" }),
+    toolCenter: executableToolBroker(["search", "read_skill_resource"]),
+    skillContexts: [{
+      ...selectedSkill,
+      skill: {
+        ...selectedSkill.skill,
+        resourceIndex: [{
+          type: "reference",
+          relativePath: "references/checklist.md",
+          exists: true,
+          contentHash: "sha256:checklist",
+        }],
+      },
+    }],
+  });
+
+  assert.deepEqual(boundary.allowedTools, ["search", "read_skill_resource"]);
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_skill_resource")?.modelVisible,
+    true
+  );
+});
+
+test("run tool boundary can activate latent read_skill_resource after skill selection", () => {
+  const selectedSkill = skillContext("repo-review");
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot(
+      [
+        tool("search", "read-only"),
+        tool("read_skill_resource", "read-only"),
+      ],
+      ["search"]
+    ),
+    goal: "use selected skill resources",
+    taskSoil: createTaskSoil({ rawGoal: "use selected skill resources" }),
+    toolCenter: executableToolBroker(["search", "read_skill_resource"]),
+    skillContexts: [{
+      ...selectedSkill,
+      skill: {
+        ...selectedSkill.skill,
+        resourceIndex: [{
+          type: "reference",
+          relativePath: "references/checklist.md",
+          exists: true,
+        }],
+      },
+    }],
+  });
+
+  assert.deepEqual(boundary.allowedTools, ["search", "read_skill_resource"]);
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_skill_resource")?.reason,
+    "当前已选中技能提供可读资源。"
+  );
+  assert.equal(boundary.capabilityResolution?.warnings.includes("已隐藏 1 个不可用工具。"), false);
+});
+
+function capabilitySnapshot(
+  tools: readonly CapabilityToolCatalogItem[],
+  allowedTools: readonly string[] = tools.filter((item) => item.enabled && item.availability === "available").map((item) => item.name)
+): BasicAgentCapabilitySnapshot {
   return {
     snapshotId: "capability-snapshot-tool-boundary-test",
     createdAt: "2026-06-08T00:00:00.000Z",
@@ -193,7 +291,7 @@ function capabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]): BasicA
     toolCatalog: {
       scope: "desktop-basic",
       tools,
-      allowedTools: tools.filter((item) => item.enabled && item.availability === "available").map((item) => item.name),
+      allowedTools,
     },
     skillCatalog: [],
     mcpCatalog: [],
@@ -237,7 +335,11 @@ function tool(
   overrides: Partial<CapabilityToolCatalogItem> = {}
 ): CapabilityToolCatalogItem {
   const metadata = {
-    category: operationType === "execute" ? "terminal" as const : "workspace" as const,
+    category: name === "read_skill_resource"
+      ? "other" as const
+      : operationType === "execute"
+        ? "terminal" as const
+        : "workspace" as const,
     riskLevel: operationType === "read-only" ? "low" as const : "high" as const,
     operationType,
     requiresConfirmation: operationType !== "read-only",

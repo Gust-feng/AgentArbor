@@ -296,7 +296,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
     description: [
       "Run a real workspace command in the current integrated shell.",
       shellUsageSentence(commandShell),
-      "Use commandLine for normal shell-native command execution, including mkdir, copy, move, delete, package manager, build, test, git, HTTP, and binary-file workflows.",
+      "Use commandLine for normal shell-native command execution, including mkdir, copy, move, delete, package manager, build, test, git, and binary-file workflows.",
       "Use command plus args when you want direct argv execution without shell parsing.",
     ].join(" "),
     metadata: {
@@ -324,12 +324,11 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
     modelContract: {
       purpose: "Run a real command in the current workspace shell and return stdout, stderr, exitCode, and shell metadata.",
       whenToUse: [
-        "Use as the general-purpose workspace command tool for shell-native workflows.",
-        "Use for creating directories, copying or moving files, removing directories, package managers, tests, builds, git, environment probes, HTTP requests, and binary-file operations.",
+        "Use as the general-purpose workspace command tool for shell-native workflows such as builds, tests, git, package managers, environment probes, directory creation, file moves, and binary-file operations.",
         "Use when a normal CLI command is the direct way to do the task.",
       ],
       whenNotToUse: [
-        "Do not use for simple text file reads, directory listings, text search, or exact text edits when the dedicated workspace tool is simpler.",
+        "Do not use when read_file, list_dir, grep_files, edit_file, http_request, or browser_snapshot is the clearer direct fit.",
       ],
       inputNotes: [
         "commandLine is the normal complete shell command line.",

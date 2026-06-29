@@ -212,7 +212,10 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.modelCapabilities.supportsToolCalling, true);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("shell_command"), false);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("browser_snapshot"), false);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("read_skill_resource"), false);
     assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "unavailable");
+    assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "read_skill_resource")?.displayName, "读取技能资源");
+    assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "read_skill_resource")?.enabled, true);
     assert.deepEqual(snapshot.skillCatalog.map((skill) => `${skill.name}:${skill.enabled}`), [
       "disabled-skill:false",
       "invalid-skill:false",

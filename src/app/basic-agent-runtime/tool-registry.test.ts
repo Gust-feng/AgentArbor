@@ -36,18 +36,15 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "shell_command",
     "write_file",
   ]);
-  assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.requiresConfirmation, true);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.requiresConfirmation, true);
-  assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.visibleResultPolicy.omitRawOutput, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "write_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "create_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "edit_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.fileOperation, "delete");
   assert.equal(catalog.tools.find((tool) => tool.name === "write_file")?.fileOperation, undefined);
-  assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.operationType, "execute");
-  assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.enabledByDefault, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.enabledByDefault, true);
+  assert.equal(catalog.tools.some((tool) => tool.name === "run_command"), false);
   assert.equal(registry.createToolCenter("desktop-basic").has("run_command"), false);
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), true);
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.operationType, "read-only");
@@ -61,13 +58,11 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(catalog.tools.every((tool) => tool.categoryLabel.length > 0 && tool.operationLabel.length > 0), true);
   assert.equal(JSON.stringify(catalog).includes("api_key"), false);
 
-  const runCommand = catalog.tools.find((tool) => tool.name === "run_command");
   const shellCommand = catalog.tools.find((tool) => tool.name === "shell_command");
-  assert.equal(runCommand?.displayDescription, "兼容旧命令入口，保留给历史运行与旧提示词。");
-  assert.equal(shellCommand?.displayDescription, "在当前会话 Shell 中运行命令，并把结果原样返回给模型。");
-  assert.match(runCommand?.description ?? "", /Legacy alias of shell_command/);
+  assert.equal(shellCommand?.displayDescription, "在当前会话 Shell 中运行命令，适合构建、测试、脚本和通用 CLI 工作流。");
   assert.match(shellCommand?.description ?? "", /current integrated shell/);
   assert.match(shellCommand?.description ?? "", /Use commandLine for normal shell-native command execution/);
+  assert.doesNotMatch(shellCommand?.description ?? "", /HTTP requests/);
   assert.equal(shellCommand?.runtimeHints?.[0]?.kind, "command_shell");
 });
 
@@ -122,11 +117,36 @@ test("model-visible tool description is concise and structured for the model", (
   assert.match(description, /\nInputs: commandLine/);
   assert.match(description, /\nRuntime: current shell=/);
   assert.match(description, /\nOutputs: result\.stdout/);
-  assert.match(description, /creating directories, copying or moving files/);
+  assert.match(description, /builds, tests, git, package managers/);
+  assert.doesNotMatch(description, /HTTP requests/);
   assert.match(description, /\nExample: \{"commandLine":"pnpm test","timeoutMs":120000\}/);
   assert.equal(description.includes("When to use"), false);
   assert.doesNotMatch(description, /Shell 命令|需确认|终端命令|风险|运行时工具/);
   assert.equal(description.includes("Allowed tools:"), false);
+});
+
+test("web tool descriptions clearly separate raw HTTP from rendered browser reading", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolCatalogNames: ["http_request", "browser_snapshot"],
+  });
+  const center = registry.createToolCenter("desktop-basic");
+  const httpRequest = center.list().find((tool) => tool.name === "http_request");
+  const browserSnapshot = center.list().find((tool) => tool.name === "browser_snapshot");
+  assert.notEqual(httpRequest, undefined);
+  assert.notEqual(browserSnapshot, undefined);
+
+  const httpDescription = modelVisibleToolDescription(httpRequest!);
+  const browserDescription = modelVisibleToolDescription(browserSnapshot!);
+
+  assert.match(httpDescription, /^Send a stateless HTTP or HTTPS request/m);
+  assert.match(httpDescription, /session state=no OAuth flow, no cookie jar/);
+  assert.match(httpDescription, /Avoid for: Do not use for rendered page inspection/);
+  assert.match(browserDescription, /^Open an HTTP or HTTPS page in a fresh Playwright browser session/m);
+  assert.match(browserDescription, /Avoid for: Do not use for API endpoints, simple raw HTTP fetches/);
+  assert.match(browserDescription, /session state=fresh isolated browser session; no existing login state/);
 });
 
 test("desktop-basic tool descriptions stay plain and do not expose deep product terms", () => {
@@ -214,6 +234,20 @@ test("desktop-basic tool registry applies configured tool disabled state", () =>
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), false);
 });
 
+test("desktop-basic tool registry does not surface legacy run_command alias in live catalogs", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolStates: [{ name: "run_command", enabled: true, updatedAt: "2026-05-12T00:00:00.000Z" }],
+  });
+  const catalog = registry.catalog("desktop-basic");
+
+  assert.equal(catalog.tools.some((tool) => tool.name === "run_command"), false);
+  assert.equal(catalog.allowedTools.includes("run_command"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("run_command"), false);
+});
+
 test("desktop-basic tool registry can keep compatibility executors enabled from frozen tool state", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
@@ -284,6 +318,8 @@ test("desktop-basic tool registry registers read_skill_resource for frozen skill
 
   assert.deepEqual(catalog.tools.map((tool) => tool.name), ["read_skill_resource"]);
   assert.deepEqual(catalog.allowedTools, ["read_skill_resource"]);
+  assert.equal(catalog.tools[0]?.displayName, "读取技能资源");
+  assert.equal(catalog.tools[0]?.displayDescription, "按本轮已选中技能读取参考资源或查看资源元数据。");
   assert.equal(center.has("read_skill_resource"), true);
 });
 

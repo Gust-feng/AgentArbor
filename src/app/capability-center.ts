@@ -146,10 +146,10 @@ export class CapabilityCenter {
       ...desktopToolCatalog.tools,
       ...exposedMcpToolCatalog.tools,
     ].map(capabilityToolCatalogItem);
-    const allAllowedTools = [
-      ...desktopToolCatalog.allowedTools,
-      ...exposedMcpToolCatalog.allowedTools,
-    ];
+    const allAllowedTools = capabilityAllowedToolNames({
+      desktopAllowedTools: desktopToolCatalog.allowedTools,
+      mcpAllowedTools: exposedMcpToolCatalog.allowedTools,
+    });
     const warnings = capabilityWarnings({
       activeModel,
       toolCount: allAllowedTools.length,
@@ -189,6 +189,16 @@ export class CapabilityCenter {
   private skillRootsFor(input: CapabilitySkillRootsInput): readonly SkillRootInput[] {
     return this.options.resolveSkillRoots?.(input) ?? this.options.skillRoots;
   }
+}
+
+function capabilityAllowedToolNames(input: {
+  readonly desktopAllowedTools: readonly string[];
+  readonly mcpAllowedTools: readonly string[];
+}): readonly string[] {
+  return [
+    ...input.desktopAllowedTools.filter((name) => name !== "read_skill_resource"),
+    ...input.mcpAllowedTools,
+  ];
 }
 
 function skillRootCacheKey(roots: readonly SkillRootInput[]): string {

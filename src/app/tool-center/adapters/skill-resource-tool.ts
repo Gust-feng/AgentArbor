@@ -163,6 +163,12 @@ export function createReadSkillResourceTool(
   };
 }
 
+export function hasReadableSelectedSkillResources(
+  skillContexts: readonly DesktopAgentSkillContext[] = []
+): boolean {
+  return selectedSkillResources(skillContexts).size > 0;
+}
+
 type SelectedSkillResource = {
   readonly skillId: string;
   readonly type: SkillRuntimeResourceType;

@@ -27,16 +27,16 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
   return {
     definition: {
       name: "browser_snapshot",
-      description: "Open an HTTP or HTTPS page and return a text snapshot. Requires Playwright at runtime.",
+      description: "Open an HTTP or HTTPS page in a fresh Playwright browser session and return a text snapshot. Requires Playwright at runtime.",
       modelContract: {
-        purpose: "Open an HTTP or HTTPS page with Playwright and return the page title, final URL, and body text snapshot.",
+        purpose: "Open an HTTP or HTTPS page in a fresh Playwright browser session and return the page title, final URL, and body text snapshot.",
         whenToUse: [
-          "Use when a web page needs to be inspected beyond search snippets.",
-          "Use for pages where the current rendered text matters.",
+          "Use when a web page needs to be inspected beyond search snippets and the current rendered page text matters.",
+          "Use for pages that need browser rendering but do not require the user's logged-in browser session.",
         ],
         whenNotToUse: [
+          "Do not use for API endpoints, simple raw HTTP fetches, logged-in browser sessions, or interactive browser control; use http_request for raw HTTP and a real browser bridge for interactive browsing.",
           "Do not use for non-HTTP URLs.",
-          "Do not use as an interactive browser control; this tool only returns a text snapshot.",
         ],
         inputNotes: [
           "url is required and must use http or https.",
@@ -51,6 +51,7 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
         ],
         runtimeHints: [
           { label: "browser engine", value: "Playwright Chromium when available" },
+          { label: "session state", value: "fresh isolated browser session; no existing login state" },
           { label: "max text chars", value: String(MAX_BROWSER_TEXT_CHARS) },
         ],
         examples: [

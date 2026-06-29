@@ -9,9 +9,9 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { validateModelVisibleToolContract } from "../../domain/tools/index.js";
+import { modelVisibleToolDescription, validateModelVisibleToolContract } from "../../domain/tools/index.js";
 import { McpClientWrapper } from "./mcp-client.js";
-import { createMcpToolExecutor } from "./mcp-tool-adapter.js";
+import { createCachedMcpToolExecutor, createMcpToolExecutor } from "./mcp-tool-adapter.js";
 import { McpManager } from "./mcp-manager.js";
 import { ensureManagedMcpExecutable, mcpManagedRuntimeDirectories, resolveMcpExecutable } from "./mcp-local-runtime.js";
 
@@ -324,6 +324,35 @@ test("createMcpToolExecutor creates correct namespaced ToolExecutor", async () =
   assert.equal(executor.definition.modelContract?.runtimeHints?.some((hint) => hint.value === "my-server"), true);
 
   await client.disconnect();
+});
+
+test("createCachedMcpToolExecutor compacts verbose MCP descriptions for model visibility", () => {
+  const executor = createCachedMcpToolExecutor(
+    {
+      name: "docs_search",
+      description: [
+        "Search documentation for a query and return the most relevant passages.",
+        "Use this for current API references that are not already present in the workspace.",
+        "",
+        "Workflow guidance: first inspect internal docs, then compare external docs, then draft a structured summary with citations and follow-up suggestions.",
+      ].join("\n"),
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+      annotations: { readOnlyHint: true },
+    },
+    "docs"
+  );
+
+  assert.equal(
+    executor.definition.description,
+    "Search documentation for a query and return the most relevant passages. Use this for current API references that are not already present in the workspace."
+  );
+  assert.equal(executor.definition.modelContract?.purpose, executor.definition.description);
+  assert.equal(executor.definition.description.includes("Workflow guidance"), false);
+  assert.match(modelVisibleToolDescription(executor.definition), /^Search documentation for a query/m);
 });
 
 test("createMcpToolExecutor infers read-only metadata from annotations", async () => {

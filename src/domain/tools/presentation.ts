@@ -41,11 +41,11 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   browser_snapshot: {
     displayName: "浏览网页",
-    displayDescription: "打开网页并返回文本快照。",
+    displayDescription: "用独立浏览器会话打开网页并返回文本快照，不复用登录态。",
   },
   http_request: {
     displayName: "HTTP 请求",
-    displayDescription: "发送 HTTP/HTTPS 请求并返回状态、响应头和有上限的响应体。",
+    displayDescription: "发送无状态 HTTP/HTTPS 请求并返回状态、响应头和有上限的响应体。",
   },
   read_file: {
     displayName: "读取文件",
@@ -115,9 +115,13 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayName: "运行命令",
     displayDescription: "兼容旧命令入口，保留给历史运行与旧提示词。",
   },
+  read_skill_resource: {
+    displayName: "读取技能资源",
+    displayDescription: "按本轮已选中技能读取参考资源或查看资源元数据。",
+  },
   shell_command: {
     displayName: "Shell 命令",
-    displayDescription: "在当前会话 Shell 中运行命令，并把结果原样返回给模型。",
+    displayDescription: "在当前会话 Shell 中运行命令，适合构建、测试、脚本和通用 CLI 工作流。",
   },
 };
 

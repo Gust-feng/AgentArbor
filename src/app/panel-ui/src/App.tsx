@@ -1162,7 +1162,7 @@ export function App(): React.ReactElement {
         <WorkbenchHeader
           collapsed={sidebarCollapsed}
           agentMode={app.agentMode}
-          disabled={isBootstrapping || app.busy || modelResponding}
+          disabled={isBootstrapping || app.busy}
           onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
           onModeChange={selectAgentMode}
         />

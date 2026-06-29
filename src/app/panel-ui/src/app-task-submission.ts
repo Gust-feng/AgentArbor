@@ -155,7 +155,7 @@ export async function submitPanelTask(
       return {
         ...previous,
         ...capabilityState,
-        busy: true,
+        busy: false,
         conversation: response.conversation,
         run: immediateRun ?? previous.run,
         events: immediateRun?.runId === previous.run?.runId ? previous.events : [],

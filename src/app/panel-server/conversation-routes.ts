@@ -383,13 +383,12 @@ async function workspaceFolderForConversation(
   conversationId: string
 ): Promise<WorkspaceFolderSummary | undefined> {
   const conversation = runtime.conversations.get(conversationId);
-  const firstRunId = firstAssistantRunId(runtime, conversationId);
-  if (firstRunId !== undefined) {
-    const liveRunWorkspace = runtime.runJobs.get(firstRunId)?.capabilitySnapshot?.workspace.workspaceDirectory;
+  for (const runId of assistantRunIdsByRecency(conversation)) {
+    const liveRunWorkspace = runtime.runJobs.get(runId)?.capabilitySnapshot?.workspace.workspaceDirectory;
     if (liveRunWorkspace !== undefined) {
       return workspaceFolderSummaryFromPath(liveRunWorkspace);
     }
-    const persistedRun = await runtime.runtimeDatabase?.getRun(firstRunId);
+    const persistedRun = await runtime.runtimeDatabase?.getRun(runId);
     const runWorkspace = workspaceFolderSummaryFromPath(
       persistedRun?.run.workspacePath ?? persistedRun?.run.capabilitySnapshot?.workspace.workspaceDirectory
     );
@@ -400,9 +399,20 @@ async function workspaceFolderForConversation(
   return workspaceFolderFromConversationContext(conversation);
 }
 
-function firstAssistantRunId(runtime: PanelRuntime, conversationId: string): string | undefined {
-  const conversation = runtime.conversations.get(conversationId);
-  return conversation?.turns.find((turn) => turn.role === "assistant" && turn.runId !== undefined)?.runId;
+function assistantRunIdsByRecency(
+  conversation: ReturnType<PanelRuntime["conversations"]["get"]>
+): readonly string[] {
+  const runIds: string[] = [];
+  const seen = new Set<string>();
+  for (let index = (conversation?.turns.length ?? 0) - 1; index >= 0; index -= 1) {
+    const turn = conversation?.turns[index];
+    if (turn?.role !== "assistant" || turn.runId === undefined || seen.has(turn.runId)) {
+      continue;
+    }
+    seen.add(turn.runId);
+    runIds.push(turn.runId);
+  }
+  return runIds;
 }
 
 function workspaceFolderFromConversationContext(

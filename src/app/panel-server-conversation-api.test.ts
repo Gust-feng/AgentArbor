@@ -403,13 +403,13 @@ test("conversation runs can use a transient workspace without updating the defau
       persistedRun.body.snapshot.run.capabilitySnapshot.workspace.workspaceDirectory,
       path.resolve(runWorkspace)
     );
-    assert.equal(conversation.body.conversation.workspaceFolder.label, path.basename(runWorkspace));
-    assert.equal(conversation.body.conversation.workspaceFolder.path, path.resolve(runWorkspace));
+    assert.equal(conversation.body.conversation.workspaceFolder.label, path.basename(followUpWorkspace));
+    assert.equal(conversation.body.conversation.workspaceFolder.path, path.resolve(followUpWorkspace));
     const listed = conversations.body.conversations.find((item: { conversationId: string }) =>
       item.conversationId === conversationId
     );
-    assert.equal(listed.workspaceFolder.label, path.basename(runWorkspace));
-    assert.equal(listed.workspaceFolder.path, path.resolve(runWorkspace));
+    assert.equal(listed.workspaceFolder.label, path.basename(followUpWorkspace));
+    assert.equal(listed.workspaceFolder.path, path.resolve(followUpWorkspace));
     assert.equal(config.body.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
   } finally {
     await server.close();

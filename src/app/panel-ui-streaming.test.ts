@@ -4,6 +4,7 @@ import {
   consumeStreamingTextFrame,
   createInitialStreamingTextState,
   createStreamingTextState,
+  stabilizeStreamingMarkdown,
   updateStreamingTextTarget,
   type StreamingTextState,
 } from "./panel-ui-streaming.js";
@@ -124,4 +125,32 @@ test("settled catch-up can animate from an empty displayed shell", () => {
 
   assert.equal(firstFrame.displayed, "等待");
   assert.equal(firstFrame.queue.join(""), "后返回的完整答案。");
+});
+
+test("stabilizeStreamingMarkdown leaves complete markdown unchanged", () => {
+  const input = "# 标题\n\n**粗体** 与 *斜体* 和 `code`。\n\n```ts\nconst x = 1;\n```";
+  assert.equal(stabilizeStreamingMarkdown(input), input);
+});
+
+test("stabilizeStreamingMarkdown closes unclosed inline markers", () => {
+  assert.equal(stabilizeStreamingMarkdown("**未闭合粗体"), "**未闭合粗体**");
+  assert.equal(stabilizeStreamingMarkdown("*未闭合斜体"), "*未闭合斜体*");
+  assert.equal(stabilizeStreamingMarkdown("`未闭合代码"), "`未闭合代码`");
+  assert.equal(stabilizeStreamingMarkdown("~~未闭合删除"), "~~未闭合删除~~");
+  assert.equal(stabilizeStreamingMarkdown("__未闭合下划线粗体"), "__未闭合下划线粗体__");
+});
+
+test("stabilizeStreamingMarkdown closes unclosed code fences", () => {
+  const input = "```ts\nconst x = 1;\n";
+  assert.equal(stabilizeStreamingMarkdown(input), "```ts\nconst x = 1;\n\n```");
+});
+
+test("stabilizeStreamingMarkdown ignores inline markers inside code blocks", () => {
+  const input = "```\n**not bold\n`not code\n```";
+  assert.equal(stabilizeStreamingMarkdown(input), input);
+});
+
+test("stabilizeStreamingMarkdown does not double close complete markers", () => {
+  const input = "`**` 是一个完整内联代码";
+  assert.equal(stabilizeStreamingMarkdown(input), input);
 });

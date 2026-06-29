@@ -12,7 +12,7 @@ test("streaming assistant answers keep streaming text without a visible cursor n
 
   assert.equal(chatTranscriptChain.includes("LiveStreamBox"), true);
   assert.equal(chatTranscriptChain.includes('className="rich-text rich-text-streaming"'), true);
-  assert.equal(chatTranscriptChain.includes("streamingPreviewText(displayed)"), true);
+  assert.equal(chatTranscriptChain.includes("stabilizeStreamingMarkdown(displayed)"), true);
   assert.equal(chatTranscriptChain.includes('className="stream-cursor"'), false);
   assert.equal(chatMessageStyles.includes(".stream-cursor"), false);
   assert.equal(chatMessageStyles.includes("stream-cursor-blink"), false);

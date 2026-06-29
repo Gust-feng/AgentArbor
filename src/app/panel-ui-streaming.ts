@@ -112,3 +112,62 @@ function sharedPrefix(left: string, right: string): string {
   }
   return leftChars.slice(0, maxLength).join("");
 }
+
+/**
+ * 让流式输出过程中不完整的 Markdown 也能被安全渲染。
+ * 仅闭合未配对的代码块围栏和常见 inline 标记，不修改已完整的内容。
+ */
+export function stabilizeStreamingMarkdown(value: string): string {
+  let text = value.replace(/\r\n/g, "\n");
+
+  // 未闭合的代码块围栏会在 ReactMarkdown 中吞掉后续内容，优先处理。
+  const fenceCount = (text.match(/^```/gm) ?? []).length;
+  if (fenceCount % 2 === 1) {
+    text += "\n```";
+  }
+
+  // 将文本按代码块切分，只在非代码块部分闭合 inline 标记。
+  const parts = text.split(/^```/m);
+  for (let index = 0; index < parts.length; index += 2) {
+    parts[index] = stabilizeInlineMarkdown(parts[index]);
+  }
+  return parts.join("```");
+}
+
+function stabilizeInlineMarkdown(value: string): string {
+  let text = value;
+
+  // 先闭合未配对的内联代码围栏，再把已闭合的代码段暂时抽离，
+  // 避免代码内容内部的 * _ 等被误当成 markdown 标记。
+  text = closeInlineMarker(text, "`");
+  const codeSpans: string[] = [];
+  text = text.replace(/`[^`]*`/g, (match) => {
+    codeSpans.push(match);
+    return `\u0000${codeSpans.length - 1}\u0000`;
+  });
+
+  text = closeInlineMarker(text, "~~");
+  text = closeInlineMarker(text, "**");
+  text = closeInlineMarker(text, "__");
+  text = closeSingleCharMarker(text, "*", "**");
+  text = closeSingleCharMarker(text, "_", "__");
+
+  return text.replace(/\u0000(\d+)\u0000/g, (_, index) => codeSpans[Number(index)]);
+}
+
+function closeInlineMarker(text: string, marker: string): string {
+  const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const count = (text.match(new RegExp(escaped, "g")) ?? []).length;
+  return count % 2 === 1 ? text + marker : text;
+}
+
+function closeSingleCharMarker(text: string, marker: string, pairMarker: string): string {
+  const pairRegex = new RegExp(escapeRegex(pairMarker) + ".*?" + escapeRegex(pairMarker), "gs");
+  const withoutPairs = text.replace(pairRegex, "");
+  const count = (withoutPairs.match(new RegExp(escapeRegex(marker), "g")) ?? []).length;
+  return count % 2 === 1 ? text + marker : text;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

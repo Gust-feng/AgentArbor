@@ -16,6 +16,7 @@ import type {
   TranscriptNode,
 } from "../contracts/run";
 import type { LiveAnswerTone } from "../../../panel-ui-live-transcript";
+import { stabilizeStreamingMarkdown } from "../../../panel-ui-streaming";
 import type { AssistantWorkflowDisplay } from "../../../panel-assistant-workflow-display";
 import type { ConversationDisplayItem } from "../../../panel-conversation-display-list";
 import { LiveStreamBox } from "./live-stream-text";
@@ -351,7 +352,9 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
         tone={props.liveTone ?? "formal"}
         renderText={(displayed) => <RichText text={displayed} />}
         renderStreamingText={(displayed) => (
-          <div className="rich-text rich-text-streaming">{streamingPreviewText(displayed)}</div>
+          <div className="rich-text rich-text-streaming">
+            <RichText text={stabilizeStreamingMarkdown(displayed)} />
+          </div>
         )}
       />
       {props.showActions && (
@@ -660,24 +663,3 @@ function trimTrailingZeros(value: string): string {
   return value.replace(/\.0+$/u, "").replace(/(\.\d*?)0+$/u, "$1");
 }
 
-function streamingPreviewText(value: string): string {
-  return stripTrailingStreamingMarkdown(
-    value
-      .replace(/\r\n/g, "\n")
-      .replace(/^#{1,6}\s+/gm, "")
-      .replace(/^[-*]\s+/gm, "")
-      .replace(/^\d+[.)、]\s+/gm, "")
-      .replace(/\*\*([^*]+)\*\*/g, "$1")
-      .replace(/__([^_]+)__/g, "$1")
-      .replace(/`([^`]+)`/g, "$1")
-      .replace(/\*\*/g, "")
-      .replace(/__/g, "")
-  );
-}
-
-function stripTrailingStreamingMarkdown(value: string): string {
-  return value
-    .replace(/(?:\n(?:[-*]|\d+[.)、]|#{1,6}|>|`{1,3}|\|)\s*)+$/u, "")
-    .replace(/(?:\*\*|__|`)+$/u, "")
-    .replace(/\s+$/u, "");
-}

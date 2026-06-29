@@ -134,6 +134,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatActive.includes("subscribeTranscriptNodesCache"), false);
   assert.equal(chatActive.includes("transcriptNodesCacheForConversation("), true);
   assert.equal(chatActive.includes("<ChatTranscriptDisplay"), true);
+  assert.equal(chatActive.includes("panel-ui-queued-turns"), false);
+  assert.equal(chatActive.includes("conversationWithQueuedUserTurns"), false);
   assert.equal(chatTranscriptDisplay.includes("projectConversationDisplayList"), true);
   assert.equal(chatTranscriptDisplay.includes("createConversationWorkflowDisplayState"), true);
   assert.equal(chatTranscriptDisplay.includes("subscribeTranscriptNodesCache(props.conversationId, listener)"), true);

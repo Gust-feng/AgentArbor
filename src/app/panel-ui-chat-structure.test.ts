@@ -134,6 +134,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatActive.includes("subscribeTranscriptNodesCache"), false);
   assert.equal(chatActive.includes("transcriptNodesCacheForConversation("), true);
   assert.equal(chatActive.includes("<ChatTranscriptDisplay"), true);
+  assert.equal(chatActive.includes("readonly showModelUsage: boolean"), true);
+  assert.equal(chatActive.includes("showModelUsage={props.showModelUsage}"), true);
   assert.equal(chatActive.includes("panel-ui-queued-turns"), false);
   assert.equal(chatActive.includes("conversationWithQueuedUserTurns"), false);
   assert.equal(chatTranscriptDisplay.includes("projectConversationDisplayList"), true);
@@ -142,6 +144,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptDisplay.includes("transcriptNodesCacheForConversation(\n    cachedHistoricalSnapshot,\n    props.conversationId"), true);
   assert.equal(chatTranscriptDisplay.includes("cachedNodesByRunId: cachedHistoricalNodes,\n      currentRunId: props.currentRunId"), true);
   assert.equal(chatTranscriptDisplay.includes("cachedNodesByRunId: cachedHistoricalNodes,\n      currentRunId: props.run?.runId"), false);
+  assert.equal(chatTranscriptDisplay.includes("readonly showModelUsage: boolean"), true);
+  assert.equal(chatTranscriptDisplay.includes("showModelUsage={props.showModelUsage}"), true);
   assert.equal(chatActive.includes("projectStandaloneAssistantWorkflowDisplay"), false);
   assert.equal(conversationDisplayListProjection.includes("export function projectConversationDisplayList"), true);
   assert.equal(conversationDisplayListProjection.includes("projectConversationWorkflowDisplay"), true);
@@ -196,8 +200,19 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptTimeline.includes("agent-activity-marker"), true);
   assert.equal(transcriptTimeline.includes("agent-activity-toggle"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-disclosure"), true);
+  assert.equal(transcriptTimeline.includes("expandable={!selectable}"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-expanded-detail"), true);
+  assert.equal(transcriptTimeline.includes('props.section.format === "source"'), true);
+  assert.equal(transcriptTimeline.includes('props.section.format === "quote"'), true);
+  assert.equal(transcriptTimeline.includes('props.section.format === "diff"'), true);
+  assert.equal(transcriptTimeline.includes("function diffLineParts"), true);
+  assert.equal(transcriptTimeline.includes("function shouldHideExpandedSectionTitle"), true);
+  assert.equal(transcriptTimeline.includes("data-title-hidden"), true);
   assert.equal(transcriptTimeline.includes("expandedDetail"), true);
+  assert.equal(transcriptTimeline.includes("function visibleBadgesForItem"), true);
+  assert.equal(transcriptTimeline.includes("shouldShowStatusBadge"), true);
+  assert.equal(transcriptTimeline.includes("badge={{ label: item.copy.label"), false);
+  assert.equal(transcriptTimeline.includes("item.badges?.map((badge"), false);
   assert.equal(transcriptTimeline.includes("function shouldRenderExpandedDetail"), true);
   assert.equal(transcriptTimeline.includes('item.tone === "thinking" || item.tone === "narration" || item.tone === "system"'), true);
   assert.equal(transcriptTimeline.includes("timelineConfirmationProjection"), false);
@@ -520,6 +535,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatMessageStyles.includes(".user-message-queued"), true);
   assert.equal(chatMessageStyles.includes(".assistant-workline-collapsed"), true);
   assert.equal(chatTranscriptChain.includes("AssistantResponseMeta"), true);
+  assert.equal(chatTranscriptChain.includes("readonly showModelUsage: boolean"), true);
+  assert.equal(chatTranscriptChain.includes("props.showModelUsage ? workflowModelUsage(props.workflow) : undefined"), true);
   assert.equal(chatTranscriptChain.includes("workflowModelUsage"), true);
   assert.equal(chatTranscriptChain.includes("cachedInputTokens"), true);
   assert.equal(chatTranscriptChain.includes("uncachedInputTokens"), true);
@@ -554,6 +571,10 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptStyles.includes(".agent-activity-label"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-detail"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-expanded-detail"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-source"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-quote"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-diff"), true);
+  assert.equal(transcriptStyles.includes('.agent-activity-diff-line[data-kind="add"]'), true);
   assert.match(transcriptStyles, /\.agent-activity-step\[data-current="true"\]\s*\{[\s\S]*?background:\s*transparent;/);
   assert.match(transcriptStyles, /\.agent-activity-label\s*\{[\s\S]*?background:\s*transparent;/);
   assert.match(defaultStyle, /html\[data-style="default"\] \.agent-activity-step\[data-current="true"\]\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/);

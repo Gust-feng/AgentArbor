@@ -18,6 +18,8 @@ import { normalizeToolDisplayForOperation } from "./tool-display-normalization.j
 
 const MODEL_TOOL_TEXT_MAX_CHARS = 128_000;
 const MODEL_TOOL_ERROR_MAX_CHARS = 64_000;
+const SEARCH_DISPLAY_RESULTS_LIMIT = 20;
+const FILE_SEARCH_DISPLAY_MATCHES_LIMIT = 80;
 
 // Historical compatibility name: callers across the app still import
 // "redactOrdinaryText", but current ordinary text policy is compact-only.
@@ -231,15 +233,19 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
   const record = asRecord(output);
   const result = asRecord(record.result);
   const action = displayActionForTool(stringOrUndefined(record.action), request.toolName);
-  const summary = compactSafeText(stringOrUndefined(record.summary), 500);
   if (request.toolName === "search" && Array.isArray(record.results)) {
+    const results = record.results
+      .slice(0, SEARCH_DISPLAY_RESULTS_LIMIT)
+      .map(searchDisplayItem)
+      .filter((item): item is NonNullable<ReturnType<typeof searchDisplayItem>> => item !== undefined);
     return {
       kind: "search_results",
       query: stringOrUndefined(record.query),
       status: stringOrUndefined(record.status),
       message: compactSafeText(searchMessageFromOutput(record), 500),
-      results: record.results.slice(0, 8).map(searchDisplayItem).filter((item): item is NonNullable<ReturnType<typeof searchDisplayItem>> => item !== undefined),
-      truncated: record.results.length > 8 || record.truncated === true,
+      results,
+      resultsReturned: record.results.length,
+      truncated: record.results.length > results.length || record.truncated === true,
     };
   }
   if (request.toolName === "read" && Array.isArray(output)) {
@@ -349,36 +355,6 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       stderrOmittedChars: numberOrUndefined(result.stderrOmittedChars),
       outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
       errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
-    };
-  }
-  if (request.toolName === "list_dir" && Array.isArray(result.entries)) {
-    return {
-      kind: "generic_tool_summary",
-      action,
-      summary,
-      items: result.entries.slice(0, 12).map((entry) => {
-        const item = asRecord(entry);
-        const path = stringOrUndefined(item.path) ?? stringOrUndefined(item.name);
-        const depth = numberOrUndefined(item.depth);
-        return [
-          stringOrUndefined(item.kind),
-          path,
-          depth === undefined ? undefined : `depth=${depth}`,
-        ].filter(isString).join(" ");
-      }).filter((item) => item.length > 0),
-    };
-  }
-  if (request.toolName === "grep_files" && Array.isArray(result.matches)) {
-    return {
-      kind: "generic_tool_summary",
-      action,
-      summary,
-      items: result.matches.slice(0, 12).map((match) => {
-        const item = asRecord(match);
-        const path = stringOrUndefined(item.path);
-        const line = numberOrUndefined(item.line);
-        return path === undefined ? undefined : `${path}${line === undefined ? "" : `:${line}`}`;
-      }).filter(isString),
     };
   }
   return normalizedDisplay;
@@ -631,7 +607,8 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       title: stringOrUndefined(result.title),
       query: stringOrUndefined(result.query),
       path: stringOrUndefined(result.path),
-      matches: Array.isArray(result.matches) ? result.matches.slice(0, 80).map(projectGrepMatch) : undefined,
+      matches: Array.isArray(result.matches) ? result.matches.slice(0, FILE_SEARCH_DISPLAY_MATCHES_LIMIT).map(projectGrepMatch) : undefined,
+      matchesReturned: Array.isArray(result.matches) ? result.matches.length : undefined,
       searchedFiles: numberOrUndefined(result.searchedFiles),
       skippedFiles: numberOrUndefined(result.skippedFiles),
       skippedBinaryFiles: numberOrUndefined(result.skippedBinaryFiles),
@@ -667,7 +644,8 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       query: stringOrUndefined(result.query),
       path: stringOrUndefined(result.path),
       engine: stringOrUndefined(result.engine),
-      matches: Array.isArray(result.matches) ? result.matches.slice(0, 80).map(projectGrepMatch) : undefined,
+      matches: Array.isArray(result.matches) ? result.matches.slice(0, FILE_SEARCH_DISPLAY_MATCHES_LIMIT).map(projectGrepMatch) : undefined,
+      matchesReturned: Array.isArray(result.matches) ? result.matches.length : undefined,
       searchedFiles: numberOrUndefined(result.searchedFiles),
       skippedFactsAvailable: result.skippedFactsAvailable === true ? true : result.skippedFactsAvailable === false ? false : undefined,
       skippedFactsComplete: result.skippedFactsComplete === true ? true : result.skippedFactsComplete === false ? false : undefined,

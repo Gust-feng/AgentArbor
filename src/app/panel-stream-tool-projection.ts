@@ -287,7 +287,7 @@ function toolResultPreview(
         display.query,
         display.status,
         display.message,
-        `results: ${display.results.length}`,
+        `results: ${display.resultsReturned ?? display.results.length}`,
       ].filter((item): item is string => item !== undefined && item.length > 0).join(" · "), 900);
     }
     return compactStreamDetailText(stringOrUndefined(output.summary), 900);

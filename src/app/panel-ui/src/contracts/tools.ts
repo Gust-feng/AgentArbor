@@ -22,6 +22,54 @@ export type ToolDisplayProjection =
       readonly status?: string;
       readonly message?: string;
       readonly results: readonly { readonly title: string; readonly url?: string; readonly summary?: string; readonly snippet?: string; readonly refId?: string; readonly source?: string }[];
+      readonly resultsReturned?: number;
+      readonly truncated?: boolean;
+    }
+  | {
+      readonly kind: "directory_listing";
+      readonly path?: string;
+      readonly depth?: number;
+      readonly entriesReturned?: number;
+      readonly totalEntries?: number;
+      readonly unreadableDirectories?: number;
+      readonly unreadableSamples?: readonly {
+        readonly path?: string;
+        readonly errorCode?: string;
+      }[];
+      readonly entries: readonly {
+        readonly path: string;
+        readonly name?: string;
+        readonly kind?: string;
+        readonly bytes?: number;
+        readonly depth?: number;
+      }[];
+      readonly truncated?: boolean;
+    }
+  | {
+      readonly kind: "file_search_results";
+      readonly query?: string;
+      readonly path?: string;
+      readonly engine?: string;
+      readonly searchedFiles?: number;
+      readonly skippedFactsAvailable?: boolean;
+      readonly skippedFiles?: number;
+      readonly skippedBinaryFiles?: number;
+      readonly skippedTooLargeFiles?: number;
+      readonly skippedUnreadableFiles?: number;
+      readonly skippedDirectories?: number;
+      readonly skippedOtherEntries?: number;
+      readonly skippedSamples?: readonly {
+        readonly path?: string;
+        readonly reason?: string;
+        readonly bytes?: number;
+        readonly errorCode?: string;
+      }[];
+      readonly matches: readonly {
+        readonly path: string;
+        readonly line?: number;
+        readonly preview?: string;
+      }[];
+      readonly matchesReturned?: number;
       readonly truncated?: boolean;
     }
   | {

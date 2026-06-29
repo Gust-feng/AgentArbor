@@ -292,13 +292,12 @@ test("tool stream projection exposes command execution facts for UI display", ()
   assert.equal(detail.preview?.includes("stderr not truncated 0 chars"), true);
 });
 
-test("tool stream projection shows file change metadata without raw replacement text", () => {
+test("tool stream projection carries edit diff preview in the file display", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "edit_file",
     input: {
       path: "src/app/example.ts",
-      oldText: "secret old text",
-      newText: "secret new text",
+      edits: [{ oldText: "old text", newText: "new text" }],
     },
     output: {
       summary: "文件已更新",
@@ -312,12 +311,12 @@ test("tool stream projection shows file change metadata without raw replacement 
   });
 
   assert.equal(detail.preview?.includes("文件已更新"), true);
-  assert.equal(detail.preview?.includes("secret old text"), false);
-  assert.equal(detail.preview?.includes("secret new text"), false);
   assert.equal(detail.display?.kind, "file_diff_preview");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.path : undefined, "src/app/example.ts");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.operation : undefined, "edit");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.replacements : undefined, 1);
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("- old text") : false, true);
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("+ new text") : false, true);
 });
 
 test("tool stream projection keeps edit preview focused on file-level summary", () => {
@@ -344,6 +343,37 @@ test("tool stream projection keeps edit preview focused on file-level summary", 
   assert.equal(detail.preview?.includes("occurrence"), false);
   assert.equal(detail.preview?.includes("same"), false);
   assert.equal(detail.preview?.includes("updated"), false);
+});
+
+test("tool stream projection derives structured directory displays from attachment listings", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "list_context_attachment_files",
+    input: {
+      attachmentId: "ctx-project",
+      path: ".",
+      depth: 1,
+    },
+    output: {
+      action: "list_context_attachment_files",
+      summary: "项目:. · 9 of 29 entries · depth 1 · truncated",
+      result: {
+        path: ".",
+        depth: 1,
+        entriesReturned: 9,
+        totalEntries: 29,
+        entries: [
+          { path: "README.md", name: "README.md", kind: "file", bytes: 120, depth: 1 },
+          { path: "src", name: "src", kind: "directory", depth: 1 },
+        ],
+      },
+      truncated: true,
+    },
+  });
+
+  assert.equal(detail.display?.kind, "directory_listing");
+  assert.equal(detail.display?.kind === "directory_listing" ? detail.display.totalEntries : undefined, 29);
+  assert.equal(detail.display?.kind === "directory_listing" ? detail.display.entries[0]?.path : undefined, "README.md");
+  assert.equal(detail.preview?.includes("项目"), true);
 });
 
 test("tool stream projection shows MCP preview without raw media payload", () => {

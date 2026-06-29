@@ -7,6 +7,11 @@ import type {
 } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 
+const UI_SEARCH_RESULTS_LIMIT = 20;
+const UI_DIRECTORY_ENTRIES_LIMIT = 80;
+const UI_FILE_SEARCH_MATCHES_LIMIT = 80;
+const UI_SKIPPED_SAMPLES_LIMIT = 8;
+
 export type ProjectToolResultEnvelopeInput = {
   readonly request: ToolCallRequest;
   readonly display: ToolDisplayProjection;
@@ -80,7 +85,7 @@ function agentSummaryForToolDisplay(
   const fallback = summary ?? `${label}已完成。`;
   if (display.kind === "search_results") {
     const results = display.results
-      .slice(0, 5)
+      .slice(0, Math.min(8, UI_SEARCH_RESULTS_LIMIT))
       .map((result, index) => {
         const snippet = compactSafeText(result.snippet, 220);
         const url = compactSafeText(result.url, 180);
@@ -92,6 +97,46 @@ function agentSummaryForToolDisplay(
         .filter(isString)
         .filter((item) => item.trim().length > 0)
         .join("\n"),
+      1_800
+    );
+  }
+  if (display.kind === "directory_listing") {
+    const entries = display.entries
+      .slice(0, Math.min(24, UI_DIRECTORY_ENTRIES_LIMIT))
+      .map((entry) => {
+        const meta = [
+          entry.kind,
+          entry.bytes === undefined ? undefined : `${entry.bytes} bytes`,
+        ].filter(isString).join(", ");
+        return `${entry.path}${meta.length === 0 ? "" : ` (${meta})`}`;
+      })
+      .join("\n");
+    return compactOrdinaryToolText(
+      [
+        `${label}已完成${display.path === undefined ? "" : `：${display.path}`}。`,
+        display.totalEntries === undefined ? undefined : `总数：${display.totalEntries}`,
+        display.unreadableDirectories === undefined ? undefined : `不可读目录：${display.unreadableDirectories}`,
+        entries || fallback,
+      ].filter(isString).join("\n"),
+      1_800
+    );
+  }
+  if (display.kind === "file_search_results") {
+    const matches = display.matches
+      .slice(0, Math.min(24, UI_FILE_SEARCH_MATCHES_LIMIT))
+      .map((match) => {
+        const location = match.line === undefined ? match.path : `${match.path}:${match.line}`;
+        return `${location}${match.preview === undefined ? "" : ` - ${compactSafeText(match.preview, 220) ?? ""}`}`;
+      })
+      .join("\n");
+    return compactOrdinaryToolText(
+      [
+        `${label}已完成${display.query === undefined ? "" : `：${display.query}`}。`,
+        display.path === undefined ? undefined : `目录：${display.path}`,
+        display.searchedFiles === undefined ? undefined : `已检索文件：${display.searchedFiles}`,
+        display.skippedFiles === undefined ? undefined : `跳过文件：${display.skippedFiles}`,
+        matches || fallback,
+      ].filter(isString).join("\n"),
       1_800
     );
   }
@@ -209,6 +254,16 @@ function evidenceRefsForToolDisplay(
       }
     }
   }
+  if (display.kind === "directory_listing") {
+    for (const entry of display.entries.slice(0, 8)) {
+      refs.add(`file:${compactOrdinaryToolText(entry.path, 220)}`);
+    }
+  }
+  if (display.kind === "file_search_results") {
+    for (const match of display.matches.slice(0, 8)) {
+      refs.add(`file:${compactOrdinaryToolText(match.path, 220)}`);
+    }
+  }
   if (display.kind === "browser_snapshot" && display.url !== undefined) {
     refs.add(compactOrdinaryToolText(display.url, 220));
   }
@@ -257,19 +312,74 @@ function compactSafeText(value: string | undefined, maxLength: number): string |
 
 function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayProjection {
   if (display.kind === "search_results") {
+    const results = display.results.slice(0, UI_SEARCH_RESULTS_LIMIT);
     return {
       kind: "search_results",
       query: compactSafeText(display.query, 240),
       status: compactSafeText(display.status, 120),
       message: compactSafeText(display.message, 500),
-      results: display.results.slice(0, 8).map((result) => ({
+      results: results.map((result) => ({
         title: compactOrdinaryToolText(result.title, 180),
         url: compactSafeText(result.url, 260),
         refId: compactSafeText(result.refId, 180),
         source: compactSafeText(result.source, 120),
         snippet: compactSafeText(result.snippet, 320),
       })),
-      truncated: display.truncated === true || display.results.length > 8,
+      resultsReturned: display.resultsReturned ?? display.results.length,
+      truncated: display.truncated === true || display.results.length > results.length,
+    };
+  }
+  if (display.kind === "directory_listing") {
+    const entries = display.entries.slice(0, UI_DIRECTORY_ENTRIES_LIMIT);
+    return {
+      kind: "directory_listing",
+      path: compactSafeText(display.path, 260),
+      depth: display.depth,
+      entriesReturned: display.entriesReturned,
+      totalEntries: display.totalEntries,
+      unreadableDirectories: display.unreadableDirectories,
+      unreadableSamples: display.unreadableSamples?.slice(0, 6).map((item) => ({
+        path: compactSafeText(item.path, 260),
+        errorCode: compactSafeText(item.errorCode, 80),
+      })),
+      entries: entries.map((entry) => ({
+        path: compactOrdinaryToolText(entry.path, 260),
+        name: compactSafeText(entry.name, 160),
+        kind: compactSafeText(entry.kind, 40),
+        bytes: entry.bytes,
+        depth: entry.depth,
+      })),
+      truncated: display.truncated === true || display.entries.length > entries.length,
+    };
+  }
+  if (display.kind === "file_search_results") {
+    const matches = display.matches.slice(0, UI_FILE_SEARCH_MATCHES_LIMIT);
+    return {
+      kind: "file_search_results",
+      query: compactSafeText(display.query, 240),
+      path: compactSafeText(display.path, 260),
+      engine: compactSafeText(display.engine, 80),
+      searchedFiles: display.searchedFiles,
+      skippedFactsAvailable: display.skippedFactsAvailable,
+      skippedFiles: display.skippedFiles,
+      skippedBinaryFiles: display.skippedBinaryFiles,
+      skippedTooLargeFiles: display.skippedTooLargeFiles,
+      skippedUnreadableFiles: display.skippedUnreadableFiles,
+      skippedDirectories: display.skippedDirectories,
+      skippedOtherEntries: display.skippedOtherEntries,
+      skippedSamples: display.skippedSamples?.slice(0, UI_SKIPPED_SAMPLES_LIMIT).map((item) => ({
+        path: compactSafeText(item.path, 260),
+        reason: compactSafeText(item.reason, 160),
+        bytes: item.bytes,
+        errorCode: compactSafeText(item.errorCode, 80),
+      })),
+      matches: matches.map((match) => ({
+        path: compactOrdinaryToolText(match.path, 260),
+        line: match.line,
+        preview: compactSafeText(match.preview, 320),
+      })),
+      matchesReturned: display.matchesReturned ?? display.matches.length,
+      truncated: display.truncated === true || display.matches.length > matches.length,
     };
   }
   if (display.kind === "browser_snapshot") {

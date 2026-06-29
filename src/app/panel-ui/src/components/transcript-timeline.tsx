@@ -53,6 +53,9 @@ type AgentWorkTimelineProps = {
   readonly collapsed?: boolean;
   readonly lifecycle?: "open" | "settled" | "attention";
   readonly collapseReason?: string;
+  readonly selectedItemKey?: string;
+  readonly selectableItemKeys?: readonly string[];
+  readonly onSelectItem?: (item: ActivityItem) => void;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 };
@@ -71,16 +74,52 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
       {items.map((item, index) => {
         const current = props.lifecycle !== "settled" && confirmation.current === undefined && index === items.length - 1;
         const toolKind = item.toolKind ?? resolveActivityToolKind(item);
+        const selectable = props.onSelectItem !== undefined &&
+          (props.selectableItemKeys === undefined || props.selectableItemKeys.includes(item.key));
+        const selected = selectable && props.selectedItemKey === item.key;
+        if (item.variant === "context_compaction") {
+          return (
+            <ContextCompactionStatusLine
+              current={current}
+              item={item}
+              key={item.key}
+            />
+          );
+        }
+        const content = (
+          <>
+            <span className="agent-activity-marker" aria-hidden="true" />
+            <ActivityLine item={item} />
+          </>
+        );
+        if (selectable) {
+          return (
+            <button
+              type="button"
+              className={`agent-activity-step ${item.tone} ${item.phase}`}
+              data-current={current ? "true" : undefined}
+              data-selected={selected ? "true" : undefined}
+              data-selectable="true"
+              data-tool-kind={toolKind}
+              aria-current={current ? "step" : undefined}
+              aria-pressed={selected}
+              onClick={() => props.onSelectItem?.(item)}
+              key={item.key}
+            >
+              {content}
+            </button>
+          );
+        }
         return (
           <div
             className={`agent-activity-step ${item.tone} ${item.phase}`}
             data-current={current ? "true" : undefined}
+            data-selected={selected ? "true" : undefined}
             data-tool-kind={toolKind}
             aria-current={current ? "step" : undefined}
             key={item.key}
           >
-            <span className="agent-activity-marker" aria-hidden="true" />
-            <ActivityLine item={item} />
+            {content}
           </div>
         );
       })}
@@ -185,24 +224,24 @@ function activityMetricKind(item: ActivityItem): ActivityMetricKind | undefined 
   return undefined;
 }
 
-function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactElement {
+function ActivityLine(props: {
+  readonly item: ActivityItem;
+  readonly expandable?: boolean;
+}): React.ReactElement {
+  const { item } = props;
   const toolKind = item.toolKind ?? resolveActivityToolKind(item);
   const Icon = TOOL_KIND_ICON[toolKind] ?? Sparkles;
-  const hasExpandedDetail = shouldRenderExpandedDetail(item);
+  const visibleBadges = visibleBadgesForItem(item);
   const line = (
     <>
       <span className="agent-activity-label" aria-hidden="true">
         <Icon size={12} strokeWidth={2.25} />
       </span>
       <span className="agent-activity-body">
-        {(item.copy.label !== undefined || item.statusBadge !== undefined || (item.badges?.length ?? 0) > 0) && (
+        {visibleBadges.length > 0 && (
           <span className="agent-activity-meta">
-            {item.copy.label !== undefined && (
-              <ActivityBadgeChip badge={{ label: item.copy.label, tone: badgeToneForKind(toolKind) }} variant="kind" />
-            )}
-            {item.statusBadge !== undefined && <ActivityBadgeChip badge={item.statusBadge} variant="status" />}
-            {item.badges?.map((badge, index) => (
-              <ActivityBadgeChip key={`${badge.label}-${index}`} badge={badge} variant="meta" />
+            {visibleBadges.map((entry, index) => (
+              <ActivityBadgeChip key={`${entry.badge.label}-${index}`} badge={entry.badge} variant={entry.variant} />
             ))}
           </span>
         )}
@@ -210,7 +249,7 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
       </span>
     </>
   );
-  if (hasExpandedDetail) {
+  if (props.expandable !== false && shouldRenderExpandedDetail(item)) {
     return (
       <details className="agent-activity-disclosure" data-tone={item.tone}>
         <summary className="agent-activity-line">{line}</summary>
@@ -225,14 +264,59 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
   );
 }
 
+function ContextCompactionStatusLine(props: {
+  readonly item: ActivityItem;
+  readonly current: boolean;
+}): React.ReactElement {
+  const status = props.item.phase === "failed" || props.item.phase === "blocked"
+    ? "failed"
+    : props.item.phase === "completed"
+      ? "completed"
+      : "running";
+  return (
+    <div
+      className="context-compaction-step"
+      data-current={props.current ? "true" : undefined}
+      data-status={status}
+      aria-current={props.current ? "step" : undefined}
+    >
+      <span className="context-compaction-rule" aria-hidden="true" />
+      <span className="context-compaction-label">
+        {props.item.copy.detail}
+      </span>
+      <span className="context-compaction-rule" aria-hidden="true" />
+    </div>
+  );
+}
+
 function shouldRenderExpandedDetail(item: ActivityItem): boolean {
   const sections = item.expandedSections ?? [];
+  if (item.tone === "tool" || item.tone === 'confirmation' || item.tone === "decision") {
+    return sections.length > 0 || item.copy.expandedDetail !== undefined;
+  }
   const hasStructuredSections = sections.some((section) => section.title !== "详情");
+  if (!itemNeedsAttention(item)) return false;
   if (hasStructuredSections) return true;
   if (item.tone === "thinking" || item.tone === "narration" || item.tone === "system") {
     return false;
   }
   return sections.length > 0 || item.copy.expandedDetail !== undefined;
+}
+
+function itemNeedsAttention(item: ActivityItem): boolean {
+  if (item.tone === 'confirmation' || item.tone === "decision") {
+    return true;
+  }
+  if (item.phase === "failed" || item.phase === "blocked" || item.phase === "cancelled") {
+    return true;
+  }
+  if (item.statusBadge?.tone === "danger" || item.statusBadge?.tone === "warning") {
+    return true;
+  }
+  if (item.badges?.some((badge) => badge.tone === "danger" || badge.tone === "warning")) {
+    return true;
+  }
+  return item.tone === "tool" && item.phase !== "completed";
 }
 
 function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.ReactElement {
@@ -244,9 +328,12 @@ function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.R
           <div
             className="agent-activity-expanded-section"
             data-tone={section.tone}
+            data-title-hidden={shouldHideExpandedSectionTitle(section, sections) ? "true" : undefined}
             key={index}
           >
-            <div className="agent-activity-expanded-section-title">{section.title}</div>
+            {!shouldHideExpandedSectionTitle(section, sections) && (
+              <div className="agent-activity-expanded-section-title">{section.title}</div>
+            )}
             <ExpandedSectionContent section={section} />
           </div>
         ))}
@@ -256,9 +343,79 @@ function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.R
   return <p className="agent-activity-expanded-detail">{item.copy.expandedDetail}</p>;
 }
 
+function shouldHideExpandedSectionTitle(
+  section: ActivityExpandedSection,
+  sections: readonly ActivityExpandedSection[],
+): boolean {
+  if (sections.length !== 1) {
+    return false;
+  }
+  return section.format === "diff" ||
+    section.format === "code" ||
+    section.format === "quote" ||
+    section.format === "list";
+}
+
 function ExpandedSectionContent(props: {
   readonly section: ActivityExpandedSection;
 }): React.ReactElement {
+  if (props.section.format === "source") {
+    const showHref = props.section.href !== undefined && props.section.href !== props.section.content;
+    return (
+      <div className="agent-activity-expanded-section-content agent-activity-source">
+        <div className="agent-activity-source-title">{props.section.content}</div>
+        {(props.section.meta?.length ?? 0) > 0 && (
+          <div className="agent-activity-source-meta">
+            {props.section.meta?.map((item, index) => (
+              <span
+                className="agent-activity-source-meta-item"
+                aria-label={item.label === undefined ? undefined : `${item.label}：${item.value}`}
+                key={`${index}-${item.value}`}
+              >
+                {item.value}
+              </span>
+            ))}
+          </div>
+        )}
+        {showHref && (
+          <a
+            className="agent-activity-source-url"
+            href={props.section.href}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            {props.section.href}
+          </a>
+        )}
+      </div>
+    );
+  }
+  if (props.section.format === "quote") {
+    return (
+      <blockquote className="agent-activity-expanded-section-content agent-activity-quote">
+        {props.section.content}
+      </blockquote>
+    );
+  }
+  if (props.section.format === "diff") {
+    return (
+      <pre className="agent-activity-expanded-section-content agent-activity-diff" aria-label={props.section.title}>
+        {props.section.content.split("\n").map((line, index) => {
+          const parts = diffLineParts(line);
+          return (
+            <span
+              className="agent-activity-diff-line"
+              data-kind={parts.kind}
+              key={`${index}-${line}`}
+            >
+              <span className="agent-activity-diff-marker" aria-hidden="true">{parts.marker}</span>
+              <code>{parts.text.length === 0 ? " " : parts.text}</code>
+            </span>
+          );
+        })}
+      </pre>
+    );
+  }
   if (props.section.format === "code") {
     return (
       <pre className="agent-activity-expanded-section-content agent-activity-expanded-code">
@@ -280,9 +437,63 @@ function ExpandedSectionContent(props: {
   return <div className="agent-activity-expanded-section-content">{props.section.content}</div>;
 }
 
+type DiffLineKind = "add" | "delete" | "hunk" | "file" | "context";
+
+function diffLineParts(line: string): {
+  readonly kind: DiffLineKind;
+  readonly marker: string;
+  readonly text: string;
+} {
+  if (line.startsWith("@@")) {
+    return { kind: "hunk", marker: "@", text: line };
+  }
+  if (line.startsWith("diff --git") || line.startsWith("index ") || line.startsWith("+++") || line.startsWith("---")) {
+    return { kind: "file", marker: "", text: line };
+  }
+  if (line.startsWith("+")) {
+    return { kind: "add", marker: "+", text: line.slice(1) };
+  }
+  if (line.startsWith("-")) {
+    return { kind: "delete", marker: "-", text: line.slice(1) };
+  }
+  if (line.startsWith(" ")) {
+    return { kind: "context", marker: "", text: line.slice(1) };
+  }
+  return { kind: "context", marker: "", text: line };
+}
+
+type VisibleBadgeEntry = {
+  readonly badge: ActivityBadge;
+  readonly variant: "status" | "meta";
+};
+
+function visibleBadgesForItem(item: ActivityItem): readonly VisibleBadgeEntry[] {
+  const badges: VisibleBadgeEntry[] = [];
+  if (item.statusBadge !== undefined && shouldShowStatusBadge(item.statusBadge)) {
+    badges.push({ badge: item.statusBadge, variant: "status" });
+  }
+  for (const badge of item.badges ?? []) {
+    if (shouldShowMetaBadge(badge)) {
+      badges.push({ badge, variant: "meta" });
+    }
+  }
+  return badges;
+}
+
+function shouldShowStatusBadge(badge: ActivityBadge): boolean {
+  if (badge.tone === "danger" || badge.tone === "warning") {
+    return true;
+  }
+  return badge.label !== "已完成" && badge.label !== "压缩完成";
+}
+
+function shouldShowMetaBadge(badge: ActivityBadge): boolean {
+  return badge.tone === "danger" || badge.tone === "warning";
+}
+
 function ActivityBadgeChip(props: {
   readonly badge: ActivityBadge;
-  readonly variant: "kind" | "status" | "meta";
+  readonly variant: "status" | "meta";
 }): React.ReactElement {
   return (
     <span
@@ -295,20 +506,13 @@ function ActivityBadgeChip(props: {
   );
 }
 
-function badgeToneForKind(kind: string): ActivityBadge["tone"] {
-  if (kind === "command") return "accent";
-  if (kind === "search" || kind === "web") return "accent";
-  if (kind === "read") return "success";
-  if (kind === "edit") return "warning";
-  if (kind === 'confirmation') return "warning";
-  if (kind === "decision") return "accent";
-  return "neutral";
-}
-
 function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentWorkTimelineProps): boolean {
   return left.collapsed === right.collapsed &&
     left.lifecycle === right.lifecycle &&
     left.collapseReason === right.collapseReason &&
+    left.selectedItemKey === right.selectedItemKey &&
+    stringListsEqual(left.selectableItemKeys, right.selectableItemKeys) &&
+    left.onSelectItem === right.onSelectItem &&
     left.onDecision === right.onDecision &&
     left.confirmationBusy === right.confirmationBusy &&
     timelineViewsEqual(left.view, right.view);
@@ -383,10 +587,37 @@ function expandedSectionsEqual(
       left[i]?.title !== right[i]?.title ||
       left[i]?.content !== right[i]?.content ||
       left[i]?.format !== right[i]?.format ||
+      left[i]?.href !== right[i]?.href ||
+      !sectionMetaEqual(left[i]?.meta, right[i]?.meta) ||
       left[i]?.tone !== right[i]?.tone
     ) {
       return false;
     }
+  }
+  return true;
+}
+
+function sectionMetaEqual(
+  left: ActivityExpandedSection["meta"],
+  right: ActivityExpandedSection["meta"],
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index]?.label !== right[index]?.label || left[index]?.value !== right[index]?.value) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function stringListsEqual(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
   }
   return true;
 }

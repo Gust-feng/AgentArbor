@@ -84,3 +84,55 @@ test("tool status envelope classifies non-process failures as tool errors", () =
   assert.equal(envelope.errorFacts?.path, "missing.md");
   assert.equal(envelope.agentSummary.includes("ENOENT"), true);
 });
+
+test("tool result envelope keeps structured directory evidence compact and referenced", () => {
+  const envelope = projectToolResultEnvelope({
+    request: { callId: "call-list", toolName: "list_dir", input: { path: "." } },
+    display: {
+      kind: "directory_listing",
+      path: ".",
+      depth: 1,
+      entriesReturned: 9,
+      totalEntries: 29,
+      unreadableDirectories: 1,
+      entries: [
+        { path: "README.md", kind: "file", bytes: 120, depth: 1 },
+        { path: "src", kind: "directory", depth: 1 },
+      ],
+      truncated: true,
+    },
+    diagnosticRef: "tool:call-list",
+    truncated: true,
+  });
+
+  assert.equal(envelope.uiDisplay?.kind, "directory_listing");
+  assert.equal(envelope.uiDisplay?.kind === "directory_listing" ? envelope.uiDisplay.totalEntries : undefined, 29);
+  assert.equal(envelope.evidenceRefs.includes("file:README.md"), true);
+  assert.equal(envelope.evidenceRefs.includes("file:src"), true);
+  assert.equal(envelope.agentSummary.includes("29"), true);
+});
+
+test("tool result envelope keeps more than sample-sized file search matches for UI", () => {
+  const envelope = projectToolResultEnvelope({
+    request: { callId: "call-grep-large", toolName: "grep_files", input: { path: ".", query: "needle" } },
+    display: {
+      kind: "file_search_results",
+      query: "needle",
+      path: ".",
+      matches: Array.from({ length: 30 }, (_, index) => ({
+        path: `src/file-${index}.ts`,
+        line: index + 1,
+        preview: `needle ${index}`,
+      })),
+      matchesReturned: 30,
+      truncated: false,
+    },
+    diagnosticRef: "tool:call-grep-large",
+    truncated: false,
+  });
+
+  assert.equal(envelope.uiDisplay?.kind, "file_search_results");
+  assert.equal(envelope.uiDisplay?.kind === "file_search_results" ? envelope.uiDisplay.matches.length : undefined, 30);
+  assert.equal(envelope.uiDisplay?.kind === "file_search_results" ? envelope.uiDisplay.matchesReturned : undefined, 30);
+  assert.equal(envelope.truncated, false);
+});

@@ -16,12 +16,16 @@ export type ToolDisplayNormalizationInput = {
 export function normalizeToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection {
   const output = asRecord(input.output);
   const existing = normalizedExistingDisplay(input.toolName, input.existingDisplay ?? output.display);
-  if (existing !== undefined && !isFileDisplay(existing)) {
+  if (existing !== undefined && existing.kind !== "generic_tool_summary" && !isFileDisplay(existing)) {
     return existing;
   }
   const fileDisplay = fileToolDisplayForOperation(input, existing);
   if (fileDisplay !== undefined) {
     return fileDisplay;
+  }
+  const structuredDisplay = structuredToolDisplayForOperation(input);
+  if (structuredDisplay !== undefined) {
+    return structuredDisplay;
   }
   if (existing !== undefined) {
     return existing;
@@ -52,6 +56,7 @@ export function toolDisplayProjectionOrUndefined(value: unknown): ToolDisplayPro
       results: Array.isArray(record.results)
         ? record.results.map(searchResultItem).filter((item): item is NonNullable<ReturnType<typeof searchResultItem>> => item !== undefined)
         : [],
+      resultsReturned: numberOrUndefined(record.resultsReturned),
       truncated: booleanOrUndefined(record.truncated),
     };
   }
@@ -70,6 +75,55 @@ export function toolDisplayProjectionOrUndefined(value: unknown): ToolDisplayPro
       preview: stringOrUndefined(record.preview),
       error: stringOrUndefined(record.error),
       errorFacts: errorFactsOrUndefined(record.errorFacts),
+      truncated: booleanOrUndefined(record.truncated),
+    };
+  }
+  if (kind === "directory_listing") {
+    return {
+      kind,
+      path: stringOrUndefined(record.path),
+      depth: numberOrUndefined(record.depth),
+      entriesReturned: numberOrUndefined(record.entriesReturned),
+      totalEntries: numberOrUndefined(record.totalEntries),
+      unreadableDirectories: numberOrUndefined(record.unreadableDirectories),
+      unreadableSamples: Array.isArray(record.unreadableSamples)
+        ? record.unreadableSamples
+          .map(unreadableDirectorySample)
+          .filter((item): item is NonNullable<ReturnType<typeof unreadableDirectorySample>> => item !== undefined)
+        : undefined,
+      entries: Array.isArray(record.entries)
+        ? record.entries
+          .map(directoryEntryDisplayItem)
+          .filter((item): item is NonNullable<ReturnType<typeof directoryEntryDisplayItem>> => item !== undefined)
+        : [],
+      truncated: booleanOrUndefined(record.truncated),
+    };
+  }
+  if (kind === "file_search_results") {
+    return {
+      kind,
+      query: stringOrUndefined(record.query),
+      path: stringOrUndefined(record.path),
+      engine: stringOrUndefined(record.engine),
+      searchedFiles: numberOrUndefined(record.searchedFiles),
+      skippedFactsAvailable: booleanOrUndefined(record.skippedFactsAvailable),
+      skippedFiles: numberOrUndefined(record.skippedFiles),
+      skippedBinaryFiles: numberOrUndefined(record.skippedBinaryFiles),
+      skippedTooLargeFiles: numberOrUndefined(record.skippedTooLargeFiles),
+      skippedUnreadableFiles: numberOrUndefined(record.skippedUnreadableFiles),
+      skippedDirectories: numberOrUndefined(record.skippedDirectories),
+      skippedOtherEntries: numberOrUndefined(record.skippedOtherEntries),
+      skippedSamples: Array.isArray(record.skippedSamples)
+        ? record.skippedSamples
+          .map(fileSearchSkippedSample)
+          .filter((item): item is NonNullable<ReturnType<typeof fileSearchSkippedSample>> => item !== undefined)
+        : undefined,
+      matches: Array.isArray(record.matches)
+        ? record.matches
+          .map(fileSearchMatchDisplayItem)
+          .filter((item): item is NonNullable<ReturnType<typeof fileSearchMatchDisplayItem>> => item !== undefined)
+        : [],
+      matchesReturned: numberOrUndefined(record.matchesReturned),
       truncated: booleanOrUndefined(record.truncated),
     };
   }
@@ -134,6 +188,82 @@ export function toolDisplayProjectionOrUndefined(value: unknown): ToolDisplayPro
   return undefined;
 }
 
+function structuredToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection | undefined {
+  const toolName = input.toolName.trim().toLowerCase();
+  const output = asRecord(input.output);
+  const result = asRecord(output.result);
+  const truncated = booleanOrUndefined(result.truncated) ??
+    booleanOrUndefined(output.truncated) ??
+    (input.truncated === true ? true : undefined);
+  if (isDirectoryListingTool(toolName, output) && Array.isArray(result.entries)) {
+    const entries = result.entries
+      .map(directoryEntryDisplayItem)
+      .filter((item): item is NonNullable<ReturnType<typeof directoryEntryDisplayItem>> => item !== undefined);
+    const entriesReturned = numberOrUndefined(result.entriesReturned) ?? entries.length;
+    return {
+      kind: "directory_listing",
+      path: stringOrUndefined(result.path) ?? stringOrUndefined(asRecord(input.input).path),
+      depth: numberOrUndefined(result.depth) ?? numberOrUndefined(asRecord(input.input).depth),
+      entriesReturned,
+      totalEntries: numberOrUndefined(result.totalEntries) ?? (truncated === true ? undefined : entriesReturned),
+      unreadableDirectories: numberOrUndefined(result.unreadableDirectories),
+      unreadableSamples: Array.isArray(result.unreadableSamples)
+        ? result.unreadableSamples
+          .map(unreadableDirectorySample)
+          .filter((item): item is NonNullable<ReturnType<typeof unreadableDirectorySample>> => item !== undefined)
+        : undefined,
+      entries,
+      truncated,
+    };
+  }
+  if (isFileSearchTool(toolName, output) && Array.isArray(result.matches)) {
+    const matches = result.matches
+      .map(fileSearchMatchDisplayItem)
+      .filter((item): item is NonNullable<ReturnType<typeof fileSearchMatchDisplayItem>> => item !== undefined);
+    return {
+      kind: "file_search_results",
+      query: stringOrUndefined(result.query) ?? stringOrUndefined(asRecord(input.input).query),
+      path: stringOrUndefined(result.path) ?? stringOrUndefined(asRecord(input.input).path),
+      engine: stringOrUndefined(result.engine),
+      searchedFiles: numberOrUndefined(result.searchedFiles),
+      skippedFactsAvailable: booleanOrUndefined(result.skippedFactsAvailable),
+      skippedFiles: numberOrUndefined(result.skippedFiles),
+      skippedBinaryFiles: numberOrUndefined(result.skippedBinaryFiles),
+      skippedTooLargeFiles: numberOrUndefined(result.skippedTooLargeFiles),
+      skippedUnreadableFiles: numberOrUndefined(result.skippedUnreadableFiles),
+      skippedDirectories: numberOrUndefined(result.skippedDirectories),
+      skippedOtherEntries: numberOrUndefined(result.skippedOtherEntries),
+      skippedSamples: Array.isArray(result.skippedSamples)
+        ? result.skippedSamples
+          .map(fileSearchSkippedSample)
+          .filter((item): item is NonNullable<ReturnType<typeof fileSearchSkippedSample>> => item !== undefined)
+        : undefined,
+      matches,
+      matchesReturned: numberOrUndefined(result.matchesReturned) ?? matches.length,
+      truncated,
+    };
+  }
+  return undefined;
+}
+
+function isDirectoryListingTool(toolName: string, output: Readonly<Record<string, unknown>>): boolean {
+  const action = stringOrUndefined(output.action)?.toLowerCase();
+  return toolName === "list_dir" ||
+    toolName === "list_files" ||
+    toolName === "list_context_attachment_files" ||
+    action === "list_dir" ||
+    action === "list_files" ||
+    action === "list_context_attachment_files";
+}
+
+function isFileSearchTool(toolName: string, output: Readonly<Record<string, unknown>>): boolean {
+  const action = stringOrUndefined(output.action)?.toLowerCase();
+  return toolName === "grep_files" ||
+    toolName === "search_context_attachment_files" ||
+    action === "grep_files" ||
+    action === "search_context_attachment_files";
+}
+
 function fileToolDisplayForOperation(
   input: ToolDisplayNormalizationInput,
   existing: ToolDisplayProjection | undefined
@@ -150,7 +280,10 @@ function fileToolDisplayForOperation(
   const path = stringOrUndefined(result.path) ??
     stringOrUndefined(outputRecord.path) ??
     stringOrUndefined(inputRecord.path);
-  if (path === undefined && !operation.explicit) {
+  const existingPath = existing?.kind === "file_change_summary" || existing?.kind === "file_diff_preview"
+    ? existing.path
+    : undefined;
+  if (path === undefined && existingPath === undefined) {
     return undefined;
   }
   if (operation.kind === "edit") {
@@ -201,7 +334,9 @@ function fileDiffDisplay(
 ): ToolDisplayProjection {
   const existingDiff = existing?.kind === "file_diff_preview" ? existing : undefined;
   const allowDerivedPreview = isBuiltInFileToolName(input.toolName);
-  const preview = allowDerivedPreview ? fileEditDiffPreview(inputRecord.edits) : undefined;
+  const preview = allowDerivedPreview
+    ? fileEditDiffPreview(inputRecord.edits) ?? diffSummaryPreview(result.diffSummary)
+    : diffSummaryPreview(result.diffSummary);
   return {
     kind: "file_diff_preview",
     path: existingDiff?.path ?? stringOrUndefined(result.path) ?? stringOrUndefined(outputRecord.path) ?? stringOrUndefined(inputRecord.path),
@@ -409,6 +544,35 @@ function fileEditDiffPreview(value: unknown): FilePreviewResult | undefined {
   return { text: compacted.text, truncated: truncated || compacted.truncated };
 }
 
+function diffSummaryPreview(value: unknown): FilePreviewResult | undefined {
+  const lines = stringArray(value)
+    .map(diffSummaryLinePreview)
+    .filter((line): line is string => line !== undefined);
+  if (lines.length === 0) {
+    return undefined;
+  }
+  const compacted = compactDiffText(lines.join("\n"), 2_400);
+  return compacted === undefined ? undefined : { ...compacted, truncated: compacted.truncated || lines.length > 12 };
+}
+
+function diffSummaryLinePreview(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  const arrow = /^(.*?)(?:\s*->\s*| → )(.*)$/u.exec(trimmed);
+  if (arrow === null) {
+    return `@@ ${trimmed}`;
+  }
+  const before = arrow[1]?.replace(/^line\s+\d+:\s*/iu, "").trim();
+  const after = arrow[2]?.trim();
+  return [
+    `@@ ${trimmed.match(/^line\s+\d+/iu)?.[0] ?? "change"}`,
+    before === undefined || before.length === 0 ? undefined : `- ${before}`,
+    after === undefined || after.length === 0 ? undefined : `+ ${after}`,
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
 function editTargetLabel(record: Readonly<Record<string, unknown>>): string | undefined {
   const occurrence = numberOrUndefined(record.occurrence);
   const start = numberOrUndefined(record.startLine) ?? numberOrUndefined(record.startLineHint);
@@ -475,6 +639,82 @@ function mcpMultimodalSummary(value: unknown): string | undefined {
     mimeType === undefined ? undefined : `MIME：${mimeType}`,
     bytesApprox === undefined ? undefined : `约 ${bytesApprox} 字节`,
   ].filter((item): item is string => item !== undefined).join("，");
+}
+
+function directoryEntryDisplayItem(value: unknown): {
+  readonly path: string;
+  readonly name?: string;
+  readonly kind?: string;
+  readonly bytes?: number;
+  readonly depth?: number;
+} | undefined {
+  const record = asRecord(value);
+  const path = stringOrUndefined(record.path) ?? stringOrUndefined(record.name);
+  if (path === undefined) {
+    return undefined;
+  }
+  return {
+    path,
+    name: stringOrUndefined(record.name),
+    kind: stringOrUndefined(record.kind),
+    bytes: numberOrUndefined(record.bytes),
+    depth: numberOrUndefined(record.depth),
+  };
+}
+
+function unreadableDirectorySample(value: unknown): {
+  readonly path?: string;
+  readonly errorCode?: string;
+} | undefined {
+  const record = asRecord(value);
+  const path = stringOrUndefined(record.path);
+  const errorCode = stringOrUndefined(record.errorCode);
+  if (path === undefined && errorCode === undefined) {
+    return undefined;
+  }
+  return {
+    path,
+    errorCode,
+  };
+}
+
+function fileSearchMatchDisplayItem(value: unknown): {
+  readonly path: string;
+  readonly line?: number;
+  readonly preview?: string;
+} | undefined {
+  const record = asRecord(value);
+  const path = stringOrUndefined(record.path);
+  if (path === undefined) {
+    return undefined;
+  }
+  return {
+    path,
+    line: numberOrUndefined(record.line),
+    preview: compactText(stringOrUndefined(record.preview), 500),
+  };
+}
+
+function fileSearchSkippedSample(value: unknown): {
+  readonly path?: string;
+  readonly reason?: string;
+  readonly bytes?: number;
+  readonly errorCode?: string;
+} | undefined {
+  const record = asRecord(value);
+  const path = stringOrUndefined(record.path);
+  const reason = stringOrUndefined(record.reason);
+  const bytes = numberOrUndefined(record.bytes);
+  const errorCode = stringOrUndefined(record.errorCode);
+  if (path === undefined && reason === undefined && bytes === undefined && errorCode === undefined) {
+    return undefined;
+  }
+  return {
+    path,
+    reason,
+    bytes,
+    errorCode,
+  };
 }
 
 function searchResultItem(value: unknown): { readonly title: string; readonly url?: string; readonly refId?: string; readonly source?: string; readonly snippet?: string } | undefined {

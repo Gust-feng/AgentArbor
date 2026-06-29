@@ -470,6 +470,8 @@ test("workspace list and grep projections keep factual traversal metadata", () =
   assert.equal(listContent.totalEntries, 2);
   assert.equal(listContent.entries?.[1]?.path, "src/index.ts");
   assert.equal(listContent.entries?.[1]?.depth, 2);
+  assert.equal(listProjection.display?.kind, "directory_listing");
+  assert.equal(listProjection.display?.kind === "directory_listing" ? listProjection.display.totalEntries : undefined, 2);
 
   const grepProjection = projectToolResult({
     request: {
@@ -514,6 +516,42 @@ test("workspace list and grep projections keep factual traversal metadata", () =
   assert.equal(grepContent.skippedFactsAvailable, true);
   assert.equal(grepContent.skippedFiles, 2);
   assert.deepEqual(grepContent.skippedSamples?.map((sample) => sample.reason), ["skipped_directory", "binary"]);
+  assert.equal(grepProjection.display?.kind, "file_search_results");
+  assert.equal(grepProjection.display?.kind === "file_search_results" ? grepProjection.display.matches[0]?.path : undefined, "src/index.ts");
+});
+
+test("grep file search projection preserves project-scale match previews", () => {
+  const matches = Array.from({ length: 30 }, (_, index) => ({
+    path: `src/file-${index}.ts`,
+    line: index + 1,
+    preview: `needle ${index}`,
+  }));
+  const projection = projectToolResult({
+    request: {
+      callId: "call-grep-large",
+      toolName: "grep_files",
+      input: { path: ".", query: "needle" },
+    },
+    output: {
+      action: "grep_files",
+      summary: ". · 30 matches for needle",
+      result: {
+        query: "needle",
+        path: ".",
+        engine: "js",
+        matches,
+        searchedFiles: 30,
+      },
+      truncated: false,
+    },
+  });
+
+  assert.equal(projection.display?.kind, "file_search_results");
+  assert.equal(projection.display?.kind === "file_search_results" ? projection.display.matches.length : undefined, 30);
+  assert.equal(projection.display?.kind === "file_search_results" ? projection.display.matchesReturned : undefined, 30);
+  assert.equal(projection.envelope?.uiDisplay?.kind, "file_search_results");
+  assert.equal(projection.envelope?.uiDisplay?.kind === "file_search_results" ? projection.envelope.uiDisplay.matches.length : undefined, 30);
+  assert.equal(projection.envelope?.uiDisplay?.kind === "file_search_results" ? projection.envelope.uiDisplay.matchesReturned : undefined, 30);
 });
 
 test("read_file projection keeps token-like file content in model-visible agent content", () => {

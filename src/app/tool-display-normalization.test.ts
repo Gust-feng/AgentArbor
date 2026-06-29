@@ -154,6 +154,81 @@ test("normalizeToolDisplayForOperation derives custom file action operation with
   assert.equal(JSON.stringify(display).includes("RAW_RESULT_TEXT_SHOULD_NOT_SURFACE"), false);
 });
 
+test("normalizeToolDisplayForOperation derives structured directory listings from list results", () => {
+  const display = normalizeToolDisplayForOperation({
+    toolName: "list_dir",
+    input: {
+      path: ".",
+      depth: 1,
+    },
+    output: {
+      action: "list_dir",
+      truncated: true,
+      summary: ". · 9 of 29 entries · depth 1 · truncated",
+      result: {
+        path: ".",
+        depth: 1,
+        entriesReturned: 9,
+        totalEntries: 29,
+        unreadableDirectories: 1,
+        unreadableSamples: [{ path: "node_modules/.cache", errorCode: "EPERM" }],
+        entries: [
+          { path: "README.md", name: "README.md", kind: "file", bytes: 120, depth: 1 },
+          { path: "src", name: "src", kind: "directory", depth: 1 },
+        ],
+      },
+    },
+  });
+
+  assert.equal(display.kind, "directory_listing");
+  assert.equal(display.kind === "directory_listing" ? display.path : undefined, ".");
+  assert.equal(display.kind === "directory_listing" ? display.depth : undefined, 1);
+  assert.equal(display.kind === "directory_listing" ? display.entriesReturned : undefined, 9);
+  assert.equal(display.kind === "directory_listing" ? display.totalEntries : undefined, 29);
+  assert.equal(display.kind === "directory_listing" ? display.entries[0]?.path : undefined, "README.md");
+  assert.equal(display.kind === "directory_listing" ? display.unreadableSamples?.[0]?.path : undefined, "node_modules/.cache");
+  assert.equal(display.kind === "directory_listing" ? display.truncated : undefined, true);
+});
+
+test("normalizeToolDisplayForOperation derives structured file search results ahead of generic attachment display", () => {
+  const display = normalizeToolDisplayForOperation({
+    toolName: "search_context_attachment_files",
+    input: {
+      attachmentId: "ctx_project",
+      query: "needle",
+      path: ".",
+    },
+    output: {
+      action: "search_context_attachment_files",
+      display: {
+        kind: "generic_tool_summary",
+        action: "search_context_attachment_files",
+        summary: "项目:. · 2 matches for needle",
+        items: ["src/index.ts:4", "README.md:8"],
+      },
+      result: {
+        query: "needle",
+        path: ".",
+        searchedFiles: 12,
+        skippedFiles: 3,
+        skippedBinaryFiles: 1,
+        skippedSamples: [{ path: "dist/app.bin", reason: "binary", bytes: 42 }],
+        matches: [
+          { path: "src/index.ts", line: 4, preview: "needle found here" },
+          { path: "README.md", line: 8 },
+        ],
+      },
+    },
+  });
+
+  assert.equal(display.kind, "file_search_results");
+  assert.equal(display.kind === "file_search_results" ? display.query : undefined, "needle");
+  assert.equal(display.kind === "file_search_results" ? display.path : undefined, ".");
+  assert.equal(display.kind === "file_search_results" ? display.matches.length : undefined, 2);
+  assert.equal(display.kind === "file_search_results" ? display.matches[0]?.preview : undefined, "needle found here");
+  assert.equal(display.kind === "file_search_results" ? display.skippedSamples?.[0]?.reason : undefined, "binary");
+});
+
 test("normalizeToolDisplayForOperation preserves existing non-file display", () => {
   const existingDisplay = {
     kind: "generic_tool_summary",

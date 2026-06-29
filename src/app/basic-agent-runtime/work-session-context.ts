@@ -8,6 +8,7 @@ import type {
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
+import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 import type { BasicAgentContextSkillFacts } from "./contracts.js";
 
@@ -327,6 +328,8 @@ function contextBudgetSummary(budget: ContextLedger["budget"]): string {
 
 function toolLedgerTitle(display: ToolDisplayProjection): string {
   if (display.kind === "search_results") return "搜索证据";
+  if (display.kind === "directory_listing") return "目录列表";
+  if (display.kind === "file_search_results") return "文件搜索";
   if (display.kind === "read_result") return "资料正文";
   if (display.kind === "browser_snapshot") return "网页摘要";
   if (display.kind === "http_response") return "HTTP 响应";
@@ -338,7 +341,24 @@ function toolLedgerTitle(display: ToolDisplayProjection): string {
 
 function toolLedgerSummary(display: ToolDisplayProjection): string {
   if (display.kind === "search_results") return redactOrdinaryText(
-    [display.query, display.message, `搜索结果 ${display.results.length} 条`].filter(isString).join(" · "),
+    [display.query, display.message, `搜索结果 ${display.resultsReturned ?? display.results.length} 条`].filter(isString).join(" · "),
+    300
+  );
+  if (display.kind === "directory_listing") return redactOrdinaryText(
+    [
+      toolPathLabel(display.path) ?? "目录已读取。",
+      `${display.totalEntries ?? display.entriesReturned ?? display.entries.length} 项`,
+      display.depth === undefined ? undefined : `深度 ${display.depth}`,
+    ].filter(isString).join(" · "),
+    300
+  );
+  if (display.kind === "file_search_results") return redactOrdinaryText(
+    [
+      display.query ?? "文件搜索已完成。",
+      toolPathLabel(display.path),
+      `${display.matchesReturned ?? display.matches.length} 处匹配`,
+      display.searchedFiles === undefined ? undefined : `${display.searchedFiles} 个文件`,
+    ].filter(isString).join(" · "),
     300
   );
   if (display.kind === "read_result") return redactOrdinaryText(
@@ -361,6 +381,13 @@ function toolLedgerSummary(display: ToolDisplayProjection): string {
   if (display.kind === "command_summary") return redactOrdinaryText(display.command ?? "命令已执行。", 240);
   if (display.kind === "file_change_summary" || display.kind === "file_diff_preview") return redactOrdinaryText(display.path ?? "文件变更摘要。", 240);
   return redactOrdinaryText(display.summary ?? display.action ?? "已处理。", 240);
+}
+
+function toolPathLabel(value: string | undefined): string | undefined {
+  if (value === ".") {
+    return "当前目录";
+  }
+  return cleanOrdinaryToolText(value);
 }
 
 function mergeContextAttachments(

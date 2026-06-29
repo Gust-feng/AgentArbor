@@ -92,6 +92,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
 
   assert.equal(app.includes("/api/conversations"), false);
   assert.equal(appBootstrap.includes("/api/conversations"), true);
+  assert.equal(appBootstrap.includes("/api/deep/conversations?limit=50"), true);
   assert.equal(appBootstrap.includes("/api/deep/runs?limit=50"), true);
   assert.equal(appConversationRefresh.includes("/api/conversations"), true);
   assert.equal(appConversationRefresh.includes("/api/basic-agent/runs/"), false);
@@ -329,6 +330,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(transcriptTimeline.includes("agent-activity-marker"), true);
   assert.equal(transcriptTimeline.includes("agent-activity-toggle"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-disclosure"), true);
+  assert.equal(transcriptTimeline.includes("expandable={!selectable}"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-expanded-detail"), true);
   assert.equal(transcriptTimeline.includes("expandedDetail"), true);
   assert.equal(transcriptTimeline.includes("timelineConfirmationProjection"), false);
@@ -376,8 +378,10 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(sidebar.includes("NAV_ITEMS"), false);
   assert.equal(sidebar.includes("onNavigate"), false);
   assert.equal(sidebar.includes("设置"), true);
-  assert.equal(sidebar.includes("待确认"), false);
+  assert.equal(sidebar.includes("计划待确认"), true);
   assert.equal(sidebar.includes("待处理"), true);
+  assert.equal(sidebar.includes("pinningConversationIds"), true);
+  assert.equal(sidebar.includes("更新中"), true);
   assert.equal(sidebar.includes("sidebarConversationTone"), false);
   assert.equal(sidebar.includes("sidebarConversationStatusLabel"), false);
   assert.equal(sidebar.includes("sidebar-status-pill"), false);

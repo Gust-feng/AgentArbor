@@ -4,7 +4,7 @@ import type { ModelProvider, ModelRequest, ModelResponse } from "../../domain/in
 import { InMemoryEventLog } from "../events/in-memory-event-log.js";
 import { nowIso } from "../id.js";
 import { InMemoryMessageBus } from "../messages/in-memory-message-bus.js";
-import { NativeIntelligenceChannel } from "./channel.js";
+import { NativeIntelligenceChannel, type ModelRequestRetryPolicy } from "./channel.js";
 import { createFailedModelResponse } from "./failures.js";
 import { pendingModelOutputValidation } from "./validation.js";
 
@@ -92,6 +92,7 @@ test("IntelligenceChannel retries retryable failed provider responses before pub
   const channel = new NativeIntelligenceChannel({
     provider,
     bus: new InMemoryMessageBus(eventLog),
+    retryPolicy: fastRetryPolicy(),
   });
 
   const response = await channel.request(createValidModelRequest());
@@ -120,6 +121,7 @@ test("IntelligenceChannel retries thrown retryable provider errors before publis
   const channel = new NativeIntelligenceChannel({
     provider,
     bus: new InMemoryMessageBus(eventLog),
+    retryPolicy: fastRetryPolicy(),
   });
 
   const response = await channel.request(createValidModelRequest());
@@ -129,10 +131,143 @@ test("IntelligenceChannel retries thrown retryable provider errors before publis
   assert.deepEqual(eventLog.types(), ["model.requested", "model.completed"]);
 });
 
+test("IntelligenceChannel uses exponential backoff for retryable provider failures", async () => {
+  let attempts = 0;
+  const delays: number[] = [];
+  const eventLog = new InMemoryEventLog();
+  const provider: ModelProvider = {
+    providerId: "test-model-provider",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    model: "test-model",
+    async complete(request) {
+      attempts += 1;
+      if (attempts <= 3) {
+        return createFailedModelResponse({
+          requestId: request.requestId,
+          providerId: this.providerId,
+          providerKind: this.providerKind,
+          protocolKind: this.protocolKind,
+          model: this.model,
+          outputKind: request.outputContract.outputKind,
+          failureKind: "provider_network",
+          message: `transient network failure ${attempts}`,
+          retryable: true,
+        });
+      }
+      return completedProviderResponse(request, { summary: "Recovered after exponential backoff." });
+    },
+  };
+  const channel = new NativeIntelligenceChannel({
+    provider,
+    bus: new InMemoryMessageBus(eventLog),
+    retryPolicy: {
+      sleep: async (delayMs) => {
+        delays.push(delayMs);
+      },
+      jitterRatio: 0,
+    },
+  });
+
+  const response = await channel.request(createValidModelRequest());
+
+  assert.equal(response.status, "completed");
+  assert.equal(attempts, 4);
+  assert.deepEqual(delays, [300, 600, 1_200]);
+  assert.deepEqual(eventLog.types(), ["model.requested", "model.completed"]);
+});
+
+test("IntelligenceChannel stops retrying retryable failures after the default retry budget", async () => {
+  let attempts = 0;
+  const delays: number[] = [];
+  const eventLog = new InMemoryEventLog();
+  const provider: ModelProvider = {
+    providerId: "test-model-provider",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    model: "test-model",
+    async complete(request) {
+      attempts += 1;
+      return createFailedModelResponse({
+        requestId: request.requestId,
+        providerId: this.providerId,
+        providerKind: this.providerKind,
+        protocolKind: this.protocolKind,
+        model: this.model,
+        outputKind: request.outputContract.outputKind,
+        failureKind: "provider_network",
+        message: "transient network failure never recovered",
+        retryable: true,
+      });
+    },
+  };
+  const channel = new NativeIntelligenceChannel({
+    provider,
+    bus: new InMemoryMessageBus(eventLog),
+    retryPolicy: {
+      sleep: async (delayMs) => {
+        delays.push(delayMs);
+      },
+      jitterRatio: 0,
+    },
+  });
+
+  const response = await channel.request(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_network");
+  assert.equal(attempts, 4);
+  assert.deepEqual(delays, [300, 600, 1_200]);
+  assert.deepEqual(eventLog.types(), ["model.requested", "model.failed"]);
+});
+
+test("IntelligenceChannel does not start another retry when aborted during backoff", async () => {
+  let attempts = 0;
+  const controller = new AbortController();
+  const eventLog = new InMemoryEventLog();
+  const provider: ModelProvider = {
+    providerId: "test-model-provider",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    model: "test-model",
+    async complete(request) {
+      attempts += 1;
+      return createFailedModelResponse({
+        requestId: request.requestId,
+        providerId: this.providerId,
+        providerKind: this.providerKind,
+        protocolKind: this.protocolKind,
+        model: this.model,
+        outputKind: request.outputContract.outputKind,
+        failureKind: "provider_network",
+        message: "transient network failure before abort",
+        retryable: true,
+      });
+    },
+  };
+  const channel = new NativeIntelligenceChannel({
+    provider,
+    bus: new InMemoryMessageBus(eventLog),
+    retryPolicy: {
+      sleep: async () => {
+        controller.abort();
+      },
+      jitterRatio: 0,
+    },
+  });
+
+  const response = await channel.request(createValidModelRequest(), { abortSignal: controller.signal });
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_network");
+  assert.equal(attempts, 1);
+  assert.deepEqual(eventLog.types(), ["model.requested", "model.failed"]);
+});
+
 test("IntelligenceChannel converts thrown provider errors into failed model facts", async () => {
   const { channel, eventLog } = createTestChannel({
     throwError: new Error("provider network unavailable api_key=sk-channel-secret-123456"),
-  });
+  }, { maxRetries: 0 });
 
   const response = await channel.request(createValidModelRequest());
 
@@ -154,7 +289,7 @@ test("IntelligenceChannel preserves sanitized provider error cause", async () =>
     throwError: new Error("Connection error.", {
       cause: new Error("fetch failed ECONNRESET apiKey=sk-channel-cause-secret-123456"),
     }),
-  });
+  }, { maxRetries: 0 });
 
   const response = await channel.request(createValidModelRequest());
 
@@ -222,12 +357,20 @@ function completedProviderResponse(request: ModelRequest, output: unknown): Mode
   };
 }
 
-function createTestChannel(options: TestModelProviderOptions = {}) {
+function createTestChannel(options: TestModelProviderOptions = {}, retryPolicy?: ModelRequestRetryPolicy) {
   const eventLog = new InMemoryEventLog();
   const bus = new InMemoryMessageBus(eventLog);
   const provider = new TestModelProvider(options);
-  const channel = new NativeIntelligenceChannel({ provider, bus });
+  const channel = new NativeIntelligenceChannel({ provider, bus, retryPolicy });
   return { channel, eventLog };
+}
+
+function fastRetryPolicy(overrides: ModelRequestRetryPolicy = {}): ModelRequestRetryPolicy {
+  return {
+    sleep: async () => undefined,
+    jitterRatio: 0,
+    ...overrides,
+  };
 }
 
 type TestModelProviderOptions = {

@@ -708,6 +708,66 @@ test("executeToolUseLoop truncates verbose tool messages before model continuati
   assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 221_000);
 });
 
+test("executeToolUseLoop gives sub-agent full output a larger model-continuation budget", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-1", "call_sub_agent"),
+    completedResponse("model-request-final", { summary: "Final answer after sub-agent result." }),
+  ]);
+  const tail = "SUB_AGENT_LONG_OUTPUT_TAIL";
+  const fullOutput = `${Array.from({ length: 240_000 }, (_, index) => String(index % 10)).join("")}${tail}`;
+  const center: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "call_sub_agent",
+        description: "Projected sub-agent tool.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "call_sub_agent",
+    execute: async (request, _context, _permission) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { result: { full_output: fullOutput } },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        agentContent: {
+          status: "completed",
+          summary: "子 Agent 已完成，完整输出 240026 字。",
+          result: {
+            status: "completed",
+            full_output: fullOutput,
+          },
+          full_output: fullOutput,
+          truncated: false,
+        },
+        uiSummary: "子 Agent 已完成。",
+        truncated: false,
+        redacted: false,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["call_sub_agent"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
+  assert.equal(toolMessage?.content.includes("tool message truncated"), false);
+  assert.equal(toolMessage?.content.includes(tail), true);
+});
+
 test("executeToolUseLoop keeps verbose tool output out of EventLog while preserving model tool messages", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([

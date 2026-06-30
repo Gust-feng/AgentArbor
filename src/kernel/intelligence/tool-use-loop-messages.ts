@@ -45,7 +45,7 @@ export function toolResultMessage(result: ToolCallResult): ModelMessage {
       output: modelOutput,
       error: safeToolErrorForModel(result.error),
       durationMs: result.durationMs,
-    })),
+    }), toolMessageContentBudget(result)),
     toolCallId: result.callId,
     toolName: result.toolName,
     attachments: attachments === undefined || attachments.length === 0
@@ -62,6 +62,8 @@ export function toolResultMessages(results: readonly ToolCallResult[]): ModelMes
 // shaped model-visible tool content. Keep this larger than the projection caps
 // so stdout/stderr and file bodies are not silently replaced by a short message.
 const MAX_TOOL_MESSAGE_CHARS = 220_000;
+const MAX_SUB_AGENT_TOOL_MESSAGE_CHARS = 1_000_000;
+const SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
 
 function safeToolErrorForModel(error: string | undefined): string | undefined {
   return error === undefined ? undefined : redactOrdinaryToolText(error, 1_000);
@@ -90,9 +92,13 @@ function sanitizeProjectedAgentContent(value: unknown): unknown {
   return String(value);
 }
 
-function truncateToolMessageContent(value: string): string {
-  if (value.length <= MAX_TOOL_MESSAGE_CHARS) {
+function toolMessageContentBudget(result: ToolCallResult): number {
+  return SUB_AGENT_TOOL_NAMES.has(result.toolName) ? MAX_SUB_AGENT_TOOL_MESSAGE_CHARS : MAX_TOOL_MESSAGE_CHARS;
+}
+
+function truncateToolMessageContent(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
     return value;
   }
-  return `${value.slice(0, MAX_TOOL_MESSAGE_CHARS - 80)}... [tool message truncated to ${MAX_TOOL_MESSAGE_CHARS} chars]`;
+  return `${value.slice(0, maxChars - 80)}... [tool message truncated to ${maxChars} chars]`;
 }

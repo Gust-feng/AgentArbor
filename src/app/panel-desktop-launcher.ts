@@ -31,6 +31,7 @@ export type PanelDesktopWindowOptions = {
   readonly backgroundColor: string;
   readonly show: boolean;
   readonly autoHideMenuBar: boolean;
+  readonly startupAnimationEnabled: boolean;
   readonly webPreferences: {
     readonly contextIsolation: true;
     readonly nodeIntegration: false;
@@ -147,6 +148,12 @@ function showPanelDesktopWindow(window: PanelDesktopWindowHandle): void {
 }
 
 export function createPanelDesktopWindowOptions(): PanelDesktopWindowOptions {
+  return createPanelDesktopWindowOptionsWithStartupAnimation(false);
+}
+
+export function createPanelDesktopWindowOptionsWithStartupAnimation(
+  startupAnimationEnabled: boolean
+): PanelDesktopWindowOptions {
   const startupWindowSize = createStartupIntroDefaultWindowSize();
   const startupTheme = createStartupThemeSnapshot(undefined, undefined);
   return {
@@ -169,6 +176,7 @@ export function createPanelDesktopWindowOptions(): PanelDesktopWindowOptions {
     backgroundColor: "#00000000",
     show: false,
     autoHideMenuBar: true,
+    startupAnimationEnabled,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

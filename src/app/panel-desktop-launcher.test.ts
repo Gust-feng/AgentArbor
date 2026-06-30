@@ -3,6 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   createPanelDesktopWindowOptions,
+  createPanelDesktopWindowOptionsWithStartupAnimation,
   startPanelDesktopSession,
   type PanelDesktopDependencies,
   type PanelDesktopWindowHandle,
@@ -44,6 +45,7 @@ test("panel desktop window options keep secure defaults", () => {
     backgroundColor: "#00000000",
     show: false,
     autoHideMenuBar: true,
+    startupAnimationEnabled: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -52,6 +54,9 @@ test("panel desktop window options keep secure defaults", () => {
       partition: "persist:agentarbor",
     },
   } satisfies Omit<PanelDesktopWindowOptions, "icon">);
+
+  assert.equal(createPanelDesktopWindowOptionsWithStartupAnimation(true).startupAnimationEnabled, true);
+  assert.equal(createPanelDesktopWindowOptionsWithStartupAnimation(false).startupAnimationEnabled, false);
 });
 
 test("panel desktop smoke starts and closes the local server without creating a window", async () => {

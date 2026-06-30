@@ -297,7 +297,11 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(runtimeEnvironmentSettings.includes("settings-runtime-list"), true);
   assert.equal(runtimeToolIcons.includes('import pythonLogo from "./runtime-tool-icon-assets/python.svg?raw"'), true);
   assert.equal(runtimeToolIcons.includes('["python", "python"]'), true);
-  assert.equal(pythonRuntimeIcon.includes('viewBox="0 0 64 64"'), true);
+  assert.equal(pythonRuntimeIcon.includes('viewBox="0 0 256 255"'), true);
+  assert.equal(pythonRuntimeIcon.includes("width="), false);
+  assert.equal(pythonRuntimeIcon.includes("height="), false);
+  assert.equal(pythonRuntimeIcon.includes('id="pythonBlue"'), true);
+  assert.equal(pythonRuntimeIcon.includes('id="pythonYellow"'), true);
   assert.equal(pythonRuntimeIcon.includes("width=\"83.371017pt\""), false);
   assert.equal(pythonRuntimeIcon.includes("sodipodi:"), false);
   assert.equal(workspaceSettings.includes("这是助手可使用的本地上下文边界"), false);

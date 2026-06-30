@@ -43,6 +43,7 @@ test("startup intro expands one real desktop window before app reveal", async ()
   assertNativeWindowExpansion(panelDesktop, preload);
   assertRendererHandoff(app, startupIntro, startupIntroStyles, chatEmpty, chatLayoutStyles);
   assertStartupAnimationPreferenceDefaults(appMotion, startupIntro, panelIndexHtml);
+  assertDesktopStartupAnimationPreference(panelDesktop, panelDesktopLauncher);
   assertStartupThemeAndEntry(startupIntroGeometry, styleEntry, appStates, preload, mainEntry, startupIntroStyles);
   assertPrintedTextStructure(startupIntroStyles);
   assertSingleStartupSurface(startupIntroStyles);
@@ -65,6 +66,29 @@ function assertStartupAnimationPreferenceDefaults(
     true,
   );
   assert.equal(panelIndexHtml.includes('document.documentElement.dataset.startupAnimation = "off";'), true);
+}
+
+function assertDesktopStartupAnimationPreference(panelDesktop: string, panelDesktopLauncher: string): void {
+  assert.equal(panelDesktop.includes('STARTUP_ANIMATION_PREFERENCE_KEY = "agentarbor:startup-animation"'), true);
+  assert.equal(panelDesktop.includes("readStartupAnimationPreference()"), true);
+  assert.equal(
+    panelDesktop.includes("startupAnimationEnabled: readStartupAnimationPreference()"),
+    true
+  );
+  assert.equal(
+    panelDesktop.includes("startupAnimationEnabled ? withStartupMode(url, startupWindowSmokeRequested) : url"),
+    true
+  );
+  assert.equal(
+    panelDesktop.includes("startupWindowSmokeRequested || configuredStartupAnimationEnabled"),
+    true
+  );
+  assert.equal(panelDesktop.includes("if (startupAnimationEnabled) {\n    startupWindowStates.set(mainWindow"), true);
+  assert.equal(
+    panelDesktopLauncher.includes("createPanelDesktopWindowOptionsWithStartupAnimation(false)"),
+    true
+  );
+  assert.equal(panelDesktopLauncher.includes("startupAnimationEnabled: boolean"), true);
 }
 
 function assertNoOldWindowHandoff(

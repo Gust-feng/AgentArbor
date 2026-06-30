@@ -57,6 +57,7 @@ const WINDOW_STATE_CHANGED_CHANNEL = "agentarbor:window-state-changed";
 const WINDOW_CLOSE_CHANNEL = "agentarbor:window-close";
 const LOCAL_PREFERENCE_GET_CHANNEL = "agentarbor:local-preference-get";
 const LOCAL_PREFERENCE_SET_CHANNEL = "agentarbor:local-preference-set";
+const STARTUP_ANIMATION_PREFERENCE_KEY = "agentarbor:startup-animation";
 const AGENTARBOR_APP_ID = "com.agentarbor.desktop";
 const AGENTARBOR_APP_NAME = "AgentArbor";
 const DESKTOP_WINDOW_MAXIMIZE_ANIMATION_MS = 180;
@@ -190,7 +191,10 @@ async function main(): Promise<void> {
     const appUpdateService = await createDesktopAppUpdateService();
     const session = await startPanelDesktopSession(args, {
       startPanelServer: startLocalPanelServer,
-      createWindow: createElectronPanelWindow,
+      createWindow: (options) => createElectronPanelWindow({
+        ...options,
+        startupAnimationEnabled: readStartupAnimationPreference(),
+      }),
       appUpdateService,
       selectWorkspaceDirectory: selectWorkspaceDirectory,
       selectContextAttachment: selectContextAttachment,
@@ -301,7 +305,12 @@ function createElectronPanelWindow(
   options: ReturnType<typeof createPanelDesktopWindowOptions> = createPanelDesktopWindowOptions()
 ) {
   installStartupWindowExpansionBridge();
-  const { startup, ...targetOptions } = options;
+  const {
+    startup,
+    startupAnimationEnabled: configuredStartupAnimationEnabled,
+    ...targetOptions
+  } = options;
+  const startupAnimationEnabled = startupWindowSmokeRequested || configuredStartupAnimationEnabled;
   const targetBounds = centeredBoundsForPrimaryDisplay(targetOptions.width, targetOptions.height);
   const startupBounds = centeredBoundsInside(targetBounds, startup.initialWidth, startup.initialHeight);
   const mainWindow = new BrowserWindow({
@@ -312,9 +321,9 @@ function createElectronPanelWindow(
     height: targetBounds.height,
     minWidth: targetOptions.minWidth,
     minHeight: targetOptions.minHeight,
-    backgroundColor: "#00000000",
-    transparent: true,
-    resizable: false,
+    backgroundColor: startupAnimationEnabled ? "#00000000" : startup.theme.backgroundColor,
+    transparent: startupAnimationEnabled,
+    resizable: !startupAnimationEnabled,
     show: false,
     webPreferences: {
       ...targetOptions.webPreferences,
@@ -331,24 +340,26 @@ function createElectronPanelWindow(
     });
   }
   activeWindows.add(mainWindow);
-  startupWindowStates.set(mainWindow, {
-    mainWindow,
-    targetMinWidth: targetOptions.minWidth,
-    targetMinHeight: targetOptions.minHeight,
-    targetBounds,
-    startupBounds,
-    handoffRequested: false,
-    reducedMotion: false,
-    handoffVisible: false,
-    handoffCompleted: false,
-    expansionStarted: false,
-    expansionFinished: false,
-    expansionResult: undefined,
-    readyToShow: false,
-    overlayReady: false,
-    showRequested: false,
-    showFallbackTimer: undefined,
-  });
+  if (startupAnimationEnabled) {
+    startupWindowStates.set(mainWindow, {
+      mainWindow,
+      targetMinWidth: targetOptions.minWidth,
+      targetMinHeight: targetOptions.minHeight,
+      targetBounds,
+      startupBounds,
+      handoffRequested: false,
+      reducedMotion: false,
+      handoffVisible: false,
+      handoffCompleted: false,
+      expansionStarted: false,
+      expansionFinished: false,
+      expansionResult: undefined,
+      readyToShow: false,
+      overlayReady: false,
+      showRequested: false,
+      showFallbackTimer: undefined,
+    });
+  }
   mainWindowStates.set(mainWindow, {
     startupWindow: mainWindow,
     maximizeState: createDesktopWindowMaximizeState(),
@@ -393,7 +404,7 @@ function createElectronPanelWindow(
   return {
     loadUrl: async (url: string) => {
       recordStartupWindowSmokeEvent("load-url");
-      await mainWindow.loadURL(withStartupMode(url, startupWindowSmokeRequested));
+      await mainWindow.loadURL(startupAnimationEnabled ? withStartupMode(url, startupWindowSmokeRequested) : url);
     },
     onReadyToShow: (handler: () => void) => {
       readyToShowHandler = handler;
@@ -544,6 +555,10 @@ function getDesktopLocalPreferenceStore(): DesktopLocalPreferenceStore {
     });
   }
   return desktopLocalPreferenceStore;
+}
+
+function readStartupAnimationPreference(): boolean {
+  return getDesktopLocalPreferenceStore().read(STARTUP_ANIMATION_PREFERENCE_KEY) === "true";
 }
 
 function panelWindowFromEvent(event: Pick<IpcMainEvent, "sender">): BrowserWindow | undefined {

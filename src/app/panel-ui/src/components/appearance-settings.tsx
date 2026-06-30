@@ -28,7 +28,8 @@ export function AppearanceSettings(): React.ReactElement {
 
   React.useEffect(() => subscribeMotionSettingsChanged(() => {
     setMotionPreference(getSavedMotionPreference());
-    setStartupAnimationEnabled(getStartupAnimationEnabled());
+    // startupAnimationEnabled is updated optimistically by toggleStartupAnimation;
+    // re-reading it from storage here could roll back the UI if the write is delayed or fails.
   }), []);
 
   function changeMotionPreference(nextPreference: MotionPreferenceId): void {

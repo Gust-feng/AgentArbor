@@ -183,6 +183,10 @@ const callSubAgentToolDefinition: ToolDefinition = {
         },
       },
     ],
+    runtimeHints: [
+      { label: "available sub-agents", value: "code-expert, doc-expert, research-expert, review-expert, test-expert" },
+      { label: "name matching", value: "case-insensitive" },
+    ],
   },
   metadata: {
     category: "other",
@@ -266,6 +270,11 @@ const callSubAgentsToolDefinition: ToolDefinition = {
           max_concurrency: 2,
         },
       },
+    ],
+    runtimeHints: [
+      { label: "available sub-agents", value: "code-expert, doc-expert, research-expert, review-expert, test-expert" },
+      { label: "default max_concurrency", value: "3" },
+      { label: "max max_concurrency", value: "10" },
     ],
   },
   metadata: {
@@ -353,6 +362,10 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
           allowed_tools: ["read_file", "list_dir", "grep_files"],
         },
       },
+    ],
+    runtimeHints: [
+      { label: "available sub-agents", value: "code-expert, doc-expert, research-expert, review-expert, test-expert" },
+      { label: "allowed_tools", value: "omit to inherit all tools" },
     ],
   },
   metadata: {

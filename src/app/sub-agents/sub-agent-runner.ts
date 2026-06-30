@@ -71,12 +71,17 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   let result: SubAgentRunnerResult;
 
   try {
-    const systemPrompt = await buildSubAgentSystemPrompt(input.subAgent, input.task, input.context);
+    const systemPrompt = await buildSubAgentSystemPrompt(input.subAgent);
     const messages: readonly ModelMessage[] = [
       {
         role: "system",
         ref: `sub-agent:system:${input.subAgent.id}`,
         content: systemPrompt,
+      },
+      {
+        role: "user",
+        ref: `sub-agent:task:${input.subAgent.id}`,
+        content: buildSubAgentTaskMessage(input.task, input.context),
       },
     ];
 
@@ -155,11 +160,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   return result;
 }
 
-async function buildSubAgentSystemPrompt(
-  subAgent: SubAgentDefinition,
-  task: string,
-  context?: string,
-): Promise<string> {
+async function buildSubAgentSystemPrompt(subAgent: SubAgentDefinition): Promise<string> {
   const body = subAgent.inlineSystemPrompt ?? await loadSubAgentBody(subAgent).catch(() => "");
   const basePrompt = body.trim().length > 0 ? body : subAgent.description;
 
@@ -169,7 +170,20 @@ async function buildSubAgentSystemPrompt(
   sections.push("");
   sections.push(`你是「${subAgent.name}」专家，正在被主 Agent 调用执行子任务。`);
   sections.push(`你的角色是: ${subAgent.description}`);
+
   sections.push("");
+  sections.push("## 执行要求");
+  sections.push("1. 专注完成上述子任务，不要超出范围");
+  sections.push("2. 可以使用分配给你的工具来获取信息和执行操作");
+  sections.push("3. 在最终回复中提供清晰、完整的结果");
+  sections.push("4. 如果遇到无法解决的问题，如实说明原因");
+
+  return sections.join("\n");
+}
+
+function buildSubAgentTaskMessage(task: string, context?: string): string {
+  const sections: string[] = [];
+
   sections.push("## 任务描述");
   sections.push(task.trim());
 
@@ -178,13 +192,6 @@ async function buildSubAgentSystemPrompt(
     sections.push("## 额外上下文");
     sections.push(context.trim());
   }
-
-  sections.push("");
-  sections.push("## 执行要求");
-  sections.push("1. 专注完成上述子任务，不要超出范围");
-  sections.push("2. 可以使用分配给你的工具来获取信息和执行操作");
-  sections.push("3. 在最终回复中提供清晰、完整的结果");
-  sections.push("4. 如果遇到无法解决的问题，如实说明原因");
 
   return sections.join("\n");
 }

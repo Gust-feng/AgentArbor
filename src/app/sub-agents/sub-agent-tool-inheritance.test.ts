@@ -34,6 +34,35 @@ test("runSubAgent inherits parent allowed tools and hides sub-agent recursion to
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["read_file"]);
 });
 
+test("runSubAgent sends instructions as system and the delegated task as user input", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-test", "task completed"),
+  ]);
+  const center = new ToolCenter();
+
+  const result = await runSubAgent({
+    subAgent: testSubAgent(),
+    task: "generate three ideas",
+    context: "Use today's schedule.",
+    toolBroker: center,
+    channel,
+    allowedTools: [],
+  });
+
+  assert.equal(result.status, "completed");
+
+  const messages = channel.requests[0]?.sanitizedMessages ?? [];
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0]?.role, "system");
+  assert.equal(messages[1]?.role, "user");
+  assert.match(messages[0]?.content ?? "", /你是「test-helper」专家/);
+  assert.doesNotMatch(messages[0]?.content ?? "", /generate three ideas/);
+  assert.match(messages[1]?.content ?? "", /## 任务描述/);
+  assert.match(messages[1]?.content ?? "", /generate three ideas/);
+  assert.match(messages[1]?.content ?? "", /## 额外上下文/);
+  assert.match(messages[1]?.content ?? "", /Use today's schedule\./);
+});
+
 test("sub-agent tool approval bubbles as the parent tool pending confirmation and resumes after approve", async () => {
   let shellRuns = 0;
   const eventLog = new InMemoryEventLog();
@@ -135,6 +164,8 @@ test("spawn_sub_agent uses system_prompt as the temporary sub-agent system body"
 
   assert.equal(result.status, "completed");
   assert.match(channel.requests[0]?.sanitizedMessages[0]?.content ?? "", /CUSTOM SYSTEM BODY FOR TEMP AGENT/);
+  assert.equal(channel.requests[0]?.sanitizedMessages[1]?.role, "user");
+  assert.match(channel.requests[0]?.sanitizedMessages[1]?.content ?? "", /review/);
 });
 
 function testSubAgent(input: {

@@ -2,6 +2,7 @@ import type { BasicAgentCapabilitySnapshot, ModelCapabilities, RunCapabilityReso
 import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../domain/tools/index.js";
+import type { SubAgentRootInput } from "./sub-agents/sub-agent-loader.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import type { BasicAgentContextPack } from "./basic-agent-runtime/context-pack.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
@@ -147,6 +148,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly runtime?: MinimalRuntime;
   readonly createIntelligenceChannel?: (runtime: MinimalRuntime) => IntelligenceChannel;
   readonly createToolCenter?: DesktopAgentToolCenterFactory;
+  readonly subAgentRoots?: readonly SubAgentRootInput[];
   readonly onRuntimeReady?: (context: DesktopAgentSessionRuntimeContext) => void;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   readonly onContextWindowExceeded?: (event: ModelRuntimeContextWindowExceededEvent) => void | Promise<void>;

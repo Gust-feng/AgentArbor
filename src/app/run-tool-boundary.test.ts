@@ -294,6 +294,7 @@ function capabilitySnapshot(
       allowedTools,
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:/AgentArbor",

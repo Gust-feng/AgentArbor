@@ -536,6 +536,7 @@ function frozenCapabilitySnapshot(): NonNullable<RuntimeRunSnapshot["run"]["capa
       allowedTools: [],
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:\\SnapshotWorkspace",

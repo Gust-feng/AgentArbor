@@ -457,6 +457,7 @@ export function App(): React.ReactElement {
     updateMcpTool,
     checkAppUpdate,
     refreshSkills,
+    refreshSubAgents,
     updateSkill,
   } = settingsController;
 
@@ -1245,6 +1246,7 @@ export function App(): React.ReactElement {
           onRevealModelApiKey={revealModelApiKey}
           modelCatalogs={modelCatalogs}
           skills={app.skills}
+          subAgents={app.subAgents}
           onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
           onSelectWorkspaceDirectory={() => void selectWorkspace()}
           onSaveCommandShell={saveCommandShell}
@@ -1268,6 +1270,7 @@ export function App(): React.ReactElement {
           onUpdateMcpTool={(serverId, toolName, enabled, autoApproved) => void updateMcpTool(serverId, toolName, enabled, autoApproved)}
           onCheckAppUpdate={() => void checkAppUpdate()}
           onRefreshSkills={() => void refreshSkills()}
+          onRefreshSubAgents={() => void refreshSubAgents()}
           onUpdateSkill={(skill, enabled) => void updateSkill(skill, enabled)}
         />
       )}

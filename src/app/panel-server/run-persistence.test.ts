@@ -83,6 +83,7 @@ test("persistPanelRun writes the workspace frozen at run birth", async () => {
         allowedTools: [],
       },
       skillCatalog: [],
+    subAgentCatalog: [],
       mcpCatalog: [],
       workspace: {
         workspaceDirectory: "Z:\\FrozenWorkspace",
@@ -393,6 +394,7 @@ function capabilitySnapshot(): BasicAgentCapabilitySnapshot {
       allowedTools: [],
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:\\AgentArbor",

@@ -1922,6 +1922,7 @@ function desktopCapabilitySnapshot(
       allowedTools: tools.filter((tool) => tool.enabled && tool.availability === "available").map((tool) => tool.name),
     },
     skillCatalog: overrides.skillCatalog ?? [],
+    subAgentCatalog: [],
     mcpCatalog: overrides.mcpCatalog ?? [],
     workspace: {
       workspaceDirectory: "Z:/AgentArbor",

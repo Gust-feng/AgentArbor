@@ -318,6 +318,7 @@ function capabilitySnapshot(snapshotId: string, activeModel: SanitizedModelProvi
       ],
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:\\AgentArbor",

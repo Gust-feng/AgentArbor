@@ -7,9 +7,9 @@ import {
   type AgentTurnPolicy,
 } from "../kernel/intelligence/agent-turn-runtime.js";
 import {
-  compactBasicAgentLoopContextIfNeeded,
+  compactAgentLoopContextIfNeeded,
   createOpenAITokenCounter,
-} from "./basic-agent-runtime/index.js";
+} from "./agent-loop-context-maintenance.js";
 import {
   DESKTOP_ROOT_AGENT,
 } from "./agent-prompts/desktop-root-agent.js";
@@ -89,7 +89,7 @@ export function createDesktopAgentTurnRuntime(input: {
     toolCenter: input.toolCenter,
     publishToolEvent: (message) => input.runtime.bus.publish(message),
     maintainContext: async (contextInput) => {
-      const result = await compactBasicAgentLoopContextIfNeeded({
+      const result = await compactAgentLoopContextIfNeeded({
         goal: input.goal,
         traceId: input.traceId,
         goalId: input.goalId,
@@ -112,6 +112,7 @@ export function createDesktopAgentTurnRuntime(input: {
           tokenCount: result.tokenCount,
           threshold: result.threshold,
           message: result.message,
+          scope: "loop_context",
           requestId: result.requestId,
           responseId: result.responseId,
         });
@@ -134,6 +135,7 @@ export function createDesktopAgentTurnRuntime(input: {
           threshold: result.threshold,
           coveredRefCount: result.conversationSummary.coveredRefs.length,
           messageCountAfter: result.messages.length,
+          scope: "loop_context",
           requestId: result.conversationSummary.modelRequestId,
           responseId: result.conversationSummary.modelResponseId,
         });

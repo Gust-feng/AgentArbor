@@ -9,6 +9,7 @@ import type { ToolDefinition } from "../../domain/tools/index.js";
 import { modelVisibleToolDescription } from "../../domain/tools/index.js";
 import { buildOpenAIResponsesControlFields } from "./openai-request-settings.js";
 import { removeUndefinedValues } from "./provider-value-utils.js";
+import { openAIResponsesContinuationItems } from "./openai-responses-continuation.js";
 
 export function buildResponsesRequestBody(
   request: ModelRequest,
@@ -58,21 +59,34 @@ function buildInput(messages: readonly ModelMessage[]): {
       input.push({
         type: "function_call_output",
         call_id: msg.toolCallId,
-        output: msg.content,
+        output: responsesFunctionCallOutput(msg),
       });
       continue;
     }
 
     if (msg.role === "assistant") {
       if (msg.toolCalls !== undefined && msg.toolCalls.length > 0) {
-        for (const call of msg.toolCalls) {
-          input.push({
-            type: "function_call",
-            call_id: call.callId,
-            name: call.toolName,
-            arguments: JSON.stringify(call.input),
-          });
+        const continuationItems = openAIResponsesContinuationItems(msg);
+        if (continuationItems !== undefined) {
+          input.push(...continuationItems);
+        } else {
+          for (const call of msg.toolCalls) {
+            input.push({
+              type: "function_call",
+              call_id: call.callId,
+              name: call.toolName,
+              arguments: JSON.stringify(call.input),
+            });
+          }
+          if (msg.content.length > 0) {
+            input.push({
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: msg.content }],
+            });
+          }
         }
+        continue;
       }
       if (msg.content.length > 0) {
         input.push({
@@ -92,6 +106,23 @@ function buildInput(messages: readonly ModelMessage[]): {
   }
 
   return { instructions, input };
+}
+
+function responsesFunctionCallOutput(message: ModelMessage): string | readonly Record<string, unknown>[] {
+  if (message.attachments === undefined || message.attachments.length === 0) {
+    return message.content;
+  }
+  const output: Record<string, unknown>[] = [];
+  if (message.content.length > 0) {
+    output.push({ type: "input_text", text: message.content });
+  }
+  for (const attachment of message.attachments) {
+    const part = toResponsesInputContentPart(attachment);
+    if (part !== undefined) {
+      output.push(part);
+    }
+  }
+  return output.length === 0 ? message.content : output;
 }
 
 function responsesInputContent(message: ModelMessage): readonly Record<string, unknown>[] {

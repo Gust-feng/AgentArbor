@@ -27,6 +27,7 @@ import {
   executeToolUseLoop,
   resumeToolUseLoopFromApproval,
   resumeToolUseLoopFromConfirmationDecision,
+  type ToolUseLoopModelResponseTrace,
   type ToolUseLoopConfirmationDecision,
   type ToolUseLoopPendingApproval,
   type ToolUseLoopContextMaintainer,
@@ -99,6 +100,8 @@ export type AgentTurnRuntimeResult = {
   readonly modelResponseId?: string;
   readonly finalOutput?: ModelResponse;
   readonly toolCalls: readonly ToolCallResult[];
+  readonly modelResponses: readonly ToolUseLoopModelResponseTrace[];
+  readonly contextMessages?: readonly ModelMessage[];
   readonly modelRounds: number;
   readonly toolRounds: number;
   readonly pendingApproval?: AgentTurnPendingApproval;
@@ -140,6 +143,7 @@ export class AgentTurnRuntime {
         fallback: policy.fallback,
         modelRequestId: requestId,
         toolCalls: [],
+        modelResponses: [],
         modelRounds: 0,
         toolRounds: 0,
       };
@@ -152,6 +156,7 @@ export class AgentTurnRuntime {
         fallback: policy.fallback,
         modelRequestId: requestId,
         toolCalls: [],
+        modelResponses: [],
         modelRounds: 0,
         toolRounds: 0,
       };
@@ -349,6 +354,8 @@ function toAgentTurnRuntimeResult(
     modelResponseId: shouldExposeOutput ? loop.finalOutput.responseId : undefined,
     finalOutput: shouldExposeOutput ? loop.finalOutput : undefined,
     toolCalls: loop.toolCalls,
+    modelResponses: loop.modelResponses,
+    contextMessages: loop.contextMessages?.map(cloneModelMessage),
     modelRounds: loop.modelRounds,
     toolRounds: loop.rounds,
     pendingApproval: loop.pendingApproval === undefined
@@ -387,6 +394,7 @@ function runtimeFailureResult(input: {
     modelResponseId: finalOutput.responseId,
     finalOutput,
     toolCalls: [],
+    modelResponses: [],
     modelRounds: 0,
     toolRounds: 0,
   };

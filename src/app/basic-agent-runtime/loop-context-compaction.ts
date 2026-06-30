@@ -116,7 +116,7 @@ function loopCompactionMessages(input: {
     {
       role: "system",
       content: [
-        `You compact earlier runtime context for ${input.agentDisplayName}, the ordinary desktop agent for this run.`,
+        `You compact earlier runtime context for ${input.agentDisplayName}, the agent for this run.`,
         "Return exactly one Markdown continuation prompt. Do not return JSON.",
         "Preserve still-relevant goals, user constraints, progress, decisions, next actions, errors, evidence refs, and file paths.",
         "Preserve concrete tool results, errors, stdout/stderr, file content fragments, and development context that may be needed to continue.",

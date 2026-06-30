@@ -701,6 +701,46 @@ test("panel transcript nodes render model failures as system failures", () => {
   assert.equal(projected[0]?.title, "模型回复失败");
 });
 
+test("visible transcript keeps context compaction events when they carry real status", () => {
+  const requested = visibleTranscriptNodes([
+    node({
+      nodeId: "compaction-requested",
+      kind: "system",
+      eventType: "context.compaction.requested",
+      phase: "executing",
+      sequence: 1,
+      title: "正在压缩上下文",
+      summary: "正在压缩较早上下文…",
+    }),
+  ]);
+  const completed = visibleTranscriptNodes([
+    node({
+      nodeId: "compaction-completed",
+      kind: "system",
+      eventType: "context.compaction.completed",
+      phase: "completed",
+      sequence: 1,
+      title: "整理上下文",
+      summary: "已整理 18 条较早上下文，后续继续当前任务。",
+    }),
+  ]);
+  const failed = visibleTranscriptNodes([
+    node({
+      nodeId: "compaction-failed",
+      kind: "system",
+      eventType: "context.compaction.failed",
+      phase: "failed",
+      sequence: 1,
+      title: "上下文整理失败",
+      summary: "上下文整理失败，任务已暂停。Context compaction returned an empty continuation prompt.",
+    }),
+  ]);
+
+  assert.deepEqual(requested.map((item) => item.nodeId), ["compaction-requested"]);
+  assert.deepEqual(completed.map((item) => item.nodeId), ["compaction-completed"]);
+  assert.deepEqual(failed.map((item) => item.nodeId), ["compaction-failed"]);
+});
+
 test("panel transcript nodes expose command execution facts in visible summaries", () => {
   const projected = createPanelTranscriptNodes([
     {

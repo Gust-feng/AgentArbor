@@ -274,7 +274,7 @@ test("executeToolUseLoop preserves user message attachments across tool rounds",
   assert.equal(JSON.stringify(secondUser).includes("aW1hZ2U="), true);
 });
 
-test("executeToolUseLoop forwards projected tool model attachments after tool result messages", async () => {
+test("executeToolUseLoop keeps projected model attachments on tool result messages", async () => {
   const attachmentData = "aW1hZ2UtYnl0ZXM=";
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-read-image", "read_context_attachment_image"),
@@ -334,25 +334,17 @@ test("executeToolUseLoop forwards projected tool model attachments after tool re
 
   const messages = channel.requests[1]?.sanitizedMessages ?? [];
   const toolMessageIndex = messages.findIndex((message) => message.role === "tool");
-  const attachmentMessageIndex = messages.findIndex((message) => message.ref === "tool:call-read-image:model-attachments");
   const toolMessage = messages[toolMessageIndex];
-  const attachmentMessage = messages[attachmentMessageIndex];
 
   assert.ok(toolMessageIndex >= 0);
-  assert.ok(attachmentMessageIndex > toolMessageIndex);
   assert.equal(toolMessage?.content.includes("image metadata returned"), true);
   assert.equal(toolMessage?.content.includes(attachmentData), false);
-  assert.equal(attachmentMessage?.role, "user");
-  assert.equal(attachmentMessage?.content.includes("not a new user request"), true);
-  assert.equal(attachmentMessage?.content.includes(attachmentData), false);
-  assert.equal(attachmentMessage?.content.includes("local-file:"), false);
-  assert.equal(attachmentMessage?.content.includes("[local-ref-hidden]"), true);
-  assert.equal(attachmentMessage?.attachments?.[0]?.kind, "image");
-  assert.equal(attachmentMessage?.attachments?.[0]?.attachmentId, "ctx-image");
-  assert.equal(attachmentMessage?.attachments?.[0]?.source.kind, "data");
-  if (attachmentMessage?.attachments?.[0]?.source.kind === "data") {
-    assert.equal(attachmentMessage.attachments[0].source.mimeType, "image/png");
-    assert.equal(attachmentMessage.attachments[0].source.data, attachmentData);
+  assert.equal(toolMessage?.attachments?.[0]?.kind, "image");
+  assert.equal(toolMessage?.attachments?.[0]?.attachmentId, "ctx-image");
+  assert.equal(toolMessage?.attachments?.[0]?.source.kind, "data");
+  if (toolMessage?.attachments?.[0]?.source.kind === "data") {
+    assert.equal(toolMessage.attachments[0].source.mimeType, "image/png");
+    assert.equal(toolMessage.attachments[0].source.data, attachmentData);
   }
 });
 
@@ -1155,6 +1147,37 @@ test("executeToolUseLoop fails instead of completing on failed model responses",
   assert.equal(result.finalOutput.failure?.kind, "provider_response");
   assert.equal(result.toolCalls.length, 0);
   assert.equal(channel.requests.length, 1);
+});
+
+test("executeToolUseLoop returns continuation context after completed tools then model failure", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search-context", "web_search"),
+    failedResponse("model-request-failed", "other side closed"),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ results: [{ title: "A" }] }));
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "error");
+  assert.equal(result.finalOutput.status, "failed");
+  assert.equal(result.contextMessages?.some((message) =>
+    message.role === "assistant" && message.toolCalls?.[0]?.callId === "call-search-context"
+  ), true);
+  assert.equal(result.contextMessages?.some((message) =>
+    message.role === "tool" && message.toolCallId === "call-search-context"
+  ), true);
+  assert.equal(result.contextMessages?.some((message) => message.ref === "model-request-failed-response"), false);
 });
 
 

@@ -57,6 +57,8 @@ export type BasicAgentConversationCompactionResult = {
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly compacted: boolean;
+  readonly tokenCount?: number;
+  readonly threshold?: number;
   readonly failed?: {
     readonly message: string;
     readonly requestId?: string;

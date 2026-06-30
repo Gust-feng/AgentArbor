@@ -247,11 +247,20 @@ function transcriptNodeForEvent(
       summary: event.summary,
     });
   }
-  if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") {
+  if (
+    event.type === "context.compaction.requested" ||
+    event.type === "context.compaction.completed" ||
+    event.type === "context.compaction.failed"
+  ) {
+    const phase = event.type === "context.compaction.requested"
+      ? "executing"
+      : event.type === "context.compaction.completed"
+        ? "completed"
+        : "failed";
     return transcriptNode(event, {
       kind: "system",
-      phase: event.type === "context.compaction.completed" ? "completed" : "failed",
-      title: event.type === "context.compaction.completed" ? "整理上下文" : "上下文整理失败",
+      phase,
+      title: contextCompactionTranscriptTitle(event.type),
       summary: event.summary,
     });
   }
@@ -264,6 +273,12 @@ function transcriptNodeForEvent(
     });
   }
   return undefined;
+}
+
+function contextCompactionTranscriptTitle(type: string): string {
+  if (type === "context.compaction.requested") return "正在压缩上下文";
+  if (type === "context.compaction.completed") return "上下文压缩完成";
+  return "上下文压缩失败";
 }
 
 type PendingBodyNode = {
@@ -552,6 +567,12 @@ function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | unde
       .filter((value): value is string => value !== undefined && value.trim().length > 0)
       .join(" · ");
   }
+  if (display?.kind === "directory_listing") {
+    return directoryListingSummary(display);
+  }
+  if (display?.kind === "file_search_results") {
+    return fileSearchSummary(display);
+  }
   if (display?.kind === "read_result") {
     return display.title ?? display.uri ?? display.url ?? event.detail?.preview ?? event.summary;
   }
@@ -603,6 +624,12 @@ function toolTranscriptTitleSet(event: PanelTranscriptStreamEvent): {
   }
   if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search") {
     return { action: "搜索资料", completed: "资料搜索完成", failed: "资料搜索未完成" };
+  }
+  if (display?.kind === "file_search_results") {
+    return { action: "搜索文件", completed: "搜索完成", failed: "搜索未完成" };
+  }
+  if (display?.kind === "directory_listing") {
+    return { action: "浏览目录", completed: "目录浏览完成", failed: "目录浏览未完成" };
   }
   if (fileMutationTitle !== undefined) {
     return fileMutationTitle;
@@ -691,6 +718,30 @@ function fileDisplaySummary(display: Extract<ToolDisplayProjection, { readonly k
   return [display.path, ...changes]
     .filter((value): value is string => value !== undefined && value.trim().length > 0)
     .join(" · ") || undefined;
+}
+
+function directoryListingSummary(display: Extract<ToolDisplayProjection, { readonly kind: "directory_listing" }>): string | undefined {
+  const count = display.totalEntries ?? display.entriesReturned ?? display.entries.length;
+  return [
+    toolPathLabel(display.path),
+    count <= 0 ? undefined : `${count} 项`,
+    display.depth === undefined ? undefined : `深度 ${display.depth}`,
+  ].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ") || undefined;
+}
+
+function fileSearchSummary(display: Extract<ToolDisplayProjection, { readonly kind: "file_search_results" }>): string | undefined {
+  return [
+    cleanOrdinaryToolText(display.query),
+    toolPathLabel(display.path),
+    `${display.matches.length} 处匹配`,
+  ].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ") || undefined;
+}
+
+function toolPathLabel(value: string | undefined): string | undefined {
+  if (value === ".") {
+    return "当前目录";
+  }
+  return cleanOrdinaryToolText(value);
 }
 
 function isString(value: string | undefined): value is string {

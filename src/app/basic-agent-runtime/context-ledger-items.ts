@@ -389,7 +389,7 @@ function contextRefPromptLine(ref: TaskSoil["contextRefs"][number]): string {
 function contextRefModelLine(ref: TaskSoil["contextRefs"][number], fallbackAttachmentId: string): string {
   const safeRef = modelSafeContextRef(ref.ref);
   return [
-    "User-provided context attachment is available by reference only.",
+    "User-provided context attachment is authorized for this run.",
     `attachment_id=${safePlain(ref.attachmentId ?? safeRef ?? fallbackAttachmentId, 220)}`,
     `kind=${ref.kind}`,
     safeRef === undefined ? undefined : `ref=${safePlain(safeRef, 220)}`,
@@ -398,7 +398,7 @@ function contextRefModelLine(ref: TaskSoil["contextRefs"][number], fallbackAttac
     ref.metadata?.mimeType === undefined ? undefined : `mime=${safePlain(ref.metadata.mimeType, 120)}`,
     ref.metadata?.byteLength === undefined ? undefined : `bytes=${ref.metadata.byteLength}`,
     ref.metadata?.truncated === true ? "preview_truncated=true" : undefined,
-    "Use available tools or model-native file/image input to inspect content; do not assume unread attachment content.",
+    "Inspect it with available attachment tools, or directly if the runtime already attached file or image input to the current request. Do not assume unread attachment content.",
   ].filter(isString).join(" ");
 }
 

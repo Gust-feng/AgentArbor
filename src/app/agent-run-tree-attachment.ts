@@ -1,3 +1,5 @@
+import type { ToolDisplayProjection } from "../domain/tools/index.js";
+
 export type AgentRunTreeAttachmentStatus = "running" | "completed" | "failed" | "stopped";
 
 export type AgentRunTreeAttachmentRootletKind =
@@ -34,10 +36,24 @@ export type AgentRunTreeChildExecutionAttachment = {
   readonly toolRounds: number;
   readonly modelRequestId?: string;
   readonly modelResponseId?: string;
+  readonly modelMessages?: readonly {
+    readonly requestId: string;
+    readonly responseId?: string;
+    readonly status: "completed" | "failed" | "cancelled";
+    readonly text?: string;
+    readonly reasoningSummary?: string;
+    readonly toolCallIds: readonly string[];
+    readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
+    readonly completedAt: string;
+  }[];
   readonly toolCalls: readonly {
     readonly callId: string;
     readonly toolName: string;
     readonly status: "completed" | "failed" | "approval_required" | "cancelled";
+    readonly summary?: string;
+    readonly inputSummary?: string;
+    readonly durationMs?: number;
+    readonly display?: ToolDisplayProjection;
   }[];
 };
 

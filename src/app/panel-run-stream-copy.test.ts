@@ -4,6 +4,7 @@ import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.
 import {
   agentNoteForEvent,
   chunkText,
+  contextCompactionStreamSummary,
   modelFailedSummary,
   modelFailureStreamDetail,
   userGuidanceSummary,
@@ -60,6 +61,16 @@ test("panel agent note copy does not invent approval progress", () => {
   assert.equal(note, undefined);
   assert.equal(userGuidanceSummary({ decision: "guidance", note: "只列出文件名。" }), "已补充要求：只列出文件名。");
   assert.equal(userGuidanceSummary({ decision: "guidance" }), "已补充要求。");
+});
+
+test("panel context compaction copy distinguishes non-blocking failures", () => {
+  assert.equal(
+    contextCompactionStreamSummary("context.compaction.failed", {
+      nonBlocking: true,
+      error: "Conversation compaction returned an empty summary.",
+    }),
+    "上下文整理失败，已保守继续。Conversation compaction returned an empty summary."
+  );
 });
 
 function visibleTextOutput(value: string): ModelVisibleOutputProjection {

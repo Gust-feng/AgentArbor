@@ -23,35 +23,26 @@ import {
   type PanelRunTranscript,
 } from "../panel-run-read-model.js";
 import { restoredModelRequestedSummary } from "../panel-model-progress-copy.js";
+import { isContextCompactionPurpose } from "../panel-run-stream-copy.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversations.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "../confirmation-copy.js";
+import { projectPanelRunResponseBase, type PanelRunResponseBase } from "./run-response-base.js";
 import {
   restoredRunResultProjection,
   restoredRunTerminalSummary,
 } from "../restored-run-projection.js";
 
-export type PanelPersistedRunResponse = {
-  readonly ok: true;
-  readonly runId: string;
-  readonly runKind: RuntimeRunRecord["runKind"];
-  readonly runMode: RuntimeRunRecord["runMode"];
-  readonly status: PanelRunStatus;
-  readonly agentDefinitionRef?: RunAgentDefinitionRef;
-  readonly capabilityResolution?: RunCapabilityResolution;
-  readonly config: SanitizedModelProviderConfig;
-  readonly informationAccess: SanitizedInformationAccessConfig;
+export type PanelPersistedRunResponse = Omit<PanelRunResponseBase, "error"> & {
   readonly trace: PanelRunTraceReadModel;
   readonly tracking: PanelRunTrackingReadModel;
   readonly transcript: PanelRunTranscript;
   readonly transcriptNodes: PanelRunTranscript["transcriptNodes"];
   readonly workNotes: PanelRunTranscript["workNotes"];
   readonly steps: PanelRunTranscript["steps"];
-  readonly streamCursor: PanelRunStreamCursor;
   readonly error?: RuntimeRunRecord["error"];
-  readonly conversation?: PanelConversationReadModel;
   readonly restoredFromSnapshot: true;
   readonly restoredResult?: {
     readonly title: string;
@@ -87,15 +78,31 @@ export function createPersistedPanelRunResponse(input: {
   const streamEvents = createPersistedStreamEvents(input.snapshot, status);
   const transcriptNodes = createPanelTranscriptNodes(streamEvents);
   return {
-    ok: true,
-    runId: input.snapshot.run.runId,
-    runKind: input.snapshot.run.runKind,
-    runMode: input.snapshot.run.runMode,
-    status,
-    agentDefinitionRef: input.snapshot.run.agentDefinitionRef,
-    capabilityResolution: input.snapshot.run.capabilityResolution,
-    config,
-    informationAccess,
+    ...projectPanelRunResponseBase({
+      runId: input.snapshot.run.runId,
+      runKind: input.snapshot.run.runKind,
+      runMode: input.snapshot.run.runMode,
+      status,
+      agentDefinitionRef: input.snapshot.run.agentDefinitionRef,
+      capabilityResolution: input.snapshot.run.capabilityResolution,
+      config,
+      informationAccess,
+      streamCursor: {
+        runId: input.snapshot.run.runId,
+        lastSequence: streamEvents.at(-1)?.sequence ?? 0,
+      },
+      error: input.snapshot.run.error,
+      conversation: input.conversation,
+    }),
+    restoredFromSnapshot: true,
+    restoredResult: restoredRunResultProjection(input.snapshot.run),
+    snapshot: {
+      run: input.snapshot.run,
+      workspace: input.snapshot.workspace,
+      toolCalls: input.snapshot.toolCalls,
+      artifacts: input.snapshot.artifacts,
+      confirmations: input.snapshot.confirmations,
+    },
     trace,
     tracking: {
       ...trackingBase,
@@ -140,21 +147,6 @@ export function createPersistedPanelRunResponse(input: {
     transcriptNodes,
     workNotes: [],
     steps: [],
-    streamCursor: {
-      runId: input.snapshot.run.runId,
-      lastSequence: streamEvents.at(-1)?.sequence ?? 0,
-    },
-    error: input.snapshot.run.error,
-    conversation: input.conversation,
-    restoredFromSnapshot: true,
-    restoredResult: restoredRunResultProjection(input.snapshot.run),
-    snapshot: {
-      run: input.snapshot.run,
-      workspace: input.snapshot.workspace,
-      toolCalls: input.snapshot.toolCalls,
-      artifacts: input.snapshot.artifacts,
-      confirmations: input.snapshot.confirmations,
-    },
   };
 }
 
@@ -238,6 +230,10 @@ export function createPersistedStreamEvents(
     }
     const streamType = streamTypeForRuntimeEvent(record.type, snapshot.run.runMode);
     if (streamType === undefined) {
+      continue;
+    }
+    const modelCall = modelCallForPersistedEvent(record, snapshot.modelCalls);
+    if (isPersistedContextCompactionModelEvent(record, modelCall)) {
       continue;
     }
     const restoredProgressSummary = record.type === "model.requested"
@@ -526,6 +522,32 @@ function isPersistedOrdinaryAgentRuntimeEvent(type: RuntimeEventRecord["type"]):
     type === "tool.failed" ||
     type === "user_approval.requested" ||
     type === "user_approval.received";
+}
+
+function modelCallForPersistedEvent(
+  event: RuntimeEventRecord,
+  modelCalls: readonly RuntimeModelCallRecord[],
+): RuntimeModelCallRecord | undefined {
+  const modelRef = event.refs.find((ref) => ref.kind === "model_call");
+  if (modelRef === undefined) {
+    return undefined;
+  }
+  return modelCalls.find((call) =>
+    call.requestId === modelRef.id ||
+    call.responseId === modelRef.id ||
+    call.eventRefs.includes(event.eventId)
+  );
+}
+
+function isPersistedContextCompactionModelEvent(
+  event: RuntimeEventRecord,
+  modelCall: RuntimeModelCallRecord | undefined,
+): boolean {
+  if (event.type !== "model.requested" && event.type !== "model.completed" && event.type !== "model.failed") {
+    return false;
+  }
+  return isContextCompactionPurpose(modelCall?.purpose) ||
+    modelCall?.outputContractId === "desktop.context_compaction.v1";
 }
 
 function persistedStageFor(

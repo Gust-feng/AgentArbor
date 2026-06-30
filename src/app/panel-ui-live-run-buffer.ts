@@ -165,6 +165,7 @@ function isLiveReasoningSettlementEvent(event: RunEventLike): boolean {
     event.type === "tool.failed" ||
     event.type === "user_approval.received" ||
     event.type === "user.guidance" ||
+    event.type === "context.compaction.requested" ||
     event.type === "context.compaction.completed" ||
     event.type === "context.compaction.failed" ||
     event.type === "final.result" ||

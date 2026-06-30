@@ -105,6 +105,7 @@ export function publishContextCompactionCompleted(input: {
   readonly threshold: number;
   readonly coveredRefCount: number;
   readonly messageCountAfter: number;
+  readonly scope?: "conversation_history" | "loop_context";
   readonly requestId?: string;
   readonly responseId?: string;
 }): void {
@@ -122,6 +123,7 @@ export function publishContextCompactionCompleted(input: {
         threshold: input.threshold,
         coveredRefCount: input.coveredRefCount,
         messageCountAfter: input.messageCountAfter,
+        scope: input.scope,
         requestId: input.requestId,
         responseId: input.responseId,
         summary: `上下文达到 ${input.tokenCount}/${input.threshold} tokens，已压缩 ${input.coveredRefCount} 条较早上下文。`,
@@ -135,9 +137,11 @@ export function publishContextCompactionFailed(input: {
   readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;
-  readonly tokenCount: number;
-  readonly threshold: number;
+  readonly tokenCount?: number;
+  readonly threshold?: number;
   readonly message: string;
+  readonly nonBlocking?: boolean;
+  readonly scope?: "conversation_history" | "loop_context";
   readonly requestId?: string;
   readonly responseId?: string;
 }): void {
@@ -152,13 +156,26 @@ export function publishContextCompactionFailed(input: {
         goalId: input.goalId,
         tokenCount: input.tokenCount,
         threshold: input.threshold,
+        nonBlocking: input.nonBlocking === true,
+        scope: input.scope,
         requestId: input.requestId,
         responseId: input.responseId,
-        summary: `上下文达到 ${input.tokenCount}/${input.threshold} tokens，但压缩没有成功。`,
+        summary: compactionFailedSummary(input),
         error: safeText(input.message, 500),
       },
     })
   );
+}
+
+function compactionFailedSummary(input: {
+  readonly tokenCount?: number;
+  readonly threshold?: number;
+  readonly nonBlocking?: boolean;
+}): string {
+  const prefix = input.tokenCount === undefined || input.threshold === undefined
+    ? "上下文整理没有成功"
+    : `上下文达到 ${input.tokenCount}/${input.threshold} tokens，但压缩没有成功`;
+  return input.nonBlocking === true ? `${prefix}，已保守继续。` : `${prefix}。`;
 }
 
 function safeText(value: string, maxLength: number): string {

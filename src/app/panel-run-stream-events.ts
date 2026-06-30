@@ -31,6 +31,7 @@ import {
   agentFabricSummary,
   agentNoteForEvent,
   blockedRunSummary,
+  isContextCompactionPurpose,
   chunkText,
   confirmationSummary,
   contextCompactionPreview,
@@ -67,6 +68,7 @@ export function createPanelRunStreamEvents(input: {
   const agentLabel = agentSelfLabel(input.agentDefinitionRef);
   const observationViews = createRunObservationEventViews(input.eventEntries);
   const viewBySequence = new Map(observationViews.map((view) => [view.sequence, view]));
+  const purposeByModelRequestId = modelRequestPurposes(input.eventEntries);
   const ordinaryAgentProjection = isOrdinaryAgentProjection(input.desktopMode);
   const suppressOrdinaryChatProgress =
     ordinaryAgentProjection && !hasUserVisibleWorkActivity(input.eventEntries, ordinaryAgentProjection);
@@ -102,6 +104,7 @@ export function createPanelRunStreamEvents(input: {
       runId: input.runId,
       entry,
       view,
+      purposeByModelRequestId,
       push,
     });
   }
@@ -226,9 +229,28 @@ function isOrdinaryAgentStreamEvent(type: ArborMessageType): boolean {
     type === "user_approval.received";
 }
 
+function modelRequestPurposes(eventEntries: readonly EventLogEntry[]): ReadonlyMap<string, string> {
+  const result = new Map<string, string>();
+  for (const entry of eventEntries) {
+    if (entry.type !== "model.requested") {
+      continue;
+    }
+    const payload = asRecord(entry.message.payload);
+    const requestId = stringOrUndefined(payload.requestId);
+    const purpose = stringOrUndefined(payload.purpose);
+    if (requestId !== undefined && purpose !== undefined) {
+      result.set(requestId, purpose);
+    }
+  }
+  return result;
+}
+
 function shouldSuppressOrdinaryChatEvent(entry: EventLogEntry): boolean {
-  if (entry.type === "goal.received" || entry.type === "model.requested") {
+  if (entry.type === "goal.received") {
     return true;
+  }
+  if (entry.type === "model.requested") {
+    return !isContextCompactionPurpose(stringOrUndefined(asRecord(entry.message.payload).purpose));
   }
   if (entry.type !== "model.completed") {
     return false;
@@ -244,6 +266,7 @@ function appendStreamEventsForEvent(input: {
   readonly runId: string;
   readonly entry: EventLogEntry;
   readonly view?: RunObservationEventView;
+  readonly purposeByModelRequestId: ReadonlyMap<string, string>;
   readonly push: (event: Omit<PanelRunStreamEvent, "sequence">) => void;
 }): void {
   const payload = asRecord(input.entry.message.payload);
@@ -256,6 +279,23 @@ function appendStreamEventsForEvent(input: {
   };
 
   if (input.entry.type === "model.requested") {
+    if (isContextCompactionPurpose(stringOrUndefined(payload.purpose))) {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:context.compaction.requested`,
+        type: "context.compaction.requested",
+        agentLabel: "上下文",
+        summary: "正在压缩较早上下文…",
+        status: "running",
+        detail: {
+          kind: "thinking",
+          action: "压缩上下文",
+          preview: "正在压缩较早上下文…",
+          truncated: false,
+        },
+      });
+      return;
+    }
     const summary = modelRequestedSummary(payload);
     if (summary === undefined || summary.trim().length === 0) {
       return;
@@ -272,6 +312,9 @@ function appendStreamEventsForEvent(input: {
   }
 
   if (input.entry.type === "model.completed") {
+    if (isContextCompactionModelPayload(payload, input.purposeByModelRequestId)) {
+      return;
+    }
     const reasoningOutput = safeReasoningOutputForPanel(payload.reasoningOutput);
     const reasoningChunks = chunkText(reasoningOutput?.content ?? "", 360);
     reasoningChunks.forEach((chunk, index) => {
@@ -334,6 +377,9 @@ function appendStreamEventsForEvent(input: {
   }
 
   if (input.entry.type === "model.failed") {
+    if (isContextCompactionModelPayload(payload, input.purposeByModelRequestId)) {
+      return;
+    }
     input.push({
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:model.failed`,
@@ -440,6 +486,17 @@ function appendStreamEventsForEvent(input: {
       status: note.status,
     });
   }
+}
+
+function isContextCompactionModelPayload(
+  payload: Readonly<Record<string, unknown>>,
+  purposeByModelRequestId: ReadonlyMap<string, string>
+): boolean {
+  if (isContextCompactionPurpose(stringOrUndefined(payload.purpose))) {
+    return true;
+  }
+  const requestId = stringOrUndefined(payload.requestId);
+  return requestId !== undefined && isContextCompactionPurpose(purposeByModelRequestId.get(requestId));
 }
 
 type UserApprovalReceivedKind = "approved" | "denied" | "guidance";

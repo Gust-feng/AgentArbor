@@ -13,6 +13,7 @@ export type PanelRunStreamEventType =
   | "model.output.completed"
   | "model.side.completed"
   | "model.failed"
+  | "context.compaction.requested"
   | "context.compaction.completed"
   | "context.compaction.failed"
   | "tool.requested"

@@ -3,6 +3,7 @@ import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligen
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../domain/tools/index.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
+import type { BasicAgentConversationSummary } from "./basic-agent-runtime/conversation-compaction-contracts.js";
 import type { BasicAgentContextPack } from "./basic-agent-runtime/context-pack.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 import type {
@@ -136,6 +137,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly providerFetch?: ModelRuntimeProviderFetch;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
+  readonly conversationSummary?: BasicAgentConversationSummary;
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly resolveSkillContexts?: (context: DesktopAgentSkillResolverContext) => Promise<readonly DesktopAgentSkillContext[]>;
   readonly modelCapabilities?: ModelCapabilities;

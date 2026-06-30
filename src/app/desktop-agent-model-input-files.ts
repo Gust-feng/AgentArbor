@@ -165,7 +165,8 @@ function appendAttachmentsToCurrentUserMessage(
       content: [
         message.content,
         "",
-        "Attached file inputs available to the model:",
+        "The following image inputs are already attached to this user message for direct visual inspection:",
+        "Inspect them directly instead of claiming that local images are unavailable.",
         attachmentLines,
       ].join("\n"),
       attachments: [...(message.attachments ?? []), ...attachments],

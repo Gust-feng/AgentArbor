@@ -490,15 +490,20 @@ function isTerminalToolNode(node: ProjectableTranscriptNode): boolean {
 
 function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem): ActivityItem {
   const sections = buildExpandedSections(requested, terminal);
+  const expandedDetail = mergedToolExpandedDetail(terminal.copy, terminal.phase);
   return {
     ...terminal,
     key: requested.key,
     copy: {
       ...terminal.copy,
-      expandedDetail: mergedToolExpandedDetail(requested.copy, terminal.copy, terminal.phase),
+      expandedDetail,
     },
     toolKind: resolveActivityToolKind(terminal),
-    expandedSections: sections.length > 0 ? sections : undefined,
+    expandedSections: sections.length > 0
+      ? sections
+      : expandedDetail === undefined
+        ? undefined
+        : fallbackExpandedSections({ ...terminal.copy, expandedDetail }),
   };
 }
 
@@ -508,67 +513,30 @@ function buildExpandedSections(
 ): readonly ActivityExpandedSection[] {
   const terminalSections = terminal.expandedSections ?? fallbackExpandedSections(terminal.copy);
   if (terminal.phase === "completed") {
-    return dedupeExpandedSections(terminalSections);
+    const sections = terminalSections.length > 0
+      ? terminalSections
+      : completedPayloadFallbackSections(requested);
+    return dedupeExpandedSections(sections);
   }
-  if (terminalSections.some((section) => section.title !== "详情")) {
-    const requestSection = requestContextSection(requested, terminalSections, terminal.phase);
-    return requestSection === undefined
-      ? dedupeExpandedSections(terminalSections)
-      : dedupeExpandedSections(appendSectionsWithoutDuplicateContent([requestSection], terminalSections));
-  }
-
-  const sections: ActivityExpandedSection[] = [];
-  const reqDetail = requested.copy.detail.trim();
-  const termDetail = terminal.copy.detail.trim();
-
-  if (reqDetail.length > 0) {
-    sections.push({ title: "发起", content: reqDetail });
-  }
-  if (termDetail !== reqDetail && termDetail.length > 0) {
-    sections.push({
-      title: terminal.phase === "failed" ? "失败" : "结果",
-      content: termDetail,
-    });
-  }
-  return dedupeExpandedSections(appendSectionsWithoutDuplicateContent(sections, terminalSections));
+  return dedupeExpandedSections(terminalSections);
 }
 
-function requestContextSection(
-  requested: ActivityItem,
-  terminalSections: readonly ActivityExpandedSection[],
-  phase: ProjectableTranscriptNode["phase"],
-): ActivityExpandedSection | undefined {
-  const requestText = requested.copy.detail.trim();
-  if (requestText.length === 0) {
-    return undefined;
+function completedPayloadFallbackSections(item: ActivityItem): readonly ActivityExpandedSection[] {
+  if (item.toolKind !== "edit") {
+    return [];
   }
-  if (requested.toolKind === "edit") {
-    return { title: "发起", content: requestText };
-  }
-  if (phase !== "failed" && phase !== "blocked" && phase !== "cancelled") {
-    return undefined;
-  }
-  const normalized = requestText.replace(/\s+/g, " ").trim();
-  const represented = terminalSections.some((section) =>
-    section.content.replace(/\s+/g, " ").includes(normalized)
-  );
-  return represented ? undefined : { title: "发起", content: requestText };
+  const sections = item.expandedSections ?? fallbackExpandedSections(item.copy);
+  return sections.filter((section) => section.format === "diff" || section.format === "code");
 }
 
 function mergedToolExpandedDetail(
-  requested: ActivityLineCopy,
   terminal: ActivityLineCopy,
   phase: ProjectableTranscriptNode["phase"]
 ): string | undefined {
-  if (terminal.expandedDetail === undefined && terminal.detail.trim() === requested.detail.trim()) {
-    return undefined;
+  if (phase === "completed") {
+    return terminal.expandedDetail;
   }
-  const lines = uniqueDetailLines([
-    phaseDetailLine("发起", requested),
-    terminal.detail === requested.detail ? undefined : phaseDetailLine(phase === "failed" ? "失败" : "结果", terminal),
-    terminal.expandedDetail,
-  ]);
-  return lines.length === 0 ? undefined : lines.join("\n");
+  return terminal.expandedDetail;
 }
 
 function fallbackExpandedSections(copy: ActivityLineCopy): readonly ActivityExpandedSection[] {
@@ -611,27 +579,6 @@ function appendSectionsWithoutDuplicateContent(
     result.push(section);
   }
   return result;
-}
-
-function phaseDetailLine(label: string, copy: ActivityLineCopy): string | undefined {
-  const detail = copy.detail.trim();
-  if (detail.length === 0) return undefined;
-  return `${label}：${detail}`;
-}
-
-function uniqueDetailLines(values: readonly (string | undefined)[]): readonly string[] {
-  const seen = new Set<string>();
-  const lines: string[] = [];
-  for (const value of values) {
-    if (value === undefined) continue;
-    for (const line of value.split("\n")) {
-      const normalized = line.trim();
-      if (normalized.length === 0 || seen.has(normalized)) continue;
-      seen.add(normalized);
-      lines.push(normalized);
-    }
-  }
-  return lines;
 }
 
 function readableConfirmationCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
@@ -1069,6 +1016,13 @@ function genericToolSections(
   display: GenericToolSummaryDisplay,
   copy: ActivityLineCopy,
 ): readonly ActivityExpandedSection[] {
+  const directory = genericDirectoryFacts(display);
+  if (directory !== undefined) {
+    return directory.items.length === 0
+      ? []
+      : [{ title: "条目", content: directory.items.join("\n"), format: "list" }];
+  }
+
   const article = genericArticleFacts(display);
   const sections: ActivityExpandedSection[] = [];
   if (article.title !== undefined || article.url !== undefined || article.published !== undefined || article.author !== undefined) {
@@ -1128,6 +1082,96 @@ function genericToolJoinedText(display: GenericToolSummaryDisplay): string {
     display.summary,
     ...(display.items ?? []).map(genericItemLabel),
   ].filter((value): value is string => value !== undefined && value.trim().length > 0)).join("\n");
+}
+
+type GenericDirectoryFacts = {
+  readonly path?: string;
+  readonly count?: number;
+  readonly depth?: number;
+  readonly items: readonly string[];
+};
+
+function genericDirectoryFacts(display: GenericToolSummaryDisplay): GenericDirectoryFacts | undefined {
+  const action = display.action?.toLowerCase() ?? "";
+  const text = genericToolJoinedText(display).toLowerCase();
+  const looksLikeDirectory =
+    action.includes("目录") ||
+    action.includes("list") ||
+    action.includes("dir") ||
+    text.includes("entries") ||
+    text.includes("depth=");
+  if (!looksLikeDirectory) {
+    return undefined;
+  }
+  const summary = display.summary ?? "";
+  const count = genericDirectoryCount(summary);
+  const depth = genericDirectoryDepth(summary) ?? genericDirectoryDepth(display.items?.join(" ") ?? "");
+  const path = genericDirectoryPath(summary);
+  const items = uniqueStrings(
+    (display.items ?? [])
+      .map(genericDirectoryItemLabel)
+      .filter((item): item is string => item !== undefined && item.length > 0)
+  );
+  if (count === undefined && path === undefined && depth === undefined && items.length === 0) {
+    return undefined;
+  }
+  return { path, count, depth, items };
+}
+
+function genericDirectoryHeadline(display: GenericToolSummaryDisplay): string | undefined {
+  const facts = genericDirectoryFacts(display);
+  if (facts === undefined) {
+    return undefined;
+  }
+  return [
+    toolPathLabel(facts.path),
+    facts.count === undefined ? undefined : `${facts.count} 项`,
+    facts.depth === undefined ? undefined : `深度 ${facts.depth}`,
+  ].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ") || undefined;
+}
+
+function genericDirectoryPath(summary: string): string | undefined {
+  const first = summary.split(/[·\n]/u)[0]?.trim();
+  if (first === undefined || first.length === 0 || /\d+\s*(?:entries|项)/iu.test(first)) {
+    return undefined;
+  }
+  if (first === ".") {
+    return first;
+  }
+  return cleanToolTargetText(first);
+}
+
+function genericDirectoryCount(summary: string): number | undefined {
+  const match = /(?:^|[^\d])(\d+)\s*(?:of\s+\d+\s*)?(?:entries|entry|项)\b/iu.exec(summary);
+  if (match?.[1] === undefined) {
+    return undefined;
+  }
+  const count = Number.parseInt(match[1], 10);
+  return Number.isFinite(count) ? count : undefined;
+}
+
+function genericDirectoryDepth(value: string): number | undefined {
+  const match = /\bdepth\s*=?\s*(\d+)\b/iu.exec(value);
+  if (match?.[1] === undefined) {
+    return undefined;
+  }
+  const depth = Number.parseInt(match[1], 10);
+  return Number.isFinite(depth) ? depth : undefined;
+}
+
+function genericDirectoryItemLabel(value: string): string | undefined {
+  const withoutPrefix = genericItemLabel(value)
+    .replace(/\s+depth\s*=?\s*\d+\b/giu, "")
+    .replace(/\s+\[truncated\]\s*$/iu, "")
+    .trim();
+  if (
+    withoutPrefix.length === 0 ||
+    withoutPrefix === "[truncated]" ||
+    /\b\d+\s*(?:entries|entry|项)\b/iu.test(withoutPrefix)
+  ) {
+    return undefined;
+  }
+  return withoutPrefix;
 }
 
 function fieldValue(text: string, field: string): string | undefined {
@@ -1440,6 +1484,12 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
     return readableToolTarget(cleanToolTargetText(display.path ?? node.summary)) ?? fallbackToolTargetCopy(node);
   }
   if (display?.kind === "generic_tool_summary") {
+    const directoryHeadline = genericDirectoryHeadline(display);
+    if (directoryHeadline !== undefined) {
+      return {
+        detail: compact(readableActivityText(directoryHeadline), 120),
+      };
+    }
     const article = genericArticleFacts(display);
     if (article.title !== undefined || article.url !== undefined) {
       return readableToolTarget(

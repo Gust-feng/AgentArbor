@@ -177,6 +177,27 @@ test("model turn settlement stops live reasoning without an explicit completed e
   assert.equal(buffer.turns[0]?.reasoningCompleted, true);
 });
 
+test("context compaction request settles live reasoning without rendering model output", () => {
+  const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
+    event({
+      id: "event-1",
+      sequence: 1,
+      type: "model.reasoning.delta",
+      delta: "准备整理较早上下文",
+    }),
+    event({
+      id: "event-2",
+      sequence: 2,
+      type: "context.compaction.requested",
+      summary: "正在压缩较早上下文…",
+    }),
+  ]);
+
+  assert.equal(buffer.turns[0]?.reasoning.text, "准备整理较早上下文");
+  assert.equal(buffer.turns[0]?.reasoningCompleted, true);
+  assert.equal(buffer.turns[0]?.output.text, "");
+});
+
 test("model output delta closes prior reasoning stage before the body is rendered", () => {
   const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
     event({

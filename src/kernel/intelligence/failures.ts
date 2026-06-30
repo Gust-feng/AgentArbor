@@ -84,7 +84,8 @@ export function modelFailureKindFromError(error: unknown): ModelFailureKind {
   if (/\b(timeout|timed out|etimedout)\b/.test(message)) {
     return "provider_timeout";
   }
-  if (/\b(network|connection error|fetch failed|econnreset|econnrefused|enotfound|eai_again|socket|dns)\b/.test(message)) {
+  if (/\b(network|connection error|fetch failed|econnreset|econnrefused|enotfound|eai_again|socket|dns)\b/.test(message) ||
+    message.includes("other side closed")) {
     return "provider_network";
   }
   if (/\b(unauthorized|forbidden|auth|401|403)\b/.test(message)) {

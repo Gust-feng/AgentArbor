@@ -69,6 +69,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     goal: input.goal,
     taskSoil: input.taskSoil,
     conversationHistory: input.options.conversationHistory ?? [],
+    conversationSummary: input.options.conversationSummary,
     skillContexts,
     modelCapabilities,
     tokenCounter,

@@ -90,6 +90,8 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
   const attachmentMessage = pack.messages.find((message) => message.ref === "context:task-soil:0");
   assert.match(attachmentMessage?.content ?? "", /attachment_id=ctx-readme/);
   assert.match(attachmentMessage?.content ?? "", /mime=text\/markdown/);
+  assert.match(attachmentMessage?.content ?? "", /authorized for this run/);
+  assert.equal((attachmentMessage?.content ?? "").includes("available by reference only"), false);
   assert.equal(attachmentMessage?.content.includes("context-token-value"), false);
   assert.equal(pack.inputRefs.some((ref) => ref.kind === "trace" && ref.id === "trace-test"), true);
   assert.equal(pack.items.some((item) => item.sourceKind === "task_soil_ref" && item.visibility === "model"), true);

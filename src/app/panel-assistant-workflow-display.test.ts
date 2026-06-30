@@ -182,6 +182,39 @@ test("assistant workflow display auto collapses completed process segments aroun
   assert.deepEqual(activitySegments.map((segment) => segment.collapseReason), ["structure", "structure"]);
 });
 
+test("assistant workflow display keeps context compaction status visible around body content", () => {
+  const display = projectStableAssistantWorkflowDisplay({
+    content: "",
+    transcriptNodes: [
+      node({
+        nodeId: "body-1",
+        sequence: 1,
+        kind: "body",
+        eventType: "model.output.completed",
+        phase: "completed",
+        text: "主回答正文。",
+      }),
+      node({
+        nodeId: "context-compaction-1",
+        sequence: 2,
+        kind: "system",
+        eventType: "context.compaction.completed",
+        phase: "completed",
+        summary: "已整理 18 条较早上下文，后续继续当前任务。",
+      }),
+    ],
+    collapseTimeline: true,
+  });
+
+  const activity = display.workflow.segments.find((segment) => segment.kind === "activity");
+
+  assert.equal(activity?.kind, "activity");
+  assert.equal(activity?.kind === "activity" ? activity.collapsed : undefined, false);
+  assert.equal(activity?.kind === "activity" ? activity.collapseReason : undefined, "expanded");
+  assert.equal(activity?.kind === "activity" ? activity.timeline.items[0]?.variant : undefined, "context_compaction");
+  assert.equal(activity?.kind === "activity" ? activity.timeline.items[0]?.copy.detail : undefined, "上下文压缩完成");
+});
+
 test("assistant workflow display keeps attention process segments expanded around body content", () => {
   const display = projectStableAssistantWorkflowDisplay({
     content: "",

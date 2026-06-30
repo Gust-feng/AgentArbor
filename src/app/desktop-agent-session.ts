@@ -1,21 +1,30 @@
 import type { TaskSoil } from "../domain/soil/index.js";
+import type { IntelligenceChannel } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { AgentTurnRuntime, AgentTurnRuntimeResult } from "../kernel/intelligence/index.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
-import type { BasicAgentContextPack } from "./basic-agent-runtime/index.js";
+import {
+  compactBasicAgentConversationIfNeeded,
+  createOpenAITokenCounter,
+  type BasicAgentContextPack,
+  type BasicAgentConversationSummary,
+} from "./basic-agent-runtime/index.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { attachDesktopFileInputsToModelMessages } from "./desktop-agent-model-input-files.js";
-import { prepareDesktopAgentLoop } from "./desktop-agent-loop-preparation.js";
+import { modelCapabilitiesForDesktopRun, prepareDesktopAgentLoop } from "./desktop-agent-loop-preparation.js";
 import { createTaskSoilFromDesktopInput } from "./task-soil-workspace.js";
 import type {
+  DesktopAgentConversationMessage,
   DesktopAgentPendingConfirmation,
   DesktopAgentPendingApprovalContinuation,
   DesktopAgentSessionResult,
   RunDesktopAgentSessionOptions,
 } from "./desktop-agent-session-contracts.js";
 import {
+  publishContextCompactionCompleted,
+  publishContextCompactionFailed,
   publishConfirmationRequested,
   publishGoalReceived,
   publishTriggeredSkills,
@@ -33,6 +42,7 @@ import {
 import {
   constraintRefsFromTaskSoil,
   createIntelligenceChannelFromOptions,
+  resolveActiveModelName,
   resolveDesktopAgentAiMode,
 } from "./desktop-agent-session-runtime.js";
 import { asRecord, stringOrUndefined } from "./panel-read-model-utils.js";
@@ -99,6 +109,16 @@ export async function runDesktopAgentSession(
   }
 
   const channel = intelligenceChannel(runtime);
+  const conversationContext = await compactConversationHistoryForSession({
+    goal,
+    runtime,
+    traceId,
+    goalId,
+    agentDefinition,
+    aiMode,
+    options,
+    channel,
+  });
   const skillContexts = options.resolveSkillContexts === undefined
     ? options.skillContexts ?? []
     : await options.resolveSkillContexts({
@@ -106,7 +126,7 @@ export async function runDesktopAgentSession(
         traceId,
         goalId,
         goal,
-        conversationHistory: options.conversationHistory ?? [],
+        conversationHistory: conversationContext.conversationHistory,
         intelligenceChannel: channel,
         abortSignal: options.abortSignal,
       });
@@ -119,6 +139,8 @@ export async function runDesktopAgentSession(
   });
   const loopOptions: RunDesktopAgentSessionOptions = {
     ...options,
+    conversationHistory: conversationContext.conversationHistory,
+    conversationSummary: conversationContext.conversationSummary,
     skillContexts,
   };
   const loop = prepareDesktopAgentLoop({
@@ -162,6 +184,98 @@ export async function runDesktopAgentSession(
     turn,
     capabilityResolution: loop.capabilityResolution,
   });
+}
+
+async function compactConversationHistoryForSession(input: {
+  readonly goal: string;
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly agentDefinition: NonNullable<RunDesktopAgentSessionOptions["agentDefinition"]>;
+  readonly aiMode: ReturnType<typeof resolveDesktopAgentAiMode>;
+  readonly options: RunDesktopAgentSessionOptions;
+  readonly channel: IntelligenceChannel;
+}): Promise<{
+  readonly conversationHistory: readonly DesktopAgentConversationMessage[];
+  readonly conversationSummary?: BasicAgentConversationSummary;
+}> {
+  const conversationHistory = input.options.conversationHistory ?? [];
+  if (conversationHistory.length === 0 || input.options.conversationSummary !== undefined) {
+    return {
+      conversationHistory,
+      conversationSummary: input.options.conversationSummary,
+    };
+  }
+
+  try {
+    const result = await compactBasicAgentConversationIfNeeded({
+      goal: input.goal,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      agentIdentity: {
+        agentId: input.agentDefinition.agentId,
+        displayName: input.agentDefinition.displayName,
+      },
+      conversationHistory,
+      intelligenceChannel: input.channel,
+      modelCapabilities: modelCapabilitiesForDesktopRun(input.aiMode, input.options),
+      tokenCounter: createOpenAITokenCounter(resolveActiveModelName(input.options)),
+    });
+    if (result.failed !== undefined) {
+      publishContextCompactionFailed({
+        runtime: input.runtime,
+        agentId: input.agentDefinition.agentId,
+        traceId: input.traceId,
+        goalId: input.goalId,
+        tokenCount: result.tokenCount,
+        threshold: result.threshold,
+        message: result.failed.message,
+        nonBlocking: true,
+        scope: "conversation_history",
+        requestId: result.failed.requestId,
+        responseId: result.failed.responseId,
+      });
+      return { conversationHistory, conversationSummary: input.options.conversationSummary };
+    }
+    if (result.compacted && result.conversationSummary !== undefined) {
+      publishContextCompactionCompleted({
+        runtime: input.runtime,
+        agentId: input.agentDefinition.agentId,
+        traceId: input.traceId,
+        goalId: input.goalId,
+        summaryId: result.conversationSummary.summaryId,
+        tokenCount: result.tokenCount ?? 0,
+        threshold: result.threshold ?? 0,
+        coveredRefCount: result.conversationSummary.coveredRefs.length,
+        messageCountAfter: result.conversationHistory.length,
+        scope: "conversation_history",
+        requestId: result.conversationSummary.modelRequestId,
+        responseId: result.conversationSummary.modelResponseId,
+      });
+      return {
+        conversationHistory: result.conversationHistory,
+        conversationSummary: result.conversationSummary,
+      };
+    }
+    return {
+      conversationHistory: result.conversationHistory,
+      conversationSummary: input.options.conversationSummary,
+    };
+  } catch (error) {
+    if (input.options.abortSignal?.aborted) {
+      throw error;
+    }
+    publishContextCompactionFailed({
+      runtime: input.runtime,
+      agentId: input.agentDefinition.agentId,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      message: error instanceof Error ? error.message : String(error),
+      nonBlocking: true,
+      scope: "conversation_history",
+    });
+    return { conversationHistory, conversationSummary: input.options.conversationSummary };
+  }
 }
 
 function desktopAgentResultFromTurn(input: {

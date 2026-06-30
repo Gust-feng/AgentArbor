@@ -30,6 +30,7 @@ test("persisted run response restores safe transcript and tracking projections",
       turns: [],
     },
   });
+  const snapshot = response.snapshot!;
 
   assert.equal(response.restoredFromSnapshot, true);
   assert.equal(response.status, "completed");
@@ -37,7 +38,7 @@ test("persisted run response restores safe transcript and tracking projections",
   assert.equal(response.config.baseUrl, "https://snapshot.example.test");
   assert.equal(response.config.model, "snapshot-model");
   assert.equal(response.tracking.provider.model, "snapshot-model");
-  assert.deepEqual(response.agentDefinitionRef, response.snapshot.run.agentDefinitionRef);
+  assert.deepEqual(response.agentDefinitionRef, snapshot.run.agentDefinitionRef);
   assert.equal(response.agentDefinitionRef?.agentId, "custom-restored-agent");
   assert.deepEqual(response.informationAccess.sourcePreference, ["web", "codebase"]);
   assert.equal(response.informationAccess.web.maxResults, 5);
@@ -112,7 +113,14 @@ test("persisted run response restores ordinary tool transcript without old diagn
           action: "编辑文件",
           path: "notes.md",
           summary: "notes.md · 32 -> 18 chars · 1 replacement",
-          preview: "notes.md · 32 -> 18 chars · 1 replacement",
+          preview: "- old\n+ new",
+          display: {
+            kind: "file_diff_preview",
+            path: "notes.md",
+            operation: "edit",
+            replacements: 1,
+            preview: "- old\n+ new",
+          },
           eventRefs: ["run-1:event:3"],
         },
       ],
@@ -130,6 +138,8 @@ test("persisted run response restores ordinary tool transcript without old diagn
   assert.equal(response.transcript.events.some((event) => event.summary === "dir"), true);
   assert.equal(response.transcript.events.some((event) => event.detail?.preview === "README.md"), true);
   assert.equal(response.transcriptNodes.some((node) => node.summary === "notes.md · 1 处修改"), true);
+  assert.equal(activityText.includes("- old"), true);
+  assert.equal(activityText.includes("+ new"), true);
   assert.equal(transcriptText.includes("exit 0"), false);
   assert.equal(transcriptText.includes("bytes"), false);
   assert.equal(transcriptText.includes("32 -> 18 chars"), false);
@@ -190,6 +200,60 @@ test("persisted run response restores model failures as typed failed events", ()
   assert.equal(modelFailureNode?.phase, "failed");
   assert.equal(activityText.includes("模型"), true);
   assert.equal(response.transcript.events.some((event) => event.type === "agent.note.completed" && event.summary === "模型服务连接失败。"), false);
+});
+
+test("persisted run response omits internal context compaction model output", () => {
+  const base = runtimeSnapshot();
+  const response = createPersistedPanelRunResponse({
+    snapshot: {
+      ...base,
+      events: [
+        runtimeEvent(1, "model.requested", "正在压缩较早上下文…", [{ kind: "model_call", id: "model-compaction" }]),
+        runtimeEvent(
+          2,
+          "model.completed",
+          "## Goal\nContinue safely.\n\n## Constraints & Preferences\nDo not show this internal prompt.",
+          [{ kind: "model_call", id: "model-response-compaction" }],
+        ),
+        runtimeEvent(3, "context.compaction.completed", "已整理 18 条较早上下文，后续继续当前任务。", [
+          { kind: "model_call", id: "model-compaction" },
+          { kind: "model_call", id: "model-response-compaction" },
+        ]),
+      ],
+      modelCalls: [
+        {
+          requestId: "model-compaction",
+          responseId: "model-response-compaction",
+          runId: "run-1",
+          status: "completed",
+          purpose: "desktop_context_compaction",
+          outputContractId: "desktop.context_compaction.v1",
+          providerKind: "fake",
+          protocolKind: "openai_compatible_chat_completions",
+          model: "fake-model",
+          eventRefs: ["run-1:event:1", "run-1:event:2"],
+        },
+      ],
+      toolCalls: [],
+      confirmations: [],
+    },
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+  const serialized = JSON.stringify({
+    events: response.transcript.events,
+    nodes: response.transcriptNodes,
+  });
+
+  assert.deepEqual(response.transcript.events.map((event) => event.type), [
+    "context.compaction.completed",
+    "final.result",
+  ]);
+  assert.equal(serialized.includes("## Goal"), false);
+  assert.equal(serialized.includes("Constraints & Preferences"), false);
+  assert.equal(serialized.includes("内部"), false);
+  assert.equal(response.transcriptNodes.some((node) => node.eventType === "model.output.completed"), false);
+  assert.equal(response.transcriptNodes.some((node) => node.eventType === "context.compaction.completed"), true);
 });
 
 test("persisted runtime running status restores as blocked ordinary panel state", () => {
@@ -353,6 +417,7 @@ test("persisted terminal run responses keep frozen run facts instead of current 
         },
       },
     });
+    const snapshot = response.snapshot!;
 
     assert.equal(response.status, status);
     assert.equal(response.config.profileId, "snapshot-profile");
@@ -362,9 +427,9 @@ test("persisted terminal run responses keep frozen run facts instead of current 
     assert.deepEqual(response.informationAccess.sourcePreference, ["web", "codebase"]);
     assert.equal(response.informationAccess.web.maxResults, 5);
     assert.equal(response.tracking.informationSources.web.maxResults, 5);
-    assert.deepEqual(response.agentDefinitionRef, response.snapshot.run.agentDefinitionRef);
+    assert.deepEqual(response.agentDefinitionRef, snapshot.run.agentDefinitionRef);
     assert.equal(response.agentDefinitionRef?.agentId, "custom-restored-agent");
-    assert.deepEqual(response.capabilityResolution, response.snapshot.run.capabilityResolution);
+    assert.deepEqual(response.capabilityResolution, snapshot.run.capabilityResolution);
     assert.equal(response.capabilityResolution?.snapshotId, "capability-snapshot-1");
     assert.equal(response.capabilityResolution?.resolutionId, "capability-resolution-1");
     assert.deepEqual(response.capabilityResolution?.allowedTools, ["shell_command"]);

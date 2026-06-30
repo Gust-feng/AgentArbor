@@ -31,6 +31,7 @@ export function ChatTranscriptDisplay(props: {
   readonly live?: LiveRunBuffer;
   readonly workView?: DesktopWorkView;
   readonly pending?: ConfirmationProjection;
+  readonly showModelUsage: boolean;
   readonly standaloneRun?: {
     readonly currentRunId?: string;
     readonly runStatus?: string;
@@ -110,6 +111,7 @@ export function ChatTranscriptDisplay(props: {
       items={conversationDisplay.items}
       models={props.models}
       selectedModelId={props.selectedModelId}
+      showModelUsage={props.showModelUsage}
       onDecision={props.onDecision}
       confirmationBusy={props.confirmationBusy}
       hiddenEarlierTurnCount={props.hiddenEarlierTurnCount}

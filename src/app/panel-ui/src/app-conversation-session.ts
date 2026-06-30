@@ -5,7 +5,7 @@ import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "
 import type { AppState } from "./app-state";
 import { liveRunForObservedReplay } from "../../panel-ui-submit-flow";
 import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-ui-transcript-cache";
-import { resetTranscriptNodesCache, updateTranscriptNodesCache } from "./panel-ui-transcript-store";
+import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
 import type { Conversation } from "./contracts/conversation";
 import type { TranscriptNode } from "./contracts/run";
 import { ordinaryWorkViewFromRunView, safeBasicRunView } from "./runtime";
@@ -192,7 +192,6 @@ export function resetConversationSession(options: ConversationSessionControllerO
   options.viewEpochRef.current += 1;
   stopLiveUpdates(options.pollTimer, options.streamRef);
   options.activeRunIdRef.current = undefined;
-  resetTranscriptNodesCache();
   options.setScreen("chat-empty");
   options.setGoal("");
   options.setAttachments([]);

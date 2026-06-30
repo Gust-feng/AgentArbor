@@ -1,10 +1,11 @@
-import type { ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
+import type { ModelMessage, ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 import { projectToolStatusEnvelope } from "../tools/index.js";
 import type {
   ToolUseLoopConfirmationDecision,
   ToolUseLoopContextMaintenanceResult,
+  ToolUseLoopModelResponseTrace,
   ToolUseLoopPendingApproval,
   ToolUseLoopResult,
 } from "./tool-use-loop-contracts.js";
@@ -13,11 +14,15 @@ export function outOfFuelLoopResult(
   initialRequest: ModelRequest,
   toolCalls: readonly ToolCallResult[],
   modelRounds: number,
-  rounds: number
+  rounds: number,
+  modelResponses: readonly ToolUseLoopModelResponseTrace[] = [],
+  contextMessages: readonly ModelMessage[] = initialRequest.sanitizedMessages,
 ): ToolUseLoopResult {
   return {
     finalOutput: outOfFuelModelResponse(initialRequest),
     toolCalls,
+    modelResponses,
+    contextMessages,
     modelRounds,
     rounds,
     stoppedReason: "out_of_fuel",
@@ -29,11 +34,15 @@ export function contextOverflowLoopResult(
   toolCalls: readonly ToolCallResult[],
   modelRounds: number,
   rounds: number,
-  failure: Extract<ToolUseLoopContextMaintenanceResult, { readonly status: "failed" }>
+  failure: Extract<ToolUseLoopContextMaintenanceResult, { readonly status: "failed" }>,
+  modelResponses: readonly ToolUseLoopModelResponseTrace[] = [],
+  contextMessages: readonly ModelMessage[] = initialRequest.sanitizedMessages,
 ): ToolUseLoopResult {
   return {
     finalOutput: contextOverflowModelResponse(initialRequest, failure),
     toolCalls,
+    modelResponses,
+    contextMessages,
     modelRounds,
     rounds,
     stoppedReason: "context_overflow",
@@ -69,7 +78,9 @@ export function abortedLoopResult(
   initialRequest: ModelRequest,
   toolCalls: readonly ToolCallResult[],
   modelRounds: number,
-  rounds: number
+  rounds: number,
+  modelResponses: readonly ToolUseLoopModelResponseTrace[] = [],
+  contextMessages: readonly ModelMessage[] = initialRequest.sanitizedMessages,
 ): ToolUseLoopResult {
   return {
     finalOutput: {
@@ -95,6 +106,8 @@ export function abortedLoopResult(
       completedAt: new Date().toISOString(),
     },
     toolCalls,
+    modelResponses,
+    contextMessages,
     modelRounds,
     rounds,
     stoppedReason: "cancelled",

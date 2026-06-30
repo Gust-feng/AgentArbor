@@ -61,12 +61,12 @@ function toOpenAIMessage(
   }
 
   if (message.role === "assistant" && message.toolCalls !== undefined && message.toolCalls.length > 0) {
-    return {
+    return removeUndefinedValues({
       ...protocolExtensionsForRequest(message.protocolExtensions),
       role: "assistant",
-      content: message.content,
+      content: chatAssistantToolCallContent(message, dialect),
       tool_calls: message.toolCalls.map(toOpenAIToolCall),
-    };
+    });
   }
 
   return {
@@ -157,6 +157,16 @@ function toOpenAIToolChoice(choice: ModelToolChoice | undefined): unknown {
       name: choice.function.name,
     },
   };
+}
+
+function chatAssistantToolCallContent(
+  message: ModelMessage,
+  dialect: OpenAICompatibleChatDialect
+): string | undefined {
+  if (message.content.length === 0) {
+    return undefined;
+  }
+  return dialect.preserveFullAssistantMessage ? message.content : undefined;
 }
 
 function toOpenAIToolCall(toolCall: ToolCallRequest): Record<string, unknown> {

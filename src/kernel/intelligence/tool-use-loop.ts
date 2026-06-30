@@ -11,6 +11,7 @@ import {
 import type {
   ToolUseLoopConfirmationDecision,
   ToolUseLoopContextMaintenanceResult,
+  ToolUseLoopModelResponseTrace,
   ToolUseLoopOptions,
   ToolUseLoopPendingApproval,
   ToolUseLoopResult,
@@ -41,6 +42,7 @@ export type {
   ToolUseLoopConfirmationDecision,
   ToolUseLoopContextMaintainer,
   ToolUseLoopContextMaintenanceResult,
+  ToolUseLoopModelResponseTrace,
   ToolUseLoopOptions,
   ToolUseLoopPendingApproval,
   ToolUseLoopResult,
@@ -55,6 +57,7 @@ export async function executeToolUseLoop(
     initialRequest,
     messages: initialRequest.sanitizedMessages,
     toolCalls: [],
+    modelResponses: [],
     modelRounds: 0,
     rounds: 0,
     requestId: initialRequest.requestId,
@@ -83,7 +86,9 @@ export async function resumeToolUseLoopFromConfirmationDecision(
       initialRequest,
       pendingApproval.toolCallsBeforeApproval,
       pendingApproval.modelRounds,
-      pendingApproval.rounds
+      pendingApproval.rounds,
+      [],
+      cloneMessages(pendingApproval.messagesBeforeToolCall),
     );
   }
 
@@ -107,6 +112,7 @@ export async function resumeToolUseLoopFromConfirmationDecision(
       ])),
     ],
     toolCalls,
+    modelResponses: [],
     modelRounds: pendingApproval.modelRounds,
     rounds: pendingApproval.rounds + 1,
     requestId: pendingApproval.requestId,
@@ -125,6 +131,8 @@ async function resumeApprovalCore(
         ...cloneToolResults(pendingApproval.toolCallsBeforeApproval),
         approvalRequiredResultFromPending(pendingApproval),
       ],
+      modelResponses: [],
+      contextMessages: cloneMessages(pendingApproval.messagesBeforeToolCall),
       modelRounds: pendingApproval.modelRounds,
       rounds: pendingApproval.rounds,
       stoppedReason: "approval_required",
@@ -136,7 +144,9 @@ async function resumeApprovalCore(
       initialRequest,
       pendingApproval.toolCallsBeforeApproval,
       pendingApproval.modelRounds,
-      pendingApproval.rounds
+      pendingApproval.rounds,
+      [],
+      cloneMessages(pendingApproval.messagesBeforeToolCall),
     );
   }
 
@@ -152,6 +162,8 @@ async function resumeApprovalCore(
     return {
       finalOutput: approvalStillRequiredModelResponse(initialRequest, pendingApproval),
       toolCalls,
+      modelResponses: [],
+      contextMessages: cloneMessages(pendingApproval.messagesBeforeToolCall),
       modelRounds: pendingApproval.modelRounds,
       rounds: pendingApproval.rounds,
       stoppedReason: "approval_required",
@@ -159,7 +171,14 @@ async function resumeApprovalCore(
     };
   }
   if (approvedResult.status === "cancelled" || Boolean(options.abortSignal?.aborted)) {
-    return abortedLoopResult(initialRequest, toolCalls, pendingApproval.modelRounds, pendingApproval.rounds);
+    return abortedLoopResult(
+      initialRequest,
+      toolCalls,
+      pendingApproval.modelRounds,
+      pendingApproval.rounds,
+      [],
+      cloneMessages(pendingApproval.messagesBeforeToolCall),
+    );
   }
   let completedToolResults = [
     ...cloneToolResults(pendingApproval.completedToolResults),
@@ -177,18 +196,20 @@ async function resumeApprovalCore(
         ...completedToolResults,
         ...remaining.pendingApproval.completedToolResults,
       ];
-      return {
-        finalOutput: approvalStillRequiredModelResponse(initialRequest, {
-          ...pendingApproval,
-          confirmationId: remaining.pendingApproval.confirmationId,
+        return {
+          finalOutput: approvalStillRequiredModelResponse(initialRequest, {
+            ...pendingApproval,
+            confirmationId: remaining.pendingApproval.confirmationId,
           pendingToolCall: remaining.pendingApproval.pendingToolCall,
           confirmationRequest: remaining.pendingApproval.confirmationRequest,
           remainingToolCallsAfterApproval: remaining.pendingApproval.remainingToolCallsAfterApproval,
-        }),
-        toolCalls,
-        modelRounds: pendingApproval.modelRounds,
-        rounds: pendingApproval.rounds,
-        stoppedReason: "approval_required",
+          }),
+          toolCalls,
+          modelResponses: [],
+          contextMessages: cloneMessages(pendingApproval.messagesBeforeToolCall),
+          modelRounds: pendingApproval.modelRounds,
+          rounds: pendingApproval.rounds,
+          stoppedReason: "approval_required",
         pendingApproval: {
           confirmationId: remaining.pendingApproval.confirmationId,
           pendingToolCall: cloneToolCallRequest(remaining.pendingApproval.pendingToolCall),
@@ -223,6 +244,7 @@ async function resumeApprovalCore(
       ...toolResultMessages(completedToolResults),
     ],
     toolCalls,
+    modelResponses: [],
     modelRounds: pendingApproval.modelRounds,
     rounds,
     requestId: pendingApproval.requestId,
@@ -234,6 +256,7 @@ async function continueToolUseLoopAfterToolResults(input: {
   readonly initialRequest: ModelRequest;
   readonly messages: readonly ModelMessage[];
   readonly toolCalls: readonly ToolCallResult[];
+  readonly modelResponses: readonly ToolUseLoopModelResponseTrace[];
   readonly modelRounds: number;
   readonly rounds: number;
   readonly requestId: string;
@@ -243,16 +266,17 @@ async function continueToolUseLoopAfterToolResults(input: {
   const toolDefinitions = modelVisibleToolDefinitions(input.options);
   let messages = cloneMessages(input.messages);
   const toolCalls: ToolCallResult[] = [...input.toolCalls];
+  let modelResponses: ToolUseLoopModelResponseTrace[] = [...input.modelResponses];
   let modelRounds = input.modelRounds;
   let rounds = input.rounds;
   let requestId = input.requestId;
 
   for (;;) {
     if (input.options.abortSignal?.aborted === true) {
-      return abortedLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
+      return abortedLoopResult(input.initialRequest, toolCalls, modelRounds, rounds, modelResponses, cloneMessages(messages));
     }
     if (maxModelRounds !== undefined && modelRounds >= maxModelRounds) {
-      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
+      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds, modelResponses, cloneMessages(messages));
     }
     const maintenance = await maintainContextIfNeeded({
       options: input.options,
@@ -265,7 +289,15 @@ async function continueToolUseLoopAfterToolResults(input: {
       rounds,
     });
     if (maintenance.status === "failed") {
-      return contextOverflowLoopResult(input.initialRequest, toolCalls, modelRounds, rounds, maintenance);
+      return contextOverflowLoopResult(
+        input.initialRequest,
+        toolCalls,
+        modelRounds,
+        rounds,
+        maintenance,
+        modelResponses,
+        cloneMessages(messages),
+      );
     }
     if (maintenance.status === "compacted") {
       messages = cloneMessages(maintenance.messages);
@@ -281,20 +313,39 @@ async function continueToolUseLoopAfterToolResults(input: {
         : input.initialRequest.toolChoice ?? (toolDefinitions.length > 0 ? "auto" : "none"),
     }, { abortSignal: input.options.abortSignal });
     modelRounds += 1;
+    modelResponses = [...modelResponses, modelResponseTrace(response)];
 
     if (response.status !== "completed") {
-      return { finalOutput: response, toolCalls, modelRounds, rounds, stoppedReason: "error" };
+      return {
+        finalOutput: response,
+        toolCalls,
+        modelResponses,
+        contextMessages: cloneMessages(messages),
+        modelRounds,
+        rounds,
+        stoppedReason: "error",
+      };
     }
 
     const requestedToolCalls = response.toolCalls ?? [];
     if (requestedToolCalls.length === 0) {
       const incompleteResponse = incompleteModelResponseForCompletion(response);
       if (incompleteResponse !== undefined) {
-        return { finalOutput: incompleteResponse, toolCalls, modelRounds, rounds, stoppedReason: "error" };
+        return {
+          finalOutput: incompleteResponse,
+          toolCalls,
+          modelResponses,
+          contextMessages: cloneMessages(messages),
+          modelRounds,
+          rounds,
+          stoppedReason: "error",
+        };
       }
       return {
         finalOutput: response,
         toolCalls,
+        modelResponses,
+        contextMessages: cloneMessages(messages),
         modelRounds,
         rounds,
         stoppedReason: toolCalls.length > 0 ? "completed" : "no_tool_calls",
@@ -302,7 +353,7 @@ async function continueToolUseLoopAfterToolResults(input: {
     }
 
     if (maxToolRounds !== undefined && rounds >= maxToolRounds) {
-      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
+      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds, modelResponses, cloneMessages(messages));
     }
 
     const roundResult = await executeToolCalls({ options: input.options, requests: requestedToolCalls, toolDefinitions });
@@ -312,6 +363,8 @@ async function continueToolUseLoopAfterToolResults(input: {
       return {
         finalOutput: response,
         toolCalls,
+        modelResponses,
+        contextMessages: cloneMessages(messages),
         modelRounds,
         rounds,
         stoppedReason: "approval_required",
@@ -346,9 +399,22 @@ async function continueToolUseLoopAfterToolResults(input: {
     requestId = createId("model-request");
 
     if (maxModelRounds !== undefined && modelRounds >= maxModelRounds) {
-      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
+      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds, modelResponses, cloneMessages(messages));
     }
   }
+}
+
+function modelResponseTrace(response: ModelResponse): ToolUseLoopModelResponseTrace {
+  return {
+    requestId: response.requestId,
+    responseId: response.responseId,
+    status: response.status,
+    text: response.textOutput ?? response.assistantMessage?.content,
+    reasoningSummary: response.reasoningOutput?.content,
+    toolCallIds: (response.toolCalls ?? []).map((call) => call.callId),
+    finishReason: response.finishReason,
+    completedAt: response.completedAt,
+  };
 }
 
 function incompleteModelResponseForCompletion(response: ModelResponse): ModelResponse | undefined {

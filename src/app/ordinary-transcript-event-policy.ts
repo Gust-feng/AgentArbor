@@ -21,6 +21,7 @@ export function isOrdinaryTranscriptReasoningSettlementEvent(type: string): bool
     type === "confirmation.needed" ||
     type === "user_approval.received" ||
     type === "user.guidance" ||
+    type === "context.compaction.requested" ||
     type === "context.compaction.completed" ||
     type === "context.compaction.failed" ||
     type === "final.result" ||

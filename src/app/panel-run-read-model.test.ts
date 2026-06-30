@@ -812,6 +812,27 @@ test("ordinary agent stream exposes context compaction as safe continuation main
       eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-context" } }),
       eventEntry({
         sequence: 2,
+        type: "model.requested",
+        payload: {
+          requestId: "model-request-compaction",
+          purpose: "desktop_context_compaction",
+        },
+      }),
+      modelCompletedEntry({
+        sequence: 3,
+        requestId: "model-request-compaction",
+        purpose: "desktop_context_compaction",
+        contractId: "desktop.context_compaction.v1",
+        decisionSummary: [
+          "## Goal",
+          "Continue safely.",
+          "## Constraints & Preferences",
+          "Do not show this internal continuation prompt to the user.",
+          "## Progress",
+        ].join("\n"),
+      }),
+      eventEntry({
+        sequence: 4,
         type: "context.compaction.completed",
         payload: {
           goalId: "goal-context",
@@ -829,17 +850,59 @@ test("ordinary agent stream exposes context compaction as safe continuation main
     createdAt: "2026-05-07T00:00:00.000Z",
     updatedAt: "2026-05-07T00:00:02.000Z",
   });
+  const requested = events.find((event) => event.type === "context.compaction.requested");
   const compaction = events.find((event) => event.type === "context.compaction.completed");
   const serialized = JSON.stringify(events);
 
+  assert.equal(requested?.agentLabel, "上下文");
+  assert.equal(requested?.summary, "正在压缩较早上下文…");
+  assert.equal(requested?.status, "running");
   assert.equal(compaction?.agentLabel, "上下文");
-  assert.equal(compaction?.summary, "较早上下文已整理。");
+  assert.equal(compaction?.summary, "已整理 18 条较早上下文，后续继续当前任务。");
   assert.equal(compaction?.detail?.preview, undefined);
   assert.deepEqual(compaction?.modelCallRefs, ["model-request-compaction", "model-response-compaction"]);
+  assert.equal(events.some((event) => event.type === "model.output.delta"), false);
+  assert.equal(events.some((event) => event.type === "model.output.completed"), false);
+  assert.equal(ordinaryVisibleProjectionIncludes(events, "## Goal"), false);
+  assert.equal(ordinaryVisibleProjectionIncludes(events, "Constraints & Preferences"), false);
   assert.equal(ordinaryVisibleProjectionIncludes(events, "tokens"), false);
-  assert.equal(ordinaryVisibleProjectionIncludes(events, "已压缩 18 条"), false);
+  assert.equal(ordinaryVisibleProjectionIncludes(events, "18 条较早上下文"), true);
   assert.equal(serialized.includes("raw prompt"), false);
   assert.equal(serialized.includes("raw tool output"), false);
+});
+
+test("ordinary agent stream keeps compaction failure visible with the pause reason", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-context-compaction-failed",
+    status: "blocked",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-context-failed" } }),
+      eventEntry({
+        sequence: 2,
+        type: "context.compaction.failed",
+        payload: {
+          goalId: "goal-context-failed",
+          tokenCount: 92_000,
+          threshold: 80_000,
+          requestId: "model-request-compaction",
+          responseId: "model-response-compaction",
+          summary: "上下文达到 92000/80000 tokens，但压缩没有成功。",
+          error: "Context compaction returned an empty continuation prompt.",
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:02.000Z",
+  });
+  const compaction = events.find((event) => event.type === "context.compaction.failed");
+
+  assert.equal(compaction?.agentLabel, "上下文");
+  assert.equal(compaction?.summary, "上下文整理失败，任务已暂停。Context compaction returned an empty continuation prompt.");
+  assert.equal(compaction?.detail?.preview, "Context compaction returned an empty continuation prompt.");
+  assert.deepEqual(compaction?.modelCallRefs, ["model-request-compaction", "model-response-compaction"]);
+  assert.equal(ordinaryVisibleProjectionIncludes(events, "任务已暂停"), true);
+  assert.equal(ordinaryVisibleProjectionIncludes(events, "empty continuation prompt"), true);
 });
 
 test("ordinary agent stream turns tool-call visible text into body output before tool work", () => {
@@ -1086,7 +1149,8 @@ test("panel transcript edit fallback omits raw replacement text", () => {
   const completedTool = transcript.events.find((event) => event.type === "tool.completed");
 
   assert.equal(completedTool?.detail?.preview?.includes("32 -> 18 chars"), false);
-  assert.equal(completedTool?.detail?.preview?.includes("替换：1 处"), true);
+  assert.equal(completedTool?.detail?.preview?.includes("替换：1 处"), false);
+  assert.equal(completedTool?.detail?.preview?.includes("notes.md"), true);
   assert.equal(serialized.includes("RAW_OLD_TEXT_SENTINEL"), false);
   assert.equal(serialized.includes("RAW_NEW_TEXT_SENTINEL"), false);
   assert.equal(serialized.includes("sk-edit-secret"), false);
@@ -1168,6 +1232,7 @@ function streamEvent(
 function modelCompletedEntry(input: {
   readonly sequence: number;
   readonly requestId: string;
+  readonly purpose?: string;
   readonly contractId: string;
   readonly decisionSummary: string;
   readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
@@ -1186,7 +1251,7 @@ function modelCompletedEntry(input: {
     payload: {
       requestId: input.requestId,
       responseId: `response-${input.requestId}`,
-      purpose: "test-purpose",
+      purpose: input.purpose ?? "test-purpose",
       outputContract: { contractId: input.contractId },
       providerKind: "fake",
       protocolKind: "openai_compatible_chat_completions",

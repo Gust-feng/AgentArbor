@@ -24,6 +24,7 @@ export function assistantToolCallMessage(
 
 export function toolResultMessage(result: ToolCallResult): ModelMessage {
   const envelope = result.projection?.envelope;
+  const attachments = result.projection?.modelAttachments;
   const modelOutput = result.projection?.agentContent !== undefined
     ? sanitizeProjectedAgentContent(result.projection.agentContent)
     : envelope !== undefined
@@ -47,14 +48,14 @@ export function toolResultMessage(result: ToolCallResult): ModelMessage {
     })),
     toolCallId: result.callId,
     toolName: result.toolName,
+    attachments: attachments === undefined || attachments.length === 0
+      ? undefined
+      : attachments.map((attachment) => globalThis.structuredClone(attachment)),
   };
 }
 
 export function toolResultMessages(results: readonly ToolCallResult[]): ModelMessage[] {
-  return [
-    ...results.map(toolResultMessage),
-    ...results.flatMap(toolResultAttachmentMessages),
-  ];
+  return results.map(toolResultMessage);
 }
 
 // Final transport guard after ToolSafeProjection.agentContent has already
@@ -87,38 +88,6 @@ function sanitizeProjectedAgentContent(value: unknown): unknown {
     return result;
   }
   return String(value);
-}
-
-function toolResultAttachmentMessages(result: ToolCallResult): readonly ModelMessage[] {
-  const attachments = result.projection?.modelAttachments;
-  if (attachments === undefined || attachments.length === 0) {
-    return [];
-  }
-  return [{
-    role: "user",
-    content: [
-      `Tool ${result.toolName} returned ${attachments.length} model input attachment${attachments.length === 1 ? "" : "s"} for call ${result.callId}.`,
-      "Use these attachments with the preceding tool result metadata; this is not a new user request.",
-      ...attachments.map((attachment, index) => {
-        return [
-          `- input=${index + 1}`,
-          `kind=${attachment.kind}`,
-          attachment.attachmentId === undefined ? undefined : `attachment_id=${attachment.attachmentId}`,
-          attachment.inputRef === undefined ? undefined : `ref=${safeModelAttachmentRef(attachment.inputRef)}`,
-          attachment.filename === undefined ? undefined : `filename=${attachment.filename}`,
-          attachment.byteLength === undefined ? undefined : `bytes=${attachment.byteLength}`,
-        ].filter((part): part is string => part !== undefined).join(" ");
-      }),
-    ].join("\n"),
-    attachments: attachments.map((attachment) => globalThis.structuredClone(attachment)),
-    ref: `tool:${result.callId}:model-attachments`,
-  }];
-}
-
-function safeModelAttachmentRef(ref: string): string {
-  return ref.startsWith("local-file:") || ref.startsWith("local-project:")
-    ? "[local-ref-hidden]"
-    : ref;
 }
 
 function truncateToolMessageContent(value: string): string {

@@ -115,11 +115,13 @@ function workflowDisplayFromMessageView<
         hasCurrentConfirmation: segment.timeline.confirmation.current !== undefined,
         hasBodySegments,
       });
+      const forceVisible = activitySegmentForcesVisible(segment);
       // When the turn has definitively settled, override orphaned
       // intermediate phases (executing/noted/preparing) that were never
       // reconciled by a terminal tool/note event.
       const settledOverride =
         input.collapseTimeline &&
+        !forceVisible &&
         !currentDecision.collapsed &&
         currentDecision.reason !== "needs_attention"
           ? { collapsed: true, reason: "turn_settled" as const }
@@ -127,6 +129,7 @@ function workflowDisplayFromMessageView<
       const effectiveDecision = settledOverride ?? currentDecision;
       const previousCollapse = previousCollapseState(input.previous, segment.segmentKey);
       const inheritPreviousCollapse = previousCollapse.collapsed &&
+        !forceVisible &&
         !activitySegmentNeedsAttention(segment, effectiveDecision);
       return {
         kind: "activity",
@@ -138,6 +141,15 @@ function workflowDisplayFromMessageView<
       };
     }),
   };
+}
+
+function activitySegmentForcesVisible<
+  TNode extends ProjectableTranscriptNode,
+  TConfirmation extends ConfirmationIdentity,
+>(
+  segment: Extract<AssistantMessageSegment<TNode, TConfirmation>, { readonly kind: "activity" }>,
+): boolean {
+  return segment.timeline.items.some((item) => item.variant === "context_compaction");
 }
 
 function activitySegmentNeedsAttention<

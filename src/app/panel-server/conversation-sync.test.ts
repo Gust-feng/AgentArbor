@@ -488,6 +488,45 @@ test("syncConversationTurnForJob suppresses pre-tool model output after confirma
   assert.equal(assistant?.content, "");
 });
 
+test("syncConversationTurnForJob suppresses previous model output while context compaction is running", () => {
+  const { conversations, job } = startedConversationJob();
+
+  job.status = "running";
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "running",
+      transcriptEvents: [
+        streamEvent({
+          sequence: 1,
+          type: "model.output.delta",
+          delta: "这段旧输出不应在压缩中继续显示。",
+          detail: {
+            kind: "thinking",
+            preview: "这段旧输出不应在压缩中继续显示。",
+          },
+          modelCallRefs: ["model-before-compaction"],
+        }),
+        streamEvent({
+          sequence: 2,
+          type: "context.compaction.requested",
+          summary: "正在压缩较早上下文…",
+          detail: {
+            kind: "thinking",
+            preview: "正在压缩较早上下文…",
+          },
+        }),
+      ],
+    }),
+  });
+
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "");
+  assert.equal(assistant?.content.includes("旧输出"), false);
+  assert.equal(assistant?.content, "");
+});
+
 test("syncConversationTurnForJob waits for post-tool model output before showing a new answer", () => {
   const { conversations, job } = startedConversationJob();
 

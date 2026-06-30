@@ -15,6 +15,7 @@ import {
 import {
   appStateWithSettledRunProjection,
   loadSettledRunProjection,
+  type SettledRunProjection,
   refreshingFollowUpRun,
 } from "./app-run-observation-settlement";
 import {
@@ -22,6 +23,8 @@ import {
   ordinaryWorkViewFromRunView,
   safeBasicRunView,
 } from "./runtime";
+import { transcriptNodesFrom } from "./app-run-projection";
+import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
 import type { BasicAgentRun, RunEvent } from "./contracts/run";
 
 const FALLBACK_POLL_INTERVAL_MS = 1_200;
@@ -153,6 +156,7 @@ export function createLiveRunUpdateController(
         stopStream(options.streamRef);
         const settled = await loadSettledRunProjection({ runId, run, workView, capabilityResolution });
         if (subscriptionIsCurrent(subscription)) {
+          cacheSettledRunTranscriptNodes(settled);
           options.setApp((previous) =>
             canApplyToState(previous, subscription)
               ? appStateWithSettledConversationGuard(previous, {
@@ -258,6 +262,7 @@ export function createLiveRunUpdateController(
       capabilityResolution: runView.capabilityResolution,
     });
     if (subscriptionIsCurrent(subscription)) {
+      cacheSettledRunTranscriptNodes(settled);
       options.setApp((previous) =>
         canApplyToState(previous, subscription)
           ? appStateWithSettledConversationGuard(previous, {
@@ -306,6 +311,21 @@ export function createLiveRunUpdateController(
       previous.run !== undefined &&
       shouldKeepRefreshing(previous.run.status);
   }
+}
+
+function cacheSettledRunTranscriptNodes(settled: SettledRunProjection): void {
+  const conversationId = settled.conversation?.conversationId ?? settled.run.conversationId;
+  if (conversationId === undefined) {
+    return;
+  }
+  const nodes = transcriptNodesFrom(settled.workView, settled.detail)
+    .filter((node) => node.runId === settled.runId);
+  if (nodes.length === 0) {
+    return;
+  }
+  updateTranscriptNodesCache(conversationId, {
+    [settled.runId]: nodes,
+  });
 }
 
 function scheduleAppendOnlyFlush(flush: () => void): () => void {

@@ -828,6 +828,82 @@ test("Desktop Agent Session uses capability snapshot model capabilities for loop
   assert.equal(channel.requests.some((request) => request.purpose === "desktop_context_compaction"), true);
 });
 
+test("Desktop Agent Session compacts oversized conversation history before the main ordinary request", async () => {
+  const requests: ModelRequest[] = [];
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      requests.push(request);
+      if (request.purpose === "desktop_context_compaction") {
+        return textResponse(request, "Older decisions preserved for continuation.");
+      }
+      return textResponse(request, "已基于压缩后的上下文继续。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("继续处理 8k 小窗口历史", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    conversationHistory: oversizedConversationHistory(),
+    capabilitySnapshot: desktopCapabilitySnapshot([], {
+      activeModel: { defaultAiMode: "fake", model: "gpt-4o" },
+      modelCapabilities: smallWindowModelCapabilities(),
+    }),
+  });
+  const finalRequest = requests.find((request) => request.purpose === "desktop_agent");
+  const finalRequestText = JSON.stringify(finalRequest?.sanitizedMessages ?? []);
+  const compactionEvent = result.runtime.eventLog.list().find((entry) => entry.type === "context.compaction.completed");
+  const compactionPayload = compactionEvent?.message.payload as Record<string, unknown> | undefined;
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(requests.map((request) => request.purpose), ["desktop_context_compaction", "desktop_agent"]);
+  assert.equal(finalRequestText.includes("Earlier conversation summary (model-compacted; use only as background):"), true);
+  assert.equal(finalRequestText.includes("Older decisions preserved for continuation."), true);
+  assert.equal(finalRequestText.includes("OLD_HISTORY_SENTINEL_0_"), false);
+  assert.equal(result.eventTypes.includes("context.compaction.completed"), true);
+  assert.equal(compactionPayload?.scope, "conversation_history");
+  assert.equal(typeof compactionPayload?.tokenCount, "number");
+  assert.equal(typeof compactionPayload?.threshold, "number");
+});
+
+test("Desktop Agent Session keeps running when conversation history compaction fails", async () => {
+  const requests: ModelRequest[] = [];
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      requests.push(request);
+      if (request.purpose === "desktop_context_compaction") {
+        return textResponse(request, "");
+      }
+      return textResponse(request, "压缩失败后仍保守继续。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("继续处理 8k 小窗口历史", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    conversationHistory: oversizedConversationHistory(),
+    capabilitySnapshot: desktopCapabilitySnapshot([], {
+      activeModel: { defaultAiMode: "fake", model: "gpt-4o" },
+      modelCapabilities: smallWindowModelCapabilities(),
+    }),
+  });
+  const compactionEvent = result.runtime.eventLog.list().find((entry) => entry.type === "context.compaction.failed");
+  const compactionPayload = compactionEvent?.message.payload as Record<string, unknown> | undefined;
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer, "压缩失败后仍保守继续。");
+  assert.deepEqual(requests.map((request) => request.purpose), ["desktop_context_compaction", "desktop_agent"]);
+  assert.equal(result.eventTypes.includes("context.compaction.failed"), true);
+  assert.equal(compactionPayload?.scope, "conversation_history");
+  assert.equal(compactionPayload?.nonBlocking, true);
+  assert.equal(String(compactionPayload?.summary).includes("已保守继续"), true);
+});
+
 test("Desktop Agent Session does not let direct model capabilities override a frozen snapshot", async () => {
   let capturedRequest: ModelRequest | undefined;
   const channel: IntelligenceChannel = {
@@ -1878,6 +1954,36 @@ class FailingToolCenter extends FixtureToolCenter {
       durationMs: 0,
     };
   }
+}
+
+function oversizedConversationHistory() {
+  return Array.from({ length: 12 }, (_, index) => {
+    const role = index % 2 === 0 ? "user" as const : "assistant" as const;
+    return {
+      role,
+      content: index < 4 ? oversizedHistoryContent(index) : `recent compact-safe turn ${index}`,
+      ref: `conversation:history:${index}`,
+    };
+  });
+}
+
+function oversizedHistoryContent(index: number): string {
+  return Array.from({ length: 2_500 }, (_, tokenIndex) => `OLD_HISTORY_SENTINEL_${index}_${tokenIndex}`).join(" ");
+}
+
+function smallWindowModelCapabilities(): BasicAgentCapabilitySnapshot["modelCapabilities"] {
+  return {
+    contextWindowTokens: 8_000,
+    maxOutputTokens: 2_000,
+    supportsToolCalling: true,
+    supportsParallelToolCalls: false,
+    supportsStructuredOutputs: false,
+    supportsStreaming: true,
+    supportsVisionInput: false,
+    supportsReasoningEffort: false,
+    preferredApiStyle: "openai_compatible",
+    stability: "unknown",
+  };
 }
 
 function desktopCapabilitySnapshot(

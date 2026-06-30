@@ -76,9 +76,27 @@ export type ToolUseLoopConfirmationDecision = {
   readonly guidance?: string;
 };
 
+export type ToolUseLoopModelResponseTrace = {
+  readonly requestId: string;
+  readonly responseId?: string;
+  readonly status: ModelResponse["status"];
+  readonly text?: string;
+  readonly reasoningSummary?: string;
+  readonly toolCallIds: readonly string[];
+  readonly finishReason?: ModelResponse["finishReason"];
+  readonly completedAt: string;
+};
+
 export type ToolUseLoopResult = {
   readonly finalOutput: ModelResponse;
   readonly toolCalls: readonly ToolCallResult[];
+  readonly modelResponses: readonly ToolUseLoopModelResponseTrace[];
+  /**
+   * Last model-visible conversation state that can continue the same loop.
+   * It includes completed assistant tool-call messages and tool result messages,
+   * but does not append failed provider responses.
+   */
+  readonly contextMessages?: readonly ModelMessage[];
   readonly modelRounds: number;
   readonly rounds: number;
   readonly stoppedReason:

@@ -41,6 +41,7 @@ export function ChatActive(props: ChatInputProps & {
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly detail?: DesktopRunDetail;
   readonly live?: LiveRunBuffer;
+  readonly showModelUsage: boolean;
   readonly error?: string;
   readonly pendingConfirmation?: PendingConfirmation | NonNullable<DesktopWorkView["pendingConfirmation"]>;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
@@ -251,6 +252,7 @@ export function ChatActive(props: ChatInputProps & {
                   live={props.live}
                   workView={props.workView}
                   pending={view.pending}
+                  showModelUsage={props.showModelUsage}
                   standaloneRun={view.workline.standaloneRun !== true
                     ? undefined
                     : {

@@ -16,6 +16,10 @@ import {
   parseToolArguments,
 } from "./provider-value-utils.js";
 import { modelUsageWithTiming, openAIResponsesUsageFromRecord } from "./model-usage-metrics.js";
+import {
+  openAIResponsesOutputItems,
+  openAIResponsesProtocolExtensions,
+} from "./openai-responses-continuation.js";
 
 export function normalizeOpenAIResponsesResponse(input: {
   request: ModelRequest;
@@ -29,6 +33,7 @@ export function normalizeOpenAIResponsesResponse(input: {
   const raw = asRecord(input.raw);
   const output = Array.isArray(raw.output) ? raw.output : [];
   const { textOutput, toolCalls, reasoningContent } = parseOutputItems(output);
+  const continuationOutputItems = openAIResponsesOutputItems(output);
   const parsedOutput = parseStructuredOutput(textOutput);
   const responseId = typeof raw.id === "string" ? raw.id : createId("model-response");
   const finishReason = finishReasonFromStatus(raw.status, toolCalls);
@@ -60,7 +65,12 @@ export function normalizeOpenAIResponsesResponse(input: {
       source: "openai_responses_reasoning_summary",
       content: reasoningContent,
     }),
-    assistantMessage: assistantMessageFromOutput({ textOutput, toolCalls, responseId }),
+    assistantMessage: assistantMessageFromOutput({
+      textOutput,
+      toolCalls,
+      responseId,
+      outputItems: continuationOutputItems,
+    }),
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
     usage: modelUsageWithTiming({
       usage: openAIResponsesUsageFromRecord(raw.usage),
@@ -91,6 +101,8 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
   let reasoningDeltaIndex = 0;
   const visibleOutputStream = createVisibleOutputStreamProjector(input.request.outputContract);
   const toolCallBuilders = new Map<number, { callId?: string; name?: string; arguments: string }>();
+  const completedOutputItems = new Map<number, unknown>();
+  let responseOutputItems: readonly unknown[] | undefined;
   let firstOutputTokenAtMs: number | undefined;
   let usage: ReturnType<typeof openAIResponsesUsageFromRecord> | undefined;
 
@@ -175,8 +187,9 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
 
       if (eventType === "response.output_item.done") {
         const item = asRecord(event.item);
+        const outputIndex = typeof event.output_index === "number" ? event.output_index : completedOutputItems.size;
+        completedOutputItems.set(outputIndex, item);
         if (item.type === "function_call") {
-          const outputIndex = typeof event.output_index === "number" ? event.output_index : toolCallBuilders.size;
           const builder = toolCallBuilders.get(outputIndex) ?? { arguments: "" };
           toolCallBuilders.set(outputIndex, {
             callId: typeof item.call_id === "string" ? item.call_id : builder.callId,
@@ -200,8 +213,10 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
         if (typeof response.model === "string") {
           model = response.model;
         }
+        const output = Array.isArray(response.output) ? response.output : [];
+        responseOutputItems = openAIResponsesOutputItems(output);
         if (reasoningContent.length === 0) {
-          const parsed = parseOutputItems(Array.isArray(response.output) ? response.output : []);
+          const parsed = parseOutputItems(output);
           reasoningContent = parsed.reasoningContent;
         }
         continue;
@@ -255,6 +270,10 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       ];
     });
   const parsedOutput = parseStructuredOutput(textContent);
+  const continuationOutputItems =
+    responseOutputItems ?? openAIResponsesOutputItems([...completedOutputItems.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, item]) => item));
   const finalFinishReason = toolCalls.length > 0 ? "tool_call" : finishReasonFromStatus(responseStatus, toolCalls);
   const incompleteResponse = failedResponseForIncompleteResponsesFinish({
     request: input.request,
@@ -284,7 +303,12 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       source: "openai_responses_reasoning_summary",
       content: reasoningContent,
     }),
-    assistantMessage: assistantMessageFromOutput({ textOutput: textContent, toolCalls, responseId }),
+    assistantMessage: assistantMessageFromOutput({
+      textOutput: textContent,
+      toolCalls,
+      responseId,
+      outputItems: continuationOutputItems,
+    }),
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
     usage: modelUsageWithTiming({
       usage,
@@ -399,6 +423,7 @@ function assistantMessageFromOutput(input: {
   textOutput: string;
   toolCalls: readonly ToolCallRequest[];
   responseId: string;
+  outputItems?: readonly unknown[];
 }): ModelMessage | undefined {
   if (input.toolCalls.length === 0) {
     return undefined;
@@ -407,7 +432,10 @@ function assistantMessageFromOutput(input: {
     role: "assistant",
     content: input.textOutput,
     toolCalls: input.toolCalls,
-    protocolExtensions: { response_id: input.responseId },
+    protocolExtensions: openAIResponsesProtocolExtensions({
+      responseId: input.responseId,
+      outputItems: input.outputItems,
+    }),
   };
 }
 

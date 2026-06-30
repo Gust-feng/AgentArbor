@@ -17,6 +17,8 @@ import { createPersistedPanelRunResponse } from "./persisted-run-response.js";
 import { createPanelUsageStatistics } from "../panel-usage-statistics.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
 import { parseRunInput } from "./request-parsers.js";
+import { projectRunEnvelopeViewBase } from "../run-read-model-envelope.js";
+import { projectSharedRunSummaryBase } from "../run-read-model-summary.js";
 import {
   createPanelRunResponse,
   createConfigurationFailedAiSummary,
@@ -30,6 +32,13 @@ import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
+
+export type RuntimeRunSummaryView = ReturnType<typeof projectRuntimeRunSummary>;
+
+export type RuntimeRunListResponse = {
+  readonly ok: true;
+  readonly runs: readonly RuntimeRunSummaryView[];
+};
 
 export async function handlePanelRunRoute(
   runtime: PanelRuntime,
@@ -74,10 +83,13 @@ export async function handlePanelRunRoute(
 
   if (request.method === "GET" && url.pathname === "/api/runtime/runs") {
     const limit = Number(url.searchParams.get("limit") ?? 50);
+    const runs = ((await runtime.runtimeDatabase?.listRuns(Number.isFinite(limit) ? limit : 50)) ?? []).map((run) =>
+      projectRuntimeRunSummary(run)
+    );
     writeJson(response, 200, {
       ok: true,
-      runs: (await runtime.runtimeDatabase?.listRuns(Number.isFinite(limit) ? limit : 50)) ?? [],
-    });
+      runs,
+    } satisfies RuntimeRunListResponse);
     return true;
   }
 
@@ -206,6 +218,40 @@ function requirePanelRunJob(runtime: PanelRuntime, runId: string): PanelRunJob {
     throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
   }
   return job;
+}
+
+function projectRuntimeRunSummary(run: RuntimeRunSnapshot["run"]): {
+  readonly runId: string;
+  readonly status: RuntimeRunSnapshot["run"]["status"];
+  readonly runKind: RuntimeRunSnapshot["run"]["runKind"];
+  readonly runMode: RuntimeRunSnapshot["run"]["runMode"];
+  readonly startedAt: string;
+  readonly updatedAt: string;
+  readonly goalSummary: string;
+  readonly completedAt?: string;
+  readonly resultTitle?: string;
+  readonly resultSummary?: string;
+  readonly conversationId?: string;
+  readonly workspacePath?: string;
+} {
+  return {
+    ...projectSharedRunSummaryBase({
+      ...projectRunEnvelopeViewBase({
+        runId: run.runId,
+        status: run.status,
+        runKind: run.runKind,
+        runMode: run.runMode,
+      }),
+      startedAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    }),
+    goalSummary: run.goalSummary,
+    completedAt: run.completedAt,
+    resultTitle: run.resultTitle,
+    resultSummary: run.resultSummary,
+    conversationId: run.conversationId,
+    workspacePath: run.workspacePath,
+  };
 }
 
 async function handleGetRunRequest(

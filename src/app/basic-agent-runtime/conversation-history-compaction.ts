@@ -42,13 +42,23 @@ export async function compactBasicAgentConversationIfNeeded(
   const inputTokenBudget = inputTokenBudgetFor(input.modelCapabilities);
   const threshold = Math.max(1_000, Math.floor(inputTokenBudget * clampRatio(input.thresholdRatio ?? DEFAULT_THRESHOLD_RATIO)));
   if (historyTokens < threshold) {
-    return { conversationHistory: input.conversationHistory, compacted: false };
+    return {
+      conversationHistory: input.conversationHistory,
+      compacted: false,
+      tokenCount: historyTokens,
+      threshold,
+    };
   }
 
   const earlier = safeHistory.slice(0, Math.max(0, safeHistory.length - recentMessageCount));
   const recent = safeHistory.slice(Math.max(0, safeHistory.length - recentMessageCount));
   if (earlier.length === 0) {
-    return { conversationHistory: recent.map((entry) => entry.message), compacted: false };
+    return {
+      conversationHistory: recent.map((entry) => entry.message),
+      compacted: false,
+      tokenCount: historyTokens,
+      threshold,
+    };
   }
 
   const requestId = createId("model-request");
@@ -76,6 +86,8 @@ export async function compactBasicAgentConversationIfNeeded(
     return {
       conversationHistory: input.conversationHistory,
       compacted: false,
+      tokenCount: historyTokens,
+      threshold,
       failed: {
         message: response.failure?.message ?? "Conversation compaction model call failed.",
         requestId,
@@ -95,6 +107,8 @@ export async function compactBasicAgentConversationIfNeeded(
     return {
       conversationHistory: input.conversationHistory,
       compacted: false,
+      tokenCount: historyTokens,
+      threshold,
       failed: {
         message: "Conversation compaction returned an empty summary.",
         requestId,
@@ -113,6 +127,8 @@ export async function compactBasicAgentConversationIfNeeded(
       modelResponseId: response.responseId,
     },
     compacted: true,
+    tokenCount: historyTokens,
+    threshold,
   };
 }
 

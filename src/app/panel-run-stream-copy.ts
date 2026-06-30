@@ -2,7 +2,7 @@ import type { ArborMessageType } from "../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import { modelVisibleOutputOrUndefined } from "./panel-transcript-model-calls.js";
-import { asRecord, isString, stringOrUndefined } from "./panel-read-model-utils.js";
+import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
 import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
 import { cleanConfirmationSummary, confirmationActionSummaryText } from "./confirmation-copy.js";
@@ -67,6 +67,10 @@ export function modelRequestedSummary(payload: Readonly<Record<string, unknown>>
   return projectedModelRequestedSummary(payload);
 }
 
+export function isContextCompactionPurpose(value: string | undefined): boolean {
+  return value?.trim() === "desktop_context_compaction";
+}
+
 export function modelCompletedSummary(payload: Readonly<Record<string, unknown>>): string {
   const validation = stringOrUndefined(payload.validationStatus) ?? "unknown";
   return validation === "passed" ? "内容已整理。" : `内容已整理，校验 ${validation}。`;
@@ -108,9 +112,20 @@ export function contextCompactionStreamSummary(
   type: "context.compaction.completed" | "context.compaction.failed",
   payload: Readonly<Record<string, unknown>>
 ): string {
-  return type === "context.compaction.completed"
-    ? "较早上下文已整理。"
-    : "较早上下文暂未整理。";
+  const coveredRefCount = numberOrUndefined(payload.coveredRefCount);
+  const error = stringOrUndefined(payload.error)?.trim();
+  if (type === "context.compaction.completed") {
+    if (coveredRefCount !== undefined && coveredRefCount > 0) {
+      return `已整理 ${coveredRefCount} 条较早上下文，后续继续当前任务。`;
+    }
+    return "较早上下文已整理，后续继续当前任务。";
+  }
+  const failedPrefix = payload.nonBlocking === true
+    ? "上下文整理失败，已保守继续。"
+    : "上下文整理失败，任务已暂停。";
+  return error === undefined || error.length === 0
+    ? failedPrefix
+    : `${failedPrefix}${error}`;
 }
 
 export function contextCompactionPreview(payload: Readonly<Record<string, unknown>>): string | undefined {
@@ -176,6 +191,9 @@ export function agentNoteForEvent(
 export function visibleOutputText(value: unknown): string {
   const output = modelVisibleOutputOrUndefined(value);
   if (output === undefined) {
+    return "";
+  }
+  if (output.contractId === "desktop.context_compaction.v1") {
     return "";
   }
   const primaryParts: string[] = [];

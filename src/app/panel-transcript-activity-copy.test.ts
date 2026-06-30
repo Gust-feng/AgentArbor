@@ -234,8 +234,8 @@ test("tool activity copy keeps aggregated file details expandable", () => {
   });
 });
 
-test("tool activity copy prefers summary while keeping multi-item details expandable", () => {
-  const copy = activityLineForNode(node({
+test("generic directory activity collapses into one structured entries section", () => {
+  const items = displayActivityItemsForNodes([node({
     kind: "tool",
     eventType: "tool.completed",
     phase: "completed",
@@ -243,16 +243,22 @@ test("tool activity copy prefers summary while keeping multi-item details expand
     display: {
       kind: "generic_tool_summary",
       action: "浏览目录",
-      summary: ". · 30 entries",
-      items: ["file README.md", "file package.json", "[truncated]"],
+      summary: ". · 29 entries · depth 1",
+      items: [
+        ". · 29 entries · depth 1",
+        "-57cdf8cd11eed6fe.jpg depth=1",
+        "1758895603614.png depth=1",
+        "[truncated]",
+      ],
     },
-  }));
+  })]);
 
-  assert.deepEqual(copy, {
-    label: "查看",
-    detail: "当前目录 · 30 entries",
-    expandedDetail: "README.md\npackage.json\n[truncated]",
-  });
+  assert.equal(items[0]?.copy.label, "查看");
+  assert.equal(items[0]?.copy.detail, "当前目录 · 29 项 · 深度 1");
+  assert.equal(items[0]?.copy.expandedDetail, undefined);
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目"]);
+  assert.equal(items[0]?.expandedSections?.[0]?.content, "-57cdf8cd11eed6fe.jpg\n1758895603614.png");
+  assert.equal(items[0]?.expandedSections?.some((section) => section.title === "摘要" || section.title === "详情"), false);
 });
 
 test("generic article tool results collapse into source and excerpt sections", () => {
@@ -326,6 +332,44 @@ test("directory listing activity uses total counts and structured sections", () 
   assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目", "异常目录"]);
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "摘要" || section.title === "详情"), false);
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "目录"), false);
+});
+
+test("completed directory activity does not expand into request/result boilerplate when empty", () => {
+  const items = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.requested",
+      phase: "executing",
+      toolName: "list_dir",
+      display: {
+        kind: "directory_listing",
+        path: ".",
+        depth: 1,
+        entries: [],
+        totalEntries: 0,
+      },
+      refs: [{ kind: "tool_call", id: "tool-list-empty" }],
+    }),
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "list_dir",
+      display: {
+        kind: "directory_listing",
+        path: ".",
+        depth: 1,
+        entries: [],
+        totalEntries: 0,
+      },
+      refs: [{ kind: "tool_call", id: "tool-list-empty" }],
+    }),
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.copy.detail, "当前目录 · 0 项 · 深度 1");
+  assert.equal(items[0]?.copy.expandedDetail, undefined);
+  assert.equal(items[0]?.expandedSections, undefined);
 });
 
 test("file search activity keeps query, matches, and skipped details structured", () => {
@@ -846,6 +890,42 @@ test("display activity items preserve requested detail and terminal preview for 
   assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["差异预览"]);
   assert.equal(items[0]?.expandedSections?.[0]?.format, "diff");
   assert.equal(items[0]?.badges, undefined);
+});
+
+test("display activity items keep requested file diff when completion has no preview", () => {
+  const items = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.requested",
+      phase: "executing",
+      toolName: "edit_file",
+      display: {
+        kind: "file_diff_preview",
+        path: "src/app.ts",
+        preview: "@@ line 2\n- old\n+ new",
+      },
+      refs: [{ kind: "tool_call", id: "tool-edit-request-preview" }],
+    }),
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "edit_file",
+      display: {
+        kind: "file_diff_preview",
+        path: "src/app.ts",
+        replacements: 1,
+      },
+      refs: [{ kind: "tool_call", id: "tool-edit-request-preview" }],
+    }),
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.copy.detail, "src/app.ts");
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["差异预览"]);
+  assert.equal(items[0]?.expandedSections?.[0]?.format, "diff");
+  assert.equal(items[0]?.expandedSections?.[0]?.content.includes("- old"), true);
+  assert.equal(items[0]?.expandedSections?.[0]?.content.includes("+ new"), true);
 });
 
 test("file creation activity shows new content as a file change diff", () => {

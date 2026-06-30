@@ -28,6 +28,7 @@ import {
   selectedComposerModel,
   type AssistantModelBadge,
 } from "./chat-session-projection";
+import { AssistantMessageLabel } from "./assistant-message-label";
 import {
   AgentWorkTimeline,
   type ConfirmationProjection,
@@ -39,6 +40,7 @@ export function TranscriptChain(props: {
   readonly items: readonly ConversationDisplayItem<ConversationTurn, TranscriptNode, ConfirmationProjection>[];
   readonly models: readonly ChatModelOption[];
   readonly selectedModelId: string;
+  readonly showModelUsage: boolean;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
   readonly hiddenEarlierTurnCount?: number;
@@ -85,6 +87,7 @@ export function TranscriptChain(props: {
               failure={item.failure}
               model={model}
               workflow={item.workflow}
+              showModelUsage={props.showModelUsage}
             />
           )
           : (
@@ -94,6 +97,7 @@ export function TranscriptChain(props: {
               animateOnMount={item.animateOnMount}
               model={model}
               workflow={item.workflow}
+              showModelUsage={props.showModelUsage}
               onDecision={stableOnDecision}
               confirmationBusy={item.hasPendingConfirmation && props.confirmationBusy}
             />
@@ -209,6 +213,7 @@ type AssistantMessageProps = {
   readonly animateOnMount?: boolean;
   readonly model?: AssistantModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
+  readonly showModelUsage: boolean;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy?: boolean;
 };
@@ -240,7 +245,7 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
             />
           );
         })}
-        <AssistantResponseMeta workflow={workflow} />
+        <AssistantResponseMeta workflow={workflow} showModelUsage={props.showModelUsage} />
       </div>
     </article>
   );
@@ -258,6 +263,7 @@ type AssistantFailureMessageProps = {
   readonly failure: AssistantFailureParts;
   readonly model?: AssistantModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
+  readonly showModelUsage: boolean;
 };
 
 const AssistantFailureMessage = React.memo(function AssistantFailureMessage(props: AssistantFailureMessageProps): React.ReactElement {
@@ -284,7 +290,7 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
             showActions={true}
           />
         )}
-        {workflow !== undefined && <AssistantResponseMeta workflow={workflow} />}
+        {workflow !== undefined && <AssistantResponseMeta workflow={workflow} showModelUsage={props.showModelUsage} />}
         <AssistantFailureNotice error={props.failure.error} />
         {activitySegments.length > 0 && (
           <div className="assistant-failure-activity">
@@ -371,9 +377,10 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
 
 const AssistantResponseMeta = React.memo(function AssistantResponseMeta(props: {
   readonly workflow: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
+  readonly showModelUsage: boolean;
 }): React.ReactElement | null {
   const showActions = props.workflow.copyText.trim().length > 0 && props.workflow.showCopyActions;
-  const usage = workflowModelUsage(props.workflow);
+  const usage = props.showModelUsage ? workflowModelUsage(props.workflow) : undefined;
   if (!showActions && usage === undefined) {
     return null;
   }
@@ -442,18 +449,6 @@ function AssistantFailureNotice(props: {
   );
 }
 
-function AssistantMessageLabel({ model }: { readonly model?: AssistantModelBadge }): React.ReactElement {
-  const modelLabel = assistantModelLabel(model);
-  return (
-    <div className="assistant-message-label">
-      {model?.iconSvg !== undefined && (
-        <span className="assistant-message-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: model.iconSvg }} />
-      )}
-      {modelLabel !== undefined && <span className="assistant-message-model">{modelLabel}</span>}
-    </div>
-  );
-}
-
 export function TypingDots(): React.ReactElement {
   return <MemoTypingDots />;
 }
@@ -470,6 +465,7 @@ const MemoTypingDots = React.memo(function TypingDotsContent(): React.ReactEleme
 
 function assistantMessagePropsEqual(left: AssistantMessageProps, right: AssistantMessageProps): boolean {
   return left.workflow === right.workflow &&
+    left.showModelUsage === right.showModelUsage &&
     left.live === right.live &&
     left.animateOnMount === right.animateOnMount &&
     assistantModelBadgesEqual(left.model, right.model) &&
@@ -480,6 +476,7 @@ function assistantMessagePropsEqual(left: AssistantMessageProps, right: Assistan
 function assistantFailureMessagePropsEqual(left: AssistantFailureMessageProps, right: AssistantFailureMessageProps): boolean {
   return left.failure.previous === right.failure.previous &&
     left.failure.error === right.failure.error &&
+    left.showModelUsage === right.showModelUsage &&
     assistantModelBadgesEqual(left.model, right.model) &&
     left.workflow === right.workflow;
 }
@@ -531,12 +528,6 @@ function byteSizeLabel(value: number | undefined): string | undefined {
     return `${Math.round(value / 1024)} KB`;
   }
   return `${value} bytes`;
-}
-
-function assistantModelLabel(model: AssistantModelBadge | undefined): string | undefined {
-  if (model === undefined) return undefined;
-  const name = model.modelName.trim();
-  return name.length > 0 ? name : undefined;
 }
 
 function workflowModelUsage(

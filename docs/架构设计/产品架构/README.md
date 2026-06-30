@@ -21,6 +21,7 @@
 ## 当前决策
 
 - [ADR-0024-桌面基础Agent与基础设施优先路线.md](ADR-0024-桌面基础Agent与基础设施优先路线.md)：当前活跃实现路线，规定默认先建设桌面基础 Agent、工具系统、安全确认、事件重放、RuntimeDatabase、Skills 最小闭环和工作台信息架构；ADR-0022 保留长期愿景。基础 Agent 路线稳定后已阶段演进重启 deep（不废弃本 ADR，普通 Agent 默认主线地位不变）。
+- [ADR-0026-子Agent工具能力架构.md](ADR-0026-子Agent工具能力架构.md)：子 Agent 工具能力架构决策（Accepted）。将子 Agent 实现为普通 Agent 的工具能力而非独立编排流程，三个工具（`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`）注册到 `desktop-basic` scope；定义格式复用 Skill 模式（Markdown + YAML frontmatter），`builtin / user / project` 三级发现，stub + 动态注册运行时集成，强制一层约束（不可递归派生），复用 `IntelligenceChannel` / `ToolExecutionBroker` / `ToolCenter` / 确认机制；与 ADR-0025 deep 编排互补不冲突。
 - [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)：deep 一期架构决策（Accepted）。在 ADR-0024 基础上重启 deep 为显式并行入口，采用 manager 自由决策循环、强制一层 child（`depth=1`）、非 Plan 交接（产物为 `SynthesizedConclusion` / `DeepExplorationReport`）；新建 DeepRuntime 边界不转正旧文件，复用共享设施；承接 ADR-0021 的本期 deep 实现决策。
 - [ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)：当前产品架构事实源，定义 `Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil`。
 - [ADR-0018-AgentArbor原生概念树架构.md](ADR-0018-AgentArbor原生概念树架构.md)：历史概念树架构，已被 ADR-0022 部分取代；保留植物学职责边界和术语来源。

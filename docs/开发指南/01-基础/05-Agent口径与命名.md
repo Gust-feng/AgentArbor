@@ -43,6 +43,7 @@ deep 重启时必须复用共享基础设施，不能另起平行运行时。它
 | 多 child/rootlet 探索并由父层综合 | `Underground` / `deep` / `Agent cluster` | 普通会话内部隐式触发 |
 | 可持久化、可验证、可恢复的方向交接对象 | `Plan` / `Plan Package` | 普通回答或临时摘要叫 Plan |
 | 纯函数、helper、adapter 或 formatter | `helper` / `service` / `adapter` | `agent` |
+| 普通会话中模型自主调用的专家助手 | `sub-agent` / `子 Agent` / `call_sub_agent` | `child` / `rootlet` / `deep child`（这些是 deep 编排术语） |
 
 `atomic` 只能用于真正具有事务边界的场景：全部校验通过才写入、失败不落盘、或有明确回滚/一致性保证。用户可见工具说明和普通文档应优先使用“编辑”“补丁”“变更集”等直白词。
 
@@ -53,6 +54,7 @@ deep 重启时必须复用共享基础设施，不能另起平行运行时。它
 - 历史 `work_session` 请求别名不能再被接口层映射为 deep；旧读模型或兼容路径只能服务历史数据和诊断，不能成为新入口。
 - 普通路径不展示 fake Plan、fake report、fake artifact、未出生的 Routines、团队 agent 或 deep 占位入口。
 - 新增概念前必须说明它承担的独立职责、输入输出、失败方式、测试边界和可观察投影；否则使用朴素名称。
+- 子 Agent（sub-agent）是普通 Agent 的工具能力，不是独立编排流程；它通过 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 工具被模型自主调用，不维护独立任务生命周期、不派生 Plan、不走 `/api/deep/*` 入口；子 Agent 不能递归派生，只有顶层 Agent 拥有 `spawn_sub_agent`。子 Agent 与 deep child/rootlet 是不同概念：deep child 由 DeepRuntime 编排，走 manager 自由决策循环和 DeepTaskBoard；子 Agent 由普通 Agent 的 ToolCenter 执行，走标准工具调用路径（见 ADR-0026）。
 - 工程边界可以保护权限、预算、审计、验证和命令确认，但不能替 agent 判断目标、工具选择、候选取舍或是否继续探索；普通模型正文、工具结果、错误信息、文件内容、stdout/stderr 和开发上下文不得被脱敏或安全投影吞掉。
 
 这条口径的目标是同时避免两种错误：一是为了当前简单实现删除未来 deep / agent 集群方向；二是在默认普通 Agent 中提前使用超出实际职责的重命名、伪协议和伪复杂流程。

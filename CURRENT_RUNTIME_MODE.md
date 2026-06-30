@@ -92,6 +92,7 @@
 - skill `evals/` 只作为 loader/doctor 的本地质量评估 artifact 被发现、索引和统计；它不是运行时资源，不进入 frozen runtime resource index，不进入 Context Ledger / Context Pack，也不能通过 `read_skill_resource` 读取。当前 doctor 默认做确定性 JSON 结构、case 数、routing 断言、quality/regression 的 `qualityBaseline` with/without skill 记录和字面量质量检查；显式传入模型通道时可通过 `skill_routing` 跑 routing eval，但仍不自动生成 with/without 输出、不调用 LLM judge、不评估运行时真实回答质量
 - skill `allowed-tools` 当前只作为冻结和审计声明处理：不能扩张工具，不能隐藏普通 `agent` 原本可见的工具，也不是 Claude Code 风格免确认授权；未来若做 skill 级免确认授权，必须新增 per-tool grant 契约
 - MCP 当前进入配置目录、能力快照的 `mcpCatalog`、能力草案投影和普通 `agent` 默认工具边界；只有已启用、已连接、已进入本轮冻结快照且通过 `AgentDefinition.toolVisibilityProfile` 的 MCP 工具，才会作为模型可见工具和可执行工具进入本轮运行
+- 子 Agent 工具（`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`）注册到 `desktop-basic` scope，进入能力快照的 `subAgentCatalog` 和普通 `agent` 默认工具边界；模型在普通会话中可自主调用内置专家（code-expert / doc-expert / research-expert / review-expert / test-expert）或通过 `spawn_sub_agent` 动态派生自定义子 Agent；子 Agent 工具在 capability snapshot 阶段注册 stub 定义（让模型可见），在 `prepareDesktopAgentLoop` 阶段动态注册真实 executor（注入 IntelligenceChannel、ToolExecutionBroker 和 eventLog）；子 Agent 不能递归派生，只有顶层 Agent 拥有 `spawn_sub_agent`；子 Agent 输出是局部材料，由父层模型决定如何使用（见 ADR-0026）
 - 工程决定哪些工具可以执行、哪些需要命令确认、哪些被隐藏
 - `AgentTurnRuntime / tool-use-loop` 在调用工具执行器前必须强制校验本轮 `allowedTools`；`ToolCenter` 和具体 adapter 仍可重复校验，但不能成为唯一防线
 - 模型只能在本轮可见工具集合内自主选择

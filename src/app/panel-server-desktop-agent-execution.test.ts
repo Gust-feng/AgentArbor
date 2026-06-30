@@ -903,6 +903,7 @@ function capabilitySnapshot(input: {
       allowedTools: tools.map((tool) => tool.name),
     },
     skillCatalog: input.skillCatalog ?? [],
+    subAgentCatalog: [],
     skillTrigger: input.skillTrigger,
     mcpCatalog: [],
     workspace: {

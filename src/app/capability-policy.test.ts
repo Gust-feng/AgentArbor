@@ -452,6 +452,7 @@ function capabilitySnapshot(
       allowedTools: tools.filter((item) => item.enabled && item.availability === "available").map((item) => item.name),
     },
     skillCatalog: overrides.skillCatalog ?? [],
+    subAgentCatalog: [],
     mcpCatalog: [
       {
         serverId: "docs",

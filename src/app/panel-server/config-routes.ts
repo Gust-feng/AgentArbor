@@ -468,6 +468,27 @@ export async function handlePanelConfigRoute(
     return true;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/config/sub-agents") {
+    const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      subAgents: capabilitySnapshot.subAgentCatalog,
+    });
+    return true;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/sub-agents/refresh") {
+    invalidateCapabilityCache(runtime);
+    const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      subAgents: capabilitySnapshot.subAgentCatalog,
+    });
+    return true;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/config/mcp/presets") {
     writeJson(response, 200, {
       ok: true,

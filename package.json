@@ -6,8 +6,9 @@
   "description": "AgentArbor deterministic minimal runtime kernel.",
   "scripts": {
     "clean:dist": "node scripts/clean-dist.mjs",
-    "build": "pnpm clean:dist && pnpm build:node && pnpm typecheck:panel && pnpm build:panel",
+    "build": "pnpm clean:dist && pnpm build:node && pnpm copy:sub-agents && pnpm typecheck:panel && pnpm build:panel",
     "build:node": "tsc -p tsconfig.json",
+    "copy:sub-agents": "node scripts/copy-sub-agent-assets.mjs",
     "typecheck:panel": "tsc -p tsconfig.panel.json --noEmit",
     "build:panel": "vite build --config vite.panel.config.ts",
     "test": "pnpm build && node --test \"dist/**/*.test.js\"",

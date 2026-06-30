@@ -164,6 +164,45 @@ test("ToolCenter keeps shell_command behind confirmation until the same confirma
   assert.equal(result.projection?.uiSummary, "safe command summary");
 });
 
+test("ToolCenter can accept a tool executor supplied approval_required result", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("delegating_tool", async (_input, context) => ({
+    kind: "tool_call_result",
+    result: {
+      callId: context.toolCallId ?? "missing-call-id",
+      toolName: "delegating_tool",
+      input: { original: true },
+      output: { delegated: true },
+      status: "approval_required",
+      error: "Delegated tool requires approval.",
+      durationMs: 12,
+      confirmationRequest: {
+        confirmationId: "confirmation-inner-call",
+        runId: "inner-call",
+        title: "内部工具确认",
+        actionSummary: "内部工具需要确认",
+        affectedResources: ["inner-resource"],
+        riskLevel: "high",
+        requestedAt: "2026-06-30T00:00:00.000Z",
+        sourceRefs: ["tool:inner-call"],
+      },
+    },
+  })));
+
+  const result = await center.execute(
+    { callId: "call-parent", toolName: "delegating_tool", input: { task: "delegate" } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("delegating_tool")
+  );
+
+  assert.equal(result.status, "approval_required");
+  assert.equal(result.callId, "call-parent");
+  assert.deepEqual(result.input, { task: "delegate" });
+  assert.equal(result.confirmationRequest?.confirmationId, "confirmation-inner-call");
+  assert.deepEqual(result.confirmationRequest?.affectedResources, ["inner-resource"]);
+  assert.equal(center.getCallCount(), 0);
+});
+
 test("ToolCenter lets full access mode execute confirmation-gated shell commands", async () => {
   let executes = 0;
   const center = new ToolCenter({ platform: "win32" });

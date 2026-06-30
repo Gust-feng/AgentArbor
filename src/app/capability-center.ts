@@ -11,10 +11,12 @@ import type {
   CapabilitySkillResourceIndexItem,
   CapabilityMcpCatalogItem,
   CapabilityToolCatalogItem,
+  CapabilitySubAgentCatalogItem,
   McpServerSettings,
   SanitizedModelProviderConfig,
 } from "../domain/config/index.js";
 import type { SkillDefinition } from "../domain/basic-agent/index.js";
+import type { SubAgentDefinition, SubAgentRootInput } from "./sub-agents/sub-agent-loader.js";
 import { createId, nowIso } from "../kernel/id.js";
 import { LazyMcpToolExecutorProvider } from "../adapters/mcp/index.js";
 import type { ConfigCenter } from "./config-center.js";
@@ -27,6 +29,8 @@ import { normalizeWorkspaceDirectory } from "./config-center/workspace-settings.
 import type { ToolCatalogItem } from "./basic-agent-runtime/tool-registry.js";
 import { discoverSkills, normalizeSkillRoots, parseSkillMarkdown, type SkillRootInput } from "./skills/skill-loader.js";
 import type { SkillStateStore } from "./skills/skill-state-store.js";
+import { discoverSubAgents, normalizeSubAgentRoots, type SubAgentDiscoveryOptions } from "./sub-agents/sub-agent-loader.js";
+import { SubAgentRegistry } from "./sub-agents/sub-agent-registry.js";
 
 export type CapabilitySkillRootsInput = {
   readonly workspaceDirectory?: string;
@@ -37,6 +41,7 @@ export type CapabilityCenterOptions = {
   readonly skillRoots: readonly SkillRootInput[];
   readonly resolveSkillRoots?: (input: CapabilitySkillRootsInput) => readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
+  readonly subAgentRoots?: readonly SubAgentRootInput[];
   readonly fetch?: ToolRegistryFetchLike;
   readonly playwrightAvailable?: boolean;
 };
@@ -47,12 +52,14 @@ export type CapabilityCenterSnapshotInput = {
 
 export class CapabilityCenter {
   private skillsPromises = new Map<string, Promise<readonly SkillDefinition[]>>();
+  private subAgentsPromise?: Promise<readonly SubAgentDefinition[]>;
   private snapshotPromise?: Promise<BasicAgentCapabilitySnapshot>;
 
   constructor(private readonly options: CapabilityCenterOptions) {}
 
   invalidate(): void {
     this.skillsPromises.clear();
+    this.subAgentsPromise = undefined;
     this.snapshotPromise = undefined;
   }
 
@@ -78,6 +85,27 @@ export class CapabilityCenter {
       this.skillsPromises.set(cacheKey, cached);
     }
     return this.skillsPromises.get(cacheKey)!;
+  }
+
+  async listSubAgents(): Promise<readonly SubAgentDefinition[]> {
+    if (this.subAgentsPromise !== undefined) {
+      return this.subAgentsPromise;
+    }
+    if (this.options.subAgentRoots === undefined || this.options.subAgentRoots.length === 0) {
+      this.subAgentsPromise = Promise.resolve([]);
+      return this.subAgentsPromise;
+    }
+    const current = discoverSubAgents({
+      roots: this.options.subAgentRoots,
+    });
+    const cached = current.catch((error) => {
+      if (this.subAgentsPromise === cached) {
+        this.subAgentsPromise = undefined;
+      }
+      throw error;
+    });
+    this.subAgentsPromise = cached;
+    return this.subAgentsPromise;
   }
 
   async snapshot(input: CapabilityCenterSnapshotInput = {}): Promise<BasicAgentCapabilitySnapshot> {
@@ -115,7 +143,10 @@ export class CapabilityCenter {
           workspaceDirectory: await normalizeWorkspaceDirectory(input.workspaceDirectory),
           updatedAt: nowIso(),
     };
-    const skills = await this.listSkills({ workspaceDirectory: workspace.workspaceDirectory });
+    const [skills, subAgents] = await Promise.all([
+      this.listSkills({ workspaceDirectory: workspace.workspaceDirectory }),
+      this.listSubAgents(),
+    ]);
     const connectableMcpServers = mcpServers.filter(isMcpServerConnectable);
     const cachedMcpServers = connectableMcpServers.filter(hasUsableMcpToolCache);
     const mcpToolProvider = cachedMcpServers.length === 0
@@ -128,6 +159,9 @@ export class CapabilityCenter {
           }),
         });
     const modelCapabilities = resolveModelCapabilities({ profile: activeModel, overrides });
+    const subAgentRegistry = this.options.subAgentRoots
+      ? new SubAgentRegistry({ roots: this.options.subAgentRoots })
+      : undefined;
     const registry = createDesktopBasicToolRegistry({
       env,
       fetch: this.options.fetch,
@@ -138,6 +172,7 @@ export class CapabilityCenter {
       commandShell,
       includeSkillResourceToolCatalog: true,
       modelCapabilities,
+      subAgentRegistry,
     });
     const desktopToolCatalog = registry.catalog("desktop-basic");
     const mcpToolCatalog = registry.catalog("mcp");
@@ -155,6 +190,7 @@ export class CapabilityCenter {
       toolCount: allAllowedTools.length,
     });
     const skillCatalog = await Promise.all(skills.map(projectSkillCatalogItem));
+    const subAgentCatalog = subAgents.map(projectSubAgentCatalogItem);
     return {
       snapshotId: createId("capability-snapshot"),
       createdAt: nowIso(),
@@ -166,6 +202,7 @@ export class CapabilityCenter {
         allowedTools: allAllowedTools,
       },
       skillCatalog,
+      subAgentCatalog,
       skillTrigger,
       mcpCatalog: mcpServers.map((server): CapabilityMcpCatalogItem =>
         mcpCatalogItemForServer(server, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
@@ -658,4 +695,25 @@ function commandSummaryFor(command: string | undefined, args: readonly string[] 
     return arg;
   });
   return [command, ...safeArgs].join(" ");
+}
+
+function projectSubAgentCatalogItem(subAgent: SubAgentDefinition): CapabilitySubAgentCatalogItem {
+  return {
+    id: subAgent.id,
+    name: subAgent.name,
+    description: subAgent.description,
+    category: subAgent.category,
+    sourceKind: subAgent.sourceKind,
+    sourceRootId: subAgent.sourceRootId,
+    sourcePrecedence: subAgent.sourcePrecedence,
+    enabled: subAgent.enabled,
+    version: subAgent.version,
+    whenToUse: subAgent.whenToUse,
+    whenNotToUse: subAgent.whenNotToUse,
+    allowedTools: subAgent.allowedTools,
+    model: subAgent.model,
+    maxSteps: subAgent.maxSteps,
+    contentHash: subAgent.contentHash,
+    bodyHash: subAgent.bodyHash,
+  };
 }

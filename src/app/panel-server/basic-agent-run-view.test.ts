@@ -742,6 +742,7 @@ function capabilitySnapshot(): BasicAgentCapabilitySnapshot {
     },
     toolCatalog: { scope: "desktop-basic", tools: [], allowedTools: [] },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:\\AgentArbor",

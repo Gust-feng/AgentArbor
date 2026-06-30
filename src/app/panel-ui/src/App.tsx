@@ -475,6 +475,7 @@ export function App(): React.ReactElement {
     checkAppUpdate,
     installAppUpdate,
     refreshSkills,
+    refreshSubAgents,
     updateSkill,
   } = settingsController;
   const checkAppUpdateRef = useRef(checkAppUpdate);
@@ -1673,6 +1674,7 @@ export function App(): React.ReactElement {
           onRevealModelApiKey={revealModelApiKey}
           modelCatalogs={modelCatalogs}
           skills={app.skills}
+          subAgents={app.subAgents}
           onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
           onSelectWorkspaceDirectory={() => void selectWorkspace()}
           onSaveCommandShell={saveCommandShell}
@@ -1697,6 +1699,7 @@ export function App(): React.ReactElement {
           onCheckAppUpdate={() => void checkAppUpdate()}
           onInstallAppUpdate={() => void installAppUpdate()}
           onRefreshSkills={() => void refreshSkills()}
+          onRefreshSubAgents={() => void refreshSubAgents()}
           onUpdateSkill={(skill, enabled) => void updateSkill(skill, enabled)}
         />
       )}

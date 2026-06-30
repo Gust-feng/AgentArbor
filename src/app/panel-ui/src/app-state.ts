@@ -18,6 +18,7 @@ import type {
   DeepRunView,
 } from "./contracts/deep";
 import type { SkillDefinition } from "./contracts/skills";
+import type { SubAgentDefinition } from "./contracts/sub-agents";
 import type { ToolsResponse } from "./contracts/tools";
 import type { AppUpdateInfo } from "./contracts/app-update";
 
@@ -26,6 +27,7 @@ export type AppState = {
   readonly tools?: ToolsResponse;
   readonly appUpdate?: AppUpdateInfo;
   readonly skills: readonly SkillDefinition[];
+  readonly subAgents: readonly SubAgentDefinition[];
   readonly conversations: readonly ConversationSummary[];
   readonly conversation?: Conversation;
   readonly run?: BasicAgentRun;
@@ -79,6 +81,7 @@ export type AppState = {
 export function createInitialAppState(): AppState {
   return {
     skills: [],
+    subAgents: [],
     conversations: [],
     transcriptNodes: [],
     transcriptNodesByRunId: {},

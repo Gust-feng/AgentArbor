@@ -7,6 +7,7 @@ import type {
   ToolRuntimeHint,
   ToolVisibleResultPolicy,
 } from "../tools/contracts.js";
+import type { SubAgentSourceKind } from "../sub-agents/contracts.js";
 
 export type ConfiguredModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
@@ -531,6 +532,25 @@ export type CapabilitySkillCatalogItem = {
   readonly validationErrors?: readonly string[];
 };
 
+export type CapabilitySubAgentCatalogItem = {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category?: string;
+  readonly sourceKind: SubAgentSourceKind;
+  readonly sourceRootId: string;
+  readonly sourcePrecedence: number;
+  readonly enabled: boolean;
+  readonly version?: string;
+  readonly whenToUse?: readonly string[];
+  readonly whenNotToUse?: readonly string[];
+  readonly allowedTools?: readonly string[];
+  readonly model?: string;
+  readonly maxSteps?: number;
+  readonly contentHash?: string;
+  readonly bodyHash?: string;
+};
+
 export type CapabilityMcpCatalogItem = {
   readonly serverId: string;
   readonly label: string;
@@ -587,6 +607,7 @@ export type BasicAgentCapabilitySnapshot = {
     readonly allowedTools: readonly string[];
   };
   readonly skillCatalog: readonly CapabilitySkillCatalogItem[];
+  readonly subAgentCatalog: readonly CapabilitySubAgentCatalogItem[];
   readonly skillTrigger?: SanitizedSkillTriggerConfig;
   readonly mcpCatalog: readonly CapabilityMcpCatalogItem[];
   readonly workspace: SanitizedWorkspaceConfig;

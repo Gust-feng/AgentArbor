@@ -8,6 +8,7 @@ import {
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { CommandShellKind, ConfigResponse, ModelCapabilities, ModelProviderModelCatalog, SkillTriggerMode } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
+import type { SubAgentDefinition } from "./contracts/sub-agents";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerPreset, ToolsResponse } from "./contracts/tools";
 import { parseModelOptionId } from "./model-options";
 
@@ -395,6 +396,11 @@ export async function updateSkillState(skill: Pick<SkillDefinition, "id" | "stat
 export async function refreshSkillCatalog(): Promise<readonly SkillDefinition[]> {
   const response = await postJson<{ readonly skills: readonly SkillDefinition[] }>("/api/skills/refresh", {});
   return response.skills;
+}
+
+export async function refreshSubAgentCatalog(): Promise<readonly SubAgentDefinition[]> {
+  const response = await postJson<{ readonly subAgents: readonly SubAgentDefinition[] }>("/api/config/sub-agents/refresh", {});
+  return response.subAgents;
 }
 
 export function mergeCatalogsIntoConfig(

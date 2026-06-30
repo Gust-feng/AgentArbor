@@ -7,6 +7,7 @@ import type {
   ToolDefinition,
   ToolExecutionBroker,
   ToolExecutionContext,
+  ToolExecutor,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
 import { InMemoryEventLog } from "../events/in-memory-event-log.js";
@@ -2095,13 +2096,26 @@ class PermissionIgnoringToolBroker implements ToolExecutionBroker {
   private readonly operationTypes = new Map<string, "read-only" | "read-write" | "execute" | "external-submit">();
   private callCount = 0;
 
+  register(executor: ToolExecutor): void;
   register(
     name: string,
     execute: (input: unknown, context: ToolExecutionContext) => Promise<unknown>,
+    operationType?: "read-only" | "read-write" | "execute" | "external-submit"
+  ): void;
+  register(
+    executorOrName: ToolExecutor | string,
+    execute?: (input: unknown, context: ToolExecutionContext) => Promise<unknown>,
     operationType: "read-only" | "read-write" | "execute" | "external-submit" = "read-only"
   ): void {
-    this.tools.set(name, execute);
-    this.operationTypes.set(name, operationType);
+    if (typeof executorOrName === "string") {
+      this.tools.set(executorOrName, execute!);
+      this.operationTypes.set(executorOrName, operationType);
+    } else {
+      const executor = executorOrName;
+      this.tools.set(executor.definition.name, executor.execute.bind(executor));
+      const opType = executor.definition.metadata?.operationType ?? "read-only";
+      this.operationTypes.set(executor.definition.name, opType);
+    }
   }
 
   list(): ToolDefinition[] {
@@ -2172,13 +2186,26 @@ class TestToolBroker implements ToolExecutionBroker {
   private readonly operationTypes = new Map<string, "read-only" | "read-write" | "execute" | "external-submit">();
   private callCount = 0;
 
+  register(executor: ToolExecutor): void;
   register(
     name: string,
     execute: (input: unknown, context: ToolExecutionContext) => Promise<unknown>,
+    operationType?: "read-only" | "read-write" | "execute" | "external-submit"
+  ): void;
+  register(
+    executorOrName: ToolExecutor | string,
+    execute?: (input: unknown, context: ToolExecutionContext) => Promise<unknown>,
     operationType: "read-only" | "read-write" | "execute" | "external-submit" = "read-only"
   ): void {
-    this.tools.set(name, execute);
-    this.operationTypes.set(name, operationType);
+    if (typeof executorOrName === "string") {
+      this.tools.set(executorOrName, execute!);
+      this.operationTypes.set(executorOrName, operationType);
+    } else {
+      const executor = executorOrName;
+      this.tools.set(executor.definition.name, executor.execute.bind(executor));
+      const opType = executor.definition.metadata?.operationType ?? "read-only";
+      this.operationTypes.set(executor.definition.name, opType);
+    }
   }
 
   list(): ToolDefinition[] {

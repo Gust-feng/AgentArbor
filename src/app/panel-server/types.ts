@@ -4,6 +4,7 @@ import type { AppUpdateFetch, AppUpdateServiceLike } from "../app-update-service
 import type { ConfigCenter } from "../config-center.js";
 import type { ProcessTerminator } from "../runtime-guard/index.js";
 import type { SkillRootInput } from "../skills/index.js";
+import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 
 export type PanelServerOptions = {
   readonly host?: string;
@@ -17,6 +18,8 @@ export type PanelServerOptions = {
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly additionalSkillRoots?: readonly SkillRootInput[];
   readonly skillRoots?: readonly SkillRootInput[];
+  readonly additionalSubAgentRoots?: readonly SubAgentRootInput[];
+  readonly subAgentRoots?: readonly SubAgentRootInput[];
   readonly desktopAgentDefinition?: AgentDefinition;
   readonly agentDefinitions?: readonly AgentDefinition[];
   readonly processTerminator?: ProcessTerminator;

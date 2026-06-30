@@ -8,20 +8,22 @@ import type {
   ListDeepRunSummariesResponse,
 } from "./contracts/deep";
 import type { SkillDefinition } from "./contracts/skills";
+import type { SubAgentDefinition } from "./contracts/sub-agents";
 import type { McpServerCatalogItem, ToolsResponse } from "./contracts/tools";
 
 export type AppBootstrapState = Pick<
   AppState,
-  "config" | "tools" | "appUpdate" | "skills" | "conversations" | "deepConversations" | "deepRuns"
+  "config" | "tools" | "appUpdate" | "skills" | "subAgents" | "conversations" | "deepConversations" | "deepRuns"
 >;
 
 export async function loadAppBootstrap(): Promise<AppBootstrapState> {
-  const [config, tools, mcp, appUpdate, skills, conversations, deepConversations, deepRuns] = await Promise.all([
+  const [config, tools, mcp, appUpdate, skills, subAgents, conversations, deepConversations, deepRuns] = await Promise.all([
     getJson<ConfigResponse>("/api/config"),
     getJson<ToolsResponse>("/api/config/tools"),
     getJson<{ readonly catalog?: readonly McpServerCatalogItem[] }>("/api/config/mcp"),
     getJson<AppUpdateInfo>("/api/app/update"),
     getJson<{ readonly skills: readonly SkillDefinition[] }>("/api/skills"),
+    getJson<{ readonly subAgents: readonly SubAgentDefinition[] }>("/api/config/sub-agents"),
     getJson<{ readonly conversations: readonly ConversationSummary[] }>("/api/conversations"),
     getJson<ListDeepConversationSummariesResponse>("/api/deep/conversations?limit=50"),
     getJson<ListDeepRunSummariesResponse>("/api/deep/runs?limit=50"),
@@ -31,6 +33,7 @@ export async function loadAppBootstrap(): Promise<AppBootstrapState> {
     tools: { ...tools, mcpCatalog: mcp.catalog ?? [] },
     appUpdate,
     skills: skills.skills ?? [],
+    subAgents: subAgents.subAgents ?? [],
     conversations: conversations.conversations ?? [],
     deepConversations: deepConversations.conversations ?? [],
     deepRuns: deepRuns.runs ?? [],

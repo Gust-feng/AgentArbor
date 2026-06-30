@@ -2,6 +2,8 @@ import type { BasicAgentCapabilitySnapshot, ModelCapabilities, RunCapabilityReso
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { AgentTurnPolicy, AgentTurnRuntime } from "../kernel/intelligence/index.js";
+import { createSubAgentToolExecutors } from "./sub-agents/sub-agent-tools.js";
+import { SubAgentRegistry } from "./sub-agents/sub-agent-registry.js";
 import { createOpenAITokenCounter, type BasicAgentContextPack } from "./basic-agent-runtime/index.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { desktopAgentContextPack } from "./desktop-agent-prompts.js";
@@ -63,6 +65,24 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     : undefined;
   toolCenter?.resetCallCount();
 
+  let parentAllowedTools: readonly string[] = [];
+  if (toolCenter !== undefined && input.options.subAgentRoots !== undefined && toolCenter.register !== undefined) {
+    const subAgentRegistry = new SubAgentRegistry({ roots: input.options.subAgentRoots });
+    const executors = createSubAgentToolExecutors({
+      subAgentRegistry,
+      channel: input.channel,
+      toolBroker: toolCenter,
+      allowedTools: () => parentAllowedTools,
+      confirmationPolicy: () => input.options.toolConfirmationPolicy,
+      publishToolEvent: (message) => input.runtime.bus.publish(message),
+      includeSpawnTool: true,
+      eventLog: input.runtime.eventLog,
+    });
+    for (const executor of executors) {
+      toolCenter.register(executor);
+    }
+  }
+
   const tokenCounter = createOpenAITokenCounter(resolveActiveModelName(input.options));
   const contextPack = desktopAgentContextPack({
     agentDefinition: input.agentDefinition,
@@ -97,6 +117,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     toolCenter,
     skillContexts,
   });
+  parentAllowedTools = toolBoundary.allowedTools;
   const turnPolicy = createDesktopAgentTurnPolicy({
     agentDefinition: input.agentDefinition,
     traceId: input.traceId,

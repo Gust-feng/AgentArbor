@@ -401,6 +401,7 @@ function capabilitySnapshotWithTools(toolNames: readonly string[]): BasicAgentCa
       allowedTools: toolNames,
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:\\AgentArbor",

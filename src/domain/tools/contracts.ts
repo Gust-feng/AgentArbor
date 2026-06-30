@@ -384,6 +384,9 @@ export type ToolExecutionContext = {
   readonly callerAgentId: string;
   readonly traceId: string;
   readonly goalId: string;
+  readonly toolCallId?: string;
+  readonly approvedConfirmationIds?: readonly string[];
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly abortSignal?: AbortSignal;
 };
 
@@ -431,8 +434,13 @@ export interface SandboxPolicy {
 
 export interface ToolExecutor {
   readonly definition: ToolDefinition;
-  execute(input: unknown, context: ToolExecutionContext): Promise<unknown>;
+  execute(input: unknown, context: ToolExecutionContext): Promise<unknown | ToolExecutorResult>;
 }
+
+export type ToolExecutorResult = {
+  readonly kind: "tool_call_result";
+  readonly result: ToolCallResult;
+};
 
 export interface ToolExecutionBroker {
   list(): ToolDefinition[];
@@ -444,4 +452,5 @@ export interface ToolExecutionBroker {
   ): Promise<ToolCallResult>;
   resetCallCount(): void;
   getCallCount(): number;
+  register?(executor: ToolExecutor): void;
 }

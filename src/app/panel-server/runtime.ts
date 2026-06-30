@@ -1,4 +1,5 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
@@ -41,6 +42,7 @@ import {
   type SkillRootInput,
   type SkillStateStore,
 } from "../skills/index.js";
+import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 import type {
   PanelContextAttachmentMediaEntry,
   PanelContextAttachmentSelection,
@@ -78,6 +80,7 @@ export type PanelRuntime = {
   readonly processRegistry: InMemoryProcessRegistry;
   readonly processTerminator: ProcessTerminator;
   readonly skillRoots: readonly SkillRootInput[];
+  readonly subAgentRoots: readonly SubAgentRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
 };
@@ -110,6 +113,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
       contextAttachmentPicker: options.contextAttachmentPicker,
       skillRoots: resolveSkillRoots(options),
       resolveSkillRoots: (input) => resolveSkillRoots(options, input),
+      subAgentRoots: resolveSubAgentRoots(options),
       skillStateStore: resolveSkillStateStore(options.configDirectory),
       processTerminator: options.processTerminator,
       appUpdateService: resolveAppUpdateService(options),
@@ -130,6 +134,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
     contextAttachmentPicker: options.contextAttachmentPicker,
     skillRoots: resolveSkillRoots(options),
     resolveSkillRoots: (input) => resolveSkillRoots(options, input),
+    subAgentRoots: resolveSubAgentRoots(options),
     skillStateStore: resolveSkillStateStore(local.configDirectory),
     processTerminator: options.processTerminator,
     appUpdateService: resolveAppUpdateService(options),
@@ -161,6 +166,7 @@ function assemblePanelRuntime(input: {
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
   readonly skillRoots: readonly SkillRootInput[];
   readonly resolveSkillRoots?: (input: PanelSkillRootsInput) => readonly SkillRootInput[];
+  readonly subAgentRoots: readonly SubAgentRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly processTerminator?: ProcessTerminator;
   readonly appUpdateService: AppUpdateServiceLike;
@@ -180,6 +186,7 @@ function assemblePanelRuntime(input: {
     skillRoots: input.skillRoots,
     resolveSkillRoots: input.resolveSkillRoots,
     skillStateStore: input.skillStateStore,
+    subAgentRoots: input.subAgentRoots,
     fetch: input.providerFetch,
   });
   const runtime: Omit<PanelRuntime, "runExecutor"> & { runExecutor?: BasicAgentRunExecutor } = {
@@ -204,6 +211,7 @@ function assemblePanelRuntime(input: {
     processRegistry,
     processTerminator,
     skillRoots: input.skillRoots,
+    subAgentRoots: input.subAgentRoots,
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
   };
@@ -372,6 +380,18 @@ function resolveSkillRoots(
   ];
 }
 
+function resolveSubAgentRoots(
+  options: PanelServerOptions
+): readonly SubAgentRootInput[] {
+  if (options.subAgentRoots !== undefined) {
+    return options.subAgentRoots;
+  }
+  return [
+    ...resolveDefaultPanelSubAgentRoots(),
+    ...(options.additionalSubAgentRoots ?? []),
+  ];
+}
+
 export function resolveDefaultPanelSkillRoots(input: {
   readonly cwd?: string;
   readonly home?: string;
@@ -402,6 +422,39 @@ export function resolveDefaultPanelSkillRoots(input: {
       precedence: 100,
     },
   ];
+}
+
+function resolveDefaultPanelSubAgentRoots(input: {
+  readonly cwd?: string;
+  readonly home?: string;
+  readonly builtinRoot?: string;
+} = {}): readonly SubAgentRootInput[] {
+  const builtinRoot = input.builtinRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "sub-agents", "builtin");
+  const projectRoot = path.join(input.cwd ?? process.cwd(), ".agents", "sub-agents");
+  const userRoot = path.join(input.home ?? homeDirectory(), ".agents", "sub-agents");
+  const roots: SubAgentRootInput[] = [
+    {
+      rootPath: builtinRoot,
+      sourceKind: "builtin",
+      sourceRootId: "builtin",
+      precedence: 1,
+    },
+  ];
+  if (path.resolve(projectRoot) !== path.resolve(userRoot)) {
+    roots.push({
+      rootPath: userRoot,
+      sourceKind: "user",
+      sourceRootId: "user",
+      precedence: 10,
+    });
+  }
+  roots.push({
+    rootPath: projectRoot,
+    sourceKind: "project",
+    sourceRootId: "project",
+    precedence: 100,
+  });
+  return roots;
 }
 
 function homeDirectory(): string {

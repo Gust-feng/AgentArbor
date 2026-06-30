@@ -309,6 +309,7 @@ function capabilitySnapshot(input: {
       tools: [],
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: process.cwd(),

@@ -423,6 +423,7 @@ function capabilitySnapshot(activeModel: SanitizedModelProviderConfig): BasicAge
       allowedTools: [],
     },
     skillCatalog: [],
+    subAgentCatalog: [],
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:\\AgentArbor",

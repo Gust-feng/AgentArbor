@@ -10,6 +10,7 @@ import {
   mergeCatalogsIntoConfig,
   revealModelProviderApiKey,
   refreshSkillCatalog,
+  refreshSubAgentCatalog,
   resetDesktopAgentSystemPrompt as requestResetDesktopAgentSystemPrompt,
   saveCommandShellConfig,
   saveDesktopAgentSystemPrompt as requestSaveDesktopAgentSystemPrompt,
@@ -41,6 +42,7 @@ import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { CommandShellKind, ConfigResponse, ModelProviderModelCatalog, SkillTriggerMode } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
+import type { SubAgentDefinition } from "./contracts/sub-agents";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
 
 export type AppSettingsController = {
@@ -73,6 +75,7 @@ export type AppSettingsController = {
   readonly checkAppUpdate: () => Promise<void>;
   readonly installAppUpdate: () => Promise<void>;
   readonly refreshSkills: () => Promise<void>;
+  readonly refreshSubAgents: () => Promise<void>;
   readonly updateSkill: (skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean) => Promise<void>;
 };
 
@@ -900,6 +903,25 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
+  async function refreshSubAgents(): Promise<void> {
+    options.setSavingTools(true);
+    try {
+      const subAgents = await refreshSubAgentCatalog();
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({ ...previous, subAgents, error: undefined }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "子 Agent 刷新失败。",
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
+    }
+  }
+
   return {
     saveModelConfig,
     createCustomModelProfile,
@@ -930,6 +952,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     checkAppUpdate,
     installAppUpdate,
     refreshSkills,
+    refreshSubAgents,
     updateSkill,
   };
 }

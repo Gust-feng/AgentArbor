@@ -78,7 +78,10 @@ export function AppearanceSettings(): React.ReactElement {
         </div>
 
         <div className="appearance-toggle-row">
-          <span>启动动画</span>
+          <span className="appearance-toggle-label">
+            <span className="appearance-toggle-title">启动动画</span>
+            <span className="appearance-toggle-badge">beta</span>
+          </span>
           <button
             type="button"
             className="appearance-toggle-switch"

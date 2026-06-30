@@ -124,5 +124,5 @@ function deepSubmissionErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.length > 0) {
     return error.message;
   }
-  return "多 Agent 任务提交失败。";
+  return "Agent 集群任务提交失败。";
 }

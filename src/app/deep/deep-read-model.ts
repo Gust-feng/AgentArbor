@@ -1,8 +1,14 @@
-import type { ChildAgentRun, ChildAgentRunParentInstruction } from "../../domain/underground/agent-fabric.js";
+import type {
+  ChildAgentRun,
+  ChildAgentRunModelMessageTrace,
+  ChildAgentRunParentInstruction,
+} from "../../domain/underground/agent-fabric.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { WorkspaceFolderSummary } from "../workspace-folder-summary.js";
 import { workspaceFolderSummaryFromPath } from "../workspace-folder-summary.js";
 import { safeAgentRunTreeRef } from "../underground-events.js";
+import { projectConversationRunEnvelopeViewBase } from "../run-read-model-envelope.js";
+import { projectSharedConversationRunSummaryBase } from "../run-read-model-summary.js";
 import type {
   DeepConversation,
   DeepFollowUpContext,
@@ -54,13 +60,49 @@ export function projectDeepConversation(conversation: DeepConversation): Record<
   return {
     conversationId: conversation.conversationId,
     title: conversation.title,
+    titleEditedAt: conversation.titleEditedAt,
     goal: conversation.goal,
     intakeTurns: conversation.intakeTurns ?? [],
+    followUpTurns: conversation.followUpTurns ?? [],
     currentObjective: conversation.currentObjective,
     birthWorkspaceDirectory: conversation.birthWorkspaceDirectory,
+    pinnedAt: conversation.pinnedAt,
     isolation: conversation.isolation,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+  };
+}
+
+export function projectDeepConversationSummary(
+  conversation: DeepConversation,
+  latestRunRecord?: DeepRunRecord,
+  latestRootRecord?: DeepRunRecord,
+): Record<string, unknown> {
+  const intakeStatus = latestDeepIntakeStatus(conversation);
+  const latestRunIsCurrent = latestRunRecord !== undefined &&
+    !conversationHasFreshIntake(conversation.updatedAt, intakeStatus, latestRunRecord.run.updatedAt);
+  const workspaceFolder = latestRunRecord === undefined
+    ? workspaceFolderForDeepConversation(conversation)
+    : workspaceFolderForDeepRecord(latestRootRecord ?? latestRunRecord) ??
+      workspaceFolderForDeepRecord(latestRunRecord) ??
+      workspaceFolderForDeepConversation(conversation);
+  const latestRun = latestRunRecord === undefined || !latestRunIsCurrent
+    ? undefined
+    : projectDeepRunSummary(latestRunRecord, latestRootRecord);
+  return {
+    conversationId: conversation.conversationId,
+    title: conversation.title,
+    titleEditedAt: conversation.titleEditedAt,
+    goal: conversation.goal,
+    currentObjective: conversation.currentObjective,
+    createdAt: conversation.createdAt,
+    updatedAt: latestRunRecord === undefined
+      ? conversation.updatedAt
+      : latestTimestamp(conversation.updatedAt, latestRunRecord.run.updatedAt),
+    pinnedAt: conversation.pinnedAt,
+    workspaceFolder,
+    intakeStatus: latestRunIsCurrent ? undefined : intakeStatus,
+    latestRun,
   };
 }
 
@@ -74,6 +116,35 @@ export function latestDeepRunRecordsByRoot(records: readonly DeepRunRecord[]): r
     }
   }
   return [...selected.values()].sort((left, right) => right.run.updatedAt.localeCompare(left.run.updatedAt));
+}
+
+function conversationHasFreshIntake(
+  conversationUpdatedAt: string,
+  intakeStatus: "needs_input" | "answered" | "plan_ready" | undefined,
+  latestRunUpdatedAt: string,
+): boolean {
+  return intakeStatus !== undefined && latestRunUpdatedAt.localeCompare(conversationUpdatedAt) < 0;
+}
+
+function latestDeepIntakeStatus(conversation: DeepConversation): "needs_input" | "answered" | "plan_ready" | undefined {
+  const lastTurn = conversation.intakeTurns?.at(-1);
+  if (lastTurn === undefined) {
+    return undefined;
+  }
+  switch (lastTurn.action) {
+    case "ask_user":
+      return "needs_input";
+    case "direct_answer":
+      return "answered";
+    case "start_collaboration":
+      return "plan_ready";
+    default:
+      return undefined;
+  }
+}
+
+function latestTimestamp(left: string, right: string): string {
+  return right.localeCompare(left) > 0 ? right : left;
 }
 
 function workspaceFolderForDeepRecord(record: DeepRunRecord): WorkspaceFolderSummary | undefined {
@@ -95,21 +166,25 @@ export function projectDeepRunSummary(
   const workspaceFolder = workspaceFolderForDeepRecord(rootRecord ?? record) ??
     workspaceFolderForDeepRecord(record);
   return {
-    runId: record.run.runId,
-    conversationId: record.run.conversationId,
-    parentRunId: record.run.parentRunId,
-    rootRunId: record.run.rootRunId ?? record.run.runId,
-    turnOrdinal: record.run.turnOrdinal ?? 1,
+    ...projectSharedConversationRunSummaryBase({
+      ...projectConversationRunEnvelopeViewBase({
+        runId: record.run.runId,
+        conversationId: record.run.conversationId,
+        parentRunId: record.run.parentRunId,
+        rootRunId: record.run.rootRunId ?? record.run.runId,
+        turnOrdinal: record.run.turnOrdinal ?? 1,
+        status: record.run.status,
+        runKind: record.run.isolation.runKind,
+        runMode: record.run.isolation.runMode,
+      }),
+      startedAt: record.run.startedAt,
+      updatedAt: record.run.updatedAt,
+      workspaceFolder,
+    }),
     goal: record.run.goal,
-    status: record.run.status,
-    runKind: record.run.isolation.runKind,
-    runMode: record.run.isolation.runMode,
-    startedAt: record.run.startedAt,
-    updatedAt: record.run.updatedAt,
     hasConclusion: record.report?.conclusion !== undefined,
     childCount: record.agentRunTree.childRuns.length,
     eventCount: record.eventSequence.length,
-    workspaceFolder,
     brief: record.brief,
   };
 }
@@ -126,15 +201,17 @@ export function projectDeepRunView(
     workspaceFolderForDeepConversation(conversation);
   return {
     run: {
-      runId: record.run.runId,
-      conversationId: record.run.conversationId,
-      parentRunId: record.run.parentRunId,
-      rootRunId: record.run.rootRunId ?? record.run.runId,
-      turnOrdinal: record.run.turnOrdinal ?? 1,
+      ...projectConversationRunEnvelopeViewBase({
+        runId: record.run.runId,
+        conversationId: record.run.conversationId,
+        parentRunId: record.run.parentRunId,
+        rootRunId: record.run.rootRunId ?? record.run.runId,
+        turnOrdinal: record.run.turnOrdinal ?? 1,
+        status: record.run.status,
+        runKind: record.run.isolation.runKind,
+        runMode: record.run.isolation.runMode,
+      }),
       goal: record.run.goal,
-      status: record.run.status,
-      runKind: record.run.isolation.runKind,
-      runMode: record.run.isolation.runMode,
       startedAt: record.run.startedAt,
       updatedAt: record.run.updatedAt,
       workspaceFolder,
@@ -163,6 +240,8 @@ export function fallbackLiveProjectionForRecord(record: DeepRunRecord): DeepLive
         latestResult: summary.summary,
         confidence: summary.confidence,
         uncertainty: summary.uncertainty,
+        failureDetail: summary.failureDetail ?? childRun?.failureDetail,
+        continuationContextRef: summary.continuationContextRef ?? childRun?.continuationContextRef,
         workflowItems: childRun === undefined
           ? fallbackWorkflowItemsForSummary(summary.childRunId, summary.spec.objective, summary.summary, updatedAt)
           : fallbackWorkflowItemsForChildRun(childRun, summary.summary, updatedAt),
@@ -179,25 +258,39 @@ export function fallbackLiveProjectionForRecord(record: DeepRunRecord): DeepLive
           conclusionId: record.report.conclusion.conclusionId,
           oneLineRationale: record.report.conclusion.oneLineRationale,
           confidence: record.report.conclusion.confidence,
-          updatedAt,
+          updatedAt: record.report.conclusion.createdAt,
         };
-  const synthesis = record.report?.synthesisRecords.at(-1);
+  const latestSynthesis = record.report?.synthesisRecords.at(-1);
+  const synthesis = latestSynthesis === undefined
+    ? undefined
+    : {
+        synthesisId: latestSynthesis.synthesisId,
+        status: "completed" as const,
+        summary: latestSynthesis.decisionSummary,
+        confidence: latestSynthesis.confidence,
+        updatedAt: latestSynthesis.createdAt,
+      };
   return {
-    phase: livePhaseForRunStatus(record.run.status),
-    activeNodeId: conclusion === undefined ? "decision" : "conclusion",
+    phase: record.run.status === "completed"
+      ? "completed"
+      : record.run.status === "failed"
+        ? "failed"
+        : record.run.status === "interrupted"
+          ? "stopped"
+          : record.run.status === "corrected"
+            ? "starting"
+            : record.run.status === "stopped"
+              ? "stopped"
+              : children.length > 0
+                ? "exploring"
+                : conclusion === undefined
+                  ? "deciding"
+                  : "completed",
+    activeNodeId: conclusion === undefined ? (children.at(-1)?.childRunId ?? "manager") : "conclusion",
     children,
-    decision: undefined,
-    synthesis:
-      synthesis === undefined
-        ? undefined
-        : {
-            synthesisId: synthesis.synthesisId,
-            status: "completed",
-            summary: synthesis.decisionSummary,
-            confidence: synthesis.confidence,
-            updatedAt,
-          },
-    conclusion,
+    decision: record.liveProjection?.decision,
+    synthesis: record.liveProjection?.synthesis ?? synthesis,
+    conclusion: record.liveProjection?.conclusion ?? conclusion,
     updatedAt,
   };
 }
@@ -255,6 +348,12 @@ function fallbackWorkflowItemsForChildRun(
     });
   }
   for (const [index, segment] of (childRun.executionHistory ?? []).entries()) {
+    for (const [messageIndex, message] of (segment.modelMessages ?? []).entries()) {
+      const item = fallbackWorkflowItemForModelMessage(childRun.childRunId, index, messageIndex, message);
+      if (item !== undefined) {
+        items.push(item);
+      }
+    }
     for (const [callIndex, call] of segment.toolCalls.entries()) {
       items.push({
         itemId: `tool:${childRun.childRunId}:${index}:${call.callId || callIndex}`,
@@ -280,6 +379,39 @@ function fallbackWorkflowItemsForChildRun(
       timestamp: segment.recordedAt,
     });
   }
+  if ((childRun.executionHistory?.length ?? 0) === 0 && childRun.execution !== undefined) {
+    const recordedAt = childRun.completedAt ?? updatedAt;
+    for (const [messageIndex, message] of (childRun.execution.modelMessages ?? []).entries()) {
+      const item = fallbackWorkflowItemForModelMessage(childRun.childRunId, "latest", messageIndex, message);
+      if (item !== undefined) {
+        items.push(item);
+      }
+    }
+    for (const [callIndex, call] of childRun.execution.toolCalls.entries()) {
+      items.push({
+        itemId: `tool:${childRun.childRunId}:latest:${call.callId || callIndex}`,
+        kind: call.status === "approval_required" ? "tool_waiting" : "tool_completed",
+        title: call.status === "approval_required" ? "等待工具确认" : "工具调用完成",
+        detail: `${call.toolName}：${call.status}`,
+        status: call.status === "approval_required"
+          ? "blocked"
+          : call.status === "completed"
+            ? "completed"
+            : call.status === "cancelled"
+              ? "cancelled"
+              : "failed",
+        timestamp: recordedAt,
+      });
+    }
+    items.push({
+      itemId: `execution:${childRun.childRunId}`,
+      kind: childRun.status === "running" || childRun.status === "resumed" ? "running" : "completed",
+      title: childRun.status === "running" || childRun.status === "resumed" ? "正在探索" : "已产生执行结果",
+      detail: `模型 ${childRun.execution.modelRounds} 轮，工具 ${childRun.execution.toolRounds} 轮`,
+      status: childRun.status === "running" || childRun.status === "resumed" ? "running" : "completed",
+      timestamp: recordedAt,
+    });
+  }
   if (childRun.pendingApproval !== undefined) {
     items.push({
       itemId: `tool-waiting:${childRun.childRunId}:${childRun.pendingApproval.confirmationId}`,
@@ -303,6 +435,38 @@ function fallbackWorkflowItemsForChildRun(
     timestamp: childRun.completedAt ?? updatedAt,
   });
   return mergeWorkflowItems(items);
+}
+
+function fallbackWorkflowItemForModelMessage(
+  childRunId: string,
+  segmentIndex: string | number,
+  messageIndex: number,
+  message: ChildAgentRunModelMessageTrace,
+): DeepLiveChildWorkflowItem | undefined {
+  const detail = fallbackModelMessageText(message);
+  if (detail === undefined) {
+    return undefined;
+  }
+  return {
+    itemId: `model:${childRunId}:${segmentIndex}:${message.responseId ?? message.requestId}:${messageIndex}`,
+    kind: "model_message",
+    title: message.toolCallIds.length > 0 ? "工具调用前说明" : "模型回答",
+    detail,
+    status: message.status === "completed" ? "completed" : message.status === "cancelled" ? "cancelled" : "failed",
+    timestamp: message.completedAt,
+  };
+}
+
+function fallbackModelMessageText(message: ChildAgentRunModelMessageTrace): string | undefined {
+  const text = message.text?.trim();
+  if (text !== undefined && text.length > 0) {
+    return text;
+  }
+  const reasoning = message.reasoningSummary?.trim();
+  if (reasoning !== undefined && reasoning.length > 0) {
+    return reasoning;
+  }
+  return undefined;
 }
 
 function fallbackExecutionFromChildRun(

@@ -21,7 +21,7 @@ type ComposerChipFeedback = "model" | "reasoning" | "access";
 
 const COMPOSER_CHIP_FEEDBACK_MS = 540;
 const EMPTY_HEADING = "今天想处理什么？";
-const MULTI_AGENT_EMPTY_HEADING = "多 Agent";
+const MULTI_AGENT_EMPTY_HEADING = "Agent 集群";
 const MULTI_AGENT_EMPTY_HINT = "适合方向不明确、需要比较多个可能方案的任务。";
 const MULTI_AGENT_PLACEHOLDER = "输入需要比较或判断的目标...";
 
@@ -91,7 +91,7 @@ export function ChatEmpty(props: ChatInputProps & {
         <div className="chat-empty-grid">
           <section className="chat-empty-copy" aria-label="任务输入">
             {isDeep && (
-              <span className="chat-empty-mode-badge" data-mode="deep">多 Agent</span>
+              <span className="chat-empty-mode-badge" data-mode="deep">Agent 集群</span>
             )}
             <h1 className="chat-empty-heading">
               <span className="chat-empty-heading-title" data-startup-title-anchor>

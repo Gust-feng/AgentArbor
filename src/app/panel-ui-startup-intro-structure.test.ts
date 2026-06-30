@@ -7,6 +7,7 @@ import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-stru
 test("startup intro expands one real desktop window before app reveal", async () => {
   const [
     app,
+    appMotion,
     startupIntro,
     startupIntroGeometry,
     styleEntry,
@@ -20,6 +21,7 @@ test("startup intro expands one real desktop window before app reveal", async ()
     chatLayoutStyles,
   ] = await Promise.all([
     readPanelUiSource("App.tsx"),
+    readPanelUiSource("app-motion.ts"),
     readPanelUiSource("app-startup-intro.tsx"),
     readAppSource("panel-startup-intro-geometry.ts"),
     readPanelUiSource("styles.css"),
@@ -34,16 +36,33 @@ test("startup intro expands one real desktop window before app reveal", async ()
   ]);
   const startupIntroStyles = normalizeLineEndings(rawStartupIntroStyles);
   const appStates = normalizeLineEndings(rawAppStates);
+  const panelIndexHtml = readFileSync(join(process.cwd(), "src", "app", "panel-ui", "index.html"), "utf8");
 
   assertNoOldWindowHandoff(startupIntro, startupIntroStyles, panelDesktop, panelDesktopLauncher, preload, mainEntry);
   assertWindowSmokeScript();
   assertNativeWindowExpansion(panelDesktop, preload);
   assertRendererHandoff(app, startupIntro, startupIntroStyles, chatEmpty, chatLayoutStyles);
+  assertStartupAnimationPreferenceDefaults(appMotion, startupIntro, panelIndexHtml);
   assertStartupThemeAndEntry(startupIntroGeometry, styleEntry, appStates, preload, mainEntry, startupIntroStyles);
   assertPrintedTextStructure(startupIntroStyles);
   assertSingleStartupSurface(startupIntroStyles);
   assertNoOuterEffects(startupIntroStyles);
 });
+
+function assertStartupAnimationPreferenceDefaults(
+  appMotion: string,
+  startupIntro: string,
+  panelIndexHtml: string
+): void {
+  assert.equal(appMotion.includes('if (typeof localStorage === "undefined") return false;'), true);
+  assert.equal(appMotion.includes('return localStorage.getItem(STORAGE_STARTUP_ANIMATION_KEY) === "true";'), true);
+  assert.equal(startupIntro.includes("const startupAnimationEnabled = options.startupAnimationEnabled === true;"), true);
+  assert.equal(
+    panelIndexHtml.includes('const startupAnimation = localStorage.getItem("agentarbor:startup-animation") === "true" ? "on" : "off";'),
+    true,
+  );
+  assert.equal(panelIndexHtml.includes('document.documentElement.dataset.startupAnimation = "off";'), true);
+}
 
 function assertNoOldWindowHandoff(
   startupIntro: string,

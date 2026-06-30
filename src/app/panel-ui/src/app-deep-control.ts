@@ -10,7 +10,7 @@ import type { VisibleAiMode } from "./app-config-projection";
 import type { taskSoilInputFromAttachments } from "./app-attachments";
 
 /**
- * 向仍在运行中的多 Agent run 注入补充上下文。
+ * 向仍在运行中的 Agent 集群 run 注入补充上下文。
  *
  * 这里只封装显式 deep 控制端点，不改变默认普通 agent 主线。
  */
@@ -31,7 +31,7 @@ export async function requestDeepRunStop(runId: string): Promise<DeepRunControlR
   return postJson<DeepRunControlResponse>(
     `/api/deep/runs/${encodeURIComponent(runId)}/stop`,
     {
-      reason: "用户停止多 Agent 运行",
+      reason: "用户停止 Agent 集群运行",
     },
   );
 }
@@ -40,7 +40,7 @@ export async function requestDeepRunInterrupt(runId: string): Promise<DeepRunCon
   return postJson<DeepRunControlResponse>(
     `/api/deep/runs/${encodeURIComponent(runId)}/interrupt`,
     {
-      reason: "用户打断多 Agent 运行",
+      reason: "用户打断 Agent 集群运行",
     },
   );
 }

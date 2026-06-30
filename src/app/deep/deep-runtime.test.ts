@@ -92,6 +92,7 @@ function makeConfig(options: {
   childContinuations?: DeepChildPendingContinuationStore;
   childInstructionQueues?: DeepChildInstructionQueueRegistry;
   childMessageStore?: DeepChildMessageStore;
+  store?: InMemoryDeepRunRecordStore;
   onOutputDelta?: (delta: ModelOutputDelta) => void;
   provider?: ModelProvider;
 }): { config: DeepRuntimeConfig; eventLog: InMemoryEventLog } {
@@ -108,7 +109,7 @@ function makeConfig(options: {
   const config: DeepRuntimeConfig = {
     turnRuntime: createDeepTurnRuntime({ intelligenceChannel: channel, toolCenter: options.toolCenter }),
     runtime,
-    store: new InMemoryDeepRunRecordStore(),
+    store: options.store ?? new InMemoryDeepRunRecordStore(),
     controlHandle: options.controlHandle,
     childContinuations: options.childContinuations,
     childInstructionQueues: options.childInstructionQueues,
@@ -143,12 +144,12 @@ class PurposeFakeModelProvider implements ModelProvider {
   readonly model = "fake-deterministic-model";
   private readonly responsesByPurpose = new Map<string, FakeModelProviderResponse[]>();
   private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
-  private readonly onRequest?: (request: ModelRequest) => void;
+  private readonly onRequest?: (request: ModelRequest) => void | Promise<void>;
 
   constructor(input: {
     readonly responsesByPurpose: Readonly<Record<string, readonly FakeModelProviderResponse[]>>;
     readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
-    readonly onRequest?: (request: ModelRequest) => void;
+    readonly onRequest?: (request: ModelRequest) => void | Promise<void>;
   }) {
     for (const [purpose, responses] of Object.entries(input.responsesByPurpose)) {
       this.responsesByPurpose.set(purpose, [...responses]);
@@ -157,8 +158,8 @@ class PurposeFakeModelProvider implements ModelProvider {
     this.onRequest = input.onRequest;
   }
 
-  complete(request: ModelRequest, _options?: ModelRequestOptions): Promise<ModelResponse> {
-    this.onRequest?.(request);
+  async complete(request: ModelRequest, _options?: ModelRequestOptions): Promise<ModelResponse> {
+    await this.onRequest?.(request);
     const queue = this.responsesByPurpose.get(request.purpose);
     const next = queue?.shift();
     if (next === undefined) {
@@ -596,6 +597,49 @@ test("executeDeepRun spawn_children→synthesize：完整 tree（root+children+s
     result.eventSequence.every((e) => e.refs.length > 0),
     "每条事件应含 refs（安全投影引用）",
   );
+});
+
+test("executeDeepRun persists live AgentRunTree child runs before final record", async () => {
+  resetIdsForTests();
+  const store = new InMemoryDeepRunRecordStore();
+  let inspectedDuringChildRun = false;
+  const provider = new PurposeFakeModelProvider({
+    responsesByPurpose: {
+      deep_decision: [
+        spawnChildrenDecisionResponse(),
+        synthesizeDecisionResponse(),
+      ],
+      deep_child_material: childMaterialResponses(),
+      deep_synthesis: [synthesisConclusionResponse()],
+    },
+    onRequest: async (request) => {
+      if (request.purpose !== "deep_child_material" || inspectedDuringChildRun) {
+        return;
+      }
+      inspectedDuringChildRun = true;
+      const record = await store.get("deep-run-live-tree-test");
+      assert.ok(record !== undefined, "running record should exist before child model request completes");
+      assert.equal(record.agentRunTree.childRuns.length > 0, true);
+      const projectedChildIds = new Set((record.liveProjection?.children ?? []).map((child) => child.childRunId));
+      assert.equal(
+        record.agentRunTree.childRuns.every((child) => projectedChildIds.has(child.childRunId)),
+        true,
+      );
+      assert.equal(record.run.status, "running");
+    },
+  });
+  const { config } = makeConfig({ provider, store });
+  const input = {
+    ...makeRuntimeInput("运行中持久化 child tree", true),
+    runId: "deep-run-live-tree-test",
+  };
+
+  const result = await executeDeepRun(input, config);
+  const persisted = await store.get(result.run.runId);
+
+  assert.equal(inspectedDuringChildRun, true);
+  assert.equal(persisted?.agentRunTree.childRuns.length, 2);
+  assert.equal(persisted?.liveProjection?.children.length, 2);
 });
 
 test("executeDeepRun continue_child：父层继续同一个 child run，并在 tree 中记录 resume_child + 真实 childRunId", async () => {

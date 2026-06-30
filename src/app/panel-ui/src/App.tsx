@@ -14,6 +14,11 @@ import {
 } from "./app-startup-intro";
 import { getStartupAnimationEnabled, subscribeMotionSettingsChanged } from "./app-motion";
 import {
+  getModelUsageDisplayEnabled,
+  saveModelUsageDisplayEnabled,
+  subscribeModelUsageDisplayChanged,
+} from "./app-model-usage-display";
+import {
   selectLocalContextAttachment,
   taskSoilInputFromAttachments,
   uniqueAttachments,
@@ -41,6 +46,13 @@ import {
   updateConversationPinnedState,
   upsertConversationSummary,
 } from "./app-conversation-management";
+import {
+  isMissingDeepConversationError,
+  removeDeepConversation,
+  renameDeepConversationTitle,
+  updateDeepConversationPinnedState,
+  upsertManagedDeepConversationSummary,
+} from "./app-deep-conversation-management";
 import { useConversationSummaryRefresh } from "./app-conversation-refresh";
 import { createAppSettingsController } from "./app-settings-controller";
 import {
@@ -57,15 +69,20 @@ import {
   shouldKeepRefreshing,
   stopLiveUpdates,
 } from "./app-runtime-controls";
-import { createInitialAppState } from "./app-state";
-import { requestDeepIntake } from "./app-deep-intake";
+import { createInitialAppState, type AppState } from "./app-state";
+import { requestDeepIntake, requestStartConfirmedDeepRun } from "./app-deep-intake";
 import { createDeepRunUpdateController } from "./app-deep-live-updates";
 import {
+  deepConversationSummaryFromView,
   deepRunSummaryFromView,
+  getDeepConversation,
   isTerminalDeepRunStatus,
-  latestActiveDeepRun,
+  latestRestorableDeepConversation,
   latestRestorableDeepRun,
   openDeepRun,
+  shouldKeepDeepRunBusy,
+  shouldPollDeepRun,
+  upsertDeepConversationSummary,
   upsertDeepRunSummary,
 } from "./app-deep-history";
 import {
@@ -105,6 +122,9 @@ export function App(): React.ReactElement {
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("models");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsedPreference);
   const [startupAnimationEnabled, setStartupAnimationEnabled] = useState(getStartupAnimationEnabled);
+  const [modelUsageDisplayEnabled, setModelUsageDisplayEnabled] = useState(getModelUsageDisplayEnabled);
+  const [agentClusterEnabled, setAgentClusterEnabled] = useState(loadAgentClusterEnabledPreference);
+  const [pinningConversationIds, setPinningConversationIds] = useState<ReadonlySet<string>>(() => new Set());
   const [inputCloseSignal, setInputCloseSignal] = useState(0);
   const [goal, setGoal] = useState("");
   const [aiMode, setAiMode] = useState<VisibleAiMode>("openai-responses");
@@ -183,9 +203,6 @@ export function App(): React.ReactElement {
   const mcpToolSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const mcpToolUpdateVersionRef = useRef(0);
   const mcpToolCatalogDraftRef = useRef<readonly McpServerCatalogItem[] | undefined>(undefined);
-  const checkAppUpdateRef = useRef<() => Promise<void>>(async () => undefined);
-  const refreshAppUpdateStatusRef = useRef<() => Promise<void>>(async () => undefined);
-  const autoAppUpdateCheckRequestedRef = useRef(false);
 
   useConversationSummaryRefresh({
     conversations: app.conversations,
@@ -201,12 +218,6 @@ export function App(): React.ReactElement {
     void loadAppBootstrap().then((bootstrap) => {
       if (mountedRef.current) {
         setApp((previous) => applyAppBootstrap(previous, bootstrap));
-        const activeDeepRun = latestActiveDeepRun(bootstrap.deepRuns);
-        if (activeDeepRun !== undefined) {
-          setScreen("chat-active");
-          setInputCloseSignal((value) => value + 1);
-          void openAgentClusterRun(activeDeepRun.runId, { auto: true });
-        }
       }
     }).catch((error) => {
       if (mountedRef.current) {
@@ -317,11 +328,12 @@ export function App(): React.ReactElement {
     () => modelOptions.find((model) => model.id === selectedModelId),
     [modelOptions, selectedModelId]
   );
-  const chatScreen = app.agentMode === "deep"
+  const agentClusterActive = agentClusterEnabled && app.agentMode === "deep";
+  const chatScreen = agentClusterActive
     ? screen
     : screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = useMemo(() => projectCurrentRun(app), currentRunProjectionDeps(app));
-  const hasNormalConversationContext = app.agentMode === "normal" && (app.conversation !== undefined || currentRun.run !== undefined);
+  const hasNormalConversationContext = !agentClusterActive && (app.conversation !== undefined || currentRun.run !== undefined);
   const latestModelUsage = useMemo(
     () => latestModelUsageFromEvents(currentRun.events) ?? latestModelUsageFromTranscript(currentRun.transcriptNodes),
     [currentRun.events, currentRun.transcriptNodes]
@@ -334,13 +346,13 @@ export function App(): React.ReactElement {
       return contextWindowUsageFrom({
         contextWindowTokens:
           selectedModel?.capabilities?.contextWindowTokens ??
-          currentRun.capabilityResolution?.capabilityPlan.modelCapabilities.contextWindowTokens,
+          currentRun.capabilityResolution?.capabilityPlan?.modelCapabilities.contextWindowTokens,
         modelUsage: latestModelUsage,
         ledgerBudget: currentRun.workView?.contextLedger.budget,
       });
     },
     [
-      currentRun.capabilityResolution?.capabilityPlan.modelCapabilities.contextWindowTokens,
+      currentRun.capabilityResolution?.capabilityPlan?.modelCapabilities.contextWindowTokens,
       currentRun.workView?.contextLedger.budget,
       hasNormalConversationContext,
       latestModelUsage,
@@ -465,6 +477,9 @@ export function App(): React.ReactElement {
     refreshSkills,
     updateSkill,
   } = settingsController;
+  const checkAppUpdateRef = useRef(checkAppUpdate);
+  const refreshAppUpdateStatusRef = useRef(refreshAppUpdateStatus);
+  const autoAppUpdateCheckRequestedRef = useRef(false);
   checkAppUpdateRef.current = checkAppUpdate;
   refreshAppUpdateStatusRef.current = refreshAppUpdateStatus;
 
@@ -490,6 +505,14 @@ export function App(): React.ReactElement {
     persistSidebarCollapsedPreference(sidebarCollapsed);
   }, [sidebarCollapsed]);
 
+  useEffect(() => subscribeMotionSettingsChanged(() => {
+    setStartupAnimationEnabled(getStartupAnimationEnabled());
+  }), []);
+
+  useEffect(() => subscribeModelUsageDisplayChanged(() => {
+    setModelUsageDisplayEnabled(getModelUsageDisplayEnabled());
+  }), []);
+
   useEffect(() => {
     const update = app.appUpdate;
     if (
@@ -514,10 +537,6 @@ export function App(): React.ReactElement {
     }, 1200);
     return () => window.clearInterval(timer);
   }, [app.appUpdate?.status]);
-
-  useEffect(() => subscribeMotionSettingsChanged(() => {
-    setStartupAnimationEnabled(getStartupAnimationEnabled());
-  }), []);
 
   function selectInputModel(modelOptionId: string): void {
     const fallbackModelId = selectedModelId;
@@ -593,6 +612,19 @@ export function App(): React.ReactElement {
     setSettingsOpen(true);
   }
 
+  function changeModelUsageDisplay(enabled: boolean): void {
+    setModelUsageDisplayEnabled(enabled);
+    saveModelUsageDisplayEnabled(enabled);
+  }
+
+  function changeAgentClusterEnabled(enabled: boolean): void {
+    setAgentClusterEnabled(enabled);
+    persistAgentClusterEnabledPreference(enabled);
+    if (!enabled && app.agentMode === "deep") {
+      openNormalAgentEntry();
+    }
+  }
+
   function changeToolConfirmationPolicy(nextPolicy: ComposerToolConfirmationPolicy): void {
     const previousPolicy = toolConfirmationPolicy;
     setToolConfirmationPolicy(nextPolicy);
@@ -603,27 +635,12 @@ export function App(): React.ReactElement {
       });
   }
 
-  /**
-   * 切换 agent 运行模式。
-   * 这是模块切换，不是新建任务：普通 Agent 会话和多 Agent 当前任务各自保留。
-   */
   function changeAgentMode(nextMode: AgentMode): void {
     const normalized = normalizeAgentMode(nextMode);
     setApp((previous) => {
       if (previous.agentMode === normalized) return previous;
       return { ...previous, agentMode: normalized, error: undefined };
     });
-  }
-
-  function selectAgentMode(nextMode: AgentMode): void {
-    if (app.agentMode === nextMode) {
-      return;
-    }
-    if (nextMode === "deep") {
-      openAgentClusterEntry();
-      return;
-    }
-    openNormalAgentEntry();
   }
 
   function openNormalAgentEntry(): void {
@@ -636,6 +653,8 @@ export function App(): React.ReactElement {
   }
 
   function openNormalTaskEntry(): void {
+    deepOpenEpochRef.current += 1;
+    deepRunUpdateController.stopPolling();
     changeAgentMode("normal");
     setSelectedWorkspaceDirectory(undefined);
     resetChat();
@@ -671,24 +690,34 @@ export function App(): React.ReactElement {
     try {
       const view = await openDeepRun(runId);
       if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
-      const terminal = isTerminalDeepRunStatus(view.run.status);
+      const keepBusy = shouldKeepDeepRunBusy(view.run);
+      const keepPolling = shouldPollDeepRun(view.run);
       const summary = deepRunSummaryFromView(view);
+      const conversationSummary = view.conversation === undefined
+        ? undefined
+        : deepConversationSummaryFromView(view.conversation, summary);
+      const intakeStatus = conversationSummary?.intakeStatus;
       setSelectedWorkspaceDirectory(view.run.workspaceFolder?.path);
       setApp((previous) => ({
         ...previous,
         agentMode: "deep",
         deep: view,
         deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+        deepConversations: conversationSummary === undefined
+          ? previous.deepConversations
+          : upsertDeepConversationSummary(previous.deepConversations, conversationSummary),
         deepActiveRunId: view.run.runId,
         deepSelectedRunId: view.run.runId,
         deepPendingGoal: undefined,
         deepConversation: view.conversation ?? previous.deepConversation,
-        deepIntakeStatus: undefined,
-        deepBusy: !terminal,
+        deepIntakeStatus: intakeStatus,
+        deepBusy: keepBusy,
         error: undefined,
       }));
-      if (!terminal) {
+      if (keepPolling) {
         deepRunUpdateController.startPolling(view.run.runId);
+      } else {
+        deepRunUpdateController.stopPolling();
       }
     } catch (error) {
       if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
@@ -699,8 +728,76 @@ export function App(): React.ReactElement {
         deepPendingGoal: undefined,
         error: errorText(
           error,
-          options?.auto === true ? "恢复多 Agent 运行失败。" : "打开多 Agent 运行失败。",
+          options?.auto === true ? "恢复 Agent 集群运行失败。" : "打开 Agent 集群运行失败。",
         ),
+      }));
+    }
+  }
+
+  async function openAgentClusterConversation(conversationId: string): Promise<void> {
+    const epoch = deepOpenEpochRef.current + 1;
+    deepOpenEpochRef.current = epoch;
+    const latestRunId = app.deepConversations.find(
+      (conversation) => conversation.conversationId === conversationId,
+    )?.latestRun?.runId;
+    if (latestRunId !== undefined) {
+      await openAgentClusterRun(latestRunId);
+      return;
+    }
+    deepRunUpdateController.stopPolling();
+    setScreen("chat-active");
+    setGoal("");
+    setAttachments([]);
+    setApp((previous) => ({
+      ...previous,
+      agentMode: "deep",
+      deep: undefined,
+      deepConversation: undefined,
+      deepIntakeStatus: undefined,
+      deepBusy: true,
+      deepPendingGoal: undefined,
+      deepActiveRunId: undefined,
+      deepSelectedRunId: undefined,
+      error: undefined,
+    }));
+    try {
+      const response = await getDeepConversation(conversationId);
+      if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
+      const latestRun = response.runs[0];
+      const summary = deepConversationSummaryFromView(response.conversation, latestRun);
+      if (latestRun !== undefined) {
+        setApp((previous) => ({
+          ...previous,
+          deepConversations: upsertDeepConversationSummary(previous.deepConversations, summary),
+          deepRuns: upsertDeepRunSummary(previous.deepRuns, latestRun),
+        }));
+        await openAgentClusterRun(latestRun.runId);
+        return;
+      }
+      setSelectedWorkspaceDirectory(
+        response.conversation.birthWorkspaceDirectory,
+      );
+      setApp((previous) => ({
+        ...previous,
+        agentMode: "deep",
+        deep: undefined,
+        deepConversation: response.conversation,
+        deepConversations: upsertDeepConversationSummary(previous.deepConversations, summary),
+        deepRuns: previous.deepRuns,
+        deepIntakeStatus: summary.intakeStatus,
+        deepBusy: false,
+        deepPendingGoal: undefined,
+        deepActiveRunId: undefined,
+        deepSelectedRunId: undefined,
+        error: undefined,
+      }));
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setApp((previous) => ({
+        ...previous,
+        agentMode: "deep",
+        deepBusy: false,
+        error: errorText(error, "打开 Agent 集群会话失败。"),
       }));
     }
   }
@@ -710,36 +807,22 @@ export function App(): React.ReactElement {
     setScreen("chat-empty");
     setGoal("");
     setAttachments([]);
-    const existingRunId = app.deep?.run.runId ?? app.deepSelectedRunId;
-    const restorableRunId = existingRunId ?? latestRestorableDeepRun(app.deepRuns)?.runId;
+    const existingRunId = app.deep?.run.runId ?? app.deepActiveRunId;
+    if (existingRunId !== undefined) {
+      void openAgentClusterRun(existingRunId);
+      return;
+    }
+    const restorableConversationId = app.deepConversation?.conversationId ??
+      latestRestorableDeepConversation(app.deepConversations)?.conversationId;
+    if (restorableConversationId !== undefined) {
+      void openAgentClusterConversation(restorableConversationId);
+      return;
+    }
+    const restorableRunId = latestRestorableDeepRun(app.deepRuns)?.runId;
     if (restorableRunId !== undefined) {
       void openAgentClusterRun(restorableRunId);
       return;
     }
-    setApp((previous) => ({
-      ...previous,
-      agentMode: "deep",
-      deep: undefined,
-      deepPendingGoal: undefined,
-      deepActiveRunId: undefined,
-      deepSelectedRunId: undefined,
-      deepConversation: undefined,
-      deepIntakeStatus: undefined,
-      deepBusy: false,
-      error: undefined,
-    }));
-  }
-
-  function openCurrentModeTaskEntry(): void {
-    if (app.agentMode !== "deep") {
-      openNormalTaskEntry();
-      return;
-    }
-    deepRunUpdateController.stopPolling();
-    setInputCloseSignal((value) => value + 1);
-    setScreen("chat-empty");
-    setGoal("");
-    setAttachments([]);
     setApp((previous) => ({
       ...previous,
       agentMode: "deep",
@@ -767,14 +850,25 @@ export function App(): React.ReactElement {
   }
 
   async function toggleConversationPinned(conversationId: string, pinned: boolean): Promise<void> {
+    if (pinningConversationIdsRef.current.has(conversationId)) return;
+    const previousPinnedAt = conversationPinnedAt(app, conversationId);
+    const optimisticPinnedAt = pinned ? new Date().toISOString() : undefined;
+    setConversationPinning(conversationId, true);
+    setApp((previous) => patchConversationPinnedAt(previous, conversationId, optimisticPinnedAt));
     try {
       const response = await updateConversationPinnedState(conversationId, pinned);
       if (!mountedRef.current) return;
       applyConversationManagementResponse(response);
     } catch (error) {
       if (mountedRef.current) {
-        setApp((previous) => ({ ...previous, error: errorText(error, "更新会话置顶失败。") }));
+        setApp((previous) => ({
+          ...patchConversationPinnedAt(previous, conversationId, previousPinnedAt),
+          error: errorText(error, "更新会话置顶失败。"),
+        }));
       }
+    } finally {
+      if (!mountedRef.current) return;
+      setConversationPinning(conversationId, false);
     }
   }
 
@@ -806,6 +900,94 @@ export function App(): React.ReactElement {
     }
   }
 
+  async function renameDeepConversation(conversationId: string, title: string): Promise<void> {
+    try {
+      const response = await renameDeepConversationTitle(conversationId, title);
+      if (!mountedRef.current) return;
+      applyDeepConversationManagementResponse(response);
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "重命名 Agent 集群会话失败。") }));
+      }
+    }
+  }
+
+  async function toggleDeepConversationPinned(conversationId: string, pinned: boolean): Promise<void> {
+    if (pinningConversationIdsRef.current.has(conversationId)) return;
+    const previousPinnedAt = deepConversationPinnedAt(app, conversationId);
+    const optimisticPinnedAt = pinned ? new Date().toISOString() : undefined;
+    setConversationPinning(conversationId, true);
+    setApp((previous) => patchDeepConversationPinnedAt(previous, conversationId, optimisticPinnedAt));
+    try {
+      const response = await updateDeepConversationPinnedState(conversationId, pinned);
+      if (!mountedRef.current) return;
+      applyDeepConversationManagementResponse(response);
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({
+          ...patchDeepConversationPinnedAt(previous, conversationId, previousPinnedAt),
+          error: errorText(error, "更新 Agent 集群会话置顶失败。"),
+        }));
+      }
+    } finally {
+      if (!mountedRef.current) return;
+      setConversationPinning(conversationId, false);
+    }
+  }
+
+  async function deleteDeepConversation(conversationId: string): Promise<void> {
+    try {
+      const response = await removeDeepConversation(conversationId);
+      if (!mountedRef.current) return;
+      deepRunUpdateController.stopPolling();
+      setSelectedWorkspaceDirectory(undefined);
+      setInputCloseSignal((value) => value + 1);
+      setGoal("");
+      setAttachments([]);
+      setScreen("chat-empty");
+      setApp((previous) => ({
+        ...previous,
+        deep: undefined,
+        deepConversation: undefined,
+        deepIntakeStatus: undefined,
+        deepPendingGoal: undefined,
+        deepActiveRunId: undefined,
+        deepSelectedRunId: undefined,
+        deepBusy: false,
+        deepConversations: (response.conversations ?? previous.deepConversations)
+          .filter((item) => item.conversationId !== conversationId),
+        deepRuns: previous.deepRuns.filter((item) => item.conversationId !== conversationId),
+        error: undefined,
+      }));
+    } catch (error) {
+      if (mountedRef.current) {
+        if (isMissingDeepConversationError(error)) {
+          deepRunUpdateController.stopPolling();
+          setSelectedWorkspaceDirectory(undefined);
+          setInputCloseSignal((value) => value + 1);
+          setGoal("");
+          setAttachments([]);
+          setScreen("chat-empty");
+          setApp((previous) => ({
+            ...previous,
+            deep: undefined,
+            deepConversation: undefined,
+            deepIntakeStatus: undefined,
+            deepPendingGoal: undefined,
+            deepActiveRunId: undefined,
+            deepSelectedRunId: undefined,
+            deepBusy: false,
+            deepConversations: previous.deepConversations.filter((item) => item.conversationId !== conversationId),
+            deepRuns: previous.deepRuns.filter((item) => item.conversationId !== conversationId),
+            error: undefined,
+          }));
+        } else {
+          setApp((previous) => ({ ...previous, error: errorText(error, "删除 Agent 集群会话失败。") }));
+        }
+      }
+    }
+  }
+
   function applyConversationManagementResponse(response: ConversationManagementResponse): void {
     setApp((previous) => ({
       ...previous,
@@ -816,6 +998,44 @@ export function App(): React.ReactElement {
           : previous.conversation,
       error: undefined,
     }));
+  }
+
+  function applyDeepConversationManagementResponse(response: {
+    readonly conversation: AppState["deepConversation"];
+    readonly conversations?: AppState["deepConversations"];
+  }): void {
+    const conversation = response.conversation;
+    if (conversation === undefined) {
+      return;
+    }
+    setApp((previous) => ({
+      ...previous,
+      deepConversations: response.conversations ??
+        upsertManagedDeepConversationSummary(previous.deepConversations, conversation),
+      deepConversation:
+        previous.deepConversation?.conversationId === conversation.conversationId
+          ? conversation
+          : previous.deepConversation,
+      deep:
+        previous.deep?.conversation?.conversationId === conversation.conversationId
+          ? {
+            ...previous.deep,
+            conversation,
+          }
+          : previous.deep,
+      error: undefined,
+    }));
+  }
+
+  function setConversationPinning(conversationId: string, pinning: boolean): void {
+    const next = new Set(pinningConversationIdsRef.current);
+    if (pinning) {
+      next.add(conversationId);
+    } else {
+      next.delete(conversationId);
+    }
+    pinningConversationIdsRef.current = next;
+    setPinningConversationIds(next);
   }
 
   const enqueueMessage = useCallback((content: string) => {
@@ -840,6 +1060,7 @@ export function App(): React.ReactElement {
   const previousRunActivityRef = useRef<{ readonly runId?: string; readonly responding: boolean }>({ responding: false });
   const queueReadyAfterRunRef = useRef<string | undefined>(undefined);
   const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
+  const pinningConversationIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const previousRunActivity = previousRunActivityRef.current;
     const activeRun = currentRun.run;
@@ -870,9 +1091,9 @@ export function App(): React.ReactElement {
   async function submitDeepInput(explicitGoal?: string): Promise<void> {
     const trimmed = (explicitGoal ?? goal).trim();
     if (trimmed.length === 0) return;
-    const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId ?? app.deepSelectedRunId;
-    const activeDeepRunStatus = app.deep?.run.status ??
-      app.deepRuns.find((run) => run.runId === activeDeepRunId)?.status;
+    const epoch = deepOpenEpochRef.current + 1;
+    deepOpenEpochRef.current = epoch;
+    const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId;
     if (app.deepBusy) {
       if (activeDeepRunId === undefined) {
         setApp((previous) => ({
@@ -883,23 +1104,30 @@ export function App(): React.ReactElement {
       }
       setGoal("");
       setAttachments([]);
+      setApp((previous) => ({
+        ...previous,
+        deepPendingGoal: trimmed,
+        error: undefined,
+      }));
       try {
         await requestDeepRunCorrection(activeDeepRunId, [trimmed]);
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
         setApp((previous) => ({ ...previous, error: undefined }));
         deepRunUpdateController.startPolling(activeDeepRunId);
       } catch (error) {
-        if (mountedRef.current) {
-          setApp((previous) => ({ ...previous, error: errorText(error, "补充多 Agent 上下文失败。") }));
+        if (mountedRef.current && deepOpenEpochRef.current === epoch) {
+          setApp((previous) => ({
+            ...previous,
+            deepPendingGoal: undefined,
+            error: errorText(error, "补充 Agent 集群上下文失败。"),
+          }));
         }
       }
       return;
     }
     const terminalActiveRunId =
-      activeDeepRunId !== undefined &&
-      activeDeepRunStatus !== undefined &&
-      isTerminalDeepRunStatus(activeDeepRunStatus)
-        ? activeDeepRunId
+      app.deep !== undefined && isTerminalDeepRunStatus(app.deep.run.status)
+        ? app.deep.run.runId
         : undefined;
     const deepConversationId =
       app.deepConversation?.conversationId ??
@@ -926,40 +1154,117 @@ export function App(): React.ReactElement {
         workspaceDirectory: selectedWorkspaceDirectory,
         taskSoilInput: taskSoilInputFromAttachments(attachments),
       });
-      if (!mountedRef.current) return;
-      if (response.status === "running") {
-        setApp((previous) => ({
-          ...previous,
-          deep: undefined,
-          deepConversation: response.conversation,
-          deepIntakeStatus: response.status,
-          deepBusy: true,
-          deepPendingGoal: trimmed,
-          deepActiveRunId: response.run.runId,
-          deepSelectedRunId: response.run.runId,
-          error: undefined,
-        }));
-        deepRunUpdateController.startPolling(response.run.runId);
-        return;
-      }
+      if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
+      const conversationSummary = deepConversationSummaryFromView(response.conversation);
+      const preservedView = terminalActiveRunId !== undefined && app.deep?.run.runId === terminalActiveRunId
+        ? app.deep
+        : undefined;
       setApp((previous) => ({
         ...previous,
-        deep: undefined,
+        deep: preservedView,
         deepConversation: response.conversation,
+        deepConversations: upsertDeepConversationSummary(previous.deepConversations, conversationSummary),
         deepIntakeStatus: response.status,
         deepBusy: false,
         deepPendingGoal: undefined,
         deepActiveRunId: undefined,
-        deepSelectedRunId: undefined,
+        deepSelectedRunId: response.status === "plan_ready" ? terminalActiveRunId : undefined,
         error: undefined,
       }));
     } catch (error) {
-      if (mountedRef.current) {
+      if (mountedRef.current && deepOpenEpochRef.current === epoch) {
         setApp((previous) => ({
           ...previous,
           deepBusy: false,
           deepPendingGoal: undefined,
-          error: errorText(error, "多 Agent 理解失败。"),
+          error: errorText(error, "Agent 集群理解失败。"),
+        }));
+      }
+    }
+  }
+
+  async function startConfirmedDeepRun(input: {
+    readonly intakeTurnId?: string;
+    readonly confirmedObjective: string;
+    readonly confirmedPlan: string;
+  }): Promise<void> {
+    const conversationId = app.deepConversation?.conversationId;
+    if (conversationId === undefined || app.deepBusy) {
+      return;
+    }
+    const objective = input.confirmedObjective.trim();
+    const plan = input.confirmedPlan.trim();
+    if (objective.length === 0 || plan.length === 0) {
+      setApp((previous) => ({ ...previous, error: "开始深度研究前需要保留主题和计划。" }));
+      return;
+    }
+    const epoch = deepOpenEpochRef.current + 1;
+    deepOpenEpochRef.current = epoch;
+    setApp((previous) => ({
+      ...previous,
+      deepBusy: true,
+      deepPendingGoal: objective,
+      deepActiveRunId: undefined,
+      deepSelectedRunId: undefined,
+      error: undefined,
+    }));
+    try {
+      const parentRunStatus = app.deepSelectedRunId === undefined
+        ? undefined
+        : app.deep?.run.runId === app.deepSelectedRunId
+          ? app.deep.run.status
+          : app.deepRuns.find((run) => run.runId === app.deepSelectedRunId)?.status;
+      const parentRunConversationId = app.deepSelectedRunId === undefined
+        ? undefined
+        : app.deep?.run.runId === app.deepSelectedRunId
+          ? app.deep.run.conversationId
+          : app.deepRuns.find((run) => run.runId === app.deepSelectedRunId)?.conversationId;
+      const parentRunId =
+        app.deepIntakeStatus === "plan_ready" &&
+        app.deepSelectedRunId !== undefined &&
+        parentRunStatus !== undefined &&
+        isTerminalDeepRunStatus(parentRunStatus) &&
+        parentRunConversationId === conversationId
+          ? app.deepSelectedRunId
+          : undefined;
+      const response = await requestStartConfirmedDeepRun({
+        conversationId,
+        parentRunId,
+        intakeTurnId: input.intakeTurnId,
+        confirmedObjective: objective,
+        confirmedPlan: plan,
+        aiMode,
+        workspaceDirectory: selectedWorkspaceDirectory,
+      });
+      if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;
+      const conversationSummary = response.conversation === undefined
+        ? undefined
+        : {
+            ...deepConversationSummaryFromView(response.conversation),
+            intakeStatus: "running" as const,
+          };
+      setApp((previous) => ({
+        ...previous,
+        deep: undefined,
+        deepConversation: response.conversation ?? previous.deepConversation,
+        deepConversations: conversationSummary === undefined
+          ? previous.deepConversations
+          : upsertDeepConversationSummary(previous.deepConversations, conversationSummary),
+        deepIntakeStatus: "running",
+        deepBusy: true,
+        deepPendingGoal: objective,
+        deepActiveRunId: response.run.runId,
+        deepSelectedRunId: response.run.runId,
+        error: undefined,
+      }));
+      deepRunUpdateController.startPolling(response.run.runId);
+    } catch (error) {
+      if (mountedRef.current && deepOpenEpochRef.current === epoch) {
+        setApp((previous) => ({
+          ...previous,
+          deepBusy: false,
+          deepPendingGoal: undefined,
+          error: errorText(error, "启动深度研究失败。"),
         }));
       }
     }
@@ -967,17 +1272,43 @@ export function App(): React.ReactElement {
 
   async function stopDeepTask(): Promise<void> {
     const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId;
-    if (activeDeepRunId === undefined || !app.deepBusy) {
+    const canStop = app.deep?.run.runtimeHealth?.canStop === true || app.deepBusy;
+    if (activeDeepRunId === undefined || !canStop) {
       return;
     }
     try {
-      await requestDeepRunStop(activeDeepRunId);
+      const response = await requestDeepRunStop(activeDeepRunId);
       if (!mountedRef.current) return;
+      if (response.status === "stopped") {
+        const view = response.view;
+        const summary = deepRunSummaryFromView(view);
+        const conversationSummary = view.conversation === undefined
+          ? undefined
+          : deepConversationSummaryFromView(view.conversation, summary);
+        const intakeStatus = conversationSummary?.intakeStatus;
+        setApp((previous) => ({
+          ...previous,
+          deep: view,
+          deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+          deepConversations: conversationSummary === undefined
+            ? previous.deepConversations
+            : upsertDeepConversationSummary(previous.deepConversations, conversationSummary),
+          deepConversation: view.conversation ?? previous.deepConversation,
+          deepActiveRunId: undefined,
+          deepSelectedRunId: view.run.runId,
+          deepIntakeStatus: intakeStatus,
+          deepPendingGoal: undefined,
+          deepBusy: false,
+          error: undefined,
+        }));
+        deepRunUpdateController.stopPolling();
+        return;
+      }
       setApp((previous) => ({ ...previous, deepBusy: true, error: undefined }));
       deepRunUpdateController.startPolling(activeDeepRunId);
     } catch (error) {
       if (mountedRef.current) {
-        setApp((previous) => ({ ...previous, error: errorText(error, "停止多 Agent 运行失败。") }));
+        setApp((previous) => ({ ...previous, error: errorText(error, "停止 Agent 集群运行失败。") }));
       }
     }
   }
@@ -992,17 +1323,31 @@ export function App(): React.ReactElement {
       const response = await requestDeepChildMessage(activeDeepRunId, childRunId, message);
       if (!mountedRef.current) return;
       const view = applyQueuedChildOperationProjection(response);
+      const keepBusy = response.status === "queued" || shouldKeepDeepRunBusy(view.run);
+      const keepPolling = shouldPollDeepRun(view.run);
       const summary = deepRunSummaryFromView(view);
+      const conversationSummary = view.conversation === undefined
+        ? undefined
+        : deepConversationSummaryFromView(view.conversation, summary);
+      const intakeStatus = conversationSummary?.intakeStatus;
       setApp((previous) => ({
         ...previous,
         deep: view,
         deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+        deepConversations: conversationSummary === undefined
+          ? previous.deepConversations
+          : upsertDeepConversationSummary(previous.deepConversations, conversationSummary),
         deepActiveRunId: view.run.runId,
         deepSelectedRunId: view.run.runId,
-        deepBusy: response.status === "queued" || !isTerminalDeepRunStatus(view.run.status),
+        deepIntakeStatus: intakeStatus,
+        deepBusy: keepBusy,
         error: undefined,
       }));
-      deepRunUpdateController.startPolling(activeDeepRunId);
+      if (keepPolling) {
+        deepRunUpdateController.startPolling(activeDeepRunId);
+      } else {
+        deepRunUpdateController.stopPolling();
+      }
     } catch (error) {
       if (mountedRef.current) {
         setApp((previous) => ({ ...previous, error: errorText(error, "继续协作项失败。") }));
@@ -1034,17 +1379,31 @@ export function App(): React.ReactElement {
         guidance,
       );
       if (!mountedRef.current) return;
+      const keepBusy = shouldKeepDeepRunBusy(response.view.run);
+      const keepPolling = shouldPollDeepRun(response.view.run);
       const summary = deepRunSummaryFromView(response.view);
+      const conversationSummary = response.view.conversation === undefined
+        ? undefined
+        : deepConversationSummaryFromView(response.view.conversation, summary);
+      const intakeStatus = conversationSummary?.intakeStatus;
       setApp((previous) => ({
         ...previous,
         deep: response.view,
         deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+        deepConversations: conversationSummary === undefined
+          ? previous.deepConversations
+          : upsertDeepConversationSummary(previous.deepConversations, conversationSummary),
         deepActiveRunId: response.view.run.runId,
         deepSelectedRunId: response.view.run.runId,
-        deepBusy: !isTerminalDeepRunStatus(response.view.run.status),
+        deepIntakeStatus: intakeStatus,
+        deepBusy: keepBusy,
         error: undefined,
       }));
-      deepRunUpdateController.startPolling(activeDeepRunId);
+      if (keepPolling) {
+        deepRunUpdateController.startPolling(activeDeepRunId);
+      } else {
+        deepRunUpdateController.stopPolling();
+      }
     } catch (error) {
       if (mountedRef.current) {
         setApp((previous) => ({ ...previous, error: errorText(error, "处理协作项确认失败。") }));
@@ -1065,17 +1424,31 @@ export function App(): React.ReactElement {
     try {
       const response = await requestDeepRunResynthesis(activeDeepRunId);
       if (!mountedRef.current) return;
+      const keepBusy = shouldKeepDeepRunBusy(response.view.run);
+      const keepPolling = shouldPollDeepRun(response.view.run);
       const summary = deepRunSummaryFromView(response.view);
+      const conversationSummary = response.view.conversation === undefined
+        ? undefined
+        : deepConversationSummaryFromView(response.view.conversation, summary);
+      const intakeStatus = conversationSummary?.intakeStatus;
       setApp((previous) => ({
         ...previous,
         deep: response.view,
         deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
+        deepConversations: conversationSummary === undefined
+          ? previous.deepConversations
+          : upsertDeepConversationSummary(previous.deepConversations, conversationSummary),
         deepActiveRunId: response.view.run.runId,
         deepSelectedRunId: response.view.run.runId,
-        deepBusy: !isTerminalDeepRunStatus(response.view.run.status),
+        deepIntakeStatus: intakeStatus,
+        deepBusy: keepBusy,
         error: undefined,
       }));
-      deepRunUpdateController.startPolling(activeDeepRunId);
+      if (keepPolling) {
+        deepRunUpdateController.startPolling(activeDeepRunId);
+      } else {
+        deepRunUpdateController.stopPolling();
+      }
     } catch (error) {
       if (mountedRef.current) {
         setApp((previous) => ({ ...previous, error: errorText(error, "重新综合失败。") }));
@@ -1087,10 +1460,11 @@ export function App(): React.ReactElement {
     }
   }
 
+  const activeInputAgentMode: AgentMode = agentClusterActive ? "deep" : "normal";
   const inputProps = {
     value: goal,
     onChange: setGoal,
-    agentMode: app.agentMode,
+    agentMode: activeInputAgentMode,
     attachments,
     selectedWorkspaceDirectory,
     onSelectWorkspaceDirectory: () => void selectTaskWorkspace(),
@@ -1111,7 +1485,7 @@ export function App(): React.ReactElement {
     onModelSelect: selectInputModel,
     onOpenSettings: () => openSettings("models"),
     onSubmit: () => {
-      if (app.agentMode === "deep") {
+      if (agentClusterActive) {
         void submitDeepInput();
       } else if (app.busy || modelResponding) {
         enqueueMessage(goal);
@@ -1127,10 +1501,13 @@ export function App(): React.ReactElement {
       void cancelRun();
     },
   };
+  const hasBusyDeepRun = shouldKeepDeepRunBusy(app.deep?.run);
+  const hasPendingDeepRunBootstrap = app.deepActiveRunId !== undefined && app.deep === undefined;
+  const hasActiveDeepRun = hasBusyDeepRun || hasPendingDeepRunBootstrap;
   const deepInputProps = {
     ...inputProps,
-    busy: app.deepBusy && app.deep === undefined && app.deepActiveRunId === undefined,
-    running: app.deepBusy && (app.deep !== undefined || app.deepActiveRunId !== undefined),
+    busy: app.deepBusy && !hasActiveDeepRun,
+    running: app.deepBusy && hasActiveDeepRun,
     queuedMessages: undefined,
     onRemoveQueuedMessage: undefined,
     onUpdateQueuedMessage: undefined,
@@ -1138,7 +1515,7 @@ export function App(): React.ReactElement {
       app.deep?.run.status,
       app.deep?.liveProjection.phase,
       app.deepBusy,
-      app.deep !== undefined || app.deepActiveRunId !== undefined || app.deepSelectedRunId !== undefined,
+      hasActiveDeepRun,
       app.deepIntakeStatus,
     ),
     onSubmit: () => {
@@ -1151,8 +1528,7 @@ export function App(): React.ReactElement {
   };
 
   const isBootstrapping = app.config === undefined && app.conversations.length === 0 && app.error === undefined;
-  /** 多 Agent 模式进入专属工作区；是否已有 run 由工作区内部处理。 */
-  const deepActive = app.agentMode === "deep";
+  const deepActive = agentClusterActive;
   const startupIntro = useStartupIntro(isBootstrapping, { startupAnimationEnabled });
   const startupIntroStyle = useMemo(() => {
     const style = startupIntroTimingStyle(startupIntro.timing) as StartupIntroRootStyle;
@@ -1176,28 +1552,34 @@ export function App(): React.ReactElement {
       <Sidebar
         currentScreen={chatScreen}
         conversations={app.conversations}
+        deepConversations={app.deepConversations}
         deepRuns={app.deepRuns}
-        activeConversationId={app.agentMode === "deep" ? undefined : app.conversation?.conversationId}
-        activeDeepRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}
+        activeConversationId={agentClusterActive ? undefined : app.conversation?.conversationId}
+        activeDeepConversationId={app.deepConversation?.conversationId ?? app.deep?.run.conversationId}
+        activeDeepRunId={app.deep?.run.runId ?? app.deepActiveRunId}
         pendingCount={pendingCount}
         collapsed={sidebarCollapsed}
-        agentClusterActive={app.agentMode === "deep"}
-        onNew={openCurrentModeTaskEntry}
+        agentClusterActive={agentClusterActive}
+        agentClusterEnabled={agentClusterEnabled}
+        pinningConversationIds={pinningConversationIds}
+        onNew={openNormalTaskEntry}
+        onOpenAgentCluster={openAgentClusterEntry}
+        onOpenDeepConversation={(conversationId) => void openAgentClusterConversation(conversationId)}
         onOpenDeepRun={(runId) => void openAgentClusterRun(runId)}
         onOpen={openNormalConversation}
         onRename={(id, title) => void renameConversation(id, title)}
+        onRenameDeep={(id, title) => void renameDeepConversation(id, title)}
         onTogglePinned={(id, pinned) => void toggleConversationPinned(id, pinned)}
+        onToggleDeepPinned={(id, pinned) => void toggleDeepConversationPinned(id, pinned)}
         onDelete={(id) => void deleteConversation(id)}
+        onDeleteDeep={(id) => void deleteDeepConversation(id)}
         onOpenSettings={() => openSettings("models")}
       />
 
       <div className="app-workbench">
         <WorkbenchHeader
           collapsed={sidebarCollapsed}
-          agentMode={app.agentMode}
-          disabled={isBootstrapping || app.busy}
           onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
-          onModeChange={selectAgentMode}
         />
         {app.appUpdate?.status === "downloaded" && (
           <div className="app-update-ready-banner" role="status">
@@ -1221,15 +1603,15 @@ export function App(): React.ReactElement {
               intakeStatus={app.deepIntakeStatus}
               busy={app.deepBusy || deepChildOperationBusyId !== undefined}
               pendingGoal={app.deepPendingGoal}
-              runs={app.deepRuns}
-              activeRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}
               error={app.error}
               inputProps={deepInputProps}
               childOperationBusyId={deepChildOperationBusyId}
               resynthesisBusy={deepResynthesisBusy}
+              onStartConfirmedRun={startConfirmedDeepRun}
               onChildMessage={sendDeepChildMessage}
               onChildConfirmation={decideDeepChild}
               onResynthesize={resynthesizeDeepRun}
+              onStopRun={stopDeepTask}
             />
           )}
           {!isBootstrapping && !deepActive && chatScreen === "chat-empty" && (
@@ -1248,6 +1630,7 @@ export function App(): React.ReactElement {
               transcriptNodes={currentRun.transcriptNodes}
               detail={currentRun.detail}
               live={currentRun.live}
+              showModelUsage={modelUsageDisplayEnabled}
               error={app.error}
               pendingConfirmation={pendingConfirmation}
               onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
@@ -1273,6 +1656,10 @@ export function App(): React.ReactElement {
           setWorkspaceDirectory={setWorkspaceDirectory}
           desktopAgentSystemPrompt={desktopAgentSystemPrompt}
           setDesktopAgentSystemPrompt={setDesktopAgentSystemPrompt}
+          modelUsageDisplayEnabled={modelUsageDisplayEnabled}
+          onModelUsageDisplayChange={changeModelUsageDisplay}
+          agentClusterEnabled={agentClusterEnabled}
+          onAgentClusterEnabledChange={changeAgentClusterEnabled}
           savingModel={savingModel}
           savingWorkspace={savingWorkspace}
           savingDesktopAgent={savingDesktopAgent}
@@ -1325,19 +1712,67 @@ export function App(): React.ReactElement {
   );
 }
 
-function appUpdateReadyText(update: AppUpdateInfo): string {
-  const version = update.latest?.version;
-  return version === undefined || version === "unknown"
-    ? "新版本已下载"
-    : `新版本 ${version} 已下载`;
+function conversationPinnedAt(app: AppState, conversationId: string): string | undefined {
+  return app.conversation?.conversationId === conversationId
+    ? app.conversation.pinnedAt
+    : app.conversations.find((conversation) => conversation.conversationId === conversationId)?.pinnedAt;
+}
+
+function patchConversationPinnedAt(
+  app: AppState,
+  conversationId: string,
+  pinnedAt: string | undefined
+): AppState {
+  return {
+    ...app,
+    conversations: app.conversations.map((conversation) =>
+      conversation.conversationId === conversationId
+        ? { ...conversation, pinnedAt }
+        : conversation
+    ),
+    conversation: app.conversation?.conversationId === conversationId
+      ? { ...app.conversation, pinnedAt }
+      : app.conversation,
+  };
+}
+
+function deepConversationPinnedAt(app: AppState, conversationId: string): string | undefined {
+  return app.deepConversation?.conversationId === conversationId
+    ? app.deepConversation.pinnedAt
+    : app.deepConversations.find((conversation) => conversation.conversationId === conversationId)?.pinnedAt;
+}
+
+function patchDeepConversationPinnedAt(
+  app: AppState,
+  conversationId: string,
+  pinnedAt: string | undefined,
+): AppState {
+  return {
+    ...app,
+    deepConversations: app.deepConversations.map((conversation) =>
+      conversation.conversationId === conversationId
+        ? { ...conversation, pinnedAt }
+        : conversation
+    ),
+    deepConversation: app.deepConversation?.conversationId === conversationId
+      ? { ...app.deepConversation, pinnedAt }
+      : app.deepConversation,
+    deep:
+      app.deep?.conversation?.conversationId === conversationId
+        ? {
+          ...app.deep,
+          conversation: {
+            ...app.deep.conversation,
+            pinnedAt,
+          },
+        }
+        : app.deep,
+  };
 }
 
 function WorkbenchHeader(props: {
   readonly collapsed: boolean;
-  readonly agentMode: AgentMode;
-  readonly disabled: boolean;
   readonly onToggleSidebar: () => void;
-  readonly onModeChange: (mode: AgentMode) => void;
 }): React.ReactElement {
   const toggleLabel = props.collapsed ? "展开侧栏" : "收起侧栏";
   const hasDesktopWindowControls = typeof window !== "undefined" && window.agentarborDesktop !== undefined;
@@ -1354,26 +1789,6 @@ function WorkbenchHeader(props: {
           >
             {props.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
-          <div className="app-mode-switch" role="tablist" aria-label="工作模式">
-            <button
-              type="button"
-              className={`app-mode-switch-button ${props.agentMode === "normal" ? "active" : ""}`}
-              aria-pressed={props.agentMode === "normal"}
-              disabled={props.disabled}
-              onClick={() => props.onModeChange("normal")}
-            >
-              桌面 Agent
-            </button>
-            <button
-              type="button"
-              className={`app-mode-switch-button ${props.agentMode === "deep" ? "active" : ""}`}
-              aria-pressed={props.agentMode === "deep"}
-              disabled={props.disabled}
-              onClick={() => props.onModeChange("deep")}
-            >
-              多 Agent
-            </button>
-          </div>
         </div>
         {hasDesktopWindowControls && <DesktopWindowControls />}
       </div>
@@ -1445,6 +1860,13 @@ function errorText(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function appUpdateReadyText(update: AppUpdateInfo): string {
+  const version = update.latest?.version;
+  return version === undefined || version === "unknown"
+    ? "新版本已下载"
+    : `新版本 ${version} 已下载`;
+}
+
 function startupIntroEmptyGridTopPadding(targetHeight: number): number {
   return Math.round(Math.min(Math.max(targetHeight * 0.16, 112), 154));
 }
@@ -1454,7 +1876,7 @@ function deepInputPlaceholder(
   phase: DeepLivePhase | undefined,
   busy: boolean,
   hasActiveRun: boolean,
-  intakeStatus: "needs_input" | "answered" | "running" | undefined,
+  intakeStatus: "needs_input" | "answered" | "plan_ready" | "running" | undefined,
 ): string {
   if (busy && !hasActiveRun) {
     return "正在理解...";
@@ -1464,6 +1886,9 @@ function deepInputPlaceholder(
   }
   if (intakeStatus === "answered" && !hasActiveRun) {
     return "继续围绕当前主题补充...";
+  }
+  if (intakeStatus === "plan_ready" && !hasActiveRun) {
+    return "继续调整计划或确认开始...";
   }
   if (!hasActiveRun) {
     return "描述要协作处理的目标...";
@@ -1516,6 +1941,7 @@ function applyQueuedChildOperationProjection(response: DeepChildOperationRespons
 }
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "agentarbor.panel.sidebar.collapsed";
+const AGENT_CLUSTER_ENABLED_STORAGE_KEY = "agentarbor.panel.agent_cluster.enabled";
 
 function loadSidebarCollapsedPreference(): boolean {
   if (typeof window === "undefined") {
@@ -1525,6 +1951,28 @@ function loadSidebarCollapsedPreference(): boolean {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
   } catch {
     return false;
+  }
+}
+
+function loadAgentClusterEnabledPreference(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(AGENT_CLUSTER_ENABLED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistAgentClusterEnabledPreference(enabled: boolean): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(AGENT_CLUSTER_ENABLED_STORAGE_KEY, enabled ? "true" : "false");
+  } catch {
+    // Local preference persistence is best-effort only.
   }
 }
 

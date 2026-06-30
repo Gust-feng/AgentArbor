@@ -41,6 +41,8 @@ export function BasicCapabilitiesSettings(props: {
   }) => Promise<void>;
   readonly desktopAgentSystemPrompt: string;
   readonly setDesktopAgentSystemPrompt: (value: string) => void;
+  readonly modelUsageDisplayEnabled: boolean;
+  readonly onModelUsageDisplayChange: (enabled: boolean) => void;
   readonly savingDesktopAgent?: boolean;
   readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
   readonly onResetDesktopAgentSystemPrompt: () => Promise<void>;
@@ -53,16 +55,12 @@ export function BasicCapabilitiesSettings(props: {
 }): React.ReactElement {
   return (
     <div className="service-settings-stack">
-      <ModelInformationSettings
-        config={props.config}
-        modelCatalogs={props.modelCatalogs}
-        saving={props.savingModel}
-        onSave={props.onSaveModelCapabilities}
-      />
-      <SkillTriggerSettings
-        config={props.config}
+      <WebSearchSettings
+        tools={props.tools}
+        toolForm={props.toolForm}
+        setToolForm={props.setToolForm}
         saving={props.savingTools}
-        onSave={props.onSaveSkillTriggerMode}
+        onSaveTools={props.onSaveTools}
       />
       <DesktopAgentPromptSettings
         config={props.config}
@@ -72,14 +70,46 @@ export function BasicCapabilitiesSettings(props: {
         onSave={props.onSaveDesktopAgentSystemPrompt}
         onReset={props.onResetDesktopAgentSystemPrompt}
       />
-      <WebSearchSettings
-        tools={props.tools}
-        toolForm={props.toolForm}
-        setToolForm={props.setToolForm}
+      <ModelUsageDisplaySettings
+        enabled={props.modelUsageDisplayEnabled}
+        onChange={props.onModelUsageDisplayChange}
+      />
+      <SkillTriggerSettings
+        config={props.config}
         saving={props.savingTools}
-        onSaveTools={props.onSaveTools}
+        onSave={props.onSaveSkillTriggerMode}
+      />
+      <ModelInformationSettings
+        config={props.config}
+        modelCatalogs={props.modelCatalogs}
+        saving={props.savingModel}
+        onSave={props.onSaveModelCapabilities}
       />
     </div>
+  );
+}
+
+function ModelUsageDisplaySettings(props: {
+  readonly enabled: boolean;
+  readonly onChange: (enabled: boolean) => void;
+}): React.ReactElement {
+  return (
+    <section className="settings-card service-settings-card" aria-label="回答展示">
+      <h3>回答展示</h3>
+      <div className="model-info-toggle-grid" aria-label="回答展示开关">
+        <div className="model-info-toggle-row">
+          <span>模型 token 信息</span>
+          <button
+            type="button"
+            className="capability-toggle"
+            aria-pressed={props.enabled}
+            onClick={() => props.onChange(!props.enabled)}
+          >
+            {props.enabled ? "显示" : "隐藏"}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 

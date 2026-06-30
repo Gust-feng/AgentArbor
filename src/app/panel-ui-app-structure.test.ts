@@ -1,8 +1,17 @@
-import assert from "node:assert/strict";
+import nodeAssert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
+
+const assert = {
+  equal(actual: unknown, expected: unknown, message?: string): void {
+    nodeAssert.equal(actual, expected, message);
+  },
+  deepEqual(actual: unknown, expected: unknown, message?: string): void {
+    nodeAssert.deepEqual(actual, expected, message);
+  },
+};
 
 test("panel UI app shell delegates data and control work", async () => {
   const [
@@ -31,6 +40,7 @@ test("panel UI app shell delegates data and control work", async () => {
     appState,
     chatEmpty,
     chatTranscriptChain,
+    transcriptTimeline,
     sidebar,
     settingsDialog,
     capabilitySettings,
@@ -50,6 +60,7 @@ test("panel UI app shell delegates data and control work", async () => {
     chatMessageStyles,
     motionResponsiveStyles,
     workspaceStyles,
+    appModelUsageDisplay,
   ] = await Promise.all([
     readPanelUiSource("main.tsx"),
     readPanelUiSource("App.tsx"),
@@ -76,6 +87,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource("app-state.ts"),
     readPanelUiSource(path.join("components", "chat-empty.tsx")),
     readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
+    readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
     readPanelUiSource(path.join("components", "sidebar.tsx")),
     readPanelUiSource(path.join("components", "settings-dialog.tsx")),
     readPanelUiSource(path.join("components", "capability-settings.tsx")),
@@ -95,6 +107,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiStyle("chat-message.css"),
     readPanelUiStyle("motion-responsive.css"),
     readPanelUiStyle("workspace.css"),
+    readPanelUiSource("app-model-usage-display.ts"),
   ]);
 
   assert.equal(entry.includes('import { App } from "./App"'), true);
@@ -112,8 +125,11 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("transcriptNodesByRunId"), false);
   assert.equal(app.includes("loadConversationTranscriptNodesByRunId"), false);
   assert.equal(app.includes('from "./app-run-projection"'), true);
+  assert.equal(app.includes('from "./app-model-usage-display"'), true);
   assert.equal(app.includes('from "../../panel-context-window-usage"'), true);
   assert.equal(app.includes("contextWindowUsageFrom({"), true);
+  assert.equal(app.includes("capabilityPlan?.modelCapabilities.contextWindowTokens"), true);
+  assert.equal(app.includes("capabilityPlan.modelCapabilities.contextWindowTokens"), false);
   assert.equal(app.includes("latestModelUsageFromEvents(currentRun.events)"), true);
   assert.equal(app.includes("latestModelUsageFromTranscript(currentRun.transcriptNodes)"), true);
   assert.equal(app.includes("contextUsage,"), true);
@@ -124,6 +140,13 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(chatEmpty.includes('className="composer-context-usage"'), true);
   assert.equal(chatComposerStyles.includes(".composer-context-usage-svg"), true);
   assert.equal(chatComposerStyles.includes(".composer-context-usage-meter"), true);
+  assert.equal(app.includes("modelUsageDisplayEnabled"), true);
+  assert.equal(app.includes("showModelUsage={modelUsageDisplayEnabled}"), true);
+  assert.equal(app.includes("onModelUsageDisplayChange={changeModelUsageDisplay}"), true);
+  assert.equal(appModelUsageDisplay.includes("agentarbor:model-usage-display"), true);
+  assert.equal(appModelUsageDisplay.includes('localStorage.getItem(STORAGE_MODEL_USAGE_DISPLAY_KEY) === "true"'), true);
+  assert.equal(appModelUsageDisplay.includes("return false"), true);
+  assert.equal(appModelUsageDisplay.includes("subscribeModelUsageDisplayChanged"), true);
   assert.equal(app.includes('from "./app-runtime-controls"'), true);
   assert.equal(app.includes('from "./app-attachments"'), true);
   assert.equal(app.includes('from "./app-bootstrap"'), true);
@@ -136,14 +159,17 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes('from "./app-state"'), true);
   assert.equal(app.includes('from "./app-skill-actions"'), false);
   assert.equal(app.includes("function refreshBootstrap"), false);
-  assert.equal(app.includes("refreshAppUpdateStatus,"), true);
   assert.equal(app.includes("checkAppUpdate,"), true);
-  assert.equal(app.includes("installAppUpdate,"), true);
   assert.equal(app.includes("saveModelCapabilities,"), true);
   assert.equal(app.includes("saveSkillTriggerMode,"), true);
   assert.equal(app.includes("appUpdate={app.appUpdate}"), true);
-  assert.equal(app.includes("onCheckAppUpdate={() => void checkAppUpdate()}"), true);
+  assert.equal(app.includes("refreshAppUpdateStatusRef.current()"), true);
+  assert.equal(app.includes("autoAppUpdateCheckRequestedRef"), true);
+  assert.equal(app.includes("checkAppUpdateRef.current()"), true);
+  assert.equal(app.includes('app.appUpdate?.status === "downloaded"'), true);
+  assert.equal(app.includes("app-update-ready-banner"), true);
   assert.equal(app.includes("onInstallAppUpdate={() => void installAppUpdate()}"), true);
+  assert.equal(app.includes("onCheckAppUpdate={() => void checkAppUpdate()}"), true);
   assert.equal(app.includes("onSaveModelCapabilities={saveModelCapabilities}"), true);
   assert.equal(app.includes("onSaveSkillTriggerMode={(mode) => void saveSkillTriggerMode(mode)}"), true);
   assert.equal(appConfigActions.includes("export async function saveModelCapabilityConfig"), true);
@@ -171,11 +197,12 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("function startSkillChat"), false);
   assert.equal(app.includes("app.busy || modelResponding"), true);
   assert.equal(app.includes("queueReadyAfterRunRef"), true);
-  assert.equal(app.includes('if (app.agentMode === "deep") {\n        void submitDeepInput();'), true);
+  assert.equal(app.includes("if (agentClusterActive) {\n        void submitDeepInput();"), true);
   assert.equal(app.includes("} else if (app.busy || modelResponding) {\n        enqueueMessage(goal);"), true);
-  assert.equal(app.includes('const chatScreen = app.agentMode === "deep"'), true);
+  assert.equal(app.includes('const agentClusterActive = agentClusterEnabled && app.agentMode === "deep";'), true);
   assert.equal(app.includes("function openNormalTaskEntry"), true);
   assert.equal(app.includes('changeAgentMode("normal");\n    setSelectedWorkspaceDirectory(undefined);\n    resetChat();'), true);
+  assert.equal(app.includes("deepOpenEpochRef.current += 1;\n    deepRunUpdateController.stopPolling();\n    changeAgentMode(\"normal\");"), true);
   assert.equal(app.includes("function openNormalAgentEntry"), true);
   assert.equal(app.includes("deepRunUpdateController.stopPolling();"), true);
   assert.equal(app.includes('setScreen(app.conversation !== undefined || app.run !== undefined ? "chat-active" : "chat-empty");'), true);
@@ -185,125 +212,178 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("app.deep?.run.workspaceFolder?.path"), true);
   assert.equal(app.includes("summary?.workspaceFolder?.path") || app.includes("view.run.workspaceFolder?.path"), true);
   assert.equal(app.includes("function openAgentClusterEntry"), true);
-  assert.equal(app.includes("function openCurrentModeTaskEntry"), true);
+  assert.equal(app.includes("function openCurrentModeTaskEntry"), false);
   assert.equal(app.includes('agentMode: "deep"'), true);
   assert.equal(app.includes('from "./app-deep-intake"'), true);
   assert.equal(app.includes('from "./app-deep-task-submission"'), false);
   assert.equal(app.includes('from "./components/multi-agent-workspace"'), true);
   assert.equal(app.includes('from "./components/deep-view"'), false);
   assert.equal(app.includes('from "./app-deep-history"'), true);
-  assert.equal(app.includes("latestActiveDeepRun(bootstrap.deepRuns)"), true);
+  assert.equal(app.includes("latestActiveDeepRun(bootstrap.deepRuns)"), false);
+  assert.equal(app.includes("latestRestorableDeepConversation(app.deepConversations)"), true);
   assert.equal(app.includes("latestRestorableDeepRun(app.deepRuns)"), true);
-  assert.equal(app.includes("openAgentClusterRun(activeDeepRun.runId, { auto: true })"), true);
+  const openAgentClusterEntryIndex = app.indexOf("function openAgentClusterEntry");
+  assert.equal(openAgentClusterEntryIndex >= 0, true);
+  assert.equal(
+    app.indexOf("latestRestorableDeepConversation(app.deepConversations)", openAgentClusterEntryIndex) <
+      app.indexOf("latestRestorableDeepRun(app.deepRuns)", openAgentClusterEntryIndex),
+    true,
+  );
+  assert.equal(app.includes("deepOpenEpochRef.current += 1;"), true);
+  assert.equal(app.includes("if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;"), true);
+  assert.equal(app.includes("openAgentClusterRun(activeDeepRun.runId, { auto: true })"), false);
+  assert.equal(app.includes("function openAgentClusterConversation"), true);
+  assert.equal(app.includes("getDeepConversation(conversationId)"), true);
   assert.equal(app.includes("openDeepRun(runId)"), true);
   assert.equal(app.includes("deepSelectedRunId"), true);
-  assert.equal(app.includes('const deepActive = app.agentMode === "deep"'), true);
+  assert.equal(app.includes("const deepActive = agentClusterActive"), true);
   assert.equal(app.includes("<MultiAgentWorkspace"), true);
   assert.equal(app.includes("<DeepView"), false);
   assert.equal(app.includes("conversation={app.deepConversation}"), true);
   assert.equal(app.includes("intakeStatus={app.deepIntakeStatus}"), true);
   assert.equal(app.includes("busy={app.deepBusy || deepChildOperationBusyId !== undefined}"), true);
   assert.equal(app.includes("pendingGoal={app.deepPendingGoal}"), true);
-  assert.equal(app.includes("runs={app.deepRuns}"), true);
-  assert.equal(app.includes("activeRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}"), true);
+  assert.equal(app.includes("runs={app.deepRuns}"), false);
+  assert.equal(app.includes("activeRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}"), false);
   assert.equal(app.includes("onOpenRun={(runId) => void openAgentClusterRun(runId)}"), false);
   assert.equal(app.includes("childOperationBusyId={deepChildOperationBusyId}"), true);
   assert.equal(app.includes("resynthesisBusy={deepResynthesisBusy}"), true);
   assert.equal(app.includes("onChildMessage={sendDeepChildMessage}"), true);
   assert.equal(app.includes("onChildConfirmation={decideDeepChild}"), true);
   assert.equal(app.includes("onResynthesize={resynthesizeDeepRun}"), true);
+  assert.equal(app.includes("onStopRun={stopDeepTask}"), true);
+  assert.equal(app.includes("const keepBusy = shouldKeepDeepRunBusy(view.run);"), true);
+  assert.equal(app.includes("const keepPolling = shouldPollDeepRun(view.run);"), true);
+  assert.equal(app.includes("const canStop = app.deep?.run.runtimeHealth?.canStop === true || app.deepBusy;"), true);
+  assert.equal(app.includes("const hasBusyDeepRun = shouldKeepDeepRunBusy(app.deep?.run);"), true);
+  assert.equal(app.includes("const hasActiveDeepRun = hasBusyDeepRun || hasPendingDeepRunBootstrap;"), true);
   assert.equal(app.includes("selectedWorkspaceDirectory: undefined"), false);
   assert.equal(app.includes("onSelectWorkspaceDirectory: undefined"), false);
   assert.equal(app.includes("agentClusterDisabled="), false);
-  assert.equal(app.includes("onOpenAgentCluster="), false);
-  assert.equal(app.includes('agentMode={app.agentMode}'), true);
-  assert.equal(app.includes("app-update-ready-banner"), true);
-  assert.equal(app.includes("function appUpdateReadyText"), true);
-  assert.equal(app.includes('onModeChange={selectAgentMode}'), true);
-  assert.equal(app.includes("桌面 Agent"), true);
-  assert.equal(app.includes("多 Agent"), true);
-  assert.equal(multiAgentWorkspace.includes("export function MultiAgentWorkspace"), true);
-  assert.equal(multiAgentWorkspace.includes("<DeepView"), true);
-  assert.equal(multiAgentWorkspace.includes("conversation={props.conversation}"), true);
-  assert.equal(multiAgentWorkspace.includes("intakeStatus={props.intakeStatus}"), true);
-  assert.equal(multiAgentWorkspace.includes("ChatInputBar"), true);
-  assert.equal(multiAgentWorkspace.includes('aria-label="多 Agent 工作区"'), true);
-  assert.equal(multiAgentWorkspace.includes("准备新的多 Agent 任务"), false);
-  assert.equal(multiAgentWorkspace.includes("multi-agent-missionbar"), false);
-  assert.equal(multiAgentWorkspace.includes("最近任务"), false);
-  assert.equal(multiAgentWorkspace.includes("暂无历史"), false);
-  assert.equal(multiAgentWorkspace.includes("props.runs"), true);
-  assert.equal(multiAgentWorkspace.includes("key={run.runId}"), false);
-  assert.equal(multiAgentWorkspace.includes("selectedChildRunId"), true);
-  assert.equal(multiAgentWorkspace.includes("setSelectedChildRunId"), true);
-  assert.equal(multiAgentWorkspace.includes("with-side-panel"), true);
-  assert.equal(multiAgentWorkspace.includes("with-child-inspector"), true);
-  assert.equal(multiAgentWorkspace.includes("<DeepCollaborationIndex"), true);
-  assert.equal(multiAgentWorkspace.includes("runStatusLabel={statusLabel"), true);
-  assert.equal(multiAgentWorkspace.includes('className="multi-agent-reading-shell"'), true);
+  assert.equal(app.includes("onOpenAgentCluster={openAgentClusterEntry}"), true);
+  assert.equal(app.includes('agentMode={app.agentMode}'), false);
+  assert.equal(app.includes('onModeChange={selectAgentMode}'), false);
+  assert.equal(app.includes("桌面 Agent"), false);
+  assert.equal(app.includes("Agent 集群"), true);
+  assertIncludesAll(multiAgentWorkspace, [
+    "export function MultiAgentWorkspace",
+    "selectedComposerModel",
+    "assistantModel",
+    "<DeepView",
+    "<DeepWorkItemDetailPanel",
+    "deepRunWorkItemExists",
+    "selectedWorkItem",
+    "setSelectedWorkItem",
+    "conversation={props.conversation}",
+    "intakeStatus={props.intakeStatus}",
+    "onStartConfirmedRun={props.onStartConfirmedRun}",
+    "resynthesisBusy={props.resynthesisBusy || props.childOperationBusyId !== undefined}",
+    "onResynthesize={props.onResynthesize}",
+    "onStopRun={props.onStopRun}",
+    "ChatInputBar",
+    'aria-label="Agent 集群工作区"',
+    "with-work-detail",
+    "props.view !== undefined && selectedWorkItem !== undefined",
+    'className="multi-agent-reading-shell"',
+  ]);
+  assertExcludesAll(multiAgentWorkspace, [
+    "<DeepTaskSidebar",
+    "<DeepParentWorkflowPane",
+    "<DeepWorkflowDetailPanel",
+    "selectedWorkflowItem",
+    "selectedNode",
+    "selectedWorkItem.kind === \"child_agent\"",
+    "准备新的 Agent 集群任务",
+    "multi-agent-missionbar",
+    "最近任务",
+    "暂无历史",
+    "props.runs",
+    "props.activeRunId",
+    "key={run.runId}",
+    "with-task-sidebar",
+    "with-workflow-detail",
+    "with-side-panel",
+    "runStatusLabel={statusLabel",
+  ]);
   assert.equal(
     multiAgentWorkspace.indexOf('className="multi-agent-commandbar"') >
       multiAgentWorkspace.indexOf('className="multi-agent-reading-shell"'),
     true,
   );
-  assert.equal(multiAgentWorkspace.includes("<DeepChildInspector"), true);
-  assert.equal(multiAgentWorkspace.includes("API path"), false);
-  assert.equal(multiAgentWorkspace.includes("raw event type"), false);
-  assert.equal(multiAgentWorkspace.includes("Deep 模式"), false);
-  assert.equal(deepView.includes("export function DeepView"), true);
-  assert.equal(deepView.includes("function DeepChatView"), true);
-  assert.equal(deepView.includes("function DeepPanelView"), false);
-  assert.equal(deepView.includes("function DeepResultCanvas"), false);
-  assert.equal(deepView.includes("function DeepPlanSummary"), false);
-  assert.equal(deepView.includes("function DeepRunCounters"), false);
-  assert.equal(deepView.includes("function DeepIntakeChatView"), true);
-  assert.equal(deepView.includes("deepIntakeChatItems"), true);
-  assert.equal(deepView.includes("type DeepChatItem"), true);
-  assert.equal(deepView.includes("<DeepRunTree"), false);
-  assert.equal(deepView.includes("<DeepConclusion"), false);
-  assert.equal(deepView.includes('from "./deep-run-tree"'), false);
-  assert.equal(deepView.includes('from "./deep-conclusion"'), false);
-  assert.equal(deepView.includes("export type DeepChildInspectorViewModel"), true);
-  assert.equal(deepView.includes("export type DeepCollaborationIndexItemViewModel"), true);
-  assert.equal(deepView.includes("export function DeepChildInspector"), true);
-  assert.equal(deepView.includes("export function DeepCollaborationIndex"), true);
-  assert.equal(deepView.includes("childInspectorViewModel"), true);
-  assert.equal(deepView.includes("DeepLiveChildWorkflowItem"), true);
-  assert.equal(deepView.includes("DeepStageNavigator"), false);
-  assert.equal(deepView.includes("DeepFocusOutput"), false);
-  assert.equal(deepView.includes("DeepModelOutputPanel"), false);
-  assert.equal(deepView.includes("DeepChildWorklist"), false);
-  assert.equal(deepView.includes("DeepWorkflowStrip"), false);
-  assert.equal(deepView.includes('className="deep-workflow-strip"'), false);
-  assert.equal(deepView.includes("deep-workflow-pending"), false);
-  assert.equal(deepView.includes("DeepChildActivityStrip"), false);
-  assert.equal(deepView.includes("DeepChildActivityCard"), false);
-  assert.equal(deepView.includes("CompactConclusion"), false);
-  assert.equal(deepView.includes("DeepBriefDetails"), false);
-  assert.equal(deepView.includes("DeepDetailStageRail"), false);
-  assert.equal(deepView.includes("DeepRunRefs"), false);
-  assert.equal(deepView.includes('aria-label="助手回复"'), true);
-  assert.equal(deepView.includes('aria-label="协作进展"'), false);
-  assert.equal(deepView.includes('aria-label="协作项索引"'), true);
-  assert.equal(deepView.includes('aria-label="协作项详情"'), true);
-  assert.equal(deepView.includes('aria-label="协作项工作流程"'), true);
-  assert.equal(deepView.includes('className="deep-flow-canvas"'), false);
-  assert.equal(deepView.includes("deep-stage-navigator"), false);
-  assert.equal(deepView.includes("deep-process-node"), false);
-  assert.equal(deepView.includes("deep-focus-output"), false);
-  assert.equal(deepView.includes('className="deep-workbench-layout"'), false);
-  assert.equal(deepView.includes('className="deep-workbench-sidebar"'), false);
-  assert.equal(deepView.includes('className="deep-workbench-main"'), false);
-  assert.equal(deepView.includes('aria-label="多 Agent 模型输出"'), false);
+  assertExcludesAll(multiAgentWorkspace, ["API path", "raw event type", "Deep 模式"]);
+  assertIncludesAll(deepView, [
+    "export function DeepView",
+    "export function DeepWorkItemDetailPanel",
+    "function DeepRunTranscriptPane",
+    "function DeepPlanConfirmationCard",
+    "function DeepIntakeChatView",
+    "AssistantMessageLabel",
+    "assistantModel?: AssistantModelBadge",
+    "deepIntakeChatItems",
+    "type DeepChatItem",
+    "DeepLiveChildWorkflowItem",
+    "chat-active-screen",
+    "chat-active-scroll",
+    "chat-active-grid",
+    "session-stream",
+    'aria-label="助手回复"',
+    'aria-label="计划确认"',
+    'aria-label="助手回复"',
+    'aria-label="详情"',
+  ]);
+  assertExcludesAll(deepView, [
+    "export function DeepTaskSidebar",
+    "export function DeepParentWorkflowPane",
+    "export function DeepWorkflowDetailPanel",
+    "function DeepChatView",
+    "function DeepPanelView",
+    "function DeepResultCanvas",
+    "function DeepPlanSummary",
+    "function DeepRunCounters",
+    "<DeepRunTree",
+    'from "./deep-run-tree"',
+    'from "./deep-conclusion"',
+    "DeepStageNavigator",
+    "DeepFocusOutput",
+    "DeepModelOutputPanel",
+    "DeepChildWorklist",
+    "DeepWorkflowStrip",
+    'className="deep-workflow-strip"',
+    "deep-workflow-pending",
+    "DeepChildActivityStrip",
+    "DeepChildActivityCard",
+    "CompactConclusion",
+    "DeepBriefDetails",
+    "DeepDetailStageRail",
+    "DeepRunRefs",
+    'aria-label="任务侧栏"',
+    'aria-label="协作摘要"',
+    'aria-label="当前协作项"',
+    'aria-label="材料与产物"',
+    'aria-label="父 Agent 工作流"',
+    'aria-label="工作流详情"',
+    'aria-label="模型工作流"',
+    'aria-label="协作进展"',
+    'className="deep-flow-canvas"',
+    "deep-stage-navigator",
+    "deep-process-node",
+    "deep-focus-output",
+    'className="deep-workbench-layout"',
+    'className="deep-workbench-sidebar"',
+    'className="deep-workbench-main"',
+    'aria-label="Agent 集群模型输出"',
+  ]);
   assert.equal(deepView.includes('label: "计划"'), false);
   assert.equal(deepView.includes('label: "探索"'), false);
-  assert.equal(deepView.includes('label: "目标"'), false);
+  assert.equal(deepView.includes('label: "目标"'), true);
   assert.equal(deepView.includes('label: "综合"'), false);
   assert.equal(deepView.includes('label: "结论"'), false);
   assert.equal(deepView.includes('label: "判断"'), false);
   assert.equal(deepView.includes('label: "子任务"'), false);
   assert.equal(deepView.includes('label: "助手"'), true);
   assert.equal(deepView.includes('label: "父 Agent"'), false);
+  assert.equal(deepView.includes("<Bot size={14} />"), false);
+  assert.equal(deepView.includes('assistant-message-model">Agent 集群'), false);
   assert.equal(deepView.includes('kind: "user_goal"'), true);
   assert.equal(deepView.includes('kind: "parent_message"'), true);
   assert.equal(deepView.includes('kind: "system_notice"'), true);
@@ -312,7 +392,6 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(deepView.includes("resultCanvasState"), false);
   assert.equal(deepView.includes("DeepRunCounters"), false);
   assert.equal(deepView.includes("workboardSummary"), false);
-  assert.equal(deepView.includes("collaborationSummary"), true);
   assert.equal(deepView.includes("deep-brief-chips"), false);
   assert.equal(deepView.includes("modelOutputEntries"), false);
   assert.equal(deepView.includes("childOutputEntries"), false);
@@ -320,44 +399,158 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(deepView.includes("view.report?.childSummaries"), true);
   assert.equal(deepView.includes("view.report?.synthesisRecords.at(-1)"), true);
   assert.equal(deepView.includes("view.report?.conclusion"), true);
-  assert.equal(deepView.includes("liveChild?.workflowItems"), true);
-  assert.equal(deepView.includes("liveChild?.latestResult"), true);
-  assert.equal(deepView.includes("model.workflowItems.map"), true);
-  assert.equal(deepView.includes("deep-child-node-confidence"), false);
-  assert.equal(deepView.includes("deep-child-node-uncertainty"), false);
-  assert.equal(deepView.includes("child.parentOperation"), false);
-  assert.equal(deepView.includes("parentOperationLabel"), false);
-  assert.equal(deepView.includes("deep-child-node-parent-op"), false);
-  assert.equal(deepView.includes("DeepUserMessage"), true);
-  assert.equal(deepView.includes("DeepParentMessage"), true);
-  assert.equal(deepView.includes("DeepSystemNotice"), true);
-  assert.equal(deepView.includes("ChildNodeFollowup"), false);
-  assert.equal(deepView.includes("deep-child-node-followup"), false);
-  assert.equal(deepView.includes("deep-child-node-followup-toggle"), false);
-  assert.equal(deepView.includes("deep-child-inspector-scrollbody"), true);
-  assert.equal(deepView.includes("deep-child-inspector-actionbar"), true);
-  assert.equal(deepView.includes("deep-child-inspector-composer"), true);
-  assert.equal(deepView.includes("ChildNodeApproval"), true);
-  assert.equal(deepView.includes("deep-child-node-approval"), true);
-  assert.equal(deepView.includes("model.pendingApproval"), true);
-  assert.equal(deepView.includes("props.onChildMessage &&"), true);
-  assert.equal(deepView.includes("补充给这个协作项"), true);
-  assert.equal(deepView.includes("补充给这个子 Agent"), false);
-  assert.equal(deepView.includes("busy={props.childOperationBusyId !== undefined}"), false);
-  assert.equal(deepView.includes("busy={props.childOperationBusyId === child.childRunId}"), false);
-  assert.equal(deepView.includes("busy={props.busy}"), true);
-  assert.equal(deepView.includes("busy={busy || props.childOperationBusyId === child.childRunId}"), false);
-  assert.equal(deepView.includes("childStatusLabel"), true);
-  assert.equal(deepView.includes("phase === \"needs_input\""), true);
+  assertIncludesAll(deepView, [
+    "export type DeepPlanConfirmationViewModel",
+    "export type DeepRunTranscriptViewModel",
+    "export type DeepRunTranscriptBlock",
+    "export type DeepWorkItemDetailViewModel",
+    "export type DeepSelectedWorkItem",
+    "function deepPlanConfirmationViewModel",
+    "function deepRunTranscriptViewModel",
+    "function deepRunTranscriptBlocks",
+    "function deepConversationTranscriptBlocks",
+    "function managerDecisionComesBeforeChildren",
+    "function isChildLifecycleEvent",
+    "export function deepRunWorkItemExists",
+    "AgentWorkTimeline",
+    "ActivityItem",
+    "function detailTimelineView",
+    "function detailActivityItem",
+    "function activityStatusBadge",
+    "function childAgentImportantSignal",
+    "function childAgentSignalText",
+    "function compactWorklineText",
+    "function childDetailWorklineItems",
+    "function deepWorkItemDetailViewModel",
+    "function deepWorklineItems",
+    "function childRunWorklineItems",
+    "function childDetailVisibleWorklineItems",
+    "function isChildDetailConcreteActionItem",
+    "function childModelMessageWorklineItem",
+    "function childModelMessageText",
+    "function childToolCallWorklineItem",
+    "displayActivityItemsForNodes",
+    "function toolCallActivityItem",
+    "function toolCallExpandedSections",
+    "function toolCallBadges",
+    "call.summary ?? call.inputSummary",
+    "readonly expandedSections?: readonly ActivityExpandedSection[]",
+    "function executionSegmentWorklineItem",
+    "function runTranscriptWorkflowItems",
+    "function childAgentSummaryItems",
+    "conversation={props.conversation}",
+    "pendingGoal={props.pendingGoal}",
+    "deepIntakeChatItems(props.conversation.intakeTurns, props.intakeStatus)",
+    "function DeepRunTranscriptChildListBlock",
+    "deep-run-child-list-item",
+    'kind: "child_agent_list"',
+    "onSelectWorkItem={props.onSelectWorkItem}",
+    "view={detailTimelineView(detail.worklineItems)}",
+    "执行记录",
+    "条动作",
+    "liveChild?.workflowItems",
+    "liveChild?.latestResult",
+    "childRun.executionHistory",
+    "segment.modelMessages",
+    "工具调用前说明",
+    "child.childRun",
+    "label: input.label",
+    "DeepUserMessage",
+    "DeepConclusionMessage",
+    "DeepParentMessage",
+    "DeepSystemNotice",
+    "ChildTaskApproval",
+    "deep-child-task-approval",
+    "props.onChildMessage &&",
+    "补充给这个协作项",
+    "busy={props.busy}",
+    'kind: "conclusion"',
+    "readonly resynthesisBusy?: boolean",
+    "readonly onResynthesize?: () => void | Promise<void>;",
+  ]);
+  assertExcludesAll(deepView, [
+    "export type DeepRunConsoleViewModel",
+    "function DeepRunConsolePane",
+    "function deepRunConsoleViewModel",
+    "function runConsoleTimelineView",
+    "function runConsoleActivityItem",
+    "function runConsoleWorklineItems",
+    "function runConsoleWorkflowItems",
+    "type DeepTaskSidebarViewModel",
+    "type DeepTaskSidebarChildViewModel",
+    "function deepTaskSidebarViewModel",
+    "function taskSidebarPlanItems",
+    "function childTaskSidebarItems",
+    "export type DeepAgentWorkflowViewModel",
+    "export type DeepWorkflowItemViewModel",
+    "export type DeepWorkflowDetailViewModel",
+    "export function managerStepDetailViewModels",
+    "export function childTaskDetailViewModels",
+    "export function synthesisDetailViewModel",
+    "export function conclusionDetailViewModel",
+    "DeepCollaborationNodeIndex",
+    "DeepNodeInspector",
+    "deep-node-inspector",
+    "deep-child-node-confidence",
+    "deep-child-node-uncertainty",
+    "child.parentOperation",
+    "parentOperationLabel",
+    "deep-child-node-parent-op",
+    "ChildNodeFollowup",
+    "deep-child-node-followup",
+    "deep-child-node-followup-toggle",
+    "ChildNodeApproval",
+    "deep-child-node-approval",
+    "补充给这个子 Agent",
+    "busy={props.childOperationBusyId !== undefined}",
+    "busy={props.childOperationBusyId === child.childRunId}",
+    "busy={busy || props.childOperationBusyId === child.childRunId}",
+    "deep-work-detail-timeline",
+    "deep-work-detail-step",
+    "workflowItemTone(",
+    "function DeepActivityLine",
+    "formatShortTime",
+    "formatToolCountSummary",
+    "model.workflowItems.map",
+    "model.worklineItems.map",
+    "detail.worklineItems.map",
+    "agent-activity-step deep-run-workflow-item",
+    "deep-workline-title",
+    "deep-run-child-card",
+    "deep-run-child-grid",
+    "deep-run-child-section",
+    "model.result",
+    "deep-run-result",
+    "最新结果",
+    "deep-run-workflow-active",
+    "deep-run-workflow-complete",
+    "detail: child.latestResult ?? child.summary",
+    "function mergeToolWorklineItems",
+    "function canMergeToolWorklineItems",
+    "已合并连续工具调用",
+    "function childTranscriptResultText",
+    'text: childActivityIntro(view.liveProjection.children)',
+    'text: `${child.title}：${result}`',
+    "return mergeAdjacentAssistantTextBlocks(blocks);",
+    "function mergeAssistantText",
+    "这个目标还缺少关键范围",
+  ]);
+  assert.equal(deepView.includes("view.liveProjection.phase === \"needs_input\""), true);
+  assertIncludesAll(transcriptTimeline, [
+    "selectedItemKey",
+    "onSelectItem",
+    "data-selected",
+    "aria-pressed={selected}",
+  ]);
   assert.equal(deepView.includes("运行细节"), false);
   assert.equal(deepView.includes("我正在接手这个目标"), false);
   assert.equal(deepView.includes("协作记录"), false);
   assert.equal(deepView.includes("deep-record-section"), false);
   assert.equal(deepView.includes("deep-resynthesis-button"), false);
-  assert.equal(deepView.includes("needsResynthesis"), false);
+  assert.equal(deepView.includes("conclusionNeedsResynthesis"), true);
   assert.equal(deepView.includes("deep-resynthesis-state"), false);
-  assert.equal(deepView.includes("待重新综合"), false);
-  assert.equal(deepView.includes("重新综合"), false);
+  assert.equal(deepView.includes("待重新综合"), true);
+  assert.equal(deepView.includes("重新综合"), true);
   assert.equal(deepView.includes("父层重新综合"), false);
   assert.equal(deepView.includes("raw prompt"), false);
   assert.equal(deepView.includes("raw response"), false);
@@ -374,7 +567,9 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appDeepLiveUpdates.includes("/api/deep/runs/"), true);
   assert.equal(appDeepLiveUpdates.includes("openDeepRunStream"), true);
   assert.equal(appDeepLiveUpdates.includes("refreshQueued"), true);
-  assert.equal(appDeepLiveUpdates.includes("isTerminalDeepRunStatus"), true);
+  assert.equal(appDeepLiveUpdates.includes("shouldKeepDeepRunBusy"), true);
+  assert.equal(appDeepLiveUpdates.includes("shouldPollDeepRun"), true);
+  assert.equal(appDeepLiveUpdates.includes("isTerminalDeepRunStatus"), false);
   assert.equal(app.includes('from "./app-deep-live-updates"'), true);
   assert.equal(app.includes("requestDeepChildMessage(activeDeepRunId, childRunId, message)"), true);
   assert.equal(app.includes("applyQueuedChildOperationProjection(response)"), true);
@@ -389,12 +584,23 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appDeepControl.includes("/confirmations/${encodeURIComponent(confirmationId)}/decision"), true);
   assert.equal(appDeepControl.includes("export async function requestDeepRunResynthesis"), true);
   assert.equal(appDeepControl.includes("/resynthesize"), true);
+  assert.equal(appDeepControl.includes("export async function requestDeepRunStop"), true);
   assert.equal(appDeepControl.includes("export async function requestDeepRunFollowUp"), true);
   assert.equal(appDeepControl.includes("/follow-up"), true);
   assert.equal(appDeepIntake.includes("export async function requestDeepIntake"), true);
+  assert.equal(appDeepIntake.includes("export async function requestStartConfirmedDeepRun"), true);
   assert.equal(appDeepIntake.includes("/api/deep/intake"), true);
+  assert.equal(appDeepIntake.includes("/api/deep/conversations/${encodeURIComponent(input.conversationId)}/runs"), true);
   assert.equal(app.includes("requestDeepRunCorrection(activeDeepRunId"), true);
   assert.equal(app.includes("requestDeepIntake({"), true);
+  assert.equal(app.includes("requestStartConfirmedDeepRun({"), true);
+  assert.equal(app.includes('deepIntakeStatus: "running"'), true);
+  assert.equal(app.includes('app.deepIntakeStatus === "plan_ready"'), true);
+  assert.equal(app.includes('response.status === "plan_ready" ? terminalActiveRunId : undefined'), true);
+  assert.equal(app.includes("const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId ?? app.deepSelectedRunId"), false);
+  assert.equal(app.includes("const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId"), true);
+  assert.equal(app.includes("parentRunConversationId === conversationId"), true);
+  assert.equal(appDeepLiveUpdates.includes("currentPollToken !== pollToken"), true);
   assert.equal(app.includes("requestDeepRunFollowUp("), false);
   assert.equal(app.includes("requestDeepRunResynthesis(activeDeepRunId)"), true);
   assert.equal(app.includes("requestDeepRunStop(activeDeepRunId)"), true);
@@ -410,8 +616,12 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("conversationId: deepConversationId"), true);
   assert.equal(appDeepLiveUpdates.includes("deepConversation: view.conversation ?? previous.deepConversation"), true);
   assert.equal(appDeepIntake.includes("conversationId: input.conversationId"), true);
+  assert.equal(appDeepIntake.includes("parentRunId: input.parentRunId"), true);
+  assert.equal(appDeepIntake.includes("taskSoilInput: input.taskSoilInput"), true);
   assert.equal(app.includes("deepRunUpdateController.startPolling(response.run.runId)"), true);
   assert.equal(app.includes("deepPollTimerRef"), true);
+  assert.equal(appDeepLiveUpdates.includes("DEEP_POLL_TIMEOUT_MS"), false);
+  assert.equal(appDeepLiveUpdates.includes("Agent 集群运行超时"), false);
   assert.equal(app.includes("TODO(T3-4e)"), false);
   assert.equal(app.includes("SkillsPage"), false);
   assert.equal(app.includes("ToolsPage"), false);
@@ -443,17 +653,30 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appBootstrap.includes('getJson<{ readonly catalog?: readonly McpServerCatalogItem[] }>("/api/config/mcp")'), true);
   assert.equal(appBootstrap.includes("/api/skills"), true);
   assert.equal(appBootstrap.includes('/api/conversations'), true);
+  assert.equal(appBootstrap.includes('getJson<ListDeepConversationSummariesResponse>("/api/deep/conversations?limit=50")'), true);
   assert.equal(appBootstrap.includes('getJson<ListDeepRunSummariesResponse>("/api/deep/runs?limit=50")'), true);
-  assert.equal(appBootstrap.includes('Pick<AppState, "config" | "tools" | "appUpdate" | "skills" | "conversations" | "deepRuns">'), true);
+  assert.equal(appBootstrap.includes('"conversations" | "deepConversations" | "deepRuns"'), true);
+  assert.equal(appState.includes("readonly deepConversations: readonly DeepConversationSummary[]"), true);
   assert.equal(appState.includes("readonly deepRuns: readonly DeepRunSummary[]"), true);
   assert.equal(appState.includes("readonly deepSelectedRunId?: string"), true);
+  assert.equal(appState.includes("deepConversations: []"), true);
   assert.equal(appState.includes("deepRuns: []"), true);
+  assert.equal(appDeepHistory.includes("export async function listDeepConversations"), true);
+  assert.equal(appDeepHistory.includes("export async function getDeepConversation"), true);
   assert.equal(appDeepHistory.includes("export async function listDeepRuns"), true);
+  assert.equal(appDeepHistory.includes("/api/deep/conversations?limit="), true);
+  assert.equal(appDeepHistory.includes("/api/deep/conversations/${encodeURIComponent(conversationId)}"), true);
   assert.equal(appDeepHistory.includes("/api/deep/runs?limit="), true);
   assert.equal(appDeepHistory.includes("export async function openDeepRun"), true);
   assert.equal(appDeepHistory.includes("/api/deep/runs/${encodeURIComponent(runId)}/view"), true);
+  assert.equal(appDeepHistory.includes("deepConversationSummaryFromView"), true);
+  assert.equal(appDeepHistory.includes("upsertDeepConversationSummary"), true);
+  assert.equal(appDeepHistory.includes("latestRestorableDeepConversation"), true);
   assert.equal(appDeepHistory.includes("latestRestorableDeepRun"), true);
   assert.equal(appDeepHistory.includes("latestActiveDeepRun"), true);
+  assert.equal(appDeepHistory.includes("export function shouldKeepDeepRunBusy"), true);
+  assert.equal(appDeepHistory.includes("export function shouldPollDeepRun"), true);
+  assert.equal(appDeepHistory.includes('health === undefined || health === "active" || health === "stalled"'), true);
   assert.equal(appDeepHistory.includes("isTerminalDeepRunStatus"), true);
   assert.equal(appConfigActions.includes("export async function saveModelProviderConfig"), true);
   assert.equal(appConfigActions.includes("export async function createCustomModelProviderProfile"), true);
@@ -470,6 +693,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appConfigActions.includes('postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp"'), true);
   assert.equal(appUpdateActions.includes("export function loadAppUpdateStatus"), true);
   assert.equal(appUpdateActions.includes("export function checkAppUpdate"), true);
+  assert.equal(appUpdateActions.includes("export function installAppUpdate"), true);
   assert.equal(appUpdateActions.includes('getJson<AppUpdateInfo>("/api/app/update")'), true);
   assert.equal(appUpdateActions.includes('postJson<AppUpdateInfo>("/api/app/update/check"'), true);
   assert.equal(appUpdateActions.includes('postJson<AppUpdateInfo>("/api/app/update/install"'), true);
@@ -557,7 +781,11 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appConversationSession.includes("loadHistoricalTranscriptNodeEntries"), true);
   assert.equal(appConversationSession.includes("HISTORICAL_RUN_LOAD_CONCURRENCY = 4"), true);
   assert.equal(appConversationSession.includes("resetTranscriptNodesCache(conversationId)"), false);
+  assert.equal(appConversationSession.includes("resetTranscriptNodesCache()"), false);
   assert.equal(appConversationSession.includes("transcriptNodesByRunId"), true);
+  assert.equal(appTaskSubmission.includes("resetTranscriptNodesCache"), false);
+  assert.equal(appLiveRunUpdates.includes("function cacheSettledRunTranscriptNodes"), true);
+  assert.equal(appLiveRunUpdates.includes("updateTranscriptNodesCache(conversationId"), true);
   assert.equal(transcriptStore.includes("readonly nodesByConversationId"), true);
   assert.equal(transcriptStore.includes("transcriptNodesCacheForConversation"), true);
   assert.equal(transcriptStore.includes("transcriptNodesByRunIdForConversation"), true);
@@ -656,10 +884,26 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(capabilitySettings.includes("McpReferencePanel"), true);
   assert.equal(capabilitySettings.includes("onLoadMcpReferences"), true);
   assert.equal(capabilitySettings.includes("网络搜索"), true);
+  assert.equal(capabilitySettings.indexOf("<WebSearchSettings") < capabilitySettings.indexOf("<DesktopAgentPromptSettings"), true);
+  assert.equal(capabilitySettings.indexOf("<DesktopAgentPromptSettings") < capabilitySettings.indexOf("<SkillTriggerSettings"), true);
+  assert.equal(capabilitySettings.indexOf("<SkillTriggerSettings") < capabilitySettings.indexOf("<ModelInformationSettings"), true);
   assert.equal(capabilitySettings.includes("网页查证"), false);
   assert.equal(capabilitySettings.includes('from "../app-config-actions"'), false);
   assert.equal(capabilitySettings.includes("模型能力"), false);
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
+  assert.equal(capabilitySettings.includes("视觉输入"), true);
+  assert.equal(capabilitySettings.includes("思考强度"), true);
+  assert.equal(capabilitySettings.includes("上下文窗口"), true);
+  assert.equal(capabilitySettings.includes("最大输出"), true);
+  assert.equal(capabilitySettings.includes("API 风格"), false);
+  assert.equal(capabilitySettings.includes("稳定性"), false);
+  assert.equal(capabilitySettings.includes("验证日期"), false);
+  assert.equal(capabilitySettings.includes("工具调用"), false);
+  assert.equal(capabilitySettings.includes("并行工具"), false);
+  assert.equal(capabilitySettings.includes("结构化输出"), false);
+  assert.equal(capabilitySettings.includes("流式输出"), false);
+  assert.equal(capabilitySettings.includes("推理输出"), false);
+  assert.equal(capabilitySettings.includes("overrideCapabilities"), true);
   assert.equal(capabilitySettings.includes("这里配置可用服务和安全边界"), false);
   assert.equal(capabilitySettings.includes("由模型按任务判断"), false);
   assert.equal(capabilitySettings.includes("不替助手决定"), false);
@@ -702,30 +946,48 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(sidebar.includes("  Pin,"), false);
   assert.equal(sidebar.includes("Trash2"), false);
   assert.equal(sidebar.includes("  Plus,"), true);
-  assert.equal(sidebar.includes("  Network,"), false);
+  assert.equal(sidebar.includes("  Network,"), true);
   assert.equal(sidebar.includes("agentClusterActive"), true);
-  assert.equal(sidebar.includes("onOpenAgentCluster"), false);
+  assert.equal(sidebar.includes("agentClusterEnabled"), true);
+  assert.equal(sidebar.includes("onOpenAgentCluster"), true);
+  assert.equal(sidebar.includes("deepConversations"), true);
   assert.equal(sidebar.includes("deepRuns"), true);
+  assert.equal(sidebar.includes("activeDeepConversationId"), true);
   assert.equal(sidebar.includes("activeDeepRunId"), true);
+  assert.equal(sidebar.includes("onOpenDeepConversation"), true);
   assert.equal(sidebar.includes("onOpenDeepRun"), true);
-  assert.equal(sidebar.includes("DeepRunGroup"), true);
-  assert.equal(sidebar.includes("DeepRunFolderGroup"), true);
+  assert.equal(sidebar.includes("DeepConversationGroup"), true);
+  assert.equal(sidebar.includes("DeepConversationFolderGroup"), true);
   assert.equal(sidebar.includes("expandedRunGroupKeys"), true);
   assert.equal(sidebar.includes("props.runs.slice(0, 24)"), false);
-  assert.equal(sidebar.includes("props.runs.slice(0, DEFAULT_FOLDER_CONVERSATION_LIMIT)"), true);
-  assert.equal(sidebar.includes("DeepRunListItem"), true);
-  assert.equal(sidebar.includes("暂无多 Agent 任务"), true);
+  assert.equal(sidebar.includes("props.conversations.slice(0, DEFAULT_FOLDER_CONVERSATION_LIMIT)"), true);
+  assert.equal(sidebar.includes("DeepConversationListItem"), true);
+  assert.equal(sidebar.includes("deepConversationSummaryFromRun"), true);
+  assert.equal(sidebar.includes("暂无 Agent 集群任务"), true);
   assert.equal(sidebar.includes("!props.agentClusterActive && props.pendingCount > 0"), true);
-  assert.equal(sidebar.includes("多 Agent 任务"), true);
+  assert.equal(sidebar.includes("多 Agent 任务"), false);
   assert.equal(sidebar.includes("sidebar-deep-run-row"), true);
-  assert.equal(sidebar.includes("多 Agent"), true);
+  assert.equal(sidebar.includes("function deepRunRuntimeHealthLabel"), true);
+  assert.equal(sidebar.includes("暂无新进展"), true);
+  assert.equal(sidebar.includes("已失联"), true);
+  assert.equal(sidebar.includes("health === undefined || health === \"active\" || health === \"stalled\""), true);
+  assert.equal(sidebar.includes("疑似卡住"), false);
+  assert.equal(sidebar.includes("Agent 集群"), true);
   assert.equal(sidebar.includes("Deep 模式"), false);
-  assert.equal(app.includes('agentClusterActive={app.agentMode === "deep"}'), true);
-  assert.equal(app.includes('activeConversationId={app.agentMode === "deep" ? undefined : app.conversation?.conversationId}'), true);
+  assert.equal(app.includes("agentClusterActive={agentClusterActive}"), true);
+  assert.equal(app.includes("agentClusterEnabled={agentClusterEnabled}"), true);
+  assert.equal(app.includes('activeConversationId={agentClusterActive ? undefined : app.conversation?.conversationId}'), true);
+  assert.equal(app.includes('deepConversations={app.deepConversations}'), true);
   assert.equal(app.includes('deepRuns={app.deepRuns}'), true);
-  assert.equal(app.includes("activeDeepRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}"), true);
+  assert.equal(app.includes("activeDeepConversationId={app.deepConversation?.conversationId ?? app.deep?.run.conversationId}"), true);
+  assert.equal(app.includes("activeDeepRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}"), false);
+  assert.equal(app.includes("activeDeepRunId={app.deep?.run.runId ?? app.deepActiveRunId}"), true);
+  assert.equal(app.includes("pinningConversationIds={pinningConversationIds}"), true);
+  assert.equal(app.includes("patchConversationPinnedAt(previous, conversationId, optimisticPinnedAt)"), true);
+  assert.equal(app.includes("patchConversationPinnedAt(previous, conversationId, previousPinnedAt)"), true);
+  assert.equal(app.includes("onOpenDeepConversation={(conversationId) => void openAgentClusterConversation(conversationId)}"), true);
   assert.equal(app.includes("onOpenDeepRun={(runId) => void openAgentClusterRun(runId)}"), true);
-  assert.equal(app.includes("onOpenAgentCluster={openAgentClusterEntry}"), false);
+  assert.equal(app.includes("onOpenAgentCluster={openAgentClusterEntry}"), true);
   assert.equal(sidebar.includes("sidebar-brand"), false);
   assert.equal(sidebar.includes("document.addEventListener(\"pointerdown\""), true);
   assert.equal(sidebar.includes("document.addEventListener(\"keydown\""), true);
@@ -741,6 +1003,9 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(sidebar.includes("sidebar-kebab-button"), true);
   assert.equal(sidebar.includes("重命名"), true);
   assert.equal(sidebar.includes("置顶"), true);
+  assert.equal(sidebar.includes("readonly pinningConversationIds: ReadonlySet<string>"), true);
+  assert.equal(sidebar.includes("props.pinningConversationIds.has(conversation.conversationId)"), true);
+  assert.equal(sidebar.includes('props.pinning ? "更新中"'), true);
   assert.equal(sidebar.includes("删除"), true);
   assert.equal(sidebar.includes("sidebarConversationTone"), false);
   assert.equal(sidebar.includes("sidebarConversationStatusLabel"), false);
@@ -769,49 +1034,78 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(shellStyles.includes(".sidebar-recent-item.active"), true);
   assert.equal(shellStyles.includes(".sidebar-deep-run-row"), true);
   assert.equal(shellStyles.includes(".sidebar-deep-run-status"), true);
+  assert.equal(shellStyles.includes(".sidebar-deep-run-status-stalled"), true);
+  assert.equal(shellStyles.includes(".sidebar-deep-run-status-orphaned"), true);
   assert.equal(shellStyles.includes(".sidebar-deep-run-copy"), true);
   assert.equal(shellStyles.includes(".sidebar-folder-heading"), true);
   assert.equal(shellStyles.includes(".sidebar-folder-more-button"), true);
   assert.equal(deepStyles.includes(".multi-agent-workspace"), true);
-  assert.equal(deepStyles.includes(".multi-agent-missionbar"), false);
-  assert.equal(deepStyles.includes(".multi-agent-body"), true);
-  assert.equal(deepStyles.includes(".multi-agent-primary"), true);
-  assert.equal(deepStyles.includes(".multi-agent-reading-shell"), true);
-  assert.equal(deepStyles.includes(".multi-agent-stage"), true);
-  assert.equal(deepStyles.includes(".multi-agent-commandbar"), true);
-  assert.equal(deepStyles.includes(".multi-agent-inspector"), false);
-  assert.equal(deepStyles.includes(".with-side-panel"), true);
-  assert.equal(deepStyles.includes(".with-child-inspector"), true);
-  assert.equal(deepStyles.includes("grid-template-columns: minmax(0, 1fr) clamp"), true);
-  assert.equal(deepStyles.includes(".deep-panel-view"), false);
-  assert.equal(deepStyles.includes(".deep-panel-scroll"), false);
-  assert.equal(deepStyles.includes(".deep-result-canvas"), false);
-  assert.equal(deepStyles.includes(".deep-result-head"), false);
-  assert.equal(deepStyles.includes(".deep-run-counters"), false);
-  assert.equal(deepStyles.includes(".deep-progress-log"), false);
-  assert.equal(deepStyles.includes(".deep-collaboration-index"), true);
-  assert.equal(deepStyles.includes(".deep-collaboration-index-runmeta"), true);
-  assert.equal(deepStyles.includes(".deep-collaboration-index-list"), true);
-  assert.equal(deepStyles.includes(".deep-workboard-result"), false);
-  assert.equal(deepStyles.includes(".deep-workboard-objective"), false);
-  assert.equal(deepStyles.includes(".deep-collaboration-index-result"), true);
-  assert.equal(deepStyles.includes(".deep-collaboration-index-objective"), true);
-  assert.equal(deepStyles.includes(".deep-child-inspector"), true);
-  assert.equal(deepStyles.includes(".deep-child-inspector-scrollbody"), true);
-  assert.equal(deepStyles.includes(".deep-child-inspector-actionbar"), true);
-  assert.equal(deepStyles.includes(".deep-child-inspector-timeline"), true);
-  assert.equal(deepStyles.includes(".deep-child-inspector-composer"), true);
-  assert.equal(deepStyles.includes(".multi-agent-history-list"), false);
-  assert.equal(deepStyles.includes(".multi-agent-run-facts"), false);
-  assert.equal(deepStyles.includes("flex: 0 0 280px"), false);
-  assert.equal(deepStyles.includes(".deep-chat-view"), true);
-  assert.equal(deepStyles.includes(".deep-chat-thread"), true);
-  assert.equal(deepStyles.includes(".deep-chat-parent-message"), true);
-  assert.equal(deepStyles.includes(".deep-chat-child-strip"), false);
-  assert.equal(deepStyles.includes(".deep-chat-child-card"), false);
-  assert.equal(deepStyles.includes(".deep-flow-canvas"), false);
-  assert.equal(deepStyles.includes(".deep-focus-output"), false);
-  assert.equal(deepStyles.includes(".deep-stage-navigator"), false);
+  assertIncludesAll(deepStyles, [
+    ".multi-agent-body",
+    ".multi-agent-primary",
+    ".multi-agent-reading-shell",
+    ".multi-agent-stage",
+    ".multi-agent-commandbar",
+    ".with-work-detail",
+    "grid-template-columns: minmax(0, 1fr) clamp",
+    ".deep-chat-view",
+    ".deep-chat-thread",
+    ".assistant-message",
+    ".assistant-answer",
+    ".user-message-wrap",
+    ".deep-plan-confirmation",
+    ".deep-run-transcript",
+    ".deep-run-transcript-thread",
+    ".deep-run-child-list",
+    ".deep-run-child-list-item",
+    ".deep-work-detail-panel",
+    ".deep-work-detail-actionbar",
+    ".deep-work-detail-composer",
+    ".deep-child-task-approval",
+  ]);
+  assertExcludesAll(deepStyles, [
+    ".multi-agent-missionbar",
+    ".multi-agent-inspector",
+    ".with-task-sidebar",
+    ".with-workflow-detail",
+    ".with-side-panel",
+    ".deep-panel-view",
+    ".deep-panel-scroll",
+    ".deep-result-canvas",
+    ".deep-result-head",
+    ".deep-run-transcript-activity-block",
+    ".deep-run-counters",
+    ".deep-progress-log",
+    ".deep-run-console",
+    ".deep-run-workflow",
+    ".deep-run-console-kicker",
+    ".deep-run-console-goal-icon",
+    ".deep-run-workflow .agent-activity-chip.meta",
+    ".deep-workboard-result",
+    ".deep-workboard-objective",
+    ".deep-tree-live-map",
+    ".deep-tree-live-node",
+    ".multi-agent-history-list",
+    ".multi-agent-run-facts",
+    "flex: 0 0 280px",
+    ".deep-task-sidebar",
+    ".deep-task-sidebar-plan",
+    ".deep-task-sidebar-child",
+    ".deep-task-sidebar-actionbar",
+    ".deep-task-sidebar-composer",
+    ".deep-run-child-card",
+    ".deep-run-child-grid",
+    ".deep-run-child-section",
+    ".deep-run-result",
+    ".deep-chat-child-strip",
+    ".deep-chat-child-card",
+    ".deep-flow-canvas",
+    ".deep-focus-output",
+    ".deep-stage-navigator",
+    ".deep-run-workflow-item",
+    ".deep-workline-title",
+    ".deep-workline-spin",
+  ]);
   assert.equal(deepStyles.includes(".deep-child-node-followup-toggle"), false);
   assert.equal(deepStyles.includes("min-height: 0"), true);
   assert.equal(deepStyles.includes("overflow-y: auto"), true);
@@ -836,11 +1130,10 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(shellStyles.includes(".topbar"), false);
   assert.equal(shellStyles.includes(".topbar-sidebar-button"), false);
   assert.equal(shellStyles.includes(".topbar-chip"), false);
-  assert.equal(shellStyles.includes(".app-mode-switch"), true);
-  assert.equal(shellStyles.includes(".app-update-ready-banner"), true);
-  assert.equal(shellStyles.includes(".app-mode-switch-button"), true);
+  assert.equal(shellStyles.includes(".app-mode-switch"), false);
+  assert.equal(shellStyles.includes(".app-mode-switch-button"), false);
   assert.equal(shellStyles.includes(".app-workbench-brand"), false);
-  assert.equal(shellStyles.includes(".sidebar-agent-cluster-button"), false);
+  assert.equal(shellStyles.includes(".sidebar-agent-cluster-button"), true);
   assert.equal(motionResponsiveStyles.includes(".topbar-chip"), false);
   assert.equal(chatEmpty.includes("composer-options-button"), true);
   assert.equal(chatEmpty.includes("composer-options-popover"), true);
@@ -918,6 +1211,8 @@ test("multi Agent run tree exposes child Agent frozen instructions in details", 
   assert.equal(deepContract.includes("export type DeepAgentSpecInstructionsView"), true);
   assert.equal(deepContract.includes("readonly instructions?: DeepAgentSpecInstructionsView"), true);
   assert.equal(deepContract.includes("export type DeepChildAgentRunExecutionView"), true);
+  assert.equal(deepContract.includes("export type DeepChildAgentRunModelMessageTraceView"), true);
+  assert.equal(deepContract.includes("readonly modelMessages?: readonly DeepChildAgentRunModelMessageTraceView[]"), true);
   assert.equal(deepContract.includes("readonly execution?: DeepChildAgentRunExecutionView"), true);
   assert.equal(deepContract.includes("export type DeepChildAgentRunExecutionSegmentView"), true);
   assert.equal(deepContract.includes("readonly executionHistory?: readonly DeepChildAgentRunExecutionSegmentView[]"), true);
@@ -967,8 +1262,14 @@ test("multi Agent run tree exposes child Agent frozen instructions in details", 
   assert.equal(deepStyles.includes(".deep-child-objective"), true);
   assert.equal(deepStyles.includes(".deep-child-execution"), true);
   assert.equal(deepStyles.includes(".deep-child-node-parent-op"), false);
-  assert.equal(deepStyles.includes(".deep-collaboration-index"), true);
-  assert.equal(deepStyles.includes(".deep-child-inspector-actionbar"), true);
+  assert.equal(deepStyles.includes(".deep-parent-workflow-pane"), false);
+  assert.equal(deepStyles.includes(".deep-parent-workflow-list"), false);
+  assert.equal(deepStyles.includes(".deep-workflow-detail-panel"), false);
+  assert.equal(deepStyles.includes(".deep-workflow-detail-actionbar"), false);
+  assert.equal(deepStyles.includes(".deep-task-sidebar"), false);
+  assert.equal(deepStyles.includes(".deep-task-sidebar-actionbar"), false);
+  assert.equal(deepStyles.includes(".deep-collaboration-node-index"), false);
+  assert.equal(deepStyles.includes(".deep-node-inspector-actionbar"), false);
   assert.equal(deepStyles.includes(".deep-child-approval"), true);
   assert.equal(deepStyles.includes(".deep-child-followup"), true);
   assert.equal(deepStyles.includes(".deep-child-approval-actions"), true);
@@ -988,6 +1289,22 @@ function hasPanelUiModuleReference(source: string, modulePath: string): boolean 
 
 function hasJsxComponentReference(source: string, componentName: string): boolean {
   return source.includes(`<${componentName}`) || source.includes(`<Lazy${componentName}`);
+}
+
+function assertIncludesAll(source: string, patterns: readonly string[]): void {
+  for (const pattern of patterns) {
+    if (!source.includes(pattern)) {
+      throw new Error(`Expected source to include: ${pattern}`);
+    }
+  }
+}
+
+function assertExcludesAll(source: string, patterns: readonly string[]): void {
+  for (const pattern of patterns) {
+    if (source.includes(pattern)) {
+      throw new Error(`Expected source to exclude: ${pattern}`);
+    }
+  }
 }
 
 async function listPanelUiSourceFiles(root: string): Promise<readonly string[]> {

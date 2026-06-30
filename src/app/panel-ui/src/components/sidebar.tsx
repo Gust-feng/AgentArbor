@@ -5,17 +5,25 @@ import {
   Check,
   EllipsisVertical,
   Folder,
+  Network,
   Plus,
   Settings,
   ShieldCheck,
   X,
 } from "lucide-react";
+import { isDeepConversationActive } from "../../../panel-ui-deep-sidebar-selection";
 import {
   isConversationWaitingForUser,
 } from "../conversation-state";
 import { compact } from "../text";
 import type { ConversationSummary } from "../contracts/conversation";
-import type { DeepRunStatus, DeepRunSummary } from "../contracts/deep";
+import type {
+  DeepConversationSummary,
+  DeepIntakeStatus,
+  DeepRunRuntimeHealthState,
+  DeepRunStatus,
+  DeepRunSummary,
+} from "../contracts/deep";
 
 const DEFAULT_FOLDER_CONVERSATION_LIMIT = 5;
 
@@ -24,18 +32,27 @@ export type Screen = "chat-empty" | "chat-active";
 export function Sidebar(props: {
   readonly currentScreen: Screen;
   readonly conversations: readonly ConversationSummary[];
+  readonly deepConversations: readonly DeepConversationSummary[];
   readonly deepRuns: readonly DeepRunSummary[];
   readonly activeConversationId?: string;
+  readonly activeDeepConversationId?: string;
   readonly activeDeepRunId?: string;
   readonly pendingCount: number;
   readonly collapsed: boolean;
   readonly agentClusterActive: boolean;
+  readonly agentClusterEnabled: boolean;
+  readonly pinningConversationIds: ReadonlySet<string>;
   readonly onNew: () => void;
+  readonly onOpenAgentCluster: () => void;
+  readonly onOpenDeepConversation: (conversationId: string) => void;
   readonly onOpenDeepRun: (runId: string) => void;
   readonly onOpen: (conversationId: string) => void;
   readonly onRename: (conversationId: string, title: string) => void;
+  readonly onRenameDeep: (conversationId: string, title: string) => void;
   readonly onTogglePinned: (conversationId: string, pinned: boolean) => void;
+  readonly onToggleDeepPinned: (conversationId: string, pinned: boolean) => void;
   readonly onDelete: (conversationId: string) => void;
+  readonly onDeleteDeep: (conversationId: string) => void;
   readonly onOpenSettings: () => void;
 }): React.ReactElement {
   const [editingConversationId, setEditingConversationId] = React.useState<string | undefined>();
@@ -44,9 +61,9 @@ export function Sidebar(props: {
   const [expandedConversationGroupKeys, setExpandedConversationGroupKeys] = React.useState<ReadonlySet<string>>(
     () => new Set()
   );
-  const newTaskActive = props.agentClusterActive
-    ? props.currentScreen === "chat-empty" && props.activeDeepRunId === undefined
-    : props.currentScreen === "chat-empty" && props.activeConversationId === undefined;
+  const newTaskActive = !props.agentClusterActive &&
+    props.currentScreen === "chat-empty" &&
+    props.activeConversationId === undefined;
   const pendingConversations = props.conversations.filter(isConversationWaitingForUser);
   const visibleConversations = [...props.conversations].sort(
     compareSidebarConversations
@@ -98,7 +115,7 @@ export function Sidebar(props: {
     setOpenMenuConversationId(undefined);
   }, [props.collapsed]);
 
-  function beginRename(conversation: ConversationSummary): void {
+  function beginRename(conversation: { readonly conversationId: string; readonly title: string }): void {
     setOpenMenuConversationId(undefined);
     setEditingConversationId(conversation.conversationId);
     setEditingTitle(conversation.title);
@@ -109,19 +126,26 @@ export function Sidebar(props: {
     setEditingTitle("");
   }
 
-  function commitRename(conversation: ConversationSummary): void {
+  function commitRename(
+    conversation: { readonly conversationId: string; readonly title: string },
+    onRename: (conversationId: string, title: string) => void,
+  ): void {
     const nextTitle = editingTitle.trim();
     if (nextTitle.length === 0 || nextTitle === conversation.title) {
       cancelRename();
       return;
     }
-    props.onRename(conversation.conversationId, nextTitle);
+    onRename(conversation.conversationId, nextTitle);
     cancelRename();
   }
 
-  function submitRename(event: React.FormEvent<HTMLFormElement>, conversation: ConversationSummary): void {
+  function submitRename(
+    event: React.FormEvent<HTMLFormElement>,
+    conversation: { readonly conversationId: string; readonly title: string },
+    onRename: (conversationId: string, title: string) => void,
+  ): void {
     event.preventDefault();
-    commitRename(conversation);
+    commitRename(conversation, onRename);
   }
 
   function toggleMenu(conversationId: string): void {
@@ -129,6 +153,7 @@ export function Sidebar(props: {
   }
 
   function togglePinned(conversation: ConversationSummary): void {
+    if (props.pinningConversationIds.has(conversation.conversationId)) return;
     setOpenMenuConversationId(undefined);
     props.onTogglePinned(conversation.conversationId, conversation.pinnedAt === undefined);
   }
@@ -136,6 +161,17 @@ export function Sidebar(props: {
   function deleteConversation(conversation: ConversationSummary): void {
     setOpenMenuConversationId(undefined);
     props.onDelete(conversation.conversationId);
+  }
+
+  function toggleDeepPinned(conversation: DeepConversationSummary): void {
+    if (props.pinningConversationIds.has(conversation.conversationId)) return;
+    setOpenMenuConversationId(undefined);
+    props.onToggleDeepPinned(conversation.conversationId, conversation.pinnedAt === undefined);
+  }
+
+  function deleteDeepConversation(conversation: DeepConversationSummary): void {
+    setOpenMenuConversationId(undefined);
+    props.onDeleteDeep(conversation.conversationId);
   }
 
   function toggleConversationGroupExpanded(groupKey: string): void {
@@ -169,6 +205,20 @@ export function Sidebar(props: {
           </span>
           <span className="sidebar-label">新任务</span>
         </button>
+        {props.agentClusterEnabled && (
+          <button
+            type="button"
+            onClick={props.onOpenAgentCluster}
+            aria-label="Agent 集群"
+            aria-current={props.agentClusterActive ? "page" : undefined}
+            className={`sidebar-action sidebar-rail-button sidebar-agent-cluster-button sidebar-collapsed-button ${props.agentClusterActive ? "active" : ""}`}
+          >
+            <span className="sidebar-icon-slot" aria-hidden="true">
+              <Network size={15} />
+            </span>
+            <span className="sidebar-label">Agent 集群</span>
+          </button>
+        )}
       </div>
 
       {!props.agentClusterActive && props.pendingCount > 0 && (
@@ -193,16 +243,31 @@ export function Sidebar(props: {
 
       <section
         className="sidebar-expandable sidebar-recent"
-        aria-label={props.agentClusterActive ? "多 Agent 历史" : "会话列表"}
+        aria-label={props.agentClusterActive ? "Agent 集群历史" : "会话列表"}
         aria-hidden={props.collapsed}
       >
         <div className="sidebar-recent-list">
           {props.agentClusterActive ? (
-            <DeepRunGroup
-              runs={props.deepRuns}
+            <DeepConversationGroup
+              conversations={props.deepConversations}
+              fallbackRuns={props.deepRuns}
+              activeDeepConversationId={props.activeDeepConversationId}
               activeDeepRunId={props.activeDeepRunId}
               collapsed={props.collapsed}
-              onOpen={props.onOpenDeepRun}
+              editingConversationId={editingConversationId}
+              editingTitle={editingTitle}
+              openMenuConversationId={openMenuConversationId}
+              pinningConversationIds={props.pinningConversationIds}
+              setEditingTitle={setEditingTitle}
+              onOpenConversation={props.onOpenDeepConversation}
+              onOpenRun={props.onOpenDeepRun}
+              onRenameStart={beginRename}
+              onRenameCancel={cancelRename}
+              onRenameCommit={(conversation) => commitRename(conversation, props.onRenameDeep)}
+              onRenameSubmit={(event, conversation) => submitRename(event, conversation, props.onRenameDeep)}
+              onMenuToggle={toggleMenu}
+              onTogglePinned={toggleDeepPinned}
+              onDelete={deleteDeepConversation}
             />
           ) : visibleConversations.length === 0 ? (
             <SidebarEmptyState />
@@ -218,12 +283,13 @@ export function Sidebar(props: {
                   editingConversationId={editingConversationId}
                   editingTitle={editingTitle}
                   openMenuConversationId={openMenuConversationId}
+                  pinningConversationIds={props.pinningConversationIds}
                   setEditingTitle={setEditingTitle}
                   onOpen={props.onOpen}
                   onRenameStart={beginRename}
                   onRenameCancel={cancelRename}
-                  onRenameCommit={commitRename}
-                  onRenameSubmit={submitRename}
+                  onRenameCommit={(conversation) => commitRename(conversation, props.onRename)}
+                  onRenameSubmit={(event, conversation) => submitRename(event, conversation, props.onRename)}
                   onMenuToggle={toggleMenu}
                   onTogglePinned={togglePinned}
                   onDelete={deleteConversation}
@@ -244,12 +310,13 @@ export function Sidebar(props: {
                   editingConversationId={editingConversationId}
                   editingTitle={editingTitle}
                   openMenuConversationId={openMenuConversationId}
+                  pinningConversationIds={props.pinningConversationIds}
                   setEditingTitle={setEditingTitle}
                   onOpen={props.onOpen}
                   onRenameStart={beginRename}
                   onRenameCancel={cancelRename}
-                  onRenameCommit={commitRename}
-                  onRenameSubmit={submitRename}
+                  onRenameCommit={(conversation) => commitRename(conversation, props.onRename)}
+                  onRenameSubmit={(event, conversation) => submitRename(event, conversation, props.onRename)}
                   onMenuToggle={toggleMenu}
                   onTogglePinned={togglePinned}
                   onDelete={deleteConversation}
@@ -278,16 +345,37 @@ export function Sidebar(props: {
   );
 }
 
-function DeepRunGroup(props: {
-  readonly runs: readonly DeepRunSummary[];
+function DeepConversationGroup(props: {
+  readonly conversations: readonly DeepConversationSummary[];
+  readonly fallbackRuns: readonly DeepRunSummary[];
+  readonly activeDeepConversationId?: string;
   readonly activeDeepRunId?: string;
   readonly collapsed: boolean;
-  readonly onOpen: (runId: string) => void;
+  readonly editingConversationId?: string;
+  readonly editingTitle: string;
+  readonly openMenuConversationId?: string;
+  readonly pinningConversationIds: ReadonlySet<string>;
+  readonly setEditingTitle: (title: string) => void;
+  readonly onOpenConversation: (conversationId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
+  readonly onRenameStart: (conversation: DeepConversationSummary) => void;
+  readonly onRenameCancel: () => void;
+  readonly onRenameCommit: (conversation: DeepConversationSummary) => void;
+  readonly onRenameSubmit: (event: React.FormEvent<HTMLFormElement>, conversation: DeepConversationSummary) => void;
+  readonly onMenuToggle: (conversationId: string) => void;
+  readonly onTogglePinned: (conversation: DeepConversationSummary) => void;
+  readonly onDelete: (conversation: DeepConversationSummary) => void;
 }): React.ReactElement {
   const [expandedRunGroupKeys, setExpandedRunGroupKeys] = React.useState<ReadonlySet<string>>(() => new Set());
-  if (props.runs.length === 0) {
-    return <SidebarEmptyState label="暂无多 Agent 任务" />;
+  const conversations = [...(props.conversations.length > 0
+    ? props.conversations
+    : props.fallbackRuns.map(deepConversationSummaryFromRun))]
+    .sort(compareSidebarDeepConversations);
+  if (conversations.length === 0) {
+    return <SidebarEmptyState label="暂无 Agent 集群任务" />;
   }
+  const pinnedConversations = conversations.filter((conversation) => conversation.pinnedAt !== undefined);
+  const recentConversations = conversations.filter((conversation) => conversation.pinnedAt === undefined);
   function toggleRunGroupExpanded(groupKey: string): void {
     setExpandedRunGroupKeys((current) => {
       const next = new Set(current);
@@ -299,20 +387,60 @@ function DeepRunGroup(props: {
       return next;
     });
   }
-  const groups = groupSidebarItemsByWorkspaceFolder(props.runs, sidebarDeepRunTime);
+  const groups = groupSidebarItemsByWorkspaceFolder(recentConversations, sidebarDeepConversationTime);
   return (
     <>
+      {pinnedConversations.length > 0 && (
+        <DeepConversationFolderGroup
+          groupKey="__pinned__"
+          label="置顶"
+          conversations={pinnedConversations}
+          expanded
+          activeDeepConversationId={props.activeDeepConversationId}
+          activeDeepRunId={props.activeDeepRunId}
+          collapsed={props.collapsed}
+          editingConversationId={props.editingConversationId}
+          editingTitle={props.editingTitle}
+          openMenuConversationId={props.openMenuConversationId}
+          pinningConversationIds={props.pinningConversationIds}
+          setEditingTitle={props.setEditingTitle}
+          onOpenConversation={props.onOpenConversation}
+          onOpenRun={props.onOpenRun}
+          onRenameStart={props.onRenameStart}
+          onRenameCancel={props.onRenameCancel}
+          onRenameCommit={props.onRenameCommit}
+          onRenameSubmit={props.onRenameSubmit}
+          onMenuToggle={props.onMenuToggle}
+          onTogglePinned={props.onTogglePinned}
+          onDelete={props.onDelete}
+          onToggleExpanded={toggleRunGroupExpanded}
+        />
+      )}
       {groups.map((group) => (
-        <DeepRunFolderGroup
+        <DeepConversationFolderGroup
           key={group.key}
           groupKey={group.key}
           label={group.label}
           path={group.path}
-          runs={group.items}
+          conversations={group.items}
           expanded={expandedRunGroupKeys.has(group.key)}
+          activeDeepConversationId={props.activeDeepConversationId}
           activeDeepRunId={props.activeDeepRunId}
           collapsed={props.collapsed}
-          onOpen={props.onOpen}
+          editingConversationId={props.editingConversationId}
+          editingTitle={props.editingTitle}
+          openMenuConversationId={props.openMenuConversationId}
+          pinningConversationIds={props.pinningConversationIds}
+          setEditingTitle={props.setEditingTitle}
+          onOpenConversation={props.onOpenConversation}
+          onOpenRun={props.onOpenRun}
+          onRenameStart={props.onRenameStart}
+          onRenameCancel={props.onRenameCancel}
+          onRenameCommit={props.onRenameCommit}
+          onRenameSubmit={props.onRenameSubmit}
+          onMenuToggle={props.onMenuToggle}
+          onTogglePinned={props.onTogglePinned}
+          onDelete={props.onDelete}
           onToggleExpanded={toggleRunGroupExpanded}
         />
       ))}
@@ -320,32 +448,62 @@ function DeepRunGroup(props: {
   );
 }
 
-function DeepRunFolderGroup(props: {
+function DeepConversationFolderGroup(props: {
   readonly groupKey: string;
   readonly label: string;
   readonly path?: string;
-  readonly runs: readonly DeepRunSummary[];
+  readonly conversations: readonly DeepConversationSummary[];
   readonly expanded: boolean;
+  readonly activeDeepConversationId?: string;
   readonly activeDeepRunId?: string;
   readonly collapsed: boolean;
-  readonly onOpen: (runId: string) => void;
+  readonly editingConversationId?: string;
+  readonly editingTitle: string;
+  readonly openMenuConversationId?: string;
+  readonly pinningConversationIds: ReadonlySet<string>;
+  readonly setEditingTitle: (title: string) => void;
+  readonly onOpenConversation: (conversationId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
+  readonly onRenameStart: (conversation: DeepConversationSummary) => void;
+  readonly onRenameCancel: () => void;
+  readonly onRenameCommit: (conversation: DeepConversationSummary) => void;
+  readonly onRenameSubmit: (event: React.FormEvent<HTMLFormElement>, conversation: DeepConversationSummary) => void;
+  readonly onMenuToggle: (conversationId: string) => void;
+  readonly onTogglePinned: (conversation: DeepConversationSummary) => void;
+  readonly onDelete: (conversation: DeepConversationSummary) => void;
   readonly onToggleExpanded: (groupKey: string) => void;
 }): React.ReactElement {
-  const canExpand = props.runs.length > DEFAULT_FOLDER_CONVERSATION_LIMIT;
-  const visibleRuns = canExpand && !props.expanded
-    ? props.runs.slice(0, DEFAULT_FOLDER_CONVERSATION_LIMIT)
-    : props.runs;
-  const hiddenCount = props.runs.length - visibleRuns.length;
+  const canExpand = props.groupKey !== "__pinned__" && props.conversations.length > DEFAULT_FOLDER_CONVERSATION_LIMIT;
+  const visibleConversations = canExpand && !props.expanded
+    ? props.conversations.slice(0, DEFAULT_FOLDER_CONVERSATION_LIMIT)
+    : props.conversations;
+  const hiddenCount = props.conversations.length - visibleConversations.length;
   return (
     <div className="sidebar-conversation-group sidebar-deep-run-group">
       <SidebarFolderHeading title={props.label} titlePath={props.path} />
-      {visibleRuns.map((run) => (
-        <DeepRunListItem
-          key={run.runId}
-          run={run}
-          active={run.runId === props.activeDeepRunId}
+      {visibleConversations.map((conversation) => (
+        <DeepConversationListItem
+          key={conversation.conversationId}
+          conversation={conversation}
+          active={isDeepConversationActive(conversation, {
+            activeConversationId: props.activeDeepConversationId,
+            activeRunId: props.activeDeepRunId,
+          })}
           collapsed={props.collapsed}
-          onOpen={props.onOpen}
+          editing={conversation.conversationId === props.editingConversationId}
+          editingTitle={props.editingTitle}
+          menuOpen={conversation.conversationId === props.openMenuConversationId}
+          pinning={props.pinningConversationIds.has(conversation.conversationId)}
+          setEditingTitle={props.setEditingTitle}
+          onOpenConversation={props.onOpenConversation}
+          onOpenRun={props.onOpenRun}
+          onRenameStart={props.onRenameStart}
+          onRenameCancel={props.onRenameCancel}
+          onRenameCommit={props.onRenameCommit}
+          onRenameSubmit={props.onRenameSubmit}
+          onMenuToggle={props.onMenuToggle}
+          onTogglePinned={props.onTogglePinned}
+          onDelete={props.onDelete}
         />
       ))}
       {canExpand && (
@@ -364,27 +522,104 @@ function DeepRunFolderGroup(props: {
   );
 }
 
-function DeepRunListItem(props: {
-  readonly run: DeepRunSummary;
+function DeepConversationListItem(props: {
+  readonly conversation: DeepConversationSummary;
   readonly active: boolean;
   readonly collapsed: boolean;
-  readonly onOpen: (runId: string) => void;
+  readonly editing: boolean;
+  readonly editingTitle: string;
+  readonly menuOpen: boolean;
+  readonly pinning: boolean;
+  readonly setEditingTitle: (title: string) => void;
+  readonly onOpenConversation: (conversationId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
+  readonly onRenameStart: (conversation: DeepConversationSummary) => void;
+  readonly onRenameCancel: () => void;
+  readonly onRenameCommit: (conversation: DeepConversationSummary) => void;
+  readonly onRenameSubmit: (event: React.FormEvent<HTMLFormElement>, conversation: DeepConversationSummary) => void;
+  readonly onMenuToggle: (conversationId: string) => void;
+  readonly onTogglePinned: (conversation: DeepConversationSummary) => void;
+  readonly onDelete: (conversation: DeepConversationSummary) => void;
 }): React.ReactElement {
+  const latestRun = props.conversation.latestRun;
+  const statusClass = deepConversationStatusClass(props.conversation);
+  const title = props.conversation.titleEditedAt === undefined
+    ? props.conversation.currentObjective ?? props.conversation.title
+    : props.conversation.title;
+  const label = deepConversationStatusLabel(props.conversation);
+  const timestamp = latestRun?.updatedAt ?? props.conversation.updatedAt;
+  const menuButtonRef = React.useRef<HTMLButtonElement>(null);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
+  const [menuPosition, setMenuPosition] = React.useState<React.CSSProperties | undefined>();
+  const pinned = props.conversation.pinnedAt !== undefined;
+  const deleteDisabled = conversationHasActiveDeepWork(props.conversation);
+
+  React.useLayoutEffect(() => {
+    if (!props.menuOpen) {
+      setMenuPosition(undefined);
+      return;
+    }
+    setMenuPosition(positionConversationMenu(menuButtonRef.current));
+  }, [props.menuOpen]);
+
+  React.useLayoutEffect(() => {
+    if (!props.editing) return;
+    const input = renameInputRef.current;
+    if (input === null) return;
+    input.focus();
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }, [props.editing]);
+
   return (
-    <div className={`sidebar-recent-item sidebar-deep-run-item ${props.active ? "active" : ""}`}>
-      <button
-        type="button"
-        onClick={() => props.onOpen(props.run.runId)}
-        className="sidebar-recent-row sidebar-deep-run-row"
-        aria-label={props.run.goal}
-        tabIndex={props.collapsed ? -1 : 0}
-      >
-        <span className={`sidebar-deep-run-status sidebar-deep-run-status-${props.run.status}`} aria-hidden="true" />
-        <span className="sidebar-conversation-copy sidebar-deep-run-copy">
-          <strong>{compact(props.run.goal, 34)}</strong>
-          <small>{deepRunStatusLabel(props.run.status)} · {sidebarDeepRunTimeLabel(props.run.updatedAt)}</small>
-        </span>
-      </button>
+    <div className={`sidebar-recent-item sidebar-deep-run-item ${props.active ? "active" : ""} ${props.editing ? "editing" : ""} ${props.menuOpen ? "menu-open" : ""}`}>
+      {props.editing ? (
+        <SidebarRenameForm
+          inputRef={renameInputRef}
+          editingTitle={props.editingTitle}
+          setEditingTitle={props.setEditingTitle}
+          onRenameCancel={props.onRenameCancel}
+          onRenameCommit={() => props.onRenameCommit(props.conversation)}
+          onRenameSubmit={(event) => props.onRenameSubmit(event, props.conversation)}
+        />
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              if (latestRun !== undefined) {
+                props.onOpenRun(latestRun.runId);
+              } else {
+                props.onOpenConversation(props.conversation.conversationId);
+              }
+            }}
+            className="sidebar-recent-row sidebar-deep-run-row"
+            aria-label={title}
+            tabIndex={props.collapsed ? -1 : 0}
+          >
+            <span className={`sidebar-deep-run-status sidebar-deep-run-status-${statusClass}`} aria-hidden="true" />
+            <span className="sidebar-conversation-copy sidebar-deep-run-copy">
+              <strong>{compact(title, 34)}</strong>
+              <small>{label} · {sidebarDeepRunTimeLabel(timestamp)}</small>
+            </span>
+          </button>
+          {!props.collapsed && (
+            <SidebarConversationMenu
+              ownerId={props.conversation.conversationId}
+              menuButtonRef={menuButtonRef}
+              menuOpen={props.menuOpen}
+              menuPosition={menuPosition}
+              pinned={pinned}
+              pinning={props.pinning}
+              deleteDisabled={deleteDisabled}
+              onMenuToggle={props.onMenuToggle}
+              onRenameStart={() => props.onRenameStart(props.conversation)}
+              onTogglePinned={() => props.onTogglePinned(props.conversation)}
+              onDelete={() => props.onDelete(props.conversation)}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -433,6 +668,7 @@ function ConversationGroup(props: {
   readonly editingConversationId?: string;
   readonly editingTitle: string;
   readonly openMenuConversationId?: string;
+  readonly pinningConversationIds: ReadonlySet<string>;
   readonly setEditingTitle: (title: string) => void;
   readonly onOpen: (conversationId: string) => void;
   readonly onRenameStart: (conversation: ConversationSummary) => void;
@@ -475,6 +711,7 @@ function ConversationGroup(props: {
           editing={conversation.conversationId === props.editingConversationId}
           editingTitle={props.editingTitle}
           menuOpen={conversation.conversationId === props.openMenuConversationId}
+          pinning={props.pinningConversationIds.has(conversation.conversationId)}
           setEditingTitle={props.setEditingTitle}
           onOpen={props.onOpen}
           onRenameStart={props.onRenameStart}
@@ -513,6 +750,7 @@ function ConversationListItem(props: {
   readonly editing: boolean;
   readonly editingTitle: string;
   readonly menuOpen: boolean;
+  readonly pinning: boolean;
   readonly setEditingTitle: (title: string) => void;
   readonly onOpen: (conversationId: string) => void;
   readonly onRenameStart: (conversation: ConversationSummary) => void;
@@ -551,40 +789,14 @@ function ConversationListItem(props: {
       className={`sidebar-recent-item ${props.active ? "active" : ""} ${props.editing ? "editing" : ""} ${props.menuOpen ? "menu-open" : ""}`}
     >
       {props.editing ? (
-        <form
-          className="sidebar-rename-form"
-          onSubmit={(event) => props.onRenameSubmit(event, props.conversation)}
-          onBlur={(event) => {
-            const nextTarget = event.relatedTarget;
-            if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
-            props.onRenameCommit(props.conversation);
-          }}
-        >
-          <input
-            ref={renameInputRef}
-            value={props.editingTitle}
-            spellCheck={false}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            onChange={(event) => props.setEditingTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                props.onRenameCancel();
-              }
-            }}
-            aria-label="会话标题"
-            maxLength={80}
-            autoFocus
-          />
-          <button type="submit" className="sidebar-icon-button" aria-label="保存重命名">
-            <Check size={14} />
-          </button>
-          <button type="button" className="sidebar-icon-button" aria-label="取消" onClick={props.onRenameCancel}>
-            <X size={14} />
-          </button>
-        </form>
+        <SidebarRenameForm
+          inputRef={renameInputRef}
+          editingTitle={props.editingTitle}
+          setEditingTitle={props.setEditingTitle}
+          onRenameCancel={props.onRenameCancel}
+          onRenameCommit={() => props.onRenameCommit(props.conversation)}
+          onRenameSubmit={(event) => props.onRenameSubmit(event, props.conversation)}
+        />
       ) : (
         <>
           <button
@@ -599,40 +811,121 @@ function ConversationListItem(props: {
             </span>
           </button>
           {!props.collapsed && (
-            <div className="sidebar-menu-wrap" data-sidebar-menu-owner={props.conversation.conversationId}>
-              <button
-                ref={menuButtonRef}
-                type="button"
-                className="sidebar-kebab-button"
-                aria-label="会话操作"
-                aria-haspopup="menu"
-                aria-expanded={props.menuOpen}
-                onClick={() => props.onMenuToggle(props.conversation.conversationId)}
-              >
-                <EllipsisVertical size={17} />
-              </button>
-              {props.menuOpen && (
-                <div className="sidebar-conversation-menu" role="menu" style={menuPosition}>
-                  <button type="button" role="menuitem" onClick={() => props.onRenameStart(props.conversation)}>
-                    重命名
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => props.onTogglePinned(props.conversation)}>
-                    {pinned ? "取消置顶" : "置顶"}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="danger"
-                    disabled={deleteDisabled}
-                    onClick={() => props.onDelete(props.conversation)}
-                  >
-                    删除
-                  </button>
-                </div>
-              )}
-            </div>
+            <SidebarConversationMenu
+              ownerId={props.conversation.conversationId}
+              menuButtonRef={menuButtonRef}
+              menuOpen={props.menuOpen}
+              menuPosition={menuPosition}
+              pinned={pinned}
+              pinning={props.pinning}
+              deleteDisabled={deleteDisabled}
+              onMenuToggle={props.onMenuToggle}
+              onRenameStart={() => props.onRenameStart(props.conversation)}
+              onTogglePinned={() => props.onTogglePinned(props.conversation)}
+              onDelete={() => props.onDelete(props.conversation)}
+            />
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+function SidebarRenameForm(props: {
+  readonly inputRef: React.RefObject<HTMLInputElement | null>;
+  readonly editingTitle: string;
+  readonly setEditingTitle: (title: string) => void;
+  readonly onRenameCancel: () => void;
+  readonly onRenameCommit: () => void;
+  readonly onRenameSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}): React.ReactElement {
+  return (
+    <form
+      className="sidebar-rename-form"
+      onSubmit={props.onRenameSubmit}
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+        props.onRenameCommit();
+      }}
+    >
+      <input
+        ref={props.inputRef}
+        value={props.editingTitle}
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        onChange={(event) => props.setEditingTitle(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            props.onRenameCancel();
+          }
+        }}
+        aria-label="会话标题"
+        maxLength={80}
+        autoFocus
+      />
+      <button type="submit" className="sidebar-icon-button" aria-label="保存重命名">
+        <Check size={14} />
+      </button>
+      <button type="button" className="sidebar-icon-button" aria-label="取消" onClick={props.onRenameCancel}>
+        <X size={14} />
+      </button>
+    </form>
+  );
+}
+
+function SidebarConversationMenu(props: {
+  readonly ownerId: string;
+  readonly menuButtonRef: React.RefObject<HTMLButtonElement | null>;
+  readonly menuOpen: boolean;
+  readonly menuPosition?: React.CSSProperties;
+  readonly pinned: boolean;
+  readonly pinning: boolean;
+  readonly deleteDisabled: boolean;
+  readonly onMenuToggle: (conversationId: string) => void;
+  readonly onRenameStart: () => void;
+  readonly onTogglePinned: () => void;
+  readonly onDelete: () => void;
+}): React.ReactElement {
+  return (
+    <div className="sidebar-menu-wrap" data-sidebar-menu-owner={props.ownerId}>
+      <button
+        ref={props.menuButtonRef}
+        type="button"
+        className="sidebar-kebab-button"
+        aria-label="会话操作"
+        aria-haspopup="menu"
+        aria-expanded={props.menuOpen}
+        onClick={() => props.onMenuToggle(props.ownerId)}
+      >
+        <EllipsisVertical size={17} />
+      </button>
+      {props.menuOpen && (
+        <div className="sidebar-conversation-menu" role="menu" style={props.menuPosition}>
+          <button type="button" role="menuitem" onClick={props.onRenameStart}>
+            重命名
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={props.pinning}
+            onClick={props.onTogglePinned}
+          >
+            {props.pinning ? "更新中" : props.pinned ? "取消置顶" : "置顶"}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="danger"
+            disabled={props.deleteDisabled}
+            onClick={props.onDelete}
+          >
+            删除
+          </button>
+        </div>
       )}
     </div>
   );
@@ -643,9 +936,21 @@ function sidebarConversationTime(conversation: ConversationSummary): number {
   return Number.isFinite(time) ? time : 0;
 }
 
-function sidebarDeepRunTime(run: DeepRunSummary): number {
-  const time = Date.parse(run.updatedAt);
+function sidebarDeepConversationTime(conversation: DeepConversationSummary): number {
+  const time = Date.parse(conversation.updatedAt);
   return Number.isFinite(time) ? time : 0;
+}
+
+function deepConversationSummaryFromRun(run: DeepRunSummary): DeepConversationSummary {
+  return {
+    conversationId: run.conversationId,
+    title: run.goal,
+    goal: run.goal,
+    createdAt: run.startedAt,
+    updatedAt: run.updatedAt,
+    workspaceFolder: run.workspaceFolder,
+    latestRun: run,
+  };
 }
 
 type SidebarWorkspaceItem = {
@@ -701,6 +1006,26 @@ function compareSidebarConversations(left: ConversationSummary, right: Conversat
   return pinned === 0 ? sidebarConversationTime(right) - sidebarConversationTime(left) : pinned;
 }
 
+function compareSidebarDeepConversations(left: DeepConversationSummary, right: DeepConversationSummary): number {
+  const pinned = (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "");
+  return pinned === 0 ? sidebarDeepConversationDisplayTime(right) - sidebarDeepConversationDisplayTime(left) : pinned;
+}
+
+function deepRunRuntimeHealthLabel(state: DeepRunRuntimeHealthState): string {
+  switch (state) {
+    case "active":
+      return "运行中";
+    case "stalled":
+      return "暂无新进展";
+    case "orphaned":
+      return "已失联";
+    case "terminal":
+      return "已结束";
+    default:
+      return state;
+  }
+}
+
 function deepRunStatusLabel(status: DeepRunStatus): string {
   switch (status) {
     case "pending":
@@ -720,6 +1045,45 @@ function deepRunStatusLabel(status: DeepRunStatus): string {
     default:
       return status;
   }
+}
+
+function deepIntakeStatusLabel(status: DeepIntakeStatus): string {
+  switch (status) {
+    case "needs_input":
+      return "待补充";
+    case "answered":
+      return "已回答";
+    case "plan_ready":
+      return "计划待确认";
+    case "running":
+      return "运行中";
+    default:
+      return status;
+  }
+}
+
+function deepConversationStatusLabel(conversation: DeepConversationSummary): string {
+  const latestRun = conversation.latestRun;
+  if (latestRun !== undefined) {
+    const health = latestRun.runtimeHealth?.state;
+    if (health !== undefined && health !== "terminal") {
+      return deepRunRuntimeHealthLabel(health);
+    }
+    return deepRunStatusLabel(latestRun.status);
+  }
+  return deepIntakeStatusLabel(conversation.intakeStatus ?? "needs_input");
+}
+
+function deepConversationStatusClass(conversation: DeepConversationSummary): string {
+  const latestRun = conversation.latestRun;
+  if (latestRun !== undefined) {
+    const health = latestRun.runtimeHealth?.state;
+    if (health !== undefined && health !== "terminal") {
+      return health;
+    }
+    return latestRun.status;
+  }
+  return conversation.intakeStatus ?? "needs_input";
 }
 
 function sidebarDeepRunTimeLabel(timestamp: string): string {
@@ -745,6 +1109,42 @@ function sidebarDeepRunTimeLabel(timestamp: string): string {
 
 function conversationHasActiveWork(conversation: ConversationSummary): boolean {
   return conversation.activeRunId !== undefined || (conversation.queuedRunCount ?? conversation.queuedRunIds?.length ?? 0) > 0;
+}
+
+function conversationHasActiveDeepWork(conversation: DeepConversationSummary): boolean {
+  if (conversation.intakeStatus === "running") {
+    return true;
+  }
+  const latestRun = conversation.latestRun;
+  if (latestRun === undefined || isTerminalDeepConversationStatus(latestRun.status)) {
+    return false;
+  }
+  const health = latestRun.runtimeHealth?.state;
+  return health === undefined || health === "active" || health === "stalled";
+}
+
+function sidebarDeepConversationDisplayTime(conversation: DeepConversationSummary): number {
+  return Math.max(
+    sidebarDeepConversationTime(conversation),
+    timestampValue(conversation.titleEditedAt),
+    timestampValue(conversation.pinnedAt),
+  );
+}
+
+function timestampValue(timestamp: string | undefined): number {
+  if (timestamp === undefined) {
+    return 0;
+  }
+  const time = Date.parse(timestamp);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function isTerminalDeepConversationStatus(status: DeepRunStatus): boolean {
+  return status === "completed" ||
+    status === "failed" ||
+    status === "interrupted" ||
+    status === "stopped" ||
+    status === "corrected";
 }
 
 function positionConversationMenu(anchor: HTMLElement | null): React.CSSProperties {

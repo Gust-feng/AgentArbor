@@ -12,7 +12,7 @@ import {
   createRunReadModelPatch,
 } from "./app-run-projection";
 import { runIdsForConversation } from "../../panel-ui-transcript-cache";
-import { resetTranscriptNodesCache, updateTranscriptNodesCache } from "./panel-ui-transcript-store";
+import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
 import { shouldKeepRefreshing, stopPolling, stopStream } from "./app-runtime-controls";
 import { parseModelOptionId } from "./model-options";
 import type { AppState } from "./app-state";
@@ -76,9 +76,6 @@ export async function submitPanelTask(
     shouldKeepRefreshing(options.app.run.status);
   options.conversationLoadAbortRef.current?.abort();
   options.conversationLoadAbortRef.current = undefined;
-  if (!likelyQueuesBehindActiveRun) {
-    resetTranscriptNodesCache(options.app.conversation?.conversationId);
-  }
   options.viewEpochRef.current = epoch;
   if (!likelyQueuesBehindActiveRun) {
     stopPolling(options.pollTimer);

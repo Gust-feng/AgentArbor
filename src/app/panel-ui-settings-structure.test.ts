@@ -146,6 +146,12 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("appUpdateStatusLabel"), true);
   assert.equal(settingsDialog.includes("appUpdateActionUrl"), true);
   assert.equal(settingsDialog.includes("onSaveSkillTriggerMode"), true);
+  assert.equal(settingsDialog.includes("modelUsageDisplayEnabled"), true);
+  assert.equal(settingsDialog.includes("onModelUsageDisplayChange"), true);
+  assert.equal(settingsDialog.includes("agentClusterEnabled"), true);
+  assert.equal(settingsDialog.includes("onAgentClusterEnabledChange"), true);
+  assert.equal(settingsDialog.includes("about-agent-cluster-card"), true);
+  assert.equal(settingsDialog.includes("当前版本仍处于测试阶段"), true);
   assert.equal(settingsDialog.includes("暖色工作台"), false);
   assert.equal(settingsDialog.includes("基础 Agent"), false);
   assert.equal(settingsDialog.includes("function ModelSettings"), false);
@@ -189,6 +195,9 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(capabilitySettings.includes("modelCapabilityTargets"), true);
   assert.equal(capabilitySettings.includes("onSaveModelCapabilities"), true);
   assert.equal(capabilitySettings.includes("onSaveSkillTriggerMode"), true);
+  assert.equal(capabilitySettings.includes("function ModelUsageDisplaySettings"), true);
+  assert.equal(capabilitySettings.includes("回答展示"), true);
+  assert.equal(capabilitySettings.includes("模型 token 信息"), true);
   assert.equal(capabilitySettings.includes("model-info-card"), true);
   assert.equal(capabilitySettings.includes("模型信息"), true);
   assert.equal(capabilitySettings.includes("模型能力"), false);
@@ -197,6 +206,10 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(capabilitySettings.includes("skill-trigger-mode"), true);
   assert.equal(capabilitySettings.includes("显式/关键词触发"), true);
   assert.equal(capabilitySettings.includes("语义路由"), true);
+  assert.equal(capabilitySettings.indexOf("<WebSearchSettings") < capabilitySettings.indexOf("<DesktopAgentPromptSettings"), true);
+  assert.equal(capabilitySettings.indexOf("<DesktopAgentPromptSettings") < capabilitySettings.indexOf("<ModelUsageDisplaySettings"), true);
+  assert.equal(capabilitySettings.indexOf("<ModelUsageDisplaySettings") < capabilitySettings.indexOf("<SkillTriggerSettings"), true);
+  assert.equal(capabilitySettings.indexOf("<SkillTriggerSettings") < capabilitySettings.indexOf("<ModelInformationSettings"), true);
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
   assert.equal(capabilitySettings.includes("运行时工具"), false);
   assert.equal(capabilitySettings.includes("工作方法"), false);
@@ -212,6 +225,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(capabilitySettings.includes("结构化输出"), false);
   assert.equal(capabilitySettings.includes("流式输出"), false);
   assert.equal(capabilitySettings.includes("推理输出"), false);
+  assert.equal(capabilitySettings.includes("overrideCapabilities"), true);
   assert.equal(skillSettings.includes("export function SkillSettings"), true);
   assert.equal(skillSettings.includes("按任务触发的工作流说明"), false);
   assert.equal(skillSettings.includes("暂无技能"), true);
@@ -224,6 +238,8 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(appearanceSettings.includes("useBrowserAppearanceSnapshot"), false);
   assert.equal(appearanceSettings.includes("<ThemeSwitcher"), true);
   assert.equal(appearanceSettings.includes("当前环境"), false);
+  assert.equal(appearanceSettings.includes('className="appearance-toggle-badge"'), true);
+  assert.equal(appearanceSettings.includes('<span className="appearance-toggle-badge">beta</span>'), true);
   assert.equal(usageStatisticsSettings.includes("export function UsageStatisticsSettings"), true);
   assert.equal(usageStatisticsSettings.includes("/api/runtime/usage-statistics"), true);
   assert.equal(usageStatisticsSettings.includes("<ThemeSwitcher"), false);
@@ -382,8 +398,6 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsFormStyles.includes(".about-update-card"), true);
   assert.equal(settingsFormStyles.includes(".about-update-check-button"), true);
   assert.equal(settingsFormStyles.includes(".about-update-download-link"), true);
-  assert.equal(settingsFormStyles.includes(".about-update-install-button"), true);
-  assert.equal(settingsFormStyles.includes(".about-update-progress"), true);
   assert.equal(settingsUsageStyles.includes(".usage-stat-grid"), true);
   assert.equal(settingsUsageStyles.includes(".usage-heatmap-grid"), true);
 });

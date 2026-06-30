@@ -47,6 +47,7 @@ export interface DeepChildMessageStore {
   getByRef(runId: string, messageRef: string): Promise<DeepChildMessageRecord | undefined>;
   listForRun(runId: string): Promise<readonly DeepChildMessageRecord[]>;
   listForChild(runId: string, childRunId: string): Promise<readonly DeepChildMessageRecord[]>;
+  deleteForRun(runId: string): Promise<void>;
 }
 
 export class InMemoryDeepChildMessageStore implements DeepChildMessageStore {
@@ -71,6 +72,14 @@ export class InMemoryDeepChildMessageStore implements DeepChildMessageStore {
 
   async listForChild(runId: string, childRunId: string): Promise<readonly DeepChildMessageRecord[]> {
     return (await this.listForRun(runId)).filter((record) => record.childRunId === childRunId);
+  }
+
+  async deleteForRun(runId: string): Promise<void> {
+    for (const key of this.records.keys()) {
+      if (key.startsWith(`${runId}:`)) {
+        this.records.delete(key);
+      }
+    }
   }
 }
 
@@ -107,6 +116,10 @@ export function createFileSystemDeepChildMessageStore(runtimeHome: string): Deep
 
     async listForChild(runId: string, childRunId: string): Promise<readonly DeepChildMessageRecord[]> {
       return (await this.listForRun(runId)).filter((record) => record.childRunId === childRunId);
+    },
+
+    async deleteForRun(runId: string): Promise<void> {
+      await fs.rm(path.join(root, safeFileName(runId), "child-messages"), { recursive: true, force: true });
     },
   };
 }

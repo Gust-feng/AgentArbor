@@ -19,6 +19,7 @@
  */
 
 import type { WorkspaceFolderSummary } from "./common";
+import type { ToolDisplayProjection } from "./tools";
 
 // ---------------------------------------------------------------------------
 // 隔离标记与状态枚举（镜像 DEEP_RUN_KIND / DEEP_RUN_MODE / DeepRunStatus）
@@ -50,7 +51,7 @@ export type DeepRunStatus =
   | "completed"
   | "failed";
 
-export type DeepIntakeStatus = "needs_input" | "answered" | "running";
+export type DeepIntakeStatus = "needs_input" | "answered" | "plan_ready" | "running";
 
 export type DeepIntakeDecisionAction = "ask_user" | "direct_answer" | "start_collaboration";
 
@@ -63,6 +64,13 @@ export type DeepIntakeTurn = {
   readonly plan?: string;
   readonly uncertainty?: string;
   readonly confidence?: number;
+  readonly createdAt: string;
+};
+
+export type DeepRunFollowUpTurn = {
+  readonly turnId: string;
+  readonly runId: string;
+  readonly userMessage: string;
   readonly createdAt: string;
 };
 
@@ -87,13 +95,42 @@ export type DeepChildRunStatus =
 export type DeepConversationView = {
   readonly conversationId: string;
   readonly title: string;
+  readonly titleEditedAt?: string;
   readonly goal: string;
   readonly intakeTurns: readonly DeepIntakeTurn[];
+  readonly followUpTurns?: readonly DeepRunFollowUpTurn[];
   readonly currentObjective?: string;
   readonly birthWorkspaceDirectory?: string;
+  readonly pinnedAt?: string;
   readonly isolation: DeepConversationIsolationMark;
   readonly createdAt: string;
   readonly updatedAt: string;
+};
+
+/** 侧栏使用的 deep 会话摘要：会话本身即使尚未启动 run，也必须可见。 */
+export type DeepConversationSummary = {
+  readonly conversationId: string;
+  readonly title: string;
+  readonly titleEditedAt?: string;
+  readonly goal: string;
+  readonly currentObjective?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly pinnedAt?: string;
+  readonly workspaceFolder?: WorkspaceFolderSummary;
+  readonly intakeStatus?: DeepIntakeStatus;
+  readonly latestRun?: DeepRunSummary;
+};
+
+export type DeepRunRuntimeHealthState = "terminal" | "active" | "stalled" | "orphaned";
+
+export type DeepRunRuntimeHealthView = {
+  readonly state: DeepRunRuntimeHealthState;
+  readonly lastActivityAt: string;
+  readonly inactiveMs: number;
+  readonly staleAfterMs: number;
+  readonly canStop: boolean;
+  readonly reason: string;
 };
 
 /** 镜像 [`projectDeepRunSummary`](src/app/panel-server/deep-routes.ts:608)。 */
@@ -114,6 +151,7 @@ export type DeepRunSummary = {
   readonly eventCount: number;
   readonly workspaceFolder?: WorkspaceFolderSummary;
   readonly brief?: DeepResearchBriefView;
+  readonly runtimeHealth?: DeepRunRuntimeHealthView;
 };
 
 /** run 级摘要（projectDeepRunView 的 `run` 字段，也用于 start run 响应）。 */
@@ -130,6 +168,7 @@ export type DeepRunRecord = {
   readonly startedAt: string;
   readonly updatedAt: string;
   readonly workspaceFolder?: WorkspaceFolderSummary;
+  readonly runtimeHealth?: DeepRunRuntimeHealthView;
 };
 
 // ---------------------------------------------------------------------------
@@ -261,6 +300,13 @@ export type DeepChildSpec = {
   readonly maxToolRounds?: number;
 };
 
+export type DeepChildFailureDetailView = {
+  readonly layer: "model_provider" | "agent_runtime" | "user_or_parent" | "output_validation" | "unknown";
+  readonly failureKind?: string;
+  readonly retryable?: boolean;
+  readonly message: string;
+};
+
 /**
  * 单个 child 探索的安全摘要投影。镜像 [`DeepChildSummary`](src/app/deep/contracts.ts:267)。
  * 摘要只是对外展示字段；模型工作所需的完整 child 材料不被摘要替代。
@@ -274,6 +320,8 @@ export type DeepChildSummaryView = {
   readonly evidenceRefs: readonly string[];
   readonly confidence?: number;
   readonly uncertainty?: string;
+  readonly failureDetail?: DeepChildFailureDetailView;
+  readonly continuationContextRef?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -299,6 +347,7 @@ export type DeepLiveChildParentOperationProjection = {
 
 export type DeepLiveChildWorkflowItemKind =
   | "objective_set"
+  | "model_message"
   | "running"
   | "tool_waiting"
   | "tool_completed"
@@ -359,6 +408,8 @@ export type DeepLiveChildProjection = {
   readonly latestResult?: string;
   readonly confidence?: number;
   readonly uncertainty?: string;
+  readonly failureDetail?: DeepChildFailureDetailView;
+  readonly continuationContextRef?: string;
   readonly workflowItems?: readonly DeepLiveChildWorkflowItem[];
   readonly execution?: DeepLiveChildExecutionProjection;
   readonly parentInstructions?: readonly DeepLiveChildParentInstructionProjection[];
@@ -500,22 +551,39 @@ export type DeepChildAgentRunToolCallTraceView = {
   readonly callId: string;
   readonly toolName: string;
   readonly status: "completed" | "failed" | "approval_required" | "cancelled";
+  readonly summary?: string;
+  readonly inputSummary?: string;
+  readonly durationMs?: number;
+  readonly display?: ToolDisplayProjection;
+};
+
+export type DeepChildAgentRunModelMessageTraceView = {
+  readonly requestId: string;
+  readonly responseId?: string;
+  readonly status: "completed" | "failed" | "cancelled";
+  readonly text?: string;
+  readonly reasoningSummary?: string;
+  readonly toolCallIds: readonly string[];
+  readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
+  readonly completedAt: string;
 };
 
 /**
  * ChildAgentRun 的安全执行事实投影。只含轮次、模型请求/响应引用和工具调用状态，
- * 不含 raw prompt / raw response / 工具原始输出。
+ * 不含 raw prompt / 工具原始输出；模型可见说明作为右侧详情的可审阅输出保留。
  */
 export type DeepChildAgentRunExecutionView = {
   readonly modelRounds: number;
   readonly toolRounds: number;
   readonly modelRequestId?: string;
   readonly modelResponseId?: string;
+  readonly modelMessages?: readonly DeepChildAgentRunModelMessageTraceView[];
   readonly toolCalls: readonly DeepChildAgentRunToolCallTraceView[];
 };
 
 export type DeepChildAgentRunExecutionSegmentView = DeepChildAgentRunExecutionView & {
   readonly outcome: "completed" | "blocked" | "failed" | "interrupted";
+  readonly continuationContextRef?: string;
   readonly recordedAt: string;
 };
 
@@ -566,6 +634,8 @@ export type DeepChildAgentRunView = {
   readonly outputRefs: readonly string[];
   readonly evidenceRefs: readonly string[];
   readonly failureReason?: string;
+  readonly failureDetail?: DeepChildFailureDetailView;
+  readonly continuationContextRef?: string;
   readonly uncertainty?: string;
   readonly confidence?: number;
   readonly execution?: DeepChildAgentRunExecutionView;
@@ -732,10 +802,36 @@ export type CreateDeepConversationResponse = {
   readonly conversation: DeepConversationView;
 };
 
+/** GET /api/deep/conversations 响应（多 Agent 侧栏会话列表）。 */
+export type ListDeepConversationSummariesResponse = {
+  readonly ok: true;
+  readonly conversations: readonly DeepConversationSummary[];
+};
+
+/** GET /api/deep/conversations/:id 响应（打开尚未启动 run 的 intake 会话）。 */
+export type GetDeepConversationResponse = {
+  readonly ok: true;
+  readonly conversation: DeepConversationView;
+  readonly runs: readonly DeepRunSummary[];
+};
+
+export type DeepConversationManagementResponse = {
+  readonly ok: true;
+  readonly conversation: DeepConversationView;
+  readonly conversations?: readonly DeepConversationSummary[];
+};
+
+export type DeepConversationDeleteResponse = {
+  readonly ok: true;
+  readonly deletedConversationId: string;
+  readonly conversations?: readonly DeepConversationSummary[];
+};
+
 /** POST /api/deep/conversations/:id/runs 响应（202 后台执行）。 */
 export type StartDeepRunResponse = {
   readonly ok: true;
   readonly status: "running";
+  readonly conversation?: DeepConversationView;
   readonly run: {
     readonly runId: string;
     readonly conversationId: string;
@@ -751,7 +847,7 @@ export type StartDeepRunResponse = {
 export type DeepIntakeResponse =
   | {
       readonly ok: true;
-      readonly status: "needs_input" | "answered";
+      readonly status: "needs_input" | "answered" | "plan_ready";
       readonly conversation: DeepConversationView;
       readonly intake: DeepIntakeTurn;
     }
@@ -795,6 +891,11 @@ export type DeepRunControlResponse = {
   readonly ok: true;
   readonly status: "interrupt_requested" | "correct_requested" | "stop_requested";
   readonly runId: string;
+} | {
+  readonly ok: true;
+  readonly status: "stopped";
+  readonly runId: string;
+  readonly view: DeepRunView;
 };
 
 /** POST /api/deep/runs/:runId/follow-up 响应。 */

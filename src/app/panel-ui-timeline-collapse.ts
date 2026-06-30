@@ -4,6 +4,7 @@ export type TimelineCollapseRunLike = {
 };
 
 export type TimelineCollapseActivityLike = {
+  readonly variant?: string;
   readonly phase: string;
   readonly copy: {
     readonly label?: string;
@@ -86,6 +87,9 @@ export function timelineCollapseDecision(input: {
   }
   if (input.lifecycle === "attention") {
     return { collapsed: false, reason: "active_or_pending" };
+  }
+  if (input.items.some((item) => item.variant === "context_compaction")) {
+    return { collapsed: false, reason: "expanded" };
   }
   if (input.items.some((item) => !isAutoCollapsibleTimelinePhase(item.phase))) {
     return { collapsed: false, reason: "active_or_pending" };

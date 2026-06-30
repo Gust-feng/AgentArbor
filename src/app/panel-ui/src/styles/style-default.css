@@ -701,15 +701,13 @@ html[data-style="default"] .agent-activity-marker {
 }
 
 html[data-style="default"] .agent-activity-expanded-detail {
-  border-color: color-mix(in oklch, var(--border) 78%, transparent);
-  border-left-color: color-mix(in oklch, var(--tool-accent, var(--accent)) 30%, var(--border));
-  border-radius: var(--radius-lg);
-  background: var(--content-surface);
-  box-shadow: inset 0 1px 0 color-mix(in oklch, white 18%, transparent);
+  border-left-color: color-mix(in oklch, var(--tool-accent, var(--accent)) 24%, var(--border));
+  background: transparent;
+  box-shadow: none;
 }
 
 html[data-style="default"] .agent-activity-expanded-section + .agent-activity-expanded-section {
-  border-top-color: color-mix(in oklch, var(--border) 48%, transparent);
+  border-top-color: transparent;
 }
 
 html[data-style="default"] .settings-dialog {

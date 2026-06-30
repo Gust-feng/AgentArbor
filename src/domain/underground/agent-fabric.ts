@@ -1,4 +1,5 @@
 import type { AgentTurnPermissionPolicy } from "../common.js";
+import type { ToolDisplayProjection } from "../tools/index.js";
 import type { AgentProtocol } from "./agent-loop.js";
 import type { RootletClusterKind } from "./rootlet-contracts.js";
 import type { WorkspaceView } from "./workspace.js";
@@ -73,6 +74,21 @@ export type ChildAgentRunToolCallTrace = {
   readonly callId: string;
   readonly toolName: string;
   readonly status: "completed" | "failed" | "approval_required" | "cancelled";
+  readonly summary?: string;
+  readonly inputSummary?: string;
+  readonly durationMs?: number;
+  readonly display?: ToolDisplayProjection;
+};
+
+export type ChildAgentRunModelMessageTrace = {
+  readonly requestId: string;
+  readonly responseId?: string;
+  readonly status: "completed" | "failed" | "cancelled";
+  readonly text?: string;
+  readonly reasoningSummary?: string;
+  readonly toolCallIds: readonly string[];
+  readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
+  readonly completedAt: string;
 };
 
 export type ChildAgentRunExecution = {
@@ -80,6 +96,7 @@ export type ChildAgentRunExecution = {
   readonly toolRounds: number;
   readonly modelRequestId?: string;
   readonly modelResponseId?: string;
+  readonly modelMessages?: readonly ChildAgentRunModelMessageTrace[];
   readonly toolCalls: readonly ChildAgentRunToolCallTrace[];
 };
 
@@ -87,7 +104,15 @@ export type ChildAgentRunExecutionOutcome = "completed" | "blocked" | "failed" |
 
 export type ChildAgentRunExecutionSegment = ChildAgentRunExecution & {
   readonly outcome: ChildAgentRunExecutionOutcome;
+  readonly continuationContextRef?: string;
   readonly recordedAt: string;
+};
+
+export type ChildAgentRunFailureDetail = {
+  readonly layer: "model_provider" | "agent_runtime" | "user_or_parent" | "output_validation" | "unknown";
+  readonly failureKind?: string;
+  readonly retryable?: boolean;
+  readonly message: string;
 };
 
 export type ChildAgentRunPendingApproval = {
@@ -167,6 +192,8 @@ export type ChildAgentRun = {
   readonly outputRefs: readonly string[];
   readonly evidenceRefs: readonly string[];
   readonly failureReason?: string;
+  readonly failureDetail?: ChildAgentRunFailureDetail;
+  readonly continuationContextRef?: string;
   readonly uncertainty?: string;
   readonly confidence?: number;
   /**
@@ -624,6 +651,7 @@ export function cloneChildAgentRun(run: ChildAgentRun): ChildAgentRun {
     inputRefs: [...run.inputRefs],
     outputRefs: [...run.outputRefs],
     evidenceRefs: [...run.evidenceRefs],
+    failureDetail: cloneChildAgentRunFailureDetail(run.failureDetail),
     execution: cloneChildAgentRunExecution(run.execution),
     executionHistory: cloneChildAgentRunExecutionHistory(run.executionHistory),
     parentInstructions: cloneChildAgentRunParentInstructions(run.parentInstructions),
@@ -657,8 +685,10 @@ function cloneChildAgentRunExecution(
   if (execution === undefined) {
     return undefined;
   }
+  const modelMessages = cloneChildAgentRunModelMessages(execution.modelMessages);
   return {
     ...execution,
+    ...(modelMessages === undefined ? {} : { modelMessages }),
     toolCalls: execution.toolCalls.map((call) => ({ ...call })),
   };
 }
@@ -669,9 +699,34 @@ function cloneChildAgentRunExecutionHistory(
   if (history === undefined) {
     return undefined;
   }
-  return history.map((segment) => ({
-    ...segment,
-    toolCalls: segment.toolCalls.map((call) => ({ ...call })),
+  return history.map((segment) => {
+    const modelMessages = cloneChildAgentRunModelMessages(segment.modelMessages);
+    return {
+      ...segment,
+      ...(modelMessages === undefined ? {} : { modelMessages }),
+      toolCalls: segment.toolCalls.map((call) => ({ ...call })),
+    };
+  });
+}
+
+function cloneChildAgentRunFailureDetail(
+  failureDetail: ChildAgentRunFailureDetail | undefined,
+): ChildAgentRunFailureDetail | undefined {
+  if (failureDetail === undefined) {
+    return undefined;
+  }
+  return { ...failureDetail };
+}
+
+function cloneChildAgentRunModelMessages(
+  messages: readonly ChildAgentRunModelMessageTrace[] | undefined,
+): readonly ChildAgentRunModelMessageTrace[] | undefined {
+  if (messages === undefined) {
+    return undefined;
+  }
+  return messages.map((message) => ({
+    ...message,
+    toolCallIds: [...message.toolCallIds],
   }));
 }
 

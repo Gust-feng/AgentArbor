@@ -1218,7 +1218,6 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
       role: "assistant",
       reasoning_content: "Previous private continuation.",
       reasoning_details: [{ text: "Previous detail." }],
-      content: "",
       tool_calls: [
         {
           id: "call-old",

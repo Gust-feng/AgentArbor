@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ModelRequest } from "../../domain/intelligence/index.js";
 import { OpenAIResponsesProvider } from "./openai-responses-provider.js";
 import type { FetchLike } from "./openai-fetch-bridge.js";
+import { OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION } from "./openai-responses-continuation.js";
 
 test("OpenAI Responses adapter maps messages to input items and returns text output", async () => {
   const calls: { url: string; body: unknown; authorization?: string }[] = [];
@@ -530,6 +531,101 @@ test("OpenAI Responses adapter maps tool results to function_call_output format"
   ]);
 });
 
+test("OpenAI Responses adapter replays native output items before tool outputs", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "resp-continuation-next",
+        model: "gpt-4.1",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Done." }],
+          },
+        ],
+      }),
+    };
+  };
+  const previousOutput = [
+    {
+      id: "rs_1",
+      type: "reasoning",
+      summary: [{ type: "summary_text", text: "Need search result." }],
+    },
+    {
+      id: "fc_1",
+      type: "function_call",
+      call_id: "call-old",
+      name: "web_search",
+      arguments: JSON.stringify({ query: "old" }),
+    },
+  ];
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  await provider.complete(
+    createValidModelRequest({
+      sanitizedMessages: [
+        { role: "user", content: "Search first." },
+        {
+          role: "assistant",
+          content: "",
+          protocolExtensions: {
+            response_id: "resp-continuation-prev",
+            [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: previousOutput,
+          },
+          toolCalls: [{ callId: "call-old", toolName: "web_search", input: { query: "old" } }],
+        },
+        {
+          role: "tool",
+          toolCallId: "call-old",
+          toolName: "web_search",
+          content: JSON.stringify({ results: [] }),
+          attachments: [{
+            kind: "image",
+            attachmentId: "ctx-image",
+            filename: "screenshot.png",
+            detail: "low",
+            source: { kind: "data", mimeType: "image/png", data: "iVBORw0KGgo=" },
+          }],
+        },
+      ],
+    })
+  );
+
+  const input = calls[0]?.body.input as unknown[];
+  assert.deepEqual(input, [
+    {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "Search first." }],
+    },
+    ...previousOutput,
+    {
+      type: "function_call_output",
+      call_id: "call-old",
+      output: [
+        { type: "input_text", text: JSON.stringify({ results: [] }) },
+        {
+          type: "input_image",
+          detail: "low",
+          image_url: "data:image/png;base64,iVBORw0KGgo=",
+        },
+      ],
+    },
+  ]);
+});
+
 test("OpenAI Responses adapter handles assistant message with both text and tool calls", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
@@ -655,7 +751,16 @@ test("OpenAI Responses adapter streams tool call arguments", async () => {
         { type: "response.function_call_arguments.delta", output_index: 0, delta: "{\"qu" },
         { type: "response.function_call_arguments.delta", output_index: 0, delta: "ery\":" },
         { type: "response.function_call_arguments.delta", output_index: 0, delta: "\"test\"}" },
-        { type: "response.output_item.done", output_index: 0 },
+        {
+          type: "response.output_item.done",
+          output_index: 0,
+          item: {
+            type: "function_call",
+            call_id: "call-stream-1",
+            name: "web_search",
+            arguments: "{\"query\":\"test\"}",
+          },
+        },
         { type: "response.completed", response: { id: "resp-stream-002", status: "completed" } },
       ]),
       json: async () => {
@@ -685,6 +790,14 @@ test("OpenAI Responses adapter streams tool call arguments", async () => {
 
   assert.deepEqual(response.toolCalls, [
     { callId: "call-stream-1", toolName: "web_search", input: { query: "test" } },
+  ]);
+  assert.deepEqual(response.assistantMessage?.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION], [
+    {
+      type: "function_call",
+      call_id: "call-stream-1",
+      name: "web_search",
+      arguments: "{\"query\":\"test\"}",
+    },
   ]);
   assert.equal(response.finishReason, "tool_call");
 });
@@ -934,7 +1047,7 @@ test("OpenAI Responses adapter returns provider_network failure on fetch error",
   assert.equal(response.failure?.retryable, true);
 });
 
-test("OpenAI Responses adapter stores response id in protocolExtensions", async () => {
+test("OpenAI Responses adapter stores response id and output items in protocolExtensions", async () => {
   const fetch: FetchLike = async () => ({
     ok: true,
     status: 200,
@@ -962,6 +1075,14 @@ test("OpenAI Responses adapter stores response id in protocolExtensions", async 
   const response = await provider.complete(createValidModelRequest());
 
   assert.equal(response.assistantMessage?.protocolExtensions?.response_id, "resp-extensions");
+  assert.deepEqual(response.assistantMessage?.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION], [
+    {
+      type: "function_call",
+      call_id: "call-ext",
+      name: "tool_a",
+      arguments: "{}",
+    },
+  ]);
 });
 
 test("OpenAI Responses adapter handles response.incomplete status", async () => {

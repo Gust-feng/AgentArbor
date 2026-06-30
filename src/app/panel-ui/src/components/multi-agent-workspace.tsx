@@ -1,12 +1,16 @@
 import React from "react";
 import type { ChatInputProps } from "./chat-empty";
 import { ChatInputBar } from "./chat-empty";
-import { DeepChildInspector, DeepCollaborationIndex, DeepView } from "./deep-view";
+import { selectedComposerModel } from "./chat-session-projection";
+import {
+  DeepView,
+  DeepWorkItemDetailPanel,
+  deepRunWorkItemExists,
+  type DeepSelectedWorkItem,
+} from "./deep-view";
 import type {
   DeepConversationView,
   DeepIntakeStatus,
-  DeepRunStatus,
-  DeepRunSummary,
   DeepRunView,
 } from "../contracts/deep";
 
@@ -16,12 +20,15 @@ type MultiAgentWorkspaceProps = {
   readonly intakeStatus?: DeepIntakeStatus;
   readonly busy: boolean;
   readonly pendingGoal?: string;
-  readonly runs: readonly DeepRunSummary[];
-  readonly activeRunId?: string;
   readonly error?: string;
   readonly inputProps: ChatInputProps;
   readonly childOperationBusyId?: string;
   readonly resynthesisBusy?: boolean;
+  readonly onStartConfirmedRun?: (input: {
+    readonly intakeTurnId?: string;
+    readonly confirmedObjective: string;
+    readonly confirmedPlan: string;
+  }) => void | Promise<void>;
   readonly onChildMessage?: (childRunId: string, message: string) => void | Promise<void>;
   readonly onChildConfirmation?: (
     childRunId: string,
@@ -30,45 +37,43 @@ type MultiAgentWorkspaceProps = {
     guidance?: string,
   ) => void | Promise<void>;
   readonly onResynthesize?: () => void | Promise<void>;
+  readonly onStopRun?: () => void | Promise<void>;
 };
 
 export function MultiAgentWorkspace(props: MultiAgentWorkspaceProps): React.ReactElement {
-  const [selectedChildRunId, setSelectedChildRunId] = React.useState<string | undefined>(undefined);
-  const activeSummary = selectedRun(props.runs, props.activeRunId);
-  const status = props.view?.run.status ?? activeSummary?.status ?? (props.busy ? "running" : undefined);
-  const updatedAt = props.view?.run.updatedAt ?? props.conversation?.updatedAt ?? activeSummary?.updatedAt;
-  const collaborationChildren = props.view?.liveProjection.children ?? [];
-  const selectedChildExists =
-    selectedChildRunId !== undefined &&
-    collaborationChildren.some((child) => child.childRunId === selectedChildRunId) === true;
-  const hasSidePanel = props.view !== undefined && collaborationChildren.length > 0;
+  const [selectedWorkItem, setSelectedWorkItem] = React.useState<DeepSelectedWorkItem | undefined>(undefined);
+  const assistantModel = React.useMemo(
+    () => selectedComposerModel(props.inputProps.models, props.inputProps.selectedModelId),
+    [props.inputProps.models, props.inputProps.selectedModelId],
+  );
+  const hasDetailPanel = props.view !== undefined && selectedWorkItem !== undefined;
   React.useEffect(() => {
-    if (selectedChildRunId === undefined) {
+    if (props.view === undefined || selectedWorkItem === undefined) {
       return;
     }
-    if (props.view === undefined || !props.view.liveProjection.children.some((child) => child.childRunId === selectedChildRunId)) {
-      setSelectedChildRunId(undefined);
+    if (!deepRunWorkItemExists(props.view, selectedWorkItem)) {
+      setSelectedWorkItem(undefined);
     }
-  }, [props.view, selectedChildRunId]);
+  }, [props.view, selectedWorkItem]);
   return (
-    <section className="multi-agent-workspace" aria-label="多 Agent 工作区">
-      <div className={`multi-agent-body ${hasSidePanel ? "with-side-panel" : ""} ${selectedChildExists ? "with-child-inspector" : ""}`}>
+    <section className="multi-agent-workspace" aria-label="Agent 集群工作区">
+      <div className={`multi-agent-body ${hasDetailPanel ? "with-work-detail" : ""}`}>
         <div className="multi-agent-primary">
           <div className="multi-agent-reading-shell">
-            <main className="multi-agent-stage" aria-label="多 Agent 当前运行">
+            <main className="multi-agent-stage" aria-label="Agent 集群当前运行">
               <DeepView
                 view={props.view}
                 conversation={props.conversation}
                 intakeStatus={props.intakeStatus}
                 busy={props.busy}
                 pendingGoal={props.pendingGoal}
-                selectedChildRunId={selectedChildRunId}
-                onSelectChild={setSelectedChildRunId}
-                childOperationBusyId={props.childOperationBusyId}
-                resynthesisBusy={props.resynthesisBusy}
-                onChildMessage={props.onChildMessage}
-                onChildConfirmation={props.onChildConfirmation}
+                assistantModel={assistantModel}
+                resynthesisBusy={props.resynthesisBusy || props.childOperationBusyId !== undefined}
+                selectedWorkItem={selectedWorkItem}
+                onSelectWorkItem={setSelectedWorkItem}
+                onStartConfirmedRun={props.onStartConfirmedRun}
                 onResynthesize={props.onResynthesize}
+                onStopRun={props.onStopRun}
               />
             </main>
             {props.error && <div className="multi-agent-error system-error-line">{props.error}</div>}
@@ -77,92 +82,18 @@ export function MultiAgentWorkspace(props: MultiAgentWorkspaceProps): React.Reac
             </div>
           </div>
         </div>
-        {props.view !== undefined && selectedChildExists ? (
-          <DeepChildInspector
+        {props.view !== undefined && selectedWorkItem !== undefined ? (
+          <DeepWorkItemDetailPanel
             view={props.view}
-            selectedChildRunId={selectedChildRunId}
+            selectedWorkItem={selectedWorkItem}
             busy={props.busy}
             childOperationBusyId={props.childOperationBusyId}
-            onClose={() => setSelectedChildRunId(undefined)}
+            onClose={() => setSelectedWorkItem(undefined)}
             onChildMessage={props.onChildMessage}
             onChildConfirmation={props.onChildConfirmation}
-          />
-        ) : props.view !== undefined && hasSidePanel ? (
-          <DeepCollaborationIndex
-            children={collaborationChildren}
-            activeChildRunId={props.view.liveProjection.activeNodeId}
-            selectedChildRunId={selectedChildRunId}
-            runStatusLabel={statusLabel(status, props.busy, props.intakeStatus)}
-            updatedLabel={updatedAt === undefined ? undefined : formatRelativeTime(updatedAt)}
-            onSelectChild={setSelectedChildRunId}
           />
         ) : null}
       </div>
     </section>
   );
-}
-
-function selectedRun(
-  runs: readonly DeepRunSummary[],
-  activeRunId: string | undefined,
-): DeepRunSummary | undefined {
-  return activeRunId === undefined ? undefined : runs.find((run) => run.runId === activeRunId);
-}
-
-function statusLabel(
-  status: DeepRunStatus | undefined,
-  busy: boolean,
-  intakeStatus: DeepIntakeStatus | undefined,
-): string {
-  if (busy && status === undefined) {
-    return "理解中";
-  }
-  if (intakeStatus === "needs_input") {
-    return "等待补充";
-  }
-  if (intakeStatus === "answered") {
-    return "已回答";
-  }
-  if (busy && (status === undefined || status === "running" || status === "pending")) {
-    return "协作中";
-  }
-  switch (status) {
-    case "pending":
-      return "待启动";
-    case "running":
-      return "运行中";
-    case "interrupted":
-      return "已打断";
-    case "corrected":
-      return "已修正";
-    case "stopped":
-      return "已停止";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "失败";
-    default:
-      return "未开始";
-  }
-}
-
-function formatRelativeTime(timestamp: string): string {
-  const time = Date.parse(timestamp);
-  if (!Number.isFinite(time)) {
-    return "未知";
-  }
-  const diff = Date.now() - time;
-  if (diff < 60_000) {
-    return "刚刚";
-  }
-  if (diff < 60 * 60_000) {
-    return `${Math.max(1, Math.floor(diff / 60_000))} 分钟前`;
-  }
-  if (diff < 24 * 60 * 60_000) {
-    return `${Math.floor(diff / (60 * 60_000))} 小时前`;
-  }
-  return new Date(timestamp).toLocaleDateString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-  });
 }

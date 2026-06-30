@@ -1520,11 +1520,9 @@ html[data-style="glass"] .transcript-load-earlier:hover {
 
 /* ---- Agent activity expanded detail ---- */
 html[data-style="glass"] .agent-activity-expanded-detail {
-  border-color: color-mix(in oklch, white 30%, transparent);
-  border-left-color: color-mix(in oklch, var(--accent) 34%, transparent);
-  box-shadow:
-    0 6px 14px color-mix(in oklch, var(--shadow-ink) 4%, transparent),
-    inset 0 1px 0 color-mix(in oklch, white 24%, transparent);
+  border-left-color: color-mix(in oklch, var(--accent) 28%, transparent);
+  background: transparent;
+  box-shadow: none;
 }
 
 /* ---- Sidebar skeleton rows ---- */

@@ -30,7 +30,7 @@ export function DeepConclusion(props: DeepConclusionProps): React.ReactElement {
   const { conclusion } = props;
   const confidence = confidencePercent(conclusion.confidence);
   return (
-    <section className="deep-conclusion" aria-label="多 Agent 可解释结论">
+    <section className="deep-conclusion" aria-label="Agent 集群可解释结论">
       <header className="deep-conclusion-head">
         <Lightbulb className="deep-conclusion-icon" aria-hidden="true" />
         <h3 className="deep-conclusion-title">综合结论</h3>

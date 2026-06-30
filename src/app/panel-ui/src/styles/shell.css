@@ -116,8 +116,6 @@ html[data-desktop-shell="true"] .app-workbench-header-inner {
 }
 
 html[data-desktop-shell="true"] .app-workbench-sidebar-toggle,
-html[data-desktop-shell="true"] .app-mode-switch,
-html[data-desktop-shell="true"] .app-mode-switch-button,
 html[data-desktop-shell="true"] .app-window-controls,
 html[data-desktop-shell="true"] .app-window-control {
   -webkit-app-region: no-drag;
@@ -176,50 +174,6 @@ html[data-desktop-shell="true"] .app-window-control {
 
 .app-workbench-sidebar-toggle:active {
   transform: scale(0.95);
-}
-
-.app-mode-switch {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: var(--border-width-thin) solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-control);
-}
-
-.app-mode-switch-button {
-  min-width: 92px;
-  height: 30px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: var(--weight-label);
-  line-height: 1;
-  transition:
-    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
-    color var(--motion-interaction-duration) var(--motion-ease-standard),
-    box-shadow var(--motion-interaction-duration) var(--motion-ease-standard);
-}
-
-.app-mode-switch-button:hover:not(:disabled) {
-  color: var(--fg);
-  background: var(--nav-hover-bg);
-}
-
-.app-mode-switch-button.active {
-  color: var(--fg);
-  background: var(--nav-active-bg);
-  box-shadow: var(--shadow-soft);
-}
-
-.app-mode-switch-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
 }
 
 .app-sidebar {
@@ -321,6 +275,41 @@ html[data-desktop-shell="true"] .app-window-control {
 
 .sidebar-new-button:hover .sidebar-icon-slot,
 .sidebar-new-button.active .sidebar-icon-slot {
+  color: var(--accent);
+}
+
+.sidebar-agent-cluster-button {
+  width: 100%;
+  height: 38px;
+  margin-top: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: var(--weight-label);
+  transition:
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-interaction-duration) var(--motion-ease-standard);
+}
+
+.sidebar-agent-cluster-button:hover {
+  border-color: var(--list-row-hover-border);
+  background: var(--nav-hover-bg);
+  color: var(--fg);
+  box-shadow: var(--list-row-hover-shadow);
+}
+
+.sidebar-agent-cluster-button.active {
+  border-color: var(--list-row-active-border);
+  background: var(--nav-active-bg);
+  color: var(--fg);
+  box-shadow: var(--list-row-active-shadow);
+}
+
+.sidebar-agent-cluster-button.active .sidebar-icon-slot {
   color: var(--accent);
 }
 
@@ -674,12 +663,15 @@ html[data-desktop-shell="true"] .app-window-control {
 }
 
 .sidebar-deep-run-status-running,
-.sidebar-deep-run-status-pending {
+.sidebar-deep-run-status-active,
+.sidebar-deep-run-status-pending,
+.sidebar-deep-run-status-plan_ready {
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.sidebar-deep-run-status-completed {
+.sidebar-deep-run-status-completed,
+.sidebar-deep-run-status-answered {
   background: var(--status-success);
 }
 
@@ -689,8 +681,15 @@ html[data-desktop-shell="true"] .app-window-control {
 
 .sidebar-deep-run-status-interrupted,
 .sidebar-deep-run-status-corrected,
-.sidebar-deep-run-status-stopped {
+.sidebar-deep-run-status-stopped,
+.sidebar-deep-run-status-stalled,
+.sidebar-deep-run-status-needs_input {
   background: var(--status-warning);
+}
+
+.sidebar-deep-run-status-orphaned {
+  background: var(--status-danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
 }
 
 .sidebar-deep-run-copy {
@@ -814,6 +813,11 @@ html[data-desktop-shell="true"] .app-window-control {
 
 .sidebar-conversation-menu button:hover:not(:disabled) {
   background: color-mix(in oklch, var(--fg) 5%, transparent);
+}
+
+.sidebar-conversation-menu button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .sidebar-conversation-menu button.danger {

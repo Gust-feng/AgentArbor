@@ -30,7 +30,7 @@
           const motionEffective = motion === "reduced" || (motion === "system" && systemReducedMotion())
             ? "reduced"
             : "standard";
-          const startupAnimation = localStorage.getItem("agentarbor:startup-animation") === "false" ? "off" : "on";
+          const startupAnimation = localStorage.getItem("agentarbor:startup-animation") === "true" ? "on" : "off";
           document.documentElement.dataset.style = style;
           document.documentElement.dataset.color = color;
           document.documentElement.dataset.colorPreference = colorPreference;
@@ -43,7 +43,7 @@
           document.documentElement.dataset.colorPreference = "light";
           document.documentElement.dataset.motion = "system";
           document.documentElement.dataset.motionEffective = systemReducedMotion() ? "reduced" : "standard";
-          document.documentElement.dataset.startupAnimation = "on";
+          document.documentElement.dataset.startupAnimation = "off";
         }
       })();
     </script>

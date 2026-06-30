@@ -8,6 +8,7 @@ export * from "./openai-compatible-chat-stream.js";
 export * from "./openai-fetch-bridge.js";
 export * from "./provider-value-utils.js";
 export * from "./openai-compatible-chat-completions-provider.js";
+export * from "./openai-responses-continuation.js";
 export * from "./openai-responses-request.js";
 export * from "./openai-responses-response.js";
 export * from "./openai-responses-provider.js";

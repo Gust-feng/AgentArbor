@@ -62,11 +62,11 @@ export function shouldUseMotion(): boolean {
 }
 
 export function getStartupAnimationEnabled(): boolean {
-  if (typeof localStorage === "undefined") return true;
+  if (typeof localStorage === "undefined") return false;
   try {
-    return localStorage.getItem(STORAGE_STARTUP_ANIMATION_KEY) !== "false";
+    return localStorage.getItem(STORAGE_STARTUP_ANIMATION_KEY) === "true";
   } catch {
-    return true;
+    return false;
   }
 }
 

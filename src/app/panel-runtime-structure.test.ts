@@ -233,12 +233,15 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(definition.includes("defaultMaxOutputTokens"), false);
   assert.equal(promptAsset.includes("export const DESKTOP_ROOT_AGENT_PROMPT"), true);
   assert.equal(promptAsset.includes("You are AgentArbor Desktop Agent"), true);
-  assert.equal(promptAsset.includes('promptRef: "prompt:desktop-root-agent:v3"'), true);
-  assert.equal(promptAsset.includes('version: "v3"'), true);
+  assert.equal(promptAsset.includes('promptRef: "prompt:desktop-root-agent:v4"'), true);
+  assert.equal(promptAsset.includes('version: "v4"'), true);
   const currentPromptAsset = currentDesktopRootPromptSource(promptAsset);
   assert.equal(currentPromptAsset.includes("You are AgentArbor Desktop Agent."), true);
   assert.equal(currentPromptAsset.includes("Help the user complete the task clearly and accurately."), true);
   assert.equal(currentPromptAsset.includes("Base external factual claims on available evidence"), true);
+  assert.equal(currentPromptAsset.includes("Runtime-selected tools and model-native file or image inputs define what you can inspect in this run"), true);
+  assert.equal(currentPromptAsset.includes("If the current request already includes user-provided file or image inputs"), true);
+  assert.equal(currentPromptAsset.includes("use available attachment tools before saying you cannot read it"), true);
   assert.equal(currentPromptAsset.includes("latest user message"), false);
   assert.equal(currentPromptAsset.includes("active request"), false);
   assert.equal(currentPromptAsset.includes("earlier messages"), false);
@@ -246,6 +249,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(currentPromptAsset.includes("tool descriptions define the tools"), false);
   assert.equal(currentPromptAsset.includes("reasoning controls are provided by the runtime"), false);
   assert.equal(currentPromptAsset.includes("Stay in the ordinary desktop agent path"), false);
+  assert.equal(promptAsset.includes("DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V3"), true);
   assert.equal(promptAsset.includes("DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V2"), true);
   assert.equal(promptAsset.includes("DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V1"), true);
   for (const promptBloatTerm of [
@@ -430,6 +434,54 @@ test("shared run summary types use app-level contracts before panel aliases", as
     assert.equal(source.includes("PanelRunSummary"), true);
     assert.equal(source.includes("panel-run-summary.js"), true);
   }
+});
+
+test("shared run shell layers stay centralized instead of diverging per mode", async () => {
+  const [
+    snapshotStoreFacade,
+    adapterSnapshotStore,
+    runtimeDatabase,
+    runEnvelope,
+    runSummary,
+    runResponseBase,
+    deepReadModel,
+    runRoutes,
+    persistedRunResponse,
+    runJobResponse,
+  ] = await Promise.all([
+    readAppSource(path.join("run-runtime-core", "snapshot-store.ts")),
+    fs.readFile(path.join(process.cwd(), "src", "adapters", "runtime-database", "run-snapshot-store.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "adapters", "runtime-database", "file-system-runtime-database.ts"), "utf8"),
+    readAppSource("run-read-model-envelope.ts"),
+    readAppSource("run-read-model-summary.ts"),
+    readAppSource(path.join("panel-server", "run-response-base.ts")),
+    readAppSource(path.join("deep", "deep-read-model.ts")),
+    readAppSource(path.join("panel-server", "run-routes.ts")),
+    readAppSource(path.join("panel-server", "persisted-run-response.ts")),
+    readAppSource(path.join("panel-server", "run-job-response.ts")),
+  ]);
+
+  assert.equal(snapshotStoreFacade.includes("export interface RunSnapshotStore"), true);
+  assert.equal(snapshotStoreFacade.includes("export type RunEnvelope = {"), true);
+  assert.equal(snapshotStoreFacade.includes("export function createInMemoryRunSnapshotStore"), true);
+  assert.equal(adapterSnapshotStore.includes('from "../../app/run-runtime-core/snapshot-store.js"'), true);
+  assert.equal(adapterSnapshotStore.includes("export function createFileSystemRunSnapshotStore"), true);
+  assert.equal(adapterSnapshotStore.includes("export function createInMemoryRunSnapshotStore"), false);
+  assert.equal(runtimeDatabase.includes("private readonly runRecordStore: RunSnapshotStore<RuntimeRunRecord>"), true);
+  assert.equal(runtimeDatabase.includes("createFileSystemRunSnapshotStore<RuntimeRunRecord>"), true);
+
+  assert.equal(runEnvelope.includes("export function projectRunEnvelopeViewBase"), true);
+  assert.equal(runEnvelope.includes("export function projectConversationRunEnvelopeViewBase"), true);
+  assert.equal(runSummary.includes("export function projectSharedRunSummaryBase"), true);
+  assert.equal(runSummary.includes("export function projectSharedConversationRunSummaryBase"), true);
+  assert.equal(runResponseBase.includes("export function projectPanelRunResponseBase"), true);
+  assert.equal(runRoutes.includes("export type RuntimeRunSummaryView = ReturnType<typeof projectRuntimeRunSummary>"), true);
+  assert.equal(runRoutes.includes("export type RuntimeRunListResponse = {"), true);
+
+  assert.equal(deepReadModel.includes("projectSharedConversationRunSummaryBase"), true);
+  assert.equal(runRoutes.includes("projectSharedRunSummaryBase"), true);
+  assert.equal(persistedRunResponse.includes("projectPanelRunResponseBase"), true);
+  assert.equal(runJobResponse.includes("projectPanelRunResponseBase"), true);
 });
 
 test("panel canvas keeps ordinary desktop agent projection split", async () => {
@@ -635,7 +687,7 @@ async function readAppTypeScriptSources(relativeDir = ""): Promise<readonly AppT
 
 function currentDesktopRootPromptSource(source: string): string {
   const start = source.indexOf("export const DESKTOP_ROOT_AGENT_PROMPT:");
-  const end = source.indexOf("export const DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V2:");
+  const end = source.indexOf("export const DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V3:");
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   return source.slice(start, end);

@@ -30,6 +30,9 @@ import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import { DEEP_CHILD_MATERIAL_CONTRACT_ID } from "./deep-model-io.js";
 import {
   buildFailedDeepChildAgentRun,
+  DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
+  DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,
+  normalizeDeepChildRoundLimit,
   runDeepChildAgent,
   type DeepChildAgentRunInput,
   type DeepChildAgentExecutionStats,
@@ -84,8 +87,8 @@ export function assertOneLayerChildDepth(input: {
  * 按 DeepChildSpec 补全为完整 domain AgentSpec（child 角度探索用）。
  *
  * DeepChildSpec 是 manager 决策语义层的轻量派生请求；本函数补全 protocol/permissions
- * 等完整字段后写入 AgentRunTree。预算只接收父 Agent 显式派生的可选轮次字段，
- * 不注入工程默认预算。
+ * 等完整字段后写入 AgentRunTree。child 有效轮次默认/最高 200，manager 只能
+ * 显式收紧，不能生成无上限或超大上限。
  */
 export function createDeepChildAgentSpec(input: {
   readonly childSpec: DeepChildSpec;
@@ -114,8 +117,8 @@ export function createDeepChildAgentSpec(input: {
     permissions: {
       allowModel: true,
       allowedTools: [...childSpec.allowedTools],
-      maxModelRounds: normalizeOptionalRoundLimit(childSpec.maxModelRounds),
-      maxToolRounds: normalizeOptionalRoundLimit(childSpec.maxToolRounds),
+      maxModelRounds: normalizeDeepChildRoundLimit(childSpec.maxModelRounds, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS),
+      maxToolRounds: normalizeDeepChildRoundLimit(childSpec.maxToolRounds, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS),
       fallback: "disabled",
     },
     budget: buildChildAgentSpecBudget(childSpec),
@@ -268,18 +271,11 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
-function normalizeOptionalRoundLimit(value: number | undefined): number | undefined {
-  if (value === undefined || !Number.isFinite(value)) {
-    return undefined;
-  }
-  return Math.max(0, Math.floor(value));
-}
-
 function buildChildAgentSpecBudget(childSpec: DeepChildSpec): AgentSpec["budget"] {
-  const maxModelRounds = normalizeOptionalRoundLimit(childSpec.maxModelRounds);
-  const maxToolRounds = normalizeOptionalRoundLimit(childSpec.maxToolRounds);
+  const maxModelRounds = normalizeDeepChildRoundLimit(childSpec.maxModelRounds, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS);
+  const maxToolRounds = normalizeDeepChildRoundLimit(childSpec.maxToolRounds, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS);
   return {
-    ...(maxModelRounds === undefined ? {} : { maxModelRounds }),
-    ...(maxToolRounds === undefined ? {} : { maxToolRounds }),
+    maxModelRounds,
+    maxToolRounds,
   };
 }

@@ -10,7 +10,13 @@ import type {
   RunEvent,
   TranscriptNode,
 } from "./contracts/run";
-import type { DeepConversationView, DeepIntakeStatus, DeepRunSummary, DeepRunView } from "./contracts/deep";
+import type {
+  DeepConversationSummary,
+  DeepConversationView,
+  DeepIntakeStatus,
+  DeepRunSummary,
+  DeepRunView,
+} from "./contracts/deep";
 import type { SkillDefinition } from "./contracts/skills";
 import type { ToolsResponse } from "./contracts/tools";
 import type { AppUpdateInfo } from "./contracts/app-update";
@@ -38,6 +44,8 @@ export type AppState = {
    * 与模型 provider 选择（VisibleAiMode）独立，由 Desktop Shell 入口控件显式切换（FR-001）。
    */
   readonly agentMode: AgentMode;
+  /** 最近多 Agent 会话摘要：包含尚未启动 run 的入口追问/计划确认会话。 */
+  readonly deepConversations: readonly DeepConversationSummary[];
   /** 最近多 Agent 运行摘要，用于显式入口恢复与侧栏历史。 */
   readonly deepRuns: readonly DeepRunSummary[];
   /**
@@ -77,6 +85,7 @@ export function createInitialAppState(): AppState {
     events: [],
     busy: false,
     agentMode: "normal",
+    deepConversations: [],
     deepRuns: [],
     deepBusy: false,
   };

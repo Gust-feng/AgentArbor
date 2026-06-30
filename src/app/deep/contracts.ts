@@ -31,6 +31,7 @@ import type {
   AgentSpec,
   ChildAgentRun,
   ChildAgentRunExecutionOutcome,
+  ChildAgentRunFailureDetail,
   ChildAgentRunParentInstructionStatus,
   ChildAgentRunParentReview,
   ChildAgentRunPendingApproval,
@@ -50,7 +51,7 @@ import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 // ---------------------------------------------------------------------------
 
 export type { AgentRunTree, AgentSpec, ChildAgentRun, ParentSynthesisResult };
-export type { ChildAgentRunParentReview };
+export type { ChildAgentRunFailureDetail, ChildAgentRunParentReview };
 export { AGENT_FABRIC_MVP_MAX_DEPTH, assertNoDirectChildOutputHandoff };
 
 // ---------------------------------------------------------------------------
@@ -81,7 +82,7 @@ export type DeepConversationIsolationMark = {
 
 export type DeepIntakeDecisionAction = "ask_user" | "direct_answer" | "start_collaboration";
 
-export type DeepIntakeStatus = "needs_input" | "answered" | "running";
+export type DeepIntakeStatus = "needs_input" | "answered" | "plan_ready" | "running";
 
 export type DeepIntakeTurn = {
   readonly turnId: string;
@@ -92,6 +93,14 @@ export type DeepIntakeTurn = {
   readonly plan?: string;
   readonly uncertainty?: string;
   readonly confidence?: number;
+  readonly createdAt: string;
+};
+
+/** 运行中追加给当前 deep run 的用户补充；用于会话恢复，不改变 intake 状态语义。 */
+export type DeepRunFollowUpTurn = {
+  readonly turnId: string;
+  readonly runId: string;
+  readonly userMessage: string;
   readonly createdAt: string;
 };
 
@@ -113,12 +122,16 @@ export type DeepIntakeContext = {
 export type DeepConversation = {
   readonly conversationId: string;
   readonly title: string;
+  readonly titleEditedAt?: string;
   readonly goal: string;
   /** Intake 对话轮次：协作 run 启动前的理解、澄清、直接回答或计划。 */
   readonly intakeTurns?: readonly DeepIntakeTurn[];
+  /** 运行中的补充要求：仅用于恢复/投影当前 run 的用户追问，不重写 intake 决策语义。 */
+  readonly followUpTurns?: readonly DeepRunFollowUpTurn[];
   /** 当前已明确的协作目标；只有 intake 判定可启动协作时才写入。 */
   readonly currentObjective?: string;
   readonly birthWorkspaceDirectory?: string;
+  readonly pinnedAt?: string;
   readonly isolation: DeepConversationIsolationMark;
   /**
    * 用户显式选择的 workspace 上下文 + 权限边界输入快照。沿用 Desktop Shell 系统
@@ -253,9 +266,9 @@ export type DeepChildSpec = {
   readonly objective: string;
   readonly allowedTools: readonly string[];
   readonly inputRefs: readonly string[];
-  /** Optional parent-assigned child Agent model loop budget. Omitted means no fixed round limit. */
+  /** Optional parent-assigned child Agent model loop budget. Runtime defaults/clamps this to the child maximum. */
   readonly maxModelRounds?: number;
-  /** Optional parent-assigned child Agent tool loop budget. Omitted means no fixed round limit. */
+  /** Optional parent-assigned child Agent tool loop budget. Runtime defaults/clamps this to the child maximum. */
   readonly maxToolRounds?: number;
 };
 
@@ -366,6 +379,8 @@ export type DeepChildSummary = {
   readonly evidenceRefs: readonly string[];
   readonly confidence?: number;
   readonly uncertainty?: string;
+  readonly failureDetail?: ChildAgentRunFailureDetail;
+  readonly continuationContextRef?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -398,6 +413,7 @@ export type DeepLiveChildParentOperationProjection = {
 
 export type DeepLiveChildWorkflowItemKind =
   | "objective_set"
+  | "model_message"
   | "running"
   | "tool_waiting"
   | "tool_completed"
@@ -458,6 +474,8 @@ export type DeepLiveChildProjection = {
   readonly latestResult?: string;
   readonly confidence?: number;
   readonly uncertainty?: string;
+  readonly failureDetail?: ChildAgentRunFailureDetail;
+  readonly continuationContextRef?: string;
   readonly workflowItems?: readonly DeepLiveChildWorkflowItem[];
   readonly execution?: DeepLiveChildExecutionProjection;
   readonly parentInstructions?: readonly DeepLiveChildParentInstructionProjection[];

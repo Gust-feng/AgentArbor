@@ -1,6 +1,13 @@
 import type React from "react";
 import { ApiError, getJson } from "./api";
-import { deepRunSummaryFromView, isTerminalDeepRunStatus, upsertDeepRunSummary } from "./app-deep-history";
+import {
+  deepConversationSummaryFromView,
+  deepRunSummaryFromView,
+  shouldKeepDeepRunBusy,
+  shouldPollDeepRun,
+  upsertDeepConversationSummary,
+  upsertDeepRunSummary,
+} from "./app-deep-history";
 import type { AppState } from "./app-state";
 import type { GetDeepRunViewResponse } from "./contracts/deep";
 import { openDeepRunStream } from "./runtime";
@@ -17,14 +24,12 @@ import { openDeepRunStream } from "./runtime";
  *
  * 轮询策略：
  *   - 提交成功后立即首轮拉取，同时开启 SSE；兜底每 1s 拉取 `/view`；
- *   - run 到达终态（completed/failed/interrupted/stopped/corrected）时停止轮询并 deepBusy=false；
+ *   - runtimeHealth 进入 terminal/orphaned 时停止高频轮询并释放 deepBusy；
  *   - 404（record 尚未写入）：静默重试，不报错（后台 run 刚启动的竞态）；
  *   - 其他错误：写入 app.error 但保持轮询（瞬态网络抖动不应终止观察）；
- *   - 超时保护：超过 5 分钟强制停止（防止后台 run 挂死导致无限轮询）。
  */
 
 const DEEP_POLL_INTERVAL_MS = 1_000;
-const DEEP_POLL_TIMEOUT_MS = 5 * 60 * 1_000;
 
 export type DeepRunUpdateControllerOptions = {
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
@@ -49,7 +54,10 @@ export type DeepRunUpdateController = {
 export function createDeepRunUpdateController(
   options: DeepRunUpdateControllerOptions,
 ): DeepRunUpdateController {
+  let pollToken = 0;
+
   function stopPolling(): void {
+    pollToken += 1;
     if (options.pollTimerRef.current !== undefined) {
       window.clearInterval(options.pollTimerRef.current);
       options.pollTimerRef.current = undefined;
@@ -62,67 +70,64 @@ export function createDeepRunUpdateController(
 
   function startPolling(runId: string): void {
     stopPolling();
+    const currentPollToken = pollToken;
     const path = `/api/deep/runs/${encodeURIComponent(runId)}/view`;
     let lastSequence = 0;
     let inFlight = false;
     let refreshQueued = false;
-    const startedAt = Date.now();
 
     async function tick(): Promise<void> {
       if (!options.mountedRef.current) {
         stopPolling();
         return;
       }
+      if (currentPollToken !== pollToken) return;
       if (inFlight) {
         refreshQueued = true;
         return;
       }
       inFlight = true;
-      if (Date.now() - startedAt > DEEP_POLL_TIMEOUT_MS) {
-        stopPolling();
-        options.setApp((previous) => ({
-          ...previous,
-          deepBusy: false,
-          deepPendingGoal: undefined,
-          deepActiveRunId: undefined,
-          error: "多 Agent 运行超时，已停止刷新。请检查后台运行状态。",
-        }));
-        inFlight = false;
-        return;
-      }
-
       try {
         const response = await getJson<GetDeepRunViewResponse>(path);
-        if (!options.mountedRef.current) return;
+        if (!options.mountedRef.current || currentPollToken !== pollToken) return;
         const view = response.view;
         const lastEvent = view.eventSequence.at(-1);
         if (lastEvent !== undefined) {
           lastSequence = Math.max(lastSequence, lastEvent.sequence);
         }
-        const isTerminal = isTerminalDeepRunStatus(view.run.status);
+        const keepBusy = shouldKeepDeepRunBusy(view.run);
+        const keepPolling = shouldPollDeepRun(view.run);
         const summary = deepRunSummaryFromView(view);
+        const conversationSummary = view.conversation === undefined
+          ? undefined
+          : deepConversationSummaryFromView(view.conversation, summary);
+        const intakeStatus = conversationSummary?.intakeStatus;
         options.setApp((previous) => ({
           ...previous,
           deep: view,
           deepConversation: view.conversation ?? previous.deepConversation,
+          deepConversations: conversationSummary === undefined
+            ? previous.deepConversations
+            : upsertDeepConversationSummary(previous.deepConversations, conversationSummary),
           deepRuns: upsertDeepRunSummary(previous.deepRuns, summary),
           deepPendingGoal: undefined,
           deepActiveRunId: view.run.runId,
           deepSelectedRunId: view.run.runId,
-          deepBusy: !isTerminal,
+          deepIntakeStatus: intakeStatus,
+          deepBusy: keepBusy,
           error: undefined,
         }));
-        if (isTerminal) {
+        if (!keepPolling) {
           stopPolling();
         }
       } catch (error) {
-        if (!options.mountedRef.current) return;
+        if (!options.mountedRef.current || currentPollToken !== pollToken) return;
         // 404：run record 尚未写入（后台 run 刚启动竞态），静默重试。
         if (error instanceof ApiError && error.status === 404) return;
         // 其他错误：写入 error 但保持轮询（瞬态网络抖动不应终止观察）。
         options.setApp((previous) => ({
           ...previous,
-          error: error instanceof Error ? error.message : "刷新多 Agent 运行状态失败。",
+          error: error instanceof Error ? error.message : "刷新 Agent 集群运行状态失败。",
         }));
       } finally {
         inFlight = false;

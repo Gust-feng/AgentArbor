@@ -296,6 +296,8 @@ function cloneSummary(summary: DeepChildSummary): DeepChildSummary {
     evidenceRefs: [...summary.evidenceRefs],
     confidence: summary.confidence,
     uncertainty: summary.uncertainty,
+    failureDetail: summary.failureDetail === undefined ? undefined : { ...summary.failureDetail },
+    continuationContextRef: summary.continuationContextRef,
   };
 }
 

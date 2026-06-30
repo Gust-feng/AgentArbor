@@ -871,11 +871,7 @@ function persistedFileChangePreview(
   const resultPath = optionalString(result.path) ?? optionalString(input.path);
   const summary = cleanOrdinaryToolText(optionalString(output.summary));
   if (toolName === "edit_file") {
-    const replacements = typeof result.replacements === "number" ? `替换：${result.replacements} 处` : undefined;
-    const diffPreview = ["变更预览", replacements]
-      .filter((item): item is string => item !== undefined && item.length > 0)
-      .join("\n");
-    return [summary, resultPath === undefined ? undefined : `文件：${resultPath}`, diffPreview].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
+    return resultPath ?? summary;
   }
   return [summary, resultPath === undefined ? undefined : `文件：${resultPath}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
 }

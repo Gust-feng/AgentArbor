@@ -310,7 +310,9 @@ test("tool stream projection carries edit diff preview in the file display", () 
     },
   });
 
-  assert.equal(detail.preview?.includes("文件已更新"), true);
+  assert.equal(detail.preview?.includes("文件已更新"), false);
+  assert.equal(detail.preview?.includes("- old text"), true);
+  assert.equal(detail.preview?.includes("+ new text"), true);
   assert.equal(detail.display?.kind, "file_diff_preview");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.path : undefined, "src/app/example.ts");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.operation : undefined, "edit");

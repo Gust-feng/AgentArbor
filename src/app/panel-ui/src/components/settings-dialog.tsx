@@ -49,6 +49,10 @@ export function SettingsDialog(props: {
   readonly setWorkspaceDirectory: (value: string) => void;
   readonly desktopAgentSystemPrompt: string;
   readonly setDesktopAgentSystemPrompt: (value: string) => void;
+  readonly modelUsageDisplayEnabled: boolean;
+  readonly onModelUsageDisplayChange: (enabled: boolean) => void;
+  readonly agentClusterEnabled: boolean;
+  readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
   readonly onSaveCommandShell: (kind: "auto" | "cmd" | "powershell" | "pwsh" | "bash" | "sh") => Promise<void> | void;
   readonly savingModel?: boolean;
   readonly savingWorkspace?: boolean;
@@ -182,6 +186,8 @@ export function SettingsDialog(props: {
                 onSaveModelCapabilities={props.onSaveModelCapabilities}
                 desktopAgentSystemPrompt={props.desktopAgentSystemPrompt}
                 setDesktopAgentSystemPrompt={props.setDesktopAgentSystemPrompt}
+                modelUsageDisplayEnabled={props.modelUsageDisplayEnabled}
+                onModelUsageDisplayChange={props.onModelUsageDisplayChange}
                 savingDesktopAgent={props.savingDesktopAgent}
                 onSaveDesktopAgentSystemPrompt={props.onSaveDesktopAgentSystemPrompt}
                 onResetDesktopAgentSystemPrompt={props.onResetDesktopAgentSystemPrompt}
@@ -234,6 +240,8 @@ export function SettingsDialog(props: {
               <AboutSettings
                 config={props.config}
                 appUpdate={props.appUpdate}
+                agentClusterEnabled={props.agentClusterEnabled}
+                onAgentClusterEnabledChange={props.onAgentClusterEnabledChange}
                 onCheckAppUpdate={props.onCheckAppUpdate}
                 onInstallAppUpdate={props.onInstallAppUpdate}
               />
@@ -261,6 +269,8 @@ const AGENTARBOR_GITHUB_REPOSITORY_URL = "https://github.com/Gust-feng/AgentArbo
 function AboutSettings(props: {
   readonly config?: ConfigResponse;
   readonly appUpdate?: AppUpdateInfo;
+  readonly agentClusterEnabled: boolean;
+  readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
   readonly onCheckAppUpdate: () => Promise<void> | void;
   readonly onInstallAppUpdate: () => Promise<void> | void;
 }): React.ReactElement {
@@ -278,7 +288,7 @@ function AboutSettings(props: {
   const canInstallUpdate = props.appUpdate?.canInstall === true && updateStatus === "downloaded";
 
   const checkUpdate = async (): Promise<void> => {
-    if (checkingUpdate || !canCheckUpdate) return;
+    if (checkingUpdate) return;
     setCheckingUpdate(true);
     try {
       await props.onCheckAppUpdate();
@@ -322,6 +332,29 @@ function AboutSettings(props: {
       <section className="about-fact-grid" aria-label="产品运行信息">
         <AboutFact icon={<CheckCircle2 size={16} />} label="版本" value={version} />
         <AboutFact icon={<Monitor size={16} />} label="默认入口" value={defaultEntry} />
+      </section>
+
+      <section className="settings-card about-agent-cluster-card">
+        <div className="settings-card-title-row">
+          <h3>Agent 集群</h3>
+          <span>beta</span>
+        </div>
+        <div className="about-agent-cluster-row">
+          <div className="about-agent-cluster-copy">
+            <strong>启用 Agent 集群</strong>
+            <span>当前版本仍处于测试阶段，可能出现运行中断、结果不稳定、状态恢复异常等意外情况；开启后仅在“新任务”下方显示入口，默认启动仍进入桌面 Agent。</span>
+          </div>
+          <button
+            type="button"
+            className="appearance-toggle-switch about-agent-cluster-switch"
+            role="switch"
+            aria-checked={props.agentClusterEnabled}
+            aria-label="启用 Agent 集群 beta"
+            onClick={() => props.onAgentClusterEnabledChange(!props.agentClusterEnabled)}
+          >
+            <span />
+          </button>
+        </div>
       </section>
 
       <section className="settings-card about-update-card">

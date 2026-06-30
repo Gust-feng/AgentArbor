@@ -19,8 +19,16 @@ import { createChildAgentRun, type ChildAgentRun } from "../../domain/undergroun
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import type { DeepChildSpec } from "./contracts.js";
 import { createDeepChildAgentSpec, DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";
-import { continueDeepChildAgent, resumeDeepChildAgent, runDeepChildAgent } from "./deep-child-agent-runner.js";
+import {
+  DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
+  DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,
+  continueDeepChildAgent,
+  normalizeDeepChildRoundLimit,
+  resumeDeepChildAgent,
+  runDeepChildAgent,
+} from "./deep-child-agent-runner.js";
 import { createDeepTurnRuntime } from "./deep-turn.js";
+import { InMemoryDeepChildLoopContextStore } from "./deep-child-loop-contexts.js";
 
 test("runDeepChildAgent runs the standard model-tool-model loop and preserves the parent-created objective", async () => {
   const childSpec = sampleChildSpec({
@@ -29,7 +37,12 @@ test("runDeepChildAgent runs the standard model-tool-model loop and preserves th
   });
   const childRun = makeChildRun(childSpec);
   const channel = new SequenceChannel([
-    toolCallResponse("call-search", "search", { query: "OAuth2 migration risk" }),
+    toolCallResponse(
+      "call-search",
+      "search",
+      { query: "OAuth2 migration risk" },
+      "我会先检索 OAuth2 迁移风险资料，再根据工具结果归纳证据。",
+    ),
     completedJsonResponse({
       summary: "风险角度：工具证据表明迁移需要重点处理回调兼容。",
       findings: ["回调兼容性是首要风险"],
@@ -60,8 +73,16 @@ test("runDeepChildAgent runs the standard model-tool-model loop and preserves th
   assert.equal(result.execution.toolRounds, 1);
   assert.equal(result.completedRun.execution?.modelRounds, 2);
   assert.equal(result.completedRun.execution?.toolRounds, 1);
+  assert.equal(result.completedRun.execution?.modelMessages?.[0]?.text, "我会先检索 OAuth2 迁移风险资料，再根据工具结果归纳证据。");
+  assert.deepEqual(result.completedRun.execution?.modelMessages?.[0]?.toolCallIds, ["call-search"]);
+  assert.equal(result.completedRun.executionHistory?.[0]?.modelMessages?.[0]?.text, "我会先检索 OAuth2 迁移风险资料，再根据工具结果归纳证据。");
   assert.equal(result.completedRun.execution?.toolCalls[0]?.toolName, "search");
   assert.equal(result.completedRun.execution?.toolCalls[0]?.status, "completed");
+  assert.equal(result.completedRun.execution?.toolCalls[0]?.summary, "search：OAuth2 migration risk");
+  assert.equal(result.completedRun.execution?.toolCalls[0]?.inputSummary, "{\"query\":\"OAuth2 migration risk\"}");
+  assert.equal(result.completedRun.execution?.toolCalls[0]?.durationMs, 1);
+  assert.equal(result.completedRun.execution?.toolCalls[0]?.display?.kind, "search_results");
+  assert.equal(result.completedRun.execution?.toolCalls[0]?.display?.query, "OAuth2 migration risk");
   assert.deepEqual(broker.executedToolNames(), ["search"]);
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["search"]);
   assert.deepEqual(channel.requests[0]?.budget, {});
@@ -73,12 +94,14 @@ test("runDeepChildAgent runs the standard model-tool-model loop and preserves th
   );
 });
 
-test("runDeepChildAgent does not impose default child round budgets when parent omits them", async () => {
+test("runDeepChildAgent applies the default child round budget when parent omits limits", async () => {
   const childSpec = sampleChildSpec({
     allowedTools: ["search"],
     objective: "连续核查 OAuth2 迁移风险，必要时多次使用工具后再总结。",
   });
   const childRun = makeChildRun(childSpec);
+  assert.equal(childRun.spec.permissions.maxModelRounds, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS);
+  assert.equal(childRun.spec.permissions.maxToolRounds, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS);
   const channel = new SequenceChannel([
     toolCallResponse("call-search-1", "search", { query: "OAuth2 migration callback risk" }),
     toolCallResponse("call-search-2", "search", { query: "OAuth2 migration rollback risk" }),
@@ -115,6 +138,15 @@ test("runDeepChildAgent does not impose default child round budgets when parent 
   assert.deepEqual(broker.executedToolNames(), ["search", "search"]);
   assert.equal(channel.requests.length, 3);
   assert.deepEqual(channel.requests.map((request) => request.budget), [{}, {}, {}]);
+});
+
+test("normalizeDeepChildRoundLimit defaults to 200 and clamps manager overshoot", () => {
+  assert.equal(normalizeDeepChildRoundLimit(undefined, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS), 200);
+  assert.equal(normalizeDeepChildRoundLimit(12, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS), 12);
+  assert.equal(normalizeDeepChildRoundLimit(999, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS), 200);
+  assert.equal(normalizeDeepChildRoundLimit(undefined, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS), 200);
+  assert.equal(normalizeDeepChildRoundLimit(7, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS), 7);
+  assert.equal(normalizeDeepChildRoundLimit(800, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS), 200);
 });
 
 test("runDeepChildAgent intersects parent prompt tools with the frozen child run permissions", async () => {
@@ -245,14 +277,14 @@ test("runDeepChildAgent maps approval_required to a blocked child Agent run", as
   assert.equal(channel.requests.length, 1);
 });
 
-test("runDeepChildAgent maps unexpected model stop to an interrupted child Agent run", async () => {
+test("runDeepChildAgent maps provider network stops to retryable interrupted child detail", async () => {
   const childSpec = sampleChildSpec({
     allowedTools: [],
     objective: "模型调用异常停止时保留同一个子 Agent，等待父层审查后继续。",
   });
   const childRun = makeChildRun(childSpec);
   const channel = new SequenceChannel([
-    failedModelResponse("provider stopped before child material was produced"),
+    failedModelResponse("other side closed", "provider_network"),
   ]);
   const turnRuntime = createDeepTurnRuntime({
     intelligenceChannel: channel,
@@ -271,11 +303,89 @@ test("runDeepChildAgent maps unexpected model stop to an interrupted child Agent
 
   assert.equal(result.summary.status, "interrupted");
   assert.equal(result.completedRun.status, "interrupted");
-  assert.match(result.completedRun.failureReason ?? "", /provider stopped/);
+  assert.match(result.completedRun.failureReason ?? "", /other side closed/);
+  assert.equal(result.completedRun.failureDetail?.layer, "model_provider");
+  assert.equal(result.completedRun.failureDetail?.failureKind, "provider_network");
+  assert.equal(result.completedRun.failureDetail?.retryable, true);
+  assert.equal(result.summary.failureDetail?.failureKind, "provider_network");
+  assert.equal(result.summary.summary, "模型通道暂时中断：other side closed");
   assert.equal(result.execution.modelRounds, 1);
   assert.equal(result.completedRun.executionHistory?.length, 1);
   assert.equal(result.completedRun.executionHistory?.[0]?.outcome, "interrupted");
   assert.equal(result.completedRun.childRunId, childRun.childRunId);
+});
+
+test("continueDeepChildAgent resumes from stored tool context after provider interruption", async () => {
+  const childSpec = sampleChildSpec({
+    allowedTools: ["search"],
+    objective: "先检索迁移回滚证据；如果模型通道中断，继续时不得从零开始。",
+  });
+  const childRun = makeChildRun(childSpec);
+  const contextStore = new InMemoryDeepChildLoopContextStore();
+  const channel = new SequenceChannel([
+    toolCallResponse("call-search-context", "search", { query: "OAuth2 rollback evidence" }),
+    failedModelResponse("other side closed", "provider_network"),
+    completedJsonResponse({
+      summary: "基于上一段工具结果继续后，补齐了回滚路径材料。",
+      findings: ["继续时看到了上一段 search 工具结果"],
+      evidenceRefs: ["tool:search:rollback-evidence"],
+      uncertainty: "仍需父层综合。",
+      confidence: 0.73,
+    }),
+  ]);
+  const broker = new RecordingToolBroker(["search"]);
+  const turnRuntime = createDeepTurnRuntime({ intelligenceChannel: channel, toolCenter: broker });
+
+  const interrupted = await runDeepChildAgent({
+    runId: "deep-run-context-test",
+    childRun,
+    childSpec,
+    goal: "评估认证模块迁移到 OAuth2 的风险",
+    permissionBoundaryRefs: [],
+    turnRuntime,
+    traceId: "trace-test",
+    goalId: "goal-test",
+    childLoopContextStore: contextStore,
+  });
+
+  assert.equal(interrupted.completedRun.status, "interrupted");
+  assert.equal(interrupted.completedRun.continuationContextRef?.startsWith("child_loop_context:"), true);
+  const stored = await contextStore.getByRef(
+    "deep-run-context-test",
+    interrupted.completedRun.continuationContextRef!,
+  );
+  assert.equal(stored?.messages.some((message) => message.role === "assistant" && message.toolCalls?.[0]?.callId === "call-search-context"), true);
+  assert.equal(stored?.messages.some((message) => message.role === "tool" && message.toolCallId === "call-search-context"), true);
+
+  const continued = await continueDeepChildAgent({
+    runId: "deep-run-context-test",
+    childRun: interrupted.completedRun,
+    childSpec,
+    previousSummary: interrupted.summary,
+    parentInstruction: "沿用上一段工具结果继续，不要重新做大范围检索。",
+    goal: "评估认证模块迁移到 OAuth2 的风险",
+    permissionBoundaryRefs: [],
+    turnRuntime,
+    traceId: "trace-test",
+    goalId: "goal-test",
+    childLoopContextStore: contextStore,
+  });
+
+  assert.equal(continued.completedRun.status, "completed");
+  assert.equal(channel.requests.length, 3);
+  assert.equal(
+    channel.requests[2]?.sanitizedMessages.some((message) =>
+      message.role === "tool" && message.toolCallId === "call-search-context"
+    ),
+    true,
+  );
+  assert.equal(
+    channel.requests[2]?.sanitizedMessages.some((message) =>
+      message.ref === `context:deep:child_parent_instruction:${childRun.childRunId}` &&
+      message.content.includes("不要重新做大范围检索")
+    ),
+    true,
+  );
 });
 
 test("resumeDeepChildAgent approves a blocked child confirmation and completes the same child run", async () => {
@@ -604,6 +714,21 @@ class RecordingToolBroker implements ToolExecutionBroker {
       };
     }
     this.executed.push(request);
+    const query = typeof request.input === "object" && request.input !== null && "query" in request.input
+      ? String((request.input as { readonly query?: unknown }).query ?? request.toolName)
+      : request.toolName;
+    const display = {
+      kind: "search_results" as const,
+      query,
+      message: `找到 ${request.toolName} 测试证据。`,
+      results: [
+        {
+          title: `${request.toolName} evidence`,
+          url: `https://example.test/${request.toolName}`,
+          snippet: "测试工具结果摘要",
+        },
+      ],
+    };
     return {
       callId: request.callId,
       toolName: request.toolName,
@@ -611,6 +736,21 @@ class RecordingToolBroker implements ToolExecutionBroker {
       output: { evidenceRef: `tool:${request.toolName}:oauth-risk` },
       status: "completed",
       durationMs: 1,
+      projection: {
+        uiSummary: `${request.toolName}：${query}`,
+        display,
+        envelope: {
+          agentSummary: `${request.toolName}：${query}`,
+          evidenceRefs: [`tool:${request.toolName}:oauth-risk`],
+          uiDisplay: display,
+          tokenEstimate: 12,
+          truncated: false,
+          redacted: false,
+          rawRetention: "none",
+        },
+        truncated: false,
+        redacted: false,
+      },
     };
   }
 
@@ -627,10 +767,11 @@ class RecordingToolBroker implements ToolExecutionBroker {
   }
 }
 
-function toolCallResponse(callId: string, toolName: string, input: unknown): ResponseStep {
+function toolCallResponse(callId: string, toolName: string, input: unknown, textOutput?: string): ResponseStep {
   return (request) => ({
     ...baseResponse(request),
     responseId: `response-${callId}`,
+    textOutput,
     toolCalls: [{ callId, toolName, input }],
     finishReason: "tool_call",
   });
@@ -645,17 +786,20 @@ function completedJsonResponse(output: unknown): ResponseStep {
   });
 }
 
-function failedModelResponse(message: string): ResponseStep {
+function failedModelResponse(
+  message: string,
+  kind: NonNullable<ModelResponse["failure"]>["kind"] = "provider_response",
+): ResponseStep {
   return (request) => ({
     ...baseResponse(request),
     responseId: "response-failed",
     status: "failed",
     finishReason: "error",
     failure: {
-      kind: "provider_response",
+      kind,
       retryable: true,
       message,
-      sanitizedErrorRef: "model-error:provider_response",
+      sanitizedErrorRef: `model-error:${kind}`,
     },
   });
 }

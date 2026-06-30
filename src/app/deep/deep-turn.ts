@@ -9,10 +9,15 @@
  * AI-first 边界：fallback 固定 "disabled"——模型不可用或 turn 失败时直接抛错，
  * 不 fallback 伪装成已完成判断（需求 A3）。调用方据此做业务决策（拒绝 run / 标记 child 失败）。
  */
+import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { IntelligenceChannel, ModelOutputContract } from "../../domain/intelligence/contracts.js";
 import type { ObservationRef } from "../../domain/observation/contracts.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import { AgentTurnRuntime, type AgentTurnRuntimeResult } from "../../kernel/intelligence/agent-turn-runtime.js";
+import {
+  compactAgentLoopContextIfNeeded,
+  createOpenAITokenCounter,
+} from "../agent-loop-context-maintenance.js";
 import type { DeepTurnMessage } from "./deep-model-io.js";
 
 export type ExecuteDeepTurnInput = {
@@ -33,6 +38,18 @@ export type ExecuteDeepTurnInput = {
   readonly maxModelRounds: number;
   readonly maxToolRounds: number;
   readonly confirmationPolicy?: ToolConfirmationPolicy;
+};
+
+export type DeepTurnContextMaintenanceConfig = {
+  readonly goal: string;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly agentIdentity: {
+    readonly agentId: string;
+    readonly displayName: string;
+  };
+  readonly activeModel?: string;
+  readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
 };
 
 /**
@@ -80,10 +97,41 @@ export function createDeepTurnRuntime(input: {
   readonly intelligenceChannel: IntelligenceChannel;
   readonly toolCenter?: import("../../domain/tools/contracts.js").ToolExecutionBroker;
   readonly publishToolEvent?: (message: unknown) => void;
+  readonly contextMaintenance?: DeepTurnContextMaintenanceConfig;
 }): AgentTurnRuntime {
+  const maintenance = input.contextMaintenance;
+  const tokenCounter = createOpenAITokenCounter(maintenance?.activeModel);
   return new AgentTurnRuntime({
     intelligenceChannel: input.intelligenceChannel,
     toolCenter: input.toolCenter,
     publishToolEvent: input.publishToolEvent,
+    maintainContext: maintenance === undefined
+      ? undefined
+      : async (contextInput) => {
+          const result = await compactAgentLoopContextIfNeeded({
+            goal: maintenance.goal,
+            traceId: maintenance.traceId,
+            goalId: maintenance.goalId,
+            agentIdentity: maintenance.agentIdentity,
+            messages: contextInput.messages,
+            tools: contextInput.tools,
+            intelligenceChannel: input.intelligenceChannel,
+            modelCapabilities: maintenance.modelCapabilities,
+            tokenCounter,
+          });
+          if (result.status === "failed") {
+            return {
+              status: "failed",
+              message: result.message,
+              requestId: result.requestId,
+              responseId: result.responseId,
+              retryable: true,
+            };
+          }
+          if (result.status === "compacted") {
+            return { status: "compacted", messages: result.messages };
+          }
+          return { status: "unchanged" };
+        },
   });
 }

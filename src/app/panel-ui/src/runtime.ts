@@ -25,6 +25,7 @@ const BASIC_RUN_EVENT_TYPES = [
   "model.output.completed",
   "model.side.completed",
   "model.failed",
+  "context.compaction.requested",
   "context.compaction.completed",
   "context.compaction.failed",
 ] as const;

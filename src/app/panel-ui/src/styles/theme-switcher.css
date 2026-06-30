@@ -75,14 +75,34 @@
   padding-top: var(--space-3);
 }
 
-.appearance-toggle-row > span {
+.appearance-toggle-label {
+  display: inline-flex;
   min-width: 0;
-  overflow: hidden;
+  align-items: center;
+  gap: var(--space-2);
   color: var(--fg);
   font-size: 13px;
   font-weight: var(--weight-body);
+  line-height: 1.2;
+}
+
+.appearance-toggle-title {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.appearance-toggle-badge {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--field-border));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent-soft) 68%, var(--surface));
+  padding: 1px 7px;
+  color: var(--accent-active);
+  font-size: 11px;
+  font-weight: var(--weight-label);
+  line-height: 1.35;
 }
 
 .appearance-toggle-switch {

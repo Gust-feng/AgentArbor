@@ -112,6 +112,20 @@ test("completed segmented activity collapses structurally once body content exis
   assert.deepEqual(decision, { collapsed: true, reason: "structure" });
 });
 
+test("context compaction timeline stays expanded as a visible status row", () => {
+  assert.deepEqual(timelineCollapseDecision({
+    collapseTimeline: true,
+    defaultCollapsed: true,
+    items: [{
+      variant: "context_compaction",
+      phase: "completed",
+      copy: { detail: "上下文压缩完成" },
+    }],
+    hasCurrentConfirmation: false,
+    hasBodySegments: true,
+  }), { collapsed: false, reason: "expanded" });
+});
+
 test("segment lifecycle keeps open and attention timelines expanded", () => {
   assert.deepEqual(timelineCollapseDecision({
     collapseTimeline: true,

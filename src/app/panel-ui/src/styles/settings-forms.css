@@ -188,6 +188,43 @@
   overflow-wrap: anywhere;
 }
 
+.about-agent-cluster-card {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.about-agent-cluster-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.about-agent-cluster-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.about-agent-cluster-copy strong {
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: var(--weight-heading);
+  line-height: 1.3;
+}
+
+.about-agent-cluster-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.about-agent-cluster-switch {
+  flex: 0 0 auto;
+}
+
 .about-path-card {
   display: grid;
   width: 100%;

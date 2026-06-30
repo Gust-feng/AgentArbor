@@ -31,7 +31,6 @@
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { Dirent } from "node:fs";
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
@@ -44,15 +43,18 @@ import type {
   AgentRunTree,
   AgentSpec,
   ChildAgentRun,
+  ChildAgentRunModelMessageTrace,
   ChildAgentRunParentInstruction,
   DelegationDecision,
   DelegationDecisionAction,
   ParentSynthesisResult,
 } from "../../domain/underground/agent-fabric.js";
 import {
-  appendChildRunToTree,
   appendDelegationDecisionToTree,
   appendParentSynthesisToTree,
+  cloneAgentRunTree,
+  cloneDelegationDecision,
+  cloneParentSynthesisResult,
   completeAgentRunTree,
   createAgentRunTree,
   replaceChildRunInTree,
@@ -62,6 +64,12 @@ import {
   type DeepEventPublisher,
   type DeepRunStreamEvent,
 } from "./deep-events.js";
+import {
+  createInMemoryRunSnapshotStore,
+  type RunEnvelope,
+  type RunSnapshotStore,
+} from "../run-runtime-core/snapshot-store.js";
+import { createFileSystemRunSnapshotStore } from "../../adapters/runtime-database/run-snapshot-store.js";
 import type {
   DeepChildStatus,
   DeepChildSummary,
@@ -116,6 +124,7 @@ import {
   createDeepChildMessageRecord,
   type DeepChildMessageStore,
 } from "./deep-child-messages.js";
+import type { DeepChildLoopContextStore } from "./deep-child-loop-contexts.js";
 import { DeepTaskBoard } from "./deep-task-board.js";
 import type { DeepChildPendingContinuationStore } from "./deep-child-continuations.js";
 
@@ -188,33 +197,42 @@ export type DeepRunRecord = {
  * DeepRunRecord 持久化端口。隔离 deep 分区（与 deep-conversations 同级），
  * 语义镜像 DeepConversationStore。InMemory 实现用于测试，FileSystem 实现用于真实运行。
  */
-export interface DeepRunRecordStore {
-  upsert(record: DeepRunRecord): Promise<DeepRunRecord>;
-  get(runId: string): Promise<DeepRunRecord | undefined>;
-  list(limit?: number): Promise<readonly DeepRunRecord[]>;
-}
+export interface DeepRunRecordStore extends RunSnapshotStore<DeepRunRecord> {}
 
 /** 内存 DeepRunRecordStore（测试与开发态）。 */
 export class InMemoryDeepRunRecordStore implements DeepRunRecordStore {
-  private readonly records = new Map<string, DeepRunRecord>();
+  private readonly store = createInMemoryRunSnapshotStore<DeepRunRecord>({
+    getEnvelope: deepRunRecordEnvelope,
+  });
 
   async upsert(record: DeepRunRecord): Promise<DeepRunRecord> {
-    this.records.set(record.run.runId, record);
-    return record;
+    return this.store.upsert(record);
   }
 
   async get(runId: string): Promise<DeepRunRecord | undefined> {
-    return this.records.get(runId);
+    return this.store.get(runId);
   }
 
   async list(limit = 50): Promise<readonly DeepRunRecord[]> {
-    const all = [...this.records.values()].sort(compareDeepRunRecordByRecency);
-    return all.slice(0, limit);
+    return this.store.list(limit);
+  }
+
+  async delete(runId: string): Promise<void> {
+    return this.store.delete(runId);
   }
 }
 
-function compareDeepRunRecordByRecency(left: DeepRunRecord, right: DeepRunRecord): number {
-  return right.run.updatedAt.localeCompare(left.run.updatedAt);
+function deepRunRecordEnvelope(record: DeepRunRecord): RunEnvelope {
+  return {
+    runId: record.run.runId,
+    updatedAt: record.run.updatedAt,
+    status: record.run.status,
+    runKind: record.run.isolation.runKind,
+    runMode: record.run.isolation.runMode,
+    rootRunId: record.run.rootRunId,
+    parentRunId: record.run.parentRunId,
+    conversationId: record.run.conversationId,
+  };
 }
 
 /**
@@ -222,35 +240,10 @@ function compareDeepRunRecordByRecency(left: DeepRunRecord, right: DeepRunRecord
  * 写入 `${runtimeHome}/deep-runs/<runId>/record.json`。
  */
 export function createFileSystemDeepRunRecordStore(runtimeHome: string): DeepRunRecordStore {
-  const root = path.join(runtimeHome, DEEP_RUN_RECORD_PARTITION);
-  return {
-    async upsert(record: DeepRunRecord): Promise<DeepRunRecord> {
-      const dir = path.join(root, record.run.runId);
-      await fs.mkdir(dir, { recursive: true });
-      await writeJsonFile(path.join(dir, "record.json"), record);
-      return record;
-    },
-    async get(runId: string): Promise<DeepRunRecord | undefined> {
-      return readJsonFile<DeepRunRecord>(path.join(root, runId, "record.json"));
-    },
-    async list(limit = 50): Promise<readonly DeepRunRecord[]> {
-      const entries: readonly Dirent[] = await fs.readdir(root, { withFileTypes: true }).catch(
-        (error: unknown) => {
-          if (isNodeError(error, "ENOENT")) return [];
-          throw error;
-        },
-      );
-      const records: DeepRunRecord[] = [];
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const record = await readJsonFile<DeepRunRecord>(
-          path.join(root, entry.name, "record.json"),
-        );
-        if (record) records.push(record);
-      }
-      return records.sort(compareDeepRunRecordByRecency).slice(0, limit);
-    },
-  };
+  return createFileSystemRunSnapshotStore<DeepRunRecord>({
+    rootDir: path.join(runtimeHome, DEEP_RUN_RECORD_PARTITION),
+    getEnvelope: deepRunRecordEnvelope,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +274,7 @@ export type DeepRuntimeConfig = {
   readonly childContinuations?: DeepChildPendingContinuationStore;
   readonly childInstructionQueues?: DeepChildInstructionQueueRegistry;
   readonly childMessageStore?: DeepChildMessageStore;
+  readonly childLoopContextStore?: DeepChildLoopContextStore;
 };
 
 export type DeepChildInstructionQueueRegistry = {
@@ -402,11 +396,14 @@ export async function executeDeepRun(
   });
   publisher.publishGoalReceived({ goal: run.goal, conversationId: run.conversationId });
   let liveProjection = createStartingLiveProjection(run, startedAt);
+  let liveRun: DeepRun = run;
+  let liveTree: AgentRunTree = initialTree;
   const writeLiveRecord = async (nextProjection: DeepLiveProjection): Promise<void> => {
     liveProjection = nextProjection;
+    liveRun = { ...liveRun, updatedAt: liveProjection.updatedAt };
     await config.store.upsert({
-      run,
-      agentRunTree: initialTree,
+      run: liveRun,
+      agentRunTree: liveTree,
       report: undefined,
       controlEvents: [],
       eventSequence: publisher.events,
@@ -425,6 +422,7 @@ export async function executeDeepRun(
     exploreDeepChild({
       childRun,
       childSpec,
+      runId: run.runId,
       goal: deepRuntimeGoal(input.conversation),
       permissionBoundaryRefs: input.permissionBoundaryRefs,
       turnRuntime: config.turnRuntime,
@@ -432,6 +430,7 @@ export async function executeDeepRun(
       goalId: input.goalId,
       confirmationPolicy: input.confirmationPolicy,
       capabilitySnapshot: input.capabilitySnapshot,
+      childLoopContextStore: config.childLoopContextStore,
     });
   const scheduler = new DeepChildScheduler({
     board,
@@ -450,6 +449,7 @@ export async function executeDeepRun(
           childRun.childRunId,
           recordedChildInstructions,
         ),
+        runId: run.runId,
         goal: deepRuntimeGoal(input.conversation),
         permissionBoundaryRefs: input.permissionBoundaryRefs,
         turnRuntime: config.turnRuntime,
@@ -457,13 +457,15 @@ export async function executeDeepRun(
         goalId: input.goalId,
         confirmationPolicy: input.confirmationPolicy,
         capabilitySnapshot: input.capabilitySnapshot,
+        childLoopContextStore: config.childLoopContextStore,
       }),
     maxConcurrency: config.maxConcurrency,
     maxChildren: config.maxChildren,
     callbacks: {
       // child pending→running：实时发布 deep.child.started + 从 board 派生投影 + 持久化。
       onChildStarted: async (_task, childRun) => {
-        publisher.publishChildStarted({ childRun, agentRunTree: initialTree });
+        liveTree = replaceChildRunInTree(liveTree, childRun, nowIso());
+        publisher.publishChildStarted({ childRun, agentRunTree: liveTree });
         await writeLiveRecord(
           withChildParentOperationFromRun(
             liveProjectionFromBoard(board.snapshot(), liveProjection),
@@ -474,26 +476,27 @@ export async function executeDeepRun(
       // child→终态（completed/blocked/interrupted/failed）：实时发布 child 事件 + 从 board 派生投影 + 持久化。
       onChildTerminal: async (task, _summary, completedRun, material) => {
         config.childContinuations?.remember(run.runId, material.pendingContinuation);
+        liveTree = replaceChildRunInTree(liveTree, completedRun, nowIso());
         if (completedRun.status === "failed") {
           publisher.publishChildFailed({
             childRun: completedRun,
             failure: task.failure,
-            agentRunTree: initialTree,
+            agentRunTree: liveTree,
           });
         } else if (completedRun.status === "interrupted") {
           publisher.publishChildInterrupted({
             childRun: completedRun,
             reason: task.failure,
-            agentRunTree: initialTree,
+            agentRunTree: liveTree,
           });
         } else if (completedRun.status === "blocked") {
           publisher.publishChildBlocked({
             childRun: completedRun,
             reason: task.failure,
-            agentRunTree: initialTree,
+            agentRunTree: liveTree,
           });
         } else {
-          publisher.publishChildCompleted({ childRun: completedRun, agentRunTree: initialTree });
+          publisher.publishChildCompleted({ childRun: completedRun, agentRunTree: liveTree });
         }
         await writeLiveRecord(
           withChildParentOperationFromRun(
@@ -511,7 +514,7 @@ export async function executeDeepRun(
           instructionId: queued.instructionId,
           messageRef: queued.messageRef,
           queuedCount: queued.queuedCount,
-          agentRunTree: initialTree,
+          agentRunTree: liveTree,
         });
         await writeLiveRecord(
           withChildParentOperation(
@@ -545,13 +548,18 @@ export async function executeDeepRun(
     // manager.decided 实时发布 deep.manager.decided（保证事件序列顺序 manager.decided→child→synthesis）。
     onProgress: async (event) => {
       if (event.kind === "manager.decided") {
+        liveTree = appendDelegationDecisionUnique(
+          liveTree,
+          mapDeepDecisionToDomain(event.decision),
+          event.recordedAt,
+        );
         publisher.publishManagerDecided({
           decision: mapDeepDecisionToDomain(event.decision),
           childSpecs: event.decision.childSpecs.map((spec) => ({
             specId: spec.specId,
             displayName: spec.displayName,
           })),
-          agentRunTree: initialTree,
+          agentRunTree: liveTree,
         });
       }
       await writeLiveRecord(liveProjectionFromBoard(board.snapshot(), liveProjection, event));
@@ -583,7 +591,7 @@ export async function executeDeepRun(
     traceId: input.traceId,
     runId: run.runId,
     startedAt,
-    initialTree,
+    initialTree: liveTree,
     executorResult,
     publisher,
     board,
@@ -601,6 +609,7 @@ export async function executeDeepRun(
 
   // 持久化到隔离 deep 分区（eventSequence 为 SSE 轮询源 + replay，EP3 安全投影）。
   const finalRun = executorResult.run;
+  liveRun = finalRun;
   const updatedAt = nowIso();
   const finalLiveProjection = liveProjectionFromFinal({
     previous: liveProjection,
@@ -911,9 +920,11 @@ function mapTaskToLiveChild(
     status,
     updatedAt: task.updatedAt,
     summary: task.summary?.summary,
-    latestResult: latestResultForLiveChild(status, task.summary?.summary, task.failure),
+    latestResult: latestResultForLiveChild(task.summary?.summary, task.failure),
     confidence: task.summary?.confidence,
     uncertainty: task.summary?.uncertainty,
+    failureDetail: task.summary?.failureDetail,
+    continuationContextRef: task.summary?.continuationContextRef,
     workflowItems,
     execution: previous?.execution,
     parentInstructions: previous?.parentInstructions,
@@ -981,10 +992,11 @@ function withChildDetailFromRun(
       status: childRun.status,
       updatedAt,
       latestResult: latestResultForLiveChild(
-        childRun.status,
-        child.summary,
+        child.latestResult ?? child.summary,
         childRun.failureReason,
       ),
+      failureDetail: childRun.failureDetail ?? child.failureDetail,
+      continuationContextRef: childRun.continuationContextRef ?? child.continuationContextRef,
       execution,
       parentInstructions,
       workflowItems,
@@ -1131,6 +1143,12 @@ function liveChildWorkflowItemsFromRun(
     items.push(workflowItemForParentInstruction(childRun.childRunId, instruction));
   }
   for (const [index, segment] of (childRun.executionHistory ?? []).entries()) {
+    for (const [messageIndex, message] of (segment.modelMessages ?? []).entries()) {
+      const item = workflowItemForModelMessage(childRun.childRunId, index, messageIndex, message);
+      if (item !== undefined) {
+        items.push(item);
+      }
+    }
     for (const [callIndex, call] of segment.toolCalls.entries()) {
       items.push({
         itemId: `tool:${childRun.childRunId}:${index}:${call.callId || callIndex}`,
@@ -1151,13 +1169,30 @@ function liveChildWorkflowItemsFromRun(
     });
   }
   if ((childRun.executionHistory?.length ?? 0) === 0 && childRun.execution !== undefined) {
+    const recordedAt = childRun.completedAt ?? previous.updatedAt;
+    for (const [messageIndex, message] of (childRun.execution.modelMessages ?? []).entries()) {
+      const item = workflowItemForModelMessage(childRun.childRunId, "latest", messageIndex, message);
+      if (item !== undefined) {
+        items.push(item);
+      }
+    }
+    for (const [callIndex, call] of childRun.execution.toolCalls.entries()) {
+      items.push({
+        itemId: `tool:${childRun.childRunId}:latest:${call.callId || callIndex}`,
+        kind: call.status === "approval_required" ? "tool_waiting" : "tool_completed",
+        title: call.status === "approval_required" ? "等待工具确认" : "工具调用完成",
+        detail: `${call.toolName}：${toolCallStatusLabel(call.status)}`,
+        status: liveWorkflowStatusForToolCall(call.status),
+        timestamp: recordedAt,
+      });
+    }
     items.push({
       itemId: `execution:${childRun.childRunId}`,
       kind: childRun.status === "running" || childRun.status === "resumed" ? "running" : "completed",
       title: childRun.status === "running" || childRun.status === "resumed" ? "正在探索" : "已产生执行结果",
       detail: `模型 ${childRun.execution.modelRounds} 轮，工具 ${childRun.execution.toolRounds} 轮`,
       status: childRun.status === "running" || childRun.status === "resumed" ? "running" : "completed",
-      timestamp: childRun.completedAt ?? previous.updatedAt,
+      timestamp: recordedAt,
     });
   }
   if (childRun.pendingApproval !== undefined) {
@@ -1172,6 +1207,38 @@ function liveChildWorkflowItemsFromRun(
   }
   items.push(workflowItemForRunStatus(childRun, previous));
   return mergeLiveChildWorkflowItems(items);
+}
+
+function workflowItemForModelMessage(
+  childRunId: string,
+  segmentIndex: string | number,
+  messageIndex: number,
+  message: ChildAgentRunModelMessageTrace,
+): DeepLiveChildWorkflowItem | undefined {
+  const detail = modelMessageProjectionText(message);
+  if (detail === undefined) {
+    return undefined;
+  }
+  return {
+    itemId: `model:${childRunId}:${segmentIndex}:${message.responseId ?? message.requestId}:${messageIndex}`,
+    kind: "model_message",
+    title: message.toolCallIds.length > 0 ? "工具调用前说明" : "模型回答",
+    detail,
+    status: liveWorkflowStatusForModelMessage(message.status),
+    timestamp: message.completedAt,
+  };
+}
+
+function modelMessageProjectionText(message: ChildAgentRunModelMessageTrace): string | undefined {
+  const text = message.text?.trim();
+  if (text !== undefined && text.length > 0) {
+    return text;
+  }
+  const reasoning = message.reasoningSummary?.trim();
+  if (reasoning !== undefined && reasoning.length > 0) {
+    return reasoning;
+  }
+  return undefined;
 }
 
 function workflowItemForRunStatus(
@@ -1309,32 +1376,16 @@ function liveChildParentInstructionsFromRun(
   }));
 }
 
-function latestResultForLiveChild(
-  status: ChildAgentRun["status"],
-  summary: string | undefined,
-  failure: string | undefined,
-): string | undefined {
-  if (summary !== undefined && summary.length > 0) {
-    return summary;
+function latestResultForLiveChild(summary: string | undefined, failure: string | undefined): string | undefined {
+  const trimmedSummary = summary?.trim();
+  if (trimmedSummary !== undefined && trimmedSummary.length > 0) {
+    return trimmedSummary;
   }
-  if (failure !== undefined && failure.length > 0) {
-    return failure;
+  const trimmedFailure = failure?.trim();
+  if (trimmedFailure !== undefined && trimmedFailure.length > 0) {
+    return trimmedFailure;
   }
-  switch (status) {
-    case "planned":
-      return "等待启动";
-    case "running":
-    case "resumed":
-      return "进行中";
-    case "blocked":
-      return "等待处理";
-    case "interrupted":
-      return "已中断";
-    case "failed":
-      return "未完成";
-    default:
-      return undefined;
-  }
+  return undefined;
 }
 
 function toolCallStatusLabel(
@@ -1368,6 +1419,20 @@ function liveWorkflowStatusForToolCall(
       return "cancelled";
     default:
       return "completed";
+  }
+}
+
+function liveWorkflowStatusForModelMessage(
+  status: ChildAgentRunModelMessageTrace["status"],
+): DeepLiveChildWorkflowItem["status"] {
+  switch (status) {
+    case "completed":
+      return "completed";
+    case "cancelled":
+      return "cancelled";
+    case "failed":
+    default:
+      return "failed";
   }
 }
 
@@ -1517,6 +1582,60 @@ function liveActiveNodeForFinal(
 // AgentRunTree 增量构建 + 事件序列发布（复用 agent-fabric + underground-events）
 // ---------------------------------------------------------------------------
 
+function appendDelegationDecisionUnique(
+  tree: AgentRunTree,
+  decision: DelegationDecision,
+  updatedAt: string,
+): AgentRunTree {
+  const existing = tree.delegationDecisions.some((item) => item.decisionId === decision.decisionId);
+  if (!existing) {
+    return appendDelegationDecisionToTree(tree, decision, updatedAt);
+  }
+  const cloned = cloneAgentRunTree(tree);
+  return {
+    ...cloned,
+    delegationDecisions: cloned.delegationDecisions.map((item) =>
+      item.decisionId === decision.decisionId ? cloneDelegationDecision(decision) : item
+    ),
+    updatedAt,
+  };
+}
+
+function appendParentSynthesisUnique(
+  tree: AgentRunTree,
+  synthesis: ParentSynthesisResult,
+  updatedAt: string,
+): AgentRunTree {
+  const existing = tree.parentSyntheses.some((item) => item.synthesisId === synthesis.synthesisId);
+  if (!existing) {
+    return appendParentSynthesisToTree(tree, synthesis, updatedAt);
+  }
+  const cloned = cloneAgentRunTree(tree);
+  return {
+    ...cloned,
+    parentSyntheses: cloned.parentSyntheses.map((item) =>
+      item.synthesisId === synthesis.synthesisId ? cloneParentSynthesisResult(synthesis) : item
+    ),
+    updatedAt,
+  };
+}
+
+function removeDelegationDecisionById(
+  tree: AgentRunTree,
+  decisionId: string,
+  updatedAt: string,
+): AgentRunTree {
+  if (!tree.delegationDecisions.some((decision) => decision.decisionId === decisionId)) {
+    return tree;
+  }
+  const cloned = cloneAgentRunTree(tree);
+  return {
+    ...cloned,
+    delegationDecisions: cloned.delegationDecisions.filter((decision) => decision.decisionId !== decisionId),
+    updatedAt,
+  };
+}
+
 type BuildAndPublishRunTreeInput = {
   readonly runtime: MinimalRuntime;
   readonly traceId: string;
@@ -1567,6 +1686,7 @@ async function buildAndPublishRunTree(
     const isConclusionStep =
       step.dispatchedAction === "synthesize" || step.dispatchedAction === "direct_answer";
     if (isConclusionStep && result.synthesisRecord && !controlApiResumeDecisionsAppended) {
+      tree = removeDelegationDecisionById(tree, domainDecision.decisionId, nowIso());
       tree = appendControlApiResumeDecisions({
         tree,
         childRunById,
@@ -1582,12 +1702,12 @@ async function buildAndPublishRunTree(
       }) ?? [];
 
     // T2-1：append decision 进 tree（deep.manager.decided 已由 onProgress 实时发布）。
-    tree = appendDelegationDecisionToTree(tree, domainDecision, nowIso());
+    tree = appendDelegationDecisionUnique(tree, domainDecision, nowIso());
 
     // T2-1：append child runs 进 tree（deep.child.started/completed/blocked/failed 已由 scheduler
     // 回调在真实状态变化时实时发布，此处只做结构构建，不事后重建事件）。
     for (const childRun of stepChildRuns) {
-      tree = appendChildRunToTree(tree, childRun, nowIso());
+      tree = replaceChildRunInTree(tree, childRun, nowIso());
     }
     if (step.dispatchedAction === "continue_child") {
       for (const childRunId of step.operatedChildRunIds ?? []) {
@@ -1601,7 +1721,7 @@ async function buildAndPublishRunTree(
     // 两者都产出结论级 synthesisRecord，append 进 tree 的 parentSyntheses（FR-009
     // 可复盘：tree 承载"结论如何形成"；一次 run 仅一个收口 step，不重复 append）。
     if (isConclusionStep && result.synthesisRecord) {
-      tree = appendParentSynthesisToTree(tree, result.synthesisRecord, nowIso());
+      tree = appendParentSynthesisUnique(tree, result.synthesisRecord, nowIso());
       publisher.publishParentSynthesisCompleted({
         parentSynthesis: result.synthesisRecord,
         childRuns: result.childRuns,
@@ -1625,7 +1745,7 @@ async function buildAndPublishRunTree(
           (synthesis) => synthesis.synthesisId === result.synthesisRecord?.synthesisId,
         );
   if (result.synthesisRecord !== undefined && !synthesisAlreadyAppended) {
-    tree = appendParentSynthesisToTree(tree, result.synthesisRecord, nowIso());
+    tree = appendParentSynthesisUnique(tree, result.synthesisRecord, nowIso());
     publisher.publishParentSynthesisCompleted({
       parentSynthesis: result.synthesisRecord,
       childRuns: result.childRuns,
@@ -1666,7 +1786,7 @@ function appendControlApiResumeDecisions(input: {
     }
     const childRun = input.childRunById.get(instruction.childRunId);
     const updatedAt = instruction.executedAt;
-    tree = appendDelegationDecisionToTree(
+    tree = appendDelegationDecisionUnique(
       tree,
       {
         decisionId: createId("deep-decision"),

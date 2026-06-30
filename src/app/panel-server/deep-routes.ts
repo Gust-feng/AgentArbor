@@ -3,6 +3,11 @@
  *
  * 端点族（design §6.1 / §6.3，落地 FR-001 / FR-002 / FR-007 / FR-008）：
  *   POST   /api/deep/conversations              创建独立 deep 会话（携带 workspace 上下文）
+ *   GET    /api/deep/conversations              全局最近 deep 会话摘要（含尚未启动 run 的 intake）
+ *   GET    /api/deep/conversations/:id          deep 会话详情（用于恢复 intake-only 会话）
+ *   POST   /api/deep/conversations/:id/rename   重命名 deep 会话
+ *   POST   /api/deep/conversations/:id/pin      置顶/取消置顶 deep 会话
+ *   DELETE /api/deep/conversations/:id          删除 deep 会话及其历史 run
  *   POST   /api/deep/conversations/:id/runs     启动 deep run（后台执行，立即返回 runId）
  *   GET    /api/deep/runs                       全局最近 deep runs 摘要（跨会话恢复入口）
  *   GET    /api/deep/conversations/:id/runs     历史复盘（该会话下的 deep runs 摘要）
@@ -58,6 +63,7 @@ import {
   writePanelError,
 } from "./http-utils.js";
 import { serveRunEventSse } from "./run-event-sse.js";
+import { projectConversationRunEnvelopeViewBase } from "../run-read-model-envelope.js";
 import type { PanelRuntime } from "./runtime.js";
 import {
   InMemoryDeepConversationStore,
@@ -75,6 +81,10 @@ import {
   type DeepRunRecordStore,
   type StartDeepRuntimeInput,
 } from "../deep/deep-runtime.js";
+import {
+  appendDeepRunFollowUpTurn,
+  createDeepRunFollowUpTurn,
+} from "../deep/deep-follow-up-turns.js";
 import type {
   DeepChildInstructionQueueHandle,
   DeepChildInstructionQueueResult,
@@ -111,11 +121,17 @@ import {
   type DeepChildMessageStore,
 } from "../deep/deep-child-messages.js";
 import {
+  InMemoryDeepChildLoopContextStore,
+  createFileSystemDeepChildLoopContextStore,
+  type DeepChildLoopContextStore,
+} from "../deep/deep-child-loop-contexts.js";
+import {
   buildDeepFollowUpContext,
   fallbackLiveProjectionForRecord,
   latestDeepRunRecordsByRoot,
   liveParentOperationFromInstruction,
   projectDeepConversation,
+  projectDeepConversationSummary,
   projectDeepRunSummary,
   projectDeepRunView,
   summarizeTaskSoilInputForIntake,
@@ -146,11 +162,16 @@ import {
   recordChildAgentRunParentInstruction,
   replaceChildRunInTree,
   type ChildAgentRun,
+  type ChildAgentRunModelMessageTrace,
   type ChildAgentRunParentInstructionStatus,
   type ParentSynthesisResult,
 } from "../../domain/underground/agent-fabric.js";
 import type { ObservationRef } from "../../domain/observation/contracts.js";
-import { parseConfirmationDecision } from "./request-parsers.js";
+import {
+  parseConfirmationDecision,
+  parseConversationPinInput,
+  parseConversationRenameInput,
+} from "./request-parsers.js";
 import { parseDeepRunListLimit } from "./deep-route-helpers.js";
 import { resolveRunToolBoundary } from "../run-tool-boundary.js";
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
@@ -170,10 +191,13 @@ type DeepRouteState = {
   readonly conversationStore: DeepConversationStore;
   readonly runRecordStore: DeepRunRecordStore;
   readonly childMessageStore: DeepChildMessageStore;
+  readonly childLoopContextStore: DeepChildLoopContextStore;
   readonly controlHandles: Map<string, DeepRunControlHandle>;
   readonly childContinuations: DeepChildPendingContinuationStore;
   readonly childInstructionQueues: DeepChildInstructionQueueStore;
   readonly runFacts: Map<string, DeepRouteRunFacts>;
+  readonly activeRunConversationIds: Map<string, string>;
+  readonly activeRunIds: Set<string>;
   readonly activeRuns: Set<Promise<void>>;
 };
 
@@ -187,6 +211,16 @@ type DeepRouteRunFacts = {
 
 /** PanelRuntime → DeepRouteState 绑定。WeakMap 使状态随 runtime 回收，避免跨实例泄漏。 */
 const deepRouteStates = new WeakMap<PanelRuntime, DeepRouteState>();
+const DEEP_RUN_STALE_AFTER_MS = 2 * 60 * 1_000;
+
+type DeepRunRuntimeHealthView = {
+  readonly state: "terminal" | "active" | "stalled" | "orphaned";
+  readonly lastActivityAt: string;
+  readonly inactiveMs: number;
+  readonly staleAfterMs: number;
+  readonly canStop: boolean;
+  readonly reason: string;
+};
 
 /** 取或创建 PanelRuntime 绑定的 deep 路由状态（幂等，首次访问时惰性装配）。 */
 function getDeepRouteState(runtime: PanelRuntime): DeepRouteState {
@@ -199,10 +233,13 @@ function getDeepRouteState(runtime: PanelRuntime): DeepRouteState {
     conversationStore: createDeepConversationStoreForRuntime(runtime),
     runRecordStore: createDeepRunRecordStoreForRuntime(runtime),
     childMessageStore: createDeepChildMessageStoreForRuntime(runtime),
+    childLoopContextStore: createDeepChildLoopContextStoreForRuntime(runtime),
     controlHandles: new Map(),
     childContinuations: new DeepChildPendingContinuationStore(),
     childInstructionQueues: new DeepChildInstructionQueueStore(),
     runFacts: new Map(),
+    activeRunConversationIds: new Map(),
+    activeRunIds: new Set(),
     activeRuns: new Set(),
   };
   deepRouteStates.set(runtime, state);
@@ -228,6 +265,13 @@ function createDeepChildMessageStoreForRuntime(runtime: PanelRuntime): DeepChild
   return runtimeHome === undefined
     ? new InMemoryDeepChildMessageStore()
     : createFileSystemDeepChildMessageStore(runtimeHome);
+}
+
+function createDeepChildLoopContextStoreForRuntime(runtime: PanelRuntime): DeepChildLoopContextStore {
+  const runtimeHome = runtime.runtimePaths?.runtimeHome;
+  return runtimeHome === undefined
+    ? new InMemoryDeepChildLoopContextStore()
+    : createFileSystemDeepChildLoopContextStore(runtimeHome);
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +332,36 @@ async function dispatchDeepRoute(
   // POST /api/deep/conversations
   if (rest.length === 1 && rest[0] === "conversations" && method === "POST") {
     await handleCreateDeepConversation(state, runtime, request, response);
+    return true;
+  }
+
+  // GET /api/deep/conversations?limit=50
+  if (rest.length === 1 && rest[0] === "conversations" && method === "GET") {
+    await handleListDeepConversations(state, response, url);
+    return true;
+  }
+
+  // GET /api/deep/conversations/:id
+  if (rest.length === 2 && rest[0] === "conversations" && method === "GET") {
+    await handleGetDeepConversation(state, rest[1], response);
+    return true;
+  }
+
+  // DELETE /api/deep/conversations/:id
+  if (rest.length === 2 && rest[0] === "conversations" && method === "DELETE") {
+    await handleDeleteDeepConversation(state, rest[1], response);
+    return true;
+  }
+
+  // POST /api/deep/conversations/:id/rename
+  if (rest.length === 3 && rest[0] === "conversations" && rest[2] === "rename" && method === "POST") {
+    await handleRenameDeepConversation(state, request, rest[1], response);
+    return true;
+  }
+
+  // POST /api/deep/conversations/:id/pin
+  if (rest.length === 3 && rest[0] === "conversations" && rest[2] === "pin" && method === "POST") {
+    await handlePinDeepConversation(state, request, rest[1], response);
     return true;
   }
 
@@ -370,17 +444,17 @@ async function dispatchDeepRoute(
   // POST /api/deep/runs/:runId/interrupt|correct|stop
   if (rest.length === 3 && rest[0] === "runs" && method === "POST") {
     const action = rest[2];
-    if (action === "interrupt" || action === "correct" || action === "stop") {
-      await handleDeepRunControl(state, rest[1], action, request, response);
-      return true;
-    }
+  if (action === "interrupt" || action === "correct" || action === "stop") {
+    await handleDeepRunControl(state, rest[1], action, request, response);
+    return true;
   }
+}
 
   throw new PanelHttpError(404, "deep_route_not_found", "未找到对应的多 Agent 端点。");
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/deep/intake —— 先理解目标，再决定追问、直接回答或启动协作
+// POST /api/deep/intake —— 先理解目标，再决定追问、直接回答或生成待确认计划
 // ---------------------------------------------------------------------------
 
 async function handleDeepIntake(
@@ -487,43 +561,12 @@ async function handleDeepIntake(
     currentObjective: normalizedObjective,
     updatedAt: nowIso(),
   });
-  const intakeContext = intakeContextFromTurn(intake);
-  const startInput =
-    previousRun === undefined
-      ? {
-          state,
-          runtime,
-          conversation: collaborationConversation,
-          aiMode,
-          intakeContext,
-        }
-      : {
-          state,
-          runtime,
-          conversation: collaborationConversation,
-          aiMode,
-          parentRunId: previousRun.run.runId,
-          rootRunId: previousRun.run.rootRunId ?? previousRun.run.runId,
-          turnOrdinal: await nextDeepRunTurnOrdinal(state, previousRun.run.rootRunId ?? previousRun.run.runId),
-          followUpContext: buildDeepFollowUpContext(previousRun, message),
-          intakeContext,
-        };
-  const started = await startDeepRunBackground(startInput);
 
-  writeJson(response, 202, {
+  writeJson(response, 200, {
     ok: true,
-    status: "running",
+    status: "plan_ready",
     conversation: projectDeepConversation(collaborationConversation),
     intake,
-    run: {
-      runId: started.runId,
-      conversationId: collaborationConversation.conversationId,
-      status: "running",
-      runKind: started.runKind,
-      runMode: started.runMode,
-      rootRunId: started.rootRunId,
-      turnOrdinal: started.turnOrdinal,
-    },
   });
 }
 
@@ -581,23 +624,68 @@ async function handleStartDeepRun(
   const body = await readJsonBody(request);
   const record = asRecord(body);
   const aiMode = await resolveDeepAiMode(runtime, record.aiMode);
+  const intakeTurnId = optionalStringField(record.intakeTurnId);
+  const confirmedObjective = optionalStringField(record.confirmedObjective);
+  const confirmedPlan = optionalStringField(record.confirmedPlan);
+  const parentRunId = optionalStringField(record.parentRunId);
+  const parentRun =
+    parentRunId === undefined
+      ? undefined
+      : await state.runRecordStore.get(parentRunId);
+  if (parentRunId !== undefined && parentRun === undefined) {
+    throw new PanelHttpError(404, "deep_run_not_found", "未找到上一轮多 Agent 运行。");
+  }
+  if (parentRun !== undefined && parentRun.run.conversationId !== conversation.conversationId) {
+    throw new PanelHttpError(409, "deep_parent_run_conversation_mismatch", "上一轮运行不属于当前多 Agent 会话。");
+  }
+  if (parentRun !== undefined && !isTerminalDeepRunStatus(parentRun.run.status)) {
+    throw new PanelHttpError(409, "deep_follow_up_requires_terminal_run", "当前多 Agent 运行仍在进行中，请直接补充要求。");
+  }
   conversation = await applyDeepBirthWorkspace(
     state,
     conversation,
-    optionalStringField(record.workspaceDirectory),
+    optionalStringField(record.workspaceDirectory) ?? (parentRun === undefined ? undefined : workspaceDirectoryFromDeepRunRecord(parentRun)),
   );
+  const sourceIntakeTurn = confirmedDeepIntakeSourceTurn(conversation, intakeTurnId);
+  const confirmedIntakeContext = confirmedDeepIntakeContext({
+    conversation,
+    intakeTurnId,
+    confirmedObjective,
+    confirmedPlan,
+  });
+  if (confirmedObjective !== undefined && confirmedObjective !== conversation.currentObjective) {
+    conversation = await state.conversationStore.upsert({
+      ...conversation,
+      currentObjective: confirmedObjective,
+      updatedAt: nowIso(),
+    });
+  }
 
+  const rootRunId = parentRun?.run.rootRunId ?? parentRun?.run.runId;
+  const turnOrdinal = rootRunId === undefined ? undefined : await nextDeepRunTurnOrdinal(state, rootRunId);
   const started = await startDeepRunBackground({
     state,
     runtime,
     conversation,
     aiMode,
+    parentRunId: parentRun?.run.runId,
+    rootRunId,
+    turnOrdinal,
+    followUpContext:
+      parentRun === undefined
+        ? undefined
+        : buildDeepFollowUpContext(
+            parentRun,
+            sourceIntakeTurn?.userMessage ?? confirmedObjective ?? deepConversationGoal(conversation),
+          ),
+    intakeContext: confirmedIntakeContext,
   });
 
   writeJson(response, 202, {
     ok: true,
     status: "running",
-    run: {
+    conversation: projectDeepConversation(conversation),
+    run: projectConversationRunEnvelopeViewBase({
       runId: started.runId,
       conversationId: conversation.conversationId,
       status: "running",
@@ -605,7 +693,7 @@ async function handleStartDeepRun(
       runMode: started.runMode,
       rootRunId: started.rootRunId,
       turnOrdinal: started.turnOrdinal,
-    },
+    }),
   });
 }
 
@@ -677,6 +765,8 @@ async function startDeepRunBackground(input: {
     permissionBoundaryRefs: conversation.permissionBoundaryRefs,
     confirmationPolicy: toolConfirmation.policy,
   });
+  state.activeRunConversationIds.set(runId, conversation.conversationId);
+  state.activeRunIds.add(runId);
 
   const startInput: StartDeepRuntimeInput = {
     conversation,
@@ -713,6 +803,8 @@ async function startDeepRunBackground(input: {
   );
   runPromise.finally(() => {
     deepRuntime.releaseResources();
+    state.activeRunConversationIds.delete(runId);
+    state.activeRunIds.delete(runId);
     state.activeRuns.delete(runPromise);
   });
   state.activeRuns.add(runPromise);
@@ -792,8 +884,117 @@ async function handleDeepRunFollowUp(
 }
 
 // ---------------------------------------------------------------------------
-// T3-1：GET /api/deep/conversations/:id/runs —— 历史复盘
+// T3-1：GET /api/deep/conversations* / runs —— 历史复盘与侧栏恢复
 // ---------------------------------------------------------------------------
+
+async function handleListDeepConversations(
+  state: DeepRouteState,
+  response: ServerResponse,
+  url: URL,
+): Promise<void> {
+  const limit = parseDeepRunListLimit(url);
+  writeJson(response, 200, {
+    ok: true,
+    conversations: await projectDeepConversationSummaries(state, limit),
+  });
+}
+
+async function handleGetDeepConversation(
+  state: DeepRouteState,
+  conversationId: string,
+  response: ServerResponse,
+): Promise<void> {
+  const conversation = await ensureDeepConversationLoaded(state, conversationId);
+  const records = await state.runRecordStore.list(200);
+  const runs = await projectLatestDeepRunSummaries(
+    state,
+    records.filter((record) => record.run.conversationId === conversationId),
+  );
+  writeJson(response, 200, {
+    ok: true,
+    conversation: projectDeepConversation(conversation),
+    runs,
+  });
+}
+
+async function handleRenameDeepConversation(
+  state: DeepRouteState,
+  request: IncomingMessage,
+  conversationId: string,
+  response: ServerResponse,
+): Promise<void> {
+  const conversation = await ensureDeepConversationLoaded(state, conversationId);
+  const input = parseConversationRenameInput(await readJsonBody(request));
+  const title = input.title.trim();
+  if (title.length === 0) {
+    throw new PanelHttpError(400, "missing_conversation_title", "会话标题不能为空。");
+  }
+  const updated = title === conversation.title
+    ? conversation
+    : await state.conversationStore.upsert({
+      ...conversation,
+      title,
+      titleEditedAt: nowIso(),
+    });
+  writeJson(response, 200, {
+    ok: true,
+    conversation: projectDeepConversation(updated),
+    conversations: await projectDeepConversationSummaries(state, 50),
+  });
+}
+
+async function handlePinDeepConversation(
+  state: DeepRouteState,
+  request: IncomingMessage,
+  conversationId: string,
+  response: ServerResponse,
+): Promise<void> {
+  const conversation = await ensureDeepConversationLoaded(state, conversationId);
+  const input = parseConversationPinInput(await readJsonBody(request));
+  const updated = await state.conversationStore.upsert({
+    ...conversation,
+    pinnedAt: input.pinned ? (conversation.pinnedAt ?? nowIso()) : undefined,
+  });
+  writeJson(response, 200, {
+    ok: true,
+    conversation: projectDeepConversation(updated),
+    conversations: await projectDeepConversationSummaries(state, 50),
+  });
+}
+
+async function handleDeleteDeepConversation(
+  state: DeepRouteState,
+  conversationId: string,
+  response: ServerResponse,
+): Promise<void> {
+  await ensureDeepConversationLoaded(state, conversationId);
+  const hasActiveInMemoryRun = [...state.activeRunConversationIds.values()].some((id) => id === conversationId);
+  if (hasActiveInMemoryRun) {
+    throw new PanelHttpError(409, "deep_conversation_busy", "多 Agent 会话仍有运行中的协作，暂不能删除。");
+  }
+  const records = (await state.runRecordStore.list(500)).filter((record) => record.run.conversationId === conversationId);
+  const busyRecord = records.find((record) => !isTerminalDeepConversationStatus(record.run.status));
+  if (busyRecord !== undefined) {
+    throw new PanelHttpError(409, "deep_conversation_busy", "多 Agent 会话仍有运行中的协作，暂不能删除。");
+  }
+  for (const record of records) {
+    await state.runRecordStore.delete(record.run.runId);
+    await state.childMessageStore.deleteForRun(record.run.runId);
+    await state.childLoopContextStore.deleteForRun(record.run.runId);
+    state.childContinuations.deleteForRun(record.run.runId);
+    state.controlHandles.delete(record.run.runId);
+    state.childInstructionQueues.deleteForRun(record.run.runId);
+    state.activeRunConversationIds.delete(record.run.runId);
+    state.activeRunIds.delete(record.run.runId);
+    state.runFacts.delete(record.run.runId);
+  }
+  await state.conversationStore.delete(conversationId);
+  writeJson(response, 200, {
+    ok: true,
+    deletedConversationId: conversationId,
+    conversations: await projectDeepConversationSummaries(state, 50),
+  });
+}
 
 async function handleListAllDeepRuns(
   state: DeepRouteState,
@@ -891,16 +1092,28 @@ async function handleDeepRunControl(
   response: ServerResponse,
 ): Promise<void> {
   const handle = state.controlHandles.get(runId);
+  const body = await readJsonBody(request);
+  const record = asRecord(body);
+  const reason = optionalStringField(record.reason);
   if (handle === undefined) {
+    if (action === "stop") {
+      const stopped = await stopOrphanedDeepRun(state, runId, reason);
+      if (stopped !== undefined) {
+        writeJson(response, 200, {
+          ok: true,
+          status: "stopped",
+          runId,
+          view: await projectDeepRunViewForResponse(state, stopped),
+        });
+        return;
+      }
+    }
     throw new PanelHttpError(
       404,
       "deep_run_control_not_found",
       "未找到该 run 的控制句柄（run 不存在或已被回收）。",
     );
   }
-  const body = await readJsonBody(request);
-  const record = asRecord(body);
-  const reason = optionalStringField(record.reason);
   if (action === "interrupt") {
     handle.requestInterrupt(reason);
   } else if (action === "stop") {
@@ -908,6 +1121,7 @@ async function handleDeepRunControl(
   } else {
     // correct：必须携带补充上下文（注入下一 manager 决策 step）。
     const correctionContext = parseCorrectionContext(record);
+    await persistActiveDeepRunFollowUp(state, runId, correctionContext);
     handle.requestCorrect(correctionContext, reason);
   }
   writeJson(response, 202, {
@@ -915,6 +1129,57 @@ async function handleDeepRunControl(
     status: `${action}_requested`,
     runId,
   });
+}
+
+async function stopOrphanedDeepRun(
+  state: DeepRouteState,
+  runId: string,
+  reason: string | undefined,
+): Promise<DeepRunRecord | undefined> {
+  const record = await state.runRecordStore.get(runId);
+  if (record === undefined || record.run.status !== "running" || state.activeRunIds.has(runId)) {
+    return undefined;
+  }
+  const updatedAt = nowIso();
+  const nextSequence = (record.eventSequence.at(-1)?.sequence ?? 0) + 1;
+  const stoppedEvent: DeepRunStreamEvent = {
+    id: createId("deep-event"),
+    runId,
+    sequence: nextSequence,
+    type: "deep.stopped",
+    title: "运行已停止",
+    summary: reason ?? "该多 Agent 运行已失联，用户已停止本次运行。",
+    status: "stopped",
+    timestamp: updatedAt,
+    refs: [],
+    visibility: "public",
+  };
+  const updated: DeepRunRecord = {
+    ...record,
+    run: {
+      ...record.run,
+      status: "stopped",
+      updatedAt,
+    },
+    agentRunTree: {
+      ...record.agentRunTree,
+      status: "stopped",
+      updatedAt,
+    },
+    eventSequence: [...record.eventSequence, stoppedEvent],
+    liveProjection: {
+      ...(record.liveProjection ?? fallbackLiveProjectionForRecord(record)),
+      phase: "stopped",
+      updatedAt,
+    },
+    updatedAt,
+  };
+  await state.runRecordStore.upsert(updated);
+  state.activeRunConversationIds.delete(runId);
+  state.activeRunIds.delete(runId);
+  state.controlHandles.delete(runId);
+  state.childInstructionQueues.deleteForRun(runId);
+  return updated;
 }
 
 // ---------------------------------------------------------------------------
@@ -945,11 +1210,13 @@ async function handleDeepChildConfirmationDecision(
   let result: DeepChildAgentRunResult;
   try {
     result = await resumeDeepChildAgent({
+      runId,
       childRun: continuation.childRun,
       childSpec: continuation.childSpec,
       pendingApproval: continuation.pendingApproval,
       decision: parsed as DeepChildConfirmationDecision,
       turnRuntime: childRuntime.turnRuntime,
+      childLoopContextStore: state.childLoopContextStore,
     });
   } finally {
     childRuntime.releaseResources();
@@ -1050,6 +1317,7 @@ async function handleDeepChildParentMessage(
       },
     );
     result = await continueDeepChildAgent({
+      runId,
       childRun: childRunWithInstruction,
       childSpec: childState.childSpec,
       previousSummary: childState.previousSummary,
@@ -1063,6 +1331,7 @@ async function handleDeepChildParentMessage(
       goalId: record.run.conversationId,
       confirmationPolicy: state.runFacts.get(runId)?.confirmationPolicy ?? "prompt",
       capabilitySnapshot: childRuntime.capabilitySnapshot,
+      childLoopContextStore: state.childLoopContextStore,
     });
     await recordDeepChildMessage(state, {
       runId,
@@ -1324,6 +1593,31 @@ function appendDeepIntakeTurn(
   };
 }
 
+async function persistActiveDeepRunFollowUp(
+  state: DeepRouteState,
+  runId: string,
+  correctionContext: readonly string[],
+): Promise<void> {
+  const conversationId = state.activeRunConversationIds.get(runId);
+  if (conversationId === undefined) {
+    return;
+  }
+  const conversation = await state.conversationStore.get(conversationId);
+  if (conversation === undefined) {
+    return;
+  }
+  await state.conversationStore.upsert(
+    appendDeepRunFollowUpTurn(
+      conversation,
+      createDeepRunFollowUpTurn({
+        runId,
+        correctionContext,
+        createdAt: nowIso(),
+      }),
+    ),
+  );
+}
+
 function intakeContextFromTurn(intake: DeepIntakeTurn): DeepIntakeContext {
   return {
     normalizedObjective: intake.normalizedObjective,
@@ -1332,6 +1626,38 @@ function intakeContextFromTurn(intake: DeepIntakeTurn): DeepIntakeContext {
     uncertainty: intake.uncertainty,
     confidence: intake.confidence,
   };
+}
+
+function confirmedDeepIntakeContext(input: {
+  readonly conversation: DeepConversation;
+  readonly intakeTurnId?: string;
+  readonly confirmedObjective?: string;
+  readonly confirmedPlan?: string;
+}): DeepIntakeContext | undefined {
+  const sourceTurn = confirmedDeepIntakeSourceTurn(input.conversation, input.intakeTurnId);
+  if (
+    sourceTurn === undefined &&
+    input.confirmedObjective === undefined &&
+    input.confirmedPlan === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    normalizedObjective: input.confirmedObjective ?? sourceTurn?.normalizedObjective ?? input.conversation.currentObjective,
+    plan: input.confirmedPlan ?? sourceTurn?.plan,
+    assistantMessage: sourceTurn?.assistantMessage ?? "用户已确认计划，开始深度研究。",
+    uncertainty: sourceTurn?.uncertainty,
+    confidence: sourceTurn?.confidence,
+  };
+}
+
+function confirmedDeepIntakeSourceTurn(
+  conversation: DeepConversation,
+  intakeTurnId: string | undefined,
+): DeepIntakeTurn | undefined {
+  return intakeTurnId === undefined
+    ? [...(conversation.intakeTurns ?? [])].reverse().find((turn) => turn.action === "start_collaboration")
+    : conversation.intakeTurns?.find((turn) => turn.turnId === intakeTurnId);
 }
 
 function deepConversationGoal(conversation: DeepConversation): string {
@@ -1403,7 +1729,21 @@ async function buildDeepRuntimeConfigForRun(input: {
     toolCenter,
   });
   const intelligenceChannel = resources.aiConfig.createIntelligenceChannel(state.minimalRuntime);
-  const turnRuntime = createDeepTurnRuntime({ intelligenceChannel, toolCenter });
+  const turnRuntime = createDeepTurnRuntime({
+    intelligenceChannel,
+    toolCenter,
+    contextMaintenance: {
+      goal: input.taskSoil.rawGoal,
+      traceId: input.taskSoil.traceId ?? "deep-run",
+      goalId: input.taskSoil.goalId ?? "deep-goal",
+      agentIdentity: {
+        agentId: "deep-runtime",
+        displayName: "DeepRuntime",
+      },
+      activeModel: resources.capabilitySnapshot.activeModel.model,
+      modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
+    },
+  });
   return {
     config: {
       turnRuntime,
@@ -1413,6 +1753,7 @@ async function buildDeepRuntimeConfigForRun(input: {
       childContinuations: state.childContinuations,
       childInstructionQueues: state.childInstructionQueues,
       childMessageStore: state.childMessageStore,
+      childLoopContextStore: state.childLoopContextStore,
     },
     capabilitySnapshot,
     releaseResources: () => {
@@ -1474,6 +1815,17 @@ async function createTurnRuntimeForExistingDeepRun(
     turnRuntime: createDeepTurnRuntime({
       intelligenceChannel: resources.aiConfig.createIntelligenceChannel(state.minimalRuntime),
       toolCenter,
+      contextMaintenance: {
+        goal: record.run.goal,
+        traceId: taskSoil.traceId ?? record.run.runId,
+        goalId: taskSoil.goalId ?? record.run.conversationId,
+        agentIdentity: {
+          agentId: "deep-runtime",
+          displayName: "DeepRuntime",
+        },
+        activeModel: resources.capabilitySnapshot.activeModel.model,
+        modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
+      },
     }),
     taskSoil,
     capabilitySnapshot: effectiveCapabilitySnapshot,
@@ -1938,6 +2290,8 @@ function updateLiveProjectionForChild(
     latestResult: result.summary.summary,
     confidence: result.summary.confidence,
     uncertainty: result.summary.uncertainty,
+    failureDetail: result.summary.failureDetail,
+    continuationContextRef: result.summary.continuationContextRef,
     workflowItems: liveChildWorkflowItemsForControlResult(result, updatedAt),
     execution: liveChildExecutionForControlResult(result.completedRun),
     parentInstructions: liveChildParentInstructionsForControlResult(result.completedRun),
@@ -2001,6 +2355,12 @@ function liveChildWorkflowItemsForControlResult(
     });
   }
   for (const [index, segment] of (childRun.executionHistory ?? []).entries()) {
+    for (const [messageIndex, message] of (segment.modelMessages ?? []).entries()) {
+      const item = workflowItemForModelMessage(childRun.childRunId, index, messageIndex, message);
+      if (item !== undefined) {
+        items.push(item);
+      }
+    }
     for (const [callIndex, call] of segment.toolCalls.entries()) {
       items.push({
         itemId: `tool:${childRun.childRunId}:${index}:${call.callId || callIndex}`,
@@ -2026,6 +2386,39 @@ function liveChildWorkflowItemsForControlResult(
       timestamp: segment.recordedAt,
     });
   }
+  if ((childRun.executionHistory?.length ?? 0) === 0 && childRun.execution !== undefined) {
+    const recordedAt = childRun.completedAt ?? updatedAt;
+    for (const [messageIndex, message] of (childRun.execution.modelMessages ?? []).entries()) {
+      const item = workflowItemForModelMessage(childRun.childRunId, "latest", messageIndex, message);
+      if (item !== undefined) {
+        items.push(item);
+      }
+    }
+    for (const [callIndex, call] of childRun.execution.toolCalls.entries()) {
+      items.push({
+        itemId: `tool:${childRun.childRunId}:latest:${call.callId || callIndex}`,
+        kind: call.status === "approval_required" ? "tool_waiting" : "tool_completed",
+        title: call.status === "approval_required" ? "等待工具确认" : "工具调用完成",
+        detail: `${call.toolName}：${call.status}`,
+        status: call.status === "approval_required"
+          ? "blocked"
+          : call.status === "completed"
+            ? "completed"
+            : call.status === "cancelled"
+              ? "cancelled"
+              : "failed",
+        timestamp: recordedAt,
+      });
+    }
+    items.push({
+      itemId: `execution:${childRun.childRunId}`,
+      kind: childRun.status === "running" || childRun.status === "resumed" ? "running" : "completed",
+      title: childRun.status === "running" || childRun.status === "resumed" ? "正在探索" : "已产生执行结果",
+      detail: `模型 ${childRun.execution.modelRounds} 轮，工具 ${childRun.execution.toolRounds} 轮`,
+      status: childRun.status === "running" || childRun.status === "resumed" ? "running" : "completed",
+      timestamp: recordedAt,
+    });
+  }
   if (childRun.pendingApproval !== undefined) {
     items.push({
       itemId: `tool-waiting:${childRun.childRunId}:${childRun.pendingApproval.confirmationId}`,
@@ -2049,6 +2442,35 @@ function liveChildWorkflowItemsForControlResult(
     timestamp: childRun.completedAt ?? updatedAt,
   });
   return mergeLiveChildWorkflowItems(items);
+}
+
+function workflowItemForModelMessage(
+  childRunId: string,
+  segmentIndex: string | number,
+  messageIndex: number,
+  message: ChildAgentRunModelMessageTrace,
+): DeepLiveChildWorkflowItem | undefined {
+  const detail = modelMessageProjectionText(message);
+  if (detail === undefined) {
+    return undefined;
+  }
+  return {
+    itemId: `model:${childRunId}:${segmentIndex}:${message.responseId ?? message.requestId}:${messageIndex}`,
+    kind: "model_message",
+    title: message.toolCallIds.length > 0 ? "工具调用前说明" : "模型回答",
+    detail,
+    status: message.status === "completed" ? "completed" : message.status === "cancelled" ? "cancelled" : "failed",
+    timestamp: message.completedAt,
+  };
+}
+
+function modelMessageProjectionText(message: ChildAgentRunModelMessageTrace): string | undefined {
+  const text = message.text?.trim();
+  if (text !== undefined && text.length > 0) {
+    return text;
+  }
+  const reasoning = message.reasoningSummary?.trim();
+  return reasoning === undefined || reasoning.length === 0 ? undefined : reasoning;
 }
 
 function liveChildExecutionForControlResult(
@@ -2159,9 +2581,66 @@ async function projectLatestDeepRunSummaries(
   return Promise.all(
     latestDeepRunRecordsByRoot(records).map(async (record) => {
       const rootRecord = await rootDeepRunRecord(state, record);
-      return projectDeepRunSummary(record, rootRecord);
+      return projectDeepRunSummaryWithHealth(state, record, rootRecord);
     })
   );
+}
+
+async function latestDeepRunRecordsByConversation(
+  state: DeepRouteState,
+  records: readonly DeepRunRecord[],
+): Promise<ReadonlyMap<string, { readonly record: DeepRunRecord; readonly rootRecord?: DeepRunRecord }>> {
+  const selected = new Map<string, { readonly record: DeepRunRecord; readonly rootRecord?: DeepRunRecord }>();
+  for (const record of latestDeepRunRecordsByRoot(records)) {
+    if (selected.has(record.run.conversationId)) {
+      continue;
+    }
+    selected.set(record.run.conversationId, {
+      record,
+      rootRecord: await rootDeepRunRecord(state, record),
+    });
+  }
+  return selected;
+}
+
+async function projectDeepConversationSummaries(
+  state: DeepRouteState,
+  limit: number,
+): Promise<readonly Record<string, unknown>[]> {
+  const [conversations, records] = await Promise.all([
+    state.conversationStore.list(Math.max(limit, 200)),
+    state.runRecordStore.list(500),
+  ]);
+  const latestByConversation = await latestDeepRunRecordsByConversation(state, records);
+  return conversations
+    .map((conversation) => {
+      const latest = latestByConversation.get(conversation.conversationId);
+      return projectDeepConversationSummaryWithHealth(state, conversation, latest?.record, latest?.rootRecord);
+    })
+    .sort((left, right) => {
+      const pinned = summaryPinnedAt(right).localeCompare(summaryPinnedAt(left));
+      return pinned === 0 ? summaryUpdatedAt(right).localeCompare(summaryUpdatedAt(left)) : pinned;
+    })
+    .slice(0, limit);
+}
+
+async function ensureDeepConversationLoaded(
+  state: DeepRouteState,
+  conversationId: string,
+): Promise<DeepConversation> {
+  const conversation = await state.conversationStore.get(conversationId);
+  if (conversation === undefined) {
+    throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
+  }
+  return conversation;
+}
+
+function isTerminalDeepConversationStatus(status: DeepRunStatus): boolean {
+  return status === "completed" ||
+    status === "failed" ||
+    status === "interrupted" ||
+    status === "stopped" ||
+    status === "corrected";
 }
 
 async function rootDeepRunRecord(
@@ -2172,12 +2651,150 @@ async function rootDeepRunRecord(
   return rootRunId === record.run.runId ? record : state.runRecordStore.get(rootRunId);
 }
 
+function summaryUpdatedAt(summary: Record<string, unknown>): string {
+  const candidates = [
+    typeof summary.updatedAt === "string" ? summary.updatedAt : "",
+    typeof summary.titleEditedAt === "string" ? summary.titleEditedAt : "",
+    typeof summary.pinnedAt === "string" ? summary.pinnedAt : "",
+  ];
+  return candidates.sort((left, right) => right.localeCompare(left))[0] ?? "";
+}
+
+function summaryPinnedAt(summary: Record<string, unknown>): string {
+  return typeof summary.pinnedAt === "string" ? summary.pinnedAt : "";
+}
+
+function projectDeepRunSummaryWithHealth(
+  state: DeepRouteState,
+  record: DeepRunRecord,
+  rootRecord?: DeepRunRecord,
+): Record<string, unknown> {
+  return {
+    ...projectDeepRunSummary(record, rootRecord),
+    runtimeHealth: deepRunRuntimeHealth(state, record),
+  };
+}
+
+function projectDeepConversationSummaryWithHealth(
+  state: DeepRouteState,
+  conversation: DeepConversation,
+  latestRunRecord?: DeepRunRecord,
+  latestRootRecord?: DeepRunRecord,
+): Record<string, unknown> {
+  const summary = projectDeepConversationSummary(conversation, latestRunRecord, latestRootRecord);
+  if (latestRunRecord === undefined || summary.latestRun === undefined) {
+    return summary;
+  }
+  return {
+    ...summary,
+    latestRun: {
+      ...asRecord(summary.latestRun),
+      runtimeHealth: deepRunRuntimeHealth(state, latestRunRecord),
+    },
+  };
+}
+
 async function projectDeepRunViewForResponse(
   state: DeepRouteState,
   record: DeepRunRecord,
 ): Promise<Record<string, unknown>> {
   const conversation = await state.conversationStore.get(record.run.conversationId);
-  return projectDeepRunView(record, conversation);
+  const view = projectDeepRunView(record, conversation);
+  const run = asRecord(view.run);
+  return {
+    ...view,
+    run: {
+      ...run,
+      runtimeHealth: deepRunRuntimeHealth(state, record),
+    },
+  };
+}
+
+export function deriveDeepRunRuntimeHealth(input: {
+  readonly status: DeepRunStatus;
+  readonly runId: string;
+  readonly activeRunIds: ReadonlySet<string>;
+  readonly lastActivityAt: string;
+  readonly nowMs?: number;
+  readonly staleAfterMs?: number;
+}): DeepRunRuntimeHealthView {
+  const staleAfterMs = input.staleAfterMs ?? DEEP_RUN_STALE_AFTER_MS;
+  const inactiveMs = Math.max(0, (input.nowMs ?? Date.now()) - timestampMs(input.lastActivityAt));
+  if (isTerminalDeepRunStatus(input.status)) {
+    return {
+      state: "terminal",
+      lastActivityAt: input.lastActivityAt,
+      inactiveMs,
+      staleAfterMs,
+      canStop: false,
+      reason: "run reached terminal status",
+    };
+  }
+  if (!input.activeRunIds.has(input.runId)) {
+    return {
+      state: "orphaned",
+      lastActivityAt: input.lastActivityAt,
+      inactiveMs,
+      staleAfterMs,
+      canStop: true,
+      reason: "running record has no active background task in this process",
+    };
+  }
+  if (inactiveMs >= staleAfterMs) {
+    return {
+      state: "stalled",
+      lastActivityAt: input.lastActivityAt,
+      inactiveMs,
+      staleAfterMs,
+      canStop: true,
+      reason: "no new multi-agent event within stale threshold",
+    };
+  }
+  return {
+    state: "active",
+    lastActivityAt: input.lastActivityAt,
+    inactiveMs,
+    staleAfterMs,
+    canStop: true,
+    reason: "background task is active",
+  };
+}
+
+function deepRunRuntimeHealth(
+  state: DeepRouteState,
+  record: DeepRunRecord,
+  nowMs = Date.now(),
+): DeepRunRuntimeHealthView {
+  return deriveDeepRunRuntimeHealth({
+    status: record.run.status,
+    runId: record.run.runId,
+    activeRunIds: state.activeRunIds,
+    lastActivityAt: latestDeepRunActivityAt(record),
+    nowMs,
+    staleAfterMs: DEEP_RUN_STALE_AFTER_MS,
+  });
+}
+
+function latestDeepRunActivityAt(record: DeepRunRecord): string {
+  const lastEventAt = record.eventSequence.at(-1)?.timestamp;
+  return latestTimestampForHealth(
+    lastEventAt,
+    record.liveProjection?.updatedAt,
+    record.updatedAt,
+    record.run.updatedAt,
+    record.run.startedAt,
+  );
+}
+
+function latestTimestampForHealth(...values: readonly (string | undefined)[]): string {
+  return values
+    .filter((value): value is string => value !== undefined && value.trim().length > 0)
+    .sort((left, right) => timestampMs(right) - timestampMs(left))[0] ?? nowIso();
+}
+
+function timestampMs(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2219,6 +2836,10 @@ class DeepChildInstructionQueueStore {
 
   get(runId: string): DeepChildInstructionQueueHandle | undefined {
     return this.handles.get(runId);
+  }
+
+  deleteForRun(runId: string): void {
+    this.handles.delete(runId);
   }
 }
 

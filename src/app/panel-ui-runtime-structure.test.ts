@@ -362,7 +362,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(modelProviderLogos.includes("默认配置"), false);
   assert.equal(modelProviderLogos.includes("value.includes(\"default\")"), false);
   assert.equal(chatEmpty.includes("任务输入"), true);
-  assert.equal(chatEmpty.includes("多 Agent"), true);
+  assert.equal(chatEmpty.includes("Agent 集群"), true);
   assert.equal(chatEmpty.includes("Deep 模式"), false);
   assert.equal(chatEmpty.includes("ChatInputBar"), true);
   assert.equal(chatEmpty.includes("composer-options-button"), true);
@@ -370,7 +370,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(chatEmpty.includes("model-select-button"), false);
   assert.equal(motionResponsiveStyles.includes(".model-select-button"), false);
   assert.equal(sidebar.includes("新任务"), true);
-  assert.equal(sidebar.includes("多 Agent"), true);
+  assert.equal(sidebar.includes("Agent 集群"), true);
   assert.equal(sidebar.includes("Deep 模式"), false);
   assert.equal(sidebar.includes("工作方式"), false);
   assert.equal(sidebar.includes("技能"), false);

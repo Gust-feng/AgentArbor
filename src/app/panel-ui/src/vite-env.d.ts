@@ -15,6 +15,8 @@ declare module "*.png" {
 
 interface Window {
   readonly agentarborDesktop?: {
+    readonly getLocalPreference: (key: string) => string | undefined;
+    readonly setLocalPreference: (key: string, value: string) => void;
     readonly getStartupThemeSnapshot: () => {
       readonly styleId: "default" | "classic" | "glass";
       readonly colorId: "system" | "light" | "dark" | "warm" | "forest" | "slate" | "aurora" | "sunset" | "ocean";

@@ -9,6 +9,7 @@ import {
   type OpenDialogOptions,
   type Rectangle,
 } from "electron";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
@@ -30,7 +31,11 @@ import {
 import { startLocalPanelServer } from "./panel-server.js";
 import type { AppUpdateServiceLike } from "./app-update-service.js";
 import { createUnsupportedAppUpdateService } from "./app-update-service.js";
-import { createElectronAppUpdateService, type ElectronUpdaterLike } from "./electron-app-update-service.js";
+import {
+  createElectronAppUpdateService,
+  electronAutoUpdaterFromModule,
+  type ElectronUpdaterLike,
+} from "./electron-app-update-service.js";
 
 const activeWindows = new Set<BrowserWindow>();
 const activeDesktopSessions = new Set<PanelDesktopSession>();
@@ -49,6 +54,10 @@ const WINDOW_TOGGLE_MAXIMIZE_CHANNEL = "agentarbor:window-toggle-maximize";
 const WINDOW_GET_STATE_CHANNEL = "agentarbor:window-get-state";
 const WINDOW_STATE_CHANGED_CHANNEL = "agentarbor:window-state-changed";
 const WINDOW_CLOSE_CHANNEL = "agentarbor:window-close";
+const LOCAL_PREFERENCE_GET_CHANNEL = "agentarbor:local-preference-get";
+const LOCAL_PREFERENCE_SET_CHANNEL = "agentarbor:local-preference-set";
+const AGENTARBOR_APP_ID = "com.agentarbor.desktop";
+const AGENTARBOR_APP_NAME = "AgentArbor";
 const DESKTOP_WINDOW_MAXIMIZE_ANIMATION_MS = 180;
 const STARTUP_WINDOW_EXPAND_MS = 720;
 const STARTUP_WINDOW_REDUCED_MOTION_MS = 80;
@@ -170,6 +179,8 @@ main().catch((error: unknown) => {
 });
 
 async function main(): Promise<void> {
+  configureDesktopAppIdentity();
+  installDesktopLocalPreferenceBridge();
   const args = parsePanelDesktopArgs(process.argv.slice(2));
   startupWindowSmokeRequested = args.windowSmoke;
   scheduleStartupWindowSmokeTimeout();
@@ -224,6 +235,18 @@ async function main(): Promise<void> {
     console.error("AgentArbor 桌面面板启动失败。");
     console.error(error);
     app.exit(1);
+  }
+}
+
+function configureDesktopAppIdentity(): void {
+  app.setName(AGENTARBOR_APP_NAME);
+  if (process.platform === "win32") {
+    app.setAppUserModelId(AGENTARBOR_APP_ID);
+  }
+  try {
+    app.setPath("userData", path.join(app.getPath("appData"), AGENTARBOR_APP_NAME));
+  } catch {
+    // Electron may reject path changes in unusual embed contexts; app identity still remains set.
   }
 }
 
@@ -501,6 +524,70 @@ function installStartupWindowExpansionBridge(): void {
     if (window === undefined) return;
     window.close();
   });
+}
+
+function installDesktopLocalPreferenceBridge(): void {
+  ipcMain.on(LOCAL_PREFERENCE_GET_CHANNEL, (event, key: unknown) => {
+    event.returnValue = readDesktopLocalPreference(key);
+  });
+  ipcMain.on(LOCAL_PREFERENCE_SET_CHANNEL, (event, payload: unknown) => {
+    writeDesktopLocalPreference(payload);
+    event.returnValue = true;
+  });
+}
+
+function readDesktopLocalPreference(key: unknown): string | undefined {
+  const normalizedKey = normalizeDesktopLocalPreferenceKey(key);
+  if (normalizedKey === undefined) return undefined;
+  return readDesktopLocalPreferences()[normalizedKey];
+}
+
+function writeDesktopLocalPreference(payload: unknown): void {
+  if (payload === null || typeof payload !== "object") return;
+  const record = payload as { readonly key?: unknown; readonly value?: unknown };
+  const key = normalizeDesktopLocalPreferenceKey(record.key);
+  const value = typeof record.value === "string" ? record.value : undefined;
+  if (key === undefined || value === undefined) return;
+  const preferences = readDesktopLocalPreferences();
+  preferences[key] = value;
+  const preferencePath = desktopLocalPreferencePath();
+  try {
+    mkdirSync(path.dirname(preferencePath), { recursive: true });
+    writeFileSync(preferencePath, `${JSON.stringify(preferences, null, 2)}\n`, "utf8");
+  } catch {
+    // Preference persistence must not block startup or UI actions.
+  }
+}
+
+function readDesktopLocalPreferences(): Record<string, string> {
+  const preferencePath = desktopLocalPreferencePath();
+  if (!existsSync(preferencePath)) {
+    return {};
+  }
+  try {
+    const raw = JSON.parse(readFileSync(preferencePath, "utf8")) as unknown;
+    if (raw === null || typeof raw !== "object") return {};
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      const normalizedKey = normalizeDesktopLocalPreferenceKey(key);
+      if (normalizedKey !== undefined && typeof value === "string") {
+        result[normalizedKey] = value;
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function desktopLocalPreferencePath(): string {
+  return path.join(app.getPath("userData"), "preferences", "local-preferences.json");
+}
+
+function normalizeDesktopLocalPreferenceKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const key = value.trim();
+  return /^agentarbor[:.][a-z0-9:._-]+$/i.test(key) ? key : undefined;
 }
 
 function panelWindowFromEvent(event: Pick<IpcMainEvent, "sender">): BrowserWindow | undefined {
@@ -1158,8 +1245,11 @@ async function createDesktopAppUpdateService(): Promise<AppUpdateServiceLike> {
   }
   try {
     const electronUpdaterModule = "electron-updater";
-    const module = await import(electronUpdaterModule) as { readonly autoUpdater?: ElectronUpdaterLike };
-    const updater = module.autoUpdater;
+    const module = await import(electronUpdaterModule) as {
+      readonly autoUpdater?: ElectronUpdaterLike;
+      readonly default?: { readonly autoUpdater?: ElectronUpdaterLike };
+    };
+    const updater = electronAutoUpdaterFromModule(module);
     if (updater === undefined) {
       return createUnsupportedAppUpdateService({
         currentVersion: app.getVersion(),

@@ -103,6 +103,7 @@ import type {
 import type { McpServerCatalogItem } from "./contracts/tools";
 import type { AppUpdateInfo } from "./contracts/app-update";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
+import { readLocalPreference, writeLocalPreference } from "./app-local-preferences";
 
 type StartupIntroRootStyle = React.CSSProperties & {
   "--startup-intro-target-width"?: string;
@@ -1947,45 +1948,17 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = "agentarbor.panel.sidebar.collapsed";
 const AGENT_CLUSTER_ENABLED_STORAGE_KEY = "agentarbor.panel.agent_cluster.enabled";
 
 function loadSidebarCollapsedPreference(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  try {
-    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
+  return readLocalPreference(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
 }
 
 function loadAgentClusterEnabledPreference(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  try {
-    return window.localStorage.getItem(AGENT_CLUSTER_ENABLED_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
+  return readLocalPreference(AGENT_CLUSTER_ENABLED_STORAGE_KEY) === "true";
 }
 
 function persistAgentClusterEnabledPreference(enabled: boolean): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem(AGENT_CLUSTER_ENABLED_STORAGE_KEY, enabled ? "true" : "false");
-  } catch {
-    // Local preference persistence is best-effort only.
-  }
+  writeLocalPreference(AGENT_CLUSTER_ENABLED_STORAGE_KEY, enabled ? "true" : "false");
 }
 
 function persistSidebarCollapsedPreference(collapsed: boolean): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
-  } catch {
-    // Local preference persistence is best-effort only.
-  }
+  writeLocalPreference(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
 }

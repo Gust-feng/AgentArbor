@@ -21,12 +21,27 @@ export function readPanelBrandLogoAsset(): PanelStaticAsset {
   };
 }
 
+export function readPanelBrandIconAsset(): PanelStaticAsset {
+  return {
+    contentType: "image/x-icon",
+    body: readFileSync(resolvePanelBrandIconPath()),
+  };
+}
+
 export function resolvePanelBrandLogoPath(): string {
   const candidates = panelAssetRoots().flatMap((root) => [
     path.join(root, "favicon.svg"),
     path.join(root, "public", "favicon.svg"),
   ]);
   return resolveFirstExistingFile(candidates, "Panel brand logo asset not found: favicon.svg");
+}
+
+export function resolvePanelBrandIconPath(): string {
+  const candidates = panelAssetRoots().flatMap((root) => [
+    path.join(root, "favicon.ico"),
+    path.join(root, "public", "favicon.ico"),
+  ]);
+  return resolveFirstExistingFile(candidates, "Panel brand icon asset not found: favicon.ico");
 }
 
 export function readPanelStaticAsset(pathname: string): PanelStaticAsset | undefined {

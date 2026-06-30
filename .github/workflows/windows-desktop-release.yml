@@ -30,7 +30,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build and publish Windows desktop
+      - name: Build Windows desktop
+        run: pnpm dist:desktop:win
+
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm publish:desktop:win
+        run: node scripts/publish-windows-release.mjs

@@ -542,11 +542,16 @@
   justify-content: center;
 }
 
-.settings-runtime-icon img {
+.settings-runtime-icon-svg,
+.settings-runtime-icon-svg svg {
   display: block;
   width: 28px;
   height: 28px;
-  object-fit: contain;
+}
+
+.settings-runtime-icon-svg svg {
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .settings-runtime-icon-fallback {

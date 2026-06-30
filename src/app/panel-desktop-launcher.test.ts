@@ -15,7 +15,7 @@ test("panel desktop window options keep secure defaults", () => {
 
   assert.equal(isPanelBrandLogoPath(icon), true);
   assert.deepEqual(stableOptions, {
-    title: "AgentArbor Desktop Shell",
+    title: "AgentArbor",
     width: 1440,
     height: 960,
     minWidth: 1200,
@@ -49,6 +49,7 @@ test("panel desktop window options keep secure defaults", () => {
       nodeIntegration: false,
       sandbox: true,
       webviewTag: false,
+      partition: "persist:agentarbor",
     },
   } satisfies Omit<PanelDesktopWindowOptions, "icon">);
 });

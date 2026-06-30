@@ -1,6 +1,6 @@
 import React from "react";
 import type { RuntimeEnvironmentTool } from "../contracts/config";
-import { resolveRuntimeToolIconSrc } from "../runtime-tool-icons";
+import { resolveRuntimeToolIconSvg } from "../runtime-tool-icons";
 
 export function RuntimeEnvironmentSettings(props: {
   readonly tools?: readonly RuntimeEnvironmentTool[];
@@ -40,13 +40,13 @@ export function RuntimeEnvironmentSettings(props: {
 }
 
 function RuntimeToolIcon(props: { readonly toolId: string }): React.ReactElement {
-  const iconSrc = resolveRuntimeToolIconSrc(props.toolId);
+  const iconSvg = resolveRuntimeToolIconSvg(props.toolId);
   return (
     <span className="settings-runtime-icon" aria-hidden="true">
-      {iconSrc === undefined ? (
+      {iconSvg === undefined ? (
         <span className="settings-runtime-icon-fallback" />
       ) : (
-        <img src={iconSrc} alt="" loading="lazy" />
+        <span className="settings-runtime-icon-svg" dangerouslySetInnerHTML={{ __html: iconSvg }} />
       )}
     </span>
   );

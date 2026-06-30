@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import {
   createElectronAppUpdateService,
+  electronAutoUpdaterFromModule,
   type ElectronUpdaterDownloadProgress,
   type ElectronUpdaterLike,
   type ElectronUpdaterUpdateInfo,
@@ -134,4 +135,12 @@ test("electron app update service can be explicitly unsupported", async () => {
   assert.equal(checked.canCheck, false);
   assert.equal(checked.canInstall, false);
   assert.equal(updater.checkCalls, 0);
+});
+
+test("electron updater module resolver accepts ESM default exports", () => {
+  const updater = new FakeElectronUpdater();
+
+  assert.equal(electronAutoUpdaterFromModule({ autoUpdater: updater }), updater);
+  assert.equal(electronAutoUpdaterFromModule({ default: { autoUpdater: updater } }), updater);
+  assert.equal(electronAutoUpdaterFromModule({}), undefined);
 });

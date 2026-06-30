@@ -75,6 +75,12 @@ const STARTUP_THEME_STYLE_STORAGE_KEY = "agentarbor:style";
 const STARTUP_THEME_COLOR_STORAGE_KEY = "agentarbor:color";
 
 contextBridge.exposeInMainWorld("agentarborDesktop", {
+  getLocalPreference: (key: string): string | undefined => {
+    return readDesktopPreference(key);
+  },
+  setLocalPreference: (key: string, value: string): void => {
+    ipcRenderer.sendSync("agentarbor:local-preference-set", { key, value });
+  },
   getStartupThemeSnapshot: (): DesktopStartupThemeSnapshot => {
     return readDesktopStartupThemeSnapshot();
   },
@@ -133,8 +139,8 @@ function readDesktopWindowPresentationState(payload: unknown): DesktopWindowPres
 }
 
 function readDesktopStartupThemeSnapshot(): DesktopStartupThemeSnapshot {
-  const styleId = readStorageValue(STARTUP_THEME_STYLE_STORAGE_KEY);
-  const colorId = readStorageValue(STARTUP_THEME_COLOR_STORAGE_KEY);
+  const styleId = readLocalPreference(STARTUP_THEME_STYLE_STORAGE_KEY);
+  const colorId = readLocalPreference(STARTUP_THEME_COLOR_STORAGE_KEY);
   const normalized = normalizeDesktopStartupTheme(styleId, colorId);
   const resolvedColorId = resolveDesktopStartupColorId(normalized);
   return {
@@ -147,9 +153,21 @@ function readDesktopStartupThemeSnapshot(): DesktopStartupThemeSnapshot {
   };
 }
 
-function readStorageValue(key: string): string | undefined {
+function readLocalPreference(key: string): string | undefined {
+  const desktopPreference = readDesktopPreference(key);
+  if (desktopPreference !== undefined) {
+    return desktopPreference;
+  }
   try {
     return window.localStorage.getItem(key) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readDesktopPreference(key: string): string | undefined {
+  try {
+    return ipcRenderer.sendSync("agentarbor:local-preference-get", key) as string | undefined;
   } catch {
     return undefined;
   }

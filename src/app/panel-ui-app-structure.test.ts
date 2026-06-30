@@ -144,8 +144,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("showModelUsage={modelUsageDisplayEnabled}"), true);
   assert.equal(app.includes("onModelUsageDisplayChange={changeModelUsageDisplay}"), true);
   assert.equal(appModelUsageDisplay.includes("agentarbor:model-usage-display"), true);
-  assert.equal(appModelUsageDisplay.includes('localStorage.getItem(STORAGE_MODEL_USAGE_DISPLAY_KEY) === "true"'), true);
-  assert.equal(appModelUsageDisplay.includes("return false"), true);
+  assert.equal(appModelUsageDisplay.includes("readLocalPreference(STORAGE_MODEL_USAGE_DISPLAY_KEY) === \"true\""), true);
+  assert.equal(appModelUsageDisplay.includes("writeLocalPreference(STORAGE_MODEL_USAGE_DISPLAY_KEY"), true);
   assert.equal(appModelUsageDisplay.includes("subscribeModelUsageDisplayChanged"), true);
   assert.equal(app.includes('from "./app-runtime-controls"'), true);
   assert.equal(app.includes('from "./app-attachments"'), true);

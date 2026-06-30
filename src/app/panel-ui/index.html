@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>AgentArbor 工作台</title>
+    <title>AgentArbor</title>
     <script>
       (() => {
         const styles = new Set(["default", "classic", "glass"]);
@@ -20,17 +20,18 @@
         const systemReducedMotion = () =>
           window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         try {
-          const savedStyle = localStorage.getItem("agentarbor:style");
+          const readPreference = (key) => window.agentarborDesktop?.getLocalPreference?.(key) ?? localStorage.getItem(key);
+          const savedStyle = readPreference("agentarbor:style");
           const style = styles.has(savedStyle) ? savedStyle : "default";
-          const savedColor = localStorage.getItem("agentarbor:color");
+          const savedColor = readPreference("agentarbor:color");
           const colorPreference = colorsByStyle[style].has(savedColor) ? savedColor : defaults[style];
           const color = style === "default" && colorPreference === "system" ? systemColor() : colorPreference;
-          const savedMotion = localStorage.getItem("agentarbor:motion");
+          const savedMotion = readPreference("agentarbor:motion");
           const motion = motions.has(savedMotion) ? savedMotion : "system";
           const motionEffective = motion === "reduced" || (motion === "system" && systemReducedMotion())
             ? "reduced"
             : "standard";
-          const startupAnimation = localStorage.getItem("agentarbor:startup-animation") === "true" ? "on" : "off";
+          const startupAnimation = readPreference("agentarbor:startup-animation") === "true" ? "on" : "off";
           document.documentElement.dataset.style = style;
           document.documentElement.dataset.color = color;
           document.documentElement.dataset.colorPreference = colorPreference;

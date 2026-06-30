@@ -1,6 +1,6 @@
 {
   "name": "agentarbor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "AgentArbor deterministic minimal runtime kernel.",
@@ -22,8 +22,9 @@
     "panel:desktop": "pnpm build && pnpm exec electron dist/app/panel-desktop.js",
     "panel:desktop:smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --smoke",
     "panel:desktop:window-smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --window-smoke",
-    "dist:desktop:win": "pnpm build && pnpm exec electron-builder --win nsis --x64",
-    "publish:desktop:win": "pnpm build && pnpm exec electron-builder --win nsis --x64 --publish always"
+    "generate:windows-icon": "node scripts/generate-windows-icon.mjs",
+    "dist:desktop:win": "pnpm generate:windows-icon && pnpm build && pnpm exec electron-builder --win nsis --x64 --publish never",
+    "publish:desktop:win": "pnpm dist:desktop:win && node scripts/publish-windows-release.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.0",

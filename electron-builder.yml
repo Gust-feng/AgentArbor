@@ -15,19 +15,24 @@ files:
       - "!**/*.map"
 extraMetadata:
   main: dist/app/panel-desktop.js
+  productName: AgentArbor
 asar: true
 compression: normal
 publish:
   provider: github
   owner: Gust-feng
   repo: AgentArbor
+  releaseType: release
 win:
+  icon: src/app/panel-ui/public/favicon.ico
   target:
     - target: nsis
       arch:
         - x64
   artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
 nsis:
+  installerIcon: src/app/panel-ui/public/favicon.ico
+  uninstallerIcon: src/app/panel-ui/public/favicon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

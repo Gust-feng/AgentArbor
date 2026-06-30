@@ -7,6 +7,7 @@
  */
 
 import { shouldUseMotion } from "./app-motion";
+import { readLocalPreference, writeLocalPreference } from "./app-local-preferences";
 
 export type StyleDefinition = {
   readonly id: ThemeStyleId;
@@ -300,46 +301,28 @@ export function applyTheme(styleId: string | undefined, colorId: string | undefi
 
 /** Read saved style id from localStorage. */
 export function getSavedStyleId(): ThemeStyleId | undefined {
-  if (typeof localStorage === "undefined") return undefined;
-  try {
-    const value = localStorage.getItem(STORAGE_STYLE_KEY);
-    if (value !== null && isValidStyle(value)) return value;
-  } catch {
-    // localStorage may be blocked
-  }
+  const value = readLocalPreference(STORAGE_STYLE_KEY);
+  if (value !== undefined && isValidStyle(value)) return value;
   return undefined;
 }
 
 /** Read saved color id from localStorage. */
 export function getSavedColorId(): ThemeColorId | undefined {
-  if (typeof localStorage === "undefined") return undefined;
-  try {
-    const value = localStorage.getItem(STORAGE_COLOR_KEY);
-    if (value !== null && isValidColor(value)) return value;
-  } catch {
-    // localStorage may be blocked
-  }
+  const value = readLocalPreference(STORAGE_COLOR_KEY);
+  if (value !== undefined && isValidColor(value)) return value;
   return undefined;
 }
 
 /** Persist style id. */
 export function saveStyleId(styleId: string): void {
-  if (!isValidStyle(styleId) || typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_STYLE_KEY, styleId);
-  } catch {
-    // Silently ignore
-  }
+  if (!isValidStyle(styleId)) return;
+  writeLocalPreference(STORAGE_STYLE_KEY, styleId);
 }
 
 /** Persist color id. */
 export function saveColorId(colorId: string): void {
-  if (!isValidColor(colorId) || typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_COLOR_KEY, colorId);
-  } catch {
-    // Silently ignore
-  }
+  if (!isValidColor(colorId)) return;
+  writeLocalPreference(STORAGE_COLOR_KEY, colorId);
 }
 
 /** Return the initial style + color to use on startup. */

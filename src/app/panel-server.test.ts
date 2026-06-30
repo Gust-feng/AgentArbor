@@ -51,6 +51,24 @@ test("panel server serves Vite React frontend assets", async () => {
   }
 });
 
+test("panel server serves real brand favicon assets", async () => {
+  const server = await startLocalPanelServer({ port: 0 });
+  try {
+    const svg = await requestBuffer(server.url, "/favicon.svg");
+    const ico = await requestBuffer(server.url, "/favicon.ico");
+
+    assert.equal(svg.status, 200);
+    assert.equal(ico.status, 200);
+    assert.match(String(svg.headers["content-type"]), /image\/svg\+xml/);
+    assert.match(String(ico.headers["content-type"]), /image\/x-icon/);
+    assert.equal(svg.body.toString("utf8").includes("<svg"), true);
+    assert.deepEqual([...ico.body.subarray(0, 4)], [0, 0, 1, 0]);
+    assert.equal(ico.body.readUInt16LE(4) > 0, true);
+  } finally {
+    await server.close();
+  }
+});
+
 test("panel config route returns product runtime metadata for settings about page", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-product-"));
   const packageJson = JSON.parse(await fs.readFile("package.json", "utf8")) as { readonly version: string };
@@ -448,6 +466,33 @@ function requestText(baseUrl: string, pathname: string): Promise<RequestTextResu
           status: response.statusCode ?? 0,
           headers: response.headers,
           text,
+        });
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+type RequestBufferResult = {
+  readonly status: number;
+  readonly headers: Record<string, string | string[] | undefined>;
+  readonly body: Buffer;
+};
+
+function requestBuffer(baseUrl: string, pathname: string): Promise<RequestBufferResult> {
+  const url = new URL(pathname, baseUrl);
+  return new Promise((resolve, reject) => {
+    const req = request(url, { method: "GET" }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer | string) => {
+        chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+      });
+      response.on("end", () => {
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          body: Buffer.concat(chunks),
         });
       });
     });

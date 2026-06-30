@@ -1,3 +1,5 @@
+import { readLocalPreference, writeLocalPreference } from "./app-local-preferences";
+
 export type MotionPreferenceId = "system" | "standard" | "reduced";
 export type EffectiveMotionId = "standard" | "reduced";
 
@@ -15,23 +17,13 @@ export function isValidMotionPreference(value: string | null | undefined): value
 }
 
 export function getSavedMotionPreference(): MotionPreferenceId {
-  if (typeof localStorage === "undefined") return "system";
-  try {
-    const value = localStorage.getItem(STORAGE_MOTION_KEY);
-    if (isValidMotionPreference(value)) return value;
-  } catch {
-    // Local appearance preferences are best-effort only.
-  }
+  const value = readLocalPreference(STORAGE_MOTION_KEY);
+  if (isValidMotionPreference(value)) return value;
   return "system";
 }
 
 export function saveMotionPreference(preference: MotionPreferenceId): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_MOTION_KEY, preference);
-  } catch {
-    // Local appearance preferences are best-effort only.
-  }
+  writeLocalPreference(STORAGE_MOTION_KEY, preference);
 }
 
 export function getEffectiveMotionPreference(
@@ -62,22 +54,11 @@ export function shouldUseMotion(): boolean {
 }
 
 export function getStartupAnimationEnabled(): boolean {
-  if (typeof localStorage === "undefined") return false;
-  try {
-    return localStorage.getItem(STORAGE_STARTUP_ANIMATION_KEY) === "true";
-  } catch {
-    return false;
-  }
+  return readLocalPreference(STORAGE_STARTUP_ANIMATION_KEY) === "true";
 }
 
 export function saveStartupAnimationEnabled(enabled: boolean): void {
-  if (typeof localStorage !== "undefined") {
-    try {
-      localStorage.setItem(STORAGE_STARTUP_ANIMATION_KEY, enabled ? "true" : "false");
-    } catch {
-      // Local appearance preferences are best-effort only.
-    }
-  }
+  writeLocalPreference(STORAGE_STARTUP_ANIMATION_KEY, enabled ? "true" : "false");
   applyStartupAnimationPreference(enabled);
 }
 

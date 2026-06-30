@@ -38,6 +38,13 @@ export type ElectronUpdaterLike = {
   on(event: "error", listener: (error: Error) => void): ElectronUpdaterLike;
 };
 
+export type ElectronUpdaterModuleLike = {
+  readonly autoUpdater?: ElectronUpdaterLike;
+  readonly default?: {
+    readonly autoUpdater?: ElectronUpdaterLike;
+  };
+};
+
 export type ElectronAppUpdateServiceOptions = {
   readonly updater: ElectronUpdaterLike;
   readonly currentVersion?: string;
@@ -253,6 +260,10 @@ export function createElectronAppUpdateService(options: ElectronAppUpdateService
     enabled: options.enabled ?? true,
     runtime: options.runtime ?? (options.enabled === false ? "unsupported" : "electron"),
   });
+}
+
+export function electronAutoUpdaterFromModule(module: ElectronUpdaterModuleLike): ElectronUpdaterLike | undefined {
+  return module.autoUpdater ?? module.default?.autoUpdater;
 }
 
 function updateManifestFromElectronInfo(

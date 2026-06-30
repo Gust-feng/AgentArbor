@@ -54,11 +54,14 @@ function assertStartupAnimationPreferenceDefaults(
   startupIntro: string,
   panelIndexHtml: string
 ): void {
-  assert.equal(appMotion.includes('if (typeof localStorage === "undefined") return false;'), true);
-  assert.equal(appMotion.includes('return localStorage.getItem(STORAGE_STARTUP_ANIMATION_KEY) === "true";'), true);
+  assert.equal(appMotion.includes("readLocalPreference(STORAGE_STARTUP_ANIMATION_KEY) === \"true\""), true);
   assert.equal(startupIntro.includes("const startupAnimationEnabled = options.startupAnimationEnabled === true;"), true);
   assert.equal(
-    panelIndexHtml.includes('const startupAnimation = localStorage.getItem("agentarbor:startup-animation") === "true" ? "on" : "off";'),
+    panelIndexHtml.includes('const readPreference = (key) => window.agentarborDesktop?.getLocalPreference?.(key) ?? localStorage.getItem(key);'),
+    true,
+  );
+  assert.equal(
+    panelIndexHtml.includes('const startupAnimation = readPreference("agentarbor:startup-animation") === "true" ? "on" : "off";'),
     true,
   );
   assert.equal(panelIndexHtml.includes('document.documentElement.dataset.startupAnimation = "off";'), true);

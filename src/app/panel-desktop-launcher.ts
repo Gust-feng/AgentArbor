@@ -36,6 +36,7 @@ export type PanelDesktopWindowOptions = {
     readonly nodeIntegration: false;
     readonly sandbox: true;
     readonly webviewTag: false;
+    readonly partition: "persist:agentarbor";
   };
 };
 
@@ -149,7 +150,7 @@ export function createPanelDesktopWindowOptions(): PanelDesktopWindowOptions {
   const startupWindowSize = createStartupIntroDefaultWindowSize();
   const startupTheme = createStartupThemeSnapshot(undefined, undefined);
   return {
-    title: "AgentArbor Desktop Shell",
+    title: "AgentArbor",
     icon: resolvePanelBrandLogoPath(),
     width: STARTUP_MAIN_WINDOW_WIDTH,
     height: STARTUP_MAIN_WINDOW_HEIGHT,
@@ -173,6 +174,7 @@ export function createPanelDesktopWindowOptions(): PanelDesktopWindowOptions {
       nodeIntegration: false,
       sandbox: true,
       webviewTag: false,
+      partition: "persist:agentarbor",
     },
   };
 }

@@ -335,8 +335,8 @@ function fileDiffDisplay(
   const existingDiff = existing?.kind === "file_diff_preview" ? existing : undefined;
   const allowDerivedPreview = isBuiltInFileToolName(input.toolName);
   const preview = allowDerivedPreview
-    ? fileEditDiffPreview(inputRecord.edits) ?? diffSummaryPreview(result.diffSummary)
-    : diffSummaryPreview(result.diffSummary);
+    ? fileEditDiffPreview(inputRecord) ?? directDiffPreview(outputRecord) ?? directDiffPreview(result) ?? diffSummaryPreview(result.diffSummary)
+    : directDiffPreview(outputRecord) ?? directDiffPreview(result) ?? diffSummaryPreview(result.diffSummary);
   return {
     kind: "file_diff_preview",
     path: existingDiff?.path ?? stringOrUndefined(result.path) ?? stringOrUndefined(outputRecord.path) ?? stringOrUndefined(inputRecord.path),
@@ -344,7 +344,7 @@ function fileDiffDisplay(
     replacements: existingDiff?.replacements ?? numberOrUndefined(result.replacements) ?? numberOrUndefined(outputRecord.replacements) ?? numberOrUndefined(result.wouldReplace) ?? editCount(inputRecord.edits),
     previousLength: existingDiff?.previousLength ?? numberOrUndefined(result.previousLength) ?? numberOrUndefined(outputRecord.previousLength),
     nextLength: existingDiff?.nextLength ?? numberOrUndefined(result.nextLength) ?? numberOrUndefined(outputRecord.nextLength),
-    preview: existingDiff?.preview ?? (allowDerivedPreview ? stringOrUndefined(outputRecord.preview) ?? stringOrUndefined(result.preview) ?? preview?.text : undefined),
+    preview: existingDiff?.preview ?? preview?.text,
     truncated: existingDiff?.truncated ?? booleanOrUndefined(result.truncated) ?? booleanOrUndefined(outputRecord.truncated) ?? (input.truncated === true || preview?.truncated === true ? true : undefined),
   };
 }
@@ -512,18 +512,14 @@ function fileWriteDiffPreview(input: {
   return boundedDiffPreview(input.content, "+", input.mode === "append" ? "追加内容" : input.mode === "create" ? "新增内容" : "写入内容");
 }
 
-function fileEditDiffPreview(value: unknown): FilePreviewResult | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
+function fileEditDiffPreview(inputRecord: Readonly<Record<string, unknown>>): FilePreviewResult | undefined {
+  const edits = normalizedEditPreviewRecords(inputRecord);
+  if (edits.length === 0) return undefined;
   const chunks: string[] = [];
-  let truncated = value.length > 6;
-  for (const item of value.slice(0, 6)) {
-    const record = asRecord(item);
-    const oldText = stringOrUndefined(record.oldText) ?? stringOrUndefined(record.anchor);
-    const replacement = typeof record.newText === "string"
-      ? record.newText
-      : typeof record.replacement === "string"
-        ? record.replacement
-        : undefined;
+  let truncated = edits.length > 6;
+  for (const record of edits.slice(0, 6)) {
+    const oldText = editBeforeText(record);
+    const replacement = editAfterText(record);
     if (oldText === undefined && replacement === undefined) continue;
     const hint = editTargetLabel(record);
     if (hint !== undefined) chunks.push(`@@ ${hint}`);
@@ -542,6 +538,69 @@ function fileEditDiffPreview(value: unknown): FilePreviewResult | undefined {
   const compacted = compactDiffText(joined, 2_400);
   if (compacted === undefined) return undefined;
   return { text: compacted.text, truncated: truncated || compacted.truncated };
+}
+
+function normalizedEditPreviewRecords(
+  inputRecord: Readonly<Record<string, unknown>>
+): readonly Readonly<Record<string, unknown>>[] {
+  const edits = Array.isArray(inputRecord.edits) ? inputRecord.edits.map(asRecord) : [];
+  if (edits.length > 0) {
+    return edits;
+  }
+  if (topLevelEditBeforeText(inputRecord) !== undefined || topLevelEditAfterText(inputRecord) !== undefined) {
+    return [inputRecord];
+  }
+  return [];
+}
+
+function editBeforeText(record: Readonly<Record<string, unknown>>): string | undefined {
+  return stringOrUndefined(record.oldText) ??
+    stringOrUndefined(record.oldString) ??
+    stringOrUndefined(record.old_text) ??
+    stringOrUndefined(record.before) ??
+    stringOrUndefined(record.anchor);
+}
+
+function editAfterText(record: Readonly<Record<string, unknown>>): string | undefined {
+  return stringOrUndefined(record.newText) ??
+    stringOrUndefined(record.newString) ??
+    stringOrUndefined(record.new_text) ??
+    stringOrUndefined(record.after) ??
+    stringOrUndefined(record.replacement);
+}
+
+function topLevelEditBeforeText(record: Readonly<Record<string, unknown>>): string | undefined {
+  return stringOrUndefined(record.oldString) ??
+    stringOrUndefined(record.old_string) ??
+    stringOrUndefined(record.before) ??
+    stringOrUndefined(record.anchor);
+}
+
+function topLevelEditAfterText(record: Readonly<Record<string, unknown>>): string | undefined {
+  return stringOrUndefined(record.newString) ??
+    stringOrUndefined(record.new_string) ??
+    stringOrUndefined(record.after) ??
+    stringOrUndefined(record.replacement);
+}
+
+function directDiffPreview(record: Readonly<Record<string, unknown>>): FilePreviewResult | undefined {
+  const value = [
+    stringOrUndefined(record.preview),
+    stringOrUndefined(record.diff),
+    stringOrUndefined(record.patch),
+    stringOrUndefined(record.unifiedDiff),
+    stringOrUndefined(record.unified_diff),
+  ].find((item): item is string => item !== undefined && looksLikeDiffText(item));
+  if (value === undefined) {
+    return undefined;
+  }
+  return compactDiffText(value, 2_400);
+}
+
+function looksLikeDiffText(value: string): boolean {
+  return value
+    .split(/\r?\n/)
+    .some((line) => line.startsWith("@@") || line.startsWith("+") || line.startsWith("-") || line.startsWith("diff --git"));
 }
 
 function diffSummaryPreview(value: unknown): FilePreviewResult | undefined {
@@ -575,8 +634,12 @@ function diffSummaryLinePreview(value: string): string | undefined {
 
 function editTargetLabel(record: Readonly<Record<string, unknown>>): string | undefined {
   const occurrence = numberOrUndefined(record.occurrence);
-  const start = numberOrUndefined(record.startLine) ?? numberOrUndefined(record.startLineHint);
-  const end = numberOrUndefined(record.endLine) ?? numberOrUndefined(record.endLineHint);
+  const start = numberOrUndefined(record.startLine) ??
+    numberOrUndefined(record.startLineHint) ??
+    numberOrUndefined(record.start_line);
+  const end = numberOrUndefined(record.endLine) ??
+    numberOrUndefined(record.endLineHint) ??
+    numberOrUndefined(record.end_line);
   const parts: string[] = [];
   if (occurrence !== undefined) {
     parts.push(`occurrence ${occurrence}`);

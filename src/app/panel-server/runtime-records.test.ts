@@ -550,8 +550,7 @@ test("runtime record mapper persists ordinary tool previews without diagnostic c
     }),
     toolCompletedEntry(3, "tool-edit", "edit_file", {
       path: "notes.md",
-      oldText: "RAW_OLD_TEXT_SENTINEL",
-      newText: "RAW_NEW_TEXT_SENTINEL",
+      edits: [{ oldText: "old visible line", newText: "new visible line" }],
     }, {
       action: "edit_file",
       summary: "notes.md · 32 -> 18 chars · 1 replacement",
@@ -580,18 +579,25 @@ test("runtime record mapper persists ordinary tool previews without diagnostic c
     }),
   ]);
   const serialized = JSON.stringify(toolCalls);
+  const listedCall = toolCalls.find((call) => call.callId === "tool-list");
 
   assert.equal(toolCalls.find((call) => call.callId === "tool-command")?.preview, "pnpm test");
-  assert.equal(toolCalls.find((call) => call.callId === "tool-list")?.preview, "file README.md\nfile package.json");
-  assert.equal(toolCalls.find((call) => call.callId === "tool-edit")?.preview, "notes.md · 1 处修改\n文件：notes.md\n变更预览\n替换：1 处");
+  assert.equal(listedCall?.preview, "file README.md\nfile package.json");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-edit")?.preview, "- old visible line\n+ new visible line");
   assert.equal(toolCalls.find((call) => call.callId === "tool-create")?.preview, "created.md · 已创建\n文件：created.md");
   assert.equal(toolCalls.find((call) => call.callId === "tool-delete")?.preview, "old.md · 已删除\n文件：old.md");
+  assert.equal(listedCall?.display?.kind, "directory_listing");
+  assert.equal(
+    listedCall?.display?.kind === "directory_listing"
+      ? listedCall.display.totalEntries
+      : undefined,
+    2,
+  );
   assert.equal(serialized.includes("exit 0"), false);
-  assert.equal(serialized.includes("bytes"), false);
   assert.equal(serialized.includes("32 -> 18 chars"), false);
   assert.equal(serialized.includes("RAW_STDOUT_SENTINEL"), false);
-  assert.equal(serialized.includes("RAW_OLD_TEXT_SENTINEL"), false);
-  assert.equal(serialized.includes("RAW_NEW_TEXT_SENTINEL"), false);
+  assert.equal(serialized.includes("old visible line"), true);
+  assert.equal(serialized.includes("new visible line"), true);
 });
 
 test("runtime tool call records preserve tool and process error domains", () => {

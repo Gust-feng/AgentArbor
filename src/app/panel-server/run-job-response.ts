@@ -31,50 +31,24 @@ import {
   syncPanelRunStreamEventsForJob,
   type PanelRunStreamSyncRuntime,
 } from "./run-stream-sync.js";
+import { projectPanelRunResponseBase, type PanelRunResponseBase } from "./run-response-base.js";
 
 export type PanelRunJobResponseRuntime = PanelRunStreamSyncRuntime & {
   readonly conversations: Pick<PanelConversationStore, "getReadModel">;
   readonly processRegistry?: PanelRuntimeSummaryRegistry;
 };
 
-export type PanelRunJobResponse = {
-  readonly ok: true;
-  readonly runId: string;
-  readonly runKind: PanelRunKind;
-  readonly runMode: PanelRunMode;
-  readonly status: PanelRunStatus;
-  readonly agentDefinitionRef?: RunAgentDefinitionRef;
-  readonly capabilityResolution?: RunCapabilityResolution;
-  readonly config: SanitizedModelProviderConfig;
-  readonly informationAccess: SanitizedInformationAccessConfig;
+export type PanelRunJobResponse = PanelRunResponseBase & {
   readonly trace: PanelRunTraceReadModel;
   readonly tracking: PanelRunTrackingReadModel;
   readonly transcript: PanelRunTranscript;
   readonly transcriptNodes: PanelRunTranscript["transcriptNodes"];
   readonly workNotes: PanelRunTranscript["workNotes"];
   readonly steps: PanelRunTranscript["steps"];
-  readonly streamCursor: PanelRunStreamCursor;
   readonly summary?: PanelRunSummaryPayload;
   readonly observation?: PanelObservationReadModel;
   readonly canvas?: PanelRunCanvasReadModel;
   readonly runtimeSummary?: PanelRuntimeSummaryReadModel;
-  readonly error?: {
-    readonly code: string;
-    readonly message: string;
-  };
-  readonly conversation?: PanelConversationReadModel;
-  readonly restoredFromSnapshot?: true;
-  readonly restoredResult?: {
-    readonly title: string;
-    readonly summary: string;
-  };
-  readonly snapshot?: {
-    readonly run: RuntimeRunSnapshot["run"];
-    readonly workspace?: RuntimeRunSnapshot["workspace"];
-    readonly toolCalls: RuntimeRunSnapshot["toolCalls"];
-    readonly artifacts: RuntimeRunSnapshot["artifacts"];
-    readonly confirmations: RuntimeRunSnapshot["confirmations"];
-  };
 };
 
 export function createPanelRunJobResponse(
@@ -119,25 +93,31 @@ export function createPanelRunJobResponse(
   });
 
   return {
-    ok: true,
-    runId: job.runId,
-    runKind: job.runKind,
-    runMode: job.runMode,
-    status: job.status,
-    agentDefinitionRef: job.agentDefinitionRef,
-    capabilityResolution: statusPayload?.capabilityResolution ?? job.capabilityResolution,
-    config,
-    informationAccess,
+    ...projectPanelRunResponseBase({
+      runId: job.runId,
+      runKind: job.runKind,
+      runMode: job.runMode,
+      status: job.status,
+      agentDefinitionRef: job.agentDefinitionRef,
+      capabilityResolution: statusPayload?.capabilityResolution ?? job.capabilityResolution,
+      config,
+      informationAccess,
+      streamCursor: {
+        runId: job.runId,
+        lastSequence: transcript.events.at(-1)?.sequence ?? 0,
+      },
+      error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
+      conversation:
+        job.conversationId === undefined
+          ? undefined
+          : runtime.conversations.getReadModel(job.conversationId),
+    }),
     trace,
     tracking,
     transcript,
     transcriptNodes: transcript.transcriptNodes,
     workNotes: transcript.workNotes,
     steps: transcript.steps,
-    streamCursor: {
-      runId: job.runId,
-      lastSequence: transcript.events.at(-1)?.sequence ?? 0,
-    },
     summary: responseSummary,
     observation,
     canvas: statusPayload?.canvas,
@@ -145,10 +125,5 @@ export function createPanelRunJobResponse(
       runId: job.runId,
       processRegistry: runtime.processRegistry,
     }),
-    error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
-    conversation:
-      job.conversationId === undefined
-        ? undefined
-        : runtime.conversations.getReadModel(job.conversationId),
   };
 }

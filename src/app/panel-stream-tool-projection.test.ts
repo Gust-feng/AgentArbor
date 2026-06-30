@@ -319,6 +319,28 @@ test("tool stream projection carries edit diff preview in the file display", () 
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("+ new text") : false, true);
 });
 
+test("tool stream projection uses the file diff as the edit preview", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "edit_file",
+    input: {
+      path: "src/app/example.ts",
+      edits: [{ oldText: "old text", newText: "new text" }],
+    },
+    output: {
+      summary: "src/app/example.ts · 1 处修改",
+      result: {
+        path: "src/app/example.ts",
+        replacements: 1,
+      },
+    },
+  });
+
+  assert.equal(detail.preview?.includes("- old text"), true);
+  assert.equal(detail.preview?.includes("+ new text"), true);
+  assert.equal(detail.preview?.includes("变更预览"), false);
+  assert.equal(detail.preview?.includes("替换：1 处"), false);
+});
+
 test("tool stream projection keeps edit preview focused on file-level summary", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "edit_file",
@@ -337,12 +359,11 @@ test("tool stream projection keeps edit preview focused on file-level summary", 
     },
   });
 
-  assert.equal(detail.preview?.includes("src/app/example.ts · 1 处修改"), true);
-  assert.equal(detail.preview?.includes("变更预览"), true);
-  assert.equal(detail.preview?.includes("替换：1 处"), true);
-  assert.equal(detail.preview?.includes("occurrence"), false);
-  assert.equal(detail.preview?.includes("same"), false);
-  assert.equal(detail.preview?.includes("updated"), false);
+  assert.equal(detail.preview?.includes("@@ occurrence 2 · line 4"), true);
+  assert.equal(detail.preview?.includes("- same"), true);
+  assert.equal(detail.preview?.includes("+ updated"), true);
+  assert.equal(detail.preview?.includes("变更预览"), false);
+  assert.equal(detail.preview?.includes("替换：1 处"), false);
 });
 
 test("tool stream projection derives structured directory displays from attachment listings", () => {

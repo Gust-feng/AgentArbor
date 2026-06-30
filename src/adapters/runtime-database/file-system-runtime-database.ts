@@ -15,6 +15,10 @@ import type {
   RuntimeToolCallRecord,
   RuntimeWorkspaceRecord,
 } from "../../domain/runtime-database/index.js";
+import type { RunEnvelope, RunSnapshotStore } from "../../app/run-runtime-core/snapshot-store.js";
+import {
+  createFileSystemRunSnapshotStore,
+} from "./run-snapshot-store.js";
 
 export type FileSystemRuntimeDatabasePaths = {
   readonly appHome: string;
@@ -37,10 +41,16 @@ export function resolveAgentArborRuntimeDatabasePaths(configDirectory: string): 
 export class FileSystemRuntimeDatabase implements RuntimeDatabase {
   readonly appHome: string;
   readonly runtimeHome: string;
+  private readonly runRecordStore: RunSnapshotStore<RuntimeRunRecord>;
 
   constructor(paths: FileSystemRuntimeDatabasePaths) {
     this.appHome = path.resolve(paths.appHome);
     this.runtimeHome = path.resolve(paths.runtimeHome);
+    this.runRecordStore = createFileSystemRunSnapshotStore<RuntimeRunRecord>({
+      rootDir: path.join(this.runtimeHome, "runs"),
+      getEnvelope: runtimeRunEnvelope,
+      fileName: "run.json",
+    });
   }
 
   async upsertWorkspace(record: RuntimeWorkspaceRecord): Promise<RuntimeWorkspaceRecord> {
@@ -83,9 +93,7 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
   }
 
   async upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord> {
-    const stored = cloneJson(record);
-    await writeJsonFile(this.runPath(record.runId), stored);
-    return stored;
+    return this.runRecordStore.upsert(record);
   }
 
   async upsertBasicRun(record: BasicAgentRun): Promise<BasicAgentRun> {
@@ -140,7 +148,7 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
   }
 
   async getRun(runId: string): Promise<RuntimeRunSnapshot | undefined> {
-    const run = await readJsonFile<RuntimeRunRecord>(this.runPath(runId));
+    const run = await this.runRecordStore.get(runId);
     if (run === undefined) {
       return undefined;
     }
@@ -163,22 +171,7 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
   }
 
   async listRuns(limit = 50): Promise<readonly RuntimeRunRecord[]> {
-    const root = path.join(this.runtimeHome, "runs");
-    const entries = await fs.readdir(root, { withFileTypes: true }).catch((error: unknown) => {
-      if (isFileNotFound(error)) {
-        return [];
-      }
-      throw error;
-    });
-    const runs = await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => readJsonFile<RuntimeRunRecord>(path.join(root, entry.name, "run.json")))
-    );
-    return runs
-      .filter((run): run is RuntimeRunRecord => run !== undefined)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .slice(0, Math.max(0, Math.floor(limit)));
+    return this.runRecordStore.list(limit);
   }
 
   async listModelCallsForRuns(runIds: readonly string[]): Promise<readonly RuntimeRunModelCallsRecord[]> {
@@ -292,6 +285,17 @@ async function readJsonlFile<T>(filePath: string): Promise<readonly T[]> {
 
 function safeFileName(value: string): string {
   return encodeURIComponent(value);
+}
+
+function runtimeRunEnvelope(record: RuntimeRunRecord): RunEnvelope {
+  return {
+    runId: record.runId,
+    updatedAt: record.updatedAt,
+    status: record.status,
+    runKind: record.runKind,
+    runMode: record.runMode,
+    conversationId: record.conversationId,
+  };
 }
 
 function cloneJson<T>(value: T): T {

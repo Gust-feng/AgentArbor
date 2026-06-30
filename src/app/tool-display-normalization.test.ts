@@ -36,6 +36,49 @@ test("normalizeToolDisplayForOperation derives edit_file display without output 
   assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("+ const value = 2;") : false, true);
 });
 
+test("normalizeToolDisplayForOperation derives edit preview from top-level anchor replacement fields", () => {
+  const display = normalizeToolDisplayForOperation({
+    toolName: "edit_file",
+    input: {
+      path: "notes/demo.md",
+      anchor: "old line",
+      replacement: "new line",
+    },
+    output: {
+      action: "edit_file",
+      result: {
+        path: "notes/demo.md",
+        replacements: 1,
+      },
+    },
+  });
+
+  assert.equal(display.kind, "file_diff_preview");
+  assert.equal(display.kind === "file_diff_preview" ? display.path : undefined, "notes/demo.md");
+  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("- old line") : false, true);
+  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("+ new line") : false, true);
+});
+
+test("normalizeToolDisplayForOperation preserves direct patch preview for file edits", () => {
+  const display = normalizeToolDisplayForOperation({
+    toolName: "workspace_patch",
+    input: {
+      path: "notes/demo.md",
+    },
+    output: {
+      action: "patch",
+      result: {
+        path: "notes/demo.md",
+        patch: "@@ line 1\n- old\n+ new",
+        replacements: 1,
+      },
+    },
+  });
+
+  assert.equal(display.kind, "file_diff_preview");
+  assert.equal(display.kind === "file_diff_preview" ? display.preview : undefined, "@@ line 1\n- old\n+ new");
+});
+
 test("normalizeToolDisplayForOperation derives write_file display without output display", () => {
   const display = normalizeToolDisplayForOperation({
     toolName: "write_file",

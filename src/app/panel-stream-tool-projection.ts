@@ -234,14 +234,20 @@ function safeFileChangePreview(
   output: Readonly<Record<string, unknown>>,
   result: Readonly<Record<string, unknown>>
 ): string | undefined {
+  const display = normalizeToolDisplayForOperation({
+    toolName,
+    input,
+    output,
+    existingDisplay: output.display,
+    truncated: output.truncated === true,
+  });
+  if ((display.kind === "file_change_summary" || display.kind === "file_diff_preview") && display.preview !== undefined) {
+    return display.preview;
+  }
   const path = stringOrUndefined(result.path) ?? stringOrUndefined(input.path);
   const summary = cleanOrdinaryToolText(stringOrUndefined(output.summary));
   if (toolName === "edit_file") {
-    const replacements = typeof result.replacements === "number" ? `替换：${result.replacements} 处` : undefined;
-    const diffPreview = ["变更预览", replacements]
-      .filter((item): item is string => item !== undefined && item.length > 0)
-      .join("\n");
-    return [summary, path === undefined ? undefined : `文件：${path}`, diffPreview].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
+    return path ?? summary;
   }
   return [summary, path === undefined ? undefined : `文件：${path}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
 }

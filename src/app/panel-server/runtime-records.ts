@@ -858,6 +858,16 @@ function persistedFileChangePreview(
   output: Readonly<Record<string, unknown>>,
   result: Readonly<Record<string, unknown>>
 ): string | undefined {
+  const display = normalizeToolDisplayForOperation({
+    toolName,
+    input,
+    output,
+    existingDisplay: output.display,
+    truncated: output.truncated === true,
+  });
+  if ((display.kind === "file_change_summary" || display.kind === "file_diff_preview") && display.preview !== undefined) {
+    return display.preview;
+  }
   const resultPath = optionalString(result.path) ?? optionalString(input.path);
   const summary = cleanOrdinaryToolText(optionalString(output.summary));
   if (toolName === "edit_file") {

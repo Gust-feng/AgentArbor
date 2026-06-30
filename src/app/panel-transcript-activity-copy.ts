@@ -42,6 +42,11 @@ export type ActivityBadge = {
   readonly monospace?: boolean;
 };
 
+export type ActivityLineDelta = {
+  readonly added: number;
+  readonly removed: number;
+};
+
 export type ActivityItem = {
   readonly nodeId: string;
   readonly key: string;
@@ -58,6 +63,7 @@ export type ActivityItem = {
   readonly subAgentCancelledCount?: number;
   readonly subAgentApprovalRequiredCount?: number;
   readonly subAgentNotStartedCount?: number;
+  readonly lineDelta?: ActivityLineDelta;
   readonly statusBadge?: ActivityBadge;
   readonly badges?: readonly ActivityBadge[];
   readonly expandedSections?: readonly ActivityExpandedSection[];
@@ -151,6 +157,7 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
       subAgentCancelledCount: node.subAgentCancelledCount,
       subAgentApprovalRequiredCount: node.subAgentApprovalRequiredCount,
       subAgentNotStartedCount: node.subAgentNotStartedCount,
+      lineDelta: activityLineDeltaForNode(node, copy),
       statusBadge: activityStatusBadge(node),
       badges: activityBadgesForNode(node),
       expandedSections: activityExpandedSectionsForNode(node, copy),
@@ -269,6 +276,7 @@ function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLin
     subAgentCancelledCount: node.subAgentCancelledCount,
     subAgentApprovalRequiredCount: node.subAgentApprovalRequiredCount,
     subAgentNotStartedCount: node.subAgentNotStartedCount,
+    lineDelta: activityLineDeltaForNode(node, copy),
     statusBadge: activityStatusBadge(node),
     badges: activityBadgesForNode(node),
     expandedSections: activityExpandedSectionsForNode(node, copy),
@@ -562,6 +570,7 @@ function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem)
       expandedDetail,
     },
     toolKind: resolveActivityToolKind(terminal),
+    lineDelta: terminal.lineDelta ?? requested.lineDelta,
     expandedSections: sections.length > 0
       ? sections
       : expandedDetail === undefined
@@ -1036,6 +1045,40 @@ function cleanFilePreviewContent(value: string | undefined): string | undefined 
     .replace(/^替换[:：]\s*\d+\s*处\s*$/gmu, "")
     .trim();
   return cleaned.length === 0 ? undefined : cleaned;
+}
+
+function activityLineDeltaForNode(
+  node: ProjectableTranscriptNode,
+  copy: ActivityLineCopy,
+): ActivityLineDelta | undefined {
+  const display = node.display;
+  if (display?.kind !== "file_change_summary" && display?.kind !== "file_diff_preview") {
+    return undefined;
+  }
+  const preview = filePreviewContentForActivity(display, node, copy);
+  if (preview === undefined) {
+    return undefined;
+  }
+  return lineDeltaFromDiffPreview(preview);
+}
+
+function lineDeltaFromDiffPreview(preview: string): ActivityLineDelta | undefined {
+  let added = 0;
+  let removed = 0;
+  for (const line of preview.split(/\r?\n/)) {
+    if (line.startsWith("+++") || line.startsWith("---")) {
+      continue;
+    }
+    if (line.startsWith("+")) {
+      added += 1;
+    } else if (line.startsWith("-")) {
+      removed += 1;
+    }
+  }
+  if (added === 0 && removed === 0) {
+    return undefined;
+  }
+  return { added, removed };
 }
 
 function filePreviewLooksLikeDiff(value: string): boolean {

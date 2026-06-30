@@ -219,6 +219,12 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptTimeline.includes("agent-activity-toggle"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-disclosure"), true);
   assert.equal(transcriptTimeline.includes("expandable={!selectable}"), false);
+  assert.equal(transcriptTimeline.includes("function LineDeltaIndicator"), true);
+  assert.equal(transcriptTimeline.includes("function visibleLineDeltaForItem"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-line-prefix"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-line-delta"), true);
+  assert.equal(transcriptTimeline.includes("metric.lineDelta"), true);
+  assert.equal(transcriptTimeline.includes("lineDeltasEqual(left.lineDelta, right.lineDelta)"), true);
   assert.equal(transcriptTimeline.includes("agent-activity-expanded-detail"), true);
   assert.equal(transcriptTimeline.includes('props.section.format === "source"'), true);
   assert.equal(transcriptTimeline.includes('props.section.format === "quote"'), true);
@@ -587,6 +593,12 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptStyles.includes(".agent-activity-toggle"), false);
   assert.equal(transcriptStyles.includes(".agent-activity-disclosure"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-label"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-line-prefix"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-line-delta"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-line-delta-add"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-line-delta-remove"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline-summary-chip .agent-activity-line-delta"), true);
+  assert.equal(transcriptStyles.includes("@keyframes agent-line-delta-pulse"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-detail"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-expanded-detail"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-source"), true);

@@ -29,6 +29,7 @@ import type {
   ActivityToolKind,
   ActivityItem,
   ActivityExpandedSection,
+  ActivityLineDelta,
 } from "../../../panel-transcript-activity-copy";
 import { resolveActivityToolKind } from "../../../panel-transcript-activity-copy";
 import { collapsedTimelineSummary } from "../../../panel-ui-timeline-collapse";
@@ -177,6 +178,9 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
                     <span className="agent-workline-summary-icon">
                       <Icon size={13} strokeWidth={2.25} />
                     </span>
+                    {metric.lineDelta !== undefined && (
+                      <LineDeltaIndicator delta={metric.lineDelta} running={metric.lineDeltaRunning === true} />
+                    )}
                     <strong>{metric.count}</strong>
                   </span>
                 );
@@ -250,25 +254,43 @@ type ActivityMetric = {
   readonly count: number;
   readonly label: string;
   readonly icon: LucideIcon;
+  readonly lineDelta?: ActivityLineDelta;
+  readonly lineDeltaRunning?: boolean;
 };
 
 function activityMetrics(items: readonly ActivityItem[]): readonly ActivityMetric[] {
   const counts = new Map<ActivityMetricKind, number>();
+  let latestEditDeltaItem: ActivityItem | undefined;
   for (const item of items) {
     const kind = activityMetricKind(item);
     if (kind === undefined) continue;
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    if (kind === "edit" && visibleLineDeltaForItem(item) !== undefined) {
+      latestEditDeltaItem = item;
+    }
   }
   if (counts.size === 0 && items.length > 0) {
     counts.set("other", items.length);
   }
-  return ACTIVITY_METRIC_ORDER
-    .map((kind) => {
-      const count = counts.get(kind);
-      if (count === undefined || count <= 0) return undefined;
-      return { ...ACTIVITY_METRIC_DEFS[kind], kind, count };
-    })
-    .filter((metric): metric is ActivityMetric => metric !== undefined);
+  const metrics: ActivityMetric[] = [];
+  for (const kind of ACTIVITY_METRIC_ORDER) {
+    const count = counts.get(kind);
+    if (count === undefined || count <= 0) continue;
+    const metric: ActivityMetric = { ...ACTIVITY_METRIC_DEFS[kind], kind, count };
+    if (kind === "edit" && latestEditDeltaItem !== undefined) {
+      const lineDelta = visibleLineDeltaForItem(latestEditDeltaItem);
+      if (lineDelta !== undefined) {
+        metrics.push({
+          ...metric,
+          lineDelta,
+          lineDeltaRunning: isLineDeltaRunning(latestEditDeltaItem),
+        });
+        continue;
+      }
+    }
+    metrics.push(metric);
+  }
+  return metrics;
 }
 
 function activityMetricKind(item: ActivityItem): ActivityMetricKind | undefined {
@@ -289,10 +311,19 @@ function ActivityLine(props: {
   const toolKind = item.toolKind ?? resolveActivityToolKind(item);
   const Icon = TOOL_KIND_ICON[toolKind] ?? Sparkles;
   const visibleBadges = visibleBadgesForItem(item);
+  const lineDelta = visibleLineDeltaForItem(item);
   const line = (
     <>
-      <span className="agent-activity-label" aria-hidden="true">
-        <Icon size={12} strokeWidth={2.25} />
+      <span className="agent-activity-line-prefix">
+        <span className="agent-activity-label" aria-hidden="true">
+          <Icon size={12} strokeWidth={2.25} />
+        </span>
+        {lineDelta !== undefined && (
+          <LineDeltaIndicator
+            delta={lineDelta}
+            running={isLineDeltaRunning(item)}
+          />
+        )}
       </span>
       <span className="agent-activity-body">
         {visibleBadges.length > 0 && (
@@ -318,6 +349,41 @@ function ActivityLine(props: {
     <p className="agent-activity-line">
       {line}
     </p>
+  );
+}
+
+function visibleLineDeltaForItem(item: ActivityItem): ActivityLineDelta | undefined {
+  if ((item.toolKind ?? resolveActivityToolKind(item)) !== "edit") {
+    return undefined;
+  }
+  const delta = item.lineDelta;
+  if (delta === undefined || (delta.added <= 0 && delta.removed <= 0)) {
+    return undefined;
+  }
+  return delta;
+}
+
+function isLineDeltaRunning(item: ActivityItem): boolean {
+  return item.phase === "executing" || item.phase === "preparing" || item.phase === "noted";
+}
+
+function LineDeltaIndicator(props: {
+  readonly delta: ActivityLineDelta;
+  readonly running: boolean;
+}): React.ReactElement {
+  return (
+    <span
+      className="agent-activity-line-delta"
+      data-running={props.running ? "true" : undefined}
+      aria-label={`新增 ${props.delta.added} 行，删除 ${props.delta.removed} 行`}
+    >
+      {props.delta.added > 0 && (
+        <span className="agent-activity-line-delta-add">+{props.delta.added}</span>
+      )}
+      {props.delta.removed > 0 && (
+        <span className="agent-activity-line-delta-remove">-{props.delta.removed}</span>
+      )}
+    </span>
   );
 }
 
@@ -615,12 +681,19 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
     left.subAgentCancelledCount === right.subAgentCancelledCount &&
     left.subAgentApprovalRequiredCount === right.subAgentApprovalRequiredCount &&
     left.subAgentNotStartedCount === right.subAgentNotStartedCount &&
+    lineDeltasEqual(left.lineDelta, right.lineDelta) &&
     left.copy.label === right.copy.label &&
     left.copy.detail === right.copy.detail &&
     left.copy.expandedDetail === right.copy.expandedDetail &&
     badgesEqual(left.statusBadge, right.statusBadge) &&
     badgeListsEqual(left.badges, right.badges) &&
     expandedSectionsEqual(left.expandedSections, right.expandedSections);
+}
+
+function lineDeltasEqual(left: ActivityLineDelta | undefined, right: ActivityLineDelta | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return left.added === right.added && left.removed === right.removed;
 }
 
 function badgeListsEqual(

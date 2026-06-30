@@ -890,6 +890,7 @@ test("display activity items preserve requested detail and terminal preview for 
   assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["差异预览"]);
   assert.equal(items[0]?.expandedSections?.[0]?.format, "diff");
   assert.equal(items[0]?.badges, undefined);
+  assert.deepEqual(items[0]?.lineDelta, { added: 1, removed: 1 });
 });
 
 test("display activity items keep requested file diff when completion has no preview", () => {
@@ -926,6 +927,7 @@ test("display activity items keep requested file diff when completion has no pre
   assert.equal(items[0]?.expandedSections?.[0]?.format, "diff");
   assert.equal(items[0]?.expandedSections?.[0]?.content.includes("- old"), true);
   assert.equal(items[0]?.expandedSections?.[0]?.content.includes("+ new"), true);
+  assert.deepEqual(items[0]?.lineDelta, { added: 1, removed: 1 });
 });
 
 test("file creation activity shows new content as a file change diff", () => {
@@ -950,6 +952,34 @@ test("file creation activity shows new content as a file change diff", () => {
   assert.equal(item?.badges, undefined);
   assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["新增内容"]);
   assert.equal(item?.expandedSections?.[0]?.format, "diff");
+  assert.deepEqual(item?.lineDelta, { added: 1, removed: 0 });
+});
+
+test("file edit activity line delta ignores diff file headers", () => {
+  const item = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "edit_file",
+      display: {
+        kind: "file_diff_preview",
+        path: "src/app.ts",
+        preview: [
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ line 2",
+          "- old",
+          "- stale",
+          "+ new",
+          "+ fresh",
+          "+ extra",
+        ].join("\n"),
+      },
+    }),
+  ])[0];
+
+  assert.deepEqual(item?.lineDelta, { added: 3, removed: 2 });
 });
 
 test("file deletion activity remains visible even without a content preview", () => {

@@ -219,6 +219,8 @@ function transcriptNodeForEvent(
       summary: event.summary,
       subAgentRunId: event.detail?.subAgentRunId,
       subAgentBatchId: event.detail?.subAgentBatchId,
+      subAgentName: event.detail?.subAgentName,
+      subAgentTask: event.detail?.subAgentTask,
       subAgentTotalCount: event.detail?.subAgentTotalCount,
       subAgentSuccessCount: event.detail?.subAgentSuccessCount,
       subAgentFailedCount: event.detail?.subAgentFailedCount,
@@ -477,6 +479,8 @@ function transcriptNode(
     readonly modelUsage?: ModelUsage;
     readonly subAgentRunId?: string;
     readonly subAgentBatchId?: string;
+    readonly subAgentName?: string;
+    readonly subAgentTask?: string;
     readonly subAgentTotalCount?: number;
     readonly subAgentSuccessCount?: number;
     readonly subAgentFailedCount?: number;
@@ -499,6 +503,8 @@ function transcriptNode(
     toolName: event.toolName,
     subAgentRunId: input.subAgentRunId,
     subAgentBatchId: input.subAgentBatchId,
+    subAgentName: input.subAgentName,
+    subAgentTask: input.subAgentTask,
     subAgentTotalCount: input.subAgentTotalCount,
     subAgentSuccessCount: input.subAgentSuccessCount,
     subAgentFailedCount: input.subAgentFailedCount,

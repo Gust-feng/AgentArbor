@@ -57,10 +57,12 @@ test("panel transcript nodes expose sub-agent runs as dedicated activity nodes",
 
   assert.equal(nodes[0]?.kind, "sub_agent");
   assert.equal(nodes[0]?.subAgentRunId, "sub-run-1");
+  assert.equal(nodes[0]?.subAgentName, "Creative Advisor");
 
   const activity = displayActivityItemsForNodes(nodes);
   assert.equal(activity[0]?.variant, "sub_agent");
   assert.equal(activity[0]?.subAgentRunId, "sub-run-1");
+  assert.equal(activity[0]?.copy.label, "Creative Advisor");
 });
 
 test("panel transcript nodes attach model usage to completed answer bodies", () => {

@@ -241,6 +241,7 @@ export type SubAgentRunView = {
   readonly modelRounds: number;
   readonly toolCalls: number;
   readonly summary: string;
+  readonly fullOutput?: string;
   readonly error?: string;
   readonly modelExchanges: readonly SubAgentModelExchange[];
   readonly toolTraces: readonly SubAgentToolTrace[];
@@ -324,6 +325,8 @@ export type TranscriptNode = {
   readonly toolName?: string;
   readonly subAgentRunId?: string;
   readonly subAgentBatchId?: string;
+  readonly subAgentName?: string;
+  readonly subAgentTask?: string;
   readonly subAgentTotalCount?: number;
   readonly subAgentSuccessCount?: number;
   readonly subAgentFailedCount?: number;

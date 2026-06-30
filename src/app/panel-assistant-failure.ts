@@ -29,6 +29,8 @@ export type FailureEchoTranscriptNode = {
   readonly timestamp: string;
   readonly subAgentRunId?: string;
   readonly subAgentBatchId?: string;
+  readonly subAgentName?: string;
+  readonly subAgentTask?: string;
   readonly subAgentTotalCount?: number;
   readonly subAgentSuccessCount?: number;
   readonly subAgentFailedCount?: number;

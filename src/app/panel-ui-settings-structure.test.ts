@@ -200,6 +200,18 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
   assert.equal(capabilitySettings.includes("运行时工具"), false);
   assert.equal(capabilitySettings.includes("工作方法"), false);
+  assert.equal(capabilitySettings.includes("视觉输入"), true);
+  assert.equal(capabilitySettings.includes("思考强度"), true);
+  assert.equal(capabilitySettings.includes("上下文窗口"), true);
+  assert.equal(capabilitySettings.includes("最大输出"), true);
+  assert.equal(capabilitySettings.includes("API 风格"), false);
+  assert.equal(capabilitySettings.includes("稳定性"), false);
+  assert.equal(capabilitySettings.includes("验证日期"), false);
+  assert.equal(capabilitySettings.includes("工具调用"), false);
+  assert.equal(capabilitySettings.includes("并行工具"), false);
+  assert.equal(capabilitySettings.includes("结构化输出"), false);
+  assert.equal(capabilitySettings.includes("流式输出"), false);
+  assert.equal(capabilitySettings.includes("推理输出"), false);
   assert.equal(skillSettings.includes("export function SkillSettings"), true);
   assert.equal(skillSettings.includes("按任务触发的工作流说明"), false);
   assert.equal(skillSettings.includes("暂无技能"), true);

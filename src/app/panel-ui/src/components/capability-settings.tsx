@@ -16,30 +16,18 @@ type ModelCapabilityTarget = {
   readonly providerKind?: string;
   readonly model: string;
   readonly label: string;
-  readonly capabilities?: ModelCapabilities;
+  readonly effectiveCapabilities?: ModelCapabilities;
+  readonly overrideCapabilities?: ModelCapabilities;
 };
 type ModelCapabilityDraft = {
   readonly contextWindowTokens: string;
   readonly maxOutputTokens: string;
-  readonly supportsToolCalling: boolean;
-  readonly supportsParallelToolCalls: boolean;
-  readonly supportsStructuredOutputs: boolean;
-  readonly supportsStreaming: boolean;
   readonly supportsVisionInput: boolean;
   readonly supportsReasoningEffort: boolean;
-  readonly supportsReasoningOutput: boolean;
-  readonly preferredApiStyle: string;
-  readonly stability: string;
-  readonly lastVerifiedAt: string;
 };
 type ModelCapabilityToggleKey =
-  | "supportsToolCalling"
-  | "supportsParallelToolCalls"
-  | "supportsStructuredOutputs"
-  | "supportsStreaming"
   | "supportsVisionInput"
-  | "supportsReasoningEffort"
-  | "supportsReasoningOutput";
+  | "supportsReasoningEffort";
 
 export function BasicCapabilitiesSettings(props: {
   readonly config?: ConfigResponse;
@@ -238,12 +226,20 @@ function ModelInformationSettings(props: {
   }, [props.config?.config?.model, props.config?.config?.profileId, selectedKey, targets]);
 
   React.useEffect(() => {
-    setDraft(modelCapabilityDraftFrom(selectedTarget?.capabilities));
-  }, [selectedTarget?.key]);
+    setDraft(modelCapabilityDraftFrom(selectedTarget?.effectiveCapabilities));
+  }, [
+    selectedTarget?.key,
+    selectedTarget?.effectiveCapabilities?.contextWindowTokens,
+    selectedTarget?.effectiveCapabilities?.maxOutputTokens,
+    selectedTarget?.effectiveCapabilities?.supportsVisionInput,
+    selectedTarget?.effectiveCapabilities?.supportsReasoningEffort,
+  ]);
 
   const updateDraft = (patch: Partial<ModelCapabilityDraft>): void => {
     setDraft((current) => ({ ...current, ...patch }));
   };
+
+  const dirty = selectedTarget !== undefined && modelCapabilityDraftChanged(draft, selectedTarget.effectiveCapabilities);
 
   const save = async (): Promise<void> => {
     if (selectedTarget === undefined) return;
@@ -251,7 +247,7 @@ function ModelInformationSettings(props: {
       profileId: selectedTarget.profileId,
       providerKind: selectedTarget.providerKind,
       model: selectedTarget.model,
-      capabilities: modelCapabilitiesFromDraft(draft),
+      capabilities: modelCapabilitiesFromDraft(draft, selectedTarget.overrideCapabilities),
     });
   };
 
@@ -263,7 +259,7 @@ function ModelInformationSettings(props: {
           type="button"
           className="model-info-save-button"
           onClick={() => void save()}
-          disabled={selectedTarget === undefined || props.saving === true}
+          disabled={selectedTarget === undefined || dirty !== true || props.saving === true}
         >
           <Save size={14} />
           <span>{props.saving ? "保存中" : "保存"}</span>
@@ -288,8 +284,14 @@ function ModelInformationSettings(props: {
                 type="number"
                 min={1}
                 value={draft.contextWindowTokens}
+                disabled={props.saving === true}
+                aria-label="上下文窗口"
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
                 onChange={(event) => updateDraft({ contextWindowTokens: event.target.value })}
-                placeholder="128000"
+                placeholder="token"
               />
             </label>
             <label className="model-info-field">
@@ -298,44 +300,14 @@ function ModelInformationSettings(props: {
                 type="number"
                 min={1}
                 value={draft.maxOutputTokens}
-                onChange={(event) => updateDraft({ maxOutputTokens: event.target.value })}
-                placeholder="4096"
-              />
-            </label>
-            <label className="model-info-field">
-              API 风格
-              <select
-                value={draft.preferredApiStyle}
-                onChange={(event) => updateDraft({ preferredApiStyle: event.target.value })}
-              >
-                <option value="">自动</option>
-                <option value="responses">Responses</option>
-                <option value="chat_completions">Chat Completions</option>
-                <option value="messages">Messages</option>
-                <option value="gemini_generate_content">Gemini Generate Content</option>
-                <option value="openai_compatible">OpenAI Compatible</option>
-              </select>
-            </label>
-            <label className="model-info-field">
-              稳定性
-              <select
-                value={draft.stability}
-                onChange={(event) => updateDraft({ stability: event.target.value })}
-              >
-                <option value="">自动</option>
-                <option value="stable">Stable</option>
-                <option value="preview">Preview</option>
-                <option value="deprecated">Deprecated</option>
-                <option value="unknown">Unknown</option>
-              </select>
-            </label>
-            <label className="model-info-field">
-              验证日期
-              <input
-                value={draft.lastVerifiedAt}
-                onChange={(event) => updateDraft({ lastVerifiedAt: event.target.value })}
-                placeholder="2026-06-28"
+                disabled={props.saving === true}
+                aria-label="最大输出"
                 spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                onChange={(event) => updateDraft({ maxOutputTokens: event.target.value })}
+                placeholder="token"
               />
             </label>
           </div>
@@ -364,13 +336,8 @@ const MODEL_CAPABILITY_TOGGLES: readonly {
   readonly key: ModelCapabilityToggleKey;
   readonly label: string;
 }[] = [
-  { key: "supportsToolCalling", label: "工具调用" },
-  { key: "supportsParallelToolCalls", label: "并行工具" },
-  { key: "supportsStructuredOutputs", label: "结构化输出" },
-  { key: "supportsStreaming", label: "流式输出" },
   { key: "supportsVisionInput", label: "视觉输入" },
   { key: "supportsReasoningEffort", label: "思考强度" },
-  { key: "supportsReasoningOutput", label: "推理输出" },
 ];
 
 function modelCapabilityTargets(
@@ -406,7 +373,8 @@ function modelCapabilityTargets(
         providerKind: profile.providerKind,
         model,
         label: `${profile.label ?? profileId} / ${model}`,
-        capabilities: modelCapabilitiesForTarget(config, profileId, model),
+        effectiveCapabilities: modelCapabilitiesForTarget(config, profileId, model),
+        overrideCapabilities: modelCapabilityOverrideForTarget(config, profileId, model),
       });
     }
   }
@@ -418,14 +386,20 @@ function modelCapabilitiesForTarget(
   profileId: string,
   model: string
 ): ModelCapabilities | undefined {
-  const projected = config?.modelCapabilityProfiles?.find((item) => item.profileId === profileId && item.model === model);
-  if (projected !== undefined) {
-    return projected.capabilities;
-  }
+  const projected = modelCapabilityOverrideForTarget(config, profileId, model);
+  if (projected !== undefined) return projected;
   if (config?.config?.profileId === profileId && config.config.model === model) {
     return config.capabilities?.modelCapabilities;
   }
   return undefined;
+}
+
+function modelCapabilityOverrideForTarget(
+  config: ConfigResponse | undefined,
+  profileId: string,
+  model: string
+): ModelCapabilities | undefined {
+  return config?.modelCapabilityProfiles?.find((item) => item.profileId === profileId && item.model === model)?.capabilities;
 }
 
 function modelCapabilityTargetKey(profileId: string, model: string): string {
@@ -434,54 +408,45 @@ function modelCapabilityTargetKey(profileId: string, model: string): string {
 
 function modelCapabilityDraftFrom(capabilities: ModelCapabilities | undefined): ModelCapabilityDraft {
   return {
-    contextWindowTokens: integerFieldValue(capabilities?.contextWindowTokens),
-    maxOutputTokens: integerFieldValue(capabilities?.maxOutputTokens),
-    supportsToolCalling: capabilities?.supportsToolCalling === true,
-    supportsParallelToolCalls: capabilities?.supportsParallelToolCalls === true,
-    supportsStructuredOutputs: capabilities?.supportsStructuredOutputs === true,
-    supportsStreaming: capabilities?.supportsStreaming === true,
+    contextWindowTokens: stringFromPositiveInteger(capabilities?.contextWindowTokens),
+    maxOutputTokens: stringFromPositiveInteger(capabilities?.maxOutputTokens),
     supportsVisionInput: capabilities?.supportsVisionInput === true,
     supportsReasoningEffort: capabilities?.supportsReasoningEffort === true,
-    supportsReasoningOutput: capabilities?.supportsReasoningOutput === true,
-    preferredApiStyle: capabilities?.preferredApiStyle ?? "",
-    stability: capabilities?.stability ?? "",
-    lastVerifiedAt: capabilities?.lastVerifiedAt ?? "",
   };
 }
 
-function modelCapabilitiesFromDraft(draft: ModelCapabilityDraft): ModelCapabilities {
+function modelCapabilitiesFromDraft(
+  draft: ModelCapabilityDraft,
+  baseCapabilities: ModelCapabilities | undefined
+): ModelCapabilities {
   return {
-    contextWindowTokens: positiveIntegerFromDraft(draft.contextWindowTokens),
-    maxOutputTokens: positiveIntegerFromDraft(draft.maxOutputTokens),
-    supportsToolCalling: draft.supportsToolCalling,
-    supportsParallelToolCalls: draft.supportsParallelToolCalls,
-    supportsStructuredOutputs: draft.supportsStructuredOutputs,
-    supportsStreaming: draft.supportsStreaming,
+    ...baseCapabilities,
+    contextWindowTokens: positiveIntegerFromString(draft.contextWindowTokens),
+    maxOutputTokens: positiveIntegerFromString(draft.maxOutputTokens),
     supportsVisionInput: draft.supportsVisionInput,
     supportsReasoningEffort: draft.supportsReasoningEffort,
-    supportsReasoningOutput: draft.supportsReasoningOutput,
-    preferredApiStyle: trimmedOrUndefined(draft.preferredApiStyle),
-    stability: trimmedOrUndefined(draft.stability),
-    lastVerifiedAt: trimmedOrUndefined(draft.lastVerifiedAt),
   };
 }
 
-function integerFieldValue(value: number | undefined): string {
-  return value === undefined || !Number.isFinite(value) || value <= 0 ? "" : String(Math.floor(value));
+function modelCapabilityDraftChanged(
+  draft: ModelCapabilityDraft,
+  capabilities: ModelCapabilities | undefined
+): boolean {
+  return (
+    draft.contextWindowTokens !== stringFromPositiveInteger(capabilities?.contextWindowTokens) ||
+    draft.maxOutputTokens !== stringFromPositiveInteger(capabilities?.maxOutputTokens) ||
+    draft.supportsVisionInput !== (capabilities?.supportsVisionInput === true) ||
+    draft.supportsReasoningEffort !== (capabilities?.supportsReasoningEffort === true)
+  );
 }
 
-function positiveIntegerFromDraft(value: string): number | undefined {
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    return undefined;
-  }
-  const parsed = Number(normalized);
+function stringFromPositiveInteger(value: number | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? String(Math.floor(value)) : "";
+}
+
+function positiveIntegerFromString(value: string): number | undefined {
+  const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
-}
-
-function trimmedOrUndefined(value: string): string | undefined {
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? undefined : trimmed;
 }
 
 export function McpServiceSettings(props: {

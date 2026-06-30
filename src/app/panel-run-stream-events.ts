@@ -211,6 +211,14 @@ function hasUserVisibleWorkActivity(
     if (entry.type === "user_approval.received") {
       return userApprovalReceivedKind(asRecord(entry.message.payload)) !== "approved";
     }
+    if (
+      entry.type === "sub_agent.started" ||
+      entry.type === "sub_agent.completed" ||
+      entry.type === "sub_agent_batch.started" ||
+      entry.type === "sub_agent_batch.completed"
+    ) {
+      return true;
+    }
     return !ordinaryAgentProjection && isAgentFabricStreamType(entry.type);
   });
 }
@@ -225,6 +233,10 @@ function isOrdinaryAgentStreamEvent(type: ArborMessageType): boolean {
     type === "tool.requested" ||
     type === "tool.completed" ||
     type === "tool.failed" ||
+    type === "sub_agent.started" ||
+    type === "sub_agent.completed" ||
+    type === "sub_agent_batch.started" ||
+    type === "sub_agent_batch.completed" ||
     type === "user_approval.requested" ||
     type === "user_approval.received";
 }
@@ -406,6 +418,24 @@ function appendStreamEventsForEvent(input: {
     return;
   }
 
+  if (
+    input.entry.type === "sub_agent.started" ||
+    input.entry.type === "sub_agent.completed" ||
+    input.entry.type === "sub_agent_batch.started" ||
+    input.entry.type === "sub_agent_batch.completed"
+  ) {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
+      type: input.entry.type,
+      agentLabel: subAgentStreamLabel(input.entry.type),
+      summary: subAgentStreamSummary(input.entry.type, payload),
+      status: subAgentStreamStatus(input.entry.type, payload),
+      detail: subAgentStreamDetail(input.entry.type, payload),
+    });
+    return;
+  }
+
   if (input.entry.type === "context.compaction.completed" || input.entry.type === "context.compaction.failed") {
     input.push({
       ...base,
@@ -549,6 +579,87 @@ function userApprovalReceivedKind(payload: Readonly<Record<string, unknown>>): U
 function deniedUserApprovalSummary(payload: Readonly<Record<string, unknown>>): string {
   const note = stringOrUndefined(payload.note) ?? stringOrUndefined(payload.guidance);
   return note === undefined ? "已不执行。" : `已不执行：${note}`;
+}
+
+function subAgentStreamLabel(type: PanelRunStreamEventType): string {
+  if (type === "sub_agent_batch.started" || type === "sub_agent_batch.completed") {
+    return "子 Agent 批次";
+  }
+  return "子 Agent";
+}
+
+function subAgentStreamSummary(
+  type: PanelRunStreamEventType,
+  payload: Readonly<Record<string, unknown>>
+): string {
+  if (type === "sub_agent.started") {
+    const name = stringOrUndefined(payload.subAgentName) ?? "子 Agent";
+    const task = stringOrUndefined(payload.task);
+    return task === undefined ? `${name} 开始运行。` : `${name} 开始运行：${task}`;
+  }
+  if (type === "sub_agent.completed") {
+    const name = stringOrUndefined(payload.subAgentName) ?? "子 Agent";
+    const summary = stringOrUndefined(payload.summary);
+    return summary === undefined ? `${name} 运行结束。` : `${name} 运行结束：${summary}`;
+  }
+  if (type === "sub_agent_batch.started") {
+    const total = numberOrUndefined(payload.totalCount) ?? 0;
+    return `开始运行 ${total} 个子 Agent。`;
+  }
+  const success = numberOrUndefined(payload.successCount) ?? 0;
+  const failed = numberOrUndefined(payload.failedCount) ?? 0;
+  const approval = numberOrUndefined(payload.approvalRequiredCount) ?? 0;
+  const notStarted = numberOrUndefined(payload.notStartedCount) ?? 0;
+  const extra = approval > 0 || notStarted > 0 ? `，${approval} 待确认，${notStarted} 未启动` : "";
+  return `子 Agent 批次结束：${success} 成功，${failed} 失败${extra}。`;
+}
+
+function subAgentStreamStatus(
+  type: PanelRunStreamEventType,
+  payload: Readonly<Record<string, unknown>>
+): PanelRunStreamEvent["status"] {
+  if (type === "sub_agent.started" || type === "sub_agent_batch.started") {
+    return "running";
+  }
+  const status = stringOrUndefined(payload.status);
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
+  if (status === "approval_required") return "approval_needed";
+  return "completed";
+}
+
+function subAgentStreamDetail(
+  type: PanelRunStreamEventType,
+  payload: Readonly<Record<string, unknown>>
+): PanelRunStreamEventDetail {
+  return {
+    kind: "sub_agent",
+    subAgentRunId: stringOrUndefined(payload.subRunId),
+    subAgentBatchId: stringOrUndefined(payload.batchId),
+    subAgentName: stringOrUndefined(payload.subAgentName),
+    subAgentTask: stringOrUndefined(payload.task),
+    subAgentStatus: type === "sub_agent.started" || type === "sub_agent_batch.started"
+      ? "running"
+      : subAgentStatusOrUndefined(payload.status),
+    subAgentModelRounds: numberOrUndefined(payload.modelRounds),
+    subAgentToolCalls: numberOrUndefined(payload.toolCalls),
+    subAgentDurationMs: numberOrUndefined(payload.durationMs) ?? numberOrUndefined(payload.totalDurationMs),
+    subAgentTotalCount: numberOrUndefined(payload.totalCount),
+    subAgentSuccessCount: numberOrUndefined(payload.successCount),
+    subAgentFailedCount: numberOrUndefined(payload.failedCount),
+    subAgentCancelledCount: numberOrUndefined(payload.cancelledCount),
+    subAgentApprovalRequiredCount: numberOrUndefined(payload.approvalRequiredCount),
+    subAgentNotStartedCount: numberOrUndefined(payload.notStartedCount),
+    preview: stringOrUndefined(payload.summary),
+  };
+}
+
+function subAgentStatusOrUndefined(value: unknown): NonNullable<PanelRunStreamEventDetail["subAgentStatus"]> | undefined {
+  const status = stringOrUndefined(value);
+  if (status === "completed" || status === "failed" || status === "approval_required" || status === "cancelled") {
+    return status;
+  }
+  return undefined;
 }
 
 function normalizedDecisionText(value: string | undefined): string {

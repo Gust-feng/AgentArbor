@@ -17,7 +17,7 @@ export type LiveTranscriptNode = {
   readonly runId: string;
   readonly sequence: number;
   readonly eventType: string;
-  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "body" | "system";
+  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "sub_agent" | "answer" | "body" | "system";
   readonly phase:
     | "noted"
     | "preparing"
@@ -34,6 +34,14 @@ export type LiveTranscriptNode = {
   readonly summary?: string;
   readonly text?: string;
   readonly timestamp: string;
+  readonly subAgentRunId?: string;
+  readonly subAgentBatchId?: string;
+  readonly subAgentTotalCount?: number;
+  readonly subAgentSuccessCount?: number;
+  readonly subAgentFailedCount?: number;
+  readonly subAgentCancelledCount?: number;
+  readonly subAgentApprovalRequiredCount?: number;
+  readonly subAgentNotStartedCount?: number;
   readonly modelUsage?: ModelUsage;
   readonly refs: readonly LiveTranscriptObservationRef[];
 };

@@ -75,6 +75,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
       allowedTools: () => parentAllowedTools,
       confirmationPolicy: () => input.options.toolConfirmationPolicy,
       publishToolEvent: (message) => input.runtime.bus.publish(message),
+      traceSink: input.runtime.subAgentRunTraceStore,
       includeSpawnTool: true,
       eventLog: input.runtime.eventLog,
     });

@@ -11,6 +11,7 @@ import type {
   ToolExecutorResult,
   ToolInputSchema,
 } from "../../domain/tools/contracts.js";
+import type { SubAgentRunTraceSink } from "../../domain/sub-agents/contracts.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type { ToolRegistry, ToolRegistryScope } from "../basic-agent-runtime/tool-registry.js";
 import {
@@ -28,6 +29,7 @@ type SubAgentToolDependencies = {
   readonly allowedTools: () => readonly string[];
   readonly confirmationPolicy?: () => ToolConfirmationPolicy | undefined;
   readonly publishToolEvent?: (message: ArborMessage) => void;
+  readonly traceSink?: SubAgentRunTraceSink;
   readonly eventLog?: { append: (message: ArborMessage) => void };
 };
 
@@ -80,14 +82,26 @@ type PendingSubAgentContinuation = {
   readonly task: string;
   readonly context?: string;
   readonly pendingApproval: NonNullable<SubAgentRunnerResult["pendingApproval"]>;
+  readonly parentToolCallId?: string;
+  readonly batchId?: string;
+  readonly batchIndex?: number;
   readonly batch?: PendingBatchState;
 };
 
 type BatchSubAgentResult = {
   readonly index: number;
+  readonly sub_agent_id: string;
   readonly sub_agent_name: string;
   readonly task: string;
   readonly result: SubAgentRunnerResult;
+};
+
+type BatchStats = {
+  readonly completedCount: number;
+  readonly failedCount: number;
+  readonly cancelledCount: number;
+  readonly approvalRequiredCount: number;
+  readonly notStartedCount: number;
 };
 
 class SubAgentPendingApprovalStore {
@@ -198,12 +212,16 @@ async function executeSubAgentContinuation(input: {
     task: input.continuation.task,
     context: input.continuation.context,
     parentRunId: input.context.goalId,
+    parentToolCallId: input.continuation.parentToolCallId ?? input.context.toolCallId,
+    batchId: input.continuation.batchId ?? input.continuation.batch?.batchId,
+    batchIndex: input.continuation.batchIndex ?? input.continuation.batch?.pendingIndex,
     conversationId: input.context.traceId,
     toolBroker: input.deps.toolBroker,
     channel: input.deps.channel,
     allowedTools: parentOptions.allowedTools,
     confirmationPolicy: parentOptions.confirmationPolicy,
     publishToolEvent: parentOptions.publishToolEvent,
+    traceSink: input.deps.traceSink,
     pendingApproval: input.continuation.pendingApproval,
     approvedConfirmationIds: input.context.approvedConfirmationIds ?? [],
     abortSignal: input.context.abortSignal,
@@ -216,6 +234,8 @@ async function executeSubAgentFromStart(input: {
   readonly subAgent: SubAgentDefinition;
   readonly task: string;
   readonly context?: string;
+  readonly batchId?: string;
+  readonly batchIndex?: number;
   readonly toolContext: ToolExecutionContext;
 }): Promise<SubAgentRunnerResult> {
   const parentOptions = parentRunOptions(input.deps, input.toolContext);
@@ -224,12 +244,16 @@ async function executeSubAgentFromStart(input: {
     task: input.task,
     context: input.context,
     parentRunId: input.toolContext.goalId,
+    parentToolCallId: input.toolContext.toolCallId,
+    batchId: input.batchId,
+    batchIndex: input.batchIndex,
     conversationId: input.toolContext.traceId,
     toolBroker: input.deps.toolBroker,
     channel: input.deps.channel,
     allowedTools: parentOptions.allowedTools,
     confirmationPolicy: parentOptions.confirmationPolicy,
     publishToolEvent: parentOptions.publishToolEvent,
+    traceSink: input.deps.traceSink,
     abortSignal: input.toolContext.abortSignal,
     eventLog: input.deps.eventLog,
   });
@@ -316,7 +340,7 @@ function toBatchEventResults(
   return results.map((r) => {
     const subAgent = subAgents.get(r.sub_agent_name.toLowerCase());
     return {
-      subAgentId: subAgent?.id ?? r.sub_agent_name,
+      subAgentId: r.sub_agent_id ?? subAgent?.id ?? r.sub_agent_name,
       subAgentName: r.sub_agent_name,
       status: r.result.status,
       summary: r.result.summary,
@@ -333,25 +357,22 @@ function buildBatchToolOutput(input: {
   readonly interruptedForApproval?: boolean;
 }) {
   const results = [...input.results].sort((a, b) => a.index - b.index);
-  const completedCount = results.filter((r) => r.result.status === "completed").length;
-  const failedCount = results.filter((r) => r.result.status === "failed").length;
-  const cancelledCount = results.filter((r) => r.result.status === "cancelled").length;
-  const pendingCount = results.filter((r) => r.result.status === "approval_required").length;
-  const notStartedCount = Math.max(0, input.tasks.length - results.length);
+  const stats = batchStats(input.tasks, results);
   const resultOutputs = results.map((r) => ({
     index: r.index,
+    sub_agent_id: r.sub_agent_id,
     sub_agent_name: r.sub_agent_name,
     task: r.task,
     ...buildSubAgentResultOutput(r.result),
   }));
   const summary =
-    `执行 ${input.tasks.length} 个子 Agent 任务：${completedCount} 成功，${failedCount} 失败，` +
-    `${cancelledCount} 取消，${pendingCount} 等待确认，${notStartedCount} 未启动，` +
+    `执行 ${input.tasks.length} 个子 Agent 任务：${stats.completedCount} 成功，${stats.failedCount} 失败，` +
+    `${stats.cancelledCount} 取消，${stats.approvalRequiredCount} 等待确认，${stats.notStartedCount} 未启动，` +
     `总耗时 ${input.totalDurationMs}ms`;
 
   return {
     action: "call_sub_agents",
-    status: failedCount > 0 || cancelledCount > 0 || pendingCount > 0 || notStartedCount > 0
+    status: stats.failedCount > 0 || stats.cancelledCount > 0 || stats.approvalRequiredCount > 0 || stats.notStartedCount > 0
       ? "partial_failure"
       : "completed",
     summary,
@@ -359,16 +380,29 @@ function buildBatchToolOutput(input: {
       results: resultOutputs,
       stats: {
         total: input.tasks.length,
-        completed: completedCount,
-        failed: failedCount,
-        cancelled: cancelledCount,
-        approval_required: pendingCount,
-        not_started: notStartedCount,
+        completed: stats.completedCount,
+        failed: stats.failedCount,
+        cancelled: stats.cancelledCount,
+        approval_required: stats.approvalRequiredCount,
+        not_started: stats.notStartedCount,
         total_duration_ms: input.totalDurationMs,
         max_concurrency: input.maxConcurrency,
         interrupted_for_approval: input.interruptedForApproval,
       },
     },
+  };
+}
+
+function batchStats(
+  tasks: readonly CallSubAgentsTaskInput[],
+  results: readonly BatchSubAgentResult[]
+): BatchStats {
+  return {
+    completedCount: results.filter((r) => r.result.status === "completed").length,
+    failedCount: results.filter((r) => r.result.status === "failed").length,
+    cancelledCount: results.filter((r) => r.result.status === "cancelled").length,
+    approvalRequiredCount: results.filter((r) => r.result.status === "approval_required").length,
+    notStartedCount: Math.max(0, tasks.length - results.length),
   };
 }
 
@@ -699,11 +733,11 @@ function createCallSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): Tool
       }
 
       const result = await executeSubAgentFromStart({
-        deps,
-        subAgent,
-        task,
-        context: ctx,
-        toolContext: context,
+          deps,
+          subAgent,
+          task,
+          context: ctx,
+          toolContext: context,
       });
       if (result.status === "approval_required" && result.pendingApproval !== undefined) {
         deps.pendingApprovals.remember(context, {
@@ -763,12 +797,34 @@ function createCallSubAgentsExecutor(deps: SubAgentToolRuntimeDependencies): Too
         const completedResults = approvedContinuation.batch?.completedResults ?? [];
         const resumedResult: BatchSubAgentResult = {
           index: approvedContinuation.batch?.pendingIndex ?? completedResults.length,
+          sub_agent_id: approvedContinuation.subAgent.id,
           sub_agent_name: approvedContinuation.subAgent.name,
           task: approvedContinuation.task,
           result,
         };
         const results = [...completedResults, resumedResult];
         const totalDurationMs = Date.now() - (approvedContinuation.batch?.startTime ?? Date.now());
+        const subAgents = new Map<string, SubAgentDefinition>([
+          [approvedContinuation.subAgent.name.toLowerCase(), approvedContinuation.subAgent],
+        ]);
+        const stats = batchStats(tasks, results);
+        if (approvedContinuation.batch !== undefined) {
+          deps.eventLog?.append(
+            createSubAgentBatchCompletedMessage({
+              traceId: context.traceId,
+              runId: context.goalId,
+              batchId: approvedContinuation.batch.batchId,
+              results: toBatchEventResults(results, subAgents),
+              successCount: stats.completedCount,
+              failedCount: stats.failedCount,
+              cancelledCount: stats.cancelledCount,
+              approvalRequiredCount: stats.approvalRequiredCount,
+              notStartedCount: stats.notStartedCount,
+              totalDurationMs,
+              timestamp: nowIso(),
+            })
+          );
+        }
         return buildBatchToolOutput({
           tasks,
           results,
@@ -829,19 +885,33 @@ function createCallSubAgentsExecutor(deps: SubAgentToolRuntimeDependencies): Too
           subAgent,
           task: taskItem.task,
           context: taskItem.context,
+          batchId,
+          batchIndex: i,
           toolContext: context,
         });
         if (result.status === "approval_required" && result.pendingApproval !== undefined) {
-          const completedCount = results.filter((r) => r.result.status === "completed").length;
-          const failedCount = results.filter((r) => r.result.status === "failed").length;
+          const pausedResults = [
+            ...results,
+            {
+              index: i,
+              sub_agent_id: subAgent.id,
+              sub_agent_name: subAgent.name,
+              task: taskItem.task,
+              result,
+            },
+          ];
+          const stats = batchStats(tasks, pausedResults);
           deps.eventLog?.append(
             createSubAgentBatchCompletedMessage({
               traceId: context.traceId,
               runId: context.goalId,
               batchId,
-              results: toBatchEventResults(results, subAgents),
-              successCount: completedCount,
-              failedCount,
+              results: toBatchEventResults(pausedResults, subAgents),
+              successCount: stats.completedCount,
+              failedCount: stats.failedCount,
+              cancelledCount: stats.cancelledCount,
+              approvalRequiredCount: stats.approvalRequiredCount,
+              notStartedCount: stats.notStartedCount,
               totalDurationMs: Date.now() - startTime,
               timestamp: nowIso(),
             })
@@ -851,6 +921,9 @@ function createCallSubAgentsExecutor(deps: SubAgentToolRuntimeDependencies): Too
             task: taskItem.task,
             context: taskItem.context,
             pendingApproval: result.pendingApproval,
+            parentToolCallId: context.toolCallId,
+            batchId,
+            batchIndex: i,
             batch: {
               batchId,
               startTime,
@@ -869,6 +942,7 @@ function createCallSubAgentsExecutor(deps: SubAgentToolRuntimeDependencies): Too
         }
         results.push({
           index: i,
+          sub_agent_id: subAgent.id,
           sub_agent_name: subAgent.name,
           task: taskItem.task,
           result,
@@ -877,9 +951,7 @@ function createCallSubAgentsExecutor(deps: SubAgentToolRuntimeDependencies): Too
 
       results.sort((a, b) => a.index - b.index);
 
-      const completedCount = results.filter((r) => r.result.status === "completed").length;
-      const failedCount = results.filter((r) => r.result.status === "failed").length;
-      const cancelledCount = results.filter((r) => r.result.status === "cancelled").length;
+      const stats = batchStats(tasks, results);
       const totalDurationMs = Date.now() - startTime;
 
       deps.eventLog?.append(
@@ -888,8 +960,11 @@ function createCallSubAgentsExecutor(deps: SubAgentToolRuntimeDependencies): Too
           runId: context.goalId,
           batchId,
           results: toBatchEventResults(results, subAgents),
-          successCount: completedCount,
-          failedCount: failedCount,
+          successCount: stats.completedCount,
+          failedCount: stats.failedCount,
+          cancelledCount: stats.cancelledCount,
+          approvalRequiredCount: stats.approvalRequiredCount,
+          notStartedCount: stats.notStartedCount,
           totalDurationMs,
           timestamp: nowIso(),
         })
@@ -980,10 +1055,10 @@ function createSpawnSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): Too
       };
 
       const result = await executeSubAgentFromStart({
-        deps,
-        subAgent: spawnedSubAgent,
-        task,
-        context: ctx,
+          deps,
+          subAgent: spawnedSubAgent,
+          task,
+          context: ctx,
         toolContext: context,
       });
       if (result.status === "approval_required" && result.pendingApproval !== undefined) {

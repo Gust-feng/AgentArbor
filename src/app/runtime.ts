@@ -9,6 +9,7 @@ import { InMemoryMessageBus } from "../kernel/messages/in-memory-message-bus.js"
 import { InMemoryAgentRegistry } from "../kernel/registry/in-memory-agent-registry.js";
 import { SimpleRouter } from "../kernel/router/simple-router.js";
 import { createDemoAgentManifests } from "./agents/manifests.js";
+import { InMemorySubAgentRunTraceStore } from "./sub-agents/sub-agent-trace-store.js";
 
 export type MinimalRuntime = ReturnType<typeof createMinimalRuntime>;
 
@@ -21,6 +22,7 @@ export function createMinimalRuntime(options: CreateMinimalRuntimeOptions = {}) 
   const bus = new InMemoryMessageBus(eventLog);
   const registry = new InMemoryAgentRegistry();
   const artifactStore = new InMemoryArtifactStore();
+  const subAgentRunTraceStore = new InMemorySubAgentRunTraceStore();
   const directionHandoffPackageStore =
     options.directionHandoffPackageStore ?? new InMemoryDirectionHandoffPackageStore();
   const router = new SimpleRouter(registry);
@@ -36,6 +38,7 @@ export function createMinimalRuntime(options: CreateMinimalRuntimeOptions = {}) 
     bus,
     registry,
     artifactStore,
+    subAgentRunTraceStore,
     directionHandoffPackageStore,
     router,
     soilStore,

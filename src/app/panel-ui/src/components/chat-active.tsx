@@ -29,6 +29,7 @@ import { ordinaryWorkViewFromRunView, safeBasicRunView } from "../runtime";
 import { ChatTranscriptDisplay } from "./chat-transcript-display";
 import type { ConfirmationProjection } from "./transcript-confirmation";
 import type { QueuedChatMessage } from "./chat-empty";
+import { SubAgentRunDrawer } from "./sub-agent-run-viewer";
 
 export type QueuedMessage = QueuedChatMessage;
 
@@ -61,6 +62,24 @@ export function ChatActive(props: ChatInputProps & {
       totalTurns: fullTurnCount,
     })
   ));
+  const [selectedSubAgent, setSelectedSubAgent] = useState<{
+    readonly runId?: string;
+    readonly batchId?: string;
+  } | undefined>(undefined);
+  const subAgentRuns = props.workView?.subAgentRuns ?? [];
+  const activeSelectedSubAgent =
+    selectedSubAgent === undefined ||
+    (
+      selectedSubAgent.runId !== undefined &&
+      !subAgentRuns.some((run) => run.subRunId === selectedSubAgent.runId)
+    ) ||
+    (
+      selectedSubAgent.runId === undefined &&
+      selectedSubAgent.batchId !== undefined &&
+      !subAgentRuns.some((run) => run.batchId === selectedSubAgent.batchId)
+    )
+      ? undefined
+      : selectedSubAgent;
   const effectiveVisibilityState = reconcileTranscriptVisibilityState({
     previous: visibilityState,
     conversationId: props.conversation?.conversationId,
@@ -253,6 +272,10 @@ export function ChatActive(props: ChatInputProps & {
                   workView={props.workView}
                   pending={view.pending}
                   showModelUsage={props.showModelUsage}
+                  subAgentRuns={subAgentRuns}
+                  selectedSubAgentRunId={activeSelectedSubAgent?.runId}
+                  selectedSubAgentBatchId={activeSelectedSubAgent?.batchId}
+                  onSelectSubAgentRun={setSelectedSubAgent}
                   standaloneRun={view.workline.standaloneRun !== true
                     ? undefined
                     : {
@@ -276,6 +299,14 @@ export function ChatActive(props: ChatInputProps & {
           </main>
         </div>
       </div>
+
+      <SubAgentRunDrawer
+        runs={subAgentRuns}
+        selectedRunId={activeSelectedSubAgent?.runId}
+        selectedBatchId={activeSelectedSubAgent?.batchId}
+        onSelectRun={(runId) => setSelectedSubAgent({ runId })}
+        onClose={() => setSelectedSubAgent(undefined)}
+      />
 
       <ChatInputBar
         {...guidanceInputProps}

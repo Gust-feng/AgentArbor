@@ -7,6 +7,7 @@ import type {
   SanitizedInformationAccessConfig,
 } from "../config/contracts.js";
 import type { ModelUsage } from "../intelligence/contracts.js";
+import type { SubAgentRunTrace } from "../sub-agents/contracts.js";
 import type { ToolDisplayProjection, ToolErrorDomain, ToolErrorFacts, ToolResultEnvelope } from "../tools/contracts.js";
 import type {
   ObservationProgress,
@@ -213,6 +214,8 @@ export type RuntimeConfirmationRecord = {
   readonly eventRefs: readonly string[];
 };
 
+export type RuntimeSubAgentRunRecord = SubAgentRunTrace;
+
 export type RuntimeContextLedgerRecord = ContextLedger;
 
 export type RuntimeRunSnapshot = {
@@ -225,6 +228,7 @@ export type RuntimeRunSnapshot = {
   readonly toolCalls: readonly RuntimeToolCallRecord[];
   readonly artifacts: readonly RuntimeArtifactRecord[];
   readonly confirmations: readonly RuntimeConfirmationRecord[];
+  readonly subAgentRuns: readonly RuntimeSubAgentRunRecord[];
   readonly contextLedger?: RuntimeContextLedgerRecord;
 };
 
@@ -247,6 +251,7 @@ export interface RuntimeDatabase {
   replaceToolCalls(runId: string, calls: readonly RuntimeToolCallRecord[]): Promise<readonly RuntimeToolCallRecord[]>;
   replaceArtifacts(runId: string, artifacts: readonly RuntimeArtifactRecord[]): Promise<readonly RuntimeArtifactRecord[]>;
   replaceConfirmations(runId: string, confirmations: readonly RuntimeConfirmationRecord[]): Promise<readonly RuntimeConfirmationRecord[]>;
+  replaceSubAgentRuns(runId: string, records: readonly RuntimeSubAgentRunRecord[]): Promise<readonly RuntimeSubAgentRunRecord[]>;
   upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord>;
   getRun(runId: string): Promise<RuntimeRunSnapshot | undefined>;
   listRuns(limit?: number): Promise<readonly RuntimeRunRecord[]>;

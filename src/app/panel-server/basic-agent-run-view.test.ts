@@ -13,6 +13,8 @@ import type { PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
 import { InMemoryProcessRegistry } from "../runtime-guard/index.js";
 import { createRunCapabilityPlan } from "../model-capability-registry.js";
+import { createMinimalRuntime } from "../runtime.js";
+import { createLiveBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
 import { createBasicAgentRunViewReadModel } from "./basic-agent-run-view.js";
 
 test("basic agent run view for live runs exposes the job birth agent definition ref consistently", async () => {
@@ -412,6 +414,23 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   const snapshot: RuntimeRunSnapshot = {
     ...runtimeSnapshot(),
     contextLedger: skillContextLedger("run-restored"),
+    subAgentRuns: [{
+      parentRunId: "run-restored",
+      parentToolCallId: "tool-call-sub-agent",
+      subRunId: "sub-run-restored",
+      subAgentId: "restored-helper",
+      subAgentName: "Restored Helper",
+      task: "复盘历史运行",
+      status: "completed",
+      startedAt: "2026-06-06T00:00:02.000Z",
+      completedAt: "2026-06-06T00:00:03.000Z",
+      durationMs: 1000,
+      modelRounds: 1,
+      toolCalls: 0,
+      summary: "历史子 Agent 结果",
+      modelExchanges: [],
+      toolTraces: [],
+    }],
   };
   const runtime = {
     runExecutor: {
@@ -450,6 +469,7 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
     },
   ]);
   assert.equal(view?.workView.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
+  assert.equal(view?.workView.subAgentRuns?.[0]?.subRunId, "sub-run-restored");
   assert.equal(view?.detail.restoredResult?.summary, "历史运行摘要");
   assert.equal(view?.detail.restoredResult?.title, "已完成");
   assert.equal(view === undefined ? false : "result" in view, false);
@@ -458,6 +478,37 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   assert.equal(view === undefined ? false : "workSession" in view, false);
   assert.equal(JSON.stringify(view?.agentDefinitionRef).includes("systemPrompt"), false);
   assert.equal(JSON.stringify(view).includes("FULL PRIVATE SKILL BODY"), false);
+});
+
+test("live basic agent work view exposes sub-agent run traces", () => {
+  const agentDefinitionRef = agentRef("live-agent", "Live Agent");
+  const job = basicJob(agentDefinitionRef);
+  job.runtime = createMinimalRuntime();
+  job.runtime.subAgentRunTraceStore.upsert({
+    parentRunId: job.runId,
+    parentToolCallId: "tool-call-sub-agent",
+    subRunId: "sub-run-live",
+    subAgentId: "live-helper",
+    subAgentName: "Live Helper",
+    task: "live task",
+    status: "completed",
+    startedAt: "2026-06-06T00:00:01.000Z",
+    completedAt: "2026-06-06T00:00:02.000Z",
+    durationMs: 1000,
+    modelRounds: 1,
+    toolCalls: 0,
+    summary: "live result",
+    modelExchanges: [],
+    toolTraces: [],
+  });
+  const view = createLiveBasicAgentWorkViewReadModel({
+    job,
+    run: basicRun(agentDefinitionRef),
+    events: basicReplay(job.runId).events,
+    streamEvents: [],
+  });
+
+  assert.equal(view.subAgentRuns?.[0]?.subRunId, "sub-run-live");
 });
 
 test("basic agent panel read-model restores pending confirmations after refresh", async () => {
@@ -659,6 +710,7 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
     toolCalls: [],
     artifacts: [],
     confirmations: [],
+    subAgentRuns: [],
   };
 }
 

@@ -10,6 +10,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     chatTranscriptDisplay,
     chatTranscriptChain,
     transcriptTimeline,
+    subAgentRunViewer,
     transcriptConfirmationProjection,
     confirmationDisplayProjection,
     transcriptTimelineCopy,
@@ -48,6 +49,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiSource(path.join("components", "chat-transcript-display.tsx")),
     readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
     readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
+    readPanelUiSource(path.join("components", "sub-agent-run-viewer.tsx")),
     readAppSource("panel-transcript-confirmation-projection.ts"),
     readAppSource("panel-confirmation-display-projection.ts"),
     readAppSource("panel-transcript-activity-copy.ts"),
@@ -129,6 +131,22 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatActive.includes(".slice(-8)"), false);
   assert.equal(chatActive.includes('from "./transcript-timeline"'), false);
   assert.equal(chatTranscriptChain.includes('from "./transcript-timeline"'), true);
+  assert.equal(chatActive.includes('from "./sub-agent-run-viewer"'), true);
+  assert.equal(chatActive.includes("<SubAgentRunDrawer"), true);
+  assert.equal(chatTranscriptChain.includes("onSelectSubAgentRun"), true);
+  assert.equal(transcriptTimeline.includes("SubAgentInlineCard"), true);
+  assert.equal(transcriptTimeline.includes("subAgentNotStartedCount"), true);
+  assert.equal(subAgentRunViewer.includes("export function SubAgentRunDrawer"), true);
+  assert.equal(subAgentRunViewer.includes("export function SubAgentInlineCard"), true);
+  assert.equal(subAgentRunViewer.includes("role=\"tab\""), true);
+  assert.equal(subAgentRunViewer.includes("activeTab"), true);
+  assert.equal(subAgentRunViewer.includes("batchStats"), true);
+  assert.equal(subAgentRunViewer.includes("概览"), true);
+  assert.equal(subAgentRunViewer.includes("输入输出"), true);
+  assert.equal(subAgentRunViewer.includes("工具"), true);
+  assert.equal(subAgentRunViewer.includes("诊断"), true);
+  assert.equal(transcriptStyles.includes(".sub-agent-inline-card"), true);
+  assert.equal(transcriptStyles.includes(".sub-agent-drawer"), true);
   assert.equal(chatTranscriptChain.includes("stableViewRef"), false);
   assert.equal(chatActive.includes("projectConversationDisplayList"), false);
   assert.equal(chatActive.includes("subscribeTranscriptNodesCache"), false);

@@ -15,6 +15,7 @@ import type {
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { SubAgentRunView } from "../../domain/sub-agents/contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 import {
@@ -94,6 +95,7 @@ export type CreateDesktopWorkViewReadModelInput = {
     readonly summary: string;
   };
   readonly restoredContextLedger?: ContextLedger;
+  readonly subAgentRuns?: readonly SubAgentRunView[];
 };
 
 export function createDesktopWorkViewReadModel(
@@ -130,6 +132,7 @@ export function createDesktopWorkViewReadModel(
     toolEvidence,
     visibleEvents,
     transcriptNodes,
+    subAgentRuns: input.subAgentRuns ?? [],
     safetySummary: {
       summary: safetySummaryText({
         pendingActionCount: pendingConfirmation === undefined ? 0 : 1,

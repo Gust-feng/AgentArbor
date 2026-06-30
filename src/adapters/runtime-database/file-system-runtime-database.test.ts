@@ -149,6 +149,25 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         eventRefs: ["event:approval-0001"],
       },
     ]);
+    await database.replaceSubAgentRuns("panel-run-0001", [
+      {
+        parentRunId: "panel-run-0001",
+        parentToolCallId: "tool-call-sub-agent",
+        subRunId: "sub-run-0001",
+        subAgentId: "creative-advisor",
+        subAgentName: "Creative Advisor",
+        task: "Generate ideas",
+        status: "completed",
+        startedAt: "2026-05-10T00:00:01.000Z",
+        completedAt: "2026-05-10T00:00:02.000Z",
+        durationMs: 1000,
+        modelRounds: 1,
+        toolCalls: 0,
+        summary: "Three ideas.",
+        modelExchanges: [],
+        toolTraces: [],
+      },
+    ]);
 
     const snapshot = await database.getRun("panel-run-0001");
     const modelCallsByRun = await database.listModelCallsForRuns(["panel-run-0001"]);
@@ -188,6 +207,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     assert.equal(snapshot?.artifacts[0]?.ref.id, "artifact-0001");
     assert.equal(snapshot?.confirmations[0]?.confirmationId, "confirmation-0001");
     assert.equal(snapshot?.confirmations[0]?.status, "pending");
+    assert.equal(snapshot?.subAgentRuns[0]?.subRunId, "sub-run-0001");
+    assert.equal(snapshot?.subAgentRuns[0]?.parentToolCallId, "tool-call-sub-agent");
     assert.deepEqual(runs.map((run) => run.runId), ["panel-run-0001"]);
     assert.equal(conversation?.turns[1]?.content, "Safe assistant result.");
     assert.deepEqual(conversations.map((item) => item.conversationId), ["conversation-0001"]);

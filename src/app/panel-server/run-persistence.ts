@@ -133,6 +133,7 @@ async function persistPanelRunNow(
   await runtime.runtimeDatabase.replaceToolCalls(job.runId, toRuntimeToolCallRecords(job.runId, streamEvents, eventEntries));
   await runtime.runtimeDatabase.replaceArtifacts(job.runId, toRuntimeArtifactRecords(job));
   await runtime.runtimeDatabase.replaceConfirmations(job.runId, toRuntimeConfirmationRecords(job, eventEntries));
+  await runtime.runtimeDatabase.replaceSubAgentRuns(job.runId, job.runtime?.subAgentRunTraceStore.list() ?? []);
 }
 
 async function persistPanelConversationNow(

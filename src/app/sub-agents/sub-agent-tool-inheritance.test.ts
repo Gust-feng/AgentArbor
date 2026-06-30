@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { IntelligenceChannel, ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
+import type { SubAgentRunTrace } from "../../domain/sub-agents/contracts.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { nowIso } from "../../kernel/id.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import { ToolCenter } from "../tool-center/tool-center.js";
 import { SubAgentRegistry } from "./sub-agent-registry.js";
+import { InMemorySubAgentRunTraceStore } from "./sub-agent-trace-store.js";
 import { createSubAgentToolExecutors } from "./sub-agent-tools.js";
 import { runSubAgent } from "./sub-agent-runner.js";
 
@@ -61,11 +63,52 @@ test("runSubAgent sends instructions as system and the delegated task as user in
   assert.match(messages[1]?.content ?? "", /generate three ideas/);
   assert.match(messages[1]?.content ?? "", /## 额外上下文/);
   assert.match(messages[1]?.content ?? "", /Use today's schedule\./);
+  assert.equal(result.trace?.subRunId, result.runId);
+  assert.equal(result.trace?.modelExchanges[0]?.messages[0]?.role, "system");
+  assert.match(result.trace?.modelExchanges[0]?.messages[1]?.content ?? "", /generate three ideas/);
+  assert.equal(result.trace?.modelExchanges[0]?.textOutput, "task completed");
+});
+
+test("runSubAgent trace captures model tool calls and failed responses", async () => {
+  const failedChannel = new SequenceIntelligenceChannel([
+    failedResponse("model-request-failed", "upstream unavailable"),
+  ]);
+  const failed = await runSubAgent({
+    subAgent: testSubAgent(),
+    task: "fail",
+    toolBroker: new ToolCenter(),
+    channel: failedChannel,
+    allowedTools: [],
+  });
+
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.trace?.modelExchanges[0]?.failureMessage, "upstream unavailable");
+
+  const toolChannel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-tool", "call-read", "read_file", { path: "README.md" }),
+    textResponse("model-request-final", "read completed"),
+  ]);
+  const center = new ToolCenter();
+  center.register(testTool("read_file", async () => ({ content: "ok" })));
+
+  const result = await runSubAgent({
+    subAgent: testSubAgent(),
+    task: "read",
+    toolBroker: center,
+    channel: toolChannel,
+    allowedTools: ["read_file"],
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.trace?.modelExchanges[0]?.toolCalls[0]?.toolName, "read_file");
+  assert.equal(result.trace?.toolTraces[0]?.toolName, "read_file");
+  assert.equal(result.trace?.toolTraces[0]?.status, "completed");
 });
 
 test("sub-agent tool approval bubbles as the parent tool pending confirmation and resumes after approve", async () => {
   let shellRuns = 0;
   const eventLog = new InMemoryEventLog();
+  const traces = new InMemorySubAgentRunTraceStore();
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-child", "call-shell", "shell_command", { commandLine: "pnpm test" }),
     textResponse("model-request-child-final", "shell finished"),
@@ -83,6 +126,7 @@ test("sub-agent tool approval bubbles as the parent tool pending confirmation an
     allowedTools: () => ["call_sub_agent", "shell_command"],
     confirmationPolicy: () => "prompt",
     publishToolEvent: (message) => eventLog.append(message),
+    traceSink: traces,
     includeSpawnTool: true,
     eventLog,
   })) {
@@ -117,6 +161,9 @@ test("sub-agent tool approval bubbles as the parent tool pending confirmation an
   assert.deepEqual(paused.confirmationRequest?.affectedResources, ["pnpm test"]);
   assert.equal(shellRuns, 0);
   assert.equal(eventLog.types().includes("user_approval.requested"), true);
+  assert.equal(traces.list().length, 1);
+  assert.equal(traces.list()[0]?.status, "approval_required");
+  assert.equal(traces.list()[0]?.toolTraces[0]?.status, "approval_required");
 
   const resumed = await center.execute(request, context, {
     callerAgentId: "agent-test",
@@ -129,6 +176,159 @@ test("sub-agent tool approval bubbles as the parent tool pending confirmation an
   assert.equal(shellRuns, 1);
   assert.equal((resumed.output as { readonly status?: string }).status, "completed");
   assert.equal(channel.requests.length, 2);
+  const mergedTrace = traces.list()[0];
+  assert.equal(traces.list().length, 1);
+  assert.equal(mergedTrace?.status, "completed");
+  assert.equal(mergedTrace?.modelExchanges.length, 2);
+  assert.equal(mergedTrace?.toolTraces.length, 1);
+  assert.equal(mergedTrace?.toolTraces[0]?.status, "completed");
+});
+
+test("call_sub_agent and batch calls link traces to parent tool calls and batch ids", async () => {
+  const collected: SubAgentRunTrace[] = [];
+  const traces = {
+    upsert(trace: SubAgentRunTrace) {
+      collected.push(trace);
+    },
+  };
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-one", "one done"),
+    textResponse("model-request-two", "two done"),
+    textResponse("model-request-three", "three done"),
+  ]);
+  const center = new ToolCenter();
+  const registry = await tempRegistry();
+  for (const executor of createSubAgentToolExecutors({
+    subAgentRegistry: registry,
+    channel,
+    toolBroker: center,
+    allowedTools: () => ["call_sub_agent", "call_sub_agents"],
+    traceSink: traces,
+  })) {
+    center.register(executor);
+  }
+
+  await center.execute(
+    {
+      callId: "call-single-parent",
+      toolName: "call_sub_agent",
+      input: { sub_agent_name: "test-helper", task: "single" },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["call_sub_agent"] }
+  );
+  await center.execute(
+    {
+      callId: "call-batch-parent",
+      toolName: "call_sub_agents",
+      input: {
+        tasks: [
+          { sub_agent_name: "test-helper", task: "first" },
+          { sub_agent_name: "test-helper", task: "second" },
+        ],
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["call_sub_agents"] }
+  );
+
+  assert.equal(collected[0]?.parentToolCallId, "call-single-parent");
+  assert.equal(collected[1]?.parentToolCallId, "call-batch-parent");
+  assert.equal(collected[1]?.batchIndex, 0);
+  assert.equal(collected[2]?.batchIndex, 1);
+  assert.equal(collected[1]?.batchId, collected[2]?.batchId);
+});
+
+test("call_sub_agents records pending and not-started batch stats when approval pauses execution", async () => {
+  const eventLog = new InMemoryEventLog();
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-one", "one done"),
+    toolCallResponse("model-request-two", "call-shell", "shell_command", { commandLine: "pnpm test" }),
+    textResponse("model-request-two-final", "two done"),
+  ]);
+  const center = new ToolCenter({ platform: "win32" });
+  center.register(testTool("shell_command", async () => ({ summary: "shell executed" }), "execute", true));
+  const registry = await tempRegistry();
+  for (const executor of createSubAgentToolExecutors({
+    subAgentRegistry: registry,
+    channel,
+    toolBroker: center,
+    allowedTools: () => ["call_sub_agents", "shell_command"],
+    confirmationPolicy: () => "prompt",
+    includeSpawnTool: true,
+    eventLog,
+  })) {
+    center.register(executor);
+  }
+
+  const paused = await center.execute(
+    {
+      callId: "call-batch-parent",
+      toolName: "call_sub_agents",
+      input: {
+        tasks: [
+          { sub_agent_name: "test-helper", task: "first" },
+          { sub_agent_name: "test-helper", task: "second" },
+          { sub_agent_name: "test-helper", task: "third" },
+        ],
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    {
+      callerAgentId: "agent-test",
+      allowedTools: ["call_sub_agents", "shell_command"],
+      confirmationPolicy: "prompt",
+    }
+  );
+
+  assert.equal(paused.status, "approval_required");
+  const batchCompleted = eventLog.list().find((entry) => entry.type === "sub_agent_batch.completed");
+  const payload = batchCompleted?.message.payload as {
+    readonly successCount?: number;
+    readonly failedCount?: number;
+    readonly approvalRequiredCount?: number;
+    readonly notStartedCount?: number;
+    readonly results?: readonly { readonly status: string }[];
+  } | undefined;
+  assert.equal(payload?.successCount, 1);
+  assert.equal(payload?.failedCount, 0);
+  assert.equal(payload?.approvalRequiredCount, 1);
+  assert.equal(payload?.notStartedCount, 1);
+  assert.deepEqual(payload?.results?.map((result) => result.status), ["completed", "approval_required"]);
+
+  const resumed = await center.execute(
+    {
+      callId: "call-batch-parent",
+      toolName: "call_sub_agents",
+      input: {
+        tasks: [
+          { sub_agent_name: "test-helper", task: "first" },
+          { sub_agent_name: "test-helper", task: "second" },
+          { sub_agent_name: "test-helper", task: "third" },
+        ],
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    {
+      callerAgentId: "agent-test",
+      allowedTools: ["call_sub_agents", "shell_command"],
+      approvedConfirmationIds: ["confirmation-call-shell"],
+      confirmationPolicy: "prompt",
+    }
+  );
+
+  assert.equal(resumed.status, "completed");
+  const finalBatchCompleted = eventLog.list().filter((entry) => entry.type === "sub_agent_batch.completed").at(-1);
+  const finalPayload = finalBatchCompleted?.message.payload as {
+    readonly successCount?: number;
+    readonly approvalRequiredCount?: number;
+    readonly notStartedCount?: number;
+    readonly results?: readonly { readonly status: string }[];
+  } | undefined;
+  assert.equal(finalPayload?.successCount, 2);
+  assert.equal(finalPayload?.approvalRequiredCount, 0);
+  assert.equal(finalPayload?.notStartedCount, 1);
+  assert.deepEqual(finalPayload?.results?.map((result) => result.status), ["completed", "completed"]);
 });
 
 test("spawn_sub_agent uses system_prompt as the temporary sub-agent system body", async () => {
@@ -252,7 +452,11 @@ class SequenceIntelligenceChannel implements IntelligenceChannel {
 
   async request(request: ModelRequest): Promise<ModelResponse> {
     this.requests.push(request);
-    return this.responses[this.requests.length - 1] ?? this.responses.at(-1)!;
+    const response = this.responses[this.requests.length - 1] ?? this.responses.at(-1)!;
+    return {
+      ...response,
+      requestId: request.requestId,
+    };
   }
 
   validateResponse(_request: ModelRequest, response: ModelResponse) {
@@ -294,5 +498,19 @@ function toolCallResponse(
     ...completedResponse(requestId, undefined),
     toolCalls: [{ callId, toolName, input }],
     finishReason: "tool_call",
+  };
+}
+
+function failedResponse(requestId: string, message: string): ModelResponse {
+  return {
+    ...completedResponse(requestId, undefined),
+    status: "failed",
+    textOutput: undefined,
+    failure: {
+      kind: "provider_response",
+      retryable: true,
+      message,
+    },
+    finishReason: "error",
   };
 }

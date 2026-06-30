@@ -13,6 +13,7 @@ import type {
   RuntimeModelCallRecord,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
+  RuntimeSubAgentRunRecord,
   RuntimeToolCallRecord,
   RuntimeWorkspaceRecord,
 } from "../../domain/runtime-database/index.js";
@@ -319,6 +320,11 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
     return confirmations;
   }
 
+  async replaceSubAgentRuns(_runId: string, records: readonly RuntimeSubAgentRunRecord[]): Promise<readonly RuntimeSubAgentRunRecord[]> {
+    this.snapshot = { ...this.snapshot, subAgentRuns: records };
+    return records;
+  }
+
   async upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord> {
     this.snapshot = { ...this.snapshot, contextLedger: record };
     return record;
@@ -344,6 +350,7 @@ function snapshotFixture(): RuntimeRunSnapshot {
     toolCalls: [],
     artifacts: [],
     confirmations: [],
+    subAgentRuns: [],
   };
 }
 

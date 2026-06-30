@@ -12,6 +12,7 @@ import type {
   RuntimeRunModelCallsRecord,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
+  RuntimeSubAgentRunRecord,
   RuntimeToolCallRecord,
   RuntimeWorkspaceRecord,
 } from "../../domain/runtime-database/index.js";
@@ -141,6 +142,15 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     return stored;
   }
 
+  async replaceSubAgentRuns(
+    runId: string,
+    records: readonly RuntimeSubAgentRunRecord[]
+  ): Promise<readonly RuntimeSubAgentRunRecord[]> {
+    const stored = cloneJson(records);
+    await writeJsonlFile(this.runJsonlPath(runId, "sub-agent-runs.jsonl"), stored);
+    return stored;
+  }
+
   async upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord> {
     const stored = cloneJson(record);
     await writeJsonFile(this.contextLedgerPath(record.runId), stored);
@@ -166,6 +176,7 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
       toolCalls: await readJsonlFile<RuntimeToolCallRecord>(this.runJsonlPath(runId, "tool-calls.jsonl")),
       artifacts: await readJsonlFile<RuntimeArtifactRecord>(this.runJsonlPath(runId, "artifacts.jsonl")),
       confirmations: await readJsonlFile<RuntimeConfirmationRecord>(this.runJsonlPath(runId, "confirmations.jsonl")),
+      subAgentRuns: await readJsonlFile<RuntimeSubAgentRunRecord>(this.runJsonlPath(runId, "sub-agent-runs.jsonl")),
       contextLedger: await readJsonFile<RuntimeContextLedgerRecord>(this.contextLedgerPath(runId)),
     };
   }

@@ -13,7 +13,7 @@ import {
 } from "./tool-display-normalization.js";
 
 export type PanelRunStreamEventDetail = {
-  readonly kind: "thinking" | "tool" | "confirmation" | "work";
+  readonly kind: "thinking" | "tool" | "confirmation" | "work" | "sub_agent";
   readonly action?: string;
   readonly path?: string;
   readonly query?: string;
@@ -27,6 +27,21 @@ export type PanelRunStreamEventDetail = {
   readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
   readonly modelUsage?: ModelUsage;
+  readonly subAgentRunId?: string;
+  readonly subAgentBatchId?: string;
+  readonly subAgentBatchIndex?: number;
+  readonly subAgentName?: string;
+  readonly subAgentStatus?: "completed" | "failed" | "approval_required" | "cancelled" | "running";
+  readonly subAgentTask?: string;
+  readonly subAgentModelRounds?: number;
+  readonly subAgentToolCalls?: number;
+  readonly subAgentDurationMs?: number;
+  readonly subAgentTotalCount?: number;
+  readonly subAgentSuccessCount?: number;
+  readonly subAgentFailedCount?: number;
+  readonly subAgentCancelledCount?: number;
+  readonly subAgentApprovalRequiredCount?: number;
+  readonly subAgentNotStartedCount?: number;
 };
 
 export function toolSummary(

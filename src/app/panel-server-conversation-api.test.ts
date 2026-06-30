@@ -1924,6 +1924,9 @@ function delayedRuntimeDatabase(
     async replaceConfirmations(_runId, confirmations) {
       return confirmations;
     },
+    async replaceSubAgentRuns(_runId, records) {
+      return records;
+    },
     async upsertContextLedger(record) {
       return record;
     },

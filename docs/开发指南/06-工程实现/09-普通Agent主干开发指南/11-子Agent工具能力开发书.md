@@ -11,9 +11,10 @@
 子 Agent 是普通 Agent 的工具能力扩展，不是独立编排流程。
 
 - 子 Agent 是“工具形态的专家助手”：模型在主循环中像调用普通工具一样调用 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`，由模型自主判断是否需要专家帮助。
-- 子 Agent 不维护独立任务生命周期：它没有独立 Task Soil、不出生独立 run facts、不写 RuntimeDatabase 主 run 表；子 Agent 的执行只在父 run 的事件流中留下 `sub_agent.*` 事件和工具结果。
+- 子 Agent 不维护独立任务生命周期：它没有独立 Task Soil、不出生独立 run facts、不写 RuntimeDatabase 主 run 表；子 Agent 的执行在父 run 的事件流中留下 `sub_agent.*` 事件和工具结果，并以 `subAgentRuns` read model 提供只读运行复盘。
 - 子 Agent 不派生 Plan：它的执行结果作为局部材料回到父层模型，由父层模型决定是否采纳、综合或继续探索。
 - 子 Agent 不走 `/api/deep/*` 入口：`/api/deep/*` 仍属于 deep / Underground 兼容路径，与子 Agent 工具无关；普通 `agent` 调用子 Agent 走的是普通工具执行路径。
+- 子 Agent 运行视图不是 deep run tree：它只服务默认普通 Agent 的子 Agent 工具，展示模型交换、内部工具事实和诊断字段，不提供重试、续跑或独立控制。
 
 与 deep / Underground 多 Agent 架构的区别：
 
@@ -32,6 +33,7 @@
 - `IntelligenceChannel`：子 Agent 的模型调用复用父 Agent 的 `IntelligenceChannel`，不另起模型接入层。
 - `ToolExecutionBroker`：子 Agent 内部若再调用工具，仍经过父层 `ToolExecutionBroker`（即 `ToolCenter`），命令类工具仍走命令确认。
 - 确认机制：子 Agent 调用工具的确认策略继承父 run 的 `toolConfirmationPolicy`；子 Agent 工具本身（`call_sub_agent` 等）默认 `requiresConfirmation: false`，不额外触发确认。若子 Agent 内部工具触发确认，该 pending confirmation 会冒泡为父 run 的 pending confirmation，用户可见、可批准/拒绝/补充指引。
+- RuntimeDatabase：子 Agent 的复盘 trace 写入父 run 目录下的 `sub-agent-runs.jsonl`，刷新或重启后继续作为 `workView.subAgentRuns` 展示。
 
 ## 子 Agent 定义格式
 
@@ -256,6 +258,34 @@ maxSteps: 50
 - 子 Agent 调用的命令类工具仍走父 run 的命令确认策略；子 Agent 工具本身不额外触发确认。内部工具触发确认时，`SubAgentRunner` 返回 `approval_required` 与 `pendingApproval`，子 Agent 工具 executor 将其转成父工具调用的 `approval_required`，父 run 进入既有 `confirmation_needed` 流程；approve 后恢复同一个子 Agent pending turn，deny/guidance 走父 run 现有确认决策路径。
 - 子 Agent 的 `model` 字段当前作为意图声明进入冻结 catalog；实际模型调用复用父 Agent 的 `IntelligenceChannel` 与 `activeModel`，子 Agent 不自行选择 provider 或模型实例。
 
+## 子 Agent 运行视图与 trace
+
+子 Agent 运行视图是普通 Agent work view 的只读调试投影，不是新的执行入口。
+
+数据流：
+
+1. `SubAgentRunner` 为每次调用创建 `SubAgentRunTrace`，记录 `parentRunId`、父工具调用 `parentToolCallId`、`subRunId`、`batchId` / `batchIndex`、子 Agent 名称、任务、上下文、状态、时间、模型轮次、工具次数、摘要和错误。
+2. runner 包装 `IntelligenceChannel`，按轮记录模型 request messages 与 response 文本、工具请求、失败类型、失败消息、usage、requestId / responseId。
+3. runner 观察内部工具事件和 turn tool call 结果，记录工具 name、input、status、duration、confirmation、display、envelope、errorFacts。
+4. runtime 内存 trace store 汇总本轮 `subAgentRuns`；run persistence 在保存父 run snapshot 时调用 `replaceSubAgentRuns` 写入 `sub-agent-runs.jsonl`。
+5. live read model 从 runtime trace store 读取 `subAgentRuns`；persisted read model 从 RuntimeDatabase snapshot 读取 `subAgentRuns`。
+6. transcript 中 `sub_agent.*` 事件形成 `kind: "sub_agent"` 的 activity node；UI 用 `subAgentRunId` / `subAgentBatchId` 关联到 `subAgentRuns`，渲染内联卡片和右侧详情抽屉。
+
+保存边界：
+
+- 保存模型可见 messages、模型输出文本、工具请求、失败信息、usage 和工具事实投影。
+- 保存工具结果时复用现有模型可见 / 用户可见投影，不额外保存 raw stdout / stderr 全量。
+- 命令长输出仍通过既有 `logRef` / `logPath` 机制查看。
+- 不保存 provider 原始 HTTP JSON，不把 trace 当作 provider 级审计日志。
+
+UI 行为：
+
+- `call_sub_agent` / `spawn_sub_agent` 在对话活动流里显示单个子 Agent 内联卡片，展示名称、任务摘要、状态、耗时、模型轮次、工具次数和最终摘要。
+- `call_sub_agents` 显示批次卡片，展示总数、成功、失败、等待确认、未启动统计，并允许在详情抽屉中切换同批次子运行。
+- 点击卡片打开右侧详情抽屉，包含概览、输入输出、工具、诊断四组只读信息。
+- 子 Agent 内部工具确认仍使用父 run 的确认卡；详情抽屉只标注等待父 run 确认，不新增子 Agent 级 approve / deny 控制。
+- 老 run 没有 `sub-agent-runs.jsonl` 时，UI 必须回退显示原有普通工具节点，不得因为缺失 `subAgentRuns` 崩溃。
+
 ## 当前不做
 
 - 不做子 Agent 级独立任务生命周期、独立 Task Soil、独立 RuntimeDatabase 主 run 表。
@@ -266,6 +296,7 @@ maxSteps: 50
 - 不做子 Agent 跨 run 持久化状态；每次调用都是无状态的一次性执行。
 - 不把子 Agent 输出自动提升为正式回答；子 Agent 输出永远是局部材料，父层模型负责最终回答。
 - 不让子 Agent 工具绕过父 run `allowedTools`、`ToolCenter`、命令确认和运行投影。
+- 不在运行视图中做重试、续跑、取消或子 Agent 独立生命周期控制；第一版仅只读复盘。
 
 ## 实现任务参考
 
@@ -277,10 +308,12 @@ maxSteps: 50
 - 工具定义与 executor：`src/app/sub-agents/sub-agent-tools.ts`。
 - 运行器：`src/app/sub-agents/sub-agent-runner.ts`。
 - 事件：`src/app/sub-agents/sub-agent-events.ts`。
+- trace：`src/app/sub-agents/sub-agent-trace-store.ts`、`src/domain/runtime-database/contracts.ts`、`src/adapters/runtime-database/file-system-runtime-database.ts`。
 - CapabilityCenter 集成：`src/app/capability-center.ts`、`src/app/basic-agent-runtime/builtin-tool-runtime.ts`。
 - 运行时集成：`src/app/desktop-agent-loop-preparation.ts`、`src/app/panel-server/desktop-agent-execution.ts`、`src/app/panel-server/runtime.ts`、`src/app/panel-server/types.ts`。
 - 内置专家：`src/app/sub-agents/builtin/<name>/SUB_AGENT.md`。
-- 前端契约与设置：`src/app/panel-ui/src/contracts/sub-agents.ts`、`src/app/panel-ui/src/components/sub-agent-settings.tsx`。
+- read model 与前端运行视图：`src/app/panel-server/basic-agent-read-models.ts`、`src/app/panel-transcript-nodes.ts`、`src/app/panel-transcript-node-projection.ts`、`src/app/panel-ui/src/components/sub-agent-run-viewer.tsx`、`src/app/panel-ui/src/components/transcript-timeline.tsx`。
+- 前端契约与设置：`src/app/panel-ui/src/contracts/sub-agents.ts`、`src/app/panel-ui/src/contracts/run.ts`、`src/app/panel-ui/src/components/sub-agent-settings.tsx`。
 
 ## 验收说明
 
@@ -289,7 +322,7 @@ maxSteps: 50
 ```powershell
 git diff --check
 pnpm build:node
-node --test dist/app/sub-agents/sub-agent-loader.test.js dist/app/sub-agents/sub-agent-validation.test.js dist/app/sub-agents/sub-agent-registry.test.js dist/app/sub-agents/sub-agent-runner.test.js dist/app/sub-agents/sub-agent-tools.test.js dist/app/capability-center.test.js dist/app/desktop-agent-loop-preparation.test.js
+node --test dist/app/sub-agents/sub-agent-loader.test.js dist/app/sub-agents/sub-agent-validation.test.js dist/app/sub-agents/sub-agent-registry.test.js dist/app/sub-agents/sub-agent-runner.test.js dist/app/sub-agents/sub-agent-tools.test.js dist/app/sub-agents/sub-agent-tool-inheritance.test.js dist/adapters/runtime-database/file-system-runtime-database.test.js dist/app/panel-server/basic-agent-run-view.test.js dist/app/panel-transcript-node-projection.test.js dist/app/panel-ui-chat-structure.test.js dist/app/capability-center.test.js dist/app/desktop-agent-loop-preparation.test.js
 pnpm test
 ```
 
@@ -303,6 +336,9 @@ pnpm test
 - `spawn_sub_agent` 不出现在子 Agent 的工具集合中，递归派生被阻止。
 - 子 Agent 工具不绕过父 run `allowedTools`、`ToolCenter` 和命令确认；内部确认会冒泡为父 run pending confirmation。
 - 子 Agent 输出默认 UI 只展示摘要，完整输出作为 tool result 回到模型上下文。
+- `subAgentRuns` 是 UI 的唯一详情数据源；live run 和 persisted run 都能恢复子 Agent 详情。
+- `sub-agent-runs.jsonl` 写入与读取保持向后兼容；老 run 缺失该文件时 read model 返回空数组。
+- 子 Agent 内联卡片、批次卡片和详情抽屉只读；不引入重试、续跑或子 Agent 生命周期控制。
 
 ## 开发 agent 开工顺序
 
@@ -310,6 +346,6 @@ pnpm test
 2. 先确认类型与契约（`SubAgentDefinition`、`CapabilitySubAgentCatalogItem`、事件 payload）已稳定。
 3. 再确认加载、校验、注册表、工具定义、runner、事件各自闭环且有测试。
 4. 再确认 CapabilityCenter stub 注册与 `prepareDesktopAgentLoop` 真实 executor 覆盖的衔接。
-5. 最后确认前端契约、设置页和 read-model 投影与冻结 catalog 一致。
+5. 最后确认前端契约、设置页、运行视图和 read-model 投影与冻结 catalog 一致。
 
 不要从 `.trellis/tasks`、历史 work session 或 underground prototype 推导子 Agent 任务；子 Agent 是普通 Agent 的工具能力，不是 deep / Underground 的前置实现。

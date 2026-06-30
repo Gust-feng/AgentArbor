@@ -32,6 +32,7 @@ export function createLiveBasicAgentWorkViewReadModel(input: {
     taskSoilInput: input.job.taskSoilInput,
     toolEvidence: toolEnvelopesFromStreamEvents(input.streamEvents),
     toolDisplays: toolDisplaysFromStreamEvents(input.streamEvents),
+    subAgentRuns: input.job.runtime?.subAgentRunTraceStore.list() ?? [],
   }) satisfies DesktopWorkViewReadModel;
   return {
     ...base,
@@ -59,6 +60,7 @@ export function createPersistedBasicAgentWorkViewReadModel(
       .filter((display): display is ToolDisplayProjection => display !== undefined),
     restoredResult: restoredRunResultProjection(snapshot.run),
     restoredContextLedger: snapshot.contextLedger,
+    subAgentRuns: snapshot.subAgentRuns,
   }) satisfies DesktopWorkViewReadModel;
 }
 

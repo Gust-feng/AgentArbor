@@ -1,6 +1,7 @@
 import type { RunAgentDefinitionRef } from "../config/contracts.js";
 import type { ModelUsage } from "../intelligence/contracts.js";
 import type { ObservationRef } from "../observation/contracts.js";
+import type { SubAgentRunView } from "../sub-agents/contracts.js";
 import type {
   ToolDisplayProjection,
   ToolErrorDomain,
@@ -85,6 +86,7 @@ export type TranscriptNodeKind =
   | "tool"
   | "confirmation"
   | "user_decision"
+  | "sub_agent"
   | "answer"
   | "body"
   | "system";
@@ -114,6 +116,14 @@ export type TranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
+  readonly subAgentRunId?: string;
+  readonly subAgentBatchId?: string;
+  readonly subAgentTotalCount?: number;
+  readonly subAgentSuccessCount?: number;
+  readonly subAgentFailedCount?: number;
+  readonly subAgentCancelledCount?: number;
+  readonly subAgentApprovalRequiredCount?: number;
+  readonly subAgentNotStartedCount?: number;
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: ConfirmationRequest;
   readonly modelUsage?: ModelUsage;
@@ -355,6 +365,7 @@ export type DesktopWorkViewReadModel = {
   readonly toolEvidence: readonly ToolResultEnvelope[];
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes: readonly TranscriptNode[];
+  readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly safetySummary: {
     readonly summary: string;
     readonly pendingActionCount: number;

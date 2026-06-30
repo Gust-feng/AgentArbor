@@ -539,6 +539,7 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
         eventRefs: ["confirmation:confirmation-1"],
       },
     ],
+    subAgentRuns: [],
   };
 }
 

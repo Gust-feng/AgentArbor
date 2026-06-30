@@ -49,6 +49,9 @@ export type SubAgentBatchCompletedEventPayload = {
   }[];
   readonly successCount: number;
   readonly failedCount: number;
+  readonly cancelledCount?: number;
+  readonly approvalRequiredCount?: number;
+  readonly notStartedCount?: number;
   readonly totalDurationMs: number;
   readonly timestamp: string;
 };
@@ -167,6 +170,9 @@ export function createSubAgentBatchCompletedMessage(input: {
   }[];
   readonly successCount: number;
   readonly failedCount: number;
+  readonly cancelledCount?: number;
+  readonly approvalRequiredCount?: number;
+  readonly notStartedCount?: number;
   readonly totalDurationMs: number;
   readonly timestamp: string;
   readonly fromId?: string;
@@ -183,6 +189,9 @@ export function createSubAgentBatchCompletedMessage(input: {
       results: input.results.map((result) => ({ ...result })),
       successCount: input.successCount,
       failedCount: input.failedCount,
+      cancelledCount: input.cancelledCount,
+      approvalRequiredCount: input.approvalRequiredCount,
+      notStartedCount: input.notStartedCount,
       totalDurationMs: input.totalDurationMs,
       timestamp: input.timestamp,
     },

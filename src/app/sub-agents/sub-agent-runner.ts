@@ -1,5 +1,19 @@
 import type { ArborMessage } from "../../domain/common.js";
-import type { IntelligenceChannel, ModelMessage, ModelOutputContract } from "../../domain/intelligence/contracts.js";
+import type {
+  IntelligenceChannel,
+  ModelMessage,
+  ModelOutputContract,
+  ModelRequest,
+  ModelRequestOptions,
+  ModelResponse,
+} from "../../domain/intelligence/contracts.js";
+import type {
+  SubAgentModelExchange,
+  SubAgentRunTrace,
+  SubAgentRunTraceSink,
+  SubAgentToolTrace,
+} from "../../domain/sub-agents/contracts.js";
+import type { ToolCallResult } from "../../domain/tools/contracts.js";
 import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../../domain/tools/contracts.js";
 import type {
   AgentTurnPendingApproval,
@@ -25,12 +39,16 @@ export type SubAgentRunnerInput = {
   readonly task: string;
   readonly context?: string;
   readonly parentRunId?: string;
+  readonly parentToolCallId?: string;
+  readonly batchId?: string;
+  readonly batchIndex?: number;
   readonly conversationId?: string;
   readonly toolBroker: ToolExecutionBroker;
   readonly channel: IntelligenceChannel;
   readonly allowedTools: readonly string[];
   readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly publishToolEvent?: (message: ArborMessage) => void;
+  readonly traceSink?: SubAgentRunTraceSink;
   readonly pendingApproval?: AgentTurnPendingApproval;
   readonly approvedConfirmationIds?: readonly string[];
   readonly policyOverrides?: Partial<AgentTurnPolicy>;
@@ -48,12 +66,26 @@ export type SubAgentRunnerResult = {
   readonly runId?: string;
   readonly error?: string;
   readonly pendingApproval?: AgentTurnPendingApproval;
+  readonly trace?: SubAgentRunTrace;
 };
 
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentRunnerResult> {
   const startTime = Date.now();
+  const startedAt = nowIso();
   const runId = input.pendingApproval?.policy.goalId ?? createId("sub-agent-run");
   const traceId = input.conversationId ?? input.pendingApproval?.policy.traceId ?? runId;
+  const recorder = new SubAgentTraceRecorder({
+    subRunId: runId,
+    parentRunId: input.parentRunId,
+    parentToolCallId: input.parentToolCallId,
+    batchId: input.batchId,
+    batchIndex: input.batchIndex,
+    subAgentId: input.subAgent.id,
+    subAgentName: input.subAgent.name,
+    task: input.task,
+    context: input.context,
+    startedAt,
+  });
 
   input.eventLog?.append(
     createSubAgentStartedMessage({
@@ -95,9 +127,12 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     });
 
     const turnRuntime = new AgentTurnRuntime({
-      intelligenceChannel: input.channel,
+      intelligenceChannel: recorder.wrapChannel(input.channel),
       toolCenter: input.toolBroker,
-      publishToolEvent: input.publishToolEvent,
+      publishToolEvent: (message) => {
+        recorder.observeToolEvent(message);
+        input.publishToolEvent?.(message);
+      },
     });
 
     const callerRef = {
@@ -129,6 +164,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
       startTime,
       subAgentId: input.subAgent.id,
     });
+    recorder.observeToolResults(turn.toolCalls);
   } catch (error) {
     result = {
       status: "failed",
@@ -140,6 +176,20 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
       error: errorMessage(error),
     };
   }
+
+  const trace = recorder.finalize({
+    status: result.status,
+    summary: result.summary,
+    error: result.error,
+    toolCalls: result.toolCalls,
+    modelRounds: result.modelRounds,
+    durationMs: result.durationMs,
+  });
+  input.traceSink?.upsert(trace);
+  result = {
+    ...result,
+    trace,
+  };
 
   input.eventLog?.append(
     createSubAgentCompletedMessage({
@@ -158,6 +208,165 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   );
 
   return result;
+}
+
+type SubAgentTraceRecorderInput = {
+  readonly subRunId: string;
+  readonly parentRunId?: string;
+  readonly parentToolCallId?: string;
+  readonly batchId?: string;
+  readonly batchIndex?: number;
+  readonly subAgentId: string;
+  readonly subAgentName: string;
+  readonly task: string;
+  readonly context?: string;
+  readonly startedAt: string;
+};
+
+class SubAgentTraceRecorder {
+  private readonly input: SubAgentTraceRecorderInput;
+  private readonly exchanges = new Map<string, SubAgentModelExchange>();
+  private readonly tools = new Map<string, SubAgentToolTrace>();
+
+  constructor(input: SubAgentTraceRecorderInput) {
+    this.input = input;
+  }
+
+  wrapChannel(channel: IntelligenceChannel): IntelligenceChannel {
+    return {
+      request: async (request: ModelRequest, options?: ModelRequestOptions): Promise<ModelResponse> => {
+        this.recordRequest(request);
+        const response = await channel.request(request, options);
+        this.recordResponse(response);
+        return response;
+      },
+      validateResponse: (request, response) => channel.validateResponse(request, response),
+    };
+  }
+
+  observeToolEvent(message: ArborMessage): void {
+    if (message.type !== "tool.requested" && message.type !== "tool.completed" && message.type !== "tool.failed") {
+      return;
+    }
+    const payload = asRecord(message.payload);
+    const callId = stringFrom(payload.callId) ?? stringFrom(payload.requestId);
+    const toolName = stringFrom(payload.toolName);
+    if (callId === undefined || toolName === undefined) {
+      return;
+    }
+    const previous = this.tools.get(callId);
+    if (message.type === "tool.requested") {
+      this.tools.set(callId, {
+        ...previous,
+        callId,
+        toolName,
+        input: payload.input ?? previous?.input,
+        status: "requested",
+        startedAt: previous?.startedAt ?? message.createdAt,
+      });
+      return;
+    }
+    const output = asRecord(payload.output);
+    const status = toolStatusFromEvent(message.type, output.status);
+    this.tools.set(callId, {
+      ...previous,
+      callId,
+      toolName,
+      input: previous?.input ?? payload.input,
+      status,
+      startedAt: previous?.startedAt,
+      completedAt: message.createdAt,
+      durationMs: numberFrom(payload.durationMs) ?? numberFrom(output.durationMs) ?? previous?.durationMs,
+      confirmationId: stringFrom(asRecord(output.confirmationRequest).confirmationId) ?? previous?.confirmationId,
+      outputSummary: stringFrom(output.summary) ?? stringFrom(asRecord(output.envelope).agentSummary) ?? previous?.outputSummary,
+      display: toolDisplayFrom(output.display) ?? toolDisplayFrom(asRecord(output.envelope).uiDisplay) ?? previous?.display,
+      envelope: toolEnvelopeFrom(output.envelope) ?? previous?.envelope,
+      error: stringFrom(payload.error) ?? stringFrom(output.error) ?? previous?.error,
+      errorFacts: toolErrorFactsFrom(output.errorFacts) ?? toolErrorFactsFrom(asRecord(output.envelope).errorFacts) ?? previous?.errorFacts,
+    });
+  }
+
+  observeToolResults(results: readonly ToolCallResult[]): void {
+    for (const result of results) {
+      const previous = this.tools.get(result.callId);
+      this.tools.set(result.callId, {
+        ...previous,
+        callId: result.callId,
+        toolName: result.toolName,
+        input: previous?.input ?? result.input,
+        status: result.status === "approval_required" ? "approval_required" : result.status,
+        startedAt: previous?.startedAt,
+        completedAt: previous?.completedAt,
+        durationMs: result.durationMs,
+        confirmationId: result.confirmationRequest?.confirmationId ?? previous?.confirmationId,
+        outputSummary: stringFrom(asRecord(result.output).summary) ?? result.projection?.envelope?.agentSummary ?? previous?.outputSummary,
+        display: result.projection?.display ?? result.projection?.envelope?.uiDisplay ?? previous?.display,
+        envelope: result.projection?.envelope ?? previous?.envelope,
+        error: result.error ?? previous?.error,
+        errorFacts: result.errorFacts ?? result.projection?.envelope?.errorFacts ?? previous?.errorFacts,
+      });
+    }
+  }
+
+  finalize(input: {
+    readonly status: SubAgentRunnerResult["status"];
+    readonly summary: string;
+    readonly error?: string;
+    readonly toolCalls: number;
+    readonly modelRounds: number;
+    readonly durationMs: number;
+  }): SubAgentRunTrace {
+    const completedAt = nowIso();
+    return {
+      ...this.input,
+      status: input.status,
+      completedAt,
+      durationMs: input.durationMs,
+      modelRounds: input.modelRounds,
+      toolCalls: input.toolCalls,
+      summary: input.summary,
+      error: input.error,
+      modelExchanges: [...this.exchanges.values()],
+      toolTraces: [...this.tools.values()],
+    };
+  }
+
+  private recordRequest(request: ModelRequest): void {
+    this.exchanges.set(request.requestId, {
+      requestId: request.requestId,
+      status: "requested",
+      purpose: request.purpose,
+      requestedAt: request.requestedAt,
+      messages: request.sanitizedMessages.map(cloneModelMessage),
+      tools: (request.tools ?? []).map((tool) => tool.name),
+      toolCalls: [],
+    });
+  }
+
+  private recordResponse(response: ModelResponse): void {
+    const previous = this.exchanges.get(response.requestId);
+    this.exchanges.set(response.requestId, {
+      requestId: response.requestId,
+      responseId: response.responseId,
+      status: response.status,
+      purpose: previous?.purpose,
+      requestedAt: previous?.requestedAt ?? response.completedAt,
+      completedAt: response.completedAt,
+      messages: previous?.messages ?? [],
+      tools: previous?.tools ?? [],
+      textOutput: response.textOutput ?? response.assistantMessage?.content,
+      toolCalls: (response.toolCalls ?? []).map((call) => ({
+        callId: call.callId,
+        toolName: call.toolName,
+        input: cloneUnknown(call.input),
+      })),
+      failureKind: response.failure?.kind,
+      failureMessage: response.failure?.message,
+      retryable: response.failure?.retryable,
+      finishReason: response.finishReason,
+      usage: response.usage,
+    });
+  }
 }
 
 async function buildSubAgentSystemPrompt(subAgent: SubAgentDefinition): Promise<string> {
@@ -396,6 +605,71 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return typeof error === "string" ? error : String(error);
+}
+
+function cloneModelMessage(message: ModelMessage): ModelMessage {
+  return {
+    ...message,
+    attachments: message.attachments?.map(cloneUnknown),
+    protocolExtensions:
+      message.protocolExtensions === undefined ? undefined : cloneUnknown(message.protocolExtensions) as Readonly<Record<string, unknown>>,
+    toolCalls: message.toolCalls?.map((toolCall) => ({
+      callId: toolCall.callId,
+      toolName: toolCall.toolName,
+      input: cloneUnknown(toolCall.input),
+    })),
+  };
+}
+
+function cloneUnknown<T>(value: T): T {
+  if (value === undefined) {
+    return value;
+  }
+  return globalThis.structuredClone(value);
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+}
+
+function stringFrom(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function numberFrom(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function toolStatusFromEvent(
+  type: ArborMessage["type"],
+  outputStatus: unknown
+): SubAgentToolTrace["status"] {
+  if (outputStatus === "approval_required") {
+    return "approval_required";
+  }
+  if (type === "tool.completed") {
+    return "completed";
+  }
+  return "failed";
+}
+
+function toolDisplayFrom(value: unknown): SubAgentToolTrace["display"] | undefined {
+  const display = asRecord(value);
+  const kind = stringFrom(display.kind);
+  return kind === undefined ? undefined : value as SubAgentToolTrace["display"];
+}
+
+function toolEnvelopeFrom(value: unknown): SubAgentToolTrace["envelope"] | undefined {
+  const envelope = asRecord(value);
+  const agentSummary = stringFrom(envelope.agentSummary);
+  return agentSummary === undefined ? undefined : value as SubAgentToolTrace["envelope"];
+}
+
+function toolErrorFactsFrom(value: unknown): SubAgentToolTrace["errorFacts"] | undefined {
+  const facts = asRecord(value);
+  return Object.keys(facts).length === 0 ? undefined : facts as SubAgentToolTrace["errorFacts"];
 }
 
 function normalizeOptionalRoundLimit(value: number | undefined): number | undefined {

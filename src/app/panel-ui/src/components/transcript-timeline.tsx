@@ -16,7 +16,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { TranscriptNode } from "../contracts/run";
+import type { SubAgentRunView, TranscriptNode } from "../contracts/run";
 import {
   ConfirmationNode,
   type ConfirmationProjection,
@@ -26,11 +26,13 @@ import {
 } from "../../../panel-agent-work-timeline-view";
 import type {
   ActivityBadge,
+  ActivityToolKind,
   ActivityItem,
   ActivityExpandedSection,
 } from "../../../panel-transcript-activity-copy";
 import { resolveActivityToolKind } from "../../../panel-transcript-activity-copy";
 import { collapsedTimelineSummary } from "../../../panel-ui-timeline-collapse";
+import { SubAgentInlineCard } from "./sub-agent-run-viewer";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";
 export { pendingForTurn } from "../../../panel-transcript-confirmation-projection";
@@ -45,6 +47,7 @@ const TOOL_KIND_ICON: Record<string, LucideIcon> = {
   confirmation: CircleCheck,
   decision: Scale,
   system: Cog,
+  sub_agent: Sparkles,
   other: Wand2,
 };
 
@@ -54,7 +57,10 @@ type AgentWorkTimelineProps = {
   readonly lifecycle?: "open" | "settled" | "attention";
   readonly collapseReason?: string;
   readonly selectedItemKey?: string;
+  readonly selectedSubAgentRunId?: string;
+  readonly selectedSubAgentBatchId?: string;
   readonly selectableItemKeys?: readonly string[];
+  readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly onSelectItem?: (item: ActivityItem) => void;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
@@ -76,7 +82,11 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
         const toolKind = item.toolKind ?? resolveActivityToolKind(item);
         const selectable = props.onSelectItem !== undefined &&
           (props.selectableItemKeys === undefined || props.selectableItemKeys.includes(item.key));
-        const selected = selectable && props.selectedItemKey === item.key;
+        const selected = selectable && (
+          props.selectedItemKey === item.key ||
+          (item.subAgentRunId !== undefined && item.subAgentRunId === props.selectedSubAgentRunId) ||
+          (item.subAgentBatchId !== undefined && item.subAgentBatchId === props.selectedSubAgentBatchId)
+        );
         if (item.variant === "context_compaction") {
           return (
             <ContextCompactionStatusLine
@@ -86,42 +96,48 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
             />
           );
         }
+        if (item.variant === "sub_agent") {
+          const run = item.subAgentRunId === undefined
+            ? undefined
+            : props.subAgentRuns?.find((candidate) => candidate.subRunId === item.subAgentRunId);
+          const batchRuns = item.subAgentBatchId === undefined
+            ? undefined
+            : props.subAgentRuns?.filter((candidate) => candidate.batchId === item.subAgentBatchId);
+          return timelineStep({
+            item,
+            current,
+            selectable,
+            selected,
+            toolKind,
+            onSelectItem: props.onSelectItem,
+            content: (
+              <>
+                <span className="agent-activity-marker" aria-hidden="true" />
+                <SubAgentInlineCard
+                  run={run}
+                  batchRuns={batchRuns}
+                  batchStats={{
+                    total: item.subAgentTotalCount,
+                    completed: item.subAgentSuccessCount,
+                    failed: item.subAgentFailedCount,
+                    cancelled: item.subAgentCancelledCount,
+                    approvalRequired: item.subAgentApprovalRequiredCount,
+                    notStarted: item.subAgentNotStartedCount,
+                  }}
+                  fallbackTitle={item.copy.label ?? "子 Agent"}
+                  fallbackSummary={item.copy.detail}
+                />
+              </>
+            ),
+          });
+        }
         const content = (
           <>
             <span className="agent-activity-marker" aria-hidden="true" />
             <ActivityLine item={item} />
           </>
         );
-        if (selectable) {
-          return (
-            <button
-              type="button"
-              className={`agent-activity-step ${item.tone} ${item.phase}`}
-              data-current={current ? "true" : undefined}
-              data-selected={selected ? "true" : undefined}
-              data-selectable="true"
-              data-tool-kind={toolKind}
-              aria-current={current ? "step" : undefined}
-              aria-pressed={selected}
-              onClick={() => props.onSelectItem?.(item)}
-              key={item.key}
-            >
-              {content}
-            </button>
-          );
-        }
-        return (
-          <div
-            className={`agent-activity-step ${item.tone} ${item.phase}`}
-            data-current={current ? "true" : undefined}
-            data-selected={selected ? "true" : undefined}
-            data-tool-kind={toolKind}
-            aria-current={current ? "step" : undefined}
-            key={item.key}
-          >
-            {content}
-          </div>
-        );
+        return timelineStep({ item, current, selectable, selected, toolKind, onSelectItem: props.onSelectItem, content });
       })}
       {confirmation.current !== undefined && (
         <div className="agent-activity-step confirmation waiting_approval" data-current="true" aria-current="step">
@@ -185,6 +201,47 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
     </section>
   );
 }, agentWorkTimelinePropsEqual);
+
+function timelineStep(input: {
+  readonly item: ActivityItem;
+  readonly current: boolean;
+  readonly selectable: boolean;
+  readonly selected: boolean;
+  readonly toolKind: ActivityToolKind;
+  readonly onSelectItem?: (item: ActivityItem) => void;
+  readonly content: React.ReactNode;
+}): React.ReactElement {
+  if (input.selectable) {
+    return (
+      <button
+        type="button"
+        className={`agent-activity-step ${input.item.tone} ${input.item.phase}`}
+        data-current={input.current ? "true" : undefined}
+        data-selected={input.selected ? "true" : undefined}
+        data-selectable="true"
+        data-tool-kind={input.toolKind}
+        aria-current={input.current ? "step" : undefined}
+        aria-pressed={input.selected}
+        onClick={() => input.onSelectItem?.(input.item)}
+        key={input.item.key}
+      >
+        {input.content}
+      </button>
+    );
+  }
+  return (
+    <div
+      className={`agent-activity-step ${input.item.tone} ${input.item.phase}`}
+      data-current={input.current ? "true" : undefined}
+      data-selected={input.selected ? "true" : undefined}
+      data-tool-kind={input.toolKind}
+      aria-current={input.current ? "step" : undefined}
+      key={input.item.key}
+    >
+      {input.content}
+    </div>
+  );
+}
 
 type ActivityMetricKind = "web" | "read" | "edit" | "command" | "other";
 
@@ -511,6 +568,9 @@ function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentW
     left.lifecycle === right.lifecycle &&
     left.collapseReason === right.collapseReason &&
     left.selectedItemKey === right.selectedItemKey &&
+    left.selectedSubAgentRunId === right.selectedSubAgentRunId &&
+    left.selectedSubAgentBatchId === right.selectedSubAgentBatchId &&
+    left.subAgentRuns === right.subAgentRuns &&
     stringListsEqual(left.selectableItemKeys, right.selectableItemKeys) &&
     left.onSelectItem === right.onSelectItem &&
     left.onDecision === right.onDecision &&
@@ -543,9 +603,18 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
   if (left === undefined || right === undefined) return false;
   return left.nodeId === right.nodeId &&
     left.key === right.key &&
+    left.variant === right.variant &&
     left.tone === right.tone &&
     left.phase === right.phase &&
     left.toolKind === right.toolKind &&
+    left.subAgentRunId === right.subAgentRunId &&
+    left.subAgentBatchId === right.subAgentBatchId &&
+    left.subAgentTotalCount === right.subAgentTotalCount &&
+    left.subAgentSuccessCount === right.subAgentSuccessCount &&
+    left.subAgentFailedCount === right.subAgentFailedCount &&
+    left.subAgentCancelledCount === right.subAgentCancelledCount &&
+    left.subAgentApprovalRequiredCount === right.subAgentApprovalRequiredCount &&
+    left.subAgentNotStartedCount === right.subAgentNotStartedCount &&
     left.copy.label === right.copy.label &&
     left.copy.detail === right.copy.detail &&
     left.copy.expandedDetail === right.copy.expandedDetail &&

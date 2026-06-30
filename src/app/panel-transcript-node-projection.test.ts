@@ -37,6 +37,32 @@ test("panel transcript nodes drop generic ordinary processing notes", () => {
   assert.deepEqual(nodes, []);
 });
 
+test("panel transcript nodes expose sub-agent runs as dedicated activity nodes", () => {
+  const nodes = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:event:1:sub_agent.completed",
+      sequence: 1,
+      type: "sub_agent.completed",
+      summary: "Creative Advisor 运行结束：三条建议。",
+      detail: {
+        kind: "sub_agent",
+        subAgentRunId: "sub-run-1",
+        subAgentName: "Creative Advisor",
+        subAgentStatus: "completed",
+        subAgentModelRounds: 1,
+        subAgentToolCalls: 0,
+      },
+    }),
+  ]);
+
+  assert.equal(nodes[0]?.kind, "sub_agent");
+  assert.equal(nodes[0]?.subAgentRunId, "sub-run-1");
+
+  const activity = displayActivityItemsForNodes(nodes);
+  assert.equal(activity[0]?.variant, "sub_agent");
+  assert.equal(activity[0]?.subAgentRunId, "sub-run-1");
+});
+
 test("panel transcript nodes attach model usage to completed answer bodies", () => {
   const nodes = createPanelTranscriptNodes([
     panelEvent({

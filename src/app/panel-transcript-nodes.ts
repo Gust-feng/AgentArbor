@@ -53,6 +53,20 @@ export type PanelTranscriptStreamEvent = {
     readonly errorDomain?: ToolErrorDomain;
     readonly errorFacts?: ToolErrorFacts;
     readonly modelUsage?: ModelUsage;
+    readonly subAgentRunId?: string;
+    readonly subAgentBatchId?: string;
+    readonly subAgentName?: string;
+    readonly subAgentStatus?: string;
+    readonly subAgentTask?: string;
+    readonly subAgentModelRounds?: number;
+    readonly subAgentToolCalls?: number;
+    readonly subAgentDurationMs?: number;
+    readonly subAgentTotalCount?: number;
+    readonly subAgentSuccessCount?: number;
+    readonly subAgentFailedCount?: number;
+    readonly subAgentCancelledCount?: number;
+    readonly subAgentApprovalRequiredCount?: number;
+    readonly subAgentNotStartedCount?: number;
   };
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];
@@ -192,6 +206,27 @@ function transcriptNodeForEvent(
       display: event.detail?.display,
     });
   }
+  if (
+    event.type === "sub_agent.started" ||
+    event.type === "sub_agent.completed" ||
+    event.type === "sub_agent_batch.started" ||
+    event.type === "sub_agent_batch.completed"
+  ) {
+    return transcriptNode(event, {
+      kind: "sub_agent",
+      phase: subAgentTranscriptPhase(event),
+      title: event.agentLabel ?? "子 Agent",
+      summary: event.summary,
+      subAgentRunId: event.detail?.subAgentRunId,
+      subAgentBatchId: event.detail?.subAgentBatchId,
+      subAgentTotalCount: event.detail?.subAgentTotalCount,
+      subAgentSuccessCount: event.detail?.subAgentSuccessCount,
+      subAgentFailedCount: event.detail?.subAgentFailedCount,
+      subAgentCancelledCount: event.detail?.subAgentCancelledCount,
+      subAgentApprovalRequiredCount: event.detail?.subAgentApprovalRequiredCount,
+      subAgentNotStartedCount: event.detail?.subAgentNotStartedCount,
+    });
+  }
   if (event.type === "confirmation.needed") {
     const pendingConfirmation = pendingConfirmationForPanelEvent(event, context.pendingConfirmation);
     if (context.confirmationMode === "current" && pendingConfirmation === undefined) {
@@ -279,6 +314,14 @@ function contextCompactionTranscriptTitle(type: string): string {
   if (type === "context.compaction.requested") return "正在压缩上下文";
   if (type === "context.compaction.completed") return "上下文压缩完成";
   return "上下文压缩失败";
+}
+
+function subAgentTranscriptPhase(event: PanelTranscriptStreamEvent): TranscriptNodePhase {
+  if (event.status === "running") return "executing";
+  if (event.status === "approval_needed") return "waiting_approval";
+  if (event.status === "failed") return "failed";
+  if (event.status === "cancelled") return "cancelled";
+  return "completed";
 }
 
 type PendingBodyNode = {
@@ -432,6 +475,14 @@ function transcriptNode(
     readonly display?: ToolDisplayProjection;
     readonly confirmation?: TranscriptNode["confirmation"];
     readonly modelUsage?: ModelUsage;
+    readonly subAgentRunId?: string;
+    readonly subAgentBatchId?: string;
+    readonly subAgentTotalCount?: number;
+    readonly subAgentSuccessCount?: number;
+    readonly subAgentFailedCount?: number;
+    readonly subAgentCancelledCount?: number;
+    readonly subAgentApprovalRequiredCount?: number;
+    readonly subAgentNotStartedCount?: number;
   }
 ): TranscriptNode {
   return {
@@ -446,6 +497,14 @@ function transcriptNode(
     text: input.text,
     timestamp: event.createdAt,
     toolName: event.toolName,
+    subAgentRunId: input.subAgentRunId,
+    subAgentBatchId: input.subAgentBatchId,
+    subAgentTotalCount: input.subAgentTotalCount,
+    subAgentSuccessCount: input.subAgentSuccessCount,
+    subAgentFailedCount: input.subAgentFailedCount,
+    subAgentCancelledCount: input.subAgentCancelledCount,
+    subAgentApprovalRequiredCount: input.subAgentApprovalRequiredCount,
+    subAgentNotStartedCount: input.subAgentNotStartedCount,
     display: input.display,
     confirmation: input.confirmation,
     modelUsage: input.modelUsage,

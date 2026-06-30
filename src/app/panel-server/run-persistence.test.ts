@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { RuntimeContextLedgerRecord, RuntimeDatabase, RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
+import type {
+  RuntimeContextLedgerRecord,
+  RuntimeDatabase,
+  RuntimeRunSnapshot,
+  RuntimeSubAgentRunRecord,
+} from "../../domain/runtime-database/index.js";
 import type {
   RuntimeArtifactRecord,
   RuntimeConfirmationRecord,
@@ -320,6 +325,10 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
 
   async replaceConfirmations(_runId: string, confirmations: readonly RuntimeConfirmationRecord[]): Promise<readonly RuntimeConfirmationRecord[]> {
     return confirmations;
+  }
+
+  async replaceSubAgentRuns(_runId: string, records: readonly RuntimeSubAgentRunRecord[]): Promise<readonly RuntimeSubAgentRunRecord[]> {
+    return records;
   }
 
   async upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord> {

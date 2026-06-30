@@ -45,11 +45,19 @@ export type ActivityBadge = {
 export type ActivityItem = {
   readonly nodeId: string;
   readonly key: string;
-  readonly variant?: "context_compaction";
+  readonly variant?: "context_compaction" | "sub_agent";
   readonly copy: ActivityLineCopy;
-  readonly tone: "thinking" | "narration" | "tool" | "confirmation" | "decision" | "system";
+  readonly tone: "thinking" | "narration" | "tool" | "confirmation" | "decision" | "sub_agent" | "system";
   readonly phase: ProjectableTranscriptNode["phase"];
-  readonly toolKind?: "command" | "search" | "read" | "edit" | "web" | "thinking" | "system" | "confirmation" | "decision" | "other";
+  readonly toolKind?: "command" | "search" | "read" | "edit" | "web" | "thinking" | "system" | "confirmation" | "decision" | "sub_agent" | "other";
+  readonly subAgentRunId?: string;
+  readonly subAgentBatchId?: string;
+  readonly subAgentTotalCount?: number;
+  readonly subAgentSuccessCount?: number;
+  readonly subAgentFailedCount?: number;
+  readonly subAgentCancelledCount?: number;
+  readonly subAgentApprovalRequiredCount?: number;
+  readonly subAgentNotStartedCount?: number;
   readonly statusBadge?: ActivityBadge;
   readonly badges?: readonly ActivityBadge[];
   readonly expandedSections?: readonly ActivityExpandedSection[];
@@ -79,6 +87,9 @@ export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLi
   if (node.kind === "user_decision") {
     return readableUserDecisionCopy(node);
   }
+  if (node.kind === "sub_agent") {
+    return readableSubAgentCopy(node);
+  }
   if (node.kind === "system") {
     if (isContextCompactionNode(node)) {
       return contextCompactionActivityCopy(node);
@@ -106,6 +117,7 @@ export function resolveActivityToolKind(item: {
   if (item.tone === "thinking") return "thinking";
   if (item.tone === "confirmation") return "confirmation";
   if (item.tone === "decision") return "decision";
+  if (item.tone === "sub_agent") return "sub_agent";
   if (item.tone === "system") return "system";
   const label = item.copy.label;
   if (label === "命令") return "command";
@@ -126,11 +138,19 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
     const item: ActivityItem = {
       nodeId: node.nodeId,
       key: activityItemKey(node),
-      variant: isContextCompactionNode(node) ? "context_compaction" : undefined,
+      variant: activityVariantForNode(node),
       copy,
       tone,
       phase: node.phase,
       toolKind: resolveActivityToolKind({ tone, copy }),
+      subAgentRunId: node.subAgentRunId,
+      subAgentBatchId: node.subAgentBatchId,
+      subAgentTotalCount: node.subAgentTotalCount,
+      subAgentSuccessCount: node.subAgentSuccessCount,
+      subAgentFailedCount: node.subAgentFailedCount,
+      subAgentCancelledCount: node.subAgentCancelledCount,
+      subAgentApprovalRequiredCount: node.subAgentApprovalRequiredCount,
+      subAgentNotStartedCount: node.subAgentNotStartedCount,
       statusBadge: activityStatusBadge(node),
       badges: activityBadgesForNode(node),
       expandedSections: activityExpandedSectionsForNode(node, copy),
@@ -143,6 +163,7 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
 export function displayActivityItemsForNodes(nodes: readonly ProjectableTranscriptNode[]): readonly ActivityItem[] {
   const items: ActivityItem[] = [];
   const requestedToolItemIndexByCall = new Map<string, number>();
+  const subAgentItemIndexByKey = new Map<string, number>();
   const failureCauseKeysByRun = new Map<string, Set<string>>();
   for (const node of nodes) {
     const copy = activityLineForNode(node);
@@ -152,6 +173,18 @@ export function displayActivityItemsForNodes(nodes: readonly ProjectableTranscri
       continue;
     }
     recordFailureCauseKey(node, item, failureCauseKeysByRun);
+    const subAgentKey = subAgentActivityKey(node);
+    if (subAgentKey !== undefined) {
+      const previousIndex = subAgentItemIndexByKey.get(subAgentKey);
+      if (previousIndex !== undefined) {
+        const previous = items[previousIndex];
+        if (previous !== undefined) {
+          items[previousIndex] = mergeSubAgentActivityItems(previous, item);
+          continue;
+        }
+      }
+      subAgentItemIndexByKey.set(subAgentKey, items.length);
+    }
     const toolCallId = toolCallIdForActivityNode(node);
     if (toolCallId !== undefined && node.kind === "tool") {
       const previousIndex = requestedToolItemIndexByCall.get(toolCallId);
@@ -223,11 +256,19 @@ function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLin
   return {
     nodeId: node.nodeId,
     key: activityItemKey(node),
-    variant: isContextCompactionNode(node) ? "context_compaction" : undefined,
+    variant: activityVariantForNode(node),
     copy,
     tone,
     phase: node.phase,
     toolKind: resolveActivityToolKind({ tone, copy }),
+    subAgentRunId: node.subAgentRunId,
+    subAgentBatchId: node.subAgentBatchId,
+    subAgentTotalCount: node.subAgentTotalCount,
+    subAgentSuccessCount: node.subAgentSuccessCount,
+    subAgentFailedCount: node.subAgentFailedCount,
+    subAgentCancelledCount: node.subAgentCancelledCount,
+    subAgentApprovalRequiredCount: node.subAgentApprovalRequiredCount,
+    subAgentNotStartedCount: node.subAgentNotStartedCount,
     statusBadge: activityStatusBadge(node),
     badges: activityBadgesForNode(node),
     expandedSections: activityExpandedSectionsForNode(node, copy),
@@ -247,6 +288,13 @@ function activityStatusBadge(node: ProjectableTranscriptNode): ActivityBadge | u
     if (node.phase === "guidance") return { label: "已补充", tone: "accent" };
     if (node.phase === "denied") return { label: "已拒绝", tone: "danger" };
     if (node.phase === "approved") return { label: "已允许", tone: "success" };
+    return undefined;
+  }
+  if (node.kind === "sub_agent") {
+    if (node.phase === "executing") return { label: "运行中", tone: "accent" };
+    if (node.phase === "waiting_approval") return { label: "待确认", tone: "warning" };
+    if (node.phase === "completed") return { label: "已完成", tone: "success" };
+    if (node.phase === "failed" || node.phase === "blocked" || node.phase === "cancelled") return { label: "未完成", tone: "danger" };
     return undefined;
   }
   if (node.kind !== "tool") {
@@ -340,10 +388,25 @@ function activityBadgesForNode(node: ProjectableTranscriptNode): readonly Activi
   return badges.length === 0 ? undefined : badges;
 }
 
+function activityVariantForNode(node: ProjectableTranscriptNode): ActivityItem["variant"] {
+  if (isContextCompactionNode(node)) return "context_compaction";
+  if (node.kind === "sub_agent") return "sub_agent";
+  return undefined;
+}
+
 function isContextCompactionNode(node: ProjectableTranscriptNode): boolean {
   return node.eventType === "context.compaction.requested" ||
     node.eventType === "context.compaction.completed" ||
     node.eventType === "context.compaction.failed";
+}
+
+function readableSubAgentCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
+  const label = node.subAgentBatchId === undefined ? "子 Agent" : "子 Agent 批次";
+  const detail = readableNarrationText(node.summary ?? node.text ?? node.title);
+  return {
+    label,
+    detail: detail ?? (node.subAgentBatchId === undefined ? "子 Agent 运行。" : "子 Agent 批次运行。"),
+  };
 }
 
 function contextCompactionActivityCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
@@ -504,6 +567,35 @@ function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem)
       : expandedDetail === undefined
         ? undefined
         : fallbackExpandedSections({ ...terminal.copy, expandedDetail }),
+  };
+}
+
+function subAgentActivityKey(node: ProjectableTranscriptNode): string | undefined {
+  if (node.kind !== "sub_agent") {
+    return undefined;
+  }
+  if (node.subAgentBatchId !== undefined) {
+    return `batch:${node.subAgentBatchId}`;
+  }
+  if (node.subAgentRunId !== undefined) {
+    return `run:${node.subAgentRunId}`;
+  }
+  return undefined;
+}
+
+function mergeSubAgentActivityItems(previous: ActivityItem, next: ActivityItem): ActivityItem {
+  return {
+    ...next,
+    nodeId: previous.nodeId,
+    key: previous.key,
+    subAgentRunId: next.subAgentRunId ?? previous.subAgentRunId,
+    subAgentBatchId: next.subAgentBatchId ?? previous.subAgentBatchId,
+    subAgentTotalCount: next.subAgentTotalCount ?? previous.subAgentTotalCount,
+    subAgentSuccessCount: next.subAgentSuccessCount ?? previous.subAgentSuccessCount,
+    subAgentFailedCount: next.subAgentFailedCount ?? previous.subAgentFailedCount,
+    subAgentCancelledCount: next.subAgentCancelledCount ?? previous.subAgentCancelledCount,
+    subAgentApprovalRequiredCount: next.subAgentApprovalRequiredCount ?? previous.subAgentApprovalRequiredCount,
+    subAgentNotStartedCount: next.subAgentNotStartedCount ?? previous.subAgentNotStartedCount,
   };
 }
 
@@ -1664,6 +1756,7 @@ function activityToneForNode(node: ProjectableTranscriptNode): ActivityItem["ton
   if (node.kind === "tool") return "tool";
   if (node.kind === "confirmation") return "confirmation";
   if (node.kind === "user_decision") return "decision";
+  if (node.kind === "sub_agent") return "sub_agent";
   return "system";
 }
 

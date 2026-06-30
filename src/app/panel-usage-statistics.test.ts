@@ -246,6 +246,7 @@ function snapshotRecord(
     toolCalls: [],
     artifacts: [],
     confirmations: [],
+    subAgentRuns: [],
   };
 }
 

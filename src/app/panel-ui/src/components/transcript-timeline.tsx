@@ -58,8 +58,6 @@ type AgentWorkTimelineProps = {
   readonly lifecycle?: "open" | "settled" | "attention";
   readonly collapseReason?: string;
   readonly selectedItemKey?: string;
-  readonly selectedSubAgentRunId?: string;
-  readonly selectedSubAgentBatchId?: string;
   readonly selectableItemKeys?: readonly string[];
   readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly onSelectItem?: (item: ActivityItem) => void;
@@ -83,11 +81,7 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
         const toolKind = item.toolKind ?? resolveActivityToolKind(item);
         const selectable = props.onSelectItem !== undefined &&
           (props.selectableItemKeys === undefined || props.selectableItemKeys.includes(item.key));
-        const selected = selectable && (
-          props.selectedItemKey === item.key ||
-          (item.subAgentRunId !== undefined && item.subAgentRunId === props.selectedSubAgentRunId) ||
-          (item.subAgentBatchId !== undefined && item.subAgentBatchId === props.selectedSubAgentBatchId)
-        );
+        const selected = selectable && props.selectedItemKey === item.key;
         if (item.variant === "context_compaction") {
           return (
             <ContextCompactionStatusLine
@@ -107,10 +101,9 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
           return timelineStep({
             item,
             current,
-            selectable,
-            selected,
+            selectable: false,
+            selected: false,
             toolKind,
-            onSelectItem: props.onSelectItem,
             content: (
               <>
                 <span className="agent-activity-marker" aria-hidden="true" />
@@ -125,8 +118,8 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
                     approvalRequired: item.subAgentApprovalRequiredCount,
                     notStarted: item.subAgentNotStartedCount,
                   }}
-                  fallbackTitle={item.copy.label ?? "子 Agent"}
-                  fallbackSummary={item.copy.detail}
+                  fallbackTitle={item.subAgentName ?? item.copy.label ?? "子 Agent"}
+                  fallbackSummary={item.subAgentTask ?? item.copy.detail}
                 />
               </>
             ),
@@ -417,10 +410,13 @@ function shouldRenderExpandedDetail(item: ActivityItem): boolean {
   if (item.tone === "tool" || item.tone === 'confirmation' || item.tone === "decision") {
     return sections.length > 0 || item.copy.expandedDetail !== undefined;
   }
+  if (item.tone === "thinking") {
+    return sections.length > 0 || item.copy.expandedDetail !== undefined;
+  }
   const hasStructuredSections = sections.some((section) => section.title !== "详情");
   if (!itemNeedsAttention(item)) return false;
   if (hasStructuredSections) return true;
-  if (item.tone === "thinking" || item.tone === "narration" || item.tone === "system") {
+  if (item.tone === "narration" || item.tone === "system") {
     return false;
   }
   return sections.length > 0 || item.copy.expandedDetail !== undefined;
@@ -443,7 +439,7 @@ function itemNeedsAttention(item: ActivityItem): boolean {
 }
 
 function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.ReactElement {
-  const sections = item.expandedSections;
+  const sections = item.expandedSections ?? expandedDetailSectionsForItem(item);
   if (sections !== undefined && sections.length > 0) {
     return (
       <div className="agent-activity-expanded-detail">
@@ -463,7 +459,18 @@ function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.R
       </div>
     );
   }
-  return <p className="agent-activity-expanded-detail">{item.copy.expandedDetail}</p>;
+  return <></>;
+}
+
+function expandedDetailSectionsForItem(item: ActivityItem): readonly ActivityExpandedSection[] | undefined {
+  if (item.copy.expandedDetail === undefined) {
+    return undefined;
+  }
+  return [{
+    title: "详情",
+    content: item.copy.expandedDetail,
+    format: item.tone === "thinking" ? "quote" : "plain",
+  }];
 }
 
 function shouldHideExpandedSectionTitle(
@@ -634,8 +641,6 @@ function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentW
     left.lifecycle === right.lifecycle &&
     left.collapseReason === right.collapseReason &&
     left.selectedItemKey === right.selectedItemKey &&
-    left.selectedSubAgentRunId === right.selectedSubAgentRunId &&
-    left.selectedSubAgentBatchId === right.selectedSubAgentBatchId &&
     left.subAgentRuns === right.subAgentRuns &&
     stringListsEqual(left.selectableItemKeys, right.selectableItemKeys) &&
     left.onSelectItem === right.onSelectItem &&
@@ -675,6 +680,8 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
     left.toolKind === right.toolKind &&
     left.subAgentRunId === right.subAgentRunId &&
     left.subAgentBatchId === right.subAgentBatchId &&
+    left.subAgentName === right.subAgentName &&
+    left.subAgentTask === right.subAgentTask &&
     left.subAgentTotalCount === right.subAgentTotalCount &&
     left.subAgentSuccessCount === right.subAgentSuccessCount &&
     left.subAgentFailedCount === right.subAgentFailedCount &&

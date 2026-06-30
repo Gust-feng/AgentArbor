@@ -43,9 +43,6 @@ export function TranscriptChain(props: {
   readonly selectedModelId: string;
   readonly showModelUsage: boolean;
   readonly subAgentRuns?: readonly SubAgentRunView[];
-  readonly selectedSubAgentRunId?: string;
-  readonly selectedSubAgentBatchId?: string;
-  readonly onSelectSubAgentRun?: (input: { readonly runId?: string; readonly batchId?: string }) => void;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
   readonly hiddenEarlierTurnCount?: number;
@@ -94,9 +91,6 @@ export function TranscriptChain(props: {
               workflow={item.workflow}
               showModelUsage={props.showModelUsage}
               subAgentRuns={props.subAgentRuns}
-              selectedSubAgentRunId={props.selectedSubAgentRunId}
-              selectedSubAgentBatchId={props.selectedSubAgentBatchId}
-              onSelectSubAgentRun={props.onSelectSubAgentRun}
             />
           )
           : (
@@ -108,9 +102,6 @@ export function TranscriptChain(props: {
               workflow={item.workflow}
               showModelUsage={props.showModelUsage}
               subAgentRuns={props.subAgentRuns}
-              selectedSubAgentRunId={props.selectedSubAgentRunId}
-              selectedSubAgentBatchId={props.selectedSubAgentBatchId}
-              onSelectSubAgentRun={props.onSelectSubAgentRun}
               onDecision={stableOnDecision}
               confirmationBusy={item.hasPendingConfirmation && props.confirmationBusy}
             />
@@ -228,9 +219,6 @@ type AssistantMessageProps = {
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly showModelUsage: boolean;
   readonly subAgentRuns?: readonly SubAgentRunView[];
-  readonly selectedSubAgentRunId?: string;
-  readonly selectedSubAgentBatchId?: string;
-  readonly onSelectSubAgentRun?: (input: { readonly runId?: string; readonly batchId?: string }) => void;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy?: boolean;
 };
@@ -258,9 +246,6 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
               key={segment.kind === "awaiting" ? `awaiting-${index}` : segment.segmentKey}
               segment={segment}
               subAgentRuns={props.subAgentRuns}
-              selectedSubAgentRunId={props.selectedSubAgentRunId}
-              selectedSubAgentBatchId={props.selectedSubAgentBatchId}
-              onSelectSubAgentRun={props.onSelectSubAgentRun}
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy === true}
             />
@@ -286,9 +271,6 @@ type AssistantFailureMessageProps = {
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly showModelUsage: boolean;
   readonly subAgentRuns?: readonly SubAgentRunView[];
-  readonly selectedSubAgentRunId?: string;
-  readonly selectedSubAgentBatchId?: string;
-  readonly onSelectSubAgentRun?: (input: { readonly runId?: string; readonly batchId?: string }) => void;
 };
 
 const AssistantFailureMessage = React.memo(function AssistantFailureMessage(props: AssistantFailureMessageProps): React.ReactElement {
@@ -306,9 +288,6 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
               key={segment.kind === "awaiting" ? `awaiting-${index}` : segment.segmentKey}
               segment={segment}
               subAgentRuns={props.subAgentRuns}
-              selectedSubAgentRunId={props.selectedSubAgentRunId}
-              selectedSubAgentBatchId={props.selectedSubAgentBatchId}
-              onSelectSubAgentRun={props.onSelectSubAgentRun}
               confirmationBusy={false}
             />
           ))
@@ -328,9 +307,6 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
               key={segment.segmentKey}
               segment={segment}
               subAgentRuns={props.subAgentRuns}
-              selectedSubAgentRunId={props.selectedSubAgentRunId}
-              selectedSubAgentBatchId={props.selectedSubAgentBatchId}
-              onSelectSubAgentRun={props.onSelectSubAgentRun}
               confirmationBusy={false}
             />
             ))}
@@ -344,9 +320,6 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
 function AssistantWorkflowSegment(props: {
   readonly segment: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>["segments"][number];
   readonly subAgentRuns?: readonly SubAgentRunView[];
-  readonly selectedSubAgentRunId?: string;
-  readonly selectedSubAgentBatchId?: string;
-  readonly onSelectSubAgentRun?: (input: { readonly runId?: string; readonly batchId?: string }) => void;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }): React.ReactElement {
@@ -359,10 +332,6 @@ function AssistantWorkflowSegment(props: {
         lifecycle={segment.lifecycle}
         collapseReason={segment.collapseReason}
         subAgentRuns={props.subAgentRuns}
-        selectedSubAgentRunId={props.selectedSubAgentRunId}
-        selectedSubAgentBatchId={props.selectedSubAgentBatchId}
-        selectableItemKeys={segment.timeline.items.filter((item) => item.variant === "sub_agent").map((item) => item.key)}
-        onSelectItem={(item) => props.onSelectSubAgentRun?.({ runId: item.subAgentRunId, batchId: item.subAgentBatchId })}
         onDecision={props.onDecision}
         confirmationBusy={props.confirmationBusy}
       />
@@ -511,6 +480,7 @@ function assistantMessagePropsEqual(left: AssistantMessageProps, right: Assistan
     left.live === right.live &&
     left.animateOnMount === right.animateOnMount &&
     assistantModelBadgesEqual(left.model, right.model) &&
+    left.subAgentRuns === right.subAgentRuns &&
     left.onDecision === right.onDecision &&
     left.confirmationBusy === right.confirmationBusy;
 }
@@ -520,6 +490,7 @@ function assistantFailureMessagePropsEqual(left: AssistantFailureMessageProps, r
     left.failure.error === right.failure.error &&
     left.showModelUsage === right.showModelUsage &&
     assistantModelBadgesEqual(left.model, right.model) &&
+    left.subAgentRuns === right.subAgentRuns &&
     left.workflow === right.workflow;
 }
 

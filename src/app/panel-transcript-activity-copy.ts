@@ -11,6 +11,7 @@ import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 const EXPANDED_SEARCH_RESULTS_LIMIT = 20;
 const EXPANDED_DIRECTORY_ENTRIES_LIMIT = 80;
 const EXPANDED_FILE_SEARCH_MATCHES_LIMIT = 80;
+const SUB_AGENT_PARENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
 
 function isString(value: string | undefined): value is string {
   return value !== undefined && value.length > 0;
@@ -57,6 +58,8 @@ export type ActivityItem = {
   readonly toolKind?: "command" | "search" | "read" | "edit" | "web" | "thinking" | "system" | "confirmation" | "decision" | "sub_agent" | "other";
   readonly subAgentRunId?: string;
   readonly subAgentBatchId?: string;
+  readonly subAgentName?: string;
+  readonly subAgentTask?: string;
   readonly subAgentTotalCount?: number;
   readonly subAgentSuccessCount?: number;
   readonly subAgentFailedCount?: number;
@@ -151,6 +154,8 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
       toolKind: resolveActivityToolKind({ tone, copy }),
       subAgentRunId: node.subAgentRunId,
       subAgentBatchId: node.subAgentBatchId,
+      subAgentName: node.subAgentName,
+      subAgentTask: node.subAgentTask,
       subAgentTotalCount: node.subAgentTotalCount,
       subAgentSuccessCount: node.subAgentSuccessCount,
       subAgentFailedCount: node.subAgentFailedCount,
@@ -172,7 +177,12 @@ export function displayActivityItemsForNodes(nodes: readonly ProjectableTranscri
   const requestedToolItemIndexByCall = new Map<string, number>();
   const subAgentItemIndexByKey = new Map<string, number>();
   const failureCauseKeysByRun = new Map<string, Set<string>>();
+  const suppressedSubAgentParentToolKeys = suppressibleSubAgentParentToolKeys(nodes);
   for (const node of nodes) {
+    const suppressedToolKey = subAgentParentToolActivityKey(node);
+    if (suppressedToolKey !== undefined && suppressedSubAgentParentToolKeys.has(suppressedToolKey)) {
+      continue;
+    }
     const copy = activityLineForNode(node);
     if (copy === undefined) continue;
     const item = activityItemFromNode(node, copy);
@@ -213,6 +223,36 @@ export function displayActivityItemsForNodes(nodes: readonly ProjectableTranscri
     );
   }
   return items;
+}
+
+function suppressibleSubAgentParentToolKeys(nodes: readonly ProjectableTranscriptNode[]): ReadonlySet<string> {
+  const suppressed = new Set<string>();
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    if (node?.kind !== "sub_agent") {
+      continue;
+    }
+    for (let lookback = index - 1; lookback >= 0; lookback -= 1) {
+      const key = subAgentParentToolActivityKey(nodes[lookback]!);
+      if (key === undefined) {
+        continue;
+      }
+      suppressed.add(key);
+      break;
+    }
+  }
+  return suppressed;
+}
+
+function subAgentParentToolActivityKey(node: ProjectableTranscriptNode): string | undefined {
+  if (!isSubAgentParentToolNode(node)) {
+    return undefined;
+  }
+  return toolCallIdForActivityNode(node) ?? `node:${node.nodeId}`;
+}
+
+function isSubAgentParentToolNode(node: ProjectableTranscriptNode): boolean {
+  return node.kind === "tool" && SUB_AGENT_PARENT_TOOL_NAMES.has(normalizedToolName(node.toolName));
 }
 
 function isRedundantRunFailureItem(
@@ -270,6 +310,8 @@ function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLin
     toolKind: resolveActivityToolKind({ tone, copy }),
     subAgentRunId: node.subAgentRunId,
     subAgentBatchId: node.subAgentBatchId,
+    subAgentName: node.subAgentName,
+    subAgentTask: node.subAgentTask,
     subAgentTotalCount: node.subAgentTotalCount,
     subAgentSuccessCount: node.subAgentSuccessCount,
     subAgentFailedCount: node.subAgentFailedCount,
@@ -409,12 +451,67 @@ function isContextCompactionNode(node: ProjectableTranscriptNode): boolean {
 }
 
 function readableSubAgentCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
-  const label = node.subAgentBatchId === undefined ? "子 Agent" : "子 Agent 批次";
-  const detail = readableNarrationText(node.summary ?? node.text ?? node.title);
+  if (node.subAgentBatchId !== undefined) {
+    const detail = readableNarrationText(node.summary ?? node.text ?? node.title);
+    return {
+      label: "子 Agent 批次",
+      detail: detail ?? "批次处理中。",
+    };
+  }
+  const label = cleanSubAgentLabel(node.subAgentName) ?? subAgentNameFromCopy(node.summary ?? node.text ?? node.title) ?? "子 Agent";
+  const detail = cleanSubAgentDetail({
+    value: node.subAgentTask ?? node.summary ?? node.text ?? node.title,
+    label,
+    phase: node.phase,
+  });
   return {
     label,
-    detail: detail ?? (node.subAgentBatchId === undefined ? "子 Agent 运行。" : "子 Agent 批次运行。"),
+    detail,
   };
+}
+
+function cleanSubAgentLabel(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (normalized === undefined || normalized.length === 0 || normalized === "子 Agent") {
+    return undefined;
+  }
+  return normalized;
+}
+
+function subAgentNameFromCopy(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (normalized === undefined || normalized.length === 0) {
+    return undefined;
+  }
+  const match = normalized.match(/^(.+?)\s*(?:开始运行|运行结束|已完成|未完成|失败|已取消|等待确认)[：:。.\s]?/u);
+  const name = match?.[1];
+  return name === undefined ? undefined : cleanSubAgentLabel(name);
+}
+
+function cleanSubAgentDetail(input: {
+  readonly value: string | undefined;
+  readonly label: string;
+  readonly phase: ProjectableTranscriptNode["phase"];
+}): string {
+  const normalized = input.value === undefined
+    ? ""
+    : readableNarrationText(input.value)?.replace(/\s+/g, " ").trim() ?? "";
+  const withoutPrefix = normalized
+    .replace(new RegExp(`^${escapeRegExp(input.label)}\\s*(?:开始运行|运行结束|已完成|未完成|失败|已取消|等待确认)[：:。.]?\\s*`, "u"), "")
+    .replace(/^子 Agent\s*(?:开始运行|运行结束|已完成|未完成|失败|已取消|等待确认)[：:。.]?\s*/u, "")
+    .trim();
+  if (withoutPrefix.length > 0 && withoutPrefix !== input.label) {
+    return withoutPrefix;
+  }
+  if (input.phase === "completed") return "已处理";
+  if (input.phase === "failed") return "未完成";
+  if (input.phase === "waiting_approval") return "等待确认";
+  if (input.phase === "cancelled") return "已取消";
+  return "处理中";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function contextCompactionActivityCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
@@ -599,6 +696,8 @@ function mergeSubAgentActivityItems(previous: ActivityItem, next: ActivityItem):
     key: previous.key,
     subAgentRunId: next.subAgentRunId ?? previous.subAgentRunId,
     subAgentBatchId: next.subAgentBatchId ?? previous.subAgentBatchId,
+    subAgentName: next.subAgentName ?? previous.subAgentName,
+    subAgentTask: next.subAgentTask ?? previous.subAgentTask,
     subAgentTotalCount: next.subAgentTotalCount ?? previous.subAgentTotalCount,
     subAgentSuccessCount: next.subAgentSuccessCount ?? previous.subAgentSuccessCount,
     subAgentFailedCount: next.subAgentFailedCount ?? previous.subAgentFailedCount,
@@ -733,8 +832,10 @@ export function readableThinkingText(value: string): string | undefined {
 export function readableThinkingCopy(value: string): ActivityLineCopy | undefined {
   const expandedDetail = readableExpandedModelText(value);
   if (expandedDetail.length === 0) return undefined;
-  const detail = compact(takeNaturalSentences(expandedDetail.replace(/\s*\n+\s*/g, " "), 2), 180);
-  return copyWithNonRepeatingExpandedDetail(detail, expandedDetail);
+  return {
+    detail: "思考中",
+    expandedDetail,
+  };
 }
 
 export function readableNarrationText(value: string): string | undefined {

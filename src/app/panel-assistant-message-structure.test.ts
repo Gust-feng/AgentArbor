@@ -80,6 +80,10 @@ test("assistant message structure uses merged activity nodes instead of stale ra
   assert.equal(activity?.timeline.items[0]?.nodeId, "thinking-live");
   assert.equal(
     activity?.timeline.items[0]?.copy.detail,
+    "思考中",
+  );
+  assert.equal(
+    activity?.timeline.items[0]?.copy.expandedDetail,
     "The user is asking me to demonstrate capabilities and inspect the workspace.",
   );
 });
@@ -183,9 +187,13 @@ test("assistant message structure removes repeated thinking inside one post-body
   const activity = structure.segments[1]?.kind === "activity" ? structure.segments[1] : undefined;
   assert.deepEqual(activity?.timeline.items.map((item) => item.nodeId), ["thinking-live", "tool-1"]);
   assert.deepEqual(activity?.timeline.items.map((item) => item.copy.detail), [
-    "The user is asking me to demonstrate my capabilities.",
+    "思考中",
     "latest AI agent development trends 2025",
   ]);
+  assert.equal(
+    activity?.timeline.items[0]?.copy.expandedDetail,
+    "The user is asking me to demonstrate my capabilities.",
+  );
 });
 
 test("assistant message structure removes repeated narration from the same cold projection", () => {

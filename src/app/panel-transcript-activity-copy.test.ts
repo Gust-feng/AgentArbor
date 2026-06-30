@@ -9,16 +9,16 @@ import {
 } from "./panel-transcript-activity-copy.js";
 import { activityVisibleNodes } from "./panel-transcript-node-projection.js";
 
-test("thinking copy keeps a single readable expandable detail without a label", () => {
+test("thinking copy keeps the line minimal and puts the full thought in detail", () => {
   const text = "## 判断\n\n- 先检查工作区\n- 再决定是否需要确认";
   const copy = readableThinkingCopy(text);
 
-  assert.equal(copy?.detail, "判断 先检查工作区 再决定是否需要确认");
-  assert.equal(copy?.expandedDetail, undefined);
+  assert.equal(copy?.detail, "思考中");
+  assert.equal(copy?.expandedDetail, "判断\n\n先检查工作区\n再决定是否需要确认");
   assert.equal(copy?.label, undefined);
 });
 
-test("thinking copy folds normal Kimi reasoning text without duplicating the summary", () => {
+test("thinking copy keeps normal Kimi reasoning fully expandable", () => {
   const text = [
     `The user is asking me to evaluate my own capabilities—essentially asking "what do you think of your abilities?"`,
     `"This is a reflective/metacognitive question about myself-assessment."`,
@@ -28,9 +28,9 @@ test("thinking copy folds normal Kimi reasoning text without duplicating the sum
   ].join("\n");
   const copy = readableThinkingCopy(text);
 
-  assert.match(copy?.detail ?? "", /The user is asking me to evaluate my own capabilities/);
-  assert.doesNotMatch(copy?.expandedDetail ?? "", /The user is asking me to evaluate my own capabilities/);
-  assert.doesNotMatch(copy?.expandedDetail ?? "", /reflective\/metacognitive question/);
+  assert.equal(copy?.detail, "思考中");
+  assert.match(copy?.expandedDetail ?? "", /The user is asking me to evaluate my own capabilities/);
+  assert.match(copy?.expandedDetail ?? "", /reflective\/metacognitive question/);
   assert.match(copy?.expandedDetail ?? "", /Let me look at one of them/);
   assert.match(copy?.expandedDetail ?? "", /maxLength to see content/);
 });
@@ -39,33 +39,27 @@ test("thinking copy does not invent spaces in compact model text", () => {
   const text = "Theuserisaskingmetodemonstratemycapabilities.\nLetmeshowthemwhatIcandobyexploringthecurrentworkspace.";
   const copy = readableThinkingCopy(text);
 
-  assert.equal(
-    copy?.detail,
-    "Theuserisaskingmetodemonstratemycapabilities. LetmeshowthemwhatIcandobyexploringthecurrentworkspace."
-  );
-  assert.equal(copy?.expandedDetail, undefined);
+  assert.equal(copy?.detail, "思考中");
+  assert.equal(copy?.expandedDetail, "Theuserisaskingmetodemonstratemycapabilities.\nLetmeshowthemwhatIcandobyexploringthecurrentworkspace.");
 });
 
 test("thinking copy preserves inline code and model punctuation", () => {
   const text = "OK, so `cmd` is rejected by sandbox policy. Good, file created. Node.js v24.15.0 works.";
   const copy = readableThinkingCopy(text);
 
-  assert.equal(
-    copy?.detail,
-    "OK, so `cmd` is rejected by sandbox policy. Good, file created."
-  );
-  assert.equal(copy?.expandedDetail, "Node.js v24.15.0 works.");
+  assert.equal(copy?.detail, "思考中");
+  assert.equal(copy?.expandedDetail, "OK, so `cmd` is rejected by sandbox policy. Good, file created. Node.js v24.15.0 works.");
 });
 
 test("thinking copy preserves natural mixed Chinese and English", () => {
   const text = "让我先看看当前工作环境，然后给你一个坦诚的评估。\nThe model output already contains spaces; the UI must not rewrite it.";
   const copy = readableThinkingCopy(text);
 
-  assert.equal(copy?.detail, "让我先看看当前工作环境，然后给你一个坦诚的评估。 The model output already contains spaces; the UI must not rewrite it.");
-  assert.equal(copy?.expandedDetail, undefined);
+  assert.equal(copy?.detail, "思考中");
+  assert.equal(copy?.expandedDetail, "让我先看看当前工作环境，然后给你一个坦诚的评估。\nThe model output already contains spaces; the UI must not rewrite it.");
 });
 
-test("thinking copy keeps expanded detail to the folded overflow only", () => {
+test("thinking copy keeps the entire thought in the expanded detail", () => {
   const text = [
     "Let me analyze the results:",
     "",
@@ -75,9 +69,9 @@ test("thinking copy keeps expanded detail to the folded overflow only", () => {
   ].join("\n");
   const copy = readableThinkingCopy(text);
 
-  assert.match(copy?.detail ?? "", /^Let me analyze the results:/);
-  assert.doesNotMatch(copy?.expandedDetail ?? "", /^Let me analyze the results:/);
-  assert.doesNotMatch(copy?.expandedDetail ?? "", /^nt capabilities/);
+  assert.equal(copy?.detail, "思考中");
+  assert.match(copy?.expandedDetail ?? "", /^Let me analyze the results:/);
+  assert.match(copy?.expandedDetail ?? "", /Agent capabilities/);
   assert.match(copy?.expandedDetail ?? "", /python3 was rejected/);
 });
 
@@ -676,6 +670,8 @@ test("activity item projection derives stable render metadata outside React comp
   assert.equal(items.length, 2);
   assert.equal(items[0]?.tone, "thinking");
   assert.equal(items[0]?.phase, "completed");
+  assert.equal(items[0]?.copy.detail, "思考中");
+  assert.equal(items[0]?.copy.expandedDetail, "先判断目标");
   assert.equal(items[0]?.key.includes("thinking"), true);
   assert.equal(items[1]?.tone, "tool");
 });
@@ -1003,6 +999,48 @@ test("file deletion activity remains visible even without a content preview", ()
   assert.equal(item?.expandedSections, undefined);
 });
 
+test("display activity items suppress sub-agent parent tool rows when a sub-agent card is present", () => {
+  const items = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "call_sub_agent",
+      summary: "已调用子 Agent：research-expert",
+      refs: [{ kind: "tool_call", id: "tool-sub-agent-1" }],
+    }),
+    node({
+      kind: "sub_agent",
+      eventType: "sub_agent.completed",
+      phase: "completed",
+      summary: "research-expert 已完成 RAG 选型。",
+      refs: [{ kind: "tool_call", id: "tool-sub-agent-1" }],
+    }),
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.variant, "sub_agent");
+});
+
+test("sub-agent activity copy separates agent name, status, and task", () => {
+  const items = displayActivityItemsForNodes([
+    node({
+      kind: "sub_agent",
+      eventType: "sub_agent.started",
+      phase: "executing",
+      title: "子 Agent",
+      summary: "code-expert 开始运行：请检查这段代码的边界问题。",
+      subAgentName: "code-expert",
+      subAgentTask: "请检查这段代码的边界问题。",
+    }),
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.variant, "sub_agent");
+  assert.equal(items[0]?.copy.label, "code-expert");
+  assert.equal(items[0]?.copy.detail, "请检查这段代码的边界问题。");
+});
+
 function node(input: {
   readonly kind: TranscriptNode["kind"];
   readonly eventType?: string;
@@ -1011,14 +1049,18 @@ function node(input: {
   readonly summary?: string;
   readonly text?: string;
   readonly toolName?: string;
+  readonly subAgentName?: string;
+  readonly subAgentTask?: string;
   readonly display?: TranscriptNode["display"];
   readonly confirmation?: TranscriptNode["confirmation"];
   readonly refs?: TranscriptNode["refs"];
+  readonly nodeId?: string;
+  readonly sequence?: number;
 }): TranscriptNode {
   return {
-    nodeId: "node-1",
+    nodeId: input.nodeId ?? "node-1",
     runId: "run-1",
-    sequence: 1,
+    sequence: input.sequence ?? 1,
     eventType: input.eventType ?? "agent.note.completed",
     kind: input.kind,
     phase: input.phase,
@@ -1027,6 +1069,8 @@ function node(input: {
     text: input.text,
     timestamp: "2026-06-04T00:00:00.000Z",
     toolName: input.toolName,
+    subAgentName: input.subAgentName,
+    subAgentTask: input.subAgentTask,
     display: input.display,
     confirmation: input.confirmation,
     refs: input.refs ?? [],

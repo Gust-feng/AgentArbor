@@ -34,9 +34,6 @@ export function ChatTranscriptDisplay(props: {
   readonly pending?: ConfirmationProjection;
   readonly showModelUsage: boolean;
   readonly subAgentRuns?: readonly SubAgentRunView[];
-  readonly selectedSubAgentRunId?: string;
-  readonly selectedSubAgentBatchId?: string;
-  readonly onSelectSubAgentRun?: (input: { readonly runId?: string; readonly batchId?: string }) => void;
   readonly standaloneRun?: {
     readonly currentRunId?: string;
     readonly runStatus?: string;
@@ -120,9 +117,6 @@ export function ChatTranscriptDisplay(props: {
       selectedModelId={props.selectedModelId}
       showModelUsage={props.showModelUsage}
       subAgentRuns={props.subAgentRuns}
-      selectedSubAgentRunId={props.selectedSubAgentRunId}
-      selectedSubAgentBatchId={props.selectedSubAgentBatchId}
-      onSelectSubAgentRun={props.onSelectSubAgentRun}
       onDecision={props.onDecision}
       confirmationBusy={props.confirmationBusy}
       hiddenEarlierTurnCount={props.hiddenEarlierTurnCount}

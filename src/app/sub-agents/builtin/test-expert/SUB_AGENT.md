@@ -12,7 +12,7 @@ whenToUse:
 whenNotToUse:
   - "只是运行已有测试时"
   - "不需要写测试的任务时"
-maxSteps: 40
+maxSteps: 200
 ---
 
 # 测试专家

@@ -12,7 +12,7 @@ whenToUse:
 whenNotToUse:
   - "已经确定方案，直接执行时"
   - "不需要调研的简单任务时"
-maxSteps: 40
+maxSteps: 200
 ---
 
 # 调研专家

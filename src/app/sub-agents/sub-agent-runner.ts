@@ -30,7 +30,7 @@ import type { SubAgentDefinition } from "./sub-agent-loader.js";
 import { loadSubAgentBody } from "./sub-agent-loader.js";
 
 const SUB_AGENT_OUTPUT_CONTRACT_ID = "sub_agent.free_text.v1";
-const DEFAULT_MAX_STEPS = 30;
+const DEFAULT_MAX_STEPS = 200;
 const DISPLAY_SUMMARY_MAX_CHARS = 500;
 const SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
 

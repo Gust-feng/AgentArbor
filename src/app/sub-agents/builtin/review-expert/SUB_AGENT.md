@@ -12,7 +12,7 @@ whenToUse:
 whenNotToUse:
   - "只是编写代码不需要审查时"
   - "任务还没完成不需要审查时"
-maxSteps: 30
+maxSteps: 200
 ---
 
 # 审查专家

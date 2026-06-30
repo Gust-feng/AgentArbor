@@ -12,7 +12,7 @@ whenToUse:
 whenNotToUse:
   - "只是简单的代码修改不需要文档时"
   - "文档不相关的任务时"
-maxSteps: 30
+maxSteps: 200
 ---
 
 # 文档专家

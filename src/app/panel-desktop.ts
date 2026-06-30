@@ -9,12 +9,12 @@ import {
   type OpenDialogOptions,
   type Rectangle,
 } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parsePanelDesktopArgs } from "./panel-args.js";
+import { createDesktopLocalPreferenceStore, type DesktopLocalPreferenceStore } from "./panel-desktop-local-preferences.js";
 import {
   createPanelDesktopWindowOptions,
   startPanelDesktopSession,
@@ -41,6 +41,7 @@ const activeWindows = new Set<BrowserWindow>();
 const activeDesktopSessions = new Set<PanelDesktopSession>();
 const startupWindowStates = new WeakMap<BrowserWindow, DesktopStartupWindowState>();
 const mainWindowStates = new WeakMap<BrowserWindow, DesktopMainWindowState>();
+let desktopLocalPreferenceStore: DesktopLocalPreferenceStore | undefined;
 const startupHandoffFallbackTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const startupNativeControlRestoreTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const STARTUP_WINDOW_EXPAND_CHANNEL = "agentarbor:startup-window-expand";
@@ -528,66 +529,21 @@ function installStartupWindowExpansionBridge(): void {
 
 function installDesktopLocalPreferenceBridge(): void {
   ipcMain.on(LOCAL_PREFERENCE_GET_CHANNEL, (event, key: unknown) => {
-    event.returnValue = readDesktopLocalPreference(key);
+    event.returnValue = getDesktopLocalPreferenceStore().read(key);
   });
   ipcMain.on(LOCAL_PREFERENCE_SET_CHANNEL, (event, payload: unknown) => {
-    writeDesktopLocalPreference(payload);
-    event.returnValue = true;
+    event.returnValue = getDesktopLocalPreferenceStore().write(payload);
   });
 }
 
-function readDesktopLocalPreference(key: unknown): string | undefined {
-  const normalizedKey = normalizeDesktopLocalPreferenceKey(key);
-  if (normalizedKey === undefined) return undefined;
-  return readDesktopLocalPreferences()[normalizedKey];
-}
-
-function writeDesktopLocalPreference(payload: unknown): void {
-  if (payload === null || typeof payload !== "object") return;
-  const record = payload as { readonly key?: unknown; readonly value?: unknown };
-  const key = normalizeDesktopLocalPreferenceKey(record.key);
-  const value = typeof record.value === "string" ? record.value : undefined;
-  if (key === undefined || value === undefined) return;
-  const preferences = readDesktopLocalPreferences();
-  preferences[key] = value;
-  const preferencePath = desktopLocalPreferencePath();
-  try {
-    mkdirSync(path.dirname(preferencePath), { recursive: true });
-    writeFileSync(preferencePath, `${JSON.stringify(preferences, null, 2)}\n`, "utf8");
-  } catch {
-    // Preference persistence must not block startup or UI actions.
+function getDesktopLocalPreferenceStore(): DesktopLocalPreferenceStore {
+  if (desktopLocalPreferenceStore === undefined) {
+    desktopLocalPreferenceStore = createDesktopLocalPreferenceStore({
+      userDataDirectory: app.getPath("userData"),
+      appDataDirectory: app.getPath("appData"),
+    });
   }
-}
-
-function readDesktopLocalPreferences(): Record<string, string> {
-  const preferencePath = desktopLocalPreferencePath();
-  if (!existsSync(preferencePath)) {
-    return {};
-  }
-  try {
-    const raw = JSON.parse(readFileSync(preferencePath, "utf8")) as unknown;
-    if (raw === null || typeof raw !== "object") return {};
-    const result: Record<string, string> = {};
-    for (const [key, value] of Object.entries(raw)) {
-      const normalizedKey = normalizeDesktopLocalPreferenceKey(key);
-      if (normalizedKey !== undefined && typeof value === "string") {
-        result[normalizedKey] = value;
-      }
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-function desktopLocalPreferencePath(): string {
-  return path.join(app.getPath("userData"), "preferences", "local-preferences.json");
-}
-
-function normalizeDesktopLocalPreferenceKey(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const key = value.trim();
-  return /^agentarbor[:.][a-z0-9:._-]+$/i.test(key) ? key : undefined;
+  return desktopLocalPreferenceStore;
 }
 
 function panelWindowFromEvent(event: Pick<IpcMainEvent, "sender">): BrowserWindow | undefined {

@@ -28,11 +28,11 @@ function readDesktopLocalPreference(key: string): string | undefined {
   }
 }
 
-function writeDesktopLocalPreference(key: string, value: string): void {
-  if (typeof window === "undefined") return;
+function writeDesktopLocalPreference(key: string, value: string): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    window.agentarborDesktop?.setLocalPreference(key, value);
+    return window.agentarborDesktop?.setLocalPreference(key, value) === true;
   } catch {
-    // Desktop preference persistence is best-effort and falls back to localStorage.
+    return false;
   }
 }

@@ -78,8 +78,8 @@ contextBridge.exposeInMainWorld("agentarborDesktop", {
   getLocalPreference: (key: string): string | undefined => {
     return readDesktopPreference(key);
   },
-  setLocalPreference: (key: string, value: string): void => {
-    ipcRenderer.sendSync("agentarbor:local-preference-set", { key, value });
+  setLocalPreference: (key: string, value: string): boolean => {
+    return ipcRenderer.sendSync("agentarbor:local-preference-set", { key, value }) === true;
   },
   getStartupThemeSnapshot: (): DesktopStartupThemeSnapshot => {
     return readDesktopStartupThemeSnapshot();

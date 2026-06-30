@@ -7,6 +7,7 @@ import type {
   ToolErrorFacts,
   ToolExecutionContext,
   ToolExecutor,
+  ToolExecutorResult,
   ToolPermissionCheck,
   ToolSecurityDecision,
 } from "../../domain/tools/index.js";
@@ -133,9 +134,21 @@ export class ToolCenter {
 
     this.callCount += 1;
     try {
-      const output = await executor.execute(request.input, context);
+      const output = await executor.execute(request.input, {
+        ...context,
+        toolCallId: request.callId,
+        approvedConfirmationIds: permission.approvedConfirmationIds,
+        confirmationPolicy: permission.confirmationPolicy,
+      });
       if (isAbortSignalAborted(context.abortSignal)) {
         return cancelledToolResult(request, startedAt);
+      }
+      if (isToolExecutorResult(output)) {
+        const result = normalizeExecutorResult(output.result, request, startedAt);
+        if (result.status === "approval_required") {
+          this.callCount = Math.max(0, this.callCount - 1);
+        }
+        return result;
       }
       return {
         callId: request.callId,
@@ -165,6 +178,30 @@ export class ToolCenter {
   getCallCount(): number {
     return this.callCount;
   }
+}
+
+function isToolExecutorResult(value: unknown): value is ToolExecutorResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { readonly kind?: unknown }).kind === "tool_call_result" &&
+    typeof (value as { readonly result?: unknown }).result === "object" &&
+    (value as { readonly result?: unknown }).result !== null
+  );
+}
+
+function normalizeExecutorResult(
+  result: ToolCallResult,
+  request: ToolCallRequest,
+  startedAt: number
+): ToolCallResult {
+  return {
+    ...result,
+    callId: request.callId,
+    toolName: request.toolName,
+    input: request.input,
+    durationMs: Number.isFinite(result.durationMs) ? result.durationMs : Date.now() - startedAt,
+  };
 }
 
 function failedToolResult(

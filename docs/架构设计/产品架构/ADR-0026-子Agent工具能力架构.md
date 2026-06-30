@@ -12,7 +12,7 @@
 
 将子 Agent 实现为**普通 Agent 的工具能力**，而非独立编排流程。三个子 Agent 工具（`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`）注册到 `desktop-basic` scope，模型在普通会话中可自主调用，不需要用户显式切换到 deep 模式。
 
-本 ADR 记录六项核心决策：
+本 ADR 记录八项核心决策：
 
 1. **子 Agent 作为工具**：子 Agent 通过标准工具接口暴露给普通 Agent，模型自主选择调用，不引入新的会话入口或运行模式切换。
 2. **定义格式复用 Skill 模式**：子 Agent 定义采用 Markdown + YAML frontmatter，与 Skill 定义格式一致，降低用户学习成本。
@@ -20,6 +20,8 @@
 4. **stub + 动态注册运行时集成**：capability snapshot 阶段注册 stub 工具定义，运行时由 `ToolExecutionBroker` 注入真实 executor。
 5. **一层约束**：子 Agent 不能递归派生子 Agent，只有顶层 Agent 拥有 `spawn_sub_agent`。
 6. **复用基础设施**：子 Agent 执行复用 `IntelligenceChannel` / `ToolExecutionBroker` / `ToolCenter` / 确认机制，不另起平行运行时。
+7. **当前工具权限策略**：子 Agent 暂时无条件继承父 run 当前 `allowedTools`，并在运行时强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`，避免递归派生；`SUB_AGENT.md` 的 `allowed-tools` 与 `spawn_sub_agent.allowed_tools` 仅作为未来声明字段保留，当前不参与裁剪。
+8. **确认冒泡**：子 Agent 内部工具触发确认时，不包装成失败摘要，而是作为父 run 的 pending confirmation 进入既有确认流程；用户可见、可批准、可拒绝或补充指引。
 
 ## 动机
 
@@ -37,10 +39,11 @@ ADR-0022 定义了双运行时架构（普通 Agent + deep / Underground），AD
 
 - 子 Agent 通过三个标准工具暴露给普通 Agent，注册到 `desktop-basic` scope：
   - `call_sub_agent`：同步调用单个子 Agent，等待其返回结果后继续主流程。
-  - `call_sub_agents`：同步并行调用多个子 Agent，聚合结果后返回。
-  - `spawn_sub_agent`：派生子 Agent 执行较长任务，主流程可继续推进。
+  - `call_sub_agents`：调用多个子 Agent，聚合已完成结果；遇到内部工具确认时暂停父 run。
+  - `spawn_sub_agent`：派生一次性子 Agent 执行任务，完成或遇到确认后把结果交回父层模型。
 - 三个工具均通过 `ToolCenter` 注册与发现，模型在普通会话中按工具契约自主选择调用，**不需要用户显式切换模式**，也不存在自动升级到 deep 的路径。
 - 子 Agent 工具调用经共享 `Confirmation Gate`，沿用普通 Agent 的工具边界与确认语义；不因“子 Agent”命名而绕过确认或扩权。
+- 当前实现中，子 Agent 内部工具事件复用父 run 的事件发布通道；内部工具的 `tool.requested`、`tool.completed`、`tool.failed`、`user_approval.requested` 均进入父 run 事件流。
 
 ### 决策二：定义格式复用 Skill 模式（Markdown + YAML frontmatter）
 
@@ -68,10 +71,24 @@ ADR-0022 定义了双运行时架构（普通 Agent + deep / Underground），AD
 ### 决策五：一层约束（不可递归派生）
 
 - 子 Agent **不能递归派生子 Agent**：只有顶层普通 Agent 拥有 `spawn_sub_agent`，子 Agent 自身的工具集不包含 `spawn_sub_agent`。
-- 一层硬约束由确定性校验在子 Agent 工具集装配阶段强制：子 Agent 的可用工具集在派生时即排除 `spawn_sub_agent`，递归派生在执行前被拒绝。
+- 一层硬约束由确定性校验在子 Agent 工具集装配阶段强制：子 Agent 的可用工具集在派生时排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`，递归派生在执行前被拒绝。
 - 该约束与 ADR-0025 的“强制一层 child（`depth = 1`）”口径一致：无论是 deep 编排还是子 Agent 工具，当前阶段都不允许形成多层递归 Agent Fabric；多层递归属长期范围，不在本期。
 
-### 决策六：复用基础设施（不另起平行运行时）
+### 决策六：当前工具权限无条件继承父 run
+
+- 当前阶段按工程时间与产品口径采用临时策略：子 Agent 不解释、不收敛自身声明的 `allowed-tools`，而是直接继承父 run 已解析出的 `allowedTools`。
+- 继承不是扩权：父 run capability snapshot、ToolCenter executable restriction 与确认门仍是上界；子 Agent 不能拿到父 run 不可见或未授权的工具。
+- 唯一确定性裁剪是递归派生工具：`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 在子 Agent policy 中强制排除。
+- `SUB_AGENT.md` 的 `allowed-tools` 和 `spawn_sub_agent.allowed_tools` 暂时只保留为未来声明字段，不参与当前运行策略。后续若改为声明式收敛，应单独更新 ADR 与开发指南，明确它与父 run capability 的交集语义。
+
+### 决策七：子 Agent 工具确认冒泡到父 run
+
+- 子 Agent 内部调用高影响工具时仍走共享 `ToolCenter` 与 `Confirmation Gate`。
+- 若内部工具返回 `approval_required`，`SubAgentRunner` 返回携带 `pendingApproval` 的 `approval_required` 结果；`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` executor 把该 pending approval 转换成父工具调用的 `ToolCallResult.status = "approval_required"`。
+- 父 run 因而进入既有 `confirmation_needed` 流程，确认卡展示内部工具的标题、影响资源和确认 id；approve 后恢复同一个子 Agent pending turn，deny/guidance 走父 run 现有确认决策路径。
+- `call_sub_agents` 当前采用确认安全优先的保守调度：任一子 Agent 触发确认时停止后续未启动任务，已完成结果保留在事件流，父 run 等待该确认。
+
+### 决策八：复用基础设施（不另起平行运行时）
 
 - 子 Agent 执行**复用**普通 Agent 已成熟的共享设施，不另起平行运行时：
   - `IntelligenceChannel`：子 Agent 经此接入 provider，不直接绑定外部 LLM SDK（遵循 `AGENTS.md` 模型接入层独立模块演进边界）。
@@ -112,6 +129,8 @@ ADR-0022 定义了双运行时架构（普通 Agent + deep / Underground），AD
 - stub + 动态注册运行时集成模式。
 - 一层约束（子 Agent 不可递归派生）。
 - 子 Agent 执行复用 `IntelligenceChannel` / `ToolExecutionBroker` / `ToolCenter` / 确认机制。
+- 子 Agent 内部工具权限无条件继承父 run `allowedTools`，同时强制排除递归派生工具。
+- 子 Agent 内部工具确认冒泡为父 run pending confirmation。
 
 本期明确**不包含**（Out of Scope）：
 

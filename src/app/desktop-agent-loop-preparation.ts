@@ -65,12 +65,16 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     : undefined;
   toolCenter?.resetCallCount();
 
+  let parentAllowedTools: readonly string[] = [];
   if (toolCenter !== undefined && input.options.subAgentRoots !== undefined && toolCenter.register !== undefined) {
     const subAgentRegistry = new SubAgentRegistry({ roots: input.options.subAgentRoots });
     const executors = createSubAgentToolExecutors({
       subAgentRegistry,
       channel: input.channel,
       toolBroker: toolCenter,
+      allowedTools: () => parentAllowedTools,
+      confirmationPolicy: () => input.options.toolConfirmationPolicy,
+      publishToolEvent: (message) => input.runtime.bus.publish(message),
       includeSpawnTool: true,
       eventLog: input.runtime.eventLog,
     });
@@ -112,6 +116,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     toolCenter,
     skillContexts,
   });
+  parentAllowedTools = toolBoundary.allowedTools;
   const turnPolicy = createDesktopAgentTurnPolicy({
     agentDefinition: input.agentDefinition,
     traceId: input.traceId,

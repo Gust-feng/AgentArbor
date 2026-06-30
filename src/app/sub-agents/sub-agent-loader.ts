@@ -32,6 +32,7 @@ export type SubAgentDefinition = {
   readonly description: string;
   readonly enabled: boolean;
   readonly sourcePath: string;
+  readonly inlineSystemPrompt?: string;
   readonly version?: string;
   readonly category?: string;
   readonly whenToUse: readonly string[];

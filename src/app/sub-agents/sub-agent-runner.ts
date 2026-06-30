@@ -1,7 +1,11 @@
 import type { ArborMessage } from "../../domain/common.js";
 import type { IntelligenceChannel, ModelMessage, ModelOutputContract } from "../../domain/intelligence/contracts.js";
-import type { ToolExecutionBroker } from "../../domain/tools/contracts.js";
-import type { AgentTurnPolicy, AgentTurnRuntimeResult } from "../../kernel/intelligence/agent-turn-runtime.js";
+import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../../domain/tools/contracts.js";
+import type {
+  AgentTurnPendingApproval,
+  AgentTurnPolicy,
+  AgentTurnRuntimeResult,
+} from "../../kernel/intelligence/agent-turn-runtime.js";
 import { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import {
@@ -14,6 +18,7 @@ import { loadSubAgentBody } from "./sub-agent-loader.js";
 const SUB_AGENT_OUTPUT_CONTRACT_ID = "sub_agent.free_text.v1";
 const DEFAULT_MAX_STEPS = 30;
 const SUMMARY_MAX_CHARS = 500;
+const SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
 
 export type SubAgentRunnerInput = {
   readonly subAgent: SubAgentDefinition;
@@ -23,13 +28,18 @@ export type SubAgentRunnerInput = {
   readonly conversationId?: string;
   readonly toolBroker: ToolExecutionBroker;
   readonly channel: IntelligenceChannel;
+  readonly allowedTools: readonly string[];
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
+  readonly publishToolEvent?: (message: ArborMessage) => void;
+  readonly pendingApproval?: AgentTurnPendingApproval;
+  readonly approvedConfirmationIds?: readonly string[];
   readonly policyOverrides?: Partial<AgentTurnPolicy>;
   readonly abortSignal?: AbortSignal;
   readonly eventLog?: { append: (message: ArborMessage) => void };
 };
 
 export type SubAgentRunnerResult = {
-  readonly status: "completed" | "failed" | "cancelled";
+  readonly status: "completed" | "failed" | "approval_required" | "cancelled";
   readonly summary: string;
   readonly fullOutput?: string;
   readonly toolCalls: number;
@@ -37,12 +47,13 @@ export type SubAgentRunnerResult = {
   readonly durationMs: number;
   readonly runId?: string;
   readonly error?: string;
+  readonly pendingApproval?: AgentTurnPendingApproval;
 };
 
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentRunnerResult> {
   const startTime = Date.now();
-  const runId = createId("sub-agent-run");
-  const traceId = input.conversationId ?? runId;
+  const runId = input.pendingApproval?.policy.goalId ?? createId("sub-agent-run");
+  const traceId = input.conversationId ?? input.pendingApproval?.policy.traceId ?? runId;
 
   input.eventLog?.append(
     createSubAgentStartedMessage({
@@ -73,12 +84,15 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
       subAgent: input.subAgent,
       traceId,
       runId,
+      allowedTools: input.allowedTools,
+      confirmationPolicy: input.confirmationPolicy,
       overrides: input.policyOverrides,
     });
 
     const turnRuntime = new AgentTurnRuntime({
       intelligenceChannel: input.channel,
       toolCenter: input.toolBroker,
+      publishToolEvent: input.publishToolEvent,
     });
 
     const callerRef = {
@@ -87,16 +101,22 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
       label: `sub_agent:${input.subAgent.id}`,
     };
 
-    const turn = await turnRuntime.executeAutonomous({
-      policy,
-      callerRef,
-      inputRefs: [],
-      sanitizedMessages: messages,
-      constraintRefs: [],
-      toolChoice: "auto",
-      requestedAt: nowIso(),
-      abortSignal: input.abortSignal,
-    });
+    const turn = input.pendingApproval === undefined
+      ? await turnRuntime.executeAutonomous({
+          policy,
+          callerRef,
+          inputRefs: [],
+          sanitizedMessages: messages,
+          constraintRefs: [],
+          toolChoice: "auto",
+          requestedAt: nowIso(),
+          abortSignal: input.abortSignal,
+        })
+      : await turnRuntime.resumeAutonomous({
+          pendingApproval: input.pendingApproval,
+          approvedConfirmationIds: input.approvedConfirmationIds ?? [],
+          abortSignal: input.abortSignal,
+        });
 
     result = buildResultFromTurn({
       turn,
@@ -140,7 +160,7 @@ async function buildSubAgentSystemPrompt(
   task: string,
   context?: string,
 ): Promise<string> {
-  const body = await loadSubAgentBody(subAgent).catch(() => "");
+  const body = subAgent.inlineSystemPrompt ?? await loadSubAgentBody(subAgent).catch(() => "");
   const basePrompt = body.trim().length > 0 ? body : subAgent.description;
 
   const sections: string[] = [];
@@ -173,11 +193,12 @@ function buildSubAgentPolicy(input: {
   readonly subAgent: SubAgentDefinition;
   readonly traceId: string;
   readonly runId: string;
+  readonly allowedTools: readonly string[];
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly overrides?: Partial<AgentTurnPolicy>;
 }): AgentTurnPolicy {
-  const allowedTools = input.subAgent.allowedTools.length > 0
-    ? [...input.subAgent.allowedTools]
-    : [];
+  const allowedTools = [...new Set(input.allowedTools)]
+    .filter((toolName) => !SUB_AGENT_TOOL_NAMES.has(toolName));
 
   const maxSteps = normalizeOptionalRoundLimit(input.subAgent.maxSteps) ?? DEFAULT_MAX_STEPS;
 
@@ -186,6 +207,7 @@ function buildSubAgentPolicy(input: {
     allowedTools,
     maxModelRounds: maxSteps,
     maxToolRounds: maxSteps,
+    confirmationPolicy: input.confirmationPolicy,
     fallback: "disabled",
     callerAgentId: `sub-agent:${input.subAgent.id}`,
     traceId: input.traceId,
@@ -235,6 +257,19 @@ function buildResultFromTurn(input: {
     };
   }
 
+  if (input.turn.status === "approval_required") {
+    return {
+      status: "approval_required",
+      summary: summary || "子 Agent 需要工具确认才能继续",
+      fullOutput,
+      toolCalls,
+      modelRounds,
+      durationMs,
+      runId: input.runId,
+      pendingApproval: input.turn.pendingApproval,
+    };
+  }
+
   if (isFailedTurn(input.turn)) {
     const error = extractError(input.turn);
     return {
@@ -265,7 +300,7 @@ function isFailedTurn(turn: AgentTurnRuntimeResult): boolean {
     return true;
   }
   if (turn.status === "approval_required") {
-    return true;
+    return false;
   }
   if (turn.status === "paused") {
     return true;

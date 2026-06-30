@@ -16,7 +16,7 @@ export type SubAgentCompletedEventPayload = {
   readonly subRunId: string;
   readonly subAgentId: string;
   readonly subAgentName: string;
-  readonly status: "completed" | "failed" | "cancelled";
+  readonly status: "completed" | "failed" | "approval_required" | "cancelled";
   readonly summary: string;
   readonly toolCalls: number;
   readonly modelRounds: number;
@@ -43,7 +43,7 @@ export type SubAgentBatchCompletedEventPayload = {
   readonly results: readonly {
     readonly subAgentId: string;
     readonly subAgentName: string;
-    readonly status: "completed" | "failed" | "cancelled";
+    readonly status: "completed" | "failed" | "approval_required" | "cancelled";
     readonly summary: string;
     readonly durationMs?: number;
   }[];
@@ -94,7 +94,7 @@ export function createSubAgentCompletedMessage(input: {
   readonly subRunId: string;
   readonly subAgentId: string;
   readonly subAgentName: string;
-  readonly status: "completed" | "failed" | "cancelled";
+  readonly status: "completed" | "failed" | "approval_required" | "cancelled";
   readonly summary: string;
   readonly toolCalls: number;
   readonly modelRounds: number;
@@ -161,7 +161,7 @@ export function createSubAgentBatchCompletedMessage(input: {
   readonly results: readonly {
     readonly subAgentId: string;
     readonly subAgentName: string;
-    readonly status: "completed" | "failed" | "cancelled";
+    readonly status: "completed" | "failed" | "approval_required" | "cancelled";
     readonly summary: string;
     readonly durationMs?: number;
   }[];

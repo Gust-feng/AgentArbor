@@ -31,7 +31,7 @@ import { loadSubAgentBody } from "./sub-agent-loader.js";
 
 const SUB_AGENT_OUTPUT_CONTRACT_ID = "sub_agent.free_text.v1";
 const DEFAULT_MAX_STEPS = 30;
-const SUMMARY_MAX_CHARS = 500;
+const DISPLAY_SUMMARY_MAX_CHARS = 500;
 const SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
 
 export type SubAgentRunnerInput = {
@@ -180,6 +180,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   const trace = recorder.finalize({
     status: result.status,
     summary: result.summary,
+    fullOutput: result.fullOutput,
     error: result.error,
     toolCalls: result.toolCalls,
     modelRounds: result.modelRounds,
@@ -311,6 +312,7 @@ class SubAgentTraceRecorder {
   finalize(input: {
     readonly status: SubAgentRunnerResult["status"];
     readonly summary: string;
+    readonly fullOutput?: string;
     readonly error?: string;
     readonly toolCalls: number;
     readonly modelRounds: number;
@@ -325,6 +327,7 @@ class SubAgentTraceRecorder {
       modelRounds: input.modelRounds,
       toolCalls: input.toolCalls,
       summary: input.summary,
+      fullOutput: input.fullOutput,
       error: input.error,
       modelExchanges: [...this.exchanges.values()],
       toolTraces: [...this.tools.values()],
@@ -544,10 +547,19 @@ function extractTextOutput(turn: AgentTurnRuntimeResult): string | undefined {
 function generateSummary(fullOutput: string | undefined, turn: AgentTurnRuntimeResult): string {
   if (fullOutput !== undefined && fullOutput.trim().length > 0) {
     const trimmed = fullOutput.trim();
-    if (trimmed.length <= SUMMARY_MAX_CHARS) {
+    if (trimmed.length <= DISPLAY_SUMMARY_MAX_CHARS) {
       return trimmed;
     }
-    return `${trimmed.slice(0, SUMMARY_MAX_CHARS)}...`;
+    if (turn.status === "cancelled" || turn.stoppedReason === "cancelled") {
+      return `子 Agent 已取消，保留完整输出（${trimmed.length} 字）。`;
+    }
+    if (turn.status === "approval_required") {
+      return `子 Agent 等待确认，已保留当前完整输出（${trimmed.length} 字）。`;
+    }
+    if (isFailedTurn(turn)) {
+      return `子 Agent 未完成，保留完整输出（${trimmed.length} 字）。`;
+    }
+    return `子 Agent 已完成，完整输出 ${trimmed.length} 字。`;
   }
 
   if (turn.status === "cancelled" || turn.stoppedReason === "cancelled") {

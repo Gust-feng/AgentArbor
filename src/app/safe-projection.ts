@@ -364,6 +364,9 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
   const record = asRecord(output);
   const result = asRecord(record.result);
   const summary = stringOrUndefined(record.summary);
+  if (isSubAgentToolName(request.toolName)) {
+    return projectSubAgentToolAgentContent(request, record, result, summary, truncated);
+  }
   if (request.toolName === "read_skill_resource") {
     const content = typeof result.content === "string"
       ? modelVisibleTextFragment({
@@ -878,6 +881,77 @@ function projectBatchReadAgentItem(
   };
 }
 
+function isSubAgentToolName(toolName: string): boolean {
+  return toolName === "call_sub_agent" || toolName === "call_sub_agents" || toolName === "spawn_sub_agent";
+}
+
+function projectSubAgentToolAgentContent(
+  request: ToolCallRequest,
+  record: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>,
+  summary: string | undefined,
+  truncated: boolean
+): unknown {
+  const action = stringOrUndefined(record.action) ?? request.toolName;
+  if (Array.isArray(result.results)) {
+    return {
+      action,
+      status: stringOrUndefined(record.status),
+      summary,
+      result: {
+        results: result.results.map(projectSubAgentResultItem),
+        stats: optionalRecord(result.stats),
+      },
+      truncated,
+    };
+  }
+
+  const projectedResult = projectSubAgentResultItem(result);
+  return {
+    action,
+    status: stringOrUndefined(record.status),
+    sub_agent_name: stringOrUndefined(record.sub_agent_name),
+    sub_agent_id: stringOrUndefined(record.sub_agent_id),
+    spawned_role: stringOrUndefined(record.spawned_role),
+    spawned_id: stringOrUndefined(record.spawned_id),
+    summary,
+    full_output: projectedResult.full_output,
+    result: projectedResult,
+    truncated,
+  };
+}
+
+function projectSubAgentResultItem(value: unknown): {
+  readonly index?: number;
+  readonly sub_agent_id?: string;
+  readonly sub_agent_name?: string;
+  readonly task?: string;
+  readonly status?: string;
+  readonly summary?: string;
+  readonly full_output?: string;
+  readonly tool_calls?: number;
+  readonly model_rounds?: number;
+  readonly duration_ms?: number;
+  readonly run_id?: string;
+  readonly error?: string;
+} {
+  const record = asRecord(value);
+  return {
+    index: numberOrUndefined(record.index),
+    sub_agent_id: stringOrUndefined(record.sub_agent_id),
+    sub_agent_name: stringOrUndefined(record.sub_agent_name),
+    task: stringOrUndefined(record.task),
+    status: stringOrUndefined(record.status),
+    summary: stringOrUndefined(record.summary),
+    full_output: textOrUndefined(record.full_output),
+    tool_calls: numberOrUndefined(record.tool_calls),
+    model_rounds: numberOrUndefined(record.model_rounds),
+    duration_ms: numberOrUndefined(record.duration_ms),
+    run_id: stringOrUndefined(record.run_id),
+    error: stringOrUndefined(record.error),
+  };
+}
+
 function projectDirectoryEntry(value: unknown): {
   readonly path?: string;
   readonly name?: string;
@@ -1044,6 +1118,10 @@ function rawToolFieldRef(request: ToolCallRequest, field: string): string {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function textOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function numberOrUndefined(value: unknown): number | undefined {

@@ -428,6 +428,7 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
       modelRounds: 1,
       toolCalls: 0,
       summary: "历史子 Agent 结果",
+      fullOutput: "历史子 Agent 完整输出",
       modelExchanges: [],
       toolTraces: [],
     }],
@@ -470,6 +471,7 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   ]);
   assert.equal(view?.workView.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
   assert.equal(view?.workView.subAgentRuns?.[0]?.subRunId, "sub-run-restored");
+  assert.equal(view?.workView.subAgentRuns?.[0]?.fullOutput, "历史子 Agent 完整输出");
   assert.equal(view?.detail.restoredResult?.summary, "历史运行摘要");
   assert.equal(view?.detail.restoredResult?.title, "已完成");
   assert.equal(view === undefined ? false : "result" in view, false);
@@ -498,6 +500,7 @@ test("live basic agent work view exposes sub-agent run traces", () => {
     modelRounds: 1,
     toolCalls: 0,
     summary: "live result",
+    fullOutput: "live full result",
     modelExchanges: [],
     toolTraces: [],
   });
@@ -509,6 +512,7 @@ test("live basic agent work view exposes sub-agent run traces", () => {
   });
 
   assert.equal(view.subAgentRuns?.[0]?.subRunId, "sub-run-live");
+  assert.equal(view.subAgentRuns?.[0]?.fullOutput, "live full result");
 });
 
 test("basic agent panel read-model restores pending confirmations after refresh", async () => {

@@ -447,8 +447,8 @@ const callSubAgentToolDefinition: ToolDefinition = {
     ],
     outputNotes: [
       "status: 执行状态，completed/failed/cancelled。",
-      "summary: 执行结果摘要。",
-      "full_output: 完整的输出内容。",
+      "summary: 轻量展示状态，不作为完整结果正文。",
+      "full_output: 子 Agent 的完整输出内容；需要引用结果时优先使用该字段。",
       "tool_calls: 子 Agent 调用工具的次数。",
       "model_rounds: 模型交互轮数。",
       "duration_ms: 执行耗时（毫秒）。",
@@ -537,7 +537,8 @@ const callSubAgentsToolDefinition: ToolDefinition = {
     ],
     outputNotes: [
       "results: 每个子 Agent 的执行结果数组。",
-      "summary: 整体执行摘要。",
+      "summary: 批次轻量展示状态，不作为各子 Agent 的完整结果正文。",
+      "full_output: 每个 results 条目中的子 Agent 完整输出；需要引用结果时优先使用该字段。",
       "stats: 统计信息（总数、成功数、失败数、总耗时）。",
     ],
     examples: [
@@ -626,8 +627,8 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
     ],
     outputNotes: [
       "status: 执行状态，completed/failed/cancelled。",
-      "summary: 执行结果摘要。",
-      "full_output: 完整的输出内容。",
+      "summary: 轻量展示状态，不作为完整结果正文。",
+      "full_output: 子 Agent 的完整输出内容；需要引用结果时优先使用该字段。",
       "tool_calls: 子 Agent 调用工具的次数。",
       "model_rounds: 模型交互轮数。",
       "duration_ms: 执行耗时（毫秒）。",

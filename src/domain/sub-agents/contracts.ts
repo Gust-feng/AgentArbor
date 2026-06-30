@@ -118,6 +118,7 @@ export type SubAgentRunTrace = {
   readonly modelRounds: number;
   readonly toolCalls: number;
   readonly summary: string;
+  readonly fullOutput?: string;
   readonly error?: string;
   readonly modelExchanges: readonly SubAgentModelExchange[];
   readonly toolTraces: readonly SubAgentToolTrace[];

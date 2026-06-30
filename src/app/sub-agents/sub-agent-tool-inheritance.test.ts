@@ -105,6 +105,70 @@ test("runSubAgent trace captures model tool calls and failed responses", async (
   assert.equal(result.trace?.toolTraces[0]?.status, "completed");
 });
 
+test("runSubAgent preserves long output separately from display summary", async () => {
+  const sentinel = "TAIL_SENTINEL_FULL_OUTPUT";
+  const fullOutput = `${"0123456789".repeat(80)}${sentinel}`;
+  const result = await runSubAgent({
+    subAgent: testSubAgent(),
+    task: "produce a long result",
+    toolBroker: new ToolCenter(),
+    channel: new SequenceIntelligenceChannel([
+      textResponse("model-request-long", fullOutput),
+    ]),
+    allowedTools: [],
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.fullOutput, fullOutput);
+  assert.equal(result.trace?.fullOutput, fullOutput);
+  assert.match(result.summary, /^子 Agent 已完成，完整输出 \d+ 字。$/);
+  assert.equal(result.summary.includes(sentinel), false);
+});
+
+test("call_sub_agent projection exposes full output to parent model continuation", async () => {
+  const sentinel = "PARENT_VISIBLE_TAIL_SENTINEL";
+  const fullOutput = `${"abcdef".repeat(120)}${sentinel}`;
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-sub-agent", fullOutput),
+  ]);
+  const center = new ToolCenter();
+  const registry = await tempRegistry();
+  for (const executor of createSubAgentToolExecutors({
+    subAgentRegistry: registry,
+    channel,
+    toolBroker: center,
+    allowedTools: () => ["call_sub_agent"],
+  })) {
+    center.register(executor);
+  }
+
+  const result = await center.execute(
+    {
+      callId: "call-parent-sub-agent",
+      toolName: "call_sub_agent",
+      input: { sub_agent_name: "test-helper", task: "return long output" },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["call_sub_agent"] }
+  );
+
+  const output = result.output as {
+    readonly result?: { readonly full_output?: string };
+    readonly summary?: string;
+  };
+  const agentContent = result.projection?.agentContent as {
+    readonly full_output?: string;
+    readonly result?: { readonly full_output?: string };
+    readonly summary?: string;
+  };
+
+  assert.equal(result.status, "completed");
+  assert.equal(output.result?.full_output, fullOutput);
+  assert.equal(agentContent.full_output, fullOutput);
+  assert.equal(agentContent.result?.full_output, fullOutput);
+  assert.equal(agentContent.summary?.includes(sentinel), false);
+});
+
 test("sub-agent tool approval bubbles as the parent tool pending confirmation and resumes after approve", async () => {
   let shellRuns = 0;
   const eventLog = new InMemoryEventLog();

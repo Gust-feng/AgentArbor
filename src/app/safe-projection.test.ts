@@ -78,6 +78,94 @@ test("read tool projection exposes content preview to model continuation", () =>
   assert.equal(JSON.stringify(agentContent).includes("材料已读取"), false);
 });
 
+test("sub-agent projection keeps full output in model continuation", () => {
+  const sentinel = "SUB_AGENT_FULL_OUTPUT_SENTINEL";
+  const fullOutput = `${"0123456789".repeat(80)}${sentinel}`;
+  const projection = projectToolResult({
+    request: {
+      callId: "call-sub-agent",
+      toolName: "call_sub_agent",
+      input: { sub_agent_name: "research-expert", task: "return details" },
+    },
+    output: {
+      action: "call_sub_agent",
+      status: "completed",
+      sub_agent_name: "research-expert",
+      sub_agent_id: "research-expert",
+      summary: "子 Agent 已完成，完整输出 826 字。",
+      result: {
+        status: "completed",
+        summary: "子 Agent 已完成，完整输出 826 字。",
+        full_output: fullOutput,
+        tool_calls: 0,
+        model_rounds: 1,
+        duration_ms: 12,
+        run_id: "sub-run-1",
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly full_output?: string;
+    readonly result?: { readonly full_output?: string };
+    readonly summary?: string;
+  };
+
+  assert.equal(agentContent.full_output, fullOutput);
+  assert.equal(agentContent.result?.full_output, fullOutput);
+  assert.equal(agentContent.summary?.includes(sentinel), false);
+});
+
+test("batch sub-agent projection keeps each full output in model continuation", () => {
+  const first = `${"a".repeat(700)}FIRST_TAIL`;
+  const second = `${"b".repeat(700)}SECOND_TAIL`;
+  const projection = projectToolResult({
+    request: {
+      callId: "call-sub-agents",
+      toolName: "call_sub_agents",
+      input: {
+        tasks: [
+          { sub_agent_name: "research-expert", task: "first" },
+          { sub_agent_name: "review-expert", task: "second" },
+        ],
+      },
+    },
+    output: {
+      action: "call_sub_agents",
+      status: "completed",
+      summary: "执行 2 个子 Agent 任务：2 成功，0 失败，0 取消，0 等待确认，0 未启动，总耗时 20ms",
+      result: {
+        results: [
+          {
+            index: 0,
+            sub_agent_name: "research-expert",
+            status: "completed",
+            summary: "子 Agent 已完成，完整输出 710 字。",
+            full_output: first,
+          },
+          {
+            index: 1,
+            sub_agent_name: "review-expert",
+            status: "completed",
+            summary: "子 Agent 已完成，完整输出 711 字。",
+            full_output: second,
+          },
+        ],
+        stats: { total: 2, completed: 2 },
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly result?: {
+      readonly results?: readonly { readonly full_output?: string }[];
+    };
+  };
+
+  assert.equal(agentContent.result?.results?.[0]?.full_output, first);
+  assert.equal(agentContent.result?.results?.[1]?.full_output, second);
+});
+
 test("batch read projection exposes per-ref content and errors to model continuation", () => {
   const projection = projectToolResult({
     request: {

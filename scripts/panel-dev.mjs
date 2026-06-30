@@ -36,11 +36,13 @@ const viteBin = path.join(root, "node_modules", "vite", "bin", "vite.js");
 const electronBin = path.join(root, "node_modules", "electron", "cli.js");
 const packageJson = path.join(root, "package.json");
 const tsconfig = path.join(root, "tsconfig.json");
+const copySubAgentsScript = path.join(root, "scripts", "copy-sub-agent-assets.mjs");
 const panelEntry = path.join(root, "dist", "app", "panel.js");
 const panelDesktopEntry = path.join(root, "dist", "app", "panel-desktop.js");
 
 assertLocalFile(packageJson, "package.json");
 assertLocalFile(tsconfig, "tsconfig.json");
+assertLocalFile(copySubAgentsScript, "scripts/copy-sub-agent-assets.mjs");
 assertLocalTool(tscBin, "typescript");
 assertLocalTool(viteBin, "vite");
 if (args.desktop) {
@@ -247,6 +249,13 @@ function runInitialNodeBuild() {
   });
   if (result.status !== 0) {
     throw new Error(`Initial TypeScript build failed with code ${result.status ?? 1}.`);
+  }
+  const copyResult = spawnSync(process.execPath, [copySubAgentsScript], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if (copyResult.status !== 0) {
+    throw new Error(`Initial sub-agent asset copy failed with code ${copyResult.status ?? 1}.`);
   }
   assertLocalFile(panelEntry, "dist/app/panel.js");
   if (args.desktop) {

@@ -136,11 +136,14 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes('from "./app-state"'), true);
   assert.equal(app.includes('from "./app-skill-actions"'), false);
   assert.equal(app.includes("function refreshBootstrap"), false);
+  assert.equal(app.includes("refreshAppUpdateStatus,"), true);
   assert.equal(app.includes("checkAppUpdate,"), true);
+  assert.equal(app.includes("installAppUpdate,"), true);
   assert.equal(app.includes("saveModelCapabilities,"), true);
   assert.equal(app.includes("saveSkillTriggerMode,"), true);
   assert.equal(app.includes("appUpdate={app.appUpdate}"), true);
   assert.equal(app.includes("onCheckAppUpdate={() => void checkAppUpdate()}"), true);
+  assert.equal(app.includes("onInstallAppUpdate={() => void installAppUpdate()}"), true);
   assert.equal(app.includes("onSaveModelCapabilities={saveModelCapabilities}"), true);
   assert.equal(app.includes("onSaveSkillTriggerMode={(mode) => void saveSkillTriggerMode(mode)}"), true);
   assert.equal(appConfigActions.includes("export async function saveModelCapabilityConfig"), true);
@@ -214,6 +217,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("agentClusterDisabled="), false);
   assert.equal(app.includes("onOpenAgentCluster="), false);
   assert.equal(app.includes('agentMode={app.agentMode}'), true);
+  assert.equal(app.includes("app-update-ready-banner"), true);
+  assert.equal(app.includes("function appUpdateReadyText"), true);
   assert.equal(app.includes('onModeChange={selectAgentMode}'), true);
   assert.equal(app.includes("桌面 Agent"), true);
   assert.equal(app.includes("多 Agent"), true);
@@ -467,6 +472,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appUpdateActions.includes("export function checkAppUpdate"), true);
   assert.equal(appUpdateActions.includes('getJson<AppUpdateInfo>("/api/app/update")'), true);
   assert.equal(appUpdateActions.includes('postJson<AppUpdateInfo>("/api/app/update/check"'), true);
+  assert.equal(appUpdateActions.includes('postJson<AppUpdateInfo>("/api/app/update/install"'), true);
   assert.equal(appBootstrap.includes("/api/app/update"), true);
   assert.equal(appSettingsController.includes("requestAppUpdateCheck"), true);
   assert.equal(appSettingsController.includes("readonly checkAppUpdate"), true);
@@ -831,6 +837,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(shellStyles.includes(".topbar-sidebar-button"), false);
   assert.equal(shellStyles.includes(".topbar-chip"), false);
   assert.equal(shellStyles.includes(".app-mode-switch"), true);
+  assert.equal(shellStyles.includes(".app-update-ready-banner"), true);
   assert.equal(shellStyles.includes(".app-mode-switch-button"), true);
   assert.equal(shellStyles.includes(".app-workbench-brand"), false);
   assert.equal(shellStyles.includes(".sidebar-agent-cluster-button"), false);

@@ -58,6 +58,39 @@ html[data-desktop-shell="true"] .app-workbench-header-inner {
   padding-right: 0;
 }
 
+.app-update-ready-banner {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: var(--border-width-thin) solid var(--border);
+  background: color-mix(in oklch, var(--status-success) 9%, var(--workbench-bg));
+  padding: 0 18px;
+  color: color-mix(in oklch, var(--fg) 88%, var(--status-success));
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.app-update-ready-banner button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in oklch, var(--status-success) 34%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  padding: 0 10px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: var(--weight-label);
+}
+
+.app-update-ready-banner button:hover {
+  border-color: color-mix(in oklch, var(--status-success) 52%, var(--field-hover-border));
+  background: var(--field-hover-bg);
+}
+
 .app-workbench-header-main {
   display: flex;
   min-width: 0;

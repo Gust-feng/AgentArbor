@@ -203,6 +203,7 @@
 }
 
 .about-update-check-button,
+.about-update-install-button,
 .about-update-download-link {
   display: inline-flex;
   min-height: 32px;
@@ -222,13 +223,15 @@
 }
 
 .about-update-check-button:hover:not(:disabled),
+.about-update-install-button:hover:not(:disabled),
 .about-update-download-link:hover {
   border-color: var(--field-hover-border);
   background: var(--field-hover-bg);
   color: var(--fg);
 }
 
-.about-update-check-button:disabled {
+.about-update-check-button:disabled,
+.about-update-install-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
@@ -286,8 +289,26 @@
   color: color-mix(in oklch, var(--muted) 88%, var(--fg));
 }
 
-.about-update-download-link {
+.about-update-download-link,
+.about-update-install-button {
   justify-self: start;
+}
+
+.about-update-progress {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--border) 62%, transparent);
+}
+
+.about-update-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in oklch, var(--accent) 82%, var(--fg));
+  transition: width var(--motion-interaction-duration) var(--motion-ease-standard);
 }
 
 .about-update-checked-at {

@@ -12,7 +12,11 @@ import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
 import { runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
 import { desktopAgentDefinitionFromConfig } from "../agent-prompts/desktop-agent-configured-definition.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
-import { createAppUpdateService, type AppUpdateService } from "../app-update-service.js";
+import {
+  createAppUpdateService,
+  createUnsupportedAppUpdateService,
+  type AppUpdateServiceLike,
+} from "../app-update-service.js";
 import {
   BasicAgentRunExecutor,
   type BasicAgentRunExecutionInput,
@@ -75,7 +79,7 @@ export type PanelRuntime = {
   readonly processTerminator: ProcessTerminator;
   readonly skillRoots: readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
-  readonly appUpdateService: AppUpdateService;
+  readonly appUpdateService: AppUpdateServiceLike;
 };
 
 type PanelSkillRootsInput = {
@@ -108,10 +112,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
       resolveSkillRoots: (input) => resolveSkillRoots(options, input),
       skillStateStore: resolveSkillStateStore(options.configDirectory),
       processTerminator: options.processTerminator,
-      appUpdateService: createAppUpdateService({
-        manifestUrl: options.updateManifestUrl ?? process.env.AGENTARBOR_UPDATE_MANIFEST_URL,
-        fetch: options.updateManifestFetch,
-      }),
+      appUpdateService: resolveAppUpdateService(options),
       hooks,
       ...runtimePersistence,
     });
@@ -131,10 +132,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
     resolveSkillRoots: (input) => resolveSkillRoots(options, input),
     skillStateStore: resolveSkillStateStore(local.configDirectory),
     processTerminator: options.processTerminator,
-    appUpdateService: createAppUpdateService({
-      manifestUrl: options.updateManifestUrl ?? process.env.AGENTARBOR_UPDATE_MANIFEST_URL,
-      fetch: options.updateManifestFetch,
-    }),
+    appUpdateService: resolveAppUpdateService(options),
     hooks,
     ...runtimePersistence,
   });
@@ -165,7 +163,7 @@ function assemblePanelRuntime(input: {
   readonly resolveSkillRoots?: (input: PanelSkillRootsInput) => readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly processTerminator?: ProcessTerminator;
-  readonly appUpdateService: AppUpdateService;
+  readonly appUpdateService: AppUpdateServiceLike;
   readonly hooks: PanelRuntimeHooks;
 }): PanelRuntime {
   const runJobs = new PanelRunJobStore();
@@ -247,6 +245,22 @@ function assemblePanelRuntime(input: {
     },
   });
   return runtime as PanelRuntime;
+}
+
+function resolveAppUpdateService(options: PanelServerOptions): AppUpdateServiceLike {
+  if (options.appUpdateService !== undefined) {
+    return options.appUpdateService;
+  }
+  const manifestUrl = options.updateManifestUrl ?? process.env.AGENTARBOR_UPDATE_MANIFEST_URL;
+  if (manifestUrl !== undefined) {
+    return createAppUpdateService({
+      manifestUrl,
+      fetch: options.updateManifestFetch,
+    });
+  }
+  return createUnsupportedAppUpdateService({
+    reason: "当前运行方式不支持自动更新。请使用 Windows 打包桌面版。",
+  });
 }
 
 export async function cleanupPanelRuntimeOwnedBackgroundProcesses(

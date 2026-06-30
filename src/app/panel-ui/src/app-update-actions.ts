@@ -8,3 +8,7 @@ export function loadAppUpdateStatus(): Promise<AppUpdateInfo> {
 export function checkAppUpdate(): Promise<AppUpdateInfo> {
   return postJson<AppUpdateInfo>("/api/app/update/check", {});
 }
+
+export function installAppUpdate(): Promise<AppUpdateInfo> {
+  return postJson<AppUpdateInfo>("/api/app/update/install", {});
+}

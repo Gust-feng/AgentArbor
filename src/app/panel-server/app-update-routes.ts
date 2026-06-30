@@ -18,5 +18,10 @@ export async function handlePanelAppUpdateRoute(
     return true;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/app/update/install") {
+    writeJson(response, 200, await runtime.appUpdateService.install());
+    return true;
+  }
+
   return false;
 }

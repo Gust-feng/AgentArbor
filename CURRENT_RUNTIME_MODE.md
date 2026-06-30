@@ -97,7 +97,16 @@
 - 模型只能在本轮可见工具集合内自主选择
 - 模型不能绕过 ToolCenter、权限、命令确认和本地策略沙箱；但普通回答、工具结果和错误信息不得被脱敏或安全投影链路吞掉
 
-### 5. 当前默认产品边界
+### 5. 桌面自动更新边界
+
+当前只有 Windows 打包桌面版支持自动更新。打包桌面版通过 `electron-builder` 产出 NSIS 安装包，并由 `electron-updater` 消费 GitHub Releases 中的 `latest.yml` 与安装包产物；启动后可自动检查并后台下载更新，下载完成后只提示用户“重启安装”，不会静默中断正在进行的任务或自动重启。
+
+- 支持范围：Windows x64 打包桌面版。
+- 不支持范围：浏览器 Panel、`panel:dev`、`panel:desktop:dev`、`--smoke`、`--window-smoke` 和未打包 Electron 运行。
+- `/api/app/update`、`/api/app/update/check` 和 `/api/app/update/install` 是 Panel 对更新状态的后端契约；普通浏览器面板默认返回 `unsupported`，显式传入旧 manifest URL 时只能作为发布信息检查 fallback，不能自动安装。
+- 自动更新发布源固定为 GitHub Releases；真正可自动更新的版本必须由 tag 发布流程产出 installer、blockmap 和 `latest.yml`，手动上传任意 release asset 不构成可更新版本。
+
+### 6. 当前默认产品边界
 
 当前默认产品的默认入口仍是普通桌面 Agent；在基础 Agent 路线稳定后，已重启 `deep` 作为显式并行入口，但 deep 不混入默认路径。
 

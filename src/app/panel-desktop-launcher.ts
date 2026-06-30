@@ -56,6 +56,7 @@ export type PanelDesktopSession = {
 export type PanelDesktopDependencies = {
   readonly startPanelServer: (options: PanelServerOptions) => Promise<StartedPanelServer>;
   readonly createWindow: (options: PanelDesktopWindowOptions) => PanelDesktopWindowHandle;
+  readonly appUpdateService?: PanelServerOptions["appUpdateService"];
   readonly selectWorkspaceDirectory?: () => Promise<string | undefined>;
   readonly selectContextAttachment?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly whenReady: Promise<void>;
@@ -75,6 +76,7 @@ export async function startPanelDesktopSession(
     configDirectory: args.configDirectory,
     workspaceDirectoryPicker: args.smoke ? undefined : dependencies.selectWorkspaceDirectory,
     contextAttachmentPicker: args.smoke ? undefined : dependencies.selectContextAttachment,
+    appUpdateService: args.smoke || args.windowSmoke || args.devUrl !== undefined ? undefined : dependencies.appUpdateService,
   });
   const panelUrl = args.devUrl ?? server.url;
   let closed = false;

@@ -31,7 +31,11 @@ import {
   updateSkillState,
   type ModelCapabilityUpdateForm,
 } from "./app-config-actions";
-import { checkAppUpdate as requestAppUpdateCheck } from "./app-update-actions";
+import {
+  checkAppUpdate as requestAppUpdateCheck,
+  loadAppUpdateStatus as requestAppUpdateStatus,
+  installAppUpdate as requestAppUpdateInstall,
+} from "./app-update-actions";
 import { mergeConfigResponse, type ComposerToolConfirmationPolicy, type VisibleAiMode } from "./app-config-projection";
 import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
@@ -65,7 +69,9 @@ export type AppSettingsController = {
   readonly installMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly deleteMcpServer: (serverId: string) => Promise<void>;
   readonly updateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => Promise<void>;
+  readonly refreshAppUpdateStatus: () => Promise<void>;
   readonly checkAppUpdate: () => Promise<void>;
+  readonly installAppUpdate: () => Promise<void>;
   readonly refreshSkills: () => Promise<void>;
   readonly updateSkill: (skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean) => Promise<void>;
 };
@@ -848,6 +854,33 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
+  async function refreshAppUpdateStatus(): Promise<void> {
+    try {
+      const appUpdate = await requestAppUpdateStatus();
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({ ...previous, appUpdate }));
+      }
+    } catch {
+      // Polling update status is best-effort; explicit check/install paths surface errors.
+    }
+  }
+
+  async function installAppUpdate(): Promise<void> {
+    try {
+      const appUpdate = await requestAppUpdateInstall();
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({ ...previous, appUpdate, error: undefined }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "更新安装启动失败。",
+        }));
+      }
+    }
+  }
+
   async function refreshSkills(): Promise<void> {
     options.setSavingTools(true);
     try {
@@ -893,7 +926,9 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     installMcpEnvironment: installSelectedMcpEnvironment,
     deleteMcpServer: deleteSelectedMcpServer,
     updateMcpTool,
+    refreshAppUpdateStatus,
     checkAppUpdate,
+    installAppUpdate,
     refreshSkills,
     updateSkill,
   };

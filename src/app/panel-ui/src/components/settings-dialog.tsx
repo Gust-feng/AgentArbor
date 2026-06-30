@@ -89,6 +89,7 @@ export function SettingsDialog(props: {
   readonly onDeleteMcpServer: (serverId: string) => void;
   readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
   readonly onCheckAppUpdate: () => Promise<void> | void;
+  readonly onInstallAppUpdate: () => Promise<void> | void;
   readonly onRefreshSkills: () => void;
   readonly onUpdateSkill: (skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean) => void;
 }): React.ReactElement | null {
@@ -234,6 +235,7 @@ export function SettingsDialog(props: {
                 config={props.config}
                 appUpdate={props.appUpdate}
                 onCheckAppUpdate={props.onCheckAppUpdate}
+                onInstallAppUpdate={props.onInstallAppUpdate}
               />
             )}
           </div>
@@ -260,8 +262,10 @@ function AboutSettings(props: {
   readonly config?: ConfigResponse;
   readonly appUpdate?: AppUpdateInfo;
   readonly onCheckAppUpdate: () => Promise<void> | void;
+  readonly onInstallAppUpdate: () => Promise<void> | void;
 }): React.ReactElement {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
   const product = props.config?.product;
   const productName = product?.name ?? "AgentArbor";
   const version = product?.version ?? "未提供";
@@ -270,14 +274,26 @@ function AboutSettings(props: {
   const runtimeDirectory = product?.runtimeDirectory ?? "未提供";
   const updateStatus = checkingUpdate ? "checking" : props.appUpdate?.status ?? "idle";
   const updateLink = appUpdateActionUrl(props.appUpdate);
+  const canCheckUpdate = props.appUpdate?.canCheck !== false && updateStatus !== "downloading" && updateStatus !== "installing";
+  const canInstallUpdate = props.appUpdate?.canInstall === true && updateStatus === "downloaded";
 
   const checkUpdate = async (): Promise<void> => {
-    if (checkingUpdate) return;
+    if (checkingUpdate || !canCheckUpdate) return;
     setCheckingUpdate(true);
     try {
       await props.onCheckAppUpdate();
     } finally {
       setCheckingUpdate(false);
+    }
+  };
+
+  const installUpdate = async (): Promise<void> => {
+    if (installingUpdate || !canInstallUpdate) return;
+    setInstallingUpdate(true);
+    try {
+      await props.onInstallAppUpdate();
+    } finally {
+      setInstallingUpdate(false);
     }
   };
 
@@ -314,7 +330,7 @@ function AboutSettings(props: {
           <button
             type="button"
             className="about-update-check-button"
-            disabled={checkingUpdate}
+            disabled={checkingUpdate || !canCheckUpdate}
             onClick={() => void checkUpdate()}
           >
             <RefreshCw size={14} />
@@ -327,6 +343,22 @@ function AboutSettings(props: {
           </span>
           <span>{appUpdateSummary(props.appUpdate, checkingUpdate)}</span>
         </div>
+        {props.appUpdate?.progress !== undefined && updateStatus === "downloading" && (
+          <div className="about-update-progress" aria-label="更新下载进度">
+            <span style={{ width: `${Math.min(100, Math.max(0, props.appUpdate.progress.percent))}%` }} />
+          </div>
+        )}
+        {canInstallUpdate && (
+          <button
+            type="button"
+            className="about-update-install-button"
+            disabled={installingUpdate}
+            onClick={() => void installUpdate()}
+          >
+            <Download size={14} />
+            <span>{installingUpdate ? "正在重启" : "重启安装"}</span>
+          </button>
+        )}
         {updateLink !== undefined && (
           <a className="about-update-download-link" href={updateLink} target="_blank" rel="noreferrer">
             <Download size={14} />
@@ -355,8 +387,16 @@ function AboutSettings(props: {
 
 function appUpdateStatusLabel(status: AppUpdateStatus): string {
   switch (status) {
+    case "unsupported":
+      return "不支持自动更新";
     case "available":
       return "有新版本";
+    case "downloading":
+      return "正在下载";
+    case "downloaded":
+      return "已下载";
+    case "installing":
+      return "正在安装";
     case "up_to_date":
       return "已是最新";
     case "no_release":
@@ -374,8 +414,8 @@ function appUpdateStatusLabel(status: AppUpdateStatus): string {
 
 function appUpdateStatusTone(status: AppUpdateStatus): "success" | "warning" | "danger" | "neutral" {
   if (status === "available") return "warning";
-  if (status === "up_to_date") return "success";
-  if (status === "unconfigured" || status === "no_release" || status === "idle" || status === "checking") return "neutral";
+  if (status === "up_to_date" || status === "downloaded") return "success";
+  if (status === "unconfigured" || status === "unsupported" || status === "no_release" || status === "idle" || status === "checking" || status === "downloading" || status === "installing") return "neutral";
   if (status === "failed") return "danger";
   return "neutral";
 }
@@ -384,8 +424,18 @@ function appUpdateSummary(update: AppUpdateInfo | undefined, checking: boolean):
   if (checking) return "正在读取更新清单...";
   if (update === undefined) return "尚未检查更新。";
   switch (update.status) {
+    case "unsupported":
+      return update.errorSummary ?? "当前运行方式不支持自动更新。";
     case "available":
       return update.latest?.version === undefined ? "发现可用更新。" : `可更新到 ${update.latest.version}`;
+    case "downloading":
+      return update.progress === undefined
+        ? "正在后台下载更新..."
+        : `正在后台下载更新 ${Math.round(update.progress.percent)}%`;
+    case "downloaded":
+      return update.latest?.version === undefined ? "新版本已下载，重启后安装。" : `版本 ${update.latest.version} 已下载，重启后安装。`;
+    case "installing":
+      return "正在重启并安装更新。";
     case "up_to_date":
       return "当前版本已是最新。";
     case "no_release":

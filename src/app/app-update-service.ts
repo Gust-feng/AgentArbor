@@ -1,13 +1,19 @@
 import { readAgentArborPackageVersion } from "./product-info.js";
 
 export type AppUpdateStatus =
+  | "unsupported"
   | "unconfigured"
   | "no_release"
   | "idle"
   | "checking"
+  | "downloading"
+  | "downloaded"
+  | "installing"
   | "up_to_date"
   | "available"
   | "failed";
+
+export type AppUpdateRuntime = "manifest" | "electron" | "unsupported";
 
 export type AppUpdateManifest = {
   readonly version: string;
@@ -22,12 +28,34 @@ export type AppUpdateManifest = {
 export type AppUpdateInfo = {
   readonly ok: boolean;
   readonly status: AppUpdateStatus;
+  readonly runtime: AppUpdateRuntime;
   readonly currentVersion: string;
   readonly manifestUrlConfigured: boolean;
+  readonly canCheck: boolean;
+  readonly canInstall: boolean;
   readonly checkedAt?: string;
+  readonly downloadedAt?: string;
   readonly latest?: AppUpdateManifest;
+  readonly progress?: AppUpdateProgress;
   readonly errorSummary?: string;
 };
+
+export type AppUpdateProgress = {
+  readonly percent: number;
+  readonly transferredBytes: number;
+  readonly totalBytes: number;
+  readonly bytesPerSecond: number;
+};
+
+export type AppUpdateCheckInput = {
+  readonly signal?: AbortSignal;
+};
+
+export interface AppUpdateServiceLike {
+  status(): AppUpdateInfo;
+  check(input?: AppUpdateCheckInput): Promise<AppUpdateInfo>;
+  install(): Promise<AppUpdateInfo>;
+}
 
 export type AppUpdateFetch = (
   url: string,
@@ -47,15 +75,19 @@ export type AppUpdateServiceOptions = {
 
 export const DEFAULT_APP_UPDATE_MANIFEST_URL = "https://api.github.com/repos/Gust-feng/AgentArbor/releases/latest";
 
-export class AppUpdateService {
+export class ManifestAppUpdateService implements AppUpdateServiceLike {
   private current: AppUpdateInfo;
 
   constructor(private readonly options: Required<Pick<AppUpdateServiceOptions, "currentVersion">> & AppUpdateServiceOptions) {
+    const manifestUrlConfigured = normalizeManifestUrl(options.manifestUrl) !== undefined;
     this.current = {
       ok: true,
-      status: normalizeManifestUrl(options.manifestUrl) === undefined ? "unconfigured" : "idle",
+      status: manifestUrlConfigured ? "idle" : "unconfigured",
+      runtime: "manifest",
       currentVersion: options.currentVersion,
-      manifestUrlConfigured: normalizeManifestUrl(options.manifestUrl) !== undefined,
+      manifestUrlConfigured,
+      canCheck: manifestUrlConfigured,
+      canInstall: false,
     };
   }
 
@@ -63,14 +95,17 @@ export class AppUpdateService {
     return this.current;
   }
 
-  async check(input: { readonly signal?: AbortSignal } = {}): Promise<AppUpdateInfo> {
+  async check(input: AppUpdateCheckInput = {}): Promise<AppUpdateInfo> {
     const manifestUrl = normalizeManifestUrl(this.options.manifestUrl);
     if (manifestUrl === undefined) {
       this.current = {
         ok: true,
         status: "unconfigured",
+        runtime: "manifest",
         currentVersion: this.options.currentVersion,
         manifestUrlConfigured: false,
+        canCheck: false,
+        canInstall: false,
       };
       return this.current;
     }
@@ -79,7 +114,10 @@ export class AppUpdateService {
       ...this.current,
       ok: true,
       status: "checking",
+      runtime: "manifest",
       manifestUrlConfigured: true,
+      canCheck: true,
+      canInstall: false,
       errorSummary: undefined,
     };
 
@@ -98,8 +136,11 @@ export class AppUpdateService {
           this.current = {
             ok: true,
             status: "no_release",
+            runtime: "manifest",
             currentVersion: this.options.currentVersion,
             manifestUrlConfigured: true,
+            canCheck: true,
+            canInstall: false,
             checkedAt,
           };
           return this.current;
@@ -117,8 +158,11 @@ export class AppUpdateService {
       this.current = {
         ok: true,
         status: comparison > 0 ? "available" : "up_to_date",
+        runtime: "manifest",
         currentVersion: this.options.currentVersion,
         manifestUrlConfigured: true,
+        canCheck: true,
+        canInstall: false,
         checkedAt,
         latest: manifest,
       };
@@ -131,12 +175,26 @@ export class AppUpdateService {
     }
   }
 
+  async install(): Promise<AppUpdateInfo> {
+    this.current = {
+      ...this.current,
+      ok: false,
+      status: "failed",
+      canInstall: false,
+      errorSummary: "当前运行方式只能检查发布信息，不能自动安装更新。",
+    };
+    return this.current;
+  }
+
   private recordFailure(errorSummary: string, checkedAt: string): AppUpdateInfo {
     this.current = {
       ok: false,
       status: "failed",
+      runtime: "manifest",
       currentVersion: this.options.currentVersion,
       manifestUrlConfigured: normalizeManifestUrl(this.options.manifestUrl) !== undefined,
+      canCheck: normalizeManifestUrl(this.options.manifestUrl) !== undefined,
+      canInstall: false,
       checkedAt,
       errorSummary,
     };
@@ -144,11 +202,44 @@ export class AppUpdateService {
   }
 }
 
-export function createAppUpdateService(options: AppUpdateServiceOptions = {}): AppUpdateService {
-  return new AppUpdateService({
+export class UnsupportedAppUpdateService implements AppUpdateServiceLike {
+  private readonly current: AppUpdateInfo;
+
+  constructor(input: { readonly currentVersion?: string; readonly reason?: string } = {}) {
+    this.current = {
+      ok: true,
+      status: "unsupported",
+      runtime: "unsupported",
+      currentVersion: input.currentVersion ?? readAgentArborPackageVersion(),
+      manifestUrlConfigured: false,
+      canCheck: false,
+      canInstall: false,
+      errorSummary: input.reason,
+    };
+  }
+
+  status(): AppUpdateInfo {
+    return this.current;
+  }
+
+  async check(): Promise<AppUpdateInfo> {
+    return this.current;
+  }
+
+  async install(): Promise<AppUpdateInfo> {
+    return this.current;
+  }
+}
+
+export function createAppUpdateService(options: AppUpdateServiceOptions = {}): ManifestAppUpdateService {
+  return new ManifestAppUpdateService({
     ...options,
     currentVersion: options.currentVersion ?? readAgentArborPackageVersion(),
   });
+}
+
+export function createUnsupportedAppUpdateService(input: { readonly currentVersion?: string; readonly reason?: string } = {}): UnsupportedAppUpdateService {
+  return new UnsupportedAppUpdateService(input);
 }
 
 export function compareAppVersions(left: string, right: string): number | undefined {

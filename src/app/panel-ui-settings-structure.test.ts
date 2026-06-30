@@ -125,6 +125,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("<AboutSettings"), true);
   assert.equal(settingsDialog.includes("appUpdate={props.appUpdate}"), true);
   assert.equal(settingsDialog.includes("onCheckAppUpdate={props.onCheckAppUpdate}"), true);
+  assert.equal(settingsDialog.includes("onInstallAppUpdate={props.onInstallAppUpdate}"), true);
   assert.equal(settingsDialog.includes("useBrowserAppearanceSnapshot"), false);
   assert.equal(settingsDialog.includes("<ThemeSwitcher"), false);
   assert.equal(settingsDialog.includes("未配置独立主题"), false);
@@ -137,6 +138,11 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("about-product-github-link"), true);
   assert.equal(settingsDialog.includes("about-update-card"), true);
   assert.equal(settingsDialog.includes("检查更新"), true);
+  assert.equal(settingsDialog.includes("重启安装"), true);
+  assert.equal(settingsDialog.includes("about-update-progress"), true);
+  assert.equal(settingsDialog.includes("不支持自动更新"), true);
+  assert.equal(settingsDialog.includes("正在后台下载更新"), true);
+  assert.equal(settingsDialog.includes("已下载，重启后安装"), true);
   assert.equal(settingsDialog.includes("appUpdateStatusLabel"), true);
   assert.equal(settingsDialog.includes("appUpdateActionUrl"), true);
   assert.equal(settingsDialog.includes("onSaveSkillTriggerMode"), true);
@@ -364,6 +370,8 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsFormStyles.includes(".about-update-card"), true);
   assert.equal(settingsFormStyles.includes(".about-update-check-button"), true);
   assert.equal(settingsFormStyles.includes(".about-update-download-link"), true);
+  assert.equal(settingsFormStyles.includes(".about-update-install-button"), true);
+  assert.equal(settingsFormStyles.includes(".about-update-progress"), true);
   assert.equal(settingsUsageStyles.includes(".usage-stat-grid"), true);
   assert.equal(settingsUsageStyles.includes(".usage-heatmap-grid"), true);
 });

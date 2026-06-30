@@ -84,6 +84,7 @@ import type {
   DeepRunView,
 } from "./contracts/deep";
 import type { McpServerCatalogItem } from "./contracts/tools";
+import type { AppUpdateInfo } from "./contracts/app-update";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
 
 type StartupIntroRootStyle = React.CSSProperties & {
@@ -182,6 +183,9 @@ export function App(): React.ReactElement {
   const mcpToolSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const mcpToolUpdateVersionRef = useRef(0);
   const mcpToolCatalogDraftRef = useRef<readonly McpServerCatalogItem[] | undefined>(undefined);
+  const checkAppUpdateRef = useRef<() => Promise<void>>(async () => undefined);
+  const refreshAppUpdateStatusRef = useRef<() => Promise<void>>(async () => undefined);
+  const autoAppUpdateCheckRequestedRef = useRef(false);
 
   useConversationSummaryRefresh({
     conversations: app.conversations,
@@ -455,10 +459,14 @@ export function App(): React.ReactElement {
     installMcpEnvironment,
     deleteMcpServer,
     updateMcpTool,
+    refreshAppUpdateStatus,
     checkAppUpdate,
+    installAppUpdate,
     refreshSkills,
     updateSkill,
   } = settingsController;
+  checkAppUpdateRef.current = checkAppUpdate;
+  refreshAppUpdateStatusRef.current = refreshAppUpdateStatus;
 
   useEffect(() => {
     if (composerSelectedModelId !== undefined && !modelOptions.some((model) => model.id === composerSelectedModelId)) {
@@ -481,6 +489,31 @@ export function App(): React.ReactElement {
   useEffect(() => {
     persistSidebarCollapsedPreference(sidebarCollapsed);
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const update = app.appUpdate;
+    if (
+      autoAppUpdateCheckRequestedRef.current ||
+      update === undefined ||
+      update.status !== "idle" ||
+      update.canCheck !== true
+    ) {
+      return;
+    }
+    autoAppUpdateCheckRequestedRef.current = true;
+    void checkAppUpdateRef.current();
+  }, [app.appUpdate?.canCheck, app.appUpdate?.status]);
+
+  useEffect(() => {
+    const status = app.appUpdate?.status;
+    if (status !== "checking" && status !== "available" && status !== "downloading" && status !== "installing") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshAppUpdateStatusRef.current();
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [app.appUpdate?.status]);
 
   useEffect(() => subscribeMotionSettingsChanged(() => {
     setStartupAnimationEnabled(getStartupAnimationEnabled());
@@ -1166,6 +1199,14 @@ export function App(): React.ReactElement {
           onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
           onModeChange={selectAgentMode}
         />
+        {app.appUpdate?.status === "downloaded" && (
+          <div className="app-update-ready-banner" role="status">
+            <span>{appUpdateReadyText(app.appUpdate)}</span>
+            <button type="button" onClick={() => void installAppUpdate()}>
+              重启安装
+            </button>
+          </div>
+        )}
         <main className="app-main">
           {isBootstrapping && (
             <div className="app-bootstrap-loading">
@@ -1267,6 +1308,7 @@ export function App(): React.ReactElement {
           onDeleteMcpServer={(serverId) => void deleteMcpServer(serverId)}
           onUpdateMcpTool={(serverId, toolName, enabled, autoApproved) => void updateMcpTool(serverId, toolName, enabled, autoApproved)}
           onCheckAppUpdate={() => void checkAppUpdate()}
+          onInstallAppUpdate={() => void installAppUpdate()}
           onRefreshSkills={() => void refreshSkills()}
           onUpdateSkill={(skill, enabled) => void updateSkill(skill, enabled)}
         />
@@ -1281,6 +1323,13 @@ export function App(): React.ReactElement {
       )}
     </div>
   );
+}
+
+function appUpdateReadyText(update: AppUpdateInfo): string {
+  const version = update.latest?.version;
+  return version === undefined || version === "unknown"
+    ? "新版本已下载"
+    : `新版本 ${version} 已下载`;
 }
 
 function WorkbenchHeader(props: {

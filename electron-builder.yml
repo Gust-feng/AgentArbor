@@ -1,0 +1,37 @@
+appId: com.agentarbor.desktop
+productName: AgentArbor
+directories:
+  output: release
+files:
+  - package.json
+  - from: dist
+    to: dist
+    filter:
+      - "**/*"
+      - "!**/*.test.js"
+      - "!**/*.test.d.ts"
+      - "!**/*.test.js.map"
+      - "!**/*.test.ts"
+      - "!**/*.map"
+extraMetadata:
+  main: dist/app/panel-desktop.js
+asar: true
+compression: normal
+publish:
+  provider: github
+  owner: Gust-feng
+  repo: AgentArbor
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AgentArbor

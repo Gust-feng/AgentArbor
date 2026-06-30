@@ -28,6 +28,9 @@ import {
   type DesktopWindowMaximizeState,
 } from "./panel-desktop-window-controls.js";
 import { startLocalPanelServer } from "./panel-server.js";
+import type { AppUpdateServiceLike } from "./app-update-service.js";
+import { createUnsupportedAppUpdateService } from "./app-update-service.js";
+import { createElectronAppUpdateService, type ElectronUpdaterLike } from "./electron-app-update-service.js";
 
 const activeWindows = new Set<BrowserWindow>();
 const activeDesktopSessions = new Set<PanelDesktopSession>();
@@ -172,9 +175,11 @@ async function main(): Promise<void> {
   scheduleStartupWindowSmokeTimeout();
   let sessionRef: PanelDesktopSession | undefined;
   try {
+    const appUpdateService = await createDesktopAppUpdateService();
     const session = await startPanelDesktopSession(args, {
       startPanelServer: startLocalPanelServer,
       createWindow: createElectronPanelWindow,
+      appUpdateService,
       selectWorkspaceDirectory: selectWorkspaceDirectory,
       selectContextAttachment: selectContextAttachment,
       whenReady: app.whenReady(),
@@ -202,6 +207,12 @@ async function main(): Promise<void> {
 
     if (!args.smoke) {
       activeDesktopSessions.add(session);
+      if (args.devUrl === undefined && !args.windowSmoke) {
+        void appUpdateService.check().catch((error: unknown) => {
+          console.error("自动更新检查失败。");
+          console.error(error);
+        });
+      }
     }
 
     console.log(`AgentArbor 本地桌面面板：${session.url}`);
@@ -1130,4 +1141,40 @@ function withStartupMode(url: string, windowSmoke = false): string {
 
 function getPanelDesktopPreloadPath(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "panel-desktop-preload.cjs");
+}
+
+async function createDesktopAppUpdateService(): Promise<AppUpdateServiceLike> {
+  if (process.platform !== "win32") {
+    return createUnsupportedAppUpdateService({
+      currentVersion: app.getVersion(),
+      reason: "当前自动更新首版仅支持 Windows 打包桌面版。",
+    });
+  }
+  if (!app.isPackaged) {
+    return createUnsupportedAppUpdateService({
+      currentVersion: app.getVersion(),
+      reason: "当前运行方式不支持自动更新。请使用 Windows 打包桌面版。",
+    });
+  }
+  try {
+    const electronUpdaterModule = "electron-updater";
+    const module = await import(electronUpdaterModule) as { readonly autoUpdater?: ElectronUpdaterLike };
+    const updater = module.autoUpdater;
+    if (updater === undefined) {
+      return createUnsupportedAppUpdateService({
+        currentVersion: app.getVersion(),
+        reason: "自动更新模块不可用。",
+      });
+    }
+    return createElectronAppUpdateService({
+      updater,
+      currentVersion: app.getVersion(),
+      enabled: true,
+    });
+  } catch (error) {
+    return createUnsupportedAppUpdateService({
+      currentVersion: app.getVersion(),
+      reason: error instanceof Error ? error.message : "自动更新模块加载失败。",
+    });
+  }
 }

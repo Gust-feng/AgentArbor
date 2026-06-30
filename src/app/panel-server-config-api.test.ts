@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { FileSystemNormalSettingsStore } from "../adapters/config/index.js";
-import type { AppUpdateFetch } from "./app-update-service.js";
+import type { AppUpdateFetch, AppUpdateInfo, AppUpdateServiceLike } from "./app-update-service.js";
 import { startLocalPanelServer, type PanelModelCatalogFetch } from "./panel-server.js";
 import { removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
 
@@ -246,6 +246,54 @@ test("panel app update API reports status and checks configured manifest", async
   }
 });
 
+test("panel app update API can install a downloaded desktop update", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-update-install-api-"));
+  const installed: string[] = [];
+  let current: AppUpdateInfo = {
+    ok: true,
+    status: "downloaded",
+    runtime: "electron",
+    currentVersion: "0.1.0",
+    manifestUrlConfigured: true,
+    canCheck: false,
+    canInstall: true,
+    downloadedAt: "2026-06-30T00:00:00.000Z",
+    latest: { version: "0.2.0" },
+  };
+  const appUpdateService: AppUpdateServiceLike = {
+    status: () => current,
+    check: async () => current,
+    install: async () => {
+      installed.push("install");
+      current = {
+        ...current,
+        status: "installing",
+        canInstall: false,
+      };
+      return current;
+    },
+  };
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    appUpdateService,
+  });
+  try {
+    const initial = await requestJson(server.url, "/api/app/update");
+    const install = await requestJson(server.url, "/api/app/update/install", { method: "POST" });
+
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.status, "downloaded");
+    assert.equal(initial.body.canInstall, true);
+    assert.equal(install.status, 200);
+    assert.equal(install.body.status, "installing");
+    assert.deepEqual(installed, ["install"]);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel app update API stays usable when update source is missing or invalid", async () => {
   const unconfiguredDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-update-none-"));
   const invalidDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-update-invalid-"));
@@ -270,8 +318,10 @@ test("panel app update API stays usable when update source is missing or invalid
 
     assert.equal(unconfigured.status, 200);
     assert.equal(unconfigured.body.ok, true);
-    assert.equal(unconfigured.body.status, "unconfigured");
+    assert.equal(unconfigured.body.status, "unsupported");
     assert.equal(unconfigured.body.manifestUrlConfigured, false);
+    assert.equal(unconfigured.body.canCheck, false);
+    assert.equal(unconfigured.body.canInstall, false);
     assert.equal(failed.status, 200);
     assert.equal(failed.body.ok, false);
     assert.equal(failed.body.status, "failed");

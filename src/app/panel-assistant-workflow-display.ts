@@ -11,7 +11,10 @@ import {
 } from "./panel-ui-timeline-collapse.js";
 import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
 import type { ProjectableTranscriptNode } from "./panel-transcript-node-projection.js";
-import type { AssistantDeliverableLike } from "./panel-assistant-message-output.js";
+import type {
+  AssistantDeliverableLike,
+  AssistantSubAgentRunLike,
+} from "./panel-assistant-message-output.js";
 import type { LiveAnswerTone } from "./panel-ui-live-transcript.js";
 
 export type AssistantWorkflowDisplaySegment<
@@ -55,6 +58,7 @@ export function projectStableAssistantWorkflowDisplay<
   readonly content: string;
   readonly deliverable?: AssistantDeliverableLike;
   readonly transcriptNodes?: readonly TNode[];
+  readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
   readonly pending?: TConfirmation;
   readonly live?: boolean;
   readonly keepStreamMounted?: boolean;
@@ -68,6 +72,7 @@ export function projectStableAssistantWorkflowDisplay<
     content: input.content,
     deliverable: input.deliverable,
     transcriptNodes: input.transcriptNodes,
+    subAgentRuns: input.subAgentRuns,
     pending: input.pending,
     live,
     keepStreamMounted,

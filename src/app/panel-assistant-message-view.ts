@@ -1,5 +1,6 @@
 import {
   assistantMessageOutput,
+  type AssistantSubAgentRunLike,
   type AssistantDeliverableLike,
 } from "./panel-assistant-message-output.js";
 import {
@@ -36,6 +37,7 @@ export function projectAssistantMessageView<
   readonly content: string;
   readonly deliverable?: AssistantDeliverableLike;
   readonly transcriptNodes?: readonly TNode[];
+  readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
   readonly pending?: TConfirmation;
   readonly live?: boolean;
   readonly keepStreamMounted?: boolean;
@@ -51,6 +53,7 @@ export function projectAssistantMessageView<
   const structure = projectAssistantMessageStructure<TNode, TConfirmation>({
     fallbackText: output.hasAnswer ? output.text : undefined,
     transcriptNodes: input.transcriptNodes,
+    subAgentRuns: input.subAgentRuns,
     pending: input.pending,
     live,
     keepStreamMounted,

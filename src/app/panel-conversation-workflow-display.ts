@@ -154,6 +154,7 @@ export function projectStandaloneAssistantWorkflowDisplay<
   readonly deliverable?: AssistantDeliverableLike;
   readonly failed?: boolean;
   readonly transcriptNodes?: readonly TNode[];
+  readonly subAgentRuns?: AssistantWorkViewOutput<TDeliverable>["subAgentRuns"];
   readonly pending?: TPending;
   readonly live?: boolean;
   readonly keepStreamMounted?: boolean;
@@ -182,6 +183,7 @@ export function projectStandaloneAssistantWorkflowDisplay<
     content: failure?.previous ?? input.content,
     deliverable: failure === undefined ? input.deliverable : undefined,
     transcriptNodes: workflowTranscriptNodes,
+    subAgentRuns: input.subAgentRuns,
     pending: input.pending,
     live: input.live,
     keepStreamMounted: input.keepStreamMounted,

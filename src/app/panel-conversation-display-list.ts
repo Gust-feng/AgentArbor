@@ -1,4 +1,8 @@
-import type { AssistantDeliverableLike, AssistantWorkViewOutput } from "./panel-assistant-message-output.js";
+import type {
+  AssistantDeliverableLike,
+  AssistantSubAgentRunLike,
+  AssistantWorkViewOutput,
+} from "./panel-assistant-message-output.js";
 import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import type { WorklineConversationTurn, WorklineProjectedTurn } from "./panel-ui-chat-workline.js";
 import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
@@ -65,6 +69,7 @@ export function projectConversationDisplayList<
   readonly live?: LiveRunBuffer;
   readonly workView?: AssistantWorkViewOutput<TDeliverable>;
   readonly pending?: TPending;
+  readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
   readonly standaloneRun?: {
     readonly currentRunId?: string;
     readonly runStatus?: string;
@@ -99,6 +104,7 @@ export function projectConversationDisplayList<
     : projectStandaloneAssistantWorkflowDisplay({
         previous: input.previous,
         conversationId: input.conversationId,
+        subAgentRuns: input.subAgentRuns ?? input.workView?.subAgentRuns,
         ...standaloneWorkflowProjectionInput(input.conversationId, standaloneRun),
       });
   const items = conversationDisplayItemsFromTurns(input.projectedTurns, turnDisplay.assistantDisplays);

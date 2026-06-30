@@ -86,6 +86,7 @@ export function ChatTranscriptDisplay(props: {
       live: props.live,
       workView: props.workView,
       pending: props.pending,
+      subAgentRuns: props.subAgentRuns,
       standaloneRun: props.standaloneRun === undefined
         ? undefined
         : {
@@ -104,6 +105,7 @@ export function ChatTranscriptDisplay(props: {
     props.live,
     props.workView,
     props.pending,
+    props.subAgentRuns,
     props.standaloneRun,
   ]);
 

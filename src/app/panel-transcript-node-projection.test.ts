@@ -729,6 +729,29 @@ test("panel transcript nodes render model failures as system failures", () => {
   assert.equal(projected[0]?.title, "模型回复失败");
 });
 
+test("panel transcript nodes render failed agent diagnostics as system failures", () => {
+  const projected = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:event:1:agent.note.completed",
+      sequence: 1,
+      type: "agent.note.completed",
+      status: "failed",
+      agentLabel: "运行诊断",
+      summary: "后台持久化失败：磁盘不可写。",
+      detail: {
+        kind: "work",
+        error: "EACCES",
+      },
+    }),
+  ]);
+
+  assert.equal(projected.length, 1);
+  assert.equal(projected[0]?.eventType, "agent.note.completed");
+  assert.equal(projected[0]?.kind, "system");
+  assert.equal(projected[0]?.phase, "failed");
+  assert.equal(projected[0]?.title, "运行诊断");
+});
+
 test("visible transcript keeps context compaction events when they carry real status", () => {
   const requested = visibleTranscriptNodes([
     node({
@@ -845,6 +868,8 @@ function panelEvent(input: {
   readonly eventId: string;
   readonly sequence: number;
   readonly type: string;
+  readonly status?: string;
+  readonly agentLabel?: string;
   readonly summary?: string;
   readonly delta?: string;
   readonly detail?: Parameters<typeof createPanelTranscriptNodes>[0][number]["detail"];
@@ -857,7 +882,9 @@ function panelEvent(input: {
     sequence: input.sequence,
     type: input.type,
     createdAt: "2026-06-04T00:00:00.000Z",
+    agentLabel: input.agentLabel,
     summary: input.summary,
+    status: input.status,
     delta: input.delta,
     detail: input.detail,
     sourceRefs: [],

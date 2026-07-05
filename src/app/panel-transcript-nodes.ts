@@ -170,10 +170,11 @@ function transcriptNodeForEvent(
     if (event.summary === undefined || event.summary.trim().length === 0) {
       return undefined;
     }
+    const failedDiagnostic = event.status === "failed" || event.detail?.error !== undefined;
     return transcriptNode(event, {
-      kind: "thinking",
-      phase: event.type === "agent.note.delta" ? "noted" : "completed",
-      title: "",
+      kind: failedDiagnostic ? "system" : "thinking",
+      phase: failedDiagnostic ? "failed" : event.type === "agent.note.delta" ? "noted" : "completed",
+      title: failedDiagnostic ? event.agentLabel ?? "运行诊断" : "",
       summary: event.summary,
     });
   }

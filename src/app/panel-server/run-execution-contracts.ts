@@ -45,6 +45,12 @@ export type PanelRunExecutionResult = {
     readonly code: string;
     readonly message: string;
   };
+  // paused 表示 out_of_fuel / context_overflow 等"可继续"停止语义，
+  // 由 BasicAgentRunExecutor 统一转 blocked 终态。
+  readonly paused?: {
+    readonly code: string;
+    readonly message: string;
+  };
   readonly pendingApproval?: BasicAgentPendingToolContinuation;
 };
 

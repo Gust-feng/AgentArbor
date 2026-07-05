@@ -24,7 +24,8 @@ import type {
 } from "../../domain/config/index.js";
 import { PanelRunJobStore } from "../panel-run-jobs.js";
 import type { PanelRunPersistenceRuntime } from "./run-persistence.js";
-import { persistPanelRun } from "./run-persistence.js";
+import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
+import { waitForPanelPersistenceIdle } from "./persistence.js";
 
 test("persistPanelRun uses frozen capability workspace instead of current config workspace", async () => {
   const database = new MemoryRuntimeDatabase();
@@ -196,6 +197,61 @@ test("persistPanelRun stores safe context ledger projection for triggered skills
   assert.equal(JSON.stringify(database.contextLedgers[0]).includes("FULL PRIVATE SKILL BODY"), false);
 });
 
+test("persistPanelRunInBackground records failures without poisoning the queue", async () => {
+  const database = new FailOnceUpsertRunDatabase();
+  const runJobs = new PanelRunJobStore();
+  const runtime = persistenceRuntime(database, runJobs);
+  const job = runJobs.create({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "Persist in background",
+    aiMode: "fake",
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    capabilitySnapshot: capabilitySnapshot(),
+    agentDefinitionRef: {
+      agentId: "desktop-agent-session",
+      agentDisplayName: "Desktop Agent",
+      promptRef: "prompt:desktop-root-agent:v1",
+      promptVersion: "v1",
+      outputContractId: "desktop.agent_response.v1",
+      toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+      definitionHash: "sha256:run-persistence-background-test",
+    },
+  });
+  const unhandledRejections: unknown[] = [];
+  const loggedErrors: unknown[][] = [];
+  const onUnhandledRejection = (reason: unknown): void => {
+    unhandledRejections.push(reason);
+  };
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]): void => {
+    loggedErrors.push(args);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+  try {
+    persistPanelRunInBackground(runtime, job);
+    persistPanelRunInBackground(runtime, job);
+    await waitForPanelPersistenceIdle(runtime.persistenceChains);
+    await flushUnhandledRejections();
+  } finally {
+    process.off("unhandledRejection", onUnhandledRejection);
+    console.error = originalConsoleError;
+  }
+
+  const diagnostic = job.streamEvents.find((event) => event.eventId.includes(":persistence.failed:"));
+  assert.equal(database.upsertRunAttempts, 2);
+  assert.equal(database.runRecords.length, 1);
+  assert.equal(runtime.persistenceChains.size, 0);
+  assert.equal(unhandledRejections.length, 0);
+  assert.equal(loggedErrors.length, 1);
+  assert.equal(diagnostic?.type, "agent.note.completed");
+  assert.equal(diagnostic?.status, "failed");
+  assert.equal(diagnostic?.detail?.errorDomain, "runtime_error");
+  assert.equal(diagnostic?.detail?.errorFacts?.operation, "persist_panel_run");
+  assert.equal(diagnostic?.detail?.errorFacts?.runId, job.runId);
+});
+
 function persistenceRuntime(
   database: MemoryRuntimeDatabase,
   runJobs: PanelRunJobStore,
@@ -343,6 +399,25 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
   async listRuns(_limit?: number): Promise<readonly RuntimeRunRecord[]> {
     return [];
   }
+}
+
+class FailOnceUpsertRunDatabase extends MemoryRuntimeDatabase {
+  upsertRunAttempts = 0;
+
+  override async upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord> {
+    this.upsertRunAttempts += 1;
+    if (this.upsertRunAttempts === 1) {
+      const error = new Error("simulated runtime database write failure") as Error & { code: string };
+      error.code = "EIO";
+      throw error;
+    }
+    return super.upsertRun(record);
+  }
+}
+
+async function flushUnhandledRejections(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 function modelConfig(): SanitizedModelProviderConfig {

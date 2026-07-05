@@ -25,17 +25,19 @@ export function assistantToolCallMessage(
 export function toolResultMessage(result: ToolCallResult): ModelMessage {
   const envelope = result.projection?.envelope;
   const attachments = result.projection?.modelAttachments;
-  const modelOutput = result.projection?.agentContent !== undefined
-    ? sanitizeProjectedAgentContent(result.projection.agentContent)
-    : envelope !== undefined
-      ? {
-          summary: envelope.agentSummary,
-          evidenceRefs: envelope.evidenceRefs,
-          truncated: envelope.truncated,
-          redacted: envelope.redacted,
-          diagnosticRef: envelope.diagnosticRef,
-        }
-      : toSafeToolEventValue(result.output);
+  const modelOutput = result.projection?.modelResult !== undefined
+    ? sanitizeProjectedAgentContent(result.projection.modelResult)
+    : result.projection?.agentContent !== undefined
+      ? sanitizeProjectedAgentContent(result.projection.agentContent)
+      : envelope !== undefined
+        ? {
+            summary: envelope.agentSummary,
+            evidenceRefs: envelope.evidenceRefs,
+            truncated: envelope.truncated,
+            redacted: envelope.redacted,
+            diagnosticRef: envelope.diagnosticRef,
+          }
+        : toSafeToolEventValue(result.output);
   return {
     role: "tool",
     content: truncateToolMessageContent(JSON.stringify({

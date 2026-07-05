@@ -140,7 +140,13 @@ export type ToolDefinitionMetadata = {
 };
 
 export type ToolSafeProjection = {
+  /**
+   * Compatibility alias consumed by the current model tool continuation path.
+   * New projections should also fill `modelResult` and keep model input
+   * attachments separate in `modelAttachments`.
+   */
   readonly agentContent?: unknown;
+  readonly modelResult?: ToolResult;
   /**
    * Ephemeral model-input attachments produced by a tool for the next model
    * round. These payloads must not be projected into events, panel read-models,
@@ -153,6 +159,60 @@ export type ToolSafeProjection = {
   readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly redacted?: boolean;
+};
+
+export type ToolContentBlock =
+  | {
+      readonly type: "text";
+      readonly text: string;
+    }
+  | {
+      readonly type: "image";
+      readonly data?: string;
+      readonly mimeType: string;
+      readonly ref?: string;
+    }
+  | {
+      readonly type: "audio";
+      readonly data?: string;
+      readonly mimeType: string;
+      readonly ref?: string;
+    }
+  | {
+      readonly type: "resource";
+      readonly uri: string;
+      readonly mimeType?: string;
+      readonly text?: string;
+    };
+
+export type ToolContinuation = {
+  readonly ref?: string;
+  readonly nextInput?: unknown;
+  readonly note?: string;
+};
+
+export type ToolResultTruncation = {
+  readonly truncated: true;
+  readonly reason?: string;
+  readonly omittedChars?: number;
+  readonly omittedItems?: number;
+  readonly continuation?: ToolContinuation;
+};
+
+export type ToolResultError = {
+  readonly message: string;
+  readonly domain?: ToolErrorDomain;
+  readonly facts?: ToolErrorFacts;
+  readonly retryable?: boolean;
+};
+
+export type ToolResult = {
+  readonly content: readonly ToolContentBlock[];
+  readonly structuredContent?: unknown;
+  readonly isError?: boolean;
+  readonly error?: ToolResultError;
+  readonly truncation?: ToolResultTruncation;
+  readonly continuation?: ToolContinuation;
 };
 
 export type ToolResultEnvelope = {

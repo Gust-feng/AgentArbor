@@ -676,6 +676,46 @@ test("activity item projection derives stable render metadata outside React comp
   assert.equal(items[1]?.tone, "tool");
 });
 
+test("tool activity derives the default line from display instead of presentation", () => {
+  const item = activityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "shell_command",
+      display: {
+        kind: "command_summary",
+        commandLine: "pnpm test",
+        exitCode: 0,
+      },
+    }),
+  ])[0];
+
+  assert.equal(item?.copy.label, "命令");
+  assert.equal(item?.copy.detail, "pnpm test");
+  assert.equal(item?.toolKind, "command");
+  assert.equal(item?.statusBadge?.label, "已完成");
+});
+
+test("tool activity derives display kind from display instead of presentation", () => {
+  const item = activityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "custom_runner",
+      display: {
+        kind: "file_diff_preview",
+        path: "src/app.ts",
+      },
+    }),
+  ])[0];
+
+  assert.equal(item?.copy.label, "编辑");
+  assert.equal(item?.copy.detail, "src/app.ts");
+  assert.equal(item?.toolKind, "edit");
+});
+
 test("activity item projection marks context compaction as a dedicated status row", () => {
   const items = activityItemsForNodes([
     node({

@@ -441,3 +441,42 @@ test("tool stream projection shows MCP preview without raw media payload", () =>
   assert.equal(detail.envelope?.rawRetention, "none");
   assert.equal(JSON.stringify(detail).includes("RAW_BASE64_SENTINEL"), false);
 });
+
+test("tool stream projection keeps model result fields out of UI detail", () => {
+  const payload = {
+    toolName: "shell_command",
+    input: { commandLine: "pnpm test" },
+    output: {
+      canonicalResult: {
+        content: [{ type: "text", text: "stdout sentinel" }],
+        structuredContent: {
+          commandLine: "pnpm test",
+          exitCode: 0,
+          stdout: "stdout sentinel",
+        },
+      },
+      presentation: {
+        explanation: {
+          text: "测试命令返回了可查看的输出。",
+          source: "runtime_fallback",
+        },
+        displayShape: "terminal",
+      },
+      result: {
+        commandLine: "pnpm test",
+        exitCode: 0,
+      },
+    },
+  };
+
+  const detail = toolStreamDetail("tool.completed", payload);
+  const summary = toolSummary("tool.completed", payload);
+  const detailRecord = detail as Readonly<Record<string, unknown>>;
+
+  assert.equal(summary.includes("测试命令返回了可查看的输出"), false);
+  assert.equal(summary.includes("pnpm test"), true);
+  assert.equal(detail.display?.kind, "command_summary");
+  assert.equal(detail.command, "pnpm test");
+  assert.equal(detailRecord.presentation, undefined);
+  assert.equal(detailRecord.canonicalResult, undefined);
+});

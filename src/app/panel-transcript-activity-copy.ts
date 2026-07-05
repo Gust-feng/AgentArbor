@@ -122,12 +122,18 @@ export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLi
 export function resolveActivityToolKind(item: {
   readonly tone: ActivityItem["tone"];
   readonly copy: { readonly label?: string };
+  readonly displayKind?: NonNullable<ProjectableTranscriptNode["display"]>["kind"];
 }): ActivityToolKind {
   if (item.tone === "thinking") return "thinking";
   if (item.tone === "confirmation") return "confirmation";
   if (item.tone === "decision") return "decision";
   if (item.tone === "sub_agent") return "sub_agent";
   if (item.tone === "system") return "system";
+  if (item.displayKind === "command_summary") return "command";
+  if (item.displayKind === "search_results" || item.displayKind === "file_search_results") return "search";
+  if (item.displayKind === "directory_listing" || item.displayKind === "read_result") return "read";
+  if (item.displayKind === "browser_snapshot" || item.displayKind === "http_response") return "web";
+  if (item.displayKind === "file_change_summary" || item.displayKind === "file_diff_preview") return "edit";
   const label = item.copy.label;
   if (label === "命令") return "command";
   if (label === "搜索") return "search";
@@ -151,7 +157,7 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
       copy,
       tone,
       phase: node.phase,
-      toolKind: resolveActivityToolKind({ tone, copy }),
+      toolKind: resolveActivityToolKind({ tone, copy, displayKind: node.display?.kind }),
       subAgentRunId: node.subAgentRunId,
       subAgentBatchId: node.subAgentBatchId,
       subAgentName: node.subAgentName,
@@ -307,7 +313,7 @@ function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLin
     copy,
     tone,
     phase: node.phase,
-    toolKind: resolveActivityToolKind({ tone, copy }),
+    toolKind: resolveActivityToolKind({ tone, copy, displayKind: node.display?.kind }),
     subAgentRunId: node.subAgentRunId,
     subAgentBatchId: node.subAgentBatchId,
     subAgentName: node.subAgentName,
@@ -666,7 +672,7 @@ function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem)
       ...terminal.copy,
       expandedDetail,
     },
-    toolKind: resolveActivityToolKind(terminal),
+    toolKind: terminal.toolKind ?? resolveActivityToolKind(terminal),
     lineDelta: terminal.lineDelta ?? requested.lineDelta,
     expandedSections: sections.length > 0
       ? sections

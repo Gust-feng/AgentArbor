@@ -374,7 +374,7 @@ test("ordinary desktop execution can run a frozen fake MCP tool through the defa
   ]);
   assert.equal(channel.requests[1]?.sanitizedMessages.some((message) =>
     message.role === "tool" &&
-    (message.content ?? "").includes("找到 AgentArbor MCP 能力底座说明。")
+    (message.content ?? "").includes("AgentArbor MCP tools are exposed from frozen run capability snapshots.")
   ), true);
   assert.equal(completedTool?.type, "tool.completed");
   assert.equal(toolPayload?.toolName, "fake_docs__lookup");

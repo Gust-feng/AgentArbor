@@ -136,7 +136,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   );
   assert.equal(persistedRunResponse.includes("export function createPersistedPanelRunResponse"), true);
   assert.equal(persistedRunResponse.includes("RunAgentDefinitionRef"), true);
-  assert.equal(persistedRunResponse.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
+  assert.equal(persistedRunResponse.includes("PanelRunResponseBase"), true);
   assert.equal(persistedRunResponse.includes("agentDefinitionRef: input.snapshot.run.agentDefinitionRef"), true);
   assert.equal(persistedRunResponse.includes("function persistedRunAgentLabel"), true);
   assert.equal(persistedRunResponse.includes("snapshot.run.agentDefinitionRef?.agentDisplayName"), true);

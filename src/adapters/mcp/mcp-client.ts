@@ -36,6 +36,7 @@ const MAX_MCP_LIST_PAGES = 100;
 
 export type McpToolResult = {
   readonly content: readonly McpContentPart[];
+  readonly structuredContent?: unknown;
   readonly isError?: boolean;
 };
 
@@ -151,11 +152,12 @@ export class McpClientWrapper {
     this.assertConnected();
     const result = await this.client!.callTool({ name, arguments: args as Record<string, unknown> });
     const isError = "isError" in result ? (result.isError as boolean) : undefined;
+    const structuredContent = "structuredContent" in result ? result.structuredContent : undefined;
     const rawContent = "content" in result ? (result.content as readonly unknown[]) : [];
     const content = rawContent
       .filter(isMcpContentPart)
       .map(toMcpContentPart);
-    return { content, isError };
+    return { content, structuredContent, isError };
   }
 
   async listReferences(): Promise<McpReferenceInfo> {

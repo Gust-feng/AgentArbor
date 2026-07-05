@@ -49,6 +49,20 @@ function createTestServer() {
     })
   );
   server.registerTool(
+    "structured_tool",
+    {
+      description: "Returns text and structured content",
+      inputSchema: { id: z.string() },
+    },
+    async (args) => ({
+      content: [{ type: "text" as const, text: `Loaded ${args.id}` }],
+      structuredContent: {
+        id: args.id,
+        records: [{ title: "Structured record", score: 1 }],
+      },
+    })
+  );
+  server.registerTool(
     "destructive_tool",
     {
       description: "Mutates external state",
@@ -111,7 +125,7 @@ test("McpClientWrapper listTools returns expected format", async () => {
   const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
-  assert.equal(tools.length, 5);
+  assert.equal(tools.length, 6);
 
   const echo = tools.find((t) => t.name === "echo");
   assert.ok(echo);
@@ -297,6 +311,20 @@ test("McpClientWrapper callTool handles error result", async () => {
   await client.disconnect();
 });
 
+test("McpClientWrapper callTool preserves structuredContent", async () => {
+  const { client } = await createConnectedPair();
+
+  const result = await client.callTool("structured_tool", { id: "record-1" });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(result.structuredContent, {
+    id: "record-1",
+    records: [{ title: "Structured record", score: 1 }],
+  });
+  assert.equal(result.content[0]?.type, "text");
+
+  await client.disconnect();
+});
+
 test("McpClientWrapper throws when not connected", async () => {
   const client = new McpClientWrapper(
     { serverId: "test-server", transport: "stdio" },
@@ -445,31 +473,49 @@ test("createMcpToolExecutor execute returns text output", async () => {
 
   assert.deepEqual(output, {
     summary: "Echo: test",
+    mcpResult: {
+      content: [{ type: "text", text: "Echo: test" }],
+      structuredContent: undefined,
+      isError: undefined,
+    },
     result: {
       text: "Echo: test",
       multimodal: undefined,
+      structuredContent: undefined,
     },
+    isError: undefined,
     truncated: false,
   });
 
   await client.disconnect();
 });
 
-test("createMcpToolExecutor execute throws on MCP error", async () => {
+test("createMcpToolExecutor execute preserves MCP error content", async () => {
   const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
   const failTool = tools.find((t) => t.name === "fail_tool")!;
   const executor = createMcpToolExecutor(client, failTool, "my-server");
 
-  await assert.rejects(
-    () =>
-      executor.execute(
-        {},
-        { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
-      ),
-    /Something went wrong/
+  const output = await executor.execute(
+    {},
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
   );
+  assert.deepEqual(output, {
+    summary: "Something went wrong.",
+    mcpResult: {
+      content: [{ type: "text", text: "Something went wrong." }],
+      structuredContent: undefined,
+      isError: true,
+    },
+    result: {
+      text: "Something went wrong.",
+      multimodal: undefined,
+      structuredContent: undefined,
+    },
+    isError: true,
+    truncated: false,
+  });
 
   await client.disconnect();
 });
@@ -572,7 +618,7 @@ test("McpManager separates discovered tools from exposed registry tools", async 
   await manager.connectAll();
 
   const discoveredTools = manager.getDiscoveredToolsForRegistry();
-  assert.equal(discoveredTools.length, 5);
+  assert.equal(discoveredTools.length, 6);
   const names = discoveredTools.map((t) => t.definition.name).sort();
   assert.deepEqual(names, [
     "srv__destructive_tool",
@@ -580,6 +626,7 @@ test("McpManager separates discovered tools from exposed registry tools", async 
     "srv__fail_tool",
     "srv__open_world_tool",
     "srv__read_only_tool",
+    "srv__structured_tool",
   ]);
   assert.equal(discoveredTools[0].definition.metadata?.category, "mcp");
   assert.deepEqual(manager.getToolsForRegistry(), []);

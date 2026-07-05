@@ -67,11 +67,7 @@ export async function executeMcpTool(
   input: unknown
 ): Promise<unknown> {
   const result = await client.callTool(tool.name, input);
-  if (result.isError === true) {
-    const errorText = extractTextContent(result.content);
-    throw new Error(errorText.length > 0 ? errorText : `MCP tool "${tool.name}" returned an error.`);
-  }
-  return buildToolOutput(result.content);
+  return buildToolOutput(result);
 }
 
 function createMcpToolDefinition(
@@ -149,8 +145,8 @@ function createMcpToolModelContract(input: {
       "MCP annotations are advisory; rely on the tool description, schema, and returned result when deciding follow-up steps.",
     ],
     outputNotes: [
-      "Successful calls return MCP content normalized into summary, result.text, result.multimodal, and truncated.",
-      "MCP tool error results fail the tool call and preserve server-provided error text when available.",
+      "MCP tool calls preserve an MCP-like canonical result with content[], structuredContent, and isError.",
+      "MCP isError=true is returned as tool result content for the model and UI; protocol, connection, or transport exceptions fail the tool call.",
     ],
     runtimeHints: [
       { label: "MCP server", value: input.serverId },
@@ -215,19 +211,19 @@ function truncateAtWordBoundary(value: string, maxChars: number): string {
   return `${trimmed}\u2026`;
 }
 
-function extractTextContent(content: readonly McpContentPart[]): string {
-  return content
-    .filter((part): part is McpContentPart & { readonly type: "text" } => part.type === "text")
-    .map((part) => part.text)
-    .join("\n");
-}
-
 type McpToolOutput = {
   readonly summary: string;
+  readonly mcpResult: {
+    readonly content: readonly McpContentPart[];
+    readonly structuredContent?: unknown;
+    readonly isError?: boolean;
+  };
   readonly result: {
     readonly text?: string;
     readonly multimodal?: readonly McpToolMultimodalSummary[];
+    readonly structuredContent?: unknown;
   };
+  readonly isError?: boolean;
   readonly truncated: boolean;
 };
 
@@ -307,10 +303,14 @@ function mcpToolNameSetHas(tools: readonly string[], serverId: string, toolName:
   return tools.includes(localName) || tools.includes(namespacedName);
 }
 
-function buildToolOutput(content: readonly McpContentPart[]): McpToolOutput {
+function buildToolOutput(result: {
+  readonly content: readonly McpContentPart[];
+  readonly structuredContent?: unknown;
+  readonly isError?: boolean;
+}): McpToolOutput {
   const textParts: string[] = [];
   const multimodalParts: McpToolMultimodalSummary[] = [];
-  for (const part of content) {
+  for (const part of result.content) {
     if (part.type === "text") {
       textParts.push(part.text);
     } else if (part.type === "image") {
@@ -335,10 +335,17 @@ function buildToolOutput(content: readonly McpContentPart[]): McpToolOutput {
   const summary = [visibleText.text, mediaSummary].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
   return {
     summary: summary.length === 0 ? "MCP tool returned no text content." : summary,
+    mcpResult: {
+      content: result.content,
+      structuredContent: result.structuredContent,
+      isError: result.isError,
+    },
     result: {
       text: visibleText.text.length > 0 ? visibleText.text : undefined,
       multimodal: multimodalParts.length === 0 ? undefined : multimodalParts,
+      structuredContent: result.structuredContent,
     },
+    isError: result.isError,
     truncated: visibleText.truncated,
   };
 }

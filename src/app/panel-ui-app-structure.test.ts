@@ -39,17 +39,36 @@ test("panel UI app shell delegates data and control work", async () => {
     appSettingsController,
     appState,
     chatEmpty,
+    workbenchShell,
+    workbenchMain,
     chatTranscriptChain,
     transcriptTimeline,
     sidebar,
     settingsDialog,
+    workbenchSettingsDialog,
     capabilitySettings,
     skillSettings,
     workspaceSettings,
     deepView,
+    deepViewModel,
+    deepTranscriptModel,
+    deepWorkDetailModel,
     deepRunTree,
     deepConclusion,
     multiAgentWorkspace,
+    appDeepEntry,
+    appDeepTaskController,
+    appSidebarConversationController,
+    appComposerController,
+    appFormStateSync,
+    appWorkbenchConfigState,
+    appShellEffects,
+    appShellState,
+    appWorkbenchShellProps,
+    appWorkbenchRuntime,
+    appWorkbenchTaskState,
+    appQueuedMessageState,
+    appWorkbenchInputProps,
     appDeepLiveUpdates,
     appDeepControl,
     appDeepIntake,
@@ -86,17 +105,36 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource("app-settings-controller.ts"),
     readPanelUiSource("app-state.ts"),
     readPanelUiSource(path.join("components", "chat-empty.tsx")),
+    readPanelUiSource(path.join("components", "workbench-shell.tsx")),
+    readPanelUiSource(path.join("components", "workbench-main.tsx")),
     readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
     readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
     readPanelUiSource(path.join("components", "sidebar.tsx")),
     readPanelUiSource(path.join("components", "settings-dialog.tsx")),
+    readPanelUiSource(path.join("components", "workbench-settings-dialog.tsx")),
     readPanelUiSource(path.join("components", "capability-settings.tsx")),
     readPanelUiSource(path.join("components", "skill-settings.tsx")),
     readPanelUiSource(path.join("components", "workspace-settings.tsx")),
     readPanelUiSource(path.join("components", "deep-view.tsx")),
+    readPanelUiSource("deep-view-model.ts"),
+    readPanelUiSource("deep-transcript-model.ts"),
+    readPanelUiSource("deep-work-detail-model.ts"),
     readPanelUiSource(path.join("components", "deep-run-tree.tsx")),
     readPanelUiSource(path.join("components", "deep-conclusion.tsx")),
     readPanelUiSource(path.join("components", "multi-agent-workspace.tsx")),
+    readPanelUiSource("app-deep-entry.ts"),
+    readPanelUiSource("app-deep-task-controller.ts"),
+    readPanelUiSource("app-sidebar-conversation-controller.ts"),
+    readPanelUiSource("app-composer-controller.ts"),
+    readPanelUiSource("app-form-state-sync.ts"),
+    readPanelUiSource("app-workbench-config-state.ts"),
+    readPanelUiSource("app-shell-effects.ts"),
+    readPanelUiSource("app-shell-state.ts"),
+    readPanelUiSource("app-workbench-shell-props.ts"),
+    readPanelUiSource("app-workbench-runtime.ts"),
+    readPanelUiSource("app-workbench-task-state.ts"),
+    readPanelUiSource("app-queued-message-state.ts"),
+    readPanelUiSource("app-workbench-input-props.ts"),
     readPanelUiSource("app-deep-live-updates.ts"),
     readPanelUiSource("app-deep-control.ts"),
     readPanelUiSource("app-deep-intake.ts"),
@@ -113,25 +151,44 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(entry.includes('import { App } from "./App"'), true);
   assert.equal(app.includes('import { getJson } from "./api"'), false);
   assert.equal(app.includes('import { getJson, postJson } from "./api"'), false);
-  assert.equal(app.includes('from "./components/sidebar"'), true);
+  assert.equal(app.includes('from "./components/sidebar"'), false);
   assert.equal(app.includes('from "./components/topbar"'), false);
-  assert.equal(app.includes('from "./components/chat-empty"'), true);
-  assert.equal(hasPanelUiModuleReference(app, "./components/chat-active"), true);
-  assert.equal(hasPanelUiModuleReference(app, "./components/settings-dialog"), true);
+  assert.equal(app.includes('from "./components/chat-empty"'), false);
+  assert.equal(hasPanelUiModuleReference(app, "./components/chat-active"), false);
+  assert.equal(hasPanelUiModuleReference(app, "./components/settings-dialog"), false);
+  assert.equal(hasPanelUiModuleReference(app, "./components/workbench-main"), false);
+  assert.equal(hasPanelUiModuleReference(app, "./components/workbench-settings-dialog"), false);
+  assert.equal(hasPanelUiModuleReference(app, "./components/workbench-shell"), true);
+  assert.equal(workbenchShell.includes('from "./sidebar"'), true);
+  assert.equal(workbenchShell.includes('from "./workbench-main"'), true);
+  assert.equal(workbenchShell.includes('from "./workbench-settings-dialog"'), true);
+  assert.equal(workbenchShell.includes('from "../app-startup-intro"'), true);
+  assert.equal(app.includes('from "./app-workbench-shell-props"'), true);
   assert.equal(app.includes('from "./ui-state"'), false);
   assert.equal(api.includes("export async function requestJson"), true);
   assert.equal(text.includes("export const STATUS_LABELS"), true);
-  assert.equal(app.includes("isConversationWaitingForUser"), true);
+  assert.equal(app.includes("isConversationWaitingForUser"), false);
+  assert.equal(appWorkbenchRuntime.includes("isConversationWaitingForUser"), true);
   assert.equal(app.includes("transcriptNodesByRunId"), false);
   assert.equal(app.includes("loadConversationTranscriptNodesByRunId"), false);
-  assert.equal(app.includes('from "./app-run-projection"'), true);
-  assert.equal(app.includes('from "./app-model-usage-display"'), true);
-  assert.equal(app.includes('from "../../panel-context-window-usage"'), true);
-  assert.equal(app.includes("contextWindowUsageFrom({"), true);
-  assert.equal(app.includes("capabilityPlan?.modelCapabilities.contextWindowTokens"), true);
+  assert.equal(app.includes('from "./app-run-projection"'), false);
+  assert.equal(app.includes('from "./app-workbench-runtime"'), true);
+  assert.equal(app.includes("useAppWorkbenchRuntime({"), true);
+  assert.equal(appWorkbenchRuntime.includes("export function useAppWorkbenchRuntime"), true);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-run-projection"'), true);
+  assert.equal(app.includes('from "./app-model-usage-display"'), false);
+  assert.equal(appShellState.includes('from "./app-model-usage-display"'), true);
+  assert.equal(app.includes('from "../../panel-context-window-usage"'), false);
+  assert.equal(appWorkbenchRuntime.includes('from "../../panel-context-window-usage"'), true);
+  assert.equal(app.includes("contextWindowUsageFrom({"), false);
+  assert.equal(appWorkbenchRuntime.includes("contextWindowUsageFrom({"), true);
+  assert.equal(app.includes("capabilityPlan?.modelCapabilities.contextWindowTokens"), false);
+  assert.equal(appWorkbenchRuntime.includes("capabilityPlan?.modelCapabilities.contextWindowTokens"), true);
   assert.equal(app.includes("capabilityPlan.modelCapabilities.contextWindowTokens"), false);
-  assert.equal(app.includes("latestModelUsageFromEvents(currentRun.events)"), true);
-  assert.equal(app.includes("latestModelUsageFromTranscript(currentRun.transcriptNodes)"), true);
+  assert.equal(app.includes("latestModelUsageFromEvents(currentRun.events)"), false);
+  assert.equal(app.includes("latestModelUsageFromTranscript(currentRun.transcriptNodes)"), false);
+  assert.equal(appWorkbenchRuntime.includes("latestModelUsageFromEvents(currentRun.events)"), true);
+  assert.equal(appWorkbenchRuntime.includes("latestModelUsageFromTranscript(currentRun.transcriptNodes)"), true);
   assert.equal(app.includes("contextUsage,"), true);
   assert.equal(panelContextWindowUsage.includes("export function contextWindowUsageFrom"), true);
   assert.equal(panelContextWindowUsage.includes("export function latestModelUsageFromTranscript"), true);
@@ -141,37 +198,167 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(chatComposerStyles.includes(".composer-context-usage-svg"), true);
   assert.equal(chatComposerStyles.includes(".composer-context-usage-meter"), true);
   assert.equal(app.includes("modelUsageDisplayEnabled"), true);
-  assert.equal(app.includes("showModelUsage={modelUsageDisplayEnabled}"), true);
-  assert.equal(app.includes("onModelUsageDisplayChange={changeModelUsageDisplay}"), true);
+  assert.equal(app.includes("showModelUsage={modelUsageDisplayEnabled}"), false);
+  assert.equal(appWorkbenchShellProps.includes("showModelUsage: options.modelUsageDisplayEnabled"), true);
+  assert.equal(workbenchMain.includes("showModelUsage={props.showModelUsage}"), true);
+  assert.equal(app.includes("onModelUsageDisplayChange={changeModelUsageDisplay}"), false);
+  assert.equal(workbenchSettingsDialog.includes("onModelUsageDisplayChange={props.preferences.onModelUsageDisplayChange}"), true);
   assert.equal(appModelUsageDisplay.includes("agentarbor:model-usage-display"), true);
   assert.equal(appModelUsageDisplay.includes("readLocalPreference(STORAGE_MODEL_USAGE_DISPLAY_KEY) === \"true\""), true);
   assert.equal(appModelUsageDisplay.includes("writeLocalPreference(STORAGE_MODEL_USAGE_DISPLAY_KEY"), true);
   assert.equal(appModelUsageDisplay.includes("subscribeModelUsageDisplayChanged"), true);
-  assert.equal(app.includes('from "./app-runtime-controls"'), true);
-  assert.equal(app.includes('from "./app-attachments"'), true);
-  assert.equal(app.includes('from "./app-bootstrap"'), true);
+  assert.equal(app.includes('from "./app-shell-effects"'), true);
+  assert.equal(app.includes('from "./app-shell-state"'), true);
+  assert.equal(app.includes("useAppShellEffects({"), true);
+  assert.equal(app.includes("useAppShellState({"), true);
+  assert.equal(app.includes('from "./app-workbench-task-state"'), true);
+  assert.equal(app.includes("useAppWorkbenchTaskState(app)"), true);
+  assert.equal(appShellEffects.includes("export function useAppShellEffects"), true);
+  assert.equal(appShellState.includes("export function useAppShellState"), true);
+  assert.equal(appWorkbenchTaskState.includes("export function useAppWorkbenchTaskState"), true);
+  assert.equal(appWorkbenchTaskState.includes("const [goal, setGoal] = useState(\"\");"), true);
+  assert.equal(appWorkbenchTaskState.includes("const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);"), true);
+  assert.equal(appWorkbenchTaskState.includes("const [selectedWorkspaceDirectory, setSelectedWorkspaceDirectory] = useState<string | undefined>(undefined);"), true);
+  assert.equal(appShellState.includes("function openSettings"), true);
+  assert.equal(appShellState.includes("function changeModelUsageDisplay"), true);
+  assert.equal(appShellState.includes("function changeAgentClusterEnabled"), true);
+  assert.equal(appShellState.includes("export function persistSidebarCollapsedPreference"), true);
+  assert.equal(appShellState.includes("onExitDeepMode"), true);
+  assert.equal(app.includes("function openSettings"), false);
+  assert.equal(app.includes("function changeModelUsageDisplay"), false);
+  assert.equal(app.includes("function changeAgentClusterEnabled"), false);
+  assert.equal(app.includes("function loadSidebarCollapsedPreference"), false);
+  assert.equal(app.includes("function loadAgentClusterEnabledPreference"), false);
+  assert.equal(app.includes("function persistAgentClusterEnabledPreference"), false);
+  assert.equal(app.includes("function persistSidebarCollapsedPreference"), false);
+  assert.equal(appShellEffects.includes("subscribeMotionSettingsChanged"), true);
+  assert.equal(appShellEffects.includes("subscribeModelUsageDisplayChanged"), true);
+  assert.equal(appShellEffects.includes("autoAppUpdateCheckRequestedRef"), true);
+  assert.equal(appShellEffects.includes("checkAppUpdateRef.current()"), true);
+  assert.equal(appShellEffects.includes("refreshAppUpdateStatusRef.current()"), true);
+  assert.equal(appShellEffects.includes("persistSidebarCollapsed(options.sidebarCollapsed)"), true);
+  assert.equal(app.includes('from "./app-queued-message-state"'), true);
+  assert.equal(app.includes("useAppQueuedMessages({"), true);
+  assert.equal(appQueuedMessageState.includes("export function useAppQueuedMessages"), true);
+  assert.equal(appQueuedMessageState.includes("queueReadyAfterRunRef"), true);
+  assert.equal(appQueuedMessageState.includes("dispatchedQueueAfterRunRef"), true);
+  assert.equal(appQueuedMessageState.includes("previousRunActivityRef"), true);
+  assert.equal(appQueuedMessageState.includes("clearQueuedMessages"), true);
+  assert.equal(app.includes('from "./app-form-state-sync"'), false);
+  assert.equal(app.includes("useAppFormStateSync({"), false);
+  assert.equal(app.includes('from "./app-workbench-config-state"'), true);
+  assert.equal(app.includes("useAppWorkbenchConfigState(app)"), true);
+  assert.equal(app.includes("const [goal, setGoal] = useState(\"\");"), false);
+  assert.equal(app.includes("const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);"), false);
+  assert.equal(app.includes("const [selectedWorkspaceDirectory, setSelectedWorkspaceDirectory] = useState<string | undefined>(undefined);"), false);
+  assert.equal(app.includes('from "./model-options"'), false);
+  assert.equal(appFormStateSync.includes("export function useAppFormStateSync"), true);
+  assert.equal(appWorkbenchConfigState.includes("export function useAppWorkbenchConfigState"), true);
+  assert.equal(appWorkbenchConfigState.includes('from "./app-form-state-sync"'), true);
+  assert.equal(appWorkbenchConfigState.includes("useAppFormStateSync({"), true);
+  assert.equal(appWorkbenchConfigState.includes('from "./model-options"'), true);
+  assert.equal(appWorkbenchConfigState.includes("modelOptionsFromConfig(app.config, modelCatalogs)"), true);
+  assert.equal(appWorkbenchConfigState.includes("selectedModelOptionId(app.config, modelOptions)"), true);
+  assert.equal(appWorkbenchConfigState.includes("modelOptionSupportsReasoningEffort(app.config, selectedModelId)"), true);
+  assert.equal(appFormStateSync.includes("normalizeVisibleAiMode"), true);
+  assert.equal(appFormStateSync.includes("visibleConfigLabel"), true);
+  assert.equal(appFormStateSync.includes("setToolForm({"), true);
+  assert.equal(appFormStateSync.includes("setMcpServerForm((previous) => {"), true);
+  assert.equal(appFormStateSync.includes("setComposerSelectedModelId(undefined)"), true);
+  assert.equal(appFormStateSync.includes('setComposerReasoningEffort("")'), true);
+  assert.equal(app.includes('from "./app-workbench-input-props"'), true);
+  assert.equal(app.includes("buildWorkbenchInputProps({"), true);
+  assert.equal(appWorkbenchInputProps.includes("export function buildWorkbenchInputProps"), true);
+  assert.equal(appWorkbenchInputProps.includes("const activeInputAgentMode: AgentMode = options.agentClusterActive ? \"deep\" : \"normal\";"), true);
+  assert.equal(appWorkbenchInputProps.includes("if (options.agentClusterActive) {"), true);
+  assert.equal(appWorkbenchInputProps.includes("} else if (options.busy || options.modelResponding) {"), true);
+  assert.equal(appWorkbenchInputProps.includes("options.enqueueMessage(options.goal);"), true);
+  assert.equal(appWorkbenchInputProps.includes("allowInputWhileBusy: true,"), true);
+  assert.equal(appWorkbenchInputProps.includes("const hasBusyDeepRun = shouldKeepDeepRunBusy(options.deep?.run);"), true);
+  assert.equal(appWorkbenchInputProps.includes("const hasPendingDeepRunBootstrap = options.deepActiveRunId !== undefined && options.deep === undefined;"), true);
+  assert.equal(appWorkbenchInputProps.includes("const hasActiveDeepRun = hasBusyDeepRun || hasPendingDeepRunBootstrap;"), true);
+  assert.equal(appWorkbenchInputProps.includes("queuedMessages: undefined,"), true);
+  assert.equal(appWorkbenchInputProps.includes("onRemoveQueuedMessage: undefined,"), true);
+  assert.equal(appWorkbenchInputProps.includes("onUpdateQueuedMessage: undefined,"), true);
+  assert.equal(appWorkbenchInputProps.includes('cancelLabel: "停止",'), true);
+  assert.equal(appWorkbenchInputProps.includes("function deepInputPlaceholder("), true);
+  assert.equal(app.includes('from "./app-composer-controller"'), false);
+  assert.equal(app.includes("createAppComposerController({"), false);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-composer-controller"'), true);
+  assert.equal(appWorkbenchRuntime.includes("createAppComposerController({"), true);
+  assert.equal(appComposerController.includes("export function createAppComposerController"), true);
+  assert.equal(appComposerController.includes('from "./app-attachments"'), true);
+  assert.equal(appComposerController.includes('from "./app-workspace-selection"'), true);
+  assert.equal(app.includes('from "./app-runtime-controls"'), false);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-runtime-controls"'), true);
+  assert.equal(app.includes('from "./app-attachments"'), false);
+  assert.equal(app.includes('from "./app-bootstrap"'), false);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-bootstrap"'), true);
   assert.equal(app.includes('from "./app-config-actions"'), false);
   assert.equal(app.includes('from "./app-update-actions"'), false);
-  assert.equal(app.includes('from "./app-config-projection"'), true);
-  assert.equal(app.includes('from "./app-conversation-refresh"'), true);
-  assert.equal(app.includes('from "./app-run-controller"'), true);
-  assert.equal(app.includes('from "./app-settings-controller"'), true);
+  assert.equal(app.includes('from "./app-config-projection"'), false);
+  assert.equal(appWorkbenchConfigState.includes('from "./app-config-projection"'), true);
+  assert.equal(app.includes('from "./app-conversation-refresh"'), false);
+  assert.equal(app.includes('from "./app-run-controller"'), false);
+  assert.equal(app.includes('from "./app-settings-controller"'), false);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-conversation-refresh"'), true);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-run-controller"'), true);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-settings-controller"'), true);
   assert.equal(app.includes('from "./app-state"'), true);
   assert.equal(app.includes('from "./app-skill-actions"'), false);
   assert.equal(app.includes("function refreshBootstrap"), false);
-  assert.equal(app.includes("checkAppUpdate,"), true);
-  assert.equal(app.includes("saveModelCapabilities,"), true);
-  assert.equal(app.includes("saveSkillTriggerMode,"), true);
+  assert.equal(app.includes("checkAppUpdate: settingsController.checkAppUpdate"), true);
+  assert.equal(app.includes("saveModelCapabilities,"), false);
+  assert.equal(app.includes("saveSkillTriggerMode,"), false);
   assert.equal(app.includes("appUpdate={app.appUpdate}"), true);
-  assert.equal(app.includes("refreshAppUpdateStatusRef.current()"), true);
-  assert.equal(app.includes("autoAppUpdateCheckRequestedRef"), true);
-  assert.equal(app.includes("checkAppUpdateRef.current()"), true);
-  assert.equal(app.includes('app.appUpdate?.status === "downloaded"'), true);
-  assert.equal(app.includes("app-update-ready-banner"), true);
-  assert.equal(app.includes("onInstallAppUpdate={() => void installAppUpdate()}"), true);
-  assert.equal(app.includes("onCheckAppUpdate={() => void checkAppUpdate()}"), true);
-  assert.equal(app.includes("onSaveModelCapabilities={saveModelCapabilities}"), true);
-  assert.equal(app.includes("onSaveSkillTriggerMode={(mode) => void saveSkillTriggerMode(mode)}"), true);
+  assert.equal(app.includes("refreshAppUpdateStatusRef.current()"), false);
+  assert.equal(app.includes("autoAppUpdateCheckRequestedRef"), false);
+  assert.equal(app.includes("checkAppUpdateRef.current()"), false);
+  assert.equal(app.includes('app.appUpdate?.status === "downloaded"'), false);
+  assert.equal(app.includes("app-update-ready-banner"), false);
+  assert.equal(workbenchShell.includes("app-update-ready-banner"), true);
+  assert.equal(appWorkbenchShellProps.includes("export function appUpdateReadyText"), true);
+  assert.equal(app.includes("onInstallAppUpdate={() => void installAppUpdate()}"), false);
+  assert.equal(app.includes("onCheckAppUpdate={() => void checkAppUpdate()}"), false);
+  assert.equal(app.includes("onSaveModelCapabilities={saveModelCapabilities}"), false);
+  assert.equal(app.includes("settingsController.installAppUpdate()"), true);
+  assert.equal(workbenchShell.includes("onClick={props.onInstallAppUpdate}"), true);
+  assert.equal(workbenchSettingsDialog.includes('from "./settings-dialog"'), true);
+  assert.equal(workbenchSettingsDialog.includes("export function WorkbenchSettingsDialog"), true);
+  assert.equal(workbenchSettingsDialog.includes("appUpdate={props.app.appUpdate}"), true);
+  assert.equal(workbenchSettingsDialog.includes("onCheckAppUpdate={() => void props.actions.checkAppUpdate()}"), true);
+  assert.equal(workbenchSettingsDialog.includes("onInstallAppUpdate={() => void props.actions.installAppUpdate()}"), true);
+  assert.equal(workbenchSettingsDialog.includes("onSaveModelCapabilities={props.actions.saveModelCapabilities}"), true);
+  assert.equal(workbenchSettingsDialog.includes("onSaveSkillTriggerMode={(mode) => void props.actions.saveSkillTriggerMode(mode)}"), true);
+  assert.equal(workbenchSettingsDialog.includes("onRefreshSkills={() => void props.actions.refreshSkills()}"), true);
+  assert.equal(workbenchSettingsDialog.includes("onUpdateSkill={(skill, enabled) => void props.actions.updateSkill(skill, enabled)}"), true);
+  assert.equal(app.includes("normalizeVisibleAiMode"), false);
+  assert.equal(app.includes("visibleConfigLabel"), false);
+  assert.equal(app.includes("setToolForm({"), false);
+  assert.equal(app.includes("setMcpServerForm((previous) => {"), false);
+  assert.equal(app.includes("setComposerSelectedModelId(undefined)"), false);
+  assert.equal(app.includes('setComposerReasoningEffort("")'), false);
+  assert.equal(app.includes("function selectInputModel"), false);
+  assert.equal(app.includes("function selectAttachment"), false);
+  assert.equal(app.includes("function selectTaskWorkspace"), false);
+  assert.equal(app.includes("function uploadAttachments"), false);
+  assert.equal(app.includes("function removeAttachment"), false);
+  assert.equal(app.includes("function changeToolConfirmationPolicy"), false);
+  assert.equal(app.includes("queueReadyAfterRunRef"), false);
+  assert.equal(app.includes("dispatchedQueueAfterRunRef"), false);
+  assert.equal(app.includes("previousRunActivityRef"), false);
+  assert.equal(app.includes("useCallback("), false);
+  assert.equal(appComposerController.includes("function selectInputModel"), true);
+  assert.equal(appComposerController.includes("function selectAttachment"), true);
+  assert.equal(appComposerController.includes("function selectTaskWorkspace"), true);
+  assert.equal(appComposerController.includes("function uploadAttachments"), true);
+  assert.equal(appComposerController.includes("function removeAttachment"), true);
+  assert.equal(appComposerController.includes("function changeToolConfirmationPolicy"), true);
+  assert.equal(appQueuedMessageState.includes("const enqueueMessage = useCallback"), true);
+  assert.equal(appQueuedMessageState.includes("const removeQueuedMessage = useCallback"), true);
+  assert.equal(appQueuedMessageState.includes("const updateQueuedMessage = useCallback"), true);
+  assert.equal(app.includes("onSaveSkillTriggerMode={(mode) => void saveSkillTriggerMode(mode)}"), false);
+  assert.equal(workbenchSettingsDialog.includes("onSaveSkillTriggerMode={(mode) => void props.actions.saveSkillTriggerMode(mode)}"), true);
   assert.equal(appConfigActions.includes("export async function saveModelCapabilityConfig"), true);
   assert.equal(appConfigActions.includes('postJson<ConfigResponse>("/api/config/model-capabilities"'), true);
   assert.equal(appConfigActions.includes("export async function saveSkillTriggerConfig"), true);
@@ -195,76 +382,137 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("function taskSoilInputFromAttachments"), false);
   assert.equal(app.includes("function mergeConfigResponse"), false);
   assert.equal(app.includes("function startSkillChat"), false);
-  assert.equal(app.includes("app.busy || modelResponding"), true);
-  assert.equal(app.includes("queueReadyAfterRunRef"), true);
-  assert.equal(app.includes("if (agentClusterActive) {\n        void submitDeepInput();"), true);
-  assert.equal(app.includes("} else if (app.busy || modelResponding) {\n        enqueueMessage(goal);"), true);
+  assert.equal(app.includes("app.busy || modelResponding"), false);
+  assert.equal(app.includes("queueReadyAfterRunRef"), false);
+  assert.equal(app.includes("if (agentClusterActive) {"), false);
+  assert.equal(app.includes("void submitDeepInput();"), false);
+  assert.equal(app.includes("} else if (app.busy || modelResponding) {"), false);
+  assert.equal(app.includes("enqueueMessage(goal);"), false);
   assert.equal(app.includes('const agentClusterActive = agentClusterEnabled && app.agentMode === "deep";'), true);
-  assert.equal(app.includes("function openNormalTaskEntry"), true);
-  assert.equal(app.includes('changeAgentMode("normal");\n    setSelectedWorkspaceDirectory(undefined);\n    resetChat();'), true);
-  assert.equal(app.includes("deepOpenEpochRef.current += 1;\n    deepRunUpdateController.stopPolling();\n    changeAgentMode(\"normal\");"), true);
-  assert.equal(app.includes("function openNormalAgentEntry"), true);
-  assert.equal(app.includes("deepRunUpdateController.stopPolling();"), true);
-  assert.equal(app.includes('setScreen(app.conversation !== undefined || app.run !== undefined ? "chat-active" : "chat-empty");'), true);
-  assert.equal(app.includes("app.conversation.workspaceFolder?.path"), true);
-  assert.equal(app.includes("app.conversation?.workspaceFolder?.path"), true);
-  assert.equal(app.includes("app.deep.run.workspaceFolder?.path"), true);
-  assert.equal(app.includes("app.deep?.run.workspaceFolder?.path"), true);
-  assert.equal(app.includes("summary?.workspaceFolder?.path") || app.includes("view.run.workspaceFolder?.path"), true);
-  assert.equal(app.includes("function openAgentClusterEntry"), true);
+  assert.equal(app.includes("function openNormalTaskEntry"), false);
+  assert.equal(appDeepEntry.includes('changeAgentMode("normal");'), true);
+  assert.equal(appDeepEntry.includes("options.setSelectedWorkspaceDirectory(undefined);"), true);
+  assert.equal(appDeepEntry.includes("options.resetChat();"), true);
+  assert.equal(appDeepEntry.includes("options.deepOpenEpochRef.current += 1;"), true);
+  assert.equal(appDeepEntry.includes("options.deepRunUpdateController.stopPolling();"), true);
+  assert.equal(app.includes("function openNormalAgentEntry"), false);
+  assert.equal(appDeepEntry.includes("options.deepRunUpdateController.stopPolling();"), true);
+  assert.equal(app.includes('setScreen(app.conversation !== undefined || app.run !== undefined ? "chat-active" : "chat-empty");'), false);
+  assert.equal(appDeepEntry.includes('options.setScreen(options.app.conversation !== undefined || options.app.run !== undefined ? "chat-active" : "chat-empty");'), true);
+  assert.equal(app.includes("app.conversation.workspaceFolder?.path"), false);
+  assert.equal(app.includes("app.conversation?.workspaceFolder?.path"), false);
+  assert.equal(app.includes("app.deep.run.workspaceFolder?.path"), false);
+  assert.equal(app.includes("app.deep?.run.workspaceFolder?.path"), false);
+  assert.equal(appWorkbenchRuntime.includes("options.app.conversation.workspaceFolder?.path"), false);
+  assert.equal(appWorkbenchRuntime.includes("options.app.deep.run.workspaceFolder?.path"), false);
+  assert.equal(appWorkbenchTaskState.includes("app.conversation.workspaceFolder?.path"), true);
+  assert.equal(appWorkbenchTaskState.includes("app.deep.run.workspaceFolder?.path"), true);
+  assert.equal(app.includes("summary?.workspaceFolder?.path") || app.includes("view.run.workspaceFolder?.path"), false);
+  assert.equal(appDeepEntry.includes("summary?.workspaceFolder?.path"), true);
+  assert.equal(appDeepEntry.includes("view.run.workspaceFolder?.path"), true);
+  assert.equal(app.includes("function openAgentClusterEntry"), false);
   assert.equal(app.includes("function openCurrentModeTaskEntry"), false);
-  assert.equal(app.includes('agentMode: "deep"'), true);
-  assert.equal(app.includes('from "./app-deep-intake"'), true);
+  assert.equal(app.includes('agentMode: "deep"'), false);
+  assert.equal(appDeepEntry.includes('agentMode: "deep"'), true);
+  assert.equal(app.includes('from "./app-deep-intake"'), false);
+  assert.equal(app.includes('from "./app-deep-control"'), false);
+  assert.equal(app.includes('from "./app-deep-entry"'), false);
+  assert.equal(app.includes('from "./app-deep-task-controller"'), false);
+  assert.equal(app.includes('from "./app-sidebar-conversation-controller"'), false);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-deep-entry"'), true);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-deep-task-controller"'), true);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-sidebar-conversation-controller"'), true);
   assert.equal(app.includes('from "./app-deep-task-submission"'), false);
-  assert.equal(app.includes('from "./components/multi-agent-workspace"'), true);
+  assert.equal(app.includes('from "./components/multi-agent-workspace"'), false);
   assert.equal(app.includes('from "./components/deep-view"'), false);
-  assert.equal(app.includes('from "./app-deep-history"'), true);
+  assert.equal(app.includes('from "./app-deep-history"'), false);
+  assert.equal(app.includes("createAppDeepEntryController({"), false);
+  assert.equal(app.includes("createAppDeepTaskController({"), false);
+  assert.equal(app.includes("createAppSidebarConversationController({"), false);
+  assert.equal(appWorkbenchRuntime.includes("createAppDeepEntryController({"), true);
+  assert.equal(appWorkbenchRuntime.includes("createAppDeepTaskController({"), true);
+  assert.equal(appWorkbenchRuntime.includes("createAppSidebarConversationController({"), true);
+  assert.equal(appDeepEntry.includes("export function createAppDeepEntryController"), true);
+  assert.equal(appDeepTaskController.includes("export function createAppDeepTaskController"), true);
+  assert.equal(appSidebarConversationController.includes("export function createAppSidebarConversationController"), true);
+  assert.equal(appWorkbenchInputProps.includes('from "./app-deep-history"'), true);
+  assert.equal(appDeepTaskController.includes('from "./app-deep-intake"'), true);
+  assert.equal(appDeepTaskController.includes('from "./app-deep-control"'), true);
+  assert.equal(appDeepTaskController.includes('from "./app-deep-history"'), true);
+  assert.equal(appSidebarConversationController.includes('from "./app-conversation-management"'), true);
+  assert.equal(appSidebarConversationController.includes('from "./app-deep-conversation-management"'), true);
   assert.equal(app.includes("latestActiveDeepRun(bootstrap.deepRuns)"), false);
-  assert.equal(app.includes("latestRestorableDeepConversation(app.deepConversations)"), true);
-  assert.equal(app.includes("latestRestorableDeepRun(app.deepRuns)"), true);
-  const openAgentClusterEntryIndex = app.indexOf("function openAgentClusterEntry");
+  assert.equal(app.includes("latestRestorableDeepConversation(app.deepConversations)"), false);
+  assert.equal(app.includes("latestRestorableDeepRun(app.deepRuns)"), false);
+  assert.equal(appDeepEntry.includes("latestRestorableDeepConversation(options.app.deepConversations)"), true);
+  assert.equal(appDeepEntry.includes("latestRestorableDeepRun(options.app.deepRuns)"), true);
+  const openAgentClusterEntryIndex = appDeepEntry.indexOf("function openAgentClusterEntry");
   assert.equal(openAgentClusterEntryIndex >= 0, true);
   assert.equal(
-    app.indexOf("latestRestorableDeepConversation(app.deepConversations)", openAgentClusterEntryIndex) <
-      app.indexOf("latestRestorableDeepRun(app.deepRuns)", openAgentClusterEntryIndex),
+    appDeepEntry.indexOf("latestRestorableDeepConversation(options.app.deepConversations)", openAgentClusterEntryIndex) <
+      appDeepEntry.indexOf("latestRestorableDeepRun(options.app.deepRuns)", openAgentClusterEntryIndex),
     true,
   );
-  assert.equal(app.includes("deepOpenEpochRef.current += 1;"), true);
-  assert.equal(app.includes("if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;"), true);
+  assert.equal(app.includes("deepOpenEpochRef.current += 1;"), false);
+  assert.equal(appDeepEntry.includes("options.deepOpenEpochRef.current += 1;"), true);
+  assert.equal(app.includes("if (!mountedRef.current || deepOpenEpochRef.current !== epoch) return;"), false);
+  assert.equal(appDeepTaskController.includes("if (!options.mountedRef.current || options.deepOpenEpochRef.current !== epoch) return;"), true);
+  assert.equal(appDeepEntry.includes("if (!options.mountedRef.current || options.deepOpenEpochRef.current !== epoch) return;"), true);
   assert.equal(app.includes("openAgentClusterRun(activeDeepRun.runId, { auto: true })"), false);
-  assert.equal(app.includes("function openAgentClusterConversation"), true);
-  assert.equal(app.includes("getDeepConversation(conversationId)"), true);
-  assert.equal(app.includes("openDeepRun(runId)"), true);
-  assert.equal(app.includes("deepSelectedRunId"), true);
-  assert.equal(app.includes("const deepActive = agentClusterActive"), true);
-  assert.equal(app.includes("<MultiAgentWorkspace"), true);
+  assert.equal(app.includes("function openAgentClusterConversation"), false);
+  assert.equal(appDeepEntry.includes("function openAgentClusterConversation"), true);
+  assert.equal(app.includes("getDeepConversation(conversationId)"), false);
+  assert.equal(appDeepEntry.includes("getDeepConversation(conversationId)"), true);
+  assert.equal(app.includes("openDeepRun(runId)"), false);
+  assert.equal(appDeepEntry.includes("openDeepRun(runId)"), true);
+  assert.equal(app.includes("deepSelectedRunId"), false);
+  assert.equal(appDeepTaskController.includes("deepSelectedRunId"), true);
+  assert.equal(app.includes("const deepActive = agentClusterActive"), false);
+  assert.equal(app.includes("<WorkbenchMain"), false);
+  assert.equal(workbenchShell.includes("<WorkbenchMain"), true);
+  assert.equal(appWorkbenchShellProps.includes("export function buildWorkbenchMainProps"), true);
+  assert.equal(appWorkbenchShellProps.includes("deepActive: options.agentClusterActive"), true);
+  assert.equal(app.includes("<MultiAgentWorkspace"), false);
+  assert.equal(app.includes("<ChatEmpty"), false);
+  assert.equal(app.includes("<ChatActive"), false);
   assert.equal(app.includes("<DeepView"), false);
-  assert.equal(app.includes("conversation={app.deepConversation}"), true);
-  assert.equal(app.includes("intakeStatus={app.deepIntakeStatus}"), true);
-  assert.equal(app.includes("busy={app.deepBusy || deepChildOperationBusyId !== undefined}"), true);
-  assert.equal(app.includes("pendingGoal={app.deepPendingGoal}"), true);
+  assert.equal(workbenchMain.includes("conversation={props.deepConversation}"), true);
+  assert.equal(workbenchMain.includes("intakeStatus={props.deepIntakeStatus}"), true);
+  assert.equal(workbenchMain.includes("busy={props.deepBusy}"), true);
+  assert.equal(workbenchMain.includes("pendingGoal={props.deepPendingGoal}"), true);
   assert.equal(app.includes("runs={app.deepRuns}"), false);
   assert.equal(app.includes("activeRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}"), false);
   assert.equal(app.includes("onOpenRun={(runId) => void openAgentClusterRun(runId)}"), false);
-  assert.equal(app.includes("childOperationBusyId={deepChildOperationBusyId}"), true);
-  assert.equal(app.includes("resynthesisBusy={deepResynthesisBusy}"), true);
-  assert.equal(app.includes("onChildMessage={sendDeepChildMessage}"), true);
-  assert.equal(app.includes("onChildConfirmation={decideDeepChild}"), true);
-  assert.equal(app.includes("onResynthesize={resynthesizeDeepRun}"), true);
-  assert.equal(app.includes("onStopRun={stopDeepTask}"), true);
-  assert.equal(app.includes("const keepBusy = shouldKeepDeepRunBusy(view.run);"), true);
-  assert.equal(app.includes("const keepPolling = shouldPollDeepRun(view.run);"), true);
-  assert.equal(app.includes("const canStop = app.deep?.run.runtimeHealth?.canStop === true || app.deepBusy;"), true);
-  assert.equal(app.includes("const hasBusyDeepRun = shouldKeepDeepRunBusy(app.deep?.run);"), true);
-  assert.equal(app.includes("const hasActiveDeepRun = hasBusyDeepRun || hasPendingDeepRunBootstrap;"), true);
+  assert.equal(workbenchMain.includes("childOperationBusyId={props.deepChildOperationBusyId}"), true);
+  assert.equal(workbenchMain.includes("resynthesisBusy={props.deepResynthesisBusy}"), true);
+  assert.equal(workbenchMain.includes("onChildMessage={props.onChildMessage}"), true);
+  assert.equal(workbenchMain.includes("onChildConfirmation={props.onChildConfirmation}"), true);
+  assert.equal(workbenchMain.includes("onResynthesize={props.onResynthesize}"), true);
+  assert.equal(workbenchMain.includes("onStopRun={props.onStopRun}"), true);
+  assert.equal(workbenchMain.includes('className="app-bootstrap-loading"'), true);
+  assert.equal(workbenchMain.includes("正在初始化工作台"), true);
+  assert.equal(workbenchMain.includes("export function WorkbenchMain"), true);
+  assert.equal(workbenchMain.includes('from "./multi-agent-workspace"'), true);
+  assert.equal(workbenchMain.includes('from "./chat-empty"'), true);
+  assert.equal(workbenchMain.includes('from "./chat-active"'), true);
+  assert.equal(app.includes("const keepBusy = shouldKeepDeepRunBusy(view.run);"), false);
+  assert.equal(app.includes("const keepPolling = shouldPollDeepRun(view.run);"), false);
+  assert.equal(appDeepTaskController.includes("const keepPolling = shouldPollDeepRun(view.run);"), true);
+  assert.equal(appDeepEntry.includes("const keepBusy = shouldKeepDeepRunBusy(view.run);"), true);
+  assert.equal(appDeepEntry.includes("const keepPolling = shouldPollDeepRun(view.run);"), true);
+  assert.equal(app.includes("const canStop = app.deep?.run.runtimeHealth?.canStop === true || app.deepBusy;"), false);
+  assert.equal(appDeepTaskController.includes("const canStop = options.app.deep?.run.runtimeHealth?.canStop === true || options.app.deepBusy;"), true);
+  assert.equal(app.includes("const hasBusyDeepRun = shouldKeepDeepRunBusy(app.deep?.run);"), false);
+  assert.equal(app.includes("const hasActiveDeepRun = hasBusyDeepRun || hasPendingDeepRunBootstrap;"), false);
   assert.equal(app.includes("selectedWorkspaceDirectory: undefined"), false);
   assert.equal(app.includes("onSelectWorkspaceDirectory: undefined"), false);
   assert.equal(app.includes("agentClusterDisabled="), false);
-  assert.equal(app.includes("onOpenAgentCluster={openAgentClusterEntry}"), true);
+  assert.equal(app.includes("onOpenAgentCluster={openAgentClusterEntry}"), false);
+  assert.equal(appWorkbenchShellProps.includes("onOpenAgentCluster: options.onOpenAgentCluster"), true);
   assert.equal(app.includes('agentMode={app.agentMode}'), false);
   assert.equal(app.includes('onModeChange={selectAgentMode}'), false);
   assert.equal(app.includes("桌面 Agent"), false);
-  assert.equal(app.includes("Agent 集群"), true);
+  assert.equal(app.includes("Agent 集群"), false);
   assertIncludesAll(multiAgentWorkspace, [
     "export function MultiAgentWorkspace",
     "selectedComposerModel",
@@ -320,7 +568,6 @@ test("panel UI app shell delegates data and control work", async () => {
     "AssistantMessageLabel",
     "assistantModel?: AssistantModelBadge",
     "deepIntakeChatItems",
-    "type DeepChatItem",
     "DeepLiveChildWorkflowItem",
     "chat-active-screen",
     "chat-active-scroll",
@@ -331,6 +578,7 @@ test("panel UI app shell delegates data and control work", async () => {
     'aria-label="助手回复"',
     'aria-label="详情"',
   ]);
+  assert.equal(deepTranscriptModel.includes("type DeepChatItem"), true);
   assertExcludesAll(deepView, [
     "export function DeepTaskSidebar",
     "export function DeepParentWorkflowPane",
@@ -375,19 +623,25 @@ test("panel UI app shell delegates data and control work", async () => {
   ]);
   assert.equal(deepView.includes('label: "计划"'), false);
   assert.equal(deepView.includes('label: "探索"'), false);
-  assert.equal(deepView.includes('label: "目标"'), true);
+  assert.equal(deepView.includes('label: "目标"'), false);
+  assert.equal(deepTranscriptModel.includes('label: "目标"'), false);
+  assert.equal(deepWorkDetailModel.includes('label: "目标"'), true);
   assert.equal(deepView.includes('label: "综合"'), false);
   assert.equal(deepView.includes('label: "结论"'), false);
   assert.equal(deepView.includes('label: "判断"'), false);
   assert.equal(deepView.includes('label: "子任务"'), false);
-  assert.equal(deepView.includes('label: "助手"'), true);
+  assert.equal(deepView.includes('label: "助手"'), false);
+  assert.equal(deepTranscriptModel.includes('label: "助手"'), true);
   assert.equal(deepView.includes('label: "父 Agent"'), false);
   assert.equal(deepView.includes("<Bot size={14} />"), false);
   assert.equal(deepView.includes('assistant-message-model">Agent 集群'), false);
   assert.equal(deepView.includes('kind: "user_goal"'), true);
-  assert.equal(deepView.includes('kind: "parent_message"'), true);
-  assert.equal(deepView.includes('kind: "system_notice"'), true);
-  assert.equal(deepView.includes("view.brief"), true);
+  assert.equal(deepView.includes('kind: "parent_message"'), false);
+  assert.equal(deepView.includes('kind: "system_notice"'), false);
+  assert.equal(deepTranscriptModel.includes('kind: "parent_message"'), true);
+  assert.equal(deepTranscriptModel.includes('kind: "system_notice"'), true);
+  assert.equal(deepView.includes("view.brief"), false);
+  assert.equal(deepViewModel.includes("view.brief"), true);
   assert.equal(deepView.includes("DeepResultCanvas"), false);
   assert.equal(deepView.includes("resultCanvasState"), false);
   assert.equal(deepView.includes("DeepRunCounters"), false);
@@ -395,16 +649,144 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(deepView.includes("deep-brief-chips"), false);
   assert.equal(deepView.includes("modelOutputEntries"), false);
   assert.equal(deepView.includes("childOutputEntries"), false);
-  assert.equal(deepView.includes("view.liveProjection.decision?.summary"), true);
-  assert.equal(deepView.includes("view.report?.childSummaries"), true);
-  assert.equal(deepView.includes("view.report?.synthesisRecords.at(-1)"), true);
-  assert.equal(deepView.includes("view.report?.conclusion"), true);
+  assert.equal(deepView.includes('from "../deep-view-model"'), true);
+  assert.equal(deepView.includes('from "../deep-transcript-model"'), true);
+  assert.equal(deepView.includes('from "../deep-work-detail-model"'), true);
+  assert.equal(deepView.includes("view.liveProjection.decision?.summary"), false);
+  assert.equal(deepView.includes("view.report?.childSummaries"), false);
+  assert.equal(deepView.includes("view.report?.synthesisRecords.at(-1)"), false);
+  assert.equal(deepView.includes("view.report?.conclusion"), false);
   assertIncludesAll(deepView, [
+    'export type { DeepWorkItemDetailViewModel } from "../deep-view-model";',
+    "AgentWorkTimeline",
+    "ActivityItem",
+    "function detailTimelineView",
+    "function detailActivityItem",
+    "function activityStatusBadge",
+    "readonly expandedSections?: readonly ActivityExpandedSection[]",
+    "conversation={props.conversation}",
+    "pendingGoal={props.pendingGoal}",
+    "deepIntakeChatItems(props.conversation.intakeTurns, props.intakeStatus)",
+    "function DeepRunTranscriptChildListBlock",
+    "deep-run-child-list-item",
+    'kind: "child_agent_list"',
+    "onSelectWorkItem={props.onSelectWorkItem}",
+    "view={detailTimelineView(detail.worklineItems)}",
+    "执行记录",
+    "条动作",
+    "child.childRun",
+    "label: input.label",
+    "DeepUserMessage",
+    "DeepConclusionMessage",
+    "DeepParentMessage",
+    "DeepSystemNotice",
+    "ChildTaskApproval",
+    "deep-child-task-approval",
+    "props.onChildMessage &&",
+    "补充给这个协作项",
+    "busy={props.busy}",
+    'kind: "conclusion"',
+    "readonly resynthesisBusy?: boolean",
+    "readonly onResynthesize?: () => void | Promise<void>;",
+  ]);
+  assertIncludesAll(deepTranscriptModel, [
     "export type DeepPlanConfirmationViewModel",
     "export type DeepRunTranscriptViewModel",
     "export type DeepRunTranscriptBlock",
-    "export type DeepWorkItemDetailViewModel",
+    "function deepPlanConfirmationViewModel",
+    "function deepRunTranscriptViewModel",
+    "function deepRunTranscriptBlocks",
+    "function deepConversationTranscriptBlocks",
+    "function managerDecisionComesBeforeChildren",
+    "function isChildLifecycleEvent",
+    "function runtimeHealthNoticeViewModel",
+    "readonly blocks: readonly DeepRunTranscriptBlock[]",
+    "readonly children: readonly DeepRunChildSummaryViewModel[]",
+    "health?.state !== \"stalled\" && health?.state !== \"orphaned\"",
+    "这次运行一段时间没有新进展",
+    "这次运行已失联",
+  ]);
+  assertIncludesAll(deepViewModel, [
     "export type DeepSelectedWorkItem",
+    "export function deepRunWorkItemExists",
+    "function runTranscriptWorkflowItems",
+    "function childAgentSummaryItems",
+    "function childAgentSummaryItem",
+    "function visibleWorkflowStatusLabel",
+    "function meaningfulChildResultText",
+    "function isNaturalChildStateText",
+    "readonly findings: readonly string[]",
+    "readonly evidenceRefs: readonly string[]",
+    "view.liveProjection.decision?.summary",
+    "view.report?.childSummaries",
+    "view.report?.synthesisRecords.at(-1)",
+    "view.report?.conclusion",
+    "liveChild?.workflowItems",
+    "liveChild?.latestResult",
+    "export type DeepWorkItemDetailViewModel",
+    "export type DeepChildAgentWorkflowSegment",
+    "readonly worklineItems: readonly DeepWorklineItemViewModel[]",
+    "function childAgentImportantSignal",
+    "function childAgentSignalText",
+    "function compactWorklineText",
+  ]);
+  assertIncludesAll(deepWorkDetailModel, [
+    "export function synthesisReviewLabel",
+    "function childDetailWorklineItems",
+    "function deepWorkItemDetailViewModel",
+    "function deepWorklineItems",
+    "function childRunWorklineItems",
+    "function childDetailVisibleWorklineItems",
+    "function isChildDetailConcreteActionItem",
+    "function childModelMessageWorklineItem",
+    "function childModelMessageText",
+    "function childToolCallWorklineItem",
+    "displayActivityItemsForNodes",
+    "function toolCallActivityItem",
+    "function toolCallExpandedSections",
+    "function toolCallBadges",
+    "call.summary ?? call.inputSummary",
+    "function executionSegmentWorklineItem",
+    "childRun.executionHistory",
+    "segment.modelMessages",
+    "工具调用前说明",
+  ]);
+  assertExcludesAll(deepViewModel, [
+    "type DeepChatItem",
+    "export type DeepPlanConfirmationViewModel",
+    "export type DeepRunTranscriptViewModel",
+    "export type DeepRunTranscriptBlock",
+    "function deepPlanConfirmationViewModel",
+    "function deepRunTranscriptViewModel",
+    "function deepRunTranscriptBlocks",
+    "function deepConversationTranscriptBlocks",
+    "function managerDecisionComesBeforeChildren",
+    "function isChildLifecycleEvent",
+    "function runtimeHealthNoticeViewModel",
+    "health?.state !== \"stalled\" && health?.state !== \"orphaned\"",
+    "这次运行一段时间没有新进展",
+    "这次运行已失联",
+    "function childDetailWorklineItems",
+    "function deepWorkItemDetailViewModel",
+    "function deepWorklineItems",
+    "function childRunWorklineItems",
+    "function childDetailVisibleWorklineItems",
+    "function isChildDetailConcreteActionItem",
+    "function childModelMessageWorklineItem",
+    "function childModelMessageText",
+    "function childToolCallWorklineItem",
+    "displayActivityItemsForNodes",
+    "function toolCallActivityItem",
+    "function toolCallExpandedSections",
+    "function toolCallBadges",
+    "call.summary ?? call.inputSummary",
+    "function executionSegmentWorklineItem",
+    "childRun.executionHistory",
+    "segment.modelMessages",
+    "工具调用前说明",
+    "function synthesisReviewLabel",
+  ]);
+  assertExcludesAll(deepView, [
     "function deepPlanConfirmationViewModel",
     "function deepRunTranscriptViewModel",
     "function deepRunTranscriptBlocks",
@@ -412,11 +794,13 @@ test("panel UI app shell delegates data and control work", async () => {
     "function managerDecisionComesBeforeChildren",
     "function isChildLifecycleEvent",
     "export function deepRunWorkItemExists",
-    "AgentWorkTimeline",
-    "ActivityItem",
-    "function detailTimelineView",
-    "function detailActivityItem",
-    "function activityStatusBadge",
+    "function runTranscriptWorkflowItems",
+    "function childAgentSummaryItems",
+    "function childAgentSummaryItem",
+    "function visibleWorkflowStatusLabel",
+    "function meaningfulChildResultText",
+    "function isNaturalChildStateText",
+    "function runtimeHealthNoticeViewModel",
     "function childAgentImportantSignal",
     "function childAgentSignalText",
     "function compactWorklineText",
@@ -434,41 +818,10 @@ test("panel UI app shell delegates data and control work", async () => {
     "function toolCallExpandedSections",
     "function toolCallBadges",
     "call.summary ?? call.inputSummary",
-    "readonly expandedSections?: readonly ActivityExpandedSection[]",
     "function executionSegmentWorklineItem",
-    "function runTranscriptWorkflowItems",
-    "function childAgentSummaryItems",
-    "conversation={props.conversation}",
-    "pendingGoal={props.pendingGoal}",
-    "deepIntakeChatItems(props.conversation.intakeTurns, props.intakeStatus)",
-    "function DeepRunTranscriptChildListBlock",
-    "deep-run-child-list-item",
-    'kind: "child_agent_list"',
-    "onSelectWorkItem={props.onSelectWorkItem}",
-    "view={detailTimelineView(detail.worklineItems)}",
-    "执行记录",
-    "条动作",
-    "liveChild?.workflowItems",
-    "liveChild?.latestResult",
     "childRun.executionHistory",
     "segment.modelMessages",
     "工具调用前说明",
-    "child.childRun",
-    "label: input.label",
-    "DeepUserMessage",
-    "DeepConclusionMessage",
-    "DeepParentMessage",
-    "DeepSystemNotice",
-    "ChildTaskApproval",
-    "deep-child-task-approval",
-    "props.onChildMessage &&",
-    "补充给这个协作项",
-    "busy={props.busy}",
-    'kind: "conclusion"',
-    "readonly resynthesisBusy?: boolean",
-    "readonly onResynthesize?: () => void | Promise<void>;",
-  ]);
-  assertExcludesAll(deepView, [
     "export type DeepRunConsoleViewModel",
     "function DeepRunConsolePane",
     "function deepRunConsoleViewModel",
@@ -535,21 +888,24 @@ test("panel UI app shell delegates data and control work", async () => {
     "function mergeAssistantText",
     "这个目标还缺少关键范围",
   ]);
-  assert.equal(deepView.includes("view.liveProjection.phase === \"needs_input\""), true);
+  assert.equal(deepView.includes("view.liveProjection.phase === \"needs_input\""), false);
+  assert.equal(deepTranscriptModel.includes("view.liveProjection.phase === \"needs_input\""), true);
   assertIncludesAll(transcriptTimeline, [
     "selectedItemKey",
     "onSelectItem",
     "data-selected",
-    "aria-pressed={selected}",
+    "aria-pressed={input.selected}",
   ]);
   assert.equal(deepView.includes("运行细节"), false);
   assert.equal(deepView.includes("我正在接手这个目标"), false);
   assert.equal(deepView.includes("协作记录"), false);
   assert.equal(deepView.includes("deep-record-section"), false);
   assert.equal(deepView.includes("deep-resynthesis-button"), false);
-  assert.equal(deepView.includes("conclusionNeedsResynthesis"), true);
+  assert.equal(deepView.includes("conclusionNeedsResynthesis"), false);
+  assert.equal(deepTranscriptModel.includes("conclusionNeedsResynthesis"), true);
   assert.equal(deepView.includes("deep-resynthesis-state"), false);
-  assert.equal(deepView.includes("待重新综合"), true);
+  assert.equal(deepView.includes("待重新综合"), false);
+  assert.equal(deepTranscriptModel.includes("待重新综合"), true);
   assert.equal(deepView.includes("重新综合"), true);
   assert.equal(deepView.includes("父层重新综合"), false);
   assert.equal(deepView.includes("raw prompt"), false);
@@ -570,14 +926,22 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appDeepLiveUpdates.includes("shouldKeepDeepRunBusy"), true);
   assert.equal(appDeepLiveUpdates.includes("shouldPollDeepRun"), true);
   assert.equal(appDeepLiveUpdates.includes("isTerminalDeepRunStatus"), false);
-  assert.equal(app.includes('from "./app-deep-live-updates"'), true);
-  assert.equal(app.includes("requestDeepChildMessage(activeDeepRunId, childRunId, message)"), true);
-  assert.equal(app.includes("applyQueuedChildOperationProjection(response)"), true);
-  assert.equal(app.includes('status: "queued" as const'), true);
-  assert.equal(app.includes("const queuedCount = response.queuedCount"), true);
-  assert.equal(app.includes("updatedAt: queuedAt"), true);
-  assert.equal(app.includes('response.status === "queued"'), true);
-  assert.equal(app.includes("decideDeepChildConfirmation("), true);
+  assert.equal(app.includes('from "./app-deep-live-updates"'), false);
+  assert.equal(appWorkbenchRuntime.includes('from "./app-deep-live-updates"'), true);
+  assert.equal(app.includes("requestDeepChildMessage(activeDeepRunId, childRunId, message)"), false);
+  assert.equal(appDeepTaskController.includes("requestDeepChildMessage(activeDeepRunId, childRunId, message)"), true);
+  assert.equal(app.includes("applyQueuedChildOperationProjection(response)"), false);
+  assert.equal(appDeepTaskController.includes("applyQueuedChildOperationProjection(response)"), true);
+  assert.equal(app.includes('status: "queued" as const'), false);
+  assert.equal(appDeepTaskController.includes('status: "queued" as const'), true);
+  assert.equal(app.includes("const queuedCount = response.queuedCount"), false);
+  assert.equal(appDeepTaskController.includes("const queuedCount = response.queuedCount"), true);
+  assert.equal(app.includes("updatedAt: queuedAt"), false);
+  assert.equal(appDeepTaskController.includes("updatedAt: queuedAt"), true);
+  assert.equal(app.includes('response.status === "queued"'), false);
+  assert.equal(appDeepTaskController.includes('response.status === "queued"'), true);
+  assert.equal(app.includes("decideDeepChildConfirmation("), false);
+  assert.equal(appDeepTaskController.includes("decideDeepChildConfirmation("), true);
   assert.equal(appDeepControl.includes("export async function requestDeepChildMessage"), true);
   assert.equal(appDeepControl.includes("/children/${encodeURIComponent(childRunId)}/messages"), true);
   assert.equal(appDeepControl.includes("export async function decideDeepChildConfirmation"), true);
@@ -591,35 +955,57 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appDeepIntake.includes("export async function requestStartConfirmedDeepRun"), true);
   assert.equal(appDeepIntake.includes("/api/deep/intake"), true);
   assert.equal(appDeepIntake.includes("/api/deep/conversations/${encodeURIComponent(input.conversationId)}/runs"), true);
-  assert.equal(app.includes("requestDeepRunCorrection(activeDeepRunId"), true);
-  assert.equal(app.includes("requestDeepIntake({"), true);
-  assert.equal(app.includes("requestStartConfirmedDeepRun({"), true);
-  assert.equal(app.includes('deepIntakeStatus: "running"'), true);
-  assert.equal(app.includes('app.deepIntakeStatus === "plan_ready"'), true);
-  assert.equal(app.includes('response.status === "plan_ready" ? terminalActiveRunId : undefined'), true);
+  assert.equal(app.includes("requestDeepRunCorrection(activeDeepRunId"), false);
+  assert.equal(appDeepTaskController.includes("requestDeepRunCorrection(activeDeepRunId"), true);
+  assert.equal(app.includes("requestDeepIntake({"), false);
+  assert.equal(appDeepTaskController.includes("requestDeepIntake({"), true);
+  assert.equal(app.includes("requestStartConfirmedDeepRun({"), false);
+  assert.equal(appDeepTaskController.includes("requestStartConfirmedDeepRun({"), true);
+  assert.equal(app.includes('deepIntakeStatus: "running"'), false);
+  assert.equal(appDeepTaskController.includes('deepIntakeStatus: "running"'), true);
+  assert.equal(app.includes('app.deepIntakeStatus === "plan_ready"'), false);
+  assert.equal(appDeepTaskController.includes('options.app.deepIntakeStatus === "plan_ready"'), true);
+  assert.equal(app.includes('response.status === "plan_ready" ? terminalActiveRunId : undefined'), false);
+  assert.equal(appDeepTaskController.includes('response.status === "plan_ready" ? terminalActiveRunId : undefined'), true);
   assert.equal(app.includes("const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId ?? app.deepSelectedRunId"), false);
-  assert.equal(app.includes("const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId"), true);
-  assert.equal(app.includes("parentRunConversationId === conversationId"), true);
+  assert.equal(app.includes("const activeDeepRunId = app.deep?.run.runId ?? app.deepActiveRunId"), false);
+  assert.equal(appDeepTaskController.includes("const activeDeepRunId = options.app.deep?.run.runId ?? options.app.deepActiveRunId"), true);
+  assert.equal(app.includes("parentRunConversationId === conversationId"), false);
+  assert.equal(appDeepTaskController.includes("parentRunConversationId === conversationId"), true);
   assert.equal(appDeepLiveUpdates.includes("currentPollToken !== pollToken"), true);
   assert.equal(app.includes("requestDeepRunFollowUp("), false);
-  assert.equal(app.includes("requestDeepRunResynthesis(activeDeepRunId)"), true);
-  assert.equal(app.includes("requestDeepRunStop(activeDeepRunId)"), true);
-  assert.equal(app.includes("app.deep?.run.runId ?? app.deepActiveRunId"), true);
-  assert.equal(app.includes('cancelLabel: "停止"'), true);
-  assert.equal(app.includes('"描述要协作处理的目标..."'), true);
-  assert.equal(app.includes('"补充要求..."'), true);
-  assert.equal(app.includes('"继续围绕当前主题补充..."'), true);
+  assert.equal(app.includes("requestDeepRunResynthesis(activeDeepRunId)"), false);
+  assert.equal(appDeepTaskController.includes("requestDeepRunResynthesis(activeDeepRunId)"), true);
+  assert.equal(app.includes("requestDeepRunStop(activeDeepRunId)"), false);
+  assert.equal(appDeepTaskController.includes("requestDeepRunStop(activeDeepRunId)"), true);
+  assert.equal(app.includes("app.deep?.run.runId ?? app.deepActiveRunId"), false);
+  assert.equal(appWorkbenchShellProps.includes("options.app.deep?.run.runId ?? options.app.deepActiveRunId"), true);
+  assert.equal(appDeepTaskController.includes("options.app.deep?.run.runId ?? options.app.deepActiveRunId"), true);
+  assert.equal(app.includes('cancelLabel: "停止"'), false);
+  assert.equal(app.includes('"描述要协作处理的目标..."'), false);
+  assert.equal(app.includes('"补充要求..."'), false);
+  assert.equal(app.includes('"继续围绕当前主题补充..."'), false);
+  assert.equal(appWorkbenchInputProps.includes('cancelLabel: "停止"'), true);
+  assert.equal(appWorkbenchInputProps.includes('"描述要协作处理的目标..."'), true);
+  assert.equal(appWorkbenchInputProps.includes('"补充要求..."'), true);
+  assert.equal(appWorkbenchInputProps.includes('"继续围绕当前主题补充..."'), true);
   assert.equal(app.includes('"继续补充这个任务..."'), false);
-  assert.equal(app.includes("deepConversation: view.conversation ?? previous.deepConversation"), true);
-  assert.equal(app.includes("const deepConversationId ="), true);
-  assert.equal(app.includes("app.deep?.conversation?.conversationId"), true);
-  assert.equal(app.includes("conversationId: deepConversationId"), true);
+  assert.equal(app.includes("deepConversation: view.conversation ?? previous.deepConversation"), false);
+  assert.equal(appDeepTaskController.includes("deepConversation: view.conversation ?? previous.deepConversation"), true);
+  assert.equal(app.includes("const deepConversationId ="), false);
+  assert.equal(appDeepTaskController.includes("const deepConversationId ="), true);
+  assert.equal(app.includes("app.deep?.conversation?.conversationId"), false);
+  assert.equal(appDeepTaskController.includes("options.app.deep?.conversation?.conversationId"), true);
+  assert.equal(app.includes("conversationId: deepConversationId"), false);
+  assert.equal(appDeepTaskController.includes("conversationId: deepConversationId"), true);
   assert.equal(appDeepLiveUpdates.includes("deepConversation: view.conversation ?? previous.deepConversation"), true);
   assert.equal(appDeepIntake.includes("conversationId: input.conversationId"), true);
   assert.equal(appDeepIntake.includes("parentRunId: input.parentRunId"), true);
   assert.equal(appDeepIntake.includes("taskSoilInput: input.taskSoilInput"), true);
-  assert.equal(app.includes("deepRunUpdateController.startPolling(response.run.runId)"), true);
-  assert.equal(app.includes("deepPollTimerRef"), true);
+  assert.equal(app.includes("deepRunUpdateController.startPolling(response.run.runId)"), false);
+  assert.equal(appDeepTaskController.includes("options.deepRunUpdateController.startPolling(response.run.runId)"), true);
+  assert.equal(app.includes("deepPollTimerRef"), false);
+  assert.equal(appWorkbenchRuntime.includes("deepPollTimerRef"), true);
   assert.equal(appDeepLiveUpdates.includes("DEEP_POLL_TIMEOUT_MS"), false);
   assert.equal(appDeepLiveUpdates.includes("Agent 集群运行超时"), false);
   assert.equal(app.includes("TODO(T3-4e)"), false);
@@ -720,6 +1106,10 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("mergeConversationTranscriptNodes"), false);
   assert.equal(appRunProjection.includes("export function projectCurrentRun"), true);
   assert.equal(appRunProjection.includes("function mergeConversationTranscriptNodes"), true);
+  assert.equal(appWorkbenchRuntime.includes("useConversationSummaryRefresh({"), true);
+  assert.equal(appWorkbenchRuntime.includes("void loadAppBootstrap().then((bootstrap) => {"), true);
+  assert.equal(appWorkbenchRuntime.includes("stopLiveUpdates(pollTimer, streamRef);"), true);
+  assert.equal(appWorkbenchRuntime.includes("const currentRun = useMemo(() => projectCurrentRun(options.app), currentRunProjectionDeps(options.app));"), true);
   assert.equal(appRunController.includes("export function createAppRunController"), true);
   assert.equal(appRunController.includes("submitPanelTask"), true);
   assert.equal(appRunController.includes("optimisticConversationForSubmit"), false);
@@ -776,7 +1166,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appConversationSession.includes("function isMissingConversationError"), true);
   assert.equal(appConversationSession.includes('error.code === "conversation_not_found"'), true);
   assert.equal(appConversationSession.includes("resetConversationSession(options)"), true);
-  assert.equal(app.includes("resetChat();"), true);
+  assert.equal(app.includes("resetChat();"), false);
+  assert.equal(appSidebarConversationController.includes("options.resetChat();"), true);
   assert.equal(appConversationSession.includes("updateTranscriptNodesCache"), true);
   assert.equal(appConversationSession.includes("loadHistoricalTranscriptNodeEntries"), true);
   assert.equal(appConversationSession.includes("HISTORICAL_RUN_LOAD_CONCURRENCY = 4"), true);
@@ -828,6 +1219,10 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appSettingsController.includes("updateMcpToolState"), true);
   assert.equal(appSettingsController.includes("updateSkillState"), true);
   assert.equal(appSettingsController.includes("selectWorkspaceDirectory"), true);
+  assert.equal(appWorkbenchRuntime.includes("const settingsController = useMemo(() => createAppSettingsController({"), true);
+  assert.equal(appWorkbenchRuntime.includes("const composerController = useMemo(() => createAppComposerController({"), true);
+  assert.equal(appWorkbenchRuntime.includes("const deepRunUpdateController = useMemo(() => createDeepRunUpdateController({"), true);
+  assert.equal(appWorkbenchRuntime.includes("const runController = useMemo(() => createAppRunController({"), true);
   assert.equal(appState.includes("export type AppState"), true);
   assert.equal(appState.includes("export function createInitialAppState"), true);
   assert.equal(appState.includes("transcriptNodesByRunId"), true);
@@ -974,20 +1369,37 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(sidebar.includes("疑似卡住"), false);
   assert.equal(sidebar.includes("Agent 集群"), true);
   assert.equal(sidebar.includes("Deep 模式"), false);
-  assert.equal(app.includes("agentClusterActive={agentClusterActive}"), true);
-  assert.equal(app.includes("agentClusterEnabled={agentClusterEnabled}"), true);
-  assert.equal(app.includes('activeConversationId={agentClusterActive ? undefined : app.conversation?.conversationId}'), true);
-  assert.equal(app.includes('deepConversations={app.deepConversations}'), true);
-  assert.equal(app.includes('deepRuns={app.deepRuns}'), true);
-  assert.equal(app.includes("activeDeepConversationId={app.deepConversation?.conversationId ?? app.deep?.run.conversationId}"), true);
+  assert.equal(appWorkbenchShellProps.includes("export function buildSidebarProps"), true);
+  assert.equal(app.includes("agentClusterActive={agentClusterActive}"), false);
+  assert.equal(app.includes("agentClusterEnabled={agentClusterEnabled}"), false);
+  assert.equal(app.includes('activeConversationId={agentClusterActive ? undefined : app.conversation?.conversationId}'), false);
+  assert.equal(app.includes('deepConversations={app.deepConversations}'), false);
+  assert.equal(app.includes('deepRuns={app.deepRuns}'), false);
+  assert.equal(app.includes("activeDeepConversationId={app.deepConversation?.conversationId ?? app.deep?.run.conversationId}"), false);
+  assert.equal(appWorkbenchShellProps.includes("agentClusterActive: options.agentClusterActive"), true);
+  assert.equal(appWorkbenchShellProps.includes("agentClusterEnabled: options.agentClusterEnabled"), true);
+  assert.equal(appWorkbenchShellProps.includes("activeConversationId: options.agentClusterActive ? undefined : options.app.conversation?.conversationId"), true);
+  assert.equal(appWorkbenchShellProps.includes("deepConversations: options.app.deepConversations"), true);
+  assert.equal(appWorkbenchShellProps.includes("deepRuns: options.app.deepRuns"), true);
+  assert.equal(appWorkbenchShellProps.includes("activeDeepConversationId: options.app.deepConversation?.conversationId ?? options.app.deep?.run.conversationId"), true);
   assert.equal(app.includes("activeDeepRunId={app.deepSelectedRunId ?? app.deep?.run.runId ?? app.deepActiveRunId}"), false);
-  assert.equal(app.includes("activeDeepRunId={app.deep?.run.runId ?? app.deepActiveRunId}"), true);
-  assert.equal(app.includes("pinningConversationIds={pinningConversationIds}"), true);
-  assert.equal(app.includes("patchConversationPinnedAt(previous, conversationId, optimisticPinnedAt)"), true);
-  assert.equal(app.includes("patchConversationPinnedAt(previous, conversationId, previousPinnedAt)"), true);
-  assert.equal(app.includes("onOpenDeepConversation={(conversationId) => void openAgentClusterConversation(conversationId)}"), true);
-  assert.equal(app.includes("onOpenDeepRun={(runId) => void openAgentClusterRun(runId)}"), true);
-  assert.equal(app.includes("onOpenAgentCluster={openAgentClusterEntry}"), true);
+  assert.equal(app.includes("activeDeepRunId={app.deep?.run.runId ?? app.deepActiveRunId}"), false);
+  assert.equal(appWorkbenchShellProps.includes("activeDeepRunId: options.app.deep?.run.runId ?? options.app.deepActiveRunId"), true);
+  assert.equal(app.includes("pinningConversationIds={pinningConversationIds}"), false);
+  assert.equal(appWorkbenchShellProps.includes("pinningConversationIds: options.pinningConversationIds"), true);
+  assert.equal(app.includes("patchConversationPinnedAt(previous, conversationId, optimisticPinnedAt)"), false);
+  assert.equal(app.includes("patchConversationPinnedAt(previous, conversationId, previousPinnedAt)"), false);
+  assert.equal(appSidebarConversationController.includes("patchConversationPinnedAt(previous, conversationId, optimisticPinnedAt)"), true);
+  assert.equal(appSidebarConversationController.includes("patchConversationPinnedAt(previous, conversationId, previousPinnedAt)"), true);
+  assert.equal(appSidebarConversationController.includes("patchDeepConversationPinnedAt(previous, conversationId, optimisticPinnedAt)"), true);
+  assert.equal(appSidebarConversationController.includes("patchDeepConversationPinnedAt(previous, conversationId, previousPinnedAt)"), true);
+  assert.equal(appSidebarConversationController.includes("setConversationPinning(conversationId, true)"), true);
+  assert.equal(appSidebarConversationController.includes("options.pinningConversationIdsRef.current"), true);
+  assert.equal(app.includes("onOpenDeepConversation={(conversationId) => void openAgentClusterConversation(conversationId)}"), false);
+  assert.equal(app.includes("onOpenDeepRun={(runId) => void openAgentClusterRun(runId)}"), false);
+  assert.equal(appWorkbenchShellProps.includes("onOpenDeepConversation: options.onOpenDeepConversation"), true);
+  assert.equal(appWorkbenchShellProps.includes("onOpenDeepRun: options.onOpenDeepRun"), true);
+  assert.equal(app.includes("onOpenAgentCluster={openAgentClusterEntry}"), false);
   assert.equal(sidebar.includes("sidebar-brand"), false);
   assert.equal(sidebar.includes("document.addEventListener(\"pointerdown\""), true);
   assert.equal(sidebar.includes("document.addEventListener(\"keydown\""), true);
@@ -1113,20 +1525,32 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(deepStyles.includes("@media (prefers-reduced-motion: reduce)"), true);
   assert.equal(app.includes("sidebarCollapsed"), true);
   assert.equal(app.includes("onToggleSidebar"), true);
-  assert.equal(app.includes("PanelLeftClose"), true);
-  assert.equal(app.includes("PanelLeftOpen"), true);
+  assert.equal(app.includes("PanelLeftClose"), false);
+  assert.equal(app.includes("PanelLeftOpen"), false);
+  assert.equal(workbenchShell.includes("data-startup-intro"), true);
+  assert.equal(workbenchShell.includes("data-sidebar-collapsed"), true);
+  assert.equal(workbenchShell.includes("app-workbench-header"), true);
+  assert.equal(workbenchShell.includes("onToggleSidebar"), true);
+  assert.equal(workbenchShell.includes("PanelLeftClose"), true);
+  assert.equal(workbenchShell.includes("PanelLeftOpen"), true);
   assert.equal(sidebar.includes("onToggleCollapsed"), false);
   assert.equal(sidebar.includes("PanelLeftClose"), false);
   assert.equal(sidebar.includes("PanelLeftOpen"), false);
   assert.equal(shellStyles.includes(".app-workbench-sidebar-toggle"), true);
-  assert.equal(app.includes("Maximize2"), true);
-  assert.equal(app.includes("Minimize2"), true);
-  assert.equal(app.includes("getWindowState"), true);
-  assert.equal(app.includes("onWindowStateChanged"), true);
+  assert.equal(app.includes("Maximize2"), false);
+  assert.equal(app.includes("Minimize2"), false);
+  assert.equal(app.includes("getWindowState"), false);
+  assert.equal(app.includes("onWindowStateChanged"), false);
+  assert.equal(workbenchShell.includes("Maximize2"), true);
+  assert.equal(workbenchShell.includes("Minimize2"), true);
+  assert.equal(workbenchShell.includes("getWindowState"), true);
+  assert.equal(workbenchShell.includes("onWindowStateChanged"), true);
+  assert.equal(workbenchShell.includes("app-window-controls"), true);
   assert.equal(app.includes("Square"), false);
   assert.equal(shellStyles.includes('data-window-animating="true"'), true);
   assert.equal(app.includes("window.confirm"), false);
-  assert.equal(app.includes("(response.conversations ?? previous.conversations).filter"), true);
+  assert.equal(app.includes("(response.conversations ?? previous.conversations).filter"), false);
+  assert.equal(appSidebarConversationController.includes("(response.conversations ?? previous.conversations).filter"), true);
   assert.equal(shellStyles.includes(".topbar"), false);
   assert.equal(shellStyles.includes(".topbar-sidebar-button"), false);
   assert.equal(shellStyles.includes(".topbar-chip"), false);

@@ -3,9 +3,12 @@ import test from "node:test";
 import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
 
 test("multi Agent workspace uses a linear answer transcript with click-to-open details", async () => {
-  const [multiAgentWorkspace, deepView, transcriptTimeline, deepStyles] = await Promise.all([
+  const [multiAgentWorkspace, deepView, deepViewModel, deepTranscriptModel, deepWorkDetailModel, transcriptTimeline, deepStyles] = await Promise.all([
     readPanelUiSource(path.join("components", "multi-agent-workspace.tsx")),
     readPanelUiSource(path.join("components", "deep-view.tsx")),
+    readPanelUiSource("deep-view-model.ts"),
+    readPanelUiSource("deep-transcript-model.ts"),
+    readPanelUiSource("deep-work-detail-model.ts"),
     readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
     readPanelUiStyle("deep-view.css"),
   ]);
@@ -17,6 +20,7 @@ test("multi Agent workspace uses a linear answer transcript with click-to-open d
   includes(multiAgentWorkspace, "selectedWorkItem");
   includes(multiAgentWorkspace, "setSelectedWorkItem");
   includes(multiAgentWorkspace, "deepRunWorkItemExists");
+  includes(multiAgentWorkspace, 'from "../deep-view-model"');
   includes(multiAgentWorkspace, "with-work-detail");
   includes(multiAgentWorkspace, "ChatInputBar");
   includes(multiAgentWorkspace, "props.view !== undefined && selectedWorkItem !== undefined");
@@ -41,78 +45,26 @@ test("multi Agent workspace uses a linear answer transcript with click-to-open d
   excludes(multiAgentWorkspace, "<DeepNodeInspector");
   excludes(multiAgentWorkspace, "<DeepRunTree");
 
-  includes(deepView, "export type DeepPlanConfirmationViewModel");
-  includes(deepView, "export type DeepRunTranscriptViewModel");
-  includes(deepView, "export type DeepRunTranscriptBlock");
-  includes(deepView, "export type DeepWorkItemDetailViewModel");
-  includes(deepView, "export type DeepSelectedWorkItem");
-  includes(deepView, "readonly blocks: readonly DeepRunTranscriptBlock[]");
-  includes(deepView, "readonly children: readonly DeepRunChildSummaryViewModel[]");
-  includes(deepView, "readonly worklineItems: readonly DeepWorklineItemViewModel[]");
+  includes(deepView, 'export type { DeepWorkItemDetailViewModel } from "../deep-view-model";');
   includes(deepView, "function DeepPlanConfirmationCard");
   includes(deepView, "function DeepRunTranscriptPane");
   includes(deepView, "function DeepRunTranscriptChildListBlock");
+  includes(deepView, 'from "../deep-view-model"');
+  includes(deepView, 'from "../deep-transcript-model"');
+  includes(deepView, 'from "../deep-work-detail-model"');
   includes(deepView, "AssistantMessageLabel");
   includes(deepView, "assistantModel?: AssistantModelBadge");
   includes(deepView, "AgentWorkTimeline");
   includes(deepView, "ActivityItem");
   includes(deepView, "export function DeepWorkItemDetailPanel");
-  includes(deepView, "function deepPlanConfirmationViewModel");
-  includes(deepView, "function deepRunTranscriptViewModel");
-  includes(deepView, "function deepRunTranscriptBlocks");
-  includes(deepView, "function deepConversationTranscriptBlocks");
-  includes(deepView, "function managerDecisionComesBeforeChildren");
-  includes(deepView, "function isChildLifecycleEvent");
-  includes(deepView, "return view.liveProjection.decision?.summary;");
   includes(deepView, "function detailTimelineView");
   includes(deepView, "function detailActivityItem");
   includes(deepView, "function activityStatusBadge");
-  includes(deepView, "function childAgentImportantSignal");
-  includes(deepView, "function childAgentSignalText");
-  includes(deepView, "function visibleWorkflowStatusLabel");
-  includes(deepView, "function meaningfulChildResultText");
-  includes(deepView, "function isNaturalChildStateText");
-  includes(deepView, "function compactWorklineText");
-  includes(deepView, "function childDetailWorklineItems");
-  includes(deepView, "type DeepChildAgentWorkflowSegment");
   includes(deepView, "function DeepChildAgentWorkflow");
-  includes(deepView, "function deepChildWorkflowHasRenderableSegments");
-  includes(deepView, "function deepChildAgentWorkflowSegments");
-  includes(deepView, "function appendExecutionSegmentWorkflow");
-  includes(deepView, "function toolActivityWorkflowSegment");
-  includes(deepView, "function childMaterialResultText");
-  includes(deepView, "const summary = meaningfulChildResultText(child.latestResult, child.objective);");
-  includes(deepView, "readonly findings: readonly string[]");
-  includes(deepView, "readonly evidenceRefs: readonly string[]");
-  includes(deepView, "发现：");
-  includes(deepView, "不确定性：");
-  includes(deepView, "证据：");
-  includes(deepView, "export function deepRunWorkItemExists");
-  includes(deepView, "function deepWorkItemDetailViewModel");
-  includes(deepView, "function deepWorklineItems");
-  includes(deepView, "function childRunWorklineItems");
-  includes(deepView, "function childDetailVisibleWorklineItems");
-  includes(deepView, "function isChildDetailConcreteActionItem");
-  includes(deepView, "function childModelMessageWorklineItem");
-  includes(deepView, "function childModelMessageText");
-  includes(deepView, "function childToolCallWorklineItem");
-  includes(deepView, "displayActivityItemsForNodes");
-  includes(deepView, "function toolCallActivityItem");
-  includes(deepView, "function toolCallExpandedSections");
-  includes(deepView, "function toolCallBadges");
-  includes(deepView, "call.summary ?? call.inputSummary");
   includes(deepView, "readonly expandedSections?: readonly ActivityExpandedSection[]");
-  includes(deepView, "function executionSegmentWorklineItem");
-  includes(deepView, "function runTranscriptWorkflowItems");
-  includes(deepView, "function childAgentSummaryItems");
-  includes(deepView, "function childAgentSummaryItem");
   includes(deepView, "conversation={props.conversation}");
   includes(deepView, "pendingGoal={props.pendingGoal}");
   includes(deepView, "deepIntakeChatItems(props.conversation.intakeTurns, props.intakeStatus)");
-  includes(deepView, "liveChild?.workflowItems");
-  includes(deepView, "liveChild?.latestResult");
-  includes(deepView, "childRun.executionHistory");
-  includes(deepView, "segment.modelMessages");
   includes(deepView, "<DeepChildAgentWorkflow");
   includes(deepView, "detail.child === undefined || !deepChildWorkflowHasRenderableSegments(detail.child, detail.worklineItems)");
   includes(deepView, "<RichText text={segment.text} />");
@@ -122,7 +74,6 @@ test("multi Agent workspace uses a linear answer transcript with click-to-open d
   excludes(deepView, "模型发起");
   excludes(deepView, "<span>工作流</span>");
   excludes(deepView, "条模型输出");
-  includes(deepView, "工具调用前说明");
   includes(deepView, "child.childRun");
   includes(deepView, "detail.child.pendingApproval");
   includes(deepView, "ChildTaskApproval");
@@ -133,17 +84,12 @@ test("multi Agent workspace uses a linear answer transcript with click-to-open d
   includes(deepView, "重置计划");
   includes(deepView, "function DeepConclusionMessage");
   includes(deepView, "function DeepRuntimeHealthNotice");
-  includes(deepView, "function runtimeHealthNoticeViewModel");
   includes(deepView, "readonly resynthesisBusy?: boolean");
   includes(deepView, "readonly onResynthesize?: () => void | Promise<void>;");
   includes(deepView, "readonly onStopRun?: () => void | Promise<void>;");
   includes(deepView, 'kind: "conclusion"');
   includes(deepView, "deep-compact-conclusion");
   includes(deepView, "重新综合");
-  includes(deepView, "view.liveProjection.synthesis?.status === \"pending\"");
-  includes(deepView, "health?.state !== \"stalled\" && health?.state !== \"orphaned\"");
-  includes(deepView, "这次运行一段时间没有新进展");
-  includes(deepView, "这次运行已失联");
   includes(deepView, "停止本次运行");
   excludes(deepView, "疑似卡住");
   includes(deepView, 'aria-label="助手回复"');
@@ -181,6 +127,49 @@ test("multi Agent workspace uses a linear answer transcript with click-to-open d
   excludes(deepView, 'text: childActivityIntro(view.liveProjection.children)');
   excludes(deepView, 'text: `${child.title}：${result}`');
   excludes(deepView, "detail: child.latestResult ?? child.summary");
+  excludes(deepView, "function deepPlanConfirmationViewModel");
+  excludes(deepView, "function deepRunTranscriptViewModel");
+  excludes(deepView, "function deepRunTranscriptBlocks");
+  excludes(deepView, "function deepConversationTranscriptBlocks");
+  excludes(deepView, "function managerDecisionComesBeforeChildren");
+  excludes(deepView, "function isChildLifecycleEvent");
+  excludes(deepView, "function visibleWorkflowStatusLabel");
+  excludes(deepView, "function meaningfulChildResultText");
+  excludes(deepView, "function isNaturalChildStateText");
+  excludes(deepView, "function runtimeHealthNoticeViewModel");
+  excludes(deepView, "function runTranscriptWorkflowItems");
+  excludes(deepView, "function childAgentSummaryItems");
+  excludes(deepView, "export function deepRunWorkItemExists");
+  excludes(deepView, "function childAgentImportantSignal");
+  excludes(deepView, "function childAgentSignalText");
+  excludes(deepView, "function compactWorklineText");
+  excludes(deepView, "function childDetailWorklineItems");
+  excludes(deepView, "type DeepChildAgentWorkflowSegment");
+  excludes(deepView, "function deepChildWorkflowHasRenderableSegments");
+  excludes(deepView, "function deepChildAgentWorkflowSegments");
+  excludes(deepView, "function appendExecutionSegmentWorkflow");
+  excludes(deepView, "function toolActivityWorkflowSegment");
+  excludes(deepView, "function childMaterialResultText");
+  excludes(deepView, "const summary = meaningfulChildResultText(child.latestResult, child.objective);");
+  excludes(deepView, "发现：");
+  excludes(deepView, "不确定性：");
+  excludes(deepView, "证据：");
+  excludes(deepView, "function deepWorkItemDetailViewModel");
+  excludes(deepView, "function deepWorklineItems");
+  excludes(deepView, "function childRunWorklineItems");
+  excludes(deepView, "function childDetailVisibleWorklineItems");
+  excludes(deepView, "function isChildDetailConcreteActionItem");
+  excludes(deepView, "function childModelMessageWorklineItem");
+  excludes(deepView, "function childModelMessageText");
+  excludes(deepView, "function childToolCallWorklineItem");
+  excludes(deepView, "displayActivityItemsForNodes");
+  excludes(deepView, "function toolCallActivityItem");
+  excludes(deepView, "function toolCallExpandedSections");
+  excludes(deepView, "function toolCallBadges");
+  excludes(deepView, "call.summary ?? call.inputSummary");
+  excludes(deepView, "function executionSegmentWorklineItem");
+  excludes(deepView, "childRun.executionHistory");
+  excludes(deepView, "segment.modelMessages");
   excludes(deepView, "export type DeepRunConsoleViewModel");
   excludes(deepView, "function DeepRunConsolePane");
   excludes(deepView, "function deepRunConsoleViewModel");
@@ -240,10 +229,106 @@ test("multi Agent workspace uses a linear answer transcript with click-to-open d
   excludes(deepView, "deep-run-workflow-active");
   excludes(deepView, "deep-run-workflow-complete");
 
+  includes(deepTranscriptModel, "export type DeepPlanConfirmationViewModel");
+  includes(deepTranscriptModel, "export type DeepRunTranscriptViewModel");
+  includes(deepTranscriptModel, "export type DeepRunTranscriptBlock");
+  includes(deepViewModel, "export type DeepSelectedWorkItem");
+  includes(deepTranscriptModel, "readonly blocks: readonly DeepRunTranscriptBlock[]");
+  includes(deepTranscriptModel, "readonly children: readonly DeepRunChildSummaryViewModel[]");
+  includes(deepViewModel, "readonly findings: readonly string[]");
+  includes(deepViewModel, "readonly evidenceRefs: readonly string[]");
+  includes(deepTranscriptModel, "function deepPlanConfirmationViewModel");
+  includes(deepTranscriptModel, "function deepRunTranscriptViewModel");
+  includes(deepTranscriptModel, "function deepRunTranscriptBlocks");
+  includes(deepTranscriptModel, "function deepConversationTranscriptBlocks");
+  includes(deepTranscriptModel, "function managerDecisionComesBeforeChildren");
+  includes(deepTranscriptModel, "function isChildLifecycleEvent");
+  includes(deepViewModel, "return view.liveProjection.decision?.summary;");
+  includes(deepViewModel, "function visibleWorkflowStatusLabel");
+  includes(deepViewModel, "function meaningfulChildResultText");
+  includes(deepViewModel, "function isNaturalChildStateText");
+  includes(deepTranscriptModel, "function runtimeHealthNoticeViewModel");
+  includes(deepViewModel, "function runTranscriptWorkflowItems");
+  includes(deepViewModel, "function childAgentSummaryItems");
+  includes(deepViewModel, "function childAgentSummaryItem");
+  includes(deepViewModel, "export type DeepWorkItemDetailViewModel");
+  includes(deepViewModel, "export type DeepChildAgentWorkflowSegment");
+  includes(deepViewModel, "readonly worklineItems: readonly DeepWorklineItemViewModel[]");
+  includes(deepViewModel, "readonly worklineItems: readonly DeepWorklineItemViewModel[]");
+  includes(deepViewModel, "function childAgentImportantSignal");
+  includes(deepViewModel, "function childAgentSignalText");
+  includes(deepViewModel, "function compactWorklineText");
+  excludes(deepViewModel, "function deepPlanConfirmationViewModel");
+  excludes(deepViewModel, "function deepRunTranscriptViewModel");
+  excludes(deepViewModel, "function deepRunTranscriptBlocks");
+  excludes(deepViewModel, "function deepConversationTranscriptBlocks");
+  excludes(deepViewModel, "function managerDecisionComesBeforeChildren");
+  excludes(deepViewModel, "function isChildLifecycleEvent");
+  excludes(deepViewModel, "function runtimeHealthNoticeViewModel");
+  excludes(deepViewModel, "function childDetailWorklineItems");
+  excludes(deepViewModel, "function deepWorkItemDetailViewModel");
+  excludes(deepViewModel, "function deepChildWorkflowHasRenderableSegments");
+  excludes(deepViewModel, "function deepChildAgentWorkflowSegments");
+  excludes(deepViewModel, "function appendExecutionSegmentWorkflow");
+  excludes(deepViewModel, "function toolActivityWorkflowSegment");
+  excludes(deepViewModel, "function childMaterialResultText");
+  excludes(deepViewModel, "发现：");
+  excludes(deepViewModel, "不确定性：");
+  excludes(deepViewModel, "证据：");
+  excludes(deepViewModel, "function deepWorklineItems");
+  excludes(deepViewModel, "function childRunWorklineItems");
+  excludes(deepViewModel, "function childDetailVisibleWorklineItems");
+  excludes(deepViewModel, "function isChildDetailConcreteActionItem");
+  excludes(deepViewModel, "function childModelMessageWorklineItem");
+  excludes(deepViewModel, "function childModelMessageText");
+  excludes(deepViewModel, "function childToolCallWorklineItem");
+  excludes(deepViewModel, "displayActivityItemsForNodes");
+  excludes(deepViewModel, "function toolCallActivityItem");
+  excludes(deepViewModel, "function toolCallExpandedSections");
+  excludes(deepViewModel, "function toolCallBadges");
+  excludes(deepViewModel, "call.summary ?? call.inputSummary");
+  excludes(deepViewModel, "function executionSegmentWorklineItem");
+  excludes(deepViewModel, "childRun.executionHistory");
+  excludes(deepViewModel, "segment.modelMessages");
+  excludes(deepViewModel, "工具调用前说明");
+  includes(deepWorkDetailModel, "function childDetailWorklineItems");
+  includes(deepWorkDetailModel, "function deepWorkItemDetailViewModel");
+  includes(deepWorkDetailModel, "function deepChildWorkflowHasRenderableSegments");
+  includes(deepWorkDetailModel, "function deepChildAgentWorkflowSegments");
+  includes(deepWorkDetailModel, "function appendExecutionSegmentWorkflow");
+  includes(deepWorkDetailModel, "function toolActivityWorkflowSegment");
+  includes(deepWorkDetailModel, "function childMaterialResultText");
+  includes(deepWorkDetailModel, "const summary = meaningfulChildResultText(child.latestResult, child.objective);");
+  includes(deepWorkDetailModel, "发现：");
+  includes(deepWorkDetailModel, "不确定性：");
+  includes(deepWorkDetailModel, "证据：");
+  includes(deepWorkDetailModel, "function deepWorklineItems");
+  includes(deepWorkDetailModel, "function childRunWorklineItems");
+  includes(deepWorkDetailModel, "function childDetailVisibleWorklineItems");
+  includes(deepWorkDetailModel, "function isChildDetailConcreteActionItem");
+  includes(deepWorkDetailModel, "function childModelMessageWorklineItem");
+  includes(deepWorkDetailModel, "function childModelMessageText");
+  includes(deepWorkDetailModel, "function childToolCallWorklineItem");
+  includes(deepWorkDetailModel, "displayActivityItemsForNodes");
+  includes(deepWorkDetailModel, "function toolCallActivityItem");
+  includes(deepWorkDetailModel, "function toolCallExpandedSections");
+  includes(deepWorkDetailModel, "function toolCallBadges");
+  includes(deepWorkDetailModel, "call.summary ?? call.inputSummary");
+  includes(deepWorkDetailModel, "function executionSegmentWorklineItem");
+  includes(deepWorkDetailModel, "childRun.executionHistory");
+  includes(deepWorkDetailModel, "segment.modelMessages");
+  includes(deepWorkDetailModel, "工具调用前说明");
+  includes(deepViewModel, "view.liveProjection.synthesis?.status === \"pending\"");
+  includes(deepViewModel, "liveChild?.workflowItems");
+  includes(deepViewModel, "liveChild?.latestResult");
+  includes(deepTranscriptModel, "health?.state !== \"stalled\" && health?.state !== \"orphaned\"");
+  includes(deepTranscriptModel, "这次运行一段时间没有新进展");
+  includes(deepTranscriptModel, "这次运行已失联");
+
   includes(transcriptTimeline, "selectedItemKey");
   includes(transcriptTimeline, "onSelectItem");
   includes(transcriptTimeline, "data-selected");
-  includes(transcriptTimeline, "aria-pressed={selected}");
+  includes(transcriptTimeline, "aria-pressed={input.selected}");
   includes(transcriptTimeline, "agent-activity-body");
   includes(transcriptTimeline, 'aria-label="工作进度"');
 
@@ -300,26 +385,28 @@ test("multi Agent workspace uses a linear answer transcript with click-to-open d
 });
 
 test("deep transcript blocks keep a single narrative with stale conclusion recovery", async () => {
-  const deepView = await readPanelUiSource(path.join("components", "deep-view.tsx"));
+  const deepTranscriptModel = await readPanelUiSource("deep-transcript-model.ts");
 
-  includes(deepView, "const synthesisText = parentSynthesisText(view);");
-  includes(deepView, "const conclusionText = parentConclusionText(view.report?.conclusion, view.liveProjection.conclusion);");
-  includes(deepView, "const staleConclusion = conclusionNeedsResynthesis(view, conclusionText);");
-  includes(deepView, "const decisionComesBeforeChildren = managerDecisionComesBeforeChildren(view);");
-  includes(deepView, "if (synthesisText !== undefined && conclusionText === undefined)");
-  includes(deepView, 'kind: "conclusion"');
-  includes(deepView, 'staleMessage: staleConclusion ? "协作材料已更新，当前结论待重新综合。" : undefined');
-  includes(deepView, "const notice = parentNotice(view);");
-  excludes(deepView, "for (const child of children)");
-  excludes(deepView, 'kind: "result_text"');
-  excludes(deepView, "return mergeAdjacentAssistantTextBlocks(blocks);");
-  excludes(deepView, "function mergeAssistantText");
-  excludes(deepView, "这个目标还缺少关键范围");
+  includes(deepTranscriptModel, "const synthesisText = parentSynthesisText(view);");
+  includes(deepTranscriptModel, "const conclusionText = parentConclusionText(view.report?.conclusion, view.liveProjection.conclusion);");
+  includes(deepTranscriptModel, "const staleConclusion = conclusionNeedsResynthesis(view, conclusionText);");
+  includes(deepTranscriptModel, "const decisionComesBeforeChildren = managerDecisionComesBeforeChildren(view);");
+  includes(deepTranscriptModel, "if (synthesisText !== undefined && conclusionText === undefined)");
+  includes(deepTranscriptModel, 'kind: "conclusion"');
+  includes(deepTranscriptModel, 'staleMessage: staleConclusion ? "协作材料已更新，当前结论待重新综合。" : undefined');
+  includes(deepTranscriptModel, "const notice = parentNotice(view);");
+  excludes(deepTranscriptModel, "for (const child of children)");
+  excludes(deepTranscriptModel, 'kind: "result_text"');
+  excludes(deepTranscriptModel, "return mergeAdjacentAssistantTextBlocks(blocks);");
+  excludes(deepTranscriptModel, "function mergeAssistantText");
+  excludes(deepTranscriptModel, "这个目标还缺少关键范围");
 });
 
 test("child detail workflow renders model output and collapsed desktop Agent tool groups", async () => {
-  const [deepView, deepContract, childRunner, deepRuntime, deepReadModel, treeAttachment] = await Promise.all([
+  const [deepView, deepViewModel, deepWorkDetailModel, deepContract, childRunner, deepRuntime, deepReadModel, treeAttachment] = await Promise.all([
     readPanelUiSource(path.join("components", "deep-view.tsx")),
+    readPanelUiSource("deep-view-model.ts"),
+    readPanelUiSource("deep-work-detail-model.ts"),
     readPanelUiSource(path.join("contracts", "deep.ts")),
     readAppSource(path.join("deep", "deep-child-agent-runner.ts")),
     readAppSource(path.join("deep", "deep-runtime.ts")),
@@ -327,19 +414,19 @@ test("child detail workflow renders model output and collapsed desktop Agent too
     readAppSource("agent-run-tree-attachment.ts"),
   ]);
 
-  includes(deepView, "displayActivityItemsForNodes([node])");
-  includes(deepView, "display: call.display");
+  includes(deepWorkDetailModel, "displayActivityItemsForNodes([node])");
+  includes(deepWorkDetailModel, "display: call.display");
   includes(deepView, "view={detailTimelineView(segment.items)}");
   includes(deepView, "collapsed={true}");
   includes(deepView, "<RichText text={segment.text} />");
-  includes(deepView, "const messageText = childModelMessageText(message);");
-  includes(deepView, "const resultText = childMaterialResultText(child);");
-  includes(deepView, "return child.latestResult === undefined || result === undefined ? undefined : compactWorklineText(result, 120);");
-  includes(deepView, "return visibleWorkflowStatusLabel(item.status);");
-  excludes(deepView, "childModelMessageText(message) ?? childModelToolCallDecisionText");
+  includes(deepWorkDetailModel, "const messageText = childModelMessageText(message);");
+  includes(deepWorkDetailModel, "const resultText = childMaterialResultText(child);");
+  includes(deepViewModel, "return child.latestResult === undefined || result === undefined ? undefined : compactWorklineText(result, 120);");
+  includes(deepWorkDetailModel, "return visibleWorkflowStatusLabel(item.status);");
+  excludes(deepWorkDetailModel, "childModelMessageText(message) ?? childModelToolCallDecisionText");
   excludes(deepView, "模型工具调用决策");
-  includes(deepView, "function mergeExpandedSections");
-  includes(deepView, "function mergeActivityBadges");
+  includes(deepWorkDetailModel, "function mergeExpandedSections");
+  includes(deepWorkDetailModel, "function mergeActivityBadges");
   includes(deepContract, "import type { ToolDisplayProjection } from \"./tools\";");
   includes(deepContract, "readonly display?: ToolDisplayProjection;");
   includes(childRunner, "display: toolCall.projection?.display ?? toolCall.projection?.envelope?.uiDisplay");

@@ -3,10 +3,12 @@ import type { ChatInputProps } from "./chat-empty";
 import { ChatInputBar } from "./chat-empty";
 import { selectedComposerModel } from "./chat-session-projection";
 import {
-  DeepView,
-  DeepWorkItemDetailPanel,
   deepRunWorkItemExists,
   type DeepSelectedWorkItem,
+} from "../deep-view-model";
+import {
+  DeepView,
+  DeepWorkItemDetailPanel,
 } from "./deep-view";
 import type {
   DeepConversationView,

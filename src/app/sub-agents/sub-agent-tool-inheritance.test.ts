@@ -125,6 +125,36 @@ test("runSubAgent preserves long output separately from display summary", async 
   assert.equal(result.summary.includes(sentinel), false);
 });
 
+test("runSubAgent fails closed when SUB_AGENT.md hash drifts after discovery", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "agentarbor-sub-agent-hash-"));
+  const packageDir = path.join(root, "test-helper");
+  mkdirSync(packageDir);
+  const sourcePath = path.join(packageDir, "SUB_AGENT.md");
+  writeTestSubAgentFile(sourcePath, "You are the original helper.");
+
+  const registry = new SubAgentRegistry({ roots: [root] });
+  const subAgent = await registry.getByName("test-helper");
+  assert.ok(subAgent);
+
+  writeTestSubAgentFile(sourcePath, "You are the changed helper.");
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-should-not-run", "should not run"),
+  ]);
+
+  const result = await runSubAgent({
+    subAgent,
+    task: "use the helper",
+    toolBroker: new ToolCenter(),
+    channel,
+    allowedTools: [],
+  });
+
+  assert.equal(result.status, "failed");
+  assert.match(result.error ?? "", /Sub-agent definition hash does not match/);
+  assert.match(result.error ?? "", /Refusing to execute changed SUB_AGENT\.md content/);
+  assert.equal(channel.requests.length, 0);
+});
+
 test("call_sub_agent projection exposes full output to parent model continuation", async () => {
   const sentinel = "PARENT_VISIBLE_TAIL_SENTINEL";
   const fullOutput = `${"abcdef".repeat(120)}${sentinel}`;
@@ -303,6 +333,48 @@ test("call_sub_agent and batch calls link traces to parent tool calls and batch 
   assert.equal(collected[1]?.batchId, collected[2]?.batchId);
 });
 
+test("call_sub_agents honors max_concurrency and preserves result order", async () => {
+  const channel = new ConcurrentIntelligenceChannel(2);
+  const center = new ToolCenter();
+  const registry = await tempRegistry();
+  for (const executor of createSubAgentToolExecutors({
+    subAgentRegistry: registry,
+    channel,
+    toolBroker: center,
+    allowedTools: () => ["call_sub_agents"],
+  })) {
+    center.register(executor);
+  }
+
+  const result = await center.execute(
+    {
+      callId: "call-batch-parent",
+      toolName: "call_sub_agents",
+      input: {
+        tasks: [
+          { sub_agent_name: "test-helper", task: "first" },
+          { sub_agent_name: "test-helper", task: "second" },
+          { sub_agent_name: "test-helper", task: "third" },
+        ],
+        max_concurrency: 2,
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["call_sub_agents"] }
+  );
+
+  const output = result.output as {
+    readonly result?: {
+      readonly results?: readonly { readonly index?: number }[];
+      readonly stats?: { readonly max_concurrency?: number };
+    };
+  };
+  assert.equal(result.status, "completed");
+  assert.equal(channel.maxActive, 2);
+  assert.equal(output.result?.stats?.max_concurrency, 2);
+  assert.deepEqual(output.result?.results?.map((item) => item.index), [0, 1, 2]);
+});
+
 test("call_sub_agents records pending and not-started batch stats when approval pauses execution", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
@@ -335,6 +407,7 @@ test("call_sub_agents records pending and not-started batch stats when approval 
           { sub_agent_name: "test-helper", task: "second" },
           { sub_agent_name: "test-helper", task: "third" },
         ],
+        max_concurrency: 1,
       },
     },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -370,6 +443,7 @@ test("call_sub_agents records pending and not-started batch stats when approval 
           { sub_agent_name: "test-helper", task: "second" },
           { sub_agent_name: "test-helper", task: "third" },
         ],
+        max_concurrency: 1,
       },
     },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -441,6 +515,7 @@ function testSubAgent(input: {
     description: "Test helper",
     enabled: true,
     sourcePath: path.join(tmpdir(), "missing-sub-agent.md"),
+    inlineSystemPrompt: "You are a test helper.",
     whenToUse: [],
     whenNotToUse: [],
     allowedTools: input.allowedTools ?? [],
@@ -460,8 +535,15 @@ async function tempRegistry(): Promise<SubAgentRegistry> {
   const root = mkdtempSync(path.join(tmpdir(), "agentarbor-sub-agent-"));
   const packageDir = path.join(root, "test-helper");
   mkdirSync(packageDir);
+  writeTestSubAgentFile(path.join(packageDir, "SUB_AGENT.md"), "You are a test helper.");
+  const registry = new SubAgentRegistry({ roots: [root] });
+  await registry.list();
+  return registry;
+}
+
+function writeTestSubAgentFile(sourcePath: string, body: string): void {
   writeFileSync(
-    path.join(packageDir, "SUB_AGENT.md"),
+    sourcePath,
     [
       "---",
       "name: test-helper",
@@ -469,14 +551,11 @@ async function tempRegistry(): Promise<SubAgentRegistry> {
       "enabled: true",
       "---",
       "",
-      "You are a test helper.",
+      body,
       "",
     ].join("\n"),
     "utf8"
   );
-  const registry = new SubAgentRegistry({ roots: [root] });
-  await registry.list();
-  return registry;
 }
 
 function testTool(
@@ -525,6 +604,60 @@ class SequenceIntelligenceChannel implements IntelligenceChannel {
 
   validateResponse(_request: ModelRequest, response: ModelResponse) {
     return response.validation;
+  }
+}
+
+class ConcurrentIntelligenceChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+  maxActive = 0;
+  private active = 0;
+  private released = false;
+  private readonly waiters: (() => void)[] = [];
+
+  constructor(private readonly releaseAt: number) {}
+
+  async request(request: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(request);
+    this.active += 1;
+    this.maxActive = Math.max(this.maxActive, this.active);
+    if (this.active >= this.releaseAt) {
+      this.release();
+    }
+    await this.waitForReleaseOrTimeout();
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    this.active -= 1;
+    return textResponse(request.requestId, `done ${this.requests.length}`);
+  }
+
+  validateResponse(_request: ModelRequest, response: ModelResponse) {
+    return response.validation;
+  }
+
+  private waitForReleaseOrTimeout(): Promise<void> {
+    if (this.released) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        this.release();
+        resolve();
+      }, 50);
+      this.waiters.push(() => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  }
+
+  private release(): void {
+    if (this.released) {
+      return;
+    }
+    this.released = true;
+    const waiters = this.waiters.splice(0);
+    for (const waiter of waiters) {
+      waiter();
+    }
   }
 }
 

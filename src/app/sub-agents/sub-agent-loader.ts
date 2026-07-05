@@ -78,12 +78,14 @@ export async function loadSubAgentBodyFacts(subAgent: SubAgentDefinition): Promi
   }
   const raw = await fs.readFile(subAgent.sourcePath, "utf8");
   const parsed = parseSubAgentMarkdown(raw);
-  return {
+  const facts = {
     body: parsed.body.trim(),
     contentHash: parsed.contentHash,
     bodyHash: parsed.bodyHash,
     metadataHash: parsed.metadataHash,
   };
+  assertSubAgentDefinitionHashesMatch(subAgent, facts);
+  return facts;
 }
 
 async function discoverSubAgentsUnderRoot(
@@ -286,4 +288,50 @@ function errorMessage(error: Error): string {
 
 function isFileNotFound(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
+}
+
+function assertSubAgentDefinitionHashesMatch(
+  subAgent: SubAgentDefinition,
+  facts: {
+    readonly contentHash: string;
+    readonly bodyHash: string;
+    readonly metadataHash: string;
+  }
+): void {
+  const mismatch = firstHashMismatch(subAgent, facts);
+  if (mismatch === undefined) {
+    return;
+  }
+  throw new Error(
+    [
+      `Sub-agent definition hash does not match the discovered catalog for "${subAgent.id}".`,
+      `${mismatch.kind} expected=${mismatch.expected} actual=${mismatch.actual}`,
+      "Refusing to execute changed SUB_AGENT.md content.",
+    ].join(" ")
+  );
+}
+
+function firstHashMismatch(
+  expected: SubAgentDefinition,
+  actual: {
+    readonly contentHash: string;
+    readonly bodyHash: string;
+    readonly metadataHash: string;
+  }
+): { readonly kind: "contentHash" | "bodyHash" | "metadataHash"; readonly expected: string; readonly actual: string } | undefined {
+  for (const kind of ["contentHash", "bodyHash", "metadataHash"] as const) {
+    const expectedHash = safeExpectedHash(expected[kind]);
+    if (expectedHash !== undefined && actual[kind] !== expectedHash) {
+      return {
+        kind,
+        expected: expectedHash,
+        actual: actual[kind],
+      };
+    }
+  }
+  return undefined;
+}
+
+function safeExpectedHash(value: string): string | undefined {
+  return value.trim().length > 0 ? value.trim() : undefined;
 }

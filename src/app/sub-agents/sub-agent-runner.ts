@@ -373,7 +373,7 @@ class SubAgentTraceRecorder {
 }
 
 async function buildSubAgentSystemPrompt(subAgent: SubAgentDefinition): Promise<string> {
-  const body = subAgent.inlineSystemPrompt ?? await loadSubAgentBody(subAgent).catch(() => "");
+  const body = subAgent.inlineSystemPrompt ?? await loadSubAgentBody(subAgent);
   const basePrompt = body.trim().length > 0 ? body : subAgent.description;
 
   const sections: string[] = [];

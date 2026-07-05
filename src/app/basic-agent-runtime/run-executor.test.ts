@@ -1838,3 +1838,185 @@ test("BasicAgentRunExecutor stores prepared direct config without capability sna
   assert.equal(runJobs.get(run.runId)?.config.profileId, "underground-profile");
   assert.equal(runJobs.get(run.runId)?.capabilitySnapshot, undefined);
 });
+
+test("BasicAgentRunExecutor maps paused execution result to blocked with preserved stop reason", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    execute: async () => ({
+      paused: {
+        code: "out_of_fuel",
+        message: "模型轮次预算已耗尽。",
+      },
+      canvas: {
+        kind: "desktop_agent_canvas",
+        agent: {},
+      },
+    }),
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "paused by out_of_fuel",
+    aiMode: "fake",
+  });
+  await waitUntil(() => runJobs.get(run.runId)?.status === "blocked");
+
+  const blocked = runJobs.get(run.runId);
+  assert.equal(blocked?.status, "blocked");
+  assert.equal(blocked?.blocked?.reason.code, "out_of_fuel");
+  assert.equal(blocked?.blocked?.reason.message, "模型轮次预算已耗尽。");
+  assert.equal(executor.get(run.runId)?.status, "blocked");
+});
+
+test("BasicAgentRunExecutor converges to failed when persistence fails after markResuming", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  let persistShouldFail = false;
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    execute: async () => ({
+      pendingApproval: {
+        confirmationId: "confirmation-persist-fail",
+        async resume() {
+          return { completed: true };
+        },
+        async resumeWithDecision() {
+          return { completed: true };
+        },
+      },
+      canvas: {
+        kind: "desktop_agent_canvas",
+        agent: {
+          pendingConfirmation: {
+            confirmationId: "confirmation-persist-fail",
+          },
+        },
+      },
+    }),
+    persistRun: async () => {
+      if (persistShouldFail) {
+        persistShouldFail = false;
+        throw new Error("persistence failed after markResuming");
+      }
+    },
+    failRun: async (job, error) => {
+      runJobs.fail(job.runId, {
+        config: job.config,
+        informationAccess: job.informationAccess,
+        capabilitySnapshot: job.capabilitySnapshot,
+        error: {
+          code: "confirmation_resume_failed",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    },
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "persistence fails after markResuming",
+    aiMode: "fake",
+  });
+  await waitUntil(() => runJobs.get(run.runId)?.status === "approval_needed");
+
+  persistShouldFail = true;
+  await executor.submitConfirmationDecision({
+    runId: run.runId,
+    confirmationId: "confirmation-persist-fail",
+    decision: "deny",
+  });
+  await waitUntil(() => {
+    const status = runJobs.get(run.runId)?.status;
+    return status === "failed" || status === "completed" || status === "blocked";
+  });
+
+  const job = runJobs.get(run.runId);
+  assert.notEqual(job?.status, "running");
+  assert.equal(job?.status, "failed");
+  assert.equal(job?.failed?.error.code, "confirmation_resume_failed");
+});
+
+test("BasicAgentRunExecutor avoids double finalize when cancel races with confirmation resume", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  let finishedCount = 0;
+  let releaseResume: (() => void) | undefined;
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    execute: async () => ({
+      pendingApproval: {
+        confirmationId: "confirmation-race",
+        async resume() {
+          await new Promise<void>((resolve) => { releaseResume = resolve; });
+          return { completed: true };
+        },
+        async resumeWithDecision() {
+          throw new Error("should not use resumeWithDecision");
+        },
+      },
+      canvas: {
+        kind: "desktop_agent_canvas",
+        agent: {
+          pendingConfirmation: {
+            confirmationId: "confirmation-race",
+          },
+        },
+      },
+    }),
+    onRunFinished: () => {
+      finishedCount += 1;
+    },
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "cancel races with resume",
+    aiMode: "fake",
+  });
+  await waitUntil(() => runJobs.get(run.runId)?.status === "approval_needed");
+
+  await executor.submitConfirmationDecision({
+    runId: run.runId,
+    confirmationId: "confirmation-race",
+    decision: "approve_once",
+  });
+  await waitUntil(() => releaseResume !== undefined);
+
+  await executor.cancel(run.runId);
+  assert.equal(runJobs.get(run.runId)?.status, "cancelled");
+  assert.equal(finishedCount, 1);
+
+  // waitUntil 已保证 releaseResume 在此非空；TS 无法跨闭包收窄，需显式断言。
+  releaseResume!();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  assert.equal(finishedCount, 1);
+  assert.equal(runJobs.get(run.runId)?.status, "cancelled");
+});
+
+test("BasicAgentRunExecutor cancel is idempotent on already-terminal runs", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  let finishedCount = 0;
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    execute: async () => ({ completed: true }),
+    onRunFinished: () => {
+      finishedCount += 1;
+    },
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "cancel after completion",
+    aiMode: "fake",
+  });
+  await waitUntil(() => runJobs.get(run.runId)?.status === "completed");
+  assert.equal(finishedCount, 1);
+
+  await executor.cancel(run.runId);
+  assert.equal(finishedCount, 1);
+  assert.equal(runJobs.get(run.runId)?.status, "completed");
+});

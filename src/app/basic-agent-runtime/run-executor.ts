@@ -121,7 +121,11 @@ export class BasicAgentRunExecutor {
 
   async cancel(runId: string): Promise<BasicAgentRun> {
     const job = this.requireJob(runId);
-    const shouldCleanup = !isTerminalBasicAgentRunJob(job);
+    if (isTerminalBasicAgentRunJob(job)) {
+      // 并发竞态防御：job 已被其他路径收口为终态，
+      // 不再 cancel/finalize，避免 double-finalize。
+      return this.requireBasicRun(runId);
+    }
     this.pendingContinuations.deleteForRun(runId);
     this.config.abortControllers.get(runId)?.abort();
     this.config.runJobs.cancel(runId, {
@@ -136,7 +140,7 @@ export class BasicAgentRunExecutor {
     });
     const cancelled = this.requireJob(runId);
     this.syncRunEvents(cancelled);
-    if (shouldCleanup && cancelled.status === "cancelled") {
+    if (cancelled.status === "cancelled") {
       await this.cleanupRunResources(runId);
     }
     await this.finalizeTerminalJob(cancelled);
@@ -160,8 +164,16 @@ export class BasicAgentRunExecutor {
       guidance: input.guidance,
     });
     this.config.runJobs.markResuming(input.runId);
-    this.syncRunEvents(this.requireJob(input.runId));
-    await this.config.persistRun(this.requireJob(input.runId));
+    try {
+      this.syncRunEvents(this.requireJob(input.runId));
+      await this.config.persistRun(this.requireJob(input.runId));
+    } catch (error) {
+      // Convergence guard: markResuming 已把 status 改成 running；
+      // 若 syncRunEvents / persistRun 抛错而 scheduleConfirmationResume 尚未注册，
+      // run 会永远卡在 running。这里直接收口到终态，复用与异步恢复相同的失败路径。
+      await this.finalizeConfirmationResumeFailure(input.runId, job, error);
+      return this.requireBasicRun(input.runId);
+    }
     if (input.decision === "approve_once") {
       const run = this.requireBasicRun(input.runId);
       this.scheduleConfirmationResume({
@@ -217,6 +229,12 @@ export class BasicAgentRunExecutor {
       }
       if (result.blocked !== undefined) {
         await this.blockFromExecutionResult(runId, job, result);
+        return;
+      }
+      if (result.paused !== undefined) {
+        // paused（out_of_fuel / context_overflow）统一转 blocked 终态，
+        // reason.code 保留停止原因，使契约层显式识别"可继续"语义。
+        await this.blockFromExecutionResult(runId, job, { ...result, blocked: result.paused });
         return;
       }
       if (result.pendingApproval !== undefined) {
@@ -376,6 +394,12 @@ export class BasicAgentRunExecutor {
   }): Promise<BasicAgentRun> {
     const continuation = this.pendingContinuations.consume(input.runId, input.confirmationId);
     if (continuation === undefined) {
+      // 并发竞态防御：若 job 已被 cancel 等路径收口为终态，
+      // continuation 已被清掉但不应再 block/finalize，避免 double-finalize。
+      const currentJob = this.config.runJobs.get(input.runId);
+      if (currentJob !== undefined && isTerminalBasicAgentRunJob(currentJob)) {
+        return this.requireBasicRun(input.runId);
+      }
       const blockedByMissingApproval = input.decision === "approve_once";
       this.config.runJobs.block(input.runId, {
         config: input.job.config,
@@ -390,8 +414,12 @@ export class BasicAgentRunExecutor {
         },
       });
       const blocked = this.requireJob(input.runId);
-      this.syncRunEvents(blocked);
-      await this.finalizeTerminalJob(blocked);
+      // block() 对终态 job 短路，blocked.status 可能仍是其他终态（如被 cancel 抢占成 cancelled）。
+      // 只有真的变成 blocked 才 finalize，避免对已被其他路径收口的 job 二次 finalize。
+      if (blocked.status === "blocked") {
+        this.syncRunEvents(blocked);
+        await this.finalizeTerminalJob(blocked);
+      }
       return this.requireBasicRun(input.runId);
     }
 
@@ -425,6 +453,12 @@ export class BasicAgentRunExecutor {
       }
       if (result.blocked !== undefined) {
         await this.blockFromExecutionResult(input.runId, input.job, result);
+        return this.requireBasicRun(input.runId);
+      }
+      if (result.paused !== undefined) {
+        // paused（out_of_fuel / context_overflow）统一转 blocked 终态，
+        // reason.code 保留停止原因，使契约层显式识别"可继续"语义。
+        await this.blockFromExecutionResult(input.runId, input.job, { ...result, blocked: result.paused });
         return this.requireBasicRun(input.runId);
       }
       if (result.pendingApproval !== undefined) {

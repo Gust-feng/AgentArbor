@@ -117,6 +117,14 @@ export type BasicAgentRunExecutionResult = {
     readonly message: string;
     readonly errorDomain?: BasicAgentErrorDomain;
   };
+  // paused 表示 out_of_fuel / context_overflow 等"可继续"停止语义。
+  // BasicAgentRunExecutor 统一将其转为 blocked 终态（reason.code 保留停止原因），
+  // 使契约层显式识别 paused，不依赖上游 adapter 自行转 blocked。
+  readonly paused?: {
+    readonly code: string;
+    readonly message: string;
+    readonly errorDomain?: BasicAgentErrorDomain;
+  };
   readonly pendingApproval?: BasicAgentPendingToolContinuation;
 };
 

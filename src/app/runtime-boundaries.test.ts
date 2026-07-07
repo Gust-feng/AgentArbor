@@ -125,6 +125,62 @@ test("runtime keeps external LLM SDKs behind provider adapters", () => {
   }
 });
 
+test("ordinary panel mainline stays clear of legacy work-session and underground compat names", () => {
+  const ordinaryMainlineFiles = [
+    join("src", "app", "panel-server", "conversation-routes.ts"),
+    join("src", "app", "panel-server", "conversation-current-run.ts"),
+    join("src", "app", "panel-server", "basic-agent-run-view.ts"),
+    join("src", "app", "panel-server", "desktop-agent-execution.ts"),
+  ];
+  const compatNamePattern = /workSession|WorkSession|work-session|work_session|underground/;
+
+  for (const file of ordinaryMainlineFiles) {
+    assert.equal(
+      compatNamePattern.test(readFileSync(file, "utf8")),
+      false,
+      `${file} must not depend on legacy work-session or underground compat naming`
+    );
+  }
+});
+
+test("panel-server work-session aliases stay in explicit compatibility files", () => {
+  const allowedCompatFiles = new Set([
+    "src/app/panel-server/basic-agent-read-models.ts",
+    "src/app/panel-server/basic-agent-routes.ts",
+    "src/app/panel-server/conversation-sync.ts",
+    "src/app/panel-server/live-model-stream.ts",
+    "src/app/panel-server/runtime-records.ts",
+  ]);
+  const compatNamePattern = /workSession|WorkSession|work-session|work_session/;
+  const unexpectedFiles = sourceFiles([join("src", "app", "panel-server")])
+    .filter((file) => !file.endsWith(".test.ts"))
+    .filter((file) => compatNamePattern.test(readFileSync(file, "utf8")))
+    .map(normalizedPath)
+    .filter((file) => !allowedCompatFiles.has(file));
+
+  assert.deepEqual(unexpectedFiles, []);
+  const compatRouteSource = readFileSync(join("src", "app", "panel-server", "basic-agent-routes.ts"), "utf8");
+  assert.match(compatRouteSource, /\/work-session/);
+  assert.match(compatRouteSource, /workSession:\s*view\.workView/);
+});
+
+test("restored ordinary run views keep frozen capability facts ahead of fallback config", () => {
+  const runViewSource = readFileSync(join("src", "app", "panel-server", "basic-agent-run-view.ts"), "utf8");
+  const persistedResponseSource = readFileSync(join("src", "app", "panel-server", "persisted-run-response.ts"), "utf8");
+
+  assert.match(runViewSource, /capabilityResolution:\s*snapshot\.run\.capabilityResolution/);
+  assert.equal(/configCenter|getModelProviderConfig|getInformationAccessConfig/.test(runViewSource), false);
+  assert.match(
+    persistedResponseSource,
+    /const config\s*=\s*input\.snapshot\.run\.capabilitySnapshot\?\.activeModel\s*\?\?\s*input\.config;/
+  );
+  assert.match(
+    persistedResponseSource,
+    /const informationAccess\s*=\s*input\.snapshot\.run\.informationAccess\s*\?\?\s*input\.informationAccess;/
+  );
+  assert.match(persistedResponseSource, /capabilityResolution:\s*input\.snapshot\.run\.capabilityResolution/);
+});
+
 function sourceFiles(roots: readonly string[]): string[] {
   const files: string[] = [];
   const walk = (path: string): void => {
@@ -143,6 +199,10 @@ function sourceFiles(roots: readonly string[]): string[] {
     walk(root);
   }
   return files;
+}
+
+function normalizedPath(file: string): string {
+  return file.replaceAll("\\", "/");
 }
 
 function isAllowedProviderAdapterCompositionRoot(file: string): boolean {

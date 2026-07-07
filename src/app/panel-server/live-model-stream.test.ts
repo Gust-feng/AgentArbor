@@ -29,17 +29,24 @@ test("live model stream preserves long output deltas without low UI truncation",
   assert.equal(events[0]?.delta, longDelta);
 });
 
-test("ordinary agent live stream ignores legacy work-session purposes", () => {
+test("ordinary agent live stream ignores every legacy work-session purpose", () => {
   const runId = "run-live-agent";
-  const events = appendDeltaToJob(
-    testJob({ runId, runMode: "agent" }),
-    delta({
-      text: "legacy work-session output",
-      purpose: "work_session_synthesis",
-    })
-  );
+  for (const purpose of [
+    "work_session_decision",
+    "work_session_child_material",
+    "work_session_synthesis",
+    "work_session_direct_answer",
+  ] as const) {
+    const events = appendDeltaToJob(
+      testJob({ runId, runMode: "agent" }),
+      delta({
+        text: `legacy output for ${purpose}`,
+        purpose,
+      })
+    );
 
-  assert.equal(events.length, 0);
+    assert.equal(events.length, 0, `${purpose} must not stream into ordinary agent output`);
+  }
 });
 
 test("deep compatibility live stream keeps legacy work-session output", () => {

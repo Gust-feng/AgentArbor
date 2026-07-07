@@ -1,12 +1,10 @@
 import { createHash } from "node:crypto";
 import type { CapabilityToolCatalogItem } from "../domain/config/index.js";
-import type { ToolDefinition, ToolInputSchema, ToolModelContract, ToolRuntimeHint, ToolVisibleResultPolicy } from "../domain/tools/index.js";
+import type { ToolDefinition, ToolInputSchema, ToolVisibleResultPolicy } from "../domain/tools/index.js";
 
 type ToolDefinitionContract = {
   readonly name: string;
-  readonly description: string;
   readonly inputSchema: ToolInputSchema;
-  readonly modelContract?: ToolModelContract;
   readonly metadata: {
     readonly category: NonNullable<ToolDefinition["metadata"]>["category"];
     readonly riskLevel: NonNullable<ToolDefinition["metadata"]>["riskLevel"];
@@ -14,7 +12,6 @@ type ToolDefinitionContract = {
     readonly fileOperation?: NonNullable<ToolDefinition["metadata"]>["fileOperation"];
     readonly requiresConfirmation: boolean;
     readonly visibleResultPolicy: ToolVisibleResultPolicy;
-    readonly runtimeHints?: readonly ToolRuntimeHint[];
   };
 };
 
@@ -24,9 +21,7 @@ export function toolDefinitionContractHash(definition: ToolDefinition): string |
   }
   return hashContract({
     name: definition.name,
-    description: definition.description,
-    inputSchema: definition.inputSchema,
-    modelContract: definition.modelContract,
+    inputSchema: normalizedSchemaContract(definition.inputSchema),
     metadata: {
       category: definition.metadata.category,
       riskLevel: definition.metadata.riskLevel,
@@ -34,7 +29,6 @@ export function toolDefinitionContractHash(definition: ToolDefinition): string |
       fileOperation: definition.metadata.fileOperation,
       requiresConfirmation: definition.metadata.requiresConfirmation,
       visibleResultPolicy: definition.metadata.visibleResultPolicy,
-      runtimeHints: definition.metadata.runtimeHints,
     },
   });
 }
@@ -43,9 +37,7 @@ export function toolCatalogContractHash(
   tool: Pick<
     CapabilityToolCatalogItem,
     | "name"
-    | "description"
     | "inputSchema"
-    | "modelContract"
     | "category"
     | "riskLevel"
     | "operationType"
@@ -57,9 +49,7 @@ export function toolCatalogContractHash(
 ): string {
   return hashContract({
     name: tool.name,
-    description: tool.description,
-    inputSchema: tool.inputSchema ?? { type: "object", properties: {}, additionalProperties: true },
-    modelContract: tool.modelContract,
+    inputSchema: normalizedSchemaContract(tool.inputSchema ?? { type: "object", properties: {}, additionalProperties: true }),
     metadata: {
       category: tool.category,
       riskLevel: tool.riskLevel,
@@ -67,13 +57,33 @@ export function toolCatalogContractHash(
       fileOperation: tool.fileOperation,
       requiresConfirmation: tool.requiresConfirmation,
       visibleResultPolicy: tool.visibleResultPolicy,
-      runtimeHints: tool.runtimeHints,
     },
   });
 }
 
 function hashContract(contract: ToolDefinitionContract): string {
   return `sha256:${createHash("sha256").update(stableStringify(contract)).digest("hex")}`;
+}
+
+function normalizedSchemaContract(schema: ToolInputSchema): ToolInputSchema {
+  return normalizeSchemaValue(schema) as ToolInputSchema;
+}
+
+function normalizeSchemaValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeSchemaValue);
+  }
+  if (value !== null && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      if (key === "description" || key === "enum") {
+        continue;
+      }
+      result[key] = normalizeSchemaValue(item);
+    }
+    return result;
+  }
+  return value;
 }
 
 function stableStringify(value: unknown): string {

@@ -185,6 +185,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes("capabilityPlan?.modelCapabilities.contextWindowTokens"), false);
   assert.equal(appWorkbenchRuntime.includes("capabilityPlan?.modelCapabilities.contextWindowTokens"), true);
   assert.equal(app.includes("capabilityPlan.modelCapabilities.contextWindowTokens"), false);
+  assert.equal(appWorkbenchRuntime.includes("selectedModelContextWindowTokens ??"), false);
+  assert.equal(appWorkbenchRuntime.includes("currentRun.run === undefined"), true);
   assert.equal(app.includes("latestModelUsageFromEvents(currentRun.events)"), false);
   assert.equal(app.includes("latestModelUsageFromTranscript(currentRun.transcriptNodes)"), false);
   assert.equal(appWorkbenchRuntime.includes("latestModelUsageFromEvents(currentRun.events)"), true);
@@ -1623,6 +1625,17 @@ test("panel UI native title tooltips stay limited to context usage ring", async 
     ),
     [],
   );
+});
+
+test("panel UI subscribes to ordinary sub-agent stream events", async () => {
+  const runtime = await readPanelUiSource("runtime.ts");
+
+  assertIncludesAll(runtime, [
+    '"sub_agent.started"',
+    '"sub_agent.completed"',
+    '"sub_agent_batch.started"',
+    '"sub_agent_batch.completed"',
+  ]);
 });
 
 test("multi Agent run tree exposes child Agent frozen instructions in details", async () => {

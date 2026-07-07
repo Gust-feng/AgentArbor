@@ -5,6 +5,7 @@ import type {
   TranscriptNode,
 } from "../domain/basic-agent/index.js";
 import type { RunAgentDefinitionRef, RunCapabilityResolution } from "../domain/config/index.js";
+import type { RuntimeRunContinuationAvailability } from "../domain/runtime-database/index.js";
 import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
 import type { PanelRuntimeSummaryReadModel } from "./panel-runtime-summary.js";
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
@@ -31,9 +32,12 @@ export type PanelBasicAgentRunDetail<TStreamEvent, TTranscriptNode, TCanvas> = {
   };
   readonly canvas?: TCanvas;
   readonly runtimeSummary?: PanelRuntimeSummaryReadModel;
+  readonly stopReason?: string;
+  readonly continuationAvailability?: RuntimeRunContinuationAvailability;
   readonly restoredResult?: {
     readonly title: string;
     readonly summary: string;
+    readonly content?: string;
   };
 };
 

@@ -5,33 +5,37 @@ import test from "node:test";
 import { readAppSource } from "./panel-structure-test-utils.js";
 
 test("basic agent work view keeps projection modules split", async () => {
-  const [workSession, transcriptProjection, transcriptTools, contextProjection] = await Promise.all([
+  const [workView, transcriptProjection, transcriptTools, contextProjection, workSessionCompat] = await Promise.all([
+    readAppSource(path.join("basic-agent-runtime", "work-view.ts")),
+    readAppSource(path.join("basic-agent-runtime", "work-view-transcript.ts")),
+    readAppSource(path.join("basic-agent-runtime", "work-view-transcript-tools.ts")),
+    readAppSource(path.join("basic-agent-runtime", "work-view-context.ts")),
     readAppSource(path.join("basic-agent-runtime", "work-session.ts")),
-    readAppSource(path.join("basic-agent-runtime", "work-session-transcript.ts")),
-    readAppSource(path.join("basic-agent-runtime", "work-session-transcript-tools.ts")),
-    readAppSource(path.join("basic-agent-runtime", "work-session-context.ts")),
   ]);
 
-  assert.equal(workSession.includes('from "./work-session-transcript.js"'), true);
-  assert.equal(workSession.includes('from "./work-session-context.js"'), true);
-  assert.equal(workSession.includes("export function createDesktopWorkViewReadModel"), true);
-  assert.equal(workSession.includes("export const createDesktopWorkSessionReadModel = createDesktopWorkViewReadModel"), true);
-  assert.equal(workSession.includes("export type CreateDesktopWorkSessionReadModelInput = CreateDesktopWorkViewReadModelInput"), true);
-  assert.equal(workSession.includes("export type DesktopWorkSessionCanvasLike = DesktopWorkViewCanvasLike"), true);
-  assert.equal(workSession.includes("visibleWorkSessionEvents"), false);
-  assert.equal(workSession.includes("isProductWorkSessionEvent"), false);
-  assert.equal(workSession.includes("transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation)"), true);
-  assert.equal(workSession.includes("function transcriptNodesFromRunEvents"), false);
-  assert.equal(workSession.includes("function transcriptNodeFromRunEvent"), false);
-  assert.equal(workSession.includes("updatePendingReasoningNode"), false);
-  assert.equal(workSession.includes("function contextLedgerFor"), false);
-  assert.equal(workSession.includes("function contextAttachmentsFor"), false);
-  assert.equal(workSession.includes("function envelopeSafeToolEvidence"), false);
-  assert.equal(workSession.includes("function taskSoilContextAttachments"), false);
+  assert.equal(workView.includes('from "./work-view-transcript.js"'), true);
+  assert.equal(workView.includes('from "./work-view-context.js"'), true);
+  assert.equal(workView.includes("export function createDesktopWorkViewReadModel"), true);
+  assert.equal(workView.includes("createDesktopWorkSessionReadModel"), false);
+  assert.equal(workView.includes("CreateDesktopWorkSessionReadModelInput"), false);
+  assert.equal(workView.includes("DesktopWorkSessionCanvasLike"), false);
+  assert.equal(workView.includes("visibleWorkSessionEvents"), false);
+  assert.equal(workView.includes("isProductWorkSessionEvent"), false);
+  assert.equal(workView.includes("type LegacyWorkSessionCanvasLike"), true);
+  assert.equal(workView.includes("canvas.workSession"), false);
+  assert.equal(workView.includes("legacyWorkSessionCanvasFor"), true);
+  assert.equal(workView.includes("transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation)"), true);
+  assert.equal(workView.includes("function transcriptNodesFromRunEvents"), false);
+  assert.equal(workView.includes("function transcriptNodeFromRunEvent"), false);
+  assert.equal(workView.includes("updatePendingReasoningNode"), false);
+  assert.equal(workView.includes("function contextLedgerFor"), false);
+  assert.equal(workView.includes("function contextAttachmentsFor"), false);
+  assert.equal(workView.includes("function envelopeSafeToolEvidence"), false);
+  assert.equal(workView.includes("function taskSoilContextAttachments"), false);
   assert.equal(transcriptProjection.includes("export function transcriptNodesFromRunEvents"), true);
   assert.equal(transcriptProjection.includes("function transcriptNodeFromRunEvent"), true);
   assert.equal(transcriptProjection.includes("updatePendingReasoningNode"), true);
-  assert.equal(transcriptProjection.includes('from "./work-session-transcript-tools.js"'), true);
+  assert.equal(transcriptProjection.includes('from "./work-view-transcript-tools.js"'), true);
   assert.equal(transcriptProjection.includes("function toolTranscriptTitleFromRunEvent"), false);
   assert.equal(transcriptProjection.includes("function transcriptToolSummaryFromRunEvent"), false);
   assert.equal(transcriptProjection.includes("function fileDisplaySummary"), false);
@@ -42,8 +46,14 @@ test("basic agent work view keeps projection modules split", async () => {
   assert.equal(contextProjection.includes("export function contextLedgerFor"), true);
   assert.equal(contextProjection.includes("export function envelopeSafeToolEvidence"), true);
   assert.equal(contextProjection.includes("export type WorkViewContextProjectionInput"), true);
-  assert.equal(contextProjection.includes("export type WorkSessionContextProjectionInput = WorkViewContextProjectionInput"), true);
+  assert.equal(contextProjection.includes("WorkSessionContextProjectionInput"), false);
   assert.equal(contextProjection.includes("function taskSoilContextAttachments"), true);
+  assert.equal(contextProjection.includes("function taskSoilCanvasForWorkViewContext"), true);
+  assert.equal(contextProjection.includes("function legacyWorkSessionTaskSoilCanvasFor"), true);
+  assert.equal(contextProjection.includes('canvas?.kind === "desktop_agent_canvas" || canvas?.kind === "work_session_canvas"'), false);
+  assert.equal(workSessionCompat.includes('from "./work-view.js"'), true);
+  assert.equal(workSessionCompat.includes("createDesktopWorkSessionReadModel"), true);
+  assert.equal(workSessionCompat.includes("export function createDesktopWorkViewReadModel"), false);
 });
 
 test("desktop agent session keeps projection and contracts split", async () => {
@@ -499,6 +509,10 @@ test("panel canvas keeps ordinary desktop agent projection split", async () => {
   assert.equal(canvas.includes('from "./panel-canvas-common.js"'), true);
   assert.equal(canvas.includes("export function createDesktopAgentCanvas"), false);
   assert.equal(canvas.includes("export type DesktopAgentCanvasReadModel"), false);
+  assert.equal(canvas.includes("export type LegacyWorkSessionCanvasReadModel"), true);
+  assert.equal(canvas.includes("export type WorkSessionCanvasReadModel = LegacyWorkSessionCanvasReadModel"), true);
+  assert.equal(canvas.includes("export function createLegacyWorkSessionCanvas"), true);
+  assert.equal(canvas.includes("export const createWorkSessionCanvas = createLegacyWorkSessionCanvas"), true);
   assert.equal(canvas.includes("function taskSoilCanvas"), false);
   assert.equal(canvas.includes("function safeText"), false);
   assert.equal(canvas.includes("export type SafeAgentRunTreeView ="), false);

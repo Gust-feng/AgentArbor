@@ -8,6 +8,8 @@ test("startup intro expands one real desktop window before app reveal", async ()
   const [
     app,
     appMotion,
+    appWorkbenchShellProps,
+    workbenchMain,
     startupIntro,
     startupIntroGeometry,
     styleEntry,
@@ -22,6 +24,8 @@ test("startup intro expands one real desktop window before app reveal", async ()
   ] = await Promise.all([
     readPanelUiSource("App.tsx"),
     readPanelUiSource("app-motion.ts"),
+    readPanelUiSource("app-workbench-shell-props.ts"),
+    readPanelUiSource(join("components", "workbench-main.tsx")),
     readPanelUiSource("app-startup-intro.tsx"),
     readAppSource("panel-startup-intro-geometry.ts"),
     readPanelUiSource("styles.css"),
@@ -41,7 +45,7 @@ test("startup intro expands one real desktop window before app reveal", async ()
   assertNoOldWindowHandoff(startupIntro, startupIntroStyles, panelDesktop, panelDesktopLauncher, preload, mainEntry);
   assertWindowSmokeScript();
   assertNativeWindowExpansion(panelDesktop, preload);
-  assertRendererHandoff(app, startupIntro, startupIntroStyles, chatEmpty, chatLayoutStyles);
+  assertRendererHandoff(app, appWorkbenchShellProps, workbenchMain, startupIntro, startupIntroStyles, chatEmpty, chatLayoutStyles);
   assertStartupAnimationPreferenceDefaults(appMotion, startupIntro, panelIndexHtml);
   assertDesktopStartupAnimationPreference(panelDesktop, panelDesktopLauncher);
   assertStartupThemeAndEntry(startupIntroGeometry, styleEntry, appStates, preload, mainEntry, startupIntroStyles);
@@ -262,6 +266,8 @@ function assertWindowSmokeScript(): void {
 
 function assertRendererHandoff(
   app: string,
+  appWorkbenchShellProps: string,
+  workbenchMain: string,
   startupIntro: string,
   styles: string,
   chatEmpty: string,
@@ -275,19 +281,19 @@ function assertRendererHandoff(
   assert.equal(app.includes("STARTUP_INTRO_MOTION_TARGETS"), false);
   assert.equal(app.includes('main: ".app-main"'), false);
   assert.equal(app.includes("animateStartupIntro"), false);
-  assert.equal(app.includes("StartupIntroRootStyle"), true);
-  assert.equal(app.includes('"--startup-intro-target-width"'), true);
-  assert.equal(app.includes('"--startup-intro-target-height"'), true);
-  assert.equal(app.includes('"--startup-intro-empty-grid-top-padding"'), true);
-  assert.equal(app.includes("startupIntroEmptyGridTopPadding(startupIntro.reveal.targetWindow.height)"), true);
-  assert.equal(app.includes("startupIntro.reveal.targetWindow.width"), true);
-  assert.equal(app.includes("startupIntro.reveal.targetWindow.height"), true);
+  assert.equal(appWorkbenchShellProps.includes("StartupIntroRootStyle"), true);
+  assert.equal(appWorkbenchShellProps.includes('"--startup-intro-target-width"'), true);
+  assert.equal(appWorkbenchShellProps.includes('"--startup-intro-target-height"'), true);
+  assert.equal(appWorkbenchShellProps.includes('"--startup-intro-empty-grid-top-padding"'), true);
+  assert.equal(appWorkbenchShellProps.includes("startupIntroEmptyGridTopPadding(startupIntro.reveal.targetWindow.height)"), true);
+  assert.equal(appWorkbenchShellProps.includes("startupIntro.reveal.targetWindow.width"), true);
+  assert.equal(appWorkbenchShellProps.includes("startupIntro.reveal.targetWindow.height"), true);
   assert.equal(app.includes("data-startup-app-reveal"), false);
   assert.equal(app.includes("appRevealActive"), false);
-  assert.equal(app.includes("startupIntroActive = startupIntro.overlayPhase !== undefined && startupIntro.reveal !== undefined"), true);
+  assert.equal(appWorkbenchShellProps.includes("startupIntro.overlayPhase !== undefined && startupIntro.reveal !== undefined"), true);
   assert.equal(app.includes("data-startup-title-slide"), false);
-  assert.equal(app.includes("reveal={startupIntro.reveal}"), true);
-  assert.equal(app.includes("autoFocus={!startupIntroActive}"), true);
+  assert.equal(appWorkbenchShellProps.includes("reveal: startupIntro.reveal"), true);
+  assert.equal(workbenchMain.includes("autoFocus={!props.startupIntroActive}"), true);
 
   assert.equal(chatEmpty.includes("data-startup-title-anchor"), true);
   assert.equal(chatEmpty.includes("chat-empty-heading-title"), true);

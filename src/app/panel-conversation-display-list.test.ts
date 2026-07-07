@@ -238,6 +238,9 @@ test("conversation display list carries workflow continuity when a standalone ru
   assert.equal(migratedDisplay.state.assistantWorkflowsByRunId.has("run-1"), true);
   assert.equal(activitySegments.length, 2);
   assert.deepEqual(activitySegments[0]?.timeline.items.map((timelineItem) => timelineItem.copy.detail), [
+    "思考中",
+  ]);
+  assert.deepEqual(activitySegments[0]?.timeline.items.map((timelineItem) => timelineItem.copy.expandedDetail), [
     "I should inspect the workspace.",
   ]);
   assert.deepEqual(activitySegments[1]?.timeline.items.map((timelineItem) => timelineItem.copy.detail), ["README.md"]);

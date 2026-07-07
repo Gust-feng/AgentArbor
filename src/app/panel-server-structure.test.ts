@@ -99,6 +99,10 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(requestHandler.includes('from "./runtime.js"'), true);
   assert.equal(requestHandler.includes('from "./skill-service.js"'), true);
   assert.equal(requestHandler.includes('from "./run-execution.js"'), true);
+  assert.equal(conversationSync.includes("canvas.workSession"), false);
+  assert.equal(conversationSync.includes("legacyWorkSessionCanvasForConversationSync"), true);
+  assert.equal(runtimeRecords.includes("canvas.workSession"), false);
+  assert.equal(runtimeRecords.includes("legacyWorkSessionCanvasForRuntimeRecord"), true);
   assert.equal(conversationHistory.includes("export async function buildConversationHistoryMessages"), true);
   assert.equal(conversationRoutes.includes("export async function handlePanelConversationRoute"), true);
   assert.equal(conversationRoutes.includes("startGuidanceFollowUpRun"), false);
@@ -198,19 +202,19 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(panelRunJobs.includes("job.agentDefinitionRef?.agentDisplayName"), true);
   assert.equal(basicAgentRoutes.includes('from "./basic-agent-run-view.js"'), true);
   assert.equal(basicAgentRoutes.includes('from "./conversation-current-run.js"'), false);
-  const basicAgentWorkSessionRouteSource = sourceBetween(
+  const basicAgentWorkViewRouteSource = sourceBetween(
     basicAgentRoutes,
-    "async function handleGetBasicWorkSessionRequest",
+    "async function handleGetBasicWorkViewRequest",
     "async function handleGetBasicRunEventsRequest"
   );
   assert.equal(
-    basicAgentWorkSessionRouteSource.includes("createBasicAgentRunViewReadModel(runtime, runId, 0)"),
+    basicAgentWorkViewRouteSource.includes("createBasicAgentRunViewReadModel(runtime, runId, 0)"),
     true
   );
-  assert.equal(basicAgentWorkSessionRouteSource.includes("createLiveBasicAgentWorkSessionReadModel"), false);
-  assert.equal(basicAgentWorkSessionRouteSource.includes("createPersistedBasicAgentWorkSessionReadModel"), false);
-  assert.equal(basicAgentWorkSessionRouteSource.includes("runtime.runtimeDatabase?.getRun"), false);
-  assert.equal(basicAgentWorkSessionRouteSource.includes("runtime.runExecutor.replayEvents"), false);
+  assert.equal(basicAgentWorkViewRouteSource.includes("createLiveBasicAgentWorkSessionReadModel"), false);
+  assert.equal(basicAgentWorkViewRouteSource.includes("createPersistedBasicAgentWorkSessionReadModel"), false);
+  assert.equal(basicAgentWorkViewRouteSource.includes("runtime.runtimeDatabase?.getRun"), false);
+  assert.equal(basicAgentWorkViewRouteSource.includes("runtime.runExecutor.replayEvents"), false);
   const basicAgentRunViewRouteSource = sourceBetween(
     basicAgentRoutes,
     "async function handleGetBasicRunViewRequest",

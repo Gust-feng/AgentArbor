@@ -30,7 +30,11 @@ export type DesktopAgentCanvasReadModel = {
       readonly title: string;
       readonly question: string;
       readonly consequence: string;
+      readonly affectedResources?: readonly string[];
       readonly riskLevel: string;
+      readonly resumeAvailability?: "live" | "lost_after_restart";
+      readonly requestedAt?: string;
+      readonly expiresAt?: string;
       readonly modelCallRefs: readonly string[];
       readonly toolCallRefs: readonly string[];
       readonly sourceRefs: readonly string[];
@@ -110,7 +114,11 @@ export function createDesktopAgentCanvas(input: {
               title: safeText(input.result.pendingConfirmation.title, 120),
               question: safeText(input.result.pendingConfirmation.question, 420),
               consequence: safeText(input.result.pendingConfirmation.consequence, 420),
+              affectedResources: input.result.pendingConfirmation.affectedResources.map((value) => safeText(value, 240)),
               riskLevel: input.result.pendingConfirmation.riskLevel,
+              resumeAvailability: input.result.pendingConfirmation.resumeAvailability,
+              requestedAt: input.result.pendingConfirmation.requestedAt,
+              expiresAt: input.result.pendingConfirmation.expiresAt,
               modelCallRefs: [...input.result.pendingConfirmation.modelCallRefs],
               toolCallRefs: [...input.result.pendingConfirmation.toolCallRefs],
               sourceRefs: input.result.pendingConfirmation.sourceRefs.map((value) => safeText(value, 180)),

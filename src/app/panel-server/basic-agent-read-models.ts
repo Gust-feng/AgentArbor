@@ -94,7 +94,7 @@ function restoredPendingConfirmation(
     resumeAvailability: "lost_after_restart",
     requestedAt: pending.requestedAt,
     expiresAt: pending.expiresAt,
-    sourceRefs: pending.eventRefs,
+    sourceRefs: pending.sourceRefs ?? pending.eventRefs,
   };
 }
 

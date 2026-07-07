@@ -58,6 +58,7 @@ export type BasicAgentRunStreamEventProjectionInput = {
   readonly status?: BasicAgentCompatRunStatus;
   readonly toolName?: string;
   readonly detail?: {
+    readonly kind?: string;
     readonly action?: string;
     readonly path?: string;
     readonly query?: string;
@@ -70,6 +71,21 @@ export type BasicAgentRunStreamEventProjectionInput = {
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;
     readonly errorFacts?: ToolErrorFacts;
+    readonly subAgentRunId?: string;
+    readonly subAgentBatchId?: string;
+    readonly subAgentBatchIndex?: number;
+    readonly subAgentName?: string;
+    readonly subAgentStatus?: "completed" | "failed" | "approval_required" | "cancelled" | "running";
+    readonly subAgentTask?: string;
+    readonly subAgentModelRounds?: number;
+    readonly subAgentToolCalls?: number;
+    readonly subAgentDurationMs?: number;
+    readonly subAgentTotalCount?: number;
+    readonly subAgentSuccessCount?: number;
+    readonly subAgentFailedCount?: number;
+    readonly subAgentCancelledCount?: number;
+    readonly subAgentApprovalRequiredCount?: number;
+    readonly subAgentNotStartedCount?: number;
   };
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];
@@ -276,6 +292,21 @@ function safeEventDetail(detail: BasicAgentRunStreamEventProjectionInput["detail
     error: safeEventSummary(detail.error),
     errorDomain: detail.errorDomain,
     errorFacts: detail.errorFacts,
+    subAgentRunId: safeEventSummary(detail.subAgentRunId),
+    subAgentBatchId: safeEventSummary(detail.subAgentBatchId),
+    subAgentBatchIndex: detail.subAgentBatchIndex,
+    subAgentName: safeEventSummary(detail.subAgentName),
+    subAgentStatus: detail.subAgentStatus,
+    subAgentTask: safeEventSummary(detail.subAgentTask),
+    subAgentModelRounds: detail.subAgentModelRounds,
+    subAgentToolCalls: detail.subAgentToolCalls,
+    subAgentDurationMs: detail.subAgentDurationMs,
+    subAgentTotalCount: detail.subAgentTotalCount,
+    subAgentSuccessCount: detail.subAgentSuccessCount,
+    subAgentFailedCount: detail.subAgentFailedCount,
+    subAgentCancelledCount: detail.subAgentCancelledCount,
+    subAgentApprovalRequiredCount: detail.subAgentApprovalRequiredCount,
+    subAgentNotStartedCount: detail.subAgentNotStartedCount,
   };
   return Object.values(projected).some((value) => value !== undefined) ? projected : undefined;
 }
@@ -305,6 +336,8 @@ function sourceRefToObservationRef(ref: string): ObservationRef {
     if (kind === "tool" || kind === "tool_call") return { kind: "tool_call", id };
     if (kind === "model" || kind === "model_call") return { kind: "model_call", id };
     if (kind === "artifact") return { kind: "artifact", id };
+    if (kind === "sub_agent_run") return { kind: "sub_agent_run", id };
+    if (kind === "sub_agent_batch") return { kind: "sub_agent_batch", id };
   }
   return { kind: "event", id: ref };
 }

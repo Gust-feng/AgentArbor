@@ -345,7 +345,7 @@ async function loadVisibleHistoricalRunNodes(input: {
       const view = await safeBasicRunView(runId, 0, { signal: abortController.signal });
       return {
         runId,
-        nodes: transcriptNodesFrom(ordinaryWorkViewFromRunView(view), view?.detail)
+        nodes: transcriptNodesFrom(ordinaryWorkViewFromRunView(view))
           .filter((node) => node.runId === runId),
       };
     }));

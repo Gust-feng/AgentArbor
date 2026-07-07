@@ -17,7 +17,7 @@ export type { SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
 
 export type PanelRunCanvasReadModel =
   | LegacyPanelRunCanvasReadModel
-  | WorkSessionCanvasReadModel
+  | LegacyWorkSessionCanvasReadModel
   | DesktopAgentCanvasReadModel
   | UndergroundDeepCanvasReadModel;
 
@@ -109,7 +109,7 @@ export type LegacyPanelRunCanvasReadModel = {
   };
 };
 
-export type WorkSessionCanvasReadModel = {
+export type LegacyWorkSessionCanvasReadModel = {
   readonly kind: "work_session_canvas";
   readonly taskSoil: PanelTaskSoilCanvasReadModel;
   readonly workSession: {
@@ -157,6 +157,8 @@ export type WorkSessionCanvasReadModel = {
     readonly observationPanelRole: string;
   };
 };
+
+export type WorkSessionCanvasReadModel = LegacyWorkSessionCanvasReadModel;
 
 export type UndergroundDeepCanvasReadModel = {
   readonly kind: "underground_deep_canvas";
@@ -311,10 +313,10 @@ export function createPanelRunCanvas(input: {
   };
 }
 
-export function createWorkSessionCanvas(input: {
+export function createLegacyWorkSessionCanvas(input: {
   readonly result: CognitiveWorkSessionResult;
   readonly transcript: PanelRunTranscript;
-}): WorkSessionCanvasReadModel {
+}): LegacyWorkSessionCanvasReadModel {
   return {
     kind: "work_session_canvas",
     taskSoil: taskSoilCanvas(input.result),
@@ -379,6 +381,8 @@ export function createWorkSessionCanvas(input: {
     },
   };
 }
+
+export const createWorkSessionCanvas = createLegacyWorkSessionCanvas;
 
 export function createUndergroundDeepCanvas(input: {
   readonly result: UndergroundDirectionSessionResult;

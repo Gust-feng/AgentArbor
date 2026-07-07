@@ -78,6 +78,21 @@ export type RunEvent = {
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;
     readonly errorFacts?: ToolErrorFacts;
+    readonly subAgentRunId?: string;
+    readonly subAgentBatchId?: string;
+    readonly subAgentBatchIndex?: number;
+    readonly subAgentName?: string;
+    readonly subAgentStatus?: "completed" | "failed" | "approval_required" | "cancelled" | "running";
+    readonly subAgentTask?: string;
+    readonly subAgentModelRounds?: number;
+    readonly subAgentToolCalls?: number;
+    readonly subAgentDurationMs?: number;
+    readonly subAgentTotalCount?: number;
+    readonly subAgentSuccessCount?: number;
+    readonly subAgentFailedCount?: number;
+    readonly subAgentCancelledCount?: number;
+    readonly subAgentApprovalRequiredCount?: number;
+    readonly subAgentNotStartedCount?: number;
   };
 };
 
@@ -368,7 +383,7 @@ export type DesktopWorkViewReadModel = {
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly subAgentRuns?: readonly SubAgentRunView[];
-  readonly safetySummary: {
+  readonly workSummary: {
     readonly summary: string;
     readonly pendingActionCount: number;
     readonly toolResultCount: number;

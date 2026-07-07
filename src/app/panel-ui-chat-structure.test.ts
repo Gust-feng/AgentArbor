@@ -365,6 +365,9 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatSessionProjection.includes("export function visibleResultText"), false);
   assert.equal(assistantRunOutputProjection.includes("export function visibleRunProblem"), true);
   assert.equal(assistantRunOutputProjection.includes("export function visibleResultText"), true);
+  assert.equal(assistantRunOutputProjection.includes("type AssistantLegacyWorkSessionCanvasLike"), true);
+  assert.equal(assistantRunOutputProjection.includes("AssistantWorkSessionCanvasLike"), false);
+  assert.equal(assistantRunOutputProjection.includes("legacyWorkSessionCanvasForAssistantOutput"), true);
   assert.equal(chatActive.includes("ChatTranscriptDisplay"), true);
   assert.equal(chatTranscriptDisplay.includes("TranscriptChain"), true);
   assert.equal(chatTranscriptChain.includes("export function TranscriptChain"), true);

@@ -610,6 +610,8 @@ function isObservationRefKind(value: string): value is ObservationRef["kind"] {
     value === "tool_call" ||
     value === "agent_spec" ||
     value === "agent_run" ||
+    value === "sub_agent_run" ||
+    value === "sub_agent_batch" ||
     value === "agent_delegation" ||
     value === "parent_synthesis" ||
     value === "user_clarification" ||

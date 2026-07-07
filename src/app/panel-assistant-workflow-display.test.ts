@@ -308,6 +308,9 @@ test("assistant workflow display closes prefix thinking after body without rewri
   assert.equal(activitySegments[0]?.collapsed, true);
   assert.equal(activitySegments[0]?.lifecycle, "settled");
   assert.deepEqual(activitySegments[0]?.timeline.items.map((item) => item.copy.detail), [
+    "思考中",
+  ]);
+  assert.deepEqual(activitySegments[0]?.timeline.items.map((item) => item.copy.expandedDetail), [
     "I should inspect the workspace.",
   ]);
   assert.deepEqual(activitySegments[1]?.timeline.items.map((item) => item.copy.detail), ["README.md"]);

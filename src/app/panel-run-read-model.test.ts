@@ -582,6 +582,56 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
 });
 
+test("ordinary agent stream exposes sub-agent runs as user-visible tool activity", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-sub-agent-work",
+    status: "running",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-sub-agent" } }),
+      eventEntry({
+        sequence: 2,
+        type: "sub_agent.started",
+        payload: {
+          runId: "run-sub-agent-work",
+          subRunId: "sub-run-review",
+          subAgentId: "reviewer",
+          subAgentName: "Reviewer",
+          task: "检查当前工具链",
+          timestamp: "2026-05-07T00:00:01.000Z",
+        },
+      }),
+      eventEntry({
+        sequence: 3,
+        type: "sub_agent.completed",
+        payload: {
+          runId: "run-sub-agent-work",
+          subRunId: "sub-run-review",
+          subAgentId: "reviewer",
+          subAgentName: "Reviewer",
+          status: "completed",
+          summary: "发现 SSE 白名单遗漏。",
+          toolCalls: 1,
+          modelRounds: 2,
+          durationMs: 1200,
+          timestamp: "2026-05-07T00:00:02.000Z",
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+  const completed = events.find((event) => event.type === "sub_agent.completed");
+  const nodes = createPanelTranscriptNodes(events);
+
+  assert.deepEqual(events.map((event) => event.type), ["run.started", "sub_agent.started", "sub_agent.completed"]);
+  assert.equal(completed?.detail?.kind, "sub_agent");
+  assert.equal(completed?.detail?.subAgentRunId, "sub-run-review");
+  assert.equal(completed?.detail?.subAgentName, "Reviewer");
+  assert.equal(completed?.detail?.subAgentModelRounds, 2);
+  assert.equal(nodes.some((node) => node.kind === "sub_agent" && node.subAgentRunId === "sub-run-review"), true);
+});
+
 test("ordinary agent stream preserves typed model failures after tool work", () => {
   const events = createPanelRunStreamEvents({
     runId: "run-tool-then-model-failure",

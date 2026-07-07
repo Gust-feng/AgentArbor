@@ -14,4 +14,11 @@ export * from "./run-projection.js";
 export * from "./run-store.js";
 export * from "./safe-projection.js";
 export * from "./tool-registry.js";
-export * from "./work-session.js";
+export * from "./work-view.js";
+export {
+  createDesktopWorkViewReadModel as createDesktopWorkSessionReadModel,
+} from "./work-view.js";
+export type {
+  CreateDesktopWorkViewReadModelInput as CreateDesktopWorkSessionReadModelInput,
+  DesktopWorkViewCanvasLike as DesktopWorkSessionCanvasLike,
+} from "./work-view.js";

@@ -37,12 +37,24 @@ export async function handlePanelBasicAgentRoute(
   url: URL,
   syncLiveRunEvents: (job: PanelRunJob) => void
 ): Promise<boolean> {
+  const basicWorkViewMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/work-view$/.exec(url.pathname);
+  if (request.method === "GET" && basicWorkViewMatch !== null) {
+    await handleGetBasicWorkViewRequest(
+      runtime,
+      decodeURIComponent(basicWorkViewMatch[1] ?? ""),
+      response,
+      false
+    );
+    return true;
+  }
+
   const basicWorkSessionMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/work-session$/.exec(url.pathname);
   if (request.method === "GET" && basicWorkSessionMatch !== null) {
-    await handleGetBasicWorkSessionRequest(
+    await handleGetBasicWorkViewRequest(
       runtime,
       decodeURIComponent(basicWorkSessionMatch[1] ?? ""),
-      response
+      response,
+      true
     );
     return true;
   }
@@ -117,14 +129,22 @@ export async function handlePanelBasicAgentRoute(
   return false;
 }
 
-async function handleGetBasicWorkSessionRequest(
+async function handleGetBasicWorkViewRequest(
   runtime: PanelBasicAgentRouteRuntime,
   runId: string,
-  response: ServerResponse
+  response: ServerResponse,
+  includeLegacyWorkSessionAlias: boolean
 ): Promise<void> {
   const view = await createBasicAgentRunViewReadModel(runtime, runId, 0);
   if (view === undefined) {
     throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
+  }
+  if (!includeLegacyWorkSessionAlias) {
+    writeJson(response, 200, {
+      ok: true,
+      workView: view.workView,
+    });
+    return;
   }
   writeJson(response, 200, {
     ok: true,

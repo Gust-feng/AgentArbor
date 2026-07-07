@@ -133,6 +133,8 @@ test("deepDecisionMessages explains child budgets as optional without showing a 
   const prompt = messages.map((message) => message.content).join("\n");
 
   assert.match(prompt, /maxModelRounds \/ maxToolRounds 是可选字段/);
+  assert.match(prompt, /省略时 child 不设置固定轮次上限/);
+  assert.equal(prompt.includes("省略时 child 默认各 200 轮"), false);
   assert.match(prompt, /continue_child/);
   assert.equal(prompt.includes('"maxModelRounds": 4'), false);
   assert.equal(prompt.includes('"maxToolRounds": 4'), false);

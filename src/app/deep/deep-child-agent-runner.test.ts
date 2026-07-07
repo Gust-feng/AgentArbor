@@ -94,14 +94,14 @@ test("runDeepChildAgent runs the standard model-tool-model loop and preserves th
   );
 });
 
-test("runDeepChildAgent applies the default child round budget when parent omits limits", async () => {
+test("runDeepChildAgent leaves child round budgets unset when parent omits limits", async () => {
   const childSpec = sampleChildSpec({
     allowedTools: ["search"],
     objective: "连续核查 OAuth2 迁移风险，必要时多次使用工具后再总结。",
   });
   const childRun = makeChildRun(childSpec);
-  assert.equal(childRun.spec.permissions.maxModelRounds, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS);
-  assert.equal(childRun.spec.permissions.maxToolRounds, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS);
+  assert.equal(childRun.spec.permissions.maxModelRounds, undefined);
+  assert.equal(childRun.spec.permissions.maxToolRounds, undefined);
   const channel = new SequenceChannel([
     toolCallResponse("call-search-1", "search", { query: "OAuth2 migration callback risk" }),
     toolCallResponse("call-search-2", "search", { query: "OAuth2 migration rollback risk" }),

@@ -87,8 +87,8 @@ export function assertOneLayerChildDepth(input: {
  * 按 DeepChildSpec 补全为完整 domain AgentSpec（child 角度探索用）。
  *
  * DeepChildSpec 是 manager 决策语义层的轻量派生请求；本函数补全 protocol/permissions
- * 等完整字段后写入 AgentRunTree。child 有效轮次默认/最高 200，manager 只能
- * 显式收紧，不能生成无上限或超大上限。
+ * 等完整字段后写入 AgentRunTree。manager 省略轮次预算时不注入默认上限；显式
+ * 填写时只做最高 200 的保护性钳制。
  */
 export function createDeepChildAgentSpec(input: {
   readonly childSpec: DeepChildSpec;
@@ -117,8 +117,8 @@ export function createDeepChildAgentSpec(input: {
     permissions: {
       allowModel: true,
       allowedTools: [...childSpec.allowedTools],
-      maxModelRounds: normalizeDeepChildRoundLimit(childSpec.maxModelRounds, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS),
-      maxToolRounds: normalizeDeepChildRoundLimit(childSpec.maxToolRounds, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS),
+      maxModelRounds: optionalDeepChildRoundLimit(childSpec.maxModelRounds, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS),
+      maxToolRounds: optionalDeepChildRoundLimit(childSpec.maxToolRounds, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS),
       fallback: "disabled",
     },
     budget: buildChildAgentSpecBudget(childSpec),
@@ -272,10 +272,14 @@ function unique(values: readonly string[]): string[] {
 }
 
 function buildChildAgentSpecBudget(childSpec: DeepChildSpec): AgentSpec["budget"] {
-  const maxModelRounds = normalizeDeepChildRoundLimit(childSpec.maxModelRounds, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS);
-  const maxToolRounds = normalizeDeepChildRoundLimit(childSpec.maxToolRounds, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS);
+  const maxModelRounds = optionalDeepChildRoundLimit(childSpec.maxModelRounds, DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS);
+  const maxToolRounds = optionalDeepChildRoundLimit(childSpec.maxToolRounds, DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS);
   return {
-    maxModelRounds,
-    maxToolRounds,
+    ...(maxModelRounds === undefined ? {} : { maxModelRounds }),
+    ...(maxToolRounds === undefined ? {} : { maxToolRounds }),
   };
+}
+
+function optionalDeepChildRoundLimit(value: number | undefined, maxValue: number): number | undefined {
+  return value === undefined ? undefined : normalizeDeepChildRoundLimit(value, maxValue);
 }

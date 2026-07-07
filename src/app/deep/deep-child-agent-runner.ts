@@ -956,15 +956,19 @@ function resolveRuntimeChildSpec(input: {
     ...delegated,
     allowedTools: effectiveAllowedTools,
     inputRefs: uniqueStrings([...delegated.inputRefs, ...input.childRun.inputRefs]),
-    maxModelRounds: normalizeDeepChildRoundLimit(
+    maxModelRounds: optionalDeepChildRoundLimit(
       delegated.maxModelRounds ?? input.childRun.spec.permissions.maxModelRounds ?? input.childRun.spec.budget.maxModelRounds,
       DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
     ),
-    maxToolRounds: normalizeDeepChildRoundLimit(
+    maxToolRounds: optionalDeepChildRoundLimit(
       delegated.maxToolRounds ?? input.childRun.spec.permissions.maxToolRounds ?? input.childRun.spec.budget.maxToolRounds,
       DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,
     ),
   };
+}
+
+function optionalDeepChildRoundLimit(value: number | undefined, maxValue: number): number | undefined {
+  return value === undefined ? undefined : normalizeDeepChildRoundLimit(value, maxValue);
 }
 
 function executionStatsFromTurn(turn: AgentTurnRuntimeResult): ChildAgentRunExecution {

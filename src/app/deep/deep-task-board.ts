@@ -274,20 +274,32 @@ function cloneTask(task: DeepChildTask): DeepChildTask {
 }
 
 function cloneSpec(spec: DeepChildSpec): DeepChildSpec {
-  return {
+  const cloned: DeepChildSpec = {
     specId: spec.specId,
     displayName: spec.displayName,
     role: spec.role,
     objective: spec.objective,
     allowedTools: [...spec.allowedTools],
     inputRefs: [...spec.inputRefs],
-    maxModelRounds: spec.maxModelRounds,
-    maxToolRounds: spec.maxToolRounds,
   };
+  if (spec.maxModelRounds !== undefined) {
+    return {
+      ...cloned,
+      maxModelRounds: spec.maxModelRounds,
+      ...(spec.maxToolRounds === undefined ? {} : { maxToolRounds: spec.maxToolRounds }),
+    };
+  }
+  if (spec.maxToolRounds !== undefined) {
+    return {
+      ...cloned,
+      maxToolRounds: spec.maxToolRounds,
+    };
+  }
+  return cloned;
 }
 
 function cloneSummary(summary: DeepChildSummary): DeepChildSummary {
-  return {
+  const cloned: DeepChildSummary = {
     childRunId: summary.childRunId,
     spec: cloneSpec(summary.spec),
     status: summary.status,
@@ -296,8 +308,11 @@ function cloneSummary(summary: DeepChildSummary): DeepChildSummary {
     evidenceRefs: [...summary.evidenceRefs],
     confidence: summary.confidence,
     uncertainty: summary.uncertainty,
-    failureDetail: summary.failureDetail === undefined ? undefined : { ...summary.failureDetail },
-    continuationContextRef: summary.continuationContextRef,
+  };
+  return {
+    ...cloned,
+    ...(summary.failureDetail === undefined ? {} : { failureDetail: { ...summary.failureDetail } }),
+    ...(summary.continuationContextRef === undefined ? {} : { continuationContextRef: summary.continuationContextRef }),
   };
 }
 

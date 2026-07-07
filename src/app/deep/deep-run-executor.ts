@@ -719,10 +719,10 @@ export async function startDeepRun(
           executedQueuedChildInstructions,
         );
         const continued: DeepChildTerminalMaterial[] = [];
-        const queuedChildRunIds: string[] = [];
+        const waitedChildRunIds: string[] = [];
         const invalidOperations: string[] = [];
         for (const operation of decision.childOperations) {
-          const snapshotTask = scheduler
+          let snapshotTask = scheduler
             .snapshot()
             .tasks
             .find((task) => task.childRunId === operation.childRunId);
@@ -731,17 +731,27 @@ export async function startDeepRun(
             continue;
           }
           if (snapshotTask.status === "pending" || snapshotTask.status === "running") {
-            const queued = scheduler.queueChildInstruction({
-              childRunId: operation.childRunId,
-              instruction: operation.instruction,
-              source: "manager",
-              review: operation.review,
-            });
-            if (queued.status === "queued") {
-              queuedChildRunIds.push(operation.childRunId);
-            } else {
-              invalidOperations.push(`${operation.childRunId}: ${queued.reason}`);
+            const harvestedBeforeContinue = await waitForChildTerminalForReview(scheduler, operation.childRunId);
+            mergeTerminalMaterials(
+              harvestedBeforeContinue,
+              childSummaries,
+              completedChildRuns,
+              executedQueuedChildInstructions,
+            );
+            if (harvestedBeforeContinue.length > 0) {
+              waitedChildRunIds.push(operation.childRunId);
             }
+            snapshotTask = scheduler
+              .snapshot()
+              .tasks
+              .find((task) => task.childRunId === operation.childRunId);
+          }
+          if (snapshotTask === undefined) {
+            invalidOperations.push(`${operation.childRunId}: child task not found after waiting`);
+            continue;
+          }
+          if (snapshotTask.status === "pending" || snapshotTask.status === "running") {
+            invalidOperations.push(`${operation.childRunId}: child status ${snapshotTask.status} is not reviewable`);
             continue;
           }
           if (snapshotTask.status === "cancelled") {
@@ -770,14 +780,13 @@ export async function startDeepRun(
           decision,
           dispatchedAction: decision.action,
           operatedChildRunIds: [
-            ...queuedChildRunIds,
             ...continued.map((material) => material.completedRun.childRunId),
           ],
           harvestedChildren: continued.length,
           note:
             invalidOperations.length === 0
-              ? `父层继续 ${continued.length} 个已有 child；排队 ${queuedChildRunIds.length} 个运行中 child。`
-              : `父层继续 ${continued.length} 个已有 child；排队 ${queuedChildRunIds.length} 个运行中 child；跳过 ${invalidOperations.length} 个无效操作：${invalidOperations.join("; ")}`,
+              ? `父层继续 ${continued.length} 个已有 child；等待 ${waitedChildRunIds.length} 个运行中 child 完成当前轮。`
+              : `父层继续 ${continued.length} 个已有 child；等待 ${waitedChildRunIds.length} 个运行中 child 完成当前轮；跳过 ${invalidOperations.length} 个无效操作：${invalidOperations.join("; ")}`,
         });
         continue;
       }
@@ -1332,6 +1341,29 @@ function mergeTerminalMaterials(
     replaceByChildRunId(completedChildRuns, material.completedRun, (run) => run.childRunId);
     if (executedQueuedChildInstructions !== undefined && material.executedQueuedInstructions !== undefined) {
       executedQueuedChildInstructions.push(...material.executedQueuedInstructions);
+    }
+  }
+}
+
+async function waitForChildTerminalForReview(
+  scheduler: DeepChildScheduler,
+  childRunId: string,
+): Promise<DeepChildTerminalMaterial[]> {
+  const accumulated: DeepChildTerminalMaterial[] = [];
+  for (;;) {
+    scheduler.startQueued();
+    const snapshot = scheduler.snapshot();
+    const task = snapshot.tasks.find((item) => item.childRunId === childRunId);
+    if (task === undefined || (task.status !== "pending" && task.status !== "running")) {
+      return accumulated;
+    }
+    const harvested = await scheduler.waitForProgress();
+    if (harvested.length === 0) {
+      return accumulated;
+    }
+    accumulated.push(...harvested);
+    if (harvested.some((material) => material.completedRun.childRunId === childRunId)) {
+      return accumulated;
     }
   }
 }

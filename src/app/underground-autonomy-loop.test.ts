@@ -55,6 +55,17 @@ test("autonomy core can use search before requesting convergence through AgentTu
         },
         required: ["query"],
       },
+      metadata: {
+        category: "research",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 800,
+          omitRawOutput: true,
+        },
+      },
     },
     async execute() {
       return {

@@ -129,3 +129,7 @@ export type SubAgentRunView = SubAgentRunTrace;
 export type SubAgentRunTraceSink = {
   upsert(trace: SubAgentRunTrace): void;
 };
+
+export type SubAgentRunTraceReader = {
+  get(subRunId: string): SubAgentRunTrace | undefined;
+};

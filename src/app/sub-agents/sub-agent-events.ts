@@ -40,6 +40,7 @@ export type SubAgentBatchStartedEventPayload = {
 export type SubAgentBatchCompletedEventPayload = {
   readonly runId: string;
   readonly batchId: string;
+  readonly status: "completed" | "failed" | "approval_required" | "cancelled";
   readonly results: readonly {
     readonly subAgentId: string;
     readonly subAgentName: string;
@@ -186,6 +187,12 @@ export function createSubAgentBatchCompletedMessage(input: {
     payload: {
       runId: input.runId,
       batchId: input.batchId,
+      status: subAgentBatchStatus({
+        failedCount: input.failedCount,
+        cancelledCount: input.cancelledCount,
+        approvalRequiredCount: input.approvalRequiredCount,
+        notStartedCount: input.notStartedCount,
+      }),
       results: input.results.map((result) => ({ ...result })),
       successCount: input.successCount,
       failedCount: input.failedCount,
@@ -271,6 +278,24 @@ export const SUB_AGENT_TRANSCRIPT_MAPPING = {
     defaultCollapsed: true,
   },
 } as const;
+
+function subAgentBatchStatus(input: {
+  readonly failedCount?: number;
+  readonly cancelledCount?: number;
+  readonly approvalRequiredCount?: number;
+  readonly notStartedCount?: number;
+}): SubAgentBatchCompletedEventPayload["status"] {
+  if ((input.approvalRequiredCount ?? 0) > 0 || (input.notStartedCount ?? 0) > 0) {
+    return "approval_required";
+  }
+  if ((input.failedCount ?? 0) > 0) {
+    return "failed";
+  }
+  if ((input.cancelledCount ?? 0) > 0) {
+    return "cancelled";
+  }
+  return "completed";
+}
 
 function compactSafeText(value: string | undefined, maxLength: number): string | undefined {
   if (value === undefined) {

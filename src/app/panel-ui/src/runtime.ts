@@ -1,8 +1,7 @@
 import { getJson } from "./api";
 import type { Conversation } from "./contracts/conversation";
 import type { DeepStreamEvent } from "./contracts/deep";
-import type { BasicAgentRunView, DesktopRunDetail, DesktopWorkView, RunEvent } from "./contracts/run";
-import type { ToolDisplayProjection } from "./contracts/tools";
+import type { BasicAgentRunView, DesktopWorkView, RunEvent } from "./contracts/run";
 
 const BASIC_RUN_EVENT_TYPES = [
   "run.started",
@@ -14,6 +13,10 @@ const BASIC_RUN_EVENT_TYPES = [
   "tool.requested",
   "tool.completed",
   "tool.failed",
+  "sub_agent.started",
+  "sub_agent.completed",
+  "sub_agent_batch.started",
+  "sub_agent_batch.completed",
   "confirmation.needed",
   "user_approval.received",
   "user.guidance",
@@ -134,11 +137,4 @@ export function openDeepRunStream(input: {
     input.onError();
   };
   return stream;
-}
-
-export function typedToolDisplays(detail: DesktopRunDetail | undefined): readonly ToolDisplayProjection[] {
-  const events = detail?.transcript?.events ?? [];
-  return events
-    .map((event) => event.detail?.display)
-    .filter((display): display is ToolDisplayProjection => display !== undefined);
 }

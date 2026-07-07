@@ -173,6 +173,8 @@ export type ObservationRef = {
     | "tool_call"
     | "agent_spec"
     | "agent_run"
+    | "sub_agent_run"
+    | "sub_agent_batch"
     | "agent_delegation"
     | "parent_synthesis"
     | "user_clarification"

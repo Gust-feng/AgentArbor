@@ -83,9 +83,14 @@ export type PanelRuntime = {
   readonly subAgentRoots: readonly SubAgentRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
+  readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
 
 type PanelSkillRootsInput = {
+  readonly workspaceDirectory?: string;
+};
+
+type PanelSubAgentRootsInput = {
   readonly workspaceDirectory?: string;
 };
 
@@ -114,6 +119,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
       skillRoots: resolveSkillRoots(options),
       resolveSkillRoots: (input) => resolveSkillRoots(options, input),
       subAgentRoots: resolveSubAgentRoots(options),
+      resolveSubAgentRoots: (input) => resolveSubAgentRoots(options, input),
       skillStateStore: resolveSkillStateStore(options.configDirectory),
       processTerminator: options.processTerminator,
       appUpdateService: resolveAppUpdateService(options),
@@ -135,6 +141,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
     skillRoots: resolveSkillRoots(options),
     resolveSkillRoots: (input) => resolveSkillRoots(options, input),
     subAgentRoots: resolveSubAgentRoots(options),
+    resolveSubAgentRoots: (input) => resolveSubAgentRoots(options, input),
     skillStateStore: resolveSkillStateStore(local.configDirectory),
     processTerminator: options.processTerminator,
     appUpdateService: resolveAppUpdateService(options),
@@ -167,6 +174,7 @@ function assemblePanelRuntime(input: {
   readonly skillRoots: readonly SkillRootInput[];
   readonly resolveSkillRoots?: (input: PanelSkillRootsInput) => readonly SkillRootInput[];
   readonly subAgentRoots: readonly SubAgentRootInput[];
+  readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly processTerminator?: ProcessTerminator;
   readonly appUpdateService: AppUpdateServiceLike;
@@ -187,6 +195,7 @@ function assemblePanelRuntime(input: {
     resolveSkillRoots: input.resolveSkillRoots,
     skillStateStore: input.skillStateStore,
     subAgentRoots: input.subAgentRoots,
+    resolveSubAgentRoots: input.resolveSubAgentRoots,
     fetch: input.providerFetch,
   });
   const runtime: Omit<PanelRuntime, "runExecutor"> & { runExecutor?: BasicAgentRunExecutor } = {
@@ -212,6 +221,7 @@ function assemblePanelRuntime(input: {
     processTerminator,
     skillRoots: input.skillRoots,
     subAgentRoots: input.subAgentRoots,
+    resolveSubAgentRoots: input.resolveSubAgentRoots,
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
   };
@@ -381,13 +391,14 @@ function resolveSkillRoots(
 }
 
 function resolveSubAgentRoots(
-  options: PanelServerOptions
+  options: PanelServerOptions,
+  input: PanelSubAgentRootsInput = {}
 ): readonly SubAgentRootInput[] {
   if (options.subAgentRoots !== undefined) {
     return options.subAgentRoots;
   }
   return [
-    ...resolveDefaultPanelSubAgentRoots(),
+    ...resolveDefaultPanelSubAgentRoots({ workspaceDirectory: input.workspaceDirectory }),
     ...(options.additionalSubAgentRoots ?? []),
   ];
 }
@@ -424,13 +435,15 @@ export function resolveDefaultPanelSkillRoots(input: {
   ];
 }
 
-function resolveDefaultPanelSubAgentRoots(input: {
+export function resolveDefaultPanelSubAgentRoots(input: {
   readonly cwd?: string;
   readonly home?: string;
   readonly builtinRoot?: string;
+  readonly workspaceDirectory?: string;
 } = {}): readonly SubAgentRootInput[] {
   const builtinRoot = input.builtinRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "sub-agents", "builtin");
-  const projectRoot = path.join(input.cwd ?? process.cwd(), ".agents", "sub-agents");
+  const projectBase = input.workspaceDirectory ?? input.cwd ?? process.cwd();
+  const projectRoot = path.join(projectBase, ".agents", "sub-agents");
   const userRoot = path.join(input.home ?? homeDirectory(), ".agents", "sub-agents");
   const roots: SubAgentRootInput[] = [
     {

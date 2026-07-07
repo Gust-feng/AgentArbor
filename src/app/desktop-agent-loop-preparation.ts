@@ -67,7 +67,14 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
 
   let parentAllowedTools: readonly string[] = [];
   if (toolCenter !== undefined && input.options.subAgentRoots !== undefined && toolCenter.register !== undefined) {
-    const subAgentRegistry = new SubAgentRegistry({ roots: input.options.subAgentRoots });
+    const subAgentRegistry = new SubAgentRegistry(
+      input.options.capabilitySnapshot === undefined
+        ? { roots: input.options.subAgentRoots }
+        : {
+            roots: input.options.subAgentRoots,
+            catalog: input.options.capabilitySnapshot.subAgentCatalog,
+          }
+    );
     const executors = createSubAgentToolExecutors({
       subAgentRegistry,
       channel: input.channel,
@@ -76,6 +83,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
       confirmationPolicy: () => input.options.toolConfirmationPolicy,
       publishToolEvent: (message) => input.runtime.bus.publish(message),
       traceSink: input.runtime.subAgentRunTraceStore,
+      traceReader: input.runtime.subAgentRunTraceStore,
       includeSpawnTool: true,
       eventLog: input.runtime.eventLog,
     });
@@ -91,7 +99,9 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     taskSoil: input.taskSoil,
     conversationHistory: input.options.conversationHistory ?? [],
     conversationSummary: input.options.conversationSummary,
+    interruptedRunContexts: input.options.interruptedRunContexts,
     skillContexts,
+    toolEvidence: input.options.toolEvidence,
     modelCapabilities,
     tokenCounter,
   });
@@ -124,6 +134,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     traceId: input.traceId,
     goalId: input.goalId,
     allowedTools: toolBoundary.allowedTools,
+    toolDefinitions: toolBoundary.toolDefinitions,
     confirmationPolicy: input.options.toolConfirmationPolicy,
     modelCapabilities,
   });

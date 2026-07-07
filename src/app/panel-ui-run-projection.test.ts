@@ -25,7 +25,7 @@ test("createRunReadModelPatch merges the targeted run transcript into cache", ()
   assert.deepEqual(patch.transcriptNodesByRunId["run-2"]?.map((item) => item.text), ["新思考"]);
 });
 
-test("createRunReadModelPatch ignores previous work view from another run", () => {
+test("createRunReadModelPatch does not use detail transcript as the main work view", () => {
   const detail = runDetail("run-2", [node("run-2:answer", "run-2", 2, "详情回答")]);
   const patch = createRunReadModelPatch<TestWorkView, TestDetail, TestNode>({
     workView: workView("run-1", [node("run-1:thinking", "run-1", 1, "旧思考")]),
@@ -38,8 +38,8 @@ test("createRunReadModelPatch ignores previous work view from another run", () =
 
   assert.equal(patch.workView, undefined);
   assert.equal(patch.detail, detail);
-  assert.deepEqual(patch.transcriptNodes.map((item) => item.text), ["详情回答"]);
-  assert.deepEqual(patch.transcriptNodesByRunId["run-2"]?.map((item) => item.text), ["详情回答"]);
+  assert.deepEqual(patch.transcriptNodes, []);
+  assert.deepEqual(patch.transcriptNodesByRunId["run-2"], []);
 });
 
 test("createRunReadModelPatch can drop stale work view after mutating a run", () => {
@@ -58,8 +58,8 @@ test("createRunReadModelPatch can drop stale work view after mutating a run", ()
   });
 
   assert.equal(patch.workView, undefined);
-  assert.deepEqual(patch.transcriptNodes.map((item) => item.text), ["继续执行"]);
-  assert.deepEqual(patch.transcriptNodesByRunId["run-1"]?.map((item) => item.text), ["继续执行"]);
+  assert.deepEqual(patch.transcriptNodes, []);
+  assert.deepEqual(patch.transcriptNodesByRunId["run-1"], []);
 });
 
 type TestWorkView = RunProjectionWorkView<TestNode>;

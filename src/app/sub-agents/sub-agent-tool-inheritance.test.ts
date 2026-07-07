@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import type { CapabilitySubAgentCatalogItem } from "../../domain/config/index.js";
 import type { IntelligenceChannel, ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import type { SubAgentRunTrace } from "../../domain/sub-agents/contracts.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
@@ -10,10 +11,10 @@ import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { nowIso } from "../../kernel/id.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import { ToolCenter } from "../tool-center/tool-center.js";
-import { SubAgentRegistry } from "./sub-agent-registry.js";
+import { SubAgentRegistry, type SubAgentDefinition } from "./sub-agent-registry.js";
 import { InMemorySubAgentRunTraceStore } from "./sub-agent-trace-store.js";
 import { createSubAgentToolExecutors } from "./sub-agent-tools.js";
-import { runSubAgent } from "./sub-agent-runner.js";
+import { runSubAgent, SUB_AGENT_DEFAULT_MAX_STEPS } from "./sub-agent-runner.js";
 
 test("runSubAgent inherits parent allowed tools and hides sub-agent recursion tools", async () => {
   const channel = new SequenceIntelligenceChannel([
@@ -34,6 +35,77 @@ test("runSubAgent inherits parent allowed tools and hides sub-agent recursion to
 
   assert.equal(result.status, "completed");
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["read_file"]);
+});
+
+test("runSubAgent intersects declared sub-agent tools with parent tools", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-test", "done"),
+  ]);
+  const center = new ToolCenter();
+  center.register(testTool("read_file", async () => ({ content: "ok" })));
+  center.register(testTool("shell_command", async () => ({ summary: "ran" }), "execute", true));
+  center.register(testTool("spawn_sub_agent", async () => ({ should_not_run: true })));
+
+  const result = await runSubAgent({
+    subAgent: testSubAgent({ allowedTools: ["read_file", "spawn_sub_agent"] }),
+    task: "use only declared tools",
+    toolBroker: center,
+    channel,
+    allowedTools: ["read_file", "shell_command", "spawn_sub_agent"],
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["read_file"]);
+});
+
+test("runSubAgent policy overrides cannot reopen sub-agent recursion tools", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-test", "done"),
+  ]);
+  const center = new ToolCenter();
+  center.register(testTool("read_file", async () => ({ content: "ok" })));
+  center.register(testTool("spawn_sub_agent", async () => ({ should_not_run: true })));
+
+  const result = await runSubAgent({
+    subAgent: testSubAgent(),
+    task: "do not recurse",
+    toolBroker: center,
+    channel,
+    allowedTools: ["read_file"],
+    policyOverrides: {
+      allowedTools: ["read_file", "spawn_sub_agent"],
+    },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["read_file"]);
+});
+
+test("runSubAgent uses the documented lightweight default step budget", async () => {
+  assert.equal(SUB_AGENT_DEFAULT_MAX_STEPS, 30);
+});
+
+test("builtin sub-agent step budgets stay tool-sized", async () => {
+  const registry = new SubAgentRegistry({
+    roots: [{
+      rootPath: path.join(process.cwd(), "src", "app", "sub-agents", "builtin"),
+      sourceKind: "builtin",
+      sourceRootId: "builtin",
+      precedence: 1,
+    }],
+  });
+  const subAgents = await registry.list();
+
+  assert.deepEqual(
+    Object.fromEntries(subAgents.map((subAgent) => [subAgent.name, subAgent.maxSteps])),
+    {
+      "code-expert": 50,
+      "doc-expert": 30,
+      "research-expert": 40,
+      "review-expert": 30,
+      "test-expert": 40,
+    },
+  );
 });
 
 test("runSubAgent sends instructions as system and the delegated task as user input", async () => {
@@ -155,6 +227,60 @@ test("runSubAgent fails closed when SUB_AGENT.md hash drifts after discovery", a
   assert.equal(channel.requests.length, 0);
 });
 
+test("frozen SubAgentRegistry only exposes sub-agents from the run birth catalog", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "agentarbor-frozen-sub-agent-catalog-"));
+  const packageDir = path.join(root, "test-helper");
+  mkdirSync(packageDir);
+  writeTestSubAgentFile(path.join(packageDir, "SUB_AGENT.md"), "You are the original helper.");
+
+  const discoveredRegistry = new SubAgentRegistry({ roots: [root] });
+  const original = await discoveredRegistry.getByName("test-helper");
+  assert.ok(original);
+  const frozenCatalog = [capabilitySubAgentCatalogItem(original)];
+
+  const latePackageDir = path.join(root, "late-helper");
+  mkdirSync(latePackageDir);
+  writeTestSubAgentFile(path.join(latePackageDir, "SUB_AGENT.md"), "You are a late helper.", "late-helper");
+
+  const frozenRegistry = new SubAgentRegistry({ roots: [root], catalog: frozenCatalog });
+
+  assert.equal((await frozenRegistry.getByName("late-helper")), undefined);
+  assert.equal((await frozenRegistry.getByName("test-helper"))?.contentHash, original.contentHash);
+});
+
+test("frozen SubAgentRegistry preserves hash expectations when a cataloged file changes", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "agentarbor-frozen-sub-agent-hash-"));
+  const packageDir = path.join(root, "test-helper");
+  mkdirSync(packageDir);
+  const sourcePath = path.join(packageDir, "SUB_AGENT.md");
+  writeTestSubAgentFile(sourcePath, "You are the original helper.");
+
+  const discoveredRegistry = new SubAgentRegistry({ roots: [root] });
+  const original = await discoveredRegistry.getByName("test-helper");
+  assert.ok(original);
+  const frozenCatalog = [capabilitySubAgentCatalogItem(original)];
+
+  writeTestSubAgentFile(sourcePath, "You are the changed helper.");
+  const frozenRegistry = new SubAgentRegistry({ roots: [root], catalog: frozenCatalog });
+  const frozen = await frozenRegistry.getByName("test-helper");
+  assert.ok(frozen);
+
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-should-not-run", "should not run"),
+  ]);
+  const result = await runSubAgent({
+    subAgent: frozen,
+    task: "use the helper",
+    toolBroker: new ToolCenter(),
+    channel,
+    allowedTools: [],
+  });
+
+  assert.equal(result.status, "failed");
+  assert.match(result.error ?? "", /Sub-agent definition hash does not match/);
+  assert.equal(channel.requests.length, 0);
+});
+
 test("call_sub_agent projection exposes full output to parent model continuation", async () => {
   const sentinel = "PARENT_VISIBLE_TAIL_SENTINEL";
   const fullOutput = `${"abcdef".repeat(120)}${sentinel}`;
@@ -197,6 +323,89 @@ test("call_sub_agent projection exposes full output to parent model continuation
   assert.equal(agentContent.full_output, fullOutput);
   assert.equal(agentContent.result?.full_output, fullOutput);
   assert.equal(agentContent.summary?.includes(sentinel), false);
+});
+
+test("read_sub_agent_output reads current-run sub-agent output slices", async () => {
+  const fullOutput = "0123456789".repeat(40);
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-sub-agent", fullOutput),
+  ]);
+  const center = new ToolCenter();
+  const traces = new InMemorySubAgentRunTraceStore();
+  const registry = await tempRegistry();
+  for (const executor of createSubAgentToolExecutors({
+    subAgentRegistry: registry,
+    channel,
+    toolBroker: center,
+    allowedTools: () => ["call_sub_agent", "read_sub_agent_output"],
+    traceSink: traces,
+  })) {
+    center.register(executor);
+  }
+
+  const subAgentResult = await center.execute(
+    {
+      callId: "call-parent-sub-agent",
+      toolName: "call_sub_agent",
+      input: { sub_agent_name: "test-helper", task: "return output" },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["call_sub_agent"] }
+  );
+  const subAgentOutput = subAgentResult.output as {
+    readonly result?: {
+      readonly run_id?: string;
+      readonly full_output_ref?: string;
+      readonly continuation?: { readonly nextInput?: { readonly sub_run_id?: string } };
+    };
+  };
+  const subRunId = subAgentOutput.result?.run_id;
+  assert.equal(subAgentResult.status, "completed");
+  assert.ok(subRunId);
+  assert.equal(subAgentOutput.result?.full_output_ref, `sub-agent-output:${subRunId}`);
+  assert.equal(subAgentOutput.result?.continuation?.nextInput?.sub_run_id, subRunId);
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name) ?? [], []);
+
+  const readResult = await center.execute(
+    {
+      callId: "read-sub-agent-output",
+      toolName: "read_sub_agent_output",
+      input: { sub_run_id: subRunId, start_char: 10, max_chars: 25 },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["read_sub_agent_output"] }
+  );
+  const readOutput = readResult.output as {
+    readonly result?: {
+      readonly content?: string;
+      readonly start_char?: number;
+      readonly end_char?: number;
+      readonly total_chars?: number;
+      readonly has_more_after?: boolean;
+      readonly continuation?: { readonly nextInput?: { readonly start_char?: number } };
+    };
+  };
+
+  assert.equal(readResult.status, "completed");
+  assert.equal(readOutput.result?.content, fullOutput.slice(10, 35));
+  assert.equal(readOutput.result?.start_char, 10);
+  assert.equal(readOutput.result?.end_char, 35);
+  assert.equal(readOutput.result?.total_chars, fullOutput.length);
+  assert.equal(readOutput.result?.has_more_after, true);
+  assert.equal(readOutput.result?.continuation?.nextInput?.start_char, 35);
+
+  const crossRunRead = await center.execute(
+    {
+      callId: "read-cross-run-sub-agent-output",
+      toolName: "read_sub_agent_output",
+      input: { sub_run_id: subRunId },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "other-goal" },
+    { callerAgentId: "agent-test", allowedTools: ["read_sub_agent_output"] }
+  );
+
+  assert.equal(crossRunRead.status, "failed");
+  assert.match(crossRunRead.error ?? "", /does not belong to the current run/);
 });
 
 test("sub-agent tool approval bubbles as the parent tool pending confirmation and resumes after approve", async () => {
@@ -326,11 +535,16 @@ test("call_sub_agent and batch calls link traces to parent tool calls and batch 
     { callerAgentId: "agent-test", allowedTools: ["call_sub_agents"] }
   );
 
-  assert.equal(collected[0]?.parentToolCallId, "call-single-parent");
-  assert.equal(collected[1]?.parentToolCallId, "call-batch-parent");
-  assert.equal(collected[1]?.batchIndex, 0);
-  assert.equal(collected[2]?.batchIndex, 1);
-  assert.equal(collected[1]?.batchId, collected[2]?.batchId);
+  const singleTrace = collected.find((trace) => trace.parentToolCallId === "call-single-parent");
+  const batchTraces = collected
+    .filter((trace) => trace.parentToolCallId === "call-batch-parent")
+    .sort((left, right) => (left.batchIndex ?? -1) - (right.batchIndex ?? -1));
+
+  assert.ok(singleTrace);
+  assert.equal(batchTraces.length, 2);
+  assert.equal(batchTraces[0]?.batchIndex, 0);
+  assert.equal(batchTraces[1]?.batchIndex, 1);
+  assert.equal(batchTraces[0]?.batchId, batchTraces[1]?.batchId);
 });
 
 test("call_sub_agents honors max_concurrency and preserves result order", async () => {
@@ -469,7 +683,7 @@ test("call_sub_agents records pending and not-started batch stats when approval 
   assert.deepEqual(finalPayload?.results?.map((result) => result.status), ["completed", "completed"]);
 });
 
-test("spawn_sub_agent uses system_prompt as the temporary sub-agent system body", async () => {
+test("spawn_sub_agent uses instructions as the temporary sub-agent body", async () => {
   const channel = new SequenceIntelligenceChannel([
     textResponse("model-request-spawn", "spawned finished"),
   ]);
@@ -491,7 +705,7 @@ test("spawn_sub_agent uses system_prompt as the temporary sub-agent system body"
       toolName: "spawn_sub_agent",
       input: {
         role: "Temporary Reviewer",
-        system_prompt: "CUSTOM SYSTEM BODY FOR TEMP AGENT",
+        instructions: "CUSTOM SYSTEM BODY FOR TEMP AGENT",
         task: "review",
         allowed_tools: ["read_file"],
       },
@@ -504,6 +718,43 @@ test("spawn_sub_agent uses system_prompt as the temporary sub-agent system body"
   assert.match(channel.requests[0]?.sanitizedMessages[0]?.content ?? "", /CUSTOM SYSTEM BODY FOR TEMP AGENT/);
   assert.equal(channel.requests[0]?.sanitizedMessages[1]?.role, "user");
   assert.match(channel.requests[0]?.sanitizedMessages[1]?.content ?? "", /review/);
+});
+
+test("spawn_sub_agent allowed_tools narrows inherited parent tools", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-spawn", "spawned finished"),
+  ]);
+  const center = new ToolCenter();
+  center.register(testTool("read_file", async () => ({ content: "ok" })));
+  center.register(testTool("shell_command", async () => ({ summary: "ran" }), "execute", true));
+  const registry = await tempRegistry();
+  for (const executor of createSubAgentToolExecutors({
+    subAgentRegistry: registry,
+    channel,
+    toolBroker: center,
+    allowedTools: () => ["spawn_sub_agent", "read_file", "shell_command"],
+    includeSpawnTool: true,
+  })) {
+    center.register(executor);
+  }
+
+  const result = await center.execute(
+    {
+      callId: "call-spawn",
+      toolName: "spawn_sub_agent",
+      input: {
+        role: "Temporary Reader",
+        instructions: "Use only the declared read tool.",
+        task: "read",
+        allowed_tools: ["read_file"],
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["spawn_sub_agent", "read_file", "shell_command"] }
+  );
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["read_file"]);
 });
 
 function testSubAgent(input: {
@@ -541,13 +792,13 @@ async function tempRegistry(): Promise<SubAgentRegistry> {
   return registry;
 }
 
-function writeTestSubAgentFile(sourcePath: string, body: string): void {
+function writeTestSubAgentFile(sourcePath: string, body: string, name = "test-helper"): void {
   writeFileSync(
     sourcePath,
     [
       "---",
-      "name: test-helper",
-      "description: Test helper",
+      `name: ${name}`,
+      `description: ${name} test helper`,
       "enabled: true",
       "---",
       "",
@@ -556,6 +807,27 @@ function writeTestSubAgentFile(sourcePath: string, body: string): void {
     ].join("\n"),
     "utf8"
   );
+}
+
+function capabilitySubAgentCatalogItem(subAgent: SubAgentDefinition): CapabilitySubAgentCatalogItem {
+  return {
+    id: subAgent.id,
+    name: subAgent.name,
+    description: subAgent.description,
+    category: subAgent.category,
+    sourceKind: subAgent.sourceKind,
+    sourceRootId: subAgent.sourceRootId,
+    sourcePrecedence: subAgent.sourcePrecedence,
+    enabled: subAgent.enabled,
+    version: subAgent.version,
+    whenToUse: subAgent.whenToUse,
+    whenNotToUse: subAgent.whenNotToUse,
+    allowedTools: subAgent.allowedTools,
+    model: subAgent.model,
+    maxSteps: subAgent.maxSteps,
+    contentHash: subAgent.contentHash,
+    bodyHash: subAgent.bodyHash,
+  };
 }
 
 function testTool(

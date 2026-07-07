@@ -77,6 +77,7 @@ function refsForEvent(entry: RunObservationEventEntry): ObservationRef[] {
   pushConvergenceRef(refs, payload);
   pushModelCallRefs(refs, entry.type, payload);
   pushToolCallRefs(refs, entry.type, payload);
+  pushSubAgentRefs(refs, entry.type, payload);
   pushAgentFabricRefs(refs, payload);
   pushClarificationRequestRef(refs, entry.type, payload);
   pushCandidatePoolRef(refs, payload);
@@ -141,6 +142,23 @@ function pushToolCallRefs(
     return;
   }
   pushStringRef(refs, payload, "callId", "tool_call");
+}
+
+function pushSubAgentRefs(
+  refs: ObservationRef[],
+  type: ArborMessageType,
+  payload: Readonly<Record<string, unknown>>
+): void {
+  if (
+    type !== "sub_agent.started" &&
+    type !== "sub_agent.completed" &&
+    type !== "sub_agent_batch.started" &&
+    type !== "sub_agent_batch.completed"
+  ) {
+    return;
+  }
+  pushStringRef(refs, payload, "subRunId", "sub_agent_run");
+  pushStringRef(refs, payload, "batchId", "sub_agent_batch");
 }
 
 function pushAgentFabricRefs(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {

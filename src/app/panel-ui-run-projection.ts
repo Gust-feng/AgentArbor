@@ -37,10 +37,9 @@ export type RunReadModelPatch<
 };
 
 export function transcriptNodesFrom<TNode extends RunProjectionNode>(
-  workView: RunProjectionWorkView<TNode> | undefined,
-  detail: RunProjectionDetail<TNode> | undefined
+  workView: RunProjectionWorkView<TNode> | undefined
 ): readonly TNode[] {
-  return workView?.transcriptNodes ?? detail?.transcript?.transcriptNodes ?? [];
+  return workView?.transcriptNodes ?? [];
 }
 
 export function nextWorkViewForRun<TWorkView extends RunProjectionWorkView>(
@@ -83,7 +82,7 @@ export function createRunReadModelPatch<
     previous.workView,
     input.reusePreviousWorkView !== false
   );
-  const transcriptNodes = transcriptNodesFrom(workView, input.detail);
+  const transcriptNodes = transcriptNodesFrom(workView);
   return {
     workView,
     detail: input.detail,

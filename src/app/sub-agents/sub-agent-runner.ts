@@ -30,9 +30,14 @@ import type { SubAgentDefinition } from "./sub-agent-loader.js";
 import { loadSubAgentBody } from "./sub-agent-loader.js";
 
 const SUB_AGENT_OUTPUT_CONTRACT_ID = "sub_agent.free_text.v1";
-const DEFAULT_MAX_STEPS = 200;
+export const SUB_AGENT_DEFAULT_MAX_STEPS = 30;
 const DISPLAY_SUMMARY_MAX_CHARS = 500;
-const SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
+const SUB_AGENT_TOOL_NAMES = new Set([
+  "call_sub_agent",
+  "call_sub_agents",
+  "spawn_sub_agent",
+  "read_sub_agent_output",
+]);
 
 export type SubAgentRunnerInput = {
   readonly subAgent: SubAgentDefinition;
@@ -416,10 +421,12 @@ function buildSubAgentPolicy(input: {
   readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly overrides?: Partial<AgentTurnPolicy>;
 }): AgentTurnPolicy {
-  const allowedTools = [...new Set(input.allowedTools)]
-    .filter((toolName) => !SUB_AGENT_TOOL_NAMES.has(toolName));
+  const allowedTools = effectiveSubAgentAllowedTools({
+    parentAllowedTools: input.allowedTools,
+    subAgentAllowedTools: input.subAgent.allowedTools,
+  });
 
-  const maxSteps = normalizeOptionalRoundLimit(input.subAgent.maxSteps) ?? DEFAULT_MAX_STEPS;
+  const maxSteps = normalizeOptionalRoundLimit(input.subAgent.maxSteps) ?? SUB_AGENT_DEFAULT_MAX_STEPS;
 
   const basePolicy: AgentTurnPolicy = {
     allowModel: true,
@@ -437,10 +444,46 @@ function buildSubAgentPolicy(input: {
     budget: {},
   };
 
+  const overrides = input.overrides ?? {};
   return {
     ...basePolicy,
-    ...(input.overrides ?? {}),
+    ...overrides,
+    allowedTools,
+    callerAgentId: basePolicy.callerAgentId,
+    traceId: basePolicy.traceId,
+    goalId: basePolicy.goalId,
+    purpose: basePolicy.purpose,
+    outputContract: basePolicy.outputContract,
   };
+}
+
+function effectiveSubAgentAllowedTools(input: {
+  readonly parentAllowedTools: readonly string[];
+  readonly subAgentAllowedTools: readonly string[];
+}): readonly string[] {
+  const inherited = uniqueToolNames(input.parentAllowedTools)
+    .filter((toolName) => !SUB_AGENT_TOOL_NAMES.has(toolName));
+  const declared = uniqueToolNames(input.subAgentAllowedTools)
+    .filter((toolName) => !SUB_AGENT_TOOL_NAMES.has(toolName));
+  if (declared.length === 0) {
+    return inherited;
+  }
+  const declaredSet = new Set(declared);
+  return inherited.filter((toolName) => declaredSet.has(toolName));
+}
+
+function uniqueToolNames(values: readonly string[]): readonly string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const toolName = value.trim();
+    if (toolName.length === 0 || seen.has(toolName)) {
+      continue;
+    }
+    seen.add(toolName);
+    names.push(toolName);
+  }
+  return names;
 }
 
 function freeTextOutputContract(): ModelOutputContract {

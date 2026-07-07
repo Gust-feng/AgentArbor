@@ -119,7 +119,7 @@ test("desktop live model stream does not repeat markdown blocks from cumulative 
   }
 });
 
-test("desktop work session completes streamed reasoning without replaying it", async () => {
+test("desktop work view completes streamed reasoning without replaying it", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-reasoning-stream-"));
   const secret = "sk-reasoning-stream-secret";
   const reasoningText = "先确认问题";
@@ -145,15 +145,15 @@ test("desktop work session completes streamed reasoning without replaying it", a
     });
     const runId = start.body.run.runId;
     const completed = await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
-    const workSession = await requestJson(
+    const workView = await requestJson(
       server.url,
-      `/api/basic-agent/runs/${encodeURIComponent(runId)}/work-session`
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/work-view`
     );
     const events = await requestJson(
       server.url,
       `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`
     );
-    const thinkingNodes = workSession.body.workSession.transcriptNodes.filter(
+    const thinkingNodes = workView.body.workView.transcriptNodes.filter(
       (node: { kind?: string; eventType?: string }) =>
         node.kind === "thinking" && node.eventType?.startsWith("model.reasoning") === true
     );
@@ -180,8 +180,9 @@ test("desktop work session completes streamed reasoning without replaying it", a
     assert.equal(thinkingNodes[0]?.text, reasoningText);
     assert.equal(completedTranscriptThinkingNodes.length, 1);
     assert.equal(completedTranscriptThinkingNodes[0]?.eventType, "model.reasoning.completed");
-    assert.equal(JSON.stringify(workSession.body.workSession.transcriptNodes).includes(`${reasoningText}${reasoningText}`), false);
-    assertSafePanelJsonText(`${completed.text}\n${workSession.text}\n${events.text}`);
+    assert.equal(JSON.stringify(workView.body.workView.transcriptNodes).includes(`${reasoningText}${reasoningText}`), false);
+    assert.equal("workSession" in workView.body, false);
+    assertSafePanelJsonText(`${completed.text}\n${workView.text}\n${events.text}`);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

@@ -98,7 +98,7 @@ export async function loadConversationTranscriptNodesByRunId(
         const view = await safeBasicRunView(runId, 0, { signal: options.signal });
         return [
           runId,
-          transcriptNodesFrom(ordinaryWorkViewFromRunView(view), view?.detail).filter((node) => node.runId === runId),
+          transcriptNodesFrom(ordinaryWorkViewFromRunView(view)).filter((node) => node.runId === runId),
         ] as const;
       })
     );
@@ -123,7 +123,7 @@ export function projectCurrentRun(app: RunProjectionState): CurrentRunProjection
   const detail = app.detail?.runId === runId ? app.detail : undefined;
   const live = app.live?.runId === runId ? app.live : undefined;
   const events = app.events.filter((event) => event.runId === runId);
-  const runTranscriptNodes = transcriptNodesFrom(workView, detail).filter((node) => node.runId === runId);
+  const runTranscriptNodes = transcriptNodesFrom(workView).filter((node) => node.runId === runId);
   const transcriptNodes = mergeConversationTranscriptNodes(app, runId, runTranscriptNodes);
   return {
     run: app.run,

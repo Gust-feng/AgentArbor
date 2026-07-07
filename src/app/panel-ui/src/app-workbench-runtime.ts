@@ -179,15 +179,18 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     if (!hasNormalConversationContext) {
       return undefined;
     }
+    const runContextWindowTokens =
+      currentRun.capabilityResolution?.capabilityPlan?.modelCapabilities.contextWindowTokens;
     return contextWindowUsageFrom({
-      contextWindowTokens:
-        options.selectedModelContextWindowTokens ??
-        currentRun.capabilityResolution?.capabilityPlan?.modelCapabilities.contextWindowTokens,
+      contextWindowTokens: currentRun.run === undefined
+        ? options.selectedModelContextWindowTokens
+        : runContextWindowTokens,
       modelUsage: latestModelUsage,
       ledgerBudget: currentRun.workView?.contextLedger.budget,
     });
   }, [
     currentRun.capabilityResolution?.capabilityPlan?.modelCapabilities.contextWindowTokens,
+    currentRun.run,
     currentRun.workView?.contextLedger.budget,
     hasNormalConversationContext,
     latestModelUsage,

@@ -10,7 +10,7 @@
 
 子 Agent 是普通 Agent 的工具能力扩展，不是独立编排流程。
 
-- 子 Agent 是“工具形态的专家助手”：模型在主循环中像调用普通工具一样调用 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`，由模型自主判断是否需要专家帮助。
+- 子 Agent 是“工具形态的专家助手”：模型在主循环中像调用普通工具一样调用 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`，必要时再用 `read_sub_agent_output` 续读长输出；由模型自主判断是否需要专家帮助。
 - 子 Agent 不维护独立任务生命周期：它没有独立 Task Soil、不出生独立 run facts、不写 RuntimeDatabase 主 run 表；子 Agent 的执行在父 run 的事件流中留下 `sub_agent.*` 事件和工具结果，并以 `subAgentRuns` read model 提供只读运行复盘。
 - 子 Agent 不派生 Plan：它的执行结果作为局部材料回到父层模型，由父层模型决定是否采纳、综合或继续探索。
 - 子 Agent 不走 `/api/deep/*` 入口：`/api/deep/*` 仍属于 deep / Underground 兼容路径，与子 Agent 工具无关；普通 `agent` 调用子 Agent 走的是普通工具执行路径。
@@ -29,7 +29,7 @@
 
 子 Agent 工具复用普通 Agent 的能力底座：
 
-- `ToolCenter`：子 Agent 的工具执行经过父 run 的 `ToolCenter`，工具注册、`allowedTools` 校验、executable restriction 和运行投影都沿用普通 Agent 主干；当前子 Agent 无条件继承父 run 已解析的 `allowedTools`，仅强制排除子 Agent 派生工具。
+- `ToolCenter`：子 Agent 的工具执行经过父 run 的 `ToolCenter`，工具注册、`allowedTools` 校验、executable restriction 和运行投影都沿用普通 Agent 主干；子 Agent 默认继承父 run 已解析的 `allowedTools`，若子 Agent 定义声明 `allowed-tools`，则实际工具集合为父 run 工具权限与该声明的交集，并始终强制排除子 Agent 派生工具。
 - `IntelligenceChannel`：子 Agent 的模型调用复用父 Agent 的 `IntelligenceChannel`，不另起模型接入层。
 - `ToolExecutionBroker`：子 Agent 内部若再调用工具，仍经过父层 `ToolExecutionBroker`（即 `ToolCenter`），命令类工具仍走命令确认。
 - 确认机制：子 Agent 调用工具的确认策略继承父 run 的 `toolConfirmationPolicy`；子 Agent 工具本身（`call_sub_agent` 等）默认 `requiresConfirmation: false`，不额外触发确认。若子 Agent 内部工具触发确认，该 pending confirmation 会冒泡为父 run 的 pending confirmation，用户可见、可批准/拒绝/补充指引。
@@ -52,7 +52,7 @@
 - `<sub-agent-name>` 目录名建议与 frontmatter 的 `name` 完全一致，使用小写字母、数字和连字符。
 - `SUB_AGENT.md` 是唯一事实源；当前不支持 `references/`、`scripts/`、`assets/`、`evals/` 等子目录（这些属于 Skill 体系，不适用于子 Agent）。
 - frontmatter 使用标准 YAML parser 解析，支持多行字符串、flow mapping、锚点/alias 和 merge。非法 YAML 不让发现流程崩溃，而是形成 `loadError` 与 `validationErrors`，并强制 `enabled: false`。
-- 正文是子 Agent 的 system prompt：runner 会读取 `SUB_AGENT.md` 的 body，叠加任务描述、额外上下文和执行要求，组成子 Agent 的完整系统提示。
+- 正文是子 Agent 的行为指令：runner 会读取 `SUB_AGENT.md` 的 body，叠加任务描述、额外上下文和执行要求，组成子 Agent 的运行指令。
 
 frontmatter 字段：
 
@@ -65,7 +65,7 @@ frontmatter 字段：
 | `version` | — | 否 | 包版本；进入冻结 catalog。 |
 | `whenToUse` | `when-to-use` | 否 | 字符串数组，说明适用场景；进入冻结 catalog 供模型选择参考。 |
 | `whenNotToUse` | `when-not-to-use` | 否 | 字符串数组，说明不适用场景。 |
-| `allowedTools` | `allowed-tools` | 否 | 字符串数组，保留为未来声明式工具收敛字段。当前运行策略暂时忽略该字段，子 Agent 无条件继承父 run 工具权限，并强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`。 |
+| `allowedTools` | `allowed-tools` | 否 | 字符串数组，作为子 Agent 的额外工具收敛声明。为空或省略时继承父 run 工具权限；非空时实际工具集合为父 run `allowedTools` 与该声明的交集，并强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` / `read_sub_agent_output`。 |
 | `model` | — | 否 | 指定模型名称；当前实现复用父 Agent 的 `IntelligenceChannel`，该字段进入冻结 catalog 作为意图声明。 |
 | `maxSteps` | `max-steps` | 否 | 正整数，子 Agent 的最大模型/工具轮数上限；省略时使用默认值 30。 |
 
@@ -127,9 +127,9 @@ maxSteps: 50
 
 `SubAgentRegistry` 在首次 `list()` 时缓存发现结果，后续 `getById` / `getByName` 走缓存；`invalidate()` 可强制重新发现。普通 run 创建时冻结的子 Agent catalog 来自当前发现结果，run 创建后的子 Agent 文件变更不影响已创建 run。
 
-## 三个工具
+## 四个工具
 
-子 Agent 通过三个工具暴露给模型，工具定义见 `src/app/sub-agents/sub-agent-tools.ts`。所有子 Agent 工具注册到 `desktop-basic` scope，`riskLevel: medium`、`operationType: read-write`、`requiresConfirmation: false`、`visibleResultPolicy: summary-only`。
+子 Agent 通过四个工具暴露给模型，工具定义见 `src/app/sub-agents/sub-agent-tools.ts`。`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 注册到 `desktop-basic` scope，`riskLevel: medium`、`operationType: read-write`、`requiresConfirmation: false`、`visibleResultPolicy: summary-only`。`read_sub_agent_output` 是只读续读工具，`riskLevel: low`、`operationType: read-only`、`requiresConfirmation: false`。
 
 ### 1. `call_sub_agent`
 
@@ -145,7 +145,8 @@ maxSteps: 50
 
 - 通过 `SubAgentRegistry.getByName` 解析子 Agent；不存在时抛 `Sub-agent not found`。
 - `enabled: false` 时抛 `Sub-agent is disabled`。
-- 调用 `runSubAgent` 执行，返回 `status` / `summary` / `full_output` / `tool_calls` / `model_rounds` / `duration_ms` / `run_id` / `error`。
+- 调用 `runSubAgent` 执行，返回 `status` / `summary` / `full_output` / `full_output_chars` / `full_output_ref` / `continuation` / `tool_calls` / `model_rounds` / `duration_ms` / `run_id` / `error`。
+- `full_output_ref` 形如 `sub-agent-output:<run_id>`；`continuation.nextInput` 可直接传给 `read_sub_agent_output`，用于 transport 截断后继续读取。
 
 ### 2. `call_sub_agents`
 
@@ -172,16 +173,33 @@ maxSteps: 50
 输入：
 
 - `role`（必填）：角色描述，例如“数据库迁移专家”。
-- `system_prompt`（必填）：定制 system prompt。
+- `instructions`（必填）：定制行为指令。
 - `task`（必填）：任务描述。
-- `allowed_tools`（可选）：保留为未来声明式工具收敛字段；当前暂时忽略，实际执行仍无条件继承父 run 工具权限。
+- `allowed_tools`（可选）：临时子 Agent 的额外工具收敛声明。为空或省略时继承父 run 工具权限；非空时实际工具集合为父 run `allowedTools` 与该声明的交集，并强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` / `read_sub_agent_output`。
 - `context`（可选）：额外上下文。
 
 行为：
 
-- 构造 `sourceKind: "custom"`、`sourcePrecedence: 999` 的临时 `SubAgentDefinition`，`id` 形如 `spawned-<temp>`，`system_prompt` 作为临时子 Agent 的 system body。
+- 构造 `sourceKind: "custom"`、`sourcePrecedence: 999` 的临时 `SubAgentDefinition`，`id` 形如 `spawned-<temp>`，`instructions` 作为临时子 Agent 的行为指令正文。
 - 不写入任何 root，不进入下一次发现的 catalog；仅在本次调用内有效。
 - 调用 `runSubAgent` 执行，返回与 `call_sub_agent` 一致的结果字段，额外返回 `spawned_role` 与 `spawned_id`。
+
+### 4. `read_sub_agent_output`
+
+按字符范围读取当前父 run 内某个子 Agent 的完整输出。它不是新的子 Agent 调度入口，只是 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 长输出的续读工具。
+
+输入：
+
+- `sub_run_id`（必填）：子 Agent 结果中的 `run_id`，或 `continuation.nextInput.sub_run_id`。
+- `start_char`（可选）：从完整输出的第几个字符开始读取，默认 0。
+- `max_chars`（可选）：最多读取字符数，默认 100000，运行时上限 120000。
+
+行为：
+
+- 只读取 `parentRunId` 等于当前父 run `goalId` 的 trace；跨 run 的 `sub_run_id` 会失败。
+- 输出 `content`、`start_char`、`end_char`、`total_chars`、`has_more_after`。
+- `has_more_after: true` 时返回新的 `continuation.nextInput`，父模型可继续调用本工具读取后续片段。
+- 该工具不读取普通文件、命令日志、网页内容或 deep child 输出。
 
 ## 运行时集成机制
 
@@ -191,7 +209,7 @@ maxSteps: 50
 
 文件：`src/app/basic-agent-runtime/builtin-tool-runtime.ts`、`src/app/capability-center.ts`。
 
-- `createDesktopBasicToolRegistry` 收到 `subAgentRegistry` 时，调用 `getSubAgentToolDefinitions({ includeSpawnTool: true })` 获取三个工具定义。
+- `createDesktopBasicToolRegistry` 收到 `subAgentRegistry` 时，调用 `getSubAgentToolDefinitions({ includeSpawnTool: true })` 获取四个工具定义。
 - 为每个工具定义注册一个 stub executor，其 `execute` 直接抛 `"Sub-agent tools not initialized in current runtime context."`。
 - stub executor 注册到 `desktop-basic` scope，`enabledByDefault: true`。
 - 目的：让 capability snapshot 的 `toolCatalog` 中可见子 Agent 工具，让模型在工具可见集合中看到它们；同时 stub 不会真正执行，避免在 snapshot 阶段引入 channel / toolBroker / eventLog 依赖。
@@ -203,7 +221,7 @@ maxSteps: 50
 
 - `prepareDesktopAgentLoop` 在创建 `toolCenter` 后，若 `options.subAgentRoots` 已提供且 `toolCenter.register` 可用：
   1. 构造一个 `SubAgentRegistry`（基于 `subAgentRoots`）。
-  2. 调用 `createSubAgentToolExecutors` 注入 `subAgentRegistry`、`channel`（父 Agent 的 `IntelligenceChannel`）、`toolBroker`（即 `toolCenter` 自身）、父 run `allowedTools` 读取闭包、父 run `toolConfirmationPolicy`、父 run `publishToolEvent`、`eventLog`（`runtime.eventLog`）、`includeSpawnTool: true`。
+  2. 调用 `createSubAgentToolExecutors` 注入 `subAgentRegistry`、`channel`（父 Agent 的 `IntelligenceChannel`）、`toolBroker`（即 `toolCenter` 自身）、父 run `allowedTools` 读取闭包、父 run `toolConfirmationPolicy`、父 run `publishToolEvent`、`traceSink` / `traceReader`（`runtime.subAgentRunTraceStore`）、`eventLog`（`runtime.eventLog`）、`includeSpawnTool: true`。
   3. 对每个真实 executor 调用 `toolCenter.register(executor)`。
 
 ### stub → 真实 executor 的替换
@@ -224,7 +242,7 @@ maxSteps: 50
 | `review-expert` | review | 30 | 代码审查、方案评审、安全检查、交付质量把关。 |
 | `test-expert` | testing | 40 | 编写单元/集成测试、运行测试、分析测试失败。 |
 
-内置专家的正文是其 system prompt，描述角色定位、擅长领域、工作原则和输出风格。修改内置专家属于产品基线变更，应通过正式提交，不能通过 `.agents/sub-agents/` 的覆盖机制静默改写产品行为。
+内置专家的正文是其行为指令，描述角色定位、擅长领域、工作原则和输出风格。修改内置专家属于产品基线变更，应通过正式提交，不能通过 `.agents/sub-agents/` 的覆盖机制静默改写产品行为。
 
 ## 事件系统
 
@@ -249,12 +267,12 @@ maxSteps: 50
 ## 工程约束
 
 - 子 Agent 工具注册到 `desktop-basic` scope，不挂到 `mcp` 或其他 scope。
-- 当前临时工具权限策略为无条件继承父 run 工具权限：runner 使用父 run 最终 `allowedTools`，并强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`。`SUB_AGENT.md` 的 `allowed-tools` 和 `spawn_sub_agent.allowed_tools` 暂不参与裁剪；声明式 allowed-tools 交集收敛延后。
+- 子 Agent 工具权限策略为父 run 权限上限下的声明式收敛：runner 先使用父 run 最终 `allowedTools`，再与 `SUB_AGENT.md` 的 `allowed-tools` 或 `spawn_sub_agent.allowed_tools` 取交集；声明为空时不额外收敛；无论声明如何，始终强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` / `read_sub_agent_output`，且 `policyOverrides` 不能重新打开这些递归工具。
 - 子 Agent 执行使用独立的 `AgentTurnRuntime` 实例（`new AgentTurnRuntime({ intelligenceChannel, toolCenter, publishToolEvent })`），但复用父 Agent 的 `IntelligenceChannel` 与 `ToolExecutionBroker`（即父 `ToolCenter`）；子 Agent 不另起模型接入层，不另起工具注册表。
 - 子 Agent 的 turn policy：`allowModel: true`、`fallback: "disabled"`、`purpose: "desktop_agent"`、`sensitivity: "internal"`、`outputContract: sub_agent.free_text.v1`（`explanation` + `text`）；`maxModelRounds` 与 `maxToolRounds` 均取 `maxSteps`（默认 30）。
-- 子 Agent 不能递归派生：`spawn_sub_agent` 仅注册到顶层普通 Agent（`includeSpawnTool: true` 在 `prepareDesktopAgentLoop` 与 `builtin-tool-runtime.ts` 中显式传入），子 Agent 的 turn policy 不包含 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 工具，因此子 Agent 内部无法再调用或派生子 Agent。
+- 子 Agent 不能递归派生：`spawn_sub_agent` 仅注册到顶层普通 Agent（`includeSpawnTool: true` 在 `prepareDesktopAgentLoop` 与 `builtin-tool-runtime.ts` 中显式传入），子 Agent 的 turn policy 不包含 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` / `read_sub_agent_output` 工具，因此子 Agent 内部无法再调用、派生或读取其他子 Agent 输出。
 - 子 Agent 输出是局部材料：`SubAgentCallResult.summary` / `fullOutput` 作为工具结果回到父层模型上下文，由父层模型决定如何使用、是否采纳、是否综合；子 Agent 不直接写 RuntimeDatabase 主 run 表，不修改 Task Soil，不触发 Governance 回流。
-- 子 Agent 工具的 `visibleResultPolicy` 为 `summary-only` 且 `omitRawOutput: true`：默认 UI 投影只展示摘要，不展示完整 `full_output`；`maxPreviewChars` 单调用 1200、批量 1600。这与普通 Agent“不削弱模型能力”原则不冲突——完整输出仍作为 tool result 进入模型上下文供 continuation 使用，只是默认 UI 不展示原文。
+- 子 Agent 调用工具的 `visibleResultPolicy` 为 `summary-only` 且 `omitRawOutput: true`：默认 UI 投影只展示摘要，不展示完整 `full_output`；`maxPreviewChars` 单调用 1200、批量 1600。这与普通 Agent“不削弱模型能力”原则不冲突——完整输出仍作为 tool result 进入模型上下文供 continuation 使用，只是默认 UI 不展示原文。若 transport 预算截断，`full_output_ref` / `continuation` 指向 `read_sub_agent_output`，父模型可以继续读取。
 - 子 Agent 调用的命令类工具仍走父 run 的命令确认策略；子 Agent 工具本身不额外触发确认。内部工具触发确认时，`SubAgentRunner` 返回 `approval_required` 与 `pendingApproval`，子 Agent 工具 executor 将其转成父工具调用的 `approval_required`，父 run 进入既有 `confirmation_needed` 流程；approve 后恢复同一个子 Agent pending turn，deny/guidance 走父 run 现有确认决策路径。
 - 子 Agent 的 `model` 字段当前作为意图声明进入冻结 catalog；实际模型调用复用父 Agent 的 `IntelligenceChannel` 与 `activeModel`，子 Agent 不自行选择 provider 或模型实例。
 
@@ -290,7 +308,7 @@ UI 行为：
 
 - 不做子 Agent 级独立任务生命周期、独立 Task Soil、独立 RuntimeDatabase 主 run 表。
 - 不做子 Agent 递归派生（`spawn_sub_agent` 不下放给子 Agent）。
-- 不做子 Agent 级免确认授权或 `allowed-tools` 全局白名单语义；当前 `allowed-tools` 仅作未来声明字段保留，不参与运行策略裁剪。
+- 不做子 Agent 级免确认授权或 `allowed-tools` 全局白名单语义；`allowed-tools` 只能在父 run 已授权工具集合内做额外收敛，不能扩张权限，也不能绕过确认。
 - 不做子 Agent 自动触发或自动选择；子 Agent 是否被调用完全由父层模型自主决定。
 - 不做子 Agent 长期记忆、RAG、向量检索或经验回流。
 - 不做子 Agent 跨 run 持久化状态；每次调用都是无状态的一次性执行。
@@ -329,13 +347,13 @@ pnpm test
 验收要点：
 
 - 默认普通 Agent 主循环语义未变化；`/api/conversations` 默认路径仍是 `agent`。
-- 三个子 Agent 工具在 capability snapshot 的 `toolCatalog` 中可见，在 run 执行阶段被真实 executor 覆盖。
+- 四个子 Agent 工具在 capability snapshot 的 `toolCatalog` 中可见，在 run 执行阶段被真实 executor 覆盖。
 - `subAgentCatalog` 包含三级发现结果，project 级覆盖 user 级和 builtin 级。
 - 校验失败的子 Agent `enabled: false`，模型无法调用，且不阻塞发现流程。
-- `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 的输入校验、错误归一化、事件发布符合本文描述。
+- `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 的输入校验、错误归一化、事件发布符合本文描述；`read_sub_agent_output` 只能读取当前父 run 的子 Agent 输出。
 - `spawn_sub_agent` 不出现在子 Agent 的工具集合中，递归派生被阻止。
 - 子 Agent 工具不绕过父 run `allowedTools`、`ToolCenter` 和命令确认；内部确认会冒泡为父 run pending confirmation。
-- 子 Agent 输出默认 UI 只展示摘要，完整输出作为 tool result 回到模型上下文。
+- 子 Agent 输出默认 UI 只展示摘要，完整输出作为 tool result 回到模型上下文；超长输出必须带可执行 continuation，而不是不可恢复截断。
 - `subAgentRuns` 是 UI 的唯一详情数据源；live run 和 persisted run 都能恢复子 Agent 详情。
 - `sub-agent-runs.jsonl` 写入与读取保持向后兼容；老 run 缺失该文件时 read model 返回空数组。
 - 子 Agent 内联卡片、批次卡片和详情抽屉只读；不引入重试、续跑或子 Agent 生命周期控制。

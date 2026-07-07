@@ -4,6 +4,7 @@ import type { IntelligenceChannel } from "../../domain/intelligence/contracts.js
 import type {
   ToolCallResult,
   ToolConfirmationPolicy,
+  ToolContinuation,
   ToolDefinition,
   ToolExecutionBroker,
   ToolExecutionContext,
@@ -11,7 +12,7 @@ import type {
   ToolExecutorResult,
   ToolInputSchema,
 } from "../../domain/tools/contracts.js";
-import type { SubAgentRunTraceSink } from "../../domain/sub-agents/contracts.js";
+import type { SubAgentRunTraceReader, SubAgentRunTraceSink } from "../../domain/sub-agents/contracts.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type { ToolRegistry, ToolRegistryScope } from "../basic-agent-runtime/tool-registry.js";
 import {
@@ -30,6 +31,7 @@ type SubAgentToolDependencies = {
   readonly confirmationPolicy?: () => ToolConfirmationPolicy | undefined;
   readonly publishToolEvent?: (message: ArborMessage) => void;
   readonly traceSink?: SubAgentRunTraceSink;
+  readonly traceReader?: SubAgentRunTraceReader;
   readonly eventLog?: { append: (message: ArborMessage) => void };
 };
 
@@ -58,10 +60,16 @@ type CallSubAgentsInput = {
 
 type SpawnSubAgentInput = {
   readonly role: string;
-  readonly system_prompt: string;
+  readonly instructions: string;
   readonly task: string;
   readonly allowed_tools?: readonly string[];
   readonly context?: string;
+};
+
+type ReadSubAgentOutputInput = {
+  readonly sub_run_id: string;
+  readonly start_char?: number;
+  readonly max_chars?: number;
 };
 
 type SubAgentToolRuntimeDependencies = SubAgentToolDependencies & {
@@ -127,6 +135,9 @@ type BatchStats = {
   readonly notStartedCount: number;
 };
 
+const READ_SUB_AGENT_OUTPUT_DEFAULT_CHARS = 100_000;
+const READ_SUB_AGENT_OUTPUT_MAX_CHARS = 120_000;
+
 class SubAgentPendingApprovalStore {
   private readonly continuations = new Map<string, PendingSubAgentContinuation>();
 
@@ -171,12 +182,55 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function optionalStringArray(value: unknown, fieldName: string): readonly string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array of strings.`);
+  }
+  return value.map((item) => {
+    if (typeof item !== "string" || item.trim().length === 0) {
+      throw new Error(`${fieldName} must be an array of non-empty strings.`);
+    }
+    return item.trim();
+  });
+}
+
 function positiveInteger(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return undefined;
   }
   const int = Math.floor(value);
   return int >= 1 ? int : undefined;
+}
+
+function nonNegativeIntegerOrDefault(value: unknown, fieldName: string, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${fieldName} must be a non-negative integer.`);
+  }
+  const int = Math.floor(value);
+  if (int < 0) {
+    throw new Error(`${fieldName} must be a non-negative integer.`);
+  }
+  return int;
+}
+
+function boundedPositiveIntegerOrDefault(value: unknown, fieldName: string, fallback: number, max: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${fieldName} must be a positive integer.`);
+  }
+  const int = Math.floor(value);
+  if (int < 1) {
+    throw new Error(`${fieldName} must be a positive integer.`);
+  }
+  return Math.min(int, max);
 }
 
 function tasksArrayOrThrow(value: unknown): readonly CallSubAgentsTaskInput[] {
@@ -204,15 +258,47 @@ function tasksArrayOrThrow(value: unknown): readonly CallSubAgentsTaskInput[] {
 }
 
 function buildSubAgentResultOutput(result: SubAgentRunnerResult) {
+  const outputRef = subAgentOutputRef(result);
+  const continuation = result.fullOutput === undefined
+    ? undefined
+    : subAgentOutputContinuation(result.runId, 0);
   return {
     status: result.status,
     summary: result.summary,
     full_output: result.fullOutput,
+    full_output_chars: result.fullOutput?.length,
+    full_output_ref: outputRef,
+    continuation,
     tool_calls: result.toolCalls,
     model_rounds: result.modelRounds,
     duration_ms: result.durationMs,
     run_id: result.runId,
     error: result.error,
+  };
+}
+
+function subAgentOutputRef(result: SubAgentRunnerResult): string | undefined {
+  return result.runId !== undefined && result.fullOutput !== undefined
+    ? `sub-agent-output:${result.runId}`
+    : undefined;
+}
+
+function subAgentOutputContinuation(
+  runId: string | undefined,
+  startChar: number,
+  maxChars = READ_SUB_AGENT_OUTPUT_DEFAULT_CHARS
+): ToolContinuation | undefined {
+  if (runId === undefined) {
+    return undefined;
+  }
+  return {
+    ref: `sub-agent-output:${runId}`,
+    nextInput: {
+      sub_run_id: runId,
+      start_char: startChar,
+      max_chars: maxChars,
+    } satisfies ReadSubAgentOutputInput,
+    note: "Use read_sub_agent_output with nextInput to read this sub-agent output by character range.",
   };
 }
 
@@ -586,6 +672,7 @@ const callSubAgentToolDefinition: ToolDefinition = {
       "status: 执行状态，completed/failed/cancelled。",
       "summary: 轻量展示状态，不作为完整结果正文。",
       "full_output: 子 Agent 的完整输出内容；需要引用结果时优先使用该字段。",
+      "full_output_ref/continuation: 当输出过长或需要精确续读时，用 continuation.nextInput 调用 read_sub_agent_output。",
       "tool_calls: 子 Agent 调用工具的次数。",
       "model_rounds: 模型交互轮数。",
       "duration_ms: 执行耗时（毫秒）。",
@@ -676,6 +763,7 @@ const callSubAgentsToolDefinition: ToolDefinition = {
       "results: 每个子 Agent 的执行结果数组。",
       "summary: 批次轻量展示状态，不作为各子 Agent 的完整结果正文。",
       "full_output: 每个 results 条目中的子 Agent 完整输出；需要引用结果时优先使用该字段。",
+      "full_output_ref/continuation: 每个 results 条目都可给出 read_sub_agent_output 续读输入。",
       "stats: 统计信息（总数、成功数、失败数、总耗时）。",
     ],
     examples: [
@@ -717,9 +805,9 @@ const spawnSubAgentInputSchema: ToolInputSchema = {
       type: "string",
       description: "角色描述，比如\"数据库迁移专家\"。",
     },
-    system_prompt: {
+    instructions: {
       type: "string",
-      description: "定制的 system prompt，定义子 Agent 的行为和能力。",
+      description: "定制的行为指令，定义子 Agent 的职责、边界和输出要求。",
     },
     task: {
       type: "string",
@@ -727,7 +815,7 @@ const spawnSubAgentInputSchema: ToolInputSchema = {
     },
     allowed_tools: {
       type: "array",
-      description: "未来字段；当前暂时忽略，实际执行继承父 run 工具权限。",
+      description: "可选工具收敛声明；实际执行取父 run 工具权限与该声明的交集，不能扩张权限。",
       items: {
         type: "string",
       },
@@ -737,7 +825,27 @@ const spawnSubAgentInputSchema: ToolInputSchema = {
       description: "额外的上下文信息，可选。",
     },
   },
-  required: ["role", "system_prompt", "task"],
+  required: ["role", "instructions", "task"],
+  additionalProperties: false,
+};
+
+const readSubAgentOutputInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    sub_run_id: {
+      type: "string",
+      description: "要读取输出的子 Agent run id。",
+    },
+    start_char: {
+      type: "number",
+      description: "从完整输出的第几个字符开始读取，默认 0。",
+    },
+    max_chars: {
+      type: "number",
+      description: `最多读取的字符数，默认 ${READ_SUB_AGENT_OUTPUT_DEFAULT_CHARS}，上限 ${READ_SUB_AGENT_OUTPUT_MAX_CHARS}。`,
+    },
+  },
+  required: ["sub_run_id"],
   additionalProperties: false,
 };
 
@@ -745,7 +853,7 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
   name: "spawn_sub_agent",
   description: "动态创建一个定制的子 Agent 并执行任务。当预置专家不满足需求时使用。",
   modelContract: {
-    purpose: "动态派生一个定制化的子 Agent，根据需要定义其角色、系统提示和可用工具。",
+    purpose: "动态创建一个定制化的子 Agent，根据需要定义其角色、行为指令和可用工具。",
     whenToUse: [
       "预置子 Agent 不能满足需求时",
       "需要特定角色的专家时",
@@ -757,15 +865,16 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
     ],
     inputNotes: [
       "role: 子 Agent 的角色名称和描述。",
-      "system_prompt: 完整的系统提示，定义子 Agent 的行为规范。",
+      "instructions: 行为指令，定义子 Agent 的职责、边界和输出要求。",
       "task: 需要子 Agent 完成的具体任务。",
-      "allowed_tools: 未来字段，当前暂时忽略；实际执行继承父 run 工具权限。",
+      "allowed_tools: 可选，声明此临时子 Agent 允许使用的工具名；实际执行取父 run 工具权限与该声明的交集，不能扩张权限。",
       "context: 可选，额外的上下文信息。",
     ],
     outputNotes: [
       "status: 执行状态，completed/failed/cancelled。",
       "summary: 轻量展示状态，不作为完整结果正文。",
       "full_output: 子 Agent 的完整输出内容；需要引用结果时优先使用该字段。",
+      "full_output_ref/continuation: 当输出过长或需要精确续读时，用 continuation.nextInput 调用 read_sub_agent_output。",
       "tool_calls: 子 Agent 调用工具的次数。",
       "model_rounds: 模型交互轮数。",
       "duration_ms: 执行耗时（毫秒）。",
@@ -776,7 +885,7 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
         title: "创建数据库迁移专家",
         input: {
           role: "数据库迁移专家",
-          system_prompt: "你是一名数据库迁移专家，擅长将 SQL Server 数据库迁移到 PostgreSQL。",
+          instructions: "你是一名数据库迁移专家，擅长将 SQL Server 数据库迁移到 PostgreSQL。",
           task: "分析当前数据库 schema 并制定迁移计划",
           allowed_tools: ["read_file", "list_dir", "grep_files"],
         },
@@ -784,7 +893,7 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
     ],
     runtimeHints: [
       { label: "available sub-agents", value: "code-expert, doc-expert, research-expert, review-expert, test-expert" },
-      { label: "allowed_tools", value: "currently ignored; sub-agent inherits parent run tools" },
+      { label: "allowed_tools", value: "optional restriction; effective tools are parent allowed tools intersect declared names" },
     ],
   },
   metadata: {
@@ -801,12 +910,68 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
   inputSchema: spawnSubAgentInputSchema,
 };
 
+const readSubAgentOutputToolDefinition: ToolDefinition = {
+  name: "read_sub_agent_output",
+  description: "按字符范围读取本轮子 Agent 的完整输出。当子 Agent 结果过长或需要精确续读时使用。",
+  modelContract: {
+    purpose: "读取当前父 run 内某个子 Agent run 的完整输出片段，作为 call_sub_agent/call_sub_agents/spawn_sub_agent 长输出的续读工具。",
+    whenToUse: [
+      "子 Agent 工具结果提示 full_output 被截断或给出 continuation/nextInput 时",
+      "需要重新读取某个子 Agent 输出的指定字符范围时",
+      "需要引用子 Agent 长输出中的后续证据时",
+    ],
+    whenNotToUse: [
+      "还没有调用过子 Agent 时",
+      "只需要调用新的专家子 Agent 时",
+      "要读取普通文件、命令日志或网页内容时",
+    ],
+    inputNotes: [
+      "sub_run_id: 子 Agent 结果中的 run_id，或 continuation.nextInput.sub_run_id。",
+      "start_char: 从 0 开始的字符偏移；使用 continuation.nextInput.start_char 可以继续读取。",
+      `max_chars: 可选读取窗口，默认 ${READ_SUB_AGENT_OUTPUT_DEFAULT_CHARS}，运行时会限制到 ${READ_SUB_AGENT_OUTPUT_MAX_CHARS} 以内。`,
+    ],
+    outputNotes: [
+      "content: 本次读取到的完整输出片段。",
+      "start_char/end_char/total_chars: 当前片段范围和完整输出长度。",
+      "has_more_after: 为 true 时继续使用 continuation.nextInput 读取后续片段。",
+      "continuation: 可直接用于下一次 read_sub_agent_output 的续读输入。",
+    ],
+    examples: [
+      {
+        title: "继续读取子 Agent 输出",
+        input: {
+          sub_run_id: "sub-agent-run_abc123",
+          start_char: 100000,
+          max_chars: 100000,
+        },
+      },
+    ],
+    runtimeHints: [
+      { label: "scope", value: "Only reads sub-agent outputs that belong to the current parent run." },
+      { label: "side effects", value: "read-only" },
+    ],
+  },
+  metadata: {
+    category: "other",
+    riskLevel: "low",
+    operationType: "read-only",
+    requiresConfirmation: false,
+    visibleResultPolicy: {
+      userVisible: "safe-preview",
+      maxPreviewChars: 1200,
+      omitRawOutput: true,
+    },
+  },
+  inputSchema: readSubAgentOutputInputSchema,
+};
+
 export function getSubAgentToolDefinitions(
   options: SubAgentToolDefinitionsOptions = {},
 ): readonly ToolDefinition[] {
   const definitions: ToolDefinition[] = [
     callSubAgentToolDefinition,
     callSubAgentsToolDefinition,
+    readSubAgentOutputToolDefinition,
   ];
 
   if (options.includeSpawnTool === true) {
@@ -1143,6 +1308,98 @@ function createCallSubAgentsExecutor(deps: SubAgentToolRuntimeDependencies): Too
   };
 }
 
+function createReadSubAgentOutputExecutor(deps: SubAgentToolRuntimeDependencies): ToolExecutor {
+  return {
+    definition: readSubAgentOutputToolDefinition,
+    execute: async (input, context) => {
+      const traceReader = deps.traceReader;
+      if (traceReader === undefined) {
+        throw new Error("read_sub_agent_output is unavailable because this run has no sub-agent trace reader.");
+      }
+      const record = asRecord(input);
+      const subRunId = stringOrFallback(record.sub_run_id, "").trim();
+      if (subRunId.length === 0) {
+        throw new Error("sub_run_id is required.");
+      }
+      const trace = traceReader.get(subRunId);
+      if (trace === undefined) {
+        throw new Error(`Sub-agent output not found: ${subRunId}`);
+      }
+      if (trace.parentRunId !== context.goalId) {
+        throw new Error(`Sub-agent output does not belong to the current run: ${subRunId}`);
+      }
+      if (trace.fullOutput === undefined) {
+        throw new Error(`Sub-agent output has no readable full_output: ${subRunId}`);
+      }
+
+      const startChar = nonNegativeIntegerOrDefault(record.start_char, "start_char", 0);
+      if (startChar > trace.fullOutput.length) {
+        throw new Error(`start_char exceeds sub-agent output length: ${startChar} > ${trace.fullOutput.length}`);
+      }
+      const maxChars = boundedPositiveIntegerOrDefault(
+        record.max_chars,
+        "max_chars",
+        READ_SUB_AGENT_OUTPUT_DEFAULT_CHARS,
+        READ_SUB_AGENT_OUTPUT_MAX_CHARS
+      );
+      const endChar = Math.min(trace.fullOutput.length, startChar + maxChars);
+      const content = trace.fullOutput.slice(startChar, endChar);
+      const hasMoreAfter = endChar < trace.fullOutput.length;
+      const continuation = hasMoreAfter
+        ? subAgentOutputContinuation(subRunId, endChar, maxChars)
+        : undefined;
+      const summary = hasMoreAfter
+        ? `读取子 Agent 输出 ${startChar}-${endChar} / ${trace.fullOutput.length} 字，仍有后续内容。`
+        : `读取子 Agent 输出 ${startChar}-${endChar} / ${trace.fullOutput.length} 字，已到末尾。`;
+      const result = {
+        sub_run_id: subRunId,
+        sub_agent_id: trace.subAgentId,
+        sub_agent_name: trace.subAgentName,
+        status: trace.status,
+        summary: trace.summary,
+        start_char: startChar,
+        end_char: endChar,
+        chars_returned: content.length,
+        total_chars: trace.fullOutput.length,
+        has_more_after: hasMoreAfter,
+        content,
+        continuation,
+      };
+      return {
+        action: "read_sub_agent_output",
+        status: "completed",
+        summary,
+        result,
+        truncated: hasMoreAfter,
+        canonicalResult: {
+          content: [{ type: "text", text: content }],
+          structuredContent: {
+            sub_run_id: subRunId,
+            sub_agent_id: trace.subAgentId,
+            sub_agent_name: trace.subAgentName,
+            status: trace.status,
+            start_char: startChar,
+            end_char: endChar,
+            chars_returned: content.length,
+            total_chars: trace.fullOutput.length,
+            has_more_after: hasMoreAfter,
+            continuation,
+          },
+          truncation: hasMoreAfter
+            ? {
+              truncated: true,
+              reason: "sub_agent_output_window",
+              omittedChars: trace.fullOutput.length - endChar,
+              continuation,
+            }
+            : undefined,
+          continuation,
+        },
+      };
+    },
+  };
+}
+
 function createSpawnSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): ToolExecutor {
   return {
     definition: spawnSubAgentToolDefinition,
@@ -1179,15 +1436,16 @@ function createSpawnSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): Too
 
       const record = asRecord(input);
       const role = stringOrFallback(record.role, "");
-      const systemPrompt = stringOrFallback(record.system_prompt, "");
+      const instructions = stringOrFallback(record.instructions, stringOrFallback(record.system_prompt, ""));
       const task = stringOrFallback(record.task, "");
+      const allowedTools = optionalStringArray(record.allowed_tools, "allowed_tools");
       const ctx = optionalString(record.context);
 
       if (role.length === 0) {
         throw new Error("role is required.");
       }
-      if (systemPrompt.length === 0) {
-        throw new Error("system_prompt is required.");
+      if (instructions.length === 0) {
+        throw new Error("instructions is required.");
       }
       if (task.length === 0) {
         throw new Error("task is required.");
@@ -1202,10 +1460,10 @@ function createSpawnSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): Too
         description: role,
         enabled: true,
         sourcePath: "",
-        inlineSystemPrompt: systemPrompt,
+        inlineSystemPrompt: instructions,
         whenToUse: [],
         whenNotToUse: [],
-        allowedTools: [],
+        allowedTools,
         sourceKind,
         sourceRootId: "spawned",
         sourcePrecedence: 999,
@@ -1256,11 +1514,13 @@ export function createSubAgentToolExecutors(
 ): readonly ToolExecutor[] {
   const runtimeDeps: SubAgentToolRuntimeDependencies = {
     ...deps,
+    traceReader: deps.traceReader ?? traceReaderFromSink(deps.traceSink),
     pendingApprovals: new SubAgentPendingApprovalStore(),
   };
   const executors: ToolExecutor[] = [
     createCallSubAgentExecutor(runtimeDeps),
     createCallSubAgentsExecutor(runtimeDeps),
+    createReadSubAgentOutputExecutor(runtimeDeps),
   ];
 
   if (deps.includeSpawnTool === true) {
@@ -1268,6 +1528,14 @@ export function createSubAgentToolExecutors(
   }
 
   return executors;
+}
+
+function traceReaderFromSink(traceSink: SubAgentRunTraceSink | undefined): SubAgentRunTraceReader | undefined {
+  const maybeReader = traceSink as { readonly get?: unknown } | undefined;
+  const get = maybeReader?.get;
+  return typeof get === "function"
+    ? { get: (subRunId: string) => get.call(traceSink, subRunId) as ReturnType<SubAgentRunTraceReader["get"]> }
+    : undefined;
 }
 
 export function registerSubAgentTools(
@@ -1282,6 +1550,8 @@ export function registerSubAgentTools(
     allowedTools: options.allowedTools,
     confirmationPolicy: options.confirmationPolicy,
     publishToolEvent: options.publishToolEvent,
+    traceSink: options.traceSink,
+    traceReader: options.traceReader,
     eventLog: options.eventLog,
   };
 

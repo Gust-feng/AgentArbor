@@ -318,7 +318,7 @@ function cacheSettledRunTranscriptNodes(settled: SettledRunProjection): void {
   if (conversationId === undefined) {
     return;
   }
-  const nodes = transcriptNodesFrom(settled.workView, settled.detail)
+  const nodes = transcriptNodesFrom(settled.workView)
     .filter((node) => node.runId === settled.runId);
   if (nodes.length === 0) {
     return;

@@ -6,6 +6,7 @@ import type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 import { frozenToolDefinitionsForRun } from "./capability-tool-definitions.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 import { createRunCapabilityPlan } from "./model-capability-registry.js";
+import { toolDefinitionContractHash } from "./tool-definition-contract.js";
 import { hasReadableSelectedSkillResources } from "./tool-center/adapters/skill-resource-tool.js";
 
 export type ResolveRunToolBoundaryInput = {
@@ -50,7 +51,8 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
             platform: input.platform,
             capabilityPlan,
           }),
-          input.toolCenter
+          input.toolCenter,
+          input.snapshot
         ),
         input.snapshot
       ),
@@ -104,9 +106,12 @@ export function hidePresetSubAgentToolsWithoutEnabledCatalog(
 
 export function restrictRunCapabilityResolutionToExecutableTools(
   resolution: RunCapabilityResolution,
-  toolCenter: ToolExecutionBroker | undefined
+  toolCenter: ToolExecutionBroker | undefined,
+  snapshot?: BasicAgentCapabilitySnapshot
 ): RunCapabilityResolution {
-  const executableTools = new Set(toolCenter?.list().map((tool) => tool.name) ?? []);
+  const executableDefinitions = new Map((toolCenter?.list() ?? []).map((tool) => [tool.name, tool]));
+  const executableTools = new Set(executableDefinitions.keys());
+  const frozenToolsByName = new Map(snapshot?.toolCatalog.tools.map((tool) => [tool.name, tool]) ?? []);
   if (executableTools.size === 0) {
     const hiddenExecutableToolCount = resolution.allowedTools.length;
     const warnings = capabilityWarningsAfterExecutableRestriction({
@@ -118,24 +123,57 @@ export function restrictRunCapabilityResolutionToExecutableTools(
         tool.modelVisible
           ? { ...tool, modelVisible: false, reasonCode: "no_executable_tool_runner" as const, reason: "本轮没有可执行的工具运行器。" }
           : tool
-      );
+    );
     return capabilityResolutionWithVisibleTools({ resolution, allowedTools: [], toolExposures, warnings });
   }
-  const allowedTools = resolution.allowedTools.filter((toolName) => executableTools.has(toolName));
+  const contractMismatchedTools = new Set<string>();
+  const allowedTools = resolution.allowedTools.filter((toolName) => {
+    if (!executableTools.has(toolName)) {
+      return false;
+    }
+    if (toolContractMatchesFrozenSnapshot(toolName, executableDefinitions, frozenToolsByName)) {
+      return true;
+    }
+    contractMismatchedTools.add(toolName);
+    return false;
+  });
   const hiddenExecutableToolCount = resolution.allowedTools.length - allowedTools.length;
+  const missingExecutableToolCount = resolution.allowedTools.filter((toolName) => !executableTools.has(toolName)).length;
   const warnings = hiddenExecutableToolCount <= 0
     ? resolution.warnings
     : capabilityWarningsAfterExecutableRestriction({
         warnings: resolution.warnings,
-        hiddenCount: hiddenExecutableToolCount,
+        hiddenCount: missingExecutableToolCount,
         noModelVisibleTools: allowedTools.length === 0,
+        contractMismatchCount: contractMismatchedTools.size,
       });
   const toolExposures = resolution.toolExposures.map((tool) =>
       tool.modelVisible && !executableTools.has(tool.name)
         ? { ...tool, modelVisible: false, reasonCode: "executable_tool_missing" as const, reason: "工具执行器当前未提供该工具。" }
+        : tool.modelVisible && contractMismatchedTools.has(tool.name)
+          ? {
+            ...tool,
+            modelVisible: false,
+            reasonCode: "tool_contract_mismatch" as const,
+            reason: "工具执行契约与本 run 创建时冻结的契约不一致。",
+          }
         : tool
     );
   return capabilityResolutionWithVisibleTools({ resolution, allowedTools, toolExposures, warnings });
+}
+
+function toolContractMatchesFrozenSnapshot(
+  toolName: string,
+  executableDefinitions: ReadonlyMap<string, ToolDefinition>,
+  frozenToolsByName: ReadonlyMap<string, BasicAgentCapabilitySnapshot["toolCatalog"]["tools"][number]>
+): boolean {
+  const frozenHash = frozenToolsByName.get(toolName)?.definitionHash;
+  if (frozenHash === undefined) {
+    return true;
+  }
+  const currentDefinition = executableDefinitions.get(toolName);
+  const currentHash = currentDefinition === undefined ? undefined : toolDefinitionContractHash(currentDefinition);
+  return currentHash !== undefined && currentHash === frozenHash;
 }
 
 export function reconcileRunCapabilityResolutionForSelectedSkillResources(
@@ -277,6 +315,7 @@ function capabilityWarningsAfterExecutableRestriction(input: {
   readonly warnings: readonly string[];
   readonly hiddenCount: number;
   readonly noModelVisibleTools: boolean;
+  readonly contractMismatchCount?: number;
 }): readonly string[] {
   const next = [...input.warnings];
   if (input.noModelVisibleTools && !next.includes("本轮没有可用工具。")) {
@@ -284,6 +323,12 @@ function capabilityWarningsAfterExecutableRestriction(input: {
   }
   if (input.hiddenCount > 0 && !next.some((warning) => warning.includes("工具执行器"))) {
     next.push(`本轮有 ${input.hiddenCount} 个策略可见工具没有对应的工具执行器。`);
+  }
+  if (
+    (input.contractMismatchCount ?? 0) > 0 &&
+    !next.some((warning) => warning.includes("工具执行契约"))
+  ) {
+    next.push(`本轮有 ${input.contractMismatchCount} 个工具执行契约与冻结快照不一致，已隐藏。`);
   }
   return next;
 }

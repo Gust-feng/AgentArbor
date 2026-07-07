@@ -31,6 +31,7 @@ import { discoverSkills, normalizeSkillRoots, parseSkillMarkdown, type SkillRoot
 import type { SkillStateStore } from "./skills/skill-state-store.js";
 import { discoverSubAgents, normalizeSubAgentRoots, type SubAgentDiscoveryOptions } from "./sub-agents/sub-agent-loader.js";
 import { SubAgentRegistry } from "./sub-agents/sub-agent-registry.js";
+import { toolCatalogContractHash } from "./tool-definition-contract.js";
 
 export type CapabilitySkillRootsInput = {
   readonly workspaceDirectory?: string;
@@ -558,6 +559,7 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     confirmationLabel: tool.confirmationLabel,
     visibleResultPolicy: tool.visibleResultPolicy,
     runtimeHints: tool.runtimeHints,
+    definitionHash: toolCatalogContractHash(tool),
     scopes: tool.scopes,
     enabled: tool.enabledByDefault,
     availability: tool.availability,

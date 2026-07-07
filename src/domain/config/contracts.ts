@@ -473,6 +473,7 @@ export type CapabilityToolCatalogItem = {
   readonly confirmationLabel: string;
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
   readonly runtimeHints?: readonly ToolRuntimeHint[];
+  readonly definitionHash?: string;
   readonly scopes: readonly CapabilityToolScope[];
   readonly enabled: boolean;
   readonly availability: "available" | "unavailable";
@@ -633,6 +634,7 @@ export type RunToolExposureReasonCode =
   | "available"
   | "no_executable_tool_runner"
   | "executable_tool_missing"
+  | "tool_contract_mismatch"
   | "selected_skill_resources_available"
   | "selected_skill_resources_unavailable"
   | "no_enabled_sub_agents";

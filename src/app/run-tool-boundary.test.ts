@@ -72,6 +72,31 @@ test("run tool boundary stays empty before a run capability snapshot exists", ()
   assert.equal(boundary.capabilityResolution, undefined);
 });
 
+test("run tool boundary hides executable tools when frozen definition hash drifts", () => {
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot([
+      tool("read_file", "read-only", { definitionHash: "sha256:old-read-file-contract" }),
+    ]),
+    goal: "inspect old run",
+    taskSoil: createTaskSoil({ rawGoal: "inspect old run" }),
+    toolCenter: executableToolBroker(["read_file"]),
+  });
+
+  assert.deepEqual(boundary.allowedTools, []);
+  assert.deepEqual(boundary.toolDefinitions, []);
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_file")?.reasonCode,
+    "tool_contract_mismatch"
+  );
+  assert.equal(
+    boundary.capabilityResolution?.warnings.some((warning) =>
+      warning === "本轮有 1 个工具执行契约与冻结快照不一致，已隐藏。"
+    ),
+    true
+  );
+});
+
 test("run tool boundary audits selected skill allowed-tools without hiding normal run tools", () => {
   const boundary = resolveRunToolBoundary({
     agentDefinition: DESKTOP_ROOT_AGENT,

@@ -1,0 +1,2418 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>工具解释输出预览</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../colors_and_type.css">
+  <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      --preview-page-width: 1380px;
+      --preview-reading-width: 880px;
+      --preview-probe-width: 392px;
+      --step-read: var(--state-info);
+      --step-search: color-mix(in srgb, var(--state-info) 72%, var(--color-primary));
+      --step-edit: var(--state-warning);
+      --step-command: color-mix(in srgb, var(--color-fg-secondary) 68%, var(--state-info));
+      --step-web: color-mix(in srgb, var(--color-primary) 58%, var(--state-info));
+      --step-other: var(--color-fg-secondary);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--color-bg);
+      color: var(--color-fg);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    body {
+      padding: 28px;
+      background:
+        radial-gradient(circle at top, color-mix(in srgb, var(--color-surface-raised) 18%, transparent) 0%, transparent 38%),
+        linear-gradient(180deg, color-mix(in srgb, var(--color-bg) 96%, var(--color-surface)) 0%, var(--color-bg) 100%);
+    }
+
+    button {
+      font: inherit;
+    }
+
+    code,
+    pre {
+      font-family: var(--font-mono);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .preview-shell {
+      display: grid;
+      gap: 36px;
+      max-width: var(--preview-page-width);
+      margin: 0 auto;
+    }
+
+    .preview-topbar {
+      display: grid;
+      gap: 14px;
+      padding: 0 0 14px;
+      border-bottom: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
+    }
+
+    .preview-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px 24px;
+      flex-wrap: wrap;
+    }
+
+    .preview-title-block {
+      min-width: 0;
+    }
+
+    .preview-title {
+      margin: 0;
+      font-size: 24px;
+      font-weight: var(--weight-semibold);
+      line-height: var(--leading-tight);
+      color: var(--color-fg);
+    }
+
+    .preview-controls {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px 16px;
+      flex-wrap: wrap;
+    }
+
+    .control-group {
+      display: grid;
+      gap: 6px;
+    }
+
+    .control-group > span {
+      font-size: 11px;
+      font-weight: var(--weight-semibold);
+      color: var(--color-fg-tertiary);
+      letter-spacing: 0;
+    }
+
+    .segmented {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+      padding: 4px;
+      border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+    }
+
+    .segmented button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 30px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--color-fg-tertiary);
+      cursor: pointer;
+      transition:
+        background-color var(--duration-normal) var(--ease-spring),
+        color var(--duration-normal) var(--ease-spring),
+        border-color var(--duration-normal) var(--ease-spring);
+    }
+
+    .segmented button[aria-pressed="true"] {
+      background: var(--color-surface);
+      color: var(--color-fg);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-border) 88%, transparent);
+    }
+
+    .segmented button:hover {
+      color: var(--color-fg);
+    }
+
+    .preview-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+      gap: 40px;
+      align-items: start;
+    }
+
+    .surface-card {
+      display: grid;
+      gap: 18px;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      background: none;
+    }
+
+    .surface-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding-bottom: 12px;
+      border-bottom: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
+    }
+
+    .surface-title-block {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .surface-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      width: fit-content;
+      padding: 0;
+      border-radius: 0;
+      border: 0;
+      background: none;
+      color: var(--color-fg-tertiary);
+      font-size: 11px;
+      font-weight: var(--weight-semibold);
+      line-height: 1;
+    }
+
+    .surface-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: var(--weight-semibold);
+      line-height: var(--leading-tight);
+      color: var(--color-fg);
+    }
+
+    .surface-subtitle {
+      display: none;
+    }
+
+    .metric-row {
+      display: none;
+    }
+
+    .timeline-shell {
+      width: min(100%, var(--preview-reading-width));
+      min-width: 0;
+    }
+
+    .timeline-steps {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .tool-step {
+      position: relative;
+      --tool-attention-color: transparent;
+      min-width: 0;
+      border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+      border-radius: 16px;
+      background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--color-surface) 98%, transparent) 0%,
+        color-mix(in srgb, var(--color-surface-raised) 14%, var(--color-surface)) 100%
+      );
+      box-shadow:
+        0 1px 0 color-mix(in srgb, white 52%, transparent) inset,
+        0 10px 24px color-mix(in srgb, var(--color-fg) 3%, transparent);
+      overflow: hidden;
+      transition:
+        border-color var(--duration-normal) var(--ease-spring),
+        background-color var(--duration-normal) var(--ease-spring),
+        box-shadow var(--duration-normal) var(--ease-spring);
+    }
+
+    .tool-step::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 1px;
+      background: color-mix(in srgb, white 56%, transparent);
+      pointer-events: none;
+    }
+
+    .tool-step[open] {
+      box-shadow:
+        0 1px 0 color-mix(in srgb, white 58%, transparent) inset,
+        0 16px 34px color-mix(in srgb, var(--color-fg) 5%, transparent);
+    }
+
+    .tool-step:hover {
+      border-color: color-mix(in srgb, var(--color-fg) 10%, var(--color-border));
+    }
+
+    .tool-step[data-phase="failed"],
+    .tool-step[data-phase="blocked"] {
+      --tool-attention-color: color-mix(in srgb, var(--state-error) 82%, transparent);
+      border-color: color-mix(in srgb, var(--state-error) 16%, var(--color-border));
+    }
+
+    .tool-step[data-phase="waiting_approval"] {
+      --tool-attention-color: color-mix(in srgb, var(--state-warning) 88%, transparent);
+      border-color: color-mix(in srgb, var(--state-warning) 18%, var(--color-border));
+    }
+
+    .tool-step[data-phase="executing"] {
+      --tool-attention-color: color-mix(in srgb, var(--state-info) 84%, transparent);
+      border-color: color-mix(in srgb, var(--state-info) 16%, var(--color-border));
+    }
+
+    .tool-step > summary {
+      list-style: none;
+      display: block;
+      padding: 18px 20px;
+      cursor: pointer;
+    }
+
+    .tool-step > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .tool-step-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      min-width: 0;
+      position: relative;
+    }
+
+    .tool-step-main {
+      display: grid;
+      gap: 0;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .tool-attention-edge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 8px;
+      min-height: 24px;
+      align-self: flex-start;
+      margin-top: 3px;
+      flex: 0 0 auto;
+    }
+
+    .tool-attention-edge::before {
+      content: "";
+      width: 3px;
+      height: 18px;
+      border-radius: 999px;
+      background: var(--tool-attention-color);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--tool-attention-color) 24%, transparent);
+    }
+
+    .tool-icon-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--color-surface-raised) 54%, var(--color-surface));
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--color-border-subtle) 84%, transparent),
+        0 6px 14px color-mix(in srgb, var(--color-fg) 3%, transparent);
+      flex: 0 0 auto;
+    }
+
+    .tool-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      color: var(--color-fg-secondary);
+      flex: 0 0 auto;
+    }
+
+    .tool-disclosure {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      margin-top: 5px;
+      color: color-mix(in srgb, var(--color-fg-tertiary) 78%, transparent);
+      flex: 0 0 auto;
+    }
+
+    .tool-disclosure i {
+      transition:
+        transform var(--duration-normal) var(--ease-spring),
+        color var(--duration-normal) var(--ease-spring);
+    }
+
+    .tool-step[open] .tool-disclosure i {
+      transform: rotate(90deg);
+      color: var(--color-fg-secondary);
+    }
+
+    .tool-step-body {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+      padding: 4px 20px 20px;
+      border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 74%, transparent);
+    }
+
+    .tool-detail-header {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+      padding-top: 10px;
+    }
+
+    .tool-detail-target {
+      min-width: 0;
+      color: var(--color-fg-tertiary);
+      font-size: 11px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+      font-family: var(--font-mono);
+    }
+
+    .fact-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .fact-chip {
+      position: relative;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 4px;
+      max-width: 100%;
+      color: var(--color-fg-tertiary);
+      font-size: 11px;
+      font-weight: var(--weight-medium);
+      line-height: 1.4;
+      white-space: normal;
+    }
+
+    .fact-chip + .fact-chip {
+      margin-left: 8px;
+      padding-left: 12px;
+    }
+
+    .fact-chip + .fact-chip::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 3px;
+      height: 3px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-fg-tertiary) 72%, transparent);
+      transform: translateY(-50%);
+    }
+
+    .fact-chip[data-monospace="true"] .fact-value {
+      font-family: var(--font-mono);
+    }
+
+    .fact-label {
+      color: var(--color-fg-tertiary);
+    }
+
+    .fact-value {
+      color: var(--color-fg-secondary);
+      font-weight: var(--weight-semibold);
+    }
+
+    .fact-chip[data-tone="success"] .fact-value {
+      color: var(--state-success);
+    }
+
+    .fact-chip[data-tone="warning"] .fact-value {
+      color: var(--state-warning);
+    }
+
+    .fact-chip[data-tone="danger"] .fact-value {
+      color: var(--state-error);
+    }
+
+    .tool-output-lead {
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      background: none;
+    }
+
+    .tool-output-lead p {
+      margin: 0;
+      min-width: 0;
+      color: var(--color-fg);
+      max-width: 68ch;
+      font-size: 15.5px;
+      font-weight: var(--weight-medium);
+      line-height: 1.72;
+      overflow-wrap: anywhere;
+    }
+
+    .tool-output-lead[data-tone="danger"] p {
+      color: color-mix(in srgb, var(--state-error) 82%, var(--color-fg));
+    }
+
+    .tool-output-lead[data-tone="warning"] p {
+      color: color-mix(in srgb, var(--state-warning) 88%, var(--color-fg));
+    }
+
+    .result-panel {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+      padding: 2px 0 0;
+      border-left: 0;
+    }
+
+    .preview-frame {
+      display: grid;
+      gap: 0;
+      min-width: 0;
+      border: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--color-surface-raised) 18%, var(--color-surface));
+      box-shadow:
+        0 1px 0 color-mix(in srgb, white 48%, transparent) inset,
+        0 12px 24px color-mix(in srgb, var(--color-fg) 3%, transparent);
+      overflow: hidden;
+    }
+
+    .preview-frame[data-tone="danger"] {
+      border-color: color-mix(in srgb, var(--state-error) 18%, var(--color-border));
+      background: color-mix(in srgb, var(--state-error-soft) 18%, var(--color-surface));
+    }
+
+    .preview-frame[data-tone="warning"] {
+      border-color: color-mix(in srgb, var(--state-warning) 20%, var(--color-border));
+      background: color-mix(in srgb, var(--state-warning-soft) 18%, var(--color-surface));
+    }
+
+    .preview-frame-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 13px 15px;
+      border-bottom: 1px solid color-mix(in srgb, var(--color-border-subtle) 86%, transparent);
+      background: color-mix(in srgb, var(--color-surface-raised) 28%, var(--color-surface));
+    }
+
+    .preview-frame-header-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-width: 0;
+      flex: 1 1 240px;
+    }
+
+    .preview-frame-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--color-surface) 42%, var(--color-surface-raised));
+      color: var(--color-fg-secondary);
+      flex: 0 0 auto;
+    }
+
+    .preview-frame-header[data-kind="file"] .preview-frame-icon {
+      color: color-mix(in srgb, var(--step-read) 74%, var(--color-fg));
+      background: color-mix(in srgb, var(--step-read) 12%, var(--color-surface));
+    }
+
+    .preview-frame-header[data-kind="source"] .preview-frame-icon {
+      color: color-mix(in srgb, var(--step-search) 74%, var(--color-fg));
+      background: color-mix(in srgb, var(--step-search) 12%, var(--color-surface));
+    }
+
+    .preview-frame-header[data-kind="diff"] .preview-frame-icon {
+      color: color-mix(in srgb, var(--step-edit) 78%, var(--color-fg));
+      background: color-mix(in srgb, var(--step-edit) 14%, var(--color-surface));
+    }
+
+    .preview-frame-header[data-kind="console"] .preview-frame-icon {
+      color: color-mix(in srgb, var(--step-command) 80%, var(--color-fg));
+      background: color-mix(in srgb, var(--step-command) 12%, var(--color-surface));
+    }
+
+    .preview-frame-header[data-kind="approval"] .preview-frame-icon {
+      color: color-mix(in srgb, var(--state-warning) 88%, var(--color-fg));
+      background: color-mix(in srgb, var(--state-warning-soft) 28%, var(--color-surface));
+    }
+
+    .preview-frame-title {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .preview-frame-title strong {
+      font-size: 12.5px;
+      font-weight: var(--weight-semibold);
+      color: var(--color-fg);
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+    }
+
+    .preview-frame-title span,
+    .preview-frame-meta {
+      color: var(--color-fg-secondary);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .preview-frame-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .preview-frame-meta-item {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-surface) 32%, var(--color-surface-raised));
+      color: var(--color-fg-secondary);
+      font-size: 11px;
+      font-weight: var(--weight-semibold);
+    }
+
+    .preview-text-note {
+      padding: 0;
+      border-radius: 0;
+      background: none;
+      color: var(--color-fg-secondary);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .preview-text-note[data-tone="danger"] {
+      background: none;
+      color: color-mix(in srgb, var(--state-error) 88%, var(--color-fg));
+    }
+
+    .preview-text-note[data-tone="warning"] {
+      background: none;
+      color: color-mix(in srgb, var(--state-warning) 88%, var(--color-fg));
+    }
+
+    .preview-text-note p {
+      margin: 0;
+    }
+
+    .preview-secondary {
+      display: grid;
+      gap: 0;
+      min-width: 0;
+      padding: 10px 14px 12px;
+      border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
+    }
+
+    .preview-secondary details {
+      min-width: 0;
+    }
+
+    .preview-secondary summary {
+      list-style: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      width: fit-content;
+      color: var(--color-fg-tertiary);
+      font-size: 11px;
+      font-weight: var(--weight-semibold);
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .preview-secondary summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .preview-secondary summary i {
+      transition: transform var(--duration-normal) var(--ease-spring);
+    }
+
+    .preview-secondary details[open] summary i {
+      transform: rotate(90deg);
+    }
+
+    .preview-secondary-body {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+      padding-top: 10px;
+    }
+
+    .preview-code-lines,
+    .preview-console-lines,
+    .preview-diff-lines {
+      display: grid;
+      min-width: 0;
+    }
+
+    .preview-code-line,
+    .preview-console-line,
+    .preview-diff-line {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      min-width: 0;
+      padding: 9px 14px;
+      font-size: 12.5px;
+      line-height: 1.6;
+    }
+
+    .preview-code-line:not(:last-child),
+    .preview-console-line:not(:last-child),
+    .preview-diff-line:not(:last-child) {
+      border-bottom: 1px solid color-mix(in srgb, var(--color-border-subtle) 70%, transparent);
+    }
+
+    .preview-code-line-number,
+    .preview-console-gutter,
+    .preview-diff-marker {
+      color: var(--color-fg-tertiary);
+      user-select: none;
+      min-width: 3ch;
+      text-align: right;
+    }
+
+    .preview-code-line code,
+    .preview-console-line code,
+    .preview-diff-line code {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      color: var(--color-fg);
+    }
+
+    .preview-code-line[data-highlight="true"] {
+      background: color-mix(in srgb, var(--state-info-soft) 34%, transparent);
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--step-read) 72%, transparent);
+    }
+
+    .preview-frame-code .preview-code-lines {
+      background: color-mix(in srgb, var(--color-surface) 78%, var(--color-surface-raised));
+    }
+
+    .preview-frame-code .preview-code-line-number {
+      color: color-mix(in srgb, var(--step-read) 52%, var(--color-fg-tertiary));
+    }
+
+    .preview-console-line[data-kind="prompt"] code {
+      color: var(--color-fg);
+    }
+
+    .preview-console-line[data-kind="success"] code {
+      color: var(--state-success);
+    }
+
+    .preview-console-line[data-kind="error"] code {
+      color: var(--state-error);
+    }
+
+    .preview-frame-console {
+      border-color: color-mix(in srgb, var(--step-command) 20%, var(--color-border));
+      background: color-mix(in srgb, #0d1117 95%, var(--color-surface));
+      box-shadow:
+        0 1px 0 color-mix(in srgb, white 10%, transparent) inset,
+        0 16px 28px color-mix(in srgb, black 10%, transparent);
+    }
+
+    .preview-terminal-shell {
+      display: grid;
+      gap: 0;
+      min-width: 0;
+      background: linear-gradient(
+        180deg,
+        color-mix(in srgb, #131923 96%, transparent) 0%,
+        color-mix(in srgb, #0d1117 98%, transparent) 100%
+      );
+    }
+
+    .preview-terminal-command {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+      padding: 13px 15px;
+      border-bottom: 1px solid color-mix(in srgb, white 8%, transparent);
+      background: color-mix(in srgb, white 4%, transparent);
+    }
+
+    .preview-terminal-command-main {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      min-width: 0;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+
+    .preview-terminal-prompt {
+      color: #6dd6a4;
+      user-select: none;
+    }
+
+    .preview-terminal-command code {
+      min-width: 0;
+      color: #f3f6fb;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .preview-terminal-inline-meta {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, white 8%, transparent);
+      color: #dce5f2;
+      font-size: 11px;
+      font-weight: var(--weight-semibold);
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+
+    .preview-terminal-banner {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      min-width: 0;
+      padding: 10px 14px;
+      border-bottom: 1px solid color-mix(in srgb, white 8%, transparent);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .preview-terminal-banner-dot {
+      width: 7px;
+      height: 7px;
+      margin-top: 4px;
+      border-radius: 999px;
+      background: color-mix(in srgb, #8ea0b8 72%, transparent);
+      flex: 0 0 auto;
+    }
+
+    .preview-terminal-banner p {
+      margin: 0;
+      min-width: 0;
+      color: #b8c6d8;
+      overflow-wrap: anywhere;
+    }
+
+    .preview-terminal-banner[data-tone="accent"] {
+      background: color-mix(in srgb, var(--state-info-soft) 14%, transparent);
+    }
+
+    .preview-terminal-banner[data-tone="accent"] .preview-terminal-banner-dot {
+      background: #6fbaff;
+      animation: terminalPulse 1.6s ease-in-out infinite;
+    }
+
+    .preview-terminal-banner[data-tone="danger"] {
+      background: color-mix(in srgb, var(--state-error-soft) 12%, transparent);
+    }
+
+    .preview-terminal-banner[data-tone="danger"] .preview-terminal-banner-dot {
+      background: #ff8d8d;
+    }
+
+    .preview-terminal-banner[data-tone="success"] .preview-terminal-banner-dot {
+      background: #78dca5;
+    }
+
+    .preview-terminal-scroll {
+      display: grid;
+      min-width: 0;
+      padding: 8px 0 10px;
+      background:
+        linear-gradient(180deg, color-mix(in srgb, white 3%, transparent) 0, transparent 36px),
+        transparent;
+    }
+
+    .preview-terminal-summary {
+      display: grid;
+      gap: 0;
+      min-width: 0;
+      border-bottom: 1px solid color-mix(in srgb, white 8%, transparent);
+    }
+
+    .preview-terminal-summary-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      min-width: 0;
+      padding: 8px 14px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .preview-terminal-summary-row + .preview-terminal-summary-row {
+      border-top: 1px solid color-mix(in srgb, white 5%, transparent);
+    }
+
+    .preview-terminal-summary-row[data-kind="progress"] {
+      background: color-mix(in srgb, var(--state-info-soft) 14%, transparent);
+    }
+
+    .preview-terminal-summary-row[data-kind="error"] {
+      background: color-mix(in srgb, var(--state-error-soft) 10%, transparent);
+    }
+
+    .preview-terminal-summary-row[data-kind="success"] {
+      background: color-mix(in srgb, var(--state-success-soft) 10%, transparent);
+    }
+
+    .preview-terminal-summary-mark {
+      width: 14px;
+      color: color-mix(in srgb, #93a5bc 76%, transparent);
+      text-align: center;
+      user-select: none;
+    }
+
+    .preview-terminal-summary-row[data-kind="progress"] .preview-terminal-summary-mark {
+      color: #7fbfff;
+    }
+
+    .preview-terminal-summary-row[data-kind="error"] .preview-terminal-summary-mark {
+      color: #ff9c9c;
+    }
+
+    .preview-terminal-summary-row[data-kind="success"] .preview-terminal-summary-mark {
+      color: #7fe0af;
+    }
+
+    .preview-terminal-summary-row code {
+      min-width: 0;
+      color: #dce5f2;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .preview-frame-console .preview-console-lines {
+      background: transparent;
+    }
+
+    .preview-frame-console .preview-console-line {
+      grid-template-columns: 14px minmax(0, 1fr);
+      gap: 12px;
+      padding: 7px 14px;
+      border-bottom: 0;
+    }
+
+    .preview-frame-console .preview-console-line[data-kind="progress"] {
+      background: color-mix(in srgb, var(--state-info-soft) 18%, transparent);
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--state-info) 64%, transparent);
+    }
+
+    .preview-frame-console .preview-console-line[data-kind="success"] {
+      background: color-mix(in srgb, var(--state-success-soft) 14%, transparent);
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--state-success) 64%, transparent);
+    }
+
+    .preview-frame-console .preview-console-line[data-kind="error"] {
+      background: color-mix(in srgb, var(--state-error-soft) 12%, transparent);
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--state-error) 68%, transparent);
+    }
+
+    .preview-frame-console .preview-console-gutter {
+      color: color-mix(in srgb, #6f839c 76%, transparent);
+    }
+
+    .preview-frame-console .preview-console-line code {
+      color: #dce5f2;
+    }
+
+    .preview-frame-console .preview-console-line[data-kind="prompt"] code {
+      color: #f3f6fb;
+    }
+
+    .preview-frame-console .preview-console-line[data-kind="success"] code {
+      color: #8be2b7;
+    }
+
+    .preview-frame-console .preview-console-line[data-kind="error"] code {
+      color: #ffb4b4;
+    }
+
+    .preview-frame-console .preview-console-line[data-kind="progress"] code {
+      color: #b6d8ff;
+    }
+
+    .preview-secondary[data-variant="console"] {
+      padding-top: 10px;
+      padding-bottom: 8px;
+      border-top-color: color-mix(in srgb, white 8%, transparent);
+    }
+
+    .preview-secondary[data-variant="console"] summary {
+      color: color-mix(in srgb, #9eb0c8 82%, transparent);
+    }
+
+    .preview-secondary[data-variant="console"] .preview-secondary-body {
+      padding-top: 8px;
+    }
+
+    .preview-secondary[data-variant="console"] .preview-console-lines {
+      padding-top: 2px;
+    }
+
+    .preview-console-cursor-line {
+      display: grid;
+      grid-template-columns: 14px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 7px 14px 3px;
+    }
+
+    .preview-console-cursor-line span {
+      color: color-mix(in srgb, #6f839c 76%, transparent);
+      text-align: right;
+    }
+
+    .preview-console-cursor-line code {
+      display: inline-flex;
+      align-items: center;
+      min-height: 18px;
+    }
+
+    .preview-terminal-caret {
+      width: 8px;
+      height: 15px;
+      border-radius: 2px;
+      background: #6dd6a4;
+      animation: caretBlink 1s step-end infinite;
+    }
+
+    .preview-diff-line[data-kind="file"] code,
+    .preview-diff-line[data-kind="hunk"] code {
+      color: var(--color-fg-secondary);
+    }
+
+    .preview-diff-line[data-kind="add"] {
+      background: color-mix(in srgb, var(--state-success-soft) 30%, transparent);
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--state-success) 72%, transparent);
+    }
+
+    .preview-diff-line[data-kind="delete"] {
+      background: color-mix(in srgb, var(--state-error-soft) 22%, transparent);
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--state-error) 72%, transparent);
+    }
+
+    .preview-diff-line[data-kind="add"] code {
+      color: color-mix(in srgb, var(--state-success) 90%, var(--color-fg));
+    }
+
+    .preview-diff-line[data-kind="delete"] code {
+      color: color-mix(in srgb, var(--state-error) 90%, var(--color-fg));
+    }
+
+    .preview-frame-diff .preview-diff-lines {
+      background: color-mix(in srgb, var(--color-surface) 72%, var(--color-surface-raised));
+    }
+
+    .preview-source {
+      display: grid;
+      gap: 0;
+      background: color-mix(in srgb, var(--color-surface) 82%, var(--color-surface-raised));
+    }
+
+    .preview-source-card {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+    }
+
+    .preview-source-card:not(:last-child) {
+      border-bottom: 1px solid color-mix(in srgb, var(--color-border-subtle) 70%, transparent);
+    }
+
+    .preview-source-main {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .preview-source-top {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
+    .preview-source-top strong {
+      min-width: 0;
+      color: var(--color-fg);
+      font-size: var(--text-sm);
+      font-weight: var(--weight-semibold);
+      overflow-wrap: anywhere;
+    }
+
+    .preview-source-domain {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-surface-raised) 48%, var(--color-surface));
+      color: var(--color-fg-tertiary);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .preview-source-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px 12px;
+      flex-wrap: wrap;
+      color: var(--color-fg-secondary);
+      font-size: var(--text-xs);
+      line-height: 1.4;
+    }
+
+    .preview-source-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      color: var(--color-fg-tertiary);
+      background: color-mix(in srgb, var(--color-surface-raised) 52%, var(--color-surface));
+      flex: 0 0 auto;
+    }
+
+    .preview-source-link:hover {
+      color: var(--color-fg);
+      background: color-mix(in srgb, var(--color-surface-raised) 72%, var(--color-surface));
+    }
+
+    .approval-frame {
+      display: grid;
+      gap: 0;
+    }
+
+    .approval-body {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      background: color-mix(in srgb, var(--state-warning-soft) 10%, var(--color-surface));
+    }
+
+    .approval-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--color-fg-secondary);
+      font-size: var(--text-sm);
+    }
+
+    .approval-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .approval-list li::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      margin-top: 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--state-warning) 72%, transparent);
+      flex: 0 0 auto;
+    }
+
+    .probe-card {
+      align-content: start;
+    }
+
+    .probe-shell {
+      width: 100%;
+      max-width: var(--preview-probe-width);
+      border: 1px solid color-mix(in srgb, var(--color-border-subtle) 88%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+      padding: 0;
+      box-shadow:
+        0 1px 0 color-mix(in srgb, white 48%, transparent) inset,
+        0 12px 28px color-mix(in srgb, var(--color-fg) 4%, transparent);
+    }
+
+    .probe-screen {
+      display: grid;
+      gap: 14px;
+      min-height: 100%;
+      padding: 14px;
+      border-radius: 0;
+      background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--color-surface) 98%, transparent) 0%,
+        color-mix(in srgb, var(--color-surface-raised) 14%, var(--color-surface)) 100%
+      );
+      border: 0;
+    }
+
+    .probe-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding-bottom: 10px;
+      border-bottom: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
+    }
+
+    .probe-header strong {
+      font-size: 12px;
+      font-weight: var(--weight-semibold);
+      color: var(--color-fg);
+    }
+
+    .probe-header span {
+      color: var(--color-fg-tertiary);
+      font-size: 11px;
+      text-transform: none;
+    }
+
+    @media (max-width: 1080px) {
+      .preview-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .timeline-shell {
+        width: 100%;
+      }
+    }
+
+    @media (max-width: 720px) {
+      body {
+        padding: 18px;
+      }
+
+      .preview-title {
+        font-size: 21px;
+      }
+
+      .tool-step > summary,
+      .tool-step-body {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .tool-step-card {
+        gap: 12px;
+      }
+
+      .tool-icon-badge {
+        width: 28px;
+        height: 28px;
+      }
+
+      .tool-disclosure {
+        width: 24px;
+        height: 24px;
+      }
+
+      .preview-terminal-command {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .preview-terminal-inline-meta {
+        margin-left: 26px;
+      }
+
+      .preview-code-line,
+      .preview-console-line,
+      .preview-diff-line {
+        grid-template-columns: 22px minmax(0, 1fr);
+      }
+
+    }
+
+    @keyframes terminalPulse {
+      0%,
+      100% {
+        opacity: 0.45;
+      }
+      50% {
+        opacity: 1;
+      }
+    }
+
+    @keyframes caretBlink {
+      0%,
+      49% {
+        opacity: 1;
+      }
+      50%,
+      100% {
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="preview-shell">
+    <section class="preview-topbar">
+      <div class="preview-title-row">
+        <div class="preview-title-block">
+          <h1 class="preview-title">工具解释输出</h1>
+        </div>
+
+        <div class="preview-controls">
+          <label class="control-group">
+            <span>外观</span>
+            <div class="segmented">
+              <button type="button" data-control="theme" data-value="light" aria-pressed="true">
+                <i data-lucide="sun-medium" style="width: 14px; height: 14px;"></i>
+                亮
+              </button>
+              <button type="button" data-control="theme" data-value="dark" aria-pressed="false">
+                <i data-lucide="moon-star" style="width: 14px; height: 14px;"></i>
+                暗
+              </button>
+            </div>
+          </label>
+
+          <label class="control-group">
+            <span>结果</span>
+            <div class="segmented">
+              <button type="button" data-control="density" data-value="expanded" aria-pressed="true">
+                <i data-lucide="panel-bottom-open" style="width: 14px; height: 14px;"></i>
+                展开
+              </button>
+              <button type="button" data-control="density" data-value="collapsed" aria-pressed="false">
+                <i data-lucide="panel-bottom-close" style="width: 14px; height: 14px;"></i>
+                收起
+              </button>
+            </div>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="preview-grid">
+      <article class="surface-card">
+        <header class="surface-header">
+          <div class="surface-title-block">
+            <span class="surface-chip">普通会话</span>
+            <h2 class="surface-title">主阅读宽度</h2>
+          </div>
+        </header>
+
+        <div id="main-timeline-host"></div>
+      </article>
+
+      <aside class="surface-card probe-card">
+        <header class="surface-header">
+          <div class="surface-title-block">
+            <span class="surface-chip">窄宽度</span>
+            <h2 class="surface-title">320px</h2>
+          </div>
+        </header>
+        <div class="probe-shell">
+          <div class="probe-screen">
+            <div class="probe-header">
+              <strong>同一条时间线</strong>
+              <span id="probe-mode">expanded</span>
+            </div>
+            <div id="probe-timeline-host"></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      theme: "light",
+      density: "expanded",
+    };
+
+    function fact(label, value, tone, priority, monospace) {
+      return {
+        label,
+        value,
+        tone: tone ?? "neutral",
+        priority: priority ?? "primary",
+        monospace: monospace === true,
+      };
+    }
+
+    // Preview-only target contract: the first text block in result.content[]
+    // is rendered as the mandatory explanatory output of the tool itself.
+    // The rest of the result stays MCP-like: content[] + structuredContent + isError.
+    const ordinaryConversation = {
+      title: "普通会话里的工具解释输出",
+      steps: [
+        {
+          id: "read-existing-ui",
+          tool: {
+            kind: "read",
+            name: "read_file",
+            target: "panel-ui/transcript-timeline.tsx",
+          },
+          execution: { phase: "completed" },
+          status: { label: "完成", tone: "success" },
+          primaryFacts: [
+            fact("定位", "284-288", "neutral", "primary", true),
+          ],
+          result: {
+            content: [
+              {
+                type: "text",
+                text: "旧视图还把 detail 文案直接塞进活动行，动作、解释和结果没有拆层。",
+              },
+              {
+                type: "code",
+                presentation: "file",
+                title: "src/app/panel-ui/src/components/transcript-timeline.tsx",
+                subtitle: "284-288",
+                lineStart: 284,
+                highlights: [287],
+                text: [
+                  "function ActivityLine(props: {",
+                  "  readonly item: ActivityItem;",
+                  "}): React.ReactElement {",
+                  "  return <span className=\"agent-activity-detail\">{item.copy.detail}</span>;",
+                  "}",
+                ].join("\n"),
+              },
+            ],
+            structuredContent: {
+              kind: "read_result",
+              path: "src/app/panel-ui/src/components/transcript-timeline.tsx",
+              startLine: 284,
+              endLine: 288,
+              highlightedLines: [287],
+            },
+            isError: false,
+          },
+        },
+        {
+          id: "search-reference-shapes",
+          tool: {
+            kind: "search",
+            name: "search",
+            target: "tool step narration design",
+          },
+          execution: { phase: "completed" },
+          status: { label: "完成", tone: "success" },
+          primaryFacts: [
+            fact("结果", "6 条", "success", "primary"),
+          ],
+          result: {
+            content: [
+              {
+                type: "text",
+                text: "来源已够，解释句可以被当作工具结果的默认输出。",
+              },
+            ],
+            structuredContent: {
+              kind: "search_results",
+              query: "\"agent tool step narration design\"",
+              resultsReturned: 6,
+              results: [
+                {
+                  title: "Using tools",
+                  source: "developers.openai.com",
+                  meta: ["官方指南", "tools"],
+                  url: "https://developers.openai.com/api/docs/guides/tools",
+                },
+                {
+                  title: "Function calling",
+                  source: "developers.openai.com",
+                  meta: ["官方指南", "function calling"],
+                  url: "https://developers.openai.com/api/docs/guides/function-calling",
+                },
+                {
+                  title: "MCP Tools Spec",
+                  source: "modelcontextprotocol.io",
+                  meta: ["官方规范", "server tools"],
+                  url: "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+                },
+                {
+                  title: "Apps SDK Reference",
+                  source: "developers.openai.com",
+                  meta: ["官方指南", "apps sdk"],
+                  url: "https://developers.openai.com/apps-sdk/reference",
+                },
+                {
+                  title: "Tool calling guide",
+                  source: "platform.openai.com",
+                  meta: ["官方文档", "guide"],
+                  url: "https://platform.openai.com/docs/guides/function-calling",
+                },
+                {
+                  title: "MCP Overview",
+                  source: "modelcontextprotocol.io",
+                  meta: ["官方规范", "overview"],
+                  url: "https://modelcontextprotocol.io/docs/learn/overview",
+                },
+              ],
+            },
+            isError: false,
+          },
+        },
+        {
+          id: "edit-preview-contract",
+          tool: {
+            kind: "edit",
+            name: "edit_file",
+            target: "tool-display-preview.html",
+          },
+          execution: { phase: "completed" },
+          status: { label: "完成", tone: "success" },
+          primaryFacts: [
+            fact("变更", "+78 / -26", "warning", "primary", true),
+          ],
+          result: {
+            content: [
+              {
+                type: "text",
+                text: "主卡片现在只保留一句解释输出，工具类型和签名信息都退到展开层。",
+              },
+              {
+                type: "code",
+                presentation: "diff",
+                title: "agentarbor-ui-redesign/pages/tool-display-preview.html",
+                text: [
+                  "+++ agentarbor-ui-redesign/pages/tool-display-preview.html",
+                  "@@",
+                  "+<details class=\"tool-step\">...</details>",
+                  "+<summary><div class=\"tool-step-card\">...</div></summary>",
+                  "+<div class=\"tool-step-body\">...</div>",
+                  "@@",
+                  "-<div class=\"tool-signature\">...</div>",
+                  "+${renderLeadOutput(step)}",
+                  "@@",
+                  "-${renderStepSignature(step)}",
+                  "+${renderApprovalResult(step, structured)}",
+                  "+${renderSecondaryDisclosure(\"原始输出\", body)}",
+                ].join("\n"),
+              },
+            ],
+            structuredContent: {
+              kind: "file_diff_preview",
+              path: "agentarbor-ui-redesign/pages/tool-display-preview.html",
+              added: 78,
+              removed: 26,
+            },
+            isError: false,
+          },
+        },
+        {
+          id: "command-lint-finished",
+          tool: {
+            kind: "command",
+            name: "shell_command",
+            target: "pnpm lint:panel",
+          },
+          execution: { phase: "completed" },
+          status: { label: "完成", tone: "success" },
+          result: {
+            content: [
+              {
+                type: "text",
+                text: "命令已经跑完，只保留真正有判断价值的两条，其余终端内容收进详情。",
+              },
+              {
+                type: "code",
+                presentation: "console",
+                title: "pnpm lint:panel",
+                subtitle: "stdout",
+                text: [
+                  "$ pnpm lint:panel",
+                  "Scope: panel-ui",
+                  "eslint src/app/panel-ui --ext .ts,.tsx",
+                  "src/app/panel-ui/src/components/tool-step.tsx",
+                  "src/app/panel-ui/src/components/tool-result.tsx",
+                  "src/app/panel-ui/src/components/transcript-timeline.tsx",
+                  "3 files checked.",
+                  "0 problems.",
+                  "Done in 8.4s.",
+                ].join("\n"),
+              },
+            ],
+            structuredContent: {
+              kind: "command_summary",
+              commandLine: "pnpm lint:panel",
+              cwd: "Z:\\AgentArbor",
+              durationMs: 8420,
+              exitCode: 0,
+            },
+            isError: false,
+          },
+        },
+        {
+          id: "command-verify-running",
+          tool: {
+            kind: "command",
+            name: "shell_command",
+            target: "pnpm typecheck:panel",
+          },
+          execution: { phase: "executing" },
+          status: { label: "运行中", tone: "accent" },
+          primaryFacts: [
+            fact("耗时", "12.4s", "neutral", "primary", true),
+          ],
+          result: {
+            content: [
+              {
+                type: "text",
+                text: "类型检查还在跑，目前停在 panel 组件扫描。",
+              },
+              {
+                type: "code",
+                presentation: "console",
+                title: "pnpm typecheck:panel",
+                subtitle: "stdout",
+                text: [
+                  "$ pnpm typecheck:panel",
+                  "Scope: panel-ui",
+                  "tsc -p tsconfig.panel.json --noEmit",
+                  "Found 142 files.",
+                  "src/app/panel-ui/src/components/activity-card.tsx(41,3): checking...",
+                  "src/app/panel-ui/src/components/activity-feed.tsx(102,7): checking...",
+                  "src/app/panel-ui/src/components/tool-step.tsx(88,5): checking...",
+                  "src/app/panel-ui/src/components/tool-result.tsx(142,7): checking...",
+                  "src/app/panel-ui/src/components/transcript-timeline.tsx(289,15): checking...",
+                  "src/app/panel-ui/src/components/transcript-timeline.tsx(301,11): checking...",
+                  "src/app/panel-ui/src/components/transcript-item.tsx(57,9): checking...",
+                  "src/app/panel-ui/src/components/workbench-main.tsx(219,7): checking...",
+                ].join("\n"),
+              },
+            ],
+            structuredContent: {
+              kind: "command_summary",
+              commandLine: "pnpm typecheck:panel",
+              cwd: "Z:\\AgentArbor",
+              durationMs: 12400,
+              exitCode: null,
+            },
+            isError: false,
+          },
+        },
+        {
+          id: "command-build-failed",
+          tool: {
+            kind: "command",
+            name: "shell_command",
+            target: "pnpm build:node",
+          },
+          execution: { phase: "failed" },
+          status: { label: "失败", tone: "danger" },
+          primaryFacts: [
+            fact("exit", "2", "danger", "primary", true),
+          ],
+          result: {
+            content: [
+              {
+                type: "text",
+                tone: "danger",
+                text: "构建卡在一个未闭合的 JSX 标签。",
+              },
+              {
+                type: "code",
+                presentation: "console",
+                title: "pnpm build:node",
+                subtitle: "stderr",
+                text: [
+                  "$ pnpm build:node",
+                  "Scope: panel-ui",
+                  "src/app/panel-ui/src/components/tool-result.tsx(101,5): building...",
+                  "src/app/panel-ui/src/components/tool-result.tsx(112,7): building...",
+                  "src/app/panel-ui/src/components/tool-result.tsx(118,7): error TS17008: JSX element 'section' has no corresponding closing tag.",
+                  "src/app/panel-ui/src/components/tool-result.tsx(136,3): error TS1005: ')' expected.",
+                  "src/app/panel-ui/src/components/tool-result.tsx(148,1): error TS1381: Unexpected token. Did you mean `{'}'}` or `&rbrace;`?",
+                  "Build failed with 1 error.",
+                ].join("\n"),
+              },
+            ],
+            structuredContent: {
+              kind: "command_summary",
+              commandLine: "pnpm build:node",
+              cwd: "Z:\\AgentArbor",
+              durationMs: 3180,
+              exitCode: 2,
+            },
+            isError: true,
+          },
+        },
+        {
+          id: "approval-delete-log",
+          tool: {
+            kind: "other",
+            name: "confirmation_gate",
+            target: "删除 logs/runtime-trace.ndjson",
+          },
+          execution: { phase: "waiting_approval" },
+          status: { label: "待确认", tone: "warning" },
+          primaryFacts: [
+            fact("风险", "medium", "warning", "primary", true),
+          ],
+          result: {
+            content: [
+              {
+                type: "text",
+                tone: "warning",
+                text: "删除还未执行，需要先确认它是否属于允许清理的范围。",
+              },
+            ],
+            structuredContent: {
+              kind: "approval_request",
+              actionSummary: "删除 logs/runtime-trace.ndjson",
+              riskLevel: "medium",
+              affectedResources: ["logs/runtime-trace.ndjson"],
+            },
+            isError: false,
+          },
+        },
+      ],
+    };
+
+    const iconNames = {
+      read: "file-text",
+      search: "search",
+      edit: "pencil-line",
+      command: "terminal-square",
+      web: "globe-2",
+      other: "sparkles",
+    };
+
+    const densityLabels = {
+      expanded: "展开",
+      collapsed: "收起",
+    };
+
+    const frameIcons = {
+      file: "file-code-2",
+      source: "search",
+      diff: "git-compare-arrows",
+      console: "terminal-square",
+      approval: "shield-alert",
+      generic: "align-left",
+    };
+
+    const consolePatterns = {
+      error: /error|unexpected|failed/i,
+      progress: /checking|scanning|running|starting|pending|watching|building|linting/i,
+      success: /done|completed|passed|ok|0 problems|no issues|generated|created|saved|updated|wrote|checked\./i,
+      boilerplate: /^Scope:|^tsc\b|^eslint\b|^Found \d+ files\.?|^Done in \d/i,
+    };
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function applyTheme() {
+      document.documentElement.classList.remove("light", "dark");
+      document.documentElement.classList.add(state.theme);
+    }
+
+    function updateControlState() {
+      document.querySelectorAll("[data-control]").forEach((button) => {
+        button.setAttribute(
+          "aria-pressed",
+          button.dataset.value === state[button.dataset.control] ? "true" : "false",
+        );
+      });
+    }
+
+    function hasAttentionState(step) {
+      return step.execution.phase === "executing"
+        || step.execution.phase === "waiting_approval"
+        || step.execution.phase === "failed"
+        || step.execution.phase === "blocked"
+        || step.execution.phase === "cancelled";
+    }
+
+    function renderFactChip(item) {
+      return `
+        <span class="fact-chip" data-priority="${item.priority}" data-tone="${item.tone}" ${item.monospace ? 'data-monospace="true"' : ""}>
+          <span class="fact-label">${escapeHtml(item.label)}</span>
+          <span class="fact-value">${escapeHtml(item.value)}</span>
+        </span>
+      `;
+    }
+
+    function previewTone(step, block) {
+      if (block?.tone) return block.tone;
+      if (step.execution.phase === "failed" || step.execution.phase === "blocked") return "danger";
+      if (step.execution.phase === "waiting_approval") return "warning";
+      return "neutral";
+    }
+
+    function frameMetaItems(meta) {
+      if (Array.isArray(meta)) return meta.filter((item) => typeof item === "string" && item.length > 0);
+      if (typeof meta === "string" && meta.length > 0) return [meta];
+      return [];
+    }
+
+    function renderFrameHeader(kind, title, subtitle, meta) {
+      const metaItems = frameMetaItems(meta);
+      if (!title && !subtitle && metaItems.length === 0) return "";
+      return `
+        <div class="preview-frame-header" data-kind="${escapeHtml(kind)}">
+          <div class="preview-frame-header-main">
+            <span class="preview-frame-icon">
+              <i data-lucide="${frameIcons[kind] ?? frameIcons.generic}" style="width: 14px; height: 14px;"></i>
+            </span>
+            <div class="preview-frame-title">
+              ${title ? `<strong>${escapeHtml(title)}</strong>` : ""}
+              ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}
+            </div>
+          </div>
+          ${metaItems.length > 0 ? `<div class="preview-frame-meta">
+            ${metaItems.map((item) => `<span class="preview-frame-meta-item">${escapeHtml(item)}</span>`).join("")}
+          </div>` : ""}
+        </div>
+      `;
+    }
+
+    function renderSecondaryDisclosure(label, body, options) {
+      const content = String(body ?? "").trim();
+      if (content.length === 0) return "";
+      const open = options?.open ? " open" : "";
+      const variant = options?.variant ? ` data-variant="${escapeHtml(options.variant)}"` : "";
+      return `
+        <div class="preview-secondary"${variant}>
+          <details${open}>
+            <summary>
+              <i data-lucide="chevron-right" style="width: 12px; height: 12px;"></i>
+              ${escapeHtml(label)}
+            </summary>
+            <div class="preview-secondary-body">${body}</div>
+          </details>
+        </div>
+      `;
+    }
+
+    function renderCodeLines(content, lineStart, highlights) {
+      const start = Number.isFinite(lineStart) ? lineStart : 1;
+      const highlightSet = new Set(Array.isArray(highlights) ? highlights : []);
+      return content.split("\n").map((line, index) => `
+        <div class="preview-code-line" data-highlight="${highlightSet.has(start + index) ? "true" : "false"}">
+          <span class="preview-code-line-number">${start + index}</span>
+          <code>${escapeHtml(line.length === 0 ? " " : line)}</code>
+        </div>
+      `).join("");
+    }
+
+    function renderConsoleLines(content) {
+      return content.split("\n").map((line) => {
+        let kind = "muted";
+        let gutter = "·";
+        let text = line;
+        if (line.startsWith("$ ")) {
+          kind = "prompt";
+          gutter = "$";
+          text = line.slice(2);
+        } else if (consolePatterns.progress.test(line)) {
+          kind = "progress";
+          gutter = ">";
+        } else if (consolePatterns.success.test(line)) {
+          kind = "success";
+          gutter = "+";
+        } else if (consolePatterns.error.test(line)) {
+          kind = "error";
+          gutter = "!";
+        } else if (line.trim().length === 0) {
+          gutter = " ";
+          text = " ";
+        }
+        return `
+          <div class="preview-console-line" data-kind="${kind}">
+            <span class="preview-console-gutter">${escapeHtml(gutter)}</span>
+            <code>${escapeHtml(text.length === 0 ? " " : text)}</code>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function splitConsoleTranscript(content) {
+      const lines = String(content ?? "").split("\n");
+      let commandLine = "";
+      if (lines[0]?.startsWith("$ ")) {
+        commandLine = lines.shift().slice(2);
+      }
+      return {
+        commandLine,
+        output: lines.join("\n"),
+      };
+    }
+
+    function meaningfulConsoleLines(lines) {
+      return lines.filter((line) => !consolePatterns.boilerplate.test(line));
+    }
+
+    function recentDistinct(lines, count) {
+      const picked = [];
+      const seen = new Set();
+      for (let index = lines.length - 1; index >= 0 && picked.length < count; index -= 1) {
+        const line = lines[index];
+        if (!line || seen.has(line)) continue;
+        seen.add(line);
+        picked.push(line);
+      }
+      return picked.reverse();
+    }
+
+    function classifyConsoleLine(line) {
+      const text = String(line ?? "");
+      if (consolePatterns.error.test(text)) {
+        return { kind: "error", mark: "!" };
+      }
+      if (consolePatterns.progress.test(text)) {
+        return { kind: "progress", mark: ">" };
+      }
+      if (consolePatterns.success.test(text)) {
+        return { kind: "success", mark: "+" };
+      }
+      return { kind: "muted", mark: "·" };
+    }
+
+    function consoleSummaryLines(step, transcript) {
+      const lines = String(transcript.output ?? "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (lines.length === 0) return [];
+      const reduced = meaningfulConsoleLines(lines);
+      const candidates = reduced.length > 0 ? reduced : lines;
+
+      if (step.execution.phase === "failed" || step.execution.phase === "blocked") {
+        const errors = candidates.filter((line) => consolePatterns.error.test(line));
+        if (errors.length > 0) return recentDistinct(errors, 2);
+        return recentDistinct(candidates, 2);
+      }
+
+      if (step.execution.phase === "executing") {
+        return recentDistinct(candidates, 3);
+      }
+
+      const successLines = candidates.filter((line) => consolePatterns.success.test(line));
+      if (successLines.length > 0) return recentDistinct(successLines, 2);
+      return recentDistinct(candidates, 2);
+    }
+
+    function renderConsoleSummary(step, transcript) {
+      const lines = consoleSummaryLines(step, transcript);
+      if (lines.length === 0) return "";
+      return `
+        <div class="preview-terminal-summary">
+          ${lines.map((line) => {
+            const info = classifyConsoleLine(line);
+            return `
+              <div class="preview-terminal-summary-row" data-kind="${info.kind}">
+                <span class="preview-terminal-summary-mark">${escapeHtml(info.mark)}</span>
+                <code>${escapeHtml(line)}</code>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
+
+    function consoleBannerTone(step) {
+      if (step.execution.phase === "executing") return "accent";
+      if (step.execution.phase === "failed" || step.execution.phase === "blocked") return "danger";
+      return "neutral";
+    }
+
+    function consoleBannerText(step, transcript) {
+      const lines = String(transcript.output ?? "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (lines.length === 0) return "";
+      const reduced = meaningfulConsoleLines(lines);
+      const candidates = reduced.length > 0 ? reduced : lines;
+      if (step.execution.phase === "failed" || step.execution.phase === "blocked") {
+        return candidates.find((line) => consolePatterns.error.test(line)) ?? candidates[candidates.length - 1];
+      }
+      return candidates[candidates.length - 1];
+    }
+
+    function renderConsoleBanner(step, transcript) {
+      if (step.execution.phase !== "executing" && step.execution.phase !== "failed" && step.execution.phase !== "blocked") {
+        return "";
+      }
+      const text = consoleBannerText(step, transcript);
+      if (!text) return "";
+      return `
+        <div class="preview-terminal-banner" data-tone="${escapeHtml(consoleBannerTone(step))}">
+          <span class="preview-terminal-banner-dot"></span>
+          <p>${escapeHtml(text || " ")}</p>
+        </div>
+      `;
+    }
+
+    function renderConsoleRaw(step, transcript) {
+      const output = String(transcript.output ?? "");
+      if (output.trim().length === 0) return "";
+      const lineCount = output.split("\n").filter((line) => line.trim().length > 0).length;
+      return renderSecondaryDisclosure(
+        lineCount > 0 ? `原始输出 ${lineCount} 行` : "原始输出",
+        `<div class="preview-console-lines">${renderConsoleLines(output)}</div>`,
+        { variant: "console" },
+      );
+    }
+
+    function splitDiffForDisplay(content, maxHunks) {
+      const lines = String(content ?? "").split("\n");
+      const files = [];
+      const limit = Math.max(1, Number.isFinite(maxHunks) ? maxHunks : 1);
+      let currentFile = { headers: [], hunks: [] };
+      let currentHunk = null;
+
+      function pushCurrentFile() {
+        if (currentFile.headers.length > 0 || currentFile.hunks.length > 0) {
+          files.push(currentFile);
+        }
+      }
+
+      lines.forEach((line) => {
+        if (line.startsWith("diff --git")) {
+          pushCurrentFile();
+          currentFile = { headers: [line], hunks: [] };
+          currentHunk = null;
+          return;
+        }
+
+        if (
+          line.startsWith("index ")
+          || line.startsWith("new file mode")
+          || line.startsWith("deleted file mode")
+          || line.startsWith("--- ")
+          || line.startsWith("+++ ")
+        ) {
+          currentFile.headers.push(line);
+          currentHunk = null;
+          return;
+        }
+
+        if (line.startsWith("@@")) {
+          currentHunk = [line];
+          currentFile.hunks.push(currentHunk);
+          return;
+        }
+
+        if (!currentHunk) {
+          return;
+        }
+
+        currentHunk.push(line);
+      });
+
+      pushCurrentFile();
+
+      const totalHunks = files.reduce((count, file) => count + file.hunks.length, 0);
+      if (totalHunks === 0) {
+        return {
+          focus: content,
+          hasOverflow: false,
+        };
+      }
+
+      const focusFile = files.find((file) => file.hunks.length > 0) ?? files[0];
+      const focusHunks = focusFile.hunks.slice(0, limit);
+
+      return {
+        focus: [...focusFile.headers, ...focusHunks.flat()].join("\n"),
+        hasOverflow: totalHunks > focusHunks.length,
+      };
+    }
+
+    function diffStats(content) {
+      let added = 0;
+      let removed = 0;
+      let hunks = 0;
+      let files = 0;
+      content.split("\n").forEach((line) => {
+        if (line.startsWith("@@")) {
+          hunks += 1;
+          return;
+        }
+        if (line.startsWith("+++ ")) {
+          files += 1;
+          return;
+        }
+        if (line.startsWith("--- ")) {
+          return;
+        }
+        if (line.startsWith("+")) {
+          added += 1;
+          return;
+        }
+        if (line.startsWith("-")) {
+          removed += 1;
+        }
+      });
+      return { added, removed, hunks, files };
+    }
+
+    function diffLines(content) {
+      return content.split("\n").map((line) => {
+        let kind = "context";
+        let marker = "";
+        let text = line;
+        if (line.startsWith("@@")) {
+          kind = "hunk";
+          marker = "@";
+        } else if (line.startsWith("+++ ") || line.startsWith("--- ")) {
+          kind = "file";
+        } else if (line.startsWith("+")) {
+          kind = "add";
+          marker = "+";
+          text = line.slice(1);
+        } else if (line.startsWith("-")) {
+          kind = "delete";
+          marker = "-";
+          text = line.slice(1);
+        }
+        return `
+          <div class="preview-diff-line" data-kind="${kind}">
+            <span class="preview-diff-marker">${escapeHtml(marker)}</span>
+            <code>${escapeHtml(text.length === 0 ? " " : text)}</code>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function leadTextBlock(result) {
+      return (result?.content ?? []).find((block) => block.type === "text" || block.type === "quote");
+    }
+
+    function detailTextBlocks(result) {
+      const lead = leadTextBlock(result);
+      let leadConsumed = false;
+      return (result?.content ?? []).filter((block) => {
+        if (block.type !== "text" && block.type !== "quote") return false;
+        if (!leadConsumed && lead === block) {
+          leadConsumed = true;
+          return false;
+        }
+        return true;
+      });
+    }
+
+    function firstCodeBlock(result, presentation) {
+      return (result?.content ?? []).find((block) => block.type === "code" && block.presentation === presentation);
+    }
+
+    function approvalRiskLabel(level) {
+      if (level === "low") return "低风险";
+      if (level === "medium") return "中风险";
+      if (level === "high") return "高风险";
+      return level ? `${level}` : "";
+    }
+
+    function renderSourceCards(results) {
+      return (results ?? []).map((source) => `
+        <div class="preview-source-card">
+          <div class="preview-source-main">
+            <div class="preview-source-top">
+              <strong>${escapeHtml(source.title)}</strong>
+              ${source.source ? `<span class="preview-source-domain">${escapeHtml(source.source)}</span>` : ""}
+            </div>
+            ${(source.meta ?? []).length > 0 ? `<div class="preview-source-meta">
+              ${(source.meta ?? []).map((entry) => `<span>${escapeHtml(entry)}</span>`).join("")}
+            </div>` : ""}
+          </div>
+          ${source.url ? `<a class="preview-source-link" href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer noopener" aria-label="${escapeHtml(source.url)}" title="${escapeHtml(source.url)}"><i data-lucide="arrow-up-right" style="width: 12px; height: 12px;"></i></a>` : ""}
+        </div>
+      `).join("");
+    }
+
+    function renderDetailTextBlocks(step) {
+      return detailTextBlocks(step.result).map((block) => `
+        <div class="preview-text-note" data-tone="${escapeHtml(previewTone(step, block))}">
+          <p>${escapeHtml(block.text)}</p>
+        </div>
+      `).join("");
+    }
+
+    function renderLeadOutput(step) {
+      const lead = leadTextBlock(step.result);
+      if (!lead) return "";
+      return `
+        <div class="tool-output-lead" data-tone="${escapeHtml(previewTone(step, lead))}">
+          <p>${escapeHtml(lead.text)}</p>
+        </div>
+      `;
+    }
+
+    function renderReadResult(step, structured) {
+      const codeBlock = firstCodeBlock(step.result, "file");
+      if (!codeBlock) return renderDetailTextBlocks(step);
+      const subtitle = structured.startLine && structured.endLine ? `${structured.startLine}-${structured.endLine}` : codeBlock.subtitle ?? "";
+      return `
+        ${renderDetailTextBlocks(step)}
+        <div class="preview-frame preview-frame-code" data-tone="${escapeHtml(previewTone(step, codeBlock))}">
+          ${renderFrameHeader("file", structured.path ?? codeBlock.title ?? step.tool.target, "", subtitle ? [subtitle] : [])}
+          <div class="preview-code-lines">
+            ${renderCodeLines(codeBlock.text, codeBlock.lineStart ?? structured.startLine, codeBlock.highlights ?? structured.highlightedLines)}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSearchResult(step, structured) {
+      const results = structured.results ?? [];
+      const count = structured.resultsReturned ?? results.length;
+      const featured = results.slice(0, 3);
+      const overflow = results.slice(3);
+      return `
+        ${renderDetailTextBlocks(step)}
+        <div class="preview-frame preview-frame-source" data-tone="${escapeHtml(previewTone(step))}">
+          ${renderFrameHeader("source", structured.query ?? step.tool.target, "", count > 0 ? [`${count} 条来源`] : [])}
+          <div class="preview-source">${renderSourceCards(featured)}</div>
+          ${overflow.length > 0 ? renderSecondaryDisclosure(
+            `其余 ${overflow.length} 条`,
+            `<div class="preview-source">${renderSourceCards(overflow)}</div>`,
+          ) : ""}
+        </div>
+      `;
+    }
+
+    function renderDiffResult(step, structured) {
+      const codeBlock = firstCodeBlock(step.result, "diff");
+      if (!codeBlock) return renderDetailTextBlocks(step);
+      const stats = diffStats(codeBlock.text);
+      const display = splitDiffForDisplay(codeBlock.text, 1);
+      const added = structured.added ?? stats.added;
+      const removed = structured.removed ?? stats.removed;
+      const meta = [];
+      if (added > 0) meta.push(`+${added}`);
+      if (removed > 0) meta.push(`-${removed}`);
+      if (stats.hunks > 0) meta.push(`${stats.hunks} 处`);
+      return `
+        ${renderDetailTextBlocks(step)}
+        <div class="preview-frame preview-frame-diff" data-tone="${escapeHtml(previewTone(step, codeBlock))}">
+          ${renderFrameHeader("diff", structured.path ?? codeBlock.title ?? step.tool.target, "", meta)}
+          <div class="preview-diff-lines">${diffLines(display.focus)}</div>
+          ${display.hasOverflow ? renderSecondaryDisclosure(
+            "完整补丁",
+            `<div class="preview-diff-lines">${diffLines(codeBlock.text)}</div>`,
+          ) : ""}
+        </div>
+      `;
+    }
+
+    function renderCommandResult(step, structured) {
+      const codeBlock = firstCodeBlock(step.result, "console");
+      const transcript = splitConsoleTranscript(codeBlock?.text ?? "");
+      const commandLine = transcript.commandLine || structured.commandLine || step.tool.target;
+      const meta = [];
+      if (step.execution.phase === "executing" && typeof structured.durationMs === "number") {
+        meta.push(`${(structured.durationMs / 1000).toFixed(1)}s`);
+      }
+      if ((step.execution.phase === "failed" || step.execution.phase === "blocked") && typeof structured.exitCode === "number" && structured.exitCode !== 0) {
+        meta.push(`exit ${structured.exitCode}`);
+      }
+      return `
+        ${renderDetailTextBlocks(step)}
+        ${codeBlock ? `
+          <div class="preview-frame preview-frame-console" data-tone="${escapeHtml(previewTone(step, codeBlock))}">
+            <div class="preview-terminal-shell">
+              <div class="preview-terminal-command">
+                <div class="preview-terminal-command-main">
+                  <span class="preview-terminal-prompt">$</span>
+                  <code>${escapeHtml(commandLine)}</code>
+                </div>
+                ${meta.length > 0 ? `<div class="preview-terminal-inline-meta">${meta.map((item) => escapeHtml(item)).join(" · ")}</div>` : ""}
+              </div>
+              ${renderConsoleBanner(step, transcript)}
+              ${renderConsoleSummary(step, transcript)}
+              <div class="preview-terminal-scroll">
+                ${renderConsoleRaw(step, transcript)}
+                ${step.execution.phase === "executing" ? `
+                  <div class="preview-console-cursor-line">
+                    <span>></span>
+                    <code><span class="preview-terminal-caret"></span></code>
+                  </div>
+                ` : ""}
+              </div>
+            </div>
+          </div>
+        ` : ""}
+      `;
+    }
+
+    function renderApprovalResult(step, structured) {
+      const riskLabel = approvalRiskLabel(structured.riskLevel);
+      const affected = structured.affectedResources?.length ?? 0;
+      const meta = [];
+      if (riskLabel) meta.push(riskLabel);
+      if (affected > 0) meta.push(`${affected} 个对象`);
+      return `
+        ${renderDetailTextBlocks(step)}
+        <div class="preview-frame preview-frame-approval approval-frame" data-tone="${escapeHtml(previewTone(step))}">
+          ${renderFrameHeader("approval", structured.actionSummary ?? step.tool.target, "", meta)}
+          <div class="approval-body">
+            <ul class="approval-list">
+              ${(structured.affectedResources ?? []).map((resource) => `<li><span>${escapeHtml(resource)}</span></li>`).join("")}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderGenericResult(step) {
+      return renderDetailTextBlocks(step);
+    }
+
+    function renderResultBody(step) {
+      const structured = step.result?.structuredContent;
+      if (!structured) return renderGenericResult(step);
+      if (structured.kind === "read_result") return renderReadResult(step, structured);
+      if (structured.kind === "search_results") return renderSearchResult(step, structured);
+      if (structured.kind === "file_diff_preview") return renderDiffResult(step, structured);
+      if (structured.kind === "command_summary") return renderCommandResult(step, structured);
+      if (structured.kind === "approval_request") return renderApprovalResult(step, structured);
+      return renderGenericResult(step);
+    }
+
+    function renderResult(step) {
+      if (!step.result) return "";
+      const body = renderResultBody(step).trim();
+      if (body.length === 0) return "";
+      return `<div class="result-panel">${body}</div>`;
+    }
+
+    function renderDetailHeader(step) {
+      const structuredKind = step.result?.structuredContent?.kind;
+      if (structuredKind === "read_result"
+        || structuredKind === "search_results"
+        || structuredKind === "file_diff_preview"
+        || structuredKind === "command_summary"
+        || structuredKind === "approval_request") {
+        return "";
+      }
+      const facts = (step.primaryFacts ?? []).slice(0, 2);
+      if (!step.tool.target && facts.length === 0) return "";
+      return `
+        <div class="tool-detail-header">
+          ${step.tool.target ? `<div class="tool-detail-target">${escapeHtml(step.tool.target)}</div>` : ""}
+          ${facts.length > 0 ? `<div class="fact-row">${facts.map(renderFactChip).join("")}</div>` : ""}
+        </div>
+      `;
+    }
+
+    function renderStep(step) {
+      const open = state.density === "expanded" ? " open" : "";
+      const attention = hasAttentionState(step);
+      return `
+        <details class="tool-step" data-kind="${escapeHtml(step.tool.kind)}" data-phase="${escapeHtml(step.execution.phase)}"${open}>
+          <summary>
+            <div class="tool-step-card">
+              <span class="tool-icon-badge">
+                <span class="tool-icon">
+                  <i data-lucide="${iconNames[step.tool.kind] ?? "sparkles"}" style="width: 14px; height: 14px;"></i>
+                </span>
+              </span>
+              <div class="tool-step-main">
+                ${renderLeadOutput(step)}
+              </div>
+              ${attention ? `<span class="tool-attention-edge" aria-hidden="true"></span>` : ""}
+              <span class="tool-disclosure" aria-hidden="true">
+                <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i>
+              </span>
+            </div>
+          </summary>
+          <div class="tool-step-body">
+            ${renderDetailHeader(step)}
+            ${renderResult(step)}
+          </div>
+        </details>
+      `;
+    }
+
+    function renderTimeline(timeline) {
+      return `
+        <div class="timeline-shell">
+          <div class="timeline-steps">
+            ${timeline.steps.map((step) => renderStep(step)).join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    function render() {
+      applyTheme();
+      updateControlState();
+
+      document.getElementById("main-timeline-host").innerHTML = renderTimeline(ordinaryConversation);
+      document.getElementById("probe-timeline-host").innerHTML = renderTimeline(ordinaryConversation);
+      document.getElementById("probe-mode").textContent = densityLabels[state.density];
+
+      window.lucide.createIcons();
+    }
+
+    document.querySelectorAll("[data-control]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state[button.dataset.control] = button.dataset.value;
+        render();
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>

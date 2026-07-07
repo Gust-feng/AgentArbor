@@ -1,0 +1,204 @@
+/*
+ * AgentArbor UI Redesign — Brand CSS
+ * Tone: Calm utilitarian precision
+ * Palette: Cool neutral + emerald accent
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+
+  /* ── Brand Colors (Light) ── */
+  --color-bg: #f8f9fb;
+  --color-surface: #ffffff;
+  --color-surface-raised: #f1f3f6;
+  --color-surface-overlay: #ffffff;
+  --color-fg: #1a1d23;
+  --color-fg-secondary: #5f6672;
+  --color-fg-tertiary: #9ca3af;
+  --color-border: #e5e7eb;
+  --color-border-subtle: #f0f1f3;
+  --color-border-strong: #d1d5db;
+
+  /* Primary accent — Emerald */
+  --color-primary: #059669;
+  --color-primary-hover: #047857;
+  --color-primary-active: #065f46;
+  --color-primary-soft: #ecfdf5;
+  --color-primary-muted: #d1fae5;
+
+  /* State colors */
+  --state-success: #059669;
+  --state-success-soft: #ecfdf5;
+  --state-warning: #d97706;
+  --state-warning-soft: #fffbeb;
+  --state-error: #dc2626;
+  --state-error-soft: #fef2f2;
+  --state-info: #2563eb;
+  --state-info-soft: #eff6ff;
+
+  /* ── Semantic Surfaces ── */
+  --sidebar-bg: #f1f3f6;
+  --sidebar-border: #e5e7eb;
+  --sidebar-item-hover: rgba(0, 0, 0, 0.04);
+  --sidebar-item-active: rgba(5, 150, 105, 0.08);
+  --sidebar-item-active-border: var(--color-primary);
+
+  --chat-bg: var(--color-bg);
+  --chat-surface: var(--color-surface);
+  --message-user-bg: var(--color-surface-raised);
+  --message-assistant-border: var(--color-border);
+
+  --composer-bg: var(--color-surface);
+  --composer-border: var(--color-border);
+  --composer-focus-border: var(--color-primary);
+
+  --settings-bg: var(--color-surface);
+  --settings-sidebar-bg: var(--color-surface-raised);
+  --settings-card-bg: var(--color-surface);
+  --settings-card-border: var(--color-border-subtle);
+
+  /* ── Depth & Shadows ── */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 48px rgba(0, 0, 0, 0.06);
+
+  /* ── Border Radius ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ── Spacing ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ── Typography Scale ── */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 32px;
+  --text-4xl: 40px;
+
+  --leading-tight: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.72;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* ── Layout ── */
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 56px;
+  --header-height: 48px;
+  --composer-max-width: 780px;
+  --content-max-width: 820px;
+
+  /* ── Motion ── */
+  --duration-fast: 100ms;
+  --duration-normal: 180ms;
+  --duration-slow: 280ms;
+  --ease-standard: ease;
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Dark Mode ── */
+.dark {
+  color-scheme: dark;
+
+  --color-bg: #111318;
+  --color-surface: #1a1d24;
+  --color-surface-raised: #22262e;
+  --color-surface-overlay: #1a1d24;
+  --color-fg: #e5e7eb;
+  --color-fg-secondary: #9ca3af;
+  --color-fg-tertiary: #6b7280;
+  --color-border: #2d3139;
+  --color-border-subtle: #23272e;
+  --color-border-strong: #3d424c;
+
+  --color-primary: #34d399;
+  --color-primary-hover: #6ee7b7;
+  --color-primary-active: #a7f3d0;
+  --color-primary-soft: rgba(52, 211, 153, 0.1);
+  --color-primary-muted: rgba(52, 211, 153, 0.18);
+
+  --state-success: #34d399;
+  --state-success-soft: rgba(52, 211, 153, 0.1);
+  --state-warning: #fbbf24;
+  --state-warning-soft: rgba(251, 191, 36, 0.1);
+  --state-error: #f87171;
+  --state-error-soft: rgba(248, 113, 113, 0.1);
+  --state-info: #60a5fa;
+  --state-info-soft: rgba(96, 165, 250, 0.1);
+
+  --sidebar-bg: #14171d;
+  --sidebar-border: #2d3139;
+  --sidebar-item-hover: rgba(255, 255, 255, 0.04);
+  --sidebar-item-active: rgba(52, 211, 153, 0.1);
+
+  --chat-bg: #111318;
+  --chat-surface: #1a1d24;
+  --message-user-bg: #22262e;
+
+  --composer-bg: #1a1d24;
+  --composer-border: #2d3139;
+  --composer-focus-border: var(--color-primary);
+
+  --settings-bg: #1a1d24;
+  --settings-sidebar-bg: #14171d;
+  --settings-card-bg: #22262e;
+  --settings-card-border: #2d3139;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 48px rgba(0, 0, 0, 0.35);
+}
+
+/* ── Rich Text Tokens ── */
+:root {
+  --rt-body-family: var(--font-sans);
+  --rt-body-size: 14.5px;
+  --rt-body-lh: 1.72;
+  --rt-heading-family: var(--font-sans);
+  --rt-heading-weight: var(--weight-semibold);
+  --rt-h1-size: 22px;
+  --rt-h2-size: 18px;
+  --rt-h3-size: 15.5px;
+  --rt-h4-size: 14px;
+  --rt-bq-border: 3px solid var(--color-primary);
+  --rt-bq-bg: var(--color-primary-soft);
+  --rt-code-bg: var(--color-surface-raised);
+  --rt-code-radius: var(--radius-md);
+  --rt-link-color: var(--color-primary);
+  --rt-divider: 1px solid var(--color-border-subtle);
+  --rt-table-header-bg: var(--color-surface-raised);
+}
+
+.dark {
+  --rt-bq-bg: var(--color-primary-soft);
+  --rt-code-bg: var(--color-surface-raised);
+  --rt-divider: 1px solid var(--color-border);
+  --rt-table-header-bg: var(--color-surface-raised);
+}

@@ -1,0 +1,58 @@
+{
+  "data": [
+    {
+      "id": "page-empty-state",
+      "title": "空状态首页",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1751388300000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/empty-state.html"
+      }
+    },
+    {
+      "id": "page-chat-active",
+      "title": "对话进行中",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1751388300000,
+      "canvasData": {
+        "x": 433,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/chat-active.html"
+      }
+    },
+    {
+      "id": "page-settings",
+      "title": "设置面板",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1751388300000,
+      "canvasData": {
+        "x": 866,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/settings.html"
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "freeSize",
+    "projectName": "AgentArbor UI 新设计方案",
+    "windowSize": {
+      "width": 800,
+      "height": 600
+    }
+  }
+}

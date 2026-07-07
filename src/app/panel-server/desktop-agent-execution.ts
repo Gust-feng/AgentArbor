@@ -57,6 +57,8 @@ export async function executeOrdinaryDesktopRunForPanel(
     taskSoilInput,
     agentDefinition,
     conversationHistory: options.conversationHistory,
+    interruptedRunContexts: options.interruptedRunContexts,
+    toolEvidence: options.toolEvidence,
     resolveSkillContexts: (context) =>
       resolveTriggeredSkillContexts(
         runtime,
@@ -69,7 +71,7 @@ export async function executeOrdinaryDesktopRunForPanel(
     workspaceRoot: resources.workspaceRoot,
     toolConfirmationPolicy: options.toolConfirmationPolicy,
     platform: process.platform,
-    subAgentRoots: runtime.subAgentRoots,
+    subAgentRoots: runtime.resolveSubAgentRoots?.({ workspaceDirectory: resources.workspaceRoot }) ?? runtime.subAgentRoots,
     abortSignal: options.abortSignal,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,

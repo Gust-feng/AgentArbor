@@ -93,17 +93,24 @@ test("conversation message returns before provider completion so the UI can subs
   }
 });
 
-test("conversation message returns before slow initial persistence settles", async () => {
+test("conversation message attaches the run before slow initial persistence starts", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-slow-persistence-"));
   let releasePersistence: (() => void) | undefined;
   let upsertRunStarted = false;
   let upsertRunCompleted = false;
+  let persistedConversationBeforeRun: Awaited<ReturnType<RuntimeDatabase["upsertConversation"]>> | undefined;
+  let latestPersistedConversation: Awaited<ReturnType<RuntimeDatabase["upsertConversation"]>> | undefined;
   const persistenceGate = new Promise<void>((resolve) => {
     releasePersistence = resolve;
   });
   const runtimeDatabase = delayedRuntimeDatabase({
+    async upsertConversation(record) {
+      latestPersistedConversation = record;
+      return record;
+    },
     async upsertRun(record) {
       upsertRunStarted = true;
+      persistedConversationBeforeRun = latestPersistedConversation;
       await persistenceGate;
       upsertRunCompleted = true;
       return record;
@@ -117,12 +124,16 @@ test("conversation message returns before slow initial persistence settles", asy
       body: { goal: "测试慢持久化不阻塞首字", aiMode: "fake" },
     });
     const elapsedMs = Date.now() - startedAt;
+    await waitForCondition(() => upsertRunStarted, 2_000);
 
     assert.equal(start.status, 202);
     assert.equal(typeof start.body.run.runId, "string");
     assert.equal(elapsedMs < 2_000, true);
     assert.equal(upsertRunStarted, true);
     assert.equal(upsertRunCompleted, false);
+    assert.equal(persistedConversationBeforeRun?.activeRunId, start.body.run.runId);
+    assert.equal(persistedConversationBeforeRun?.turns[1]?.runId, start.body.run.runId);
+    assert.equal(persistedConversationBeforeRun?.turns[1]?.status, "running");
   } finally {
     releasePersistence?.();
     await server.close();
@@ -297,7 +308,7 @@ test("conversation provider tools come from backend AgentDefinition instead of r
   }
 });
 
-test("context attachment preview feeds the Basic Agent work session read model with original text", async () => {
+test("context attachment preview feeds the Basic Agent work view read model with original text", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-work-session-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-workspace-"));
   const fileBody = "private body with sk-work-session-secret";
@@ -334,6 +345,7 @@ test("context attachment preview feeds the Basic Agent work session read model w
     });
     const runId = start.body.run.runId;
     await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const workView = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/work-view`);
     const workSession = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/work-session`);
 
     assert.equal(preview.status, 200);
@@ -341,13 +353,16 @@ test("context attachment preview feeds the Basic Agent work session read model w
     assert.equal(preview.text.includes(fileBody), true);
     assert.equal(invalidKind.status, 400);
     assert.equal(invalidKind.body.error.code, "invalid_context_attachment_kind");
+    assert.equal(workView.status, 200);
+    assert.equal(workView.body.workView.stage, "completed");
+    assert.equal(workView.body.workView.contextAttachments.some((item: { ref?: string }) => item.ref === "file:notes.md"), true);
+    assert.equal(typeof workView.body.workView.answer?.content, "string");
+    assert.equal(workView.body.workView.deliverable, undefined);
+    assert.equal("workSession" in workView.body, false);
     assert.equal(workSession.status, 200);
     assert.equal(workSession.body.workSession.stage, "completed");
-    assert.equal(workSession.body.workSession.contextAttachments.some((item: { ref?: string }) => item.ref === "file:notes.md"), true);
-    assert.equal(typeof workSession.body.workSession.answer?.content, "string");
-    assert.equal(workSession.body.workSession.deliverable, undefined);
     assert.equal(workSession.text.includes("[redacted-secret]"), false);
-    assertSafePanelJsonText(workSession.text);
+    assertSafePanelJsonText(`${workView.text}\n${workSession.text}`);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -1879,6 +1894,16 @@ function multipartBody(boundary: string, files: readonly MultipartTestFile[]): B
   }
   chunks.push(Buffer.from(`--${boundary}--\r\n`, "utf8"));
   return Buffer.concat(chunks);
+}
+
+async function waitForCondition(predicate: () => boolean, timeoutMs: number): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("Timed out waiting for condition.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function delayedRuntimeDatabase(

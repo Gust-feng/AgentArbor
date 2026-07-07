@@ -272,6 +272,45 @@ test("Basic Agent context pack keeps current user message last under tight budge
   assert.equal(pack.truncated, true);
 });
 
+test("Basic Agent context pack injects interrupted run context as system continuity facts", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "continue the blocked run",
+    goalId: "goal-interrupted-run",
+    traceId: "trace-interrupted-run",
+  });
+  const longPartialOutput = `partial ${"x".repeat(1_200)} SENTINEL_AFTER_INTERRUPTION_PREVIEW`;
+
+  const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
+    goal: "continue the blocked run",
+    taskSoil,
+    conversationHistory: [
+      { role: "user", content: "previous user request", ref: "conversation:interrupted:user" },
+    ],
+    interruptedRunContexts: [{
+      runId: "run-interrupted-context",
+      turnStatus: "blocked",
+      stopReason: "out_of_fuel",
+      continuationAvailability: "new_turn",
+      message: "达到轮次边界，需要继续。",
+      partialOutput: longPartialOutput,
+      refs: ["conversation:conv-1:turn:assistant-1", "run:run-interrupted-context"],
+    }],
+  });
+
+  const interruptionMessage = pack.messages.find((message) => message.ref?.startsWith("context:run-interruption:"));
+  const interruptionItem = pack.items.find((item) => item.sourceKind === "run_interruption");
+
+  assert.equal(interruptionMessage?.role, "system");
+  assert.match(interruptionMessage?.content ?? "", /Previous ordinary agent run did not complete/);
+  assert.match(interruptionMessage?.content ?? "", /run_id=run-interrupted-context/);
+  assert.match(interruptionMessage?.content ?? "", /stop_reason=out_of_fuel/);
+  assert.match(interruptionMessage?.content ?? "", /continuation_availability=new_turn/);
+  assert.equal((interruptionMessage?.content ?? "").includes("SENTINEL_AFTER_INTERRUPTION_PREVIEW"), false);
+  assert.equal(interruptionItem?.truncated, true);
+  assert.equal(pack.truncationReport.truncatedItemIds.includes(interruptionItem?.itemId ?? ""), true);
+});
+
 test("Basic Agent context pack preserves history roles without pre-threshold deterministic compaction", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "continue",

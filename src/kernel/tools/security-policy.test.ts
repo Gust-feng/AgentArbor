@@ -134,6 +134,7 @@ test("tool security policy gates explicit confirmation tools unless exact confir
   assert.equal(confirmation.resumeAvailability, "live");
   assert.equal(confirmation.title, "Shell 命令");
   assert.equal(confirmation.actionSummary, "Shell 命令：pnpm test");
+  assert.equal(confirmation.consequence, "目标：pnpm test。批准后只执行本次Shell 命令。");
   assert.equal(confirmation.actionSummary.includes("请求执行执行操作"), false);
   assert.equal(confirmation.actionSummary.includes("需要你确认后继续"), false);
   assert.equal(confirmation.actionSummary.includes("在工作区内执行 Shell 命令"), false);

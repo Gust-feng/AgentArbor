@@ -626,9 +626,11 @@ test("Desktop Agent Session keeps approval waits out of assistant answers", asyn
   assert.equal(result.answer, undefined);
   assert.equal(result.pendingConfirmation?.title, "删除文件");
   assert.equal(result.pendingConfirmation?.question, "删除文件：pending.txt");
-  assert.equal(result.pendingConfirmation?.consequence, "");
+  assert.equal(result.pendingConfirmation?.consequence, "目标：pending.txt。批准后只执行本次删除文件。");
+  const confirmationEvent = result.runtime.eventLog.list().find((entry) => entry.type === "user_approval.requested");
+  const confirmationPayload = confirmationEvent?.message.payload as { readonly consequence?: string } | undefined;
+  assert.equal(confirmationPayload?.consequence, "目标：pending.txt。批准后只执行本次删除文件。");
   assert.equal(JSON.stringify(result).includes("这个操作需要你确认后才能继续"), false);
-  assert.equal(JSON.stringify(result).includes("批准后"), false);
   assert.equal(result.eventTypes.includes("user_approval.requested"), true);
 });
 

@@ -72,10 +72,37 @@ async function writeFileAtomically(filePath: string, content: string): Promise<v
     encoding: "utf8",
     mode: 0o600,
   });
-  await fs.rename(tempPath, filePath).catch(async (error: unknown) => {
+  await renameWithTransientRetry(tempPath, filePath).catch(async (error: unknown) => {
     await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   });
+}
+
+async function renameWithTransientRetry(source: string, target: string): Promise<void> {
+  const maxAttempts = 6;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await fs.rename(source, target);
+      return;
+    } catch (error) {
+      if (attempt >= maxAttempts || !isTransientRenameError(error)) {
+        throw error;
+      }
+      await delay(25 * attempt);
+    }
+  }
+}
+
+function isTransientRenameError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  const code = (error as { readonly code?: unknown }).code;
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | undefined> {

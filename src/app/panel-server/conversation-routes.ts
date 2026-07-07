@@ -18,7 +18,7 @@ import {
   parseConversationRenameInput,
   parseRunInput,
 } from "./request-parsers.js";
-import { persistPanelConversation } from "./run-persistence.js";
+import { persistPanelConversation, persistPanelRunInBackground } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
 import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
 import { syncConversationPreviewsForRunningJobs } from "./conversation-sync.js";
@@ -215,8 +215,10 @@ async function handleConversationMessageRequest(
     modelOverride: runInput.modelOverride,
     startImmediately: !shouldQueue,
     deferSchedule: !shouldQueue,
+    deferInitialPersistence: true,
   });
   const job = requirePanelRunJob(runtime, basicRun.runId);
+  let shouldScheduleQueuedRun = false;
   if (shouldQueue) {
     runtime.conversations.queueRun({
       conversationId: started.conversation.conversationId,
@@ -224,9 +226,7 @@ async function handleConversationMessageRequest(
       runId: job.runId,
       responseModel: turnModelFromConfig(job.config),
     });
-    if (queuedRunCanStartNow(runtime, runAfterRunId)) {
-      schedulePanelRunJob(runtime, job.runId);
-    }
+    shouldScheduleQueuedRun = queuedRunCanStartNow(runtime, runAfterRunId);
   } else {
     runtime.conversations.attachRun({
       conversationId: started.conversation.conversationId,
@@ -235,12 +235,14 @@ async function handleConversationMessageRequest(
       responseModel: turnModelFromConfig(job.config),
     });
   }
+  await persistPanelConversation(runtime, started.conversation.conversationId);
+  persistPanelRunInBackground(runtime, job);
   writeJson(response, 202, {
     ok: true,
     conversation: await getPanelConversation(runtime, started.conversation.conversationId),
     run: createPanelRunJobResponse(runtime, job),
   });
-  if (!shouldQueue) {
+  if (shouldScheduleQueuedRun || !shouldQueue) {
     schedulePanelRunJob(runtime, job.runId);
   }
 }

@@ -6,6 +6,7 @@ export type ConfirmationRequest = {
   readonly conversationId?: string;
   readonly title: string;
   readonly actionSummary: string;
+  readonly consequence?: string;
   readonly affectedResources: readonly string[];
   readonly riskLevel: ConfirmationRiskLevel;
   readonly resumeAvailability?: "live" | "lost_after_restart";

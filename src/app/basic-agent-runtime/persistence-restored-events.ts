@@ -6,6 +6,11 @@ import type {
 import { redactOrdinaryText } from "../safe-projection.js";
 import { restoredRunTerminalSummary } from "../restored-run-projection.js";
 import {
+  isSubAgentStreamEventType,
+  subAgentStreamDetailFromTraces,
+  subAgentStreamSummaryFromDetail,
+} from "../sub-agent-stream-projection.js";
+import {
   agentTaskStatusFromSnapshot,
   basicRunTitleFromStatus,
 } from "./persistence-status.js";
@@ -41,17 +46,28 @@ function fallbackBasicEventsFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): r
     if (type === undefined) {
       continue;
     }
+    const detail = isSubAgentStreamEventType(type)
+      ? subAgentStreamDetailFromTraces({
+          type,
+          refs: record.refs,
+          fallbackSummary: record.summary,
+          runs: snapshot.subAgentRuns,
+        })
+      : undefined;
     events.push({
       id: `${snapshot.run.runId}:restored:event:${record.sequence}:${type}`,
       runId: snapshot.run.runId,
       sequence: events.length + 1,
       type,
       title: basicEventTitleFromType(type),
-      summary: redactOrdinaryText(record.summary, 1_200),
-      status: agentTaskStatusFromBasicEventType(type),
+      summary: isSubAgentStreamEventType(type)
+        ? redactOrdinaryText(subAgentStreamSummaryFromDetail(type, detail, record.summary), 1_200)
+        : redactOrdinaryText(record.summary, 1_200),
+      status: agentTaskStatusFromBasicEventType(type, detail),
       timestamp: record.recordedAt,
       refs: record.refs,
-      visibility: type.startsWith("tool.") || type === "confirmation.needed" ? "expanded" : "compact",
+      visibility: type.startsWith("tool.") || type.startsWith("sub_agent") || type === "confirmation.needed" ? "expanded" : "compact",
+      detail,
     });
   }
   for (const confirmation of snapshot.confirmations) {
@@ -130,6 +146,14 @@ function restoredBasicTerminalSummary(
 
 function basicEventTypeForRuntimeEvent(type: RuntimeRunSnapshot["events"][number]["type"]): string | undefined {
   if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed") return type;
+  if (
+    type === "sub_agent.started" ||
+    type === "sub_agent.completed" ||
+    type === "sub_agent_batch.started" ||
+    type === "sub_agent_batch.completed"
+  ) {
+    return type;
+  }
   if (type === "user_approval.requested") return "confirmation.needed";
   if (type === "user_approval.received") return "user_approval.received";
   if (type === "model.failed") return "run.failed";
@@ -143,6 +167,8 @@ function basicEventTitleFromType(type: string): string {
   if (type === "run.resumed") return "运行恢复";
   if (type === "tool.requested" || type === "tool.completed") return "动作";
   if (type === "tool.failed") return "未完成";
+  if (type === "sub_agent.started" || type === "sub_agent.completed") return "子 Agent";
+  if (type === "sub_agent_batch.started" || type === "sub_agent_batch.completed") return "子 Agent 批次";
   if (type === "confirmation.needed") return "需要你判断";
   if (type === "user_approval.received") return "用户决定";
   if (type === "user.guidance") return "补充要求";
@@ -151,9 +177,20 @@ function basicEventTitleFromType(type: string): string {
   return "更新";
 }
 
-function agentTaskStatusFromBasicEventType(type: string): BasicAgentRun["status"] {
+function agentTaskStatusFromBasicEventType(
+  type: string,
+  detail?: RunEvent["detail"]
+): BasicAgentRun["status"] {
   if (type === "confirmation.needed") return "approval_needed";
   if (type === "user.guidance") return "needs_input";
+  if (type === "sub_agent.started" || type === "sub_agent_batch.started") return "running";
+  if (type === "sub_agent.completed") {
+    if (detail?.subAgentStatus === "failed") return "failed";
+    if (detail?.subAgentStatus === "cancelled") return "cancelled";
+    if (detail?.subAgentStatus === "approval_required") return "approval_needed";
+    return "completed";
+  }
+  if (type === "sub_agent_batch.completed") return "completed";
   if (type === "run.cancelled") return "cancelled";
   if (type === "run.blocked") return "blocked";
   if (type === "run.failed") return "failed";

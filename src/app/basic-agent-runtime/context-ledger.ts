@@ -3,7 +3,11 @@ import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import { createId } from "../../kernel/id.js";
-import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
+import type {
+  DesktopAgentConversationMessage,
+  DesktopAgentInterruptedRunContext,
+  DesktopAgentSkillContext,
+} from "../desktop-agent-contracts.js";
 import type { BasicAgentContextItem } from "./contracts.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import {
@@ -45,6 +49,7 @@ export type CreateBasicAgentContextLedgerInput = {
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
+  readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly toolEvidence?: readonly ToolResultEnvelope[];
   readonly modelCapabilities?: ModelCapabilities;
@@ -206,6 +211,7 @@ function prioritizedOptionalContextItems(
 
 function contextItemRetentionPriority(item: BasicAgentContextItem): number {
   if (item.sourceKind === "tool_evidence") return 0;
+  if (item.sourceKind === "run_interruption") return 0;
   if (item.sourceKind === "conversation_recent_turn") return 1;
   if (item.sourceKind === "task_soil_ref") return 2;
   if (item.sourceKind === "skill") return 3;
@@ -216,7 +222,8 @@ function contextItemRetentionPriority(item: BasicAgentContextItem): number {
 
 function contextItemTokenCount(counter: BasicAgentTokenCounter, item: BasicAgentContextItem): number {
   const role =
-    item.sourceKind === "system" || item.sourceKind === "skill" || item.sourceKind === "conversation_summary" || item.sourceKind === "tool_evidence"
+    item.sourceKind === "system" || item.sourceKind === "skill" || item.sourceKind === "conversation_summary" ||
+      item.sourceKind === "tool_evidence" || item.sourceKind === "run_interruption"
       ? "system"
       : item.sourceKind === "user_message"
         ? "user"

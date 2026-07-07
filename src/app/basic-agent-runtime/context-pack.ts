@@ -2,7 +2,12 @@ import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
+import type { ToolResultEnvelope } from "../../domain/tools/index.js";
+import type {
+  DesktopAgentConversationMessage,
+  DesktopAgentInterruptedRunContext,
+  DesktopAgentSkillContext,
+} from "../desktop-agent-contracts.js";
 import { createBasicAgentContextLedger } from "./context-ledger.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";
@@ -26,7 +31,9 @@ export type BuildBasicAgentContextPackInput = {
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
+  readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly toolEvidence?: readonly ToolResultEnvelope[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly tokenCounter?: BasicAgentTokenCounter;
   readonly maxMessages?: number;
@@ -42,7 +49,9 @@ export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInpu
     taskSoil: input.taskSoil,
     conversationHistory: input.conversationHistory,
     conversationSummary: input.conversationSummary,
+    interruptedRunContexts: input.interruptedRunContexts,
     skillContexts: input.skillContexts,
+    toolEvidence: input.toolEvidence,
     modelCapabilities: input.modelCapabilities,
     tokenCounter: input.tokenCounter,
     maxMessages: input.maxMessages,
@@ -81,7 +90,7 @@ function contextMessageForItem(item: BasicAgentContextItem): ModelMessage | unde
       ref: item.itemId,
     };
   }
-  if (item.sourceKind === "conversation_summary") {
+  if (item.sourceKind === "conversation_summary" || item.sourceKind === "run_interruption") {
     return {
       role: "system",
       content,

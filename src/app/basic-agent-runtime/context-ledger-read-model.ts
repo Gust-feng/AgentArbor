@@ -118,7 +118,12 @@ function contextBudgetSummary(budget: BasicAgentContextBudget): string {
 
 function contextLedgerEntryKind(kind: BasicAgentContextSourceKind): ContextLedgerEntry["kind"] {
   if (kind === "system" || kind === "user_message") return "goal";
-  if (kind === "conversation" || kind === "conversation_summary" || kind === "conversation_recent_turn") return "history";
+  if (
+    kind === "conversation" ||
+    kind === "conversation_summary" ||
+    kind === "conversation_recent_turn" ||
+    kind === "run_interruption"
+  ) return "history";
   if (kind === "skill") return "skill";
   if (kind === "task_soil_ref") return "attachment";
   return "tool_evidence";
@@ -131,6 +136,7 @@ function contextLedgerEntryTitle(item: BasicAgentContextItem): string {
     conversation: "历史对话",
     conversation_summary: "历史摘要",
     conversation_recent_turn: "最近对话",
+    run_interruption: "运行中断",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
     tool_evidence: "证据",
@@ -152,6 +158,7 @@ function contextUsageSummary(
     conversation: "历史对话",
     conversation_summary: "历史摘要",
     conversation_recent_turn: "最近对话",
+    run_interruption: "运行中断",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
     tool_evidence: "证据",

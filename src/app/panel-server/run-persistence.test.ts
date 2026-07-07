@@ -103,6 +103,8 @@ test("persistPanelRun writes the workspace frozen at run birth", async () => {
   await persistPanelRun(runtime, job);
 
   assert.equal(database.workspaceRecords.length, 1);
+  assert.equal(database.workspaceRecords[0]?.workspaceId, `workspace:run:${job.runId}`);
+  assert.equal(database.runRecords[0]?.workspaceId, `workspace:run:${job.runId}`);
   assert.equal(database.workspaceRecords[0]?.path, "Z:\\FrozenWorkspace");
   assert.equal(database.runRecords[0]?.workspacePath, "Z:\\FrozenWorkspace");
 });

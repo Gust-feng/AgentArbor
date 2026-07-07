@@ -9,49 +9,44 @@ export type AssistantWorkViewProblemLike = {
   readonly currentAction?: string;
 };
 
+type AssistantDesktopAgentCanvasLike = {
+  readonly kind: "desktop_agent_canvas";
+  readonly agent?: {
+    readonly answer?: {
+      readonly answer: string;
+    };
+  };
+};
+
+type AssistantLegacyWorkSessionCanvasLike = {
+  readonly kind: "work_session_canvas";
+  readonly workSession?: {
+    readonly directAnswer?: {
+      readonly answer: string;
+    };
+    readonly report?: {
+      readonly decisionSummary?: string;
+    };
+  };
+};
+
 export type AssistantRunDetailLike = {
   readonly error?: {
     readonly code: string;
     readonly message: string;
   };
   readonly canvas?:
-    | {
-        readonly kind: "desktop_agent_canvas";
-        readonly agent?: {
-          readonly answer?: {
-            readonly answer: string;
-          };
-        };
-      }
-    | {
-        readonly kind: "work_session_canvas";
-        readonly workSession?: {
-          readonly directAnswer?: {
-            readonly answer: string;
-          };
-          readonly report?: {
-            readonly decisionSummary?: string;
-          };
-        };
-      }
+    | AssistantDesktopAgentCanvasLike
+    | AssistantLegacyWorkSessionCanvasLike
     | {
         readonly kind?: string;
         readonly [key: string]: unknown;
       };
   readonly restoredResult?: {
     readonly summary: string;
+    readonly content?: string;
   };
 };
-
-type AssistantDesktopAgentCanvasLike = Extract<
-  NonNullable<AssistantRunDetailLike["canvas"]>,
-  { readonly kind: "desktop_agent_canvas" }
->;
-
-type AssistantWorkSessionCanvasLike = Extract<
-  NonNullable<AssistantRunDetailLike["canvas"]>,
-  { readonly kind: "work_session_canvas" }
->;
 
 export type AssistantRunProblem = {
   readonly title: string;
@@ -87,14 +82,27 @@ export function visibleRunProblem(
 
 export function visibleResultText(detail: AssistantRunDetailLike | undefined): string | undefined {
   const canvas = detail?.canvas;
-  const desktopCanvas = canvas?.kind === "desktop_agent_canvas" ? (canvas as AssistantDesktopAgentCanvasLike) : undefined;
-  const legacyWorkSessionCanvas = canvas?.kind === "work_session_canvas" ? (canvas as AssistantWorkSessionCanvasLike) : undefined;
+  const desktopCanvas = desktopAgentCanvasForAssistantOutput(canvas);
+  const legacyWorkSessionCanvas = legacyWorkSessionCanvasForAssistantOutput(canvas);
   return (
     desktopCanvas?.agent?.answer?.answer ??
     legacyWorkSessionCanvas?.workSession?.directAnswer?.answer ??
     nonEmptyText(legacyWorkSessionCanvas?.workSession?.report?.decisionSummary) ??
+    nonEmptyText(detail?.restoredResult?.content) ??
     detail?.restoredResult?.summary
   );
+}
+
+function desktopAgentCanvasForAssistantOutput(
+  canvas: AssistantRunDetailLike["canvas"] | undefined
+): AssistantDesktopAgentCanvasLike | undefined {
+  return canvas?.kind === "desktop_agent_canvas" ? canvas as AssistantDesktopAgentCanvasLike : undefined;
+}
+
+function legacyWorkSessionCanvasForAssistantOutput(
+  canvas: AssistantRunDetailLike["canvas"] | undefined
+): AssistantLegacyWorkSessionCanvasLike | undefined {
+  return canvas?.kind === "work_session_canvas" ? canvas as AssistantLegacyWorkSessionCanvasLike : undefined;
 }
 
 function readableAppError(error: string): string {

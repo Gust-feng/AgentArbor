@@ -90,15 +90,32 @@ export function pendingConfirmationFrom(input: {
       confirmationId: confirmation.confirmationId,
       title: confirmation.title,
       question: confirmation.actionSummary,
-      consequence: "",
+      consequence: confirmation.consequence ?? confirmationConsequenceFallback(confirmation),
+      affectedResources: confirmation.affectedResources,
       riskLevel: confirmation.riskLevel,
+      resumeAvailability: confirmation.resumeAvailability,
       requestedAt: confirmation.requestedAt,
+      expiresAt: confirmation.expiresAt,
       modelCallRefs: input.modelCallRefs,
       toolCallRefs: [approvalRequired.callId],
       sourceRefs: confirmation.sourceRefs,
     };
   }
   return undefined;
+}
+
+function confirmationConsequenceFallback(input: {
+  readonly title: string;
+  readonly actionSummary: string;
+  readonly affectedResources: readonly string[];
+}): string {
+  const title = safeText(input.title, 120);
+  const resources = input.affectedResources.slice(0, 4).join("、");
+  const target = resources.length === 0 ? "" : `目标：${safeText(resources, 240)}。`;
+  if (title.length > 0) {
+    return `${target}批准后只执行本次${title}。`;
+  }
+  return `${target}批准后只执行本次操作。`;
 }
 
 export function resultBlocksFrom(input: {

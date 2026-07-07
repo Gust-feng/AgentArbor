@@ -49,7 +49,10 @@ export function publishConfirmationRequested(input: {
         title: input.pendingConfirmation.title,
         question: input.pendingConfirmation.question,
         consequence: input.pendingConfirmation.consequence,
+        affectedResources: input.pendingConfirmation.affectedResources,
         riskLevel: input.pendingConfirmation.riskLevel,
+        resumeAvailability: input.pendingConfirmation.resumeAvailability,
+        expiresAt: input.pendingConfirmation.expiresAt,
         sourceRefs: input.pendingConfirmation.sourceRefs,
       },
     })

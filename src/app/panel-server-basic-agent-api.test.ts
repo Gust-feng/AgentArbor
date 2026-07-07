@@ -608,9 +608,9 @@ test("basic agent approve after restart blocks because executable continuation i
 
     await server.close();
     server = await startLocalPanelServer({ port: 0, configDirectory: directory });
-    const restoredWorkSession = await requestJson(
+    const restoredWorkView = await requestJson(
       server.url,
-      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/work-session`
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/work-view`
     );
     const approved = await requestJson(
       server.url,
@@ -623,7 +623,8 @@ test("basic agent approve after restart blocks because executable continuation i
     );
     const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
 
-    assert.equal(restoredWorkSession.body.workSession.pendingConfirmation.resumeAvailability, "lost_after_restart");
+    assert.equal(restoredWorkView.body.workView.pendingConfirmation.resumeAvailability, "lost_after_restart");
+    assert.equal("workSession" in restoredWorkView.body, false);
     assert.equal(approved.status, 200);
     assert.equal(approved.body.run.status, "blocked");
     assert.equal(runtimeRun.body.snapshot.run.status, "blocked");

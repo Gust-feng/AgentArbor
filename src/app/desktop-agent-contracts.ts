@@ -6,6 +6,16 @@ export type DesktopAgentConversationMessage = {
   readonly ref?: string;
 };
 
+export type DesktopAgentInterruptedRunContext = {
+  readonly runId: string;
+  readonly turnStatus: "blocked" | "needs_input" | "failed";
+  readonly stopReason?: string;
+  readonly continuationAvailability?: "none" | "live" | "lost_after_restart" | "new_turn";
+  readonly message?: string;
+  readonly partialOutput?: string;
+  readonly refs: readonly string[];
+};
+
 export type DesktopAgentSkillLoadStatus = "loaded" | "failed";
 
 export type DesktopAgentSkillMarkUsedStatus = "succeeded" | "failed" | "skipped";

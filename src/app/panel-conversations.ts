@@ -5,6 +5,7 @@ import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 import type {
   PanelConversation,
   PanelConversationCurrentRunReadModel,
+  PanelConversationPendingAction,
   PanelConversationReadModel,
   PanelConversationSummaryReadModel,
   PanelConversationTurn,
@@ -31,6 +32,7 @@ export {
 } from "./panel-conversation-projection.js";
 export type {
   PanelConversation,
+  PanelConversationPendingAction,
   PanelConversationReadModel,
   PanelConversationSummaryReadModel,
   PanelConversationTurn,
@@ -134,6 +136,7 @@ export class PanelConversationStore {
       currentRunId: record.activeRunId,
       latestRunId: record.latestRunId,
       queuedRunIds: [...record.queuedRunIds],
+      pendingAction: restoredPendingAction(record),
       turns: record.turns.map((turn) => ({
         turnId: turn.turnId,
         role: turn.role,
@@ -237,6 +240,7 @@ export class PanelConversationStore {
     assistantTurn.status = "pending";
     assistantTurn.title = "";
     assistantTurn.updatedAt = nowIso();
+    conversation.pendingAction = clearPendingActionForTurn(conversation.pendingAction, assistantTurn.turnId);
     if (!conversation.queuedRunIds.includes(input.runId)) {
       conversation.queuedRunIds.push(input.runId);
     }
@@ -257,6 +261,7 @@ export class PanelConversationStore {
     assistantTurn.status = "running";
     assistantTurn.title = "";
     assistantTurn.updatedAt = nowIso();
+    conversation.pendingAction = clearPendingActionForTurn(conversation.pendingAction, assistantTurn.turnId);
     conversation.currentRunId = input.runId;
     conversation.latestRunId = latestAssistantRunId(conversation) ?? input.runId;
     conversation.updatedAt = assistantTurn.updatedAt;
@@ -272,6 +277,7 @@ export class PanelConversationStore {
     assistantTurn.status = "running";
     assistantTurn.title = "";
     assistantTurn.updatedAt = nowIso();
+    conversation.pendingAction = clearPendingActionForTurn(conversation.pendingAction, assistantTurn.turnId);
     const userTurn = previousUserTurn(conversation, assistantTurn.turnId);
     if (userTurn !== undefined && userTurn.status === "pending") {
       userTurn.status = "completed";
@@ -303,6 +309,7 @@ export class PanelConversationStore {
     assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
+    conversation.pendingAction = clearPendingActionForTurn(conversation.pendingAction, assistantTurn.turnId);
     conversation.latestRunId = latestAssistantRunId(conversation) ?? input.runId;
     conversation.currentRunId = conversation.currentRunId === input.runId ? undefined : conversation.currentRunId;
     conversation.queuedRunIds = conversation.queuedRunIds.filter((runId) => runId !== input.runId);
@@ -314,6 +321,7 @@ export class PanelConversationStore {
     if (conversation.currentRunId === runId) {
       conversation.currentRunId = undefined;
       conversation.queuedRunIds = conversation.queuedRunIds.filter((item) => item !== runId);
+      conversation.pendingAction = clearPendingActionForRun(conversation.pendingAction, runId);
       conversation.updatedAt = nowIso();
     }
   }
@@ -324,6 +332,7 @@ export class PanelConversationStore {
     readonly title: string;
     readonly content: string;
     readonly status: PanelConversationTurnStatus;
+    readonly pendingActionKind?: PanelConversationPendingAction["kind"];
   }): void {
     const conversation = this.requireConversation(input.conversationId);
     const assistantTurn = requireTurn(conversation, input.assistantTurnId);
@@ -331,6 +340,13 @@ export class PanelConversationStore {
     assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
+    conversation.pendingAction = input.pendingActionKind === undefined || assistantTurn.runId === undefined
+      ? clearPendingActionForTurn(conversation.pendingAction, assistantTurn.turnId)
+      : {
+          kind: input.pendingActionKind,
+          runId: assistantTurn.runId,
+          assistantTurnId: assistantTurn.turnId,
+        };
     conversation.updatedAt = assistantTurn.updatedAt;
   }
 
@@ -454,6 +470,38 @@ function latestAssistantRunId(conversation: PanelConversation): string | undefin
     }
   }
   return undefined;
+}
+
+function clearPendingActionForTurn(
+  pendingAction: PanelConversationPendingAction | undefined,
+  assistantTurnId: string
+): PanelConversationPendingAction | undefined {
+  return pendingAction?.assistantTurnId === assistantTurnId ? undefined : pendingAction;
+}
+
+function clearPendingActionForRun(
+  pendingAction: PanelConversationPendingAction | undefined,
+  runId: string
+): PanelConversationPendingAction | undefined {
+  return pendingAction?.runId === runId ? undefined : pendingAction;
+}
+
+function restoredPendingAction(record: RuntimeConversationRecord): PanelConversationPendingAction | undefined {
+  if (record.status !== "approval_needed" || record.activeRunId === undefined) {
+    return undefined;
+  }
+  const assistantTurn = record.turns.find((turn) =>
+    turn.role === "assistant" &&
+    turn.runId === record.activeRunId &&
+    turn.status === "running"
+  );
+  return assistantTurn === undefined
+    ? undefined
+    : {
+        kind: "approval",
+        runId: record.activeRunId,
+        assistantTurnId: assistantTurn.turnId,
+      };
 }
 
 function reserveConversationIds(conversation: PanelConversation): void {

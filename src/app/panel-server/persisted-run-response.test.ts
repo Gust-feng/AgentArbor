@@ -267,6 +267,8 @@ test("persisted blocked ordinary responses explain the new-turn recovery path", 
       run: {
         ...runtimeSnapshot().run,
         status: "blocked",
+        stopReason: "confirmation_continuation_lost",
+        continuationAvailability: "lost_after_restart",
         error: {
           code: "confirmation_continuation_lost",
           message: "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。",
@@ -278,8 +280,31 @@ test("persisted blocked ordinary responses explain the new-turn recovery path", 
   });
 
   assert.equal(response.status, "blocked");
+  assert.equal(response.stopReason, "confirmation_continuation_lost");
+  assert.equal(response.continuationAvailability, "lost_after_restart");
   assert.equal(response.transcript.events.at(-1)?.type, "run.blocked");
   assert.equal(response.transcript.events.at(-1)?.summary, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
+});
+
+test("persisted run response exposes full restored answer separately from summary", () => {
+  const fullAnswer = "完整回答。\n\n```ts\nconst kept = true;\n```";
+  const base = runtimeSnapshot();
+  const response = createPersistedPanelRunResponse({
+    snapshot: {
+      ...base,
+      run: {
+        ...base.run,
+        resultSummary: "短摘要",
+        resultAnswer: fullAnswer,
+      },
+    },
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+
+  assert.equal(response.restoredResult?.summary, "短摘要");
+  assert.equal(response.restoredResult?.content, fullAnswer);
+  assert.equal(response.transcript.events.at(-1)?.summary, "短摘要");
 });
 
 test("persisted user-action statuses restore concrete confirmation without generic waiting points", () => {

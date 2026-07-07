@@ -46,6 +46,9 @@ export class BasicAgentRunExecutor {
     const runMode = resolveBasicAgentRunMode(input.runKind, input.runMode);
     const startInput: BasicAgentRunStartInput = { ...input, runMode };
     const startImmediately = input.startImmediately !== false;
+    if (input.deferInitialPersistence === true && startImmediately && input.deferSchedule !== true) {
+      throw new Error("BasicAgentRunExecutor deferInitialPersistence requires deferred scheduling.");
+    }
     const startFacts = await this.config.prepareRunStart(startInput);
     const toolConfirmationPolicy = startInput.toolConfirmationPolicy ?? startFacts.toolConfirmationPolicy;
     const job = this.config.runJobs.create({
@@ -65,10 +68,12 @@ export class BasicAgentRunExecutor {
       capabilitySnapshot: startFacts.capabilitySnapshot,
     });
     this.syncRun(job);
-    if (this.config.persistRunInBackground !== undefined) {
-      this.config.persistRunInBackground(job);
-    } else {
-      await this.config.persistRun(job);
+    if (input.deferInitialPersistence !== true) {
+      if (this.config.persistRunInBackground !== undefined) {
+        this.config.persistRunInBackground(job);
+      } else {
+        await this.config.persistRun(job);
+      }
     }
     if (startImmediately && input.deferSchedule !== true) {
       this.schedule(job.runId);

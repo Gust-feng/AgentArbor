@@ -10,12 +10,16 @@ import type {
   ToolStateSettings,
 } from "../../domain/config/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
-import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
+import type { ToolConfirmationPolicy, ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { BasicAgentPendingToolContinuation } from "../basic-agent-runtime/index.js";
-import type { DesktopAgentConversationMessage, DesktopAgentSessionRuntimeContext } from "../desktop-agent-session-contracts.js";
+import type {
+  DesktopAgentConversationMessage,
+  DesktopAgentInterruptedRunContext,
+  DesktopAgentSessionRuntimeContext,
+} from "../desktop-agent-session-contracts.js";
 import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
 import type { PanelRunSummary } from "../panel-run-summary.js";
@@ -56,6 +60,8 @@ export type PanelRunExecutionResult = {
 
 export type PanelRunExecutionOptions = {
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
+  readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
+  readonly toolEvidence?: readonly ToolResultEnvelope[];
   readonly agentDefinition?: AgentDefinition;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly config?: SanitizedModelProviderConfig;

@@ -3,7 +3,11 @@ import type { SkillSelectionDecisionFacts, SkillSelectionDecisionReason } from "
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
-import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
+import type {
+  DesktopAgentConversationMessage,
+  DesktopAgentInterruptedRunContext,
+  DesktopAgentSkillContext,
+} from "../desktop-agent-contracts.js";
 import type { BasicAgentContextItem, BasicAgentContextSkillFacts } from "./contracts.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import {
@@ -21,6 +25,7 @@ export type BuildContextLedgerDraftInput = {
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
+  readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly toolEvidence?: readonly ToolResultEnvelope[];
 };
@@ -43,6 +48,7 @@ const MAX_SKILL_RESOURCE_NOTE_CHARS = 1_200;
 const MAX_REF_SUMMARY_CHARS = 240;
 const MAX_PREVIEW_CHARS = 700;
 const MAX_TOOL_EVIDENCE_CHARS = 1_400;
+const MAX_INTERRUPTED_RUN_CONTEXT_CHARS = 1_600;
 
 type RuntimeSkillResourceType = "script" | "reference" | "asset";
 
@@ -51,10 +57,65 @@ export function buildContextLedgerDraftItems(input: BuildContextLedgerDraftInput
     systemContextItem(input.agentDefinition),
     ...skillContextItems(input.skillContexts ?? []),
     ...historyContextItems(input.conversationHistory, input.conversationSummary),
+    ...interruptedRunContextItems(input.interruptedRunContexts ?? []),
     ...taskSoilRefItems(input.taskSoil),
     ...toolEvidenceItems(input.toolEvidence ?? []),
     currentUserMessageItem(input.goal, input.taskSoil),
   ];
+}
+
+function interruptedRunContextItems(
+  contexts: readonly DesktopAgentInterruptedRunContext[]
+): readonly BasicAgentContextItem[] {
+  return contexts.slice(-6).map((context, index) => {
+    const modelText = interruptedRunContextModelText(context);
+    const summary = safeText(modelText.text, MAX_INTERRUPTED_RUN_CONTEXT_CHARS);
+    return {
+      itemId: `context:run-interruption:${context.runId}:${index}`,
+      sourceKind: "run_interruption",
+      summary: summary.text,
+      refs: interruptedRunRefs(context),
+      visibility: "model" as const,
+      truncated: summary.truncated || modelText.truncated,
+    };
+  });
+}
+
+function interruptedRunContextModelText(context: DesktopAgentInterruptedRunContext): {
+  readonly text: string;
+  readonly truncated: boolean;
+} {
+  const message = context.message === undefined ? undefined : safeText(context.message, 520);
+  const partialOutput = context.partialOutput === undefined ? undefined : safeText(context.partialOutput, 900);
+  const parts = [
+    "Previous ordinary agent run did not complete. Treat this as runtime continuity context, not as a completed assistant answer.",
+    `run_id=${safePlain(context.runId, 180)}`,
+    `assistant_turn_status=${context.turnStatus}`,
+    context.stopReason === undefined ? undefined : `stop_reason=${safePlain(context.stopReason, 180)}`,
+    context.continuationAvailability === undefined
+      ? undefined
+      : `continuation_availability=${context.continuationAvailability}`,
+    message === undefined || message.text.trim().length === 0
+      ? undefined
+      : `message:\n${message.text}`,
+    partialOutput === undefined || partialOutput.text.trim().length === 0
+      ? undefined
+      : `partial_output:\n${partialOutput.text}`,
+    context.refs.length === 0
+      ? undefined
+      : `refs=${context.refs.slice(0, 8).map((ref) => safePlain(ref, 220)).filter((ref) => ref.length > 0).join("; ")}`,
+  ].filter(isString);
+  return {
+    text: parts.join("\n"),
+    truncated: message?.truncated === true || partialOutput?.truncated === true,
+  };
+}
+
+function interruptedRunRefs(context: DesktopAgentInterruptedRunContext): readonly ObservationRef[] {
+  const refs = [`run:${context.runId}`, ...context.refs]
+    .map((ref) => safePlain(ref, 220))
+    .filter((ref) => ref.length > 0);
+  return [...new Set(refs)].slice(0, 10).map((id): ObservationRef => ({ kind: "event", id }));
 }
 
 export function toolEvidenceItems(envelopes: readonly ToolResultEnvelope[]): readonly BasicAgentContextItem[] {

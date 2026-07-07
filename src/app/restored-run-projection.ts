@@ -5,11 +5,12 @@ import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
 export type RestoredRunResultProjection = {
   readonly title: string;
   readonly summary: string;
+  readonly content?: string;
 };
 
 export const ORDINARY_RUN_BLOCKED_FALLBACK = "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。";
 
-type RestoredRunResultSource = Pick<RuntimeRunRecord, "resultTitle" | "resultSummary">;
+type RestoredRunResultSource = Pick<RuntimeRunRecord, "resultTitle" | "resultSummary" | "resultAnswer">;
 type RestoredTerminalRunSource = Pick<RuntimeRunRecord, "error" | "resultTitle" | "resultSummary">;
 
 export function restoredRunResultProjection(
@@ -17,12 +18,14 @@ export function restoredRunResultProjection(
 ): RestoredRunResultProjection | undefined {
   const title = optionalRestoredText(run.resultTitle, 160);
   const summary = optionalRestoredText(run.resultSummary, 1_000);
-  if (title === undefined && summary === undefined) {
+  const content = optionalRestoredText(run.resultAnswer, 128_000);
+  if (title === undefined && summary === undefined && content === undefined) {
     return undefined;
   }
   return {
     title: title ?? "",
-    summary: summary ?? title ?? "",
+    summary: summary ?? optionalRestoredText(content, 1_000) ?? title ?? "",
+    content,
   };
 }
 

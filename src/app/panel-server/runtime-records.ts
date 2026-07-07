@@ -7,6 +7,7 @@ import type {
 } from "../../domain/tools/index.js";
 import { isToolErrorDomain, normalizeToolErrorFacts, toolDisplayName } from "../../domain/tools/index.js";
 import type {
+  RuntimeRunContinuationAvailability,
   RuntimeArtifactRecord,
   RuntimeConfirmationRecord,
   RuntimeEventRecord,
@@ -36,7 +37,7 @@ import {
   normalizeToolDisplayForOperation,
   toolDisplayProjectionOrUndefined,
 } from "../tool-display-normalization.js";
-import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
+import { normalizeModelFacingText, sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 import { confirmationActionSummaryText } from "../confirmation-copy.js";
 import { asRecord, optionalString, unique } from "./request-parsers.js";
 
@@ -56,10 +57,11 @@ export type RuntimeToolCallRecordWithErrorDomain = RuntimeToolCallRecord & {
 
 export function createRuntimeWorkspaceRecord(
   workspace: SanitizedWorkspaceConfig,
-  selectedAt: string
+  selectedAt: string,
+  runId: string
 ): RuntimeWorkspaceRecord {
   return {
-    workspaceId: "workspace:current",
+    workspaceId: `workspace:run:${runId}`,
     kind: "local_directory",
     path: workspace.workspaceDirectory,
     label: path.basename(workspace.workspaceDirectory) || workspace.workspaceDirectory,
@@ -98,6 +100,9 @@ export function createRuntimeRunRecord(input: {
     completedAt: isTerminalPanelRunStatus(input.job.status) ? input.job.updatedAt : undefined,
     resultTitle: restoredResult?.title,
     resultSummary: restoredResult?.summary,
+    resultAnswer: restoredResult?.answer,
+    stopReason: runtimeStopReasonForJob(input.job),
+    continuationAvailability: runtimeContinuationAvailabilityForJob(input.job),
     error: safeRuntimeError(terminalError, inferRunErrorDomain(input.job, terminalError)),
     agentDefinitionRef: input.job.agentDefinitionRef,
     capabilitySnapshot: input.job.capabilitySnapshot,
@@ -215,6 +220,7 @@ export function toRuntimeConfirmationRecords(
   eventEntries: readonly EventLogEntry[]
 ): readonly RuntimeConfirmationRecord[] {
   const confirmations = new Map<string, RuntimeConfirmationRecord>();
+  const toolNames = toolNameByCallId(eventEntries);
   for (const entry of eventEntries) {
     if (entry.type !== "user_approval.requested" && entry.type !== "user_approval.received") {
       continue;
@@ -229,6 +235,8 @@ export function toRuntimeConfirmationRecords(
     if (entry.type === "user_approval.requested") {
       const question = optionalString(payload.question);
       const consequence = optionalString(payload.consequence);
+      const sourceRefs = sourceRefsFrom(payload, eventRef);
+      const toolCallId = toolCallIdFrom(payload, sourceRefs);
       confirmations.set(confirmationId, {
         confirmationId,
         runId: job.runId,
@@ -245,6 +253,10 @@ export function toRuntimeConfirmationRecords(
         ),
         affectedResources: affectedResourcesFrom(payload),
         riskLevel: riskLevelFrom(payload.riskLevel),
+        toolCallId,
+        toolName: toolCallId === undefined ? undefined : toolNames.get(toolCallId),
+        resumeAvailability: "lost_after_restart",
+        sourceRefs,
         requestedAt: entry.recordedAt,
         expiresAt: optionalString(payload.expiresAt),
         decidedAt: previous?.decidedAt,
@@ -262,6 +274,10 @@ export function toRuntimeConfirmationRecords(
       actionSummary: previous?.actionSummary ?? confirmationRecordActionSummary(decisionStatusFrom(payload)),
       affectedResources: previous?.affectedResources ?? affectedResourcesFrom(payload),
       riskLevel: previous?.riskLevel ?? "medium",
+      toolCallId: previous?.toolCallId,
+      toolName: previous?.toolName,
+      resumeAvailability: previous?.resumeAvailability,
+      sourceRefs: previous?.sourceRefs ?? sourceRefsFrom(payload, eventRef),
       requestedAt: previous?.requestedAt ?? entry.recordedAt,
       expiresAt: previous?.expiresAt,
       decidedAt: optionalString(payload.answeredAt) ?? entry.recordedAt,
@@ -285,6 +301,10 @@ export function toRuntimeConfirmationRecords(
       actionSummary: previous?.actionSummary ?? confirmationDecisionActionSummary(decision.decision),
       affectedResources: previous?.affectedResources ?? [],
       riskLevel: previous?.riskLevel ?? "medium",
+      toolCallId: previous?.toolCallId,
+      toolName: previous?.toolName,
+      resumeAvailability: previous?.resumeAvailability,
+      sourceRefs: previous?.sourceRefs ?? [`confirmation:${decision.confirmationId}`],
       requestedAt: previous?.requestedAt ?? decision.decidedAt,
       expiresAt: previous?.expiresAt,
       decidedAt: decision.decidedAt,
@@ -345,7 +365,11 @@ export function canvasTraceId(canvas: PanelRunCanvasReadModel | undefined): stri
   return canvas.taskSoil.traceId;
 }
 
-function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readonly summary: string } | undefined {
+function resultSummaryForJob(job: PanelRunJob): {
+  readonly title: string;
+  readonly summary: string;
+  readonly answer?: string;
+} | undefined {
   const statusPayload = panelRunPayloadForStatus(job);
   if (job.status === "failed" && statusPayload !== undefined && "error" in statusPayload) {
     return {
@@ -367,9 +391,11 @@ function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readon
   }
   const canvas = statusPayload?.canvas;
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
+    const answer = preserveRuntimeAnswerText(canvas.agent.answer.answer, 128_000);
     return {
       title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "待处理",
-      summary: compactRuntimeText(canvas.agent.answer.answer, 900),
+      summary: compactRuntimeText(answer, 900),
+      answer,
     };
   }
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation !== undefined) {
@@ -384,16 +410,19 @@ function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readon
       ),
     };
   }
-  if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
+  const legacyCanvas = legacyWorkSessionCanvasForRuntimeRecord(canvas);
+  if (legacyCanvas?.workSession.directAnswer !== undefined) {
+    const answer = preserveRuntimeAnswerText(legacyCanvas.workSession.directAnswer.answer, 128_000);
     return {
       title: "已回答",
-      summary: compactRuntimeText(canvas.workSession.directAnswer.answer, 900),
+      summary: compactRuntimeText(answer, 900),
+      answer,
     };
   }
-  if (canvas?.kind === "work_session_canvas" && canvas.workSession.report !== undefined) {
+  if (legacyCanvas?.workSession.report !== undefined) {
     return {
-      title: canvas.workSession.report.title,
-      summary: compactRuntimeText(canvas.workSession.report.decisionSummary, 900),
+      title: legacyCanvas.workSession.report.title,
+      summary: compactRuntimeText(legacyCanvas.workSession.report.decisionSummary, 900),
     };
   }
   if (canvas?.kind === "underground_deep_canvas") {
@@ -406,6 +435,64 @@ function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readon
     };
   }
   return undefined;
+}
+
+type RuntimeRecordLegacyWorkSessionCanvas = Extract<PanelRunCanvasReadModel, { readonly kind: "work_session_canvas" }>;
+
+function legacyWorkSessionCanvasForRuntimeRecord(
+  canvas: PanelRunCanvasReadModel | undefined
+): RuntimeRecordLegacyWorkSessionCanvas | undefined {
+  return canvas?.kind === "work_session_canvas" ? canvas : undefined;
+}
+
+function runtimeStopReasonForJob(job: PanelRunJob): string | undefined {
+  if (job.status === "approval_needed") {
+    return "approval_required";
+  }
+  if (job.status === "needs_input") {
+    return "needs_input";
+  }
+  if (job.status === "completed") {
+    return "completed";
+  }
+  if (job.status === "failed") {
+    return job.failed?.error.code ?? "failed";
+  }
+  if (job.status === "cancelled") {
+    return job.cancelled?.reason.code ?? "cancelled";
+  }
+  if (job.status === "blocked") {
+    return job.blocked?.reason.code ?? "blocked";
+  }
+  return undefined;
+}
+
+function runtimeContinuationAvailabilityForJob(job: PanelRunJob): RuntimeRunContinuationAvailability {
+  if (job.status === "approval_needed") {
+    return "lost_after_restart";
+  }
+  if (job.status === "needs_input") {
+    return "new_turn";
+  }
+  if (job.status === "running" || job.status === "pending") {
+    return "lost_after_restart";
+  }
+  const stopReason = runtimeStopReasonForJob(job);
+  if (stopReason === "out_of_fuel" || stopReason === "context_overflow") {
+    return "new_turn";
+  }
+  if (stopReason === "confirmation_continuation_lost") {
+    return "lost_after_restart";
+  }
+  return "none";
+}
+
+function preserveRuntimeAnswerText(value: string, maxLength: number): string {
+  const normalized = redactSensitiveText(normalizeModelFacingText(value));
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 function safeRuntimeError(
@@ -659,7 +746,7 @@ function toolResultEnvelopeOrUndefined(value: unknown): RuntimeToolCallRecordWit
       ? Math.max(1, Math.floor(record.tokenEstimate))
       : Math.max(1, Math.ceil(agentSummary.length / 4)),
     truncated: record.truncated === true,
-    redacted: record.redacted !== false,
+    redacted: record.redacted === true,
     diagnosticRef: optionalString(record.diagnosticRef),
     rawRetention,
     errorDomain: errorDomainOrUndefined(record.errorDomain),
@@ -909,6 +996,57 @@ function affectedResourcesFrom(payload: Readonly<Record<string, unknown>>): read
   }
   const evidenceRefs = stringArrayFrom(payload.evidenceRefs);
   return evidenceRefs.slice(0, 12).map((value) => compactRuntimeText(value, 240));
+}
+
+function sourceRefsFrom(
+  payload: Readonly<Record<string, unknown>>,
+  fallbackEventRef: string
+): readonly string[] {
+  const refs = [
+    ...stringArrayFrom(payload.sourceRefs),
+    ...stringArrayFrom(payload.evidenceRefs),
+  ];
+  const selected = refs.length > 0 ? refs : [fallbackEventRef];
+  return unique(selected.map((value) => compactRuntimeText(value, 240))).slice(0, 16);
+}
+
+function toolCallIdFrom(
+  payload: Readonly<Record<string, unknown>>,
+  sourceRefs: readonly string[]
+): string | undefined {
+  const explicit =
+    optionalString(payload.toolCallId) ??
+    optionalString(payload.toolCallRef) ??
+    optionalString(payload.callId);
+  if (explicit !== undefined) {
+    return compactRuntimeText(explicit, 180);
+  }
+  for (const ref of sourceRefs) {
+    const toolRef =
+      ref.startsWith("tool:") ? ref.slice("tool:".length) :
+      ref.startsWith("tool_call:") ? ref.slice("tool_call:".length) :
+      undefined;
+    if (toolRef !== undefined && toolRef.trim().length > 0) {
+      return compactRuntimeText(toolRef.trim(), 180);
+    }
+  }
+  return undefined;
+}
+
+function toolNameByCallId(eventEntries: readonly EventLogEntry[]): ReadonlyMap<string, string> {
+  const names = new Map<string, string>();
+  for (const entry of eventEntries) {
+    if (entry.type !== "tool.requested" && entry.type !== "tool.completed" && entry.type !== "tool.failed") {
+      continue;
+    }
+    const payload = asRecord(entry.message.payload);
+    const callId = optionalString(payload.callId);
+    const toolName = optionalString(payload.toolName);
+    if (callId !== undefined && toolName !== undefined) {
+      names.set(callId, compactRuntimeText(toolName, 160));
+    }
+  }
+  return names;
 }
 
 function riskLevelFrom(value: unknown): RuntimeConfirmationRecord["riskLevel"] {

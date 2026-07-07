@@ -25,7 +25,7 @@ test("runtime record mapper creates safe run and workspace records", () => {
   const workspace = createRuntimeWorkspaceRecord({
     workspaceDirectory: "Z:\\AgentArbor",
     updatedAt: "2026-05-31T00:00:00.000Z",
-  }, "2026-05-31T00:00:01.000Z");
+  }, "2026-05-31T00:00:01.000Z", "run-1");
   const run = createRuntimeRunRecord({
     job: job({
       status: "failed",
@@ -44,6 +44,7 @@ test("runtime record mapper creates safe run and workspace records", () => {
   });
 
   assert.equal(workspace.label, "AgentArbor");
+  assert.equal(workspace.workspaceId, "workspace:run:run-1");
   assert.equal(run.completedAt, "2026-05-31T00:00:10.000Z");
   assert.equal(run.resultTitle, "运行失败");
   assert.equal(run.resultSummary?.includes("sk-hidden-secret"), true);
@@ -143,6 +144,87 @@ test("runtime record mapper does not invent completed result summaries without v
   assert.equal(run.resultSummary, undefined);
   assert.equal(JSON.stringify(run).includes("结果已生成"), false);
   assert.equal(JSON.stringify(run).includes("结果已经整理完成"), false);
+});
+
+test("runtime record mapper persists full ordinary answers separately from UI summaries", () => {
+  const answer = [
+    "第一行保留。",
+    "",
+    "```ts",
+    "const value = 42;",
+    "```",
+    "后续说明：",
+    "x".repeat(1_200),
+  ].join("\n");
+  const run = createRuntimeRunRecord({
+    job: job({
+      completed: {
+        config: modelConfig(),
+        informationAccess: informationAccess(),
+        canvas: {
+          kind: "desktop_agent_canvas",
+          taskSoil: {
+            taskSoilId: "task-soil-answer",
+            goalSummary: "需要完整回答",
+            contextRefs: [],
+            permissionBoundaryRefs: [],
+          },
+          agent: {
+            status: "completed",
+            answer: {
+              answer,
+              modelCallRefs: [],
+              toolCallRefs: [],
+              evidenceRefs: [],
+              resultBlocks: [],
+            },
+            modelCallRefs: [],
+            toolCallRefs: [],
+            activity: [],
+          },
+          explanation: {
+            resultWhyReasonable: "完整回答应作为运行事实持久化。",
+            observationPanelRole: "测试。",
+          },
+        },
+      },
+    }),
+    workspace: undefined,
+    appHome: "C:\\AgentArbor\\app",
+    runtimeHome: "C:\\AgentArbor\\runtime",
+  });
+
+  assert.equal(run.resultTitle, "已完成");
+  assert.equal(run.resultAnswer, answer);
+  assert.equal(run.resultAnswer?.includes("```ts\nconst value = 42;\n```"), true);
+  assert.notEqual(run.resultSummary, run.resultAnswer);
+  assert.equal((run.resultSummary?.length ?? 0) <= 900, true);
+  assert.equal(run.stopReason, "completed");
+  assert.equal(run.continuationAvailability, "none");
+});
+
+test("runtime record mapper preserves paused stop reasons and new-turn continuation facts", () => {
+  const run = createRuntimeRunRecord({
+    job: job({
+      status: "blocked",
+      blocked: {
+        config: modelConfig(),
+        informationAccess: informationAccess(),
+        reason: {
+          code: "context_overflow",
+          message: "上下文整理没有成功，任务没有完成。",
+        },
+      },
+    }),
+    workspace: undefined,
+    appHome: "C:\\AgentArbor\\app",
+    runtimeHome: "C:\\AgentArbor\\runtime",
+  });
+
+  assert.equal(run.status, "blocked");
+  assert.equal(run.stopReason, "context_overflow");
+  assert.equal(run.continuationAvailability, "new_turn");
+  assert.equal(run.resultTitle, "需要处理");
 });
 
 test("runtime record mapper preserves failed run capability resolution", () => {
@@ -418,6 +500,14 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
     ],
   }), [
     eventEntry({
+      sequence: 1,
+      type: "tool.requested",
+      payload: {
+        callId: "call-shell-confirmed",
+        toolName: "shell_command",
+      },
+    }),
+    eventEntry({
       sequence: 2,
       type: "user_approval.requested",
       payload: {
@@ -426,6 +516,8 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
         consequence: "会读取命令摘要。",
         affectedResources: ["shell:pnpm test"],
         riskLevel: "medium",
+        resumeAvailability: "live",
+        sourceRefs: ["tool:call-shell-confirmed"],
       },
     }),
   ]);
@@ -440,6 +532,10 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
   assert.equal(confirmations[0]?.actionSummary, "是否运行命令？");
   assert.equal(confirmations[0]?.actionSummary.includes("会读取命令摘要"), false);
   assert.equal(confirmations[0]?.guidance?.includes("sk-guidance-secret"), true);
+  assert.equal(confirmations[0]?.toolCallId, "call-shell-confirmed");
+  assert.equal(confirmations[0]?.toolName, "shell_command");
+  assert.equal(confirmations[0]?.resumeAvailability, "lost_after_restart");
+  assert.deepEqual(confirmations[0]?.sourceRefs, ["tool:call-shell-confirmed"]);
 });
 
 test("runtime record mapper keeps commandLine as the persisted command fact", () => {

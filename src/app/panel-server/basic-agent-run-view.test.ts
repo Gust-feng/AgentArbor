@@ -414,6 +414,11 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   const snapshot: RuntimeRunSnapshot = {
     ...runtimeSnapshot(),
     contextLedger: skillContextLedger("run-restored"),
+    events: [
+      runtimeEvent(1, "sub_agent.completed", "Sub-agent completed execution.", [
+        { kind: "sub_agent_run", id: "sub-run-restored" },
+      ]),
+    ],
     subAgentRuns: [{
       parentRunId: "run-restored",
       parentToolCallId: "tool-call-sub-agent",
@@ -472,14 +477,61 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   assert.equal(view?.workView.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
   assert.equal(view?.workView.subAgentRuns?.[0]?.subRunId, "sub-run-restored");
   assert.equal(view?.workView.subAgentRuns?.[0]?.fullOutput, "历史子 Agent 完整输出");
+  assert.equal(view?.workView.transcriptNodes?.some((node) => node.kind === "sub_agent" && node.subAgentRunId === "sub-run-restored"), true);
   assert.equal(view?.detail.restoredResult?.summary, "历史运行摘要");
   assert.equal(view?.detail.restoredResult?.title, "已完成");
   assert.equal(view === undefined ? false : "result" in view, false);
+  assert.equal(view?.replay.events.some((event) => event.type === "sub_agent.completed"), true);
+  assert.equal(
+    view?.replay.events.find((event) => event.type === "sub_agent.completed")?.detail?.subAgentRunId,
+    "sub-run-restored",
+  );
   assert.equal(view?.replay.events.some((event) => event.type === "final.result"), true);
+  assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "sub_agent.completed"), true);
+  assert.equal(view?.detail.transcript?.transcriptNodes?.some((node) => node.kind === "sub_agent" && node.subAgentRunId === "sub-run-restored"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "final.result"), true);
   assert.equal(view === undefined ? false : "workSession" in view, false);
   assert.equal(JSON.stringify(view?.agentDefinitionRef).includes("systemPrompt"), false);
   assert.equal(JSON.stringify(view).includes("FULL PRIVATE SKILL BODY"), false);
+});
+
+test("basic agent run view restores full persisted ordinary answers", async () => {
+  const fullAnswer = [
+    "完整历史回答第一行。",
+    "",
+    "```ts",
+    "export const preserved = true;",
+    "```",
+  ].join("\n");
+  const snapshot: RuntimeRunSnapshot = {
+    ...runtimeSnapshot(),
+    run: {
+      ...runtimeSnapshot().run,
+      resultSummary: "短摘要",
+      resultAnswer: fullAnswer,
+    },
+  };
+  const runtime = {
+    runExecutor: {
+      get: () => undefined,
+      replayEvents: () => undefined,
+      syncRunEvents: () => [],
+    },
+    runJobs: {
+      get: () => undefined,
+      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
+    },
+    runtimeDatabase: {
+      getRun: async () => snapshot,
+    },
+  } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
+
+  const view = await createBasicAgentRunViewReadModel(runtime, "run-restored", 0);
+
+  assert.equal(view?.detail.restoredResult?.summary, "短摘要");
+  assert.equal(view?.detail.restoredResult?.content, fullAnswer);
+  assert.equal(view?.workView.answer?.content, fullAnswer);
+  assert.equal(view?.workView.answer?.content.includes("```ts\nexport const preserved = true;\n```"), true);
 });
 
 test("live basic agent work view exposes sub-agent run traces", () => {
@@ -535,7 +587,9 @@ test("basic agent panel read-model restores pending confirmations after refresh"
         actionSummary: "删除文件：old.txt",
         affectedResources: ["old.txt"],
         riskLevel: "high",
+        resumeAvailability: "lost_after_restart",
         requestedAt: "2026-06-06T00:00:05.000Z",
+        sourceRefs: ["tool:tool-delete-old"],
         eventRefs: ["confirmation:confirmation-refresh"],
       },
     ],
@@ -561,6 +615,7 @@ test("basic agent panel read-model restores pending confirmations after refresh"
   assert.equal(view?.workView.stage, "awaiting_approval");
   assert.equal(view?.workView.pendingConfirmation?.confirmationId, "confirmation-refresh");
   assert.equal(view?.workView.pendingConfirmation?.resumeAvailability, "lost_after_restart");
+  assert.deepEqual(view?.workView.pendingConfirmation?.sourceRefs, ["tool:tool-delete-old"]);
   assert.equal(view?.workView.transcriptNodes?.some((node) => node.kind === "confirmation"), true);
   assert.equal(view?.detail.status, "approval_needed");
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "confirmation.needed"), true);
@@ -715,6 +770,32 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
     artifacts: [],
     confirmations: [],
     subAgentRuns: [],
+  };
+}
+
+function runtimeEvent(
+  sequence: number,
+  type: RuntimeRunSnapshot["events"][number]["type"],
+  summary: string,
+  refs: RuntimeRunSnapshot["events"][number]["refs"] = [],
+): RuntimeRunSnapshot["events"][number] {
+  return {
+    eventId: `run-restored:event:${sequence}`,
+    runId: "run-restored",
+    sequence,
+    type,
+    summary,
+    scope: "runtime",
+    severity: "info",
+    progress: {
+      status: "completed",
+      label: type,
+    },
+    refs,
+    traceId: "trace-restored",
+    intent: type.replaceAll(".", "_"),
+    createdAt: `2026-06-06T00:00:${String(sequence).padStart(2, "0")}.000Z`,
+    recordedAt: `2026-06-06T00:00:${String(sequence).padStart(2, "0")}.000Z`,
   };
 }
 

@@ -26,7 +26,11 @@ import {
 } from "../model-runtime/index.js";
 import { latestModelFailureTextForUser } from "../model-failure-visible-copy.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
-import { buildConversationHistoryMessages } from "./conversation-history.js";
+import {
+  buildConversationHistoryMessages,
+  buildConversationInterruptedRunContexts,
+  buildConversationToolEvidence,
+} from "./conversation-history.js";
 import { PanelHttpError } from "./http-utils.js";
 import { throwIfAborted } from "./request-parsers.js";
 import { canvasTraceId } from "./runtime-records.js";
@@ -75,11 +79,16 @@ export async function executeBasicPanelRun(
   if (job.conversationId !== undefined && job.runAfterRunId !== undefined) {
     runtime.conversations.activateQueuedRun(job.conversationId, job.runId);
   }
-  const conversationHistory = await buildConversationHistoryMessages({
+  const conversationContext = {
     source: runtime,
     conversationId: job.conversationId,
     assistantTurnId: job.assistantTurnId,
-  });
+  };
+  const [conversationHistory, interruptedRunContexts, toolEvidence] = await Promise.all([
+    buildConversationHistoryMessages(conversationContext),
+    buildConversationInterruptedRunContexts(conversationContext),
+    buildConversationToolEvidence(conversationContext),
+  ]);
   return executePanelRunFromFrozenJob(runtime, {
     runKind: job.runKind,
     runMode: job.runMode,
@@ -88,6 +97,8 @@ export async function executeBasicPanelRun(
     taskSoilInput: job.taskSoilInput,
     options: {
       conversationHistory,
+      interruptedRunContexts,
+      toolEvidence,
       agentDefinition: resolveExecutionAgentDefinition(runtime, job),
       agentDefinitionRef: job.agentDefinitionRef,
       config: job.config,

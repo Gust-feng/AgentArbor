@@ -29,6 +29,12 @@ export type RuntimeRunStatus =
   | "cancelled"
   | "blocked";
 
+export type RuntimeRunContinuationAvailability =
+  | "none"
+  | "live"
+  | "lost_after_restart"
+  | "new_turn";
+
 export type RuntimeConversationStatus =
   | "idle"
   | Extract<
@@ -124,6 +130,9 @@ export type RuntimeRunRecord = {
   readonly completedAt?: string;
   readonly resultTitle?: string;
   readonly resultSummary?: string;
+  readonly resultAnswer?: string;
+  readonly stopReason?: string;
+  readonly continuationAvailability?: RuntimeRunContinuationAvailability;
   readonly error?: {
     readonly code: string;
     readonly message: string;
@@ -207,6 +216,10 @@ export type RuntimeConfirmationRecord = {
   readonly actionSummary: string;
   readonly affectedResources: readonly string[];
   readonly riskLevel: "low" | "medium" | "high";
+  readonly toolCallId?: string;
+  readonly toolName?: string;
+  readonly resumeAvailability?: "live" | "lost_after_restart";
+  readonly sourceRefs?: readonly string[];
   readonly requestedAt: string;
   readonly expiresAt?: string;
   readonly decidedAt?: string;

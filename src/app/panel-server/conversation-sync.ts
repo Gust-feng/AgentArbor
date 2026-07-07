@@ -70,12 +70,17 @@ export function syncConversationTurnForJob(input: {
     return;
   }
   if (response.status === "blocked") {
+    const previousContent = assistantContentBeforeFailure(
+      assistantTurnContent(conversations, job.conversationId, job.assistantTurnId),
+      response
+    );
+    const blockedText = sanitizeAssistantVisibleText(response.error?.message ?? ORDINARY_RUN_BLOCKED_FALLBACK);
     conversations.completeAssistantTurn({
       conversationId: job.conversationId,
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
       title: "需要处理",
-      content: sanitizeAssistantVisibleText(response.error?.message ?? ORDINARY_RUN_BLOCKED_FALLBACK),
+      content: appendAssistantBlockedContent(previousContent, blockedText),
       status: "blocked",
       responseModel,
     });
@@ -92,16 +97,21 @@ export function syncConversationTurnForJob(input: {
       title: "待处理",
       content: sanitizeAssistantVisibleText(pendingTurn.content),
       status: "running",
+      pendingActionKind: "approval",
     });
     return;
   }
   if (response.status === "needs_input") {
+    const previousContent = assistantContentBeforeFailure(
+      assistantTurnContent(conversations, job.conversationId, job.assistantTurnId),
+      response
+    );
     conversations.completeAssistantTurn({
       conversationId: job.conversationId,
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
       title: "需要补充",
-      content: "",
+      content: previousContent,
       status: "needs_input",
       responseModel,
     });
@@ -195,14 +205,15 @@ function assistantTurnFromResponse(
       ),
     };
   }
-  if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
+  const legacyCanvas = legacyWorkSessionCanvasForConversationSync(canvas);
+  if (legacyCanvas?.workSession.directAnswer !== undefined) {
     return {
       title: "已回答",
-      content: sanitizeAssistantVisibleText(canvas.workSession.directAnswer.answer),
+      content: sanitizeAssistantVisibleText(legacyCanvas.workSession.directAnswer.answer),
     };
   }
-  if (canvas?.kind === "work_session_canvas" && canvas.workSession.report !== undefined) {
-    const report = canvas.workSession.report;
+  if (legacyCanvas?.workSession.report !== undefined) {
+    const report = legacyCanvas.workSession.report;
     const summary = report.decisionSummary.trim().length > 0 ? report.decisionSummary : `已生成：${report.title}`;
     const nextAction = report.nextActions[0];
     return {
@@ -221,6 +232,14 @@ function assistantTurnFromResponse(
     };
   }
   return undefined;
+}
+
+type ConversationSyncLegacyWorkSessionCanvas = Extract<PanelRunCanvasReadModel, { readonly kind: "work_session_canvas" }>;
+
+function legacyWorkSessionCanvasForConversationSync(
+  canvas: PanelRunCanvasReadModel | undefined
+): ConversationSyncLegacyWorkSessionCanvas | undefined {
+  return canvas?.kind === "work_session_canvas" ? canvas : undefined;
 }
 
 function runningAssistantTurnFromResponse(
@@ -338,6 +357,17 @@ function appendAssistantFailureContent(previousContent: string, failureText: str
     return previousContent;
   }
   return `${previousContent.trim()}\n\n${errorLine}`;
+}
+
+function appendAssistantBlockedContent(previousContent: string, blockedText: string): string {
+  const blockedLine = `停止原因：${blockedText.trim()}`;
+  if (previousContent.trim().length === 0) {
+    return blockedText;
+  }
+  if (previousContent.includes("停止原因：") && previousContent.includes(blockedText.trim())) {
+    return previousContent;
+  }
+  return `${previousContent.trim()}\n\n${blockedLine}`;
 }
 
 function conciseRunFailureText(error: { readonly code: string; readonly message: string } | undefined): string {

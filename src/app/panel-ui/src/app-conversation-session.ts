@@ -92,7 +92,7 @@ export async function loadConversationSession(
   const replay = currentRun?.replay;
   const workView = ordinaryWorkViewFromRunView(currentRun);
   const capabilityResolution = currentRun?.capabilityResolution;
-  const transcriptNodes = transcriptNodesFrom(workView, detail);
+  const transcriptNodes = transcriptNodesFrom(workView);
   if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
 
   // ── Phase 1: Switch to the new conversation immediately ──────────────
@@ -224,7 +224,7 @@ export async function loadHistoricalTranscriptNodeEntries(
       const runId = runIds[nextIndex]!;
       nextIndex += 1;
       const view = await safeBasicRunView(runId, 0, { signal });
-      const nodes = transcriptNodesFrom(ordinaryWorkViewFromRunView(view), view?.detail)
+      const nodes = transcriptNodesFrom(ordinaryWorkViewFromRunView(view))
         .filter((node: TranscriptNode) => node.runId === runId);
       entries.push([runId, nodes] as const);
     }

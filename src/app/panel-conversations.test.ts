@@ -259,6 +259,7 @@ test("panel conversation summaries expose actionable and queued task states", ()
     title: "待处理",
     content: "删除文件前需要你判断。",
     status: "running",
+    pendingActionKind: "approval",
   });
 
   const queued = store.startDesktopMessage({
@@ -286,6 +287,32 @@ test("panel conversation summaries expose actionable and queued task states", ()
   assert.equal(persisted.requiresUserAction, true);
   assert.equal(persisted.currentAction, "删除文件前需要你判断。");
   assert.equal(persisted.nextStep, "");
+});
+
+test("panel conversation summaries do not infer user action from assistant copy", () => {
+  const store = new PanelConversationStore();
+  const started = store.startDesktopMessage({ goal: "解释确认流程" });
+  store.attachRun({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-copy-only",
+  });
+  store.updateAssistantPreview({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    title: "说明",
+    content: "如果后面需要确认，我会说明原因，但现在不需要你处理。",
+    status: "running",
+  });
+
+  const summary = store.list().find((item) => item.conversationId === started.conversation.conversationId)!;
+  const persisted = toRuntimeConversationRecord(store.getReadModel(started.conversation.conversationId)!);
+
+  assert.equal(summary.status, "running");
+  assert.equal(summary.requiresUserAction, false);
+  assert.equal(summary.pendingAction, undefined);
+  assert.equal(persisted.status, "running");
+  assert.equal(persisted.requiresUserAction, false);
 });
 
 test("panel conversation summaries do not invent running next steps", () => {

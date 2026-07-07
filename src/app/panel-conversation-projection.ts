@@ -5,6 +5,7 @@ import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
 import type {
   PanelConversation,
   PanelConversationCurrentRunReadModel,
+  PanelConversationPendingAction,
   PanelConversationReadModel,
   PanelConversationSummaryReadModel,
   PanelConversationStatus,
@@ -143,8 +144,9 @@ export function toConversationSummary(
   conversation: PanelConversation,
   currentRun?: PanelConversationCurrentRunReadModel
 ): PanelConversationSummaryReadModel {
-  const requiresUserAction = conversationRequiresUserAction(conversation);
-  const status = conversationStatus(conversation);
+  const pendingAction = activePendingAction(conversation);
+  const status = conversationStatus(conversation, pendingAction);
+  const requiresUserAction = conversationRequiresUserAction(status, pendingAction);
   return {
     conversationId: conversation.conversationId,
     title: conversation.title,
@@ -159,6 +161,7 @@ export function toConversationSummary(
     activeRunId: conversation.currentRunId,
     latestRunId: conversation.latestRunId,
     requiresUserAction,
+    pendingAction,
     queuedRunIds: [...conversation.queuedRunIds],
     queuedRunCount: conversation.queuedRunIds.length,
     currentRun,
@@ -193,7 +196,7 @@ export function compactMessageContent(value: string, maxLength: number): string 
   const normalized = String(value || "")
     .replace(/\r\n?/g, "\n")
     .split("\n")
-    .map((line) => line.replace(/[^\S\n]+/g, " ").trimEnd())
+    .map((line) => line.trimEnd())
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -322,34 +325,31 @@ function lastAssistantTurn<T extends { readonly role: PanelConversationTurnRole 
   return undefined;
 }
 
-function conversationRequiresUserAction(conversation: PanelConversation): boolean {
-  const status = conversationStatus(conversation);
-  if (status === "approval_needed" || status === "needs_input" || status === "blocked") {
-    return true;
-  }
-  const lastAssistant = lastAssistantTurn(conversation.turns);
-  if (lastAssistant === undefined) {
-    return false;
-  }
-  const text = `${lastAssistant.title}\n${lastAssistant.content}`;
-  return /需要确认|需要你判断|请选择|补充授权|补充材料|待确认|待处理/.test(text);
+function conversationRequiresUserAction(
+  status: PanelConversationStatus,
+  pendingAction: PanelConversationPendingAction | undefined
+): boolean {
+  return pendingAction !== undefined || status === "needs_input" || status === "blocked";
 }
 
-function conversationStatus(conversation: PanelConversation): PanelConversationStatus {
+function conversationStatus(
+  conversation: PanelConversation,
+  pendingAction: PanelConversationPendingAction | undefined
+): PanelConversationStatus {
+  if (pendingAction?.kind === "approval") {
+    return "approval_needed";
+  }
+  if (pendingAction?.kind === "input") {
+    return "needs_input";
+  }
   const activeAssistant = conversation.currentRunId === undefined
     ? undefined
     : assistantTurnByRunId(conversation, conversation.currentRunId);
-  if (activeAssistant?.status === "running" && isApprovalAssistantTitle(activeAssistant.title)) {
-    return "approval_needed";
-  }
-  if (activeAssistant?.status === "needs_input" || (activeAssistant?.status === "running" && activeAssistant.title === "需要补充")) {
+  if (activeAssistant?.status === "needs_input") {
     return "needs_input";
   }
   const lastAssistant = lastAssistantTurn(conversation.turns);
-  if (lastAssistant?.status === "running" && isApprovalAssistantTitle(lastAssistant.title)) {
-    return "approval_needed";
-  }
-  if (lastAssistant?.status === "needs_input" || (lastAssistant?.status === "running" && lastAssistant.title === "需要补充")) {
+  if (lastAssistant?.status === "needs_input") {
     return "needs_input";
   }
   if (conversation.currentRunId !== undefined) {
@@ -367,13 +367,26 @@ function conversationStatus(conversation: PanelConversation): PanelConversationS
   if (lastAssistant.status === "blocked") {
     return "blocked";
   }
-  if (lastAssistant.status === "completed" && lastAssistant.title === "需要补充") {
-    return "needs_input";
-  }
   if (lastAssistant.status === "completed") {
     return "completed";
   }
   return "idle";
+}
+
+function activePendingAction(conversation: PanelConversation): PanelConversationPendingAction | undefined {
+  const pendingAction = conversation.pendingAction;
+  if (pendingAction === undefined) {
+    return undefined;
+  }
+  const assistantTurn = conversation.turns.find((turn) =>
+    turn.role === "assistant" &&
+    turn.turnId === pendingAction.assistantTurnId &&
+    turn.runId === pendingAction.runId
+  );
+  if (assistantTurn === undefined || assistantTurn.status !== "running") {
+    return undefined;
+  }
+  return pendingAction;
 }
 
 function conversationCurrentAction(conversation: ConversationProjectionSource, status: PanelConversationStatus): string {
@@ -461,10 +474,6 @@ function assistantTurnByRunId(
 ): ConversationProjectionTurn | undefined {
   const turn = conversation.turns.find((candidate) => candidate.role === "assistant" && candidate.runId === runId);
   return turn;
-}
-
-function isApprovalAssistantTitle(value: string): boolean {
-  return value === "需要确认" || value === "待确认" || value === "需要你判断" || value === "待处理";
 }
 
 function emptyToUndefined(value: string | undefined): string | undefined {

@@ -1,12 +1,16 @@
 import type { BasicAgentCapabilitySnapshot, ModelCapabilities, RunCapabilityResolution } from "../domain/config/index.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
-import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../domain/tools/index.js";
+import type { ToolConfirmationPolicy, ToolExecutionBroker, ToolResultEnvelope } from "../domain/tools/index.js";
 import type { SubAgentRootInput } from "./sub-agents/sub-agent-loader.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import type { BasicAgentConversationSummary } from "./basic-agent-runtime/conversation-compaction-contracts.js";
 import type { BasicAgentContextPack } from "./basic-agent-runtime/context-pack.js";
-import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
+import type {
+  DesktopAgentConversationMessage,
+  DesktopAgentInterruptedRunContext,
+  DesktopAgentSkillContext,
+} from "./desktop-agent-contracts.js";
 import type {
   ModelRuntimeContextWindowExceededEvent,
   ModelRuntimeEnvironment,
@@ -62,8 +66,11 @@ export type DesktopAgentPendingConfirmation = {
   readonly title: string;
   readonly question: string;
   readonly consequence: string;
+  readonly affectedResources: readonly string[];
   readonly riskLevel: "low" | "medium" | "high";
+  readonly resumeAvailability?: "live" | "lost_after_restart";
   readonly requestedAt: string;
+  readonly expiresAt?: string;
   readonly modelCallRefs: readonly string[];
   readonly toolCallRefs: readonly string[];
   readonly sourceRefs: readonly string[];
@@ -139,7 +146,9 @@ export type RunDesktopAgentSessionOptions = {
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
+  readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly toolEvidence?: readonly ToolResultEnvelope[];
   readonly resolveSkillContexts?: (context: DesktopAgentSkillResolverContext) => Promise<readonly DesktopAgentSkillContext[]>;
   readonly modelCapabilities?: ModelCapabilities;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
@@ -157,3 +166,4 @@ export type RunDesktopAgentSessionOptions = {
 };
 
 export type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
+export type { DesktopAgentInterruptedRunContext } from "./desktop-agent-contracts.js";

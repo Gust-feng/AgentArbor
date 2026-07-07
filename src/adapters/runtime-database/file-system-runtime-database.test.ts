@@ -222,3 +222,66 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
+
+test("FileSystemRuntimeDatabase keeps run-born workspace records immutable across later runs", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-db-workspace-"));
+  try {
+    const paths = resolveAgentArborRuntimeDatabasePaths(path.join(root, "config"));
+    const database = new FileSystemRuntimeDatabase(paths);
+    const firstWorkspace = {
+      workspaceId: "workspace:run:run-first",
+      kind: "local_directory" as const,
+      path: path.join(root, "first-workspace"),
+      label: "first-workspace",
+      selectedAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+    };
+    const secondWorkspace = {
+      workspaceId: "workspace:run:run-second",
+      kind: "local_directory" as const,
+      path: path.join(root, "second-workspace"),
+      label: "second-workspace",
+      selectedAt: "2026-05-10T00:01:00.000Z",
+      updatedAt: "2026-05-10T00:01:00.000Z",
+    };
+
+    await database.upsertWorkspace(firstWorkspace);
+    await database.upsertRun(runRecord("run-first", paths, firstWorkspace.workspaceId, firstWorkspace.path));
+    await database.upsertWorkspace(secondWorkspace);
+    await database.upsertRun(runRecord("run-second", paths, secondWorkspace.workspaceId, secondWorkspace.path));
+
+    const firstSnapshot = await database.getRun("run-first");
+    const secondSnapshot = await database.getRun("run-second");
+
+    assert.equal(firstSnapshot?.workspace?.path, firstWorkspace.path);
+    assert.equal(firstSnapshot?.run.workspacePath, firstWorkspace.path);
+    assert.equal(secondSnapshot?.workspace?.path, secondWorkspace.path);
+    assert.equal(secondSnapshot?.run.workspacePath, secondWorkspace.path);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+function runRecord(
+  runId: string,
+  paths: ReturnType<typeof resolveAgentArborRuntimeDatabasePaths>,
+  workspaceId: string,
+  workspacePath: string
+) {
+  return {
+    runId,
+    profile: "lite" as const,
+    runKind: "desktop" as const,
+    runMode: "agent" as const,
+    status: "completed" as const,
+    goalSummary: runId,
+    aiMode: "fake" as const,
+    workspaceId,
+    workspacePath,
+    appHome: paths.appHome,
+    runHome: path.join(paths.runtimeHome, "runs", encodeURIComponent(runId)),
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:01.000Z",
+    completedAt: "2026-05-10T00:00:01.000Z",
+  };
+}

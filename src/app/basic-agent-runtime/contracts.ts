@@ -29,6 +29,7 @@ export type BasicAgentContextSourceKind =
   | "conversation"
   | "conversation_summary"
   | "conversation_recent_turn"
+  | "run_interruption"
   | "user_message"
   | "task_soil_ref"
   | "tool_evidence";
@@ -197,6 +198,11 @@ export type BasicAgentRunStartInput = {
   };
   readonly startImmediately?: boolean;
   readonly deferSchedule?: boolean;
+  /**
+   * Lets a caller finish durable run-birth side effects, such as attaching the
+   * run to a conversation turn, before the first persistence snapshot is queued.
+   */
+  readonly deferInitialPersistence?: boolean;
 };
 
 /** User/API request shape for the ordinary Desktop Agent run birth path. */

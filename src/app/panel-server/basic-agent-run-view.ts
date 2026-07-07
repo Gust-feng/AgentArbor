@@ -1,4 +1,5 @@
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
+import type { RuntimeRunContinuationAvailability } from "../../domain/runtime-database/index.js";
 import {
   basicRunFromRuntimeSnapshot,
   basicRunReplayFromRuntimeSnapshot,
@@ -74,6 +75,8 @@ async function createLiveBasicAgentRunViewReadModel(
       runId: job.runId,
       status: job.status,
       error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
+      stopReason: liveStopReasonForJob(job),
+      continuationAvailability: liveContinuationAvailabilityForJob(job),
       transcript: {
         events: streamEvents,
         transcriptNodes: workView.transcriptNodes,
@@ -126,10 +129,51 @@ function createPersistedBasicAgentRunDetailReadModel(
     runId: snapshot.run.runId,
     status,
     error: snapshot.run.error,
+    stopReason: snapshot.run.stopReason,
+    continuationAvailability: snapshot.run.continuationAvailability,
     transcript: {
       events: streamEvents,
       transcriptNodes: createPanelTranscriptNodes(streamEvents),
     },
     restoredResult: restoredRunResultProjection(snapshot.run),
   };
+}
+
+function liveStopReasonForJob(job: PanelRunJob): string | undefined {
+  if (job.status === "approval_needed") {
+    return "approval_required";
+  }
+  if (job.status === "needs_input") {
+    return "needs_input";
+  }
+  if (job.status === "completed") {
+    return "completed";
+  }
+  if (job.status === "failed") {
+    return job.failed?.error.code ?? "failed";
+  }
+  if (job.status === "cancelled") {
+    return job.cancelled?.reason.code ?? "cancelled";
+  }
+  if (job.status === "blocked") {
+    return job.blocked?.reason.code ?? "blocked";
+  }
+  return undefined;
+}
+
+function liveContinuationAvailabilityForJob(job: PanelRunJob): RuntimeRunContinuationAvailability {
+  if (job.status === "approval_needed") {
+    return "live";
+  }
+  if (job.status === "needs_input") {
+    return "new_turn";
+  }
+  const stopReason = liveStopReasonForJob(job);
+  if (stopReason === "out_of_fuel" || stopReason === "context_overflow") {
+    return "new_turn";
+  }
+  if (stopReason === "confirmation_continuation_lost") {
+    return "lost_after_restart";
+  }
+  return "none";
 }

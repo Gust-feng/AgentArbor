@@ -55,6 +55,12 @@ export type Conversation = {
   readonly updatedAt?: string;
 };
 
+export type ConversationPendingAction = {
+  readonly kind: "approval" | "input";
+  readonly runId: string;
+  readonly assistantTurnId: string;
+};
+
 export type ConversationSummary = {
   readonly conversationId: string;
   readonly title: string;
@@ -71,4 +77,5 @@ export type ConversationSummary = {
   readonly pinnedAt?: string;
   readonly updatedAt?: string;
   readonly requiresUserAction?: boolean;
+  readonly pendingAction?: ConversationPendingAction;
 };

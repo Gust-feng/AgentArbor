@@ -93,7 +93,7 @@ async function persistPanelRunNow(
     await persistPanelConversation(runtime, job.conversationId);
   }
   const workspace = job.capabilitySnapshot?.workspace;
-  const workspaceRecord = workspace === undefined ? undefined : createRuntimeWorkspaceRecord(workspace, job.updatedAt);
+  const workspaceRecord = workspace === undefined ? undefined : createRuntimeWorkspaceRecord(workspace, job.updatedAt, job.runId);
   if (workspaceRecord !== undefined) {
     await runtime.runtimeDatabase.upsertWorkspace(workspaceRecord);
   }

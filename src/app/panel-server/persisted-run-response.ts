@@ -8,6 +8,7 @@ import type {
   RuntimeConfirmationRecord,
   RuntimeEventRecord,
   RuntimeModelCallRecord,
+  RuntimeRunContinuationAvailability,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
   RuntimeToolCallRecord,
@@ -34,6 +35,13 @@ import {
   restoredRunResultProjection,
   restoredRunTerminalSummary,
 } from "../restored-run-projection.js";
+import {
+  isSubAgentStreamEventType,
+  subAgentStreamDetailFromTraces,
+  subAgentStreamLabel,
+  subAgentStreamStatusFromDetail,
+  subAgentStreamSummaryFromDetail,
+} from "../sub-agent-stream-projection.js";
 
 export type PanelPersistedRunResponse = Omit<PanelRunResponseBase, "error"> & {
   readonly trace: PanelRunTraceReadModel;
@@ -47,7 +55,10 @@ export type PanelPersistedRunResponse = Omit<PanelRunResponseBase, "error"> & {
   readonly restoredResult?: {
     readonly title: string;
     readonly summary: string;
+    readonly content?: string;
   };
+  readonly stopReason?: string;
+  readonly continuationAvailability?: RuntimeRunContinuationAvailability;
   readonly snapshot: {
     readonly run: RuntimeRunSnapshot["run"];
     readonly workspace?: RuntimeRunSnapshot["workspace"];
@@ -96,6 +107,8 @@ export function createPersistedPanelRunResponse(input: {
     }),
     restoredFromSnapshot: true,
     restoredResult: restoredRunResultProjection(input.snapshot.run),
+    stopReason: input.snapshot.run.stopReason,
+    continuationAvailability: input.snapshot.run.continuationAvailability,
     snapshot: {
       run: input.snapshot.run,
       workspace: input.snapshot.workspace,
@@ -236,6 +249,14 @@ export function createPersistedStreamEvents(
     if (isPersistedContextCompactionModelEvent(record, modelCall)) {
       continue;
     }
+    const subAgentDetail = isSubAgentStreamEventType(streamType)
+      ? subAgentStreamDetailFromTraces({
+          type: streamType,
+          refs: record.refs,
+          fallbackSummary: record.summary,
+          runs: snapshot.subAgentRuns,
+        })
+      : undefined;
     const restoredProgressSummary = record.type === "model.requested"
       ? restoredModelRequestedSummary(record.summary)
       : undefined;
@@ -243,6 +264,7 @@ export function createPersistedStreamEvents(
       continue;
     }
     const toolCall = toolCallForPersistedEvent(record, snapshot.toolCalls);
+    const detail = subAgentDetail ?? (toolCall === undefined ? undefined : persistedToolStreamDetail(toolCall));
     events.push({
       eventId: `${snapshot.run.runId}:restored:event:${record.sequence}:${streamType}`,
       runId: snapshot.run.runId,
@@ -250,10 +272,10 @@ export function createPersistedStreamEvents(
       type: streamType,
       createdAt: record.recordedAt,
       agentLabel: persistedStreamAgentLabel(streamType),
-      summary: restoredProgressSummary ?? persistedStreamSummary(record),
-      status: streamStatusFor(streamType),
+      summary: restoredProgressSummary ?? persistedStreamSummary(record, streamType, subAgentDetail),
+      status: streamStatusFor(streamType, subAgentDetail),
       toolName: toolCall?.toolName,
-      detail: toolCall === undefined ? undefined : persistedToolStreamDetail(toolCall),
+      detail,
       sourceRefs: record.refs
         .filter((ref) => ref.kind !== "model_call" && ref.kind !== "tool_call")
         .map((ref) => `${ref.kind}:${ref.id}`),
@@ -423,6 +445,14 @@ function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord
     if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") {
       return true;
     }
+    if (
+      event.type === "sub_agent.started" ||
+      event.type === "sub_agent.completed" ||
+      event.type === "sub_agent_batch.started" ||
+      event.type === "sub_agent_batch.completed"
+    ) {
+      return true;
+    }
     if (event.type === "user_approval.requested") {
       return true;
     }
@@ -440,6 +470,9 @@ function shouldSuppressPersistedOrdinaryChatEvent(type: RuntimeEventRecord["type
 function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
   if (type.startsWith("tool.")) {
     return "工具";
+  }
+  if (isSubAgentStreamEventType(type)) {
+    return subAgentStreamLabel(type);
   }
   if (type === "confirmation.needed") {
     return "待处理";
@@ -464,7 +497,14 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
   return "AgentArbor";
 }
 
-function persistedStreamSummary(record: RuntimeEventRecord): string {
+function persistedStreamSummary(
+  record: RuntimeEventRecord,
+  type: PanelRunStreamEvent["type"],
+  subAgentDetail: PanelRunStreamEvent["detail"] | undefined
+): string {
+  if (isSubAgentStreamEventType(type)) {
+    return subAgentStreamSummaryFromDetail(type, subAgentDetail, record.summary);
+  }
   if (record.type === "tool.requested" || record.type === "tool.completed" || record.type === "tool.failed") {
     return cleanOrdinaryToolText(record.summary) ?? record.summary;
   }
@@ -520,6 +560,10 @@ function isPersistedOrdinaryAgentRuntimeEvent(type: RuntimeEventRecord["type"]):
     type === "tool.requested" ||
     type === "tool.completed" ||
     type === "tool.failed" ||
+    type === "sub_agent.started" ||
+    type === "sub_agent.completed" ||
+    type === "sub_agent_batch.started" ||
+    type === "sub_agent_batch.completed" ||
     type === "user_approval.requested" ||
     type === "user_approval.received";
 }
@@ -560,6 +604,12 @@ function persistedStageFor(
   }
   if (runMode === "agent" && !isPersistedOrdinaryAgentRuntimeEvent(type)) {
     return status === "running" ? "running" : "not_started";
+  }
+  if (type === "sub_agent.started" || type === "sub_agent_batch.started") {
+    return "tool_requested";
+  }
+  if (type === "sub_agent.completed" || type === "sub_agent_batch.completed") {
+    return "tool_completed";
   }
   const normalized = type.replaceAll(".", "_");
   if (isPersistedRunStage(normalized)) {
@@ -649,6 +699,9 @@ function streamTypeForRuntimeEvent(
   if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed") {
     return type;
   }
+  if (isSubAgentStreamEventType(type)) {
+    return type;
+  }
   if (
     type === "agent.delegation.planned" ||
     type === "agent.child.started" ||
@@ -667,9 +720,22 @@ function streamTypeForRuntimeEvent(
   return "agent.note.completed";
 }
 
-function streamStatusFor(type: PanelRunStreamEvent["type"]): NonNullable<PanelRunStreamEvent["status"]> {
-  if (type === "tool.requested" || type === "agent.note.delta" || type === "agent.child.started" || type === "agent.child.waiting") {
+function streamStatusFor(
+  type: PanelRunStreamEvent["type"],
+  detail?: PanelRunStreamEvent["detail"]
+): NonNullable<PanelRunStreamEvent["status"]> {
+  if (
+    type === "tool.requested" ||
+    type === "sub_agent.started" ||
+    type === "sub_agent_batch.started" ||
+    type === "agent.note.delta" ||
+    type === "agent.child.started" ||
+    type === "agent.child.waiting"
+  ) {
     return "running";
+  }
+  if (isSubAgentStreamEventType(type)) {
+    return subAgentStreamStatusFromDetail(type, detail);
   }
   if (type === "confirmation.needed") {
     return "pending";

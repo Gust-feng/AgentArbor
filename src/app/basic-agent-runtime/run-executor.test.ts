@@ -329,6 +329,59 @@ test("BasicAgentRunExecutor can return before background persistence settles", a
   await waitUntil(() => backgroundPersistenceCompleted);
 });
 
+test("BasicAgentRunExecutor can defer initial persistence for caller-owned birth side effects", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  let foregroundPersisted = false;
+  let backgroundPersisted = false;
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    persistRun: async () => {
+      foregroundPersisted = true;
+    },
+    persistRunInBackground: () => {
+      backgroundPersisted = true;
+    },
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "attach before persist",
+    aiMode: "fake",
+    startImmediately: false,
+    deferInitialPersistence: true,
+  });
+
+  assert.equal(run.status, "queued");
+  assert.equal(runJobs.get(run.runId)?.goal, "attach before persist");
+  assert.equal(foregroundPersisted, false);
+  assert.equal(backgroundPersisted, false);
+});
+
+test("BasicAgentRunExecutor rejects deferred initial persistence without deferred scheduling", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  let prepared = false;
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    prepareRunStart: async (input) => {
+      prepared = true;
+      return preparedStartFacts(input);
+    },
+  }));
+
+  await assert.rejects(
+    () => executor.start({
+      runKind: "desktop",
+      runMode: "agent",
+      goal: "invalid deferred birth persistence",
+      aiMode: "fake",
+      deferInitialPersistence: true,
+    }),
+    /deferInitialPersistence requires deferred scheduling/
+  );
+  assert.equal(prepared, false);
+});
+
 test("BasicAgentRunExecutor waits for prepared start facts before creating and persisting a run", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   const startInputs: BasicAgentRunStartInput[] = [];

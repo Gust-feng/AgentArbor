@@ -101,6 +101,13 @@ export async function submitRestoredBasicConfirmationDecision(input: {
     status: input.decision.decision === "guidance" ? "needs_input" : "blocked",
     updatedAt: decidedAt,
     completedAt: input.decision.decision === "guidance" ? undefined : decidedAt,
+    stopReason:
+      input.decision.decision === "guidance"
+        ? "needs_input"
+        : blockedByMissingContinuation
+          ? "confirmation_continuation_lost"
+          : "confirmation_denied",
+    continuationAvailability: input.decision.decision === "guidance" ? "new_turn" : "lost_after_restart",
     error:
       input.decision.decision === "guidance"
         ? snapshot.run.error

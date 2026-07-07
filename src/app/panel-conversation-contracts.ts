@@ -62,6 +62,12 @@ export type PanelConversationTurn = {
   attachments?: readonly PanelConversationTurnAttachment[];
 };
 
+export type PanelConversationPendingAction = {
+  readonly kind: "approval" | "input";
+  readonly runId: string;
+  readonly assistantTurnId: string;
+};
+
 export type PanelConversation = {
   readonly conversationId: string;
   readonly createdAt: string;
@@ -72,6 +78,7 @@ export type PanelConversation = {
   currentRunId?: string;
   latestRunId?: string;
   queuedRunIds: string[];
+  pendingAction?: PanelConversationPendingAction;
   turns: PanelConversationTurn[];
 };
 
@@ -103,6 +110,7 @@ export type PanelConversationReadModel = {
   readonly latestRunId?: string;
   readonly workspaceFolder?: WorkspaceFolderSummary;
   readonly requiresUserAction: boolean;
+  readonly pendingAction?: PanelConversationPendingAction;
   readonly queuedRunIds: readonly string[];
   readonly queuedRunCount: number;
   readonly currentRun?: PanelConversationCurrentRunReadModel;

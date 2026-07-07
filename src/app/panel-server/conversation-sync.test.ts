@@ -328,6 +328,38 @@ test("syncConversationTurnForJob keeps blocked fallback concise", () => {
   assert.equal(JSON.stringify(assistant).includes("无法继续原操作"), false);
 });
 
+test("syncConversationTurnForJob preserves partial model output on blocked turns", () => {
+  const { conversations, job } = startedConversationJob();
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "blocked",
+      error: {
+        code: "out_of_fuel",
+        message: "达到轮次边界，需要继续。",
+      },
+      transcriptEvents: [
+        streamEvent({
+          type: "model.output.delta",
+          delta: "我已经定位到失败测试，还没完成修改。",
+          detail: {
+            kind: "thinking",
+            preview: "我已经定位到失败测试，还没完成修改。",
+          },
+        }),
+      ],
+    }),
+  });
+
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "需要处理");
+  assert.equal(assistant?.status, "blocked");
+  assert.equal(assistant?.content.includes("我已经定位到失败测试"), true);
+  assert.equal(assistant?.content.includes("停止原因：达到轮次边界，需要继续。"), true);
+});
+
 test("syncConversationTurnForJob ignores run started copy and refreshes from model output", () => {
   const { conversations, job } = startedConversationJob();
   const secret = "sk-running-preview-secret";

@@ -49,6 +49,7 @@ export function confirmationRequestFromSecurityDecision(input: {
     runId: input.request.callId,
     title: input.decision.title,
     actionSummary: input.decision.actionSummary,
+    consequence: input.decision.consequence,
     affectedResources: input.decision.affectedResources,
     riskLevel: input.decision.riskLevel,
     resumeAvailability: "live",
@@ -72,11 +73,16 @@ function approvalDecision(input: {
     confirmationActionSummary(presentation.displayName, affectedResources),
     500
   );
+  const consequence = redactOrdinaryToolText(
+    confirmationConsequence(presentation.displayName, affectedResources),
+    500
+  );
   return {
     decision: "approval_required",
     reason: `等待确认：${actionSummary}`,
     title: presentation.displayName,
     actionSummary,
+    consequence,
     affectedResources,
     riskLevel: input.metadata.riskLevel,
     sourceRefs: [`tool:${input.request.callId}`],
@@ -87,6 +93,11 @@ function confirmationActionSummary(displayName: string, affectedResources: reado
   return affectedResources.length === 0
     ? displayName
     : `${displayName}：${affectedResources.join("、")}`;
+}
+
+function confirmationConsequence(displayName: string, affectedResources: readonly string[]): string {
+  const target = affectedResources.length === 0 ? "" : `目标：${affectedResources.join("、")}。`;
+  return `${target}批准后只执行本次${displayName}。`;
 }
 
 function evaluateUrlSupport(request: ToolCallRequest): ToolSecurityDecision | undefined {

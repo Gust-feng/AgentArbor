@@ -21,6 +21,7 @@ export type BrowserToolOptions = {
 
 const DEFAULT_BROWSER_TEXT_CHARS = 64_000;
 const MAX_BROWSER_TEXT_CHARS = 128_000;
+const MAX_BROWSER_START_CHAR = 2_000_000;
 
 export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): ToolExecutor {
   const automation = options.automation ?? createPlaywrightBrowserAutomation();
@@ -42,17 +43,21 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
           "url is required and must use http or https.",
           "waitMs optionally waits after load and is capped at 5000ms.",
           "maxTextChars optionally caps returned body text.",
+          "startChar continues a truncated body text snapshot from a zero-based character offset.",
         ],
         outputNotes: [
           "result.url is the final page URL after navigation.",
           "result.title is the browser page title when available.",
           "result.text is the returned body text snapshot.",
+          "result.hasMoreAfter/result.nextStartChar provide the continuation point when truncated is true.",
+          "result.reachedStartCharCeiling=true means there is more text beyond the supported continuation window and no nextStartChar will be returned.",
           "truncated tells whether the body text was capped.",
         ],
         runtimeHints: [
           { label: "browser engine", value: "Playwright Chromium when available" },
           { label: "session state", value: "fresh isolated browser session; no existing login state" },
           { label: "max text chars", value: String(MAX_BROWSER_TEXT_CHARS) },
+          { label: "max startChar", value: String(MAX_BROWSER_START_CHAR) },
         ],
         examples: [
           { title: "Read rendered page text", input: { url: "https://example.com", waitMs: 500, maxTextChars: 12000 } },
@@ -75,6 +80,7 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
           url: { type: "string", description: "HTTP or HTTPS URL to open." },
           waitMs: { type: "number", description: "Optional wait time after page load, max 5000ms." },
           maxTextChars: { type: "number", description: "Optional maximum text characters to return." },
+          startChar: { type: "number", description: "Zero-based body text offset for continuing a truncated snapshot." },
         },
         required: ["url"],
       },
@@ -85,8 +91,21 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
       const url = requireHttpUrl(record.url);
       const waitMs = Math.min(5_000, positiveInteger(record.waitMs) ?? 500);
       const maxTextChars = Math.min(MAX_BROWSER_TEXT_CHARS, positiveInteger(record.maxTextChars) ?? DEFAULT_BROWSER_TEXT_CHARS);
-      const snapshot = await automation.snapshot({ url, waitMs, maxTextChars, abortSignal: context.abortSignal });
-      const text = truncateText(snapshot.text ?? "", maxTextChars);
+      const startChar = Math.min(MAX_BROWSER_START_CHAR, nonNegativeInteger(record.startChar) ?? 0);
+      const snapshot = await automation.snapshot({
+        url,
+        waitMs,
+        maxTextChars: Math.min(MAX_BROWSER_START_CHAR + MAX_BROWSER_TEXT_CHARS + 1, startChar + maxTextChars + 1),
+        abortSignal: context.abortSignal,
+      });
+      const fullText = snapshot.text ?? "";
+      const text = fullText.slice(startChar, startChar + maxTextChars);
+      const hasMoreAfter = fullText.length > startChar + text.length;
+      const rawNextStartChar = hasMoreAfter ? startChar + text.length : undefined;
+      const nextStartChar = rawNextStartChar !== undefined && rawNextStartChar <= MAX_BROWSER_START_CHAR
+        ? rawNextStartChar
+        : undefined;
+      const reachedStartCharCeiling = hasMoreAfter && nextStartChar === undefined;
       return {
         action: "browser_snapshot",
         status: "completed",
@@ -96,8 +115,15 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
           url: snapshot.url,
           title: snapshot.title,
           text,
+          startChar,
+          textChars: text.length,
+          totalTextChars: fullText.length,
+          hasMoreAfter,
+          nextStartChar,
+          reachedStartCharCeiling,
+          startCharCeiling: MAX_BROWSER_START_CHAR,
         },
-        truncated: (snapshot.text?.length ?? 0) > text.length,
+        truncated: hasMoreAfter,
       };
     },
   };
@@ -185,6 +211,10 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 function positiveInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
 }
 
 function truncateText(value: string, maxLength: number): string {

@@ -43,6 +43,12 @@ export type HttpRequestToolOutput = {
     readonly headers: Readonly<Record<string, string>>;
     readonly body: string;
     readonly durationMs: number;
+    readonly startChar: number;
+    readonly bodyChars: number;
+    readonly hasMoreAfter: boolean;
+    readonly nextStartChar?: number;
+    readonly reachedStartCharCeiling: boolean;
+    readonly startCharCeiling: number;
     readonly truncated: boolean;
   };
   readonly truncated: boolean;
@@ -90,6 +96,7 @@ type MutableNetworkFacts = {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_BODY_CHARS = 128_000;
+const MAX_BODY_START_CHAR = 2_000_000;
 const ALLOWED_METHODS = new Set<HttpRequestMethod>(["GET", "HEAD", "POST", "PUT", "DELETE"]);
 
 export function createHttpRequestTool(options: HttpRequestToolOptions = {}): ToolExecutor {
@@ -115,6 +122,7 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
           "method defaults to GET and supports GET, HEAD, POST, PUT, and DELETE.",
           "headers is an optional object of string header values.",
           "body may be a string or JSON-serializable value for POST, PUT, or DELETE; GET and HEAD do not accept a body.",
+          "startChar continues a truncated GET response from a zero-based character offset; it is not accepted for side-effecting methods.",
           `timeoutMs defaults to ${DEFAULT_TIMEOUT_MS} and is capped at ${options.maxTimeoutMs ?? MAX_TIMEOUT_MS}.`,
         ],
         usageNotes: [
@@ -126,6 +134,8 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
           "result.statusCode and result.statusText contain the HTTP response status.",
           "result.headers is a plain object of response headers.",
           "result.body is bounded text and may be empty.",
+          "result.hasMoreAfter/result.nextStartChar provide the continuation point when a GET response body is truncated.",
+          "result.reachedStartCharCeiling=true means there is more body text beyond the supported continuation window and no nextStartChar will be returned.",
           `result.truncated is true when the response body exceeds ${maxBodyChars} characters.`,
           "result.durationMs is measured inside the HTTP tool and may differ slightly from the outer tool event duration.",
         ],
@@ -133,6 +143,7 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
           { label: "session state", value: "no OAuth flow, no cookie jar, no upload or download handling" },
           { label: "default timeoutMs", value: String(DEFAULT_TIMEOUT_MS) },
           { label: "max body chars", value: String(maxBodyChars) },
+          { label: "max startChar", value: String(MAX_BODY_START_CHAR) },
         ],
         examples: [
           { title: "GET JSON", input: { url: "https://api.example.test/status" } },
@@ -162,6 +173,7 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
             description: "Optional request headers with string values.",
           },
           body: { description: "Optional string or JSON-serializable request body for POST, PUT, or DELETE." },
+          startChar: { type: "number", description: "Zero-based body character offset for continuing a truncated GET response." },
           timeoutMs: { type: "number", description: `Optional timeout in milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS}.` },
         },
         required: ["url"],
@@ -182,6 +194,10 @@ async function executeHttpRequest(
   const record = asRecord(input);
   const url = requireHttpUrl(record.url);
   const method = methodFromInput(record.method);
+  const startChar = boundedBodyStartChar(record.startChar);
+  if (startChar > 0 && method !== "GET") {
+    throw new Error("http_request startChar continuation is only supported for GET requests.");
+  }
   const timeoutMs = boundedPositiveInteger(
     record.timeoutMs,
     options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -207,8 +223,8 @@ async function executeHttpRequest(
       signal: controller.signal,
     });
     const bodyResult = method === "HEAD"
-      ? { body: "", truncated: false }
-      : await readResponseBody(response, maxBodyChars);
+      ? { body: "", startChar: 0, bodyChars: 0, hasMoreAfter: false, reachedStartCharCeiling: false, startCharCeiling: MAX_BODY_START_CHAR, truncated: false }
+      : await readResponseBody(response, maxBodyChars, startChar);
     const durationMs = Date.now() - startedAt;
     const statusText = response.statusText ?? "";
     return {
@@ -222,6 +238,12 @@ async function executeHttpRequest(
         headers: headersToRecord(response.headers),
         body: bodyResult.body,
         durationMs,
+        startChar: bodyResult.startChar,
+        bodyChars: bodyResult.bodyChars,
+        hasMoreAfter: bodyResult.hasMoreAfter,
+        nextStartChar: bodyResult.nextStartChar,
+        reachedStartCharCeiling: bodyResult.reachedStartCharCeiling,
+        startCharCeiling: bodyResult.startCharCeiling,
         truncated: bodyResult.truncated,
       },
       truncated: bodyResult.truncated,
@@ -333,32 +355,48 @@ function setDefaultContentType(headers: Record<string, string>): void {
 
 async function readResponseBody(
   response: HttpRequestFetchResponseLike,
-  maxBodyChars: number
-): Promise<{ readonly body: string; readonly truncated: boolean }> {
+  maxBodyChars: number,
+  startChar: number
+): Promise<{
+  readonly body: string;
+  readonly startChar: number;
+  readonly bodyChars: number;
+  readonly hasMoreAfter: boolean;
+  readonly nextStartChar?: number;
+  readonly reachedStartCharCeiling: boolean;
+  readonly startCharCeiling: number;
+  readonly truncated: boolean;
+}> {
   if (maxBodyChars <= 0) {
     await cancelBody(response.body);
-    return { body: "", truncated: true };
+    return {
+      body: "",
+      startChar,
+      bodyChars: 0,
+      hasMoreAfter: true,
+      reachedStartCharCeiling: startChar >= MAX_BODY_START_CHAR,
+      startCharCeiling: MAX_BODY_START_CHAR,
+      truncated: true,
+    };
   }
+  const readLimit = startChar + maxBodyChars + 1;
   if (response.body !== undefined && response.body !== null) {
-    return readStreamBody(response.body, maxBodyChars);
+    return bodyWindow(await readStreamBody(response.body, readLimit), startChar, maxBodyChars);
   }
   if (response.text !== undefined) {
     const text = await response.text();
-    return text.length <= maxBodyChars
-      ? { body: text, truncated: false }
-      : { body: text.slice(0, maxBodyChars), truncated: true };
+    return bodyWindow(text, startChar, maxBodyChars);
   }
-  return { body: "", truncated: false };
+  return { body: "", startChar, bodyChars: 0, hasMoreAfter: false, reachedStartCharCeiling: false, startCharCeiling: MAX_BODY_START_CHAR, truncated: false };
 }
 
 async function readStreamBody(
   stream: ReadableStream<Uint8Array>,
-  maxBodyChars: number
-): Promise<{ readonly body: string; readonly truncated: boolean }> {
+  maxReadChars: number
+): Promise<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let text = "";
-  let truncated = false;
   try {
     for (;;) {
       const chunk = await reader.read();
@@ -367,9 +405,8 @@ async function readStreamBody(
         break;
       }
       text += decoder.decode(chunk.value, { stream: true });
-      if (text.length > maxBodyChars) {
-        text = text.slice(0, maxBodyChars);
-        truncated = true;
+      if (text.length > maxReadChars) {
+        text = text.slice(0, maxReadChars);
         await reader.cancel().catch(() => undefined);
         break;
       }
@@ -377,7 +414,40 @@ async function readStreamBody(
   } finally {
     reader.releaseLock();
   }
-  return { body: text, truncated };
+  return text;
+}
+
+function bodyWindow(
+  text: string,
+  startChar: number,
+  maxBodyChars: number
+): {
+  readonly body: string;
+  readonly startChar: number;
+  readonly bodyChars: number;
+  readonly hasMoreAfter: boolean;
+  readonly nextStartChar?: number;
+  readonly reachedStartCharCeiling: boolean;
+  readonly startCharCeiling: number;
+  readonly truncated: boolean;
+} {
+  const endChar = startChar + maxBodyChars;
+  const body = text.slice(startChar, endChar);
+  const hasMoreAfter = text.length > endChar;
+  const rawNextStartChar = hasMoreAfter ? startChar + body.length : undefined;
+  const nextStartChar = rawNextStartChar !== undefined && rawNextStartChar > startChar && rawNextStartChar <= MAX_BODY_START_CHAR
+    ? rawNextStartChar
+    : undefined;
+  return {
+    body,
+    startChar,
+    bodyChars: body.length,
+    hasMoreAfter,
+    nextStartChar,
+    reachedStartCharCeiling: hasMoreAfter && rawNextStartChar !== undefined && rawNextStartChar > MAX_BODY_START_CHAR,
+    startCharCeiling: MAX_BODY_START_CHAR,
+    truncated: hasMoreAfter,
+  };
 }
 
 async function cancelBody(stream: ReadableStream<Uint8Array> | null | undefined): Promise<void> {
@@ -411,6 +481,16 @@ function boundedPositiveInteger(value: unknown, fallback: number, max: number): 
     return Math.min(Math.max(1, Math.floor(fallback)), Math.max(1, Math.floor(max)));
   }
   return Math.min(Math.floor(value), Math.max(1, Math.floor(max)));
+}
+
+function boundedBodyStartChar(value: unknown): number {
+  return Math.min(MAX_BODY_START_CHAR, Math.max(0, positiveInteger(value) ?? 0));
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
 }
 
 function resolveGlobalFetch(): HttpRequestFetchLike | undefined {

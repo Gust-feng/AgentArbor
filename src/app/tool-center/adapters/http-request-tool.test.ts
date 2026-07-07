@@ -217,10 +217,61 @@ test("http_request truncates large response bodies at the configured limit", asy
 
     assert.equal(output.result.body, "x".repeat(12));
     assert.equal(output.result.truncated, true);
+    assert.equal(output.result.startChar, 0);
+    assert.equal(output.result.bodyChars, 12);
+    assert.equal(output.result.hasMoreAfter, true);
+    assert.equal(output.result.nextStartChar, 12);
     assert.equal(output.truncated, true);
   } finally {
     await server.close();
   }
+});
+
+test("http_request continues truncated GET response bodies with startChar", async () => {
+  const server = await createServer(async (_request, response) => {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("0123456789abcdef");
+  });
+  const tool = createHttpRequestTool({ maxBodyChars: 5 });
+  try {
+    const output = asHttpOutput(await tool.execute({ url: `${server.origin}/large`, startChar: 5 }, context));
+
+    assert.equal(output.result.body, "56789");
+    assert.equal(output.result.startChar, 5);
+    assert.equal(output.result.bodyChars, 5);
+    assert.equal(output.result.hasMoreAfter, true);
+    assert.equal(output.result.nextStartChar, 10);
+    assert.equal(output.truncated, true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("http_request stops continuation at the startChar ceiling without hiding overflow", async () => {
+  const tool = createHttpRequestTool({
+    maxBodyChars: 5,
+    fetch: async () => ({
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: async () => `${"x".repeat(2_000_000)}abcdeTAIL`,
+    }),
+  });
+
+  const output = asHttpOutput(await tool.execute({
+    url: "https://example.test/ceiling",
+    startChar: 2_000_000,
+  }, context));
+
+  assert.equal(output.result.body, "abcde");
+  assert.equal(output.result.startChar, 2_000_000);
+  assert.equal(output.result.bodyChars, 5);
+  assert.equal(output.result.hasMoreAfter, true);
+  assert.equal(output.result.nextStartChar, undefined);
+  assert.equal(output.result.reachedStartCharCeiling, true);
+  assert.equal(output.result.startCharCeiling, 2_000_000);
+  assert.equal(output.result.truncated, true);
+  assert.equal(output.truncated, true);
 });
 
 type TestServer = {
@@ -267,6 +318,12 @@ type HttpOutputForTest = {
     readonly statusCode: number;
     readonly headers: Readonly<Record<string, string>>;
     readonly body: string;
+    readonly startChar: number;
+    readonly bodyChars: number;
+    readonly hasMoreAfter: boolean;
+    readonly nextStartChar?: number;
+    readonly reachedStartCharCeiling: boolean;
+    readonly startCharCeiling: number;
     readonly truncated: boolean;
   };
 };

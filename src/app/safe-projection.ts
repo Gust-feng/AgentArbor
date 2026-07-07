@@ -2,6 +2,7 @@ import type { ModelFailure } from "../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolContentBlock,
+  ToolContinuation,
   ToolDisplayProjection,
   ToolErrorDomain,
   ToolErrorFacts,
@@ -17,6 +18,10 @@ import { commandProgramFromToolResult, commandTextFromToolResult } from "./comma
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";
+import {
+  toolContinuationFromUnknown,
+  toolResultContinuation,
+} from "./tool-result-continuation.js";
 
 const MODEL_TOOL_TEXT_MAX_CHARS = 128_000;
 const MODEL_TOOL_ERROR_MAX_CHARS = 64_000;
@@ -205,36 +210,76 @@ function projectToolModelResult(
     return searchToolResult(request, output, display);
   }
   if (request.toolName === "grep_files" || request.toolName === "search_context_attachment_files") {
-    return fileSearchToolResult(output, truncated);
+    return fileSearchToolResult(request, output, truncated);
+  }
+  if (request.toolName === "list_context_attachment_files") {
+    return contextAttachmentListToolResult(request, output, truncated);
+  }
+  if (request.toolName === "read_context_attachment_table") {
+    return contextAttachmentTableToolResult(request, output, truncated);
   }
   if (display.kind === "directory_listing") {
-    return directoryToolResult(display, truncated);
+    return directoryToolResult(request, display, truncated, output);
   }
   if (display.kind === "file_change_summary" || display.kind === "file_diff_preview") {
     return fileChangeToolResult(display, truncated);
   }
-  if (display.kind === "browser_snapshot") {
+  if (isSubAgentToolName(request.toolName)) {
+    const continuation = subAgentToolContinuation(record);
     return ensureToolResultContent({
-      content: textContentBlocks(display.text),
+      content: genericToolResultContent(record, display),
+      structuredContent: genericStructuredContent(request, output, display, truncated),
+      isError: record.isError === true ? true : undefined,
+      continuation,
+    }, toolResultFallbackText(request, display, record));
+  }
+  if (display.kind === "browser_snapshot") {
+    const result = asRecord(record.result);
+    const text = textFragmentForToolResult(result.text, MODEL_TOOL_TEXT_MAX_CHARS, request, "text");
+    const effectiveTruncated = display.truncated === true || truncated || text?.truncated === true;
+    const continuation = toolResultContinuation({ request, result, truncated: effectiveTruncated });
+    return ensureToolResultContent({
+      content: textContentBlocks(text?.text),
       structuredContent: structuredSnapshot({
         title: display.title,
         url: display.url,
-        truncated: display.truncated === true || truncated,
+        startChar: numberOrUndefined(result.startChar),
+        textChars: numberOrUndefined(result.textChars),
+        totalTextChars: numberOrUndefined(result.totalTextChars),
+        hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+        nextStartChar: numberOrUndefined(result.nextStartChar),
+        reachedStartCharCeiling: booleanOrUndefined(result.reachedStartCharCeiling),
+        startCharCeiling: numberOrUndefined(result.startCharCeiling),
+        rawTextRef: text?.rawRef,
+        truncated: effectiveTruncated,
       }),
+      continuation,
     }, toolResultFallbackText(request, display, record));
   }
   if (display.kind === "http_response") {
+    const result = asRecord(record.result);
+    const body = textFragmentForToolResult(result.body, MODEL_TOOL_TEXT_MAX_CHARS, request, "body");
+    const effectiveTruncated = display.truncated === true || truncated || body?.truncated === true;
+    const continuation = toolResultContinuation({ request, result, truncated: effectiveTruncated });
     return ensureToolResultContent({
-      content: textContentBlocks(display.bodyPreview),
+      content: textContentBlocks(body?.text),
       structuredContent: structuredSnapshot({
         method: display.method,
         url: display.url,
         statusCode: display.statusCode,
         statusText: display.statusText,
         durationMs: display.durationMs,
-        truncated: display.truncated === true || truncated,
+        startChar: numberOrUndefined(result.startChar),
+        bodyChars: numberOrUndefined(result.bodyChars),
+        hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+        nextStartChar: numberOrUndefined(result.nextStartChar),
+        reachedStartCharCeiling: booleanOrUndefined(result.reachedStartCharCeiling),
+        startCharCeiling: numberOrUndefined(result.startCharCeiling),
+        rawBodyRef: body?.rawRef,
+        truncated: effectiveTruncated,
       }),
       isError: typeof display.statusCode === "number" && display.statusCode >= 400 ? true : undefined,
+      continuation,
     }, toolResultFallbackText(request, display, record));
   }
   return ensureToolResultContent({
@@ -354,7 +399,10 @@ function toolResultFromModelResult(
     structuredContent: modelResult.structuredContent,
     isError: modelResult.isError,
     error: modelResult.error,
-    truncation: modelResult.truncation ?? (truncated ? { truncated: true } : undefined),
+    truncation: modelResult.truncation ?? (truncated ? {
+      truncated: true,
+      continuation: modelResult.continuation,
+    } : undefined),
     continuation: modelResult.continuation,
   };
 }
@@ -371,6 +419,9 @@ function toolResultFromUnknown(value: unknown): InternalToolResult | undefined {
     content,
     structuredContent: record.structuredContent,
     isError: booleanOrUndefined(record.isError),
+    error: toolResultErrorFromUnknown(record.error),
+    truncation: toolResultTruncationFromUnknown(record.truncation),
+    continuation: toolContinuationFromUnknown(record.continuation),
   };
 }
 
@@ -414,6 +465,44 @@ function toolContentBlockFromUnknown(value: unknown): ToolContentBlock | undefin
   return undefined;
 }
 
+function toolResultTruncationFromUnknown(value: unknown): ToolResult["truncation"] | undefined {
+  const record = asRecord(value);
+  if (record.truncated !== true) {
+    return undefined;
+  }
+  return {
+    truncated: true,
+    reason: stringOrUndefined(record.reason),
+    omittedChars: numberOrUndefined(record.omittedChars),
+    omittedItems: numberOrUndefined(record.omittedItems),
+    continuation: toolContinuationFromUnknown(record.continuation),
+  };
+}
+
+function toolResultErrorFromUnknown(value: unknown): ToolResult["error"] | undefined {
+  const record = asRecord(value);
+  const message = stringOrUndefined(record.message);
+  if (message === undefined) {
+    return undefined;
+  }
+  return {
+    message,
+    domain: toolErrorDomainFromUnknown(record.domain),
+    facts: optionalRecord(record.facts) as ToolErrorFacts | undefined,
+    retryable: booleanOrUndefined(record.retryable),
+  };
+}
+
+function toolErrorDomainFromUnknown(value: unknown): ToolErrorDomain | undefined {
+  return value === "tool_error" ||
+      value === "runtime_error" ||
+      value === "model_error" ||
+      value === "ui_submit_error" ||
+      value === "process_error"
+    ? value
+    : undefined;
+}
+
 function projectLegacyMcpToolResult(record: Readonly<Record<string, unknown>>): InternalToolResult {
   const result = asRecord(record.result);
   const content: ToolContentBlock[] = [];
@@ -446,6 +535,11 @@ function commandToolResult(request: ToolCallRequest, output: unknown, truncated:
     ...(stderr?.text === undefined ? [] : [{ type: "text" as const, text: stderr.text }]),
   ];
   const exitCode = numberOrUndefined(result.exitCode);
+  const continuation = toolResultContinuation({
+    request,
+    result,
+    truncated: truncated || stdout?.truncated === true || stderr?.truncated === true,
+  });
   return ensureToolResultContent({
     content,
     structuredContent: structuredSnapshot({
@@ -477,6 +571,7 @@ function commandToolResult(request: ToolCallRequest, output: unknown, truncated:
       truncated: truncated || stdout?.truncated === true || stderr?.truncated === true,
     }),
     isError: exitCode !== undefined && exitCode !== 0 ? true : undefined,
+    continuation,
   }, toolResultFallbackText(request, projectToolDisplay(request, output), record));
 }
 
@@ -484,6 +579,11 @@ function fileReadToolResult(request: ToolCallRequest, output: unknown, truncated
   const record = asRecord(output);
   const result = asRecord(record.result);
   const content = textFragmentForToolResult(result.content, MODEL_TOOL_TEXT_MAX_CHARS, request, "content");
+  const continuation = toolResultContinuation({
+    request,
+    result,
+    truncated: truncated || content?.truncated === true,
+  });
   return ensureToolResultContent({
     content: textContentBlocks(content?.text),
     structuredContent: structuredSnapshot({
@@ -501,10 +601,15 @@ function fileReadToolResult(request: ToolCallRequest, output: unknown, truncated
       totalLines: numberOrUndefined(result.totalLines),
       hasMoreBefore: booleanOrUndefined(result.hasMoreBefore),
       hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      startChar: numberOrUndefined(result.startChar),
+      textChars: numberOrUndefined(result.textChars),
+      charCount: numberOrUndefined(result.charCount),
+      nextStartChar: numberOrUndefined(result.nextStartChar),
       rawContentRef: content?.rawRef,
       truncated: truncated || content?.truncated === true || booleanOrUndefined(result.truncated),
     }),
     isError: booleanOrUndefined(result.readable) === false ? true : undefined,
+    continuation,
   }, toolResultFallbackText(request, projectToolDisplay(request, output), record));
 }
 
@@ -583,7 +688,7 @@ function searchToolResult(
   }, toolResultFallbackText(request, display, record));
 }
 
-function fileSearchToolResult(output: unknown, truncated: boolean): InternalToolResult {
+function fileSearchToolResult(request: ToolCallRequest, output: unknown, truncated: boolean): InternalToolResult {
   const record = asRecord(output);
   const result = asRecord(record.result);
   const matches = Array.isArray(result.matches) ? result.matches.slice(0, FILE_SEARCH_DISPLAY_MATCHES_LIMIT).map(projectGrepMatch) : [];
@@ -596,8 +701,10 @@ function fileSearchToolResult(output: unknown, truncated: boolean): InternalTool
       query: stringOrUndefined(result.query),
       path: stringOrUndefined(result.path),
       engine: stringOrUndefined(result.engine),
+      offset: numberOrUndefined(result.offset),
+      limit: numberOrUndefined(result.limit),
       matches,
-      matchesReturned: Array.isArray(result.matches) ? result.matches.length : matches.length,
+      matchesReturned: numberOrUndefined(result.matchesReturned) ?? (Array.isArray(result.matches) ? result.matches.length : matches.length),
       searchedFiles: numberOrUndefined(result.searchedFiles),
       skippedFactsAvailable: booleanOrUndefined(result.skippedFactsAvailable),
       skippedFactsComplete: booleanOrUndefined(result.skippedFactsComplete),
@@ -605,12 +712,112 @@ function fileSearchToolResult(output: unknown, truncated: boolean): InternalTool
       skippedSamples: Array.isArray(result.skippedSamples)
         ? result.skippedSamples.slice(0, 8).map(projectGrepSkippedSample)
         : undefined,
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextOffset: numberOrUndefined(result.nextOffset),
+      reachedOffsetCeiling: booleanOrUndefined(result.reachedOffsetCeiling),
+      offsetCeiling: numberOrUndefined(result.offsetCeiling),
+      maxOffset: numberOrUndefined(result.maxOffset),
       truncated,
     }),
+    continuation: toolResultContinuation({ request, result, truncated }),
   }, stringOrUndefined(record.summary) ?? "工具返回了可参考的结果。");
 }
 
-function directoryToolResult(display: Extract<ToolDisplayProjection, { readonly kind: "directory_listing" }>, truncated: boolean): InternalToolResult {
+function contextAttachmentListToolResult(
+  request: ToolCallRequest,
+  output: unknown,
+  truncated: boolean
+): InternalToolResult {
+  const record = asRecord(output);
+  const result = asRecord(record.result);
+  const entries = Array.isArray(result.entries) ? result.entries.slice(0, 200).map(projectDirectoryEntry) : [];
+  return ensureToolResultContent({
+    content: textContentBlocks(entries.slice(0, 30).map((entry) =>
+      [entry.kind, entry.path].filter(isString).join(" ")
+    ).join("\n")),
+    structuredContent: structuredSnapshot({
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      depth: numberOrUndefined(result.depth),
+      offset: numberOrUndefined(result.offset),
+      limit: numberOrUndefined(result.limit),
+      maxDepth: numberOrUndefined(result.maxDepth),
+      entries,
+      entriesReturned: numberOrUndefined(result.entriesReturned),
+      totalEntries: numberOrUndefined(result.totalEntries),
+      unreadableDirectories: numberOrUndefined(result.unreadableDirectories),
+      unreadableSamples: Array.isArray(result.unreadableSamples)
+        ? result.unreadableSamples.slice(0, 8).map(projectUnreadableDirectorySample)
+        : undefined,
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextOffset: numberOrUndefined(result.nextOffset),
+      reachedOffsetCeiling: booleanOrUndefined(result.reachedOffsetCeiling),
+      offsetCeiling: numberOrUndefined(result.offsetCeiling),
+      truncated,
+    }),
+    continuation: toolResultContinuation({ request, result, truncated }),
+  }, stringOrUndefined(record.summary) ?? "工具返回了可查看的附件目录结果。");
+}
+
+function contextAttachmentTableToolResult(
+  request: ToolCallRequest,
+  output: unknown,
+  truncated: boolean
+): InternalToolResult {
+  const record = asRecord(output);
+  const result = asRecord(record.result);
+  const rows = Array.isArray(result.rows) ? result.rows.slice(0, 200).map(projectTableRow) : [];
+  const content = rows.slice(0, 30).map((row) =>
+    `row ${row.rowNumber ?? "?"}: ${(row.values ?? []).join(" | ")}`
+  ).join("\n");
+  return ensureToolResultContent({
+    content: textContentBlocks(content),
+    structuredContent: structuredSnapshot({
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      mimeType: stringOrUndefined(result.mimeType),
+      bytes: numberOrUndefined(result.bytes),
+      table: booleanOrUndefined(result.table),
+      readable: booleanOrUndefined(result.readable),
+      reason: stringOrUndefined(result.reason),
+      format: stringOrUndefined(result.format),
+      delimiter: stringOrUndefined(result.delimiter),
+      sheetName: stringOrUndefined(result.sheetName),
+      sheetIndex: numberOrUndefined(result.sheetIndex),
+      sheets: stringArray(result.sheets),
+      headerRow: booleanOrUndefined(result.headerRow),
+      totalRows: numberOrUndefined(result.totalRows),
+      dataRows: numberOrUndefined(result.dataRows),
+      columnCount: numberOrUndefined(result.columnCount),
+      columns: stringArray(result.columns),
+      startRow: numberOrUndefined(result.startRow),
+      rowCount: numberOrUndefined(result.rowCount),
+      requestedRowCount: numberOrUndefined(result.requestedRowCount),
+      nextStartRow: numberOrUndefined(result.nextStartRow),
+      rows,
+      rowsReturned: numberOrUndefined(result.rowsReturned),
+      hasMoreBefore: booleanOrUndefined(result.hasMoreBefore),
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      reachedRowCeiling: booleanOrUndefined(result.reachedRowCeiling),
+      rowCeiling: numberOrUndefined(result.rowCeiling),
+      truncated,
+    }),
+    continuation: toolResultContinuation({ request, result, truncated }),
+    isError: booleanOrUndefined(result.readable) === false ? true : undefined,
+  }, stringOrUndefined(record.summary) ?? "工具返回了可查看的附件表格结果。");
+}
+
+function directoryToolResult(
+  request: ToolCallRequest,
+  display: Extract<ToolDisplayProjection, { readonly kind: "directory_listing" }>,
+  truncated: boolean,
+  output?: unknown
+): InternalToolResult {
+  const result = asRecord(asRecord(output).result);
   const entries = display.entries.map((entry) => [entry.kind, entry.path].filter(isString).join(" "));
   return ensureToolResultContent({
     content: textContentBlocks(entries.slice(0, 30).join("\n")),
@@ -622,6 +829,16 @@ function directoryToolResult(display: Extract<ToolDisplayProjection, { readonly 
       unreadableDirectories: display.unreadableDirectories,
       unreadableSamples: display.unreadableSamples,
       entries: display.entries,
+      offset: numberOrUndefined(result.offset),
+      limit: numberOrUndefined(result.limit),
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextOffset: numberOrUndefined(result.nextOffset),
+      truncated: display.truncated === true || truncated,
+    }),
+    continuation: toolResultContinuation({
+      request,
+      result,
+      display,
       truncated: display.truncated === true || truncated,
     }),
   }, "工具返回了可查看的结果。");
@@ -1103,6 +1320,11 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
           field: "content",
         })
       : undefined;
+    const continuation = toolResultContinuation({
+      request,
+      result,
+      truncated: truncated || content?.truncated === true,
+    });
     return {
       summary,
       skillId: stringOrUndefined(result.skillId),
@@ -1117,6 +1339,7 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       truncated: truncated || content?.truncated === true,
       content: content?.text,
       rawContentRef: content?.rawRef,
+      continuation,
     };
   }
   if (request.toolName === "read_file") {
@@ -1128,6 +1351,11 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
           field: "content",
         })
       : undefined;
+    const continuation = toolResultContinuation({
+      request,
+      result,
+      truncated: truncated || content?.truncated === true,
+    });
     return {
       summary,
       path: stringOrUndefined(result.path),
@@ -1141,6 +1369,7 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       truncated: truncated || content?.truncated === true,
       content: content?.text,
       rawContentRef: content?.rawRef,
+      continuation,
     };
   }
   if (request.toolName === "read_context_attachment_text") {
@@ -1152,6 +1381,11 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
           field: "content",
         })
       : undefined;
+    const continuation = toolResultContinuation({
+      request,
+      result,
+      truncated: truncated || content?.truncated === true,
+    });
     return {
       summary,
       attachmentId: stringOrUndefined(result.attachmentId),
@@ -1171,6 +1405,7 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       truncated: truncated || content?.truncated === true,
       content: content?.text,
       rawContentRef: content?.rawRef,
+      continuation,
     };
   }
   if (request.toolName === "read_context_attachment_pdf_text") {
@@ -1182,6 +1417,11 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
           field: "content",
         })
       : undefined;
+    const continuation = toolResultContinuation({
+      request,
+      result,
+      truncated: truncated || content?.truncated === true,
+    });
     return {
       summary,
       attachmentId: stringOrUndefined(result.attachmentId),
@@ -1198,11 +1438,15 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       decodedStreams: numberOrUndefined(result.decodedStreams),
       skippedStreams: numberOrUndefined(result.skippedStreams),
       textFragments: numberOrUndefined(result.textFragments),
+      startChar: numberOrUndefined(result.startChar),
+      textChars: numberOrUndefined(result.textChars),
       charCount: numberOrUndefined(result.charCount),
       hasMoreAfter: result.hasMoreAfter === true,
+      nextStartChar: numberOrUndefined(result.nextStartChar),
       truncated: truncated || content?.truncated === true,
       content: content?.text,
       rawContentRef: content?.rawRef,
+      continuation,
     };
   }
   if (request.toolName === "read_context_attachment_image") {
@@ -1261,6 +1505,7 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
     };
   }
   if (request.toolName === "read_context_attachment_table") {
+    const continuation = toolResultContinuation({ request, result, truncated });
     return {
       summary,
       attachmentId: stringOrUndefined(result.attachmentId),
@@ -1283,12 +1528,17 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       columnCount: numberOrUndefined(result.columnCount),
       columns: stringArray(result.columns),
       startRow: numberOrUndefined(result.startRow),
+      rowCount: numberOrUndefined(result.rowCount),
       requestedRowCount: numberOrUndefined(result.requestedRowCount),
+      nextStartRow: numberOrUndefined(result.nextStartRow),
       rows: Array.isArray(result.rows) ? result.rows.slice(0, 200).map(projectTableRow) : undefined,
       rowsReturned: numberOrUndefined(result.rowsReturned),
       hasMoreBefore: result.hasMoreBefore === true,
       hasMoreAfter: result.hasMoreAfter === true,
+      reachedRowCeiling: booleanOrUndefined(result.reachedRowCeiling),
+      rowCeiling: numberOrUndefined(result.rowCeiling),
       truncated,
+      continuation,
     };
   }
   if (request.toolName === "inspect_context_attachment_archive") {
@@ -1311,6 +1561,7 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
     };
   }
   if (request.toolName === "list_context_attachment_files") {
+    const continuation = toolResultContinuation({ request, result, truncated });
     return {
       summary,
       attachmentId: stringOrUndefined(result.attachmentId),
@@ -1318,6 +1569,8 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       title: stringOrUndefined(result.title),
       path: stringOrUndefined(result.path),
       depth: numberOrUndefined(result.depth),
+      offset: numberOrUndefined(result.offset),
+      limit: numberOrUndefined(result.limit),
       maxDepth: numberOrUndefined(result.maxDepth),
       entries: Array.isArray(result.entries) ? result.entries.slice(0, 200).map(projectDirectoryEntry) : undefined,
       entriesReturned: numberOrUndefined(result.entriesReturned),
@@ -1326,7 +1579,12 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       unreadableSamples: Array.isArray(result.unreadableSamples)
         ? result.unreadableSamples.slice(0, 8).map(projectUnreadableDirectorySample)
         : undefined,
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextOffset: numberOrUndefined(result.nextOffset),
+      reachedOffsetCeiling: booleanOrUndefined(result.reachedOffsetCeiling),
+      offsetCeiling: numberOrUndefined(result.offsetCeiling),
       truncated,
+      continuation,
     };
   }
   if (request.toolName === "search_context_attachment_files") {
@@ -1337,8 +1595,10 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       title: stringOrUndefined(result.title),
       query: stringOrUndefined(result.query),
       path: stringOrUndefined(result.path),
+      offset: numberOrUndefined(result.offset),
+      limit: numberOrUndefined(result.limit),
       matches: Array.isArray(result.matches) ? result.matches.slice(0, FILE_SEARCH_DISPLAY_MATCHES_LIMIT).map(projectGrepMatch) : undefined,
-      matchesReturned: Array.isArray(result.matches) ? result.matches.length : undefined,
+      matchesReturned: numberOrUndefined(result.matchesReturned) ?? (Array.isArray(result.matches) ? result.matches.length : undefined),
       searchedFiles: numberOrUndefined(result.searchedFiles),
       skippedFiles: numberOrUndefined(result.skippedFiles),
       skippedBinaryFiles: numberOrUndefined(result.skippedBinaryFiles),
@@ -1349,14 +1609,22 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       skippedSamples: Array.isArray(result.skippedSamples)
         ? result.skippedSamples.slice(0, 8).map(projectGrepSkippedSample)
         : undefined,
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextOffset: numberOrUndefined(result.nextOffset),
+      reachedOffsetCeiling: booleanOrUndefined(result.reachedOffsetCeiling),
+      offsetCeiling: numberOrUndefined(result.offsetCeiling),
       truncated,
+      continuation: toolResultContinuation({ request, result, truncated }),
     };
   }
   if (request.toolName === "list_dir") {
+    const display = projectToolDisplay(request, output);
     return {
       summary,
       path: stringOrUndefined(result.path),
       depth: numberOrUndefined(result.depth),
+      offset: numberOrUndefined(result.offset),
+      limit: numberOrUndefined(result.limit),
       maxDepth: numberOrUndefined(result.maxDepth),
       entries: Array.isArray(result.entries) ? result.entries.slice(0, 200).map(projectDirectoryEntry) : undefined,
       entriesReturned: numberOrUndefined(result.entriesReturned),
@@ -1365,7 +1633,14 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       unreadableSamples: Array.isArray(result.unreadableSamples)
         ? result.unreadableSamples.slice(0, 8).map(projectUnreadableDirectorySample)
         : undefined,
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextOffset: numberOrUndefined(result.nextOffset),
+      reachedOffsetCeiling: booleanOrUndefined(result.reachedOffsetCeiling),
+      offsetCeiling: numberOrUndefined(result.offsetCeiling),
       truncated,
+      continuation: display.kind === "directory_listing"
+        ? toolResultContinuation({ request, result, display, truncated })
+        : undefined,
     };
   }
   if (request.toolName === "grep_files") {
@@ -1374,8 +1649,10 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       query: stringOrUndefined(result.query),
       path: stringOrUndefined(result.path),
       engine: stringOrUndefined(result.engine),
+      offset: numberOrUndefined(result.offset),
+      limit: numberOrUndefined(result.limit),
       matches: Array.isArray(result.matches) ? result.matches.slice(0, FILE_SEARCH_DISPLAY_MATCHES_LIMIT).map(projectGrepMatch) : undefined,
-      matchesReturned: Array.isArray(result.matches) ? result.matches.length : undefined,
+      matchesReturned: numberOrUndefined(result.matchesReturned) ?? (Array.isArray(result.matches) ? result.matches.length : undefined),
       searchedFiles: numberOrUndefined(result.searchedFiles),
       skippedFactsAvailable: result.skippedFactsAvailable === true ? true : result.skippedFactsAvailable === false ? false : undefined,
       skippedFactsComplete: result.skippedFactsComplete === true ? true : result.skippedFactsComplete === false ? false : undefined,
@@ -1388,7 +1665,13 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       skippedSamples: Array.isArray(result.skippedSamples)
         ? result.skippedSamples.slice(0, 8).map(projectGrepSkippedSample)
         : undefined,
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextOffset: numberOrUndefined(result.nextOffset),
+      reachedOffsetCeiling: booleanOrUndefined(result.reachedOffsetCeiling),
+      offsetCeiling: numberOrUndefined(result.offsetCeiling),
+      maxOffset: numberOrUndefined(result.maxOffset),
       truncated,
+      continuation: toolResultContinuation({ request, result, truncated }),
     };
   }
   if (request.toolName === "read") {
@@ -1477,6 +1760,11 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       stderr: stderr?.text,
       rawStdoutRef: stdout?.rawRef,
       rawStderrRef: stderr?.rawRef,
+      continuation: toolResultContinuation({
+        request,
+        result,
+        truncated: truncated || stdout?.truncated === true || stderr?.truncated === true,
+      }),
     };
   }
   if (request.toolName === "browser_snapshot") {
@@ -1488,13 +1776,26 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
           field: "text",
         })
       : undefined;
+    const continuation = toolResultContinuation({
+      request,
+      result,
+      truncated: truncated || text?.truncated === true,
+    });
     return {
       summary,
       url: stringOrUndefined(result.url),
       title: stringOrUndefined(result.title),
+      startChar: numberOrUndefined(result.startChar),
+      textChars: numberOrUndefined(result.textChars),
+      totalTextChars: numberOrUndefined(result.totalTextChars),
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextStartChar: numberOrUndefined(result.nextStartChar),
+      reachedStartCharCeiling: booleanOrUndefined(result.reachedStartCharCeiling),
+      startCharCeiling: numberOrUndefined(result.startCharCeiling),
       truncated: truncated || text?.truncated === true,
       text: text?.text,
       rawTextRef: text?.rawRef,
+      continuation,
     };
   }
   if (request.toolName === "http_request") {
@@ -1506,6 +1807,11 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
           field: "body",
         })
       : undefined;
+    const continuation = toolResultContinuation({
+      request,
+      result,
+      truncated: result.truncated === true || truncated || body?.truncated === true,
+    });
     return {
       summary,
       url: stringOrUndefined(result.url),
@@ -1514,9 +1820,16 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       statusText: stringOrUndefined(result.statusText),
       headers: asRecord(result.headers),
       durationMs: numberOrUndefined(result.durationMs),
+      startChar: numberOrUndefined(result.startChar),
+      bodyChars: numberOrUndefined(result.bodyChars),
+      hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
+      nextStartChar: numberOrUndefined(result.nextStartChar),
+      reachedStartCharCeiling: booleanOrUndefined(result.reachedStartCharCeiling),
+      startCharCeiling: numberOrUndefined(result.startCharCeiling),
       truncated: result.truncated === true || truncated || body?.truncated === true,
       body: body?.text,
       rawBodyRef: body?.rawRef,
+      continuation,
     };
   }
   if (record.result !== undefined && isMcpToolName(request.toolName)) {
@@ -1612,6 +1925,26 @@ function isSubAgentToolName(toolName: string): boolean {
   return toolName === "call_sub_agent" || toolName === "call_sub_agents" || toolName === "spawn_sub_agent";
 }
 
+function subAgentToolContinuation(record: Readonly<Record<string, unknown>>): ToolContinuation | undefined {
+  const result = asRecord(record.result);
+  const direct =
+    toolContinuationFromUnknown(record.continuation) ??
+    toolContinuationFromUnknown(result.continuation);
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (!Array.isArray(result.results)) {
+    return undefined;
+  }
+  for (const item of result.results) {
+    const continuation = toolContinuationFromUnknown(asRecord(item).continuation);
+    if (continuation !== undefined) {
+      return continuation;
+    }
+  }
+  return undefined;
+}
+
 function projectSubAgentToolAgentContent(
   request: ToolCallRequest,
   record: Readonly<Record<string, unknown>>,
@@ -1656,6 +1989,9 @@ function projectSubAgentResultItem(value: unknown): {
   readonly status?: string;
   readonly summary?: string;
   readonly full_output?: string;
+  readonly full_output_chars?: number;
+  readonly full_output_ref?: string;
+  readonly continuation?: ToolContinuation;
   readonly tool_calls?: number;
   readonly model_rounds?: number;
   readonly duration_ms?: number;
@@ -1671,6 +2007,9 @@ function projectSubAgentResultItem(value: unknown): {
     status: stringOrUndefined(record.status),
     summary: stringOrUndefined(record.summary),
     full_output: textOrUndefined(record.full_output),
+    full_output_chars: numberOrUndefined(record.full_output_chars),
+    full_output_ref: stringOrUndefined(record.full_output_ref),
+    continuation: toolContinuationFromUnknown(record.continuation),
     tool_calls: numberOrUndefined(record.tool_calls),
     model_rounds: numberOrUndefined(record.model_rounds),
     duration_ms: numberOrUndefined(record.duration_ms),

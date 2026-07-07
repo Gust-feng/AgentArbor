@@ -160,6 +160,158 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
   }
 });
 
+test("local list_dir and grep_files return executable continuation offsets when truncated", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-continuation-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    for (let index = 1; index <= 5; index += 1) {
+      await writeFile(path.join(root, "src", `note-${index}.txt`), `needle ${index}\n`, "utf8");
+    }
+    const listDir = createLocalListDirTool(root);
+    const grepFiles = createLocalGrepFilesTool(root, { ripgrepSearch: false });
+
+    const firstList = asRecord(await listDir.execute({ path: "src", limit: 2 }, context));
+    const firstListResult = asRecord(firstList.result);
+    assert.equal(firstList.truncated, true);
+    assert.equal(firstListResult.hasMoreAfter, true);
+    assert.equal(firstListResult.nextOffset, 2);
+    assert.equal(firstListResult.entriesReturned, 2);
+
+    const secondList = asRecord(await listDir.execute({ path: "src", limit: 2, offset: 2 }, context));
+    const secondListResult = asRecord(secondList.result);
+    assert.equal(secondListResult.offset, 2);
+    assert.equal(secondListResult.entriesReturned, 2);
+    assert.equal(secondListResult.nextOffset, 4);
+
+    const firstGrep = asRecord(await grepFiles.execute({ path: "src", query: "needle", limit: 2 }, context));
+    const firstGrepResult = asRecord(firstGrep.result);
+    assert.equal(firstGrep.truncated, true);
+    assert.equal(firstGrepResult.hasMoreAfter, true);
+    assert.equal(firstGrepResult.nextOffset, 2);
+    assert.equal(firstGrepResult.matchesReturned, 2);
+
+    const secondGrep = asRecord(await grepFiles.execute({ path: "src", query: "needle", limit: 2, offset: 2 }, context));
+    const secondGrepResult = asRecord(secondGrep.result);
+    assert.equal(secondGrepResult.offset, 2);
+    assert.equal(secondGrepResult.matchesReturned, 2);
+    assert.equal(secondGrepResult.nextOffset, 4);
+
+    const exactGrep = asRecord(await grepFiles.execute({ path: "src", query: "needle", limit: 5 }, context));
+    const exactGrepResult = asRecord(exactGrep.result);
+    assert.equal(exactGrep.truncated, false);
+    assert.equal(exactGrepResult.hasMoreAfter, false);
+    assert.equal(exactGrepResult.nextOffset, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local grep_files caps oversized offsets before collecting matches", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-offset-cap-"));
+  try {
+    let observedCollectLimit = 0;
+    const grepFiles = createLocalGrepFilesTool(root, {
+      ripgrepSearch: async (request) => {
+        observedCollectLimit = request.limit;
+        return [];
+      },
+    });
+
+    const grep = asRecord(await grepFiles.execute({
+      path: ".",
+      query: "needle",
+      limit: 80,
+      offset: Number.MAX_SAFE_INTEGER,
+    }, context));
+    const result = asRecord(grep.result);
+
+    assert.equal(observedCollectLimit, 10_081);
+    assert.equal(result.offset, 10_000);
+    assert.equal(result.maxOffset, 10_000);
+    assert.equal(result.offsetCeiling, 10_000);
+    assert.equal(result.matchesReturned, 0);
+    assert.equal(result.hasMoreAfter, false);
+    assert.equal(result.reachedOffsetCeiling, false);
+    assert.equal(result.nextOffset, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local grep_files stops continuation at the offset ceiling without hiding overflow", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-offset-boundary-"));
+  try {
+    const observedCollectLimits: number[] = [];
+    const grepFiles = createLocalGrepFilesTool(root, {
+      ripgrepSearch: async (request) => {
+        observedCollectLimits.push(request.limit);
+        return Array.from({ length: request.limit }, (_value, index) => ({
+          path: `src/match-${index}.txt`,
+          line: 1,
+          preview: `needle ${index}`,
+        }));
+      },
+    });
+
+    const firstGrep = asRecord(await grepFiles.execute({ path: ".", query: "needle", limit: 80, offset: 10_000 }, context));
+    const firstResult = asRecord(firstGrep.result);
+    const firstMatches = firstResult.matches as readonly { readonly path: string }[];
+    assert.equal(firstGrep.truncated, true);
+    assert.equal(firstResult.offset, 10_000);
+    assert.equal(firstResult.matchesReturned, 80);
+    assert.equal(firstResult.hasMoreAfter, true);
+    assert.equal(firstResult.nextOffset, undefined);
+    assert.equal(firstResult.reachedOffsetCeiling, true);
+    assert.equal(firstResult.offsetCeiling, 10_000);
+    assert.equal(firstMatches[0]?.path, "src/match-10000.txt");
+    assert.deepEqual(observedCollectLimits, [10_081]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read_file returns executable character continuation for maxLength windows", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-char-continuation-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "src", "long.txt"), "abcdefghij", "utf8");
+    const readFileTool = createLocalReadFileTool(root);
+
+    const firstRead = asRecord(await readFileTool.execute({ path: "src/long.txt", maxLength: 5 }, context));
+    const firstResult = asRecord(firstRead.result);
+    assert.equal(firstRead.truncated, true);
+    assert.equal(firstResult.content, "abcd…");
+    assert.equal(firstResult.startChar, 0);
+    assert.equal(firstResult.textChars, 4);
+    assert.equal(firstResult.charCount, 10);
+    assert.equal(firstResult.nextStartChar, 4);
+
+    const secondRead = asRecord(await readFileTool.execute({ path: "src/long.txt", maxLength: 5, startChar: 4 }, context));
+    const secondResult = asRecord(secondRead.result);
+    assert.equal(secondResult.content, "efgh…");
+    assert.equal(secondResult.startChar, 4);
+    assert.equal(secondResult.nextStartChar, 8);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read_file rejects line ranges with maxLength to avoid skipped continuation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-line-maxlength-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "src", "long-lines.txt"), "abcdefghij\nklmnopqrst\n", "utf8");
+    const readFileTool = createLocalReadFileTool(root);
+
+    await assert.rejects(
+      () => readFileTool.execute({ path: "src/long-lines.txt", startLine: 1, endLine: 2, maxLength: 5 }, context),
+      /cannot combine maxLength with startLine\/endLine/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("local grep_files prefers ripgrep runner and records the search engine", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
@@ -168,7 +320,7 @@ test("local grep_files prefers ripgrep runner and records the search engine", as
       ripgrepSearch: async (request) => {
         called = true;
         assert.equal(request.query, "Needle");
-        assert.equal(request.limit, 1);
+        assert.equal(request.limit, 2);
         return [{ path: "src/from-rg.txt", line: 7, preview: "Needle from rg" }];
       },
     });

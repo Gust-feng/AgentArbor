@@ -20,9 +20,11 @@ import {
 
 const DEFAULT_MAX_CHARS = 128_000;
 const MAX_LIST_ENTRIES = 200;
+const MAX_LIST_OFFSET = 10_000;
 const DEFAULT_LIST_DEPTH = 1;
 const MAX_LIST_DEPTH = 3;
 const MAX_SEARCH_MATCHES = 80;
+const MAX_SEARCH_OFFSET = 10_000;
 const MAX_SKIPPED_SAMPLES = 8;
 const MAX_READ_LINE_COUNT = 2_000;
 const DEFAULT_READ_LINE_COUNT = 200;
@@ -74,6 +76,18 @@ type DirectoryEntry = {
   readonly kind: "directory" | "file" | "symlink" | "other";
   readonly bytes?: number;
   readonly depth: number;
+};
+
+type ReadContentWindow = {
+  readonly content: string;
+  readonly range?: { readonly startLine: number; readonly endLine: number };
+  readonly totalLines?: number;
+  readonly hasMoreBefore: boolean;
+  readonly hasMoreAfter: boolean;
+  readonly startChar?: number;
+  readonly textChars?: number;
+  readonly charCount?: number;
+  readonly nextStartChar?: number;
 };
 
 type SearchMatch = {
@@ -245,6 +259,8 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
           "Read textual content from a current context attachment selected by attachmentId or ref.",
           "For file attachments, omit path. For project attachments, path is required and must be relative to the attached project root.",
           "Use startLine/endLine to inspect a focused range or continue through a large file.",
+          "Use startChar to continue a character-window read when result.nextStartChar is present.",
+          "maxLength applies to whole-file/startChar reads; do not combine maxLength with startLine/endLine.",
           "Do not use for images, PDFs, archives, spreadsheets, or binary files; the tool will return non-text metadata instead of content.",
           "Local absolute paths are not accepted as input and are not returned in output.",
         ],
@@ -252,6 +268,7 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
           "result.content contains UTF-8 text when the attachment target is readable text.",
           "result.binary or result.readable=false means the attachment cannot be read as text by this tool.",
           "result.path is relative to the attachment root for project attachments and never a local absolute path.",
+          "result.hasMoreAfter/result.nextStartChar provide the continuation point for character-window reads.",
           "truncated and hasMoreAfter indicate whether another focused read may be needed.",
         ],
         runtimeHints: [
@@ -283,6 +300,7 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
           maxLength: { type: "number", description: "Maximum characters to return." },
           startLine: { type: "number", description: "Optional 1-based first line to return." },
           endLine: { type: "number", description: "Optional 1-based last line to return." },
+          startChar: { type: "number", description: "Optional zero-based character offset for continuing a truncated text window." },
         },
       },
     },
@@ -323,17 +341,34 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
         };
       }
       const lineRange = parseLineRange(record);
+      const hasStartChar = record.startChar !== undefined;
+      const startChar = boundedOffset(record.startChar, Number.MAX_SAFE_INTEGER);
+      if (lineRange !== undefined && hasStartChar) {
+        throw new Error("read_context_attachment_text cannot combine startChar with startLine/endLine.");
+      }
+      if (lineRange !== undefined && record.maxLength !== undefined) {
+        throw new Error("read_context_attachment_text cannot combine maxLength with startLine/endLine; request a smaller line range instead.");
+      }
       if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES && lineRange === undefined) {
         throw new Error("Attachment text target is too large to read safely without a line range.");
       }
       const maxLength = positiveInteger(record.maxLength) ?? DEFAULT_MAX_CHARS;
       const content = lineRange === undefined
-        ? wholeFileContent(await readAttachmentTextFile(target.targetAbsolutePath))
+        ? charWindowContent(await readAttachmentTextFile(target.targetAbsolutePath), startChar)
         : stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES
           ? await readLineRange(target.targetAbsolutePath, lineRange)
           : sliceLines(await readAttachmentTextFile(target.targetAbsolutePath), lineRange);
       const truncated = content.content.length > maxLength;
+      if (lineRange !== undefined && truncated) {
+        throw new Error("read_context_attachment_text line range exceeds the text return budget; request fewer lines so continuation does not skip unread text.");
+      }
       const returned = truncateText(content.content, maxLength);
+      const returnedTextChars = returnedRawTextChars(content.content, maxLength);
+      const nextStartChar = content.startChar === undefined
+        ? undefined
+        : content.content.length > returnedTextChars
+          ? content.startChar + returnedTextChars
+          : content.nextStartChar;
       const rangeSummary = content.range === undefined
         ? ""
         : ` · lines ${content.range.startLine}-${content.range.endLine}${content.totalLines === undefined ? "" : ` of ${content.totalLines}`}`;
@@ -356,6 +391,10 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
           totalLines: content.totalLines,
           hasMoreBefore: content.hasMoreBefore,
           hasMoreAfter: content.hasMoreAfter || truncated,
+          startChar: content.startChar,
+          textChars: content.startChar === undefined ? undefined : returnedTextChars,
+          charCount: content.charCount,
+          nextStartChar,
         },
         truncated: truncated || content.hasMoreAfter,
       };
@@ -374,11 +413,13 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
           "For project attachments, path is required and must point to the PDF file inside the attached project.",
           "This is a conservative built-in extractor for text-native PDFs; scanned PDFs, OCR, complex encodings, and image-only pages may return no_extractable_pdf_text.",
           "Use read_context_attachment_text for normal text files and table tools for tables; do not paste PDF bytes into the prompt.",
+          "startChar continues a truncated extracted text window from a zero-based character offset.",
           "Local absolute paths are not accepted as input and are not returned in output.",
         ],
         outputNotes: [
           "result.readable=true means bounded PDF text was extracted for the model.",
           "result.content contains best-effort text, with hasMoreAfter/truncated indicating whether content was clipped.",
+          "result.nextStartChar provides the continuation point when truncated is true.",
           "result.reason explains unsupported, scanned, encrypted, or unreadable PDF cases without returning local paths.",
         ],
         runtimeHints: [
@@ -408,6 +449,7 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
           ref: { type: "string", description: "Exact non-local context ref when attachmentId is unavailable." },
           path: { type: "string", description: "Relative PDF path inside a project attachment." },
           maxLength: { type: "number", description: "Maximum extracted characters to return." },
+          startChar: { type: "number", description: "Zero-based extracted-text character offset for continuing a truncated PDF read." },
         },
       },
     },
@@ -464,9 +506,10 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
         });
       }
       const maxLength = positiveInteger(record.maxLength) ?? DEFAULT_PDF_MAX_CHARS;
-      const truncated = extracted.text.length > maxLength;
-      const returned = truncateText(extracted.text, maxLength);
-      const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · PDF text · ${returned.length}${truncated ? ` of ${extracted.text.length}` : ""} chars${truncated ? " · truncated" : ""}`;
+      const startChar = boundedOffset(record.startChar, extracted.text.length);
+      const returned = extracted.text.slice(startChar, startChar + maxLength);
+      const hasMoreAfter = extracted.text.length > startChar + returned.length;
+      const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · PDF text · ${returned.length}${hasMoreAfter ? ` of ${extracted.text.length - startChar}` : ""} chars${startChar > 0 ? ` · offset ${startChar}` : ""}${hasMoreAfter ? " · truncated" : ""}`;
       return {
         action: "read_context_attachment_pdf_text",
         status: "completed",
@@ -483,11 +526,14 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
           readable: true,
           extraction: "best_effort_pdf_text",
           content: returned,
+          startChar,
+          textChars: returned.length,
           charCount: extracted.text.length,
-          hasMoreAfter: truncated,
+          hasMoreAfter,
+          nextStartChar: hasMoreAfter ? startChar + returned.length : undefined,
           ...extracted.facts,
         },
-        truncated,
+        truncated: hasMoreAfter,
       };
     },
   };
@@ -803,6 +849,7 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
           "result.format is delimited or xlsx; XLSX results include sheetName, sheetIndex, and sheets.",
           "result.columns contains header columns when headerRow is true.",
           "result.hasMoreBefore/hasMoreAfter indicate whether another row window may be needed.",
+          "result.nextStartRow and continuation.nextInput provide the next executable row-window call when truncated is true.",
           "result.reason explains unsupported or unreadable table targets without returning local paths.",
         ],
         runtimeHints: [
@@ -876,42 +923,77 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
       });
       const actualEndRow = rows.length === 0 ? startRow : rows[rows.length - 1]!.rowNumber;
       const hasMoreAfter = table.parsed.rows.some((row) => row.rowNumber > actualEndRow);
+      const nextStartRow = hasMoreAfter ? actualEndRow + 1 : undefined;
+      const continuation = nextStartRow === undefined
+        ? undefined
+        : {
+            nextInput: compactRecord({
+              attachmentId: entry.attachmentId,
+              path: target.targetPath,
+              sheetName: table.parsed.kind === "xlsx" ? table.parsed.sheetName : undefined,
+              sheetIndex: table.parsed.kind === "xlsx" ? table.parsed.sheetIndex : undefined,
+              startRow: nextStartRow,
+              rowCount,
+              headerRow,
+            }),
+            note: "Continue read_context_attachment_table with the same attachment/path/sheet/header settings and nextStartRow.",
+          };
       const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · rows ${startRow}-${actualEndRow} of ${tableFacts.totalRows} · ${rows.length} returned`;
+      const result = {
+        attachmentId: entry.attachmentId,
+        kind: entry.ref.kind,
+        title: attachmentTitle(entry),
+        path: target.targetPath,
+        mimeType: entry.ref.metadata?.mimeType,
+        bytes: table.bytes,
+        table: true,
+        format: table.parsed.kind,
+        delimiter: table.parsed.kind === "delimited" ? table.parsed.delimiter.kind : undefined,
+        sheetName: table.parsed.kind === "xlsx" ? table.parsed.sheetName : undefined,
+        sheetIndex: table.parsed.kind === "xlsx" ? table.parsed.sheetIndex : undefined,
+        sheets: table.parsed.kind === "xlsx" ? table.parsed.sheets : undefined,
+        headerRow,
+        totalRows: tableFacts.totalRows,
+        dataRows: tableFacts.dataRows,
+        columnCount: tableFacts.columnCount,
+        columns: tableFacts.columns,
+        startRow,
+        requestedRowCount: rowCount,
+        rowCount,
+        rows,
+        rowsReturned: rows.length,
+        hasMoreBefore: startRow > 1,
+        hasMoreAfter,
+        nextStartRow,
+        continuation,
+      };
       return {
         action: "read_context_attachment_table",
         status: "completed",
         refId: `context-attachment:${entry.attachmentId}:table:${safeRefToken(target.targetPath)}:${startRow}`,
         summary,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          path: target.targetPath,
-          mimeType: entry.ref.metadata?.mimeType,
-          bytes: table.bytes,
-          table: true,
-          format: table.parsed.kind,
-          delimiter: table.parsed.kind === "delimited" ? table.parsed.delimiter.kind : undefined,
-          sheetName: table.parsed.kind === "xlsx" ? table.parsed.sheetName : undefined,
-          sheetIndex: table.parsed.kind === "xlsx" ? table.parsed.sheetIndex : undefined,
-          sheets: table.parsed.kind === "xlsx" ? table.parsed.sheets : undefined,
-          headerRow,
-          totalRows: tableFacts.totalRows,
-          dataRows: tableFacts.dataRows,
-          columnCount: tableFacts.columnCount,
-          columns: tableFacts.columns,
-          startRow,
-          requestedRowCount: rowCount,
-          rows,
-          rowsReturned: rows.length,
-          hasMoreBefore: startRow > 1,
-          hasMoreAfter,
-        },
+        result,
         display: {
           kind: "generic_tool_summary",
           action: "read_context_attachment_table",
           summary,
           items: rows.slice(0, 8).map((row) => `row ${row.rowNumber}: ${row.values.join(" | ")}`),
+        },
+        continuation,
+        canonicalResult: continuation === undefined ? undefined : {
+          content: [
+            { type: "text", text: [summary, ...rows.slice(0, 8).map((row) => `row ${row.rowNumber}: ${row.values.join(" | ")}`)].join("\n") },
+          ],
+          structuredContent: {
+            action: "read_context_attachment_table",
+            result,
+            truncated: true,
+          },
+          truncation: {
+            truncated: true,
+            continuation,
+          },
+          continuation,
         },
         truncated: hasMoreAfter,
       };
@@ -1071,17 +1153,20 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
           "List files and folders inside a project or workspace context attachment.",
           "Use this before reading a file inside a selected local project or attached project folder.",
           "path is optional and defaults to the attachment root. It must be relative to the attachment root.",
-          "depth defaults to 1 and is capped; limit caps returned entries.",
+          "depth defaults to 1 and is capped; limit caps returned entries; offset continues a truncated listing.",
           "Local absolute paths are not accepted or returned.",
         ],
         outputNotes: [
           "result.entries[] contains attachment-relative path, name, kind, byte size, and depth.",
           "result.totalEntries is the full enumerated count when traversal completes.",
-          "truncated tells whether not all entries were returned.",
+          "result.hasMoreAfter/result.nextOffset provide the continuation point when truncated is true.",
+          "result.reachedOffsetCeiling=true means there are more entries beyond the supported continuation window and no nextOffset will be returned.",
+          "truncated tells whether another continuation page is available.",
         ],
         runtimeHints: [
           { label: "max depth", value: String(MAX_LIST_DEPTH) },
           { label: "max entries", value: String(MAX_LIST_ENTRIES) },
+          { label: "max continuation offset", value: String(MAX_LIST_OFFSET) },
         ],
         examples: [
           { title: "List attached project root", input: { attachmentId: "ctx_project", depth: 2, limit: 80 } },
@@ -1106,6 +1191,7 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
           path: { type: "string", description: "Attachment-relative directory path. Defaults to attachment root." },
           depth: { type: "number", description: "Recursive listing depth. Defaults to 1 and is capped." },
           limit: { type: "number", description: "Maximum entries to return." },
+          offset: { type: "number", description: "Zero-based entry offset used to continue a truncated listing." },
         },
       },
     },
@@ -1130,13 +1216,25 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
       }
       const depth = Math.min(MAX_LIST_DEPTH, positiveInteger(record.depth) ?? DEFAULT_LIST_DEPTH);
       const limit = Math.min(MAX_LIST_ENTRIES, positiveInteger(record.limit) ?? MAX_LIST_ENTRIES);
+      const offset = boundedOffset(record.offset, MAX_LIST_OFFSET);
       const listed = await listDirectoryTree({
         absolutePath: target.targetAbsolutePath,
         rootAbsolutePath: target.rootAbsolutePath,
         maxDepth: depth,
         limit,
+        offset,
       });
-      const summary = `${attachmentTitle(entry)}:${target.targetPath} · ${listed.entries.length}${listed.truncated ? ` of ${listed.totalEntries}` : ""} entries · depth ${depth}${listed.truncated ? " · truncated" : ""}`;
+      const continuation = boundedContinuationOffset({
+        hasMoreAfter: listed.hasMoreAfter,
+        nextOffset: listed.nextOffset,
+        maxOffset: MAX_LIST_OFFSET,
+      });
+      const continuationSummary = continuation.reachedOffsetCeiling
+        ? " · offset ceiling reached"
+        : continuation.hasMoreAfter
+          ? " · truncated"
+          : "";
+      const summary = `${attachmentTitle(entry)}:${target.targetPath} · ${listed.entries.length}${listed.truncated ? ` of ${listed.totalEntries}` : ""} entries · depth ${depth}${offset > 0 ? ` · offset ${offset}` : ""}${continuationSummary}`;
       return {
         action: "list_context_attachment_files",
         status: "completed",
@@ -1148,6 +1246,8 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
           title: attachmentTitle(entry),
           path: target.targetPath,
           depth,
+          offset,
+          limit,
           maxDepth: MAX_LIST_DEPTH,
           maxEntries: MAX_LIST_ENTRIES,
           entries: listed.entries,
@@ -1155,6 +1255,10 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
           totalEntries: listed.totalEntries,
           unreadableDirectories: listed.unreadableDirectories,
           unreadableSamples: listed.unreadableSamples,
+          hasMoreAfter: continuation.hasMoreAfter,
+          nextOffset: continuation.nextOffset,
+          reachedOffsetCeiling: continuation.reachedOffsetCeiling,
+          offsetCeiling: MAX_LIST_OFFSET,
         },
         display: {
           kind: "generic_tool_summary",
@@ -1164,7 +1268,7 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
             [entry.kind, entry.path, entry.bytes === undefined ? undefined : `${entry.bytes} bytes`].filter(isString).join(" ")
           ),
         },
-        truncated: listed.truncated,
+        truncated: continuation.hasMoreAfter,
       };
     },
   };
@@ -1181,16 +1285,20 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
           "Use this to locate relevant files or passages in an attached local project before reading them.",
           "For project attachments, path optionally narrows search to an attachment-relative directory or file.",
           "For file attachments, omit path; the tool searches that file only.",
+          "offset optionally continues a previously truncated search with the same query/path.",
           "Do not use regular expressions. Local absolute paths are not accepted or returned.",
         ],
         outputNotes: [
           "result.matches[] includes attachment-relative path, 1-based line, and preview.",
           "Skipped binary, too-large, unreadable, generated, or non-file entries are counted.",
-          "truncated tells whether the match limit was reached.",
+          "result.hasMoreAfter/result.nextOffset provide the continuation point when truncated is true.",
+          "result.reachedOffsetCeiling=true means there are more matches beyond the supported continuation window and no nextOffset will be returned.",
+          "truncated tells whether another continuation page is available.",
         ],
         runtimeHints: [
           { label: "max matches", value: String(MAX_SEARCH_MATCHES) },
           { label: "max file bytes", value: String(MAX_LOCAL_WORKSPACE_FILE_BYTES) },
+          { label: "max continuation offset", value: String(MAX_SEARCH_OFFSET) },
         ],
         examples: [
           { title: "Search attached project", input: { attachmentId: "ctx_project", query: "TODO", path: "src", limit: 20 } },
@@ -1215,6 +1323,7 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
           query: { type: "string", description: "Plain-text query to search for, case-insensitive." },
           path: { type: "string", description: "Attachment-relative directory or file path. Defaults to attachment root for project attachments." },
           limit: { type: "number", description: "Maximum matches to return." },
+          offset: { type: "number", description: "Zero-based match offset used to continue a truncated search." },
         },
         required: ["query"],
       },
@@ -1237,18 +1346,31 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
       });
       await statAttachmentTarget(target.targetAbsolutePath, "Attachment search target could not be read.");
       const limit = Math.min(MAX_SEARCH_MATCHES, positiveInteger(record.limit) ?? MAX_SEARCH_MATCHES);
-      const matches: SearchMatch[] = [];
+      const offset = boundedOffset(record.offset, MAX_SEARCH_OFFSET);
+      const collectionLimit = Math.min(MAX_SEARCH_OFFSET + MAX_SEARCH_MATCHES + 1, offset + limit + 1);
+      const collectedMatches: SearchMatch[] = [];
       const facts = createSearchFacts();
       await searchPath({
         absolutePath: target.targetAbsolutePath,
         rootAbsolutePath: target.rootAbsolutePath,
         normalizedQuery: query.toLowerCase(),
-        limit,
-        matches,
+        limit: collectionLimit,
+        matches: collectedMatches,
         facts,
       });
-      const truncated = matches.length >= limit;
-      const summary = `${attachmentTitle(entry)}:${target.targetPath} · ${matches.length} matches for ${query}${truncated ? " · truncated" : ""}`;
+      const matches = collectedMatches.slice(offset, offset + limit);
+      const rawHasMoreAfter = collectedMatches.length > offset + matches.length;
+      const continuation = boundedContinuationOffset({
+        hasMoreAfter: rawHasMoreAfter,
+        nextOffset: rawHasMoreAfter ? offset + matches.length : undefined,
+        maxOffset: MAX_SEARCH_OFFSET,
+      });
+      const continuationSummary = continuation.reachedOffsetCeiling
+        ? " · offset ceiling reached"
+        : continuation.hasMoreAfter
+          ? " · truncated"
+          : "";
+      const summary = `${attachmentTitle(entry)}:${target.targetPath} · ${matches.length} matches for ${query}${offset > 0 ? ` · offset ${offset}` : ""}${continuationSummary}`;
       return {
         action: "search_context_attachment_files",
         status: "completed",
@@ -1260,7 +1382,10 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
           title: attachmentTitle(entry),
           query,
           path: target.targetPath,
+          offset,
+          limit,
           matches,
+          matchesReturned: matches.length,
           searchedFiles: facts.searchedFiles,
           skippedFiles: facts.skippedFiles,
           skippedBinaryFiles: facts.skippedBinaryFiles,
@@ -1269,6 +1394,10 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
           skippedDirectories: facts.skippedDirectories,
           skippedOtherEntries: facts.skippedOtherEntries,
           skippedSamples: facts.skippedSamples,
+          hasMoreAfter: continuation.hasMoreAfter,
+          nextOffset: continuation.nextOffset,
+          reachedOffsetCeiling: continuation.reachedOffsetCeiling,
+          offsetCeiling: MAX_SEARCH_OFFSET,
         },
         display: {
           kind: "generic_tool_summary",
@@ -1276,7 +1405,7 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
           summary,
           items: matches.slice(0, 12).map((match) => `${match.path}:${match.line}`),
         },
-        truncated,
+        truncated: continuation.hasMoreAfter,
       };
     },
   };
@@ -2647,12 +2776,15 @@ async function listDirectoryTree(input: {
   readonly rootAbsolutePath: string;
   readonly maxDepth: number;
   readonly limit: number;
+  readonly offset: number;
 }): Promise<{
   readonly entries: readonly DirectoryEntry[];
   readonly totalEntries: number;
   readonly unreadableDirectories: number;
   readonly unreadableSamples: readonly { readonly path: string; readonly errorCode?: string }[];
   readonly truncated: boolean;
+  readonly hasMoreAfter: boolean;
+  readonly nextOffset?: number;
 }> {
   const entries: DirectoryEntry[] = [];
   const unreadableSamples: { path: string; errorCode?: string }[] = [];
@@ -2676,8 +2808,9 @@ async function listDirectoryTree(input: {
       const absoluteChild = path.join(directory, child.name);
       const entryDepth = currentDepth + 1;
       const stat = await fs.stat(absoluteChild).catch(() => undefined);
+      const entryIndex = totalEntries;
       totalEntries += 1;
-      if (entries.length < input.limit) {
+      if (entryIndex >= input.offset && entries.length < input.limit) {
         entries.push({
           path: toAttachmentRelative(input.rootAbsolutePath, absoluteChild),
           name: child.name,
@@ -2693,12 +2826,48 @@ async function listDirectoryTree(input: {
   }
 
   await visit(input.absolutePath, 0);
+  const hasMoreAfter = totalEntries > input.offset + entries.length;
   return {
     entries,
     totalEntries,
     unreadableDirectories,
     unreadableSamples,
-    truncated: totalEntries > entries.length,
+    truncated: hasMoreAfter,
+    hasMoreAfter,
+    nextOffset: hasMoreAfter ? input.offset + entries.length : undefined,
+  };
+}
+
+function boundedOffset(value: unknown, maxOffset: number): number {
+  return Math.min(maxOffset, Math.max(0, positiveInteger(value) ?? 0));
+}
+
+function compactRecord(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item !== undefined) {
+      result[key] = item;
+    }
+  }
+  return result;
+}
+
+function boundedContinuationOffset(input: {
+  readonly hasMoreAfter: boolean;
+  readonly nextOffset?: number;
+  readonly maxOffset: number;
+}): {
+  readonly hasMoreAfter: boolean;
+  readonly nextOffset?: number;
+  readonly reachedOffsetCeiling: boolean;
+} {
+  const nextOffset = input.hasMoreAfter && input.nextOffset !== undefined && input.nextOffset <= input.maxOffset
+    ? input.nextOffset
+    : undefined;
+  return {
+    hasMoreAfter: input.hasMoreAfter,
+    nextOffset,
+    reachedOffsetCeiling: input.hasMoreAfter && nextOffset === undefined,
   };
 }
 
@@ -2736,6 +2905,7 @@ async function searchPath(input: {
     if (entries === undefined) {
       return;
     }
+    entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       if (input.matches.length >= input.limit) {
         return;
@@ -2872,32 +3042,23 @@ function parseLineRange(record: Readonly<Record<string, unknown>>): { readonly s
   return { startLine: start, endLine: end };
 }
 
-function wholeFileContent(raw: string): {
-  readonly content: string;
-  readonly range: undefined;
-  readonly totalLines: number;
-  readonly hasMoreBefore: false;
-  readonly hasMoreAfter: false;
-} {
+function charWindowContent(raw: string, requestedStartChar: number): ReadContentWindow {
+  const startChar = Math.min(Math.max(0, requestedStartChar), raw.length);
   return {
-    content: raw,
+    content: raw.slice(startChar),
     range: undefined,
     totalLines: countLines(raw),
-    hasMoreBefore: false,
+    hasMoreBefore: startChar > 0,
     hasMoreAfter: false,
+    startChar,
+    charCount: raw.length,
   };
 }
 
 function sliceLines(
   raw: string,
   range: { readonly startLine: number; readonly endLine: number }
-): {
-  readonly content: string;
-  readonly range: { readonly startLine: number; readonly endLine: number };
-  readonly totalLines: number;
-  readonly hasMoreBefore: boolean;
-  readonly hasMoreAfter: boolean;
-} {
+): ReadContentWindow {
   const lines = raw.split(/\r?\n/);
   const selected = lines.slice(range.startLine - 1, range.endLine);
   const actualEndLine = selected.length === 0 ? range.startLine : range.startLine + selected.length - 1;
@@ -2910,16 +3071,14 @@ function sliceLines(
   };
 }
 
+function returnedRawTextChars(value: string, maxLength: number): number {
+  return value.length <= maxLength ? value.length : Math.max(0, maxLength - 1);
+}
+
 async function readLineRange(
   absolutePath: string,
   range: { readonly startLine: number; readonly endLine: number }
-): Promise<{
-  readonly content: string;
-  readonly range: { readonly startLine: number; readonly endLine: number };
-  readonly totalLines?: number;
-  readonly hasMoreBefore: boolean;
-  readonly hasMoreAfter: boolean;
-}> {
+): Promise<ReadContentWindow> {
   const stream = createReadStream(absolutePath, { encoding: "utf8" });
   const reader = createInterface({ input: stream, crlfDelay: Infinity });
   const lines: string[] = [];

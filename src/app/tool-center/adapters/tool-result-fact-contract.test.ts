@@ -7,7 +7,7 @@ import { createDesktopBasicToolRegistry } from "../../basic-agent-runtime/index.
 import { ToolCenter } from "../tool-center.js";
 import { createHttpRequestTool, type HttpRequestFetchLike } from "./http-request-tool.js";
 import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
-import { createLocalGrepFilesTool } from "./local-workspace-read-tools.js";
+import { createLocalGrepFilesTool, createLocalListDirTool, createLocalReadFileTool } from "./local-workspace-read-tools.js";
 import { createLocalEditFileTool } from "./local-workspace-write-tools.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
@@ -258,6 +258,85 @@ test("grep_files exposes skipped facts only when the search engine can observe t
     assert.equal(rgResult.skippedFiles, undefined);
     assert.equal(rgResult.skippedUnreadableFiles, undefined);
     assert.equal(rgResult.skippedSamples, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("ToolCenter exposes executable continuation inputs for truncated local list and grep results", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-continuation-"));
+  try {
+    for (let index = 1; index <= 5; index += 1) {
+      await writeFile(path.join(root, `note-${index}.txt`), `needle ${index}\n`, "utf8");
+    }
+    const center = new ToolCenter();
+    center.register(createLocalReadFileTool(root));
+    center.register(createLocalListDirTool(root));
+    center.register(createLocalGrepFilesTool(root, { ripgrepSearch: false }));
+
+    const read = await center.execute(
+      { callId: "call-read-continuation", toolName: "read_file", input: { path: "note-1.txt", startLine: 1, endLine: 1 } },
+      context,
+      { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
+    );
+    const readModelResult = asRecord(read.projection?.modelResult);
+    const readNextInput = asRecord(asRecord(readModelResult.continuation).nextInput);
+
+    assert.equal(read.status, "completed");
+    assert.equal(asRecord(readModelResult.truncation).truncated, true);
+    assert.equal(readNextInput.path, "note-1.txt");
+    assert.equal(readNextInput.startLine, 2);
+
+    await writeFile(path.join(root, "long.txt"), "abcdefghij", "utf8");
+    const charRead = await center.execute(
+      { callId: "call-read-char-continuation", toolName: "read_file", input: { path: "long.txt", maxLength: 5 } },
+      context,
+      { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
+    );
+    const charReadModelResult = asRecord(charRead.projection?.modelResult);
+    const charReadNextInput = asRecord(asRecord(charReadModelResult.continuation).nextInput);
+
+    assert.equal(charRead.status, "completed");
+    assert.equal(asRecord(charReadModelResult.truncation).truncated, true);
+    assert.equal(charReadNextInput.path, "long.txt");
+    assert.equal(charReadNextInput.maxLength, 5);
+    assert.equal(charReadNextInput.startChar, 4);
+    assert.equal("startLine" in charReadNextInput, false);
+
+    const listed = await center.execute(
+      { callId: "call-list-continuation", toolName: "list_dir", input: { path: ".", limit: 2 } },
+      context,
+      { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
+    );
+    const listModelResult = asRecord(listed.projection?.modelResult);
+    const listContinuation = asRecord(listModelResult.continuation);
+    const listNextInput = asRecord(listContinuation.nextInput);
+    const listAgentContent = asRecord(listed.projection?.agentContent);
+
+    assert.equal(listed.status, "completed");
+    assert.equal(asRecord(listModelResult.truncation).truncated, true);
+    assert.equal(listNextInput.path, ".");
+    assert.equal(listNextInput.limit, 2);
+    assert.equal(listNextInput.offset, 2);
+    assert.equal(asRecord(asRecord(listAgentContent.continuation).nextInput).offset, 2);
+
+    const grep = await center.execute(
+      { callId: "call-grep-continuation", toolName: "grep_files", input: { path: ".", query: "needle", limit: 2 } },
+      context,
+      { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
+    );
+    const grepModelResult = asRecord(grep.projection?.modelResult);
+    const grepContinuation = asRecord(grepModelResult.continuation);
+    const grepNextInput = asRecord(grepContinuation.nextInput);
+    const grepAgentContent = asRecord(grep.projection?.agentContent);
+
+    assert.equal(grep.status, "completed");
+    assert.equal(asRecord(grepModelResult.truncation).truncated, true);
+    assert.equal(grepNextInput.query, "needle");
+    assert.equal(grepNextInput.path, ".");
+    assert.equal(grepNextInput.limit, 2);
+    assert.equal(grepNextInput.offset, 2);
+    assert.equal(asRecord(asRecord(grepAgentContent.continuation).nextInput).offset, 2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

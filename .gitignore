@@ -9,6 +9,7 @@ build/
 coverage/
 .turbo/
 output/
+# Local analysis/reference bundles that are not product docs.
 分析/
 # Local environment
 .env
@@ -48,4 +49,5 @@ desktop-agent-infra-analysis*.md
 figma
 images/
 
-docs/模型信息
+docs/研究资料/参考资料/模型信息
+docs/研究资料/参考资料/外部项目分析

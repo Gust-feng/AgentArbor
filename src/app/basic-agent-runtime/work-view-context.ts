@@ -189,6 +189,8 @@ export function envelopeSafeToolEvidence(envelopes: readonly ToolResultEnvelope[
       redacted: envelope.redacted === true,
       diagnosticRef: envelope.diagnosticRef === undefined ? undefined : redactOrdinaryText(envelope.diagnosticRef, 220),
       rawRetention: envelope.rawRetention,
+      errorDomain: envelope.errorDomain,
+      errorFacts: envelope.errorFacts,
     });
   }
   return selected.slice(0, 24);

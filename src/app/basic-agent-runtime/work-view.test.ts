@@ -694,6 +694,31 @@ test("work view read model keeps tool evidence out of ordinary message deliverab
   assert.equal(json.includes("sk-tool-secret"), true);
 });
 
+test("work view tool evidence preserves tool error facts", () => {
+  const run = basicRun("failed");
+  const failedEvidence: ToolResultEnvelope = {
+    ...searchEnvelope(),
+    agentSummary: "read_file failed for missing.md",
+    diagnosticRef: "tool:call-read-missing",
+    errorDomain: "tool_error",
+    errorFacts: {
+      code: "ENOENT",
+      path: "missing.md",
+      operation: "read_file",
+    },
+  };
+  const workView = createDesktopWorkViewReadModel({
+    run,
+    events: [event(run.runId, "tool.failed", "read_file failed", "failed")],
+    toolEvidence: [failedEvidence],
+  });
+
+  assert.equal(workView.toolEvidence[0]?.errorDomain, "tool_error");
+  assert.equal(workView.toolEvidence[0]?.errorFacts?.code, "ENOENT");
+  assert.equal(workView.toolEvidence[0]?.errorFacts?.path, "missing.md");
+  assert.equal(workView.contextLedger.entries.some((entry) => entry.kind === "tool_evidence"), true);
+});
+
 test("work view visible events preserve product activity instead of tail model deltas", () => {
   const run = basicRun("completed");
   const events: RunEvent[] = [

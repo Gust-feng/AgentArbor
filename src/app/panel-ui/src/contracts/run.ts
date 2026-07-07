@@ -533,6 +533,7 @@ export type DesktopWorkView = {
   };
   readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;
+  readonly toolEvidence: readonly ToolResultEnvelope[];
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes?: readonly TranscriptNode[];
   readonly subAgentRuns?: readonly SubAgentRunView[];

@@ -712,7 +712,7 @@ test("executeToolUseLoop does not inject iteration warning near round limits", a
   assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.ref, undefined);
 });
 
-test("executeToolUseLoop truncates verbose tool messages before model continuation", async () => {
+test("executeToolUseLoop keeps transport-truncated tool messages recoverable with refs", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-1", "read"),
     completedResponse("model-request-final", { summary: "Final answer after truncation." }),
@@ -738,6 +738,7 @@ test("executeToolUseLoop truncates verbose tool messages before model continuati
         agentContent: {
           truncated: false,
           stdout: verboseText,
+          logRef: "command-log://tool-loop-verbose-output",
         },
         uiSummary: "UI summary",
         truncated: false,
@@ -768,19 +769,33 @@ test("executeToolUseLoop truncates verbose tool messages before model continuati
         readonly reason?: string;
         readonly continuationAvailable?: boolean;
         readonly unrecoverable?: boolean;
+        readonly continuation?: {
+          readonly nextInput?: {
+            readonly ref?: string;
+            readonly maxLength?: number;
+          };
+        };
       };
       readonly truncation?: {
         readonly truncated?: boolean;
         readonly reason?: string;
+        readonly continuation?: {
+          readonly nextInput?: {
+            readonly ref?: string;
+          };
+        };
       };
     };
   };
   assert.equal(parsed.output?.structuredContent?.truncated, true);
   assert.equal(parsed.output?.structuredContent?.reason, "tool_message_transport_budget_exceeded");
-  assert.equal(parsed.output?.structuredContent?.continuationAvailable, false);
-  assert.equal(parsed.output?.structuredContent?.unrecoverable, true);
+  assert.equal(parsed.output?.structuredContent?.continuationAvailable, true);
+  assert.equal(parsed.output?.structuredContent?.unrecoverable, false);
+  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.ref, "command-log://tool-loop-verbose-output");
+  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.maxLength, 30_000);
   assert.equal(parsed.output?.truncation?.truncated, true);
   assert.equal(parsed.output?.truncation?.reason, "tool_message_transport_budget_exceeded");
+  assert.equal(parsed.output?.truncation?.continuation?.nextInput?.ref, "command-log://tool-loop-verbose-output");
   assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 221_000);
 });
 

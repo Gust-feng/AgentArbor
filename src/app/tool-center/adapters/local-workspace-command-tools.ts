@@ -1174,6 +1174,9 @@ async function runSpawnedCommand(
       finish(resultFromClose(code, signal));
     });
     timer = setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
       timedOut = true;
       requestTermination();
     }, timeoutMs);

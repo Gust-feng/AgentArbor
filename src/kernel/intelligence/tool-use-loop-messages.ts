@@ -161,7 +161,65 @@ function transportTruncatedToolPayload(
 function modelOutputContinuation(value: unknown): ToolContinuation | undefined {
   const record = asRecord(value);
   return toolContinuationFromUnknown(record.continuation) ??
-    toolContinuationFromUnknown(asRecord(record.truncation).continuation);
+    toolContinuationFromUnknown(asRecord(record.truncation).continuation) ??
+    continuationFromKnownRef(value);
+}
+
+function continuationFromKnownRef(value: unknown): ToolContinuation | undefined {
+  const logRef = findStringField(value, new Set(["logRef"]));
+  if (logRef !== undefined) {
+    return {
+      ref: logRef,
+      nextInput: { ref: logRef, maxLength: 30_000 },
+      note: "Use the read tool with this logRef to inspect the complete tool output.",
+    };
+  }
+  const rawRef = findStringField(value, new Set([
+    "rawRef",
+    "rawTextRef",
+    "rawBodyRef",
+    "rawContentRef",
+    "rawContentPreviewRef",
+    "rawStdoutRef",
+    "rawStderrRef",
+  ]));
+  if (rawRef === undefined) {
+    return undefined;
+  }
+  return {
+    ref: rawRef,
+    nextInput: { ref: rawRef, maxLength: 30_000 },
+    note: "Use the read tool with this raw ref to inspect the complete tool output.",
+  };
+}
+
+function findStringField(value: unknown, keys: ReadonlySet<string>, depth = 0): string | undefined {
+  if (depth > 6 || value === null || typeof value !== "object") {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 32)) {
+      const found = findStringField(item, keys, depth + 1);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  for (const item of Object.values(record).slice(0, 64)) {
+    const found = findStringField(item, keys, depth + 1);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
 }
 
 function toolContinuationFromUnknown(value: unknown): ToolContinuation | undefined {

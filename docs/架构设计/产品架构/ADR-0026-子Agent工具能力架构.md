@@ -20,7 +20,7 @@
 4. **stub + 动态注册运行时集成**：capability snapshot 阶段注册 stub 工具定义，运行时由 `ToolExecutionBroker` 注入真实 executor。
 5. **一层约束**：子 Agent 不能递归派生子 Agent，只有顶层 Agent 拥有 `spawn_sub_agent`。
 6. **复用基础设施**：子 Agent 执行复用 `IntelligenceChannel` / `ToolExecutionBroker` / `ToolCenter` / 确认机制，不另起平行运行时。
-7. **当前工具权限策略**：子 Agent 暂时无条件继承父 run 当前 `allowedTools`，并在运行时强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`，避免递归派生；`SUB_AGENT.md` 的 `allowed-tools` 与 `spawn_sub_agent.allowed_tools` 仅作为未来声明字段保留，当前不参与裁剪。
+7. **当前工具权限策略**：子 Agent 以父 run 当前 `allowedTools` 为上限；若 `SUB_AGENT.md` 的 `allowed-tools` 或 `spawn_sub_agent.allowed_tools` 声明了更窄工具集，则实际工具集合为父 run 权限与声明集合的交集，并始终强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` / `read_sub_agent_output`，避免递归派生、跨子 Agent 读取和权限扩张。
 8. **确认冒泡**：子 Agent 内部工具触发确认时，不包装成失败摘要，而是作为父 run 的 pending confirmation 进入既有确认流程；用户可见、可批准、可拒绝或补充指引。
 9. **运行视图与本地 trace**：普通 Agent read model 以 `subAgentRuns` 作为子 Agent UI 的唯一数据源；运行时保存模型可见消息、模型输出、工具事实和失败信息到本地 `sub-agent-runs.jsonl`，用于只读复盘，不保存 provider 原始 HTTP 响应。
 
@@ -75,12 +75,12 @@ ADR-0022 定义了双运行时架构（普通 Agent + deep / Underground），AD
 - 一层硬约束由确定性校验在子 Agent 工具集装配阶段强制：子 Agent 的可用工具集在派生时排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`，递归派生在执行前被拒绝。
 - 该约束与 ADR-0025 的“强制一层 child（`depth = 1`）”口径一致：无论是 deep 编排还是子 Agent 工具，当前阶段都不允许形成多层递归 Agent Fabric；多层递归属长期范围，不在本期。
 
-### 决策六：当前工具权限无条件继承父 run
+### 决策六：当前工具权限在父 run 上限内声明式收敛
 
-- 当前阶段按工程时间与产品口径采用临时策略：子 Agent 不解释、不收敛自身声明的 `allowed-tools`，而是直接继承父 run 已解析出的 `allowedTools`。
-- 继承不是扩权：父 run capability snapshot、ToolCenter executable restriction 与确认门仍是上界；子 Agent 不能拿到父 run 不可见或未授权的工具。
-- 唯一确定性裁剪是递归派生工具：`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 在子 Agent policy 中强制排除。
-- `SUB_AGENT.md` 的 `allowed-tools` 和 `spawn_sub_agent.allowed_tools` 暂时只保留为未来声明字段，不参与当前运行策略。后续若改为声明式收敛，应单独更新 ADR 与开发指南，明确它与父 run capability 的交集语义。
+- 子 Agent 默认继承父 run 已解析出的 `allowedTools`，但这只是权限上限，不是扩权来源。
+- 若 `SUB_AGENT.md` 的 `allowed-tools` 或 `spawn_sub_agent.allowed_tools` 声明了工具集合，runner 必须将其与父 run `allowedTools` 取交集；声明为空或省略时不额外收敛。
+- 无论声明如何，`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` / `read_sub_agent_output` 都必须从子 Agent 的工具集合中移除，`policyOverrides` 不能重新打开这些递归或跨子 Agent 读取工具。
+- 父 run capability snapshot、ToolCenter executable restriction 与确认门仍是最终上界；子 Agent 不能拿到父 run 不可见或未授权的工具，也不能绕过确认。
 
 ### 决策七：子 Agent 工具确认冒泡到父 run
 
@@ -140,7 +140,7 @@ ADR-0022 定义了双运行时架构（普通 Agent + deep / Underground），AD
 - stub + 动态注册运行时集成模式。
 - 一层约束（子 Agent 不可递归派生）。
 - 子 Agent 执行复用 `IntelligenceChannel` / `ToolExecutionBroker` / `ToolCenter` / 确认机制。
-- 子 Agent 内部工具权限无条件继承父 run `allowedTools`，同时强制排除递归派生工具。
+- 子 Agent 内部工具权限在父 run `allowedTools` 上限内按声明式交集收敛，同时强制排除递归派生和跨子 Agent 读取工具。
 - 子 Agent 内部工具确认冒泡为父 run pending confirmation。
 - 子 Agent 运行视图、`subAgentRuns` read model 与本地 `sub-agent-runs.jsonl` trace 持久化。
 

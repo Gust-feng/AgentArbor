@@ -39,6 +39,7 @@ export type AgentTurnFallbackBehavior = "deterministic" | "disabled";
 export type AgentTurnPolicy = {
   readonly allowModel: boolean;
   readonly allowedTools: readonly string[];
+  readonly toolDefinitions?: readonly ToolDefinition[];
   readonly maxModelRounds?: number;
   readonly maxToolRounds?: number;
   readonly confirmationPolicy?: ToolConfirmationPolicy;
@@ -174,6 +175,7 @@ export class AgentTurnRuntime {
           maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
           maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
           allowedTools: policy.allowedTools,
+          toolDefinitions: policy.toolDefinitions,
           blockedToolNames: semantics.blockedToolNames,
           confirmationPolicy: policy.confirmationPolicy,
           publishToolEvent: this.options.publishToolEvent,
@@ -242,6 +244,7 @@ export class AgentTurnRuntime {
           maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
           maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
           allowedTools: policy.allowedTools,
+          toolDefinitions: policy.toolDefinitions,
           blockedToolNames: semantics.blockedToolNames,
           approvedConfirmationIds: input.approvedConfirmationIds,
           confirmationPolicy: policy.confirmationPolicy,
@@ -279,6 +282,7 @@ export class AgentTurnRuntime {
           maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
           maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
           allowedTools: policy.allowedTools,
+          toolDefinitions: policy.toolDefinitions,
           blockedToolNames: semantics.blockedToolNames,
           confirmationPolicy: policy.confirmationPolicy,
           publishToolEvent: this.options.publishToolEvent,
@@ -417,6 +421,7 @@ function normalizePolicy(policy: AgentTurnPolicy): AgentTurnPolicy {
   return {
     ...policy,
     allowedTools: [...policy.allowedTools],
+    toolDefinitions: policy.toolDefinitions?.map(cloneToolDefinition),
     maxModelRounds: normalizeOptionalRoundLimit(policy.maxModelRounds),
     maxToolRounds: normalizeOptionalRoundLimit(policy.maxToolRounds),
     budget: { ...policy.budget },
@@ -425,6 +430,34 @@ function normalizePolicy(policy: AgentTurnPolicy): AgentTurnPolicy {
 
 function normalizeOptionalRoundLimit(value: number | undefined): number | undefined {
   return value === undefined || !Number.isFinite(value) ? undefined : Math.floor(value);
+}
+
+function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {
+  return {
+    name: definition.name,
+    description: definition.description,
+    inputSchema: {
+      type: "object",
+      properties: globalThis.structuredClone(definition.inputSchema.properties),
+      required: definition.inputSchema.required === undefined ? undefined : [...definition.inputSchema.required],
+      additionalProperties: definition.inputSchema.additionalProperties,
+    },
+    modelContract:
+      definition.modelContract === undefined
+        ? undefined
+        : globalThis.structuredClone(definition.modelContract),
+    metadata:
+      definition.metadata === undefined
+        ? undefined
+        : {
+            ...definition.metadata,
+            visibleResultPolicy: { ...definition.metadata.visibleResultPolicy },
+            runtimeHints:
+              definition.metadata.runtimeHints === undefined
+                ? undefined
+                : globalThis.structuredClone(definition.metadata.runtimeHints),
+          },
+  };
 }
 
 function cloneModelMessage(message: ModelMessage): ModelMessage {

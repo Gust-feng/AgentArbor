@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type {
   BasicAgentCapabilitySnapshot,
+  CapabilitySubAgentCatalogItem,
   CapabilityToolCatalogItem,
   CapabilityToolScope,
 } from "../domain/config/index.js";
@@ -33,6 +34,9 @@ test("run tool boundary intersects policy-visible tools with executable tools", 
   });
 
   assert.deepEqual(boundary.allowedTools, ["search"]);
+  assert.deepEqual(boundary.toolDefinitions.map((tool) => tool.name), ["search"]);
+  assert.equal(boundary.toolDefinitions[0]?.inputSchema.properties.query !== undefined, true);
+  assert.match(boundary.toolDefinitions[0]?.modelContract?.purpose ?? "", /search tool/);
   assert.deepEqual(boundary.capabilityResolution?.allowedTools, ["search"]);
   assert.deepEqual(boundary.capabilityResolution?.capabilityPlan.allowedTools, ["search"]);
   assert.equal(boundary.capabilityResolution?.capabilityPlan.canExposeModelTools, true);
@@ -184,6 +188,10 @@ test("run tool boundary hides read_skill_resource when no selected skill resourc
     "当前没有已选中且可读的技能资源。"
   );
   assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_skill_resource")?.reasonCode,
+    "selected_skill_resources_unavailable"
+  );
+  assert.equal(
     boundary.capabilityResolution?.warnings.includes("当前没有已选中且可读的技能资源，已隐藏 read_skill_resource。"),
     true
   );
@@ -253,12 +261,84 @@ test("run tool boundary can activate latent read_skill_resource after skill sele
     boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_skill_resource")?.reason,
     "当前已选中技能提供可读资源。"
   );
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_skill_resource")?.reasonCode,
+    "selected_skill_resources_available"
+  );
   assert.equal(boundary.capabilityResolution?.warnings.includes("已隐藏 1 个不可用工具。"), false);
+});
+
+test("run tool boundary injects frozen sub-agent catalog into sub-agent tool definitions", () => {
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot(
+      [tool("call_sub_agent", "read-write")],
+      ["call_sub_agent"],
+      [
+        subAgentCatalogItem("project-helper", {
+          description: "Project-specific helper from the frozen run catalog.",
+          category: "project",
+          allowedTools: ["read_file"],
+          whenToUse: ["Use for project-specific inspection."],
+          maxSteps: 12,
+        }),
+        subAgentCatalogItem("code-expert", { enabled: false }),
+      ]
+    ),
+    goal: "use frozen sub-agent catalog",
+    taskSoil: createTaskSoil({ rawGoal: "use frozen sub-agent catalog" }),
+    toolCenter: executableToolBroker(["call_sub_agent"]),
+  });
+
+  const hint = boundary.toolDefinitions[0]?.modelContract?.runtimeHints?.find((item) =>
+    item.label === "available sub-agents"
+  )?.value ?? "";
+
+  assert.equal(boundary.toolDefinitions[0]?.name, "call_sub_agent");
+  assert.match(hint, /project-helper/);
+  assert.match(hint, /allowedTools=read_file/);
+  assert.match(hint, /maxSteps=12/);
+  assert.equal(hint.includes("code-expert"), false);
+});
+
+test("run tool boundary hides preset sub-agent call tools when no enabled sub-agents exist", () => {
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot(
+      [
+        tool("call_sub_agent", "read-write"),
+        tool("call_sub_agents", "read-write"),
+        tool("read_sub_agent_output", "read-only"),
+        tool("spawn_sub_agent", "read-write"),
+      ],
+      ["call_sub_agent", "call_sub_agents", "read_sub_agent_output", "spawn_sub_agent"],
+      [subAgentCatalogItem("disabled-helper", { enabled: false })]
+    ),
+    goal: "use sub-agent tools",
+    taskSoil: createTaskSoil({ rawGoal: "use sub-agent tools" }),
+    toolCenter: executableToolBroker(["call_sub_agent", "call_sub_agents", "read_sub_agent_output", "spawn_sub_agent"]),
+  });
+
+  assert.deepEqual(boundary.allowedTools, ["read_sub_agent_output", "spawn_sub_agent"]);
+  assert.deepEqual(boundary.toolDefinitions.map((definition) => definition.name), ["read_sub_agent_output", "spawn_sub_agent"]);
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "call_sub_agent")?.reasonCode,
+    "no_enabled_sub_agents"
+  );
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "call_sub_agents")?.reason,
+    "本轮没有可调用的预置子 Agent。"
+  );
+  assert.equal(
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "spawn_sub_agent")?.modelVisible,
+    true
+  );
 });
 
 function capabilitySnapshot(
   tools: readonly CapabilityToolCatalogItem[],
-  allowedTools: readonly string[] = tools.filter((item) => item.enabled && item.availability === "available").map((item) => item.name)
+  allowedTools: readonly string[] = tools.filter((item) => item.enabled && item.availability === "available").map((item) => item.name),
+  subAgentCatalog: readonly CapabilitySubAgentCatalogItem[] = []
 ): BasicAgentCapabilitySnapshot {
   return {
     snapshotId: "capability-snapshot-tool-boundary-test",
@@ -294,7 +374,7 @@ function capabilitySnapshot(
       allowedTools,
     },
     skillCatalog: [],
-    subAgentCatalog: [],
+    subAgentCatalog,
     mcpCatalog: [],
     workspace: {
       workspaceDirectory: "Z:/AgentArbor",
@@ -302,6 +382,30 @@ function capabilitySnapshot(
     },
     securitySummary: "Safe capability snapshot.",
     warnings: [],
+  };
+}
+
+function subAgentCatalogItem(
+  name: string,
+  overrides: Partial<CapabilitySubAgentCatalogItem> = {}
+): CapabilitySubAgentCatalogItem {
+  return {
+    id: name,
+    name,
+    description: `${name} test sub-agent`,
+    category: "test",
+    sourceKind: "project",
+    sourceRootId: "project",
+    sourcePrecedence: 100,
+    enabled: true,
+    version: "1.0.0",
+    whenToUse: [],
+    whenNotToUse: [],
+    allowedTools: [],
+    maxSteps: 30,
+    contentHash: `sha256:${name}:content`,
+    bodyHash: `sha256:${name}:body`,
+    ...overrides,
   };
 }
 
@@ -356,6 +460,20 @@ function tool(
     displayName: presentation.displayName,
     displayDescription: presentation.displayDescription,
     description: `${name} tool`,
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    modelContract: {
+      purpose: `${name} search tool contract.`,
+      whenToUse: [`Use ${name} when the test task needs this tool.`],
+      inputNotes: ["query: test query text."],
+      outputNotes: ["Returns structured test output."],
+      runtimeHints: [{ label: "source", value: "capability_snapshot_test" }],
+      examples: [{ input: { query: "AgentArbor" } }],
+    },
     category: metadata.category,
     categoryLabel: presentation.categoryLabel,
     riskLevel: metadata.riskLevel,

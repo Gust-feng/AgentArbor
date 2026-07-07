@@ -2,6 +2,7 @@ import type { IntelligenceChannel } from "../domain/intelligence/contracts.js";
 import type { ConstraintRef } from "../domain/constraints.js";
 import type { TaskSoil } from "../domain/soil/task-soil.js";
 import type { ToolExecutionBroker } from "../domain/tools/contracts.js";
+import type { ToolDefinition } from "../domain/tools/index.js";
 import {
   AgentTurnRuntime,
   type AgentTurnPolicy,
@@ -58,6 +59,7 @@ export function createDesktopAgentTurnPolicy(input: {
   readonly traceId: string;
   readonly goalId: string;
   readonly allowedTools: readonly string[];
+  readonly toolDefinitions?: readonly ToolDefinition[];
   readonly confirmationPolicy?: RunDesktopAgentSessionOptions["toolConfirmationPolicy"];
   readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
 }): AgentTurnPolicy {
@@ -66,6 +68,7 @@ export function createDesktopAgentTurnPolicy(input: {
     traceId: input.traceId,
     goalId: input.goalId,
     allowedTools: input.allowedTools,
+    toolDefinitions: input.toolDefinitions,
     confirmationPolicy: input.confirmationPolicy,
     modelCapabilities: input.modelCapabilities,
   });

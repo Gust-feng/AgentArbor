@@ -124,12 +124,28 @@ export function createToolApprovalRequiredMessage(input: {
       confirmationId: confirmation?.confirmationId ?? `confirmation-${input.result.callId}`,
       title: confirmation?.title ?? "需要确认",
       question: confirmation?.actionSummary ?? toolDisplayName(input.result.toolName),
-      consequence: "",
+      consequence: confirmationConsequenceFromRequest(
+        confirmation,
+        toolDisplayName(input.result.toolName)
+      ),
       riskLevel: confirmation?.riskLevel ?? "medium",
       affectedResources: confirmation?.affectedResources ?? [],
       sourceRefs: confirmation?.sourceRefs ?? [`tool:${input.result.callId}`],
     },
   });
+}
+
+function confirmationConsequenceFromRequest(
+  confirmation: ToolCallResult["confirmationRequest"] | undefined,
+  fallbackTitle: string
+): string {
+  if (confirmation?.consequence !== undefined && confirmation.consequence.trim().length > 0) {
+    return confirmation.consequence;
+  }
+  const title = confirmation?.title ?? fallbackTitle;
+  const resources = confirmation?.affectedResources ?? [];
+  const target = resources.length === 0 ? "" : `目标：${resources.slice(0, 4).join("、")}。`;
+  return `${target}批准后只执行本次${title}。`;
 }
 
 export function toSafeToolEventValue(value: unknown): unknown {
@@ -152,7 +168,7 @@ function toProjectedToolEventOutput(result: ToolCallResult): unknown {
     envelope: result.projection.envelope,
     result: safeToolResultEnvelope(result.output),
     truncated: result.projection.truncated === true,
-    redacted: result.projection.redacted !== false,
+    redacted: result.projection.redacted === true,
   };
 }
 

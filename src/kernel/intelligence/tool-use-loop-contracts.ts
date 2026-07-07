@@ -22,6 +22,7 @@ export type ToolUseLoopOptions = {
   readonly maxModelRounds?: number;
   readonly maxToolRounds?: number;
   readonly allowedTools: readonly string[];
+  readonly toolDefinitions?: readonly ToolDefinition[];
   readonly blockedToolNames?: readonly string[];
   readonly approvedConfirmationIds?: readonly string[];
   readonly confirmationPolicy?: ToolConfirmationPolicy;

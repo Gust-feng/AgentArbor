@@ -272,6 +272,10 @@ test("run capability policy never expands beyond snapshot allowed tools", () => 
     resolution.toolExposures.find((item) => item.name === "read_file")?.reason,
     "不在本轮可用范围内。"
   );
+  assert.equal(
+    resolution.toolExposures.find((item) => item.name === "read_file")?.reasonCode,
+    "not_in_run_scope"
+  );
 });
 
 test("executable restriction only counts tools that were model-visible before execution pruning", () => {

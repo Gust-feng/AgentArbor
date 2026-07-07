@@ -5,6 +5,7 @@ import {
   RunCapabilityResolution,
   RunEnabledSkill,
   RunToolExposure,
+  RunToolExposureReasonCode,
   RunCapabilityPlan,
 } from "../domain/config/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
@@ -56,6 +57,16 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       isVisibleToProfile(input.agentDefinition.toolVisibilityProfile, tool);
     // 有效确认要求取保守默认（FR-TOOL-002）：显式契约字段权威；缺失时高影响动作默认按需确认。
     const requiresConfirmation = resolveEffectiveConfirmationRequirement(tool);
+    const reasonCode = exposureReasonCode({
+      enabled: tool.enabled,
+      availability: tool.availability,
+      allowedBySnapshot,
+      denied,
+      canExposeModelTools: baseCapabilityPlan.canExposeModelTools,
+      modelVisible,
+      requiresConfirmation,
+      confirmationPolicy: input.snapshot.toolConfirmation?.policy,
+    });
     return {
       name: tool.name,
       displayName: tool.displayName,
@@ -70,16 +81,8 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       ...(input.snapshot.toolConfirmation === undefined
         ? {}
         : { confirmationPolicy: input.snapshot.toolConfirmation.policy }),
-      reason: exposureReason({
-        enabled: tool.enabled,
-        availability: tool.availability,
-        allowedBySnapshot,
-        denied,
-        canExposeModelTools: baseCapabilityPlan.canExposeModelTools,
-        modelVisible,
-        requiresConfirmation,
-        confirmationPolicy: input.snapshot.toolConfirmation?.policy,
-      }),
+      reasonCode,
+      reason: exposureReason(reasonCode),
     };
   });
   const allowedTools = toolExposures
@@ -182,7 +185,7 @@ function isDeniedByPermissionRef(toolName: string, refs: ReadonlySet<string>): b
   return refs.has(`deny:tool:${toolName}`) || refs.has(`deny:${toolName}`);
 }
 
-function exposureReason(input: {
+function exposureReasonCode(input: {
   readonly enabled: boolean;
   readonly availability: "available" | "unavailable";
   readonly allowedBySnapshot: boolean;
@@ -191,15 +194,27 @@ function exposureReason(input: {
   readonly modelVisible: boolean;
   readonly requiresConfirmation: boolean;
   readonly confirmationPolicy?: "prompt" | "full_access";
-}): string {
-  if (!input.canExposeModelTools) return "当前模型不支持工具调用。";
-  if (!input.enabled) return "工具已在配置中停用。";
-  if (input.availability !== "available") return "当前不可用。";
-  if (!input.allowedBySnapshot) return "不在本轮可用范围内。";
-  if (input.denied) return "本轮已隐藏。";
-  if (!input.modelVisible) return "当前模式不可用。";
-  if (input.requiresConfirmation && input.confirmationPolicy === "full_access") return "可用，当前完全访问会跳过逐条确认。";
-  if (input.requiresConfirmation) return "可用，命令执行会先等你确认。";
+}): RunToolExposureReasonCode {
+  if (!input.canExposeModelTools) return "model_tools_unsupported";
+  if (!input.enabled) return "tool_disabled";
+  if (input.availability !== "available") return "tool_unavailable";
+  if (!input.allowedBySnapshot) return "not_in_run_scope";
+  if (input.denied) return "permission_denied";
+  if (!input.modelVisible) return "profile_hidden";
+  if (input.requiresConfirmation && input.confirmationPolicy === "full_access") return "available_full_access";
+  if (input.requiresConfirmation) return "available_requires_confirmation";
+  return "available";
+}
+
+function exposureReason(reasonCode: RunToolExposureReasonCode): string {
+  if (reasonCode === "model_tools_unsupported") return "当前模型不支持工具调用。";
+  if (reasonCode === "tool_disabled") return "工具已在配置中停用。";
+  if (reasonCode === "tool_unavailable") return "当前不可用。";
+  if (reasonCode === "not_in_run_scope") return "不在本轮可用范围内。";
+  if (reasonCode === "permission_denied") return "本轮已隐藏。";
+  if (reasonCode === "profile_hidden") return "当前模式不可用。";
+  if (reasonCode === "available_full_access") return "可用，当前完全访问会跳过逐条确认。";
+  if (reasonCode === "available_requires_confirmation") return "可用，命令执行会先等你确认。";
   return "可用。";
 }
 

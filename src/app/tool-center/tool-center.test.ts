@@ -24,6 +24,29 @@ test("ToolCenter registers, lists, executes, and unregisters tools", async () =>
   assert.equal(center.has("echo"), false);
 });
 
+test("ToolCenter rejects tools without explicit metadata", () => {
+  const center = new ToolCenter();
+
+  assert.throws(
+    () =>
+      center.register({
+        definition: {
+          name: "unsafe_tool",
+          description: "Missing metadata must not default to low-risk read-only.",
+          inputSchema: {
+            type: "object",
+            properties: {},
+          },
+        },
+        async execute() {
+          return { ok: true };
+        },
+      }),
+    /cannot enter ToolCenter without metadata/
+  );
+  assert.equal(center.has("unsafe_tool"), false);
+});
+
 test("ToolCenter enforces allowedTools permissions", async () => {
   const center = new ToolCenter();
   center.register(testTool("web_search", async () => ({ ok: true })));
@@ -121,8 +144,10 @@ test("ToolCenter gates any tool metadata that requires confirmation before execu
   assert.equal(execute.error, "等待确认：运行命令：pnpm test");
   assert.equal(deleteResult.confirmationRequest?.confirmationId, "confirmation-call-delete");
   assert.equal(deleteResult.confirmationRequest?.affectedResources[0], "notes.txt");
+  assert.equal(deleteResult.confirmationRequest?.consequence, "目标：notes.txt。批准后只执行本次删除文件。");
   assert.equal(execute.confirmationRequest?.confirmationId, "confirmation-call-exec");
   assert.equal(execute.confirmationRequest?.affectedResources[0], "pnpm test");
+  assert.equal(execute.confirmationRequest?.consequence, "目标：pnpm test。批准后只执行本次运行命令。");
   assert.equal(writes, 1);
   assert.equal(deletes, 0);
   assert.equal(executes, 0);

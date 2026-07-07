@@ -1,5 +1,5 @@
 import type { ModelMessage, ModelResponse } from "../../domain/intelligence/index.js";
-import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
+import type { ToolCallRequest, ToolCallResult, ToolContinuation } from "../../domain/tools/index.js";
 import { redactOrdinaryToolText } from "../tools/index.js";
 import { toSafeToolEventValue } from "./tool-events.js";
 import { cloneModelMessage, cloneToolCallRequest } from "./tool-use-loop-cloning.js";
@@ -38,16 +38,17 @@ export function toolResultMessage(result: ToolCallResult): ModelMessage {
             diagnosticRef: envelope.diagnosticRef,
           }
         : toSafeToolEventValue(result.output);
+  const payload = {
+    callId: result.callId,
+    toolName: result.toolName,
+    status: result.status,
+    output: modelOutput,
+    error: safeToolErrorForModel(result.error),
+    durationMs: result.durationMs,
+  };
   return {
     role: "tool",
-    content: truncateToolMessageContent(JSON.stringify({
-      callId: result.callId,
-      toolName: result.toolName,
-      status: result.status,
-      output: modelOutput,
-      error: safeToolErrorForModel(result.error),
-      durationMs: result.durationMs,
-    }), toolMessageContentBudget(result)),
+    content: stringifyToolMessagePayload(payload, toolMessageContentBudget(result)),
     toolCallId: result.callId,
     toolName: result.toolName,
     attachments: attachments === undefined || attachments.length === 0
@@ -98,9 +99,96 @@ function toolMessageContentBudget(result: ToolCallResult): number {
   return SUB_AGENT_TOOL_NAMES.has(result.toolName) ? MAX_SUB_AGENT_TOOL_MESSAGE_CHARS : MAX_TOOL_MESSAGE_CHARS;
 }
 
-function truncateToolMessageContent(value: string, maxChars: number): string {
+type ToolMessagePayload = {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly status: ToolCallResult["status"];
+  readonly output: unknown;
+  readonly error?: string;
+  readonly durationMs: number;
+};
+
+function stringifyToolMessagePayload(payload: ToolMessagePayload, maxChars: number): string {
+  const value = JSON.stringify(payload);
   if (value.length <= maxChars) {
     return value;
   }
-  return `${value.slice(0, maxChars - 80)}... [tool message truncated to ${maxChars} chars]`;
+  return JSON.stringify(transportTruncatedToolPayload(payload, value.length, maxChars));
+}
+
+function transportTruncatedToolPayload(
+  payload: ToolMessagePayload,
+  originalChars: number,
+  maxChars: number
+): ToolMessagePayload {
+  const continuation = modelOutputContinuation(payload.output);
+  const omittedChars = Math.max(0, originalChars - maxChars);
+  return {
+    callId: payload.callId,
+    toolName: payload.toolName,
+    status: payload.status,
+    output: {
+      content: [{
+        type: "text",
+        text: continuation === undefined
+          ? "Tool result exceeded the model transport budget. No continuation reference was supplied by the tool result."
+          : "Tool result exceeded the model transport budget. Use the supplied continuation reference to inspect more.",
+      }],
+      structuredContent: {
+        truncated: true,
+        reason: "tool_message_transport_budget_exceeded",
+        originalChars,
+        maxChars,
+        omittedChars,
+        continuationAvailable: continuation !== undefined,
+        unrecoverable: continuation === undefined,
+        continuation,
+        preview: compactJsonPreview(payload.output, 4_000),
+      },
+      truncation: {
+        truncated: true,
+        reason: "tool_message_transport_budget_exceeded",
+        omittedChars,
+        continuation,
+      },
+      continuation,
+    },
+    error: payload.error,
+    durationMs: payload.durationMs,
+  };
+}
+
+function modelOutputContinuation(value: unknown): ToolContinuation | undefined {
+  const record = asRecord(value);
+  return toolContinuationFromUnknown(record.continuation) ??
+    toolContinuationFromUnknown(asRecord(record.truncation).continuation);
+}
+
+function toolContinuationFromUnknown(value: unknown): ToolContinuation | undefined {
+  const record = asRecord(value);
+  const ref = typeof record.ref === "string" && record.ref.trim().length > 0 ? record.ref : undefined;
+  const note = typeof record.note === "string" && record.note.trim().length > 0 ? record.note : undefined;
+  const nextInput = record.nextInput === undefined ? undefined : sanitizeProjectedAgentContent(record.nextInput);
+  if (ref === undefined && note === undefined && nextInput === undefined) {
+    return undefined;
+  }
+  const continuation: Record<string, unknown> = {};
+  if (ref !== undefined) continuation.ref = ref;
+  if (nextInput !== undefined) continuation.nextInput = nextInput;
+  if (note !== undefined) continuation.note = note;
+  return continuation as ToolContinuation;
+}
+
+function compactJsonPreview(value: unknown, maxChars: number): string {
+  const serialized = JSON.stringify(value) ?? "undefined";
+  if (serialized.length <= maxChars) {
+    return serialized;
+  }
+  return `${serialized.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }

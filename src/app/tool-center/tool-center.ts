@@ -44,7 +44,14 @@ export class ToolCenter {
   }
 
   register(executor: ToolExecutor): void {
-    this.tools.set(executor.definition.name, executor);
+    const metadata = normalizeToolMetadata(executor.definition);
+    this.tools.set(executor.definition.name, {
+      ...executor,
+      definition: {
+        ...executor.definition,
+        metadata,
+      },
+    });
   }
 
   unregister(name: string): void {
@@ -321,23 +328,13 @@ function cloneToolModelContract(definition: ToolDefinition["modelContract"]): To
 }
 
 function normalizeToolMetadata(definition: ToolDefinition): ToolDefinitionMetadata {
-  if (definition.metadata !== undefined) {
-    return {
-      ...definition.metadata,
-      visibleResultPolicy: { ...definition.metadata.visibleResultPolicy },
-      runtimeHints: cloneRuntimeHints(definition.metadata.runtimeHints),
-    };
+  if (definition.metadata === undefined) {
+    throw new Error(`Tool ${definition.name} cannot enter ToolCenter without metadata.`);
   }
   return {
-    category: "other",
-    riskLevel: "low",
-    operationType: "read-only",
-    requiresConfirmation: false,
-    visibleResultPolicy: {
-      userVisible: "summary-only",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
+    ...definition.metadata,
+    visibleResultPolicy: { ...definition.metadata.visibleResultPolicy },
+    runtimeHints: cloneRuntimeHints(definition.metadata.runtimeHints),
   };
 }
 

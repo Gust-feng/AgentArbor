@@ -417,6 +417,7 @@ export type ToolSecurityDecision =
       readonly reason: string;
       readonly title: string;
       readonly actionSummary: string;
+      readonly consequence?: string;
       readonly affectedResources: readonly string[];
       readonly riskLevel: ToolRiskLevel;
       readonly sourceRefs: readonly string[];

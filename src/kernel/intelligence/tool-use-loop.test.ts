@@ -102,6 +102,63 @@ test("executeToolUseLoop exposes only allowed registered tools to the model", as
   assert.equal(center.getCallCount(), 0);
 });
 
+test("executeToolUseLoop uses frozen tool definitions instead of current broker definitions", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-text", "Final answer with frozen tool contract."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ ok: true }));
+  const frozenTool: ToolDefinition = {
+    name: "web_search",
+    description: "Frozen web search contract from the run capability snapshot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Frozen query text." },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    modelContract: {
+      purpose: "Use the frozen web search contract.",
+      whenToUse: ["Use for frozen search tests."],
+      inputNotes: ["query: frozen query text."],
+      outputNotes: ["Returns frozen search results."],
+      runtimeHints: [{ label: "source", value: "capability_snapshot" }],
+      examples: [{ input: { query: "AgentArbor" } }],
+    },
+    metadata: {
+      category: "research",
+      riskLevel: "low",
+      operationType: "read-only",
+      requiresConfirmation: false,
+      visibleResultPolicy: {
+        userVisible: "summary-only",
+        maxPreviewChars: 800,
+        omitRawOutput: true,
+      },
+    },
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+      toolDefinitions: [frozenTool],
+    },
+    createValidModelRequest()
+  );
+
+  const visibleTool = channel.requests[0]?.tools?.[0];
+  assert.equal(visibleTool?.description, "Frozen web search contract from the run capability snapshot.");
+  assert.deepEqual(visibleTool?.inputSchema.required, ["query"]);
+  assert.equal(visibleTool?.modelContract?.runtimeHints?.[0]?.value, "capability_snapshot");
+});
+
 test("executeToolUseLoop passes tools through request schema without mutating prompt messages", async () => {
   const channel = new SequenceIntelligenceChannel([
     textResponse("model-request-text", "Final answer with structured tools."),
@@ -704,7 +761,26 @@ test("executeToolUseLoop truncates verbose tool messages before model continuati
   );
 
   const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
-  assert.equal(toolMessage?.content.includes("tool message truncated"), true);
+  const parsed = JSON.parse(toolMessage?.content ?? "{}") as {
+    readonly output?: {
+      readonly structuredContent?: {
+        readonly truncated?: boolean;
+        readonly reason?: string;
+        readonly continuationAvailable?: boolean;
+        readonly unrecoverable?: boolean;
+      };
+      readonly truncation?: {
+        readonly truncated?: boolean;
+        readonly reason?: string;
+      };
+    };
+  };
+  assert.equal(parsed.output?.structuredContent?.truncated, true);
+  assert.equal(parsed.output?.structuredContent?.reason, "tool_message_transport_budget_exceeded");
+  assert.equal(parsed.output?.structuredContent?.continuationAvailable, false);
+  assert.equal(parsed.output?.structuredContent?.unrecoverable, true);
+  assert.equal(parsed.output?.truncation?.truncated, true);
+  assert.equal(parsed.output?.truncation?.reason, "tool_message_transport_budget_exceeded");
   assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 221_000);
 });
 
@@ -766,6 +842,107 @@ test("executeToolUseLoop gives sub-agent full output a larger model-continuation
   const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
   assert.equal(toolMessage?.content.includes("tool message truncated"), false);
   assert.equal(toolMessage?.content.includes(tail), true);
+});
+
+test("executeToolUseLoop keeps oversized sub-agent output recoverable with continuation", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-1", "call_sub_agent"),
+    completedResponse("model-request-final", { summary: "Final answer after sub-agent continuation." }),
+  ]);
+  const subRunId = "sub-agent-run-long";
+  const continuation = {
+    ref: `sub-agent-output:${subRunId}`,
+    nextInput: {
+      sub_run_id: subRunId,
+      start_char: 0,
+      max_chars: 100_000,
+    },
+    note: "Use read_sub_agent_output with nextInput to inspect more.",
+  };
+  const fullOutput = Array.from({ length: 1_050_000 }, (_, index) => String(index % 10)).join("");
+  const center: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "call_sub_agent",
+        description: "Projected sub-agent tool.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "call_sub_agent",
+    execute: async (request, _context, _permission) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { result: { full_output: fullOutput, continuation } },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        modelResult: {
+          content: [{ type: "text" as const, text: "sub-agent completed" }],
+          structuredContent: {
+            status: "completed",
+            result: {
+              full_output: fullOutput,
+              continuation,
+            },
+          },
+          continuation,
+        },
+        uiSummary: "子 Agent 已完成。",
+        truncated: false,
+        redacted: false,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["call_sub_agent"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
+  const parsed = JSON.parse(toolMessage?.content ?? "{}") as {
+    readonly output?: {
+      readonly structuredContent?: {
+        readonly truncated?: boolean;
+        readonly reason?: string;
+        readonly continuationAvailable?: boolean;
+        readonly unrecoverable?: boolean;
+        readonly continuation?: {
+          readonly nextInput?: {
+            readonly sub_run_id?: string;
+            readonly start_char?: number;
+            readonly max_chars?: number;
+          };
+        };
+      };
+      readonly truncation?: {
+        readonly continuation?: {
+          readonly nextInput?: {
+            readonly sub_run_id?: string;
+          };
+        };
+      };
+    };
+  };
+  assert.equal(parsed.output?.structuredContent?.truncated, true);
+  assert.equal(parsed.output?.structuredContent?.reason, "tool_message_transport_budget_exceeded");
+  assert.equal(parsed.output?.structuredContent?.continuationAvailable, true);
+  assert.equal(parsed.output?.structuredContent?.unrecoverable, false);
+  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.sub_run_id, subRunId);
+  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.start_char, 0);
+  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.max_chars, 100_000);
+  assert.equal(parsed.output?.truncation?.continuation?.nextInput?.sub_run_id, subRunId);
+  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 1_000_000);
 });
 
 test("executeToolUseLoop keeps verbose tool output out of EventLog while preserving model tool messages", async () => {

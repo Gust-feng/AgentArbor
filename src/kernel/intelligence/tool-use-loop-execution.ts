@@ -150,8 +150,7 @@ export async function executeToolCallSafely(
 }
 
 export function modelVisibleToolDefinitions(options: ToolUseLoopOptions): readonly ToolDefinition[] {
-  return options.toolCenter
-    .list()
+  return (options.toolDefinitions ?? options.toolCenter.list())
     .filter((tool) => options.allowedTools.includes(tool.name))
     .filter((tool) => !isBlockedToolName(options, tool.name));
 }

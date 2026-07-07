@@ -5,6 +5,8 @@ import type {
   ToolExecutionBroker,
   ToolExecutor,
   ToolFileDisplayOperation,
+  ToolInputSchema,
+  ToolModelContract,
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
@@ -34,6 +36,8 @@ export type ToolCatalogItem = {
   readonly displayName: string;
   readonly displayDescription: string;
   readonly description: string;
+  readonly inputSchema: ToolInputSchema;
+  readonly modelContract?: ToolModelContract;
   readonly category: ToolCategory;
   readonly categoryLabel: string;
   readonly riskLevel: ToolRiskLevel;
@@ -111,6 +115,11 @@ export class ToolRegistry {
           displayName: presentation.displayName,
           displayDescription: presentation.displayDescription,
           description: definition.description,
+          inputSchema: cloneInputSchema(definition.inputSchema),
+          modelContract:
+            definition.modelContract === undefined
+              ? undefined
+              : globalThis.structuredClone(definition.modelContract),
           category: metadata.category,
           categoryLabel: presentation.categoryLabel,
           riskLevel: metadata.riskLevel,
@@ -144,6 +153,15 @@ export class ToolRegistry {
     const requested = new Set(scopes);
     return [...this.entries.values()].filter((entry) => entry.scopes.some((scope) => requested.has(scope)));
   }
+}
+
+function cloneInputSchema(value: ToolInputSchema): ToolInputSchema {
+  return {
+    type: "object",
+    properties: globalThis.structuredClone(value.properties),
+    required: value.required === undefined ? undefined : [...value.required],
+    additionalProperties: value.additionalProperties,
+  };
 }
 
 export function requireToolMetadata(definition: ToolDefinition): ToolDefinitionMetadata {

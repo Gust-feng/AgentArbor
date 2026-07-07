@@ -36,12 +36,17 @@ export type CapabilitySkillRootsInput = {
   readonly workspaceDirectory?: string;
 };
 
+export type CapabilitySubAgentRootsInput = {
+  readonly workspaceDirectory?: string;
+};
+
 export type CapabilityCenterOptions = {
   readonly configCenter: ConfigCenter;
   readonly skillRoots: readonly SkillRootInput[];
   readonly resolveSkillRoots?: (input: CapabilitySkillRootsInput) => readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly subAgentRoots?: readonly SubAgentRootInput[];
+  readonly resolveSubAgentRoots?: (input: CapabilitySubAgentRootsInput) => readonly SubAgentRootInput[];
   readonly fetch?: ToolRegistryFetchLike;
   readonly playwrightAvailable?: boolean;
 };
@@ -52,14 +57,14 @@ export type CapabilityCenterSnapshotInput = {
 
 export class CapabilityCenter {
   private skillsPromises = new Map<string, Promise<readonly SkillDefinition[]>>();
-  private subAgentsPromise?: Promise<readonly SubAgentDefinition[]>;
+  private subAgentsPromises = new Map<string, Promise<readonly SubAgentDefinition[]>>();
   private snapshotPromise?: Promise<BasicAgentCapabilitySnapshot>;
 
   constructor(private readonly options: CapabilityCenterOptions) {}
 
   invalidate(): void {
     this.skillsPromises.clear();
-    this.subAgentsPromise = undefined;
+    this.subAgentsPromises.clear();
     this.snapshotPromise = undefined;
   }
 
@@ -87,25 +92,28 @@ export class CapabilityCenter {
     return this.skillsPromises.get(cacheKey)!;
   }
 
-  async listSubAgents(): Promise<readonly SubAgentDefinition[]> {
-    if (this.subAgentsPromise !== undefined) {
-      return this.subAgentsPromise;
+  async listSubAgents(input: CapabilitySubAgentRootsInput = {}): Promise<readonly SubAgentDefinition[]> {
+    const effectiveInput = await this.effectiveSubAgentRootInput(input);
+    const roots = this.subAgentRootsFor(effectiveInput);
+    if (roots.length === 0) {
+      return [];
     }
-    if (this.options.subAgentRoots === undefined || this.options.subAgentRoots.length === 0) {
-      this.subAgentsPromise = Promise.resolve([]);
-      return this.subAgentsPromise;
+    const cacheKey = subAgentRootCacheKey(roots);
+    const existing = this.subAgentsPromises.get(cacheKey);
+    if (existing !== undefined) {
+      return existing;
     }
     const current = discoverSubAgents({
-      roots: this.options.subAgentRoots,
+      roots,
     });
     const cached = current.catch((error) => {
-      if (this.subAgentsPromise === cached) {
-        this.subAgentsPromise = undefined;
+      if (this.subAgentsPromises.get(cacheKey) === cached) {
+        this.subAgentsPromises.delete(cacheKey);
       }
       throw error;
     });
-    this.subAgentsPromise = cached;
-    return this.subAgentsPromise;
+    this.subAgentsPromises.set(cacheKey, cached);
+    return cached;
   }
 
   async snapshot(input: CapabilityCenterSnapshotInput = {}): Promise<BasicAgentCapabilitySnapshot> {
@@ -145,7 +153,7 @@ export class CapabilityCenter {
     };
     const [skills, subAgents] = await Promise.all([
       this.listSkills({ workspaceDirectory: workspace.workspaceDirectory }),
-      this.listSubAgents(),
+      this.listSubAgents({ workspaceDirectory: workspace.workspaceDirectory }),
     ]);
     const connectableMcpServers = mcpServers.filter(isMcpServerConnectable);
     const cachedMcpServers = connectableMcpServers.filter(hasUsableMcpToolCache);
@@ -159,8 +167,9 @@ export class CapabilityCenter {
           }),
         });
     const modelCapabilities = resolveModelCapabilities({ profile: activeModel, overrides });
-    const subAgentRegistry = this.options.subAgentRoots
-      ? new SubAgentRegistry({ roots: this.options.subAgentRoots })
+    const subAgentRoots = this.subAgentRootsFor({ workspaceDirectory: workspace.workspaceDirectory });
+    const subAgentRegistry = subAgentRoots.length > 0
+      ? new SubAgentRegistry({ roots: subAgentRoots })
       : undefined;
     const registry = createDesktopBasicToolRegistry({
       env,
@@ -226,6 +235,18 @@ export class CapabilityCenter {
   private skillRootsFor(input: CapabilitySkillRootsInput): readonly SkillRootInput[] {
     return this.options.resolveSkillRoots?.(input) ?? this.options.skillRoots;
   }
+
+  private async effectiveSubAgentRootInput(input: CapabilitySubAgentRootsInput): Promise<CapabilitySubAgentRootsInput> {
+    if (input.workspaceDirectory !== undefined || this.options.resolveSubAgentRoots === undefined) {
+      return input;
+    }
+    const workspace = await this.options.configCenter.getWorkspaceConfig();
+    return { workspaceDirectory: workspace.workspaceDirectory };
+  }
+
+  private subAgentRootsFor(input: CapabilitySubAgentRootsInput): readonly SubAgentRootInput[] {
+    return this.options.resolveSubAgentRoots?.(input) ?? this.options.subAgentRoots ?? [];
+  }
 }
 
 function capabilityAllowedToolNames(input: {
@@ -240,6 +261,10 @@ function capabilityAllowedToolNames(input: {
 
 function skillRootCacheKey(roots: readonly SkillRootInput[]): string {
   return JSON.stringify(normalizeSkillRoots(roots));
+}
+
+function subAgentRootCacheKey(roots: readonly SubAgentRootInput[]): string {
+  return JSON.stringify(normalizeSubAgentRoots(roots));
 }
 
 async function projectSkillCatalogItem(skill: SkillDefinition): Promise<CapabilitySkillCatalogItem> {
@@ -512,6 +537,16 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     displayName: tool.displayName,
     displayDescription: tool.displayDescription,
     description: tool.description,
+    inputSchema: {
+      type: "object",
+      properties: globalThis.structuredClone(tool.inputSchema.properties),
+      required: tool.inputSchema.required === undefined ? undefined : [...tool.inputSchema.required],
+      additionalProperties: tool.inputSchema.additionalProperties,
+    },
+    modelContract:
+      tool.modelContract === undefined
+        ? undefined
+        : globalThis.structuredClone(tool.modelContract),
     category: tool.category,
     categoryLabel: tool.categoryLabel,
     riskLevel: tool.riskLevel,

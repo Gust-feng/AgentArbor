@@ -7,6 +7,7 @@ import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "..
 import { CapabilityCenter } from "./capability-center.js";
 import { ConfigCenter } from "./config-center.js";
 import type { SkillRootInput } from "./skills/index.js";
+import type { SubAgentRootInput } from "./sub-agents/sub-agent-loader.js";
 
 test("CapabilityCenter freezes transient run workspace without changing the default workspace", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-"));
@@ -80,6 +81,53 @@ test("CapabilityCenter discovers project skills from the effective workspace", a
     ]);
     assert.equal(runSnapshot.skillCatalog.some((skill) => skill.name === "default-helper"), false);
     assert.equal(runSnapshot.skillCatalog.find((skill) => skill.name === "run-helper")?.sourceRootId, "project");
+  } finally {
+    await fs.rm(directory, { force: true, recursive: true });
+  }
+});
+
+test("CapabilityCenter discovers project sub-agents and tools from the effective workspace", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-sub-agents-"));
+  const defaultWorkspace = path.join(directory, "default-workspace");
+  const runWorkspace = path.join(directory, "run-workspace");
+  try {
+    await writeTestSubAgentPackage(
+      path.join(defaultWorkspace, ".agents", "sub-agents"),
+      "default-helper",
+      "Default workspace helper."
+    );
+    await writeTestSubAgentPackage(
+      path.join(runWorkspace, ".agents", "sub-agents"),
+      "run-helper",
+      "Run workspace helper."
+    );
+
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.updateWorkspaceConfig({ workspaceDirectory: defaultWorkspace });
+    const center = new CapabilityCenter({
+      configCenter,
+      skillRoots: [],
+      resolveSubAgentRoots: (input) =>
+        subAgentRootsForWorkspace(input.workspaceDirectory ?? defaultWorkspace),
+      playwrightAvailable: false,
+    });
+
+    const defaultSubAgents = await center.listSubAgents();
+    const runSnapshot = await center.snapshot({ workspaceDirectory: runWorkspace });
+
+    assert.deepEqual(defaultSubAgents.map((subAgent) => `${subAgent.name}:${subAgent.sourceKind}`), [
+      "default-helper:project",
+    ]);
+    assert.deepEqual(runSnapshot.subAgentCatalog.map((subAgent) => `${subAgent.name}:${subAgent.sourceKind}`), [
+      "run-helper:project",
+    ]);
+    assert.equal(runSnapshot.subAgentCatalog[0]?.sourceRootId, "project");
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agent"), true);
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agents"), true);
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("spawn_sub_agent"), true);
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("read_sub_agent_output"), true);
   } finally {
     await fs.rm(directory, { force: true, recursive: true });
   }
@@ -216,6 +264,10 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "unavailable");
     assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "read_skill_resource")?.displayName, "读取技能资源");
     assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "read_skill_resource")?.enabled, true);
+    const shellTool = snapshot.toolCatalog.tools.find((tool) => tool.name === "shell_command");
+    assert.equal(shellTool?.inputSchema?.properties.commandLine !== undefined, true);
+    assert.match(shellTool?.modelContract?.purpose ?? "", /stdout/);
+    assert.equal((shellTool?.modelContract?.examples?.length ?? 0) > 0, true);
     assert.deepEqual(snapshot.skillCatalog.map((skill) => `${skill.name}:${skill.enabled}`), [
       "disabled-skill:false",
       "invalid-skill:false",
@@ -517,12 +569,43 @@ function skillRootsForWorkspace(userSkillRoot: string, workspaceDirectory: strin
   ];
 }
 
+function subAgentRootsForWorkspace(workspaceDirectory: string): readonly SubAgentRootInput[] {
+  return [
+    {
+      rootPath: path.join(workspaceDirectory, ".agents", "sub-agents"),
+      sourceKind: "project",
+      sourceRootId: "project",
+      precedence: 100,
+    },
+  ];
+}
+
 async function writeTestSkillPackage(root: string, packageName: string, description: string): Promise<void> {
   const skillDir = path.join(root, packageName);
   await fs.mkdir(skillDir, { recursive: true });
   await fs.writeFile(
     path.join(skillDir, "SKILL.md"),
     `---\nname: ${packageName}\ndescription: ${description}\n---\n\n${description}`,
+    "utf8"
+  );
+}
+
+async function writeTestSubAgentPackage(root: string, packageName: string, description: string): Promise<void> {
+  const subAgentDir = path.join(root, packageName);
+  await fs.mkdir(subAgentDir, { recursive: true });
+  await fs.writeFile(
+    path.join(subAgentDir, "SUB_AGENT.md"),
+    [
+      "---",
+      `name: ${packageName}`,
+      `description: ${description}`,
+      "enabled: true",
+      "allowedTools: [read_file]",
+      "maxSteps: 12",
+      "---",
+      "",
+      description,
+    ].join("\n"),
     "utf8"
   );
 }

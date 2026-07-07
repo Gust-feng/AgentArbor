@@ -2,6 +2,8 @@ import type {
   ToolCategory,
   ToolConfirmationPolicy,
   ToolFileDisplayOperation,
+  ToolInputSchema,
+  ToolModelContract,
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
@@ -458,6 +460,8 @@ export type CapabilityToolCatalogItem = {
   readonly displayName: string;
   readonly displayDescription: string;
   readonly description: string;
+  readonly inputSchema?: ToolInputSchema;
+  readonly modelContract?: ToolModelContract;
   readonly category: ToolCategory;
   readonly categoryLabel: string;
   readonly riskLevel: ToolRiskLevel;
@@ -617,6 +621,22 @@ export type BasicAgentCapabilitySnapshot = {
   readonly warnings: readonly string[];
 };
 
+export type RunToolExposureReasonCode =
+  | "model_tools_unsupported"
+  | "tool_disabled"
+  | "tool_unavailable"
+  | "not_in_run_scope"
+  | "permission_denied"
+  | "profile_hidden"
+  | "available_full_access"
+  | "available_requires_confirmation"
+  | "available"
+  | "no_executable_tool_runner"
+  | "executable_tool_missing"
+  | "selected_skill_resources_available"
+  | "selected_skill_resources_unavailable"
+  | "no_enabled_sub_agents";
+
 export type RunToolExposure = {
   readonly name: string;
   readonly displayName: string;
@@ -629,6 +649,7 @@ export type RunToolExposure = {
   readonly fileOperation?: ToolFileDisplayOperation;
   readonly requiresConfirmation: boolean;
   readonly confirmationPolicy?: ToolConfirmationPolicy;
+  readonly reasonCode?: RunToolExposureReasonCode;
   readonly reason: string;
 };
 

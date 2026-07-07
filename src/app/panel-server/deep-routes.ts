@@ -131,8 +131,6 @@ import {
   latestDeepRunRecordsByRoot,
   liveParentOperationFromInstruction,
   projectDeepConversation,
-  projectDeepConversationSummary,
-  projectDeepRunSummary,
   projectDeepRunView,
   summarizeTaskSoilInputForIntake,
   summarizeTerminalDeepRunForIntake,
@@ -173,8 +171,18 @@ import {
   parseConversationRenameInput,
 } from "./request-parsers.js";
 import { parseDeepRunListLimit } from "./deep-route-helpers.js";
+import {
+  deepRunRuntimeHealth,
+  isTerminalDeepRunStatus,
+  projectDeepConversationSummaryWithHealth,
+  projectDeepRunSummaryWithHealth,
+} from "./deep-run-health.js";
 import { resolveRunToolBoundary } from "../run-tool-boundary.js";
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
+
+export { deriveDeepRunRuntimeHealth } from "./deep-run-health.js";
+export type { DeepRunRuntimeHealthView } from "./deep-run-health.js";
+
 // ---------------------------------------------------------------------------
 // 路由状态（EP4 注册表 + 隔离 store + 后台 run 追踪）
 // ---------------------------------------------------------------------------
@@ -211,16 +219,6 @@ type DeepRouteRunFacts = {
 
 /** PanelRuntime → DeepRouteState 绑定。WeakMap 使状态随 runtime 回收，避免跨实例泄漏。 */
 const deepRouteStates = new WeakMap<PanelRuntime, DeepRouteState>();
-const DEEP_RUN_STALE_AFTER_MS = 2 * 60 * 1_000;
-
-type DeepRunRuntimeHealthView = {
-  readonly state: "terminal" | "active" | "stalled" | "orphaned";
-  readonly lastActivityAt: string;
-  readonly inactiveMs: number;
-  readonly staleAfterMs: number;
-  readonly canStop: boolean;
-  readonly reason: string;
-};
 
 /** 取或创建 PanelRuntime 绑定的 deep 路由状态（幂等，首次访问时惰性装配）。 */
 function getDeepRouteState(runtime: PanelRuntime): DeepRouteState {
@@ -2664,36 +2662,6 @@ function summaryPinnedAt(summary: Record<string, unknown>): string {
   return typeof summary.pinnedAt === "string" ? summary.pinnedAt : "";
 }
 
-function projectDeepRunSummaryWithHealth(
-  state: DeepRouteState,
-  record: DeepRunRecord,
-  rootRecord?: DeepRunRecord,
-): Record<string, unknown> {
-  return {
-    ...projectDeepRunSummary(record, rootRecord),
-    runtimeHealth: deepRunRuntimeHealth(state, record),
-  };
-}
-
-function projectDeepConversationSummaryWithHealth(
-  state: DeepRouteState,
-  conversation: DeepConversation,
-  latestRunRecord?: DeepRunRecord,
-  latestRootRecord?: DeepRunRecord,
-): Record<string, unknown> {
-  const summary = projectDeepConversationSummary(conversation, latestRunRecord, latestRootRecord);
-  if (latestRunRecord === undefined || summary.latestRun === undefined) {
-    return summary;
-  }
-  return {
-    ...summary,
-    latestRun: {
-      ...asRecord(summary.latestRun),
-      runtimeHealth: deepRunRuntimeHealth(state, latestRunRecord),
-    },
-  };
-}
-
 async function projectDeepRunViewForResponse(
   state: DeepRouteState,
   record: DeepRunRecord,
@@ -2708,93 +2676,6 @@ async function projectDeepRunViewForResponse(
       runtimeHealth: deepRunRuntimeHealth(state, record),
     },
   };
-}
-
-export function deriveDeepRunRuntimeHealth(input: {
-  readonly status: DeepRunStatus;
-  readonly runId: string;
-  readonly activeRunIds: ReadonlySet<string>;
-  readonly lastActivityAt: string;
-  readonly nowMs?: number;
-  readonly staleAfterMs?: number;
-}): DeepRunRuntimeHealthView {
-  const staleAfterMs = input.staleAfterMs ?? DEEP_RUN_STALE_AFTER_MS;
-  const inactiveMs = Math.max(0, (input.nowMs ?? Date.now()) - timestampMs(input.lastActivityAt));
-  if (isTerminalDeepRunStatus(input.status)) {
-    return {
-      state: "terminal",
-      lastActivityAt: input.lastActivityAt,
-      inactiveMs,
-      staleAfterMs,
-      canStop: false,
-      reason: "run reached terminal status",
-    };
-  }
-  if (!input.activeRunIds.has(input.runId)) {
-    return {
-      state: "orphaned",
-      lastActivityAt: input.lastActivityAt,
-      inactiveMs,
-      staleAfterMs,
-      canStop: true,
-      reason: "running record has no active background task in this process",
-    };
-  }
-  if (inactiveMs >= staleAfterMs) {
-    return {
-      state: "stalled",
-      lastActivityAt: input.lastActivityAt,
-      inactiveMs,
-      staleAfterMs,
-      canStop: true,
-      reason: "no new multi-agent event within stale threshold",
-    };
-  }
-  return {
-    state: "active",
-    lastActivityAt: input.lastActivityAt,
-    inactiveMs,
-    staleAfterMs,
-    canStop: true,
-    reason: "background task is active",
-  };
-}
-
-function deepRunRuntimeHealth(
-  state: DeepRouteState,
-  record: DeepRunRecord,
-  nowMs = Date.now(),
-): DeepRunRuntimeHealthView {
-  return deriveDeepRunRuntimeHealth({
-    status: record.run.status,
-    runId: record.run.runId,
-    activeRunIds: state.activeRunIds,
-    lastActivityAt: latestDeepRunActivityAt(record),
-    nowMs,
-    staleAfterMs: DEEP_RUN_STALE_AFTER_MS,
-  });
-}
-
-function latestDeepRunActivityAt(record: DeepRunRecord): string {
-  const lastEventAt = record.eventSequence.at(-1)?.timestamp;
-  return latestTimestampForHealth(
-    lastEventAt,
-    record.liveProjection?.updatedAt,
-    record.updatedAt,
-    record.run.updatedAt,
-    record.run.startedAt,
-  );
-}
-
-function latestTimestampForHealth(...values: readonly (string | undefined)[]): string {
-  return values
-    .filter((value): value is string => value !== undefined && value.trim().length > 0)
-    .sort((left, right) => timestampMs(right) - timestampMs(left))[0] ?? nowIso();
-}
-
-function timestampMs(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2968,10 +2849,6 @@ async function writeFailureRecord(
   } catch {
     /* 写失败 record 本身失败时不影响主流程（已记录原始错误）。 */
   }
-}
-
-function isTerminalDeepRunStatus(status: DeepRunStatus): boolean {
-  return status !== "running";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

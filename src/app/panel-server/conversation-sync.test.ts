@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PanelConversationStore } from "../panel-conversations.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
-import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
+import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import {
   syncConversationPreviewsForRunningJobs,
   syncConversationTurnForJob,

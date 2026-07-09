@@ -1,15 +1,15 @@
-import type { ArborMessageType } from "../domain/common.js";
-import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
-import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import { modelVisibleOutputOrUndefined } from "./panel-read-model/transcript/panel-transcript-model-calls.js";
-import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
-import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
+import type { ArborMessageType } from "../../../domain/common.js";
+import type { ModelVisibleOutputProjection } from "../../../domain/intelligence/index.js";
+import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
+import { modelVisibleOutputOrUndefined } from "../transcript/panel-transcript-model-calls.js";
+import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "../../panel-read-model-utils.js";
+import { compactStreamDetailText, type PanelRunStreamEventDetail } from "../../panel-stream-tool-projection.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
-import { cleanConfirmationSummary, confirmationActionSummaryText } from "./confirmation-copy.js";
+import { cleanConfirmationSummary, confirmationActionSummaryText } from "../../confirmation-copy.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
-import type { PanelRunSummary, PanelRunSummaryPayload } from "./panel-run-summary.js";
-import { friendlyUserFacingFailureText, friendlyUserFacingModelFailureText } from "./visible-text-safety.js";
-import { modelRequestedSummary as projectedModelRequestedSummary } from "./panel-model-progress-copy.js";
+import type { PanelRunSummary, PanelRunSummaryPayload } from "../../panel-run-summary.js";
+import { friendlyUserFacingFailureText, friendlyUserFacingModelFailureText } from "../../visible-text-safety.js";
+import { modelRequestedSummary as projectedModelRequestedSummary } from "../../panel-model-progress-copy.js";
 
 export function blockedRunSummary(error: { readonly code: string; readonly message: string } | undefined): string {
   if (error?.code === "out_of_fuel") {

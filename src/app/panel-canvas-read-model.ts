@@ -4,8 +4,8 @@ import type { UndergroundDirectionSessionResult } from "./underground-direction-
 import type {
   PanelObservationReadModel,
   PanelRunTrackingReadModel,
-} from "./panel-run-tracking-contracts.js";
-import type { PanelRunTranscript } from "./panel-run-transcript-contracts.js";
+} from "./panel-read-model/run/panel-run-tracking-contracts.js";
+import type { PanelRunTranscript } from "./panel-read-model/run/panel-run-transcript-contracts.js";
 import { safeText, taskSoilCanvas, unique, type PanelTaskSoilCanvasReadModel } from "./panel-canvas-common.js";
 import type { DesktopAgentCanvasReadModel } from "./panel-desktop-agent-canvas.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";

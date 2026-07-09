@@ -1,4 +1,4 @@
-import { toolDisplayName } from "../domain/tools/presentation.js";
+import { toolDisplayName } from "../../../domain/tools/presentation.js";
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
 import type { PanelRunStep, PanelRunStepToolItem } from "./panel-run-transcript-contracts.js";
 

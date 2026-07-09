@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ArborMessage, ArborMessageType } from "../domain/common.js";
-import { ROOTLET_CLUSTER_KINDS } from "../domain/underground/index.js";
-import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import type { AgentRunTreeAttachment } from "./agent-run-tree-attachment.js";
-import type { PanelRunSummary } from "./panel-run-summary.js";
+import type { ArborMessage, ArborMessageType } from "../../../domain/common.js";
+import { ROOTLET_CLUSTER_KINDS } from "../../../domain/underground/index.js";
+import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
+import type { AgentRunTreeAttachment } from "../../agent-run-tree-attachment.js";
+import type { PanelRunSummary } from "../../panel-run-summary.js";
 import { createPanelRunTrace, createPanelRunTracking } from "./panel-run-tracking.js";
-import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../../domain/config/index.js";
 
 test("panel run tracking derives safe provider context and event totals", () => {
   const tracking = createPanelRunTracking({

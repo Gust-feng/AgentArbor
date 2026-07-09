@@ -77,9 +77,9 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-server", "desktop-run-model-settings.ts")),
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
     readAppSource(path.join("panel-server", "underground-compat-execution.ts")),
-    readAppSource("panel-run-stream-events.ts"),
-    readAppSource("panel-run-stream-copy.ts"),
-    readAppSource("panel-run-stream-contracts.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-stream-events.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-stream-copy.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-stream-contracts.ts")),
     readAppSource("panel-model-progress-copy.ts"),
     readAppSource("model-failure-visible-copy.ts"),
     readAppSource(path.join("basic-agent-runtime", "contracts.ts")),
@@ -510,7 +510,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runStreamCopy.includes("export function finalResultSummary"), true);
   assert.equal(runStreamCopy.includes("export function modelRequestedSummary"), true);
   assert.equal(runStreamCopy.includes("function purposeProgressLabel"), false);
-  assert.equal(runStreamCopy.includes('from "./panel-model-progress-copy.js"'), true);
+  assert.equal(runStreamCopy.includes('from "../../panel-model-progress-copy.js"'), true);
   assert.equal(persistedRunResponse.includes('from "../panel-model-progress-copy.js"'), true);
   assert.equal(modelProgressCopy.includes("export function modelRequestedSummary"), true);
   assert.equal(modelProgressCopy.includes("export function restoredModelRequestedSummary"), true);

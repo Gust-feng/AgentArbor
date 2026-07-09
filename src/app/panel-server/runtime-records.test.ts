@@ -6,9 +6,9 @@ import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { createToolCompletedMessage, createToolFailedMessage } from "../../kernel/intelligence/tool-events.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import { createPanelRunTranscript } from "../panel-run-read-model.js";
-import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
-import type { PanelRunTraceReadModel } from "../panel-run-tracking-contracts.js";
-import type { PanelRunTranscript } from "../panel-run-transcript-contracts.js";
+import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
+import type { PanelRunTraceReadModel } from "../panel-read-model/run/panel-run-tracking-contracts.js";
+import type { PanelRunTranscript } from "../panel-read-model/run/panel-run-transcript-contracts.js";
 import { createRunCapabilityPlan } from "../model-capability-registry.js";
 import {
   compactRuntimeText,

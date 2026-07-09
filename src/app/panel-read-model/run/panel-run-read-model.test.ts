@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ArborMessage, ArborMessageType } from "../domain/common.js";
-import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
-import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import type { PanelRunSummary } from "./panel-run-summary.js";
+import type { ArborMessage, ArborMessageType } from "../../../domain/common.js";
+import type { ModelVisibleOutputProjection } from "../../../domain/intelligence/index.js";
+import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
+import type { PanelRunSummary } from "../../panel-run-summary.js";
 import { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
 import { createPanelRunTranscript } from "./panel-run-transcript.js";
-import { createPanelTranscriptNodes } from "./panel-read-model/transcript/panel-transcript-nodes.js";
+import { createPanelTranscriptNodes } from "../transcript/panel-transcript-nodes.js";
 
 test("panel reasoning trace is matched by exact model output contract", () => {
   const transcript = createPanelRunTranscript({

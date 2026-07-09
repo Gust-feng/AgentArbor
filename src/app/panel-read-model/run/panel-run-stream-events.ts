@@ -1,37 +1,37 @@
-import type { ArborMessageType } from "../domain/common.js";
-import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../domain/config/index.js";
-import type { ModelUsage } from "../domain/intelligence/index.js";
+import type { ArborMessageType } from "../../../domain/common.js";
+import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../../../domain/config/index.js";
+import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import {
   createRunObservationEventViews,
   type RunObservationEventView,
-} from "../domain/observation/index.js";
+} from "../../../domain/observation/index.js";
 import {
   modelReasoningOutputOrUndefined,
   safeReasoningOutputForPanel,
-} from "./panel-read-model/transcript/panel-transcript-model-calls.js";
+} from "../transcript/panel-transcript-model-calls.js";
 import {
   asRecord,
   isString,
   numberOrUndefined,
   stringOrUndefined,
   unique,
-} from "./panel-read-model-utils.js";
+} from "../../panel-read-model-utils.js";
 import {
   type PanelRunStreamEventDetail,
   toolStreamDetail,
   toolSummary,
-} from "./panel-stream-tool-projection.js";
+} from "../../panel-stream-tool-projection.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
-import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import type { PanelRunSummaryPayload } from "./panel-run-summary.js";
+import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
+import type { PanelRunSummaryPayload } from "../../panel-run-summary.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 import {
   subAgentStreamDetailFromPayload,
   subAgentStreamLabel,
   subAgentStreamStatusFromPayload,
   subAgentStreamSummaryFromPayload,
-} from "./sub-agent-stream-projection.js";
+} from "../../sub-agent-stream-projection.js";
 import {
   agentFabricLabel,
   agentFabricSummary,

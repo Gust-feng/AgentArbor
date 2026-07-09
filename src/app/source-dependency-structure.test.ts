@@ -349,6 +349,39 @@ test("panel transcript read-model stays under panel-read-model ownership", () =>
   }
 });
 
+test("panel run read-model stays under panel-read-model ownership", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const runRoot = path.join(appRoot, "panel-read-model", "run");
+  const readModelFacade = await readSource(path.join(appRoot, "panel-run-read-model.ts"));
+  const runReadModelFiles = [
+    "index.ts",
+    "panel-run-read-model.test.ts",
+    "panel-run-status.ts",
+    "panel-run-steps.ts",
+    "panel-run-stream-contracts.ts",
+    "panel-run-stream-copy.test.ts",
+    "panel-run-stream-copy.ts",
+    "panel-run-stream-events.ts",
+    "panel-run-tracking-contracts.ts",
+    "panel-run-tracking.test.ts",
+    "panel-run-tracking.ts",
+    "panel-run-transcript-contracts.ts",
+    "panel-run-transcript.ts",
+  ];
+
+  assert.equal(readModelFacade.trim(), 'export * from "./panel-read-model/run/index.js";');
+  for (const fileName of runReadModelFiles) {
+    if (fileName !== "index.ts") {
+      assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    }
+    assert.equal(
+      fileExistsSync(path.join(runRoot, fileName)),
+      true,
+      `${fileName} should live in panel-read-model/run`
+    );
+  }
+});
+
 test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const sources = await Promise.all([

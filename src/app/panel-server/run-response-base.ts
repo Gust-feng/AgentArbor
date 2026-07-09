@@ -6,8 +6,8 @@ import type {
 } from "../../domain/config/index.js";
 import type { RuntimeRunRecord } from "../../domain/runtime-database/index.js";
 import type { PanelConversationReadModel } from "../panel-conversations.js";
-import type { PanelRunStatus } from "../panel-run-status.js";
-import type { PanelRunStreamCursor } from "../panel-run-transcript-contracts.js";
+import type { PanelRunStatus } from "../panel-read-model/run/panel-run-status.js";
+import type { PanelRunStreamCursor } from "../panel-read-model/run/panel-run-transcript-contracts.js";
 import type { PanelRunKind, PanelRunMode } from "../panel-run-jobs.js";
 import { projectRunEnvelopeViewBase } from "../run-read-model-envelope.js";
 

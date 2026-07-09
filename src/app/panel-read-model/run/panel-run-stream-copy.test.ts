@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
+import type { ModelVisibleOutputProjection } from "../../../domain/intelligence/index.js";
 import {
   agentNoteForEvent,
   chunkText,

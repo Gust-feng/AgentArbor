@@ -303,8 +303,8 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     configContracts,
   ] = await Promise.all([
     readAppSource("panel-run-jobs.ts"),
-    readAppSource("panel-run-tracking.ts"),
-    readAppSource("panel-run-tracking-contracts.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-tracking.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-tracking-contracts.ts")),
     readAppSource("task-soil-workspace.ts"),
     readAppSource(path.join("config-center", "model-provider-common.ts")),
     readAppSource(path.join("config-center", "model-provider-profile-settings.ts")),
@@ -407,11 +407,11 @@ test("shared run summary types use app-level contracts before panel aliases", as
   ]);
   const panelRunSummarySources = await Promise.all([
     readAppSource("panel-run-jobs.ts"),
-    readAppSource("panel-run-tracking-contracts.ts"),
-    readAppSource("panel-run-tracking.ts"),
-    readAppSource("panel-run-stream-events.ts"),
-    readAppSource("panel-run-stream-copy.ts"),
-    readAppSource("panel-run-transcript-contracts.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-tracking-contracts.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-tracking.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-stream-events.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-stream-copy.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-transcript-contracts.ts")),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-model-calls.ts")),
     readAppSource("panel-work-note-contracts.ts"),
     readAppSource(path.join("panel-server", "run-execution-contracts.ts")),
@@ -500,8 +500,8 @@ test("panel canvas keeps ordinary desktop agent projection split", async () => {
     readAppSource("panel-desktop-agent-canvas.ts"),
     readAppSource("panel-canvas-common.ts"),
     readAppSource("panel-agent-run-tree-view.ts"),
-    readAppSource("panel-run-transcript-contracts.ts"),
-    readAppSource("panel-run-tracking-contracts.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-transcript-contracts.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-tracking-contracts.ts")),
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
   ]);
 
@@ -535,15 +535,14 @@ test("panel canvas keeps ordinary desktop agent projection split", async () => {
 test("panel run read model stays a compatibility facade", async () => {
   const [readModel, transcript, transcriptContracts, streamEvents, steps, workNotes] = await Promise.all([
     readAppSource("panel-run-read-model.ts"),
-    readAppSource("panel-run-transcript.ts"),
-    readAppSource("panel-run-transcript-contracts.ts"),
-    readAppSource("panel-run-stream-events.ts"),
-    readAppSource("panel-run-steps.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-transcript.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-transcript-contracts.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-stream-events.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-steps.ts")),
     readAppSource("panel-work-notes.ts"),
   ]);
 
-  assert.equal(readModel.includes("export { createPanelRunTranscript }"), true);
-  assert.equal(readModel.includes("export { deriveRunSteps }"), true);
+  assert.equal(readModel.trim(), 'export * from "./panel-read-model/run/index.js";');
   assert.equal(readModel.includes("function createPanelRunTranscript"), false);
   assert.equal(readModel.includes("function deriveRunSteps"), false);
   assert.equal(readModel.includes("createPanelWorkNotes("), false);

@@ -267,6 +267,8 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["agent-definition-runtime.ts", 'export * from "./agent-definitions/agent-definition-runtime.js";'],
     ["model-capability-registry.ts", 'export * from "./model-runtime/model-capability-registry.js";'],
     ["model-context-window-fallback.ts", 'export * from "./model-runtime/model-context-window-fallback.js";'],
+    ["run-read-model-envelope.ts", 'export * from "./run-read-model/envelope.js";'],
+    ["run-read-model-summary.ts", 'export * from "./run-read-model/summary.js";'],
     ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
     ["context-attachments.ts", 'export * from "./task-soil/context-attachments.js";'],
     ["desktop-agent-model-input-files.ts", 'export * from "./task-soil/desktop-agent-model-input-files.js";'],

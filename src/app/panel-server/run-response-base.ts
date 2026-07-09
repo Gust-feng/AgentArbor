@@ -9,7 +9,7 @@ import type { PanelConversationReadModel } from "../panel-conversation/panel-con
 import type { PanelRunStatus } from "../panel-read-model/run/panel-run-status.js";
 import type { PanelRunStreamCursor } from "../panel-read-model/run/panel-run-transcript-contracts.js";
 import type { PanelRunKind, PanelRunMode } from "../panel-run-jobs.js";
-import { projectRunEnvelopeViewBase } from "../run-read-model-envelope.js";
+import { projectRunEnvelopeViewBase } from "../run-read-model/envelope.js";
 
 export type PanelRunResponseError = RuntimeRunRecord["error"];
 

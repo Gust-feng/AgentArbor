@@ -63,7 +63,7 @@ import {
   writePanelError,
 } from "./http-utils.js";
 import { serveRunEventSse } from "./run-event-sse.js";
-import { projectConversationRunEnvelopeViewBase } from "../run-read-model-envelope.js";
+import { projectConversationRunEnvelopeViewBase } from "../run-read-model/envelope.js";
 import type { PanelRuntime } from "./runtime.js";
 import {
   InMemoryDeepConversationStore,

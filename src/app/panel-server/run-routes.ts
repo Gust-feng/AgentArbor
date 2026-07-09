@@ -17,8 +17,8 @@ import { createPersistedPanelRunResponse } from "./persisted-run-response.js";
 import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import { parseRunInput } from "./request-parsers.js";
-import { projectRunEnvelopeViewBase } from "../run-read-model-envelope.js";
-import { projectSharedRunSummaryBase } from "../run-read-model-summary.js";
+import { projectRunEnvelopeViewBase } from "../run-read-model/envelope.js";
+import { projectSharedRunSummaryBase } from "../run-read-model/summary.js";
 import {
   createPanelRunResponse,
   createConfigurationFailedAiSummary,

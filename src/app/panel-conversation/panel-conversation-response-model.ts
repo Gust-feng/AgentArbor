@@ -1,4 +1,4 @@
-import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
 import type { PanelConversationTurnModel } from "./panel-conversation-contracts.js";
 import { turnModelFromConfig } from "./panel-conversation-projection.js";
 

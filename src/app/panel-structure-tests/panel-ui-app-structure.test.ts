@@ -92,7 +92,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource("app-update-actions.ts"),
     readPanelUiSource("app-config-projection.ts"),
     readPanelUiSource("app-conversation-refresh.ts"),
-    readAppSource("panel-conversation-refresh.ts"),
+    readAppSource(path.join("panel-conversation", "panel-conversation-refresh.ts")),
     readAppSource("panel-ui-submit-flow.ts"),
     readPanelUiSource("app-observed-run-read-model.ts"),
     readPanelUiSource("app-run-projection.ts"),
@@ -1091,7 +1091,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appState.includes("readonly appUpdate?: AppUpdateInfo"), true);
   assert.equal(appConfigProjection.includes("export function mergeConfigResponse"), true);
   assert.equal(appConfigProjection.includes("export function runReasoningSettings"), true);
-  assert.equal(appConversationRefresh.includes('from "../../panel-conversation-refresh"'), true);
+  assert.equal(appConversationRefresh.includes('from "../../panel-conversation/panel-conversation-refresh"'), true);
   assert.equal(conversationRefresh.includes("export function conversationSummaryNeedsRefresh"), true);
   assert.equal(conversationRefresh.includes("export function conversationSummariesNeedRefresh"), true);
   assert.equal(appConversationRefresh.includes("export function useConversationSummaryRefresh"), true);

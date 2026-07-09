@@ -1,4 +1,4 @@
-import type { PanelConversationCurrentRunReadModel } from "../panel-conversation-contracts.js";
+import type { PanelConversationCurrentRunReadModel } from "../panel-conversation/panel-conversation-contracts.js";
 import {
   createBasicAgentRunViewReadModel,
   type BasicAgentRunViewRuntime,

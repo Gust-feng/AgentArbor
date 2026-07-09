@@ -424,6 +424,33 @@ test("panel run read-model stays under panel-read-model ownership", async () => 
   }
 });
 
+test("panel conversation module stays under panel-conversation ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const conversationRoot = path.join(appRoot, "panel-conversation");
+  const conversationFiles = [
+    "panel-conversation-contracts.ts",
+    "panel-conversation-display-list.test.ts",
+    "panel-conversation-display-list.ts",
+    "panel-conversation-projection.ts",
+    "panel-conversation-refresh.test.ts",
+    "panel-conversation-refresh.ts",
+    "panel-conversation-response-model.ts",
+    "panel-conversation-workflow-display.test.ts",
+    "panel-conversation-workflow-display.ts",
+    "panel-conversations.test.ts",
+    "panel-conversations.ts",
+  ];
+
+  for (const fileName of conversationFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(
+      fileExistsSync(path.join(conversationRoot, fileName)),
+      true,
+      `${fileName} should live in panel-conversation`
+    );
+  }
+});
+
 test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const sources = await Promise.all([

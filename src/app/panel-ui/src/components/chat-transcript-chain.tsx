@@ -19,7 +19,7 @@ import type {
 import type { LiveAnswerTone } from "../../../panel-ui-live-transcript";
 import { stabilizeStreamingMarkdown } from "../../../panel-ui-streaming";
 import type { AssistantWorkflowDisplay } from "../../../panel-read-model/assistant/panel-assistant-workflow-display";
-import type { ConversationDisplayItem } from "../../../panel-conversation-display-list";
+import type { ConversationDisplayItem } from "../../../panel-conversation/panel-conversation-display-list";
 import { LiveStreamBox } from "./live-stream-text";
 import { RichText } from "./rich-text";
 import type { ChatModelOption } from "./chat-empty";

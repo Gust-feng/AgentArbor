@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { createId, resetIdsForTests } from "../kernel/id.js";
+import { createId, resetIdsForTests } from "../../kernel/id.js";
 import { PanelConversationStore, toRuntimeConversationRecord } from "./panel-conversations.js";
 
 test("panel conversations keep store state separate from projection", async () => {
   const [storeSource, contractsSource, projectionSource] = await Promise.all([
-    readAppSource("panel-conversations.ts"),
-    readAppSource("panel-conversation-contracts.ts"),
-    readAppSource("panel-conversation-projection.ts"),
+    readAppSource(path.join("panel-conversation", "panel-conversations.ts")),
+    readAppSource(path.join("panel-conversation", "panel-conversation-contracts.ts")),
+    readAppSource(path.join("panel-conversation", "panel-conversation-projection.ts")),
   ]);
 
   assert.equal(storeSource.includes('from "./panel-conversation-contracts.js"'), true);

@@ -9,11 +9,11 @@ import {
   toRuntimeConversationRecord,
   type PanelConversationReadModel,
   type PanelConversationStore,
-} from "../panel-conversations.js";
+} from "../panel-conversation/panel-conversations.js";
 import {
   turnModelFromConfigAndModelCall,
   turnModelFromModelCallFallback,
-} from "../panel-conversation-response-model.js";
+} from "../panel-conversation/panel-conversation-response-model.js";
 import { unique } from "./request-parsers.js";
 
 export type PanelConversationRestoreRuntime = {

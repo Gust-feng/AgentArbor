@@ -5,7 +5,7 @@ import type {
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
-import type { PanelConversationReadModel, PanelConversationStore } from "../panel-conversations.js";
+import type { PanelConversationReadModel, PanelConversationStore } from "../panel-conversation/panel-conversations.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
 import {
   createPanelRunTrace,

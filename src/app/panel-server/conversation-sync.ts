@@ -3,8 +3,8 @@ import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
 import {
   type PanelConversationStore,
   type PanelConversationTurnModel,
-} from "../panel-conversations.js";
-import { turnModelFromConfigAndModelCall } from "../panel-conversation-response-model.js";
+} from "../panel-conversation/panel-conversations.js";
+import { turnModelFromConfigAndModelCall } from "../panel-conversation/panel-conversation-response-model.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStatus, PanelRunTranscript } from "../panel-run-read-model.js";
 import {

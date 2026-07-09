@@ -10,8 +10,8 @@ import type {
 import type { LiveRunBuffer } from "../../../panel-ui-live-run-buffer";
 import type { WorklineProjectedTurn } from "../../../panel-ui-chat-workline";
 import type { LiveRunTranscriptProjection } from "../../../panel-ui-live-transcript";
-import { projectConversationDisplayList } from "../../../panel-conversation-display-list";
-import { createConversationWorkflowDisplayState } from "../../../panel-conversation-workflow-display";
+import { projectConversationDisplayList } from "../../../panel-conversation/panel-conversation-display-list";
+import { createConversationWorkflowDisplayState } from "../../../panel-conversation/panel-conversation-workflow-display";
 import { shouldCollapseStandaloneTimeline } from "../../../panel-ui-timeline-collapse";
 import {
   getTranscriptNodesCache,

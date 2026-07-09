@@ -67,7 +67,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-server", "run-job-response.ts")),
     readAppSource("panel-run-jobs.ts"),
     readAppSource("panel-basic-agent-run-view-contracts.ts"),
-    readAppSource("panel-conversation-contracts.ts"),
+    readAppSource(path.join("panel-conversation", "panel-conversation-contracts.ts")),
     readAppSource(path.join("panel-server", "runtime.ts")),
     readAppSource("agent-definition-catalog.ts"),
     readAppSource(path.join("panel-server", "skill-service.ts")),

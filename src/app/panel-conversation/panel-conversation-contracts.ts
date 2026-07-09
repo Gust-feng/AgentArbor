@@ -1,10 +1,10 @@
-import type { RuntimeConversationRecord, RuntimeRunStatus } from "../domain/runtime-database/index.js";
+import type { RuntimeConversationRecord, RuntimeRunStatus } from "../../domain/runtime-database/index.js";
 import type {
   PanelBasicAgentRunDetailReadModel,
   PanelBasicAgentRunViewReadModel,
-} from "./panel-basic-agent-run-view-contracts.js";
-import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
-import type { WorkspaceFolderSummary } from "./workspace-folder-summary.js";
+} from "../panel-basic-agent-run-view-contracts.js";
+import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
+import type { WorkspaceFolderSummary } from "../workspace-folder-summary.js";
 
 export type PanelConversationTurnRole = "user" | "assistant";
 export type PanelConversationTurnStatus =

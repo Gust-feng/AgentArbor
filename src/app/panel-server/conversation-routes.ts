@@ -4,7 +4,7 @@ import {
   type PanelConversationTurnAttachment,
   type PanelConversationReadModel,
   type PanelConversationSummaryReadModel,
-} from "../panel-conversations.js";
+} from "../panel-conversation/panel-conversations.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";

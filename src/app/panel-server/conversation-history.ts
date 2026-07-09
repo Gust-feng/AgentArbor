@@ -4,7 +4,7 @@ import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
 } from "../desktop-agent-session-contracts.js";
-import type { PanelConversation, PanelConversationReadModel, PanelConversationStore } from "../panel-conversations.js";
+import type { PanelConversation, PanelConversationReadModel, PanelConversationStore } from "../panel-conversation/panel-conversations.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import type { PanelRunJob, PanelRunJobStore } from "../panel-run-jobs.js";
 import { normalizeModelFacingText } from "../visible-text-safety.js";

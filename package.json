@@ -11,7 +11,7 @@
     "copy:sub-agents": "node scripts/copy-sub-agent-assets.mjs",
     "typecheck:panel": "tsc -p tsconfig.panel.json --noEmit",
     "build:panel": "vite build --config vite.panel.config.ts",
-    "test": "pnpm build && node --test \"dist/**/*.test.js\"",
+    "test": "pnpm build && node --test --test-concurrency=4 \"dist/**/*.test.js\"",
     "demo": "pnpm build && node dist/app/demo.js",
     "demo:underground": "pnpm build && node dist/app/underground-demo.js",
     "smoke:real-ai": "pnpm build && node dist/app/real-ai-smoke.js",

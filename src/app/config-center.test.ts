@@ -188,7 +188,7 @@ test("command shell auto mode prefers Windows shells that avoid cmd quoting trap
     assert.equal(explicitCmd.configuredKind, "cmd");
     assert.equal(explicitCmd.kind, "cmd");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -214,7 +214,7 @@ test("ConfigCenter persists tool confirmation policy and defaults shell commands
     assert.equal(reloaded.policy, "full_access");
     assert.equal(settingsRaw.toolConfirmation?.policy, "full_access");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -239,7 +239,7 @@ test("ConfigCenter persists skill trigger mode and defaults to keyword", async (
     assert.equal(reloaded.mode, "model");
     assert.equal(settingsRaw.skillTrigger?.mode, "model");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -268,7 +268,7 @@ test("ConfigCenter persists Desktop Agent system prompt settings", async () => {
     assert.equal(reset.systemPrompt, DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT);
     assert.equal(reset.isDefault, true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -344,7 +344,7 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
     assert.equal(webSearch.status, "ready");
     assert.equal(JSON.stringify(webSearch).includes(tavilySecret), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -376,7 +376,7 @@ test("ConfigCenter clears saved model provider API keys explicitly", async () =>
     assert.equal(secretsRaw.includes(secret), false);
     assert.equal(secretsRaw.includes(staleSecret), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -419,7 +419,7 @@ test("ConfigCenter persists custom model provider label and logo", async () => {
     assert.equal(cleared.label, "OpenAI Router");
     assert.equal(cleared.logoDataUrl, undefined);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -462,7 +462,7 @@ test("ConfigCenter scopes model provider logos to the updated profile", async ()
     assert.equal(profiles.find((profile) => profile.profileId === "router-two")?.logoDataUrl, undefined);
     assert.equal(profiles.find((profile) => profile.profileId === "default")?.logoDataUrl, undefined);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -530,7 +530,7 @@ test("ConfigCenter repairs logo pollution on built-in model provider profiles", 
     assert.equal(profiles.find((profile) => profile.profileId === "deepseek")?.logoDataUrl, undefined);
     assert.equal(profiles.find((profile) => profile.profileId === "custom-router")?.logoDataUrl, logoDataUrl);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -566,7 +566,7 @@ test("ConfigCenter keeps built-in provider label and logo immutable", async () =
     assert.equal(reloaded.label, "OpenAI");
     assert.equal(reloaded.logoDataUrl, undefined);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -600,7 +600,7 @@ test("ConfigCenter clears model names explicitly and does not inherit them into 
     assert.equal(created.model, undefined);
     assert.equal(env.AGENTARBOR_MODEL_NAME, undefined);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -632,7 +632,7 @@ test("ConfigCenter web search compatibility API stores key only in secret store"
     assert.equal(settingsRaw.includes(tavilySecret), false);
     assert.equal(secretsRaw.includes(tavilySecret), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -668,7 +668,7 @@ test("ConfigCenter web search provider none disables Tavily environment projecti
     assert.equal(settingsRaw.includes(tavilySecret), false);
     assert.equal(secretsRaw.includes(tavilySecret), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -700,7 +700,7 @@ test("ConfigCenter model built-in web search enables model-native search without
     assert.equal(env.AGENTARBOR_WEB_SEARCH_API_KEY, undefined);
     assert.equal(env.AGENTARBOR_TAVILY_API_KEY, undefined);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -740,7 +740,7 @@ test("ConfigCenter can build a model runtime environment from frozen run informa
     assert.equal(env.AGENTARBOR_INFORMATION_SOURCE_PREFERENCE, "docs,web");
     assert.notEqual(env.AGENTARBOR_TAVILY_API_KEY, currentSecret);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -817,7 +817,7 @@ test("ConfigCenter reads v1 settings and upgrades local settings to v3", async (
     assert.deepEqual(settingsRaw.informationAccess?.sourcePreference, ["codebase", "web"]);
     assert.equal(settingsRaw.informationAccess?.tavily?.maxResults, 2);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -970,7 +970,7 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
     assert.equal(openaiProxy?.baseUrl, "https://openrouter.ai/api/v1");
     assert.equal(openaiProxy?.model, "deepseek-proxy-model");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1004,7 +1004,7 @@ test("ConfigCenter stores Exa web search keys under provider-scoped secrets", as
     assert.equal(settingsRaw.includes(exaSecret), false);
     assert.equal(secretsRaw.includes(exaSecret), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1039,7 +1039,7 @@ test("ConfigCenter stores Metaso web search keys under provider-scoped secrets",
     assert.equal(settingsRaw.includes(metasoSecret), false);
     assert.equal(secretsRaw.includes(metasoSecret), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1073,7 +1073,7 @@ test("ConfigCenter requires Google engine id before reporting web search ready",
     assert.equal(env.AGENTARBOR_WEB_SEARCH_GOOGLE_ENGINE_ID, "engine-id");
     assert.equal(env.AGENTARBOR_GOOGLE_CSE_ID, "engine-id");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1161,7 +1161,7 @@ test("ConfigCenter keeps duplicate model ids scoped to provider profiles", async
     assert.equal(env.AGENTARBOR_MODEL_NAME, sharedModel);
     assert.equal(env.AGENTARBOR_MODEL_API_KEY, "sk-openrouter");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1208,7 +1208,7 @@ test("ConfigCenter manages model profiles and keeps profile secrets scoped", asy
     const remaining = await configCenter.deleteModelProviderProfile("default");
     assert.equal(remaining.some((profile) => profile.profileId === "default"), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1261,7 +1261,7 @@ test("ConfigCenter persists model catalogs and removes them with deleted profile
     assert.equal(remainingProfiles.some((profile) => profile.profileId === "deepseek"), false);
     assert.equal(remainingCatalogs.length, 0);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1297,7 +1297,7 @@ test("ConfigCenter repairs cosmetic generated model catalog display names", asyn
     assert.equal(catalogs[0]?.models.find((model) => model.id === "MiniMax-M3")?.displayName, "MiniMax-M3");
     assert.equal(catalogs[0]?.models.find((model) => model.id === "plain-model")?.displayName, "Provider Plain Model");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1340,7 +1340,7 @@ test("ConfigCenter removes a model catalog when its saved model list is empty", 
     assert.equal(catalogs.length, 0);
     assert.equal(profile?.model, undefined);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1448,7 +1448,7 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
     assert.equal(settingsRaw.includes("mcp-token-value"), false);
     assert.equal(settingsRaw.includes("mcp-bearer-value"), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1469,7 +1469,7 @@ test("ConfigCenter MCP command line parser preserves Windows paths", async () =>
     assert.equal(server?.command, String.raw`C:\Tools\node.exe`);
     assert.deepEqual(server?.args, [String.raw`C:\MCP Servers\server.mjs`, "--flag", "value"]);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1509,7 +1509,7 @@ test("ConfigCenter normalizes legacy MCP SSE transport to streamable HTTP", asyn
     assert.equal(servers[0]?.transport, "http");
     assert.equal(servers[0]?.url, "https://mcp.example.test/mcp");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1581,7 +1581,7 @@ test("ConfigCenter preserves MCP tool cache across policy edits and clears it wh
     assert.equal(changed?.lastConnectedAt, undefined);
     assert.equal(changed?.lastError, undefined);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1647,7 +1647,7 @@ test("ConfigCenter preserves MCP server order when updating existing servers", a
     assert.deepEqual(afterConnectionEdit.map((server) => server.serverId), ["context7", "exa", "docs"]);
     assert.deepEqual(afterAppend.map((server) => server.serverId), ["context7", "exa", "docs", "new-docs"]);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -1672,8 +1672,8 @@ test("ConfigCenter stores and validates workspace directory", async () => {
     assert.equal(autoCreated.workspaceDirectory, path.resolve(missing));
     assert.equal(settingsRaw.workspaceDirectory, path.resolve(missing));
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
-    await fs.rm(workspace, { recursive: true, force: true });
+    await removeTestDirectory(directory);
+    await removeTestDirectory(workspace);
   }
 });
 
@@ -1699,3 +1699,7 @@ test("default local config directory resolves outside the repository", () => {
   assert.equal(resolved, path.join(localAppData, "AgentArbor", "config"));
   assert.equal(path.resolve(resolved).startsWith(path.resolve(process.cwd())), false);
 });
+
+async function removeTestDirectory(directory: string): Promise<void> {
+  await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}

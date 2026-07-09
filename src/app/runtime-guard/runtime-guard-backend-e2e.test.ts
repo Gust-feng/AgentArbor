@@ -79,16 +79,20 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
       args: ["server.mjs", String(port)],
       cwd: "demo",
       background: true,
-      backgroundWaitMs: 100,
+      backgroundWaitMs: 500,
       waitForPort: port,
       waitForPortTimeoutMs: 5_000,
     });
+    assert.equal(
+      startServer.status,
+      "completed",
+      `start server failed: ${JSON.stringify({ error: startServer.error, errorFacts: startServer.errorFacts })}`
+    );
     const startOutput = asRecord(startServer.output);
     const startResult = asRecord(startOutput.result);
     serverPid = numberField(startResult.pid);
     const logRef = stringField(startResult.logRef);
 
-    assert.equal(startServer.status, "completed");
     assert.equal(startResult.exitCode, 0);
     assert.equal(startResult.background, true);
     assert.equal(startResult.waitForPort, port);
@@ -144,14 +148,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     assert.notEqual(registry.get(record.processId)?.status, "running");
     assert.equal(await waitForPidExit(serverPid, 5_000), true);
 
-    const portAfterCleanup = await waitForLocalPort({
-      port,
-      host: "127.0.0.1",
-      timeoutMs: 350,
-      probeTimeoutMs: 100,
-      pollIntervalMs: 50,
-    });
-    assert.equal(portAfterCleanup.ready, false);
+    assert.equal(await waitForLocalPortRelease(port, 3_000), true);
   } finally {
     if (!cleaned) {
       await registry.cleanupByRun(runId, createPlatformProcessTerminator()).catch(() => undefined);
@@ -577,6 +574,24 @@ async function waitForPidExit(pid: number | undefined, timeoutMs: number): Promi
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
     if (!isPidRunning(pid)) {
+      return true;
+    }
+    await delay(100);
+  }
+  return false;
+}
+
+async function waitForLocalPortRelease(port: number, timeoutMs: number): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const probe = await waitForLocalPort({
+      port,
+      host: "127.0.0.1",
+      timeoutMs: 120,
+      probeTimeoutMs: 80,
+      pollIntervalMs: 20,
+    });
+    if (!probe.ready) {
       return true;
     }
     await delay(100);

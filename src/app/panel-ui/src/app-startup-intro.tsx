@@ -3,7 +3,7 @@ import {
   STARTUP_INTRO_TEXT,
   createStartupIntroDefaultWindowSize,
   createStartupIntroWindowSize,
-} from "../../panel-startup-intro-geometry";
+} from "../../desktop/panel-startup-intro-geometry";
 import { isReducedMotionEffective, subscribeMotionSettingsChanged } from "./app-motion";
 
 export type StartupIntroPhase = "loading" | "handoff-ready" | "expanding" | "title-ready" | "title-handoff" | "done";

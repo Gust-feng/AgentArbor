@@ -14,12 +14,12 @@ import { performance } from "node:perf_hooks";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parsePanelDesktopArgs } from "./panel-args.js";
-import { createDesktopLocalPreferenceStore, type DesktopLocalPreferenceStore } from "./panel-desktop-local-preferences.js";
+import { createDesktopLocalPreferenceStore, type DesktopLocalPreferenceStore } from "./desktop/panel-desktop-local-preferences.js";
 import {
   createPanelDesktopWindowOptions,
   startPanelDesktopSession,
   type PanelDesktopSession,
-} from "./panel-desktop-launcher.js";
+} from "./desktop/panel-desktop-launcher.js";
 import {
   clearDesktopWindowMaximizeState,
   createDesktopWindowMaximizeState,
@@ -27,7 +27,7 @@ import {
   toggleDesktopWindowMaximize,
   type DesktopWindowPresentationState,
   type DesktopWindowMaximizeState,
-} from "./panel-desktop-window-controls.js";
+} from "./desktop/panel-desktop-window-controls.js";
 import { startLocalPanelServer } from "./panel-server.js";
 import type { AppUpdateServiceLike } from "./app-update-service.js";
 import { createUnsupportedAppUpdateService } from "./app-update-service.js";
@@ -1198,7 +1198,7 @@ function withStartupMode(url: string, windowSmoke = false): string {
 }
 
 function getPanelDesktopPreloadPath(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "panel-desktop-preload.cjs");
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "desktop", "panel-desktop-preload.cjs");
 }
 
 async function createDesktopAppUpdateService(): Promise<AppUpdateServiceLike> {

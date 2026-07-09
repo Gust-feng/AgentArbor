@@ -1,13 +1,13 @@
 import { createStartupIntroDefaultWindowSize } from "./panel-startup-intro-geometry.js";
-import { resolvePanelBrandLogoPath } from "./panel-assets.js";
+import { resolvePanelBrandLogoPath } from "../panel-assets.js";
 import {
   STARTUP_MAIN_WINDOW_HEIGHT,
   STARTUP_MAIN_WINDOW_WIDTH,
   createStartupThemeSnapshot,
   type StartupThemeSnapshot,
 } from "./panel-startup-theme.js";
-import type { PanelLaunchArgs } from "./panel-args.js";
-import type { PanelContextAttachmentSelection, PanelServerOptions, StartedPanelServer } from "./panel-server.js";
+import type { PanelLaunchArgs } from "../panel-args.js";
+import type { PanelContextAttachmentSelection, PanelServerOptions, StartedPanelServer } from "../panel-server.js";
 
 export type PanelDesktopWindowKind = "startup" | "main";
 

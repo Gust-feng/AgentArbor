@@ -1,5 +1,5 @@
 import type { DesktopAgentSessionResult } from "./desktop-agent-session-contracts.js";
-import { latestModelFailureTextForUser } from "./model-failure-visible-copy.js";
+import { latestModelFailureTextForUser } from "./panel-read-model/run/panel-model-failure-copy.js";
 import { safeText, taskSoilCanvas, type PanelTaskSoilCanvasReadModel } from "./panel-canvas-common.js";
 import type { PanelRunTranscript } from "./panel-read-model/run/panel-run-transcript-contracts.js";
 import { friendlyUserFacingFailureText } from "./visible-text-safety.js";

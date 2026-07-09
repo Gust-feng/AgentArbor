@@ -81,7 +81,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-read-model", "run", "panel-run-stream-copy.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-stream-contracts.ts")),
     readAppSource(path.join("panel-read-model", "panel-model-progress-copy.ts")),
-    readAppSource("model-failure-visible-copy.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-model-failure-copy.ts")),
     readAppSource(path.join("basic-agent-runtime", "contracts.ts")),
   ]);
 
@@ -400,7 +400,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecution.includes('from "./desktop-agent-execution.js"'), true);
   assert.equal(runExecution.includes('from "./underground-compat-execution.js"'), true);
   assert.equal(runExecution.includes('from "./run-execution-contracts.js"'), true);
-  assert.equal(runExecution.includes('from "../model-failure-visible-copy.js"'), true);
+  assert.equal(runExecution.includes('from "../panel-read-model/run/panel-model-failure-copy.js"'), true);
   assert.equal(runExecution.includes("function resolveExecutionAgentDefinition"), true);
   assert.equal(runExecution.includes("agentDefinition: resolveExecutionAgentDefinition(runtime, job)"), true);
   assert.equal(runExecution.includes("agentDefinitionRef: job.agentDefinitionRef"), true);

@@ -24,7 +24,7 @@ import {
   type ModelRuntimeSummaryInput,
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
-import { latestModelFailureTextForUser } from "../model-failure-visible-copy.js";
+import { latestModelFailureTextForUser } from "../panel-read-model/run/panel-model-failure-copy.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import {
   buildConversationHistoryMessages,

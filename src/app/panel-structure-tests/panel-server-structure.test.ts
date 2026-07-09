@@ -69,7 +69,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource("panel-basic-agent-run-view-contracts.ts"),
     readAppSource(path.join("panel-conversation", "panel-conversation-contracts.ts")),
     readAppSource(path.join("panel-server", "runtime.ts")),
-    readAppSource("agent-definition-catalog.ts"),
+    readAppSource(path.join("agent-definitions", "agent-definition-catalog.ts")),
     readAppSource(path.join("panel-server", "skill-service.ts")),
     readAppSource(path.join("panel-server", "run-execution.ts")),
     readAppSource(path.join("panel-server", "run-execution-contracts.ts")),
@@ -332,7 +332,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(panelRuntime.includes("new AgentDefinitionRegistry(["), false);
   assert.equal(agentDefinitionCatalog.includes("export function createRuntimeAgentDefinitionCatalog"), true);
   assert.equal(agentDefinitionCatalog.includes('from "./agent-definition-registry.js"'), true);
-  assert.equal(agentDefinitionCatalog.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
+  assert.equal(agentDefinitionCatalog.includes('from "../agent-prompts/desktop-root-agent.js"'), true);
   assert.equal(agentDefinitionCatalog.includes("new AgentDefinitionRegistry(["), true);
   assert.equal(panelRuntime.includes("new BasicAgentRunExecutor"), true);
   assert.equal(panelRuntime.includes("prepareRunStart: (startInput) => preparePanelBasicRunStart(runtime as PanelRuntime, startInput)"), true);

@@ -6,7 +6,7 @@ import {
   isCompleteRunAgentDefinitionRef,
   runAgentDefinitionRef,
 } from "./agent-definition-runtime.js";
-import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 
 test("AgentDefinition runtime creates ordinary turn policy without round limits", () => {
   const allowedTools = ["read_file", "web_search"] as const;

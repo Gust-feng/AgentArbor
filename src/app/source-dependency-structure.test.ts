@@ -176,7 +176,7 @@ test("run mode policy depends on AgentDefinition refs without importing runtime 
 test("AgentDefinition runtime does not own executable tool boundary pruning", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const [definitionRuntime, runToolBoundary, loopPreparation] = await Promise.all([
-    readSource(path.join(appRoot, "agent-definition-runtime.ts")),
+    readSource(path.join(appRoot, "agent-definitions", "agent-definition-runtime.ts")),
     readSource(path.join(appRoot, "run-tool-boundary.ts")),
     readSource(path.join(appRoot, "desktop-agent-loop-preparation.ts")),
   ]);
@@ -260,6 +260,10 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["app-update-service.ts", 'export * from "./app-update/app-update-service.js";'],
     ["electron-app-update-service.ts", 'export * from "./app-update/electron-app-update-service.js";'],
     ["product-info.ts", 'export * from "./app-update/product-info.js";'],
+    ["agent-definition-catalog.ts", 'export * from "./agent-definitions/agent-definition-catalog.js";'],
+    ["agent-definition-ref.ts", 'export * from "./agent-definitions/agent-definition-ref.js";'],
+    ["agent-definition-registry.ts", 'export * from "./agent-definitions/agent-definition-registry.js";'],
+    ["agent-definition-runtime.ts", 'export * from "./agent-definitions/agent-definition-runtime.js";'],
   ]);
 
   for (const [fileName, expectedSource] of compatibilityFacades) {
@@ -271,11 +275,17 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "tool-display-normalization.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "app-update-service.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "electron-app-update-service.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-catalog.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-registry.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-runtime.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "config-center", "config-center.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "safe-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "tool-display-normalization.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "app-update", "app-update-service.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "app-update", "electron-app-update-service.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-catalog.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-registry.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-runtime.test.ts")), true);
 });
 
 test("tool projection support modules stay under tool-projection ownership", () => {
@@ -308,6 +318,27 @@ test("app update support modules stay under app-update ownership", () => {
     const facade = path.join(appRoot, fileName);
     assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
     assert.equal(fileExistsSync(path.join(appUpdateRoot, fileName)), true, `${fileName} should live in app-update`);
+  }
+});
+
+test("AgentDefinition support modules stay under agent-definitions ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const agentDefinitionRoot = path.join(appRoot, "agent-definitions");
+  const movedAgentDefinitionFiles = [
+    "agent-definition-catalog.ts",
+    "agent-definition-ref.ts",
+    "agent-definition-registry.ts",
+    "agent-definition-runtime.ts",
+  ];
+
+  for (const fileName of movedAgentDefinitionFiles) {
+    const facade = path.join(appRoot, fileName);
+    assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
+    assert.equal(
+      fileExistsSync(path.join(agentDefinitionRoot, fileName)),
+      true,
+      `${fileName} should live in agent-definitions`
+    );
   }
 });
 

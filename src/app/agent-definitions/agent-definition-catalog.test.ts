@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createRuntimeAgentDefinitionCatalog } from "./agent-definition-catalog.js";
 import { runAgentDefinitionRef } from "./agent-definition-runtime.js";
-import type { AgentDefinition } from "./agent-prompts/contracts.js";
+import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
   DESKTOP_ROOT_AGENT,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V3,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V2,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1,
-} from "./agent-prompts/desktop-root-agent.js";
+} from "../agent-prompts/desktop-root-agent.js";
 
 test("runtime AgentDefinition catalog owns the default desktop definition and extra definitions", () => {
   const extraDefinition: AgentDefinition = {

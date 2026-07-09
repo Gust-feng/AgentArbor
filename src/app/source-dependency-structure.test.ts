@@ -269,6 +269,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["context-attachments.ts", 'export * from "./task-soil/context-attachments.js";'],
     ["desktop-agent-model-input-files.ts", 'export * from "./task-soil/desktop-agent-model-input-files.js";'],
     ["workspace-folder-summary.ts", 'export * from "./task-soil/workspace-folder-summary.js";'],
+    ["panel-confirmation-display-projection.ts", 'export * from "./panel-ui/src/confirmation-display-projection.js";'],
     ["panel-stream-tool-projection.ts", 'export * from "./panel-read-model/run/panel-stream-tool-projection.js";'],
     ["panel-agent-run-tree-view.ts", 'export * from "./panel-read-model/run/panel-agent-run-tree-view.js";'],
     ["panel-work-note-contracts.ts", 'export * from "./panel-read-model/run/panel-work-note-contracts.js";'],
@@ -300,6 +301,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil-workspace.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "context-attachments.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-model-input-files.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-ui-confirmation-projection.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-stream-tool-projection.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-work-notes.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-runtime-summary.test.ts")), false);
@@ -323,8 +325,10 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-work-notes.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-runtime-summary.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-server", "panel-usage-statistics.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "tests", "confirmation-display-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "tests", "context-window-usage.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "panel-model-progress-copy.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "panel-transcript-confirmation-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "readable-text-fragments.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "transcript-reasoning.test.ts")), true);
 });
@@ -441,6 +445,7 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
     "app-task-submit-flow.ts",
     "chat-active-projection.ts",
     "chat-active-view.ts",
+    "confirmation-display-projection.ts",
     "context-window-usage.ts",
     "deep-sidebar-selection.ts",
     "deep-transcript.ts",
@@ -452,6 +457,7 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
     "app-task-submit-flow.test.ts",
     "chat-active-projection.test.ts",
     "chat-active-view.test.ts",
+    "confirmation-display-projection.test.ts",
     "context-window-usage.test.ts",
     "deep-sidebar-selection.test.ts",
     "deep-transcript.test.ts",
@@ -472,6 +478,7 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
     "panel-ui-chat-active-projection.ts",
     "panel-ui-chat-active-view.test.ts",
     "panel-ui-chat-active-view.ts",
+    "panel-ui-confirmation-projection.test.ts",
     "panel-ui-streaming.test.ts",
     "panel-ui-streaming.ts",
     "panel-ui-transcript-window.test.ts",
@@ -596,6 +603,7 @@ test("panel transcript read-model stays under panel-read-model ownership", () =>
     "panel-transcript-activity-copy.ts",
     "panel-transcript-cache.test.ts",
     "panel-transcript-cache.ts",
+    "panel-transcript-confirmation-projection.test.ts",
     "panel-transcript-confirmation-projection.ts",
     "panel-transcript-materializer.test.ts",
     "panel-transcript-materializer.ts",
@@ -877,19 +885,24 @@ test("ordinary Desktop Agent entry does not import legacy desktop chat compatibi
   assert.deepEqual(violations, [], "new ordinary Agent code should import desktop-agent-session directly");
 });
 
-test("confirmation copy and display projection stay app-owned", async () => {
+test("confirmation copy stays app-owned while display projection stays panel UI-owned", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const [transcriptConfirmation, confirmationDisplayProjection] = await Promise.all([
+  const [transcriptConfirmation, confirmationDisplayFacade, confirmationDisplayProjection] = await Promise.all([
     readSource(path.join(appRoot, "panel-ui", "src", "components", "transcript-confirmation.tsx")),
     readSource(path.join(appRoot, "panel-confirmation-display-projection.ts")),
+    readSource(path.join(appRoot, "panel-ui", "src", "confirmation-display-projection.ts")),
   ]);
 
   assert.equal(fileExistsSync(path.join(appRoot, "confirmation-copy.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-confirmation-copy.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-confirmation-display-projection.ts")), true);
-  assert.equal(confirmationDisplayProjection.includes('from "./confirmation-copy.js"'), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "src", "confirmation-display-projection.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "tests", "confirmation-display-projection.test.ts")), true);
+  assert.equal(confirmationDisplayFacade.trim(), 'export * from "./panel-ui/src/confirmation-display-projection.js";');
+  assert.equal(confirmationDisplayProjection.includes('from "../../confirmation-copy.js"'), true);
   assert.equal(transcriptConfirmation.includes("../../../confirmation-copy"), false);
-  assert.equal(transcriptConfirmation.includes("../../../panel-confirmation-display-projection"), true);
+  assert.equal(transcriptConfirmation.includes("../../../panel-confirmation-display-projection"), false);
+  assert.equal(transcriptConfirmation.includes("../confirmation-display-projection"), true);
   assert.equal(transcriptConfirmation.includes("panel-confirmation-copy"), false);
 });
 

@@ -51,7 +51,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
     readPanelUiSource(path.join("components", "sub-agent-run-viewer.tsx")),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-confirmation-projection.ts")),
-    readAppSource("panel-confirmation-display-projection.ts"),
+    readPanelUiSource("confirmation-display-projection.ts"),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-activity-copy.ts")),
     readAppSource("panel-agent-work-timeline-view.ts"),
     readPanelUiSource(path.join("components", "transcript-confirmation.tsx")),

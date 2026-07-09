@@ -1,6 +1,6 @@
 import React from "react";
 import type { DesktopWorkView, PendingConfirmation, TranscriptConfirmation } from "../contracts/run";
-import { projectConfirmationDisplay } from "../../../panel-confirmation-display-projection";
+import { projectConfirmationDisplay } from "../confirmation-display-projection";
 
 export type ConfirmationProjection = PendingConfirmation | NonNullable<DesktopWorkView["pendingConfirmation"]> | TranscriptConfirmation;
 

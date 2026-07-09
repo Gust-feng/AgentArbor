@@ -14,14 +14,14 @@ import {
   projectToolResultEnvelope as projectKernelToolResultEnvelope,
   projectToolStatusEnvelope,
 } from "../../kernel/tools/index.js";
-import { commandProgramFromToolResult, commandTextFromToolResult } from "../command-text.js";
+import { commandProgramFromToolResult, commandTextFromToolResult } from "./command-text.js";
 import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
-import { normalizeToolDisplayForOperation } from "../tool-display-normalization.js";
+import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";
 import {
   toolContinuationFromUnknown,
   toolResultContinuation,
-} from "../tool-result-continuation.js";
+} from "./tool-result-continuation.js";
 
 const MODEL_TOOL_TEXT_MAX_CHARS = 128_000;
 const MODEL_TOOL_ERROR_MAX_CHARS = 64_000;

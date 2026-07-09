@@ -250,15 +250,42 @@ test("Basic Agent run projection does not keep stale panel projection files", ()
 
 test("app top-level keeps moved implementation modules as compatibility facades", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const configCenterFacade = await readSource(path.join(appRoot, "config-center.ts"));
-  const safeProjectionFacade = await readSource(path.join(appRoot, "safe-projection.ts"));
+  const compatibilityFacades = new Map([
+    ["config-center.ts", 'export * from "./config-center/index.js";'],
+    ["safe-projection.ts", 'export * from "./tool-projection/safe-projection.js";'],
+    ["command-text.ts", 'export * from "./tool-projection/command-text.js";'],
+    ["safe-tool-preview.ts", 'export * from "./tool-projection/safe-tool-preview.js";'],
+    ["tool-display-normalization.ts", 'export * from "./tool-projection/tool-display-normalization.js";'],
+    ["tool-result-continuation.ts", 'export * from "./tool-projection/tool-result-continuation.js";'],
+  ]);
 
-  assert.equal(configCenterFacade.trim(), 'export * from "./config-center/index.js";');
-  assert.equal(safeProjectionFacade.trim(), 'export * from "./tool-projection/safe-projection.js";');
+  for (const [fileName, expectedSource] of compatibilityFacades) {
+    const facade = await readSource(path.join(appRoot, fileName));
+    assert.equal(facade.trim(), expectedSource, `${fileName} should stay a re-export compatibility facade`);
+  }
   assert.equal(fileExistsSync(path.join(appRoot, "config-center.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "safe-projection.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "tool-display-normalization.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "config-center", "config-center.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "safe-projection.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "tool-display-normalization.test.ts")), true);
+});
+
+test("tool projection support modules stay under tool-projection ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const toolProjectionRoot = path.join(appRoot, "tool-projection");
+  const movedToolProjectionFiles = [
+    "command-text.ts",
+    "safe-tool-preview.ts",
+    "tool-display-normalization.ts",
+    "tool-result-continuation.ts",
+  ];
+
+  for (const fileName of movedToolProjectionFiles) {
+    const facade = path.join(appRoot, fileName);
+    assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
+    assert.equal(fileExistsSync(path.join(toolProjectionRoot, fileName)), true, `${fileName} should live in tool-projection`);
+  }
 });
 
 test("panel structure tests stay in the panel structure test module", () => {

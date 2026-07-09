@@ -257,6 +257,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["safe-tool-preview.ts", 'export * from "./tool-projection/safe-tool-preview.js";'],
     ["tool-display-normalization.ts", 'export * from "./tool-projection/tool-display-normalization.js";'],
     ["tool-result-continuation.ts", 'export * from "./tool-projection/tool-result-continuation.js";'],
+    ["ordinary-tool-copy.ts", 'export * from "./tool-projection/ordinary-tool-copy.js";'],
     ["app-update-service.ts", 'export * from "./app-update/app-update-service.js";'],
     ["electron-app-update-service.ts", 'export * from "./app-update/electron-app-update-service.js";'],
     ["product-info.ts", 'export * from "./app-update/product-info.js";'],
@@ -306,6 +307,7 @@ test("tool projection support modules stay under tool-projection ownership", () 
   const toolProjectionRoot = path.join(appRoot, "tool-projection");
   const movedToolProjectionFiles = [
     "command-text.ts",
+    "ordinary-tool-copy.ts",
     "safe-tool-preview.ts",
     "tool-display-normalization.ts",
     "tool-result-continuation.ts",

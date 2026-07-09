@@ -1,4 +1,4 @@
-import type { PanelRunStreamEventDetail } from "../../panel-stream-tool-projection.js";
+import type { PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
 
 export type PanelRunStreamEventType =
   | "run.started"
@@ -34,7 +34,7 @@ export type PanelRunStreamEventType =
   | "final.result"
   | "run.failed";
 
-export type { PanelRunStreamEventDetail } from "../../panel-stream-tool-projection.js";
+export type { PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
 
 export type PanelRunStreamEvent = {
   readonly eventId: string;

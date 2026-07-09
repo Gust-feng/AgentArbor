@@ -23,7 +23,7 @@ import {
 } from "./transcript-confirmation";
 import {
   type AgentWorkTimelineView,
-} from "../../../panel-agent-work-timeline-view";
+} from "../../../panel-read-model/assistant/panel-agent-work-timeline-view";
 import type {
   ActivityBadge,
   ActivityToolKind,

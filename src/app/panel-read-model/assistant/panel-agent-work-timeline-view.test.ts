@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { projectAgentWorkTimelineView } from "./panel-agent-work-timeline-view.js";
-import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
+import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 
 test("agent work timeline view projects items and current confirmation outside React", () => {
   const pending = { confirmationId: "confirmation-1", runId: "run-1" };

@@ -12,7 +12,7 @@ import {
   HelpCircle,
   Send,
 } from "lucide-react";
-import type { AgentWorkTimelineView } from "../../../panel-agent-work-timeline-view";
+import type { AgentWorkTimelineView } from "../../../panel-read-model/assistant/panel-agent-work-timeline-view";
 import {
   childAgentImportantSignal,
   compactWorklineText,

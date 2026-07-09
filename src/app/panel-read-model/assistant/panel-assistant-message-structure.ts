@@ -1,7 +1,7 @@
 import {
   projectAgentWorkTimelineView,
   type AgentWorkTimelineView,
-} from "../../panel-agent-work-timeline-view.js";
+} from "./panel-agent-work-timeline-view.js";
 import type { ActivityItem } from "../transcript/panel-transcript-activity-copy.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import type { AssistantSubAgentRunLike } from "./panel-assistant-message-output.js";

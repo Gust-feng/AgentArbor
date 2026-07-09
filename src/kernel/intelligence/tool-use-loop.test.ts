@@ -960,6 +960,147 @@ test("executeToolUseLoop keeps oversized sub-agent output recoverable with conti
   assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 1_000_000);
 });
 
+test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable with every continuation", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-1", "call_sub_agents"),
+    completedResponse("model-request-final", { summary: "Final answer after batch sub-agent continuations." }),
+  ]);
+  const firstContinuation = {
+    ref: "sub-agent-output:batch-sub-run-first",
+    nextInput: {
+      sub_run_id: "batch-sub-run-first",
+      start_char: 0,
+      max_chars: 100_000,
+    },
+    note: "Read first batch output.",
+  };
+  const secondContinuation = {
+    ref: "sub-agent-output:batch-sub-run-second",
+    nextInput: {
+      sub_run_id: "batch-sub-run-second",
+      start_char: 0,
+      max_chars: 100_000,
+    },
+    note: "Read second batch output.",
+  };
+  const firstOutput = "a".repeat(610_000);
+  const secondOutput = "b".repeat(610_000);
+  const center: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "call_sub_agents",
+        description: "Projected batch sub-agent tool.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "call_sub_agents",
+    execute: async (request, _context, _permission) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: {
+        result: {
+          results: [
+            { full_output: firstOutput, continuation: firstContinuation },
+            { full_output: secondOutput, continuation: secondContinuation },
+          ],
+        },
+      },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        modelResult: {
+          content: [{ type: "text" as const, text: "batch sub-agents completed" }],
+          structuredContent: {
+            status: "completed",
+            result: {
+              results: [
+                {
+                  index: 0,
+                  sub_agent_name: "research-expert",
+                  full_output: firstOutput,
+                  continuation: firstContinuation,
+                  run_id: "batch-sub-run-first",
+                },
+                {
+                  index: 1,
+                  sub_agent_name: "review-expert",
+                  full_output: secondOutput,
+                  continuation: secondContinuation,
+                  run_id: "batch-sub-run-second",
+                },
+              ],
+            },
+            continuations: [
+              { index: 0, continuation: firstContinuation },
+              { index: 1, continuation: secondContinuation },
+            ],
+          },
+          continuation: firstContinuation,
+        },
+        uiSummary: "子 Agent 批次已完成。",
+        truncated: false,
+        redacted: false,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["call_sub_agents"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
+  const parsed = JSON.parse(toolMessage?.content ?? "{}") as {
+    readonly output?: {
+      readonly structuredContent?: {
+        readonly truncated?: boolean;
+        readonly reason?: string;
+        readonly continuationAvailable?: boolean;
+        readonly unrecoverable?: boolean;
+        readonly continuationCount?: number;
+        readonly continuation?: {
+          readonly nextInput?: { readonly sub_run_id?: string };
+        };
+        readonly continuations?: readonly {
+          readonly nextInput?: { readonly sub_run_id?: string };
+        }[];
+      };
+      readonly truncation?: {
+        readonly continuations?: readonly {
+          readonly nextInput?: { readonly sub_run_id?: string };
+        }[];
+      };
+    };
+  };
+  const structuredContinuations = parsed.output?.structuredContent?.continuations ?? [];
+  const truncationContinuations = parsed.output?.truncation?.continuations ?? [];
+  assert.equal(parsed.output?.structuredContent?.truncated, true);
+  assert.equal(parsed.output?.structuredContent?.reason, "tool_message_transport_budget_exceeded");
+  assert.equal(parsed.output?.structuredContent?.continuationAvailable, true);
+  assert.equal(parsed.output?.structuredContent?.unrecoverable, false);
+  assert.equal(parsed.output?.structuredContent?.continuationCount, 2);
+  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.sub_run_id, "batch-sub-run-first");
+  assert.deepEqual(
+    structuredContinuations.map((continuation) => continuation.nextInput?.sub_run_id),
+    ["batch-sub-run-first", "batch-sub-run-second"]
+  );
+  assert.deepEqual(
+    truncationContinuations.map((continuation) => continuation.nextInput?.sub_run_id),
+    ["batch-sub-run-first", "batch-sub-run-second"]
+  );
+  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 1_000_000);
+});
+
 test("executeToolUseLoop keeps verbose tool output out of EventLog while preserving model tool messages", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([

@@ -166,6 +166,95 @@ test("batch sub-agent projection keeps each full output in model continuation", 
   assert.equal(agentContent.result?.results?.[1]?.full_output, second);
 });
 
+test("batch sub-agent projection exposes every output continuation ref", () => {
+  const firstContinuation = {
+    ref: "sub-agent-output:sub-run-first",
+    nextInput: { sub_run_id: "sub-run-first", start_char: 0, max_chars: 100_000 },
+    note: "Read first output.",
+  };
+  const secondContinuation = {
+    ref: "sub-agent-output:sub-run-second",
+    nextInput: { sub_run_id: "sub-run-second", start_char: 0, max_chars: 100_000 },
+    note: "Read second output.",
+  };
+  const projection = projectToolResult({
+    request: {
+      callId: "call-sub-agents-continuations",
+      toolName: "call_sub_agents",
+      input: {
+        tasks: [
+          { sub_agent_name: "research-expert", task: "first" },
+          { sub_agent_name: "review-expert", task: "second" },
+        ],
+      },
+    },
+    output: {
+      action: "call_sub_agents",
+      status: "completed",
+      summary: "执行 2 个子 Agent 任务：2 成功，0 失败，0 取消，0 等待确认，0 未启动，总耗时 20ms",
+      result: {
+        results: [
+          {
+            index: 0,
+            sub_agent_name: "research-expert",
+            status: "completed",
+            summary: "first summary",
+            full_output: "a".repeat(140_000),
+            full_output_ref: "sub-agent-output:sub-run-first",
+            continuation: firstContinuation,
+            run_id: "sub-run-first",
+          },
+          {
+            index: 1,
+            sub_agent_name: "review-expert",
+            status: "completed",
+            summary: "second summary",
+            full_output: "b".repeat(140_000),
+            full_output_ref: "sub-agent-output:sub-run-second",
+            continuation: secondContinuation,
+            run_id: "sub-run-second",
+          },
+        ],
+        stats: { total: 2, completed: 2 },
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly continuations?: readonly {
+      readonly index?: number;
+      readonly continuation?: { readonly nextInput?: { readonly sub_run_id?: string } };
+    }[];
+    readonly result?: {
+      readonly results?: readonly {
+        readonly continuation?: { readonly nextInput?: { readonly sub_run_id?: string } };
+      }[];
+    };
+  };
+  const structuredContent = projection.modelResult?.structuredContent as {
+    readonly continuations?: readonly {
+      readonly index?: number;
+      readonly continuation?: { readonly nextInput?: { readonly sub_run_id?: string } };
+    }[];
+  };
+
+  assert.equal(agentContent.result?.results?.[0]?.continuation?.nextInput?.sub_run_id, "sub-run-first");
+  assert.equal(agentContent.result?.results?.[1]?.continuation?.nextInput?.sub_run_id, "sub-run-second");
+  assert.equal(agentContent.continuations?.length, 2);
+  assert.equal(agentContent.continuations?.[0]?.index, 0);
+  assert.equal(agentContent.continuations?.[0]?.continuation?.nextInput?.sub_run_id, "sub-run-first");
+  assert.equal(agentContent.continuations?.[1]?.index, 1);
+  assert.equal(agentContent.continuations?.[1]?.continuation?.nextInput?.sub_run_id, "sub-run-second");
+  assert.equal(structuredContent.continuations?.length, 2);
+  assert.equal(structuredContent.continuations?.[0]?.continuation?.nextInput?.sub_run_id, "sub-run-first");
+  assert.equal(structuredContent.continuations?.[1]?.continuation?.nextInput?.sub_run_id, "sub-run-second");
+  assert.equal(
+    (projection.modelResult?.continuation as { readonly nextInput?: { readonly sub_run_id?: string } } | undefined)
+      ?.nextInput?.sub_run_id,
+    "sub-run-first"
+  );
+});
+
 test("batch read projection exposes per-ref content and errors to model continuation", () => {
   const projection = projectToolResult({
     request: {

@@ -66,6 +66,7 @@ export function toolResultMessages(results: readonly ToolCallResult[]): ModelMes
 // so stdout/stderr and file bodies are not silently replaced by a short message.
 const MAX_TOOL_MESSAGE_CHARS = 220_000;
 const MAX_SUB_AGENT_TOOL_MESSAGE_CHARS = 1_000_000;
+const MAX_TRANSPORT_CONTINUATIONS = 32;
 const SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
 
 function safeToolErrorForModel(error: string | undefined): string | undefined {
@@ -121,7 +122,9 @@ function transportTruncatedToolPayload(
   originalChars: number,
   maxChars: number
 ): ToolMessagePayload {
-  const continuation = modelOutputContinuation(payload.output);
+  const continuations = modelOutputContinuations(payload.output);
+  const continuation = continuations[0];
+  const continuationList = continuations.length === 0 ? undefined : continuations;
   const omittedChars = Math.max(0, originalChars - maxChars);
   return {
     callId: payload.callId,
@@ -140,9 +143,11 @@ function transportTruncatedToolPayload(
         originalChars,
         maxChars,
         omittedChars,
-        continuationAvailable: continuation !== undefined,
-        unrecoverable: continuation === undefined,
+        continuationAvailable: continuations.length > 0,
+        unrecoverable: continuations.length === 0,
         continuation,
+        continuations: continuationList,
+        continuationCount: continuations.length,
         preview: compactJsonPreview(payload.output, 4_000),
       },
       truncation: {
@@ -150,6 +155,7 @@ function transportTruncatedToolPayload(
         reason: "tool_message_transport_budget_exceeded",
         omittedChars,
         continuation,
+        continuations: continuationList,
       },
       continuation,
     },
@@ -158,11 +164,64 @@ function transportTruncatedToolPayload(
   };
 }
 
-function modelOutputContinuation(value: unknown): ToolContinuation | undefined {
+function modelOutputContinuations(value: unknown): readonly ToolContinuation[] {
+  const knownRefContinuation = continuationFromKnownRef(value);
+  return uniqueContinuations([
+    ...collectExplicitContinuations(value),
+    ...(knownRefContinuation === undefined ? [] : [knownRefContinuation]),
+  ]).slice(0, MAX_TRANSPORT_CONTINUATIONS);
+}
+
+function collectExplicitContinuations(value: unknown): readonly ToolContinuation[] {
+  const continuations: ToolContinuation[] = [];
+  collectExplicitContinuationsInto(value, continuations);
+  return continuations;
+}
+
+function collectExplicitContinuationsInto(value: unknown, continuations: ToolContinuation[], depth = 0): void {
+  if (depth > 8 || value === null || typeof value !== "object") {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 128)) {
+      collectExplicitContinuationsInto(item, continuations, depth + 1);
+    }
+    return;
+  }
   const record = asRecord(value);
-  return toolContinuationFromUnknown(record.continuation) ??
-    toolContinuationFromUnknown(asRecord(record.truncation).continuation) ??
-    continuationFromKnownRef(value);
+  for (const [key, item] of Object.entries(record).slice(0, 128)) {
+    if (key === "continuation") {
+      const continuation = toolContinuationFromUnknown(item);
+      if (continuation !== undefined) {
+        continuations.push(continuation);
+      }
+      continue;
+    }
+    if (key === "continuations" && Array.isArray(item)) {
+      for (const entry of item.slice(0, MAX_TRANSPORT_CONTINUATIONS)) {
+        const continuation =
+          toolContinuationFromUnknown(asRecord(entry).continuation) ??
+          toolContinuationFromUnknown(entry);
+        if (continuation !== undefined) {
+          continuations.push(continuation);
+        }
+      }
+    }
+    collectExplicitContinuationsInto(item, continuations, depth + 1);
+  }
+}
+
+function uniqueContinuations(continuations: readonly ToolContinuation[]): readonly ToolContinuation[] {
+  const seen = new Set<string>();
+  const uniqueValues: ToolContinuation[] = [];
+  for (const continuation of continuations) {
+    const key = JSON.stringify(continuation);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueValues.push(continuation);
+    }
+  }
+  return uniqueValues;
 }
 
 function continuationFromKnownRef(value: unknown): ToolContinuation | undefined {

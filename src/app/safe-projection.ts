@@ -32,6 +32,15 @@ type InternalToolResult = ToolResult;
 
 type ToolDisplayShape = "file" | "sources" | "diff" | "terminal" | "approval" | "text" | "generic";
 
+type SubAgentContinuationRef = {
+  readonly index?: number;
+  readonly sub_agent_id?: string;
+  readonly sub_agent_name?: string;
+  readonly run_id?: string;
+  readonly full_output_ref?: string;
+  readonly continuation: ToolContinuation;
+};
+
 // Historical compatibility name: callers across the app still import
 // "redactOrdinaryText", but current ordinary text policy is compact-only.
 export function redactOrdinaryText(value: string, maxLength = 1_200): string {
@@ -225,10 +234,11 @@ function projectToolModelResult(
     return fileChangeToolResult(display, truncated);
   }
   if (isSubAgentToolName(request.toolName)) {
-    const continuation = subAgentToolContinuation(record);
+    const continuationRefs = subAgentToolContinuationRefs(record);
+    const continuation = continuationRefs[0]?.continuation;
     return ensureToolResultContent({
       content: genericToolResultContent(record, display),
-      structuredContent: genericStructuredContent(request, output, display, truncated),
+      structuredContent: subAgentStructuredContent(request, output, display, truncated, continuationRefs),
       isError: record.isError === true ? true : undefined,
       continuation,
     }, toolResultFallbackText(request, display, record));
@@ -1925,24 +1935,64 @@ function isSubAgentToolName(toolName: string): boolean {
   return toolName === "call_sub_agent" || toolName === "call_sub_agents" || toolName === "spawn_sub_agent";
 }
 
-function subAgentToolContinuation(record: Readonly<Record<string, unknown>>): ToolContinuation | undefined {
+function subAgentStructuredContent(
+  request: ToolCallRequest,
+  output: unknown,
+  display: ToolDisplayProjection,
+  truncated: boolean,
+  continuationRefs: readonly SubAgentContinuationRef[]
+): unknown {
+  return structuredSnapshot({
+    ...asRecord(genericStructuredContent(request, output, display, truncated)),
+    continuations: continuationRefs.length === 0 ? undefined : continuationRefs,
+  });
+}
+
+function subAgentToolContinuationRefs(record: Readonly<Record<string, unknown>>): readonly SubAgentContinuationRef[] {
   const result = asRecord(record.result);
-  const direct =
-    toolContinuationFromUnknown(record.continuation) ??
-    toolContinuationFromUnknown(result.continuation);
-  if (direct !== undefined) {
-    return direct;
+  const refs: SubAgentContinuationRef[] = [];
+  const recordContinuation = toolContinuationFromUnknown(record.continuation);
+  if (recordContinuation !== undefined) {
+    refs.push({ continuation: recordContinuation });
   }
-  if (!Array.isArray(result.results)) {
-    return undefined;
+  const resultContinuation = toolContinuationFromUnknown(result.continuation);
+  if (resultContinuation !== undefined) {
+    refs.push({
+      run_id: stringOrUndefined(result.run_id),
+      full_output_ref: stringOrUndefined(result.full_output_ref),
+      continuation: resultContinuation,
+    });
   }
-  for (const item of result.results) {
-    const continuation = toolContinuationFromUnknown(asRecord(item).continuation);
-    if (continuation !== undefined) {
-      return continuation;
+  if (Array.isArray(result.results)) {
+    for (const item of result.results) {
+      const itemRecord = asRecord(item);
+      const continuation = toolContinuationFromUnknown(itemRecord.continuation);
+      if (continuation !== undefined) {
+        refs.push({
+          index: numberOrUndefined(itemRecord.index),
+          sub_agent_id: stringOrUndefined(itemRecord.sub_agent_id),
+          sub_agent_name: stringOrUndefined(itemRecord.sub_agent_name),
+          run_id: stringOrUndefined(itemRecord.run_id),
+          full_output_ref: stringOrUndefined(itemRecord.full_output_ref),
+          continuation,
+        });
+      }
     }
   }
-  return undefined;
+  return uniqueSubAgentContinuationRefs(refs);
+}
+
+function uniqueSubAgentContinuationRefs(refs: readonly SubAgentContinuationRef[]): readonly SubAgentContinuationRef[] {
+  const seen = new Set<string>();
+  const uniqueRefs: SubAgentContinuationRef[] = [];
+  for (const ref of refs) {
+    const key = JSON.stringify(ref.continuation);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueRefs.push(ref);
+    }
+  }
+  return uniqueRefs;
 }
 
 function projectSubAgentToolAgentContent(
@@ -1954,6 +2004,7 @@ function projectSubAgentToolAgentContent(
 ): unknown {
   const action = stringOrUndefined(record.action) ?? request.toolName;
   if (Array.isArray(result.results)) {
+    const continuationRefs = subAgentToolContinuationRefs(record);
     return {
       action,
       status: stringOrUndefined(record.status),
@@ -1962,6 +2013,7 @@ function projectSubAgentToolAgentContent(
         results: result.results.map(projectSubAgentResultItem),
         stats: optionalRecord(result.stats),
       },
+      continuations: continuationRefs.length === 0 ? undefined : continuationRefs,
       truncated,
     };
   }

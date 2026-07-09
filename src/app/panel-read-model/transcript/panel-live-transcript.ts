@@ -1,10 +1,10 @@
-import type { ModelUsage } from "../domain/intelligence/index.js";
-import type { LiveModelTurnBuffer, LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
+import type { ModelUsage } from "../../../domain/intelligence/index.js";
+import type { LiveModelTurnBuffer, LiveRunBuffer } from "../run/panel-run-live-buffer.js";
 import {
   comparableTranscriptText,
   mergeTranscriptRefs,
   moreCompleteTranscriptText,
-} from "./panel-read-model/transcript/panel-transcript-node-identity.js";
+} from "./panel-transcript-node-identity.js";
 
 export type LiveTranscriptObservationRef = {
   readonly kind: string;

@@ -6,8 +6,8 @@ import {
   projectStableAssistantTurnDisplays,
   type StableAssistantTurnDisplay,
 } from "../panel-read-model/assistant/panel-assistant-turn-display.js";
-import type { LiveRunBuffer } from "../panel-ui-live-run-buffer.js";
-import type { WorklineConversationTurn, WorklineProjectedTurn } from "../panel-ui-chat-workline.js";
+import type { LiveRunBuffer } from "../panel-read-model/run/panel-run-live-buffer.js";
+import type { WorklineConversationTurn, WorklineProjectedTurn } from "../panel-read-model/assistant/panel-assistant-workline.js";
 import {
   assistantShellSnapshot,
   latestAssistantTurnIdForTurns,
@@ -22,7 +22,7 @@ import {
   stableTranscriptNodesByRunIdMap,
   type MaterializedConversationTranscript,
 } from "../panel-read-model/transcript/panel-transcript-materializer.js";
-import type { LiveAnswerTone } from "../panel-ui-live-transcript.js";
+import type { LiveAnswerTone } from "../panel-read-model/transcript/panel-live-transcript.js";
 import {
   projectStableAssistantWorkflowDisplay,
   type AssistantWorkflowDisplay,

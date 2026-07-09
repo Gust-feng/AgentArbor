@@ -13,7 +13,7 @@ import {
   transcriptNodesByRunIdForConversation,
   updateConversationTranscriptNodes,
   type TranscriptNodesByConversationId,
-} from "../../panel-ui-transcript-cache";
+} from "../../panel-read-model/transcript/panel-transcript-cache";
 
 export type TranscriptNodesCache = Readonly<Record<string, readonly TranscriptNode[]>>;
 export type TranscriptNodesStoreSnapshot = {

@@ -3,7 +3,7 @@ import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import { createRunReadModelPatch } from "./app-run-projection";
 import { shouldKeepRefreshing } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
-import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
+import { emptyLiveRun } from "../../panel-read-model/run/panel-run-live-buffer";
 import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
 import type { LiveRunSubscription } from "./app-live-run-updates";
 import type { BasicAgentRun } from "./contracts/run";

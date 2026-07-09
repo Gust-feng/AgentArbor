@@ -1,4 +1,4 @@
-import type { LiveRunBuffer } from "../../panel-ui-live-run-buffer";
+import type { LiveRunBuffer } from "../../panel-read-model/run/panel-run-live-buffer";
 import type { AgentMode } from "./app-config-projection";
 import type { ConfigResponse } from "./contracts/config";
 import type { Conversation, ConversationSummary } from "./contracts/conversation";

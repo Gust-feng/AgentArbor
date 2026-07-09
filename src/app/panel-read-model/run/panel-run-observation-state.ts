@@ -2,14 +2,14 @@ import {
   appendLiveRunEvent,
   appendLiveRunEvents,
   type LiveRunBuffer,
-} from "./panel-ui-live-run-buffer.js";
+} from "./panel-run-live-buffer.js";
 import {
   createRunReadModelPatch,
   detailForRun,
   type RunProjectionDetail,
   type RunProjectionNode,
   type RunProjectionWorkView,
-} from "./panel-ui-run-projection.js";
+} from "./panel-run-projection.js";
 
 export type RunObservationEvent = {
   readonly id: string;

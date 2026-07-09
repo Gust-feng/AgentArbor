@@ -2,7 +2,7 @@ import {
   mergeReplacingTranscriptNodeLists,
   mergeTranscriptNodeLists,
   type TranscriptNodeIdentityLike,
-} from "./panel-read-model/transcript/panel-transcript-node-identity.js";
+} from "./panel-transcript-node-identity.js";
 
 export type TranscriptNodeCacheItem = {
   readonly nodeId: string;

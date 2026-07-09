@@ -1,8 +1,8 @@
-import type { LiveRunBuffer } from "../../panel-ui-live-run-buffer.js";
+import type { LiveRunBuffer } from "../run/panel-run-live-buffer.js";
 import type {
   WorklineConversationTurn,
   WorklineProjectedTurn,
-} from "../../panel-ui-chat-workline.js";
+} from "./panel-assistant-workline.js";
 import type { ConfirmationIdentity } from "../transcript/panel-transcript-confirmation-projection.js";
 import {
   type AssistantDeliverableLike,
@@ -15,7 +15,7 @@ import {
   type AssistantTranscriptRunLike,
   type AssistantTranscriptTurnProjection,
 } from "../transcript/panel-transcript-turn-projection.js";
-import { shouldCollapseTimelineAfterTurn } from "../../panel-ui-timeline-collapse.js";
+import { shouldCollapseTimelineAfterTurn } from "./panel-assistant-timeline-collapse.js";
 import { transcriptNodesForRunId } from "../transcript/panel-transcript-materializer.js";
 import {
   projectStableAssistantWorkflowDisplay,

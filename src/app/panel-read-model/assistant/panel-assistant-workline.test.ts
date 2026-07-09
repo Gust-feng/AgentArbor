@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   projectChatWorkline,
   type WorklineConversationTurn,
-} from "./panel-ui-chat-workline.js";
+} from "./panel-assistant-workline.js";
 
 test("chat workline claims an unbound assistant shell for the active run", () => {
   const projection = projectChatWorkline({

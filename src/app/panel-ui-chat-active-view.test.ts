@@ -5,7 +5,7 @@ import type {
   ChatActiveRun,
   ChatActiveTranscriptNode,
 } from "./panel-ui-chat-active-projection.js";
-import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
+import type { LiveRunBuffer } from "./panel-read-model/run/panel-run-live-buffer.js";
 import { textStreamAssemblyFromText } from "./readable-text-fragments.js";
 
 test("chat active view filters transcript nodes before building the workline", () => {

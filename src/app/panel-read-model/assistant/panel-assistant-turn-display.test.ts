@@ -7,7 +7,7 @@ import {
   latestAssistantTurnIdForTurns,
   precomputeAssistantTurnSlotKeys,
 } from "../transcript/panel-transcript-turn-projection.js";
-import type { WorklineProjectedTurn } from "../../panel-ui-chat-workline.js";
+import type { WorklineProjectedTurn } from "./panel-assistant-workline.js";
 
 test("stable assistant workflow display does not append late pre-body process after rendered fallback text", () => {
   const previous = projectStableAssistantWorkflowDisplay({

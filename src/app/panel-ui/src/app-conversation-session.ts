@@ -4,7 +4,7 @@ import { transcriptNodesFrom } from "./app-run-projection";
 import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import { liveRunForObservedReplay } from "../../panel-ui-submit-flow";
-import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-ui-transcript-cache";
+import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
 import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
 import type { Conversation } from "./contracts/conversation";
 import type { TranscriptNode } from "./contracts/run";

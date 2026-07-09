@@ -6,7 +6,7 @@ import {
   type ChatActiveStatusNotice,
   type ChatActiveTranscriptNode,
 } from "./panel-ui-chat-active-projection.js";
-import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
+import type { LiveRunBuffer } from "./panel-read-model/run/panel-run-live-buffer.js";
 import { firstNonEmptyText } from "./panel-read-model/assistant/panel-assistant-output.js";
 import {
   visibleDeliverable,

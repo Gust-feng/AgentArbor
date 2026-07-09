@@ -4,7 +4,7 @@ import {
   appendLiveRunEvent,
   appendLiveRunEvents,
   emptyLiveRun,
-} from "./panel-ui-live-run-buffer.js";
+} from "./panel-run-live-buffer.js";
 
 type TestRunEvent = Parameters<typeof appendLiveRunEvent>[2];
 

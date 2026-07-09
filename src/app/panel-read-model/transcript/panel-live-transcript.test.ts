@@ -5,9 +5,9 @@ import {
   projectLiveRunTranscript,
   withLiveTranscriptNodes,
   type LiveTranscriptNode,
-} from "./panel-ui-live-transcript.js";
-import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
-import { textStreamAssemblyFromText } from "./readable-text-fragments.js";
+} from "./panel-live-transcript.js";
+import type { LiveRunBuffer } from "../run/panel-run-live-buffer.js";
+import { textStreamAssemblyFromText } from "../../readable-text-fragments.js";
 
 test("withLiveTranscriptNodes replaces existing reasoning node instead of appending duplicate", () => {
   const existing = node({

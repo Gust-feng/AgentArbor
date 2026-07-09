@@ -3,9 +3,9 @@ import {
   type LiveAnswerProjection,
   type LiveTranscriptNode,
   type LiveRunTranscriptProjection,
-} from "./panel-ui-live-transcript.js";
-import { projectChatWorkline, type ChatWorklineProjection, type WorklineTaskStatus } from "./panel-ui-chat-workline.js";
-import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
+} from "./panel-read-model/transcript/panel-live-transcript.js";
+import { projectChatWorkline, type ChatWorklineProjection, type WorklineTaskStatus } from "./panel-read-model/assistant/panel-assistant-workline.js";
+import type { LiveRunBuffer } from "./panel-read-model/run/panel-run-live-buffer.js";
 import { firstNonEmptyText, hasNonEmptyText } from "./panel-read-model/assistant/panel-assistant-output.js";
 import {
   isLowValueUserDecisionNode,

@@ -5,7 +5,7 @@ import {
   projectConversationWorkflowDisplay,
   projectStandaloneAssistantWorkflowDisplay,
 } from "./panel-conversation-workflow-display.js";
-import type { WorklineProjectedTurn } from "../panel-ui-chat-workline.js";
+import type { WorklineProjectedTurn } from "../panel-read-model/assistant/panel-assistant-workline.js";
 
 test("conversation workflow display keeps rendered body stable when earlier process arrives late", () => {
   const initialState = createConversationWorkflowDisplayState<

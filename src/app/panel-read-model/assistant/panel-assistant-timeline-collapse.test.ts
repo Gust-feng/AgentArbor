@@ -7,7 +7,7 @@ import {
   shouldCollapseStandaloneTimeline,
   shouldCollapseTimelineAfterTurn,
   timelineCollapseDecision,
-} from "./panel-ui-timeline-collapse.js";
+} from "./panel-assistant-timeline-collapse.js";
 
 test("historical settled turn stays collapsed while another run is active", () => {
   assert.equal(shouldCollapseTimelineAfterTurn({
@@ -37,7 +37,7 @@ test("failed blocked and waiting approval activity stay expanded during auto col
   assert.equal(shouldAutoCollapseTimelineSegment({
     collapseTimeline: true,
     defaultCollapsed: false,
-    items: [{ phase: "blocked", copy: { label: "编辑", detail: "src/app/panel-ui-timeline-collapse.ts" } }],
+    items: [{ phase: "blocked", copy: { label: "编辑", detail: "src/app/panel-read-model/assistant/panel-assistant-timeline-collapse.ts" } }],
     hasCurrentConfirmation: false,
     hasBodySegments: false,
   }), false);
@@ -148,7 +148,7 @@ test("segment lifecycle keeps open and attention timelines expanded", () => {
 
 test("collapsed timeline summary keeps action and status anchors", () => {
   const summary = collapsedTimelineSummary({
-    items: [{ phase: "completed", copy: { label: "编辑", detail: "src/app/panel-ui-timeline-collapse.ts" } }],
+    items: [{ phase: "completed", copy: { label: "编辑", detail: "src/app/panel-read-model/assistant/panel-assistant-timeline-collapse.ts" } }],
     hasCurrentConfirmation: false,
   });
 

@@ -58,7 +58,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-tool-format.ts")),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-node-projection.ts")),
     readPanelUiSource(path.join("components", "chat-session-projection.ts")),
-    readAppSource("panel-ui-chat-workline.ts"),
+    readAppSource(path.join("panel-read-model", "assistant", "panel-assistant-workline.ts")),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-turn-projection.ts")),
     readAppSource("panel-ui-chat-active-projection.ts"),
     readAppSource("panel-ui-chat-active-view.ts"),

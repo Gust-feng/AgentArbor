@@ -1,4 +1,4 @@
-import { mergeTranscriptNodesByRunId } from "./panel-ui-transcript-cache.js";
+import { mergeTranscriptNodesByRunId } from "../transcript/panel-transcript-cache.js";
 
 export type RunProjectionNode = {
   readonly nodeId: string;

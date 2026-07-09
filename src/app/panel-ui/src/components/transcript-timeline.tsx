@@ -32,7 +32,7 @@ import type {
   ActivityLineDelta,
 } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import { resolveActivityToolKind } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
-import { collapsedTimelineSummary } from "../../../panel-ui-timeline-collapse";
+import { collapsedTimelineSummary } from "../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
 import { SubAgentInlineCard } from "./sub-agent-run-viewer";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";

@@ -10,7 +10,7 @@ import {
 } from "./panel-assistant-message-structure.js";
 import type { ConfirmationIdentity } from "../transcript/panel-transcript-confirmation-projection.js";
 import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
-import type { LiveAnswerTone } from "../../panel-ui-live-transcript.js";
+import type { LiveAnswerTone } from "../transcript/panel-live-transcript.js";
 
 export type { AssistantMessageSegment, AssistantMessageStructure };
 

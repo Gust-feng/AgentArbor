@@ -11,7 +11,7 @@ import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import {
   createRunReadModelPatch,
 } from "./app-run-projection";
-import { runIdsForConversation } from "../../panel-ui-transcript-cache";
+import { runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
 import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
 import { shouldKeepRefreshing, stopPolling, stopStream } from "./app-runtime-controls";
 import { parseModelOptionId } from "./model-options";
@@ -28,7 +28,7 @@ import {
   type StartedConversationRun,
 } from "../../panel-ui-submit-flow";
 import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
-import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
+import { emptyLiveRun } from "../../panel-read-model/run/panel-run-live-buffer";
 import {
   safeConversation,
 } from "./runtime";

@@ -6,7 +6,7 @@ import {
   transcriptNodesByRunIdForConversation,
   transcriptNodesForConversation,
   updateConversationTranscriptNodes,
-} from "./panel-ui-transcript-cache.js";
+} from "./panel-transcript-cache.js";
 
 type TestNode = {
   readonly nodeId: string;

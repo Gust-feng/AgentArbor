@@ -4,7 +4,7 @@ import {
   projectConversationDisplayList,
 } from "./panel-conversation-display-list.js";
 import { createConversationWorkflowDisplayState } from "./panel-conversation-workflow-display.js";
-import type { WorklineProjectedTurn } from "../panel-ui-chat-workline.js";
+import type { WorklineProjectedTurn } from "../panel-read-model/assistant/panel-assistant-workline.js";
 
 test("conversation display list appends standalone assistant after transcript items", () => {
   const turns = [

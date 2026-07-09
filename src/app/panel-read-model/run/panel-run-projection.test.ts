@@ -4,7 +4,7 @@ import {
   createRunReadModelPatch,
   type RunProjectionNode,
   type RunProjectionWorkView,
-} from "./panel-ui-run-projection.js";
+} from "./panel-run-projection.js";
 
 test("createRunReadModelPatch merges the targeted run transcript into cache", () => {
   const incoming = workView("run-2", [node("run-2:thinking", "run-2", 1, "新思考")]);

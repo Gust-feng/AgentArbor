@@ -6,7 +6,7 @@ import {
   type ChatActiveConversationTurn,
   type ChatActiveTranscriptNode,
 } from "./panel-ui-chat-active-projection.js";
-import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
+import type { LiveRunBuffer } from "./panel-read-model/run/panel-run-live-buffer.js";
 import { textStreamAssemblyFromText } from "./readable-text-fragments.js";
 
 test("active chat projection claims the optimistic assistant shell for live run material", () => {

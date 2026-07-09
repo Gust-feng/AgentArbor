@@ -16,7 +16,7 @@ import type {
   SubAgentRunView,
   TranscriptNode,
 } from "../contracts/run";
-import type { LiveAnswerTone } from "../../../panel-ui-live-transcript";
+import type { LiveAnswerTone } from "../../../panel-read-model/transcript/panel-live-transcript";
 import { stabilizeStreamingMarkdown } from "../../../panel-ui-streaming";
 import type { AssistantWorkflowDisplay } from "../../../panel-read-model/assistant/panel-assistant-workflow-display";
 import type { ConversationDisplayItem } from "../../../panel-conversation/panel-conversation-display-list";

@@ -8,7 +8,7 @@ import type {
   PendingConfirmation,
   TranscriptNode,
 } from "../contracts/run";
-import type { LiveRunBuffer } from "../../../panel-ui-live-run-buffer";
+import type { LiveRunBuffer } from "../../../panel-read-model/run/panel-run-live-buffer";
 import { RichText } from "./rich-text";
 import { ChatInputBar, type ChatInputProps } from "./chat-empty";
 import { projectChatActiveView, type ChatStatusNotice } from "../../../panel-ui-chat-active-view";

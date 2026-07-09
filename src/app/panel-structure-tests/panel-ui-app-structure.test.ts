@@ -1320,7 +1320,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(workspaceSettings.includes("这是助手可使用的本地上下文边界"), false);
   assert.equal(app.includes('from "../../panel-ui-transcript-cache"'), false);
   assert.equal(appRunController.includes('from "../../panel-ui-transcript-cache"'), false);
-  assert.equal(appConversationSession.includes('from "../../panel-ui-transcript-cache"'), true);
+  assert.equal(appConversationSession.includes('from "../../panel-ui-transcript-cache"'), false);
+  assert.equal(appConversationSession.includes('from "../../panel-read-model/transcript/panel-transcript-cache"'), true);
   assert.equal(app.includes("shouldShowProviderIcon"), false);
   assert.equal(sidebar.includes('export type Screen = "chat-empty" | "chat-active"'), true);
   assert.equal(sidebar.includes("NAV_ITEMS"), false);

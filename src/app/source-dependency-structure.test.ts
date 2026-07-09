@@ -321,9 +321,19 @@ test("panel server integration tests stay under panel-server ownership", () => {
 test("panel transcript read-model stays under panel-read-model ownership", () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const transcriptRoot = path.join(appRoot, "panel-read-model", "transcript");
+  const legacyTopLevelTranscriptFiles = [
+    "panel-ui-live-transcript.test.ts",
+    "panel-ui-live-transcript.ts",
+    "panel-ui-transcript-cache.test.ts",
+    "panel-ui-transcript-cache.ts",
+  ];
   const transcriptFiles = [
+    "panel-live-transcript.test.ts",
+    "panel-live-transcript.ts",
     "panel-transcript-activity-copy.test.ts",
     "panel-transcript-activity-copy.ts",
+    "panel-transcript-cache.test.ts",
+    "panel-transcript-cache.ts",
     "panel-transcript-confirmation-projection.ts",
     "panel-transcript-materializer.test.ts",
     "panel-transcript-materializer.ts",
@@ -347,11 +357,20 @@ test("panel transcript read-model stays under panel-read-model ownership", () =>
       `${fileName} should live in panel-read-model/transcript`
     );
   }
+  for (const fileName of legacyTopLevelTranscriptFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+  }
 });
 
 test("panel assistant read-model stays under panel-read-model ownership", () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const assistantRoot = path.join(appRoot, "panel-read-model", "assistant");
+  const legacyTopLevelAssistantFiles = [
+    "panel-ui-chat-workline.test.ts",
+    "panel-ui-chat-workline.ts",
+    "panel-ui-timeline-collapse.test.ts",
+    "panel-ui-timeline-collapse.ts",
+  ];
   const assistantFiles = [
     "panel-assistant-activity-identity.test.ts",
     "panel-assistant-activity-identity.ts",
@@ -373,12 +392,16 @@ test("panel assistant read-model stays under panel-read-model ownership", () => 
     "panel-assistant-segment-identity.ts",
     "panel-assistant-segment-policy.test.ts",
     "panel-assistant-segment-policy.ts",
+    "panel-assistant-timeline-collapse.test.ts",
+    "panel-assistant-timeline-collapse.ts",
     "panel-assistant-turn-display.test.ts",
     "panel-assistant-turn-display.ts",
     "panel-assistant-visible-text.test.ts",
     "panel-assistant-visible-text.ts",
     "panel-assistant-workflow-display.test.ts",
     "panel-assistant-workflow-display.ts",
+    "panel-assistant-workline.test.ts",
+    "panel-assistant-workline.ts",
   ];
 
   for (const fileName of assistantFiles) {
@@ -389,14 +412,29 @@ test("panel assistant read-model stays under panel-read-model ownership", () => 
       `${fileName} should live in panel-read-model/assistant`
     );
   }
+  for (const fileName of legacyTopLevelAssistantFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+  }
 });
 
 test("panel run read-model stays under panel-read-model ownership", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const runRoot = path.join(appRoot, "panel-read-model", "run");
   const readModelFacade = await readSource(path.join(appRoot, "panel-run-read-model.ts"));
+  const legacyTopLevelRunFiles = [
+    "panel-ui-live-run-buffer.test.ts",
+    "panel-ui-live-run-buffer.ts",
+    "panel-ui-run-projection.test.ts",
+    "panel-ui-run-projection.ts",
+  ];
   const runReadModelFiles = [
     "index.ts",
+    "panel-run-live-buffer.test.ts",
+    "panel-run-live-buffer.ts",
+    "panel-run-observation-state.test.ts",
+    "panel-run-observation-state.ts",
+    "panel-run-projection.test.ts",
+    "panel-run-projection.ts",
     "panel-run-read-model.test.ts",
     "panel-run-status.ts",
     "panel-run-steps.ts",
@@ -421,6 +459,9 @@ test("panel run read-model stays under panel-read-model ownership", async () => 
       true,
       `${fileName} should live in panel-read-model/run`
     );
+  }
+  for (const fileName of legacyTopLevelRunFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
   }
 });
 

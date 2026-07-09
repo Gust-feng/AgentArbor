@@ -8,14 +8,14 @@ import { stabilizeAssistantMessageView } from "./panel-assistant-message-stabili
 import {
   timelineCollapseDecision,
   type TimelineCollapseReason,
-} from "../../panel-ui-timeline-collapse.js";
+} from "./panel-assistant-timeline-collapse.js";
 import type { ConfirmationIdentity } from "../transcript/panel-transcript-confirmation-projection.js";
 import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 import type {
   AssistantDeliverableLike,
   AssistantSubAgentRunLike,
 } from "./panel-assistant-message-output.js";
-import type { LiveAnswerTone } from "../../panel-ui-live-transcript.js";
+import type { LiveAnswerTone } from "../transcript/panel-live-transcript.js";
 
 export type AssistantWorkflowDisplaySegment<
   TNode extends ProjectableTranscriptNode,

@@ -18,7 +18,7 @@ import {
   timelineVisibleNodes,
 } from "../transcript/panel-transcript-node-projection.js";
 import { normalizeComparableText } from "./panel-assistant-visible-text.js";
-import type { LiveAnswerTone } from "../../panel-ui-live-transcript.js";
+import type { LiveAnswerTone } from "../transcript/panel-live-transcript.js";
 
 export type AssistantMessageSegmentLifecycle = "open" | "settled" | "attention";
 

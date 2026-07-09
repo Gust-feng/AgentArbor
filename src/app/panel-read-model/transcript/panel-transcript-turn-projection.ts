@@ -1,9 +1,9 @@
 import {
   projectLiveRunTranscript,
   type LiveRunTranscriptProjection,
-} from "../../panel-ui-live-transcript.js";
-import type { LiveRunBuffer } from "../../panel-ui-live-run-buffer.js";
-import type { WorklineConversationTurn, WorklineProjectedTurn } from "../../panel-ui-chat-workline.js";
+} from "./panel-live-transcript.js";
+import type { LiveRunBuffer } from "../run/panel-run-live-buffer.js";
+import type { WorklineConversationTurn, WorklineProjectedTurn } from "../assistant/panel-assistant-workline.js";
 import {
   answerForWorkViewTurn,
   deliverableForWorkViewTurn,

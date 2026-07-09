@@ -1,7 +1,7 @@
 import { mergeTranscriptNodeLists } from "./panel-transcript-node-identity.js";
 import {
   type TranscriptNodeCacheItem,
-} from "../../panel-ui-transcript-cache.js";
+} from "./panel-transcript-cache.js";
 
 export type MaterializedConversationTranscript<T extends TranscriptNodeCacheItem> = {
   readonly conversationId?: string;

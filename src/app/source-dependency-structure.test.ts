@@ -273,6 +273,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["panel-agent-run-tree-view.ts", 'export * from "./panel-read-model/run/panel-agent-run-tree-view.js";'],
     ["panel-work-note-contracts.ts", 'export * from "./panel-read-model/run/panel-work-note-contracts.js";'],
     ["panel-work-notes.ts", 'export * from "./panel-read-model/run/panel-work-notes.js";'],
+    ["panel-runtime-summary.ts", 'export * from "./panel-read-model/run/panel-runtime-summary.js";'],
     ["panel-usage-statistics.ts", 'export * from "./panel-server/panel-usage-statistics.js";'],
     ["panel-context-window-usage.ts", 'export * from "./panel-ui/src/context-window-usage.js";'],
     ["panel-model-progress-copy.ts", 'export * from "./panel-read-model/panel-model-progress-copy.js";'],
@@ -301,6 +302,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-model-input-files.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-stream-tool-projection.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-work-notes.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-runtime-summary.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-usage-statistics.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-context-window-usage.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-model-progress-copy.test.ts")), false);
@@ -319,6 +321,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "desktop-agent-model-input-files.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-stream-tool-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-work-notes.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-runtime-summary.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-server", "panel-usage-statistics.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "tests", "context-window-usage.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "panel-model-progress-copy.test.ts")), true);
@@ -716,6 +719,7 @@ test("panel run read-model stays under panel-read-model ownership", async () => 
   ];
   const runFacadeFiles = new Set([
     "panel-agent-run-tree-view.ts",
+    "panel-runtime-summary.ts",
     "panel-stream-tool-projection.ts",
     "panel-work-note-contracts.ts",
     "panel-work-notes.ts",
@@ -736,6 +740,8 @@ test("panel run read-model stays under panel-read-model ownership", async () => 
     "panel-run-stream-copy.test.ts",
     "panel-run-stream-copy.ts",
     "panel-run-stream-events.ts",
+    "panel-runtime-summary.test.ts",
+    "panel-runtime-summary.ts",
     "panel-stream-tool-projection.test.ts",
     "panel-stream-tool-projection.ts",
     "panel-run-tracking-contracts.ts",

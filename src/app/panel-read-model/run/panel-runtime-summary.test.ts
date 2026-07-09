@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { InMemoryProcessRegistry } from "./runtime-guard/index.js";
+import { InMemoryProcessRegistry } from "../../runtime-guard/index.js";
 import { summarizePanelRuntimeVisibility } from "./panel-runtime-summary.js";
 
 test("panel runtime visibility summary projects process registry facts without recovery advice", async () => {

@@ -25,7 +25,11 @@ import {
   type PanelRunMode,
 } from "../panel-run-jobs.js";
 import type { PanelRunSummaryPayload } from "../panel-run-summary.js";
-import { summarizePanelRuntimeVisibility, type PanelRuntimeSummaryReadModel, type PanelRuntimeSummaryRegistry } from "../panel-runtime-summary.js";
+import {
+  summarizePanelRuntimeVisibility,
+  type PanelRuntimeSummaryReadModel,
+  type PanelRuntimeSummaryRegistry,
+} from "../panel-read-model/run/panel-runtime-summary.js";
 import {
   persistentPanelRunStreamEvents,
   syncPanelRunStreamEventsForJob,

@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { isDeepConversationActive } from "../../../panel-ui-deep-sidebar-selection";
+import { isDeepConversationActive } from "../deep-sidebar-selection";
 import {
   isConversationWaitingForUser,
 } from "../conversation-state";

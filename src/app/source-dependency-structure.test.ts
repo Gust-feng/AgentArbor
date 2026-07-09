@@ -280,6 +280,7 @@ test("panel structure tests stay in the panel structure test module", () => {
     "panel-ui-runtime-structure.test.ts",
     "panel-ui-settings-structure.test.ts",
     "panel-ui-startup-intro-structure.test.ts",
+    "panel-ui-structure.test.ts",
     "panel-ui-streaming-cursor.test.ts",
     "panel-ui-submit-locking-structure.test.ts",
   ];
@@ -300,6 +301,9 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
     "app-task-submit-flow.ts",
     "chat-active-projection.ts",
     "chat-active-view.ts",
+    "deep-sidebar-selection.ts",
+    "deep-transcript.ts",
+    "run-capability-state.ts",
     "streaming-text.ts",
     "transcript-window.ts",
   ];
@@ -307,10 +311,19 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
     "app-task-submit-flow.test.ts",
     "chat-active-projection.test.ts",
     "chat-active-view.test.ts",
+    "deep-sidebar-selection.test.ts",
+    "deep-transcript.test.ts",
+    "run-capability-state.test.ts",
     "streaming-text.test.ts",
     "transcript-window.test.ts",
   ];
   const legacyTopLevelPanelUiFiles = [
+    "panel-ui-deep-sidebar-selection.test.ts",
+    "panel-ui-deep-sidebar-selection.ts",
+    "panel-ui-deep-transcript.test.ts",
+    "panel-ui-deep-transcript.ts",
+    "panel-ui-run-capability-state.test.ts",
+    "panel-ui-run-capability-state.ts",
     "panel-ui-submit-flow.test.ts",
     "panel-ui-submit-flow.ts",
     "panel-ui-chat-active-projection.test.ts",

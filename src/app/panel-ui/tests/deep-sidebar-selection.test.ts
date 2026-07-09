@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isDeepConversationActive } from "./panel-ui-deep-sidebar-selection.js";
+import { isDeepConversationActive } from "../src/deep-sidebar-selection.js";
 
 test("deep sidebar selection does not match missing run ids", () => {
   assert.equal(

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nextRunCapabilityState } from "./panel-ui-run-capability-state.js";
+import { nextRunCapabilityState } from "../src/run-capability-state.js";
 
 test("panel run capability state only reuses facts for the same run", () => {
   const run1Capabilities = capabilityResolution("run-1-resolution");

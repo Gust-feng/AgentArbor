@@ -8,7 +8,7 @@ import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import { stopLiveUpdates } from "./app-runtime-controls";
 import { loadConversationSession, resetConversationSession } from "./app-conversation-session";
 import { submitPanelTask } from "./app-task-submission";
-import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
+import { nextRunCapabilityState } from "./run-capability-state";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
 import type { ConversationSummary } from "./contracts/conversation";

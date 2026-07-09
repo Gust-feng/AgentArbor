@@ -1,4 +1,4 @@
-import { splitConversationTurnsAroundRun } from "../../panel-ui-deep-transcript.js";
+import { splitConversationTurnsAroundRun } from "./deep-transcript.js";
 import type {
   DeepConversationView,
   DeepIntakeStatus,

@@ -9,7 +9,7 @@ import {
   stateWithObservedRunEvents,
   stateWithObservedRunProjection,
 } from "../../panel-read-model/run/panel-run-observation-state";
-import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
+import { nextRunCapabilityState } from "./run-capability-state";
 import type { AppState } from "./app-state";
 import type {
   BasicAgentRun,

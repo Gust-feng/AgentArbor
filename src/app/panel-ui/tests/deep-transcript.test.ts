@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { splitConversationTurnsAroundRun } from "./panel-ui-deep-transcript.js";
+import { splitConversationTurnsAroundRun } from "../src/deep-transcript.js";
 
 test("deep transcript split keeps follow-up intake turns after the terminal run", () => {
   const turns = [

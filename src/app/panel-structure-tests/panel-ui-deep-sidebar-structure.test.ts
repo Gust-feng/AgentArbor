@@ -1,11 +1,11 @@
 import path from "node:path";
 import test from "node:test";
-import { readAppSource, readPanelUiSource } from "./panel-structure-test-utils.js";
+import { readPanelUiSource } from "./panel-structure-test-utils.js";
 
 test("deep sidebar uses explicit selection guards for conversation and run ids", async () => {
   const [sidebarSource, selectionSource] = await Promise.all([
     readPanelUiSource(path.join("components", "sidebar.tsx")),
-    readAppSource("panel-ui-deep-sidebar-selection.ts"),
+    readPanelUiSource("deep-sidebar-selection.ts"),
   ]);
 
   includes(sidebarSource, "active={isDeepConversationActive(conversation, {");

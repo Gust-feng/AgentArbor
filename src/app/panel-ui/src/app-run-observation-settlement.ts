@@ -1,5 +1,5 @@
 import { appendLiveRunEvents } from "../../panel-read-model/run/panel-run-live-buffer.js";
-import { nextRunCapabilityState } from "../../panel-ui-run-capability-state.js";
+import { nextRunCapabilityState } from "./run-capability-state.js";
 import { loadObservedRunReadModel } from "./app-observed-run-read-model.js";
 import { createRunReadModelPatch } from "./app-run-projection.js";
 import { shouldKeepRefreshing } from "./app-runtime-controls.js";

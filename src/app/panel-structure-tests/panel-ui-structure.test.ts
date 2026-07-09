@@ -6,11 +6,12 @@ test("panel UI structure checks are split by product concern", () => {
     "panel-ui-app-structure.test.ts",
     "panel-ui-chat-structure.test.ts",
     "panel-ui-contract-structure.test.ts",
+    "panel-ui-structure.test.ts",
     "panel-ui-settings-structure.test.ts",
     "panel-ui-runtime-structure.test.ts",
     "panel-ui-startup-intro-structure.test.ts",
   ];
 
-  assert.equal(splitStructureSuites.length, 6);
+  assert.equal(splitStructureSuites.length, 7);
   assert.equal(splitStructureSuites.every((fileName) => fileName.startsWith("panel-ui-")), true);
 });

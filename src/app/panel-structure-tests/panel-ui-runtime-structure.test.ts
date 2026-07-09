@@ -117,7 +117,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appTaskSubmission.includes("runMode"), false);
   assert.equal(appTaskSubmission.includes("/api/desktop/runs"), false);
   assert.equal(appTaskSubmission.includes("/api/underground"), false);
-  assert.equal(appTaskSubmission.includes('from "../../panel-ui-run-capability-state"'), true);
+  assert.equal(appTaskSubmission.includes('from "./run-capability-state"'), true);
   assert.equal(appTaskSubmission.match(/nextRunCapabilityState\(/g)?.length, 4);
   assert.equal(appTaskSubmission.includes("likelyQueuesBehindActiveRun && previous.capabilityResolutionRunId === previous.run?.runId"), false);
   assert.equal(appTaskSubmission.includes("observedRun?.runId === previous.capabilityResolutionRunId ? previous.capabilityResolution : undefined"), false);
@@ -205,14 +205,14 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appRunController.includes("reusePreviousWorkView: false"), true);
   assert.equal(appRunController.includes("const observedRun = observed.run ?? response.run"), true);
   assert.equal(appRunController.includes("capabilityResolution: observed.capabilityResolution ??"), false);
-  assert.equal(appRunController.includes('from "../../panel-ui-run-capability-state"'), true);
+  assert.equal(appRunController.includes('from "./run-capability-state"'), true);
   assert.equal(appRunController.includes("nextRunCapabilityState(previous, {"), true);
   assert.equal(appRunController.includes("capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : currentRunId"), false);
   assert.equal(appRunController.includes("run: response.run"), false);
   assert.equal(appConfirmationDecisions.includes("const observedRun = observed.run ?? response.run"), true);
   assert.equal(appConfirmationDecisions.includes("shouldKeepRefreshing(observedRun.status)"), true);
   assert.equal(appConfirmationDecisions.includes("capabilityResolution: observed.capabilityResolution ??"), false);
-  assert.equal(appConfirmationDecisions.includes('from "../../panel-ui-run-capability-state"'), true);
+  assert.equal(appConfirmationDecisions.includes('from "./run-capability-state"'), true);
   assert.equal(appConfirmationDecisions.match(/nextRunCapabilityState\(previous, \{/g)?.length, 2);
   assert.equal(appConfirmationDecisions.includes("capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : currentRunId"), false);
   assert.equal(appConfirmationDecisions.includes("capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : input.runId"), false);
@@ -288,7 +288,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appObservedRunReadModel.includes("capabilityResolution: currentRun.capabilityResolution"), true);
   assert.equal(appObservedRunReadModel.includes("capabilityResolution: view?.capabilityResolution"), true);
   assert.equal(appRunObservationState.includes("function nextCapabilityResolution"), true);
-  assert.equal(appRunObservationState.includes('from "../../panel-ui-run-capability-state"'), true);
+  assert.equal(appRunObservationState.includes('from "./run-capability-state"'), true);
   assert.equal(appRunObservationState.includes("return nextRunCapabilityState(previous, { runId, capabilityResolution: incoming })"), true);
   assert.equal(appRunObservationState.includes("previous.capabilityResolutionRunId === runId"), false);
   assert.equal(appRunProjection.includes("app.capabilityResolutionRunId === runId ? app.capabilityResolution : undefined"), true);

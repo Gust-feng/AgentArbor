@@ -9,7 +9,7 @@ import {
   deliverableForWorkViewTurn,
   type AssistantDeliverableLike,
   type AssistantWorkViewOutput,
-} from "../../panel-assistant-message-output.js";
+} from "../assistant/panel-assistant-message-output.js";
 import {
   pendingForTurn,
   type ConfirmationIdentity,

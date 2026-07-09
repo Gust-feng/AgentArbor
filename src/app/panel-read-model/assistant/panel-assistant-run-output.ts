@@ -1,4 +1,4 @@
-import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
+import { friendlyUserFacingFailureText } from "../../visible-text-safety.js";
 
 export type AssistantRunLike = {
   readonly status: string;

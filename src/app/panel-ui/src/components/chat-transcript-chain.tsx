@@ -18,12 +18,12 @@ import type {
 } from "../contracts/run";
 import type { LiveAnswerTone } from "../../../panel-ui-live-transcript";
 import { stabilizeStreamingMarkdown } from "../../../panel-ui-streaming";
-import type { AssistantWorkflowDisplay } from "../../../panel-assistant-workflow-display";
+import type { AssistantWorkflowDisplay } from "../../../panel-read-model/assistant/panel-assistant-workflow-display";
 import type { ConversationDisplayItem } from "../../../panel-conversation-display-list";
 import { LiveStreamBox } from "./live-stream-text";
 import { RichText } from "./rich-text";
 import type { ChatModelOption } from "./chat-empty";
-import type { AssistantFailureParts } from "../../../panel-assistant-failure";
+import type { AssistantFailureParts } from "../../../panel-read-model/assistant/panel-assistant-failure";
 import {
   assistantModelForTurn,
   selectedComposerModel,

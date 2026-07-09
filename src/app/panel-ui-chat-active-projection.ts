@@ -6,7 +6,7 @@ import {
 } from "./panel-ui-live-transcript.js";
 import { projectChatWorkline, type ChatWorklineProjection, type WorklineTaskStatus } from "./panel-ui-chat-workline.js";
 import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
-import { firstNonEmptyText, hasNonEmptyText } from "./panel-assistant-output.js";
+import { firstNonEmptyText, hasNonEmptyText } from "./panel-read-model/assistant/panel-assistant-output.js";
 import {
   isLowValueUserDecisionNode,
   nodesForRun,

@@ -8,9 +8,9 @@ import {
   type AssistantMessageSegment,
   type AssistantMessageStructure,
 } from "./panel-assistant-message-structure.js";
-import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
-import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
-import type { LiveAnswerTone } from "./panel-ui-live-transcript.js";
+import type { ConfirmationIdentity } from "../transcript/panel-transcript-confirmation-projection.js";
+import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
+import type { LiveAnswerTone } from "../../panel-ui-live-transcript.js";
 
 export type { AssistantMessageSegment, AssistantMessageStructure };
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { projectAssistantMessageStructure } from "./panel-assistant-message-structure.js";
-import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
+import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 
 test("assistant activity segment identity keeps one key as a tool request completes", () => {
   const requested = projectAssistantMessageStructure({

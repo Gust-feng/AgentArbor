@@ -2,7 +2,7 @@ import type {
   AssistantDeliverableLike,
   AssistantSubAgentRunLike,
   AssistantWorkViewOutput,
-} from "./panel-assistant-message-output.js";
+} from "./panel-read-model/assistant/panel-assistant-message-output.js";
 import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import type { WorklineConversationTurn, WorklineProjectedTurn } from "./panel-ui-chat-workline.js";
 import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
@@ -11,14 +11,14 @@ import {
   projectStandaloneAssistantWorkflowDisplay,
   type ConversationWorkflowDisplayState,
 } from "./panel-conversation-workflow-display.js";
-import type { StableAssistantTurnDisplay } from "./panel-assistant-turn-display.js";
+import type { StableAssistantTurnDisplay } from "./panel-read-model/assistant/panel-assistant-turn-display.js";
 import type { AssistantTranscriptNodeLike, AssistantTranscriptRunLike } from "./panel-read-model/transcript/panel-transcript-turn-projection.js";
 import type {
   AssistantWorkflowDisplay,
   AssistantWorkflowDisplayState,
-} from "./panel-assistant-workflow-display.js";
+} from "./panel-read-model/assistant/panel-assistant-workflow-display.js";
 import type { LiveRunTranscriptProjection } from "./panel-ui-live-transcript.js";
-import type { AssistantFailureParts } from "./panel-assistant-failure.js";
+import type { AssistantFailureParts } from "./panel-read-model/assistant/panel-assistant-failure.js";
 
 export type ConversationDisplayItem<
   TTurn extends WorklineConversationTurn,

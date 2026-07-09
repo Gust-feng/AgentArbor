@@ -1,11 +1,11 @@
 import type {
   AssistantDeliverableLike,
   AssistantWorkViewOutput,
-} from "./panel-assistant-message-output.js";
+} from "./panel-read-model/assistant/panel-assistant-message-output.js";
 import {
   projectStableAssistantTurnDisplays,
   type StableAssistantTurnDisplay,
-} from "./panel-assistant-turn-display.js";
+} from "./panel-read-model/assistant/panel-assistant-turn-display.js";
 import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import type { WorklineConversationTurn, WorklineProjectedTurn } from "./panel-ui-chat-workline.js";
 import {
@@ -27,12 +27,12 @@ import {
   projectStableAssistantWorkflowDisplay,
   type AssistantWorkflowDisplay,
   type AssistantWorkflowDisplayState,
-} from "./panel-assistant-workflow-display.js";
+} from "./panel-read-model/assistant/panel-assistant-workflow-display.js";
 import {
   assistantFailureParts,
   transcriptNodesWithoutFailureEcho,
   type AssistantFailureParts,
-} from "./panel-assistant-failure.js";
+} from "./panel-read-model/assistant/panel-assistant-failure.js";
 
 export type ConversationWorkflowDisplayState<
   TTurn extends WorklineConversationTurn,

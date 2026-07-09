@@ -349,6 +349,48 @@ test("panel transcript read-model stays under panel-read-model ownership", () =>
   }
 });
 
+test("panel assistant read-model stays under panel-read-model ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const assistantRoot = path.join(appRoot, "panel-read-model", "assistant");
+  const assistantFiles = [
+    "panel-assistant-activity-identity.test.ts",
+    "panel-assistant-activity-identity.ts",
+    "panel-assistant-failure.test.ts",
+    "panel-assistant-failure.ts",
+    "panel-assistant-message-output.test.ts",
+    "panel-assistant-message-output.ts",
+    "panel-assistant-message-stability.test.ts",
+    "panel-assistant-message-stability.ts",
+    "panel-assistant-message-structure.test.ts",
+    "panel-assistant-message-structure.ts",
+    "panel-assistant-message-view.test.ts",
+    "panel-assistant-message-view.ts",
+    "panel-assistant-output.test.ts",
+    "panel-assistant-output.ts",
+    "panel-assistant-run-output.test.ts",
+    "panel-assistant-run-output.ts",
+    "panel-assistant-segment-identity.test.ts",
+    "panel-assistant-segment-identity.ts",
+    "panel-assistant-segment-policy.test.ts",
+    "panel-assistant-segment-policy.ts",
+    "panel-assistant-turn-display.test.ts",
+    "panel-assistant-turn-display.ts",
+    "panel-assistant-visible-text.test.ts",
+    "panel-assistant-visible-text.ts",
+    "panel-assistant-workflow-display.test.ts",
+    "panel-assistant-workflow-display.ts",
+  ];
+
+  for (const fileName of assistantFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(
+      fileExistsSync(path.join(assistantRoot, fileName)),
+      true,
+      `${fileName} should live in panel-read-model/assistant`
+    );
+  }
+});
+
 test("panel run read-model stays under panel-read-model ownership", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const runRoot = path.join(appRoot, "panel-read-model", "run");

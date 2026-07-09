@@ -6,7 +6,7 @@ import {
   sameActivityItemCopy,
   sameModelNarrativeActivity,
 } from "./panel-assistant-activity-identity.js";
-import type { ActivityItem } from "./panel-read-model/transcript/panel-transcript-activity-copy.js";
+import type { ActivityItem } from "../transcript/panel-transcript-activity-copy.js";
 
 test("assistant activity identity treats thinking and narration as the same model narrative lane", () => {
   assert.equal(sameModelNarrativeActivity(

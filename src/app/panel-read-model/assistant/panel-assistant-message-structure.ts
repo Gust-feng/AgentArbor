@@ -1,9 +1,9 @@
 import {
   projectAgentWorkTimelineView,
   type AgentWorkTimelineView,
-} from "./panel-agent-work-timeline-view.js";
-import type { ActivityItem } from "./panel-read-model/transcript/panel-transcript-activity-copy.js";
-import type { ModelUsage } from "../domain/intelligence/index.js";
+} from "../../panel-agent-work-timeline-view.js";
+import type { ActivityItem } from "../transcript/panel-transcript-activity-copy.js";
+import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import type { AssistantSubAgentRunLike } from "./panel-assistant-message-output.js";
 import {
   isModelNarrativeActivityItem,
@@ -11,14 +11,14 @@ import {
   sameModelNarrativeActivity,
 } from "./panel-assistant-activity-identity.js";
 import { assistantActivitySegmentKey } from "./panel-assistant-segment-identity.js";
-import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
+import type { ConfirmationIdentity } from "../transcript/panel-transcript-confirmation-projection.js";
 import {
   isModelSideOutputNode,
   type ProjectableTranscriptNode,
   timelineVisibleNodes,
-} from "./panel-read-model/transcript/panel-transcript-node-projection.js";
+} from "../transcript/panel-transcript-node-projection.js";
 import { normalizeComparableText } from "./panel-assistant-visible-text.js";
-import type { LiveAnswerTone } from "./panel-ui-live-transcript.js";
+import type { LiveAnswerTone } from "../../panel-ui-live-transcript.js";
 
 export type AssistantMessageSegmentLifecycle = "open" | "settled" | "attention";
 

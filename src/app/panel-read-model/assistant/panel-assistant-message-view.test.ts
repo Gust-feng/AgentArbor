@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   projectAssistantMessageView,
 } from "./panel-assistant-message-view.js";
-import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
+import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 
 test("assistant message view keeps the stream placeholder only before first visible output", () => {
   const view = projectAssistantMessageView({

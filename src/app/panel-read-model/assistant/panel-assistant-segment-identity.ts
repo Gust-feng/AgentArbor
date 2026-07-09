@@ -1,6 +1,6 @@
-import type { ActivityItem } from "./panel-read-model/transcript/panel-transcript-activity-copy.js";
-import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
-import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
+import type { ActivityItem } from "../transcript/panel-transcript-activity-copy.js";
+import type { ConfirmationIdentity } from "../transcript/panel-transcript-confirmation-projection.js";
+import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 
 type SegmentIdentityActivityItem = Pick<ActivityItem, "nodeId" | "key" | "tone" | "copy">;
 

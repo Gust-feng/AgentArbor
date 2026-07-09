@@ -12,15 +12,15 @@ import {
   sameActivityItemCopy,
   sameModelNarrativeActivity,
 } from "./panel-assistant-activity-identity.js";
-import type { ActivityItem } from "./panel-read-model/transcript/panel-transcript-activity-copy.js";
+import type { ActivityItem } from "../transcript/panel-transcript-activity-copy.js";
 import {
   assistantSegmentUpdatePolicy,
   type AssistantSegmentUpdatePolicy,
 } from "./panel-assistant-segment-policy.js";
 import { assistantActivitySegmentKey } from "./panel-assistant-segment-identity.js";
 import type { AssistantMessageView } from "./panel-assistant-message-view.js";
-import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
-import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
+import type { ConfirmationIdentity } from "../transcript/panel-transcript-confirmation-projection.js";
+import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 
 export function stabilizeAssistantMessageView<
   TNode extends ProjectableTranscriptNode,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { projectAssistantMessageStructure } from "./panel-assistant-message-structure.js";
 import type { AssistantSubAgentRunLike } from "./panel-assistant-message-output.js";
-import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
+import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 
 test("assistant message structure keeps leading activity before the first visible body", () => {
   const structure = projectAssistantMessageStructure({

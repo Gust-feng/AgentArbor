@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
 import {
   BUILTIN_MODEL_DEFINITIONS,
   DEFAULT_CONTEXT_WINDOW_TOKENS,

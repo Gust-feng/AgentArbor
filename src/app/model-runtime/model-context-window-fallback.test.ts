@@ -3,8 +3,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../adapters/config/index.js";
-import { ConfigCenter } from "./config-center.js";
+import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../../adapters/config/index.js";
+import { ConfigCenter } from "../config-center/index.js";
 import { persistContextWindowFallback } from "./model-context-window-fallback.js";
 import { resolveModelCapabilities } from "./model-capability-registry.js";
 

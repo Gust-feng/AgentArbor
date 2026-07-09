@@ -265,6 +265,8 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["agent-definition-ref.ts", 'export * from "./agent-definitions/agent-definition-ref.js";'],
     ["agent-definition-registry.ts", 'export * from "./agent-definitions/agent-definition-registry.js";'],
     ["agent-definition-runtime.ts", 'export * from "./agent-definitions/agent-definition-runtime.js";'],
+    ["model-capability-registry.ts", 'export * from "./model-runtime/model-capability-registry.js";'],
+    ["model-context-window-fallback.ts", 'export * from "./model-runtime/model-context-window-fallback.js";'],
     ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
     ["context-attachments.ts", 'export * from "./task-soil/context-attachments.js";'],
     ["desktop-agent-model-input-files.ts", 'export * from "./task-soil/desktop-agent-model-input-files.js";'],
@@ -299,6 +301,8 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-catalog.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-registry.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-runtime.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "model-capability-registry.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "model-context-window-fallback.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil-workspace.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "context-attachments.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-model-input-files.test.ts")), false);
@@ -320,6 +324,8 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-catalog.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-registry.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-runtime.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "model-capability-registry.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "model-context-window-fallback.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "task-soil-workspace.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "context-attachments.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "desktop-agent-model-input-files.test.ts")), true);

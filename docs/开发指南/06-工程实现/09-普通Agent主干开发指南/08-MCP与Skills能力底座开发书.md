@@ -259,7 +259,7 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 文件：
 
 - `src/adapters/mcp/mcp-tool-adapter.ts`
-- `src/app/safe-projection.ts`
+- `src/app/tool-projection/safe-projection.ts`（`src/app/safe-projection.ts` 只保留兼容导出）
 - `src/kernel/tools/tool-result-envelope.ts`
 
 要求：

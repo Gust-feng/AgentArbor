@@ -3,11 +3,11 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { McpCachedToolInfo, ModelCapabilities } from "../domain/config/index.js";
-import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAgentArborConfigDirectory } from "../adapters/config/index.js";
-import { ConfigCenter, ConfigCenterValidationError } from "./config-center.js";
-import { toSanitizedCommandShellConfig } from "./config-center/command-shell-settings.js";
-import { DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT } from "./config-center/desktop-agent-settings.js";
+import type { McpCachedToolInfo, ModelCapabilities } from "../../domain/config/index.js";
+import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
+import { ConfigCenter, ConfigCenterValidationError } from "./index.js";
+import { toSanitizedCommandShellConfig } from "./command-shell-settings.js";
+import { DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT } from "./desktop-agent-settings.js";
 
 test("config settings schema keeps OpenAI request settings split", async () => {
   const [settingsSchema, openAIRequestSettings] = await Promise.all([
@@ -109,14 +109,16 @@ test("command shell settings keep runtime environment detection split", async ()
 });
 
 test("ConfigCenter keeps projections and workspace validation split from orchestration", async () => {
-  const [configCenter, projections, workspaceSettings] = await Promise.all([
+  const [configCenterFacade, configCenter, projections, workspaceSettings] = await Promise.all([
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "index.ts"), "utf8"),
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "projections.ts"), "utf8"),
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "workspace-settings.ts"), "utf8"),
   ]);
 
-  assert.equal(configCenter.includes('from "./config-center/projections.js"'), true);
-  assert.equal(configCenter.includes('from "./config-center/workspace-settings.js"'), true);
+  assert.equal(configCenterFacade.trim(), 'export * from "./config-center/index.js";');
+  assert.equal(configCenter.includes('from "./projections.js"'), true);
+  assert.equal(configCenter.includes('from "./workspace-settings.js"'), true);
   assert.equal(configCenter.includes("private async toSanitizedConfig"), false);
   assert.equal(configCenter.includes("private async toSanitizedModelProfile"), false);
   assert.equal(configCenter.includes("private async toSanitizedInformationAccessConfig"), false);

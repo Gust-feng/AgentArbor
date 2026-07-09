@@ -248,6 +248,19 @@ test("Basic Agent run projection does not keep stale panel projection files", ()
   assert.equal(fileExistsSync(path.join(runtimeRoot, "panel-projection.test.ts")), false);
 });
 
+test("app top-level keeps moved implementation modules as compatibility facades", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const configCenterFacade = await readSource(path.join(appRoot, "config-center.ts"));
+  const safeProjectionFacade = await readSource(path.join(appRoot, "safe-projection.ts"));
+
+  assert.equal(configCenterFacade.trim(), 'export * from "./config-center/index.js";');
+  assert.equal(safeProjectionFacade.trim(), 'export * from "./tool-projection/safe-projection.js";');
+  assert.equal(fileExistsSync(path.join(appRoot, "config-center.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "safe-projection.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "config-center", "config-center.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "safe-projection.test.ts")), true);
+});
+
 test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const sources = await Promise.all([

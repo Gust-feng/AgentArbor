@@ -275,6 +275,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["panel-work-notes.ts", 'export * from "./panel-read-model/run/panel-work-notes.js";'],
     ["panel-usage-statistics.ts", 'export * from "./panel-server/panel-usage-statistics.js";'],
     ["panel-context-window-usage.ts", 'export * from "./panel-ui/src/context-window-usage.js";'],
+    ["panel-model-progress-copy.ts", 'export * from "./panel-read-model/panel-model-progress-copy.js";'],
     [
       "ordinary-transcript-event-policy.ts",
       'export * from "./panel-read-model/transcript/ordinary-transcript-event-policy.js";',
@@ -302,6 +303,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "panel-work-notes.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-usage-statistics.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-context-window-usage.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-model-progress-copy.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "readable-text-fragments.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "transcript-reasoning.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "config-center", "config-center.test.ts")), true);
@@ -319,6 +321,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-work-notes.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-server", "panel-usage-statistics.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "tests", "context-window-usage.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "panel-model-progress-copy.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "readable-text-fragments.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "transcript-reasoning.test.ts")), true);
 });
@@ -621,6 +624,28 @@ test("panel transcript read-model stays under panel-read-model ownership", () =>
   }
   for (const fileName of legacyTopLevelTranscriptFiles) {
     assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+  }
+});
+
+test("panel shared read-model support modules stay under panel-read-model ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const readModelRoot = path.join(appRoot, "panel-read-model");
+  const sharedReadModelFiles = [
+    "panel-model-progress-copy.test.ts",
+    "panel-model-progress-copy.ts",
+  ];
+
+  for (const fileName of sharedReadModelFiles) {
+    if (!fileName.endsWith(".test.ts")) {
+      assert.equal(fileExistsSync(path.join(appRoot, fileName)), true, `${fileName} should keep a top-level compatibility facade`);
+    } else {
+      assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    }
+    assert.equal(
+      fileExistsSync(path.join(readModelRoot, fileName)),
+      true,
+      `${fileName} should live in panel-read-model`
+    );
   }
 });
 

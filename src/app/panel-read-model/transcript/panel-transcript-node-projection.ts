@@ -1,4 +1,4 @@
-import { isStaleModelProgressSummary } from "../../panel-model-progress-copy.js";
+import { isStaleModelProgressSummary } from "../panel-model-progress-copy.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import { userVisibleAnswer } from "../assistant/panel-assistant-visible-text.js";
 import { genericItemLabel } from "./panel-transcript-tool-format.js";

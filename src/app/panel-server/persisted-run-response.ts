@@ -23,7 +23,7 @@ import {
   type PanelRunTrackingReadModel,
   type PanelRunTranscript,
 } from "../panel-run-read-model.js";
-import { restoredModelRequestedSummary } from "../panel-model-progress-copy.js";
+import { restoredModelRequestedSummary } from "../panel-read-model/panel-model-progress-copy.js";
 import { isContextCompactionPurpose } from "../panel-read-model/run/panel-run-stream-copy.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { compactRuntimeText } from "./runtime-records.js";

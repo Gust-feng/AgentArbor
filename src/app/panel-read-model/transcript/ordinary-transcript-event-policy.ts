@@ -1,4 +1,4 @@
-import { isStaleModelProgressSummary } from "../../panel-model-progress-copy.js";
+import { isStaleModelProgressSummary } from "../panel-model-progress-copy.js";
 
 export function isOrdinaryTranscriptSuppressedEvent(input: {
   readonly type: string;

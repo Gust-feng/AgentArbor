@@ -385,6 +385,32 @@ test("panel server integration test assets stay under panel-server ownership", (
   }
 });
 
+test("shared app test fixtures stay under testing ownership", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const testingRoot = path.join(appRoot, "testing");
+  const movedSharedTestFixtures = ["openai-test-fixtures.ts"];
+  const violations: string[] = [];
+
+  for (const fileName of movedSharedTestFixtures) {
+    assert.equal(fileExistsSync(path.join(appRoot, `panel-${fileName}`)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(fileExistsSync(path.join(testingRoot, fileName)), true, `${fileName} should live in app/testing`);
+  }
+
+  for (const file of await collectSourceFiles(appRoot)) {
+    if (file.startsWith(testingRoot) || isTestAssetSource(file)) {
+      continue;
+    }
+    const source = await fs.readFile(file, "utf8");
+    for (const target of resolveRelativeImports(file, source)) {
+      if (target.startsWith(testingRoot)) {
+        violations.push(`${relativePath(file)} -> ${relativePath(target)}`);
+      }
+    }
+  }
+
+  assert.deepEqual(violations, [], "production app source must not import shared test fixtures");
+});
+
 test("panel transcript read-model stays under panel-read-model ownership", () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const transcriptRoot = path.join(appRoot, "panel-read-model", "transcript");
@@ -979,6 +1005,11 @@ function resolveSourceSpecifier(file: string, specifier: string): string | undef
 
 function fileExistsSync(file: string): boolean {
   return existsSync(file);
+}
+
+function isTestAssetSource(file: string): boolean {
+  const normalized = relativePath(file);
+  return normalized.endsWith(".test.ts") || normalized.includes("/integration-tests/") || normalized.includes("/tests/");
 }
 
 function findDependencyCycles(graph: SourceGraph, maxLength: number): string[][] {

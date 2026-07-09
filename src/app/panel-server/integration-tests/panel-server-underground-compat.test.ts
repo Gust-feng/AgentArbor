@@ -21,7 +21,7 @@ import {
   hasResponsesToolOutput,
   parseResponsesRequestBody,
   responsesRequestText,
-} from "../../panel-openai-test-fixtures.js";
+} from "../../testing/openai-test-fixtures.js";
 
 test("panel rejects disabled AI mode without starting an approved underground run or leaking secrets", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-ai-disabled-"));

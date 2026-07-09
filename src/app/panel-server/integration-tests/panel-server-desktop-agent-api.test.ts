@@ -21,7 +21,7 @@ import {
   hasResponsesToolDefinition,
   hasResponsesToolOutput,
   parseResponsesRequestBody,
-} from "../../panel-openai-test-fixtures.js";
+} from "../../testing/openai-test-fixtures.js";
 import { runAgentDefinitionRef } from "../../agent-definition-runtime.js";
 import type { AgentDefinition } from "../../agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "../../agent-prompts/desktop-root-agent.js";

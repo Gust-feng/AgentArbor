@@ -1,4 +1,4 @@
-import type { PanelProviderFetch } from "./panel-server.js";
+import type { PanelProviderFetch } from "../panel-server.js";
 
 export type ResponsesRequestBody = {
   readonly instructions?: string;

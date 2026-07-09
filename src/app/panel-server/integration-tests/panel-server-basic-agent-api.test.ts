@@ -16,7 +16,7 @@ import {
   createOpenAiToolCallResponse,
   createOpenAiRunCommandToolCallResponse,
   createOpenAiTextResponse,
-} from "../../panel-openai-test-fixtures.js";
+} from "../../testing/openai-test-fixtures.js";
 
 test("basic agent events endpoint derives completed events without a prior run read", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-events-direct-"));

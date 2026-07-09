@@ -21,7 +21,7 @@ import {
   hasResponsesToolDefinition,
   hasResponsesToolOutput,
   parseResponsesRequestBody,
-} from "../../panel-openai-test-fixtures.js";
+} from "../../testing/openai-test-fixtures.js";
 
 test("panel server serves Vite React frontend assets", async () => {
   const server = await startLocalPanelServer({ port: 0 });

@@ -28,7 +28,7 @@ import {
   parseResponsesRequestBody,
   responsesRequestText,
   type ResponsesRequestBody,
-} from "../../panel-openai-test-fixtures.js";
+} from "../../testing/openai-test-fixtures.js";
 import { runAgentDefinitionRef } from "../../agent-definition-runtime.js";
 import { DESKTOP_ROOT_AGENT } from "../../agent-prompts/desktop-root-agent.js";
 import type { AgentDefinition } from "../../agent-prompts/contracts.js";

@@ -24,7 +24,7 @@ import {
   createOpenAiStreamTextResponse,
   createOpenAiTextResponse,
   createStubOpenAiResponse,
-} from "../../panel-openai-test-fixtures.js";
+} from "../../testing/openai-test-fixtures.js";
 
 test("desktop live model stream preserves markdown structure", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-markdown-stream-"));

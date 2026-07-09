@@ -7,8 +7,8 @@ import type {
   RunAgentDefinitionRef,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
-} from "../domain/config/index.js";
-import type { IntelligenceChannel, ModelRequest, ModelResponse } from "../domain/intelligence/index.js";
+} from "../../../domain/config/index.js";
+import type { IntelligenceChannel, ModelRequest, ModelResponse } from "../../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -17,15 +17,15 @@ import type {
   ToolExecutor,
   ToolExecutionContext,
   ToolPermissionCheck,
-} from "../domain/tools/index.js";
-import { toolPresentationForName } from "../domain/tools/index.js";
-import { runAgentDefinitionRef } from "./agent-definition-runtime.js";
-import type { AgentDefinition } from "./agent-prompts/contracts.js";
-import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
-import { runOrdinaryDesktopForPanel } from "./panel-server/desktop-agent-execution.js";
-import { PanelHttpError } from "./panel-server/http-utils.js";
-import type { DesktopRunResources } from "./panel-server/run-execution-contracts.js";
-import type { PanelRuntime } from "./panel-server/runtime.js";
+} from "../../../domain/tools/index.js";
+import { toolPresentationForName } from "../../../domain/tools/index.js";
+import { runAgentDefinitionRef } from "../../agent-definition-runtime.js";
+import type { AgentDefinition } from "../../agent-prompts/contracts.js";
+import { DESKTOP_ROOT_AGENT } from "../../agent-prompts/desktop-root-agent.js";
+import { runOrdinaryDesktopForPanel } from "../desktop-agent-execution.js";
+import { PanelHttpError } from "../http-utils.js";
+import type { DesktopRunResources } from "../run-execution-contracts.js";
+import type { PanelRuntime } from "../runtime.js";
 
 test("ordinary desktop execution keeps frozen run facts on failed agent results", async () => {
   const snapshot = capabilitySnapshot();

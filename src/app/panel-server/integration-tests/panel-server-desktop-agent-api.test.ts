@@ -3,16 +3,16 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../adapters/config/index.js";
-import { ConfigCenter } from "./config-center.js";
-import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
+import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../../../adapters/config/index.js";
+import { ConfigCenter } from "../../config-center.js";
+import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
 import {
   assertSafePanelJsonText,
   removeTemporaryTree,
   requestJson,
   requestSse,
   waitForRun,
-} from "./panel-server-test-utils.js";
+} from "../../panel-server-test-utils.js";
 import {
   createOpenAiReadFileToolCallResponse,
   createOpenAiSearchToolCallResponse,
@@ -21,10 +21,10 @@ import {
   hasResponsesToolDefinition,
   hasResponsesToolOutput,
   parseResponsesRequestBody,
-} from "./panel-openai-test-fixtures.js";
-import { runAgentDefinitionRef } from "./agent-definition-runtime.js";
-import type { AgentDefinition } from "./agent-prompts/contracts.js";
-import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+} from "../../panel-openai-test-fixtures.js";
+import { runAgentDefinitionRef } from "../../agent-definition-runtime.js";
+import type { AgentDefinition } from "../../agent-prompts/contracts.js";
+import { DESKTOP_ROOT_AGENT } from "../../agent-prompts/desktop-root-agent.js";
 
 test("desktop async fake run answers arbitrary lightweight question without report workflow", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-direct-answer-"));

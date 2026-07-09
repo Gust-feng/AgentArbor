@@ -162,7 +162,7 @@ test("collapsed timeline summary keeps long command detail out of the main workf
       phase: "completed",
       copy: {
         label: "命令",
-        detail: "$lines = Get-Content dist/app/panel-ui-chat-structure.test.js; for ($idx=266; $idx -le 278; $idx++) { '{0,4}: {1}' -f $idx, $lines[$idx] }",
+        detail: "$lines = Get-Content dist/app/panel-structure-tests/panel-ui-chat-structure.test.js; for ($idx=266; $idx -le 278; $idx++) { '{0,4}: {1}' -f $idx, $lines[$idx] }",
       },
     }],
     hasCurrentConfirmation: false,

@@ -439,8 +439,8 @@ Panel explicit 多 Agent入口
 
 文件：
 
-- `src/app/panel-ui-app-structure.test.ts`
-- `src/app/panel-ui-runtime-structure.test.ts`
+- `src/app/panel-structure-tests/panel-ui-app-structure.test.ts`
+- `src/app/panel-structure-tests/panel-ui-runtime-structure.test.ts`
 
 必须覆盖：
 
@@ -458,7 +458,7 @@ Panel explicit 多 Agent入口
 pnpm typecheck:panel
 pnpm build:node
 node --test dist/app/deep/deep-run-executor.test.js dist/app/deep/deep-runtime.test.js
-node --test dist/app/panel-ui-app-structure.test.js dist/app/panel-ui-runtime-structure.test.js
+node --test dist/app/panel-structure-tests/panel-ui-app-structure.test.js dist/app/panel-structure-tests/panel-ui-runtime-structure.test.js
 pnpm build:panel
 git diff --check
 ```

@@ -8,15 +8,15 @@ import type {
   CapabilityToolCatalogItem,
   ModelCapabilities,
   SanitizedInformationAccessConfig,
-} from "../domain/config/index.js";
-import { createMinimalRuntime } from "./runtime.js";
+} from "../../../domain/config/index.js";
+import { createMinimalRuntime } from "../../runtime.js";
 import {
   createDesktopToolCenterFactory,
   prepareDesktopRunResources,
-} from "./panel-server/desktop-run-resources.js";
-import { desktopCapabilitySnapshotForRunStart } from "./panel-server/desktop-run-model-settings.js";
-import { PanelHttpError } from "./panel-server/http-utils.js";
-import type { PanelRuntime } from "./panel-server/runtime.js";
+} from "../desktop-run-resources.js";
+import { desktopCapabilitySnapshotForRunStart } from "../desktop-run-model-settings.js";
+import { PanelHttpError } from "../http-utils.js";
+import type { PanelRuntime } from "../runtime.js";
 
 test("desktop run resources require the run-created capability snapshot", async () => {
   await assert.rejects(

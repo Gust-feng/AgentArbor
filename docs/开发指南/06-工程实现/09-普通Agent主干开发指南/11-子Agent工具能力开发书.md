@@ -349,7 +349,7 @@ node --test `
   dist/app/panel-server/basic-agent-run-view.test.js `
   dist/adapters/runtime-database/file-system-runtime-database.test.js `
   dist/app/panel-transcript-node-projection.test.js `
-  dist/app/panel-ui-chat-structure.test.js
+  dist/app/panel-structure-tests/panel-ui-chat-structure.test.js
 ```
 
 当前加载、校验、注册表、runner 和 tools 的核心回归集中在 `src/app/sub-agents/sub-agent-tool-inheritance.test.ts`，不要引用不存在的拆分测试文件。若改动触及普通 Agent 全局工具边界、持久化主链路或前端构建，再补跑 `pnpm test` 做全量回归。

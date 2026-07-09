@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
+import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
 import {
   assertSafePanelJsonText,
   removeTemporaryTree,
@@ -11,12 +11,12 @@ import {
   requestSse,
   waitForBasicEvents,
   waitForRun,
-} from "./panel-server-test-utils.js";
+} from "../../panel-server-test-utils.js";
 import {
   createOpenAiToolCallResponse,
   createOpenAiRunCommandToolCallResponse,
   createOpenAiTextResponse,
-} from "./panel-openai-test-fixtures.js";
+} from "../../panel-openai-test-fixtures.js";
 
 test("basic agent events endpoint derives completed events without a prior run read", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-events-direct-"));

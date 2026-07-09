@@ -24,30 +24,30 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveAgentArborRuntimeDatabasePaths } from "../adapters/runtime-database/index.js";
-import { createAgentRunTree, type AgentSpec } from "../domain/underground/agent-fabric.js";
+import { resolveAgentArborRuntimeDatabasePaths } from "../../../adapters/runtime-database/index.js";
+import { createAgentRunTree, type AgentSpec } from "../../../domain/underground/agent-fabric.js";
 import {
   DEEP_RUN_KIND,
   DEEP_RUN_MODE,
   type DeepConversation,
   type DeepRun,
-} from "./deep/contracts.js";
-import type { DeepRunStreamEvent } from "./deep/deep-events.js";
-import { createFileSystemDeepConversationStore } from "./deep/deep-conversation.js";
-import { createFileSystemDeepRunRecordStore, type DeepRunRecord } from "./deep/deep-runtime.js";
-import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
-import { createFileSystemDeepChildMessageStore } from "./deep/deep-child-messages.js";
+} from "../../deep/contracts.js";
+import type { DeepRunStreamEvent } from "../../deep/deep-events.js";
+import { createFileSystemDeepConversationStore } from "../../deep/deep-conversation.js";
+import { createFileSystemDeepRunRecordStore, type DeepRunRecord } from "../../deep/deep-runtime.js";
+import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
+import { createFileSystemDeepChildMessageStore } from "../../deep/deep-child-messages.js";
 import {
   deepChildInstructionQueueRejectionError,
   deriveDeepRunRuntimeHealth,
-} from "./panel-server/deep-routes.js";
+} from "../deep-routes.js";
 import {
   assertSafePanelJsonText,
   readSseUntil,
   removeTemporaryTree,
   requestJson,
   requestSse,
-} from "./panel-server-test-utils.js";
+} from "../../panel-server-test-utils.js";
 
 /** 复杂桌面任务目标：触发 fake provider 的 spawn_children 分支（多角度探索→综合）。 */
 const COMPLEX_GOAL = "分析当前 AgentArbor 项目并产出优化方向报告";

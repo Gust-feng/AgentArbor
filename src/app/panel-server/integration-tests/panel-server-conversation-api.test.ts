@@ -4,14 +4,14 @@ import { request } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../adapters/config/index.js";
+import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../../../adapters/config/index.js";
 import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
-} from "../adapters/runtime-database/index.js";
-import type { RuntimeDatabase } from "../domain/runtime-database/index.js";
-import { ConfigCenter } from "./config-center.js";
-import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
+} from "../../../adapters/runtime-database/index.js";
+import type { RuntimeDatabase } from "../../../domain/runtime-database/index.js";
+import { ConfigCenter } from "../../config-center.js";
+import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
 import {
   assertSafePanelJsonText,
   removeTemporaryTree,
@@ -19,7 +19,7 @@ import {
   requestJson,
   type RequestJsonResult,
   waitForRun,
-} from "./panel-server-test-utils.js";
+} from "../../panel-server-test-utils.js";
 import {
   createOpenAiReadFileToolCallResponse,
   createOpenAiTextResponse,
@@ -28,10 +28,10 @@ import {
   parseResponsesRequestBody,
   responsesRequestText,
   type ResponsesRequestBody,
-} from "./panel-openai-test-fixtures.js";
-import { runAgentDefinitionRef } from "./agent-definition-runtime.js";
-import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
-import type { AgentDefinition } from "./agent-prompts/contracts.js";
+} from "../../panel-openai-test-fixtures.js";
+import { runAgentDefinitionRef } from "../../agent-definition-runtime.js";
+import { DESKTOP_ROOT_AGENT } from "../../agent-prompts/desktop-root-agent.js";
+import type { AgentDefinition } from "../../agent-prompts/contracts.js";
 
 test("conversation message returns before provider completion so the UI can subscribe before output", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-early-stream-"));

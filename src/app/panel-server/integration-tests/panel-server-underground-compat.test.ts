@@ -3,14 +3,14 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
+import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
 import {
   assertSafePanelJsonText,
   removeTemporaryTree,
   requestJson,
   requestSse,
   waitForRun,
-} from "./panel-server-test-utils.js";
+} from "../../panel-server-test-utils.js";
 import {
   createInvalidOpenAiResponse,
   createOpenAiSearchToolCallResponse,
@@ -21,7 +21,7 @@ import {
   hasResponsesToolOutput,
   parseResponsesRequestBody,
   responsesRequestText,
-} from "./panel-openai-test-fixtures.js";
+} from "../../panel-openai-test-fixtures.js";
 
 test("panel rejects disabled AI mode without starting an approved underground run or leaking secrets", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-ai-disabled-"));

@@ -3,16 +3,16 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { CapabilitySkillCatalogItem } from "../domain/config/index.js";
+import type { CapabilitySkillCatalogItem } from "../../../domain/config/index.js";
 import type {
   IntelligenceChannel,
   ModelOutputValidationResult,
   ModelRequest,
   ModelRequestOptions,
   ModelResponse,
-} from "../domain/intelligence/index.js";
-import { resolveTriggeredSkillContexts, type PanelSkillRuntime } from "./panel-server/skill-service.js";
-import { loadSkillBodyFacts } from "./skills/index.js";
+} from "../../../domain/intelligence/index.js";
+import { resolveTriggeredSkillContexts, type PanelSkillRuntime } from "../skill-service.js";
+import { loadSkillBodyFacts } from "../../skills/index.js";
 
 test("resolveTriggeredSkillContexts uses the run-created skill catalog instead of current skill state", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-skill-snapshot-"));

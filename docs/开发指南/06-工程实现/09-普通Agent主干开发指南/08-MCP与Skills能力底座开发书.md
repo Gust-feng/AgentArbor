@@ -406,7 +406,7 @@ git diff --check
 
 ```powershell
 pnpm build:node
-node --test dist/adapters/mcp/mcp-client.test.js dist/app/capability-center.test.js dist/app/capability-policy.test.js dist/app/basic-agent-runtime/tool-registry.test.js dist/app/panel-server-skill-service.test.js
+node --test dist/adapters/mcp/mcp-client.test.js dist/app/capability-center.test.js dist/app/capability-policy.test.js dist/app/basic-agent-runtime/tool-registry.test.js dist/app/panel-server/integration-tests/panel-server-skill-service.test.js
 ```
 
 ## 验收标准

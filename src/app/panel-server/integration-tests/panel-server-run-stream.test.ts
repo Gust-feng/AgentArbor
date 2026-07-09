@@ -6,8 +6,8 @@ import test from "node:test";
 import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
-} from "../adapters/runtime-database/index.js";
-import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
+} from "../../../adapters/runtime-database/index.js";
+import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
 import {
   assertSafePanelJsonText,
   openAndAbortSse,
@@ -16,7 +16,7 @@ import {
   requestJson,
   requestSse,
   waitForRun,
-} from "./panel-server-test-utils.js";
+} from "../../panel-server-test-utils.js";
 import {
   createOpenAiReadFileToolCallResponse,
   createOpenAiChatStreamTextResponse,
@@ -24,7 +24,7 @@ import {
   createOpenAiStreamTextResponse,
   createOpenAiTextResponse,
   createStubOpenAiResponse,
-} from "./panel-openai-test-fixtures.js";
+} from "../../panel-openai-test-fixtures.js";
 
 test("desktop live model stream preserves markdown structure", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-markdown-stream-"));

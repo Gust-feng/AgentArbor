@@ -261,6 +261,63 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "safe-projection.test.ts")), true);
 });
 
+test("panel structure tests stay in the panel structure test module", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const structureTestRoot = path.join(appRoot, "panel-structure-tests");
+  const movedStructureTests = [
+    "panel-runtime-structure.test.ts",
+    "panel-server-structure.test.ts",
+    "panel-structure.test.ts",
+    "panel-ui-app-structure.test.ts",
+    "panel-ui-chat-structure.test.ts",
+    "panel-ui-contract-structure.test.ts",
+    "panel-ui-deep-follow-up-structure.test.ts",
+    "panel-ui-deep-history-structure.test.ts",
+    "panel-ui-deep-sidebar-structure.test.ts",
+    "panel-ui-model-options-structure.test.ts",
+    "panel-ui-model-provider-projection.test.ts",
+    "panel-ui-multi-agent-node-structure.test.ts",
+    "panel-ui-runtime-structure.test.ts",
+    "panel-ui-settings-structure.test.ts",
+    "panel-ui-startup-intro-structure.test.ts",
+    "panel-ui-streaming-cursor.test.ts",
+    "panel-ui-submit-locking-structure.test.ts",
+  ];
+
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-structure-test-utils.ts")), false);
+  assert.equal(fileExistsSync(path.join(structureTestRoot, "panel-structure-test-utils.ts")), true);
+  for (const fileName of movedStructureTests) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(fileExistsSync(path.join(structureTestRoot, fileName)), true, `${fileName} should live in panel-structure-tests`);
+  }
+});
+
+test("panel server integration tests stay under panel-server ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const integrationTestRoot = path.join(appRoot, "panel-server", "integration-tests");
+  const movedIntegrationTests = [
+    "panel-server-basic-agent-api.test.ts",
+    "panel-server-config-api.test.ts",
+    "panel-server-conversation-api.test.ts",
+    "panel-server-deep-routes.test.ts",
+    "panel-server-desktop-agent-api.test.ts",
+    "panel-server-desktop-agent-execution.test.ts",
+    "panel-server-desktop-run-resources.test.ts",
+    "panel-server-run-stream.test.ts",
+    "panel-server-skill-service.test.ts",
+    "panel-server-underground-compat.test.ts",
+  ];
+
+  for (const fileName of movedIntegrationTests) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(
+      fileExistsSync(path.join(integrationTestRoot, fileName)),
+      true,
+      `${fileName} should live in panel-server/integration-tests`
+    );
+  }
+});
+
 test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const sources = await Promise.all([

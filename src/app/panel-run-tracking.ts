@@ -11,7 +11,7 @@ import type { AgentRunTreeAttachment } from "./agent-run-tree-attachment.js";
 import type { ModelRuntimeMode } from "./model-runtime/index.js";
 import type { PanelRunSummary } from "./panel-run-summary.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
-import { rootletKindFromAdviceContractId } from "./panel-transcript-model-calls.js";
+import { rootletKindFromAdviceContractId } from "./panel-read-model/transcript/panel-transcript-model-calls.js";
 import { asRecord, hasEvent, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
 import type { PanelObservationReadModel, PanelRootletTrackingReadModel, PanelRunTraceReadModel, PanelRunTrackingReadModel } from "./panel-run-tracking-contracts.js";

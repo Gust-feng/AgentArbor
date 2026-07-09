@@ -4,7 +4,7 @@ import {
   comparableTranscriptText,
   mergeTranscriptRefs,
   moreCompleteTranscriptText,
-} from "./panel-transcript-node-identity.js";
+} from "./panel-read-model/transcript/panel-transcript-node-identity.js";
 
 export type LiveTranscriptObservationRef = {
   readonly kind: string;

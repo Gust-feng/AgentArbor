@@ -1,15 +1,15 @@
 import {
   projectLiveRunTranscript,
   type LiveRunTranscriptProjection,
-} from "./panel-ui-live-transcript.js";
-import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
-import type { WorklineConversationTurn, WorklineProjectedTurn } from "./panel-ui-chat-workline.js";
+} from "../../panel-ui-live-transcript.js";
+import type { LiveRunBuffer } from "../../panel-ui-live-run-buffer.js";
+import type { WorklineConversationTurn, WorklineProjectedTurn } from "../../panel-ui-chat-workline.js";
 import {
   answerForWorkViewTurn,
   deliverableForWorkViewTurn,
   type AssistantDeliverableLike,
   type AssistantWorkViewOutput,
-} from "./panel-assistant-message-output.js";
+} from "../../panel-assistant-message-output.js";
 import {
   pendingForTurn,
   type ConfirmationIdentity,
@@ -18,7 +18,7 @@ import {
   isLowValueUserDecisionNode,
   nodesForRun,
 } from "./panel-transcript-node-projection.js";
-import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
+import { isGenericApprovalDecisionText } from "../../confirmation-copy.js";
 
 export type AssistantTranscriptRunLike = {
   readonly runId: string;

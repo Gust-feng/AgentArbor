@@ -2,7 +2,7 @@ import type { ArborMessageType } from "../domain/common.js";
 import type { RunObservationSnapshot } from "../domain/observation/index.js";
 import type { RootletClusterKind } from "../domain/underground/index.js";
 import { ROOTLET_CLUSTER_KINDS } from "../domain/underground/index.js";
-import type { PanelTranscriptModelCall } from "./panel-transcript-model-calls.js";
+import type { PanelTranscriptModelCall } from "./panel-read-model/transcript/panel-transcript-model-calls.js";
 import { eventRefsFor, hasEvent, isString, lastRecordedAt, unique } from "./panel-read-model-utils.js";
 import type { AgentWorkNote, PanelWorkNotesInput } from "./panel-work-note-contracts.js";
 

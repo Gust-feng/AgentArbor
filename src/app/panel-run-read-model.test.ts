@@ -6,7 +6,7 @@ import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { PanelRunSummary } from "./panel-run-summary.js";
 import { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
 import { createPanelRunTranscript } from "./panel-run-transcript.js";
-import { createPanelTranscriptNodes } from "./panel-transcript-nodes.js";
+import { createPanelTranscriptNodes } from "./panel-read-model/transcript/panel-transcript-nodes.js";
 
 test("panel reasoning trace is matched by exact model output contract", () => {
   const transcript = createPanelRunTranscript({

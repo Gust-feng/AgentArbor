@@ -5,7 +5,7 @@ import {
   type ConfirmationIdentity,
   pendingForTurn,
   timelineConfirmationProjection,
-} from "./panel-transcript-confirmation-projection.js";
+} from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
 import { projectConfirmationDisplay } from "./panel-confirmation-display-projection.js";
 
 type TestConfirmation = ConfirmationIdentity & {

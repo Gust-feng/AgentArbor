@@ -30,13 +30,13 @@ import type {
   ActivityItem,
   ActivityExpandedSection,
   ActivityLineDelta,
-} from "../../../panel-transcript-activity-copy";
-import { resolveActivityToolKind } from "../../../panel-transcript-activity-copy";
+} from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
+import { resolveActivityToolKind } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import { collapsedTimelineSummary } from "../../../panel-ui-timeline-collapse";
 import { SubAgentInlineCard } from "./sub-agent-run-viewer";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";
-export { pendingForTurn } from "../../../panel-transcript-confirmation-projection";
+export { pendingForTurn } from "../../../panel-read-model/transcript/panel-transcript-confirmation-projection";
 
 const TOOL_KIND_ICON: Record<string, LucideIcon> = {
   command: Terminal,

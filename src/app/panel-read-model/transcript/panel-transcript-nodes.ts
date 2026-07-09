@@ -1,9 +1,9 @@
-import type { TranscriptNode, TranscriptNodePhase } from "../domain/basic-agent/index.js";
-import type { ModelUsage } from "../domain/intelligence/index.js";
-import type { ObservationRef } from "../domain/observation/index.js";
-import { type ToolDisplayProjection, type ToolErrorDomain, type ToolErrorFacts, type ToolResultEnvelope } from "../domain/tools/index.js";
-import { toolDisplayName } from "../domain/tools/index.js";
-import { cleanConfirmationSummary } from "./confirmation-copy.js";
+import type { TranscriptNode, TranscriptNodePhase } from "../../../domain/basic-agent/index.js";
+import type { ModelUsage } from "../../../domain/intelligence/index.js";
+import type { ObservationRef } from "../../../domain/observation/index.js";
+import { type ToolDisplayProjection, type ToolErrorDomain, type ToolErrorFacts, type ToolResultEnvelope } from "../../../domain/tools/index.js";
+import { toolDisplayName } from "../../../domain/tools/index.js";
+import { cleanConfirmationSummary } from "../../confirmation-copy.js";
 import {
   completeOpenReasoningNodes,
   flushPendingReasoningNode,
@@ -12,20 +12,20 @@ import {
   updatePendingReasoningNode,
   type PendingReasoningNode,
   type ReasoningTranscriptEvent,
-} from "./transcript-reasoning.js";
+} from "../../transcript-reasoning.js";
 import {
   appendTextStreamAssembly,
   emptyTextStreamAssembly,
   textStreamFragmentSourceFromEventId,
   type TextStreamAssembly,
-} from "./readable-text-fragments.js";
-import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
+} from "../../readable-text-fragments.js";
+import { cleanOrdinaryToolText } from "../../ordinary-tool-copy.js";
 import { commandSummaryParts } from "./panel-transcript-tool-format.js";
 import {
   isLowValueOrdinaryAgentNote,
   isOrdinaryTranscriptReasoningSettlementEvent,
   isOrdinaryTranscriptSuppressedEvent,
-} from "./ordinary-transcript-event-policy.js";
+} from "../../ordinary-transcript-event-policy.js";
 
 export type PanelTranscriptStreamEvent = {
   readonly eventId: string;

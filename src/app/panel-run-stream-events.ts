@@ -8,7 +8,7 @@ import {
 import {
   modelReasoningOutputOrUndefined,
   safeReasoningOutputForPanel,
-} from "./panel-transcript-model-calls.js";
+} from "./panel-read-model/transcript/panel-transcript-model-calls.js";
 import {
   asRecord,
   isString,

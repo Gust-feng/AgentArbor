@@ -10,7 +10,7 @@ import { firstNonEmptyText, hasNonEmptyText } from "./panel-assistant-output.js"
 import {
   isLowValueUserDecisionNode,
   nodesForRun,
-} from "./panel-transcript-node-projection.js";
+} from "./panel-read-model/transcript/panel-transcript-node-projection.js";
 import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
 
 export type ChatActiveConversationTurn = {

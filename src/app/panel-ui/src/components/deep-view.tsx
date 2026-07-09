@@ -45,7 +45,7 @@ import {
   type ActivityBadge,
   type ActivityExpandedSection,
   type ActivityItem,
-} from "../../../panel-transcript-activity-copy";
+} from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import type {
   DeepConversationView,
   DeepIntakeStatus,

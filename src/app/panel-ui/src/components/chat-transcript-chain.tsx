@@ -35,7 +35,7 @@ import {
   type ConfirmationProjection,
 } from "./transcript-timeline";
 
-export { isRefreshingRunStatus } from "../../../panel-transcript-turn-projection";
+export { isRefreshingRunStatus } from "../../../panel-read-model/transcript/panel-transcript-turn-projection";
 
 export function TranscriptChain(props: {
   readonly items: readonly ConversationDisplayItem<ConversationTurn, TranscriptNode, ConfirmationProjection>[];

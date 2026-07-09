@@ -15,13 +15,13 @@ import {
   type AssistantShellSnapshot,
   type AssistantTranscriptNodeLike,
   type AssistantTranscriptRunLike,
-} from "./panel-transcript-turn-projection.js";
-import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
+} from "./panel-read-model/transcript/panel-transcript-turn-projection.js";
+import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
 import {
   materializeConversationTranscript,
   stableTranscriptNodesByRunIdMap,
   type MaterializedConversationTranscript,
-} from "./panel-transcript-materializer.js";
+} from "./panel-read-model/transcript/panel-transcript-materializer.js";
 import type { LiveAnswerTone } from "./panel-ui-live-transcript.js";
 import {
   projectStableAssistantWorkflowDisplay,

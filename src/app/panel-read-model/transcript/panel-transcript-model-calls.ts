@@ -1,7 +1,7 @@
-import type { ModelReasoningOutputProjection, ModelUsage, ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
-import type { RootletClusterKind } from "../domain/underground/index.js";
-import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import type { PanelRunSummary } from "./panel-run-summary.js";
+import type { ModelReasoningOutputProjection, ModelUsage, ModelVisibleOutputProjection } from "../../../domain/intelligence/index.js";
+import type { RootletClusterKind } from "../../../domain/underground/index.js";
+import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
+import type { PanelRunSummary } from "../../panel-run-summary.js";
 
 export type PanelTranscriptModelCall = {
   readonly requestId: string;

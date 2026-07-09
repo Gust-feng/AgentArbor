@@ -5,14 +5,14 @@ import type {
 } from "./panel-assistant-message-output.js";
 import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import type { WorklineConversationTurn, WorklineProjectedTurn } from "./panel-ui-chat-workline.js";
-import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
+import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
 import {
   projectConversationWorkflowDisplay,
   projectStandaloneAssistantWorkflowDisplay,
   type ConversationWorkflowDisplayState,
 } from "./panel-conversation-workflow-display.js";
 import type { StableAssistantTurnDisplay } from "./panel-assistant-turn-display.js";
-import type { AssistantTranscriptNodeLike, AssistantTranscriptRunLike } from "./panel-transcript-turn-projection.js";
+import type { AssistantTranscriptNodeLike, AssistantTranscriptRunLike } from "./panel-read-model/transcript/panel-transcript-turn-projection.js";
 import type {
   AssistantWorkflowDisplay,
   AssistantWorkflowDisplayState,

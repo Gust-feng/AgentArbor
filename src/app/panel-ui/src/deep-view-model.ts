@@ -2,7 +2,7 @@ import {
   type ActivityBadge,
   type ActivityExpandedSection,
   type ActivityItem,
-} from "../../panel-transcript-activity-copy.js";
+} from "../../panel-read-model/transcript/panel-transcript-activity-copy.js";
 import type {
   DeepChildAgentRunView,
   DeepChildRunStatus,

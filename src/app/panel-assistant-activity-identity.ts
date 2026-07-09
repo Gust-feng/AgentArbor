@@ -1,6 +1,6 @@
-import type { ActivityItem } from "./panel-transcript-activity-copy.js";
-import { comparableTranscriptText } from "./panel-transcript-node-identity.js";
-import type { ProjectableTranscriptNode } from "./panel-transcript-node-projection.js";
+import type { ActivityItem } from "./panel-read-model/transcript/panel-transcript-activity-copy.js";
+import { comparableTranscriptText } from "./panel-read-model/transcript/panel-transcript-node-identity.js";
+import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
 
 export function isModelNarrativeActivityItem(item: { readonly tone: string }): boolean {
   return item.tone === "thinking" || item.tone === "narration";

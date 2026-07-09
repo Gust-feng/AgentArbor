@@ -2,7 +2,7 @@ import type { RunObservationSnapshot } from "../domain/observation/index.js";
 import type { RunAgentDefinitionRef } from "../domain/config/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
-import type { PanelTranscriptModelCall } from "./panel-transcript-model-calls.js";
+import type { PanelTranscriptModelCall } from "./panel-read-model/transcript/panel-transcript-model-calls.js";
 import type { PanelRunSummary } from "./panel-run-summary.js";
 
 export type AgentWorkNote = {

@@ -1,4 +1,4 @@
-import { userVisibleAnswer } from "./panel-assistant-visible-text.js";
+import { userVisibleAnswer } from "../../panel-assistant-visible-text.js";
 
 export type TranscriptNodeRefLike = {
   readonly kind: string;

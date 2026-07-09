@@ -9,8 +9,8 @@ import {
   timelineCollapseDecision,
   type TimelineCollapseReason,
 } from "./panel-ui-timeline-collapse.js";
-import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
-import type { ProjectableTranscriptNode } from "./panel-transcript-node-projection.js";
+import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
+import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
 import type {
   AssistantDeliverableLike,
   AssistantSubAgentRunLike,

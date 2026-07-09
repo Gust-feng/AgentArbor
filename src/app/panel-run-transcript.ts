@@ -2,8 +2,8 @@ import type { AgentRunTreeAttachment } from "./agent-run-tree-attachment.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
 import { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
 import { deriveRunSteps } from "./panel-run-steps.js";
-import { createPanelTranscriptModelCalls } from "./panel-transcript-model-calls.js";
-import { createPanelTranscriptNodes } from "./panel-transcript-nodes.js";
+import { createPanelTranscriptModelCalls } from "./panel-read-model/transcript/panel-transcript-model-calls.js";
+import { createPanelTranscriptNodes } from "./panel-read-model/transcript/panel-transcript-nodes.js";
 import { createPanelWorkNotes } from "./panel-work-notes.js";
 import type {
   CreatePanelRunTranscriptInput,

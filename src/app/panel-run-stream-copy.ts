@@ -1,7 +1,7 @@
 import type { ArborMessageType } from "../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import { modelVisibleOutputOrUndefined } from "./panel-transcript-model-calls.js";
+import { modelVisibleOutputOrUndefined } from "./panel-read-model/transcript/panel-transcript-model-calls.js";
 import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
 import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";

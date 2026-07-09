@@ -412,7 +412,7 @@ test("shared run summary types use app-level contracts before panel aliases", as
     readAppSource("panel-run-stream-events.ts"),
     readAppSource("panel-run-stream-copy.ts"),
     readAppSource("panel-run-transcript-contracts.ts"),
-    readAppSource("panel-transcript-model-calls.ts"),
+    readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-model-calls.ts")),
     readAppSource("panel-work-note-contracts.ts"),
     readAppSource(path.join("panel-server", "run-execution-contracts.ts")),
     readAppSource(path.join("panel-server", "run-execution.ts")),

@@ -6,8 +6,8 @@ import {
   createPersistedPanelRunResponse,
   panelStatusFromRuntimeStatus,
 } from "./persisted-run-response.js";
-import { displayActivityItemsForNodes } from "../panel-transcript-activity-copy.js";
-import { activityVisibleNodes } from "../panel-transcript-node-projection.js";
+import { displayActivityItemsForNodes } from "../panel-read-model/transcript/panel-transcript-activity-copy.js";
+import { activityVisibleNodes } from "../panel-read-model/transcript/panel-transcript-node-projection.js";
 import { createRunCapabilityPlan } from "../model-capability-registry.js";
 
 test("persisted run response restores safe transcript and tracking projections", () => {

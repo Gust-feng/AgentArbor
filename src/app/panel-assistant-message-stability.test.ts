@@ -3,7 +3,7 @@ import test from "node:test";
 import type { AssistantMessageView } from "./panel-assistant-message-view.js";
 import type { AssistantMessageSegmentLifecycle } from "./panel-assistant-message-structure.js";
 import { stabilizeAssistantMessageView } from "./panel-assistant-message-stability.js";
-import type { ProjectableTranscriptNode } from "./panel-transcript-node-projection.js";
+import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
 
 test("assistant message stability does not append late pre-body activity after rendered history", () => {
   const previous = view([

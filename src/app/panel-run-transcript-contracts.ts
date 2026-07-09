@@ -3,7 +3,7 @@ import type { ToolDisplayProjection } from "../domain/tools/index.js";
 import type { TranscriptNode } from "../domain/basic-agent/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "./agent-run-tree-attachment.js";
-import type { PanelTranscriptModelCall } from "./panel-transcript-model-calls.js";
+import type { PanelTranscriptModelCall } from "./panel-read-model/transcript/panel-transcript-model-calls.js";
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";

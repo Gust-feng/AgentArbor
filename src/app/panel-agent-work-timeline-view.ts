@@ -3,15 +3,15 @@ import {
   type ConfirmationNodeLike,
   type ConfirmationIdentity,
   type TimelineConfirmationProjection,
-} from "./panel-transcript-confirmation-projection.js";
+} from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
 import {
   displayActivityItemsForNodes,
   type ActivityItem,
-} from "./panel-transcript-activity-copy.js";
+} from "./panel-read-model/transcript/panel-transcript-activity-copy.js";
 import {
   timelineVisibleNodes,
   type ProjectableTranscriptNode,
-} from "./panel-transcript-node-projection.js";
+} from "./panel-read-model/transcript/panel-transcript-node-projection.js";
 
 export type AgentWorkTimelineView<
   TNode extends ProjectableTranscriptNode,

@@ -330,7 +330,7 @@ UI 行为：
 - CapabilityCenter 集成：`src/app/capability-center.ts`、`src/app/basic-agent-runtime/builtin-tool-runtime.ts`。
 - 运行时集成：`src/app/desktop-agent-loop-preparation.ts`、`src/app/panel-server/desktop-agent-execution.ts`、`src/app/panel-server/runtime.ts`、`src/app/panel-server/types.ts`。
 - 内置专家：`src/app/sub-agents/builtin/<name>/SUB_AGENT.md`。
-- read model 与前端运行视图：`src/app/panel-server/basic-agent-read-models.ts`、`src/app/panel-transcript-nodes.ts`、`src/app/panel-transcript-node-projection.ts`、`src/app/panel-ui/src/components/sub-agent-run-viewer.tsx`、`src/app/panel-ui/src/components/transcript-timeline.tsx`。
+- read model 与前端运行视图：`src/app/panel-server/basic-agent-read-models.ts`、`src/app/panel-read-model/transcript/panel-transcript-nodes.ts`、`src/app/panel-read-model/transcript/panel-transcript-node-projection.ts`、`src/app/panel-ui/src/components/sub-agent-run-viewer.tsx`、`src/app/panel-ui/src/components/transcript-timeline.tsx`。
 - 前端契约与设置：`src/app/panel-ui/src/contracts/sub-agents.ts`、`src/app/panel-ui/src/contracts/run.ts`、`src/app/panel-ui/src/components/sub-agent-settings.tsx`。
 
 ## 验收说明
@@ -348,7 +348,7 @@ node --test `
   dist/app/panel-server/runtime.test.js `
   dist/app/panel-server/basic-agent-run-view.test.js `
   dist/adapters/runtime-database/file-system-runtime-database.test.js `
-  dist/app/panel-transcript-node-projection.test.js `
+  dist/app/panel-read-model/transcript/panel-transcript-node-projection.test.js `
   dist/app/panel-structure-tests/panel-ui-chat-structure.test.js
 ```
 

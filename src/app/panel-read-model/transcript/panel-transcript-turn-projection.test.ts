@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
+import type { LiveRunBuffer } from "../../panel-ui-live-run-buffer.js";
 import {
   assistantShellSnapshot,
   assistantTurnSlotKey,
@@ -10,8 +10,8 @@ import {
   projectAssistantTranscriptTurn,
   type AssistantTranscriptNodeLike,
 } from "./panel-transcript-turn-projection.js";
-import type { WorklineProjectedTurn } from "./panel-ui-chat-workline.js";
-import { textStreamAssemblyFromText } from "./readable-text-fragments.js";
+import type { WorklineProjectedTurn } from "../../panel-ui-chat-workline.js";
+import { textStreamAssemblyFromText } from "../../readable-text-fragments.js";
 
 test("assistant shell snapshot tracks empty running turns by id and stable slot", () => {
   const turns = [

@@ -18,8 +18,8 @@ import {
   type AssistantRunDetailLike,
   type AssistantWorkViewProblemLike,
 } from "./panel-assistant-run-output.js";
-import { activityVisibleNodes } from "./panel-transcript-node-projection.js";
-import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
+import { activityVisibleNodes } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
+import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
 
 export type ChatActiveWorkViewLike<
   TDeliverable extends AssistantDeliverableLike,

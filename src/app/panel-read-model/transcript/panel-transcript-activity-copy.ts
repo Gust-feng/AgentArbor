@@ -1,4 +1,4 @@
-import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "./confirmation-copy.js";
+import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "../../confirmation-copy.js";
 import {
   isFileReadNode,
   isModelSideOutputNode,
@@ -6,7 +6,7 @@ import {
   type ProjectableTranscriptNode,
 } from "./panel-transcript-node-projection.js";
 import { commandText, genericItemLabel } from "./panel-transcript-tool-format.js";
-import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
+import { cleanOrdinaryToolText } from "../../ordinary-tool-copy.js";
 
 const EXPANDED_SEARCH_RESULTS_LIMIT = 20;
 const EXPANDED_DIRECTORY_ENTRIES_LIMIT = 80;

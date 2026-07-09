@@ -3,7 +3,7 @@ import type {
   WorklineConversationTurn,
   WorklineProjectedTurn,
 } from "./panel-ui-chat-workline.js";
-import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
+import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
 import {
   type AssistantDeliverableLike,
   type AssistantWorkViewOutput,
@@ -14,9 +14,9 @@ import {
   type AssistantTranscriptNodeLike,
   type AssistantTranscriptRunLike,
   type AssistantTranscriptTurnProjection,
-} from "./panel-transcript-turn-projection.js";
+} from "./panel-read-model/transcript/panel-transcript-turn-projection.js";
 import { shouldCollapseTimelineAfterTurn } from "./panel-ui-timeline-collapse.js";
-import { transcriptNodesForRunId } from "./panel-transcript-materializer.js";
+import { transcriptNodesForRunId } from "./panel-read-model/transcript/panel-transcript-materializer.js";
 import {
   projectStableAssistantWorkflowDisplay,
   type AssistantWorkflowDisplay,

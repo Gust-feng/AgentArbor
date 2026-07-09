@@ -2,8 +2,8 @@ import type {
   AssistantMessageSegment,
   AssistantMessageSegmentLifecycle,
 } from "./panel-assistant-message-structure.js";
-import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
-import type { ProjectableTranscriptNode } from "./panel-transcript-node-projection.js";
+import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
+import type { ProjectableTranscriptNode } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
 
 export type AssistantSegmentUpdatePolicy = {
   readonly updateContent: boolean;

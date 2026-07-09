@@ -1,8 +1,8 @@
-import { isStaleModelProgressSummary } from "./panel-model-progress-copy.js";
-import type { ModelUsage } from "../domain/intelligence/index.js";
-import { userVisibleAnswer } from "./panel-assistant-visible-text.js";
+import { isStaleModelProgressSummary } from "../../panel-model-progress-copy.js";
+import type { ModelUsage } from "../../../domain/intelligence/index.js";
+import { userVisibleAnswer } from "../../panel-assistant-visible-text.js";
 import { genericItemLabel } from "./panel-transcript-tool-format.js";
-import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
+import { isGenericApprovalDecisionText } from "../../confirmation-copy.js";
 import {
   isMergeableModelTranscriptNode,
   isModelSideTranscriptNode,

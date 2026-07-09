@@ -587,7 +587,7 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -635,7 +635,7 @@ test("configured ToolCenter reads Exa web search config and routes search throug
     assert.equal(output.results?.[0]?.snippet, "configured exa snippet");
     assert.equal(JSON.stringify(search.output).includes("exa-configured-tool-secret"), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -697,7 +697,7 @@ test("configured ToolCenter reads Metaso web search config and routes search thr
     assert.equal(output.results?.[0]?.snippet, "configured metaso snippet");
     assert.equal(JSON.stringify(search.output).includes("metaso-configured-tool-secret"), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -720,7 +720,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
     assert.equal(search.status, "completed");
     assert.equal((search.output as { status?: string }).status, "no-provider");
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -744,8 +744,8 @@ test("configured ToolCenter uses workspaceRoot for local tools", async () => {
     assert.equal((read.output as { refId?: string }).refId, "workspace:file:note.txt");
     assert.equal(JSON.stringify(read.output).includes("workspace note"), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
-    await fs.rm(workspace, { recursive: true, force: true });
+    await removeTestDirectory(directory);
+    await removeTestDirectory(workspace);
   }
 });
 
@@ -776,8 +776,8 @@ test("configured ToolCenter uses workspaceRoot for codebase research search", as
     assert.equal(output.results?.some((result) => result.title === "research-note.md"), true);
     assert.equal(output.results?.some((result) => result.uri === "repo://research-note.md"), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
-    await fs.rm(workspace, { recursive: true, force: true });
+    await removeTestDirectory(directory);
+    await removeTestDirectory(workspace);
   }
 });
 
@@ -812,7 +812,7 @@ test("configured ToolCenter keeps web search disabled even when a historical Tav
     assert.equal(JSON.stringify(search.output).includes("tvly-disabled-tool-secret"), false);
     assert.equal(fetchCalls, 0);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -925,4 +925,8 @@ function fixedReadResult(input: {
       ],
     },
   };
+}
+
+async function removeTestDirectory(directory: string): Promise<void> {
+  await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

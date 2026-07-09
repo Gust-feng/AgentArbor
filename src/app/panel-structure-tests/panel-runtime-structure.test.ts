@@ -413,7 +413,7 @@ test("shared run summary types use app-level contracts before panel aliases", as
     readAppSource(path.join("panel-read-model", "run", "panel-run-stream-copy.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-transcript-contracts.ts")),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-model-calls.ts")),
-    readAppSource("panel-work-note-contracts.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-work-note-contracts.ts")),
     readAppSource(path.join("panel-server", "run-execution-contracts.ts")),
     readAppSource(path.join("panel-server", "run-execution.ts")),
     readAppSource(path.join("panel-server", "run-job-response.ts")),
@@ -499,7 +499,7 @@ test("panel canvas keeps ordinary desktop agent projection split", async () => {
     readAppSource("panel-canvas-read-model.ts"),
     readAppSource("panel-desktop-agent-canvas.ts"),
     readAppSource("panel-canvas-common.ts"),
-    readAppSource("panel-agent-run-tree-view.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-agent-run-tree-view.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-transcript-contracts.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-tracking-contracts.ts")),
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
@@ -533,16 +533,18 @@ test("panel canvas keeps ordinary desktop agent projection split", async () => {
 });
 
 test("panel run read model stays a compatibility facade", async () => {
-  const [readModel, transcript, transcriptContracts, streamEvents, steps, workNotes] = await Promise.all([
+  const [readModel, workNotesFacade, transcript, transcriptContracts, streamEvents, steps, workNotes] = await Promise.all([
     readAppSource("panel-run-read-model.ts"),
+    readAppSource("panel-work-notes.ts"),
     readAppSource(path.join("panel-read-model", "run", "panel-run-transcript.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-transcript-contracts.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-stream-events.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-steps.ts")),
-    readAppSource("panel-work-notes.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-work-notes.ts")),
   ]);
 
   assert.equal(readModel.trim(), 'export * from "./panel-read-model/run/index.js";');
+  assert.equal(workNotesFacade.trim(), 'export * from "./panel-read-model/run/panel-work-notes.js";');
   assert.equal(readModel.includes("function createPanelRunTranscript"), false);
   assert.equal(readModel.includes("function deriveRunSteps"), false);
   assert.equal(readModel.includes("createPanelWorkNotes("), false);

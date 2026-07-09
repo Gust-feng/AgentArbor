@@ -6,7 +6,7 @@ import type {
   RuntimeModelCallRecord,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
-} from "../domain/runtime-database/index.js";
+} from "../../domain/runtime-database/index.js";
 import {
   USAGE_HEATMAP_WINDOW_DAYS,
   createPanelUsageStatistics,

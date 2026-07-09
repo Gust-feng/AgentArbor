@@ -14,7 +14,7 @@ import {
 } from "./http-utils.js";
 import { serveRunEventSse } from "./run-event-sse.js";
 import { createPersistedPanelRunResponse } from "./persisted-run-response.js";
-import { createPanelUsageStatistics } from "../panel-usage-statistics.js";
+import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import { parseRunInput } from "./request-parsers.js";
 import { projectRunEnvelopeViewBase } from "../run-read-model-envelope.js";

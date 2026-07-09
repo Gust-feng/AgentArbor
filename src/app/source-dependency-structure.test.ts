@@ -270,6 +270,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["desktop-agent-model-input-files.ts", 'export * from "./task-soil/desktop-agent-model-input-files.js";'],
     ["workspace-folder-summary.ts", 'export * from "./task-soil/workspace-folder-summary.js";'],
     ["panel-stream-tool-projection.ts", 'export * from "./panel-read-model/run/panel-stream-tool-projection.js";'],
+    ["panel-usage-statistics.ts", 'export * from "./panel-server/panel-usage-statistics.js";'],
     [
       "ordinary-transcript-event-policy.ts",
       'export * from "./panel-read-model/transcript/ordinary-transcript-event-policy.js";',
@@ -294,6 +295,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "context-attachments.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-model-input-files.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-stream-tool-projection.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-usage-statistics.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "readable-text-fragments.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "transcript-reasoning.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "config-center", "config-center.test.ts")), true);
@@ -308,6 +310,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "context-attachments.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "desktop-agent-model-input-files.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-stream-tool-projection.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-server", "panel-usage-statistics.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "readable-text-fragments.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "transcript-reasoning.test.ts")), true);
 });
@@ -504,6 +507,26 @@ test("panel server integration test assets stay under panel-server ownership", (
       fileExistsSync(path.join(integrationTestRoot, fileName)),
       true,
       `${fileName} should live in panel-server/integration-tests`
+    );
+  }
+});
+
+test("panel server support modules stay under panel-server ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const panelServerRoot = path.join(appRoot, "panel-server");
+  const panelServerFiles = [
+    "panel-usage-statistics.test.ts",
+    "panel-usage-statistics.ts",
+  ];
+
+  for (const fileName of panelServerFiles) {
+    if (fileName !== "panel-usage-statistics.ts") {
+      assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    }
+    assert.equal(
+      fileExistsSync(path.join(panelServerRoot, fileName)),
+      true,
+      `${fileName} should live in panel-server`
     );
   }
 });

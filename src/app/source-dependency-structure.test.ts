@@ -257,6 +257,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["safe-tool-preview.ts", 'export * from "./tool-projection/safe-tool-preview.js";'],
     ["tool-display-normalization.ts", 'export * from "./tool-projection/tool-display-normalization.js";'],
     ["tool-result-continuation.ts", 'export * from "./tool-projection/tool-result-continuation.js";'],
+    ["app-update-service.ts", 'export * from "./app-update/app-update-service.js";'],
+    ["electron-app-update-service.ts", 'export * from "./app-update/electron-app-update-service.js";'],
+    ["product-info.ts", 'export * from "./app-update/product-info.js";'],
   ]);
 
   for (const [fileName, expectedSource] of compatibilityFacades) {
@@ -266,9 +269,13 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "config-center.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "safe-projection.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "tool-display-normalization.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "app-update-service.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "electron-app-update-service.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "config-center", "config-center.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "safe-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "tool-display-normalization.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "app-update", "app-update-service.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "app-update", "electron-app-update-service.test.ts")), true);
 });
 
 test("tool projection support modules stay under tool-projection ownership", () => {
@@ -285,6 +292,22 @@ test("tool projection support modules stay under tool-projection ownership", () 
     const facade = path.join(appRoot, fileName);
     assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
     assert.equal(fileExistsSync(path.join(toolProjectionRoot, fileName)), true, `${fileName} should live in tool-projection`);
+  }
+});
+
+test("app update support modules stay under app-update ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const appUpdateRoot = path.join(appRoot, "app-update");
+  const movedAppUpdateFiles = [
+    "app-update-service.ts",
+    "electron-app-update-service.ts",
+    "product-info.ts",
+  ];
+
+  for (const fileName of movedAppUpdateFiles) {
+    const facade = path.join(appRoot, fileName);
+    assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
+    assert.equal(fileExistsSync(path.join(appUpdateRoot, fileName)), true, `${fileName} should live in app-update`);
   }
 });
 

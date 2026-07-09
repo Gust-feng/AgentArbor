@@ -340,9 +340,19 @@ UI 行为：
 ```powershell
 git diff --check
 pnpm build:node
-node --test dist/app/sub-agents/sub-agent-loader.test.js dist/app/sub-agents/sub-agent-validation.test.js dist/app/sub-agents/sub-agent-registry.test.js dist/app/sub-agents/sub-agent-runner.test.js dist/app/sub-agents/sub-agent-tools.test.js dist/app/sub-agents/sub-agent-tool-inheritance.test.js dist/adapters/runtime-database/file-system-runtime-database.test.js dist/app/panel-server/basic-agent-run-view.test.js dist/app/panel-transcript-node-projection.test.js dist/app/panel-ui-chat-structure.test.js dist/app/capability-center.test.js dist/app/desktop-agent-loop-preparation.test.js
-pnpm test
+node --test `
+  dist/app/sub-agents/sub-agent-tool-inheritance.test.js `
+  dist/app/sub-agent-stream-projection.test.js `
+  dist/app/capability-center.test.js `
+  dist/app/desktop-agent-loop-preparation.test.js `
+  dist/app/panel-server/runtime.test.js `
+  dist/app/panel-server/basic-agent-run-view.test.js `
+  dist/adapters/runtime-database/file-system-runtime-database.test.js `
+  dist/app/panel-transcript-node-projection.test.js `
+  dist/app/panel-ui-chat-structure.test.js
 ```
+
+当前加载、校验、注册表、runner 和 tools 的核心回归集中在 `src/app/sub-agents/sub-agent-tool-inheritance.test.ts`，不要引用不存在的拆分测试文件。若改动触及普通 Agent 全局工具边界、持久化主链路或前端构建，再补跑 `pnpm test` 做全量回归。
 
 验收要点：
 

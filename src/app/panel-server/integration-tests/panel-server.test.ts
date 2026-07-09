@@ -7,10 +7,10 @@ import test from "node:test";
 import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
-} from "../adapters/runtime-database/index.js";
-import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
-import { ConfigCenter } from "./config-center.js";
-import { resolveDefaultPanelSkillRoots } from "./panel-server/runtime.js";
+} from "../../../adapters/runtime-database/index.js";
+import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
+import { ConfigCenter } from "../../config-center.js";
+import { resolveDefaultPanelSkillRoots } from "../runtime.js";
 import {
   removeTemporaryTree,
   requestJson,
@@ -21,7 +21,7 @@ import {
   hasResponsesToolDefinition,
   hasResponsesToolOutput,
   parseResponsesRequestBody,
-} from "./panel-openai-test-fixtures.js";
+} from "../../panel-openai-test-fixtures.js";
 
 test("panel server serves Vite React frontend assets", async () => {
   const server = await startLocalPanelServer({ port: 0 });

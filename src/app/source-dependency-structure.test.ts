@@ -357,10 +357,10 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
   }
 });
 
-test("panel server integration tests stay under panel-server ownership", () => {
+test("panel server integration test assets stay under panel-server ownership", () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const integrationTestRoot = path.join(appRoot, "panel-server", "integration-tests");
-  const movedIntegrationTests = [
+  const movedIntegrationTestAssets = [
     "panel-server-basic-agent-api.test.ts",
     "panel-server-config-api.test.ts",
     "panel-server-conversation-api.test.ts",
@@ -370,10 +370,12 @@ test("panel server integration tests stay under panel-server ownership", () => {
     "panel-server-desktop-run-resources.test.ts",
     "panel-server-run-stream.test.ts",
     "panel-server-skill-service.test.ts",
+    "panel-server-test-utils.ts",
+    "panel-server.test.ts",
     "panel-server-underground-compat.test.ts",
   ];
 
-  for (const fileName of movedIntegrationTests) {
+  for (const fileName of movedIntegrationTestAssets) {
     assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
     assert.equal(
       fileExistsSync(path.join(integrationTestRoot, fileName)),

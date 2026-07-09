@@ -47,7 +47,7 @@ import {
   removeTemporaryTree,
   requestJson,
   requestSse,
-} from "../../panel-server-test-utils.js";
+} from "./panel-server-test-utils.js";
 
 /** 复杂桌面任务目标：触发 fake provider 的 spawn_children 分支（多角度探索→综合）。 */
 const COMPLEX_GOAL = "分析当前 AgentArbor 项目并产出优化方向报告";

@@ -6,7 +6,7 @@ import test from "node:test";
 import { FileSystemNormalSettingsStore } from "../../../adapters/config/index.js";
 import type { AppUpdateFetch, AppUpdateInfo, AppUpdateServiceLike } from "../../app-update-service.js";
 import { startLocalPanelServer, type PanelModelCatalogFetch } from "../../panel-server.js";
-import { removeTemporaryTree, requestJson } from "../../panel-server-test-utils.js";
+import { removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
 
 test("panel config API keeps model provider and search keys out of ordinary responses", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-"));

@@ -19,7 +19,7 @@ import {
   requestJson,
   type RequestJsonResult,
   waitForRun,
-} from "../../panel-server-test-utils.js";
+} from "./panel-server-test-utils.js";
 import {
   createOpenAiReadFileToolCallResponse,
   createOpenAiTextResponse,

@@ -12,7 +12,7 @@ import {
   requestJson,
   requestSse,
   waitForRun,
-} from "../../panel-server-test-utils.js";
+} from "./panel-server-test-utils.js";
 import {
   createOpenAiReadFileToolCallResponse,
   createOpenAiSearchToolCallResponse,

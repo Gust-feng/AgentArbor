@@ -7,7 +7,7 @@ import {
   stabilizeStreamingMarkdown,
   updateStreamingTextTarget,
   type StreamingTextState,
-} from "./panel-ui-streaming.js";
+} from "../src/streaming-text.js";
 
 test("streaming target appends only the new suffix while display lags", () => {
   const laggingState: StreamingTextState = {

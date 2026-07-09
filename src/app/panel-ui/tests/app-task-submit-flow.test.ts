@@ -9,7 +9,7 @@ import {
   type StartedConversationRun,
   type SubmitFlowBasicRun,
   type SubmitFlowConversation,
-} from "./panel-ui-submit-flow.js";
+} from "../src/app-task-submit-flow.js";
 
 test("submit flow observes the new run when it has started", () => {
   const conversation: SubmitFlowConversation = {

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectChatActiveView } from "./panel-ui-chat-active-view.js";
+import { projectChatActiveView } from "../src/chat-active-view.js";
 import type {
   ChatActiveRun,
   ChatActiveTranscriptNode,
-} from "./panel-ui-chat-active-projection.js";
-import type { LiveRunBuffer } from "./panel-read-model/run/panel-run-live-buffer.js";
-import { textStreamAssemblyFromText } from "./readable-text-fragments.js";
+} from "../src/chat-active-projection.js";
+import type { LiveRunBuffer } from "../../panel-read-model/run/panel-run-live-buffer.js";
+import { textStreamAssemblyFromText } from "../../readable-text-fragments.js";
 
 test("chat active view filters transcript nodes before building the workline", () => {
   const view = projectChatActiveView({

@@ -78,7 +78,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
     readAppSource(path.join("panel-conversation", "panel-conversation-display-list.ts")),
     readAppSource(path.join("panel-read-model", "assistant", "panel-assistant-message-view.ts")),
-    readAppSource("panel-ui-chat-active-view.ts"),
+    readPanelUiSource("chat-active-view.ts"),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-turn-projection.ts")),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-activity-copy.ts")),
     readAppSource("panel-agent-work-timeline-view.ts"),

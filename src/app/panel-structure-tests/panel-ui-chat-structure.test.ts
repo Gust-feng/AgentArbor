@@ -60,8 +60,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiSource(path.join("components", "chat-session-projection.ts")),
     readAppSource(path.join("panel-read-model", "assistant", "panel-assistant-workline.ts")),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-turn-projection.ts")),
-    readAppSource("panel-ui-chat-active-projection.ts"),
-    readAppSource("panel-ui-chat-active-view.ts"),
+    readPanelUiSource("chat-active-projection.ts"),
+    readPanelUiSource("chat-active-view.ts"),
     readAppSource(path.join("panel-read-model", "assistant", "panel-assistant-visible-text.ts")),
     readAppSource(path.join("panel-read-model", "assistant", "panel-assistant-failure.ts")),
     readAppSource(path.join("panel-read-model", "assistant", "panel-assistant-message-output.ts")),
@@ -356,7 +356,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatActiveViewProjection.includes("visibleDeliverable"), true);
   assert.equal(chatActiveViewProjection.includes("visibleResultText"), true);
   assert.equal(chatActiveViewProjection.includes("visibleRunProblem"), true);
-  assert.equal(chatActive.includes("../../../panel-ui-chat-active-view"), true);
+  assert.equal(chatActive.includes("../chat-active-view"), true);
   assert.equal(chatActive.includes("./chat-active-projection"), false);
   assert.equal(chatSessionProjection.includes("export function assistantModelForTurn"), true);
   assert.equal(chatSessionProjection.includes("export function visibleDeliverable"), false);

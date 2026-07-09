@@ -292,6 +292,58 @@ test("panel structure tests stay in the panel structure test module", () => {
   }
 });
 
+test("panel UI frontend support modules stay under panel-ui ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const panelUiRoot = path.join(appRoot, "panel-ui", "src");
+  const panelUiTestRoot = path.join(appRoot, "panel-ui", "tests");
+  const movedPanelUiSourceFiles = [
+    "app-task-submit-flow.ts",
+    "chat-active-projection.ts",
+    "chat-active-view.ts",
+    "streaming-text.ts",
+    "transcript-window.ts",
+  ];
+  const movedPanelUiTestFiles = [
+    "app-task-submit-flow.test.ts",
+    "chat-active-projection.test.ts",
+    "chat-active-view.test.ts",
+    "streaming-text.test.ts",
+    "transcript-window.test.ts",
+  ];
+  const legacyTopLevelPanelUiFiles = [
+    "panel-ui-submit-flow.test.ts",
+    "panel-ui-submit-flow.ts",
+    "panel-ui-chat-active-projection.test.ts",
+    "panel-ui-chat-active-projection.ts",
+    "panel-ui-chat-active-view.test.ts",
+    "panel-ui-chat-active-view.ts",
+    "panel-ui-streaming.test.ts",
+    "panel-ui-streaming.ts",
+    "panel-ui-transcript-window.test.ts",
+    "panel-ui-transcript-window.ts",
+  ];
+
+  for (const fileName of movedPanelUiSourceFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(
+      fileExistsSync(path.join(panelUiRoot, fileName)),
+      true,
+      `${fileName} should live in panel-ui/src`
+    );
+  }
+  for (const fileName of movedPanelUiTestFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(
+      fileExistsSync(path.join(panelUiTestRoot, fileName)),
+      true,
+      `${fileName} should live in panel-ui/tests`
+    );
+  }
+  for (const fileName of legacyTopLevelPanelUiFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+  }
+});
+
 test("panel server integration tests stay under panel-server ownership", () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const integrationTestRoot = path.join(appRoot, "panel-server", "integration-tests");

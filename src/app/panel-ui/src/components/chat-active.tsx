@@ -11,14 +11,14 @@ import type {
 import type { LiveRunBuffer } from "../../../panel-read-model/run/panel-run-live-buffer";
 import { RichText } from "./rich-text";
 import { ChatInputBar, type ChatInputProps } from "./chat-empty";
-import { projectChatActiveView, type ChatStatusNotice } from "../../../panel-ui-chat-active-view";
+import { projectChatActiveView, type ChatStatusNotice } from "../chat-active-view";
 import {
   previousTranscriptVisibleTurnCount,
   reconcileTranscriptVisibilityState,
   runIdsForTurnWindow,
   transcriptVisibleTurnWindow,
   type TranscriptVisibilityState,
-} from "../../../panel-ui-transcript-window";
+} from "../transcript-window";
 import {
   getTranscriptNodesCache,
   transcriptNodesCacheForConversation,

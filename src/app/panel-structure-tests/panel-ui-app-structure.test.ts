@@ -93,7 +93,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource("app-config-projection.ts"),
     readPanelUiSource("app-conversation-refresh.ts"),
     readAppSource(path.join("panel-conversation", "panel-conversation-refresh.ts")),
-    readAppSource("panel-ui-submit-flow.ts"),
+    readPanelUiSource("app-task-submit-flow.ts"),
     readPanelUiSource("app-observed-run-read-model.ts"),
     readPanelUiSource("app-run-projection.ts"),
     readAppSource("panel-context-window-usage.ts"),

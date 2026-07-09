@@ -5,21 +5,21 @@ import {
   type ChatActiveRun,
   type ChatActiveStatusNotice,
   type ChatActiveTranscriptNode,
-} from "./panel-ui-chat-active-projection.js";
-import type { LiveRunBuffer } from "./panel-read-model/run/panel-run-live-buffer.js";
-import { firstNonEmptyText } from "./panel-read-model/assistant/panel-assistant-output.js";
+} from "./chat-active-projection.js";
+import type { LiveRunBuffer } from "../../panel-read-model/run/panel-run-live-buffer.js";
+import { firstNonEmptyText } from "../../panel-read-model/assistant/panel-assistant-output.js";
 import {
   visibleDeliverable,
   type AssistantDeliverableLike,
-} from "./panel-read-model/assistant/panel-assistant-message-output.js";
+} from "../../panel-read-model/assistant/panel-assistant-message-output.js";
 import {
   visibleResultText,
   visibleRunProblem,
   type AssistantRunDetailLike,
   type AssistantWorkViewProblemLike,
-} from "./panel-read-model/assistant/panel-assistant-run-output.js";
-import { activityVisibleNodes } from "./panel-read-model/transcript/panel-transcript-node-projection.js";
-import type { ConfirmationIdentity } from "./panel-read-model/transcript/panel-transcript-confirmation-projection.js";
+} from "../../panel-read-model/assistant/panel-assistant-run-output.js";
+import { activityVisibleNodes } from "../../panel-read-model/transcript/panel-transcript-node-projection.js";
+import type { ConfirmationIdentity } from "../../panel-read-model/transcript/panel-transcript-confirmation-projection.js";
 
 export type ChatActiveWorkViewLike<
   TDeliverable extends AssistantDeliverableLike,

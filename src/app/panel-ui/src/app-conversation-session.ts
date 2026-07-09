@@ -3,7 +3,7 @@ import { ApiError, getJson } from "./api";
 import { transcriptNodesFrom } from "./app-run-projection";
 import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
-import { liveRunForObservedReplay } from "../../panel-ui-submit-flow";
+import { liveRunForObservedReplay } from "./app-task-submit-flow";
 import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
 import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
 import type { Conversation } from "./contracts/conversation";
@@ -14,7 +14,7 @@ import {
   initialVisibleTranscriptTurnCount,
   runIdsForTurnWindow,
   transcriptVisibleTurnWindow,
-} from "../../panel-ui-transcript-window";
+} from "./transcript-window";
 
 const HISTORICAL_RUN_LOAD_CONCURRENCY = 4;
 

@@ -11,7 +11,7 @@ import {
   reconcileTranscriptVisibilityState,
   runIdsForTurnWindow,
   transcriptVisibleTurnWindow,
-} from "./panel-ui-transcript-window.js";
+} from "../src/transcript-window.js";
 
 test("short transcripts stay fully visible", () => {
   assert.equal(initialVisibleTranscriptTurnCount(0), 0);

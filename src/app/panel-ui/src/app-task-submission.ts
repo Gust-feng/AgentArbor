@@ -26,7 +26,7 @@ import {
   optimisticConversationForSubmit,
   runIdToObserveAfterStart,
   type StartedConversationRun,
-} from "../../panel-ui-submit-flow";
+} from "./app-task-submit-flow";
 import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
 import { emptyLiveRun } from "../../panel-read-model/run/panel-run-live-buffer";
 import {

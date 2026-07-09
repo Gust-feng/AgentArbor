@@ -1,7 +1,7 @@
 import {
   appendLiveRunEvents,
   type LiveRunBuffer,
-} from "./panel-read-model/run/panel-run-live-buffer.js";
+} from "../../panel-read-model/run/panel-run-live-buffer.js";
 
 export type SubmitFlowTaskStatus =
   | "queued"

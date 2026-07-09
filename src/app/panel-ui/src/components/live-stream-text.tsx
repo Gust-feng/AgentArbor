@@ -5,7 +5,7 @@ import {
   updateStreamingTextTarget,
   type StreamingTextState,
   type StreamingTextTone,
-} from "../../../panel-ui-streaming";
+} from "../streaming-text";
 
 /**
  * 流式输出调度器

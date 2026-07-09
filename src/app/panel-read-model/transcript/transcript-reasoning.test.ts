@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TranscriptNode } from "../domain/basic-agent/index.js";
-import type { ObservationRef } from "../domain/observation/index.js";
+import type { TranscriptNode } from "../../../domain/basic-agent/index.js";
+import type { ObservationRef } from "../../../domain/observation/index.js";
 import {
   completeOpenReasoningNodes,
   flushPendingReasoningNode,

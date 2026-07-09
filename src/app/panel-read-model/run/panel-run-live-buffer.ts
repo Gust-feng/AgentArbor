@@ -6,7 +6,7 @@ import {
   appendSnapshotTextFragment,
   textStreamFragmentSourceFromEventId,
   type TextStreamAssembly,
-} from "../../readable-text-fragments.js";
+} from "../transcript/readable-text-fragments.js";
 
 export type LiveRunBuffer = {
   readonly runId: string;

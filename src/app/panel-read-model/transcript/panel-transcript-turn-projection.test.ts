@@ -11,7 +11,7 @@ import {
   type AssistantTranscriptNodeLike,
 } from "./panel-transcript-turn-projection.js";
 import type { WorklineProjectedTurn } from "../assistant/panel-assistant-workline.js";
-import { textStreamAssemblyFromText } from "../../readable-text-fragments.js";
+import { textStreamAssemblyFromText } from "./readable-text-fragments.js";
 
 test("assistant shell snapshot tracks empty running turns by id and stable slot", () => {
   const turns = [

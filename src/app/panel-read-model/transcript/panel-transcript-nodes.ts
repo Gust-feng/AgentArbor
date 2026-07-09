@@ -12,20 +12,20 @@ import {
   updatePendingReasoningNode,
   type PendingReasoningNode,
   type ReasoningTranscriptEvent,
-} from "../../transcript-reasoning.js";
+} from "./transcript-reasoning.js";
 import {
   appendTextStreamAssembly,
   emptyTextStreamAssembly,
   textStreamFragmentSourceFromEventId,
   type TextStreamAssembly,
-} from "../../readable-text-fragments.js";
+} from "./readable-text-fragments.js";
 import { cleanOrdinaryToolText } from "../../ordinary-tool-copy.js";
 import { commandSummaryParts } from "./panel-transcript-tool-format.js";
 import {
   isLowValueOrdinaryAgentNote,
   isOrdinaryTranscriptReasoningSettlementEvent,
   isOrdinaryTranscriptSuppressedEvent,
-} from "../../ordinary-transcript-event-policy.js";
+} from "./ordinary-transcript-event-policy.js";
 
 export type PanelTranscriptStreamEvent = {
   readonly eventId: string;

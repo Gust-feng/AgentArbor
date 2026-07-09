@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createMinimalReadonlySoilStore } from "../domain/soil/index.js";
-import { createMinimalSoilConstraints } from "../domain/soil/index.js";
+import { createMinimalReadonlySoilStore } from "../../domain/soil/index.js";
+import { createMinimalSoilConstraints } from "../../domain/soil/index.js";
 import {
   createTaskSoilFromDesktopInput,
   parseDesktopTaskSoilInput,

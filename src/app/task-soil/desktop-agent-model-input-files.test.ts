@@ -3,9 +3,9 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { ModelCapabilities } from "../domain/config/index.js";
-import type { ModelMessage } from "../domain/intelligence/index.js";
-import { createTaskSoil } from "../domain/soil/index.js";
+import type { ModelCapabilities } from "../../domain/config/index.js";
+import type { ModelMessage } from "../../domain/intelligence/index.js";
+import { createTaskSoil } from "../../domain/soil/index.js";
 import { attachDesktopFileInputsToModelMessages } from "./desktop-agent-model-input-files.js";
 
 const VISION_CAPABILITIES: ModelCapabilities = {

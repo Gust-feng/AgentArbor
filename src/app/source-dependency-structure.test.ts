@@ -264,6 +264,10 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["agent-definition-ref.ts", 'export * from "./agent-definitions/agent-definition-ref.js";'],
     ["agent-definition-registry.ts", 'export * from "./agent-definitions/agent-definition-registry.js";'],
     ["agent-definition-runtime.ts", 'export * from "./agent-definitions/agent-definition-runtime.js";'],
+    ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
+    ["context-attachments.ts", 'export * from "./task-soil/context-attachments.js";'],
+    ["desktop-agent-model-input-files.ts", 'export * from "./task-soil/desktop-agent-model-input-files.js";'],
+    ["workspace-folder-summary.ts", 'export * from "./task-soil/workspace-folder-summary.js";'],
   ]);
 
   for (const [fileName, expectedSource] of compatibilityFacades) {
@@ -278,6 +282,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-catalog.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-registry.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definition-runtime.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "task-soil-workspace.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "context-attachments.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-model-input-files.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "config-center", "config-center.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "safe-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "tool-projection", "tool-display-normalization.test.ts")), true);
@@ -286,6 +293,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-catalog.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-registry.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "agent-definitions", "agent-definition-runtime.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "task-soil-workspace.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "context-attachments.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "desktop-agent-model-input-files.test.ts")), true);
 });
 
 test("tool projection support modules stay under tool-projection ownership", () => {
@@ -339,6 +349,23 @@ test("AgentDefinition support modules stay under agent-definitions ownership", (
       true,
       `${fileName} should live in agent-definitions`
     );
+  }
+});
+
+test("Task Soil support modules stay under task-soil ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const taskSoilRoot = path.join(appRoot, "task-soil");
+  const movedTaskSoilFiles = [
+    "task-soil-workspace.ts",
+    "context-attachments.ts",
+    "desktop-agent-model-input-files.ts",
+    "workspace-folder-summary.ts",
+  ];
+
+  for (const fileName of movedTaskSoilFiles) {
+    const facade = path.join(appRoot, fileName);
+    assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
+    assert.equal(fileExistsSync(path.join(taskSoilRoot, fileName)), true, `${fileName} should live in task-soil`);
   }
 });
 

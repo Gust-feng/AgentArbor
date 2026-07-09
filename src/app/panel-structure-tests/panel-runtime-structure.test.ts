@@ -305,7 +305,7 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     readAppSource("panel-run-jobs.ts"),
     readAppSource(path.join("panel-read-model", "run", "panel-run-tracking.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-tracking-contracts.ts")),
-    readAppSource("task-soil-workspace.ts"),
+    readAppSource(path.join("task-soil", "task-soil-workspace.ts")),
     readAppSource(path.join("config-center", "model-provider-common.ts")),
     readAppSource(path.join("config-center", "model-provider-profile-settings.ts")),
     readAppSource("intelligence-channel-factory.test.ts"),

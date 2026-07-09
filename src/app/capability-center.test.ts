@@ -31,9 +31,9 @@ test("CapabilityCenter freezes transient run workspace without changing the defa
     assert.equal(cachedDefaultSnapshot.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
     assert.equal(persistedWorkspace.workspaceDirectory, path.resolve(defaultWorkspace));
   } finally {
-    await fs.rm(directory, { force: true, recursive: true });
-    await fs.rm(defaultWorkspace, { force: true, recursive: true });
-    await fs.rm(runWorkspace, { force: true, recursive: true });
+    await removeTestDirectory(directory);
+    await removeTestDirectory(defaultWorkspace);
+    await removeTestDirectory(runWorkspace);
   }
 });
 
@@ -82,7 +82,7 @@ test("CapabilityCenter discovers project skills from the effective workspace", a
     assert.equal(runSnapshot.skillCatalog.some((skill) => skill.name === "default-helper"), false);
     assert.equal(runSnapshot.skillCatalog.find((skill) => skill.name === "run-helper")?.sourceRootId, "project");
   } finally {
-    await fs.rm(directory, { force: true, recursive: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -129,7 +129,7 @@ test("CapabilityCenter discovers project sub-agents and tools from the effective
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("spawn_sub_agent"), true);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("read_sub_agent_output"), true);
   } finally {
-    await fs.rm(directory, { force: true, recursive: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -326,8 +326,8 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(text.includes("Do not include this body"), false);
     assert.equal(text.includes("Disabled body"), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
-    await fs.rm(skillRoot, { recursive: true, force: true });
+    await removeTestDirectory(directory);
+    await removeTestDirectory(skillRoot);
   }
 });
 
@@ -348,7 +348,7 @@ test("CapabilityCenter freezes full access confirmation policy in snapshots", as
     assert.equal(snapshot.toolConfirmation?.shellCommandRequiresConfirmation, false);
     assert.equal(snapshot.securitySummary.includes("完全访问"), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -398,7 +398,7 @@ test("CapabilityCenter applies MCP enabledTools and confirmation mode before mod
     assert.deepEqual(snapshot.toolCatalog.allowedTools.filter((name) => name.startsWith("docs__")), ["docs__lookup"]);
     assert.equal(snapshot.mcpCatalog[0]?.exposedTools[0]?.requiresConfirmation, true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -430,7 +430,7 @@ test("CapabilityCenter leaves uncached configured MCP servers out of the model t
     assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools, []);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("docs__lookup"), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -487,7 +487,7 @@ test("CapabilityCenter uses cached MCP tools without reconnecting unchanged serv
     assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
     assert.deepEqual(snapshot.toolCatalog.allowedTools.filter((name) => name.startsWith("docs__")), ["docs__lookup"]);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -513,7 +513,7 @@ test("CapabilityCenter marks incomplete MCP servers unavailable without connecti
     assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "unavailable");
     assert.deepEqual(snapshot.mcpCatalog[0]?.tools, []);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -548,7 +548,7 @@ test("CapabilityCenter keeps MCP connection error summaries in snapshot without 
     assert.equal(text.includes("do-not-leak"), false);
     assert.equal(text.includes("--token"), false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   }
 });
 
@@ -608,4 +608,8 @@ async function writeTestSubAgentPackage(root: string, packageName: string, descr
     ].join("\n"),
     "utf8"
   );
+}
+
+async function removeTestDirectory(directory: string): Promise<void> {
+  await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

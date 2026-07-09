@@ -15,7 +15,7 @@ import type { ContextAttachment } from "../contracts/context";
 import type { ModelCapabilities } from "../contracts/config";
 import { modelCapabilitySummary } from "../model-capability-display";
 import type { ModelProviderIdentity } from "../model-provider-logos";
-import type { ContextWindowUsage } from "../../../panel-context-window-usage";
+import type { ContextWindowUsage } from "../context-window-usage";
 
 type ComposerChipFeedback = "model" | "reasoning" | "access";
 

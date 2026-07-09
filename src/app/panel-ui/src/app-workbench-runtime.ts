@@ -19,7 +19,7 @@ import {
   latestModelUsageFromEvents,
   latestModelUsageFromTranscript,
   type ContextWindowUsage,
-} from "../../panel-context-window-usage";
+} from "./context-window-usage";
 import { isConversationWaitingForUser } from "./conversation-state";
 import type { AppState } from "./app-state";
 import type {

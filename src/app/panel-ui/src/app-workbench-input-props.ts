@@ -8,7 +8,7 @@ import type {
   DeepRunStatus,
   DeepRunView,
 } from "./contracts/deep";
-import type { ContextWindowUsage } from "../../panel-context-window-usage";
+import type { ContextWindowUsage } from "./context-window-usage";
 
 export type WorkbenchInputPropsOptions = {
   readonly agentClusterActive: boolean;

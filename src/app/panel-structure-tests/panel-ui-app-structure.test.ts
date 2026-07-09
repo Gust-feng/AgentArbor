@@ -96,7 +96,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource("app-task-submit-flow.ts"),
     readPanelUiSource("app-observed-run-read-model.ts"),
     readPanelUiSource("app-run-projection.ts"),
-    readAppSource("panel-context-window-usage.ts"),
+    readPanelUiSource("context-window-usage.ts"),
     readPanelUiSource("app-run-controller.ts"),
     readPanelUiSource("app-conversation-session.ts"),
     readPanelUiSource("app-task-submission.ts"),
@@ -179,7 +179,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes('from "./app-model-usage-display"'), false);
   assert.equal(appShellState.includes('from "./app-model-usage-display"'), true);
   assert.equal(app.includes('from "../../panel-context-window-usage"'), false);
-  assert.equal(appWorkbenchRuntime.includes('from "../../panel-context-window-usage"'), true);
+  assert.equal(appWorkbenchRuntime.includes('from "../../panel-context-window-usage"'), false);
+  assert.equal(appWorkbenchRuntime.includes('from "./context-window-usage"'), true);
   assert.equal(app.includes("contextWindowUsageFrom({"), false);
   assert.equal(appWorkbenchRuntime.includes("contextWindowUsageFrom({"), true);
   assert.equal(app.includes("capabilityPlan?.modelCapabilities.contextWindowTokens"), false);

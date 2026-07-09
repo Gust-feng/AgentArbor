@@ -4,7 +4,7 @@ import {
   contextWindowUsageFrom,
   latestModelUsageFromEvents,
   latestModelUsageFromTranscript,
-} from "./panel-context-window-usage.js";
+} from "../src/context-window-usage.js";
 
 test("context window usage prefers provider input tokens", () => {
   const usage = contextWindowUsageFrom({

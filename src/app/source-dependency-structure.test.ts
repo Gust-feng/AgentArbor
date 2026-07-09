@@ -274,6 +274,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["panel-work-note-contracts.ts", 'export * from "./panel-read-model/run/panel-work-note-contracts.js";'],
     ["panel-work-notes.ts", 'export * from "./panel-read-model/run/panel-work-notes.js";'],
     ["panel-usage-statistics.ts", 'export * from "./panel-server/panel-usage-statistics.js";'],
+    ["panel-context-window-usage.ts", 'export * from "./panel-ui/src/context-window-usage.js";'],
     [
       "ordinary-transcript-event-policy.ts",
       'export * from "./panel-read-model/transcript/ordinary-transcript-event-policy.js";',
@@ -300,6 +301,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "panel-stream-tool-projection.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-work-notes.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-usage-statistics.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-context-window-usage.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "readable-text-fragments.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "transcript-reasoning.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "config-center", "config-center.test.ts")), true);
@@ -316,6 +318,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-stream-tool-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "run", "panel-work-notes.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-server", "panel-usage-statistics.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "tests", "context-window-usage.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "readable-text-fragments.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "transcript-reasoning.test.ts")), true);
 });
@@ -432,6 +435,7 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
     "app-task-submit-flow.ts",
     "chat-active-projection.ts",
     "chat-active-view.ts",
+    "context-window-usage.ts",
     "deep-sidebar-selection.ts",
     "deep-transcript.ts",
     "run-capability-state.ts",
@@ -442,6 +446,7 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
     "app-task-submit-flow.test.ts",
     "chat-active-projection.test.ts",
     "chat-active-view.test.ts",
+    "context-window-usage.test.ts",
     "deep-sidebar-selection.test.ts",
     "deep-transcript.test.ts",
     "run-capability-state.test.ts",
@@ -465,6 +470,7 @@ test("panel UI frontend support modules stay under panel-ui ownership", () => {
     "panel-ui-streaming.ts",
     "panel-ui-transcript-window.test.ts",
     "panel-ui-transcript-window.ts",
+    "panel-context-window-usage.test.ts",
   ];
 
   for (const fileName of movedPanelUiSourceFiles) {

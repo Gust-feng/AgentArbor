@@ -330,6 +330,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["run-read-model-summary.ts", 'export * from "./run-read-model/summary.js";'],
     ["restored-run-projection.ts", 'export * from "./run-read-model/restored-run-projection.js";'],
     ["sub-agent-stream-projection.ts", 'export * from "./run-read-model/sub-agent-stream-projection.js";'],
+    ["desktop-agent-contracts.ts", 'export * from "./desktop-agent/desktop-agent-contracts.js";'],
+    ["desktop-agent-prompts.ts", 'export * from "./desktop-agent/desktop-agent-prompts.js";'],
+    ["desktop-chat-session.ts", 'export * from "./desktop-agent/desktop-chat-session.js";'],
     ["panel-read-model-utils.ts", 'export * from "./run-read-model/value-utils.js";'],
     ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
     ["direction-handoff-derivation.ts", 'export * from "./underground/compat/direction-handoff-derivation.js";'],
@@ -1013,6 +1016,47 @@ test("desktop shell support modules stay under desktop ownership", async () => {
   }
 });
 
+test("desktop agent support modules stay under desktop-agent ownership", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const desktopAgentRoot = path.join(appRoot, "desktop-agent");
+  const desktopAgentFiles = [
+    "desktop-agent-contracts.ts",
+    "desktop-agent-prompts.ts",
+    "desktop-chat-session.ts",
+  ];
+  const ownerSources = await Promise.all([
+    readSource(path.join(appRoot, "desktop-agent-session-contracts.ts")),
+    readSource(path.join(appRoot, "desktop-agent-session-events.ts")),
+    readSource(path.join(appRoot, "desktop-agent-loop-preparation.ts")),
+    readSource(path.join(appRoot, "basic-agent-runtime", "context-pack.ts")),
+    readSource(path.join(appRoot, "basic-agent-runtime", "context-ledger.ts")),
+    readSource(path.join(appRoot, "basic-agent-runtime", "context-ledger-items.ts")),
+    readSource(path.join(appRoot, "basic-agent-runtime", "builtin-tool-runtime.ts")),
+    readSource(path.join(appRoot, "panel-server", "skill-service.ts")),
+    readSource(path.join(appRoot, "run-tool-boundary.ts")),
+  ]);
+
+  for (const fileName of desktopAgentFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), true, `${fileName} should keep a top-level compatibility facade`);
+    assert.equal(fileExistsSync(path.join(desktopAgentRoot, fileName)), true, `${fileName} should live in desktop-agent`);
+  }
+
+  const contractsFacade = await readSource(path.join(appRoot, "desktop-agent-contracts.ts"));
+  assert.equal(contractsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-contracts.js";');
+  const promptsFacade = await readSource(path.join(appRoot, "desktop-agent-prompts.ts"));
+  assert.equal(promptsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-prompts.js";');
+  const chatFacade = await readSource(path.join(appRoot, "desktop-chat-session.ts"));
+  assert.equal(chatFacade.trim(), 'export * from "./desktop-agent/desktop-chat-session.js";');
+
+  for (const source of ownerSources) {
+    assert.equal(source.includes("desktop-agent/desktop-agent-"), true);
+    assert.equal(source.includes('from "./desktop-agent-contracts.js"'), false);
+    assert.equal(source.includes('from "./desktop-agent-prompts.js"'), false);
+    assert.equal(source.includes('from "../desktop-agent-contracts.js"'), false);
+    assert.equal(source.includes('from "../desktop-agent-prompts.js"'), false);
+  }
+});
+
 test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const sources = await Promise.all([
@@ -1051,14 +1095,15 @@ test("ordinary Desktop Agent entry does not import legacy desktop chat compatibi
   const violations: string[] = [];
 
   for (const file of files) {
-    if (relativePath(file) === "src/app/desktop-chat-session.ts") {
+    const relative = relativePath(file);
+    if (relative === "src/app/desktop-chat-session.ts" || relative.endsWith(".test.ts")) {
       continue;
     }
 
     const source = await fs.readFile(file, "utf8");
     for (const specifier of importSpecifiersFrom(source)) {
       if (specifier.includes("desktop-chat-session")) {
-        violations.push(`${relativePath(file)} -> ${specifier}`);
+        violations.push(`${relative} -> ${specifier}`);
       }
     }
   }
@@ -1170,7 +1215,7 @@ test("Basic Agent context pack does not own model-visible tool exposure", async 
   const appRoot = path.join(process.cwd(), "src", "app");
   const basicRuntimeRoot = path.join(appRoot, "basic-agent-runtime");
   const promptAndContextSources = await Promise.all([
-    readSource(path.join(appRoot, "desktop-agent-prompts.ts")),
+    readSource(path.join(appRoot, "desktop-agent", "desktop-agent-prompts.ts")),
     readSource(path.join(basicRuntimeRoot, "context-pack.ts")),
     readSource(path.join(basicRuntimeRoot, "context-ledger.ts")),
     readSource(path.join(basicRuntimeRoot, "context-ledger-items.ts")),

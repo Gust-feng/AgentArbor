@@ -7,7 +7,7 @@ import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
   DesktopAgentSkillContext,
-} from "../desktop-agent-contracts.js";
+} from "../desktop-agent/desktop-agent-contracts.js";
 import type { BasicAgentContextItem, BasicAgentContextSkillFacts } from "./contracts.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import {

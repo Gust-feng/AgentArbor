@@ -7,7 +7,7 @@ import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
   DesktopAgentSkillContext,
-} from "../desktop-agent-contracts.js";
+} from "../desktop-agent/desktop-agent-contracts.js";
 import { createBasicAgentContextLedger } from "./context-ledger.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";

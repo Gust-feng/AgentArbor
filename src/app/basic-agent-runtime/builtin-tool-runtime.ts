@@ -15,7 +15,7 @@ import {
 import {
   createContextAttachmentTools,
 } from "../tool-center/adapters/context-attachment-tools.js";
-import type { DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
+import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-contracts.js";
 import {
   createHttpRequestTool,
 } from "../tool-center/adapters/http-request-tool.js";

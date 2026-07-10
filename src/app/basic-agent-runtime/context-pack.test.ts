@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTaskSoil } from "../../domain/soil/index.js";
-import { desktopAgentContextPack, type DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
+import { desktopAgentContextPack, type DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-prompts.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { safeDesktopAgentContextPack } from "../desktop-agent-session-projection.js";
 import { buildBasicAgentContextPack } from "./context-pack.js";

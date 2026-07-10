@@ -10,7 +10,7 @@ import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
   DesktopAgentSkillContext,
-} from "./desktop-agent-contracts.js";
+} from "./desktop-agent/desktop-agent-contracts.js";
 import type {
   ModelRuntimeContextWindowExceededEvent,
   ModelRuntimeEnvironment,
@@ -165,5 +165,5 @@ export type RunDesktopAgentSessionOptions = {
   readonly onContextWindowExceeded?: (event: ModelRuntimeContextWindowExceededEvent) => void | Promise<void>;
 };
 
-export type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
-export type { DesktopAgentInterruptedRunContext } from "./desktop-agent-contracts.js";
+export type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent/desktop-agent-contracts.js";
+export type { DesktopAgentInterruptedRunContext } from "./desktop-agent/desktop-agent-contracts.js";

@@ -2,7 +2,7 @@ import type { BasicAgentCapabilitySnapshot, RunCapabilityPlan, RunCapabilityReso
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolDefinition, ToolExecutionBroker } from "../domain/tools/index.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
-import type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
+import type { DesktopAgentSkillContext } from "./desktop-agent/desktop-agent-contracts.js";
 import { frozenToolDefinitionsForRun } from "./capability-tool-definitions.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 import { createRunCapabilityPlan } from "./model-capability-registry.js";

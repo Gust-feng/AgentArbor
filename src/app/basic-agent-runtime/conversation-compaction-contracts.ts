@@ -1,7 +1,7 @@
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { IntelligenceChannel, ModelMessage } from "../../domain/intelligence/index.js";
 import type { ToolDefinition } from "../../domain/tools/index.js";
-import type { DesktopAgentConversationMessage } from "../desktop-agent-contracts.js";
+import type { DesktopAgentConversationMessage } from "../desktop-agent/desktop-agent-contracts.js";
 import type { BasicAgentTokenCounter } from "./token-counter.js";
 
 export type BasicAgentConversationSummary = {

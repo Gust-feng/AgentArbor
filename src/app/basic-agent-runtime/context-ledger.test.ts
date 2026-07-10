@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { createTaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
-import type { DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
+import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-prompts.js";
 import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";
 import {
   appendToolEnvelopeToContextLedger,

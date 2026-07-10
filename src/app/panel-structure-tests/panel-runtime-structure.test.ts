@@ -79,7 +79,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
   ] = await Promise.all([
     readAppSource("desktop-agent-session.ts"),
     readAppSource("desktop-agent-session-contracts.ts"),
-    readAppSource("desktop-agent-contracts.ts"),
+    readAppSource(path.join("desktop-agent", "desktop-agent-contracts.ts")),
     readAppSource("desktop-agent-session-projection.ts"),
     readAppSource("desktop-agent-session-runtime.ts"),
     readAppSource("desktop-agent-loop-preparation.ts"),
@@ -696,6 +696,7 @@ test("ordinary desktop runtime does not adopt legacy model purposes", async () =
     desktopAgentExecution,
     turnPolicyAsset,
     desktopChatFacade,
+    desktopChatCompatibility,
   ] = await Promise.all([
     readAppSource("desktop-agent-session.ts"),
     readAppSource("desktop-agent-session-runtime.ts"),
@@ -704,6 +705,7 @@ test("ordinary desktop runtime does not adopt legacy model purposes", async () =
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
     readAppSource(path.join("agent-prompts", "desktop-root-agent-turn-policy.ts")),
     readAppSource("desktop-chat-session.ts"),
+    readAppSource(path.join("desktop-agent", "desktop-chat-session.ts")),
   ]);
 
   for (const [sourceName, source] of [
@@ -722,8 +724,9 @@ test("ordinary desktop runtime does not adopt legacy model purposes", async () =
 
   assert.equal(turnPolicyAsset.includes('purpose: "desktop_agent"'), true);
   assert.equal(session.includes('label: "desktop_agent"'), true);
-  assert.equal(desktopChatFacade.includes("@deprecated Compatibility exports for older callers"), true);
-  assert.equal(desktopChatFacade.includes("runDesktopAgentSession as runDesktopChatSession"), true);
+  assert.equal(desktopChatFacade.trim(), 'export * from "./desktop-agent/desktop-chat-session.js";');
+  assert.equal(desktopChatCompatibility.includes("@deprecated Compatibility exports for older callers"), true);
+  assert.equal(desktopChatCompatibility.includes("runDesktopAgentSession as runDesktopChatSession"), true);
 });
 
 type AppTypeScriptSource = {

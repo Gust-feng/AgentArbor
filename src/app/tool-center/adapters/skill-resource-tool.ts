@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { SkillDefinition } from "../../../domain/basic-agent/index.js";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
-import type { DesktopAgentSkillContext } from "../../desktop-agent-contracts.js";
+import type { DesktopAgentSkillContext } from "../../desktop-agent/desktop-agent-contracts.js";
 import {
   DEFAULT_SKILL_RESOURCE_MAX_CHARS,
   readSkillResource,

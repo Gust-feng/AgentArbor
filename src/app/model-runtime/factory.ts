@@ -25,7 +25,7 @@ import type { MinimalRuntime } from "../runtime.js";
 import { createDesktopBasicToolRegistry, type ToolRegistryFetchLike } from "../basic-agent-runtime/builtin-tool-runtime.js";
 import type { McpToolExecutorProvider } from "../basic-agent-runtime/builtin-tool-runtime.js";
 import type { ToolRegistryScope } from "../basic-agent-runtime/tool-registry.js";
-import type { DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
+import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-contracts.js";
 import type { LocalCommandProcessRegistry } from "../tool-center/adapters/local-workspace-command-tools.js";
 
 export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";

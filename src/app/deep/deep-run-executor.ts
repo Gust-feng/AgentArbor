@@ -38,7 +38,7 @@
  *     assertNoDirectChildOutputHandoff），不替代模型的语义判断（FR-003/FR-005）。
  *
  * 复用边界：
- *   - 复用 AgentTurnRuntime（经 deep-turn.executeDeepTurn）调模型；
+ *   - 经 deep-manager-turns 复用 AgentTurnRuntime 调模型；
  *   - 复用 child Agent runner 做 child 探索（默认 scheduler 工厂经 exploreDeepChild 兼容包装封装）；
  *   - 复用 DeepChildScheduler/DeepTaskBoard（闭环1-A 产出）做并发调度与运行中权威状态；
  *   - 复用 deep-model-io（契约/消息/解析器，含 correctionContext + task board 摘要投影，T2-7/T1-5）；
@@ -51,7 +51,6 @@
  * 命名红线（ADR-0025 决策三）：产物统一 SynthesizedConclusion/DeepExplorationReport，不出现
  * Plan/directionHandoffPackage/artifact/Fruits；DeepResearchBrief 是低心智计划投影，非 Plan。
  */
-import type { ObservationRef } from "../../domain/observation/contracts.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
@@ -76,15 +75,7 @@ import type {
 import {
   DEEP_DECISION_CONTRACT_ID,
   DEEP_DIRECT_ANSWER_CONTRACT_ID,
-  deepDecisionMessages,
-  deepDecisionOutputContract,
-  deepDirectAnswerMessages,
-  deepDirectAnswerOutputContract,
-  extractStructuredOutput,
-  parseDeepDecision,
-  parseDeepDirectAnswer,
 } from "./deep-model-io.js";
-import { executeDeepTurn } from "./deep-turn.js";
 import type { DeepRunControlEvent, DeepRunControlHandle } from "./deep-run-control.js";
 export {
   createDeepRunControlHandle,
@@ -101,6 +92,14 @@ import {
 } from "./child-delegation.js";
 import { continueDeepChildAgent } from "./deep-child-agent-runner.js";
 import { synthesizeDeepConclusion, buildParentSynthesisRecord } from "./parent-synthesis.js";
+import {
+  attemptDeepPartialSynthesis,
+  buildDeepManagerInputRefs,
+  collectDeepChildEvidenceRefs,
+  describeDeepManagerTurnError,
+  runDeepDirectAnswerTurn,
+  runDeepManagerDecisionTurn,
+} from "./deep-manager-turns.js";
 import { DeepTaskBoard } from "./deep-task-board.js";
 import {
   DeepChildScheduler,
@@ -440,15 +439,15 @@ export async function startDeepRun(
           scheduler.cancelPendingAndRunning(signal.reason);
           const drained = await scheduler.waitForAll();
           mergeTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
-          const partial = await attemptPartialSynthesis({
-            input,
-            config,
+          const partial = await attemptDeepPartialSynthesis({
+            context: input,
+            turnRuntime: config.turnRuntime,
             childSummaries,
             completedChildRuns,
             decisions,
             goal,
-            managerMaxModelRounds,
-            managerMaxToolRounds,
+            maxModelRounds: managerMaxModelRounds,
+            maxToolRounds: managerMaxToolRounds,
           });
           if (partial) {
             conclusion = partial.conclusion;
@@ -481,22 +480,23 @@ export async function startDeepRun(
       }
 
       board.setPhase("deciding");
-      const evidenceRefs = collectEvidenceRefs(childSummaries);
+      const evidenceRefs = collectDeepChildEvidenceRefs(childSummaries);
       await emitProgress(config, {
         kind: "decision.started",
         stepIndex,
         recordedAt: nowIso(),
       });
-      const decision = await runManagerDecisionStep({
-        input,
-        config,
+      const decision = await runDeepManagerDecisionTurn({
+        context: input,
+        turnRuntime: config.turnRuntime,
         scheduler,
         stepIndex,
         stepLimit,
         maxChildren,
-        managerMaxModelRounds,
-        managerMaxToolRounds,
-        managerMaxRetries,
+        maxModelRounds: managerMaxModelRounds,
+        maxToolRounds: managerMaxToolRounds,
+        maxRetries: managerMaxRetries,
+        retryBackoffMs: DEEP_TURN_RETRY_BACKOFF_MS,
         childSummaries,
         completedChildRuns,
         evidenceRefs,
@@ -521,14 +521,15 @@ export async function startDeepRun(
           stepIndex,
           recordedAt: nowIso(),
         });
-        conclusion = await runDirectAnswerStep({
-          input,
-          config,
+        conclusion = await runDeepDirectAnswerTurn({
+          context: input,
+          turnRuntime: config.turnRuntime,
           decision,
           evidenceRefs,
-          managerMaxModelRounds,
-          managerMaxToolRounds,
-          managerMaxRetries,
+          maxModelRounds: managerMaxModelRounds,
+          maxToolRounds: managerMaxToolRounds,
+          maxRetries: managerMaxRetries,
+          retryBackoffMs: DEEP_TURN_RETRY_BACKOFF_MS,
           goal,
           createdAt: nowIso(),
         });
@@ -725,7 +726,7 @@ export async function startDeepRun(
         }
         // T2-5：synthesize 分支委托 parent-synthesis.synthesizeDeepConclusion（受
         // assertNoDirectChildOutputHandoff 守 FR-005 硬约束）。
-        const evidenceRefsForSynthesis = collectEvidenceRefs(childSummaries);
+        const evidenceRefsForSynthesis = collectDeepChildEvidenceRefs(childSummaries);
         const outcome = await synthesizeDeepConclusion({
           turnRuntime: config.turnRuntime,
           traceId: input.traceId,
@@ -736,7 +737,7 @@ export async function startDeepRun(
           childSummaries,
           completedChildRuns,
           evidenceRefs: evidenceRefsForSynthesis,
-          inputRefs: buildManagerInputRefs(input, decisions),
+          inputRefs: buildDeepManagerInputRefs(input, decisions),
           maxModelRounds: managerMaxModelRounds,
           maxToolRounds: managerMaxToolRounds,
           createdAt: nowIso(),
@@ -776,15 +777,15 @@ export async function startDeepRun(
         scheduler.cancelPendingAndRunning(decision.uncertainty);
         const drained = await scheduler.waitForAll();
         mergeTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
-        const partial = await attemptPartialSynthesis({
-          input,
-          config,
+        const partial = await attemptDeepPartialSynthesis({
+          context: input,
+          turnRuntime: config.turnRuntime,
           childSummaries,
           completedChildRuns,
           decisions,
           goal,
-          managerMaxModelRounds,
-          managerMaxToolRounds,
+          maxModelRounds: managerMaxModelRounds,
+          maxToolRounds: managerMaxToolRounds,
         });
         if (partial) {
           conclusion = partial.conclusion;
@@ -820,7 +821,7 @@ export async function startDeepRun(
       break;
     }
   } catch (error) {
-    failure = errorMessage(error);
+    failure = describeDeepManagerTurnError(error);
     stopReason = "failed";
     finalStatus = "failed";
   }
@@ -839,15 +840,15 @@ export async function startDeepRun(
     stopReason = "step_limit_reached";
     if (childSummaries.length > 0) {
       board.setPhase("synthesizing");
-      const partial = await attemptPartialSynthesis({
-        input,
-        config,
+      const partial = await attemptDeepPartialSynthesis({
+        context: input,
+        turnRuntime: config.turnRuntime,
         childSummaries,
         completedChildRuns,
         decisions,
         goal,
-        managerMaxModelRounds,
-        managerMaxToolRounds,
+        maxModelRounds: managerMaxModelRounds,
+        maxToolRounds: managerMaxToolRounds,
       });
       if (partial) {
         conclusion = partial.conclusion;
@@ -895,269 +896,6 @@ export async function startDeepRun(
 // ---------------------------------------------------------------------------
 // Step 实现：manager 决策
 // ---------------------------------------------------------------------------
-
-type RunManagerDecisionStepInput = {
-  readonly input: StartDeepRunInput;
-  readonly config: DeepRunExecutorConfig;
-  /** T1-4：scheduler（提供 task board 摘要投影，FR-SPAWN-02）。 */
-  readonly scheduler: DeepChildScheduler;
-  readonly stepIndex: number;
-  readonly stepLimit: number;
-  readonly maxChildren: number;
-  readonly managerMaxModelRounds: number;
-  readonly managerMaxToolRounds: number;
-  /** EP1/EP2：模型轮失败重试上限（turn 异常 + 解析错误共享预算）。 */
-  readonly managerMaxRetries: number;
-  readonly childSummaries: readonly DeepChildSummary[];
-  readonly completedChildRuns: readonly ChildAgentRun[];
-  readonly evidenceRefs: readonly string[];
-  readonly priorDecisions: readonly DeepDelegationDecision[];
-  /** T2-7：用户中途纠正/补充上下文（FR-008），传入决策消息让 manager 据此调整。 */
-  readonly correctionContext?: readonly string[];
-  readonly goal: string;
-  readonly createdAt: string;
-};
-
-/**
- * 执行一个 manager 决策 step：经 AgentTurnRuntime 调模型（deep_decision）产出
- * DeepDelegationDecision。manager 是纯推理（allowedTools=[]，单轮），工具调用并入 child。
- * T2-7：correctionContext 非空时经 deepDecisionMessages 标注"用户纠正/补充"段。
- * T1-5：决策消息携带 task board 摘要投影（pending/running/completed/blocked/failed 数量 +
- * 最近完成/受阻/失败摘要），让 manager 据真实在途状态决策（FR-SPAWN-02）。
- *
- * EP1/EP2 工程鲁棒性（重试循环，守 AI-first 边界）：
- *   - EP1 模型 turn 瞬时异常（网络/超时/provider 抖动）：按 DEEP_TURN_RETRY_BACKOFF_MS 退避后重试；
- *   - EP2 输出解析失败（schema 校验错误）：把错误经 priorParseError 注入下一轮消息，让模型
- *     据错误自我修正后重新输出（不伪造决策）；
- *   - 两类失败共享 step.managerMaxRetries 重试预算；重试成功则正常返回，重试耗尽仍失败则
- *     向上抛出（被 startDeepRun 的 try/catch 捕获，run 置 failed，不伪装完成）。
- */
-async function runManagerDecisionStep(
-  step: RunManagerDecisionStepInput,
-): Promise<DeepDelegationDecision> {
-  const callerRef: ObservationRef = {
-    kind: "agent_run",
-    id: step.input.run.runId,
-    label: `${DEEP_MANAGER_AGENT_ID}:decision:${step.stepIndex}`,
-  };
-  const inputRefs = buildManagerInputRefs(step.input, step.priorDecisions);
-  // T1-5：投影 task board 摘要（安全结构化字段，不含 raw prompt/response/工具输出）。
-  const taskBoardSnapshot = step.scheduler.snapshot();
-  let lastError: unknown;
-  let priorParseError: string | undefined;
-  for (let attempt = 0; attempt <= step.managerMaxRetries; attempt += 1) {
-    let turn;
-    try {
-      turn = await executeDeepTurn({
-        turnRuntime: step.config.turnRuntime,
-        traceId: step.input.traceId,
-        goalId: step.input.goalId,
-        callerAgentId: DEEP_MANAGER_AGENT_ID,
-        callerRef,
-        purpose: "deep_decision",
-        outputContract: deepDecisionOutputContract(),
-        inputRefs,
-        messages: deepDecisionMessages({
-          goal: step.goal,
-          taskSoil: step.input.taskSoil,
-          stepIndex: step.stepIndex,
-          stepLimit: step.stepLimit,
-          childSummaries: step.childSummaries,
-          childRuns: step.completedChildRuns,
-          followUpContext: step.input.followUpContext,
-          intakeContext: step.input.intakeContext,
-          priorDecisionSummaries: step.priorDecisions.map((decision) => decision.decisionSummary),
-          evidenceRefs: step.evidenceRefs,
-          permissionBoundaryRefs: step.input.permissionBoundaryRefs,
-          maxChildren: step.maxChildren,
-          correctionContext: step.correctionContext,
-          // P6：传入 run 冻结的 capabilitySnapshot，让 manager 决策消息投影「可用工具清单」，
-          // 引导其设计 childSpec.allowedTools 时从真实可用工具中选取（不凭空编造）。
-          capabilitySnapshot: step.input.capabilitySnapshot,
-          // EP2：解析失败重试时注入错误反馈，让模型据错误自我修正。
-          priorParseError,
-          // T1-5：task board 摘要投影（FR-SPAWN-02）。
-          taskBoardSnapshot,
-        }),
-        allowedTools: [],
-        maxModelRounds: step.managerMaxModelRounds,
-        maxToolRounds: step.managerMaxToolRounds,
-      });
-    } catch (turnError) {
-      // EP1：模型 turn 瞬时异常。退避后重试（共享预算）；耗尽则记录后继续到抛出点。
-      lastError = turnError;
-      priorParseError = undefined;
-      if (attempt < step.managerMaxRetries) {
-        await sleepDeep(DEEP_TURN_RETRY_BACKOFF_MS * (attempt + 1));
-        continue;
-      }
-      break;
-    }
-    try {
-      const structured = extractStructuredOutput(turn.finalOutput);
-      return parseDeepDecision({
-        value: structured,
-        parentAgentId: DEEP_MANAGER_AGENT_ID,
-        createdAt: step.createdAt,
-      });
-    } catch (parseError) {
-      // EP2：输出解析失败。把错误注入下一轮反馈，让模型自我修正后重试（共享预算）。
-      lastError = parseError;
-      priorParseError = errorMessage(parseError);
-      if (attempt < step.managerMaxRetries) {
-        continue;
-      }
-      break;
-    }
-  }
-  // 重试耗尽仍失败：向上抛出（run 失败，守 AI-first 边界，不伪造决策）。
-  throw lastError;
-}
-
-// ---------------------------------------------------------------------------
-// Step 实现：direct_answer
-// ---------------------------------------------------------------------------
-
-type RunDirectAnswerStepInput = {
-  readonly input: StartDeepRunInput;
-  readonly config: DeepRunExecutorConfig;
-  readonly decision: DeepDelegationDecision;
-  readonly evidenceRefs: readonly string[];
-  readonly managerMaxModelRounds: number;
-  readonly managerMaxToolRounds: number;
-  /** EP1/EP2：模型轮失败重试上限（turn 异常 + 解析错误共享预算）。 */
-  readonly managerMaxRetries: number;
-  readonly goal: string;
-  readonly createdAt: string;
-};
-
-/**
- * direct_answer 分支：证据已足够时直接产出结论级 SynthesizedConclusion（简单任务，
- * 无需多角度探索）。经 deep_direct_answer 契约调模型解析。
- *
- * EP1/EP2 工程鲁棒性（重试循环，与 runManagerDecisionStep 同构，守 AI-first 边界）：
- *   - EP1 模型 turn 瞬时异常：按 DEEP_TURN_RETRY_BACKOFF_MS 退避后重试；
- *   - EP2 输出解析失败：把错误经 priorParseError 注入下一轮消息，让模型据错误自我
- *     修正后重新输出（不伪造结论）；
- *   - 两类失败共享 step.managerMaxRetries 重试预算；重试成功则正常返回，重试耗尽
- *     仍失败则向上抛出（被 startDeepRun 的 try/catch 捕获，run 置 failed，不伪装完成）。
- */
-async function runDirectAnswerStep(
-  step: RunDirectAnswerStepInput,
-): Promise<SynthesizedConclusion> {
-  const callerRef: ObservationRef = {
-    kind: "agent_run",
-    id: step.input.run.runId,
-    label: `${DEEP_MANAGER_AGENT_ID}:direct_answer`,
-  };
-  const inputRefs = buildManagerInputRefs(step.input, []);
-  let lastError: unknown;
-  let priorParseError: string | undefined;
-  for (let attempt = 0; attempt <= step.managerMaxRetries; attempt += 1) {
-    let turn;
-    try {
-      turn = await executeDeepTurn({
-        turnRuntime: step.config.turnRuntime,
-        traceId: step.input.traceId,
-        goalId: step.input.goalId,
-        callerAgentId: DEEP_MANAGER_AGENT_ID,
-        callerRef,
-        purpose: "deep_direct_answer",
-        outputContract: deepDirectAnswerOutputContract(),
-        inputRefs,
-        messages: deepDirectAnswerMessages({
-          goal: step.goal,
-          taskSoil: step.input.taskSoil,
-          decision: step.decision,
-          evidenceRefs: step.evidenceRefs,
-          // EP2：解析失败重试时注入错误反馈，让模型据错误自我修正。
-          priorParseError,
-        }),
-        allowedTools: [],
-        maxModelRounds: step.managerMaxModelRounds,
-        maxToolRounds: step.managerMaxToolRounds,
-      });
-    } catch (turnError) {
-      // EP1：模型 turn 瞬时异常。退避后重试（共享预算）；耗尽则记录后继续到抛出点。
-      lastError = turnError;
-      priorParseError = undefined;
-      if (attempt < step.managerMaxRetries) {
-        await sleepDeep(DEEP_TURN_RETRY_BACKOFF_MS * (attempt + 1));
-        continue;
-      }
-      break;
-    }
-    try {
-      const structured = extractStructuredOutput(turn.finalOutput);
-      return parseDeepDirectAnswer({
-        value: structured,
-        createdAt: step.createdAt,
-        evidenceRefs: step.evidenceRefs,
-      });
-    } catch (parseError) {
-      // EP2：输出解析失败。把错误注入下一轮反馈，让模型自我修正后重试（共享预算）。
-      lastError = parseError;
-      priorParseError = errorMessage(parseError);
-      if (attempt < step.managerMaxRetries) {
-        continue;
-      }
-      break;
-    }
-  }
-  // 重试耗尽仍失败：向上抛出（run 失败，守 AI-first 边界，不伪造结论）。
-  throw lastError;
-}
-
-// ---------------------------------------------------------------------------
-// T2-7 辅助：stop 时的 partial 综合（FR-008，保留材料 + 尝试收口）
-// ---------------------------------------------------------------------------
-
-type AttemptPartialSynthesisInput = {
-  readonly input: StartDeepRunInput;
-  readonly config: DeepRunExecutorConfig;
-  readonly childSummaries: readonly DeepChildSummary[];
-  readonly completedChildRuns: readonly ChildAgentRun[];
-  readonly decisions: readonly DeepDelegationDecision[];
-  readonly goal: string;
-  readonly managerMaxModelRounds: number;
-  readonly managerMaxToolRounds: number;
-};
-
-/**
- * 用户 stop 时若有 child 材料则尝试产出 partial conclusion（经综合，受
- * assertNoDirectChildOutputHandoff 约束）。无材料返回 undefined；综合失败（硬约束或
- * 模型异常）时返回 undefined 但不抛——停止意图优先，材料已保留在结果中（FR-008）。
- */
-async function attemptPartialSynthesis(
-  input: AttemptPartialSynthesisInput,
-): Promise<{ conclusion: SynthesizedConclusion; synthesisRecord: ParentSynthesisResult } | undefined> {
-  if (input.childSummaries.length === 0) {
-    return undefined;
-  }
-  const evidenceRefs = collectEvidenceRefs(input.childSummaries);
-  try {
-    const outcome = await synthesizeDeepConclusion({
-      turnRuntime: input.config.turnRuntime,
-      traceId: input.input.traceId,
-      goalId: input.input.goalId,
-      runId: input.input.run.runId,
-      goal: input.goal,
-      taskSoil: input.input.taskSoil,
-      childSummaries: input.childSummaries,
-      completedChildRuns: input.completedChildRuns,
-      evidenceRefs,
-      inputRefs: buildManagerInputRefs(input.input, input.decisions),
-      maxModelRounds: input.managerMaxModelRounds,
-      maxToolRounds: input.managerMaxToolRounds,
-      createdAt: nowIso(),
-    });
-    return outcome;
-  } catch {
-    // FR-008：停止意图优先。partial 综合失败（硬约束/模型异常）不阻塞停止；
-    // 已产出材料仍在结果中保留。partialSynthesis=false 体现在 control event。
-    return undefined;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // T1-4 辅助：默认 scheduler 装配 / brief 装配 / 材料合并 / step childrenAdded 回填 / 相位映射
@@ -1389,63 +1127,6 @@ function deepRunGoal(conversation: DeepConversation): string {
 }
 
 /**
- * 构造 manager turn 的 inputRefs（可观察引用链）：trace + goal + manager run +
- * taskSoil 上下文引用 + 历史 decision 引用。用于 AgentTurnRuntime 把上下文挂到
- * ModelRequest（经 sanitizedMessages 装配正文，inputRefs 承载可观察引用）。
- */
-function buildManagerInputRefs(
-  input: StartDeepRunInput,
-  decisions: readonly DeepDelegationDecision[],
-): ObservationRef[] {
-  const refs: ObservationRef[] = [
-    { kind: "trace", id: input.traceId },
-    { kind: "goal", id: input.goalId },
-    { kind: "agent_run", id: input.run.runId, label: "deep-manager-run" },
-  ];
-  for (const contextRef of input.taskSoil.contextRefs) {
-    refs.push({
-      kind: "artifact",
-      id: contextRef.ref,
-      label: contextRef.summary,
-    });
-  }
-  for (const decision of decisions) {
-    refs.push({ kind: "agent_delegation", id: decision.decisionId });
-  }
-  return refs;
-}
-
-async function emitProgress(
-  config: DeepRunExecutorConfig,
-  event: DeepRunProgressEvent,
-): Promise<void> {
-  if (config.onProgress === undefined) {
-    return;
-  }
-  try {
-    await config.onProgress(event);
-  } catch {
-    // 实时投影只服务观察体验，不能反向改变 manager 决策或 run 终态。
-  }
-}
-
-/**
- * 汇总已完成 child 的证据引用（去重），供 manager 决策/综合消息装配与结论 keyEvidenceRefs。
- */
-function collectEvidenceRefs(childSummaries: readonly DeepChildSummary[]): string[] {
-  const refs = new Set<string>();
-  for (const child of childSummaries) {
-    for (const ref of child.evidenceRefs) {
-      const trimmed = ref.trim();
-      if (trimmed.length > 0) {
-        refs.add(trimmed);
-      }
-    }
-  }
-  return [...refs];
-}
-
-/**
  * 返回带新 status 的 DeepRun（不可变更新）。终态（completed/failed/stopped）补 completedAt。
  */
 function withRunStatus(run: DeepRun, status: DeepRunStatus): DeepRun {
@@ -1459,20 +1140,18 @@ function withRunStatus(run: DeepRun, status: DeepRunStatus): DeepRun {
   };
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
+async function emitProgress(
+  config: DeepRunExecutorConfig,
+  event: DeepRunProgressEvent,
+): Promise<void> {
+  if (config.onProgress === undefined) {
+    return;
   }
-  return typeof error === "string" ? error : String(error);
-}
-
-/**
- * EP1：重试退避用的简易 sleep（基于 setTimeout 的 Promise）。线性退避时间由调用方
- * 传入（DEEP_TURN_RETRY_BACKOFF_MS * (attempt + 1)），失败重试之间给 provider 一点
- * 抖动恢复窗口；不参与决策语义，仅作工程鲁棒性兜底。
- */
-function sleepDeep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    await config.onProgress(event);
+  } catch {
+    // Observation updates must not change the model decision or run terminal state.
+  }
 }
 
 // ---------------------------------------------------------------------------

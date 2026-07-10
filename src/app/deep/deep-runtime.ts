@@ -85,22 +85,20 @@ import {
   buildAndPublishRunTree,
   buildExplorationReport,
 } from "./deep-run-tree.js";
-import {
-  continueDeepChildAgent,
-  type DeepChildParentMessageContext,
-} from "./deep-child-agent-runner.js";
+import { continueDeepChildAgent } from "./deep-child-agent-runner.js";
 import { DEEP_DECISION_CONTRACT_ID } from "./deep-model-io.js";
 import {
   DeepChildScheduler,
-  type DeepChildExecutedQueuedInstruction,
   type DeepChildInstructionRecord,
   type DeepChildInstructionQueueHandle,
   type ExploreDeepChildFactory,
 } from "./deep-child-scheduler.js";
+import type { DeepChildMessageStore } from "./deep-child-messages.js";
 import {
-  createDeepChildMessageRecord,
-  type DeepChildMessageStore,
-} from "./deep-child-messages.js";
+  loadDeepChildParentMessageContext,
+  persistDeepChildInstructionRecords,
+  persistExecutedQueuedChildMessages,
+} from "./deep-child-parent-messages.js";
 import type { DeepChildLoopContextStore } from "./deep-child-loop-contexts.js";
 import { DeepTaskBoard } from "./deep-task-board.js";
 import type { DeepChildPendingContinuationStore } from "./deep-child-continuations.js";
@@ -434,7 +432,7 @@ export async function executeDeepRun(
         );
       },
       onChildInstructionRecorded: (instruction) => {
-        recordedChildInstructions.push(cloneDeepChildInstructionRecord(instruction));
+        recordedChildInstructions.push({ ...instruction });
       },
     },
   });
@@ -542,126 +540,6 @@ export async function executeDeepRun(
     failure: executorResult.failure,
   };
 }
-
-async function persistDeepChildInstructionRecord(
-  store: DeepChildMessageStore | undefined,
-  runId: string,
-  instruction: DeepChildInstructionRecord,
-): Promise<void> {
-  if (store === undefined) {
-    return;
-  }
-  await store.upsert(createDeepChildMessageRecord({
-    runId,
-    childRunId: instruction.childRunId,
-    instructionId: instruction.instructionId,
-    messageRef: instruction.messageRef,
-    source: instruction.source,
-    status: instruction.status,
-    content: instruction.instruction,
-    requestedAt: instruction.requestedAt,
-    queuedAt: instruction.queuedAt,
-    executedAt: instruction.executedAt,
-    cancelledAt: instruction.cancelledAt,
-  }));
-}
-
-async function persistDeepChildInstructionRecords(
-  store: DeepChildMessageStore | undefined,
-  runId: string,
-  instructions: readonly DeepChildInstructionRecord[],
-): Promise<void> {
-  for (const instruction of instructions) {
-    await persistDeepChildInstructionRecord(store, runId, instruction);
-  }
-}
-
-async function loadDeepChildParentMessageContext(
-  store: DeepChildMessageStore | undefined,
-  runId: string,
-  childRunId: string,
-  recordedInstructions: readonly DeepChildInstructionRecord[] = [],
-): Promise<readonly DeepChildParentMessageContext[]> {
-  const contexts = new Map<string, DeepChildParentMessageContext>();
-  if (store === undefined) {
-    return parentMessageContextsFromRecordedInstructions(childRunId, recordedInstructions);
-  }
-  const records = await store.listForChild(runId, childRunId);
-  for (const record of records) {
-    if (record.status !== "executed") {
-      continue;
-    }
-    contexts.set(record.messageRef, {
-      messageRef: record.messageRef,
-      source: record.source,
-      status: record.status,
-      content: record.content,
-      updatedAt: record.updatedAt,
-    });
-  }
-  for (const context of parentMessageContextsFromRecordedInstructions(childRunId, recordedInstructions)) {
-    contexts.set(context.messageRef, context);
-  }
-  return [...contexts.values()].sort(compareParentMessageContexts);
-}
-
-function parentMessageContextsFromRecordedInstructions(
-  childRunId: string,
-  instructions: readonly DeepChildInstructionRecord[],
-): readonly DeepChildParentMessageContext[] {
-  return instructions
-    .filter((instruction) =>
-      instruction.childRunId === childRunId && instruction.status === "executed"
-    )
-    .map((instruction) => ({
-      messageRef: instruction.messageRef,
-      source: instruction.source,
-      status: instruction.status,
-      content: instruction.instruction,
-      updatedAt: instruction.executedAt ?? instruction.queuedAt ?? instruction.requestedAt,
-    }))
-    .sort(compareParentMessageContexts);
-}
-
-function compareParentMessageContexts(
-  left: DeepChildParentMessageContext,
-  right: DeepChildParentMessageContext,
-): number {
-  const byTime = left.updatedAt.localeCompare(right.updatedAt);
-  return byTime === 0 ? left.messageRef.localeCompare(right.messageRef) : byTime;
-}
-
-function cloneDeepChildInstructionRecord(
-  instruction: DeepChildInstructionRecord,
-): DeepChildInstructionRecord {
-  return { ...instruction };
-}
-
-async function persistExecutedQueuedChildMessages(
-  store: DeepChildMessageStore | undefined,
-  runId: string,
-  instructions: readonly DeepChildExecutedQueuedInstruction[],
-): Promise<void> {
-  if (store === undefined || instructions.length === 0) {
-    return;
-  }
-  await Promise.all(instructions.map((instruction) =>
-    store.upsert(createDeepChildMessageRecord({
-      runId,
-      childRunId: instruction.childRunId,
-      instructionId: instruction.instructionId,
-      messageRef: instruction.messageRef,
-      source: instruction.source,
-      status: "executed",
-      content: instruction.instruction,
-      requestedAt: instruction.queuedAt,
-      queuedAt: instruction.queuedAt,
-      executedAt: instruction.executedAt,
-    }))
-  ));
-}
-
-// ---------------------------------------------------------------------------
 
 function deepRuntimeGoal(conversation: DeepConversation): string {
   return conversation.currentObjective ?? conversation.goal;

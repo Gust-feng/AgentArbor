@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
-import type { UndergroundAiProviderFetch } from "./underground-ai-runtime.js";
+import type { UndergroundAiProviderFetch } from "../underground-ai-runtime.js";
 import { runRealAiSmoke } from "./real-ai-smoke-runner.js";
 
 const execFileAsync = promisify(execFile);

@@ -272,6 +272,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["run-mode-policy.ts", 'export * from "./run-runtime-core/run-mode-policy.js";'],
     ["run-facts-policy.ts", 'export * from "./run-runtime-core/run-facts-policy.js";'],
     ["agent-run-tree-attachment.ts", 'export * from "./run-read-model/agent-run-tree-attachment.js";'],
+    ["real-ai-smoke-runner.ts", 'export * from "./smoke/real-ai-smoke-runner.js";'],
     ["cognitive-work-session.ts", 'export * from "./underground/cognitive-work-session/cognitive-work-session.js";'],
     [
       "cognitive-work-session-contracts.ts",
@@ -365,6 +366,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "model-context-window-fallback.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "run-mode-policy.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "run-facts-policy.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "real-ai-smoke.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "cognitive-work-session.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "clarification-flow.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "minimal-loop.test.ts")), false);
@@ -394,6 +396,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "model-context-window-fallback.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "run-runtime-core", "run-mode-policy.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "run-runtime-core", "run-facts-policy.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "smoke", "real-ai-smoke.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "smoke", "real-ai-smoke-runner.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "smoke", "real-ai-smoke.test.ts")), true);
   assert.equal(
     fileExistsSync(path.join(appRoot, "underground", "cognitive-work-session", "cognitive-work-session.test.ts")),
     true
@@ -414,6 +419,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "assistant", "panel-agent-work-timeline-view.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "readable-text-fragments.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-read-model", "transcript", "transcript-reasoning.test.ts")), true);
+
+  const smokeCliFacade = await readSource(path.join(appRoot, "real-ai-smoke.ts"));
+  assert.equal(smokeCliFacade.trim(), 'import "./smoke/real-ai-smoke.js";');
 });
 
 test("shared read-model value helpers use neutral run-read-model ownership", async () => {

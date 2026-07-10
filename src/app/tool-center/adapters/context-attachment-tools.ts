@@ -36,7 +36,6 @@ import {
   sliceLines,
 } from "./context-attachment-text.js";
 import {
-  archiveTargetExtension,
   assertAttachmentAuthorized,
   attachmentEntries,
   attachmentSummary,
@@ -53,11 +52,11 @@ import {
   type ContextAttachmentToolOptions,
 } from "./context-attachment-access.js";
 import { createReadContextAttachmentImageTool } from "./context-attachment-image.js";
+import { createInspectContextAttachmentArchiveTool } from "./context-attachment-archive.js";
 import {
   normalizeZipEntryName,
   readZipEntries,
   readZipTextEntry,
-  type ZipEntry,
 } from "./context-attachment-zip.js";
 
 export type { ContextAttachmentToolOptions } from "./context-attachment-access.js";
@@ -69,7 +68,6 @@ const MAX_TABLE_READ_ROWS = 200;
 const DEFAULT_TABLE_READ_ROWS = 50;
 const MAX_TABLE_CELL_CHARS = 500;
 const MAX_SPREADSHEET_BYTES = 8 * 1024 * 1024;
-const MAX_ARCHIVE_LIST_ENTRIES = 200;
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
 const DEFAULT_PDF_MAX_CHARS = 128_000;
 type TableDelimiter = {
@@ -779,148 +777,6 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
   };
 }
 
-export function createInspectContextAttachmentArchiveTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
-  return {
-    definition: {
-      name: "inspect_context_attachment_archive",
-      description: "Inspect a ZIP archive context attachment and return bounded internal entry metadata without extracting files.",
-      modelContract: {
-        usageNotes: [
-          "Inspect a ZIP archive from a current context attachment selected by attachmentId or ref.",
-          "For project attachments, path is required and must point to the archive file inside the attached project.",
-          "This tool only lists ZIP entries; it does not extract files or read archive contents.",
-          "Use this before deciding whether an archive needs explicit extraction or a project attachment workflow.",
-          "Local absolute paths are not accepted as input and are not returned in output.",
-        ],
-        outputNotes: [
-          "result.archive=true means the archive directory was parsed.",
-          "result.entries[] contains archive-internal path, kind, byte size, compressed byte size, and unsafePath when a name is not safe to extract.",
-          "result.reason explains unsupported archive formats such as tar/gz/7z without returning local paths.",
-        ],
-        runtimeHints: [
-          { label: "supported formats", value: "zip" },
-          { label: "max returned entries", value: String(MAX_ARCHIVE_LIST_ENTRIES) },
-        ],
-        examples: [
-          { title: "Inspect attached ZIP", input: { attachmentId: "ctx_archive", limit: 80 } },
-          { title: "Inspect ZIP inside project", input: { attachmentId: "ctx_project", path: "assets/project.zip" } },
-        ],
-      },
-      metadata: {
-        category: "filesystem",
-        riskLevel: "low",
-        operationType: "read-only",
-        requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_400,
-          omitRawOutput: true,
-        },
-      },
-      inputSchema: {
-        type: "object",
-        properties: {
-          attachmentId: { type: "string", description: "Attachment id from Task Soil context, preferred over ref." },
-          ref: { type: "string", description: "Exact non-local context ref when attachmentId is unavailable." },
-          path: { type: "string", description: "Relative archive path inside a project attachment." },
-          limit: { type: "number", description: "Maximum archive entries to return." },
-        },
-      },
-    },
-    execute: async (input, context) => {
-      throwIfAborted(context.abortSignal);
-      const record = asRecord(input);
-      const entry = requireAttachmentEntry(options.taskSoil, record);
-      assertAttachmentAuthorized(entry);
-      const target = await resolveAttachmentTarget({
-        entry,
-        workspaceRoot: options.workspaceRoot ?? process.cwd(),
-        requestedPath: stringOrUndefined(record.path),
-        requireFile: true,
-        projectPathRequired: true,
-      });
-      const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment archive target could not be read.");
-      if (!stat.isFile()) {
-        throw new Error("inspect_context_attachment_archive expects a file target.");
-      }
-      const format = tableTargetFormat(entry.ref, target.targetPath);
-      if (format !== "archive" || archiveTargetExtension(entry.ref, target.targetPath) !== ".zip") {
-        return unsupportedArchiveResult({
-          entry,
-          target,
-          reason: format === "archive" ? "unsupported_archive_format" : "not_an_archive",
-          bytes: stat.size,
-        });
-      }
-      if (stat.size > MAX_SPREADSHEET_BYTES) {
-        return unsupportedArchiveResult({
-          entry,
-          target,
-          reason: "archive_file_too_large",
-          bytes: stat.size,
-        });
-      }
-      const buffer = await fs.readFile(target.targetAbsolutePath).catch(() => undefined);
-      if (buffer === undefined) {
-        return unsupportedArchiveResult({
-          entry,
-          target,
-          reason: "archive_file_unreadable",
-          bytes: stat.size,
-        });
-      }
-      const parsed = (() => {
-        try {
-          return { supported: true as const, entries: readZipEntries(buffer) };
-        } catch (error: unknown) {
-          return { supported: false as const, reason: archiveReadErrorReason(error) };
-        }
-      })();
-      if (!parsed.supported) {
-        return unsupportedArchiveResult({
-          entry,
-          target,
-          reason: parsed.reason,
-          bytes: stat.size,
-        });
-      }
-      const limit = Math.min(MAX_ARCHIVE_LIST_ENTRIES, positiveInteger(record.limit) ?? MAX_ARCHIVE_LIST_ENTRIES);
-      const archiveEntries = parsed.entries.map(archiveEntrySummary);
-      const returned = archiveEntries.slice(0, limit);
-      const truncated = archiveEntries.length > returned.length;
-      const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · zip archive · ${returned.length}${truncated ? ` of ${archiveEntries.length}` : ""} entries`;
-      return {
-        action: "inspect_context_attachment_archive",
-        status: "completed",
-        refId: `context-attachment:${entry.attachmentId}:archive:${safeRefToken(target.targetPath)}`,
-        summary,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          path: target.targetPath,
-          mimeType: entry.ref.metadata?.mimeType,
-          bytes: stat.size,
-          archive: true,
-          format: "zip",
-          entryCount: archiveEntries.length,
-          entriesReturned: returned.length,
-          entries: returned,
-        },
-        display: {
-          kind: "generic_tool_summary",
-          action: "inspect_context_attachment_archive",
-          summary,
-          items: returned.slice(0, 12).map((item) =>
-            [item.kind, item.path, item.bytes === undefined ? undefined : `${item.bytes} bytes`].filter(isString).join(" ")
-          ),
-        },
-        truncated,
-      };
-    },
-  };
-}
-
 export function createListContextAttachmentFilesTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
   return {
     definition: {
@@ -1284,38 +1140,6 @@ function unsupportedTableResult(input: {
   };
 }
 
-function unsupportedArchiveResult(input: {
-  readonly entry: AttachmentEntry;
-  readonly target: AttachmentTarget;
-  readonly reason: string;
-  readonly bytes?: number;
-}): Readonly<Record<string, unknown>> {
-  const summary = `${attachmentTitle(input.entry)}${input.target.targetPath === "." ? "" : `:${input.target.targetPath}`} · not readable as a ZIP archive · ${input.reason}`;
-  return {
-    action: "inspect_context_attachment_archive",
-    status: "completed",
-    refId: `context-attachment:${input.entry.attachmentId}:archive:${safeRefToken(input.target.targetPath)}`,
-    summary,
-    result: {
-      attachmentId: input.entry.attachmentId,
-      kind: input.entry.ref.kind,
-      title: attachmentTitle(input.entry),
-      path: input.target.targetPath,
-      mimeType: input.entry.ref.metadata?.mimeType,
-      bytes: input.bytes,
-      archive: false,
-      format: tableTargetFormat(input.entry.ref, input.target.targetPath),
-      readable: false,
-      reason: input.reason,
-    },
-    display: {
-      kind: "generic_tool_summary",
-      action: "inspect_context_attachment_archive",
-      summary,
-    },
-  };
-}
-
 function unsupportedPdfResult(input: {
   readonly entry: AttachmentEntry;
   readonly target: AttachmentTarget;
@@ -1347,42 +1171,6 @@ function unsupportedPdfResult(input: {
       summary,
     },
   };
-}
-
-function archiveReadErrorReason(error: unknown): string {
-  const message = error instanceof Error ? error.message : "";
-  return /^[a-z0-9_]+$/u.test(message) ? message : "archive_parse_failed";
-}
-
-function archiveEntrySummary(entry: ZipEntry): {
-  readonly path: string;
-  readonly name: string;
-  readonly kind: "directory" | "file";
-  readonly bytes: number;
-  readonly compressedBytes: number;
-  readonly compressionMethod: number;
-  readonly unsafePath: boolean;
-} {
-  const rawName = entry.name.replace(/\\/g, "/");
-  const normalized = normalizeZipEntryName(entry.name);
-  const unsafePath = isUnsafeArchivePath(rawName);
-  const safePath = truncateText(normalized.length === 0 ? "." : normalized, 500);
-  const basename = path.posix.basename(safePath.replace(/\/+$/u, "")) || safePath;
-  return {
-    path: safePath,
-    name: basename,
-    kind: safePath.endsWith("/") ? "directory" : "file",
-    bytes: entry.uncompressedSize,
-    compressedBytes: entry.compressedSize,
-    compressionMethod: entry.compressionMethod,
-    unsafePath,
-  };
-}
-
-function isUnsafeArchivePath(value: string): boolean {
-  return value.length === 0 ||
-    value.startsWith("/") ||
-    value.split("/").some((segment) => segment === "..");
 }
 
 function tableFactsFromRows(

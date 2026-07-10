@@ -9,7 +9,7 @@
  *   - 从 executor 结果**增量构建 domain {@link AgentRunTree}**（root manager + child runs +
  *     delegation decisions + parent syntheses），复用 agent-fabric 的 tree 操作；
  *   - 按 step 顺序发布事件序列（delegation_planned / child_started / child_completed /
- *     parent_synthesis_completed / control），复用 underground-events 的投影语义；
+ *     parent_synthesis_completed / control），复用 underground/events 的投影语义；
  *   - 持久化 deep 产物（run + agentRunTree + report + controlEvents）到**隔离 deep 分区**
  *     （DeepRunRecordStore，镜像 DeepConversationStore 口径）；
  *   - 产出 {@link DeepExplorationReport}（结论如何形成的可追溯证据链，FR-009）。
@@ -21,7 +21,7 @@
  *   - 复用 deep-run-executor.startDeepRun（manager 决策循环 + control point）；
  *   - 复用 agent-fabric（createAgentRunTree / appendChildRunToTree /
  *     appendDelegationDecisionToTree / appendParentSynthesisToTree / completeAgentRunTree）；
- *   - 复用 underground-events（publishAgentDelegationPlanned / publishChildAgentRunStarted /
+ *   - 复用 underground/events（publishAgentDelegationPlanned / publishChildAgentRunStarted /
  *     publishChildAgentRunCompleted / publishParentSynthesisCompleted）；
  *   - 复用 child-delegation.DEEP_MANAGER_AGENT_ID（manager agent id 口径）。
  *   - 不 import cognitive-work-session-* / underground/orchestrator*（legacy，design.md §4.1）。
@@ -1579,7 +1579,7 @@ function liveActiveNodeForFinal(
 }
 
 // ---------------------------------------------------------------------------
-// AgentRunTree 增量构建 + 事件序列发布（复用 agent-fabric + underground-events）
+// AgentRunTree 增量构建 + 事件序列发布（复用 agent-fabric + underground/events）
 // ---------------------------------------------------------------------------
 
 function appendDelegationDecisionUnique(

@@ -6,7 +6,7 @@ import type {
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { WorkspaceFolderSummary } from "../workspace-folder-summary.js";
 import { workspaceFolderSummaryFromPath } from "../workspace-folder-summary.js";
-import { safeAgentRunTreeRef } from "../underground-events.js";
+import { safeAgentRunTreeRef } from "../underground/events.js";
 import { projectConversationRunEnvelopeViewBase } from "../run-read-model/envelope.js";
 import { projectSharedConversationRunSummaryBase } from "../run-read-model/summary.js";
 import type {

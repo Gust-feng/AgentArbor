@@ -54,7 +54,7 @@ import {
   publishExplorationCandidatesProduced,
   publishRootletClustersStarted,
   publishUndergroundExplorationPlanned,
-} from "./underground-events.js";
+} from "./underground/events.js";
 import {
   requestConvergenceAiAdvisoryForCandidatePool,
   type ConvergenceAiAdvisory,

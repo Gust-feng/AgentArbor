@@ -256,7 +256,7 @@ HandoffStewardAgent
 | 文件 | 变更 |
 |---|---|
 | `src/app/underground-intelligence.ts` | 移除 rootlet 专用 intelligence 函数，改为通用 AgentTurnRuntime 策略构建 |
-| `src/app/underground-events.ts` | 保留事件发布函数，调整 payload 以适配新 agent 产出格式 |
+| `src/app/underground/events.ts` | 保留事件发布函数，调整 payload 以适配新 agent 产出格式 |
 | `src/app/underground-demo.ts` | 改用 Orchestrator 入口 |
 | `src/app/underground-direction-session.ts` | 改用 Orchestrator 入口 |
 | `src/app/underground-runner.ts` | 改用 Orchestrator 入口 |

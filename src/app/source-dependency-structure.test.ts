@@ -315,6 +315,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["underground-candidates.ts", 'export * from "./underground/primitives/underground-candidates.js";'],
     ["underground-convergence.ts", 'export * from "./underground/primitives/underground-convergence.js";'],
     ["underground-evidence.ts", 'export * from "./underground/primitives/underground-evidence.js";'],
+    ["underground-events.ts", 'export * from "./underground/events.js";'],
     ["underground-goal-profile.ts", 'export * from "./underground/primitives/underground-goal-profile.js";'],
     ["underground-report.ts", 'export * from "./underground/primitives/underground-report.js";'],
     ["underground-rootlets.ts", 'export * from "./underground/primitives/underground-rootlets.js";'],
@@ -1267,12 +1268,18 @@ test("Fake model provider keeps fixture families split", async () => {
 });
 
 test("Underground orchestrator keeps run factories split", async () => {
-  const [orchestrator, factories] = await Promise.all([
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const [orchestrator, factories, eventsFacade] = await Promise.all([
     readSource(path.join(process.cwd(), "src", "app", "underground", "orchestrator.ts")),
     readSource(path.join(process.cwd(), "src", "app", "underground", "orchestrator-factories.ts")),
+    readSource(path.join(appRoot, "underground-events.ts")),
   ]);
 
   assert.equal(orchestrator.includes('from "./orchestrator-factories.js"'), true);
+  assert.equal(orchestrator.includes('from "./events.js"'), true);
+  assert.equal(orchestrator.includes("../underground-events.js"), false);
+  assert.equal(eventsFacade.trim(), 'export * from "./underground/events.js";');
+  assert.equal(fileExistsSync(path.join(appRoot, "underground", "events.ts")), true);
   assert.equal(orchestrator.includes("function createManagerAgentSpec"), false);
   assert.equal(orchestrator.includes("function createRootletChildRuns"), false);
   assert.equal(orchestrator.includes("function createDelegationDecisionFromGrowth"), false);

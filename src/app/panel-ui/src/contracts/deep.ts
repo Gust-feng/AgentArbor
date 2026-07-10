@@ -7,7 +7,7 @@
  *   - [`projectDeepRunView`](src/app/panel-server/deep-routes.ts:632)
  *   - [`DeepRunStreamEvent`](src/app/deep/deep-events.ts:68)（SSE 安全投影）
  *   - [`DeepExplorationReport`](src/app/deep/contracts.ts:285)（report 完整领域形状）
- *   - [`safeAgentRunTreeRef`](src/app/underground-events.ts:374)（view.agentRunTree 计数投影）
+ *   - [`safeAgentRunTreeRef`](src/app/underground/events.ts:374)（view.agentRunTree 计数投影）
  *
  * 设计原则：
  *   - 纯类型镜像，自包含（不 import `src/app` 或 `src/domain`，避免前后端编译耦合）。
@@ -178,7 +178,7 @@ export type DeepRunRecord = {
 /**
  * AgentRunTree 的安全计数投影（不含 raw 材料）。
  *
- * 镜像 [`safeAgentRunTreeRef`](src/app/underground-events.ts:374)：
+ * 镜像 [`safeAgentRunTreeRef`](src/app/underground/events.ts:374)：
  * 仅暴露 treeId / root 标识 / 状态 / 三类子记录计数，供前端快速判断 run 结构规模。
  * 完整 run tree（含 childRuns / delegationDecisions / parentSyntheses 详情）在
  * [`DeepRunView.report.agentRunTree`](#deeprunview) 中。

@@ -85,7 +85,7 @@ DeepRuntime 通过契约使用以下共享设施，不复制其实现：
 - `ToolCenter` + `Confirmation Gate`：child 工具调用经同一套执行与确认门。
 - `RuntimeDatabase`：deep 会话 / run tree / synthesis / 打断点持久化进同一存储（独立 deep 分区）。
 - `Context Ledger` / `Context Pack` / `capabilitySnapshot` 冻结机制 / `Skill Context`：与普通 Agent 共享，复用而非另起。
-- `RunEvent` 安全投影与 `underground-events.ts` 事件投影口径：deep 投影沿用同一安全口径，不另建投影实现。
+- `RunEvent` 安全投影与 `src/app/underground/events.ts` 事件投影口径：deep 投影沿用同一安全口径，不另建投影实现。
 - 模型运行时 / IntelligenceChannel：deep 经此接入 provider，不直接绑定外部 LLM SDK（遵循 `AGENTS.md` 模型接入层独立模块演进边界）。
 
 ## 默认入口与隔离

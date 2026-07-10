@@ -15,8 +15,8 @@
  * buildAndPublishRunTree 倒序重建。publisher 本身只提供发布能力，"实时 vs 事后重建"
  * 由调用方装配决定。
  *
- * 复用边界：复用 {@link safeAgentRunTreeRef}（underground-events）的 tree 投影语义。
- * 旧 `underground-events.ts` 的 `agent.*` publisher 仍服务旧 underground cluster 兼容链，
+ * 复用边界：复用 {@link safeAgentRunTreeRef}（underground/events）的 tree 投影语义。
+ * 旧 `underground/events.ts` 的 `agent.*` publisher 仍服务旧 underground cluster 兼容链，
  * 不在此模块修改；deep-runtime 改用本模块发布 `deep.*`。
  *
  * 命名红线：消费 contracts.ts 的 SynthesizedConclusion；不引入 Plan/artifact/Fruits。
@@ -31,7 +31,7 @@ import type {
   DelegationDecision,
   ParentSynthesisResult,
 } from "../../domain/underground/agent-fabric.js";
-import { safeAgentRunTreeRef } from "../underground-events.js";
+import { safeAgentRunTreeRef } from "../underground/events.js";
 import type { DeepRunControlEvent } from "./deep-run-executor.js";
 import type { SynthesizedConclusion } from "./contracts.js";
 import { DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";

@@ -87,7 +87,7 @@ import {
   publishChildAgentRunStarted,
   publishChildAgentRunWaiting,
   publishParentSynthesisCompleted,
-} from "../../underground-events.js";
+} from "../events.js";
 
 // Legacy explicit deep prototype. Keep it isolated from the default Desktop Agent path
 // until the deep / Agent cluster product entry is restarted with a fresh contract.

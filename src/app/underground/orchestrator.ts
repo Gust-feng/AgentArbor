@@ -75,7 +75,7 @@ import {
   publishParentSynthesisCompleted,
   publishRootletClustersStarted,
   publishUndergroundExplorationPlanned,
-} from "../underground-events.js";
+} from "./events.js";
 import {
   UNDERGROUND_CENTER_MANAGER_AGENT_ID,
   createAutonomyReview,

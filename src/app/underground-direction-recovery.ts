@@ -31,7 +31,7 @@ import {
   createClarificationRecoveryDirectionMaterial,
   createDefaultClarificationResponse,
 } from "./underground/clarification/clarification-recovery.js";
-import { publishConvergenceReviewCompleted } from "./underground-events.js";
+import { publishConvergenceReviewCompleted } from "./underground/events.js";
 import type {
   UndergroundDirectionSessionResult,
   UndergroundDirectionSessionTerminalStatus,

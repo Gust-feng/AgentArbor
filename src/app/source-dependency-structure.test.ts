@@ -272,6 +272,35 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["run-mode-policy.ts", 'export * from "./run-runtime-core/run-mode-policy.js";'],
     ["run-facts-policy.ts", 'export * from "./run-runtime-core/run-facts-policy.js";'],
     ["agent-run-tree-attachment.ts", 'export * from "./run-read-model/agent-run-tree-attachment.js";'],
+    ["cognitive-work-session.ts", 'export * from "./underground/cognitive-work-session/cognitive-work-session.js";'],
+    [
+      "cognitive-work-session-contracts.ts",
+      'export * from "./underground/cognitive-work-session/cognitive-work-session-contracts.js";',
+    ],
+    [
+      "cognitive-work-session-fabric.ts",
+      'export * from "./underground/cognitive-work-session/cognitive-work-session-fabric.js";',
+    ],
+    [
+      "cognitive-work-session-model-io.ts",
+      'export * from "./underground/cognitive-work-session/cognitive-work-session-model-io.js";',
+    ],
+    [
+      "cognitive-work-session-result.ts",
+      'export * from "./underground/cognitive-work-session/cognitive-work-session-result.js";',
+    ],
+    [
+      "cognitive-work-session-run-projection.ts",
+      'export * from "./underground/cognitive-work-session/cognitive-work-session-run-projection.js";',
+    ],
+    [
+      "cognitive-work-session-runtime.ts",
+      'export * from "./underground/cognitive-work-session/cognitive-work-session-runtime.js";',
+    ],
+    [
+      "cognitive-work-session-safe.ts",
+      'export * from "./underground/cognitive-work-session/cognitive-work-session-safe.js";',
+    ],
     ["clarification-flow.ts", 'export * from "./underground/clarification/clarification-flow.js";'],
     ["clarification-recovery.ts", 'export * from "./underground/clarification/clarification-recovery.js";'],
     ["minimal-direction.ts", 'export * from "./underground/minimal/minimal-direction.js";'],
@@ -336,6 +365,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "model-context-window-fallback.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "run-mode-policy.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "run-facts-policy.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "cognitive-work-session.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "clarification-flow.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "minimal-loop.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil-workspace.test.ts")), false);
@@ -364,6 +394,10 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "model-context-window-fallback.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "run-runtime-core", "run-mode-policy.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "run-runtime-core", "run-facts-policy.test.ts")), true);
+  assert.equal(
+    fileExistsSync(path.join(appRoot, "underground", "cognitive-work-session", "cognitive-work-session.test.ts")),
+    true
+  );
   assert.equal(fileExistsSync(path.join(appRoot, "underground", "clarification", "clarification-flow.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "underground", "minimal", "minimal-loop.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "task-soil-workspace.test.ts")), true);

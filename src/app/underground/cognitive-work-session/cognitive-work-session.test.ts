@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModelProvider, ModelRequest, ModelResponse } from "../domain/intelligence/index.js";
+import type { ModelProvider, ModelRequest, ModelResponse } from "../../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -8,10 +8,10 @@ import type {
   ToolExecutionBroker,
   ToolExecutionContext,
   ToolPermissionCheck,
-} from "../domain/tools/index.js";
-import { createId, nowIso } from "../kernel/id.js";
-import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
-import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
+} from "../../../domain/tools/index.js";
+import { createId, nowIso } from "../../../kernel/id.js";
+import { NativeIntelligenceChannel } from "../../../kernel/intelligence/channel.js";
+import { pendingModelOutputValidation } from "../../../kernel/intelligence/validation.js";
 import { runCognitiveWorkSession } from "./cognitive-work-session.js";
 
 test("Cognitive Work Session fake AI completes with child delegation, parent synthesis, and report artifact", async () => {

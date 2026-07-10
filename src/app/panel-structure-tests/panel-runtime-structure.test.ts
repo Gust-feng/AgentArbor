@@ -606,14 +606,14 @@ test("panel run event helpers stay owned by panel read model run", async () => {
 
 test("cognitive work session keeps helpers split by runtime concern", async () => {
   const [session, contracts, modelIo, fabric, result, runProjection, runtime, safe] = await Promise.all([
-    readAppSource("cognitive-work-session.ts"),
-    readAppSource("cognitive-work-session-contracts.ts"),
-    readAppSource("cognitive-work-session-model-io.ts"),
-    readAppSource("cognitive-work-session-fabric.ts"),
-    readAppSource("cognitive-work-session-result.ts"),
-    readAppSource("cognitive-work-session-run-projection.ts"),
-    readAppSource("cognitive-work-session-runtime.ts"),
-    readAppSource("cognitive-work-session-safe.ts"),
+    readAppSource(path.join("underground", "cognitive-work-session", "cognitive-work-session.ts")),
+    readAppSource(path.join("underground", "cognitive-work-session", "cognitive-work-session-contracts.ts")),
+    readAppSource(path.join("underground", "cognitive-work-session", "cognitive-work-session-model-io.ts")),
+    readAppSource(path.join("underground", "cognitive-work-session", "cognitive-work-session-fabric.ts")),
+    readAppSource(path.join("underground", "cognitive-work-session", "cognitive-work-session-result.ts")),
+    readAppSource(path.join("underground", "cognitive-work-session", "cognitive-work-session-run-projection.ts")),
+    readAppSource(path.join("underground", "cognitive-work-session", "cognitive-work-session-runtime.ts")),
+    readAppSource(path.join("underground", "cognitive-work-session", "cognitive-work-session-safe.ts")),
   ]);
 
   assert.equal(session.includes('from "./cognitive-work-session-contracts.js"'), true);

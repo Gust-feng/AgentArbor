@@ -5,7 +5,7 @@ import { createMinimalRuntime, type MinimalRuntime } from "./runtime.js";
 import {
   runCognitiveWorkSession,
   type CognitiveWorkSessionResult,
-} from "./cognitive-work-session.js";
+} from "./underground/cognitive-work-session/cognitive-work-session.js";
 import {
   createUndergroundAiRuntimeConfig,
   UndergroundAiConfigurationError,

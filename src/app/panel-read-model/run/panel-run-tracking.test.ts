@@ -4,7 +4,7 @@ import type { ArborMessage, ArborMessageType } from "../../../domain/common.js";
 import { ROOTLET_CLUSTER_KINDS } from "../../../domain/underground/index.js";
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../../run-read-model/agent-run-tree-attachment.js";
-import type { PanelRunSummary } from "../../panel-run-summary.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 import { createPanelRunTrace, createPanelRunTracking } from "./panel-run-tracking.js";
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../../domain/config/index.js";
 

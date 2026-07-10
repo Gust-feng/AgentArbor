@@ -2,7 +2,7 @@ import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } f
 import type { RunObservationEventView, RunObservationSnapshot } from "../../../domain/observation/index.js";
 import type { CandidatePoolCounts, RootletClusterKind } from "../../../domain/underground/index.js";
 import type { ModelRuntimeMode } from "../../model-runtime/index.js";
-import type { PanelRunSummary } from "../../panel-run-summary.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
 
 export type PanelObservationReadModel = Pick<

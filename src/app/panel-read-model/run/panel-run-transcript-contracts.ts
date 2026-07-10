@@ -7,7 +7,7 @@ import type { PanelTranscriptModelCall } from "../transcript/panel-transcript-mo
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
-import type { PanelRunSummary } from "../../panel-run-summary.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 import type { AgentWorkNote } from "./panel-work-note-contracts.js";
 
 export type PanelRunStepToolItem = {

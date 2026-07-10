@@ -19,7 +19,7 @@ import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-at
 import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-contracts.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
-import type { RunSummary } from "../run-summary.js";
+import type { RunSummary } from "../run-read-model/run-summary.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { BasicAgentCanvasProjection, BasicAgentRunJob, BasicAgentRunJobStore, BasicAgentRunKind, BasicAgentRunMode } from "./run-job.js";
 

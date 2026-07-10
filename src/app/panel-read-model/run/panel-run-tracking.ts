@@ -9,7 +9,7 @@ import { ROOTLET_CLUSTER_KINDS, type CandidatePoolCounts, type RootletClusterKin
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../../run-read-model/agent-run-tree-attachment.js";
 import type { ModelRuntimeMode } from "../../model-runtime/index.js";
-import type { PanelRunSummary } from "../../panel-run-summary.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
 import { rootletKindFromAdviceContractId } from "../transcript/panel-transcript-model-calls.js";
 import { asRecord, numberOrUndefined, stringOrUndefined } from "../../run-read-model/value-utils.js";

@@ -24,7 +24,7 @@ import {
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
-import type { PanelRunSummaryPayload } from "../../panel-run-summary.js";
+import type { PanelRunSummaryPayload } from "./panel-run-summary.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 import {
   subAgentStreamDetailFromPayload,

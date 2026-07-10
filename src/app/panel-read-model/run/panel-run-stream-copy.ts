@@ -7,7 +7,7 @@ import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
 import { cleanConfirmationSummary, confirmationActionSummaryText } from "../../confirmation-copy.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
-import type { PanelRunSummary, PanelRunSummaryPayload } from "../../panel-run-summary.js";
+import type { PanelRunSummary, PanelRunSummaryPayload } from "./panel-run-summary.js";
 import { friendlyUserFacingFailureText, friendlyUserFacingModelFailureText } from "../../visible-text-safety.js";
 import { modelRequestedSummary as projectedModelRequestedSummary } from "../panel-model-progress-copy.js";
 

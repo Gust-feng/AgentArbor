@@ -396,8 +396,10 @@ test("shared panel run orchestration uses neutral run mode naming", async () => 
 });
 
 test("shared run summary types use app-level contracts before panel aliases", async () => {
-  const [summaryContract, panelSummaryFacade, undergroundSummary] = await Promise.all([
+  const [summaryContract, summaryFacade, panelSummaryContract, panelSummaryFacade, undergroundSummary] = await Promise.all([
+    readAppSource(path.join("run-read-model", "run-summary.ts")),
     readAppSource("run-summary.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-summary.ts")),
     readAppSource("panel-run-summary.ts"),
     readAppSource("underground-demo-summary.ts"),
   ]);
@@ -423,11 +425,13 @@ test("shared run summary types use app-level contracts before panel aliases", as
   assert.equal(summaryContract.includes("export type RunSummary = {"), true);
   assert.equal(summaryContract.includes("export type RunSummaryAiInput = ModelRuntimeSummaryInput"), true);
   assert.equal(summaryContract.includes("export type RunSummaryPayload"), true);
-  assert.equal(panelSummaryFacade.includes("underground-demo-summary.js"), false);
-  assert.equal(panelSummaryFacade.includes('from "./run-summary.js"'), true);
-  assert.equal(panelSummaryFacade.includes("export type PanelRunSummary = RunSummary"), true);
-  assert.equal(panelSummaryFacade.includes("export type PanelRunSummaryPayload = RunSummaryPayload"), true);
-  assert.equal(undergroundSummary.includes('from "./run-summary.js"'), true);
+  assert.equal(summaryFacade.trim(), 'export * from "./run-read-model/run-summary.js";');
+  assert.equal(panelSummaryContract.includes("underground-demo-summary.js"), false);
+  assert.equal(panelSummaryContract.includes('from "../../run-read-model/run-summary.js"'), true);
+  assert.equal(panelSummaryContract.includes("export type PanelRunSummary = RunSummary"), true);
+  assert.equal(panelSummaryContract.includes("export type PanelRunSummaryPayload = RunSummaryPayload"), true);
+  assert.equal(panelSummaryFacade.trim(), 'export * from "./panel-read-model/run/panel-run-summary.js";');
+  assert.equal(undergroundSummary.includes('from "./run-read-model/run-summary.js"'), true);
   assert.equal(undergroundSummary.includes("export type UndergroundDemoSummary = RunSummary"), true);
   assert.equal(undergroundSummary.includes("export type UndergroundDemoAiInput = RunSummaryAiInput"), true);
   for (const source of basicAgentRunSummarySources) {
@@ -436,13 +440,15 @@ test("shared run summary types use app-level contracts before panel aliases", as
     assert.equal(source.includes("PanelRunSummary"), false);
     assert.equal(source.includes("panel-run-summary.js"), false);
     assert.equal(source.includes("RunSummary"), true);
-    assert.equal(source.includes("run-summary.js"), true);
+    assert.equal(source.includes("run-read-model/run-summary.js"), true);
   }
   for (const source of panelRunSummarySources) {
     assert.equal(source.includes("underground-demo-summary.js"), false);
     assert.equal(source.includes("UndergroundDemoSummary"), false);
     assert.equal(source.includes("PanelRunSummary"), true);
     assert.equal(source.includes("panel-run-summary.js"), true);
+    assert.equal(source.includes("../panel-run-summary.js"), false);
+    assert.equal(source.includes("../../panel-run-summary.js"), false);
   }
 });
 

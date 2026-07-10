@@ -22,7 +22,7 @@ import type {
 } from "../desktop-agent-session-contracts.js";
 import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
-import type { PanelRunSummary } from "../panel-run-summary.js";
+import type { PanelRunSummary } from "../panel-read-model/run/panel-run-summary.js";
 import type { ModelRuntimeConfig } from "../model-runtime/index.js";
 import type { McpToolExecutorProvider } from "../basic-agent-runtime/builtin-tool-runtime.js";
 import type { LocalCommandProcessRegistry } from "../tool-center/adapters/local-workspace-command-tools.js";

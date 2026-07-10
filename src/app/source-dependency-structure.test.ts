@@ -272,6 +272,8 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["run-mode-policy.ts", 'export * from "./run-runtime-core/run-mode-policy.js";'],
     ["run-facts-policy.ts", 'export * from "./run-runtime-core/run-facts-policy.js";'],
     ["agent-run-tree-attachment.ts", 'export * from "./run-read-model/agent-run-tree-attachment.js";'],
+    ["run-summary.ts", 'export * from "./run-read-model/run-summary.js";'],
+    ["panel-run-summary.ts", 'export * from "./panel-read-model/run/panel-run-summary.js";'],
     ["real-ai-smoke-runner.ts", 'export * from "./smoke/real-ai-smoke-runner.js";'],
     ["cognitive-work-session.ts", 'export * from "./underground/cognitive-work-session/cognitive-work-session.js";'],
     [

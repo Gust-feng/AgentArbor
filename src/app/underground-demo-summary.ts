@@ -23,7 +23,7 @@ import type {
   RunSummaryAiInput,
   RunSummaryAiSummary,
   RunSummaryToolSummary,
-} from "./run-summary.js";
+} from "./run-read-model/run-summary.js";
 
 export type UndergroundDemoSummary = RunSummary;
 

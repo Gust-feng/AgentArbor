@@ -55,6 +55,11 @@ import {
   deepChildParentInstructionMessageRef,
   summarizeDeepChildParentInstruction,
 } from "./deep-child-parent-instruction-history.js";
+import {
+  executeDeepChildScheduledRun,
+  mapDeepChildExecutionResult,
+  type DeepChildScheduledInstruction,
+} from "./deep-child-scheduler-execution.js";
 import type {
   ContinueDeepChildFactory,
   DeepChildCancelResult,
@@ -91,17 +96,6 @@ export type {
 /** scheduler 默认并发上限（design.md §3.2：生产默认 3，测试可注入 2）。 */
 export const DEEP_SCHEDULER_DEFAULT_CONCURRENCY = 3;
 
-/** Raw instruction retained only until the scheduler executes or cancels it. */
-type QueuedChildInstruction = {
-  readonly instructionId: string;
-  readonly messageRef: string;
-  readonly childRunId: string;
-  readonly instruction: string;
-  readonly source: DeepChildQueuedInstructionSource;
-  readonly review?: ChildAgentRunParentReview;
-  readonly queuedAt: string;
-};
-
 /**
  * DeepChildScheduler —— per-run 并发调度器。
  *
@@ -126,7 +120,7 @@ export class DeepChildScheduler {
   /** 自上次 waitForProgress 以来新终态的材料缓冲。 */
   private terminalBuffer: DeepChildTerminalMaterial[] = [];
   /** pending/running child 接收到的父层补充指令；当前 loop 结束后按 FIFO 同 childRunId 续跑。 */
-  private readonly queuedInstructionsByChildRunId: Map<string, QueuedChildInstruction[]> = new Map();
+  private readonly queuedInstructionsByChildRunId: Map<string, DeepChildScheduledInstruction[]> = new Map();
   /** waitForProgress 的等待者（任一终态时被唤醒）。 */
   private progressWaiters: Array<() => void> = [];
   /** executor 每步设置的当前 stepIndex，供生命周期回调装配进度事件元数据（默认 0）。 */
@@ -295,27 +289,11 @@ export class DeepChildScheduler {
         },
       );
       pendingContinuation = result.pendingContinuation;
-      if (result.completedRun.status === "blocked" || result.summary.status === "blocked") {
-        terminalTask = this.board.markBlocked(
-          task.taskId,
-          result.summary,
-          result.completedRun.pendingApproval,
-        );
-      } else if (result.completedRun.status === "failed" || result.summary.status === "failed") {
-        terminalTask = this.board.markFailed(
-          task.taskId,
-          result.completedRun.failureReason ?? result.summary.uncertainty ?? "child Agent run failed",
-          result.summary,
-        );
-      } else if (result.completedRun.status === "interrupted" || result.summary.status === "interrupted") {
-        terminalTask = this.board.markInterrupted(
-          task.taskId,
-          result.completedRun.failureReason ?? result.summary.uncertainty ?? "child Agent run interrupted",
-          result.summary,
-        );
-      } else {
-        terminalTask = this.board.markCompleted(task.taskId, result.summary);
-      }
+      terminalTask = mapDeepChildExecutionResult({
+        board: this.board,
+        taskId: task.taskId,
+        result,
+      });
       summary = result.summary;
       completedRun = this.applyParentInstructionHistory(result.completedRun);
       this.childRunById.set(input.childRun.childRunId, completedRun);
@@ -399,7 +377,7 @@ export class DeepChildScheduler {
       };
     }
     const instructionId = createId("deep-child-instruction");
-    const queuedInstruction: QueuedChildInstruction = {
+    const queuedInstruction: DeepChildScheduledInstruction = {
       instructionId,
       messageRef: deepChildParentInstructionMessageRef(instructionId),
       childRunId: input.childRunId,
@@ -695,142 +673,24 @@ export class DeepChildScheduler {
    * 终态后 notifyTerminal 把材料交还 waitForProgress / waitForAll。
    */
   private async runChild(taskId: string, childRun: ChildAgentRun, childSpec: DeepChildSpec): Promise<void> {
-    let summary: DeepChildSummary;
-    let completedRun: ChildAgentRun;
-    let terminalTask: DeepChildTask;
-    let pendingContinuation: ExploreDeepChildResult["pendingContinuation"];
-    let executedQueuedInstructions: readonly DeepChildExecutedQueuedInstruction[] = [];
-    try {
-      const queuedResult = await this.runQueuedContinuations({
-        childRunId: childRun.childRunId,
-        initial: await this.exploreFactory(childRun, childSpec),
-        fallbackChildSpec: childSpec,
-      });
-      const result = queuedResult.result;
-      executedQueuedInstructions = queuedResult.executedQueuedInstructions;
-      pendingContinuation = result.pendingContinuation;
-      this.childRunById.set(childRun.childRunId, result.completedRun);
-      if (result.completedRun.status === "blocked" || result.summary.status === "blocked") {
-        terminalTask = this.board.markBlocked(
-          taskId,
-          result.summary,
-          result.completedRun.pendingApproval,
-        );
-      } else if (result.completedRun.status === "failed" || result.summary.status === "failed") {
-        terminalTask = this.board.markFailed(
-          taskId,
-          result.completedRun.failureReason ?? result.summary.uncertainty ?? "child Agent run failed",
-          result.summary,
-        );
-      } else if (result.completedRun.status === "interrupted" || result.summary.status === "interrupted") {
-        terminalTask = this.board.markInterrupted(
-          taskId,
-          result.completedRun.failureReason ?? result.summary.uncertainty ?? "child Agent run interrupted",
-          result.summary,
-        );
-      } else {
-        terminalTask = this.board.markCompleted(taskId, result.summary);
-      }
-      summary = result.summary;
-      completedRun = result.completedRun;
-    } catch (error) {
-      // FR-SCH-04 / FR-SAFE-01：单 child 抛错经 buildFailedChildExploration 降级为 failed
-      // task，不击穿 run。failed task 作为失败材料进父层（综合模型据 [status=failed] 降权）。
-      const reason = errorMessage(error);
-      const failedSeed = this.applyParentInstructionHistory(
-        this.childRunById.get(childRun.childRunId) ?? childRun,
-      );
-      const failed = buildFailedChildExploration({
-        childRun: failedSeed,
-        childSpec,
-        reason,
-        failedAt: nowIso(),
-      });
-      summary = failed.summary;
-      completedRun = this.applyParentInstructionHistory(failed.completedRun);
-      terminalTask = this.board.markFailed(taskId, reason, summary);
-      this.childRunById.set(childRun.childRunId, completedRun);
-    }
-    const material: DeepChildTerminalMaterial = {
-      task: terminalTask,
-      summary,
-      completedRun,
-      pendingContinuation,
-      executedQueuedInstructions,
-    };
+    const material = await executeDeepChildScheduledRun({
+      board: this.board,
+      taskId,
+      childRun,
+      childSpec,
+      childRunById: this.childRunById,
+      exploreFactory: this.exploreFactory,
+      continueFactory: this.continueFactory,
+      applyParentInstructionHistory: (run) => this.applyParentInstructionHistory(run),
+      takeNextInstruction: (childRunId) => this.shiftQueuedInstruction(childRunId),
+      markParentInstructionExecuted: (childRunId, instructionId, executedAt) =>
+        this.markParentInstructionExecuted(childRunId, instructionId, executedAt),
+      recordInstruction: (instruction) => this.invokeInstructionRecorded(instruction),
+    });
     this.invokeTerminal(material);
     this.notifyTerminal(material);
   }
-
-  private async runQueuedContinuations(input: {
-    readonly childRunId: string;
-    readonly initial: ExploreDeepChildResult;
-    readonly fallbackChildSpec: DeepChildSpec;
-  }): Promise<{
-    readonly result: ExploreDeepChildResult;
-    readonly executedQueuedInstructions: readonly DeepChildExecutedQueuedInstruction[];
-  }> {
-    let current: ExploreDeepChildResult = {
-      ...input.initial,
-      completedRun: this.applyParentInstructionHistory(input.initial.completedRun),
-    };
-    const executedQueuedInstructions: DeepChildExecutedQueuedInstruction[] = [];
-    for (;;) {
-      const queued = this.shiftQueuedInstruction(input.childRunId);
-      if (queued === undefined) {
-        return { result: current, executedQueuedInstructions };
-      }
-      if (this.continueFactory === undefined) {
-        return { result: current, executedQueuedInstructions };
-      }
-      const executedAt = nowIso();
-      this.markParentInstructionExecuted(queued.childRunId, queued.instructionId, executedAt);
-      const executedInstructionRecord: DeepChildInstructionRecord = {
-        instructionId: queued.instructionId,
-        messageRef: queued.messageRef,
-        childRunId: queued.childRunId,
-        source: queued.source,
-        status: "executed",
-        instruction: queued.instruction,
-        review: cloneDeepChildParentReview(queued.review),
-        requestedAt: queued.queuedAt,
-        queuedAt: queued.queuedAt,
-        executedAt,
-      };
-      try {
-        current = await this.continueFactory(
-          this.applyParentInstructionHistory(current.completedRun),
-          current.summary.spec ?? input.fallbackChildSpec,
-          queued.instruction,
-          current.summary,
-          {
-            instructionId: queued.instructionId,
-            messageRef: queued.messageRef,
-            source: queued.source,
-            review: cloneDeepChildParentReview(queued.review),
-          },
-        );
-      } finally {
-        this.invokeInstructionRecorded(executedInstructionRecord);
-      }
-      current = {
-        ...current,
-        completedRun: this.applyParentInstructionHistory(current.completedRun),
-      };
-      executedQueuedInstructions.push({
-        instructionId: queued.instructionId,
-        messageRef: queued.messageRef,
-        childRunId: queued.childRunId,
-        instruction: queued.instruction,
-        source: queued.source,
-        review: cloneDeepChildParentReview(queued.review),
-        queuedAt: queued.queuedAt,
-        executedAt,
-      });
-    }
-  }
-
-  private shiftQueuedInstruction(childRunId: string): QueuedChildInstruction | undefined {
+  private shiftQueuedInstruction(childRunId: string): DeepChildScheduledInstruction | undefined {
     const queue = this.queuedInstructionsByChildRunId.get(childRunId);
     if (queue === undefined || queue.length === 0) {
       return undefined;

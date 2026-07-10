@@ -33,14 +33,7 @@
  */
 import type {
   ChildAgentRun,
-  ChildAgentRunParentInstruction,
   ChildAgentRunParentReview,
-} from "../../domain/underground/agent-fabric.js";
-import {
-  markChildAgentRunParentInstructionCancelled,
-  markChildAgentRunParentInstructionExecuted,
-  recordChildAgentRunParentInstruction,
-  replaceChildAgentRunParentInstructions,
 } from "../../domain/underground/agent-fabric.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type {
@@ -56,6 +49,12 @@ import {
   type ExploreDeepChildResult,
 } from "./child-delegation.js";
 import { DeepTaskBoard } from "./deep-task-board.js";
+import {
+  DeepChildParentInstructionHistory,
+  cloneDeepChildParentReview,
+  deepChildParentInstructionMessageRef,
+  summarizeDeepChildParentInstruction,
+} from "./deep-child-parent-instruction-history.js";
 
 /** scheduler 默认并发上限（design.md §3.2：生产默认 3，测试可注入 2）。 */
 export const DEEP_SCHEDULER_DEFAULT_CONCURRENCY = 3;
@@ -270,7 +269,7 @@ export class DeepChildScheduler {
   /** childRunId → ChildAgentRun（deriveDeepChildren 产出，供 startQueued 调 exploreFactory）。 */
   private readonly childRunById: Map<string, ChildAgentRun> = new Map();
   /** childRunId -> 父层对该 child run 的追加/取消/执行操作历史。 */
-  private readonly parentInstructionsByChildRunId: Map<string, readonly ChildAgentRunParentInstruction[]> = new Map();
+  private readonly parentInstructionHistory = new DeepChildParentInstructionHistory();
   /** 当前在途（已启动未终态）的 child 数。 */
   private inFlightCount = 0;
   /** 自上次 waitForProgress 以来新终态的材料缓冲。 */
@@ -402,15 +401,15 @@ export class DeepChildScheduler {
     }
     const requestedAt = nowIso();
     const instructionId = createId("deep-child-instruction");
-    const messageRef = parentInstructionMessageRef(instructionId);
+    const messageRef = deepChildParentInstructionMessageRef(instructionId);
     const childRunForContinuation = this.recordParentInstructionForRun(input.childRun, {
       instructionId,
       messageRef,
       childRunId: input.childRun.childRunId,
       source: input.source ?? "manager",
       status: "executed",
-      instructionSummary: parentInstructionSummary(input.parentInstruction),
-      review: cloneParentReview(input.review),
+      instructionSummary: summarizeDeepChildParentInstruction(input.parentInstruction),
+      review: cloneDeepChildParentReview(input.review),
       requestedAt,
       executedAt: requestedAt,
     });
@@ -421,7 +420,7 @@ export class DeepChildScheduler {
       source: input.source ?? "manager",
       status: "executed",
       instruction: input.parentInstruction,
-      review: cloneParentReview(input.review),
+      review: cloneDeepChildParentReview(input.review),
       requestedAt,
       executedAt: requestedAt,
     };
@@ -441,7 +440,7 @@ export class DeepChildScheduler {
           instructionId,
           messageRef,
           source: input.source ?? "manager",
-          review: cloneParentReview(input.review),
+          review: cloneDeepChildParentReview(input.review),
         },
       );
       pendingContinuation = result.pendingContinuation;
@@ -551,11 +550,11 @@ export class DeepChildScheduler {
     const instructionId = createId("deep-child-instruction");
     const queuedInstruction: QueuedChildInstruction = {
       instructionId,
-      messageRef: parentInstructionMessageRef(instructionId),
+      messageRef: deepChildParentInstructionMessageRef(instructionId),
       childRunId: input.childRunId,
       instruction,
       source: input.source ?? "control_api",
-      review: cloneParentReview(input.review),
+      review: cloneDeepChildParentReview(input.review),
       queuedAt: nowIso(),
     };
     this.recordParentInstruction(input.childRunId, {
@@ -564,8 +563,8 @@ export class DeepChildScheduler {
       childRunId: queuedInstruction.childRunId,
       source: queuedInstruction.source,
       status: "queued",
-      instructionSummary: parentInstructionSummary(instruction),
-      review: cloneParentReview(queuedInstruction.review),
+      instructionSummary: summarizeDeepChildParentInstruction(instruction),
+      review: cloneDeepChildParentReview(queuedInstruction.review),
       requestedAt: queuedInstruction.queuedAt,
       queuedAt: queuedInstruction.queuedAt,
     });
@@ -576,7 +575,7 @@ export class DeepChildScheduler {
       source: queuedInstruction.source,
       status: "queued",
       instruction,
-      review: cloneParentReview(queuedInstruction.review),
+      review: cloneDeepChildParentReview(queuedInstruction.review),
       requestedAt: queuedInstruction.queuedAt,
       queuedAt: queuedInstruction.queuedAt,
     });
@@ -682,7 +681,7 @@ export class DeepChildScheduler {
         previousSummary: task.summary,
         parentInstruction: instruction,
         source: input.source ?? "control_api",
-        review: cloneParentReview(input.review),
+        review: cloneDeepChildParentReview(input.review),
       });
       this.notifyTerminal(material);
       return {
@@ -942,7 +941,7 @@ export class DeepChildScheduler {
         source: queued.source,
         status: "executed",
         instruction: queued.instruction,
-        review: cloneParentReview(queued.review),
+        review: cloneDeepChildParentReview(queued.review),
         requestedAt: queued.queuedAt,
         queuedAt: queued.queuedAt,
         executedAt,
@@ -957,7 +956,7 @@ export class DeepChildScheduler {
             instructionId: queued.instructionId,
             messageRef: queued.messageRef,
             source: queued.source,
-            review: cloneParentReview(queued.review),
+            review: cloneDeepChildParentReview(queued.review),
           },
         );
       } finally {
@@ -973,7 +972,7 @@ export class DeepChildScheduler {
         childRunId: queued.childRunId,
         instruction: queued.instruction,
         source: queued.source,
-        review: cloneParentReview(queued.review),
+        review: cloneDeepChildParentReview(queued.review),
         queuedAt: queued.queuedAt,
         executedAt,
       });
@@ -1053,109 +1052,50 @@ export class DeepChildScheduler {
     return this.board.snapshot().tasks.find((task) => task.childRunId === childRunId);
   }
 
-  private recordParentInstruction(
-    childRunId: string,
-    instruction: ChildAgentRunParentInstruction & { readonly childRunId?: string },
-  ): void {
-    const childRun = this.childRunById.get(childRunId);
-    if (childRun !== undefined) {
-      this.recordParentInstructionForRun(childRun, instruction);
-      return;
+  private recordParentInstruction(childRunId: string, instruction: Parameters<DeepChildParentInstructionHistory["record"]>[2]): void {
+    const updated = this.parentInstructionHistory.record(
+      childRunId,
+      this.childRunById.get(childRunId),
+      instruction,
+    );
+    if (updated !== undefined) {
+      this.childRunById.set(childRunId, updated);
     }
-    const history = this.parentInstructionsByChildRunId.get(childRunId) ?? [];
-    const existingIndex = history.findIndex((item) => item.instructionId === instruction.instructionId);
-    const next = cloneParentInstruction(instruction);
-    const merged =
-      existingIndex >= 0
-        ? history.map((item, index) => index === existingIndex ? next : cloneParentInstruction(item))
-        : [...history.map(cloneParentInstruction), next];
-    this.parentInstructionsByChildRunId.set(childRunId, merged);
   }
 
   private recordParentInstructionForRun(
     childRun: ChildAgentRun,
-    instruction: ChildAgentRunParentInstruction & { readonly childRunId?: string },
+    instruction: Parameters<DeepChildParentInstructionHistory["record"]>[2],
   ): ChildAgentRun {
-    this.seedParentInstructionHistory(childRun);
-    const updated = recordChildAgentRunParentInstruction(
-      this.applyParentInstructionHistory(childRun),
-      instruction,
-    );
-    this.parentInstructionsByChildRunId.set(
-      childRun.childRunId,
-      updated.parentInstructions?.map(cloneParentInstruction) ?? [],
-    );
-    this.childRunById.set(childRun.childRunId, updated);
-    return updated;
+    return this.parentInstructionHistory.record(childRun.childRunId, childRun, instruction) ?? childRun;
   }
 
   private markParentInstructionExecuted(childRunId: string, instructionId: string, executedAt: string): void {
-    const childRun = this.childRunById.get(childRunId);
-    if (childRun !== undefined) {
-      const updated = markChildAgentRunParentInstructionExecuted(
-        this.applyParentInstructionHistory(childRun),
-        instructionId,
-        executedAt,
-      );
-      this.parentInstructionsByChildRunId.set(
-        childRunId,
-        updated.parentInstructions?.map(cloneParentInstruction) ?? [],
-      );
-      this.childRunById.set(childRunId, updated);
-      return;
-    }
-    const history = this.parentInstructionsByChildRunId.get(childRunId) ?? [];
-    this.parentInstructionsByChildRunId.set(
+    const updated = this.parentInstructionHistory.markExecuted(
       childRunId,
-      history.map((instruction) =>
-        instruction.instructionId === instructionId
-          ? { ...instruction, status: "executed", executedAt }
-          : cloneParentInstruction(instruction)
-      ),
+      this.childRunById.get(childRunId),
+      instructionId,
+      executedAt,
     );
+    if (updated !== undefined) {
+      this.childRunById.set(childRunId, updated);
+    }
   }
 
   private markParentInstructionCancelled(childRunId: string, instructionId: string, cancelledAt: string): void {
-    const childRun = this.childRunById.get(childRunId);
-    if (childRun !== undefined) {
-      const updated = markChildAgentRunParentInstructionCancelled(
-        this.applyParentInstructionHistory(childRun),
-        instructionId,
-        cancelledAt,
-      );
-      this.parentInstructionsByChildRunId.set(
-        childRunId,
-        updated.parentInstructions?.map(cloneParentInstruction) ?? [],
-      );
-      this.childRunById.set(childRunId, updated);
-      return;
-    }
-    const history = this.parentInstructionsByChildRunId.get(childRunId) ?? [];
-    this.parentInstructionsByChildRunId.set(
+    const updated = this.parentInstructionHistory.markCancelled(
       childRunId,
-      history.map((instruction) =>
-        instruction.instructionId === instructionId && instruction.status === "queued"
-          ? { ...instruction, status: "cancelled", cancelledAt }
-          : cloneParentInstruction(instruction)
-      ),
+      this.childRunById.get(childRunId),
+      instructionId,
+      cancelledAt,
     );
+    if (updated !== undefined) {
+      this.childRunById.set(childRunId, updated);
+    }
   }
 
   private applyParentInstructionHistory(childRun: ChildAgentRun): ChildAgentRun {
-    this.seedParentInstructionHistory(childRun);
-    return replaceChildAgentRunParentInstructions(
-      childRun,
-      this.parentInstructionsByChildRunId.get(childRun.childRunId),
-    );
-  }
-
-  private seedParentInstructionHistory(childRun: ChildAgentRun): void {
-    if (!this.parentInstructionsByChildRunId.has(childRun.childRunId)) {
-      this.parentInstructionsByChildRunId.set(
-        childRun.childRunId,
-        childRun.parentInstructions?.map(cloneParentInstruction) ?? [],
-      );
-    }
+    return this.parentInstructionHistory.apply(childRun);
   }
 
   /**
@@ -1182,37 +1122,4 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return typeof error === "string" ? error : String(error);
-}
-
-function parentInstructionSummary(instruction: string): string {
-  const normalized = instruction.replace(/\s+/g, " ").trim();
-  if (normalized.length <= 180) {
-    return normalized;
-  }
-  return `${normalized.slice(0, 177)}...`;
-}
-
-function parentInstructionMessageRef(instructionId: string): string {
-  return `child_message:${instructionId}`;
-}
-
-function cloneParentInstruction(
-  instruction: ChildAgentRunParentInstruction,
-): ChildAgentRunParentInstruction {
-  return {
-    ...instruction,
-    review: cloneParentReview(instruction.review),
-  };
-}
-
-function cloneParentReview(
-  review: ChildAgentRunParentReview | undefined,
-): ChildAgentRunParentReview | undefined {
-  if (review === undefined) {
-    return undefined;
-  }
-  return {
-    ...review,
-    evidenceRefs: [...review.evidenceRefs],
-  };
 }

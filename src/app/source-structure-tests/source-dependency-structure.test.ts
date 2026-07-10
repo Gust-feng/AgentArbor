@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
-import { existsSync, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-
-type SourceGraph = ReadonlyMap<string, readonly string[]>;
-
-const SOURCE_EXTENSIONS = [".ts", ".tsx"] as const;
-const IMPORT_SPECIFIER_PATTERN =
-  /(?:import|export)\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?["']([^"']+)["']/g;
+import {
+  buildSourceGraph,
+  collectOrdinaryAgentSourceFiles,
+  collectSourceFiles,
+  fileExistsSync,
+  findDependencyCycles,
+  importSpecifiersFrom,
+  isSiblingBarrelImport,
+  isTestAssetSource,
+  readSource,
+  relativePath,
+  resolveRelativeImports,
+} from "./source-structure-test-utils.js";
 
 test("app and domain source dependencies do not form local cycles", async () => {
   for (const area of ["src/app", "src/domain"]) {
@@ -624,6 +631,24 @@ test("panel structure tests stay in the panel structure test module", () => {
   for (const fileName of movedStructureTests) {
     assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
     assert.equal(fileExistsSync(path.join(structureTestRoot, fileName)), true, `${fileName} should live in panel-structure-tests`);
+  }
+});
+
+test("source structure tests stay in the source structure test module", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const sourceStructureTestRoot = path.join(appRoot, "source-structure-tests");
+  const sourceStructureFiles = [
+    "source-dependency-structure.test.ts",
+    "source-structure-test-utils.ts",
+  ];
+
+  for (const fileName of sourceStructureFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(
+      fileExistsSync(path.join(sourceStructureTestRoot, fileName)),
+      true,
+      `${fileName} should live in source-structure-tests`
+    );
   }
 });
 
@@ -1520,182 +1545,3 @@ test("legacy underground compat chain stays under underground/compat ownership",
     assert.equal(source.includes("../../underground-agent-cluster-runtime.js"), false);
   }
 });
-
-async function buildSourceGraph(area: string): Promise<SourceGraph> {
-  const root = process.cwd();
-  const sourceRoot = path.join(root, area);
-  const files = await collectSourceFiles(sourceRoot);
-  const fileSet = new Set(files);
-  const graph = new Map<string, string[]>();
-
-  for (const file of files) {
-    const source = await fs.readFile(file, "utf8");
-    graph.set(file, resolveRelativeImports(file, source).filter((target) => fileSet.has(target)));
-  }
-
-  return graph;
-}
-
-async function collectSourceFiles(directory: string): Promise<string[]> {
-  const entries = await fs.readdir(directory, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    if (entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git") {
-      continue;
-    }
-
-    const fullPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await collectSourceFiles(fullPath)));
-    } else if (SOURCE_EXTENSIONS.includes(path.extname(entry.name) as (typeof SOURCE_EXTENSIONS)[number])) {
-      files.push(fullPath);
-    }
-  }
-
-  return files;
-}
-
-async function collectOrdinaryAgentSourceFiles(): Promise<string[]> {
-  const appRoot = path.join(process.cwd(), "src", "app");
-  const panelServerRoot = path.join(appRoot, "panel-server");
-  const files = [
-    ...(await collectSourceFiles(path.join(appRoot, "basic-agent-runtime"))),
-    ...(await collectDirectSourceFiles(path.join(appRoot, "desktop-agent"), (name) =>
-      name.startsWith("desktop-agent-session")
-    )),
-    ...(await collectDirectSourceFiles(panelServerRoot, (name) => name.startsWith("basic-agent"))),
-    ...(await collectDirectSourceFiles(panelServerRoot, (name) => name.startsWith("conversation"))),
-  ];
-
-  return [...new Set(files)].sort((left, right) => relativePath(left).localeCompare(relativePath(right)));
-}
-
-async function collectDirectSourceFiles(directory: string, matchesName: (name: string) => boolean): Promise<string[]> {
-  const entries = await fs.readdir(directory, { withFileTypes: true });
-
-  return entries
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        matchesName(entry.name) &&
-        SOURCE_EXTENSIONS.includes(path.extname(entry.name) as (typeof SOURCE_EXTENSIONS)[number])
-    )
-    .map((entry) => path.join(directory, entry.name));
-}
-
-async function readSource(file: string): Promise<string> {
-  return fs.readFile(file, "utf8");
-}
-
-function resolveRelativeImports(file: string, source: string): string[] {
-  const targets: string[] = [];
-  for (const specifier of importSpecifiersFrom(source)) {
-    if (!specifier.startsWith(".")) {
-      continue;
-    }
-
-    const target = resolveSourceSpecifier(file, specifier);
-    if (target !== undefined) {
-      targets.push(target);
-    }
-  }
-
-  return targets;
-}
-
-function importSpecifiersFrom(source: string): string[] {
-  return [...source.matchAll(IMPORT_SPECIFIER_PATTERN)].map((match) => match[1]);
-}
-
-function isSiblingBarrelImport(specifier: string): boolean {
-  return /^(\.\.\/|\.\/)[^/]+\/index\.js$/.test(specifier);
-}
-
-function resolveSourceSpecifier(file: string, specifier: string): string | undefined {
-  const withoutJsExtension = path
-    .resolve(path.dirname(file), specifier)
-    .replace(/\.js$/, "");
-  const candidates = [
-    `${withoutJsExtension}.ts`,
-    `${withoutJsExtension}.tsx`,
-    path.join(withoutJsExtension, "index.ts"),
-    path.join(withoutJsExtension, "index.tsx"),
-  ];
-
-  return candidates.find((candidate) => fileExistsSync(candidate));
-}
-
-function fileExistsSync(file: string): boolean {
-  return existsSync(file);
-}
-
-function isTestAssetSource(file: string): boolean {
-  const normalized = relativePath(file);
-  return normalized.endsWith(".test.ts") || normalized.includes("/integration-tests/") || normalized.includes("/tests/");
-}
-
-function findDependencyCycles(graph: SourceGraph, maxLength: number): string[][] {
-  const cycles = new Map<string, string[]>();
-
-  for (const start of graph.keys()) {
-    const stack = [start];
-    const visited = new Set([start]);
-
-    searchDependencyCycles(start, start, stack, visited, graph, cycles, maxLength);
-  }
-
-  return [...cycles.values()].sort(compareCycle);
-}
-
-function searchDependencyCycles(
-  start: string,
-  current: string,
-  stack: string[],
-  visited: Set<string>,
-  graph: SourceGraph,
-  cycles: Map<string, string[]>,
-  maxLength: number
-): void {
-  if (stack.length > maxLength) {
-    return;
-  }
-
-  for (const next of graph.get(current) ?? []) {
-    if (next === start && stack.length > 1) {
-      const cycle = canonicalCycle(stack.map(relativePath));
-      cycles.set(cycle.join(" -> "), cycle);
-      continue;
-    }
-
-    if (visited.has(next)) {
-      continue;
-    }
-
-    visited.add(next);
-    stack.push(next);
-    searchDependencyCycles(start, next, stack, visited, graph, cycles, maxLength);
-    stack.pop();
-    visited.delete(next);
-  }
-}
-
-function canonicalCycle(cycle: string[]): string[] {
-  let best = cycle;
-  for (let index = 1; index < cycle.length; index += 1) {
-    const rotated = [...cycle.slice(index), ...cycle.slice(0, index)];
-    if (rotated.join("\n") < best.join("\n")) {
-      best = rotated;
-    }
-  }
-
-  return best;
-}
-
-function compareCycle(left: string[], right: string[]): number {
-  return left.length - right.length || left.join("").localeCompare(right.join(""));
-}
-
-function relativePath(file: string): string {
-  return path.relative(process.cwd(), file).replaceAll(path.sep, "/");
-}

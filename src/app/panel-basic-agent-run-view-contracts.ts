@@ -6,7 +6,7 @@ import type {
 } from "../domain/basic-agent/index.js";
 import type { RunAgentDefinitionRef, RunCapabilityResolution } from "../domain/config/index.js";
 import type { RuntimeRunContinuationAvailability } from "../domain/runtime-database/index.js";
-import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
+import type { PanelRunCanvasReadModel } from "./panel-read-model/canvas/panel-canvas-read-model.js";
 import type { PanelRuntimeSummaryReadModel } from "./panel-read-model/run/panel-runtime-summary.js";
 import type { PanelRunStreamEvent } from "./panel-read-model/run/panel-run-stream-contracts.js";
 

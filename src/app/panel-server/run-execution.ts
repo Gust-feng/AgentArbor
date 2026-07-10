@@ -4,7 +4,7 @@ import type {
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import { type BasicAgentRunExecutionInput } from "../basic-agent-runtime/index.js";
-import { type PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
+import { type PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import {
   createPanelRunTrace,
   createPanelRunTracking,

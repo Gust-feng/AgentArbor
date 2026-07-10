@@ -495,16 +495,33 @@ test("shared run shell layers stay centralized instead of diverging per mode", a
 });
 
 test("panel canvas keeps ordinary desktop agent projection split", async () => {
-  const [canvas, desktopCanvas, canvasCommon, agentRunTreeView, transcriptContracts, trackingContracts, desktopAgentExecution] = await Promise.all([
+  const [
+    canvasFacade,
+    desktopCanvasFacade,
+    canvasCommonFacade,
+    canvas,
+    desktopCanvas,
+    canvasCommon,
+    agentRunTreeView,
+    transcriptContracts,
+    trackingContracts,
+    desktopAgentExecution,
+  ] = await Promise.all([
     readAppSource("panel-canvas-read-model.ts"),
     readAppSource("panel-desktop-agent-canvas.ts"),
     readAppSource("panel-canvas-common.ts"),
+    readAppSource(path.join("panel-read-model", "canvas", "panel-canvas-read-model.ts")),
+    readAppSource(path.join("panel-read-model", "canvas", "panel-desktop-agent-canvas.ts")),
+    readAppSource(path.join("panel-read-model", "canvas", "panel-canvas-common.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-agent-run-tree-view.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-transcript-contracts.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-tracking-contracts.ts")),
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
   ]);
 
+  assert.equal(canvasFacade.trim(), 'export * from "./panel-read-model/canvas/panel-canvas-read-model.js";');
+  assert.equal(desktopCanvasFacade.trim(), 'export * from "./panel-read-model/canvas/panel-desktop-agent-canvas.js";');
+  assert.equal(canvasCommonFacade.trim(), 'export * from "./panel-read-model/canvas/panel-canvas-common.js";');
   assert.equal(canvas.includes('from "./panel-desktop-agent-canvas.js"'), true);
   assert.equal(canvas.includes('from "./panel-canvas-common.js"'), true);
   assert.equal(canvas.includes("export function createDesktopAgentCanvas"), false);
@@ -528,7 +545,8 @@ test("panel canvas keeps ordinary desktop agent projection split", async () => {
   assert.equal(agentRunTreeView.includes("export function createSafeAgentRunTreeView"), true);
   assert.equal(transcriptContracts.includes("export type PanelRunTranscript"), true);
   assert.equal(trackingContracts.includes("export type PanelObservationReadModel"), true);
-  assert.equal(desktopAgentExecution.includes('from "../panel-desktop-agent-canvas.js"'), true);
+  assert.equal(desktopAgentExecution.includes('from "../panel-read-model/canvas/panel-desktop-agent-canvas.js"'), true);
+  assert.equal(desktopAgentExecution.includes('from "../panel-desktop-agent-canvas.js"'), false);
   assert.equal(desktopAgentExecution.includes('from "../panel-canvas-read-model.js"'), false);
 });
 

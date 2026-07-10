@@ -4,7 +4,7 @@ import {
   createModelRuntimeDisabledConfigurationError,
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
-import { createUndergroundDeepCanvas } from "../panel-canvas-read-model.js";
+import { createUndergroundDeepCanvas } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import { createPanelRunTranscript, toPanelObservation } from "../panel-run-read-model.js";
 import {
   createUndergroundDemoSummary,

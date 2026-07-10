@@ -20,7 +20,7 @@ import type {
   DesktopAgentInterruptedRunContext,
   DesktopAgentSessionRuntimeContext,
 } from "../desktop-agent-session-contracts.js";
-import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
+import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
 import type { PanelRunSummary } from "../panel-run-summary.js";
 import type { ModelRuntimeConfig } from "../model-runtime/index.js";

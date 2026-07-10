@@ -286,6 +286,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["panel-usage-statistics.ts", 'export * from "./panel-server/panel-usage-statistics.js";'],
     ["panel-context-window-usage.ts", 'export * from "./panel-ui/src/context-window-usage.js";'],
     ["panel-model-progress-copy.ts", 'export * from "./panel-read-model/panel-model-progress-copy.js";'],
+    ["panel-canvas-read-model.ts", 'export * from "./panel-read-model/canvas/panel-canvas-read-model.js";'],
+    ["panel-canvas-common.ts", 'export * from "./panel-read-model/canvas/panel-canvas-common.js";'],
+    ["panel-desktop-agent-canvas.ts", 'export * from "./panel-read-model/canvas/panel-desktop-agent-canvas.js";'],
     [
       "ordinary-transcript-event-policy.ts",
       'export * from "./panel-read-model/transcript/ordinary-transcript-event-policy.js";',
@@ -691,6 +694,25 @@ test("panel shared read-model support modules stay under panel-read-model owners
       fileExistsSync(path.join(readModelRoot, fileName)),
       true,
       `${fileName} should live in panel-read-model`
+    );
+  }
+});
+
+test("panel canvas read-model stays under panel-read-model ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const canvasRoot = path.join(appRoot, "panel-read-model", "canvas");
+  const canvasFiles = [
+    "panel-canvas-common.ts",
+    "panel-canvas-read-model.ts",
+    "panel-desktop-agent-canvas.ts",
+  ];
+
+  for (const fileName of canvasFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), true, `${fileName} should keep a top-level compatibility facade`);
+    assert.equal(
+      fileExistsSync(path.join(canvasRoot, fileName)),
+      true,
+      `${fileName} should live in panel-read-model/canvas`
     );
   }
 });

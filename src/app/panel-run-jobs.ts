@@ -11,7 +11,7 @@ import type { ToolConfirmationPolicy } from "../domain/tools/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { ModelRuntimeMode } from "./model-runtime/index.js";
 import type { PanelRunConfigurationFailureSummary, PanelRunSummary } from "./panel-run-summary.js";
-import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
+import type { PanelRunCanvasReadModel } from "./panel-read-model/canvas/panel-canvas-read-model.js";
 import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "./panel-run-read-model.js";
 import type { MinimalRuntime } from "./runtime.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";

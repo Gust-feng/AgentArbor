@@ -18,7 +18,7 @@ import type {
 } from "../../domain/runtime-database/index.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
-import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
+import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import {
   panelRunPayloadForStatus,
   type PanelRunConfirmationDecisionRecord,

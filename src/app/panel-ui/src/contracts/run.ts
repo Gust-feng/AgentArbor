@@ -11,7 +11,7 @@ import type {
   PanelBasicAgentReplay,
   PanelBasicAgentRunDetail,
   PanelBasicAgentRunView,
-} from "../../../panel-basic-agent-run-view-contracts";
+} from "../../../panel-read-model/basic-agent-run-view-contracts";
 
 export type RunAgentDefinitionRef = {
   readonly agentId: string;

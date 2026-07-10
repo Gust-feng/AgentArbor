@@ -286,6 +286,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["panel-usage-statistics.ts", 'export * from "./panel-server/panel-usage-statistics.js";'],
     ["panel-run-jobs.ts", 'export * from "./panel-server/run-jobs.js";'],
     ["panel-args.ts", 'export * from "./panel-server/panel-launch-args.js";'],
+    ["panel-basic-agent-run-view-contracts.ts", 'export * from "./panel-read-model/basic-agent-run-view-contracts.js";'],
     ["panel-context-window-usage.ts", 'export * from "./panel-ui/src/context-window-usage.js";'],
     ["panel-model-progress-copy.ts", 'export * from "./panel-read-model/panel-model-progress-copy.js";'],
     ["panel-canvas-read-model.ts", 'export * from "./panel-read-model/canvas/panel-canvas-read-model.js";'],
@@ -689,6 +690,22 @@ test("panel shared read-model support modules stay under panel-read-model owners
     "panel-model-progress-copy.test.ts",
     "panel-model-progress-copy.ts",
   ];
+
+  assert.equal(
+    fileExistsSync(path.join(appRoot, "panel-basic-agent-run-view-contracts.ts")),
+    true,
+    "panel-basic-agent-run-view-contracts.ts should keep a top-level compatibility facade"
+  );
+  assert.equal(
+    fileExistsSync(path.join(appRoot, "basic-agent-run-view-contracts.ts")),
+    false,
+    "basic-agent-run-view-contracts.ts should not live at src/app top level"
+  );
+  assert.equal(
+    fileExistsSync(path.join(readModelRoot, "basic-agent-run-view-contracts.ts")),
+    true,
+    "basic-agent-run-view-contracts.ts should live in panel-read-model"
+  );
 
   for (const fileName of sharedReadModelFiles) {
     if (!fileName.endsWith(".test.ts")) {

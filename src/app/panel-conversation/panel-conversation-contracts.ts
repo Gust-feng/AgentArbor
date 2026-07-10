@@ -2,7 +2,7 @@ import type { RuntimeConversationRecord, RuntimeRunStatus } from "../../domain/r
 import type {
   PanelBasicAgentRunDetailReadModel,
   PanelBasicAgentRunViewReadModel,
-} from "../panel-basic-agent-run-view-contracts.js";
+} from "../panel-read-model/basic-agent-run-view-contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { WorkspaceFolderSummary } from "../workspace-folder-summary.js";
 

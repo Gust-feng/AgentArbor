@@ -46,7 +46,7 @@ test("panel UI contracts stay split by product concern", async () => {
   assert.equal(contractRun.includes("systemPrompt"), false);
   assert.equal(contractRun.includes('import type { ObservationRef, TaskStatus } from "./common"'), true);
   assert.equal(contractRun.includes('import type { ContextAttachment } from "./context"'), true);
-  assert.equal(contractRun.includes('from "../../../panel-basic-agent-run-view-contracts"'), true);
+  assert.equal(contractRun.includes('from "../../../panel-read-model/basic-agent-run-view-contracts"'), true);
   assert.equal(contractRun.includes("type BackendBasicAgentRunView = PanelBasicAgentRunView<"), true);
   assert.equal(contractRun.includes("export type BasicAgentRunView = BackendBasicAgentRunView"), true);
   assert.equal(contractRun.includes("PanelRunResultReadModel"), false);

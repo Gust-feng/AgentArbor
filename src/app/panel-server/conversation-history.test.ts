@@ -8,7 +8,7 @@ import type {
 } from "../../domain/config/index.js";
 import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import { PanelConversationStore } from "../panel-conversation/panel-conversations.js";
-import { PanelRunJobStore } from "../panel-run-jobs.js";
+import { PanelRunJobStore } from "./run-jobs.js";
 import {
   buildConversationHistoryMessages,
   buildConversationInterruptedRunContexts,

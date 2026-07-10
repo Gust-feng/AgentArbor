@@ -9,7 +9,7 @@ import {
   submitRestoredBasicConfirmationDecision,
   type BasicAgentRunExecutor,
 } from "../basic-agent-runtime/index.js";
-import type { PanelRunJob } from "../panel-run-jobs.js";
+import type { PanelRunJob } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
 import { createBasicAgentRunViewReadModel } from "./basic-agent-run-view.js";
 import {

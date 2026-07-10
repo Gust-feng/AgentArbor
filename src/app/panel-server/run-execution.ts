@@ -16,7 +16,7 @@ import {
   type PanelRunTrackingReadModel,
   type PanelRunTranscript,
 } from "../panel-run-read-model.js";
-import type { PanelRunJob, PanelRunKind, PanelRunMode } from "../panel-run-jobs.js";
+import type { PanelRunJob, PanelRunKind, PanelRunMode } from "./run-jobs.js";
 import type { PanelRunConfigurationFailureSummary, PanelRunSummary } from "../panel-run-summary.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import {

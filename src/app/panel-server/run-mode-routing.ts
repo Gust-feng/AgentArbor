@@ -1,4 +1,4 @@
-import type { PanelRunKind, PanelRunMode } from "../panel-run-jobs.js";
+import type { PanelRunKind, PanelRunMode } from "./run-jobs.js";
 import {
   resolveRunModeForKind,
   RunModePolicyError,

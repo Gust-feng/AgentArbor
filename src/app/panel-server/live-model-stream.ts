@@ -1,7 +1,7 @@
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { redactOrdinaryMarkdownFragment } from "../safe-projection.js";
-import type { PanelRunJob, PanelRunJobStore } from "../panel-run-jobs.js";
+import type { PanelRunJob, PanelRunJobStore } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
 import { asRecord, optionalString } from "./request-parsers.js";
 

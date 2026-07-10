@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import test from "node:test";
 import type { BasicAgentRunExecutionInput, BasicAgentRunExecutionResult } from "../basic-agent-runtime/index.js";
-import type { PanelRunJob } from "../panel-run-jobs.js";
+import type { PanelRunJob } from "./run-jobs.js";
 import { closePanelServer } from "./request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "./runtime.js";
 

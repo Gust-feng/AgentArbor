@@ -24,7 +24,7 @@ import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import { TaskSoilInputValidationError, parseDesktopTaskSoilInput, type DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
-import type { PanelRunMode } from "../panel-run-jobs.js";
+import type { PanelRunMode } from "./run-jobs.js";
 import { DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS } from "../config-center/desktop-agent-settings.js";
 import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";

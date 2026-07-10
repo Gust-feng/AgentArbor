@@ -3,7 +3,7 @@ import {
   ModelRuntimeConfigurationError,
 } from "../model-runtime/index.js";
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
-import type { PanelRunJob, PanelRunKind } from "../panel-run-jobs.js";
+import type { PanelRunJob, PanelRunKind } from "./run-jobs.js";
 import { getPanelConversation } from "./conversation-routes.js";
 import { syncConversationTurnForJob } from "./conversation-sync.js";
 import {

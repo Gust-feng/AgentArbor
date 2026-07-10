@@ -23,7 +23,7 @@ import {
   panelRunPayloadForStatus,
   type PanelRunConfirmationDecisionRecord,
   type PanelRunJob,
-} from "../panel-run-jobs.js";
+} from "./run-jobs.js";
 import type {
   PanelRunStatus,
   PanelRunStreamEvent,

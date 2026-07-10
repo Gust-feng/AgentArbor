@@ -302,7 +302,7 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     undergroundAiRuntime,
     configContracts,
   ] = await Promise.all([
-    readAppSource("panel-run-jobs.ts"),
+    readAppSource(path.join("panel-server", "run-jobs.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-tracking.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-tracking-contracts.ts")),
     readAppSource(path.join("task-soil", "task-soil-workspace.ts")),
@@ -366,7 +366,7 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
 test("shared panel run orchestration uses neutral run mode naming", async () => {
   const [runModePolicy, panelRunJobs, requestParsers, runModeRouting, runExecution, runJobResponse] = await Promise.all([
     readAppSource("run-mode-policy.ts"),
-    readAppSource("panel-run-jobs.ts"),
+    readAppSource(path.join("panel-server", "run-jobs.ts")),
     readAppSource(path.join("panel-server", "request-parsers.ts")),
     readAppSource(path.join("panel-server", "run-mode-routing.ts")),
     readAppSource(path.join("panel-server", "run-execution.ts")),
@@ -406,7 +406,7 @@ test("shared run summary types use app-level contracts before panel aliases", as
     readAppSource(path.join("basic-agent-runtime", "run-job.ts")),
   ]);
   const panelRunSummarySources = await Promise.all([
-    readAppSource("panel-run-jobs.ts"),
+    readAppSource(path.join("panel-server", "run-jobs.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-tracking-contracts.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-tracking.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-stream-events.ts")),

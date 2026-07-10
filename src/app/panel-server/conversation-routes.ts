@@ -6,7 +6,7 @@ import {
   type PanelConversationSummaryReadModel,
 } from "../panel-conversation/panel-conversations.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import type { PanelRunJob } from "../panel-run-jobs.js";
+import type { PanelRunJob } from "./run-jobs.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import { restorePersistedPanelConversation } from "./conversation-restore.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";

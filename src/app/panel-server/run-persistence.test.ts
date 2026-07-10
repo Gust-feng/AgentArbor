@@ -22,7 +22,7 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import { PanelRunJobStore } from "../panel-run-jobs.js";
+import { PanelRunJobStore } from "./run-jobs.js";
 import type { PanelRunPersistenceRuntime } from "./run-persistence.js";
 import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
 import { waitForPanelPersistenceIdle } from "./persistence.js";

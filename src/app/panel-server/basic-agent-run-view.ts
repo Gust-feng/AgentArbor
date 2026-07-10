@@ -8,7 +8,7 @@ import type {
   PanelBasicAgentRunDetailReadModel,
   PanelBasicAgentRunViewReadModel,
 } from "../panel-basic-agent-run-view-contracts.js";
-import { panelRunPayloadForStatus, type PanelRunJob } from "../panel-run-jobs.js";
+import { panelRunPayloadForStatus, type PanelRunJob } from "./run-jobs.js";
 import { summarizePanelRuntimeVisibility, type PanelRuntimeSummaryRegistry } from "../panel-read-model/run/panel-runtime-summary.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
 import { restoredRunResultProjection } from "../restored-run-projection.js";

@@ -9,7 +9,7 @@ import type {
 } from "../../domain/config/index.js";
 import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
-import type { PanelRunJob } from "../panel-run-jobs.js";
+import type { PanelRunJob } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import { InMemoryProcessRegistry } from "../runtime-guard/index.js";
 import { createRunCapabilityPlan } from "../model-capability-registry.js";

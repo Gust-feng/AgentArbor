@@ -4,7 +4,7 @@ import type { ArborMessage, ArborMessageType } from "../../domain/common.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { createToolCompletedMessage, createToolFailedMessage } from "../../kernel/intelligence/tool-events.js";
-import type { PanelRunJob } from "../panel-run-jobs.js";
+import type { PanelRunJob } from "./run-jobs.js";
 import { createPanelRunTranscript } from "../panel-run-read-model.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import type { PanelRunTraceReadModel } from "../panel-read-model/run/panel-run-tracking-contracts.js";

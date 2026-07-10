@@ -5,7 +5,7 @@ import { nowIso } from "../../kernel/id.js";
 import type { BasicAgentRunExecutor } from "../basic-agent-runtime/index.js";
 import type { PanelConversationReadModel } from "../panel-conversation/panel-conversations.js";
 import { toRuntimeConversationRecord } from "../panel-conversation/panel-conversations.js";
-import { panelRunPayloadForStatus, PanelRunJobStore, type PanelRunJob } from "../panel-run-jobs.js";
+import { panelRunPayloadForStatus, PanelRunJobStore, type PanelRunJob } from "./run-jobs.js";
 import { createPanelRunTrace, createPanelRunTranscript } from "../panel-run-read-model.js";
 import { createLiveBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
 import {

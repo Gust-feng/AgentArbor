@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelOutputDelta, ModelPurpose } from "../../domain/intelligence/index.js";
-import type { PanelRunJob } from "../panel-run-jobs.js";
+import type { PanelRunJob } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
 import { appendLiveModelOutputDelta } from "./live-model-stream.js";
 

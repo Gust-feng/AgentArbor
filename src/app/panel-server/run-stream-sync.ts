@@ -1,5 +1,5 @@
 import type { BasicAgentRunExecutor } from "../basic-agent-runtime/index.js";
-import { panelRunPayloadForStatus, type PanelRunJob, type PanelRunJobStore } from "../panel-run-jobs.js";
+import { panelRunPayloadForStatus, type PanelRunJob, type PanelRunJobStore } from "./run-jobs.js";
 import {
   createPanelRunStreamEvents,
   type PanelRunStreamEvent,

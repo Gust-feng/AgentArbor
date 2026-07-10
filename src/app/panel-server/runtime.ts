@@ -29,7 +29,7 @@ import { CapabilityCenter } from "../capability-center.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center.js";
 import { resolveModelCapabilities } from "../model-capability-registry.js";
 import { PanelConversationStore } from "../panel-conversation/panel-conversations.js";
-import { PanelRunJobStore, resolvePanelRunMode, type PanelRunJob } from "../panel-run-jobs.js";
+import { PanelRunJobStore, resolvePanelRunMode, type PanelRunJob } from "./run-jobs.js";
 import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,

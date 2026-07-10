@@ -12,7 +12,7 @@ import {
   type BasicAgentRunExecutionInput,
   type BasicAgentRunExecutionResult,
 } from "../basic-agent-runtime/index.js";
-import type { PanelRunJob } from "../panel-run-jobs.js";
+import type { PanelRunJob } from "../panel-server/run-jobs.js";
 import { closePanelServer } from "../panel-server/request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "../panel-server/runtime.js";
 import { createLocalShellCommandTool } from "../tool-center/adapters/local-workspace-command-tools.js";

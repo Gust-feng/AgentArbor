@@ -14,7 +14,7 @@ import {
   createDesktopWorkViewReadModel,
 } from "../basic-agent-runtime/index.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
-import { panelRunPayloadForStatus, type PanelRunJob } from "../panel-run-jobs.js";
+import { panelRunPayloadForStatus, type PanelRunJob } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import { restoredRunResultProjection } from "../restored-run-projection.js";
 

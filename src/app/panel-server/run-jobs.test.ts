@@ -6,9 +6,9 @@ import type {
   RunCapabilityResolution,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
-} from "../domain/config/index.js";
-import { createRunCapabilityPlan } from "./model-capability-registry.js";
-import { PanelRunJobStore, type PanelRunJob } from "./panel-run-jobs.js";
+} from "../../domain/config/index.js";
+import { createRunCapabilityPlan } from "../model-runtime/model-capability-registry.js";
+import { PanelRunJobStore, type PanelRunJob } from "./run-jobs.js";
 
 test("PanelRunJobStore derives deep mode for underground run jobs at birth", () => {
   const runJobs = new PanelRunJobStore();

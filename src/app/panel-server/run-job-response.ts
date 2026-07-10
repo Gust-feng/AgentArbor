@@ -23,7 +23,7 @@ import {
   type PanelRunJob,
   type PanelRunKind,
   type PanelRunMode,
-} from "../panel-run-jobs.js";
+} from "./run-jobs.js";
 import type { PanelRunSummaryPayload } from "../panel-run-summary.js";
 import {
   summarizePanelRuntimeVisibility,

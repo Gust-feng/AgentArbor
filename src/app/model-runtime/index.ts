@@ -10,7 +10,7 @@ export {
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
   ModelRuntimeConfigurationError,
-} from "../intelligence-channel-factory.js";
+} from "./factory.js";
 
 export type {
   ModelRuntimeConfig,
@@ -21,7 +21,7 @@ export type {
   ModelRuntimeMode,
   ModelRuntimeProviderFetch,
   ModelRuntimeSummaryInput,
-} from "../intelligence-channel-factory.js";
+} from "./factory.js";
 
 export type ModelRuntimeRequestPlan = {
   readonly requestId: string;

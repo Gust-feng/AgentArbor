@@ -288,7 +288,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
 });
 
 test("ordinary shared model runtime paths use neutral model runtime naming", async () => {
-  const directFactoryImport = "intelligence-channel" + "-factory.js";
+  const directFactoryImport = "./f" + "actory.js";
   const [
     panelRunJobs,
     panelRunTracking,
@@ -308,8 +308,8 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     readAppSource(path.join("task-soil", "task-soil-workspace.ts")),
     readAppSource(path.join("config-center", "model-provider-common.ts")),
     readAppSource(path.join("config-center", "model-provider-profile-settings.ts")),
-    readAppSource("intelligence-channel-factory.test.ts"),
-    readAppSource("intelligence-channel-factory.ts"),
+    readAppSource(path.join("model-runtime", "factory.test.ts")),
+    readAppSource(path.join("model-runtime", "factory.ts")),
     readAppSource(path.join("model-runtime", "index.ts")),
     readAppSource("underground-ai-runtime.ts"),
     fs.readFile(path.join(process.cwd(), "src", "domain", "config", "contracts.ts"), "utf8"),
@@ -330,7 +330,7 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     assert.equal(source.includes("ConfiguredUndergroundAiMode"), false);
     assert.equal(source.includes("ConfiguredModelRuntimeMode"), true);
   }
-  assert.equal(modelRuntimeFactoryTest.includes('from "./model-runtime/index.js"'), true);
+  assert.equal(modelRuntimeFactoryTest.includes('from "./index.js"'), true);
   assert.equal(modelRuntimeFactoryTest.includes(directFactoryImport), false);
   assert.equal(modelRuntimeFactoryTest.includes("createModelRuntimeConfig"), true);
   assert.equal(modelRuntimeFactoryTest.includes("ModelRuntimeConfigurationError"), true);

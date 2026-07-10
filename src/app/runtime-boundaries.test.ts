@@ -101,7 +101,7 @@ test("runtime keeps external LLM SDKs behind provider adapters", () => {
 
   // 边界规则区分 production 运行时代码与测试代码：
   //   - production（domain/kernel/app 非测试）不得直接 import adapters/intelligence，
-  //     只能经 intelligence-channel-factory 组合根使用模型能力，保证依赖倒置。
+  //     只能经 model-runtime/factory 组合根使用模型能力，保证依赖倒置。
   //   - 测试文件（*.test.ts）使用 FakeModelProvider 等测试桩构造 IntelligenceChannel
   //     是标准测试实践；FakeModelProvider 是 adapters/intelligence 下的测试基础设施，
   //     不构成对真实 provider 实现的耦合，故对 adapters/intelligence import 豁免。
@@ -206,5 +206,5 @@ function normalizedPath(file: string): string {
 }
 
 function isAllowedProviderAdapterCompositionRoot(file: string): boolean {
-  return file.endsWith(join("src", "app", "intelligence-channel-factory.ts"));
+  return file.endsWith(join("src", "app", "model-runtime", "factory.ts"));
 }

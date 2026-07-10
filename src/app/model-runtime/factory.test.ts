@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModelRequest } from "../domain/intelligence/index.js";
+import type { ModelRequest } from "../../domain/intelligence/index.js";
 import {
   createModelRuntimeConfig,
   ModelRuntimeConfigurationError,
-} from "./model-runtime/index.js";
-import { createMinimalRuntime } from "./runtime.js";
+} from "./index.js";
+import { createMinimalRuntime } from "../runtime.js";
 
 test("model runtime factory exposes a disabled boundary without runtime factories", () => {
   const config = createModelRuntimeConfig({});

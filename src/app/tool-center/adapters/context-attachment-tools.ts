@@ -1,5 +1,4 @@
-import { createReadStream, promises as fs } from "node:fs";
-import { createInterface } from "node:readline";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { inflateRawSync } from "node:zlib";
 import type { ModelInputAttachment } from "../../../domain/intelligence/index.js";
@@ -17,6 +16,15 @@ import {
   throwIfAborted,
   truncateText,
 } from "./local-workspace-common.js";
+import { extractPdfText } from "./context-attachment-pdf.js";
+import {
+  charWindowContent,
+  parseLineRange,
+  readAttachmentTextFile,
+  readLineRange,
+  returnedRawTextChars,
+  sliceLines,
+} from "./context-attachment-text.js";
 
 const DEFAULT_MAX_CHARS = 128_000;
 const MAX_LIST_ENTRIES = 200;
@@ -26,8 +34,6 @@ const MAX_LIST_DEPTH = 3;
 const MAX_SEARCH_MATCHES = 80;
 const MAX_SEARCH_OFFSET = 10_000;
 const MAX_SKIPPED_SAMPLES = 8;
-const MAX_READ_LINE_COUNT = 2_000;
-const DEFAULT_READ_LINE_COUNT = 200;
 const MAX_TABLE_SAMPLE_ROWS = 20;
 const DEFAULT_TABLE_SAMPLE_ROWS = 5;
 const MAX_TABLE_READ_ROWS = 200;
@@ -76,18 +82,6 @@ type DirectoryEntry = {
   readonly kind: "directory" | "file" | "symlink" | "other";
   readonly bytes?: number;
   readonly depth: number;
-};
-
-type ReadContentWindow = {
-  readonly content: string;
-  readonly range?: { readonly startLine: number; readonly endLine: number };
-  readonly totalLines?: number;
-  readonly hasMoreBefore: boolean;
-  readonly hasMoreAfter: boolean;
-  readonly startChar?: number;
-  readonly textChars?: number;
-  readonly charCount?: number;
-  readonly nextStartChar?: number;
 };
 
 type SearchMatch = {
@@ -1728,12 +1722,6 @@ async function statAttachmentTarget(filePath: string, message: string): Promise<
   });
 }
 
-async function readAttachmentTextFile(filePath: string): Promise<string> {
-  return fs.readFile(filePath, "utf8").catch(() => {
-    throw new Error("Attachment text target could not be read.");
-  });
-}
-
 async function loadTableTarget(
   entry: AttachmentEntry,
   target: AttachmentTarget,
@@ -1981,207 +1969,6 @@ function imageMimeTypeForTarget(ref: TaskSoilContextRef, target: AttachmentTarge
 
 function imageDetailFromUnknown(value: unknown): "auto" | "low" | "high" {
   return value === "low" || value === "high" ? value : "auto";
-}
-
-function extractPdfText(buffer: Buffer): {
-  readonly text: string;
-  readonly reason?: string;
-  readonly facts: {
-    readonly streamCount: number;
-    readonly decodedStreams: number;
-    readonly skippedStreams: number;
-    readonly textFragments: number;
-  };
-} {
-  if (!buffer.subarray(0, Math.min(buffer.length, 1024)).toString("latin1").includes("%PDF-")) {
-    return {
-      text: "",
-      reason: "invalid_pdf_header",
-      facts: { streamCount: 0, decodedStreams: 0, skippedStreams: 0, textFragments: 0 },
-    };
-  }
-  const source = buffer.toString("latin1");
-  const chunks: string[] = [];
-  let streamCount = 0;
-  let decodedStreams = 0;
-  let skippedStreams = 0;
-  const streamPattern = /stream\r?\n?([\s\S]*?)\r?\n?endstream/giu;
-  for (const match of source.matchAll(streamPattern)) {
-    streamCount += 1;
-    const rawStream = match[1] ?? "";
-    const dictionaryStart = source.lastIndexOf("<<", match.index ?? 0);
-    const dictionaryEnd = source.lastIndexOf(">>", match.index ?? 0);
-    const dictionary = dictionaryStart >= 0 && dictionaryEnd > dictionaryStart
-      ? source.slice(dictionaryStart, dictionaryEnd + 2)
-      : "";
-    const decoded = decodePdfStream(Buffer.from(rawStream, "latin1"), dictionary);
-    if (decoded === undefined) {
-      skippedStreams += 1;
-      continue;
-    }
-    decodedStreams += 1;
-    chunks.push(...extractPdfTextFragments(decoded.toString("latin1")));
-  }
-  const text = normalizeExtractedPdfText(chunks.filter(isUsefulPdfText).join("\n"));
-  return {
-    text,
-    reason: text.length === 0 ? "no_extractable_pdf_text" : undefined,
-    facts: {
-      streamCount,
-      decodedStreams,
-      skippedStreams,
-      textFragments: chunks.length,
-    },
-  };
-}
-
-function decodePdfStream(stream: Buffer, dictionary: string): Buffer | undefined {
-  const hasFilter = /\/Filter\b/u.test(dictionary);
-  if (!hasFilter) {
-    return stream;
-  }
-  if (/\/FlateDecode\b/u.test(dictionary)) {
-    try {
-      return inflateRawSync(stream);
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
-function extractPdfTextFragments(value: string): readonly string[] {
-  const fragments: string[] = [];
-  let index = 0;
-  while (index < value.length) {
-    const char = value[index];
-    if (char === "(") {
-      const parsed = readPdfLiteralString(value, index);
-      if (parsed !== undefined) {
-        fragments.push(parsed.value);
-        index = parsed.nextIndex;
-        continue;
-      }
-    }
-    if (char === "<" && value[index + 1] !== "<") {
-      const parsed = readPdfHexString(value, index);
-      if (parsed !== undefined) {
-        fragments.push(parsed.value);
-        index = parsed.nextIndex;
-        continue;
-      }
-    }
-    index += 1;
-  }
-  return fragments;
-}
-
-function readPdfLiteralString(value: string, startIndex: number): { readonly value: string; readonly nextIndex: number } | undefined {
-  let index = startIndex + 1;
-  let depth = 1;
-  const bytes: number[] = [];
-  while (index < value.length) {
-    const char = value[index]!;
-    if (char === "\\") {
-      const escaped = value[index + 1];
-      if (escaped === undefined) {
-        return undefined;
-      }
-      const octal = /^[0-7]{1,3}/u.exec(value.slice(index + 1, index + 4))?.[0];
-      if (octal !== undefined) {
-        bytes.push(Number.parseInt(octal, 8));
-        index += 1 + octal.length;
-        continue;
-      }
-      const mapped = pdfEscapedByte(escaped);
-      if (mapped !== undefined) {
-        bytes.push(mapped);
-      }
-      index += 2;
-      continue;
-    }
-    if (char === "(") {
-      depth += 1;
-      bytes.push(char.charCodeAt(0));
-      index += 1;
-      continue;
-    }
-    if (char === ")") {
-      depth -= 1;
-      if (depth === 0) {
-        return {
-          value: decodePdfStringBytes(Buffer.from(bytes)),
-          nextIndex: index + 1,
-        };
-      }
-      bytes.push(char.charCodeAt(0));
-      index += 1;
-      continue;
-    }
-    bytes.push(char.charCodeAt(0) & 0xff);
-    index += 1;
-  }
-  return undefined;
-}
-
-function readPdfHexString(value: string, startIndex: number): { readonly value: string; readonly nextIndex: number } | undefined {
-  const endIndex = value.indexOf(">", startIndex + 1);
-  if (endIndex < 0) {
-    return undefined;
-  }
-  const hex = value.slice(startIndex + 1, endIndex).replace(/\s+/gu, "");
-  if (hex.length === 0 || !/^[0-9a-f]+$/iu.test(hex)) {
-    return undefined;
-  }
-  const padded = hex.length % 2 === 0 ? hex : `${hex}0`;
-  return {
-    value: decodePdfStringBytes(Buffer.from(padded, "hex")),
-    nextIndex: endIndex + 1,
-  };
-}
-
-function pdfEscapedByte(value: string): number | undefined {
-  if (value === "n") return 0x0a;
-  if (value === "r") return 0x0d;
-  if (value === "t") return 0x09;
-  if (value === "b") return 0x08;
-  if (value === "f") return 0x0c;
-  if (value === "\n" || value === "\r") return undefined;
-  return value.charCodeAt(0) & 0xff;
-}
-
-function decodePdfStringBytes(bytes: Buffer): string {
-  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-    const codes: number[] = [];
-    for (let index = 2; index + 1 < bytes.length; index += 2) {
-      codes.push(bytes.readUInt16BE(index));
-    }
-    return String.fromCharCode(...codes);
-  }
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
-    return bytes.subarray(2).toString("utf16le");
-  }
-  return bytes.toString("utf8");
-}
-
-function isUsefulPdfText(value: string): boolean {
-  const text = value.trim();
-  if (text.length === 0) {
-    return false;
-  }
-  const printable = [...text].filter((char) => {
-    const code = char.codePointAt(0) ?? 0;
-    return code === 0x09 || code === 0x0a || code === 0x0d || code >= 0x20;
-  }).length;
-  return printable / Math.max(1, text.length) > 0.8 && /[\p{L}\p{N}]/u.test(text);
-}
-
-function normalizeExtractedPdfText(value: string): string {
-  return value
-    .replace(/\u0000/gu, "")
-    .replace(/[ \t]+\n/gu, "\n")
-    .replace(/\n{3,}/gu, "\n\n")
-    .trim();
 }
 
 function archiveReadErrorReason(error: unknown): string {
@@ -3023,95 +2810,6 @@ function directoryEntryKind(entry: import("node:fs").Dirent): DirectoryEntry["ki
   if (entry.isFile()) return "file";
   if (entry.isSymbolicLink()) return "symlink";
   return "other";
-}
-
-function parseLineRange(record: Readonly<Record<string, unknown>>): { readonly startLine: number; readonly endLine: number } | undefined {
-  const startLine = positiveInteger(record.startLine);
-  const explicitEndLine = positiveInteger(record.endLine);
-  if (startLine === undefined && explicitEndLine === undefined) {
-    return undefined;
-  }
-  const start = startLine ?? 1;
-  const end = explicitEndLine ?? start + DEFAULT_READ_LINE_COUNT - 1;
-  if (end < start) {
-    throw new Error("read_context_attachment_text endLine must be greater than or equal to startLine.");
-  }
-  if (end - start + 1 > MAX_READ_LINE_COUNT) {
-    throw new Error(`read_context_attachment_text line range is too large; request at most ${MAX_READ_LINE_COUNT} lines at a time.`);
-  }
-  return { startLine: start, endLine: end };
-}
-
-function charWindowContent(raw: string, requestedStartChar: number): ReadContentWindow {
-  const startChar = Math.min(Math.max(0, requestedStartChar), raw.length);
-  return {
-    content: raw.slice(startChar),
-    range: undefined,
-    totalLines: countLines(raw),
-    hasMoreBefore: startChar > 0,
-    hasMoreAfter: false,
-    startChar,
-    charCount: raw.length,
-  };
-}
-
-function sliceLines(
-  raw: string,
-  range: { readonly startLine: number; readonly endLine: number }
-): ReadContentWindow {
-  const lines = raw.split(/\r?\n/);
-  const selected = lines.slice(range.startLine - 1, range.endLine);
-  const actualEndLine = selected.length === 0 ? range.startLine : range.startLine + selected.length - 1;
-  return {
-    content: selected.join("\n"),
-    range: { startLine: range.startLine, endLine: actualEndLine },
-    totalLines: lines.length,
-    hasMoreBefore: range.startLine > 1,
-    hasMoreAfter: actualEndLine < lines.length,
-  };
-}
-
-function returnedRawTextChars(value: string, maxLength: number): number {
-  return value.length <= maxLength ? value.length : Math.max(0, maxLength - 1);
-}
-
-async function readLineRange(
-  absolutePath: string,
-  range: { readonly startLine: number; readonly endLine: number }
-): Promise<ReadContentWindow> {
-  const stream = createReadStream(absolutePath, { encoding: "utf8" });
-  const reader = createInterface({ input: stream, crlfDelay: Infinity });
-  const lines: string[] = [];
-  let lineNumber = 0;
-  let hasMoreAfter = false;
-  try {
-    for await (const line of reader) {
-      lineNumber += 1;
-      if (lineNumber < range.startLine) {
-        continue;
-      }
-      if (lineNumber > range.endLine) {
-        hasMoreAfter = true;
-        break;
-      }
-      lines.push(line);
-    }
-  } finally {
-    reader.close();
-    stream.destroy();
-  }
-  const actualEndLine = lines.length === 0 ? range.startLine : range.startLine + lines.length - 1;
-  return {
-    content: lines.join("\n"),
-    range: { startLine: range.startLine, endLine: actualEndLine },
-    totalLines: hasMoreAfter ? undefined : lineNumber,
-    hasMoreBefore: range.startLine > 1,
-    hasMoreAfter,
-  };
-}
-
-function countLines(raw: string): number {
-  return raw.length === 0 ? 0 : raw.split(/\r?\n/).length;
 }
 
 function nodeErrorCode(error: unknown): string | undefined {

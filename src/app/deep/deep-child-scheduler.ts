@@ -55,117 +55,43 @@ import {
   deepChildParentInstructionMessageRef,
   summarizeDeepChildParentInstruction,
 } from "./deep-child-parent-instruction-history.js";
+import type {
+  ContinueDeepChildFactory,
+  DeepChildCancelResult,
+  DeepChildEnqueueResult,
+  DeepChildExecutedQueuedInstruction,
+  DeepChildInstructionContinueResult,
+  DeepChildInstructionQueueHandle,
+  DeepChildInstructionQueueResult,
+  DeepChildInstructionRecord,
+  DeepChildQueuedInstructionProjection,
+  DeepChildQueuedInstructionSource,
+  DeepChildSchedulerCallbacks,
+  DeepChildSchedulerConfig,
+  DeepChildTerminalMaterial,
+  ExploreDeepChildFactory,
+} from "./deep-child-scheduler-contracts.js";
+export type {
+  ContinueDeepChildFactory,
+  DeepChildCancelResult,
+  DeepChildEnqueueResult,
+  DeepChildExecutedQueuedInstruction,
+  DeepChildInstructionContinueResult,
+  DeepChildInstructionQueueHandle,
+  DeepChildInstructionQueueResult,
+  DeepChildInstructionRecord,
+  DeepChildQueuedInstructionProjection,
+  DeepChildQueuedInstructionSource,
+  DeepChildSchedulerCallbacks,
+  DeepChildSchedulerConfig,
+  DeepChildTerminalMaterial,
+  ExploreDeepChildFactory,
+} from "./deep-child-scheduler-contracts.js";
 
 /** scheduler 默认并发上限（design.md §3.2：生产默认 3，测试可注入 2）。 */
 export const DEEP_SCHEDULER_DEFAULT_CONCURRENCY = 3;
 
-/**
- * Child Agent run 工厂：由调用方（T2-1 runtime）注入，封装共享 AgentTurnRuntime /
- * ToolCenter / 确认门与 run 上下文（goal / permissionBoundaryRefs / traceId / goalId /
- * confirmationPolicy / capabilitySnapshot）。scheduler 只持工厂，不直接绑定这些依赖，
- * 保持"只做状态与并发，不绑定执行细节"的边界（FR-SCH-03 复用而非另起）。
- */
-export type ExploreDeepChildFactory = (
-  childRun: ChildAgentRun,
-  childSpec: DeepChildSpec,
-) => Promise<ExploreDeepChildResult>;
-
-export type ContinueDeepChildFactory = (
-  childRun: ChildAgentRun,
-  childSpec: DeepChildSpec,
-  parentInstruction: string,
-  previousSummary: DeepChildSummary | undefined,
-  parentOperation: {
-    readonly instructionId: string;
-    readonly messageRef: string;
-    readonly source: DeepChildQueuedInstructionSource;
-    readonly review?: ChildAgentRunParentReview;
-  },
-) => Promise<ExploreDeepChildResult>;
-
-export type DeepChildInstructionQueueResult =
-  | {
-      readonly status: "queued";
-      readonly instructionId: string;
-      readonly messageRef: string;
-      readonly childRunId: string;
-      readonly childStatus: DeepChildTask["status"];
-      readonly queuedCount: number;
-      readonly queuedAt: string;
-    }
-  | {
-      readonly status: "child_not_found" | "not_accepting";
-      readonly childRunId: string;
-      readonly childStatus?: DeepChildTask["status"];
-      readonly reason: string;
-    };
-
-export type DeepChildInstructionContinueResult =
-  | {
-      readonly status: "continued";
-      readonly childRunId: string;
-      readonly childStatus: DeepChildTask["status"];
-      readonly material: DeepChildTerminalMaterial;
-    }
-  | {
-      readonly status: "child_not_found" | "not_accepting";
-      readonly childRunId: string;
-      readonly childStatus?: DeepChildTask["status"];
-      readonly reason: string;
-    };
-
-export type DeepChildInstructionQueueHandle = {
-  readonly queueChildInstruction: (input: {
-    readonly childRunId: string;
-    readonly instruction: string;
-    readonly source?: DeepChildQueuedInstructionSource;
-    readonly review?: ChildAgentRunParentReview;
-  }) => DeepChildInstructionQueueResult;
-  readonly continueChildInstruction: (input: {
-    readonly childRunId: string;
-    readonly instruction: string;
-    readonly source?: DeepChildQueuedInstructionSource;
-    readonly review?: ChildAgentRunParentReview;
-  }) => Promise<DeepChildInstructionContinueResult>;
-  readonly snapshot: () => DeepTaskBoardSnapshot;
-};
-
-export type DeepChildQueuedInstructionSource = "manager" | "control_api";
-
-export type DeepChildExecutedQueuedInstruction = {
-  readonly instructionId: string;
-  readonly messageRef: string;
-  readonly childRunId: string;
-  readonly instruction: string;
-  readonly source: DeepChildQueuedInstructionSource;
-  readonly review?: ChildAgentRunParentReview;
-  readonly queuedAt: string;
-  readonly executedAt: string;
-};
-
-export type DeepChildQueuedInstructionProjection = {
-  readonly instructionId: string;
-  readonly messageRef: string;
-  readonly childRunId: string;
-  readonly source: DeepChildQueuedInstructionSource;
-  readonly queuedAt: string;
-  readonly queuedCount: number;
-};
-
-export type DeepChildInstructionRecord = {
-  readonly instructionId: string;
-  readonly messageRef: string;
-  readonly childRunId: string;
-  readonly source: DeepChildQueuedInstructionSource;
-  readonly status: "queued" | "executed" | "cancelled";
-  readonly instruction: string;
-  readonly review?: ChildAgentRunParentReview;
-  readonly requestedAt: string;
-  readonly queuedAt?: string;
-  readonly executedAt?: string;
-  readonly cancelledAt?: string;
-};
-
+/** Raw instruction retained only until the scheduler executes or cancels it. */
 type QueuedChildInstruction = {
   readonly instructionId: string;
   readonly messageRef: string;
@@ -174,81 +100,6 @@ type QueuedChildInstruction = {
   readonly source: DeepChildQueuedInstructionSource;
   readonly review?: ChildAgentRunParentReview;
   readonly queuedAt: string;
-};
-
-/**
- * 生命周期回调位（由 T2-1 runtime 装配为 publisher + liveProjection + store.upsert）。
- * 回调可做异步工作（如 store.upsert），但 scheduler 不 await 其结果——投影/事件不能
- * 反向改变调度状态或击穿 run（与 executor emitProgress 同口径）。
- */
-export type DeepChildSchedulerCallbacks = {
-  /**
-   * 任务 pending → running 时触发（实时发布 deep.child.started + 投影派生）。
-   * childRun 为该任务对应的 ChildAgentRun（startQueued 已建立映射）；stepIndex 为
-   * executor 当前 manager step（透传给回调装配进度事件元数据，scheduler 不解读语义）。
-   */
-  readonly onChildStarted?: (
-    task: DeepChildTask,
-    childRun: ChildAgentRun,
-    stepIndex: number,
-  ) => void | Promise<void>;
-  /** 任务进入 completed/blocked/failed 时触发（实时发布 child 终态事件 + 投影派生）。 */
-  readonly onChildTerminal?: (
-    task: DeepChildTask,
-    summary: DeepChildSummary,
-    completedRun: ChildAgentRun,
-    material: DeepChildTerminalMaterial,
-    stepIndex: number,
-  ) => void | Promise<void>;
-  /**
-   * 父层为 pending/running child 追加继续指令时触发。回调只接收安全队列元数据，
-   * 不接收 raw instruction 正文。
-   */
-  readonly onChildInstructionQueued?: (
-    task: DeepChildTask,
-    queued: DeepChildQueuedInstructionProjection,
-    stepIndex: number,
-  ) => void | Promise<void>;
-  /**
-   * Internal persistence hook for parent-to-child raw messages. Do not forward
-   * this record to default events or liveProjection; onChildInstructionQueued
-   * remains the safe public projection.
-   */
-  readonly onChildInstructionRecorded?: (
-    instruction: DeepChildInstructionRecord,
-    stepIndex: number,
-  ) => void | Promise<void>;
-};
-
-/** 单个 child 终态后交还父层的材料元组（供 executor 合并进 childSummaries / completedChildRuns）。 */
-export type DeepChildTerminalMaterial = {
-  readonly task: DeepChildTask;
-  readonly summary: DeepChildSummary;
-  readonly completedRun: ChildAgentRun;
-  readonly pendingContinuation?: ExploreDeepChildResult["pendingContinuation"];
-  readonly executedQueuedInstructions?: readonly DeepChildExecutedQueuedInstruction[];
-};
-
-/** enqueue 返回（供 executor step 记录新增 / 已启动 / overflowCount / depthGuard）。 */
-export type DeepChildEnqueueResult = {
-  readonly addedCount: number;
-  readonly overflowCount: number;
-  readonly depthGuardPassed: boolean;
-  readonly tasks: readonly DeepChildTask[];
-};
-
-/** cancel 返回（被取消的 pending 任务数）。 */
-export type DeepChildCancelResult = {
-  readonly cancelledCount: number;
-};
-
-export type DeepChildSchedulerConfig = {
-  readonly board: DeepTaskBoard;
-  readonly exploreFactory: ExploreDeepChildFactory;
-  readonly continueFactory?: ContinueDeepChildFactory;
-  readonly maxConcurrency?: number;
-  readonly maxChildren?: number;
-  readonly callbacks?: DeepChildSchedulerCallbacks;
 };
 
 /**

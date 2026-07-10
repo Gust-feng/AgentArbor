@@ -6,7 +6,7 @@ import {
 import type {
   DeepChildExecutedQueuedInstruction,
   DeepChildInstructionRecord,
-} from "./deep-child-scheduler.js";
+} from "./deep-child-scheduler-contracts.js";
 
 /** Persist parent instructions and reconstruct the executed instruction history for child continuation. */
 export async function persistDeepChildInstructionRecords(

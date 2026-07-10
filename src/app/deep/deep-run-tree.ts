@@ -27,7 +27,7 @@ import type {
 import { DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";
 import type { DeepEventPublisher } from "./deep-events.js";
 import type { DeepRunExecutorResult } from "./deep-run-executor.js";
-import type { DeepChildExecutedQueuedInstruction } from "./deep-child-scheduler.js";
+import type { DeepChildExecutedQueuedInstruction } from "./deep-child-scheduler-contracts.js";
 
 function appendDelegationDecisionUnique(
   tree: AgentRunTree,

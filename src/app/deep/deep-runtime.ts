@@ -87,12 +87,12 @@ import {
 } from "./deep-run-tree.js";
 import { continueDeepChildAgent } from "./deep-child-agent-runner.js";
 import { DEEP_DECISION_CONTRACT_ID } from "./deep-model-io.js";
-import {
-  DeepChildScheduler,
-  type DeepChildInstructionRecord,
-  type DeepChildInstructionQueueHandle,
-  type ExploreDeepChildFactory,
-} from "./deep-child-scheduler.js";
+import { DeepChildScheduler } from "./deep-child-scheduler.js";
+import type {
+  DeepChildInstructionRecord,
+  DeepChildInstructionQueueHandle,
+  ExploreDeepChildFactory,
+} from "./deep-child-scheduler-contracts.js";
 import type { DeepChildMessageStore } from "./deep-child-messages.js";
 import {
   loadDeepChildParentMessageContext,

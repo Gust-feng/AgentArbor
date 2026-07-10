@@ -37,7 +37,7 @@ import {
   type DeepChildMessageStore,
 } from "./deep-child-messages.js";
 import { DeepChildPendingContinuationStore } from "./deep-child-continuations.js";
-import type { DeepChildInstructionQueueHandle } from "./deep-child-scheduler.js";
+import type { DeepChildInstructionQueueHandle } from "./deep-child-scheduler-contracts.js";
 import type { DeepRunControlHandle, DeepRunControlSignal } from "./deep-run-executor.js";
 import { DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";
 import { DEEP_RUN_KIND, DEEP_RUN_MODE, type DeepConversation } from "./contracts.js";

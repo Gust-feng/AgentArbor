@@ -14,12 +14,12 @@ import type {
 import { exploreDeepChild } from "./child-delegation.js";
 import { continueDeepChildAgent } from "./deep-child-agent-runner.js";
 import { DeepTaskBoard } from "./deep-task-board.js";
-import {
-  DeepChildScheduler,
-  type DeepChildExecutedQueuedInstruction,
-  type DeepChildTerminalMaterial,
-  type ExploreDeepChildFactory,
-} from "./deep-child-scheduler.js";
+import { DeepChildScheduler } from "./deep-child-scheduler.js";
+import type {
+  DeepChildExecutedQueuedInstruction,
+  DeepChildTerminalMaterial,
+  ExploreDeepChildFactory,
+} from "./deep-child-scheduler-contracts.js";
 
 export type DeepSchedulerProgressEvent =
   | {

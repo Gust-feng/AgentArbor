@@ -94,12 +94,12 @@ import {
   runDeepDirectAnswerTurn,
   runDeepManagerDecisionTurn,
 } from "./deep-manager-turns.js";
-import {
-  DeepChildScheduler,
-  type DeepChildExecutedQueuedInstruction,
-  type DeepChildSchedulerCallbacks,
-  type DeepChildTerminalMaterial,
-} from "./deep-child-scheduler.js";
+import { DeepChildScheduler } from "./deep-child-scheduler.js";
+import type {
+  DeepChildExecutedQueuedInstruction,
+  DeepChildSchedulerCallbacks,
+  DeepChildTerminalMaterial,
+} from "./deep-child-scheduler-contracts.js";
 import type { DeepTaskBoard } from "./deep-task-board.js";
 import {
   backfillDeepSpawnedChildren,

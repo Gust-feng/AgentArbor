@@ -88,7 +88,7 @@ import {
 import type {
   DeepChildInstructionQueueHandle,
   DeepChildInstructionQueueResult,
-} from "../deep/deep-child-scheduler.js";
+} from "../deep/deep-child-scheduler-contracts.js";
 import {
   createDeepRunControlHandle,
   DEEP_MANAGER_MAX_MODEL_ROUNDS,

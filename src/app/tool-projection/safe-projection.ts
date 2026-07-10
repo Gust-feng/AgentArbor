@@ -2,7 +2,6 @@ import type { ModelFailure } from "../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolContentBlock,
-  ToolContinuation,
   ToolDisplayProjection,
   ToolErrorDomain,
   ToolErrorFacts,
@@ -22,6 +21,11 @@ import {
   toolContinuationFromUnknown,
   toolResultContinuation,
 } from "./tool-result-continuation.js";
+import {
+  isSubAgentToolName,
+  projectSubAgentToolAgentContent,
+  projectSubAgentToolModelResult,
+} from "./sub-agent-tool-projection.js";
 
 const MODEL_TOOL_TEXT_MAX_CHARS = 128_000;
 const MODEL_TOOL_ERROR_MAX_CHARS = 64_000;
@@ -31,15 +35,6 @@ const FILE_SEARCH_DISPLAY_MATCHES_LIMIT = 80;
 type InternalToolResult = ToolResult;
 
 type ToolDisplayShape = "file" | "sources" | "diff" | "terminal" | "approval" | "text" | "generic";
-
-type SubAgentContinuationRef = {
-  readonly index?: number;
-  readonly sub_agent_id?: string;
-  readonly sub_agent_name?: string;
-  readonly run_id?: string;
-  readonly full_output_ref?: string;
-  readonly continuation: ToolContinuation;
-};
 
 // Historical compatibility name: callers across the app still import
 // "redactOrdinaryText", but current ordinary text policy is compact-only.
@@ -234,14 +229,13 @@ function projectToolModelResult(
     return fileChangeToolResult(display, truncated);
   }
   if (isSubAgentToolName(request.toolName)) {
-    const continuationRefs = subAgentToolContinuationRefs(record);
-    const continuation = continuationRefs[0]?.continuation;
-    return ensureToolResultContent({
-      content: genericToolResultContent(record, display),
-      structuredContent: subAgentStructuredContent(request, output, display, truncated, continuationRefs),
-      isError: record.isError === true ? true : undefined,
-      continuation,
-    }, toolResultFallbackText(request, display, record));
+    return projectSubAgentToolModelResult({
+      request,
+      output,
+      display,
+      truncated,
+      fallbackText: toolResultFallbackText(request, display, record),
+    });
   }
   if (display.kind === "browser_snapshot") {
     const result = asRecord(record.result);
@@ -1319,7 +1313,7 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
   const result = asRecord(record.result);
   const summary = stringOrUndefined(record.summary);
   if (isSubAgentToolName(request.toolName)) {
-    return projectSubAgentToolAgentContent(request, record, result, summary, truncated);
+    return projectSubAgentToolAgentContent({ request, output, truncated });
   }
   if (request.toolName === "read_skill_resource") {
     const content = typeof result.content === "string"
@@ -1928,145 +1922,6 @@ function projectBatchReadAgentItem(
     error: stringOrUndefined(item.error),
     errorFacts: optionalRecord(item.errorFacts),
     metadata: optionalRecord(item.metadata),
-  };
-}
-
-function isSubAgentToolName(toolName: string): boolean {
-  return toolName === "call_sub_agent" || toolName === "call_sub_agents" || toolName === "spawn_sub_agent";
-}
-
-function subAgentStructuredContent(
-  request: ToolCallRequest,
-  output: unknown,
-  display: ToolDisplayProjection,
-  truncated: boolean,
-  continuationRefs: readonly SubAgentContinuationRef[]
-): unknown {
-  return structuredSnapshot({
-    ...asRecord(genericStructuredContent(request, output, display, truncated)),
-    continuations: continuationRefs.length === 0 ? undefined : continuationRefs,
-  });
-}
-
-function subAgentToolContinuationRefs(record: Readonly<Record<string, unknown>>): readonly SubAgentContinuationRef[] {
-  const result = asRecord(record.result);
-  const refs: SubAgentContinuationRef[] = [];
-  const recordContinuation = toolContinuationFromUnknown(record.continuation);
-  if (recordContinuation !== undefined) {
-    refs.push({ continuation: recordContinuation });
-  }
-  const resultContinuation = toolContinuationFromUnknown(result.continuation);
-  if (resultContinuation !== undefined) {
-    refs.push({
-      run_id: stringOrUndefined(result.run_id),
-      full_output_ref: stringOrUndefined(result.full_output_ref),
-      continuation: resultContinuation,
-    });
-  }
-  if (Array.isArray(result.results)) {
-    for (const item of result.results) {
-      const itemRecord = asRecord(item);
-      const continuation = toolContinuationFromUnknown(itemRecord.continuation);
-      if (continuation !== undefined) {
-        refs.push({
-          index: numberOrUndefined(itemRecord.index),
-          sub_agent_id: stringOrUndefined(itemRecord.sub_agent_id),
-          sub_agent_name: stringOrUndefined(itemRecord.sub_agent_name),
-          run_id: stringOrUndefined(itemRecord.run_id),
-          full_output_ref: stringOrUndefined(itemRecord.full_output_ref),
-          continuation,
-        });
-      }
-    }
-  }
-  return uniqueSubAgentContinuationRefs(refs);
-}
-
-function uniqueSubAgentContinuationRefs(refs: readonly SubAgentContinuationRef[]): readonly SubAgentContinuationRef[] {
-  const seen = new Set<string>();
-  const uniqueRefs: SubAgentContinuationRef[] = [];
-  for (const ref of refs) {
-    const key = JSON.stringify(ref.continuation);
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueRefs.push(ref);
-    }
-  }
-  return uniqueRefs;
-}
-
-function projectSubAgentToolAgentContent(
-  request: ToolCallRequest,
-  record: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>,
-  summary: string | undefined,
-  truncated: boolean
-): unknown {
-  const action = stringOrUndefined(record.action) ?? request.toolName;
-  if (Array.isArray(result.results)) {
-    const continuationRefs = subAgentToolContinuationRefs(record);
-    return {
-      action,
-      status: stringOrUndefined(record.status),
-      summary,
-      result: {
-        results: result.results.map(projectSubAgentResultItem),
-        stats: optionalRecord(result.stats),
-      },
-      continuations: continuationRefs.length === 0 ? undefined : continuationRefs,
-      truncated,
-    };
-  }
-
-  const projectedResult = projectSubAgentResultItem(result);
-  return {
-    action,
-    status: stringOrUndefined(record.status),
-    sub_agent_name: stringOrUndefined(record.sub_agent_name),
-    sub_agent_id: stringOrUndefined(record.sub_agent_id),
-    spawned_role: stringOrUndefined(record.spawned_role),
-    spawned_id: stringOrUndefined(record.spawned_id),
-    summary,
-    full_output: projectedResult.full_output,
-    result: projectedResult,
-    truncated,
-  };
-}
-
-function projectSubAgentResultItem(value: unknown): {
-  readonly index?: number;
-  readonly sub_agent_id?: string;
-  readonly sub_agent_name?: string;
-  readonly task?: string;
-  readonly status?: string;
-  readonly summary?: string;
-  readonly full_output?: string;
-  readonly full_output_chars?: number;
-  readonly full_output_ref?: string;
-  readonly continuation?: ToolContinuation;
-  readonly tool_calls?: number;
-  readonly model_rounds?: number;
-  readonly duration_ms?: number;
-  readonly run_id?: string;
-  readonly error?: string;
-} {
-  const record = asRecord(value);
-  return {
-    index: numberOrUndefined(record.index),
-    sub_agent_id: stringOrUndefined(record.sub_agent_id),
-    sub_agent_name: stringOrUndefined(record.sub_agent_name),
-    task: stringOrUndefined(record.task),
-    status: stringOrUndefined(record.status),
-    summary: stringOrUndefined(record.summary),
-    full_output: textOrUndefined(record.full_output),
-    full_output_chars: numberOrUndefined(record.full_output_chars),
-    full_output_ref: stringOrUndefined(record.full_output_ref),
-    continuation: toolContinuationFromUnknown(record.continuation),
-    tool_calls: numberOrUndefined(record.tool_calls),
-    model_rounds: numberOrUndefined(record.model_rounds),
-    duration_ms: numberOrUndefined(record.duration_ms),
-    run_id: stringOrUndefined(record.run_id),
-    error: stringOrUndefined(record.error),
   };
 }
 

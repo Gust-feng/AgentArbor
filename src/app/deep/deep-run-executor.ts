@@ -56,7 +56,7 @@ import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type { ChildAgentRun, ParentSynthesisResult } from "../../domain/underground/agent-fabric.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
-import { createId, nowIso } from "../../kernel/id.js";
+import { nowIso } from "../../kernel/id.js";
 import type {
   DeepConversation,
   DeepDelegationAction,
@@ -68,7 +68,6 @@ import type {
   DeepChildSpec,
   DeepChildSummary,
   DeepResearchBrief,
-  DeepTaskBoardPhase,
   DeepTaskBoardSnapshot,
   SynthesizedConclusion,
 } from "./contracts.js";
@@ -85,12 +84,7 @@ export type {
   DeepRunControlHandle,
   DeepRunControlSignal,
 } from "./deep-run-control.js";
-import {
-  DEEP_MANAGER_AGENT_ID,
-  DEEP_MAX_CHILDREN,
-  exploreDeepChild,
-} from "./child-delegation.js";
-import { continueDeepChildAgent } from "./deep-child-agent-runner.js";
+import { DEEP_MANAGER_AGENT_ID, DEEP_MAX_CHILDREN } from "./child-delegation.js";
 import { synthesizeDeepConclusion, buildParentSynthesisRecord } from "./parent-synthesis.js";
 import {
   attemptDeepPartialSynthesis,
@@ -100,14 +94,21 @@ import {
   runDeepDirectAnswerTurn,
   runDeepManagerDecisionTurn,
 } from "./deep-manager-turns.js";
-import { DeepTaskBoard } from "./deep-task-board.js";
 import {
   DeepChildScheduler,
   type DeepChildExecutedQueuedInstruction,
   type DeepChildSchedulerCallbacks,
   type DeepChildTerminalMaterial,
-  type ExploreDeepChildFactory,
 } from "./deep-child-scheduler.js";
+import type { DeepTaskBoard } from "./deep-task-board.js";
+import {
+  backfillDeepSpawnedChildren,
+  buildDeepResearchBrief,
+  createDeepDefaultScheduler,
+  deepTaskBoardPhaseForRunStatus,
+  mergeDeepTerminalMaterials,
+  waitForDeepChildTerminalForReview,
+} from "./deep-run-scheduler-support.js";
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -375,7 +376,20 @@ export async function startDeepRun(
 
   // T1-4：装配 board+scheduler。外部注入（T2-1 runtime 装配回调后）优先；否则内部创建默认
   // scheduler（无生命周期回调，闭环2 由 runtime 注入补齐实时事件/投影）。
-  const scheduler = config.scheduler ?? createDefaultScheduler(input, config);
+  const goal = deepRunGoal(input.conversation);
+  const scheduler = config.scheduler ?? createDeepDefaultScheduler({
+    runId: input.run.runId,
+    goal,
+    permissionBoundaryRefs: input.permissionBoundaryRefs,
+    turnRuntime: config.turnRuntime,
+    traceId: input.traceId,
+    goalId: input.goalId,
+    confirmationPolicy: input.confirmationPolicy,
+    capabilitySnapshot: input.capabilitySnapshot,
+    maxConcurrency: config.maxConcurrency,
+    maxChildren: config.maxChildren,
+    emitProgress: (event) => emitProgress(config, event),
+  });
   const board = scheduler.getBoard();
   board.setPhase("planning");
 
@@ -385,7 +399,6 @@ export async function startDeepRun(
   const completedChildRuns: ChildAgentRun[] = [];
   const executedQueuedChildInstructions: DeepChildExecutedQueuedInstruction[] = [];
   const controlEvents: DeepRunControlEvent[] = [];
-  const goal = deepRunGoal(input.conversation);
   /** spawn step 派生并入板的 childRunId（stepIndex → childRunId[]），供 run 结束时回填 childrenAdded。 */
   const spawnedChildRunIdsByStep = new Map<number, string[]>();
   let conclusion: SynthesizedConclusion | undefined;
@@ -401,7 +414,7 @@ export async function startDeepRun(
       scheduler.setStepIndex(stepIndex);
       // 非阻塞回收上一 step fire-and-forget child 已经完成的材料，让 manager 下一次决策能审查
       // 完整 child material，而不是只能看到 task board 的短摘要。
-      mergeTerminalMaterials(
+      mergeDeepTerminalMaterials(
         scheduler.harvestReady(),
         childSummaries,
         completedChildRuns,
@@ -418,7 +431,7 @@ export async function startDeepRun(
           // 合并新终态材料后记录保留量。已产出的 child/材料保留，run 置 interrupted。
           scheduler.cancelPendingAndRunning(signal.reason);
           const drained = await scheduler.waitForAll();
-          mergeTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+          mergeDeepTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
           controlEvents.push({
             kind: "interrupt",
             atStepIndex: stepIndex,
@@ -438,7 +451,7 @@ export async function startDeepRun(
           // 失败时不阻塞停止，材料仍保留在结果中。
           scheduler.cancelPendingAndRunning(signal.reason);
           const drained = await scheduler.waitForAll();
-          mergeTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+          mergeDeepTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
           const partial = await attemptDeepPartialSynthesis({
             context: input,
             turnRuntime: config.turnRuntime,
@@ -567,7 +580,7 @@ export async function startDeepRun(
         // FR-BRIEF-02/03：首次 spawn 后装配 DeepResearchBrief。目标明确时 brief 自动进入探索
         // （不强制审批，needsUserApproval=false）；信息不足由 manager 走 ask_user，不伪装完成。
         if (brief === undefined && decision.childSpecs.length > 0) {
-          brief = buildResearchBrief({
+          brief = buildDeepResearchBrief({
             goal,
             decision,
             childSpecs: decision.childSpecs,
@@ -602,7 +615,7 @@ export async function startDeepRun(
           continue;
         }
         const harvested = await scheduler.waitForProgress();
-        mergeTerminalMaterials(harvested, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+        mergeDeepTerminalMaterials(harvested, childSummaries, completedChildRuns, executedQueuedChildInstructions);
         // 并发槽空闲且有 pending 时继续启动剩余 pending（FR-WAIT-02）。
         scheduler.startQueued();
         steps.push({
@@ -620,7 +633,7 @@ export async function startDeepRun(
 
       if (decision.action === "continue_child") {
         board.setPhase("exploring");
-        mergeTerminalMaterials(
+        mergeDeepTerminalMaterials(
           scheduler.harvestReady(),
           childSummaries,
           completedChildRuns,
@@ -639,8 +652,8 @@ export async function startDeepRun(
             continue;
           }
           if (snapshotTask.status === "pending" || snapshotTask.status === "running") {
-            const harvestedBeforeContinue = await waitForChildTerminalForReview(scheduler, operation.childRunId);
-            mergeTerminalMaterials(
+            const harvestedBeforeContinue = await waitForDeepChildTerminalForReview(scheduler, operation.childRunId);
+            mergeDeepTerminalMaterials(
               harvestedBeforeContinue,
               childSummaries,
               completedChildRuns,
@@ -682,7 +695,7 @@ export async function startDeepRun(
           });
           continued.push(material);
         }
-        mergeTerminalMaterials(continued, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+        mergeDeepTerminalMaterials(continued, childSummaries, completedChildRuns, executedQueuedChildInstructions);
         steps.push({
           stepIndex,
           decision,
@@ -710,7 +723,7 @@ export async function startDeepRun(
         // 仍有 pending/running child 时先清空队列（本轮最小闭环口径，FR-SAFE-03）；
         // waitForAllQueued 会按并发上限启动剩余 pending，避免终态残留 planned 节点。
         const drained = await scheduler.waitForAllQueued();
-        mergeTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+        mergeDeepTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
         // 无任何 completed/blocked/failed child 材料时拒绝综合，走 ask_user/failed guard，不伪造结论。
         if (childSummaries.length === 0) {
           steps.push({
@@ -776,7 +789,7 @@ export async function startDeepRun(
       if (decision.action === "stop") {
         scheduler.cancelPendingAndRunning(decision.uncertainty);
         const drained = await scheduler.waitForAll();
-        mergeTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+        mergeDeepTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
         const partial = await attemptDeepPartialSynthesis({
           context: input,
           turnRuntime: config.turnRuntime,
@@ -831,7 +844,7 @@ export async function startDeepRun(
   // board 已 stopped（control 终止）时 running 仍自然完成进 buffer，waitForAll 照常 drain。
   try {
     const tailMaterials = await scheduler.waitForAll();
-    mergeTerminalMaterials(tailMaterials, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+    mergeDeepTerminalMaterials(tailMaterials, childSummaries, completedChildRuns, executedQueuedChildInstructions);
   } catch {
     // 兜底 drain 失败不改变已确定的终态（失败/中断材料已在循环内保留）。
   }
@@ -869,12 +882,12 @@ export async function startDeepRun(
 
   // 终态相位对齐（循环正常收束但相位未被显式置位时按 finalStatus 收口）。
   if (board.getPhase() !== "stopped" && board.getPhase() !== "needs_input") {
-    board.setPhase(phaseForFinalStatus(finalStatus));
+    board.setPhase(deepTaskBoardPhaseForRunStatus(finalStatus));
   }
 
   // 回填 spawn step 的 childrenAdded：按 childRunId 从最终 childSummaries 匹配，供
   // DeepRuntime buildAndPublishRunTree 按 step 关联 child 进 AgentRunTree + 发布事件序列。
-  const finalSteps = backfillChildrenAdded(steps, spawnedChildRunIdsByStep, childSummaries);
+  const finalSteps = backfillDeepSpawnedChildren(steps, spawnedChildRunIdsByStep, childSummaries);
 
   return {
     run: withRunStatus(input.run, finalStatus),
@@ -891,213 +904,6 @@ export async function startDeepRun(
     brief,
     executedQueuedChildInstructions,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Step 实现：manager 决策
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// T1-4 辅助：默认 scheduler 装配 / brief 装配 / 材料合并 / step childrenAdded 回填 / 相位映射
-// ---------------------------------------------------------------------------
-
-/**
- * 创建默认 board+scheduler（scheduler 未注入时，design.md §3.3 配置扩展口径）。
- * 默认 exploreFactory 封装 child Agent runner + run 上下文（goal/permissionBoundaryRefs/
- * turnRuntime/traceId/goalId/confirmationPolicy/capabilitySnapshot），使本任务在不改 runtime
- * 的前提下即具备真实并发语义。默认 scheduler 内置生命周期回调（onChildStarted/onChildTerminal），
- * 把 child 生命周期转译为 DeepRunProgressEvent（child.started/child.completed）：child.started
- * 携带原始 childSpec.objective，避免被 child-delegation 还原的派生 objective（如
- * "Explore from angle: ..."）覆盖，消费方据此维护 liveProjection。T2-1 runtime 注入的
- * scheduler（config.scheduler）优先，可装配更完整的 deep.* 事件/store 实时投影（闭环2 投影权威化）。
- */
-function createDefaultScheduler(input: StartDeepRunInput, config: DeepRunExecutorConfig): DeepChildScheduler {
-  const board = new DeepTaskBoard({ runId: input.run.runId });
-  const exploreFactory: ExploreDeepChildFactory = (childRun, childSpec) =>
-    exploreDeepChild({
-      childRun,
-      childSpec,
-      goal: deepRunGoal(input.conversation),
-      permissionBoundaryRefs: input.permissionBoundaryRefs,
-      turnRuntime: config.turnRuntime,
-      traceId: input.traceId,
-      goalId: input.goalId,
-      confirmationPolicy: input.confirmationPolicy,
-      // P6：传入 run 冻结的 capabilitySnapshot，让 child 探索消息投影「本 child 被授权可用工具」。
-      capabilitySnapshot: input.capabilitySnapshot,
-    });
-  return new DeepChildScheduler({
-    board,
-    exploreFactory,
-    continueFactory: (childRun, childSpec, parentInstruction, previousSummary, parentOperation) =>
-      continueDeepChildAgent({
-        childRun,
-        childSpec,
-        previousSummary,
-        parentInstruction,
-        currentParentInstructionRef: parentOperation.messageRef,
-        currentParentReview: parentOperation.review,
-        goal: deepRunGoal(input.conversation),
-        permissionBoundaryRefs: input.permissionBoundaryRefs,
-        turnRuntime: config.turnRuntime,
-        traceId: input.traceId,
-        goalId: input.goalId,
-        confirmationPolicy: input.confirmationPolicy,
-        capabilitySnapshot: input.capabilitySnapshot,
-      }),
-    maxConcurrency: config.maxConcurrency,
-    maxChildren: config.maxChildren,
-    callbacks: {
-      onChildStarted: (task, childRun, stepIndex) => {
-        void emitProgress(config, {
-          kind: "child.started",
-          stepIndex,
-          childRun,
-          childSpec: task.spec,
-          recordedAt: nowIso(),
-        });
-      },
-      onChildTerminal: (_task, summary, completedRun, _material, stepIndex) => {
-        void emitProgress(config, {
-          kind: "child.completed",
-          stepIndex,
-          childRun: completedRun,
-          summary,
-          recordedAt: nowIso(),
-        });
-      },
-    },
-  });
-}
-
-/**
- * 把 scheduler 回收的终态材料合并进父层综合输入（childSummaries / completedChildRuns）。
- * 单 child 失败已由 scheduler 经 buildFailedChildExploration 降级为 failed summary，此处照常
- * 合并（综合模型据 [status=failed] 标记降权，不击穿 run，FR-SAFE-01）。
- */
-function mergeTerminalMaterials(
-  materials: readonly DeepChildTerminalMaterial[],
-  childSummaries: DeepChildSummary[],
-  completedChildRuns: ChildAgentRun[],
-  executedQueuedChildInstructions?: DeepChildExecutedQueuedInstruction[],
-): void {
-  for (const material of materials) {
-    replaceByChildRunId(childSummaries, material.summary, (summary) => summary.childRunId);
-    replaceByChildRunId(completedChildRuns, material.completedRun, (run) => run.childRunId);
-    if (executedQueuedChildInstructions !== undefined && material.executedQueuedInstructions !== undefined) {
-      executedQueuedChildInstructions.push(...material.executedQueuedInstructions);
-    }
-  }
-}
-
-async function waitForChildTerminalForReview(
-  scheduler: DeepChildScheduler,
-  childRunId: string,
-): Promise<DeepChildTerminalMaterial[]> {
-  const accumulated: DeepChildTerminalMaterial[] = [];
-  for (;;) {
-    scheduler.startQueued();
-    const snapshot = scheduler.snapshot();
-    const task = snapshot.tasks.find((item) => item.childRunId === childRunId);
-    if (task === undefined || (task.status !== "pending" && task.status !== "running")) {
-      return accumulated;
-    }
-    const harvested = await scheduler.waitForProgress();
-    if (harvested.length === 0) {
-      return accumulated;
-    }
-    accumulated.push(...harvested);
-    if (harvested.some((material) => material.completedRun.childRunId === childRunId)) {
-      return accumulated;
-    }
-  }
-}
-
-function replaceByChildRunId<T>(items: T[], next: T, idOf: (item: T) => string): void {
-  const nextId = idOf(next);
-  const index = items.findIndex((item) => idOf(item) === nextId);
-  if (index >= 0) {
-    items[index] = next;
-    return;
-  }
-  items.push(next);
-}
-
-/**
- * 回填 spawn step 的 childrenAdded：按本 step 派生并入板的 childRunId，从最终 childSummaries
- * 匹配（并发模型下 spawn step 不再同步持有 child summary，需在 run 结束、材料回收完毕后回填）。
- * 供 DeepRuntime buildAndPublishRunTree 按 step 关联 child 进 AgentRunTree 并发布生命周期事件。
- */
-function backfillChildrenAdded(
-  steps: readonly DeepRunStepRecord[],
-  spawnedChildRunIdsByStep: ReadonlyMap<number, readonly string[]>,
-  childSummaries: readonly DeepChildSummary[],
-): DeepRunStepRecord[] {
-  const summaryByChildRunId = new Map<string, DeepChildSummary>();
-  for (const summary of childSummaries) {
-    summaryByChildRunId.set(summary.childRunId, summary);
-  }
-  return steps.map((step) => {
-    const spawnedIds = spawnedChildRunIdsByStep.get(step.stepIndex);
-    if (spawnedIds === undefined || spawnedIds.length === 0) {
-      return step;
-    }
-    const childrenAdded = spawnedIds
-      .map((childRunId) => summaryByChildRunId.get(childRunId))
-      .filter((summary): summary is DeepChildSummary => summary !== undefined);
-    const failedChildren = childrenAdded.filter((summary) => summary.status === "failed").length;
-    return {
-      ...step,
-      childrenAdded,
-      failedChildren: failedChildren > 0 ? failedChildren : step.failedChildren,
-    };
-  });
-}
-
-/**
- * 装配 DeepResearchBrief（FR-BRIEF-01/02/03）。从 manager 首次 spawn_children 决策的
- * childSpecs 摘要装配：goal/scopeSummary（决策摘要）/sourcePolicySummary（来源策略摘要）/
- * plannedAngles（计划探索角度）。needsUserApproval 固定 false（不强制审批流程）。
- */
-function buildResearchBrief(input: {
-  readonly goal: string;
-  readonly decision: DeepDelegationDecision;
-  readonly childSpecs: readonly DeepChildSpec[];
-  readonly permissionBoundaryRefs: readonly string[];
-}): DeepResearchBrief {
-  const plannedAngles = input.childSpecs.map(
-    (spec) => `${spec.displayName}（${spec.role}）：${spec.objective}`,
-  );
-  const sourcePolicySummary =
-    input.permissionBoundaryRefs.length > 0
-      ? `来源策略：受 ${input.permissionBoundaryRefs.length} 项权限边界约束；child 按授权工具收集证据。`
-      : "来源策略：本轮无显式权限边界约束；child 按授权工具收集证据。";
-  return {
-    briefId: createId("deep-brief"),
-    goal: input.goal,
-    scopeSummary: input.decision.decisionSummary,
-    sourcePolicySummary,
-    plannedAngles,
-    needsUserApproval: false,
-    updatedAt: nowIso(),
-  };
-}
-
-/** finalStatus → board 终态相位映射（board.setPhase 收口用）。 */
-function phaseForFinalStatus(status: DeepRunStatus): DeepTaskBoardPhase {
-  switch (status) {
-    case "completed":
-      return "completed";
-    case "failed":
-      return "failed";
-    case "stopped":
-      return "stopped";
-    case "interrupted":
-    case "corrected":
-      return "needs_input";
-    default:
-      return "completed";
-  }
 }
 
 // ---------------------------------------------------------------------------

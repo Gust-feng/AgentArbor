@@ -1,6 +1,5 @@
 import type {
   ToolCallRequest,
-  ToolContentBlock,
   ToolDisplayProjection,
   ToolErrorDomain,
   ToolErrorFacts,
@@ -14,6 +13,10 @@ import {
 } from "../../kernel/tools/index.js";
 import { projectToolDisplay } from "./tool-display-projection.js";
 import { projectToolAgentContent } from "./tool-agent-content-projection.js";
+import {
+  projectFileChangeToolModelResult,
+  projectGenericToolModelResult,
+} from "./tool-model-result-default-adapters.js";
 import {
   projectContextAttachmentListToolModelResult,
   projectContextAttachmentTableToolModelResult,
@@ -45,9 +48,7 @@ import { compactSafeText, redactOrdinaryText } from "./tool-projection-text.js";
 import { isSubAgentToolName, projectSubAgentToolModelResult } from "./sub-agent-tool-projection.js";
 import {
   ensureToolResultContent,
-  structuredRecordWithoutVerbose,
   structuredSnapshot,
-  textContentBlocks,
 } from "./tool-model-result-support.js";
 type ToolDisplayShape = "file" | "sources" | "diff" | "terminal" | "approval" | "text" | "generic";
 
@@ -217,7 +218,13 @@ export function projectToolModelResult(
     });
   }
   if (display.kind === "file_change_summary" || display.kind === "file_diff_preview") {
-    return fileChangeToolResult(display, truncated);
+    return projectFileChangeToolModelResult({
+      request,
+      output,
+      display,
+      truncated,
+      fallbackText: "工具返回了文件变更内容。",
+    });
   }
   if (isSubAgentToolName(request.toolName)) {
     return projectSubAgentToolModelResult({
@@ -246,11 +253,13 @@ export function projectToolModelResult(
       fallbackText: toolResultFallbackText(request, display, record),
     });
   }
-  return ensureToolResultContent({
-    content: genericToolResultContent(record, display),
-    structuredContent: genericStructuredContent(request, output, display, truncated),
-    isError: record.isError === true ? true : undefined,
-  }, toolResultFallbackText(request, display, record));
+  return projectGenericToolModelResult({
+    request,
+    output,
+    display,
+    truncated,
+    fallbackText: toolResultFallbackText(request, display, record),
+  });
 }
 
 export function projectToolFallbackSummary(
@@ -371,57 +380,6 @@ function toolResultFromModelResult(
   };
 }
 
-function fileChangeToolResult(
-  display: Extract<ToolDisplayProjection, { readonly kind: "file_change_summary" | "file_diff_preview" }>,
-  truncated: boolean
-): InternalToolResult {
-  const files = diffFilesFromPreview(display.preview, display.path);
-  return ensureToolResultContent({
-    content: files.flatMap((file) => textContentBlocks(file.diff)),
-    structuredContent: structuredSnapshot({
-      files,
-      path: display.path,
-      operation: display.operation,
-      bytes: "bytes" in display ? display.bytes : undefined,
-      replacements: display.replacements,
-      previousLength: display.previousLength,
-      nextLength: display.nextLength,
-      truncated: display.truncated === true || truncated,
-    }),
-  }, "工具返回了文件变更内容。");
-}
-
-function genericToolResultContent(
-  record: Readonly<Record<string, unknown>>,
-  display: ToolDisplayProjection
-): readonly ToolContentBlock[] {
-  const result = asRecord(record.result);
-  if (display.kind === "generic_tool_summary") {
-    return [
-      ...textContentBlocks(display.summary),
-      ...(display.items ?? []).flatMap((item) => textContentBlocks(item)),
-    ];
-  }
-  return textContentBlocks(stringOrUndefined(result.text) ?? stringOrUndefined(record.summary));
-}
-
-function genericStructuredContent(
-  request: ToolCallRequest,
-  output: unknown,
-  display: ToolDisplayProjection,
-  truncated: boolean
-): unknown {
-  const record = asRecord(output);
-  const result = asRecord(record.result);
-  return structuredSnapshot({
-    toolName: request.toolName,
-    action: stringOrUndefined(record.action),
-    display,
-    result: structuredRecordWithoutVerbose(result),
-    truncated,
-  });
-}
-
 function displayShapeForTool(request: ToolCallRequest, display: ToolDisplayProjection): ToolDisplayShape {
   if (display.kind === "command_summary") return "terminal";
   if (display.kind === "search_results" || display.kind === "file_search_results") return "sources";
@@ -534,37 +492,6 @@ function isLowValueExplanation(value: string): boolean {
     normalized === "命令已执行" ||
     normalized === "执行完成" ||
     normalized === "搜索完成";
-}
-
-function diffFilesFromPreview(
-  preview: string | undefined,
-  fallbackPath: string | undefined
-): readonly { readonly path?: string; readonly diff: string }[] {
-  if (preview === undefined || preview.trim().length === 0) {
-    return fallbackPath === undefined ? [] : [{ path: fallbackPath, diff: "" }];
-  }
-  const lines = preview.replace(/\r\n?/g, "\n").split("\n");
-  const blocks: { path?: string; lines: string[] }[] = [];
-  let current: { path?: string; lines: string[] } = { path: fallbackPath, lines: [] };
-  for (const line of lines) {
-    const diffPath = line.match(/^diff --git a\/(.+?) b\/(.+)$/u)?.[2];
-    if (diffPath !== undefined && current.lines.length > 0) {
-      blocks.push(current);
-      current = { path: diffPath, lines: [line] };
-      continue;
-    }
-    if (diffPath !== undefined) {
-      current.path = diffPath;
-    }
-    current.lines.push(line);
-  }
-  if (current.lines.length > 0) {
-    blocks.push(current);
-  }
-  return blocks.map((block) => ({
-    path: block.path,
-    diff: block.lines.join("\n").trim(),
-  })).filter((block) => block.diff.length > 0 || block.path !== undefined);
 }
 
 function isFileReadTool(toolName: string): boolean {

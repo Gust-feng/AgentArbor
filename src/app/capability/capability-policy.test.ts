@@ -4,13 +4,13 @@ import type {
   BasicAgentCapabilitySnapshot,
   CapabilityToolCatalogItem,
   CapabilityToolScope,
-} from "../domain/config/index.js";
-import { toolPresentationForName } from "../domain/tools/index.js";
-import { createTaskSoil } from "../domain/soil/index.js";
-import type { AgentDefinition } from "./agent-prompts/contracts.js";
-import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+} from "../../domain/config/index.js";
+import { toolPresentationForName } from "../../domain/tools/index.js";
+import { createTaskSoil } from "../../domain/soil/index.js";
+import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
-import { resolveModelCapabilities } from "./model-capability-registry.js";
+import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import { restrictRunCapabilityResolutionToExecutableTools } from "./run-tool-boundary.js";
 
 test("run capability policy hides disabled, unavailable, denied, and mode-internal tools", () => {

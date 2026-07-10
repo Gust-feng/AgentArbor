@@ -16,7 +16,7 @@ import {
 import type { MinimalRuntime } from "../runtime.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import { createRunCapabilityPlan } from "../model-runtime/model-capability-registry.js";
-import { resolveRunToolBoundary } from "../run-tool-boundary.js";
+import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
 
 export type DesktopAgentLoopPreparationInput = {
   readonly runtime: MinimalRuntime;

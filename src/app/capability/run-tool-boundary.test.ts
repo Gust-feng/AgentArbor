@@ -5,7 +5,7 @@ import type {
   CapabilitySubAgentCatalogItem,
   CapabilityToolCatalogItem,
   CapabilityToolScope,
-} from "../domain/config/index.js";
+} from "../../domain/config/index.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -13,10 +13,10 @@ import type {
   ToolExecutionBroker,
   ToolExecutionContext,
   ToolPermissionCheck,
-} from "../domain/tools/index.js";
-import { toolPresentationForName } from "../domain/tools/index.js";
-import { createTaskSoil } from "../domain/soil/index.js";
-import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+} from "../../domain/tools/index.js";
+import { toolPresentationForName } from "../../domain/tools/index.js";
+import { createTaskSoil } from "../../domain/soil/index.js";
+import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { resolveRunToolBoundary } from "./run-tool-boundary.js";
 
 test("run tool boundary intersects policy-visible tools with executable tools", () => {

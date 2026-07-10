@@ -177,7 +177,7 @@ import {
   projectDeepConversationSummaryWithHealth,
   projectDeepRunSummaryWithHealth,
 } from "./deep-run-health.js";
-import { resolveRunToolBoundary } from "../run-tool-boundary.js";
+import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 
 export { deriveDeepRunRuntimeHealth } from "./deep-run-health.js";

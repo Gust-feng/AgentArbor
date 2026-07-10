@@ -25,9 +25,9 @@ import {
   type BasicAgentRunStartFacts,
   type BasicAgentRunStartInput,
 } from "../basic-agent-runtime/index.js";
-import { CapabilityCenter } from "../capability-center.js";
+import { CapabilityCenter } from "../capability/capability-center.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center.js";
-import { resolveModelCapabilities } from "../model-capability-registry.js";
+import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import { PanelConversationStore } from "../panel-conversation/panel-conversations.js";
 import { PanelRunJobStore, resolvePanelRunMode, type PanelRunJob } from "./run-jobs.js";
 import {

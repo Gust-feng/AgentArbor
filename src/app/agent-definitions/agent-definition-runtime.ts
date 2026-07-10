@@ -3,8 +3,8 @@ import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolConfirmationPolicy, ToolDefinition } from "../../domain/tools/index.js";
 import type { AgentTurnPolicy } from "../../kernel/intelligence/agent-turn-runtime.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
-import { resolveRunCapabilities } from "../capability-policy.js";
-import { createRunCapabilityPlan } from "../model-capability-registry.js";
+import { resolveRunCapabilities } from "../capability/capability-policy.js";
+import { createRunCapabilityPlan } from "../model-runtime/model-capability-registry.js";
 
 export {
   agentDefinitionHash,

@@ -83,7 +83,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
     readAppSource(path.join("desktop-agent", "desktop-agent-session-projection.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-session-runtime.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-loop-preparation.ts")),
-    readAppSource("run-tool-boundary.ts"),
+    readAppSource(path.join("capability", "run-tool-boundary.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-session-events.ts")),
     readAppSource(path.join("agent-definitions", "agent-definition-registry.ts")),
     readAppSource(path.join("agent-definitions", "agent-definition-ref.ts")),
@@ -183,6 +183,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(loopPreparation.includes("agentDisplayName: input.agentDefinition.displayName"), true);
   assert.equal(loopPreparation.includes("resolveDesktopAgentRunCapabilities({"), false);
   assert.equal(loopPreparation.includes("restrictRunCapabilityResolutionToExecutableTools("), false);
+  assert.equal(loopPreparation.includes('from "../capability/run-tool-boundary.js"'), true);
   assert.equal(loopPreparation.includes("resolveRunToolBoundary({"), true);
   assert.equal(loopPreparation.includes("createDesktopAgentTurnPolicy({"), true);
   assert.equal(runToolBoundary.includes("export function resolveRunToolBoundary"), true);

@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { modelVisibleToolDescription } from "../domain/tools/index.js";
-import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/index.js";
-import { ensurePidExited } from "./tool-center/adapters/background-process-test-utils.js";
+import { modelVisibleToolDescription } from "../../domain/tools/index.js";
+import { createDesktopBasicToolRegistry } from "../basic-agent-runtime/index.js";
+import { ensurePidExited } from "../tool-center/adapters/background-process-test-utils.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 

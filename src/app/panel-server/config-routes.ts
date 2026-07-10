@@ -4,7 +4,7 @@ import { listBuiltinMcpServerPresets, listBuiltinModelProviderPresets, listBuilt
 import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
 import { resolveModelCapabilities } from "../model-capability-registry.js";
 import { fetchModelRuntimeModelCatalog } from "../model-runtime/index.js";
-import { CapabilityCenter } from "../capability-center.js";
+import { CapabilityCenter } from "../capability/capability-center.js";
 import {
   ConfigCenter,
   ConfigCenterValidationError,

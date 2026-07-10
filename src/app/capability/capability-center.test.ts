@@ -3,11 +3,11 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../adapters/config/index.js";
+import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../../adapters/config/index.js";
 import { CapabilityCenter } from "./capability-center.js";
-import { ConfigCenter } from "./config-center.js";
-import type { SkillRootInput } from "./skills/index.js";
-import type { SubAgentRootInput } from "./sub-agents/sub-agent-loader.js";
+import { ConfigCenter } from "../config-center.js";
+import type { SkillRootInput } from "../skills/index.js";
+import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 
 test("CapabilityCenter freezes transient run workspace without changing the default workspace", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-"));

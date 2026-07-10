@@ -177,7 +177,7 @@ test("AgentDefinition runtime does not own executable tool boundary pruning", as
   const appRoot = path.join(process.cwd(), "src", "app");
   const [definitionRuntime, runToolBoundary, loopPreparation] = await Promise.all([
     readSource(path.join(appRoot, "agent-definitions", "agent-definition-runtime.ts")),
-    readSource(path.join(appRoot, "run-tool-boundary.ts")),
+    readSource(path.join(appRoot, "capability", "run-tool-boundary.ts")),
     readSource(path.join(appRoot, "desktop-agent", "desktop-agent-loop-preparation.ts")),
   ]);
 
@@ -186,7 +186,7 @@ test("AgentDefinition runtime does not own executable tool boundary pruning", as
   assert.equal(runToolBoundary.includes("ToolExecutionBroker"), true);
   assert.equal(runToolBoundary.includes("resolveRunToolBoundary"), true);
   assert.equal(runToolBoundary.includes("restrictRunCapabilityResolutionToExecutableTools"), true);
-  assert.equal(loopPreparation.includes('from "../run-tool-boundary.js"'), true);
+  assert.equal(loopPreparation.includes('from "../capability/run-tool-boundary.js"'), true);
   assert.equal(loopPreparation.includes("resolveRunToolBoundary({"), true);
 });
 
@@ -265,6 +265,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["agent-definition-ref.ts", 'export * from "./agent-definitions/agent-definition-ref.js";'],
     ["agent-definition-registry.ts", 'export * from "./agent-definitions/agent-definition-registry.js";'],
     ["agent-definition-runtime.ts", 'export * from "./agent-definitions/agent-definition-runtime.js";'],
+    ["capability-center.ts", 'export * from "./capability/capability-center.js";'],
+    ["capability-policy.ts", 'export * from "./capability/capability-policy.js";'],
+    ["capability-tool-definitions.ts", 'export * from "./capability/capability-tool-definitions.js";'],
     ["intelligence-channel-factory.ts", 'export * from "./model-runtime/factory.js";'],
     ["model-capability-registry.ts", 'export * from "./model-runtime/model-capability-registry.js";'],
     ["model-context-window-fallback.ts", 'export * from "./model-runtime/model-context-window-fallback.js";'],
@@ -338,6 +341,8 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["desktop-agent-session-events.ts", 'export * from "./desktop-agent/desktop-agent-session-events.js";'],
     ["desktop-agent-session-runtime.ts", 'export * from "./desktop-agent/desktop-agent-session-runtime.js";'],
     ["desktop-agent-loop-preparation.ts", 'export * from "./desktop-agent/desktop-agent-loop-preparation.js";'],
+    ["run-tool-boundary.ts", 'export * from "./capability/run-tool-boundary.js";'],
+    ["tool-definition-contract.ts", 'export * from "./capability/tool-definition-contract.js";'],
     ["panel-read-model-utils.ts", 'export * from "./run-read-model/value-utils.js";'],
     ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
     ["direction-handoff-derivation.ts", 'export * from "./underground/compat/direction-handoff-derivation.js";'],
@@ -496,6 +501,58 @@ test("app update support modules stay under app-update ownership", () => {
     const facade = path.join(appRoot, fileName);
     assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
     assert.equal(fileExistsSync(path.join(appUpdateRoot, fileName)), true, `${fileName} should live in app-update`);
+  }
+});
+
+test("capability boundary modules stay under capability ownership", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const capabilityRoot = path.join(appRoot, "capability");
+  const capabilityFiles = [
+    "capability-center.ts",
+    "capability-policy.ts",
+    "capability-tool-definitions.ts",
+    "run-tool-boundary.ts",
+    "tool-definition-contract.ts",
+  ];
+  const ownerSources = await Promise.all([
+    readSource(path.join(appRoot, "agent-definitions", "agent-definition-runtime.ts")),
+    readSource(path.join(appRoot, "desktop-agent", "desktop-agent-loop-preparation.ts")),
+    readSource(path.join(appRoot, "panel-server", "config-routes.ts")),
+    readSource(path.join(appRoot, "panel-server", "deep-routes.ts")),
+    readSource(path.join(appRoot, "panel-server", "mcp-management-service.ts")),
+    readSource(path.join(appRoot, "panel-server", "runtime.ts")),
+  ]);
+
+  for (const fileName of capabilityFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), true, `${fileName} should keep a top-level compatibility facade`);
+    assert.equal(fileExistsSync(path.join(capabilityRoot, fileName)), true, `${fileName} should live in capability`);
+  }
+
+  const centerFacade = await readSource(path.join(appRoot, "capability-center.ts"));
+  assert.equal(centerFacade.trim(), 'export * from "./capability/capability-center.js";');
+  const policyFacade = await readSource(path.join(appRoot, "capability-policy.ts"));
+  assert.equal(policyFacade.trim(), 'export * from "./capability/capability-policy.js";');
+  const toolDefinitionsFacade = await readSource(path.join(appRoot, "capability-tool-definitions.ts"));
+  assert.equal(toolDefinitionsFacade.trim(), 'export * from "./capability/capability-tool-definitions.js";');
+  const toolBoundaryFacade = await readSource(path.join(appRoot, "run-tool-boundary.ts"));
+  assert.equal(toolBoundaryFacade.trim(), 'export * from "./capability/run-tool-boundary.js";');
+  const toolDefinitionContractFacade = await readSource(path.join(appRoot, "tool-definition-contract.ts"));
+  assert.equal(toolDefinitionContractFacade.trim(), 'export * from "./capability/tool-definition-contract.js";');
+  assert.equal(fileExistsSync(path.join(appRoot, "capability-center.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(capabilityRoot, "capability-center.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "capability-policy.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(capabilityRoot, "capability-policy.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "run-tool-boundary.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(capabilityRoot, "run-tool-boundary.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "tool-capability-acceptance.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(capabilityRoot, "tool-capability-acceptance.test.ts")), true);
+
+  for (const source of ownerSources) {
+    assert.equal(source.includes("capability/"), true);
+    assert.equal(source.includes('from "../capability-center.js"'), false);
+    assert.equal(source.includes('from "../capability-policy.js"'), false);
+    assert.equal(source.includes('from "../run-tool-boundary.js"'), false);
+    assert.equal(source.includes('from "../tool-definition-contract.js"'), false);
   }
 });
 
@@ -1047,7 +1104,7 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
     readSource(path.join(appRoot, "panel-server", "desktop-agent-execution.ts")),
     readSource(path.join(appRoot, "panel-server", "run-execution-contracts.ts")),
     readSource(path.join(appRoot, "panel-server", "skill-service.ts")),
-    readSource(path.join(appRoot, "run-tool-boundary.ts")),
+    readSource(path.join(appRoot, "capability", "run-tool-boundary.ts")),
   ]);
 
   for (const fileName of desktopAgentFiles) {

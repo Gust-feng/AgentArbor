@@ -303,7 +303,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationRoutes.includes("resolvePanelRouteRunMode({"), true);
   assert.equal(conversationRoutes.includes('runKind: "desktop"'), true);
   assert.equal(conversationRoutes.includes("conversation_run_mode_not_supported"), true);
-  assert.equal(deepRoutes.includes('from "../run-tool-boundary.js"'), true);
+  assert.equal(deepRoutes.includes('from "../capability/run-tool-boundary.js"'), true);
   assert.equal(deepRoutes.includes("function deepCapabilitySnapshotWithExecutableTools"), true);
   assert.equal(deepRoutes.includes("resolveRunToolBoundary({"), true);
   assert.equal(deepRoutes.includes("allowedTools: toolBoundary.allowedTools"), true);

@@ -564,6 +564,24 @@ test("panel run read model stays a compatibility facade", async () => {
   assert.equal(workNotes.includes("input.agentDefinitionRef?.agentId"), true);
 });
 
+test("panel run event helpers stay owned by panel read model run", async () => {
+  const [topLevelUtils, runEventUtils, workNotes, tracking] = await Promise.all([
+    readAppSource("panel-read-model-utils.ts"),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-event-utils.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-work-notes.ts")),
+    readAppSource(path.join("panel-read-model", "run", "panel-run-tracking.ts")),
+  ]);
+
+  assert.equal(runEventUtils.includes("export function eventRefsFor"), true);
+  assert.equal(runEventUtils.includes("export function hasEvent"), true);
+  assert.equal(runEventUtils.includes("export function lastRecordedAt"), true);
+  assert.equal(topLevelUtils.includes("eventRefsFor"), false);
+  assert.equal(topLevelUtils.includes("hasEvent"), false);
+  assert.equal(topLevelUtils.includes("lastRecordedAt"), false);
+  assert.equal(workNotes.includes('from "./panel-run-event-utils.js"'), true);
+  assert.equal(tracking.includes('from "./panel-run-event-utils.js"'), true);
+});
+
 test("cognitive work session keeps helpers split by runtime concern", async () => {
   const [session, contracts, modelIo, fabric, result, runProjection, runtime, safe] = await Promise.all([
     readAppSource("cognitive-work-session.ts"),

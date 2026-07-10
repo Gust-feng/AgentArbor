@@ -23,8 +23,8 @@ import {
 } from "../../../domain/underground/index.js";
 import { InMemoryDirectionHandoffPackageStore } from "../../../domain/agentarbor/direction-handoff-package.js";
 import { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
-import { createGoalIntentProfileForMinimalUnderground } from "../../underground-goal-profile.js";
-import { createMinimalUndergroundExplorationPlan, startRootletClusters } from "../../underground-rootlets.js";
+import { createGoalIntentProfileForMinimalUnderground } from "../primitives/underground-goal-profile.js";
+import { createMinimalUndergroundExplorationPlan, startRootletClusters } from "../primitives/underground-rootlets.js";
 import {
   HandoffStewardAgent,
   type HandoffStewardCapabilities,

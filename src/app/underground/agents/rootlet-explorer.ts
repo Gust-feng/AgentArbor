@@ -34,8 +34,8 @@ import {
 } from "../../../domain/underground/index.js";
 import { sanitizeUndergroundConvergenceAiAdvisoryText } from "../../../domain/underground/radial-growth.js";
 import type { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
-import { createGoalIntentProfileForMinimalUnderground } from "../../underground-goal-profile.js";
-import { createRootletOutputForInvocation } from "../../underground-rootlets.js";
+import { createGoalIntentProfileForMinimalUnderground } from "../primitives/underground-goal-profile.js";
+import { createRootletOutputForInvocation } from "../primitives/underground-rootlets.js";
 import { createDeterministicFallbackRootletOutputs } from "../fallback.js";
 import {
   getRootletKindStrategy,

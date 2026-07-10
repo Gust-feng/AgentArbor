@@ -16,8 +16,8 @@ import {
   type WorkspaceSnapshot,
 } from "../../../domain/underground/index.js";
 import { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
-import { createGoalIntentProfileForMinimalUnderground } from "../../underground-goal-profile.js";
-import { createMinimalUndergroundExplorationPlan, startRootletClusters } from "../../underground-rootlets.js";
+import { createGoalIntentProfileForMinimalUnderground } from "../primitives/underground-goal-profile.js";
+import { createMinimalUndergroundExplorationPlan, startRootletClusters } from "../primitives/underground-rootlets.js";
 import { RootletExplorerAgent } from "./rootlet-explorer.js";
 
 type RootletExplorerContext = Parameters<RootletExplorerAgent["observe"]>[0];

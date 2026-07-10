@@ -41,7 +41,7 @@ import {
   spendCandidateBudget,
   startRootletClusters,
 } from "./underground/minimal/minimal-underground.js";
-import { createRootletOutputsForInvocation } from "./underground-rootlets.js";
+import { createRootletOutputsForInvocation } from "./underground/primitives/underground-rootlets.js";
 import type { MinimalRuntime } from "./runtime.js";
 import {
   createUndergroundRootletAgentTurnPolicy,

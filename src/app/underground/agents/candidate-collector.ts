@@ -25,7 +25,7 @@ import {
   type GuardedActionOutput,
   rejectGuardedAction,
 } from "../../../domain/underground/index.js";
-import { createMinimalCandidatePool } from "../../underground-candidates.js";
+import { createMinimalCandidatePool } from "../primitives/underground-candidates.js";
 import {
   fallbackReasoningTrace,
   reasonWithAgentTurn,

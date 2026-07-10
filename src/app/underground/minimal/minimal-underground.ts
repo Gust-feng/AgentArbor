@@ -14,9 +14,9 @@ export {
   produceMinimalRootletOutputs,
   spendCandidateBudget,
   startRootletClusters,
-} from "../../underground-rootlets.js";
-export { createMinimalCandidatePool } from "../../underground-candidates.js";
-export { convergeMinimalCandidatePool } from "../../underground-convergence.js";
-export { createMinimalUndergroundEvidenceLedger } from "../../underground-evidence.js";
-export { createGoalIntentProfileForMinimalUnderground } from "../../underground-goal-profile.js";
-export { createUndergroundExplorationReport } from "../../underground-report.js";
+} from "../primitives/underground-rootlets.js";
+export { createMinimalCandidatePool } from "../primitives/underground-candidates.js";
+export { convergeMinimalCandidatePool } from "../primitives/underground-convergence.js";
+export { createMinimalUndergroundEvidenceLedger } from "../primitives/underground-evidence.js";
+export { createGoalIntentProfileForMinimalUnderground } from "../primitives/underground-goal-profile.js";
+export { createUndergroundExplorationReport } from "../primitives/underground-report.js";

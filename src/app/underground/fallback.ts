@@ -10,9 +10,9 @@
  */
 import type { Constraint } from "../../domain/contracts.js";
 import type { GoalIntentProfile, UndergroundAgentInvocation, RootletClusterPlan, RootletOutput } from "../../domain/underground/index.js";
-import { createRootletOutputsForInvocation } from "../underground-rootlets.js";
+import { createRootletOutputsForInvocation } from "./primitives/underground-rootlets.js";
 
-export * from "../underground-rootlets.js";
+export * from "./primitives/underground-rootlets.js";
 
 export type DeterministicFallbackRootletOutputInput = {
   readonly goalId: string;

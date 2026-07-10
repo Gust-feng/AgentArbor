@@ -28,7 +28,7 @@ import {
   parseUndergroundRootletCandidateAdviceOutput,
 } from "./underground/intelligence-output.js";
 import { buildUndergroundRootletCandidateAdviceMessages, type SoilRefSummary } from "./underground/intelligence-prompts.js";
-import { createRootletOutputForInvocation } from "./underground-rootlets.js";
+import { createRootletOutputForInvocation } from "./underground/primitives/underground-rootlets.js";
 
 export type UndergroundRootletCandidateAdviceRequestResult = {
   readonly rootletOutputs: readonly RootletOutput[];

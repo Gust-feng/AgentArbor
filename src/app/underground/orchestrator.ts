@@ -59,7 +59,7 @@ import { CandidateCollectorAgent, type CandidateCollectorWorkspace } from "./age
 import { AutonomyReviewerAgent, type AutonomyReviewerWorkspace } from "./agents/autonomy-reviewer.js";
 import { ConvergenceJudgeAgent, type ConvergenceJudgeWorkspace } from "./agents/convergence-judge.js";
 import { HandoffStewardAgent, type HandoffStewardWorkspace } from "./agents/handoff-steward.js";
-import { createUndergroundExplorationReport } from "../underground-report.js";
+import { createUndergroundExplorationReport } from "./primitives/underground-report.js";
 import { completeUndergroundRootletInvocations } from "../underground-agent-cluster-runtime.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import {

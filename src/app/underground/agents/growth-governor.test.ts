@@ -13,8 +13,8 @@ import {
 } from "../../../domain/underground/index.js";
 import type { IntelligenceChannel, ModelRequest, ModelResponse } from "../../../domain/intelligence/index.js";
 import { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
-import { createGoalIntentProfileForMinimalUnderground } from "../../underground-goal-profile.js";
-import { createMinimalUndergroundExplorationPlan } from "../../underground-rootlets.js";
+import { createGoalIntentProfileForMinimalUnderground } from "../primitives/underground-goal-profile.js";
+import { createMinimalUndergroundExplorationPlan } from "../primitives/underground-rootlets.js";
 import {
   GrowthGovernorAgent,
   type GrowthGovernorCapabilities,

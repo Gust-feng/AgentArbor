@@ -13,7 +13,7 @@ import { createMessage } from "../../kernel/messages/create-message.js";
 import { finalizeUndergroundAgentClusterRun } from "../underground-agent-cluster-runtime.js";
 import { createMinimalDirectionMaterial } from "../underground/minimal/minimal-direction.js";
 import type { MinimalRuntime } from "../runtime.js";
-import { createUndergroundExplorationReport } from "../underground-report.js";
+import { createUndergroundExplorationReport } from "../underground/primitives/underground-report.js";
 import { runUndergroundExploration } from "../underground-runner.js";
 import type { DirectionOutput } from "./types.js";
 

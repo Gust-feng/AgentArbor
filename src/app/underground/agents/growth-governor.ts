@@ -37,7 +37,7 @@ import {
   completeUndergroundAgentInvocation,
   startUndergroundAgentInvocation,
 } from "../../underground-agent-cluster-runtime.js";
-import { startRootletClusters } from "../../underground-rootlets.js";
+import { startRootletClusters } from "../primitives/underground-rootlets.js";
 import {
   fallbackReasoningTrace,
   reasonWithAgentTurn,

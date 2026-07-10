@@ -40,7 +40,7 @@ import {
   type ConvergenceJudgment,
   type ConvergenceJudgmentCandidateDecision,
   type ConvergenceJudgmentNextAction,
-} from "../../underground-convergence.js";
+} from "../primitives/underground-convergence.js";
 import {
   fallbackReasoningTrace,
   reasonWithAgentTurn,

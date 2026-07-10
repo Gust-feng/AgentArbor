@@ -8,8 +8,8 @@ import type {
   BasicAgentCapabilitySnapshot,
   CapabilityToolCatalogItem,
   CapabilityToolScope,
-} from "../domain/config/index.js";
-import type { IntelligenceChannel, ModelRequest } from "../domain/intelligence/index.js";
+} from "../../domain/config/index.js";
+import type { IntelligenceChannel, ModelRequest } from "../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -17,14 +17,14 @@ import type {
   ToolExecutionBroker,
   ToolExecutionContext,
   ToolPermissionCheck,
-} from "../domain/tools/index.js";
-import { toolPresentationForName } from "../domain/tools/index.js";
-import type { AgentDefinition } from "./agent-prompts/contracts.js";
-import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+} from "../../domain/tools/index.js";
+import { toolPresentationForName } from "../../domain/tools/index.js";
+import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { runDesktopAgentSession } from "./desktop-agent-session.js";
-import { createOpenAiStreamTextResponse } from "./testing/openai-test-fixtures.js";
-import { createReadSkillResourceTool } from "./tool-center/adapters/skill-resource-tool.js";
-import { ToolCenter } from "./tool-center/index.js";
+import { createOpenAiStreamTextResponse } from "../testing/openai-test-fixtures.js";
+import { createReadSkillResourceTool } from "../tool-center/adapters/skill-resource-tool.js";
+import { ToolCenter } from "../tool-center/index.js";
 
 test("Desktop Agent Session answers ordinary questions without entering deep mode", async () => {
   const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "fake" });

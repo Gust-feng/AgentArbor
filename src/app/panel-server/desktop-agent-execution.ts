@@ -1,6 +1,6 @@
 import type { ModelRunReasoningEffort } from "../../domain/config/index.js";
 import { agentDefinitionRefMatchesDefinition } from "../agent-definition-ref.js";
-import { runDesktopAgentSession } from "../desktop-agent-session.js";
+import { runDesktopAgentSession } from "../desktop-agent/desktop-agent-session.js";
 import { latestModelFailureTextForUser } from "../panel-read-model/run/panel-model-failure-copy.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import { createDesktopAgentCanvas } from "../panel-read-model/canvas/panel-desktop-agent-canvas.js";

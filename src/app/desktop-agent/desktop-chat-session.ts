@@ -5,7 +5,7 @@
  */
 export {
   runDesktopAgentSession as runDesktopChatSession,
-} from "../desktop-agent-session.js";
+} from "./desktop-agent-session.js";
 
 export type {
   DesktopAgentActivity as DesktopChatActivity,
@@ -17,4 +17,4 @@ export type {
   DesktopAgentSessionRuntimeContext as DesktopChatSessionRuntimeContext,
   DesktopAgentSessionStatus as DesktopChatSessionStatus,
   RunDesktopAgentSessionOptions as RunDesktopChatSessionOptions,
-} from "../desktop-agent-session.js";
+} from "./desktop-agent-session.js";

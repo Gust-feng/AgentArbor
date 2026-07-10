@@ -77,7 +77,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
     outputContractAsset,
     toolVisibilityAsset,
   ] = await Promise.all([
-    readAppSource("desktop-agent-session.ts"),
+    readAppSource(path.join("desktop-agent", "desktop-agent-session.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-session-contracts.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-contracts.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-session-projection.ts")),
@@ -97,12 +97,12 @@ test("desktop agent session keeps projection and contracts split", async () => {
     readAppSource(path.join("agent-prompts", "desktop-root-agent-tool-visibility.ts")),
   ]);
 
-  assert.equal(session.includes('from "./desktop-agent/desktop-agent-session-contracts.js"'), true);
-  assert.equal(session.includes('from "./desktop-agent/desktop-agent-session-projection.js"'), true);
-  assert.equal(session.includes('from "./desktop-agent/desktop-agent-session-runtime.js"'), true);
-  assert.equal(session.includes('from "./desktop-agent/desktop-agent-loop-preparation.js"'), true);
-  assert.equal(session.includes('from "./desktop-agent/desktop-agent-session-events.js"'), true);
-  assert.equal(session.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
+  assert.equal(session.includes('from "./desktop-agent-session-contracts.js"'), true);
+  assert.equal(session.includes('from "./desktop-agent-session-projection.js"'), true);
+  assert.equal(session.includes('from "./desktop-agent-session-runtime.js"'), true);
+  assert.equal(session.includes('from "./desktop-agent-loop-preparation.js"'), true);
+  assert.equal(session.includes('from "./desktop-agent-session-events.js"'), true);
+  assert.equal(session.includes('from "../agent-prompts/desktop-root-agent.js"'), true);
   assert.equal(session.includes("const agentDefinition = options.agentDefinition ?? DESKTOP_ROOT_AGENT"), true);
   assert.equal(session.includes("const aiMode = resolveDesktopAgentAiMode(options)"), true);
   assert.equal(session.includes('options.aiMode ?? "openai-responses"'), false);
@@ -699,7 +699,7 @@ test("ordinary desktop runtime does not adopt legacy model purposes", async () =
     desktopChatFacade,
     desktopChatCompatibility,
   ] = await Promise.all([
-    readAppSource("desktop-agent-session.ts"),
+    readAppSource(path.join("desktop-agent", "desktop-agent-session.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-session-runtime.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-loop-preparation.ts")),
     readAppSource(path.join("panel-server", "run-execution.ts")),

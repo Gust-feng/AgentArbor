@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModelProvider, ModelRequest, ModelResponse } from "../domain/intelligence/index.js";
-import type { RootletClusterKind } from "../domain/underground/index.js";
-import { nowIso } from "../kernel/id.js";
-import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
-import { createFailedModelResponse } from "../kernel/intelligence/failures.js";
-import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
-import { ToolCenter } from "./tool-center/tool-center.js";
+import type { ModelProvider, ModelRequest, ModelResponse } from "../../../domain/intelligence/index.js";
+import type { RootletClusterKind } from "../../../domain/underground/index.js";
+import { nowIso } from "../../../kernel/id.js";
+import { NativeIntelligenceChannel } from "../../../kernel/intelligence/channel.js";
+import { createFailedModelResponse } from "../../../kernel/intelligence/failures.js";
+import { pendingModelOutputValidation } from "../../../kernel/intelligence/validation.js";
+import { ToolCenter } from "../../tool-center/tool-center.js";
 import {
   runUndergroundDirectionSession,
   runUndergroundDirectionSessionWithIntelligence,

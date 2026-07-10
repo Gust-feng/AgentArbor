@@ -12,8 +12,8 @@ import test from "node:test";
 import {
   FileSystemDirectionHandoffPackageStore,
   InMemoryDirectionHandoffPackageStore,
-} from "../domain/agentarbor/direction-handoff-package.js";
-import { createUndergroundAiRuntimeConfig } from "./underground-ai-runtime.js";
+} from "../../../domain/agentarbor/direction-handoff-package.js";
+import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import {
   runUndergroundDirectionSession,

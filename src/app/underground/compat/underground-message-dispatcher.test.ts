@@ -6,11 +6,11 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ArborMessage } from "../domain/common.js";
-import type { IntelligenceChannel } from "../domain/intelligence/index.js";
-import { createMessage } from "../kernel/messages/create-message.js";
-import { createUndergroundAiRuntimeConfig } from "./underground-ai-runtime.js";
-import { createMinimalRuntime } from "./runtime.js";
+import type { ArborMessage } from "../../../domain/common.js";
+import type { IntelligenceChannel } from "../../../domain/intelligence/index.js";
+import { createMessage } from "../../../kernel/messages/create-message.js";
+import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
+import { createMinimalRuntime } from "../../runtime.js";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
 import {
   MessageDrivenUndergroundDispatcher,

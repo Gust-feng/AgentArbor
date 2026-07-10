@@ -60,7 +60,7 @@ import { AutonomyReviewerAgent, type AutonomyReviewerWorkspace } from "./agents/
 import { ConvergenceJudgeAgent, type ConvergenceJudgeWorkspace } from "./agents/convergence-judge.js";
 import { HandoffStewardAgent, type HandoffStewardWorkspace } from "./agents/handoff-steward.js";
 import { createUndergroundExplorationReport } from "./primitives/underground-report.js";
-import { completeUndergroundRootletInvocations } from "../underground-agent-cluster-runtime.js";
+import { completeUndergroundRootletInvocations } from "./compat/underground-agent-cluster-runtime.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import {
   publishAgentDelegationPlanned,

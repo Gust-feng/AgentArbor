@@ -74,7 +74,7 @@ child output **不直通结论**：综合结论的 outputRefs 与 child outputRe
 
 ## 新建 DeepRuntime 边界（不转正旧文件）
 
-- DeepRuntime 是**新建的正式边界**，不是任何旧文件（`cognitive-work-session-*` / `underground/orchestrator*` / `underground-direction-session*`）改名为正式主线。旧文件本期定位为 DeepRuntime 的**设计参考来源**与**迁移前兼容路径**；其去留按渐进迁移与退役策略处理，不激进删除。
+- DeepRuntime 是**新建的正式边界**，不是任何旧文件（`cognitive-work-session-*` / `underground/orchestrator*` / `underground/compat/underground-direction-session*`）改名为正式主线。旧文件本期定位为 DeepRuntime 的**设计参考来源**与**迁移前兼容路径**；其去留按渐进迁移与退役策略处理，不激进删除。
 - DeepRuntime 的"新"只体现在**编排策略边界**（DeepConversation 会话隔离 / DeepRunExecutor manager 决策循环 / Child Delegation / Parent Synthesis）；其依赖的全部运行能力**复用**现有共享设施，不另起平行运行时。
 
 ## 复用边界（复用而非另起）

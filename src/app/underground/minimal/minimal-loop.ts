@@ -38,10 +38,10 @@ import {
   type UndergroundAiProviderFetch,
 } from "../../underground-ai-runtime.js";
 import type { MinimalRuntime } from "../../runtime.js";
-import { runUndergroundDirectionSessionWithIntelligence } from "../../underground-direction-session.js";
+import { runUndergroundDirectionSessionWithIntelligence } from "../compat/underground-direction-session.js";
 import type { ModelOutputDelta } from "../../../domain/intelligence/index.js";
 import type { ToolExecutionBroker } from "../../../domain/tools/index.js";
-import type { UndergroundDirectionSessionRuntimeContext } from "../../underground-direction-session.js";
+import type { UndergroundDirectionSessionRuntimeContext } from "../compat/underground-direction-session.js";
 import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "../../task-soil/task-soil-workspace.js";
 
 export const EXPECTED_DEMO_EVENTS: ArborMessageType[] = [

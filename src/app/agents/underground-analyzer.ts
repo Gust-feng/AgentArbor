@@ -10,11 +10,11 @@
  */
 import { createDirectionHandoffPackageRef } from "../../domain/agentarbor/direction-handoff-package.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
-import { finalizeUndergroundAgentClusterRun } from "../underground-agent-cluster-runtime.js";
+import { finalizeUndergroundAgentClusterRun } from "../underground/compat/underground-agent-cluster-runtime.js";
 import { createMinimalDirectionMaterial } from "../underground/minimal/minimal-direction.js";
 import type { MinimalRuntime } from "../runtime.js";
 import { createUndergroundExplorationReport } from "../underground/primitives/underground-report.js";
-import { runUndergroundExploration } from "../underground-runner.js";
+import { runUndergroundExploration } from "../underground/compat/underground-runner.js";
 import type { DirectionOutput } from "./types.js";
 
 export class UndergroundAnalyzer {

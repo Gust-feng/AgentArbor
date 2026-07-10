@@ -26,7 +26,7 @@ import type { PanelRunSummary } from "../panel-read-model/run/panel-run-summary.
 import type { ModelRuntimeConfig } from "../model-runtime/index.js";
 import type { McpToolExecutorProvider } from "../basic-agent-runtime/builtin-tool-runtime.js";
 import type { LocalCommandProcessRegistry } from "../tool-center/adapters/local-workspace-command-tools.js";
-import type { UndergroundDirectionSessionRuntimeContext } from "../underground-direction-session.js";
+import type { UndergroundDirectionSessionRuntimeContext } from "../underground/compat/underground-direction-session.js";
 import type { PanelRuntime } from "./runtime.js";
 
 export type PanelRunExecutionResult = {

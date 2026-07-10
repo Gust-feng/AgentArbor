@@ -10,11 +10,11 @@ import type {
 } from "../../../domain/underground/index.js";
 import type { MinimalRuntime } from "../../runtime.js";
 import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
-import { recoverUndergroundDirectionSession } from "../../underground-direction-recovery.js";
+import { recoverUndergroundDirectionSession } from "../compat/underground-direction-recovery.js";
 import {
   runUndergroundDirectionSessionWithIntelligence,
   type UndergroundDirectionSessionResult,
-} from "../../underground-direction-session.js";
+} from "../compat/underground-direction-session.js";
 
 export const EXPECTED_CLARIFICATION_REQUIRED_EVENTS: ArborMessageType[] = [
   "goal.received",

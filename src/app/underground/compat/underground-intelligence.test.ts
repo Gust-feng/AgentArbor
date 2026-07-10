@@ -6,15 +6,15 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModelProvider, ModelRequest, ModelResponse, ModelToolCall } from "../domain/intelligence/index.js";
-import type { RootletClusterKind } from "../domain/underground/index.js";
-import { nowIso } from "../kernel/id.js";
-import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
-import { createFailedModelResponse } from "../kernel/intelligence/failures.js";
-import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
-import { createDefaultToolCenter } from "./model-runtime/index.js";
-import type { FetchLike } from "./tool-center/index.js";
-import { createUndergroundAiRuntimeConfig } from "./underground-ai-runtime.js";
+import type { ModelProvider, ModelRequest, ModelResponse, ModelToolCall } from "../../../domain/intelligence/index.js";
+import type { RootletClusterKind } from "../../../domain/underground/index.js";
+import { nowIso } from "../../../kernel/id.js";
+import { NativeIntelligenceChannel } from "../../../kernel/intelligence/channel.js";
+import { createFailedModelResponse } from "../../../kernel/intelligence/failures.js";
+import { pendingModelOutputValidation } from "../../../kernel/intelligence/validation.js";
+import { createDefaultToolCenter } from "../../model-runtime/index.js";
+import type { FetchLike } from "../../tool-center/index.js";
+import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
 import { createUndergroundDemoSummary } from "./underground-demo-summary.js";
 import {
   runUndergroundDirectionSession,

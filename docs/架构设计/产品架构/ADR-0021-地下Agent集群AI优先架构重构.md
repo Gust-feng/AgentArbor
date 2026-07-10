@@ -255,19 +255,19 @@ HandoffStewardAgent
 
 | 文件 | 变更 |
 |---|---|
-| `src/app/underground-intelligence.ts` | 移除 rootlet 专用 intelligence 函数，改为通用 AgentTurnRuntime 策略构建 |
+| `src/app/underground/compat/underground-intelligence.ts` | 移除 rootlet 专用 intelligence 函数，改为通用 AgentTurnRuntime 策略构建 |
 | `src/app/underground/events.ts` | 保留事件发布函数，调整 payload 以适配新 agent 产出格式 |
-| `src/app/underground-demo.ts` | 改用 Orchestrator 入口 |
-| `src/app/underground-direction-session.ts` | 改用 Orchestrator 入口 |
-| `src/app/underground-runner.ts` | 改用 Orchestrator 入口 |
-| `src/app/underground-message-dispatcher.ts` | 删除，Orchestrator 按 DAG 推进 |
-| `src/app/underground-direction-recovery.ts` | 适配新 WorkspaceView 接口 |
+| `src/app/underground/compat/underground-demo.ts` | 改用 Orchestrator 入口 |
+| `src/app/underground/compat/underground-direction-session.ts` | 改用 Orchestrator 入口 |
+| `src/app/underground/compat/underground-runner.ts` | 改用 Orchestrator 入口 |
+| `src/app/underground/compat/underground-message-dispatcher.ts` | 删除，Orchestrator 按 DAG 推进 |
+| `src/app/underground/compat/underground-direction-recovery.ts` | 适配新 WorkspaceView 接口 |
 | `src/app/underground-convergence.ts` | 保留收敛逻辑函数，但作为 ConvergenceJudgeAgent 的 guard 层和 fallback 使用 |
 | `src/app/underground-candidates.ts` | 保留候选池创建逻辑，但作为 CandidateCollector 的 act 层使用 |
 | `src/app/underground-evidence.ts` | 保留证据账本逻辑，适配新接口 |
 | `src/app/underground-report.ts` | 保留报告创建逻辑，适配新接口 |
 | `src/app/underground-goal-profile.ts` | 保留，作为 IntentCoreAgent 的 observe 层使用 |
-| `src/app/underground-demo-summary.ts` | 适配新接口 |
+| `src/app/underground/compat/underground-demo-summary.ts` | 适配新接口 |
 | `src/app/agents/manifests.ts` | 更新 agent manifest 以适配 AgentLoop 接口 |
 | `src/domain/underground/agent-cluster.ts` | 扩展 UndergroundAgentClusterPlan 以包含 DAG 和协议信息 |
 | `src/domain/underground/radial-growth.ts` | RootletOutput 增加 `source: "ai" | "deterministic_fallback"` 字段 |
@@ -288,7 +288,7 @@ HandoffStewardAgent
 | `src/app/underground/cluster/handoff-steward-agent.ts` | 被 agents/handoff-steward.ts 替代 |
 | `src/app/underground/cluster/rootlet-agent.ts` | 被 agents/rootlet-explorer.ts 替代 |
 | `src/app/underground/cluster/index.ts` | 目录整体删除 |
-| `src/app/underground-agent-cluster-runtime.ts` | 被 Orchestrator 替代 |
+| `src/app/underground/compat/underground-agent-cluster-runtime.ts` | 被 Orchestrator 替代 |
 | `src/app/underground-rootlets.ts` | 模板工厂逻辑移入 fallback.ts，探索逻辑移入 rootlet-explorer.ts |
 | `src/app/minimal-underground.ts` | 功能分散到各 agent 的 fallback 层 |
 | `src/app/underground/convergence-intelligence.ts` | 移入 agents/convergence-judge.ts 的 reason 层 |

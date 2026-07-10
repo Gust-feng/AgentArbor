@@ -10,7 +10,7 @@ import { createId } from "../../kernel/id.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import { createMinimalRuntime } from "../runtime.js";
 import { createUndergroundAiRuntimeConfig } from "../underground-ai-runtime.js";
-import { runUndergroundDirectionSessionWithIntelligence } from "../underground-direction-session.js";
+import { runUndergroundDirectionSessionWithIntelligence } from "./compat/underground-direction-session.js";
 import { UndergroundAgentOrchestrator } from "./orchestrator.js";
 
 test("UndergroundAgentOrchestrator stops instead of approving when no AgentTurnRuntime is available", async () => {

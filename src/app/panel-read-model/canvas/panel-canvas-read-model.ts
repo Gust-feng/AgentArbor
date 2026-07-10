@@ -1,6 +1,6 @@
 import type { MinimalLoopResult } from "../../underground/minimal/minimal-loop.js";
 import type { CognitiveWorkSessionResult } from "../../underground/cognitive-work-session/cognitive-work-session.js";
-import type { UndergroundDirectionSessionResult } from "../../underground-direction-session.js";
+import type { UndergroundDirectionSessionResult } from "../../underground/compat/underground-direction-session.js";
 import type {
   PanelObservationReadModel,
   PanelRunTrackingReadModel,

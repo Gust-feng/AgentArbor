@@ -315,10 +315,17 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["underground-candidates.ts", 'export * from "./underground/primitives/underground-candidates.js";'],
     ["underground-convergence.ts", 'export * from "./underground/primitives/underground-convergence.js";'],
     ["underground-evidence.ts", 'export * from "./underground/primitives/underground-evidence.js";'],
+    ["underground-agent-cluster-runtime.ts", 'export * from "./underground/compat/underground-agent-cluster-runtime.js";'],
+    ["underground-demo-summary.ts", 'export * from "./underground/compat/underground-demo-summary.js";'],
+    ["underground-direction-recovery.ts", 'export * from "./underground/compat/underground-direction-recovery.js";'],
+    ["underground-direction-session.ts", 'export * from "./underground/compat/underground-direction-session.js";'],
     ["underground-events.ts", 'export * from "./underground/events.js";'],
     ["underground-goal-profile.ts", 'export * from "./underground/primitives/underground-goal-profile.js";'],
+    ["underground-intelligence.ts", 'export * from "./underground/compat/underground-intelligence.js";'],
+    ["underground-message-dispatcher.ts", 'export * from "./underground/compat/underground-message-dispatcher.js";'],
     ["underground-report.ts", 'export * from "./underground/primitives/underground-report.js";'],
     ["underground-rootlets.ts", 'export * from "./underground/primitives/underground-rootlets.js";'],
+    ["underground-runner.ts", 'export * from "./underground/compat/underground-runner.js";'],
     ["run-read-model-envelope.ts", 'export * from "./run-read-model/envelope.js";'],
     ["run-read-model-summary.ts", 'export * from "./run-read-model/summary.js";'],
     ["restored-run-projection.ts", 'export * from "./run-read-model/restored-run-projection.js";'],
@@ -1295,6 +1302,63 @@ test("Underground orchestrator keeps run factories split", async () => {
   assert.equal(factories.includes("export function createExplorationPlanFromAutonomyDecision"), true);
   assert.equal(factories.includes("export function createExplorationCycle"), true);
   assert.equal(factories.includes("export function createAutonomyReview"), true);
+});
+
+test("legacy underground compat chain stays under underground/compat ownership", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const compatRoot = path.join(appRoot, "underground", "compat");
+  const productionFacades = new Map([
+    ["underground-agent-cluster-runtime.ts", 'export * from "./underground/compat/underground-agent-cluster-runtime.js";'],
+    ["underground-demo-summary.ts", 'export * from "./underground/compat/underground-demo-summary.js";'],
+    ["underground-direction-recovery.ts", 'export * from "./underground/compat/underground-direction-recovery.js";'],
+    ["underground-direction-session.ts", 'export * from "./underground/compat/underground-direction-session.js";'],
+    ["underground-intelligence.ts", 'export * from "./underground/compat/underground-intelligence.js";'],
+    ["underground-message-dispatcher.ts", 'export * from "./underground/compat/underground-message-dispatcher.js";'],
+    ["underground-runner.ts", 'export * from "./underground/compat/underground-runner.js";'],
+  ]);
+  const movedTests = [
+    "underground-autonomy-loop.test.ts",
+    "underground-demo-cli.test.ts",
+    "underground-demo-summary.test.ts",
+    "underground-direction-session.test.ts",
+    "underground-intelligence.test.ts",
+    "underground-message-dispatcher.test.ts",
+  ];
+  const ownerSources = await Promise.all([
+    readSource(path.join(appRoot, "agents", "underground-analyzer.ts")),
+    readSource(path.join(appRoot, "underground", "orchestrator.ts")),
+    readSource(path.join(appRoot, "underground", "orchestrator.test.ts")),
+    readSource(path.join(appRoot, "underground", "minimal", "minimal-loop.ts")),
+    readSource(path.join(appRoot, "underground", "clarification", "clarification-flow.ts")),
+    readSource(path.join(appRoot, "underground", "agents", "growth-governor.ts")),
+    readSource(path.join(appRoot, "panel-server", "underground-compat-execution.ts")),
+    readSource(path.join(appRoot, "panel-server", "run-execution-contracts.ts")),
+    readSource(path.join(appRoot, "panel-read-model", "canvas", "panel-canvas-read-model.ts")),
+  ]);
+
+  for (const [fileName, expectedSource] of productionFacades) {
+    const facade = await readSource(path.join(appRoot, fileName));
+    assert.equal(facade.trim(), expectedSource, `${fileName} should stay a top-level compatibility facade`);
+    assert.equal(fileExistsSync(path.join(compatRoot, fileName)), true, `${fileName} implementation should live in underground/compat`);
+  }
+
+  const cliFacade = await readSource(path.join(appRoot, "underground-demo.ts"));
+  assert.equal(cliFacade.trim(), 'import "./underground/compat/underground-demo.js";');
+  assert.equal(fileExistsSync(path.join(compatRoot, "underground-demo.ts")), true);
+
+  for (const fileName of movedTests) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(fileExistsSync(path.join(compatRoot, fileName)), true, `${fileName} should live in underground/compat`);
+  }
+
+  for (const source of ownerSources) {
+    assert.equal(source.includes("/compat/"), true);
+    assert.equal(source.includes("../underground-direction-session.js"), false);
+    assert.equal(source.includes("../../underground-direction-session.js"), false);
+    assert.equal(source.includes("../underground-demo-summary.js"), false);
+    assert.equal(source.includes("../underground-agent-cluster-runtime.js"), false);
+    assert.equal(source.includes("../../underground-agent-cluster-runtime.js"), false);
+  }
 });
 
 async function buildSourceGraph(area: string): Promise<SourceGraph> {

@@ -8,8 +8,8 @@ import { createUndergroundDeepCanvas } from "../panel-read-model/canvas/panel-ca
 import { createPanelRunTranscript, toPanelObservation } from "../panel-run-read-model.js";
 import {
   createUndergroundDemoSummary,
-} from "../underground-demo-summary.js";
-import { runUndergroundDirectionSessionWithIntelligence } from "../underground-direction-session.js";
+} from "../underground/compat/underground-demo-summary.js";
+import { runUndergroundDirectionSessionWithIntelligence } from "../underground/compat/underground-direction-session.js";
 import { persistContextWindowFallback } from "../model-context-window-fallback.js";
 import type { PanelRuntime } from "./runtime.js";
 import { createDesktopToolCenterFactory, desktopRuntimeMode } from "./desktop-run-resources.js";

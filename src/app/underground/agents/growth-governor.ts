@@ -36,7 +36,7 @@ import type { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
 import {
   completeUndergroundAgentInvocation,
   startUndergroundAgentInvocation,
-} from "../../underground-agent-cluster-runtime.js";
+} from "../compat/underground-agent-cluster-runtime.js";
 import { startRootletClusters } from "../primitives/underground-rootlets.js";
 import {
   fallbackReasoningTrace,

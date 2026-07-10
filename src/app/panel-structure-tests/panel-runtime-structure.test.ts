@@ -396,11 +396,19 @@ test("shared panel run orchestration uses neutral run mode naming", async () => 
 });
 
 test("shared run summary types use app-level contracts before panel aliases", async () => {
-  const [summaryContract, summaryFacade, panelSummaryContract, panelSummaryFacade, undergroundSummary] = await Promise.all([
+  const [
+    summaryContract,
+    summaryFacade,
+    panelSummaryContract,
+    panelSummaryFacade,
+    undergroundSummaryContract,
+    undergroundSummaryFacade,
+  ] = await Promise.all([
     readAppSource(path.join("run-read-model", "run-summary.ts")),
     readAppSource("run-summary.ts"),
     readAppSource(path.join("panel-read-model", "run", "panel-run-summary.ts")),
     readAppSource("panel-run-summary.ts"),
+    readAppSource(path.join("underground", "compat", "underground-demo-summary.ts")),
     readAppSource("underground-demo-summary.ts"),
   ]);
   const basicAgentRunSummarySources = await Promise.all([
@@ -431,9 +439,10 @@ test("shared run summary types use app-level contracts before panel aliases", as
   assert.equal(panelSummaryContract.includes("export type PanelRunSummary = RunSummary"), true);
   assert.equal(panelSummaryContract.includes("export type PanelRunSummaryPayload = RunSummaryPayload"), true);
   assert.equal(panelSummaryFacade.trim(), 'export * from "./panel-read-model/run/panel-run-summary.js";');
-  assert.equal(undergroundSummary.includes('from "./run-read-model/run-summary.js"'), true);
-  assert.equal(undergroundSummary.includes("export type UndergroundDemoSummary = RunSummary"), true);
-  assert.equal(undergroundSummary.includes("export type UndergroundDemoAiInput = RunSummaryAiInput"), true);
+  assert.equal(undergroundSummaryContract.includes('from "../../run-read-model/run-summary.js"'), true);
+  assert.equal(undergroundSummaryContract.includes("export type UndergroundDemoSummary = RunSummary"), true);
+  assert.equal(undergroundSummaryContract.includes("export type UndergroundDemoAiInput = RunSummaryAiInput"), true);
+  assert.equal(undergroundSummaryFacade.trim(), 'export * from "./underground/compat/underground-demo-summary.js";');
   for (const source of basicAgentRunSummarySources) {
     assert.equal(source.includes("underground-demo-summary.js"), false);
     assert.equal(source.includes("UndergroundDemoSummary"), false);

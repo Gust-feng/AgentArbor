@@ -85,6 +85,15 @@ import {
   parseDeepDirectAnswer,
 } from "./deep-model-io.js";
 import { executeDeepTurn } from "./deep-turn.js";
+import type { DeepRunControlEvent, DeepRunControlHandle } from "./deep-run-control.js";
+export {
+  createDeepRunControlHandle,
+} from "./deep-run-control.js";
+export type {
+  DeepRunControlEvent,
+  DeepRunControlHandle,
+  DeepRunControlSignal,
+} from "./deep-run-control.js";
 import {
   DEEP_MANAGER_AGENT_ID,
   DEEP_MAX_CHILDREN,
@@ -125,110 +134,8 @@ export const DEEP_MANAGER_MAX_RETRIES = 1;
 export const DEEP_TURN_RETRY_BACKOFF_MS = 400;
 
 // ---------------------------------------------------------------------------
-// T2-7 打断/纠正/停止 control handle（FR-008）
+// 运行进度事件
 // ---------------------------------------------------------------------------
-
-/**
- * control point 读出的信号。`none` 表示无待处理信号；`correct` 被消费（读后即清，
- * 仅作用于下一个 manager 决策 step）；`interrupt`/`stop` 为终态（读后循环终止）。
- */
-export type DeepRunControlSignal =
-  | { readonly kind: "none" }
-  | { readonly kind: "correct"; readonly correctionContext: readonly string[]; readonly reason?: string }
-  | { readonly kind: "interrupt"; readonly reason?: string }
-  | { readonly kind: "stop"; readonly reason?: string };
-
-/**
- * 可变 control handle：外部调用方经 request* 设信号，executor 在每个 manager step
- * 之间经 {@link consume} 读出并处理。一旦终态（interrupt/stop）被设置，后续 correct
- * 请求被忽略；correct 信号读后即清（仅作用于一次决策）。
- *
- * 该 handle 使 executor 能在 manager step 循环之间响应外部打断/纠正/停止，不阻塞
- * 模型 turn 本身（B-3 不在模型 turn 内部中断，符合"step 之间注入打断点"口径）。
- */
-export type DeepRunControlHandle = {
-  /** executor 在 control point 读取并（对 correct）消费待处理信号。 */
-  readonly consume: () => DeepRunControlSignal;
-  /** 外部请求打断：保留已产出材料，run 置 interrupted。终态，忽略其后的 correct/stop。 */
-  readonly requestInterrupt: (reason?: string) => void;
-  /** 外部请求纠正：携带补充上下文，注入下一 manager 决策 step。非终态，可多次请求。 */
-  readonly requestCorrect: (correctionContext: readonly string[], reason?: string) => void;
-  /** 外部请求停止：停止运行，若已有 child 材料尝试产出 partial conclusion。终态。 */
-  readonly requestStop: (reason?: string) => void;
-};
-
-/**
- * 创建一个独立的 control handle。同一 run 共享一个 handle；DeepRuntime（T2-6/T2-7）
- * 持有 handle 以便 API 层转发用户打断/纠正/停止请求。
- */
-export function createDeepRunControlHandle(): DeepRunControlHandle {
-  let terminal: { readonly kind: "interrupt" | "stop"; readonly reason?: string } | undefined;
-  let pendingCorrect:
-    | { readonly correctionContext: readonly string[]; readonly reason?: string }
-    | undefined;
-  return {
-    consume(): DeepRunControlSignal {
-      if (terminal) {
-        return terminal.kind === "interrupt"
-          ? { kind: "interrupt", reason: terminal.reason }
-          : { kind: "stop", reason: terminal.reason };
-      }
-      if (pendingCorrect) {
-        const consumed = pendingCorrect;
-        pendingCorrect = undefined;
-        return {
-          kind: "correct",
-          correctionContext: consumed.correctionContext,
-          reason: consumed.reason,
-        };
-      }
-      return { kind: "none" };
-    },
-    requestInterrupt(reason?: string): void {
-      if (!terminal) {
-        terminal = { kind: "interrupt", reason };
-      }
-    },
-    requestCorrect(correctionContext: readonly string[], reason?: string): void {
-      if (!terminal) {
-        pendingCorrect = { correctionContext, reason };
-      }
-    },
-    requestStop(reason?: string): void {
-      if (!terminal) {
-        terminal = { kind: "stop", reason };
-      }
-    },
-  };
-}
-
-/**
- * 一次 control 事件的可观察记录（持久化投影，FR-008/FR-009）。executor 在 control
- * point 处理信号时记录，供 DeepRuntime 写入事件序列与可复盘证据链。
- */
-export type DeepRunControlEvent =
-  | {
-      readonly kind: "interrupt";
-      readonly atStepIndex: number;
-      readonly recordedAt: string;
-      readonly reason?: string;
-      readonly preservedChildRuns: number;
-      readonly preservedMaterials: number;
-    }
-  | {
-      readonly kind: "correct";
-      readonly atStepIndex: number;
-      readonly recordedAt: string;
-      readonly correctionContext: readonly string[];
-      readonly reason?: string;
-    }
-  | {
-      readonly kind: "stop";
-      readonly atStepIndex: number;
-      readonly recordedAt: string;
-      readonly reason?: string;
-      readonly partialSynthesis: boolean;
-    };
 
 export type DeepRunProgressEvent =
   | {

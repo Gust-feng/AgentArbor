@@ -671,6 +671,7 @@ test("source structure tests stay in the source structure test module", () => {
   const sourceStructureFiles = [
     "source-dependency-structure.test.ts",
     "source-structure-test-utils.ts",
+    "trellis-gitignore.test.ts",
   ];
 
   for (const fileName of sourceStructureFiles) {

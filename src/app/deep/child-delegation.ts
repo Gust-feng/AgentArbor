@@ -30,15 +30,17 @@ import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import { DEEP_CHILD_MATERIAL_CONTRACT_ID } from "./deep-model-io.js";
 import {
   buildFailedDeepChildAgentRun,
+  runDeepChildAgent,
+} from "./deep-child-agent-runner.js";
+import {
   DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
   DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,
   normalizeDeepChildRoundLimit,
-  runDeepChildAgent,
-  type DeepChildAgentRunInput,
   type DeepChildAgentExecutionStats,
   type DeepChildAgentPrompt,
+  type DeepChildAgentRunInput,
   type DeepChildAgentRuntimeContinuation,
-} from "./deep-child-agent-runner.js";
+} from "./deep-child-run-contracts.js";
 
 /** deep 一期默认 child 数量上限（FR-004）。 */
 export const DEEP_MAX_CHILDREN = 4;

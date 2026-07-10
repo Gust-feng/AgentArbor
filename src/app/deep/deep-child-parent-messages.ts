@@ -1,4 +1,4 @@
-import type { DeepChildParentMessageContext } from "./deep-child-agent-runner.js";
+import type { DeepChildParentMessageContext } from "./deep-child-run-contracts.js";
 import {
   createDeepChildMessageRecord,
   type DeepChildMessageStore,

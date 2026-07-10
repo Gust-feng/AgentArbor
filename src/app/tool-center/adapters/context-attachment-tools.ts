@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { inflateRawSync } from "node:zlib";
 import type { ModelInputAttachment } from "../../../domain/intelligence/index.js";
-import type { TaskSoil, TaskSoilContextRef } from "../../../domain/soil/index.js";
+import type { TaskSoilContextRef } from "../../../domain/soil/index.js";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import { withToolModelAttachments } from "../../../domain/tools/index.js";
 import {
@@ -38,6 +38,25 @@ import {
   returnedRawTextChars,
   sliceLines,
 } from "./context-attachment-text.js";
+import {
+  archiveTargetExtension,
+  assertAttachmentAuthorized,
+  attachmentEntries,
+  attachmentSummary,
+  attachmentTitle,
+  isSupportedSpreadsheetRef,
+  isSupportedSpreadsheetTarget,
+  requireAttachmentEntry,
+  resolveAttachmentTarget,
+  statAttachmentTarget,
+  tableTargetExtension,
+  tableTargetFormat,
+  type AttachmentEntry,
+  type AttachmentTarget,
+  type ContextAttachmentToolOptions,
+} from "./context-attachment-access.js";
+
+export type { ContextAttachmentToolOptions } from "./context-attachment-access.js";
 
 const DEFAULT_MAX_CHARS = 128_000;
 const MAX_TABLE_SAMPLE_ROWS = 20;
@@ -60,38 +79,6 @@ const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".png": "image/png",
   ".webp": "image/webp",
 };
-
-export type ContextAttachmentToolOptions = {
-  readonly taskSoil?: TaskSoil;
-  readonly workspaceRoot?: string;
-  readonly supportsVisionInput?: boolean;
-};
-
-type AttachmentEntry = {
-  readonly attachmentId: string;
-  readonly index: number;
-  readonly ref: TaskSoilContextRef;
-  readonly authorized: boolean;
-};
-
-type AttachmentTarget = {
-  readonly entry: AttachmentEntry;
-  readonly rootAbsolutePath: string;
-  readonly targetAbsolutePath: string;
-  readonly targetPath: string;
-  readonly rootKind: "file" | "project";
-};
-
-type AttachmentFormat =
-  | "image"
-  | "pdf"
-  | "table"
-  | "spreadsheet"
-  | "archive"
-  | "text"
-  | "project"
-  | "web"
-  | "unknown";
 
 type TableDelimiter = {
   readonly kind: "comma" | "tab" | "semicolon";
@@ -1381,309 +1368,6 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
   };
 }
 
-function attachmentEntries(taskSoil: TaskSoil | undefined): readonly AttachmentEntry[] {
-  if (taskSoil === undefined) {
-    return [];
-  }
-  return taskSoil.contextRefs
-    .map((ref, index): AttachmentEntry | undefined => {
-      if (!isUserVisibleAttachmentRef(ref, taskSoil)) {
-        return undefined;
-      }
-      return {
-        attachmentId: attachmentEntryId(ref, index),
-        index,
-        ref,
-        authorized: isAttachmentReadAuthorized(ref, taskSoil.permissionBoundaryRefs),
-      };
-    })
-    .filter((entry): entry is AttachmentEntry => entry !== undefined);
-}
-
-function attachmentSummary(entry: AttachmentEntry): Readonly<Record<string, unknown>> {
-  const capabilities = attachmentCapabilities(entry.ref);
-  const format = attachmentFormat(entry.ref);
-  return {
-    attachmentId: entry.attachmentId,
-    kind: entry.ref.kind,
-    format,
-    title: entry.ref.title,
-    summary: entry.ref.summary,
-    mimeType: entry.ref.metadata?.mimeType,
-    byteLength: entry.ref.metadata?.byteLength,
-    available: entry.ref.metadata?.available,
-    previewTruncated: entry.ref.metadata?.truncated === true || entry.ref.readonlyPreview?.truncated === true,
-    authorized: entry.authorized,
-    ref: modelSafeRef(entry.ref.ref),
-    canReadText: capabilities.canReadText,
-    canReadPdfText: capabilities.canReadPdfText,
-    canReadImage: capabilities.canReadImage,
-    canReadTable: capabilities.canReadTable,
-    canInspectArchive: capabilities.canInspectArchive,
-    canListFiles: capabilities.canListFiles,
-    canSearchFiles: capabilities.canSearchFiles,
-    canUseVisionInput: format === "image",
-  };
-}
-
-function attachmentCapabilities(ref: TaskSoilContextRef): {
-  readonly canReadText: boolean;
-  readonly canReadPdfText: boolean;
-  readonly canReadImage: boolean;
-  readonly canReadTable: boolean;
-  readonly canInspectArchive: boolean;
-  readonly canListFiles: boolean;
-  readonly canSearchFiles: boolean;
-} {
-  const format = attachmentFormat(ref);
-  if (ref.kind === "file") {
-    return {
-      canReadText: true,
-      canReadPdfText: format === "pdf",
-      canReadImage: format === "image",
-      canReadTable: format === "table" || isSupportedSpreadsheetRef(ref),
-      canInspectArchive: format === "archive" && contextRefExtension(ref) === ".zip",
-      canListFiles: false,
-      canSearchFiles: true,
-    };
-  }
-  if (ref.kind === "project" || ref.kind === "workspace") {
-    return {
-      canReadText: ref.kind === "project",
-      canReadPdfText: true,
-      canReadImage: true,
-      canReadTable: true,
-      canInspectArchive: true,
-      canListFiles: true,
-      canSearchFiles: true,
-    };
-  }
-  return {
-    canReadText: false,
-    canReadPdfText: false,
-    canReadImage: false,
-    canReadTable: false,
-    canInspectArchive: false,
-    canListFiles: false,
-    canSearchFiles: false,
-  };
-}
-
-function requireAttachmentEntry(taskSoil: TaskSoil | undefined, record: Readonly<Record<string, unknown>>): AttachmentEntry {
-  const attachmentId = stringOrUndefined(record.attachmentId);
-  const ref = stringOrUndefined(record.ref);
-  if (attachmentId === undefined && ref === undefined) {
-    throw new Error("Provide attachmentId from list_context_attachments or a non-local context ref.");
-  }
-  const entries = attachmentEntries(taskSoil);
-  const found = entries.find((entry) =>
-    (attachmentId !== undefined && entry.attachmentId === attachmentId) ||
-    (ref !== undefined && entry.ref.ref === ref)
-  );
-  if (found === undefined) {
-    throw new Error("No current context attachment matched the provided selector.");
-  }
-  return found;
-}
-
-function assertAttachmentAuthorized(entry: AttachmentEntry): void {
-  if (!entry.authorized) {
-    throw new Error("The selected context attachment is not authorized for reading in this run.");
-  }
-}
-
-async function resolveAttachmentTarget(input: {
-  readonly entry: AttachmentEntry;
-  readonly workspaceRoot: string;
-  readonly requestedPath?: string;
-  readonly requireFile: boolean;
-  readonly projectPathRequired: boolean;
-}): Promise<AttachmentTarget> {
-  const root = resolveAttachmentRoot(input.entry.ref, input.workspaceRoot);
-  if (root === undefined) {
-    throw new Error("This context attachment cannot be inspected by local attachment tools.");
-  }
-  if (root.kind === "file") {
-    if (input.requestedPath !== undefined && input.requestedPath !== ".") {
-      throw new Error("File attachments do not accept a nested path.");
-    }
-    return {
-      entry: input.entry,
-      rootAbsolutePath: root.absolutePath,
-      targetAbsolutePath: root.absolutePath,
-      targetPath: ".",
-      rootKind: "file",
-    };
-  }
-  const requestedPath = input.requestedPath ?? ".";
-  if (input.requireFile && input.projectPathRequired && requestedPath === ".") {
-    throw new Error("Project attachments require an attachment-relative file path.");
-  }
-  const target = resolveInsideRoot(root.absolutePath, requestedPath);
-  return {
-    entry: input.entry,
-    rootAbsolutePath: root.absolutePath,
-    targetAbsolutePath: target.absolutePath,
-    targetPath: target.relativePath,
-    rootKind: "project",
-  };
-}
-
-function resolveAttachmentRoot(
-  ref: TaskSoilContextRef,
-  workspaceRoot: string
-): { readonly kind: "file" | "project"; readonly absolutePath: string } | undefined {
-  const normalized = ref.ref.toLowerCase();
-  if (ref.kind === "file" && normalized.startsWith("local-file:")) {
-    return { kind: "file", absolutePath: path.resolve(ref.ref.slice("local-file:".length)) };
-  }
-  if (ref.kind === "project" && normalized.startsWith("local-project:")) {
-    return { kind: "project", absolutePath: path.resolve(ref.ref.slice("local-project:".length)) };
-  }
-  if (ref.kind === "file" && normalized.startsWith("file:")) {
-    return { kind: "file", absolutePath: resolveInsideRoot(workspaceRoot, ref.ref.slice("file:".length)).absolutePath };
-  }
-  if (ref.kind === "project" && normalized.startsWith("project:")) {
-    return { kind: "project", absolutePath: resolveInsideRoot(workspaceRoot, ref.ref.slice("project:".length) || ".").absolutePath };
-  }
-  if (ref.kind === "workspace") {
-    return { kind: "project", absolutePath: path.resolve(workspaceRoot) };
-  }
-  if ((ref.kind === "file" || ref.kind === "project") && normalized.startsWith("workspace:")) {
-    const relative = ref.ref.slice("workspace:".length);
-    return {
-      kind: ref.kind === "file" ? "file" : "project",
-      absolutePath: resolveInsideRoot(workspaceRoot, relative || ".").absolutePath,
-    };
-  }
-  return undefined;
-}
-
-function resolveInsideRoot(rootAbsolutePath: string, requestedPath: string): { readonly absolutePath: string; readonly relativePath: string } {
-  const root = path.resolve(rootAbsolutePath);
-  const absolutePath = path.resolve(root, requestedPath);
-  const relative = path.relative(root, absolutePath);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error("Attachment-relative path is outside the selected attachment boundary.");
-  }
-  return {
-    absolutePath,
-    relativePath: toPortableRelativePath(relative.length === 0 ? "." : relative),
-  };
-}
-
-function isUserVisibleAttachmentRef(ref: TaskSoilContextRef, taskSoil: TaskSoil): boolean {
-  if (ref.kind === "user_goal" || ref.kind === "runtime") {
-    return false;
-  }
-  if (ref.kind === "workspace" && (ref.ref === `workspace:${taskSoil.goalId}` || ref.ref.startsWith("workspace:goal-"))) {
-    return false;
-  }
-  return ref.kind === "workspace" || ref.kind === "file" || ref.kind === "project" || ref.kind === "web";
-}
-
-function isAttachmentReadAuthorized(ref: TaskSoilContextRef, permissionBoundaryRefs: readonly string[]): boolean {
-  const permissions = new Set(permissionBoundaryRefs);
-  const normalized = ref.ref.toLowerCase();
-  if (ref.kind === "file" && normalized.startsWith("local-file:")) {
-    return permissions.has(`read:local-file:${ref.ref.slice("local-file:".length)}`);
-  }
-  if (ref.kind === "project" && normalized.startsWith("local-project:")) {
-    return permissions.has(`read:local-project:${ref.ref.slice("local-project:".length)}`);
-  }
-  if (ref.kind === "file" && normalized.startsWith("file:")) {
-    return permissions.has(`read:file:${ref.ref.slice("file:".length)}`) || permissions.has("read:workspace:current-task");
-  }
-  if (ref.kind === "project" && normalized.startsWith("project:")) {
-    return permissions.has(`read:project:${ref.ref.slice("project:".length) || "."}`) || permissions.has("read:workspace:current-task");
-  }
-  if ((ref.kind === "file" || ref.kind === "project") && normalized.startsWith("workspace:")) {
-    return permissions.has("read:workspace:current-task");
-  }
-  if (ref.kind === "workspace") {
-    return permissions.has("read:workspace:current-task");
-  }
-  if (ref.kind === "web") {
-    return permissions.has("read:web");
-  }
-  return false;
-}
-
-function attachmentEntryId(ref: TaskSoilContextRef, index: number): string {
-  return ref.attachmentId ?? `context:task-soil:${index}`;
-}
-
-function attachmentTitle(entry: AttachmentEntry): string {
-  return entry.ref.title ?? entry.attachmentId;
-}
-
-function attachmentFormat(ref: TaskSoilContextRef): AttachmentFormat {
-  return formatFromMimeOrExtension(ref.metadata?.mimeType, contextRefExtension(ref), ref.kind);
-}
-
-function contextRefExtension(ref: TaskSoilContextRef): string {
-  const source = ref.title ?? ref.ref;
-  return path.extname(source).toLowerCase();
-}
-
-function formatFromMimeOrExtension(
-  mimeType: string | undefined,
-  extension: string,
-  kind: TaskSoilContextRef["kind"]
-): AttachmentFormat {
-  const mime = mimeType?.toLowerCase();
-  if (kind === "project") return "project";
-  if (kind === "web") return "web";
-  if (mime?.startsWith("image/") === true || isImageExtension(extension)) return "image";
-  if (mime === "application/pdf" || extension === ".pdf") return "pdf";
-  if (mime === "text/csv" || mime === "text/tab-separated-values" || extension === ".csv" || extension === ".tsv") return "table";
-  if (
-    mime === "application/vnd.ms-excel" ||
-    mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-    extension === ".xls" ||
-    extension === ".xlsx"
-  ) {
-    return "spreadsheet";
-  }
-  if (mime === "application/zip" || extension === ".zip" || extension === ".7z" || extension === ".gz" || extension === ".tar") {
-    return "archive";
-  }
-  if (mime?.startsWith("text/") === true || isTextExtension(extension)) return "text";
-  return "unknown";
-}
-
-function isImageExtension(extension: string): boolean {
-  return extension === ".png" || extension === ".jpg" || extension === ".jpeg" || extension === ".gif" || extension === ".webp";
-}
-
-function isTextExtension(extension: string): boolean {
-  return (
-    extension === ".txt" ||
-    extension === ".md" ||
-    extension === ".json" ||
-    extension === ".jsonl" ||
-    extension === ".html" ||
-    extension === ".js" ||
-    extension === ".jsx" ||
-    extension === ".ts" ||
-    extension === ".tsx"
-  );
-}
-
-function modelSafeRef(ref: string): string | undefined {
-  const normalized = ref.toLowerCase();
-  if (normalized.startsWith("local-file:") || normalized.startsWith("local-project:")) {
-    return undefined;
-  }
-  return ref;
-}
-
-async function statAttachmentTarget(filePath: string, message: string): Promise<import("node:fs").Stats> {
-  return fs.stat(filePath).catch(() => {
-    throw new Error(message);
-  });
-}
-
 async function loadTableTarget(
   entry: AttachmentEntry,
   target: AttachmentTarget,
@@ -2167,35 +1851,10 @@ function countDelimiterOutsideQuotes(value: string, delimiter: "," | "\t" | ";")
   return count;
 }
 
-function tableTargetFormat(ref: TaskSoilContextRef, targetPath: string): AttachmentFormat {
-  const extension = tableTargetExtension(ref, targetPath);
-  return formatFromMimeOrExtension(ref.metadata?.mimeType, extension, ref.kind);
-}
-
-function tableTargetExtension(ref: TaskSoilContextRef, targetPath: string): string {
-  const source = targetPath !== "." ? targetPath : ref.title ?? ref.ref;
-  return path.extname(source).toLowerCase();
-}
-
-function archiveTargetExtension(ref: TaskSoilContextRef, targetPath: string): string {
-  return tableTargetExtension(ref, targetPath);
-}
-
 function tableFormatSummary(table: ParsedAttachmentTable): string {
   return table.kind === "delimited"
     ? `${table.delimiter.kind} table`
     : `xlsx sheet "${table.sheetName}"`;
-}
-
-function isSupportedSpreadsheetRef(ref: TaskSoilContextRef): boolean {
-  return isSupportedSpreadsheetTarget(ref, ".");
-}
-
-function isSupportedSpreadsheetTarget(ref: TaskSoilContextRef, targetPath: string): boolean {
-  const extension = tableTargetExtension(ref, targetPath);
-  const mimeType = ref.metadata?.mimeType?.toLowerCase();
-  return extension === ".xlsx" ||
-    mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 }
 
 async function readXlsxTable(

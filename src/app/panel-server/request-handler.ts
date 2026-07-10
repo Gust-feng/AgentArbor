@@ -7,7 +7,7 @@ import {
   readPanelBrandIconAsset,
   readPanelBrandLogoAsset,
   readPanelStaticAsset,
-} from "../panel-assets.js";
+} from "./panel-assets.js";
 import {
   PanelHttpError,
   readJsonBody,

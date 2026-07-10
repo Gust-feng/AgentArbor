@@ -22,7 +22,7 @@ import type {
   UserClarificationRequest,
 } from "../../../domain/underground/index.js";
 import { selectHandoffSourceCandidates } from "../../../domain/underground/index.js";
-import { deriveDirectionHandoffDraft } from "../../direction-handoff-derivation.js";
+import { deriveDirectionHandoffDraft } from "../compat/direction-handoff-derivation.js";
 
 export type MinimalDirectionMaterial = {
   sourceCandidates: ExplorationCandidateRef[];

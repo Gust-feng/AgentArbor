@@ -332,11 +332,13 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["sub-agent-stream-projection.ts", 'export * from "./run-read-model/sub-agent-stream-projection.js";'],
     ["panel-read-model-utils.ts", 'export * from "./run-read-model/value-utils.js";'],
     ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
+    ["direction-handoff-derivation.ts", 'export * from "./underground/compat/direction-handoff-derivation.js";'],
     ["context-attachments.ts", 'export * from "./task-soil/context-attachments.js";'],
     ["desktop-agent-model-input-files.ts", 'export * from "./task-soil/desktop-agent-model-input-files.js";'],
     ["workspace-folder-summary.ts", 'export * from "./task-soil/workspace-folder-summary.js";'],
     ["panel-confirmation-display-projection.ts", 'export * from "./panel-ui/src/confirmation-display-projection.js";'],
     ["panel-agent-work-timeline-view.ts", 'export * from "./panel-read-model/assistant/panel-agent-work-timeline-view.js";'],
+    ["panel-assets.ts", 'export * from "./panel-server/panel-assets.js";'],
     ["panel-stream-tool-projection.ts", 'export * from "./panel-read-model/run/panel-stream-tool-projection.js";'],
     ["panel-agent-run-tree-view.ts", 'export * from "./panel-read-model/run/panel-agent-run-tree-view.js";'],
     ["panel-work-note-contracts.ts", 'export * from "./panel-read-model/run/panel-work-note-contracts.js";'],
@@ -661,6 +663,7 @@ test("panel server support modules stay under panel-server ownership", () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const panelServerRoot = path.join(appRoot, "panel-server");
   const panelServerFiles = [
+    "panel-assets.ts",
     "panel-launch-args.test.ts",
     "panel-launch-args.ts",
     "run-jobs.test.ts",
@@ -670,7 +673,12 @@ test("panel server support modules stay under panel-server ownership", () => {
   ];
 
   for (const fileName of panelServerFiles) {
-    if (fileName !== "panel-usage-statistics.ts" && fileName !== "panel-launch-args.ts" && fileName !== "run-jobs.ts") {
+    if (
+      fileName !== "panel-assets.ts" &&
+      fileName !== "panel-usage-statistics.ts" &&
+      fileName !== "panel-launch-args.ts" &&
+      fileName !== "run-jobs.ts"
+    ) {
       assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
     }
     assert.equal(
@@ -1308,6 +1316,7 @@ test("legacy underground compat chain stays under underground/compat ownership",
   const appRoot = path.join(process.cwd(), "src", "app");
   const compatRoot = path.join(appRoot, "underground", "compat");
   const productionFacades = new Map([
+    ["direction-handoff-derivation.ts", 'export * from "./underground/compat/direction-handoff-derivation.js";'],
     ["underground-agent-cluster-runtime.ts", 'export * from "./underground/compat/underground-agent-cluster-runtime.js";'],
     ["underground-demo-summary.ts", 'export * from "./underground/compat/underground-demo-summary.js";'],
     ["underground-direction-recovery.ts", 'export * from "./underground/compat/underground-direction-recovery.js";'],
@@ -1329,6 +1338,7 @@ test("legacy underground compat chain stays under underground/compat ownership",
     readSource(path.join(appRoot, "underground", "orchestrator.ts")),
     readSource(path.join(appRoot, "underground", "orchestrator.test.ts")),
     readSource(path.join(appRoot, "underground", "minimal", "minimal-loop.ts")),
+    readSource(path.join(appRoot, "underground", "minimal", "minimal-direction.ts")),
     readSource(path.join(appRoot, "underground", "clarification", "clarification-flow.ts")),
     readSource(path.join(appRoot, "underground", "agents", "growth-governor.ts")),
     readSource(path.join(appRoot, "panel-server", "underground-compat-execution.ts")),

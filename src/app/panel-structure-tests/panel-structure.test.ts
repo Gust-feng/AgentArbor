@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPanelHtml } from "../panel-assets.js";
+import { createPanelHtml } from "../panel-server/panel-assets.js";
 import { assertFirstScreenHasNoInternalTerms } from "./panel-structure-test-utils.js";
 
 test("panel HTML serves the React workbench shell without first-screen internals", () => {

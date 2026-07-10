@@ -13,7 +13,7 @@ import { stat } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parsePanelDesktopArgs } from "../panel-args.js";
+import { parsePanelDesktopArgs } from "../panel-server/panel-launch-args.js";
 import { createDesktopLocalPreferenceStore, type DesktopLocalPreferenceStore } from "./panel-desktop-local-preferences.js";
 import {
   createPanelDesktopWindowOptions,

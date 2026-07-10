@@ -284,6 +284,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["panel-work-notes.ts", 'export * from "./panel-read-model/run/panel-work-notes.js";'],
     ["panel-runtime-summary.ts", 'export * from "./panel-read-model/run/panel-runtime-summary.js";'],
     ["panel-usage-statistics.ts", 'export * from "./panel-server/panel-usage-statistics.js";'],
+    ["panel-args.ts", 'export * from "./panel-server/panel-launch-args.js";'],
     ["panel-context-window-usage.ts", 'export * from "./panel-ui/src/context-window-usage.js";'],
     ["panel-model-progress-copy.ts", 'export * from "./panel-read-model/panel-model-progress-copy.js";'],
     ["panel-canvas-read-model.ts", 'export * from "./panel-read-model/canvas/panel-canvas-read-model.js";'],
@@ -577,12 +578,14 @@ test("panel server support modules stay under panel-server ownership", () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const panelServerRoot = path.join(appRoot, "panel-server");
   const panelServerFiles = [
+    "panel-launch-args.test.ts",
+    "panel-launch-args.ts",
     "panel-usage-statistics.test.ts",
     "panel-usage-statistics.ts",
   ];
 
   for (const fileName of panelServerFiles) {
-    if (fileName !== "panel-usage-statistics.ts") {
+    if (fileName !== "panel-usage-statistics.ts" && fileName !== "panel-launch-args.ts") {
       assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
     }
     assert.equal(

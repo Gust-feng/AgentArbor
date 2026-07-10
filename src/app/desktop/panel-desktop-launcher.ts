@@ -6,7 +6,7 @@ import {
   createStartupThemeSnapshot,
   type StartupThemeSnapshot,
 } from "./panel-startup-theme.js";
-import type { PanelLaunchArgs } from "../panel-args.js";
+import type { PanelLaunchArgs } from "../panel-server/panel-launch-args.js";
 import type { PanelContextAttachmentSelection, PanelServerOptions, StartedPanelServer } from "../panel-server.js";
 
 export type PanelDesktopWindowKind = "startup" | "main";

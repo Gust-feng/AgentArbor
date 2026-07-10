@@ -1,4 +1,4 @@
-import { parsePanelArgs } from "./panel-args.js";
+import { parsePanelArgs } from "./panel-server/panel-launch-args.js";
 import { startLocalPanelServer } from "./panel-server.js";
 
 await main();

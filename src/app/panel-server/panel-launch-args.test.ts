@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parsePanelArgs, parsePanelDesktopArgs } from "./panel-args.js";
+import { parsePanelArgs, parsePanelDesktopArgs } from "./panel-launch-args.js";
 
 test("panel args default to the fixed local browser panel port and smoke off", () => {
   assert.deepEqual(parsePanelArgs([]), {

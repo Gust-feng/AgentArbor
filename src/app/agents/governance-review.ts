@@ -16,7 +16,7 @@ import type {
   VerificationReport,
 } from "../../domain/contracts.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
-import { createMinimalGovernanceOutput } from "../minimal-governance.js";
+import { createMinimalGovernanceOutput } from "../underground/minimal/minimal-governance.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { GovernanceOutput } from "./types.js";
 

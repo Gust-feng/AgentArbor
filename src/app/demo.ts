@@ -1,4 +1,4 @@
-import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./minimal-loop.js";
+import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./underground/minimal/minimal-loop.js";
 
 const result = await runMinimalLoop("Design a daily AI model trend monitoring plan.");
 

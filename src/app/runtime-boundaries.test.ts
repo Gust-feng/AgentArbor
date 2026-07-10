@@ -9,7 +9,7 @@ import {
 } from "../domain/agentarbor/test-fixtures.js";
 import { StateGuardError } from "../kernel/state-machine/task-state-machine.js";
 import { AbovegroundPlanner } from "./agents.js";
-import { runMinimalLoop } from "./minimal-loop.js";
+import { runMinimalLoop } from "./underground/minimal/minimal-loop.js";
 
 test("aboveground planner blocks draft and awaiting_user Plan Packages", async () => {
   const result = await runMinimalLoop();

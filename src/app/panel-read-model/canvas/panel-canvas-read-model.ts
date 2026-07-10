@@ -1,4 +1,4 @@
-import type { MinimalLoopResult } from "../../minimal-loop.js";
+import type { MinimalLoopResult } from "../../underground/minimal/minimal-loop.js";
 import type { CognitiveWorkSessionResult } from "../../cognitive-work-session.js";
 import type { UndergroundDirectionSessionResult } from "../../underground-direction-session.js";
 import type {

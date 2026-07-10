@@ -40,7 +40,7 @@ import {
   produceMinimalRootletOutputs,
   spendCandidateBudget,
   startRootletClusters,
-} from "./minimal-underground.js";
+} from "./underground/minimal/minimal-underground.js";
 import { createRootletOutputsForInvocation } from "./underground-rootlets.js";
 import type { MinimalRuntime } from "./runtime.js";
 import {

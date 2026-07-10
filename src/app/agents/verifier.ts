@@ -10,7 +10,7 @@
  */
 import type { TaskSpec, VerificationReport } from "../../domain/contracts.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
-import { createMinimalVerificationReport } from "../minimal-verification.js";
+import { createMinimalVerificationReport } from "../underground/minimal/minimal-verification.js";
 import type { MinimalRuntime } from "../runtime.js";
 
 export class Verifier {

@@ -9,7 +9,7 @@ import {
   runClarificationRecoveryFlow,
   runClarificationRequiredUndergroundFlow,
 } from "./clarification-flow.js";
-import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./minimal-loop.js";
+import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./underground/minimal/minimal-loop.js";
 
 test("clarification-required underground flow produces awaiting_user handoff and user approval request", async () => {
   const result = await runClarificationRequiredUndergroundFlow();

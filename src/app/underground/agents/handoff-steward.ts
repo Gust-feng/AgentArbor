@@ -44,7 +44,7 @@ import {
   createAwaitingUserDirectionMaterial,
   createStoppedDirectionMaterial,
   type MinimalDirectionMaterial,
-} from "../../minimal-direction.js";
+} from "../minimal/minimal-direction.js";
 import {
   fallbackReasoningTrace,
   reasonWithAgentTurn,

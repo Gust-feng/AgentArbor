@@ -8,7 +8,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRunObservationEventViews, resolveRunObservationPosition } from "../domain/observation/index.js";
+import { createRunObservationEventViews, resolveRunObservationPosition } from "../../../domain/observation/index.js";
 import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./minimal-loop.js";
 
 test("runs the fake-AI desktop agent event sequence in product order", async () => {

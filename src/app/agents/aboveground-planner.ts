@@ -19,7 +19,7 @@ import {
   enterPlanning,
   StateGuardError,
 } from "../../kernel/state-machine/task-state-machine.js";
-import { createMinimalGrowthPlanMaterial } from "../minimal-growth-plan.js";
+import { createMinimalGrowthPlanMaterial } from "../underground/minimal/minimal-growth-plan.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { PlanOutput } from "./types.js";
 

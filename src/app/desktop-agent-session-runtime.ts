@@ -23,12 +23,12 @@ import {
   type ModelRuntimeMode,
 } from "./model-runtime/index.js";
 import type { MinimalRuntime } from "./runtime.js";
-import type { RunDesktopAgentSessionOptions } from "./desktop-agent-session-contracts.js";
+import type { RunDesktopAgentSessionOptions } from "./desktop-agent/desktop-agent-session-contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../domain/config/contracts.js";
 import {
   publishContextCompactionCompleted,
   publishContextCompactionFailed,
-} from "./desktop-agent-session-events.js";
+} from "./desktop-agent/desktop-agent-session-events.js";
 
 type DesktopAgentDefinition = NonNullable<RunDesktopAgentSessionOptions["agentDefinition"]>;
 

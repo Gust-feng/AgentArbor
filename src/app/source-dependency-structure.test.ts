@@ -333,6 +333,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["desktop-agent-contracts.ts", 'export * from "./desktop-agent/desktop-agent-contracts.js";'],
     ["desktop-agent-prompts.ts", 'export * from "./desktop-agent/desktop-agent-prompts.js";'],
     ["desktop-chat-session.ts", 'export * from "./desktop-agent/desktop-chat-session.js";'],
+    ["desktop-agent-session-contracts.ts", 'export * from "./desktop-agent/desktop-agent-session-contracts.js";'],
+    ["desktop-agent-session-projection.ts", 'export * from "./desktop-agent/desktop-agent-session-projection.js";'],
+    ["desktop-agent-session-events.ts", 'export * from "./desktop-agent/desktop-agent-session-events.js";'],
     ["panel-read-model-utils.ts", 'export * from "./run-read-model/value-utils.js";'],
     ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
     ["direction-handoff-derivation.ts", 'export * from "./underground/compat/direction-handoff-derivation.js";'],
@@ -444,7 +447,7 @@ test("shared read-model value helpers use neutral run-read-model ownership", asy
   const [valueUtils, desktopSession, desktopProjection, subAgentStream, panelStreamEvents] = await Promise.all([
     readSource(path.join(appRoot, "run-read-model", "value-utils.ts")),
     readSource(path.join(appRoot, "desktop-agent-session.ts")),
-    readSource(path.join(appRoot, "desktop-agent-session-projection.ts")),
+    readSource(path.join(appRoot, "desktop-agent", "desktop-agent-session-projection.ts")),
     readSource(path.join(appRoot, "run-read-model", "sub-agent-stream-projection.ts")),
     readSource(path.join(appRoot, "panel-read-model", "run", "panel-run-stream-events.ts")),
   ]);
@@ -1023,15 +1026,24 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
     "desktop-agent-contracts.ts",
     "desktop-agent-prompts.ts",
     "desktop-chat-session.ts",
+    "desktop-agent-session-contracts.ts",
+    "desktop-agent-session-projection.ts",
+    "desktop-agent-session-events.ts",
   ];
   const ownerSources = await Promise.all([
-    readSource(path.join(appRoot, "desktop-agent-session-contracts.ts")),
-    readSource(path.join(appRoot, "desktop-agent-session-events.ts")),
+    readSource(path.join(appRoot, "desktop-agent-session.ts")),
+    readSource(path.join(appRoot, "desktop-agent-session-runtime.ts")),
     readSource(path.join(appRoot, "desktop-agent-loop-preparation.ts")),
     readSource(path.join(appRoot, "basic-agent-runtime", "context-pack.ts")),
+    readSource(path.join(appRoot, "basic-agent-runtime", "context-pack.test.ts")),
     readSource(path.join(appRoot, "basic-agent-runtime", "context-ledger.ts")),
     readSource(path.join(appRoot, "basic-agent-runtime", "context-ledger-items.ts")),
     readSource(path.join(appRoot, "basic-agent-runtime", "builtin-tool-runtime.ts")),
+    readSource(path.join(appRoot, "panel-read-model", "canvas", "panel-desktop-agent-canvas.ts")),
+    readSource(path.join(appRoot, "panel-server", "conversation-history.ts")),
+    readSource(path.join(appRoot, "panel-server", "desktop-run-resources.ts")),
+    readSource(path.join(appRoot, "panel-server", "desktop-agent-execution.ts")),
+    readSource(path.join(appRoot, "panel-server", "run-execution-contracts.ts")),
     readSource(path.join(appRoot, "panel-server", "skill-service.ts")),
     readSource(path.join(appRoot, "run-tool-boundary.ts")),
   ]);
@@ -1047,6 +1059,14 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
   assert.equal(promptsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-prompts.js";');
   const chatFacade = await readSource(path.join(appRoot, "desktop-chat-session.ts"));
   assert.equal(chatFacade.trim(), 'export * from "./desktop-agent/desktop-chat-session.js";');
+  const sessionContractsFacade = await readSource(path.join(appRoot, "desktop-agent-session-contracts.ts"));
+  assert.equal(sessionContractsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-contracts.js";');
+  const sessionProjectionFacade = await readSource(path.join(appRoot, "desktop-agent-session-projection.ts"));
+  assert.equal(sessionProjectionFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-projection.js";');
+  const sessionEventsFacade = await readSource(path.join(appRoot, "desktop-agent-session-events.ts"));
+  assert.equal(sessionEventsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-events.js";');
+  assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-session-projection.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(desktopAgentRoot, "desktop-agent-session-projection.test.ts")), true);
 
   for (const source of ownerSources) {
     assert.equal(source.includes("desktop-agent/desktop-agent-"), true);
@@ -1054,6 +1074,12 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
     assert.equal(source.includes('from "./desktop-agent-prompts.js"'), false);
     assert.equal(source.includes('from "../desktop-agent-contracts.js"'), false);
     assert.equal(source.includes('from "../desktop-agent-prompts.js"'), false);
+    assert.equal(source.includes('from "./desktop-agent-session-contracts.js"'), false);
+    assert.equal(source.includes('from "./desktop-agent-session-projection.js"'), false);
+    assert.equal(source.includes('from "./desktop-agent-session-events.js"'), false);
+    assert.equal(source.includes('from "../desktop-agent-session-contracts.js"'), false);
+    assert.equal(source.includes('from "../desktop-agent-session-projection.js"'), false);
+    assert.equal(source.includes('from "../desktop-agent-session-events.js"'), false);
   }
 });
 

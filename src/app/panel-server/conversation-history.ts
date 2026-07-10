@@ -3,7 +3,7 @@ import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
-} from "../desktop-agent-session-contracts.js";
+} from "../desktop-agent/desktop-agent-session-contracts.js";
 import type { PanelConversation, PanelConversationReadModel, PanelConversationStore } from "../panel-conversation/panel-conversations.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import type { PanelRunJob, PanelRunJobStore } from "./run-jobs.js";

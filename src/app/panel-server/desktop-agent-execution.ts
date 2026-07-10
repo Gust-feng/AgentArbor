@@ -11,7 +11,7 @@ import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { resolveTriggeredSkillContexts, type ResolveTriggeredSkillContextsOptions } from "./skill-service.js";
 import { createDesktopToolCenterFactory } from "./desktop-run-resources.js";
-import type { DesktopAgentConversationMessage, DesktopAgentSkillResolverContext } from "../desktop-agent-session-contracts.js";
+import type { DesktopAgentConversationMessage, DesktopAgentSkillResolverContext } from "../desktop-agent/desktop-agent-session-contracts.js";
 import type {
   DesktopRunResources,
   PanelRunExecutionOptions,

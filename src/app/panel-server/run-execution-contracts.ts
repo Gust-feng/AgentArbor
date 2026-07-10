@@ -19,7 +19,7 @@ import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
   DesktopAgentSessionRuntimeContext,
-} from "../desktop-agent-session-contracts.js";
+} from "../desktop-agent/desktop-agent-session-contracts.js";
 import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
 import type { PanelRunSummary } from "../panel-read-model/run/panel-run-summary.js";

@@ -1,4 +1,4 @@
-import type { DesktopAgentSessionResult } from "../../desktop-agent-session-contracts.js";
+import type { DesktopAgentSessionResult } from "../../desktop-agent/desktop-agent-session-contracts.js";
 import { latestModelFailureTextForUser } from "../run/panel-model-failure-copy.js";
 import { safeText, taskSoilCanvas, type PanelTaskSoilCanvasReadModel } from "./panel-canvas-common.js";
 import type { PanelRunTranscript } from "../run/panel-run-transcript-contracts.js";

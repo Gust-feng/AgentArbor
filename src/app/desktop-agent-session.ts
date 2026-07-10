@@ -21,14 +21,14 @@ import type {
   DesktopAgentPendingApprovalContinuation,
   DesktopAgentSessionResult,
   RunDesktopAgentSessionOptions,
-} from "./desktop-agent-session-contracts.js";
+} from "./desktop-agent/desktop-agent-session-contracts.js";
 import {
   publishContextCompactionCompleted,
   publishContextCompactionFailed,
   publishConfirmationRequested,
   publishGoalReceived,
   publishTriggeredSkills,
-} from "./desktop-agent-session-events.js";
+} from "./desktop-agent/desktop-agent-session-events.js";
 import {
   activityFromEventEntries,
   evidenceRefsFromToolCalls,
@@ -38,7 +38,7 @@ import {
   refsFromToolCalls,
   resultBlocksFrom,
   safeDesktopAgentContextPack,
-} from "./desktop-agent-session-projection.js";
+} from "./desktop-agent/desktop-agent-session-projection.js";
 import {
   constraintRefsFromTaskSoil,
   createIntelligenceChannelFromOptions,
@@ -58,7 +58,7 @@ export type {
   DesktopAgentSessionRuntimeContext,
   DesktopAgentSessionStatus,
   RunDesktopAgentSessionOptions,
-} from "./desktop-agent-session-contracts.js";
+} from "./desktop-agent/desktop-agent-session-contracts.js";
 
 /**
  * Ordinary desktop agent turn/session executor. Runtime orchestration should

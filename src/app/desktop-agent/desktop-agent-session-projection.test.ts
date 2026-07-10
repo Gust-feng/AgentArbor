@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ArborMessage } from "../domain/common.js";
-import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
+import type { ArborMessage } from "../../domain/common.js";
+import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { activityFromEventEntries } from "./desktop-agent-session-projection.js";
 
 test("desktop agent activity preserves user-facing model failure kind", () => {

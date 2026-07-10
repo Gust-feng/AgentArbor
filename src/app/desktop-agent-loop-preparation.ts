@@ -7,7 +7,7 @@ import { SubAgentRegistry } from "./sub-agents/sub-agent-registry.js";
 import { createOpenAITokenCounter, type BasicAgentContextPack } from "./basic-agent-runtime/index.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { desktopAgentContextPack } from "./desktop-agent/desktop-agent-prompts.js";
-import type { RunDesktopAgentSessionOptions } from "./desktop-agent-session-contracts.js";
+import type { RunDesktopAgentSessionOptions } from "./desktop-agent/desktop-agent-session-contracts.js";
 import {
   createDesktopAgentTurnPolicy,
   createDesktopAgentTurnRuntime,

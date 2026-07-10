@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { DirectionHandoffPackageValidationError } from "../domain/agentarbor/direction-handoff-package.js";
+import { DirectionHandoffPackageValidationError } from "../../domain/agentarbor/direction-handoff-package.js";
 import {
   createAwaitingUserDirectionHandoffPackageFixture,
   tamperAwaitingUserPackageToApprovedShape,
-} from "../domain/agentarbor/test-fixtures.js";
-import { StateGuardError } from "../kernel/state-machine/task-state-machine.js";
-import { AbovegroundPlanner } from "./agents.js";
-import { runMinimalLoop } from "./underground/minimal/minimal-loop.js";
+} from "../../domain/agentarbor/test-fixtures.js";
+import { StateGuardError } from "../../kernel/state-machine/task-state-machine.js";
+import { AbovegroundPlanner } from "../agents.js";
+import { runMinimalLoop } from "../underground/minimal/minimal-loop.js";
 
 test("aboveground planner blocks draft and awaiting_user Plan Packages", async () => {
   const result = await runMinimalLoop();

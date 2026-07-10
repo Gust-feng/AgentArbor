@@ -652,6 +652,21 @@ test("source structure tests stay in the source structure test module", () => {
   }
 });
 
+test("runtime boundary tests stay in the runtime boundary test module", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const runtimeBoundaryTestRoot = path.join(appRoot, "runtime-boundary-tests");
+  const runtimeBoundaryTestFiles = ["runtime-boundaries.test.ts"];
+
+  for (const fileName of runtimeBoundaryTestFiles) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(
+      fileExistsSync(path.join(runtimeBoundaryTestRoot, fileName)),
+      true,
+      `${fileName} should live in runtime-boundary-tests`
+    );
+  }
+});
+
 test("panel UI frontend support modules stay under panel-ui ownership", () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const panelUiRoot = path.join(appRoot, "panel-ui", "src");

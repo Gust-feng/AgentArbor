@@ -89,7 +89,7 @@ external protocol / SDK
 原因：
 
 - 默认普通 Agent 主链已经存在，不需要用新框架重写模型工具循环。
-- 项目已有结构测试禁止引入 LangChain 依赖，见 `src/app/runtime-boundaries.test.ts`。
+- 项目已有结构测试禁止引入 LangChain 依赖，见 `src/app/runtime-boundary-tests/runtime-boundaries.test.ts`。
 - LangGraph 更适合显式多节点状态图和 deep / 多 Agent 编排，不适合在普通 Agent 第一阶段补 MCP / Skills 底座时介入。
 - MCP 与 Skills 现在的问题是能力冻结、暴露、执行、投影、持久化没有完全闭环，不是缺一个编排 DSL。
 

@@ -12,16 +12,10 @@ import type { ObservationRef } from "../../domain/observation/contracts.js";
 import type {
   ChildAgentRun,
   ChildAgentRunExecution,
-  ChildAgentRunFailureDetail,
   ChildAgentRunParentInstruction,
   ChildAgentRunParentReview,
-  ChildAgentRunPendingApproval,
 } from "../../domain/underground/agent-fabric.js";
 import {
-  blockChildAgentRun,
-  completeChildAgentRun,
-  failChildAgentRun,
-  interruptChildAgentRun,
   resumeChildAgentRun,
   startChildAgentRun,
 } from "../../domain/underground/agent-fabric.js";
@@ -33,15 +27,10 @@ import {
   type DeepChildLoopContextStore,
 } from "./deep-child-loop-contexts.js";
 import {
-  DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID,
-  DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
-  DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,
-  normalizeDeepChildRoundLimit,
   type DeepChildAgentContinuationInput,
   type DeepChildAgentResumeInput,
   type DeepChildAgentRunInput,
   type DeepChildAgentRunResult,
-  type DeepChildAgentPrompt,
   type DeepChildParentMessageContext,
 } from "./deep-child-run-contracts.js";
 export {
@@ -62,6 +51,22 @@ export type {
   DeepChildConfirmationDecision,
   DeepChildParentMessageContext,
 } from "./deep-child-run-contracts.js";
+import {
+  buildBlockedDeepChildAgentRun,
+  buildCompletedDeepChildAgentRun,
+  buildFailedDeepChildAgentRun,
+  buildInterruptedDeepChildAgentRun,
+  buildInvalidDeepChildMaterialRun,
+  classifyDeepChildTurn,
+  executionStatsFromTurn,
+  failureDetailFromTurn,
+  invalidOutputFailureReason,
+  resolveRuntimeChildSpec,
+} from "./deep-child-run-result-mapping.js";
+export {
+  buildFailedDeepChildAgentRun,
+  deepChildSpecFromRun,
+} from "./deep-child-run-result-mapping.js";
 import {
   deepChildMaterialMessages,
   deepChildMaterialOutputContract,
@@ -141,13 +146,6 @@ async function executeDeepChildAgentLoop(input: DeepChildAgentRunInput & {
     id: input.childRun.childRunId,
     label: `deep_child:${childSpec.role}`,
   };
-  const prompt: DeepChildAgentPrompt = {
-    templateId: DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID,
-    objective: childSpec.objective,
-    role: childSpec.role,
-    displayName: childSpec.displayName,
-    inputRefs: [...childSpec.inputRefs],
-  };
   const turn = await input.turnRuntime.executeAutonomous({
     policy: {
       allowModel: true,
@@ -177,86 +175,13 @@ async function executeDeepChildAgentLoop(input: DeepChildAgentRunInput & {
     abortSignal: input.abortSignal,
   });
   const continuationContextRef = await persistContinuationContext(input, turn);
-  if (isOutputValidationChildTurn(turn)) {
-    const failureDetail = failureDetailFromTurn(turn);
-    return buildFailedDeepChildAgentRun({
-      childRun: input.activeRun,
-      childSpec,
-      reason: invalidOutputFailureReason(failureDetail),
-      failedAt: nowIso(),
-      execution: executionStatsFromTurn(turn),
-      failureDetail,
-      continuationContextRef,
-    });
-  }
-  if (isBlockedChildTurn(turn)) {
-    return buildBlockedDeepChildAgentRun({
-      childRun: input.activeRun,
-      childSpec,
-      turn,
-      blockedAt: nowIso(),
-      continuationContextRef,
-    });
-  }
-  if (isInterruptedChildTurn(turn)) {
-    return buildInterruptedDeepChildAgentRun({
-      childRun: input.activeRun,
-      childSpec,
-      turn,
-      interruptedAt: nowIso(),
-      continuationContextRef,
-    });
-  }
-  if (turn.status !== "completed" || turn.finalOutput?.status !== "completed") {
-    throw new Error(
-      `Deep child Agent run failed: ${input.childRun.childRunId} / ${DEEP_CHILD_MATERIAL_CONTRACT_ID} (status=${turn.status})`,
-    );
-  }
-  const structured = extractStructuredOutput(turn.finalOutput);
-  let summary: DeepChildSummary;
-  try {
-    summary = parseDeepChildMaterial({
-      value: structured,
-      childSpec,
-      childRunId: input.childRun.childRunId,
-    });
-  } catch (error) {
-    return buildFailedDeepChildAgentRun({
-      childRun: input.activeRun,
-      childSpec,
-      reason: `invalid child material: ${errorMessage(error)}`,
-      failedAt: nowIso(),
-      execution: executionStatsFromTurn(turn),
-      failureDetail: {
-        layer: "output_validation",
-        failureKind: "invalid_child_material",
-        retryable: false,
-        message: errorMessage(error),
-      },
-      continuationContextRef,
-    });
-  }
-  const completedRun = completeChildAgentRun({
-    run: input.activeRun,
-    outputRefs: summary.evidenceRefs.slice(0, 6),
-    evidenceRefs: summary.evidenceRefs,
-    confidence: summary.confidence,
-    uncertainty: summary.uncertainty,
-    execution: executionStatsFromTurn(turn),
-    completedAt: nowIso(),
-  });
-  const completedRunWithContext = withChildRunRuntimeDetails(completedRun, {
+  return finalizeDeepChildTurn({
+    childRun: input.activeRun,
+    childSpec,
+    turn,
     continuationContextRef,
+    unexpectedTurn: "throw",
   });
-  const summaryWithContext = withSummaryRuntimeDetails(summary, {
-    continuationContextRef,
-  });
-  return {
-    summary: summaryWithContext,
-    completedRun: completedRunWithContext,
-    prompt,
-    execution: executionStatsFromTurn(turn),
-  };
 }
 
 async function persistContinuationContext(
@@ -282,38 +207,9 @@ async function persistContinuationContext(
   return (await input.childLoopContextStore.upsert(record)).contextRef;
 }
 
-function withChildRunRuntimeDetails(
-  run: ChildAgentRun,
-  details: {
-    readonly failureDetail?: ChildAgentRunFailureDetail;
-    readonly continuationContextRef?: string;
-  },
-): ChildAgentRun {
-  return {
-    ...run,
-    failureDetail: details.failureDetail ?? run.failureDetail,
-    continuationContextRef: details.continuationContextRef ?? run.continuationContextRef,
-  };
-}
-
-function withSummaryRuntimeDetails(
-  summary: DeepChildSummary,
-  details: {
-    readonly failureDetail?: ChildAgentRunFailureDetail;
-    readonly continuationContextRef?: string;
-  },
-): DeepChildSummary {
-  return {
-    ...summary,
-    failureDetail: details.failureDetail ?? summary.failureDetail,
-    continuationContextRef: details.continuationContextRef ?? summary.continuationContextRef,
-  };
-}
-
 export async function resumeDeepChildAgent(input: DeepChildAgentResumeInput): Promise<DeepChildAgentRunResult> {
   const childSpec = resolveRuntimeChildSpec({ childRun: input.childRun, childSpec: input.childSpec });
   const resumedRun = resumeChildAgentRun(input.childRun, nowIso());
-  const prompt = promptFromChildSpec(childSpec);
   const confirmationId = input.pendingApproval.confirmationId;
   const turn = input.decision.decision === "approve_once"
     ? await input.turnRuntime.resumeAutonomous({
@@ -335,91 +231,84 @@ export async function resumeDeepChildAgent(input: DeepChildAgentResumeInput): Pr
     childRun: input.childRun,
     childLoopContextStore: input.childLoopContextStore,
   }, turn);
+  return finalizeDeepChildTurn({
+    childRun: resumedRun,
+    childSpec,
+    turn,
+    continuationContextRef,
+    unexpectedTurn: "interrupt",
+  });
+}
 
-  if (isOutputValidationChildTurn(turn)) {
-    const failureDetail = failureDetailFromTurn(turn);
+function finalizeDeepChildTurn(input: {
+  readonly childRun: ChildAgentRun;
+  readonly childSpec: DeepChildSpec;
+  readonly turn: AgentTurnRuntimeResult;
+  readonly continuationContextRef?: string;
+  readonly unexpectedTurn: "throw" | "interrupt";
+}): DeepChildAgentRunResult {
+  const disposition = classifyDeepChildTurn(input.turn);
+  if (disposition === "output_validation_failure") {
+    const failureDetail = failureDetailFromTurn(input.turn);
     return buildFailedDeepChildAgentRun({
-      childRun: resumedRun,
-      childSpec,
+      childRun: input.childRun,
+      childSpec: input.childSpec,
       reason: invalidOutputFailureReason(failureDetail),
       failedAt: nowIso(),
-      execution: executionStatsFromTurn(turn),
+      execution: executionStatsFromTurn(input.turn),
       failureDetail,
-      continuationContextRef,
+      continuationContextRef: input.continuationContextRef,
     });
   }
-  if (isBlockedChildTurn(turn)) {
+  if (disposition === "blocked") {
     return buildBlockedDeepChildAgentRun({
-      childRun: resumedRun,
-      childSpec,
-      turn,
+      childRun: input.childRun,
+      childSpec: input.childSpec,
+      turn: input.turn,
       blockedAt: nowIso(),
-      continuationContextRef,
+      continuationContextRef: input.continuationContextRef,
     });
   }
-  if (isInterruptedChildTurn(turn)) {
+  if (disposition === "interrupted" ||
+    (input.unexpectedTurn === "interrupt" && disposition !== "completed")) {
     return buildInterruptedDeepChildAgentRun({
-      childRun: resumedRun,
-      childSpec,
-      turn,
+      childRun: input.childRun,
+      childSpec: input.childSpec,
+      turn: input.turn,
       interruptedAt: nowIso(),
-      continuationContextRef,
+      continuationContextRef: input.continuationContextRef,
     });
   }
-  if (turn.status !== "completed" || turn.finalOutput?.status !== "completed") {
-    return buildInterruptedDeepChildAgentRun({
-      childRun: resumedRun,
-      childSpec,
-      turn,
-      interruptedAt: nowIso(),
-      continuationContextRef,
-    });
+  if (disposition !== "completed") {
+    throw new Error(
+      `Deep child Agent run failed: ${input.childRun.childRunId} / ${DEEP_CHILD_MATERIAL_CONTRACT_ID} (status=${input.turn.status})`,
+    );
   }
-  const structured = extractStructuredOutput(turn.finalOutput);
-  let summary: DeepChildSummary;
+  const structured = extractStructuredOutput(input.turn.finalOutput);
   try {
-    summary = parseDeepChildMaterial({
+    const summary = parseDeepChildMaterial({
       value: structured,
-      childSpec,
+      childSpec: input.childSpec,
       childRunId: input.childRun.childRunId,
     });
+    return buildCompletedDeepChildAgentRun({
+      childRun: input.childRun,
+      childSpec: input.childSpec,
+      summary,
+      turn: input.turn,
+      completedAt: nowIso(),
+      continuationContextRef: input.continuationContextRef,
+    });
   } catch (error) {
-    return buildFailedDeepChildAgentRun({
-      childRun: resumedRun,
-      childSpec,
-      reason: `invalid child material: ${errorMessage(error)}`,
+    return buildInvalidDeepChildMaterialRun({
+      childRun: input.childRun,
+      childSpec: input.childSpec,
+      reason: errorMessage(error),
       failedAt: nowIso(),
-      execution: executionStatsFromTurn(turn),
-      failureDetail: {
-        layer: "output_validation",
-        failureKind: "invalid_child_material",
-        retryable: false,
-        message: errorMessage(error),
-      },
-      continuationContextRef,
+      turn: input.turn,
+      continuationContextRef: input.continuationContextRef,
     });
   }
-  const completedRun = completeChildAgentRun({
-    run: resumedRun,
-    outputRefs: summary.evidenceRefs.slice(0, 6),
-    evidenceRefs: summary.evidenceRefs,
-    confidence: summary.confidence,
-    uncertainty: summary.uncertainty,
-    execution: executionStatsFromTurn(turn),
-    completedAt: nowIso(),
-  });
-  const completedRunWithContext = withChildRunRuntimeDetails(completedRun, {
-    continuationContextRef,
-  });
-  const summaryWithContext = withSummaryRuntimeDetails(summary, {
-    continuationContextRef,
-  });
-  return {
-    summary: summaryWithContext,
-    completedRun: completedRunWithContext,
-    prompt,
-    execution: executionStatsFromTurn(turn),
-  };
 }
 
 function continuationInstructionMessage(input: {
@@ -578,405 +467,6 @@ function formatChildExecutionSegmentHistory(childRun: ChildAgentRun): string {
   }).join(" | ");
 }
 
-function buildBlockedDeepChildAgentRun(input: {
-  readonly childRun: ChildAgentRun;
-  readonly childSpec: DeepChildSpec;
-  readonly turn: AgentTurnRuntimeResult;
-  readonly blockedAt: string;
-  readonly continuationContextRef?: string;
-}): DeepChildAgentRunResult {
-  const block = describeBlockedTurn(input.turn);
-  const evidenceRefs = input.turn.toolCalls.map((call) => call.callId);
-  const blockedRun = withChildRunRuntimeDetails(blockChildAgentRun({
-    run: input.childRun,
-    reason: block.reason,
-    evidenceRefs,
-    confidence: 0,
-    uncertainty: block.uncertainty,
-    execution: executionStatsFromTurn(input.turn),
-    pendingApproval: pendingApprovalFromTurn(input.turn),
-    blockedAt: input.blockedAt,
-  }), {
-    continuationContextRef: input.continuationContextRef,
-  });
-  const summary: DeepChildSummary = withSummaryRuntimeDetails({
-    childRunId: input.childRun.childRunId,
-    spec: input.childSpec,
-    status: "blocked",
-    summary: block.summary,
-    findings: block.findings,
-    evidenceRefs,
-    confidence: 0,
-    uncertainty: block.uncertainty,
-  }, {
-    continuationContextRef: input.continuationContextRef,
-  });
-  return {
-    summary,
-    completedRun: blockedRun,
-    prompt: promptFromChildSpec(input.childSpec),
-    execution: executionStatsFromTurn(input.turn),
-    pendingContinuation: input.turn.pendingApproval === undefined
-      ? undefined
-      : {
-          childRunId: input.childRun.childRunId,
-          confirmationId: input.turn.pendingApproval.confirmationId,
-          childRun: blockedRun,
-          childSpec: input.childSpec,
-          pendingApproval: input.turn.pendingApproval,
-        },
-  };
-}
-
-function buildInterruptedDeepChildAgentRun(input: {
-  readonly childRun: ChildAgentRun;
-  readonly childSpec: DeepChildSpec;
-  readonly turn: AgentTurnRuntimeResult;
-  readonly interruptedAt: string;
-  readonly continuationContextRef?: string;
-}): DeepChildAgentRunResult {
-  const failureDetail = failureDetailFromTurn(input.turn);
-  const reason = failureDetail.message;
-  const evidenceRefs = input.turn.toolCalls.map((call) => call.callId);
-  const interruptedRun = withChildRunRuntimeDetails(interruptChildAgentRun(
-    input.childRun,
-    reason,
-    input.interruptedAt,
-    executionStatsFromTurn(input.turn),
-  ), {
-    failureDetail,
-    continuationContextRef: input.continuationContextRef,
-  });
-  const summary: DeepChildSummary = withSummaryRuntimeDetails({
-    childRunId: input.childRun.childRunId,
-    spec: input.childSpec,
-    status: "interrupted",
-    summary: interruptedChildSummary(failureDetail),
-    findings: [],
-    evidenceRefs,
-    confidence: 0,
-    uncertainty: "This child Agent did not produce governed child material before the loop stopped; the parent can review and continue the same child run.",
-  }, {
-    failureDetail,
-    continuationContextRef: input.continuationContextRef,
-  });
-  return {
-    summary,
-    completedRun: interruptedRun,
-    prompt: promptFromChildSpec(input.childSpec),
-    execution: executionStatsFromTurn(input.turn),
-  };
-}
-
-export function buildFailedDeepChildAgentRun(input: {
-  readonly childRun: ChildAgentRun;
-  readonly childSpec?: DeepChildSpec;
-  readonly reason: string;
-  readonly failedAt: string;
-  readonly execution?: ChildAgentRunExecution;
-  readonly failureDetail?: ChildAgentRunFailureDetail;
-  readonly continuationContextRef?: string;
-}): DeepChildAgentRunResult {
-  const childSpec = resolveRuntimeChildSpec({ childRun: input.childRun, childSpec: input.childSpec });
-  const failedRun = withChildRunRuntimeDetails(
-    failChildAgentRun(input.childRun, input.reason, input.failedAt, input.execution),
-    {
-      failureDetail: input.failureDetail,
-      continuationContextRef: input.continuationContextRef,
-    },
-  );
-  const trimmedReason = input.reason.trim().length > 0 ? input.reason.trim() : "unknown exploration error";
-  const summary: DeepChildSummary = withSummaryRuntimeDetails({
-    childRunId: input.childRun.childRunId,
-    spec: childSpec,
-    status: "failed",
-    summary: `Child Agent run failed: ${trimmedReason}`,
-    findings: [],
-    evidenceRefs: [],
-    confidence: 0,
-    uncertainty: `This child Agent run failed (${trimmedReason}); no usable evidence collected.`,
-  }, {
-    failureDetail: input.failureDetail,
-    continuationContextRef: input.continuationContextRef,
-  });
-  return {
-    summary,
-    completedRun: failedRun,
-    prompt: {
-      templateId: DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID,
-      objective: childSpec.objective,
-      role: childSpec.role,
-      displayName: childSpec.displayName,
-      inputRefs: [...childSpec.inputRefs],
-    },
-    execution: input.execution ?? {
-      modelRounds: 0,
-      toolRounds: 0,
-      toolCalls: [],
-    },
-  };
-}
-
-function promptFromChildSpec(childSpec: DeepChildSpec): DeepChildAgentPrompt {
-  return {
-    templateId: DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID,
-    objective: childSpec.objective,
-    role: childSpec.role,
-    displayName: childSpec.displayName,
-    inputRefs: [...childSpec.inputRefs],
-  };
-}
-
-function isBlockedChildTurn(turn: AgentTurnRuntimeResult): boolean {
-  return turn.status === "approval_required" ||
-    (turn.status === "paused" && (
-      turn.stoppedReason === "out_of_fuel" ||
-      turn.stoppedReason === "context_overflow"
-    ));
-}
-
-function isOutputValidationChildTurn(turn: AgentTurnRuntimeResult): boolean {
-  return turn.status === "failed" &&
-    turn.stoppedReason === "model_failed" &&
-    turn.finalOutput?.failure?.kind === "output_validation";
-}
-
-function isInterruptedChildTurn(turn: AgentTurnRuntimeResult): boolean {
-  return turn.status === "cancelled" ||
-    turn.stoppedReason === "cancelled" ||
-    (turn.status === "failed" && (
-      turn.stoppedReason === "model_failed" ||
-      turn.stoppedReason === "runtime_error"
-    ) && turn.finalOutput?.failure?.kind !== "output_validation");
-}
-
-function failureDetailFromTurn(turn: AgentTurnRuntimeResult): ChildAgentRunFailureDetail {
-  if (turn.status === "cancelled" || turn.stoppedReason === "cancelled") {
-    return {
-      layer: "user_or_parent",
-      failureKind: "cancelled",
-      retryable: false,
-      message: "child Agent loop was cancelled",
-    };
-  }
-  const failure = turn.finalOutput?.failure;
-  const message = failure?.message?.trim();
-  if (failure?.kind === "output_validation") {
-    return {
-      layer: "output_validation",
-      failureKind: failure.kind,
-      retryable: failure.retryable,
-      message: message && message.length > 0 ? message : "child Agent output validation failed",
-    };
-  }
-  if (turn.stoppedReason === "runtime_error") {
-    return {
-      layer: "agent_runtime",
-      failureKind: failure?.kind ?? "runtime_error",
-      retryable: failure?.retryable,
-      message: message && message.length > 0 ? message : "child Agent runtime stopped unexpectedly",
-    };
-  }
-  if (turn.stoppedReason === "model_failed") {
-    return {
-      layer: "model_provider",
-      failureKind: failure?.kind ?? "provider_response",
-      retryable: failure?.retryable,
-      message: message && message.length > 0 ? message : "child Agent model call stopped unexpectedly",
-    };
-  }
-  return {
-    layer: "unknown",
-    failureKind: turn.stoppedReason,
-    retryable: false,
-    message: `child Agent loop stopped unexpectedly (${turn.stoppedReason})`,
-  };
-}
-
-function interruptedChildSummary(failureDetail: ChildAgentRunFailureDetail): string {
-  switch (failureDetail.failureKind) {
-    case "provider_network":
-      return `模型通道暂时中断：${failureDetail.message}`;
-    case "provider_timeout":
-      return `模型通道请求超时：${failureDetail.message}`;
-    case "provider_rate_limit":
-      return `模型通道被限流：${failureDetail.message}`;
-    case "cancelled":
-      return `子 Agent 已取消：${failureDetail.message}`;
-    default:
-      return failureDetail.layer === "agent_runtime"
-        ? `子 Agent 运行时异常：${failureDetail.message}`
-        : `模型通道异常：${failureDetail.message}`;
-  }
-}
-
-function invalidOutputFailureReason(failureDetail: ChildAgentRunFailureDetail): string {
-  const message = failureDetail.message.trim();
-  return message.length === 0
-    ? "invalid child material: output validation failed"
-    : `invalid child material: ${message}`;
-}
-
-function describeBlockedTurn(turn: AgentTurnRuntimeResult): {
-  readonly reason: string;
-  readonly summary: string;
-  readonly findings: readonly string[];
-  readonly uncertainty: string;
-} {
-  if (turn.status === "approval_required") {
-    const approvalTools = uniqueStrings(
-      turn.toolCalls
-        .filter((call) => call.status === "approval_required")
-        .map((call) => call.toolName),
-    );
-    const toolList = approvalTools.length === 0 ? "tool" : approvalTools.join(", ");
-    return {
-      reason: "waiting for tool confirmation",
-      summary: `Child Agent blocked: waiting for confirmation to use ${toolList}.`,
-      findings: [`Waiting for tool confirmation: ${toolList}.`],
-      uncertainty: "This child Agent needs confirmation before it can continue its standard tool loop.",
-    };
-  }
-  if (turn.stoppedReason === "context_overflow") {
-    return {
-      reason: "context overflow",
-      summary: "Child Agent blocked: context overflow prevented completion.",
-      findings: ["Context overflow prevented this child Agent from producing a final material summary."],
-      uncertainty: "The child Agent needs a smaller context or better context maintenance before continuing.",
-    };
-  }
-  return {
-    reason: "round budget exhausted",
-    summary: "达到探索上限，可基于已保留上下文继续或综合。",
-    findings: ["The child Agent reached its model/tool exploration limit before producing final material."],
-    uncertainty: "The parent Agent can continue this same child from preserved context or synthesize from available material.",
-  };
-}
-
-export function deepChildSpecFromRun(run: ChildAgentRun): DeepChildSpec {
-  return {
-    specId: run.spec.specId,
-    displayName: run.spec.displayName,
-    role: run.spec.role,
-    objective: run.spec.instructions?.objective ?? `Explore from angle: ${run.spec.role}`,
-    allowedTools: [...run.spec.permissions.allowedTools],
-    inputRefs: [...run.spec.inputRefs],
-    maxModelRounds: run.spec.permissions.maxModelRounds ?? run.spec.budget.maxModelRounds,
-    maxToolRounds: run.spec.permissions.maxToolRounds ?? run.spec.budget.maxToolRounds,
-  };
-}
-
-function resolveRuntimeChildSpec(input: {
-  readonly childRun: ChildAgentRun;
-  readonly childSpec?: DeepChildSpec;
-}): DeepChildSpec {
-  const delegated = input.childSpec ?? deepChildSpecFromRun(input.childRun);
-  const effectiveAllowedTools = intersectPreserveLeftOrder(
-    delegated.allowedTools,
-    input.childRun.spec.permissions.allowedTools,
-  );
-  return {
-    ...delegated,
-    allowedTools: effectiveAllowedTools,
-    inputRefs: uniqueStrings([...delegated.inputRefs, ...input.childRun.inputRefs]),
-    maxModelRounds: optionalDeepChildRoundLimit(
-      delegated.maxModelRounds ?? input.childRun.spec.permissions.maxModelRounds ?? input.childRun.spec.budget.maxModelRounds,
-      DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
-    ),
-    maxToolRounds: optionalDeepChildRoundLimit(
-      delegated.maxToolRounds ?? input.childRun.spec.permissions.maxToolRounds ?? input.childRun.spec.budget.maxToolRounds,
-      DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,
-    ),
-  };
-}
-
-function optionalDeepChildRoundLimit(value: number | undefined, maxValue: number): number | undefined {
-  return value === undefined ? undefined : normalizeDeepChildRoundLimit(value, maxValue);
-}
-
-function executionStatsFromTurn(turn: AgentTurnRuntimeResult): ChildAgentRunExecution {
-  return {
-    modelRounds: turn.modelRounds,
-    toolRounds: turn.toolRounds,
-    modelRequestId: turn.modelRequestId,
-    modelResponseId: turn.modelResponseId,
-    modelMessages: turn.modelResponses.map((response) => ({
-      requestId: response.requestId,
-      responseId: response.responseId,
-      status: response.status,
-      text: response.text,
-      reasoningSummary: response.reasoningSummary,
-      toolCallIds: [...response.toolCallIds],
-      finishReason: response.finishReason,
-      completedAt: response.completedAt,
-    })),
-    toolCalls: turn.toolCalls.map((toolCall) => ({
-      callId: toolCall.callId,
-      toolName: toolCall.toolName,
-      status: toolCall.status,
-      summary: toolCallSummary(toolCall),
-      inputSummary: summarizeToolInput(toolCall.input),
-      durationMs: toolCall.durationMs,
-      display: toolCall.projection?.display ?? toolCall.projection?.envelope?.uiDisplay,
-    })),
-  };
-}
-
-function toolCallSummary(toolCall: AgentTurnRuntimeResult["toolCalls"][number]): string | undefined {
-  const summary =
-    toolCall.projection?.uiSummary ??
-    toolCall.projection?.envelope?.agentSummary ??
-    toolCall.error;
-  return compactTraceText(summary, 500);
-}
-
-function summarizeToolInput(input: unknown): string | undefined {
-  if (input === undefined) {
-    return undefined;
-  }
-  if (typeof input === "string") {
-    return compactTraceText(input, 240);
-  }
-  try {
-    return compactTraceText(JSON.stringify(input), 240);
-  } catch {
-    return undefined;
-  }
-}
-
-function compactTraceText(value: string | undefined, maxLength: number): string | undefined {
-  const text = value?.replace(/\s+/g, " ").trim();
-  if (text === undefined || text.length === 0) {
-    return undefined;
-  }
-  if (text.length <= maxLength) {
-    return text;
-  }
-  return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function pendingApprovalFromTurn(turn: AgentTurnRuntimeResult): ChildAgentRunPendingApproval | undefined {
-  const pending = turn.pendingApproval;
-  if (pending === undefined) {
-    return undefined;
-  }
-  const request = pending.toolLoop.pendingToolCall;
-  const confirmation = pending.toolLoop.confirmationRequest;
-  return {
-    confirmationId: pending.confirmationId,
-    toolCallId: request.callId,
-    toolName: request.toolName,
-    title: confirmation?.title ?? "需要确认",
-    actionSummary: confirmation?.actionSummary ?? request.toolName,
-    affectedResources: [...(confirmation?.affectedResources ?? [])],
-    riskLevel: confirmation?.riskLevel ?? "medium",
-    resumeAvailability: confirmation?.resumeAvailability,
-    requestedAt: confirmation?.requestedAt ?? nowIso(),
-    expiresAt: confirmation?.expiresAt,
-    sourceRefs: [...(confirmation?.sourceRefs ?? [request.callId])],
-  };
-}
-
 function formatChildToolCalls(toolCalls: ChildAgentRunExecution["toolCalls"]): string {
   if (toolCalls.length === 0) {
     return "(none)";
@@ -989,15 +479,6 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return typeof error === "string" ? error : String(error);
-}
-
-function intersectPreserveLeftOrder(left: readonly string[], right: readonly string[]): string[] {
-  const allowed = new Set(right);
-  return uniqueStrings(left).filter((toolName) => allowed.has(toolName));
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
 const OBSERVATION_REF_KINDS: ReadonlySet<string> = new Set<string>([

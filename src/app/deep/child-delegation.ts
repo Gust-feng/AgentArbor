@@ -29,9 +29,9 @@ import { createId, nowIso } from "../../kernel/id.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import { DEEP_CHILD_MATERIAL_CONTRACT_ID } from "./deep-model-io.js";
 import {
-  buildFailedDeepChildAgentRun,
   runDeepChildAgent,
 } from "./deep-child-agent-runner.js";
+import { buildFailedDeepChildAgentRun } from "./deep-child-run-result-mapping.js";
 import {
   DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
   DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,

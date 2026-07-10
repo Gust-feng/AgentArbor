@@ -12,7 +12,7 @@ import {
   projectToolResultEnvelope as projectKernelToolResultEnvelope,
   projectToolStatusEnvelope,
 } from "../../kernel/tools/index.js";
-import { projectSearchDisplayItem, projectToolDisplay } from "./tool-display-projection.js";
+import { projectToolDisplay } from "./tool-display-projection.js";
 import { projectToolAgentContent } from "./tool-agent-content-projection.js";
 import {
   projectContextAttachmentListToolModelResult,
@@ -27,28 +27,27 @@ import {
   projectResearchReadToolModelResult,
 } from "./tool-model-result-read-adapters.js";
 import {
+  projectBrowserSnapshotToolModelResult,
+  projectHttpResponseToolModelResult,
+} from "./tool-model-result-web-adapters.js";
+import {
   projectLegacyMcpToolResult,
   toolResultFromUnknown,
   type InternalToolResult,
 } from "./tool-result-canonical.js";
-import { MODEL_TOOL_TEXT_MAX_CHARS } from "./tool-result-field-projection.js";
 import {
   asRecord,
-  booleanOrUndefined,
   isMcpToolName,
-  numberOrUndefined,
   stringOrUndefined,
   textOrUndefined,
 } from "./tool-result-facts.js";
 import { compactSafeText, redactOrdinaryText } from "./tool-projection-text.js";
-import { toolResultContinuation } from "./tool-result-continuation.js";
 import { isSubAgentToolName, projectSubAgentToolModelResult } from "./sub-agent-tool-projection.js";
 import {
   ensureToolResultContent,
   structuredRecordWithoutVerbose,
   structuredSnapshot,
   textContentBlocks,
-  textFragmentForToolResult,
 } from "./tool-model-result-support.js";
 type ToolDisplayShape = "file" | "sources" | "diff" | "terminal" | "approval" | "text" | "generic";
 
@@ -230,53 +229,22 @@ export function projectToolModelResult(
     });
   }
   if (display.kind === "browser_snapshot") {
-    const result = asRecord(record.result);
-    const text = textFragmentForToolResult(result.text, MODEL_TOOL_TEXT_MAX_CHARS, request, "text");
-    const effectiveTruncated = display.truncated === true || truncated || text?.truncated === true;
-    const continuation = toolResultContinuation({ request, result, truncated: effectiveTruncated });
-    return ensureToolResultContent({
-      content: textContentBlocks(text?.text),
-      structuredContent: structuredSnapshot({
-        title: display.title,
-        url: display.url,
-        startChar: numberOrUndefined(result.startChar),
-        textChars: numberOrUndefined(result.textChars),
-        totalTextChars: numberOrUndefined(result.totalTextChars),
-        hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
-        nextStartChar: numberOrUndefined(result.nextStartChar),
-        reachedStartCharCeiling: booleanOrUndefined(result.reachedStartCharCeiling),
-        startCharCeiling: numberOrUndefined(result.startCharCeiling),
-        rawTextRef: text?.rawRef,
-        truncated: effectiveTruncated,
-      }),
-      continuation,
-    }, toolResultFallbackText(request, display, record));
+    return projectBrowserSnapshotToolModelResult({
+      request,
+      output,
+      display,
+      truncated,
+      fallbackText: toolResultFallbackText(request, display, record),
+    });
   }
   if (display.kind === "http_response") {
-    const result = asRecord(record.result);
-    const body = textFragmentForToolResult(result.body, MODEL_TOOL_TEXT_MAX_CHARS, request, "body");
-    const effectiveTruncated = display.truncated === true || truncated || body?.truncated === true;
-    const continuation = toolResultContinuation({ request, result, truncated: effectiveTruncated });
-    return ensureToolResultContent({
-      content: textContentBlocks(body?.text),
-      structuredContent: structuredSnapshot({
-        method: display.method,
-        url: display.url,
-        statusCode: display.statusCode,
-        statusText: display.statusText,
-        durationMs: display.durationMs,
-        startChar: numberOrUndefined(result.startChar),
-        bodyChars: numberOrUndefined(result.bodyChars),
-        hasMoreAfter: booleanOrUndefined(result.hasMoreAfter),
-        nextStartChar: numberOrUndefined(result.nextStartChar),
-        reachedStartCharCeiling: booleanOrUndefined(result.reachedStartCharCeiling),
-        startCharCeiling: numberOrUndefined(result.startCharCeiling),
-        rawBodyRef: body?.rawRef,
-        truncated: effectiveTruncated,
-      }),
-      isError: typeof display.statusCode === "number" && display.statusCode >= 400 ? true : undefined,
-      continuation,
-    }, toolResultFallbackText(request, display, record));
+    return projectHttpResponseToolModelResult({
+      request,
+      output,
+      display,
+      truncated,
+      fallbackText: toolResultFallbackText(request, display, record),
+    });
   }
   return ensureToolResultContent({
     content: genericToolResultContent(record, display),

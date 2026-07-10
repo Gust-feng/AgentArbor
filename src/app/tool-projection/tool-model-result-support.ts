@@ -5,6 +5,13 @@ import {
   type ModelVisibleTextFragment,
 } from "./tool-result-field-projection.js";
 
+export interface ToolModelResultAdapterInput {
+  readonly request: ToolCallRequest;
+  readonly output: unknown;
+  readonly truncated: boolean;
+  readonly fallbackText: string;
+}
+
 export function ensureToolResultContent(
   result: InternalToolResult,
   fallbackText: string

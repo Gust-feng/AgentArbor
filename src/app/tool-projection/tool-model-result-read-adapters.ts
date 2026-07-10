@@ -1,4 +1,3 @@
-import type { ToolCallRequest } from "../../domain/tools/index.js";
 import { commandProgramFromToolResult, commandTextFromToolResult } from "./command-text.js";
 import type { InternalToolResult } from "./tool-result-canonical.js";
 import {
@@ -21,14 +20,8 @@ import {
   structuredSnapshot,
   textContentBlocks,
   textFragmentForToolResult,
+  type ToolModelResultAdapterInput,
 } from "./tool-model-result-support.js";
-
-interface ToolModelResultAdapterInput {
-  readonly request: ToolCallRequest;
-  readonly output: unknown;
-  readonly truncated: boolean;
-  readonly fallbackText: string;
-}
 
 export function projectCommandToolModelResult(input: ToolModelResultAdapterInput): InternalToolResult {
   const { request, output, truncated, fallbackText } = input;

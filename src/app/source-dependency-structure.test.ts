@@ -849,14 +849,16 @@ test("panel conversation module stays under panel-conversation ownership", () =>
   }
 });
 
-test("desktop shell support modules stay under desktop ownership", () => {
+test("desktop shell support modules stay under desktop ownership", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const desktopRoot = path.join(appRoot, "desktop");
+  const panelDesktopEntry = await fs.readFile(path.join(appRoot, "panel-desktop.ts"), "utf8");
   const desktopFiles = [
     "panel-desktop-launcher.test.ts",
     "panel-desktop-launcher.ts",
     "panel-desktop-local-preferences.test.ts",
     "panel-desktop-local-preferences.ts",
+    "panel-desktop-main.ts",
     "panel-desktop-preload.cts",
     "panel-desktop-window-controls.test.ts",
     "panel-desktop-window-controls.ts",
@@ -866,6 +868,7 @@ test("desktop shell support modules stay under desktop ownership", () => {
     "panel-startup-theme.ts",
   ];
 
+  assert.equal(panelDesktopEntry.trim(), 'import "./desktop/panel-desktop-main.js";');
   for (const fileName of desktopFiles) {
     assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
     assert.equal(

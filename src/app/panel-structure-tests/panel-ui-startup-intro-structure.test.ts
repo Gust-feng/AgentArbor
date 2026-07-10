@@ -31,7 +31,7 @@ test("startup intro expands one real desktop window before app reveal", async ()
     readPanelUiSource("styles.css"),
     readPanelUiStyle("startup-intro.css"),
     readPanelUiStyle("app-states.css"),
-    readAppSource("panel-desktop.ts"),
+    readAppSource(join("desktop", "panel-desktop-main.ts")),
     readAppSource(join("desktop", "panel-desktop-launcher.ts")),
     readAppSource(join("desktop", "panel-desktop-preload.cts")),
     readPanelUiSource("main.tsx"),

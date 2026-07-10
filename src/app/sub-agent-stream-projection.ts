@@ -1,6 +1,6 @@
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-read-model/run/panel-run-stream-contracts.js";
 import type { PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
-import { numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
+import { numberOrUndefined, stringOrUndefined } from "./run-read-model/value-utils.js";
 
 export type SubAgentStreamEventType = Extract<
   PanelRunStreamEventType,

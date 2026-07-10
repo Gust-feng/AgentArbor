@@ -1,5 +1,5 @@
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
-import { asRecord } from "../../panel-read-model-utils.js";
+import { asRecord } from "../../run-read-model/value-utils.js";
 import { friendlyUserFacingModelFailureText } from "../../visible-text-safety.js";
 
 export function latestModelFailureTextForUser(

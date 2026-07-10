@@ -15,7 +15,7 @@ import {
   numberOrUndefined,
   stringOrUndefined,
   unique,
-} from "../../panel-read-model-utils.js";
+} from "../../run-read-model/value-utils.js";
 import {
   type PanelRunStreamEventDetail,
   toolStreamDetail,

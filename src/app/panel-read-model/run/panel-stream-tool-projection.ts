@@ -4,7 +4,7 @@ import { isToolErrorDomain, normalizeToolErrorFacts, toolDisplayName } from "../
 import { redactSensitiveText } from "../../../kernel/redaction.js";
 import { commandTextFromToolInput, commandTextFromToolResult } from "../../command-text.js";
 import { cleanOrdinaryToolText } from "../../ordinary-tool-copy.js";
-import { asRecord, stringArray, stringOrUndefined } from "../../panel-read-model-utils.js";
+import { asRecord, stringArray, stringOrUndefined } from "../../run-read-model/value-utils.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "../../safe-tool-preview.js";
 import {
   normalizeToolDisplayForOperation,

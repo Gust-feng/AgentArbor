@@ -3,7 +3,7 @@ import type { RunObservationSnapshot } from "../../../domain/observation/index.j
 import type { RootletClusterKind } from "../../../domain/underground/index.js";
 import { ROOTLET_CLUSTER_KINDS } from "../../../domain/underground/index.js";
 import type { PanelTranscriptModelCall } from "../transcript/panel-transcript-model-calls.js";
-import { isString, unique } from "../../panel-read-model-utils.js";
+import { isString, unique } from "../../run-read-model/value-utils.js";
 import { eventRefsFor, hasEvent, lastRecordedAt } from "./panel-run-event-utils.js";
 import type { AgentWorkNote, PanelWorkNotesInput } from "./panel-work-note-contracts.js";
 

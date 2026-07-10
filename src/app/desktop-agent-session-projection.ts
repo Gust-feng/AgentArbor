@@ -12,7 +12,7 @@ import type {
   DesktopAgentSessionResult,
   DesktopAgentSessionStatus,
 } from "./desktop-agent-session-contracts.js";
-import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
+import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./run-read-model/value-utils.js";
 import { friendlyUserFacingModelFailureText, sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 
 const DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS = 128_000;

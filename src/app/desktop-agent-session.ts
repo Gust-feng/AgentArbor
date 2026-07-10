@@ -45,7 +45,7 @@ import {
   resolveActiveModelName,
   resolveDesktopAgentAiMode,
 } from "./desktop-agent-session-runtime.js";
-import { asRecord, stringOrUndefined } from "./panel-read-model-utils.js";
+import { asRecord, stringOrUndefined } from "./run-read-model/value-utils.js";
 
 export type {
   DesktopAgentActivity,

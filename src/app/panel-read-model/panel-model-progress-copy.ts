@@ -1,4 +1,4 @@
-import { stringOrUndefined } from "../panel-read-model-utils.js";
+import { stringOrUndefined } from "../run-read-model/value-utils.js";
 
 export function modelRequestedSummary(payload: Readonly<Record<string, unknown>>): string | undefined {
   const explicit = visibleModelProgressSummary(

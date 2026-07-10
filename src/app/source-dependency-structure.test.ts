@@ -270,6 +270,8 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["model-context-window-fallback.ts", 'export * from "./model-runtime/model-context-window-fallback.js";'],
     ["model-failure-visible-copy.ts", 'export * from "./panel-read-model/run/panel-model-failure-copy.js";'],
     ["run-mode-policy.ts", 'export * from "./run-runtime-core/run-mode-policy.js";'],
+    ["clarification-flow.ts", 'export * from "./underground/clarification/clarification-flow.js";'],
+    ["clarification-recovery.ts", 'export * from "./underground/clarification/clarification-recovery.js";'],
     ["minimal-direction.ts", 'export * from "./underground/minimal/minimal-direction.js";'],
     ["minimal-governance.ts", 'export * from "./underground/minimal/minimal-governance.js";'],
     ["minimal-growth-plan.ts", 'export * from "./underground/minimal/minimal-growth-plan.js";'],
@@ -325,6 +327,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "model-capability-registry.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "model-context-window-fallback.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "run-mode-policy.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "clarification-flow.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "minimal-loop.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil-workspace.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "context-attachments.test.ts")), false);
@@ -351,6 +354,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "model-capability-registry.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "model-context-window-fallback.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "run-runtime-core", "run-mode-policy.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "underground", "clarification", "clarification-flow.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "underground", "minimal", "minimal-loop.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "task-soil-workspace.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "context-attachments.test.ts")), true);

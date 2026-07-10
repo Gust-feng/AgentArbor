@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DirectionHandoffPackageValidationError } from "../domain/agentarbor/direction-handoff-package.js";
-import { createRunObservationEventViews, resolveRunObservationPosition } from "../domain/observation/index.js";
-import { AbovegroundPlanner } from "./agents.js";
+import { DirectionHandoffPackageValidationError } from "../../../domain/agentarbor/direction-handoff-package.js";
+import { createRunObservationEventViews, resolveRunObservationPosition } from "../../../domain/observation/index.js";
+import { AbovegroundPlanner } from "../../agents.js";
 import {
   EXPECTED_CLARIFICATION_REQUIRED_EVENTS,
   EXPECTED_CLARIFICATION_RECOVERY_EVENTS,
   runClarificationRecoveryFlow,
   runClarificationRequiredUndergroundFlow,
 } from "./clarification-flow.js";
-import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./underground/minimal/minimal-loop.js";
+import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "../minimal/minimal-loop.js";
 
 test("clarification-required underground flow produces awaiting_user handoff and user approval request", async () => {
   const result = await runClarificationRequiredUndergroundFlow();

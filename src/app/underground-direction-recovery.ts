@@ -30,7 +30,7 @@ import { createMessage } from "../kernel/messages/create-message.js";
 import {
   createClarificationRecoveryDirectionMaterial,
   createDefaultClarificationResponse,
-} from "./clarification-recovery.js";
+} from "./underground/clarification/clarification-recovery.js";
 import { publishConvergenceReviewCompleted } from "./underground-events.js";
 import type {
   UndergroundDirectionSessionResult,

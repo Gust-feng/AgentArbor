@@ -29,7 +29,6 @@
  * 命名红线：消费 contracts.ts 的 SynthesizedConclusion / DeepExplorationReport；不引入
  * Plan / directionHandoffPackage / artifact / Fruits 产物字段。
  */
-import path from "node:path";
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
@@ -61,12 +60,6 @@ import {
   type DeepEventPublisher,
   type DeepRunStreamEvent,
 } from "./deep-events.js";
-import {
-  createInMemoryRunSnapshotStore,
-  type RunEnvelope,
-  type RunSnapshotStore,
-} from "../run-runtime-core/snapshot-store.js";
-import { createFileSystemRunSnapshotStore } from "../../adapters/runtime-database/run-snapshot-store.js";
 import type {
   DeepChildSummary,
   DeepConversation,
@@ -74,7 +67,6 @@ import type {
   DeepFollowUpContext,
   DeepIntakeContext,
   DeepLiveProjection,
-  DeepResearchBrief,
   DeepRun,
   DeepRunStatus,
   DeepDelegationDecision,
@@ -101,6 +93,7 @@ import {
   withChildDetailFromRun,
   withChildParentOperation,
 } from "./deep-live-projection.js";
+import type { DeepRunRecord, DeepRunRecordStore } from "./deep-run-record-store.js";
 import {
   continueDeepChildAgent,
   type DeepChildParentMessageContext,
@@ -125,8 +118,12 @@ import type { DeepChildPendingContinuationStore } from "./deep-child-continuatio
 // 常量：manager root spec（AgentRunTree root，FR-009 可复盘 root agent 元数据）
 // ---------------------------------------------------------------------------
 
-/** deep run 的运行级分区名（隔离 deep 产物，镜像 deep-conversations 口径）。 */
-export const DEEP_RUN_RECORD_PARTITION = "deep-runs";
+export {
+  DEEP_RUN_RECORD_PARTITION,
+  InMemoryDeepRunRecordStore,
+  createFileSystemDeepRunRecordStore,
+} from "./deep-run-record-store.js";
+export type { DeepRunRecord, DeepRunRecordStore } from "./deep-run-record-store.js";
 
 /**
  * 构造 manager root AgentSpec（AgentRunTree.rootSpec）。manager 是纯推理决策者
@@ -160,83 +157,6 @@ export function buildDeepManagerSpec(createdAt: string): AgentSpec {
     inputRefs: [],
     createdAt,
   };
-}
-
-// ---------------------------------------------------------------------------
-// 持久化端口：DeepRunRecordStore（隔离 deep 分区）
-// ---------------------------------------------------------------------------
-
-/**
- * 一次 deep run 的持久化记录。承载完整可复盘证据链（FR-009）：
- *   - run：run 级元数据 + 冻结的 capabilitySnapshot；
- *   - agentRunTree：root manager + child runs + delegation decisions + parent syntheses
- *     （事件序列的结构化投影，replay 可重建"manager 决策 → child 探索 → 父层综合 → 结论"路径）；
- *   - report：DeepExplorationReport（结论如何形成，含 childSummaries + synthesisRecords）；
- *   - controlEvents：T2-7 打断/纠正/停止事件（FR-008）。
- */
-export type DeepRunRecord = {
-  readonly run: DeepRun;
-  readonly agentRunTree: AgentRunTree;
-  readonly report?: DeepExplorationReport;
-  readonly controlEvents: readonly DeepRunControlEvent[];
-  readonly eventSequence: readonly DeepRunStreamEvent[];
-  readonly liveProjection?: DeepLiveProjection;
-  /** T2-1：首次 spawn 后装配的研究简报（FR-BRIEF-01/02），供 Panel 消费。 */
-  readonly brief?: DeepResearchBrief;
-  readonly updatedAt: string;
-};
-
-/**
- * DeepRunRecord 持久化端口。隔离 deep 分区（与 deep-conversations 同级），
- * 语义镜像 DeepConversationStore。InMemory 实现用于测试，FileSystem 实现用于真实运行。
- */
-export interface DeepRunRecordStore extends RunSnapshotStore<DeepRunRecord> {}
-
-/** 内存 DeepRunRecordStore（测试与开发态）。 */
-export class InMemoryDeepRunRecordStore implements DeepRunRecordStore {
-  private readonly store = createInMemoryRunSnapshotStore<DeepRunRecord>({
-    getEnvelope: deepRunRecordEnvelope,
-  });
-
-  async upsert(record: DeepRunRecord): Promise<DeepRunRecord> {
-    return this.store.upsert(record);
-  }
-
-  async get(runId: string): Promise<DeepRunRecord | undefined> {
-    return this.store.get(runId);
-  }
-
-  async list(limit = 50): Promise<readonly DeepRunRecord[]> {
-    return this.store.list(limit);
-  }
-
-  async delete(runId: string): Promise<void> {
-    return this.store.delete(runId);
-  }
-}
-
-function deepRunRecordEnvelope(record: DeepRunRecord): RunEnvelope {
-  return {
-    runId: record.run.runId,
-    updatedAt: record.run.updatedAt,
-    status: record.run.status,
-    runKind: record.run.isolation.runKind,
-    runMode: record.run.isolation.runMode,
-    rootRunId: record.run.rootRunId,
-    parentRunId: record.run.parentRunId,
-    conversationId: record.run.conversationId,
-  };
-}
-
-/**
- * 文件系统 DeepRunRecordStore（隔离 deep 分区，镜像 createFileSystemDeepConversationStore）。
- * 写入 `${runtimeHome}/deep-runs/<runId>/record.json`。
- */
-export function createFileSystemDeepRunRecordStore(runtimeHome: string): DeepRunRecordStore {
-  return createFileSystemRunSnapshotStore<DeepRunRecord>({
-    rootDir: path.join(runtimeHome, DEEP_RUN_RECORD_PARTITION),
-    getEnvelope: deepRunRecordEnvelope,
-  });
 }
 
 // ---------------------------------------------------------------------------

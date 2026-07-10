@@ -31,7 +31,7 @@ import {
   subAgentStreamLabel,
   subAgentStreamStatusFromPayload,
   subAgentStreamSummaryFromPayload,
-} from "../../sub-agent-stream-projection.js";
+} from "../../run-read-model/sub-agent-stream-projection.js";
 import {
   agentFabricLabel,
   agentFabricSummary,

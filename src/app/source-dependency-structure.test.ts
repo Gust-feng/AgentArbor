@@ -272,6 +272,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["run-read-model-envelope.ts", 'export * from "./run-read-model/envelope.js";'],
     ["run-read-model-summary.ts", 'export * from "./run-read-model/summary.js";'],
     ["restored-run-projection.ts", 'export * from "./run-read-model/restored-run-projection.js";'],
+    ["sub-agent-stream-projection.ts", 'export * from "./run-read-model/sub-agent-stream-projection.js";'],
     ["panel-read-model-utils.ts", 'export * from "./run-read-model/value-utils.js";'],
     ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
     ["context-attachments.ts", 'export * from "./task-soil/context-attachments.js";'],
@@ -362,17 +363,19 @@ test("shared read-model value helpers use neutral run-read-model ownership", asy
     readSource(path.join(appRoot, "run-read-model", "value-utils.ts")),
     readSource(path.join(appRoot, "desktop-agent-session.ts")),
     readSource(path.join(appRoot, "desktop-agent-session-projection.ts")),
-    readSource(path.join(appRoot, "sub-agent-stream-projection.ts")),
+    readSource(path.join(appRoot, "run-read-model", "sub-agent-stream-projection.ts")),
     readSource(path.join(appRoot, "panel-read-model", "run", "panel-run-stream-events.ts")),
   ]);
 
   assert.equal(valueUtils.includes("export function asRecord"), true);
   assert.equal(valueUtils.includes("export function stringOrUndefined"), true);
   assert.equal(valueUtils.includes("export function numberOrUndefined"), true);
-  for (const source of [desktopSession, desktopProjection, subAgentStream, panelStreamEvents]) {
+  for (const source of [desktopSession, desktopProjection, panelStreamEvents]) {
     assert.equal(source.includes("panel-read-model-utils.js"), false);
     assert.equal(source.includes("run-read-model/value-utils.js"), true);
   }
+  assert.equal(subAgentStream.includes("panel-read-model-utils.js"), false);
+  assert.equal(subAgentStream.includes('from "./value-utils.js"'), true);
 });
 
 test("tool projection support modules stay under tool-projection ownership", () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSubAgentBatchCompletedMessage } from "./sub-agents/sub-agent-events.js";
+import { createSubAgentBatchCompletedMessage } from "../sub-agents/sub-agent-events.js";
 import {
   subAgentStreamDetailFromPayload,
   subAgentStreamStatusFromDetail,

@@ -9,7 +9,7 @@ import {
   isSubAgentStreamEventType,
   subAgentStreamDetailFromTraces,
   subAgentStreamSummaryFromDetail,
-} from "../sub-agent-stream-projection.js";
+} from "../run-read-model/sub-agent-stream-projection.js";
 import {
   agentTaskStatusFromSnapshot,
   basicRunTitleFromStatus,

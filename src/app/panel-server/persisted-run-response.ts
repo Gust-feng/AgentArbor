@@ -41,7 +41,7 @@ import {
   subAgentStreamLabel,
   subAgentStreamStatusFromDetail,
   subAgentStreamSummaryFromDetail,
-} from "../sub-agent-stream-projection.js";
+} from "../run-read-model/sub-agent-stream-projection.js";
 
 export type PanelPersistedRunResponse = Omit<PanelRunResponseBase, "error"> & {
   readonly trace: PanelRunTraceReadModel;

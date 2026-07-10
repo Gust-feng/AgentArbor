@@ -11,7 +11,7 @@ import {
   friendlyUserFacingFailureText,
   sanitizeAssistantVisibleText,
 } from "../visible-text-safety.js";
-import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../restored-run-projection.js";
+import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../run-read-model/restored-run-projection.js";
 import {
   appendTextStreamAssembly,
   emptyTextStreamAssembly,

@@ -11,7 +11,7 @@ import type {
 import { panelRunPayloadForStatus, type PanelRunJob } from "./run-jobs.js";
 import { summarizePanelRuntimeVisibility, type PanelRuntimeSummaryRegistry } from "../panel-read-model/run/panel-runtime-summary.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
-import { restoredRunResultProjection } from "../restored-run-projection.js";
+import { restoredRunResultProjection } from "../run-read-model/restored-run-projection.js";
 import { createLiveBasicAgentWorkViewReadModel, createPersistedBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
 import { createPersistedStreamEvents, panelStatusFromRuntimeStatus } from "./persisted-run-response.js";
 import type { PanelRuntime } from "./runtime.js";

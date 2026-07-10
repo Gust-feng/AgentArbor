@@ -22,7 +22,7 @@ import {
   BasicAgentPendingContinuationStore,
 } from "./run-executor-continuations.js";
 import { resolveCompatibleRunFacts } from "../run-facts-policy.js";
-import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../restored-run-projection.js";
+import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../run-read-model/restored-run-projection.js";
 
 export type {
   BasicAgentExecutionAdapter,

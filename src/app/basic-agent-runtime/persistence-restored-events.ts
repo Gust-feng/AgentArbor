@@ -4,7 +4,7 @@ import type {
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../safe-projection.js";
-import { restoredRunTerminalSummary } from "../restored-run-projection.js";
+import { restoredRunTerminalSummary } from "../run-read-model/restored-run-projection.js";
 import {
   isSubAgentStreamEventType,
   subAgentStreamDetailFromTraces,

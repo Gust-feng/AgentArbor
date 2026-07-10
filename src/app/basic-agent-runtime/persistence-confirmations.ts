@@ -4,7 +4,7 @@ import type {
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../safe-projection.js";
-import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../restored-run-projection.js";
+import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../run-read-model/restored-run-projection.js";
 
 export function upsertRestoredConfirmation(input: {
   readonly snapshot: RuntimeRunSnapshot;

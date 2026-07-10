@@ -34,7 +34,7 @@ import { projectPanelRunResponseBase, type PanelRunResponseBase } from "./run-re
 import {
   restoredRunResultProjection,
   restoredRunTerminalSummary,
-} from "../restored-run-projection.js";
+} from "../run-read-model/restored-run-projection.js";
 import {
   isSubAgentStreamEventType,
   subAgentStreamDetailFromTraces,

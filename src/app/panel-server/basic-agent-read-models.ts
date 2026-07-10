@@ -16,7 +16,7 @@ import {
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
 import { panelRunPayloadForStatus, type PanelRunJob } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
-import { restoredRunResultProjection } from "../restored-run-projection.js";
+import { restoredRunResultProjection } from "../run-read-model/restored-run-projection.js";
 
 export function createLiveBasicAgentWorkViewReadModel(input: {
   readonly job: PanelRunJob;

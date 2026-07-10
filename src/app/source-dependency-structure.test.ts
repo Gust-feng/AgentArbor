@@ -271,6 +271,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["model-failure-visible-copy.ts", 'export * from "./panel-read-model/run/panel-model-failure-copy.js";'],
     ["run-read-model-envelope.ts", 'export * from "./run-read-model/envelope.js";'],
     ["run-read-model-summary.ts", 'export * from "./run-read-model/summary.js";'],
+    ["restored-run-projection.ts", 'export * from "./run-read-model/restored-run-projection.js";'],
     ["panel-read-model-utils.ts", 'export * from "./run-read-model/value-utils.js";'],
     ["task-soil-workspace.ts", 'export * from "./task-soil/task-soil-workspace.js";'],
     ["context-attachments.ts", 'export * from "./task-soil/context-attachments.js";'],

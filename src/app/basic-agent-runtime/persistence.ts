@@ -18,7 +18,7 @@ import {
   basicRunNextStepFromStatus,
   basicRunTitleFromStatus,
 } from "./persistence-status.js";
-import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../restored-run-projection.js";
+import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../run-read-model/restored-run-projection.js";
 
 export { restoredBasicEventsFromRuntimeSnapshot } from "./persistence-restored-events.js";
 

@@ -453,6 +453,7 @@ test("shared run shell layers stay centralized instead of diverging per mode", a
     runtimeDatabase,
     runEnvelope,
     runSummary,
+    restoredRunProjection,
     runResponseBase,
     deepReadModel,
     runRoutes,
@@ -464,6 +465,7 @@ test("shared run shell layers stay centralized instead of diverging per mode", a
     fs.readFile(path.join(process.cwd(), "src", "adapters", "runtime-database", "file-system-runtime-database.ts"), "utf8"),
     readAppSource(path.join("run-read-model", "envelope.ts")),
     readAppSource(path.join("run-read-model", "summary.ts")),
+    readAppSource(path.join("run-read-model", "restored-run-projection.ts")),
     readAppSource(path.join("panel-server", "run-response-base.ts")),
     readAppSource(path.join("deep", "deep-read-model.ts")),
     readAppSource(path.join("panel-server", "run-routes.ts")),
@@ -484,6 +486,8 @@ test("shared run shell layers stay centralized instead of diverging per mode", a
   assert.equal(runEnvelope.includes("export function projectConversationRunEnvelopeViewBase"), true);
   assert.equal(runSummary.includes("export function projectSharedRunSummaryBase"), true);
   assert.equal(runSummary.includes("export function projectSharedConversationRunSummaryBase"), true);
+  assert.equal(restoredRunProjection.includes("export function restoredRunResultProjection"), true);
+  assert.equal(restoredRunProjection.includes("export function restoredRunTerminalSummary"), true);
   assert.equal(runResponseBase.includes("export function projectPanelRunResponseBase"), true);
   assert.equal(runRoutes.includes("export type RuntimeRunSummaryView = ReturnType<typeof projectRuntimeRunSummary>"), true);
   assert.equal(runRoutes.includes("export type RuntimeRunListResponse = {"), true);

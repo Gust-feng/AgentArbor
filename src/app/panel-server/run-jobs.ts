@@ -18,7 +18,7 @@ import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import { assertRunBirthFactsForKind, resolveRunModeForKind } from "../run-runtime-core/run-mode-policy.js";
 import type { AgentArborRunKind, AgentArborRunMode } from "../run-runtime-core/run-mode-policy.js";
-import { resolveCompatibleRunFacts } from "../run-facts-policy.js";
+import { resolveCompatibleRunFacts } from "../run-runtime-core/run-facts-policy.js";
 import { basicConfirmationDecisionSummary } from "../confirmation-copy.js";
 
 export type PanelRunKind = AgentArborRunKind;

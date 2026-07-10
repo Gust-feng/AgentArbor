@@ -6,8 +6,8 @@ import type {
   RunCapabilityResolution,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
-} from "../domain/config/index.js";
-import { createRunCapabilityPlan } from "./model-capability-registry.js";
+} from "../../domain/config/index.js";
+import { createRunCapabilityPlan } from "../model-runtime/model-capability-registry.js";
 import { resolveCompatibleRunFacts } from "./run-facts-policy.js";
 
 test("resolveCompatibleRunFacts keeps frozen ordinary desktop facts over terminal payload facts", () => {

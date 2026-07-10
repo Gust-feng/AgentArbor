@@ -40,7 +40,7 @@ import { prepareDesktopRunResources } from "./desktop-run-resources.js";
 import { runUndergroundForPanel } from "./underground-compat-execution.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import { runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
-import { assertRunModeForKind, RunModePolicyError } from "../run-mode-policy.js";
+import { assertRunModeForKind, RunModePolicyError } from "../run-runtime-core/run-mode-policy.js";
 import type {
   PanelRunExecutionOptions,
   PanelRunExecutionResult,

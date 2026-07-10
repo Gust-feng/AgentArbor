@@ -1,5 +1,5 @@
 import { createId, nowIso } from "../../kernel/id.js";
-import { assertRunBirthFactsForKind } from "../run-mode-policy.js";
+import { assertRunBirthFactsForKind } from "../run-runtime-core/run-mode-policy.js";
 import { resolveCompatibleRunFacts } from "../run-facts-policy.js";
 import { basicConfirmationDecisionSummary } from "./run-projection.js";
 import { resolveBasicAgentRunMode } from "./run-job.js";

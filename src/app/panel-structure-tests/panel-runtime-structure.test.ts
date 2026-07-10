@@ -365,7 +365,7 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
 
 test("shared panel run orchestration uses neutral run mode naming", async () => {
   const [runModePolicy, panelRunJobs, requestParsers, runModeRouting, runExecution, runJobResponse] = await Promise.all([
-    readAppSource("run-mode-policy.ts"),
+    readAppSource(path.join("run-runtime-core", "run-mode-policy.ts")),
     readAppSource(path.join("panel-server", "run-jobs.ts")),
     readAppSource(path.join("panel-server", "request-parsers.ts")),
     readAppSource(path.join("panel-server", "run-mode-routing.ts")),

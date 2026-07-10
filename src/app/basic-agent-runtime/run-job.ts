@@ -12,8 +12,8 @@ import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { RunConfigurationFailureSummary, RunSummary } from "../run-summary.js";
 import type { MinimalRuntime } from "../runtime.js";
-import { resolveRunModeForKind } from "../run-mode-policy.js";
-import type { AgentArborRunKind, AgentArborRunMode } from "../run-mode-policy.js";
+import { resolveRunModeForKind } from "../run-runtime-core/run-mode-policy.js";
+import type { AgentArborRunKind, AgentArborRunMode } from "../run-runtime-core/run-mode-policy.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type {
   BasicAgentCompatRunStatus,

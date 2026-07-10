@@ -165,9 +165,9 @@ test("Basic Agent run executor consumes prepared start facts instead of route in
 });
 
 test("run mode policy depends on AgentDefinition refs without importing runtime capability wiring", async () => {
-  const source = await readSource(path.join(process.cwd(), "src", "app", "run-mode-policy.ts"));
+  const source = await readSource(path.join(process.cwd(), "src", "app", "run-runtime-core", "run-mode-policy.ts"));
 
-  assert.equal(source.includes("./agent-definition-ref.js"), true);
+  assert.equal(source.includes("../agent-definitions/agent-definition-ref.js"), true);
   assert.equal(source.includes("./agent-definition-runtime.js"), false);
   assert.equal(source.includes("resolveRunCapabilities"), false);
   assert.equal(source.includes("createAgentTurnPolicyFromDefinition"), false);
@@ -269,6 +269,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["model-capability-registry.ts", 'export * from "./model-runtime/model-capability-registry.js";'],
     ["model-context-window-fallback.ts", 'export * from "./model-runtime/model-context-window-fallback.js";'],
     ["model-failure-visible-copy.ts", 'export * from "./panel-read-model/run/panel-model-failure-copy.js";'],
+    ["run-mode-policy.ts", 'export * from "./run-runtime-core/run-mode-policy.js";'],
     ["run-read-model-envelope.ts", 'export * from "./run-read-model/envelope.js";'],
     ["run-read-model-summary.ts", 'export * from "./run-read-model/summary.js";'],
     ["restored-run-projection.ts", 'export * from "./run-read-model/restored-run-projection.js";'],
@@ -317,6 +318,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "intelligence-channel-factory.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "model-capability-registry.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "model-context-window-fallback.test.ts")), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "run-mode-policy.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil-workspace.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "context-attachments.test.ts")), false);
   assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-model-input-files.test.ts")), false);
@@ -341,6 +343,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
   assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "factory.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "model-capability-registry.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "model-runtime", "model-context-window-fallback.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "run-runtime-core", "run-mode-policy.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "task-soil-workspace.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "context-attachments.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "task-soil", "desktop-agent-model-input-files.test.ts")), true);

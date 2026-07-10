@@ -5,7 +5,7 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../domain/config/index.js";
-import type { AgentArborRunKind, AgentArborRunMode } from "./run-mode-policy.js";
+import type { AgentArborRunKind, AgentArborRunMode } from "./run-runtime-core/run-mode-policy.js";
 import {
   resolveProtocolToolCallCapabilities,
   supportsProtocolToolCalling,

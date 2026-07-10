@@ -49,7 +49,7 @@ import {
   assertRunModeForKind,
   type AgentArborRunKind,
   type AgentArborRunMode,
-} from "../run-mode-policy.js";
+} from "../run-runtime-core/run-mode-policy.js";
 import {
   createTaskSoilFromDesktopInput,
   parseDesktopTaskSoilInput,

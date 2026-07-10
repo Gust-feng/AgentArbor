@@ -3,7 +3,7 @@ import {
   resolveRunModeForKind,
   RunModePolicyError,
   type RunModePolicyErrorCode,
-} from "../run-mode-policy.js";
+} from "../run-runtime-core/run-mode-policy.js";
 import { PanelHttpError } from "./http-utils.js";
 
 export function resolvePanelRouteRunMode(input: {

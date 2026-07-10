@@ -1,4 +1,3 @@
-import type { ModelFailure } from "../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolContentBlock,
@@ -14,9 +13,6 @@ import {
   projectToolStatusEnvelope,
 } from "../../kernel/tools/index.js";
 import { commandProgramFromToolResult, commandTextFromToolResult } from "./command-text.js";
-import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
-import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
-import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";
 import {
   toolContinuationFromUnknown,
   toolResultContinuation,
@@ -26,30 +22,47 @@ import {
   projectSubAgentToolAgentContent,
   projectSubAgentToolModelResult,
 } from "./sub-agent-tool-projection.js";
+import { projectSearchDisplayItem, projectToolDisplay } from "./tool-display-projection.js";
+import {
+  asRecord,
+  booleanOrUndefined,
+  isMcpToolName,
+  isString,
+  numberOrUndefined,
+  optionalRecord,
+  readErrorFactsFromOutput,
+  readErrorMessageFromOutput,
+  searchMessageFromOutput,
+  stringArray,
+  stringOrUndefined,
+  stringRecordOrUndefined,
+  textOrUndefined,
+} from "./tool-result-facts.js";
+import {
+  compactSafeText,
+  projectModelFailure,
+  redactOrdinaryMarkdownFragment,
+  redactOrdinaryText,
+  safeCommandToolPreview,
+  safeReadFileToolPreview,
+} from "./tool-projection-text.js";
+
+export {
+  compactSafeText,
+  projectModelFailure,
+  redactOrdinaryMarkdownFragment,
+  redactOrdinaryText,
+  safeCommandToolPreview,
+  safeReadFileToolPreview,
+} from "./tool-projection-text.js";
 
 const MODEL_TOOL_TEXT_MAX_CHARS = 128_000;
 const MODEL_TOOL_ERROR_MAX_CHARS = 64_000;
-const SEARCH_DISPLAY_RESULTS_LIMIT = 20;
 const FILE_SEARCH_DISPLAY_MATCHES_LIMIT = 80;
 
 type InternalToolResult = ToolResult;
 
 type ToolDisplayShape = "file" | "sources" | "diff" | "terminal" | "approval" | "text" | "generic";
-
-// Historical compatibility name: callers across the app still import
-// "redactOrdinaryText", but current ordinary text policy is compact-only.
-export function redactOrdinaryText(value: string, maxLength = 1_200): string {
-  return compactSafeText(sanitizeAssistantVisibleText(value), maxLength) ?? "";
-}
-
-// Historical compatibility name: markdown visible to the model/UI is preserved
-// except for newline normalization and transparent length clipping.
-export function redactOrdinaryMarkdownFragment(value: string, maxLength = 1_200): string {
-  const text = sanitizeAssistantVisibleText(value, { preserveOuterWhitespace: true })
-    .replace(/\r\n?/g, "\n");
-  if (text.trim().length === 0) return text;
-  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
-}
 
 export function projectToolResult(input: {
   readonly request: ToolCallRequest;
@@ -150,41 +163,6 @@ export function projectToolApprovalRequired(input: {
     truncated: false,
     redacted: false,
   };
-}
-
-export function projectModelFailure(failure: ModelFailure | undefined): string {
-  return redactOrdinaryText(failure?.message ?? "模型服务没有返回可用结果。", 600);
-}
-
-export function safeReadFileToolPreview(input: {
-  readonly summary?: string;
-  readonly path?: string;
-  readonly bytes?: number;
-  readonly maxLength?: number;
-}): string | undefined {
-  const headline = cleanOrdinaryToolText(input.summary) ?? input.path;
-  return compactSafeText(headline || "文件已读取。", input.maxLength ?? 900);
-}
-
-export function safeCommandToolPreview(input: {
-  readonly summary?: string;
-  readonly command?: string;
-  readonly exitCode?: number;
-  readonly maxLength?: number;
-}): string | undefined {
-  const headline = cleanOrdinaryToolText(input.summary) ?? input.command;
-  return compactSafeText(headline || "命令已执行。", input.maxLength ?? 900);
-}
-
-export function compactSafeText(value: string | undefined, maxLength: number): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const text = value.trim();
-  if (text.length === 0) {
-    return undefined;
-  }
-  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}...`;
 }
 
 function projectToolModelResult(
@@ -674,7 +652,7 @@ function searchToolResult(
   const results = display.kind === "search_results"
     ? display.results
     : Array.isArray(record.results)
-      ? record.results.map(searchDisplayItem).filter((item): item is NonNullable<ReturnType<typeof searchDisplayItem>> => item !== undefined)
+      ? record.results.map(projectSearchDisplayItem).filter((item): item is NonNullable<ReturnType<typeof projectSearchDisplayItem>> => item !== undefined)
       : [];
   const content = results
     .flatMap((item) => textContentBlocks([item.title, item.snippet].filter(isString).join("\n")));
@@ -1106,206 +1084,6 @@ function isFileReadTool(toolName: string): boolean {
     toolName === "read_skill_resource" ||
     toolName === "read_context_attachment_text" ||
     toolName === "read_context_attachment_pdf_text";
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
-}
-
-function optionalRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  const record = asRecord(value);
-  return Object.keys(record).length === 0 ? undefined : record;
-}
-
-function readErrorFactsFromOutput(record: Readonly<Record<string, unknown>>): ToolErrorFacts | undefined {
-  const direct = optionalRecord(record.errorFacts);
-  if (direct !== undefined) {
-    return direct as ToolErrorFacts;
-  }
-  const trace = asRecord(record.trace);
-  const sourceSteps = Array.isArray(trace.sourceSteps) ? trace.sourceSteps : [];
-  for (const value of sourceSteps) {
-    const step = asRecord(value);
-    if (stringOrUndefined(step.status) === "completed") {
-      continue;
-    }
-    const facts = optionalRecord(step.errorFacts);
-    if (facts !== undefined) {
-      return facts as ToolErrorFacts;
-    }
-  }
-  return undefined;
-}
-
-function readErrorMessageFromOutput(record: Readonly<Record<string, unknown>>): string | undefined {
-  const direct = stringOrUndefined(record.error);
-  if (direct !== undefined) {
-    return direct;
-  }
-  const trace = asRecord(record.trace);
-  const sourceSteps = Array.isArray(trace.sourceSteps) ? trace.sourceSteps : [];
-  for (const value of sourceSteps) {
-    const step = asRecord(value);
-    if (stringOrUndefined(step.status) === "completed") {
-      continue;
-    }
-    const message = stringOrUndefined(step.message);
-    if (message !== undefined) {
-      return message;
-    }
-  }
-  return undefined;
-}
-
-function searchMessageFromOutput(record: Readonly<Record<string, unknown>>): string | undefined {
-  const direct = stringOrUndefined(record.message);
-  if (direct !== undefined) {
-    return direct;
-  }
-  const trace = asRecord(record.trace);
-  const sourceSteps = Array.isArray(trace.sourceSteps) ? trace.sourceSteps : [];
-  for (const value of sourceSteps) {
-    const step = asRecord(value);
-    if (stringOrUndefined(step.status) === "completed") {
-      continue;
-    }
-    const message = stringOrUndefined(step.message);
-    if (message !== undefined) {
-      return message;
-    }
-  }
-  return undefined;
-}
-
-function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
-  const record = asRecord(output);
-  const result = asRecord(record.result);
-  const action = displayActionForTool(stringOrUndefined(record.action), request.toolName);
-  if (request.toolName === "search" && Array.isArray(record.results)) {
-    const results = record.results
-      .slice(0, SEARCH_DISPLAY_RESULTS_LIMIT)
-      .map(searchDisplayItem)
-      .filter((item): item is NonNullable<ReturnType<typeof searchDisplayItem>> => item !== undefined);
-    return {
-      kind: "search_results",
-      query: stringOrUndefined(record.query),
-      status: stringOrUndefined(record.status),
-      message: compactSafeText(searchMessageFromOutput(record), 500),
-      results,
-      resultsReturned: record.results.length,
-      truncated: record.results.length > results.length || record.truncated === true,
-    };
-  }
-  if (request.toolName === "read" && Array.isArray(output)) {
-    return {
-      kind: "generic_tool_summary",
-      action,
-      summary: `读取 ${output.length} 个 ref。`,
-      items: output.slice(0, 8).map(batchReadDisplayItem).filter(isString),
-    };
-  }
-  if (request.toolName === "read") {
-    const errorFacts = readErrorFactsFromOutput(record);
-    const error = readErrorMessageFromOutput(record);
-    return {
-      kind: "read_result",
-      ref: stringOrUndefined(record.ref) ?? stringOrUndefined(asRecord(request.input).ref),
-      source: stringOrUndefined(result.source),
-      status: stringOrUndefined(record.status) ?? stringOrUndefined(result.status),
-      title: stringOrUndefined(result.title),
-      url: stringOrUndefined(result.uri),
-      uri: stringOrUndefined(result.uri),
-      sourceSearchRef: stringOrUndefined(result.sourceSearchRef),
-      contentPreview: compactSafeText(stringOrUndefined(result.contentPreview) ?? stringOrUndefined(result.summary), 1_200),
-      error,
-      errorFacts,
-      truncated: result.truncated === true || record.truncated === true,
-    };
-  }
-  if (request.toolName === "browser_snapshot") {
-    return {
-      kind: "browser_snapshot",
-      title: stringOrUndefined(result.title),
-      url: stringOrUndefined(result.url),
-      text: compactSafeText(stringOrUndefined(result.text), 900),
-      truncated: record.truncated === true,
-    };
-  }
-  if (request.toolName === "http_request") {
-    return {
-      kind: "http_response",
-      method: stringOrUndefined(result.method),
-      url: stringOrUndefined(result.url),
-      statusCode: numberOrUndefined(result.statusCode),
-      statusText: stringOrUndefined(result.statusText),
-      durationMs: numberOrUndefined(result.durationMs),
-      bodyPreview: compactSafeText(stringOrUndefined(result.body), 900),
-      truncated: result.truncated === true || record.truncated === true,
-    };
-  }
-  if (record.result !== undefined && isMcpToolName(request.toolName)) {
-    return normalizeToolDisplayForOperation({
-      toolName: request.toolName,
-      input: request.input,
-      output,
-      existingDisplay: record.display,
-      truncated: record.truncated === true,
-    });
-  }
-  const normalizedDisplay = normalizeToolDisplayForOperation({
-    toolName: request.toolName,
-    input: request.input,
-    output,
-    existingDisplay: record.display,
-    truncated: record.truncated === true,
-  });
-  if (
-    (normalizedDisplay.kind === "file_change_summary" || normalizedDisplay.kind === "file_diff_preview") &&
-    request.toolName !== "write_file" &&
-    request.toolName !== "create_file" &&
-    request.toolName !== "delete_file" &&
-    request.toolName !== "edit_file"
-  ) {
-    return normalizedDisplay;
-  }
-  if (request.toolName === "write_file" || request.toolName === "create_file" || request.toolName === "delete_file") {
-    return normalizedDisplay;
-  }
-  if (request.toolName === "edit_file") {
-    return normalizedDisplay;
-  }
-  if (request.toolName === "run_command" || request.toolName === "shell_command") {
-    const stdout = stringOrUndefined(result.stdout);
-    const stderr = stringOrUndefined(result.stderr);
-    const commandLine = commandTextFromToolResult(result, request.input);
-    return {
-      kind: "command_summary",
-      command: commandProgramFromToolResult(result, request.input),
-      args: stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(asRecord(request.input).args),
-      commandLine,
-      cwd: stringOrUndefined(result.cwd),
-      shell: stringOrUndefined(asRecord(result.shell).label),
-      exitCode: numberOrUndefined(result.exitCode),
-      timedOut: result.timedOut === true,
-      background: result.background === true,
-      pid: numberOrUndefined(result.pid),
-      logRef: stringOrUndefined(result.logRef),
-      logPath: stringOrUndefined(result.logPath),
-      stopCommand: stringOrUndefined(result.stopCommand),
-      durationMs: numberOrUndefined(result.durationMs),
-      waitForPort: numberOrUndefined(result.waitForPort),
-      portReady: result.portReady === true ? true : result.portReady === false ? false : undefined,
-      stdoutTruncated: result.stdoutTruncated === true ? true : result.stdoutTruncated === false ? false : undefined,
-      stderrTruncated: result.stderrTruncated === true ? true : result.stderrTruncated === false ? false : undefined,
-      stdoutChars: numberOrUndefined(result.stdoutChars),
-      stderrChars: numberOrUndefined(result.stderrChars),
-      stdoutOmittedChars: numberOrUndefined(result.stdoutOmittedChars),
-      stderrOmittedChars: numberOrUndefined(result.stderrOmittedChars),
-      outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
-      errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
-    };
-  }
-  return normalizedDisplay;
 }
 
 function projectToolAgentContent(request: ToolCallRequest, output: unknown, truncated: boolean): unknown {
@@ -1863,19 +1641,6 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
   };
 }
 
-function batchReadDisplayItem(value: unknown): string | undefined {
-  const item = asRecord(value);
-  const ref = stringOrUndefined(item.ref);
-  const status = stringOrUndefined(item.status);
-  const title = stringOrUndefined(item.title);
-  const error = stringOrUndefined(item.error);
-  const headline = title ?? ref;
-  if (headline === undefined && status === undefined) {
-    return undefined;
-  }
-  return [status, headline, error].filter(isString).join(" · ");
-}
-
 function projectBatchReadAgentItem(
   value: unknown,
   request: ToolCallRequest,
@@ -2087,78 +1852,6 @@ function modelVisibleTextFragment(input: {
 
 function rawToolFieldRef(request: ToolCallRequest, field: string): string {
   return `tool:${request.callId}:raw:${request.toolName}:${field}`;
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function textOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function booleanOrUndefined(value: unknown): boolean | undefined {
-  if (value === true) return true;
-  if (value === false) return false;
-  return undefined;
-}
-
-function displayActionForTool(action: string | undefined, toolName: string): string {
-  if (action === undefined || action === toolName || /^[a-z][a-z0-9_:-]*$/i.test(action)) {
-    return toolDisplayName(action ?? toolName);
-  }
-  return action;
-}
-
-function stringArray(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
-function stringRecordOrUndefined(value: unknown): Readonly<Record<string, string>> | undefined {
-  const record = asRecord(value);
-  const result: Record<string, string> = {};
-  for (const [key, item] of Object.entries(record)) {
-    if (typeof item === "string") {
-      result[key] = item;
-    }
-  }
-  return Object.keys(result).length === 0 ? undefined : result;
-}
-
-function isString(value: unknown): value is string {
-  return typeof value === "string";
-}
-
-function searchDisplayItem(value: unknown): Extract<ToolDisplayProjection, { readonly kind: "search_results" }>["results"][number] | undefined {
-  const item = asRecord(value);
-  const title = stringOrUndefined(item.title);
-  if (title === undefined) {
-    return undefined;
-  }
-  return {
-    title: redactOrdinaryText(title, 160),
-    url: stringOrUndefined(item.url) ?? stringOrUndefined(item.uri),
-    refId: stringOrUndefined(item.refId),
-    source: stringOrUndefined(item.source),
-    snippet: compactSafeText(stringOrUndefined(item.snippet), 260),
-  };
-}
-
-function summarizeCommandOutput(value: string): string | undefined {
-  const lines = value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .slice(0, 4);
-  return compactSafeText(lines.join("\n"), 420);
-}
-
-function isMcpToolName(toolName: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9_.-]*__[A-Za-z0-9][A-Za-z0-9_.-]*$/u.test(toolName);
 }
 
 function projectMcpMultimodalPart(value: unknown): {

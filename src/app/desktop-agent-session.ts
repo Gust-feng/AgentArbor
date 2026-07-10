@@ -13,7 +13,7 @@ import {
 } from "./basic-agent-runtime/index.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { attachDesktopFileInputsToModelMessages } from "./desktop-agent-model-input-files.js";
-import { modelCapabilitiesForDesktopRun, prepareDesktopAgentLoop } from "./desktop-agent-loop-preparation.js";
+import { modelCapabilitiesForDesktopRun, prepareDesktopAgentLoop } from "./desktop-agent/desktop-agent-loop-preparation.js";
 import { createTaskSoilFromDesktopInput } from "./task-soil-workspace.js";
 import type {
   DesktopAgentConversationMessage,
@@ -44,7 +44,7 @@ import {
   createIntelligenceChannelFromOptions,
   resolveActiveModelName,
   resolveDesktopAgentAiMode,
-} from "./desktop-agent-session-runtime.js";
+} from "./desktop-agent/desktop-agent-session-runtime.js";
 import { asRecord, stringOrUndefined } from "./run-read-model/value-utils.js";
 
 export type {

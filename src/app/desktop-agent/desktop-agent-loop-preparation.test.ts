@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { BasicAgentCapabilitySnapshot, ModelCapabilities } from "../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot, ModelCapabilities } from "../../domain/config/index.js";
 import { modelCapabilitiesForDesktopRun } from "./desktop-agent-loop-preparation.js";
 
 const directModelCapabilities: ModelCapabilities = {

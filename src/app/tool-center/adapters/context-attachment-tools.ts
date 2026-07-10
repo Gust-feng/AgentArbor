@@ -54,6 +54,12 @@ import {
 } from "./context-attachment-table.js";
 
 export type { ContextAttachmentToolOptions } from "./context-attachment-access.js";
+export {
+  createInspectContextAttachmentArchiveTool,
+  createInspectContextAttachmentTableTool,
+  createReadContextAttachmentImageTool,
+  createReadContextAttachmentTableTool,
+};
 
 const DEFAULT_MAX_CHARS = 128_000;
 const MAX_PDF_BYTES = 8 * 1024 * 1024;

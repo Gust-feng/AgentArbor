@@ -12,7 +12,7 @@ import type {
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { ToolConfirmationPolicy, ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
-import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
+import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { BasicAgentPendingToolContinuation } from "../basic-agent-runtime/index.js";
 import type {

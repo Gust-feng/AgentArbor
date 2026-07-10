@@ -15,7 +15,7 @@ import type {
   ContextLedgerSkillMarkUsedStatus,
 } from "../../domain/basic-agent/index.js";
 import type { ToolConfirmationPolicy, ToolErrorDomain } from "../../domain/tools/index.js";
-import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
+import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-contracts.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";

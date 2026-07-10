@@ -7,7 +7,7 @@ import {
 } from "../../../domain/observation/index.js";
 import { ROOTLET_CLUSTER_KINDS, type CandidatePoolCounts, type RootletClusterKind } from "../../../domain/underground/index.js";
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
-import type { AgentRunTreeAttachment } from "../../agent-run-tree-attachment.js";
+import type { AgentRunTreeAttachment } from "../../run-read-model/agent-run-tree-attachment.js";
 import type { ModelRuntimeMode } from "../../model-runtime/index.js";
 import type { PanelRunSummary } from "../../panel-run-summary.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";

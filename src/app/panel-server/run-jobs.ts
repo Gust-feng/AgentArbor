@@ -15,7 +15,7 @@ import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-c
 import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "../panel-read-model/run/index.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
-import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
+import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import { assertRunBirthFactsForKind, resolveRunModeForKind } from "../run-runtime-core/run-mode-policy.js";
 import type { AgentArborRunKind, AgentArborRunMode } from "../run-runtime-core/run-mode-policy.js";
 import { resolveCompatibleRunFacts } from "../run-runtime-core/run-facts-policy.js";

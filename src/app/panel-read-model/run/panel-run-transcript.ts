@@ -1,4 +1,4 @@
-import type { AgentRunTreeAttachment } from "../../agent-run-tree-attachment.js";
+import type { AgentRunTreeAttachment } from "../../run-read-model/agent-run-tree-attachment.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
 import { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
 import { deriveRunSteps } from "./panel-run-steps.js";

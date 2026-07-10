@@ -2,7 +2,7 @@ import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../../../do
 import type { ToolDisplayProjection } from "../../../domain/tools/index.js";
 import type { TranscriptNode } from "../../../domain/basic-agent/index.js";
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
-import type { AgentRunTreeAttachment } from "../../agent-run-tree-attachment.js";
+import type { AgentRunTreeAttachment } from "../../run-read-model/agent-run-tree-attachment.js";
 import type { PanelTranscriptModelCall } from "../transcript/panel-transcript-model-calls.js";
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
 import type { PanelRunStatus } from "./panel-run-status.js";

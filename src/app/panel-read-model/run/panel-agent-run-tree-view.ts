@@ -1,4 +1,4 @@
-import type { AgentRunTreeAttachment, AgentRunTreeAttachmentRootletKind } from "../../agent-run-tree-attachment.js";
+import type { AgentRunTreeAttachment, AgentRunTreeAttachmentRootletKind } from "../../run-read-model/agent-run-tree-attachment.js";
 
 export type SafeAgentRunTreeView = {
   readonly treeId: string;

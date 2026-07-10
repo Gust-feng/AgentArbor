@@ -411,7 +411,7 @@ test("child detail workflow renders model output and collapsed desktop Agent too
     readAppSource(path.join("deep", "deep-child-agent-runner.ts")),
     readAppSource(path.join("deep", "deep-runtime.ts")),
     readAppSource(path.join("deep", "deep-read-model.ts")),
-    readAppSource("agent-run-tree-attachment.ts"),
+    readAppSource(path.join("run-read-model", "agent-run-tree-attachment.ts")),
   ]);
 
   includes(deepWorkDetailModel, "displayActivityItemsForNodes([node])");

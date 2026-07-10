@@ -284,6 +284,7 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["model-failure-visible-copy.ts", 'export * from "./panel-read-model/run/panel-model-failure-copy.js";'],
     ["run-mode-policy.ts", 'export * from "./run-runtime-core/run-mode-policy.js";'],
     ["run-facts-policy.ts", 'export * from "./run-runtime-core/run-facts-policy.js";'],
+    ["runtime.ts", 'export * from "./run-runtime-core/minimal-runtime.js";'],
     ["agent-run-tree-attachment.ts", 'export * from "./run-read-model/agent-run-tree-attachment.js";'],
     ["run-summary.ts", 'export * from "./run-read-model/run-summary.js";'],
     ["panel-run-summary.ts", 'export * from "./panel-read-model/run/panel-run-summary.js";'],
@@ -458,6 +459,33 @@ test("app top-level keeps moved implementation modules as compatibility facades"
 
   const smokeCliFacade = await readSource(path.join(appRoot, "real-ai-smoke.ts"));
   assert.equal(smokeCliFacade.trim(), 'import "./smoke/real-ai-smoke.js";');
+});
+
+test("app CLI entrypoints stay thin and delegate to owning modules", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const [demoEntrypoint, panelEntrypoint, minimalRuntime, demoCli, panelCli] = await Promise.all([
+    readSource(path.join(appRoot, "demo.ts")),
+    readSource(path.join(appRoot, "panel.ts")),
+    readSource(path.join(appRoot, "run-runtime-core", "minimal-runtime.ts")),
+    readSource(path.join(appRoot, "underground", "minimal", "minimal-demo-cli.ts")),
+    readSource(path.join(appRoot, "panel-server", "panel-cli.ts")),
+  ]);
+
+  assert.equal(
+    demoEntrypoint.trim(),
+    'import { runMinimalDemoCli } from "./underground/minimal/minimal-demo-cli.js";\n\nawait runMinimalDemoCli();'
+  );
+  assert.equal(
+    panelEntrypoint.trim(),
+    'import { runPanelCli } from "./panel-server/panel-cli.js";\n\nawait runPanelCli();'
+  );
+  assert.equal(minimalRuntime.includes("export function createMinimalRuntime"), true);
+  assert.equal(demoCli.includes("export async function runMinimalDemoCli"), true);
+  assert.equal(panelCli.includes("export async function runPanelCli"), true);
+  assert.equal(demoEntrypoint.includes("runMinimalLoop"), false);
+  assert.equal(demoEntrypoint.includes("console.log"), false);
+  assert.equal(panelEntrypoint.includes("startLocalPanelServer"), false);
+  assert.equal(panelEntrypoint.includes("process.on"), false);
 });
 
 test("shared read-model value helpers use neutral run-read-model ownership", async () => {

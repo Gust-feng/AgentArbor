@@ -1,7 +1,7 @@
 import { createId, nowIso, reserveId } from "../../kernel/id.js";
 import type { RuntimeConversationRecord } from "../../domain/runtime-database/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
+import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import type {
   PanelConversation,
   PanelConversationCurrentRunReadModel,

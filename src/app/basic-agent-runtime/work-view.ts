@@ -22,7 +22,7 @@ import {
   cleanConfirmationSummary,
   confirmationActionSummaryText,
   isGenericApprovalDecisionText,
-} from "../confirmation-copy.js";
+} from "../text-projection/confirmation-copy.js";
 import {
   isLowValueOrdinaryAgentNote,
   isOrdinaryTranscriptSuppressedEvent,

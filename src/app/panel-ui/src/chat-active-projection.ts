@@ -11,7 +11,7 @@ import {
   isLowValueUserDecisionNode,
   nodesForRun,
 } from "../../panel-read-model/transcript/panel-transcript-node-projection.js";
-import { isGenericApprovalDecisionText } from "../../confirmation-copy.js";
+import { isGenericApprovalDecisionText } from "../../text-projection/confirmation-copy.js";
 
 export type ChatActiveConversationTurn = {
   readonly turnId: string;

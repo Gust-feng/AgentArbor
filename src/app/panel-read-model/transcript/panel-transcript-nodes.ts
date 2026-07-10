@@ -3,7 +3,7 @@ import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import type { ObservationRef } from "../../../domain/observation/index.js";
 import { type ToolDisplayProjection, type ToolErrorDomain, type ToolErrorFacts, type ToolResultEnvelope } from "../../../domain/tools/index.js";
 import { toolDisplayName } from "../../../domain/tools/index.js";
-import { cleanConfirmationSummary } from "../../confirmation-copy.js";
+import { cleanConfirmationSummary } from "../../text-projection/confirmation-copy.js";
 import {
   completeOpenReasoningNodes,
   flushPendingReasoningNode,

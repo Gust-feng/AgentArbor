@@ -10,7 +10,7 @@ import {
   basicConfirmationDecisionSummary,
   cleanConfirmationSummary,
   isGenericApprovalDecisionText,
-} from "../confirmation-copy.js";
+} from "../text-projection/confirmation-copy.js";
 import { redactOrdinaryMarkdownFragment, redactOrdinaryText } from "../safe-projection.js";
 
 export { basicConfirmationDecisionSummary };

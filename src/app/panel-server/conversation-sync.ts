@@ -10,14 +10,14 @@ import type { PanelRunStatus, PanelRunTranscript } from "../panel-run-read-model
 import {
   friendlyUserFacingFailureText,
   sanitizeAssistantVisibleText,
-} from "../visible-text-safety.js";
+} from "../text-projection/visible-text-safety.js";
 import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../run-read-model/restored-run-projection.js";
 import {
   appendTextStreamAssembly,
   emptyTextStreamAssembly,
   textStreamFragmentSourceFromEventId,
 } from "../readable-text-fragments.js";
-import { confirmationActionSummaryText } from "../confirmation-copy.js";
+import { confirmationActionSummaryText } from "../text-projection/confirmation-copy.js";
 
 export type PanelConversationSyncRunResponse = {
   readonly status: PanelRunStatus;

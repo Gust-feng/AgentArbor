@@ -1,7 +1,7 @@
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent/desktop-agent-contracts.js";
-import { normalizeModelFacingText } from "../visible-text-safety.js";
+import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
 import {
   clampRatio,
   compactionAgentDisplayName,

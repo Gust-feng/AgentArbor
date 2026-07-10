@@ -1,7 +1,7 @@
 import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
 import type { RuntimeConversationRecord } from "../../domain/runtime-database/index.js";
-import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
-import { isGenericApprovalDecisionText } from "../confirmation-copy.js";
+import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
+import { isGenericApprovalDecisionText } from "../text-projection/confirmation-copy.js";
 import type {
   PanelConversation,
   PanelConversationCurrentRunReadModel,

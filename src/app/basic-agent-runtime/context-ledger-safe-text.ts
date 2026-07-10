@@ -1,4 +1,4 @@
-import { normalizeModelFacingText } from "../visible-text-safety.js";
+import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
 
 /**
  * Model-facing context text helpers for the Basic Agent Context Ledger.

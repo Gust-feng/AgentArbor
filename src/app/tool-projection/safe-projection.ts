@@ -15,7 +15,7 @@ import {
   projectToolStatusEnvelope,
 } from "../../kernel/tools/index.js";
 import { commandProgramFromToolResult, commandTextFromToolResult } from "./command-text.js";
-import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
+import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";
 import {

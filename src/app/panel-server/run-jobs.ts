@@ -19,7 +19,7 @@ import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-at
 import { assertRunBirthFactsForKind, resolveRunModeForKind } from "../run-runtime-core/run-mode-policy.js";
 import type { AgentArborRunKind, AgentArborRunMode } from "../run-runtime-core/run-mode-policy.js";
 import { resolveCompatibleRunFacts } from "../run-runtime-core/run-facts-policy.js";
-import { basicConfirmationDecisionSummary } from "../confirmation-copy.js";
+import { basicConfirmationDecisionSummary } from "../text-projection/confirmation-copy.js";
 
 export type PanelRunKind = AgentArborRunKind;
 /**

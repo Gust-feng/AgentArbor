@@ -265,6 +265,9 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["tool-display-normalization.ts", 'export * from "./tool-projection/tool-display-normalization.js";'],
     ["tool-result-continuation.ts", 'export * from "./tool-projection/tool-result-continuation.js";'],
     ["ordinary-tool-copy.ts", 'export * from "./tool-projection/ordinary-tool-copy.js";'],
+    ["confirmation-copy.ts", 'export * from "./text-projection/confirmation-copy.js";'],
+    ["failure-copy.ts", 'export * from "./text-projection/failure-copy.js";'],
+    ["visible-text-safety.ts", 'export * from "./text-projection/visible-text-safety.js";'],
     ["app-update-service.ts", 'export * from "./app-update/app-update-service.js";'],
     ["electron-app-update-service.ts", 'export * from "./app-update/electron-app-update-service.js";'],
     ["product-info.ts", 'export * from "./app-update/product-info.js";'],
@@ -493,6 +496,34 @@ test("tool projection support modules stay under tool-projection ownership", () 
     const facade = path.join(appRoot, fileName);
     assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
     assert.equal(fileExistsSync(path.join(toolProjectionRoot, fileName)), true, `${fileName} should live in tool-projection`);
+  }
+});
+
+test("text projection support modules stay under text-projection ownership", () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const textProjectionRoot = path.join(appRoot, "text-projection");
+  const movedTextProjectionFiles = [
+    "confirmation-copy.ts",
+    "failure-copy.ts",
+    "visible-text-safety.ts",
+  ];
+  const movedTextProjectionTests = [
+    "confirmation-copy.test.ts",
+    "visible-text-safety.test.ts",
+  ];
+
+  for (const fileName of movedTextProjectionFiles) {
+    const facade = path.join(appRoot, fileName);
+    assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
+    assert.equal(fileExistsSync(path.join(textProjectionRoot, fileName)), true, `${fileName} should live in text-projection`);
+  }
+  for (const fileName of movedTextProjectionTests) {
+    assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);
+    assert.equal(
+      fileExistsSync(path.join(textProjectionRoot, fileName)),
+      true,
+      `${fileName} should live in text-projection`
+    );
   }
 });
 
@@ -1256,7 +1287,7 @@ test("ordinary Desktop Agent entry does not import legacy desktop chat compatibi
   assert.deepEqual(violations, [], "new ordinary Agent code should import desktop-agent-session directly");
 });
 
-test("confirmation copy stays app-owned while display projection stays panel UI-owned", async () => {
+test("confirmation copy stays text projection-owned while display projection stays panel UI-owned", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const [transcriptConfirmation, confirmationDisplayFacade, confirmationDisplayProjection] = await Promise.all([
     readSource(path.join(appRoot, "panel-ui", "src", "components", "transcript-confirmation.tsx")),
@@ -1270,7 +1301,7 @@ test("confirmation copy stays app-owned while display projection stays panel UI-
   assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "src", "confirmation-display-projection.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-ui", "tests", "confirmation-display-projection.test.ts")), true);
   assert.equal(confirmationDisplayFacade.trim(), 'export * from "./panel-ui/src/confirmation-display-projection.js";');
-  assert.equal(confirmationDisplayProjection.includes('from "../../confirmation-copy.js"'), true);
+  assert.equal(confirmationDisplayProjection.includes('from "../../text-projection/confirmation-copy.js"'), true);
   assert.equal(transcriptConfirmation.includes("../../../confirmation-copy"), false);
   assert.equal(transcriptConfirmation.includes("../../../panel-confirmation-display-projection"), false);
   assert.equal(transcriptConfirmation.includes("../confirmation-display-projection"), true);

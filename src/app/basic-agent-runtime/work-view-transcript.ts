@@ -25,7 +25,7 @@ import {
   textStreamFragmentSourceFromEventId,
   type TextStreamAssembly,
 } from "../readable-text-fragments.js";
-import { cleanConfirmationSummary } from "../confirmation-copy.js";
+import { cleanConfirmationSummary } from "../text-projection/confirmation-copy.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 import {
   isLowValueOrdinaryAgentNote,

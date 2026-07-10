@@ -26,7 +26,7 @@ import { TaskSoilInputValidationError, parseDesktopTaskSoilInput, type DesktopTa
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { PanelRunMode } from "./run-jobs.js";
 import { DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS } from "../config-center/desktop-agent-settings.js";
-import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
+import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import { PanelHttpError } from "./http-utils.js";
 

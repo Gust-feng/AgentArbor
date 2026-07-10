@@ -6,7 +6,7 @@ import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import { createDesktopAgentCanvas } from "../panel-read-model/canvas/panel-desktop-agent-canvas.js";
 import { createPanelRunTranscript } from "../panel-run-read-model.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
+import { friendlyUserFacingFailureText } from "../text-projection/visible-text-safety.js";
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { resolveTriggeredSkillContexts, type ResolveTriggeredSkillContextsOptions } from "./skill-service.js";

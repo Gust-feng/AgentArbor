@@ -1,6 +1,6 @@
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
 import { asRecord } from "../../run-read-model/value-utils.js";
-import { friendlyUserFacingModelFailureText } from "../../visible-text-safety.js";
+import { friendlyUserFacingModelFailureText } from "../../text-projection/visible-text-safety.js";
 
 export function latestModelFailureTextForUser(
   eventEntries: readonly EventLogEntry[]

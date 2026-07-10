@@ -5,7 +5,7 @@ import type {
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../safe-projection.js";
-import { isGenericApprovalDecisionText } from "../confirmation-copy.js";
+import { isGenericApprovalDecisionText } from "../text-projection/confirmation-copy.js";
 import {
   nextBasicEventSequence,
   restoredBlockedEvent,

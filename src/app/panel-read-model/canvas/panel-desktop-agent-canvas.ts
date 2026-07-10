@@ -2,7 +2,7 @@ import type { DesktopAgentSessionResult } from "../../desktop-agent/desktop-agen
 import { latestModelFailureTextForUser } from "../run/panel-model-failure-copy.js";
 import { safeText, taskSoilCanvas, type PanelTaskSoilCanvasReadModel } from "./panel-canvas-common.js";
 import type { PanelRunTranscript } from "../run/panel-run-transcript-contracts.js";
-import { friendlyUserFacingFailureText } from "../../visible-text-safety.js";
+import { friendlyUserFacingFailureText } from "../../text-projection/visible-text-safety.js";
 
 const DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS = 128_000;
 

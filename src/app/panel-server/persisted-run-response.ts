@@ -25,11 +25,11 @@ import {
 } from "../panel-run-read-model.js";
 import { restoredModelRequestedSummary } from "../panel-read-model/panel-model-progress-copy.js";
 import { isContextCompactionPurpose } from "../panel-read-model/run/panel-run-stream-copy.js";
-import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
+import { friendlyUserFacingFailureText } from "../text-projection/visible-text-safety.js";
 import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversation/panel-conversations.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
-import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "../confirmation-copy.js";
+import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "../text-projection/confirmation-copy.js";
 import { projectPanelRunResponseBase, type PanelRunResponseBase } from "./run-response-base.js";
 import {
   restoredRunResultProjection,

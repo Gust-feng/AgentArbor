@@ -1,6 +1,6 @@
 import type { RuntimeRunRecord } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../tool-projection/safe-projection.js";
-import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
+import { friendlyUserFacingFailureText } from "../text-projection/visible-text-safety.js";
 
 export type RestoredRunResultProjection = {
   readonly title: string;

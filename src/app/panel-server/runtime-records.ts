@@ -37,8 +37,8 @@ import {
   normalizeToolDisplayForOperation,
   toolDisplayProjectionOrUndefined,
 } from "../tool-display-normalization.js";
-import { normalizeModelFacingText, sanitizeAssistantVisibleText } from "../visible-text-safety.js";
-import { confirmationActionSummaryText } from "../confirmation-copy.js";
+import { normalizeModelFacingText, sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
+import { confirmationActionSummaryText } from "../text-projection/confirmation-copy.js";
 import { asRecord, optionalString, unique } from "./request-parsers.js";
 
 export type RuntimeErrorDomain = ToolErrorDomain;

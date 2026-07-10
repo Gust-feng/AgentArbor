@@ -25,7 +25,7 @@ import {
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
 import { latestModelFailureTextForUser } from "../panel-read-model/run/panel-model-failure-copy.js";
-import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
+import { friendlyUserFacingFailureText } from "../text-projection/visible-text-safety.js";
 import {
   buildConversationHistoryMessages,
   buildConversationInterruptedRunContexts,

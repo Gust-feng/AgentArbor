@@ -1,7 +1,7 @@
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { ToolDefinition } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
-import { normalizeModelFacingText } from "../visible-text-safety.js";
+import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
 import {
   clampRatio,
   compactionAgentDisplayName,

@@ -16,6 +16,11 @@ import { commandProgramFromToolResult, commandTextFromToolResult } from "./comma
 import { projectSearchDisplayItem, projectToolDisplay } from "./tool-display-projection.js";
 import { projectToolAgentContent } from "./tool-agent-content-projection.js";
 import {
+  projectLegacyMcpToolResult,
+  toolResultFromUnknown,
+  type InternalToolResult,
+} from "./tool-result-canonical.js";
+import {
   FILE_SEARCH_MODEL_MATCHES_LIMIT,
   MODEL_TOOL_ERROR_MAX_CHARS,
   MODEL_TOOL_TEXT_MAX_CHARS,
@@ -42,10 +47,8 @@ import {
   textOrUndefined,
 } from "./tool-result-facts.js";
 import { compactSafeText, redactOrdinaryText } from "./tool-projection-text.js";
-import { toolContinuationFromUnknown, toolResultContinuation } from "./tool-result-continuation.js";
+import { toolResultContinuation } from "./tool-result-continuation.js";
 import { isSubAgentToolName, projectSubAgentToolModelResult } from "./sub-agent-tool-projection.js";
-type InternalToolResult = ToolResult;
-
 type ToolDisplayShape = "file" | "sources" | "diff" | "terminal" | "approval" | "text" | "generic";
 
 export function projectToolResult(input: {
@@ -370,124 +373,6 @@ function toolResultFromModelResult(
       continuation: modelResult.continuation,
     } : undefined),
     continuation: modelResult.continuation,
-  };
-}
-
-function toolResultFromUnknown(value: unknown): InternalToolResult | undefined {
-  const record = asRecord(value);
-  if (!Array.isArray(record.content)) {
-    return undefined;
-  }
-  const content = record.content
-    .map(toolContentBlockFromUnknown)
-    .filter((part): part is ToolContentBlock => part !== undefined);
-  return {
-    content,
-    structuredContent: record.structuredContent,
-    isError: booleanOrUndefined(record.isError),
-    error: toolResultErrorFromUnknown(record.error),
-    truncation: toolResultTruncationFromUnknown(record.truncation),
-    continuation: toolContinuationFromUnknown(record.continuation),
-  };
-}
-
-function toolContentBlockFromUnknown(value: unknown): ToolContentBlock | undefined {
-  const record = asRecord(value);
-  const type = stringOrUndefined(record.type);
-  if (type === "text") {
-    const text = textOrUndefined(record.text);
-    return text === undefined ? undefined : { type: "text", text };
-  }
-  if (type === "image") {
-    const mimeType = stringOrUndefined(record.mimeType);
-    if (mimeType === undefined) return undefined;
-    return {
-      type: "image",
-      mimeType,
-      data: textOrUndefined(record.data),
-      ref: stringOrUndefined(record.ref),
-    };
-  }
-  if (type === "audio") {
-    const mimeType = stringOrUndefined(record.mimeType);
-    if (mimeType === undefined) return undefined;
-    return {
-      type: "audio",
-      mimeType,
-      data: textOrUndefined(record.data),
-      ref: stringOrUndefined(record.ref),
-    };
-  }
-  if (type === "resource") {
-    const uri = stringOrUndefined(record.uri);
-    if (uri === undefined) return undefined;
-    return {
-      type: "resource",
-      uri,
-      mimeType: stringOrUndefined(record.mimeType),
-      text: textOrUndefined(record.text),
-    };
-  }
-  return undefined;
-}
-
-function toolResultTruncationFromUnknown(value: unknown): ToolResult["truncation"] | undefined {
-  const record = asRecord(value);
-  if (record.truncated !== true) {
-    return undefined;
-  }
-  return {
-    truncated: true,
-    reason: stringOrUndefined(record.reason),
-    omittedChars: numberOrUndefined(record.omittedChars),
-    omittedItems: numberOrUndefined(record.omittedItems),
-    continuation: toolContinuationFromUnknown(record.continuation),
-  };
-}
-
-function toolResultErrorFromUnknown(value: unknown): ToolResult["error"] | undefined {
-  const record = asRecord(value);
-  const message = stringOrUndefined(record.message);
-  if (message === undefined) {
-    return undefined;
-  }
-  return {
-    message,
-    domain: toolErrorDomainFromUnknown(record.domain),
-    facts: optionalRecord(record.facts) as ToolErrorFacts | undefined,
-    retryable: booleanOrUndefined(record.retryable),
-  };
-}
-
-function toolErrorDomainFromUnknown(value: unknown): ToolErrorDomain | undefined {
-  return value === "tool_error" ||
-      value === "runtime_error" ||
-      value === "model_error" ||
-      value === "ui_submit_error" ||
-      value === "process_error"
-    ? value
-    : undefined;
-}
-
-function projectLegacyMcpToolResult(record: Readonly<Record<string, unknown>>): InternalToolResult {
-  const result = asRecord(record.result);
-  const content: ToolContentBlock[] = [];
-  const text = textOrUndefined(result.text);
-  if (text !== undefined) {
-    content.push({ type: "text", text });
-  }
-  for (const item of Array.isArray(result.multimodal) ? result.multimodal : []) {
-    const part = asRecord(item);
-    const type = stringOrUndefined(part.type);
-    const mimeType = stringOrUndefined(part.mimeType);
-    if ((type === "image" || type === "audio") && mimeType !== undefined) {
-      content.push({ type, mimeType, ref: stringOrUndefined(part.ref) });
-    }
-  }
-  return {
-    content,
-    structuredContent: result.structuredContent ?? record.structuredContent,
-    isError: booleanOrUndefined(record.isError),
   };
 }
 

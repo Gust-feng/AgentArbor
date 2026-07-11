@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectToolApprovalRequired, projectToolFailure, projectToolResult, redactOrdinaryMarkdownFragment } from "./safe-projection.js";
+import { redactOrdinaryMarkdownFragment } from "./safe-projection.js";
 
 test("ordinary markdown fragments preserve whitespace-only streaming deltas", () => {
   assert.equal(redactOrdinaryMarkdownFragment(" "), " ");

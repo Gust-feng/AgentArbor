@@ -329,7 +329,7 @@ test("Cognitive Work Session can use tools before child delegation and preserve 
   });
 
   assert.equal(result.status, "completed");
-  assert.equal(toolCenter.getCallCount(), 1);
+  assert.equal(toolCenter.executionCount(), 1);
   assert.equal(result.steps[0]?.action, "use_tools");
   assert.equal(result.steps.some((step) => step.toolCallRefs.includes("call-search-work-session")), true);
   assert.equal(result.evidenceRefs.includes("research:codebase:work-session"), true);
@@ -467,11 +467,7 @@ class FixtureToolCenter implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {
-    this.calls = 0;
-  }
-
-  getCallCount(): number {
+  executionCount(): number {
     return this.calls;
   }
 }

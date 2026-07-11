@@ -120,7 +120,9 @@ export function createPanelRunTracking(input: {
     },
     rootletsByKind,
     modelTotals: deepSummary?.ai.eventCounts ?? countModelEvents(input.eventEntries),
-    toolTotals: deepSummary?.tools.eventCounts ?? countToolEvents(input.eventEntries),
+    toolTotals: deepSummary === undefined
+      ? countToolEvents(input.eventEntries)
+      : { ...deepSummary.tools.eventCounts, cancelled: 0 },
     context: {
       compaction: countContextCompactionEvents(input.eventEntries),
     },
@@ -189,6 +191,7 @@ function isOrdinaryAgentRuntimeEvent(type: ArborMessageType): boolean {
     type === "tool.requested" ||
     type === "tool.completed" ||
     type === "tool.failed" ||
+    type === "tool.cancelled" ||
     type === "user_approval.requested" ||
     type === "user_approval.received";
 }
@@ -329,6 +332,7 @@ function countToolEvents(eventEntries: readonly EventLogEntry[]): PanelRunTracki
     requested: eventEntries.filter((entry) => entry.type === "tool.requested").length,
     completed: eventEntries.filter((entry) => entry.type === "tool.completed").length,
     failed: eventEntries.filter((entry) => entry.type === "tool.failed").length,
+    cancelled: eventEntries.filter((entry) => entry.type === "tool.cancelled").length,
   };
 }
 
@@ -460,6 +464,7 @@ function waitingPointFor(
       return "已发出工具调用，等待工具返回结果引用。";
     case "tool.completed":
     case "tool.failed":
+    case "tool.cancelled":
       return "工具调用已返回，模型将基于工具结果继续生成候选。";
     case "agent.delegation.planned":
       return "已形成分工计划，等待局部检查启动。";

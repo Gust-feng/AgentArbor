@@ -1,5 +1,5 @@
 import type { RuntimeDatabase, RuntimeRunContinuationAvailability } from "../../domain/runtime-database/index.js";
-import type { ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
@@ -8,6 +8,7 @@ import type { PanelConversation, PanelConversationReadModel, PanelConversationSt
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import type { PanelRunJob, PanelRunJobStore } from "./run-jobs.js";
 import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
+import { toolEvidenceFromRuntimeToolCalls, toolEvidenceFromStreamEvents } from "./basic-agent-read-models.js";
 
 export type PanelConversationHistorySource = {
   readonly conversations: PanelConversationStore;
@@ -66,7 +67,7 @@ export async function buildConversationToolEvidence(input: {
   readonly source: PanelConversationHistorySource;
   readonly conversationId: string | undefined;
   readonly assistantTurnId: string | undefined;
-}): Promise<readonly ToolResultEnvelope[]> {
+}): Promise<readonly ToolCallEvidence[]> {
   if (input.conversationId === undefined) {
     return [];
   }
@@ -81,22 +82,22 @@ export async function buildConversationToolEvidence(input: {
   if (input.assistantTurnId !== undefined && assistantIndex < 0) {
     return [];
   }
-  const envelopes: ToolResultEnvelope[] = [];
+  const evidence: ToolCallEvidence[] = [];
   const seen = new Set<string>();
   for (const turn of conversationHistoryTurnsBeforeCurrentUser(conversation, assistantIndex)) {
     if (turn.role !== "assistant" || !(await assistantTurnCanProvideToolEvidence(input.source, turn))) {
       continue;
     }
-    for (const envelope of await toolEnvelopesForAssistantTurn(input.source, turn)) {
-      const key = toolEnvelopeKey(envelope);
+    for (const item of await toolEvidenceForAssistantTurn(input.source, turn)) {
+      const key = item.callId;
       if (seen.has(key)) {
         continue;
       }
       seen.add(key);
-      envelopes.push(envelope);
+      evidence.push(item);
     }
   }
-  return envelopes.slice(-12);
+  return evidence.slice(-12);
 }
 
 export async function buildConversationInterruptedRunContexts(input: {
@@ -178,51 +179,22 @@ async function assistantTurnCanProvideToolEvidence(
   return assistantTurnStatusCanProvideToolEvidence(turn.status);
 }
 
-async function toolEnvelopesForAssistantTurn(
+async function toolEvidenceForAssistantTurn(
   source: PanelConversationHistorySource,
   turn: PanelConversationReadModel["turns"][number]
-): Promise<readonly ToolResultEnvelope[]> {
+): Promise<readonly ToolCallEvidence[]> {
   if (turn.runId === undefined) {
     return [];
   }
   const liveJob = source.runJobs.get(turn.runId);
   if (liveJob !== undefined && liveRunCanProvideHistoricalToolEvidence(liveJob.status)) {
-    const liveEnvelopes = toolEnvelopesFromStreamEvents(liveJob.streamEvents);
-    if (liveEnvelopes.length > 0) {
-      return liveEnvelopes;
+    const liveEvidence = toolEvidenceFromStreamEvents(liveJob.streamEvents);
+    if (liveEvidence.length > 0) {
+      return liveEvidence;
     }
   }
   const snapshot = await source.runtimeDatabase?.getRun(turn.runId);
-  return snapshot?.toolCalls
-    .map((call) => call.envelope)
-    .filter((envelope): envelope is ToolResultEnvelope => envelope !== undefined) ?? [];
-}
-
-function toolEnvelopesFromStreamEvents(
-  events: readonly PanelRunStreamEvent[]
-): readonly ToolResultEnvelope[] {
-  const envelopes: ToolResultEnvelope[] = [];
-  const seen = new Set<string>();
-  for (const event of events) {
-    const envelope = event.detail?.envelope;
-    if (envelope === undefined) {
-      continue;
-    }
-    const key = toolEnvelopeKey(envelope);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    envelopes.push(envelope);
-  }
-  return envelopes;
-}
-
-function toolEnvelopeKey(envelope: ToolResultEnvelope): string {
-  return envelope.diagnosticRef ?? JSON.stringify({
-    summary: envelope.agentSummary,
-    evidenceRefs: envelope.evidenceRefs,
-  });
+  return snapshot === undefined ? [] : toolEvidenceFromRuntimeToolCalls(snapshot.toolCalls);
 }
 
 async function interruptedRunContextForAssistantTurn(

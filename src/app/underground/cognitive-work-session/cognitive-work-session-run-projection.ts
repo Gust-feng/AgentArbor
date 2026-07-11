@@ -95,7 +95,7 @@ export function modelCallRefsFromEvents(eventEntries: readonly RuntimeEventEntry
 
 export function toolCallRefsFromEvents(eventEntries: readonly RuntimeEventEntry[]): readonly string[] {
   return unique(eventEntries.flatMap((entry) => {
-    if (entry.type !== "tool.requested" && entry.type !== "tool.completed" && entry.type !== "tool.failed") {
+    if (entry.type !== "tool.requested" && entry.type !== "tool.completed" && entry.type !== "tool.failed" && entry.type !== "tool.cancelled") {
       return [];
     }
     const payload = asRecord(entry.message.payload);

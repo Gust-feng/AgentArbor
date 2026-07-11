@@ -1,4 +1,4 @@
-import type { ArborMessageType } from "../../../domain/common.js";
+import { isToolLifecycleMessageType, type ArborMessageType } from "../../../domain/common.js";
 import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../../../domain/config/index.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import {
@@ -336,7 +336,7 @@ function isUserVisibleWorkActivity(
   entry: EventLogEntry,
   ordinaryAgentProjection: boolean
 ): boolean {
-  if (entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed") {
+  if (isToolLifecycleMessageType(entry.type)) {
     return true;
   }
   if (entry.type === "user_approval.requested") {
@@ -366,6 +366,7 @@ function isOrdinaryAgentStreamEvent(type: ArborMessageType): boolean {
     type === "tool.requested" ||
     type === "tool.completed" ||
     type === "tool.failed" ||
+    type === "tool.cancelled" ||
     type === "sub_agent.started" ||
     type === "sub_agent.completed" ||
     type === "sub_agent_batch.started" ||
@@ -541,7 +542,7 @@ function appendStreamEventsForEvent(input: {
     return;
   }
 
-  if (input.entry.type === "tool.requested" || input.entry.type === "tool.completed" || input.entry.type === "tool.failed") {
+  if (isToolLifecycleMessageType(input.entry.type)) {
     input.push({
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
@@ -549,7 +550,13 @@ function appendStreamEventsForEvent(input: {
       agentLabel: "工具",
       toolName: stringOrUndefined(payload.toolName),
       summary: toolSummary(input.entry.type, payload),
-      status: input.entry.type === "tool.requested" ? "running" : input.entry.type === "tool.completed" ? "completed" : "failed",
+      status: input.entry.type === "tool.requested"
+        ? "running"
+        : input.entry.type === "tool.completed"
+          ? "completed"
+          : input.entry.type === "tool.cancelled"
+            ? "cancelled"
+            : "failed",
       detail: toolStreamDetail(input.entry.type, payload),
     });
     return;
@@ -761,6 +768,7 @@ function toolCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, 
     entry.type !== "tool.requested" &&
     entry.type !== "tool.completed" &&
     entry.type !== "tool.failed" &&
+    entry.type !== "tool.cancelled" &&
     entry.type !== "user_approval.requested"
   ) {
     return [];

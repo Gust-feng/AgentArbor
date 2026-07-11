@@ -45,6 +45,7 @@ Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Abovegrou
 - [ADR-0024-桌面基础Agent与基础设施优先路线.md](ADR-0024-桌面基础Agent与基础设施优先路线.md)
 - [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)
 - [ADR-0026-子Agent工具能力架构.md](ADR-0026-子Agent工具能力架构.md)
+- [ADR-0027-工具执行事实与单向消费架构.md](ADR-0027-工具执行事实与单向消费架构.md)
 - [ADR-0018-AgentArbor原生概念树架构.md](ADR-0018-AgentArbor原生概念树架构.md)
 
 ## 相关文档

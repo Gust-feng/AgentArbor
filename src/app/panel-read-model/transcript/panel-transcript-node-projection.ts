@@ -207,7 +207,7 @@ export function visibleTranscriptNodes<TNode extends ProjectableTranscriptNode>(
     .sort(compareNodeOrder);
   const terminalToolCallIds = new Set(
     sorted
-      .filter((node) => node.eventType === "tool.completed" || node.eventType === "tool.failed")
+      .filter((node) => node.eventType === "tool.completed" || node.eventType === "tool.failed" || node.eventType === "tool.cancelled")
       .flatMap(toolCallIdsForNode)
   );
   const source = sorted.filter((node) => {

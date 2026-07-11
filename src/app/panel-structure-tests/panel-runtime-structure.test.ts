@@ -44,7 +44,7 @@ test("basic agent work view keeps projection modules split", async () => {
   assert.equal(transcriptTools.includes("function fileDisplaySummary"), true);
   assert.equal(contextProjection.includes("export function contextAttachmentsFor"), true);
   assert.equal(contextProjection.includes("export function contextLedgerFor"), true);
-  assert.equal(contextProjection.includes("export function envelopeSafeToolEvidence"), true);
+  assert.equal(contextProjection.includes("export function normalizeToolEvidence"), true);
   assert.equal(contextProjection.includes("export type WorkViewContextProjectionInput"), true);
   assert.equal(contextProjection.includes("WorkSessionContextProjectionInput"), false);
   assert.equal(contextProjection.includes("function taskSoilContextAttachments"), true);

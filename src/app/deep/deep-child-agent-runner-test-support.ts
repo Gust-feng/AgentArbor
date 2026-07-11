@@ -131,49 +131,24 @@ export class RecordingToolBroker implements ToolExecutionBroker {
     const query = typeof request.input === "object" && request.input !== null && "query" in request.input
       ? String((request.input as { readonly query?: unknown }).query ?? request.toolName)
       : request.toolName;
-    const display = {
-      kind: "search_results" as const,
-      query,
-      message: `找到 ${request.toolName} 测试证据。`,
-      results: [
-        {
-          title: `${request.toolName} evidence`,
-          url: `https://example.test/${request.toolName}`,
-          snippet: "测试工具结果摘要",
-        },
-      ],
-    };
     return {
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { evidenceRef: `tool:${request.toolName}:oauth-risk` },
+      output: {
+        action: request.toolName,
+        query,
+        status: "completed",
+        message: `${request.toolName}：${query}`,
+        results: [{
+          title: `${request.toolName} evidence`,
+          refId: `tool:${request.toolName}:oauth-risk`,
+          snippet: "测试工具结果摘要",
+        }],
+      },
       status: "completed",
       durationMs: 1,
-      projection: {
-        uiSummary: `${request.toolName}：${query}`,
-        display,
-        envelope: {
-          agentSummary: `${request.toolName}：${query}`,
-          evidenceRefs: [`tool:${request.toolName}:oauth-risk`],
-          uiDisplay: display,
-          tokenEstimate: 12,
-          truncated: false,
-          redacted: false,
-          rawRetention: "none",
-        },
-        truncated: false,
-        redacted: false,
-      },
     };
-  }
-
-  resetCallCount(): void {
-    this.executed.length = 0;
-  }
-
-  getCallCount(): number {
-    return this.executed.length;
   }
 
   executedToolNames(): readonly string[] {

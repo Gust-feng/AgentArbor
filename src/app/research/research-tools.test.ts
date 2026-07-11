@@ -15,6 +15,7 @@ import type {
 import { ConfigCenter } from "../config-center.js";
 import { createConfiguredToolCenter, createDefaultToolCenter } from "../model-runtime/index.js";
 import type { FetchLike } from "../tool-center/index.js";
+import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { createDefaultResearchRuntime } from "./research-runtime.js";
 import { createResearchReadTool, createResearchSearchTool } from "./research-tools.js";
 import type { PageFetchLike } from "./source-adapters.js";
@@ -356,14 +357,12 @@ test("ToolCenter read direct bad HTTP URL preserves page error facts through out
       }[];
     };
   };
-  const agentContent = result.projection?.agentContent as {
+  const agentContent = output as {
     readonly status?: string;
     readonly error?: string;
     readonly errorFacts?: Readonly<Record<string, unknown>>;
   };
-  const display = result.projection?.display;
-  const envelope = result.projection?.envelope;
-  const uiDisplay = envelope?.uiDisplay;
+  const display = projectToolDisplay({ callId: result.callId, toolName: result.toolName, input: result.input }, result.output);
 
   assert.equal(result.status, "completed");
   assert.equal(output.status, "provider-failed");
@@ -386,12 +385,6 @@ test("ToolCenter read direct bad HTTP URL preserves page error facts through out
     throw new Error("expected read_result display");
   }
   assert.equal(display.errorFacts?.code, "ECONNREFUSED");
-  assert.equal(envelope?.errorFacts?.code, "ECONNREFUSED");
-  assert.equal(uiDisplay?.kind, "read_result");
-  if (uiDisplay?.kind !== "read_result") {
-    throw new Error("expected read_result envelope display");
-  }
-  assert.equal(uiDisplay.errorFacts?.code, "ECONNREFUSED");
   assert.equal(JSON.stringify(result).includes("recoveryHint"), false);
   assert.doesNotMatch(JSON.stringify(result), suggestionPattern);
 });
@@ -420,15 +413,7 @@ test("ToolCenter search empty query is invalid-input instead of empty results", 
       }[];
     };
   };
-  const agentContent = result.projection?.agentContent as {
-    readonly display?: {
-      readonly kind?: string;
-      readonly status?: string;
-      readonly message?: string;
-      readonly results?: readonly unknown[];
-    };
-  };
-  const display = result.projection?.display;
+  const display = projectToolDisplay({ callId: result.callId, toolName: result.toolName, input: result.input }, result.output);
 
   assert.equal(result.status, "completed");
   assert.equal(output.status, "invalid-input");
@@ -444,11 +429,6 @@ test("ToolCenter search empty query is invalid-input instead of empty results", 
   assert.equal(display.status, "invalid-input");
   assert.equal(display.message, "search requires a non-empty query.");
   assert.equal(display.results.length, 0);
-  assert.equal(agentContent.display?.kind, "search_results");
-  assert.equal(agentContent.display?.status, "invalid-input");
-  assert.equal(agentContent.display?.message, "search requires a non-empty query.");
-  assert.equal(result.projection?.envelope?.uiDisplay?.kind, "search_results");
-  assert.equal(result.projection?.envelope?.agentSummary.includes("search requires a non-empty query."), true);
   assert.equal(JSON.stringify(result).includes("recoveryHint"), false);
   assert.doesNotMatch(JSON.stringify(result), suggestionPattern);
 });

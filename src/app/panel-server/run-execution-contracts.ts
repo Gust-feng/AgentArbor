@@ -10,7 +10,8 @@ import type {
   ToolStateSettings,
 } from "../../domain/config/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
-import type { ToolConfirmationPolicy, ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
+import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
@@ -61,7 +62,7 @@ export type PanelRunExecutionResult = {
 export type PanelRunExecutionOptions = {
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
-  readonly toolEvidence?: readonly ToolResultEnvelope[];
+  readonly toolEvidence?: readonly ToolCallEvidence[];
   readonly agentDefinition?: AgentDefinition;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly config?: SanitizedModelProviderConfig;

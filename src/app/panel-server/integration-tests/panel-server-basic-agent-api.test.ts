@@ -545,7 +545,7 @@ test("basic agent denied confirmation feeds the decision back into the same run"
     assert.equal(denied.status, 200);
     assert.equal(runtimeRun.body.snapshot.run.status, "completed");
     assert.equal(runtimeRun.body.snapshot.confirmations[0].status, "denied");
-    assert.equal(runtimeRun.body.snapshot.toolCalls.some((call: { status: string }) => call.status === "failed"), true);
+    assert.equal(runtimeRun.body.snapshot.toolCalls.some((call: { status: string }) => call.status === "cancelled"), true);
     assert.equal(deniedEvents.body.events.some((event: { type: string }) => event.type === "user_approval.received"), true);
     assert.equal(deniedEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), false);
     assert.equal(deniedEvents.body.events.some((event: { type: string }) => event.type === "final.result"), true);

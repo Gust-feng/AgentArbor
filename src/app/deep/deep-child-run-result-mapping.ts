@@ -20,6 +20,7 @@ import {
 import type { AgentTurnRuntimeResult } from "../../kernel/intelligence/agent-turn-runtime.js";
 import { nowIso } from "../../kernel/id.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
+import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import {
   DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID,
   DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
@@ -356,7 +357,7 @@ export function executionStatsFromTurn(turn: AgentTurnRuntimeResult): ChildAgent
       summary: toolCallSummary(toolCall),
       inputSummary: summarizeToolInput(toolCall.input),
       durationMs: toolCall.durationMs,
-      display: toolCall.projection?.display ?? toolCall.projection?.envelope?.uiDisplay,
+      display: projectToolDisplay({ callId: toolCall.callId, toolName: toolCall.toolName, input: toolCall.input }, toolCall.output),
     })),
   };
 }
@@ -479,11 +480,19 @@ function pendingApprovalFromTurn(turn: AgentTurnRuntimeResult): ChildAgentRunPen
 }
 
 function toolCallSummary(toolCall: AgentTurnRuntimeResult["toolCalls"][number]): string | undefined {
-  const summary =
-    toolCall.projection?.uiSummary ??
-    toolCall.projection?.envelope?.agentSummary ??
-    toolCall.error;
+  const output = recordValue(toolCall.output);
+  const summary = stringValue(output.summary) ?? stringValue(output.message) ?? toolCall.error;
   return compactTraceText(summary, 500);
+}
+
+function recordValue(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 function summarizeToolInput(input: unknown): string | undefined {

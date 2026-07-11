@@ -659,7 +659,7 @@ function toolCallIdForActivityNode(node: ProjectableTranscriptNode): string | un
 }
 
 function isTerminalToolNode(node: ProjectableTranscriptNode): boolean {
-  return node.eventType === "tool.completed" || node.eventType === "tool.failed";
+  return node.eventType === "tool.completed" || node.eventType === "tool.failed" || node.eventType === "tool.cancelled";
 }
 
 function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem): ActivityItem {

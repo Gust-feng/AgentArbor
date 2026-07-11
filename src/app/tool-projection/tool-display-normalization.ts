@@ -1,8 +1,5 @@
-import type {
-  ToolDisplayProjection,
-  ToolErrorFacts,
-  ToolFileDisplayOperation,
-} from "../../domain/tools/index.js";
+import type { ToolDisplayProjection } from "../../domain/observation/index.js";
+import type { ToolErrorFacts, ToolFileDisplayOperation } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 
 export type ToolDisplayNormalizationInput = {

@@ -1,7 +1,6 @@
 import type { ObservationRef } from "../../domain/observation/index.js";
-import type { SkillSelectionDecisionFacts, SkillSelectionDecisionReason } from "../../domain/basic-agent/index.js";
+import type { SkillSelectionDecisionFacts, SkillSelectionDecisionReason, ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type {
   DesktopAgentConversationMessage,
@@ -27,7 +26,7 @@ export type BuildContextLedgerDraftInput = {
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly toolEvidence?: readonly ToolResultEnvelope[];
+  readonly toolEvidence?: readonly ToolCallEvidence[];
 };
 
 const MAX_HISTORY_CHARS = 1_200;
@@ -118,22 +117,22 @@ function interruptedRunRefs(context: DesktopAgentInterruptedRunContext): readonl
   return [...new Set(refs)].slice(0, 10).map((id): ObservationRef => ({ kind: "event", id }));
 }
 
-export function toolEvidenceItems(envelopes: readonly ToolResultEnvelope[]): readonly BasicAgentContextItem[] {
-  return envelopes.slice(0, 12).map((envelope, index) => {
+export function toolEvidenceItems(evidence: readonly ToolCallEvidence[]): readonly BasicAgentContextItem[] {
+  return evidence.slice(0, 12).map((item, index) => {
     const summary = safeText(
       [
-        envelope.agentSummary,
-        envelope.evidenceRefs.length === 0 ? undefined : `Evidence refs: ${envelope.evidenceRefs.slice(0, 8).join("; ")}`,
+        item.summary,
+        item.evidenceRefs.length === 0 ? undefined : `Evidence refs: ${item.evidenceRefs.slice(0, 8).join("; ")}`,
       ].filter(isString).join("\n"),
       MAX_TOOL_EVIDENCE_CHARS
     );
     return {
-      itemId: envelope.diagnosticRef ?? `context:tool-evidence:${index}`,
+      itemId: item.callId || `context:tool-evidence:${index}`,
       sourceKind: "tool_evidence",
       summary: summary.text,
-      refs: envelope.evidenceRefs.slice(0, 8).map((ref): ObservationRef => ({ kind: "event", id: safeText(ref, 220).text })),
+      refs: item.evidenceRefs.slice(0, 8).map((ref): ObservationRef => ({ kind: "event", id: safeText(ref, 220).text })),
       visibility: "model" as const,
-      truncated: summary.truncated || envelope.truncated,
+      truncated: summary.truncated || item.truncated === true,
     };
   });
 }

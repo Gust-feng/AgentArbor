@@ -241,7 +241,8 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
       ];
     case "tool.requested":
     case "tool.completed":
-    case "tool.failed": {
+    case "tool.failed":
+    case "tool.cancelled": {
       const toolName = stringOrUndefined(payload.toolName) ?? "tool";
       const toolLabel = toolDisplayName(toolName);
       const output = asRecord(payload.output);
@@ -252,18 +253,20 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
           ? "tool_requested"
           : entry.type === "tool.completed"
             ? "tool_completed"
-            : "tool_failed";
+            : entry.type === "tool.cancelled" ? "tool_cancelled" : "tool_failed";
       return [
         activity(
           entry,
           type,
-          entry.type === "tool.requested" ? toolActivityTitle(toolName, "start") : entry.type === "tool.completed" ? toolActivityTitle(toolName, "completed") : toolActivityTitle(toolName, "failed"),
+          entry.type === "tool.requested" ? toolActivityTitle(toolName, "start") : entry.type === "tool.completed" ? toolActivityTitle(toolName, "completed") : entry.type === "tool.cancelled" ? `${toolLabel}已取消` : toolActivityTitle(toolName, "failed"),
           entry.type === "tool.completed"
             ? completedToolActivitySummary(toolName, payload)
             : entry.type === "tool.failed"
               ? `${toolLabel}失败，错误信息已整理。`
+              : entry.type === "tool.cancelled"
+                ? `${toolLabel}已取消。`
               : `${toolLabel}开始执行。`,
-          entry.type === "tool.requested" ? "running" : entry.type === "tool.completed" ? "completed" : "failed",
+          entry.type === "tool.requested" ? "running" : entry.type === "tool.completed" ? "completed" : entry.type === "tool.cancelled" ? "cancelled" : "failed",
           sourceRefs,
           [],
           stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string],

@@ -8,7 +8,7 @@ import type {
 } from "../config/contracts.js";
 import type { ModelUsage } from "../intelligence/contracts.js";
 import type { SubAgentRunTrace } from "../sub-agents/contracts.js";
-import type { ToolDisplayProjection, ToolErrorDomain, ToolErrorFacts, ToolResultEnvelope } from "../tools/contracts.js";
+import type { ToolErrorDomain, ToolErrorFacts } from "../tools/contracts.js";
 import type {
   ObservationProgress,
   ObservationRef,
@@ -191,8 +191,6 @@ export type RuntimeToolCallRecord = {
   readonly exitCode?: number;
   readonly summary?: string;
   readonly preview?: string;
-  readonly display?: ToolDisplayProjection;
-  readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;

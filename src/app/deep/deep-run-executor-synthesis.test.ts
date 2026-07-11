@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FakeModelProviderResponse } from "../../adapters/intelligence/fake-model-provider-contracts.js";
+import type { SequenceModelProviderResponse as FakeModelProviderResponse } from "./deep-run-executor-test-support.js";
 import {
   makeStartInput,
   makeTurnRuntime,

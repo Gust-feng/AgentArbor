@@ -1,10 +1,8 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
-import type { ObservationRef } from "../../domain/observation/index.js";
+import type { ObservationRef, ToolDisplayProjection } from "../../domain/observation/index.js";
 import type {
-  ToolDisplayProjection,
   ToolErrorDomain,
   ToolErrorFacts,
-  ToolResultEnvelope,
 } from "../../domain/tools/index.js";
 import {
   basicConfirmationDecisionSummary,
@@ -66,7 +64,6 @@ export type BasicAgentRunStreamEventProjectionInput = {
     readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
-    readonly envelope?: ToolResultEnvelope;
     readonly truncated?: boolean;
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;
@@ -143,6 +140,7 @@ function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string
   if (event.type === "run.resumed") return "运行恢复";
   if (event.type === "tool.requested" || event.type === "tool.completed") return "动作";
   if (event.type === "tool.failed") return "未完成";
+  if (event.type === "tool.cancelled") return "已取消";
   if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") return "上下文";
   if (event.type === "confirmation.needed") return "需要你判断";
   if (event.type === "user_approval.received") return "用户决定";
@@ -287,7 +285,6 @@ function safeEventDetail(detail: BasicAgentRunStreamEventProjectionInput["detail
     exitCode: detail.exitCode,
     preview: safeEventSummary(detail.preview),
     display: detail.display,
-    envelope: detail.envelope,
     truncated: detail.truncated,
     error: safeEventSummary(detail.error),
     errorDomain: detail.errorDomain,

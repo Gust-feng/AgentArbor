@@ -13,6 +13,7 @@ import type {
   RuntimeRunSnapshot,
   RuntimeToolCallRecord,
 } from "../../domain/runtime-database/index.js";
+import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import {
   createPanelRunTracking,
   createPanelTranscriptNodes,
@@ -29,6 +30,7 @@ import { friendlyUserFacingFailureText } from "../text-projection/visible-text-s
 import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversation/panel-conversations.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
+import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "../text-projection/confirmation-copy.js";
 import { projectPanelRunResponseBase, type PanelRunResponseBase } from "./run-response-base.js";
 import {
@@ -442,7 +444,7 @@ function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRe
 
 function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord[]): boolean {
   return events.some((event) => {
-    if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") {
+    if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled") {
       return true;
     }
     if (
@@ -505,7 +507,7 @@ function persistedStreamSummary(
   if (isSubAgentStreamEventType(type)) {
     return subAgentStreamSummaryFromDetail(type, subAgentDetail, record.summary);
   }
-  if (record.type === "tool.requested" || record.type === "tool.completed" || record.type === "tool.failed") {
+  if (record.type === "tool.requested" || record.type === "tool.completed" || record.type === "tool.failed" || record.type === "tool.cancelled") {
     return cleanOrdinaryToolText(record.summary) ?? record.summary;
   }
   return record.summary;
@@ -560,6 +562,7 @@ function isPersistedOrdinaryAgentRuntimeEvent(type: RuntimeEventRecord["type"]):
     type === "tool.requested" ||
     type === "tool.completed" ||
     type === "tool.failed" ||
+    type === "tool.cancelled" ||
     type === "sub_agent.started" ||
     type === "sub_agent.completed" ||
     type === "sub_agent_batch.started" ||
@@ -628,6 +631,7 @@ function isPersistedRunStage(value: string): value is PanelRunTraceReadModel["cu
     "tool_requested",
     "tool_completed",
     "tool_failed",
+    "tool_cancelled",
     "agent_delegation_planned",
     "agent_child_started",
     "agent_child_completed",
@@ -696,7 +700,7 @@ function streamTypeForRuntimeEvent(
   if (type === "context.compaction.completed" || type === "context.compaction.failed") {
     return type;
   }
-  if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed") {
+  if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed" || type === "tool.cancelled") {
     return type;
   }
   if (isSubAgentStreamEventType(type)) {
@@ -743,7 +747,7 @@ function streamStatusFor(
   if (type === "user_approval.received") {
     return "completed";
   }
-  if (type === "run.cancelled") {
+  if (type === "run.cancelled" || type === "tool.cancelled") {
     return "cancelled";
   }
   if (type === "run.blocked") {
@@ -764,23 +768,37 @@ function toolCallForPersistedEvent(
 }
 
 function persistedToolStreamDetail(call: RuntimeToolCallRecord): PanelRunStreamEvent["detail"] {
+  const display = persistedToolDisplay(call);
   return {
     kind: "tool",
     action: call.action ?? call.toolName,
     path: call.path,
     query: call.query,
-    command: call.display?.kind === "command_summary"
-      ? call.display.commandLine ?? call.command
+    command: display?.kind === "command_summary"
+      ? display.commandLine ?? call.command
       : call.command,
     exitCode: call.exitCode,
     preview: call.error ?? cleanOrdinaryToolText(call.preview) ?? cleanOrdinaryToolText(call.summary),
-    display: call.display,
-    envelope: call.envelope,
+    display,
     truncated: call.truncated,
     error: call.error,
     errorDomain: call.errorDomain,
     errorFacts: call.errorFacts,
   };
+}
+
+function persistedToolDisplay(call: RuntimeToolCallRecord): ToolDisplayProjection | undefined {
+  if (call.toolName === undefined) return undefined;
+  if (call.toolName === "edit_file") {
+    return { kind: "file_diff_preview", path: call.path, operation: "edit", preview: call.preview, truncated: call.truncated };
+  }
+  if (call.toolName === "shell_command" || call.toolName === "run_command") {
+    return { kind: "command_summary", commandLine: call.command, exitCode: call.exitCode };
+  }
+  return projectToolDisplay(
+    { callId: call.callId, toolName: call.toolName, input: { path: call.path, query: call.query, command: call.command } },
+    { action: call.action, summary: call.summary, preview: call.preview, truncated: call.truncated, result: { path: call.path, query: call.query, command: call.command, exitCode: call.exitCode, preview: call.preview } },
+  );
 }
 
 function countPersistedModelCalls(
@@ -800,5 +818,6 @@ function countPersistedToolCalls(
     requested: calls.length,
     completed: calls.filter((call) => call.status === "completed").length,
     failed: calls.filter((call) => call.status === "failed").length,
+    cancelled: calls.filter((call) => call.status === "cancelled").length,
   };
 }

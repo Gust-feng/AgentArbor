@@ -4,9 +4,9 @@ import type {
   ContextLedger,
   ContextLedgerEntry,
   ContextLedgerSkillFacts,
+  ToolCallEvidence,
 } from "../../domain/basic-agent/index.js";
-import type { ObservationRef } from "../../domain/observation/index.js";
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { ObservationRef, ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 import { redactOrdinaryText } from "../safe-projection.js";
@@ -56,7 +56,7 @@ export type WorkViewContextProjectionInput = {
   readonly canvas?: WorkViewCanvasContextLike;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
-  readonly toolEvidence?: readonly ToolResultEnvelope[];
+  readonly toolEvidence?: readonly ToolCallEvidence[];
 };
 
 export function contextAttachmentsFor(input: WorkViewContextProjectionInput): readonly ContextAttachment[] {
@@ -90,7 +90,7 @@ export function contextAttachmentsFor(input: WorkViewContextProjectionInput): re
 export function contextLedgerFor(
   input: WorkViewContextProjectionInput,
   attachments: readonly ContextAttachment[],
-  toolEvidence: readonly ToolResultEnvelope[],
+  toolEvidence: readonly ToolCallEvidence[],
   toolDisplays: readonly ToolDisplayProjection[]
 ): ContextLedger {
   const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent?.context : undefined;
@@ -136,13 +136,13 @@ export function contextLedgerFor(
               truncated: item.truncated || item.skill.truncated,
             },
       })),
-    ...toolEvidence.slice(0, 12).map((envelope, index): ContextLedgerEntry => ({
-      entryId: `${input.run.runId}:ledger:tool-evidence:${envelope.diagnosticRef ?? index}`,
+    ...toolEvidence.slice(0, 12).map((evidence, index): ContextLedgerEntry => ({
+      entryId: `${input.run.runId}:ledger:tool-evidence:${evidence.callId || index}`,
       kind: "tool_evidence",
-      title: envelope.uiDisplay === undefined ? "工具证据" : toolLedgerTitle(envelope.uiDisplay),
-      summary: redactOrdinaryText(envelope.agentSummary, 420),
-      refs: observationRefs(envelope.evidenceRefs),
-      status: envelope.truncated ? "truncated" : "used",
+      title: evidence.toolName === undefined ? "工具证据" : `工具：${evidence.toolName}`,
+      summary: redactOrdinaryText(evidence.summary ?? evidence.error ?? evidence.status, 420),
+      refs: observationRefs(evidence.evidenceRefs),
+      status: evidence.status === "failed" ? "failed" : evidence.truncated === true ? "truncated" : "used",
     })),
     ...(toolEvidence.length > 0 ? [] : toolDisplays.slice(0, 12).map((display, index): ContextLedgerEntry => ({
       entryId: `${input.run.runId}:ledger:tool:${index}`,
@@ -169,28 +169,22 @@ export function contextLedgerFor(
   };
 }
 
-export function envelopeSafeToolEvidence(envelopes: readonly ToolResultEnvelope[]): readonly ToolResultEnvelope[] {
-  const selected: ToolResultEnvelope[] = [];
+export function normalizeToolEvidence(evidence: readonly ToolCallEvidence[]): readonly ToolCallEvidence[] {
+  const selected: ToolCallEvidence[] = [];
   const seen = new Set<string>();
-  for (const envelope of envelopes) {
-    const key = envelope.diagnosticRef ?? `${envelope.agentSummary}:${envelope.evidenceRefs.join("|")}`;
+  for (const item of evidence) {
+    const key = item.callId;
     if (seen.has(key)) {
       continue;
     }
     seen.add(key);
     selected.push({
-      agentSummary: redactOrdinaryText(envelope.agentSummary, 1_800),
-      evidenceRefs: envelope.evidenceRefs.map((ref) => redactOrdinaryText(ref, 220)).filter((ref) => ref.length > 0).slice(0, 12),
-      uiDisplay: envelope.uiDisplay,
-      tokenEstimate: Number.isFinite(envelope.tokenEstimate)
-        ? Math.max(1, Math.floor(envelope.tokenEstimate))
-        : Math.max(1, Math.ceil(envelope.agentSummary.length / 4)),
-      truncated: envelope.truncated,
-      redacted: envelope.redacted === true,
-      diagnosticRef: envelope.diagnosticRef === undefined ? undefined : redactOrdinaryText(envelope.diagnosticRef, 220),
-      rawRetention: envelope.rawRetention,
-      errorDomain: envelope.errorDomain,
-      errorFacts: envelope.errorFacts,
+      ...item,
+      callId: redactOrdinaryText(item.callId, 220),
+      toolName: item.toolName === undefined ? undefined : redactOrdinaryText(item.toolName, 160),
+      summary: item.summary === undefined ? undefined : redactOrdinaryText(item.summary, 1_800),
+      evidenceRefs: item.evidenceRefs.map((ref) => redactOrdinaryText(ref, 220)).filter((ref) => ref.length > 0).slice(0, 12),
+      error: item.error === undefined ? undefined : redactOrdinaryText(item.error, 900),
     });
   }
   return selected.slice(0, 24);

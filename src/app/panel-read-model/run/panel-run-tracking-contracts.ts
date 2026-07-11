@@ -66,6 +66,7 @@ export type PanelRunTrackingReadModel = {
     readonly requested: number;
     readonly completed: number;
     readonly failed: number;
+    readonly cancelled: number;
   };
   readonly context: {
     readonly compaction: {

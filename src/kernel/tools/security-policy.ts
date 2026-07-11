@@ -8,7 +8,6 @@ import type {
 } from "../../domain/tools/index.js";
 import { commandTextFromValue, toolPresentationForDefinition } from "../../domain/tools/index.js";
 import { nowIso } from "../id.js";
-import { redactOrdinaryToolText } from "./tool-result-envelope.js";
 
 export function evaluateToolCallSecurity(input: {
   readonly request: ToolCallRequest;
@@ -69,11 +68,11 @@ function approvalDecision(input: {
 }): Extract<ToolSecurityDecision, { readonly decision: "approval_required" }> {
   const presentation = toolPresentationForDefinition(input.definition);
   const affectedResources = affectedResourcesFromInput(input.request.input);
-  const actionSummary = redactOrdinaryToolText(
+  const actionSummary = compactPolicyText(
     confirmationActionSummary(presentation.displayName, affectedResources),
     500
   );
-  const consequence = redactOrdinaryToolText(
+  const consequence = compactPolicyText(
     confirmationConsequence(presentation.displayName, affectedResources),
     500
   );
@@ -111,7 +110,7 @@ function evaluateUrlSupport(request: ToolCallRequest): ToolSecurityDecision | un
       decision: "blocked",
       code: "url_protocol_blocked",
       reason: "Only HTTP and HTTPS URLs are allowed.",
-      affectedResources: [redactOrdinaryToolText(url, 220)],
+      affectedResources: [compactPolicyText(url, 220)],
       sourceRefs: [`tool:${request.callId}`],
     };
   }
@@ -140,7 +139,12 @@ function affectedResourcesFromInput(input: unknown): readonly string[] {
     stringOrUndefined(record.url),
     stringOrUndefined(record.ref),
   ];
-  return values.filter((value): value is string => value !== undefined).map((value) => redactOrdinaryToolText(value, 240)).slice(0, 8);
+  return values.filter((value): value is string => value !== undefined).map((value) => compactPolicyText(value, 240)).slice(0, 8);
+}
+
+function compactPolicyText(value: string, maxLength = 1_200): string {
+  const text = value.trim();
+  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}...`;
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {

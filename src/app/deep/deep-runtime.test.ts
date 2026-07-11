@@ -241,11 +241,7 @@ class ApprovalRequiredToolBroker implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {
-    // no-op
-  }
-
-  getCallCount(): number {
+  executionCount(): number {
     return 0;
   }
 }

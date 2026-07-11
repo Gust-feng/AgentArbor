@@ -393,17 +393,6 @@ function approvalRequiredExecutorResult(input: {
     error: input.result.summary,
     durationMs: input.result.durationMs,
     confirmationRequest,
-    projection: {
-      uiSummary: input.result.summary,
-      diagnosticRef: `sub-agent:${input.result.runId ?? "approval-required"}`,
-      display: {
-        kind: "generic_tool_summary",
-        action: input.toolName,
-        summary: input.result.summary,
-      },
-      truncated: false,
-      redacted: false,
-    },
   });
 }
 

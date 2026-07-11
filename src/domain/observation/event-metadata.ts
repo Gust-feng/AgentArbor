@@ -110,6 +110,14 @@ export const EVENT_OBSERVATION_METADATA = {
     phase: "underground",
     stage: "tool_failed",
   }),
+  "tool.cancelled": metadata({
+    summary: "Tool execution was cancelled.",
+    scope: "runtime",
+    severity: "warning",
+    progressStatus: "cancelled",
+    phase: "underground",
+    stage: "tool_cancelled",
+  }),
   "skill.triggered": metadata({
     summary: "A desktop agent skill was matched and added as safe context.",
     scope: "runtime",

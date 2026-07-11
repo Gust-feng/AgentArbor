@@ -1170,22 +1170,6 @@ test("panel transcript preserves typed safe tool display without raw command out
               exitCode: 0,
               outputSummary: "tests passed",
             },
-            envelope: {
-              agentSummary: "Command completed with exit 0.\noutput summary:\ntests passed",
-              evidenceRefs: ["tool:tool-call-shell"],
-              uiDisplay: {
-                kind: "command_summary",
-                command: "pnpm",
-                args: ["test"],
-                exitCode: 0,
-                outputSummary: "tests passed",
-              },
-              tokenEstimate: 12,
-              truncated: false,
-              redacted: false,
-              diagnosticRef: "tool:tool-call-shell",
-              rawRetention: "none",
-            },
             result: {
               command: "pnpm",
               args: ["test"],
@@ -1204,8 +1188,7 @@ test("panel transcript preserves typed safe tool display without raw command out
   const completedNode = transcript.transcriptNodes.find((node) => node.eventType === "tool.completed");
 
   assert.equal(completedTool?.detail?.display?.kind, "command_summary");
-  assert.equal(completedTool?.detail?.envelope?.uiDisplay?.kind, "command_summary");
-  assert.equal(completedTool?.detail?.envelope?.evidenceRefs.includes("tool:tool-call-shell"), true);
+  assert.equal(completedTool?.toolCallRefs.includes("tool-call-shell"), true);
   assert.equal(JSON.stringify(transcript).includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(completedNode?.display?.kind, "command_summary");
   assert.equal(completedNode?.summary?.includes("tests passed"), true);
@@ -1454,6 +1437,7 @@ function panelRunSummaryFixture(): PanelRunSummary {
         requested: 0,
         completed: 0,
         failed: 0,
+        cancelled: 0,
       },
       toolCallRefs: [],
     },

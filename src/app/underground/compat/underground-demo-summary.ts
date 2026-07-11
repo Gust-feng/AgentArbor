@@ -129,7 +129,7 @@ function summarizeTools(
   eventEntries: ReturnType<UndergroundDirectionSessionResult["runtime"]["eventLog"]["list"]>
 ): UndergroundDemoToolSummary {
   const toolEvents = eventEntries.filter(
-    (entry) => entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed"
+    (entry) => entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed" || entry.type === "tool.cancelled"
   );
   const calls = new Map<
     string,
@@ -137,7 +137,7 @@ function summarizeTools(
       callId: string;
       toolName?: string;
       callerAgentId?: string;
-      status: "requested" | "completed" | "failed";
+      status: "requested" | "completed" | "failed" | "cancelled";
       durationMs?: number;
       eventRefs: string[];
     }
@@ -158,7 +158,7 @@ function summarizeTools(
       ...existing,
       toolName: stringOrUndefined(payload.toolName) ?? existing.toolName,
       callerAgentId: stringOrUndefined(payload.callerAgentId) ?? existing.callerAgentId,
-      status: event.type === "tool.failed" ? "failed" : event.type === "tool.completed" ? "completed" : existing.status,
+      status: event.type === "tool.failed" ? "failed" : event.type === "tool.cancelled" ? "cancelled" : event.type === "tool.completed" ? "completed" : existing.status,
       durationMs: numberOrUndefined(payload.durationMs) ?? existing.durationMs,
       eventRefs: [...existing.eventRefs, event.message.id],
     });
@@ -169,6 +169,7 @@ function summarizeTools(
       requested: toolEvents.filter((entry) => entry.type === "tool.requested").length,
       completed: toolEvents.filter((entry) => entry.type === "tool.completed").length,
       failed: toolEvents.filter((entry) => entry.type === "tool.failed").length,
+      cancelled: toolEvents.filter((entry) => entry.type === "tool.cancelled").length,
     },
     toolCallRefs: [...calls.values()],
   };

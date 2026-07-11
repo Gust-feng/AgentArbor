@@ -496,10 +496,6 @@ const NO_TOOL_BROKER: ToolExecutionBroker = {
       durationMs: 0,
     };
   },
-  resetCallCount(): void {},
-  getCallCount(): number {
-    return 0;
-  },
 };
 
 const ORDINARY_AGENT_INTERNAL_TOOL_NAMES = ["finish_task"];

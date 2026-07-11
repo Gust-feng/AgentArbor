@@ -148,12 +148,13 @@ export type RunSummaryToolSummary = {
     readonly requested: number;
     readonly completed: number;
     readonly failed: number;
+    readonly cancelled: number;
   };
   readonly toolCallRefs: readonly {
     readonly callId: string;
     readonly toolName?: string;
     readonly callerAgentId?: string;
-    readonly status: "requested" | "completed" | "failed";
+    readonly status: "requested" | "completed" | "failed" | "cancelled";
     readonly durationMs?: number;
     readonly eventRefs: readonly string[];
   }[];

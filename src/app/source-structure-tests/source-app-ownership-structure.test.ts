@@ -12,7 +12,6 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["command-text.ts", 'export * from "./tool-projection/command-text.js";'],
     ["safe-tool-preview.ts", 'export * from "./tool-projection/safe-tool-preview.js";'],
     ["tool-display-normalization.ts", 'export * from "./tool-projection/tool-display-normalization.js";'],
-    ["tool-result-continuation.ts", 'export * from "./tool-projection/tool-result-continuation.js";'],
     ["ordinary-tool-copy.ts", 'export * from "./tool-projection/ordinary-tool-copy.js";'],
     ["confirmation-copy.ts", 'export * from "./text-projection/confirmation-copy.js";'],
     ["failure-copy.ts", 'export * from "./text-projection/failure-copy.js";'],
@@ -266,7 +265,6 @@ test("tool projection support modules stay under tool-projection ownership", () 
     "ordinary-tool-copy.ts",
     "safe-tool-preview.ts",
     "tool-display-normalization.ts",
-    "tool-result-continuation.ts",
   ];
 
   for (const fileName of movedToolProjectionFiles) {
@@ -274,6 +272,8 @@ test("tool projection support modules stay under tool-projection ownership", () 
     assert.equal(fileExistsSync(facade), true, `${fileName} should keep a top-level compatibility facade`);
     assert.equal(fileExistsSync(path.join(toolProjectionRoot, fileName)), true, `${fileName} should live in tool-projection`);
   }
+  assert.equal(fileExistsSync(path.join(appRoot, "tool-result-continuation.ts")), false);
+  assert.equal(fileExistsSync(path.join(toolProjectionRoot, "tool-result-continuation.ts")), false);
 });
 
 test("text projection support modules stay under text-projection ownership", () => {

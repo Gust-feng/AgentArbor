@@ -1,9 +1,9 @@
 import path from "node:path";
 import type { SanitizedWorkspaceConfig } from "../../domain/config/index.js";
+import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import type {
   ToolErrorDomain,
   ToolErrorFacts,
-  ToolResultEnvelope,
 } from "../../domain/tools/index.js";
 import { isToolErrorDomain, normalizeToolErrorFacts, toolDisplayName } from "../../domain/tools/index.js";
 import type {
@@ -33,6 +33,7 @@ import type {
 import { commandTextFromToolResult } from "../command-text.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "../safe-tool-preview.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
+import { reduceToolCallEventFacts } from "../run-read-model/tool-call-event-reducer.js";
 import {
   normalizeToolDisplayForOperation,
   toolDisplayProjectionOrUndefined,
@@ -52,7 +53,10 @@ export type RuntimeRunRecordWithErrorDomain = RuntimeRunRecord & {
 export type RuntimeToolCallRecordWithErrorDomain = RuntimeToolCallRecord & {
   readonly errorDomain?: RuntimeErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
-  readonly envelope?: ToolResultEnvelope;
+};
+
+type LocalToolDetails = Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "truncated" | "error" | "errorDomain" | "errorFacts"> & {
+  readonly display?: ToolDisplayProjection;
 };
 
 export function createRuntimeWorkspaceRecord(
@@ -162,49 +166,32 @@ export function toRuntimeModelCallRecord(
 
 export function toRuntimeToolCallRecords(
   runId: string,
-  events: readonly PanelRunStreamEvent[],
+  _events: readonly PanelRunStreamEvent[],
   eventEntries: readonly EventLogEntry[]
 ): readonly RuntimeToolCallRecordWithErrorDomain[] {
   const detailsByCallId = localToolDetailsByCallId(eventEntries);
-  const calls = new Map<string, RuntimeToolCallRecordWithErrorDomain>();
-  for (const event of events) {
-    if (!event.type.startsWith("tool.") && event.type !== "confirmation.needed") {
-      continue;
-    }
-    for (const callId of event.toolCallRefs) {
-      const previous = calls.get(callId);
-      const detail = detailsByCallId.get(callId);
-      calls.set(callId, {
-        callId,
-        runId,
-        toolName: event.toolName ?? previous?.toolName,
-        status: mergeToolStatus(previous?.status, event.type),
-        action: event.detail?.action ?? detail?.action ?? previous?.action,
-        path: event.detail?.path ?? detail?.path ?? previous?.path,
-        query: event.detail?.query ?? detail?.query ?? previous?.query,
-        command: event.detail?.command ?? detail?.command ?? previous?.command,
-        exitCode: event.detail?.exitCode ?? detail?.exitCode ?? previous?.exitCode,
-        summary: cleanOrdinaryToolText(detail?.summary) ?? cleanOrdinaryToolText(event.summary) ?? cleanOrdinaryToolText(previous?.summary),
-        preview: cleanOrdinaryToolText(event.detail?.preview) ?? cleanOrdinaryToolText(detail?.preview) ?? cleanOrdinaryToolText(previous?.preview),
-        display: event.detail?.display ?? detail?.display ?? previous?.display,
-        envelope: event.detail?.envelope ?? detail?.envelope ?? previous?.envelope,
-        truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
-        error: event.detail?.error ?? detail?.error ?? previous?.error,
-        errorFacts: event.detail?.errorFacts ?? (event.detail?.envelope ?? detail?.envelope ?? previous?.envelope)?.errorFacts ?? detail?.errorFacts ?? previous?.errorFacts,
-        errorDomain: event.detail?.errorDomain ?? inferToolCallErrorDomain({
-          eventType: event.type,
-          toolName: event.toolName ?? previous?.toolName,
-          envelope: event.detail?.envelope ?? detail?.envelope ?? previous?.envelope,
-          error: event.detail?.error ?? detail?.error ?? previous?.error,
-          exitCode: event.detail?.exitCode ?? detail?.exitCode ?? previous?.exitCode,
-          previous: previous?.errorDomain,
-        }),
-        eventRefs: unique([...(previous?.eventRefs ?? []), event.eventId]),
-        createdAt: previous?.createdAt ?? event.createdAt,
-      });
-    }
-  }
-  return [...calls.values()];
+  return reduceToolCallEventFacts(eventEntries).map((fact) => {
+    const detail = detailsByCallId.get(fact.callId);
+    return {
+      callId: fact.callId,
+      runId,
+      toolName: fact.toolName,
+      status: fact.status,
+      action: detail?.action,
+      path: detail?.path,
+      query: detail?.query,
+      command: detail?.command,
+      exitCode: detail?.exitCode,
+      summary: cleanOrdinaryToolText(detail?.summary),
+      preview: cleanOrdinaryToolText(detail?.preview),
+      truncated: detail?.truncated,
+      error: detail?.error ?? fact.error,
+      errorFacts: detail?.errorFacts ?? fact.errorFacts,
+      errorDomain: detail?.errorDomain ?? fact.errorDomain,
+      eventRefs: fact.eventSequences.map((sequence) => `${runId}:event:${sequence}`),
+      createdAt: fact.createdAt,
+    };
+  });
 }
 
 export function toRuntimeArtifactRecords(job: PanelRunJob): readonly RuntimeArtifactRecord[] {
@@ -546,12 +533,11 @@ function inferRunErrorDomain(
 function inferToolCallErrorDomain(input: {
   readonly eventType: PanelRunStreamEvent["type"];
   readonly toolName?: string;
-  readonly envelope?: RuntimeToolCallRecordWithErrorDomain["envelope"];
   readonly error?: string;
   readonly exitCode?: number;
   readonly previous?: RuntimeErrorDomain;
 }): RuntimeErrorDomain | undefined {
-  const explicit = input.envelope?.errorDomain ?? input.previous;
+  const explicit = input.previous;
   if (explicit !== undefined) {
     return explicit;
   }
@@ -622,10 +608,10 @@ function isProcessTool(toolName: string | undefined): boolean {
 
 function localToolDetailsByCallId(
   eventEntries: readonly EventLogEntry[]
-): Map<string, Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error" | "errorDomain" | "errorFacts">> {
-  const details = new Map<string, Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error" | "errorDomain" | "errorFacts">>();
+): Map<string, LocalToolDetails> {
+  const details = new Map<string, LocalToolDetails>();
   for (const entry of eventEntries) {
-    if (entry.type !== "tool.completed" && entry.type !== "tool.failed") {
+    if (entry.type !== "tool.completed" && entry.type !== "tool.failed" && entry.type !== "tool.cancelled") {
       continue;
     }
     const payload = asRecord(entry.message.payload);
@@ -638,10 +624,10 @@ function localToolDetailsByCallId(
     const result = asRecord(output.result);
     const toolName = optionalString(payload.toolName) ?? optionalString(output.action);
     const pathValue = optionalString(result.path) ?? optionalString(input.path);
-    const envelope = toolResultEnvelopeOrUndefined(output.envelope);
-    const error = optionalString(payload.error);
+    const error = optionalString(payload.error) ?? optionalString(payload.reason);
     const payloadErrorDomain = errorDomainOrUndefined(payload.errorDomain);
     const payloadErrorFacts = normalizeToolErrorFacts(payload.errorFacts);
+    const outputErrorFacts = normalizeToolErrorFacts(output.errorFacts) ?? normalizeToolErrorFacts(result.errorFacts);
     const display = toolDisplayForRuntimeCall(toolName, input, output);
     const preview = persistedToolPreview(optionalString(payload.toolName), output, result, payload);
     details.set(callId, {
@@ -653,14 +639,12 @@ function localToolDetailsByCallId(
       summary: persistedToolSummary(toolName, display, output, preview),
       preview,
       display,
-      envelope,
       truncated: output.truncated === true,
       error,
-      errorFacts: envelope?.errorFacts ?? payloadErrorFacts,
+      errorFacts: outputErrorFacts ?? payloadErrorFacts,
       errorDomain: payloadErrorDomain ?? inferToolCallErrorDomain({
         eventType: entry.type === "tool.failed" ? "tool.failed" : "tool.completed",
         toolName,
-        envelope,
         error,
         exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
       }),
@@ -669,13 +653,13 @@ function localToolDetailsByCallId(
   return details;
 }
 
-function toolDisplayOrUndefined(value: unknown): RuntimeToolCallRecord["display"] | undefined {
+function toolDisplayOrUndefined(value: unknown): ToolDisplayProjection | undefined {
   const display = toolDisplayProjectionOrUndefined(value);
   if (display === undefined) {
     return undefined;
   }
   if (display.kind !== "generic_tool_summary") {
-    return display as RuntimeToolCallRecord["display"];
+    return display;
   }
   return {
     ...display,
@@ -687,10 +671,24 @@ function toolDisplayForRuntimeCall(
   toolName: string | undefined,
   input: Readonly<Record<string, unknown>>,
   output: Readonly<Record<string, unknown>>,
-): RuntimeToolCallRecord["display"] | undefined {
+): ToolDisplayProjection | undefined {
   const result = asRecord(output.result);
   if (toolName === undefined) {
     return toolDisplayOrUndefined(output.display);
+  }
+  if (toolName === "read") {
+    return {
+      kind: "read_result",
+      ref: optionalString(input.ref),
+      status: optionalString(result.status),
+      title: optionalString(result.title),
+      url: optionalString(result.url),
+      uri: optionalString(result.uri),
+      contentPreview: optionalString(result.contentPreview),
+      error: optionalString(result.error) ?? optionalString(output.error),
+      errorFacts: normalizeToolErrorFacts(result.errorFacts) ?? normalizeToolErrorFacts(output.errorFacts),
+      truncated: booleanOrUndefined(result.truncated),
+    };
   }
   if (toolName === "run_command" || toolName === "shell_command") {
     return {
@@ -729,29 +727,6 @@ function toolDisplayForRuntimeCall(
 
 function displayActionLabel(value: string): string {
   return /^[a-z][a-z0-9_:-]*$/i.test(value) ? toolDisplayName(value) : value;
-}
-
-function toolResultEnvelopeOrUndefined(value: unknown): RuntimeToolCallRecordWithErrorDomain["envelope"] | undefined {
-  const record = asRecord(value);
-  const agentSummary = optionalString(record.agentSummary);
-  const rawRetention = optionalString(record.rawRetention);
-  if (agentSummary === undefined || (rawRetention !== "none" && rawRetention !== "diagnostic_ref_only")) {
-    return undefined;
-  }
-  return {
-    agentSummary: compactRuntimeText(agentSummary, 1_800),
-    evidenceRefs: stringArrayFrom(record.evidenceRefs).map((ref) => compactRuntimeText(ref, 220)).slice(0, 12),
-    uiDisplay: toolDisplayOrUndefined(record.uiDisplay),
-    tokenEstimate: typeof record.tokenEstimate === "number" && Number.isFinite(record.tokenEstimate)
-      ? Math.max(1, Math.floor(record.tokenEstimate))
-      : Math.max(1, Math.ceil(agentSummary.length / 4)),
-    truncated: record.truncated === true,
-    redacted: record.redacted === true,
-    diagnosticRef: optionalString(record.diagnosticRef),
-    rawRetention,
-    errorDomain: errorDomainOrUndefined(record.errorDomain),
-    errorFacts: normalizeToolErrorFacts(record.errorFacts),
-  };
 }
 
 function persistedToolPreview(
@@ -837,10 +812,6 @@ function persistedToolPreview(
     if (display?.kind === "read_result") {
       return persistedReadPreviewFromDisplay(display, asRecord(payload.input));
     }
-    const envelope = toolResultEnvelopeOrUndefined(output.envelope);
-    if (envelope?.agentSummary !== undefined) {
-      return compactRuntimeText(envelope.agentSummary, 900);
-    }
     const title = optionalString(result.title);
     const uri = optionalString(result.uri);
     const contentPreview = optionalString(result.contentPreview);
@@ -862,7 +833,7 @@ function persistedToolPreview(
 
 function persistedToolSummary(
   toolName: string | undefined,
-  display: RuntimeToolCallRecord["display"] | undefined,
+  display: ToolDisplayProjection | undefined,
   output: Readonly<Record<string, unknown>>,
   preview: string | undefined,
 ): string | undefined {
@@ -896,7 +867,7 @@ function persistedToolSummary(
 }
 
 function persistedReadPreviewFromDisplay(
-  display: Extract<RuntimeToolCallRecord["display"], { readonly kind: "read_result" }>,
+  display: Extract<ToolDisplayProjection, { readonly kind: "read_result" }>,
   input: Readonly<Record<string, unknown>>
 ): string | undefined {
   const headline = [
@@ -912,7 +883,7 @@ function persistedReadPreviewFromDisplay(
 }
 
 function fileMutationSummary(
-  display: Extract<RuntimeToolCallRecord["display"], { readonly kind: "file_change_summary" | "file_diff_preview" }>,
+  display: Extract<ToolDisplayProjection, { readonly kind: "file_change_summary" | "file_diff_preview" }>,
 ): string {
   if (display.kind === "file_diff_preview") {
     return [
@@ -1034,19 +1005,9 @@ function toolCallIdFrom(
 }
 
 function toolNameByCallId(eventEntries: readonly EventLogEntry[]): ReadonlyMap<string, string> {
-  const names = new Map<string, string>();
-  for (const entry of eventEntries) {
-    if (entry.type !== "tool.requested" && entry.type !== "tool.completed" && entry.type !== "tool.failed") {
-      continue;
-    }
-    const payload = asRecord(entry.message.payload);
-    const callId = optionalString(payload.callId);
-    const toolName = optionalString(payload.toolName);
-    if (callId !== undefined && toolName !== undefined) {
-      names.set(callId, compactRuntimeText(toolName, 160));
-    }
-  }
-  return names;
+  return new Map(reduceToolCallEventFacts(eventEntries)
+    .filter((call): call is typeof call & { readonly toolName: string } => call.toolName !== undefined)
+    .map((call) => [call.callId, compactRuntimeText(call.toolName, 160)]));
 }
 
 function riskLevelFrom(value: unknown): RuntimeConfirmationRecord["riskLevel"] {
@@ -1088,23 +1049,4 @@ function booleanOrUndefined(value: unknown): boolean | undefined {
   if (value === true) return true;
   if (value === false) return false;
   return undefined;
-}
-
-function mergeToolStatus(
-  previous: RuntimeToolCallRecord["status"] | undefined,
-  eventType: PanelRunStreamEvent["type"]
-): RuntimeToolCallRecord["status"] {
-  if (previous === "failed" || eventType === "tool.failed") {
-    return "failed";
-  }
-  if (previous === "completed" || eventType === "tool.completed") {
-    return "completed";
-  }
-  if (previous === "cancelled") {
-    return "cancelled";
-  }
-  if (eventType === "confirmation.needed" || previous === "approval_required") {
-    return "approval_required";
-  }
-  return "requested";
 }

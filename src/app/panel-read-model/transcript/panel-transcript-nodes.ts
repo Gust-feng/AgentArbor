@@ -1,7 +1,7 @@
 import type { TranscriptNode, TranscriptNodePhase } from "../../../domain/basic-agent/index.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
-import type { ObservationRef } from "../../../domain/observation/index.js";
-import { type ToolDisplayProjection, type ToolErrorDomain, type ToolErrorFacts, type ToolResultEnvelope } from "../../../domain/tools/index.js";
+import type { ObservationRef, ToolDisplayProjection } from "../../../domain/observation/index.js";
+import { type ToolErrorDomain, type ToolErrorFacts } from "../../../domain/tools/index.js";
 import { toolDisplayName } from "../../../domain/tools/index.js";
 import { cleanConfirmationSummary } from "../../text-projection/confirmation-copy.js";
 import {
@@ -46,7 +46,6 @@ export type PanelTranscriptStreamEvent = {
     readonly command?: string;
     readonly exitCode?: number;
     readonly display?: ToolDisplayProjection;
-    readonly envelope?: ToolResultEnvelope;
     readonly preview?: string;
     readonly truncated?: boolean;
     readonly error?: string;
@@ -197,8 +196,8 @@ function transcriptNodeForEvent(
       display: event.detail?.display,
     });
   }
-  if (event.type === "tool.completed" || event.type === "tool.failed") {
-    const phase: TranscriptNodePhase = event.type === "tool.completed" ? "completed" : "failed";
+  if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled") {
+    const phase: TranscriptNodePhase = event.type === "tool.completed" ? "completed" : event.type === "tool.cancelled" ? "cancelled" : "failed";
     return transcriptNode(event, {
       kind: "tool",
       phase,
@@ -460,7 +459,7 @@ function requestSequencesBeforeConfirmations(events: readonly PanelTranscriptStr
       latestRequested = undefined;
       continue;
     }
-    if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "final.result") {
+    if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled" || event.type === "final.result") {
       latestRequested = undefined;
     }
   }
@@ -627,7 +626,7 @@ function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | unde
   if (display?.kind === "command_summary") {
     return commandSummaryParts({
       display,
-      failed: event.type === "tool.failed",
+      failed: event.type === "tool.failed" || event.type === "tool.cancelled",
     }).join(" · ") || undefined;
   }
   if (display?.kind === "search_results") {

@@ -71,7 +71,7 @@ test("persisted run response restores safe transcript and tracking projections",
   assert.equal(JSON.stringify(response.agentDefinitionRef).includes("systemPrompt"), false);
 });
 
-test("persisted run response restores ordinary tool transcript without old diagnostic copy", () => {
+test("persisted run response restores ordinary tool transcript from factual records", () => {
   const response = createPersistedPanelRunResponse({
     snapshot: {
       ...runtimeSnapshot(),
@@ -114,13 +114,6 @@ test("persisted run response restores ordinary tool transcript without old diagn
           path: "notes.md",
           summary: "notes.md · 32 -> 18 chars · 1 replacement",
           preview: "- old\n+ new",
-          display: {
-            kind: "file_diff_preview",
-            path: "notes.md",
-            operation: "edit",
-            replacements: 1,
-            preview: "- old\n+ new",
-          },
           eventRefs: ["run-1:event:3"],
         },
       ],
@@ -129,26 +122,14 @@ test("persisted run response restores ordinary tool transcript without old diagn
     config: modelConfig(),
     informationAccess: informationAccess(),
   });
-  const transcriptText = JSON.stringify({
-    events: response.transcript.events,
-    nodes: response.transcriptNodes,
-  });
   const activityText = JSON.stringify(displayActivityItemsForNodes(activityVisibleNodes(response.transcriptNodes)));
 
   assert.equal(response.transcript.events.some((event) => event.summary === "dir"), true);
   assert.equal(response.transcript.events.some((event) => event.detail?.preview === "README.md"), true);
-  assert.equal(response.transcriptNodes.some((node) => node.summary === "notes.md · 1 处修改"), true);
-  assert.equal(activityText.includes("- old"), true);
-  assert.equal(activityText.includes("+ new"), true);
-  assert.equal(transcriptText.includes("exit 0"), false);
-  assert.equal(transcriptText.includes("bytes"), false);
-  assert.equal(transcriptText.includes("32 -> 18 chars"), false);
-  assert.equal(transcriptText.includes("目标："), false);
-  assert.equal(transcriptText.includes("运行命令："), false);
+  assert.equal(response.transcriptNodes.some((node) => node.summary?.includes("notes.md")), true);
+  assert.equal(response.transcript.events.some((event) => event.detail?.preview?.includes("- old")), true);
+  assert.equal(response.transcript.events.some((event) => event.detail?.preview?.includes("+ new")), true);
   assert.equal(activityText.includes("README.md"), true);
-  assert.equal(activityText.includes("目标："), false);
-  assert.equal(activityText.includes("bytes"), false);
-  assert.equal(activityText.includes("exit 0"), false);
 });
 
 test("persisted run response restores model failures as typed failed events", () => {
@@ -537,13 +518,6 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
         exitCode: 0,
         summary: "命令完成",
         preview: "测试通过",
-        display: {
-          kind: "command_summary",
-          command: "pnpm",
-          args: ["test"],
-          exitCode: 0,
-          outputSummary: "测试通过",
-        },
         eventRefs: ["run-1:event:3", "run-1:event:4"],
       },
     ],

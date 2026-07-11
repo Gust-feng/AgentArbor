@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { toolExecutionContinuation, toolExecutionResult } from "./tool-result-test-support.js";
 import {
   asRecord,
   contextAttachmentToolCenter,
@@ -77,9 +78,9 @@ test("context attachment table tools inspect and read selected CSV without expos
       permission
     );
     const projected = JSON.stringify([
-      listed.projection?.agentContent,
-      inspected.projection?.agentContent,
-      read.projection?.agentContent,
+      toolExecutionResult(listed),
+      toolExecutionResult(inspected),
+      toolExecutionResult(read),
     ]);
 
     assert.equal(listed.status, "completed");
@@ -139,9 +140,8 @@ test("context attachment table read returns executable row continuation facts", 
     const result = asRecord(output.result);
     const continuation = asRecord(output.continuation);
     const nextInput = asRecord(continuation.nextInput);
-    const modelResult = asRecord(firstRead.projection?.modelResult);
-    const modelContinuation = asRecord(modelResult.continuation);
-    const structuredContent = asRecord(modelResult.structuredContent);
+    const modelContinuation = asRecord(toolExecutionContinuation(firstRead));
+    const structuredContent = toolExecutionResult(firstRead);
     const structuredResult = asRecord(structuredContent.result);
 
     assert.equal(firstRead.status, "completed");
@@ -211,7 +211,7 @@ test("context attachment table tools read TSV inside selected local project", as
         allowedTools: ["read_context_attachment_table"],
       }
     );
-    const modelVisible = JSON.stringify(result.projection?.agentContent);
+    const modelVisible = JSON.stringify(toolExecutionResult(result));
 
     assert.equal(result.status, "completed");
     assert.equal(modelVisible.includes("tab"), true);
@@ -285,9 +285,9 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
       permission
     );
     const modelVisible = JSON.stringify([
-      listed.projection?.agentContent,
-      inspected.projection?.agentContent,
-      read.projection?.agentContent,
+      toolExecutionResult(listed),
+      toolExecutionResult(inspected),
+      toolExecutionResult(read),
     ]);
 
     assert.equal(listed.status, "completed");
@@ -343,7 +343,7 @@ test("context attachment table tools report unsupported legacy XLS spreadsheet f
         allowedTools: ["inspect_context_attachment_table"],
       }
     );
-    const modelVisible = JSON.stringify(result.projection?.agentContent);
+    const modelVisible = JSON.stringify(toolExecutionResult(result));
 
     assert.equal(result.status, "completed");
     assert.equal(modelVisible.includes("\"table\":false"), true);

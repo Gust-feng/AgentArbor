@@ -661,8 +661,6 @@ function bulkyToolCenter(): ToolExecutionBroker {
         durationMs: 0,
       };
     },
-    resetCallCount: () => undefined,
-    getCallCount: () => 0,
   };
 }
 
@@ -848,8 +846,6 @@ function extraToolCenter(): ToolExecutionBroker {
         durationMs: 0,
       };
     },
-    resetCallCount: () => undefined,
-    getCallCount: () => 0,
   };
 }
 
@@ -868,8 +864,6 @@ function noToolBroker(): ToolExecutionBroker {
         durationMs: 0,
       };
     },
-    resetCallCount: () => undefined,
-    getCallCount: () => 0,
   };
 }
 

@@ -41,6 +41,13 @@ export type AgentTurnPermissionPolicy = {
   readonly fallback: "deterministic" | "disabled";
 };
 
+export const TOOL_LIFECYCLE_MESSAGE_TYPES = [
+  "tool.requested",
+  "tool.completed",
+  "tool.failed",
+  "tool.cancelled",
+] as const;
+
 export const ARBOR_MESSAGE_TYPES = [
   "goal.received",
   "underground.exploration_planned",
@@ -52,9 +59,7 @@ export const ARBOR_MESSAGE_TYPES = [
   "model.failed",
   "context.compaction.completed",
   "context.compaction.failed",
-  "tool.requested",
-  "tool.completed",
-  "tool.failed",
+  ...TOOL_LIFECYCLE_MESSAGE_TYPES,
   "skill.triggered",
   "agent.delegation.planned",
   "agent.child.started",
@@ -122,6 +127,13 @@ export const ARBOR_MESSAGE_TYPES = [
 ] as const;
 
 export type ArborMessageType = (typeof ARBOR_MESSAGE_TYPES)[number];
+export type ToolLifecycleMessageType = (typeof TOOL_LIFECYCLE_MESSAGE_TYPES)[number];
+
+const TOOL_LIFECYCLE_MESSAGE_TYPE_SET = new Set<string>(TOOL_LIFECYCLE_MESSAGE_TYPES);
+
+export function isToolLifecycleMessageType(type: string): type is ToolLifecycleMessageType {
+  return TOOL_LIFECYCLE_MESSAGE_TYPE_SET.has(type);
+}
 
 export type ArtifactRef = {
   id: string;

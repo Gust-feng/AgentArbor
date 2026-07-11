@@ -71,6 +71,7 @@ function createOrdinaryDesktopAgentNote(input: NoteFactoryInput): AgentWorkNote 
     "tool.requested",
     "tool.completed",
     "tool.failed",
+    "tool.cancelled",
     "user_approval.requested",
   ]);
   const failed = input.modelCalls.some((call) => call.status === "failed");
@@ -205,6 +206,7 @@ function createRootletAgentsNote(input: NoteFactoryInput): AgentWorkNote {
     "tool.requested",
     "tool.completed",
     "tool.failed",
+    "tool.cancelled",
     "exploration_candidate.produced",
     "candidate_pool.updated",
   ]);

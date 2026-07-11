@@ -3,31 +3,19 @@ import test from "node:test";
 import type { ToolCallResult, ToolExecutionContext } from "../../domain/tools/index.js";
 import { createToolCompletedMessage } from "./tool-events.js";
 
-test("tool completed event marks output redacted only when projection says so", () => {
+test("tool completed event records the execution fact", () => {
   const plain = createToolCompletedMessage({
-    result: toolResult({
-      projection: {
-        uiSummary: "read file",
-        diagnosticRef: "tool:call-read",
-        truncated: false,
-      },
-    }),
+    result: toolResult(),
     context: toolContext(),
   });
   const explicit = createToolCompletedMessage({
-    result: toolResult({
-      projection: {
-        uiSummary: "redacted result",
-        diagnosticRef: "tool:call-redacted",
-        truncated: false,
-        redacted: true,
-      },
-    }),
+    result: toolResult(),
     context: toolContext(),
   });
 
-  assert.equal(outputRecord(plain.payload.output).redacted, false);
-  assert.equal(outputRecord(explicit.payload.output).redacted, true);
+  assert.equal((outputRecord(plain.payload.output).result as { readonly path?: string } | undefined)?.path, "README.md");
+  assert.equal((outputRecord(explicit.payload.output).result as { readonly path?: string } | undefined)?.path, "README.md");
+  assert.equal(JSON.stringify(explicit.payload.output).includes("redacted result"), false);
 });
 
 function outputRecord(value: unknown): Readonly<Record<string, unknown>> {

@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { toolExecutionResult } from "./tool-result-test-support.js";
 import {
   contextAttachmentToolCenter,
   createZipBuffer,
@@ -63,8 +64,8 @@ test("context attachment archive tools inspect selected ZIP without extracting o
       permission
     );
     const modelVisible = JSON.stringify([
-      listed.projection?.agentContent,
-      inspected.projection?.agentContent,
+      toolExecutionResult(listed),
+      toolExecutionResult(inspected),
     ]);
 
     assert.equal(listed.status, "completed");

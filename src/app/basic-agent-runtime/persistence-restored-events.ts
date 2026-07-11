@@ -145,7 +145,7 @@ function restoredBasicTerminalSummary(
 }
 
 function basicEventTypeForRuntimeEvent(type: RuntimeRunSnapshot["events"][number]["type"]): string | undefined {
-  if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed") return type;
+  if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed" || type === "tool.cancelled") return type;
   if (
     type === "sub_agent.started" ||
     type === "sub_agent.completed" ||
@@ -167,6 +167,7 @@ function basicEventTitleFromType(type: string): string {
   if (type === "run.resumed") return "运行恢复";
   if (type === "tool.requested" || type === "tool.completed") return "动作";
   if (type === "tool.failed") return "未完成";
+  if (type === "tool.cancelled") return "已取消";
   if (type === "sub_agent.started" || type === "sub_agent.completed") return "子 Agent";
   if (type === "sub_agent_batch.started" || type === "sub_agent_batch.completed") return "子 Agent 批次";
   if (type === "confirmation.needed") return "需要你判断";

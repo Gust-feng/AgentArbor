@@ -151,15 +151,14 @@ export type ToolDisplayProjection =
       readonly items?: readonly string[];
     };
 
-export type ToolResultEnvelope = {
-  readonly agentSummary: string;
+export type ToolCallEvidence = {
+  readonly callId: string;
+  readonly toolName?: string;
+  readonly status: "completed" | "failed" | "cancelled";
+  readonly summary?: string;
   readonly evidenceRefs: readonly string[];
-  readonly uiDisplay?: ToolDisplayProjection;
-  readonly tokenEstimate: number;
-  readonly truncated: boolean;
-  readonly redacted: boolean;
-  readonly diagnosticRef?: string;
-  readonly rawRetention: "none" | "diagnostic_ref_only";
+  readonly truncated?: boolean;
+  readonly error?: string;
   readonly errorDomain?: string;
   readonly errorFacts?: ToolErrorFacts;
 };

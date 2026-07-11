@@ -1,7 +1,8 @@
 import type { BasicAgentCapabilitySnapshot, ModelCapabilities, RunCapabilityResolution } from "../../domain/config/index.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { ToolConfirmationPolicy, ToolExecutionBroker, ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
+import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../../domain/tools/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { BasicAgentConversationSummary } from "../basic-agent-runtime/conversation-compaction-contracts.js";
@@ -34,13 +35,14 @@ export type DesktopAgentActivity = {
     | "tool_requested"
     | "tool_completed"
     | "tool_failed"
+    | "tool_cancelled"
     | "confirmation_needed"
     | "completed"
     | "stopped"
     | "failed";
   readonly title: string;
   readonly summary: string;
-  readonly status: "pending" | "running" | "completed" | "failed";
+  readonly status: "pending" | "running" | "completed" | "failed" | "cancelled";
   readonly createdAt: string;
   readonly action?: string;
   readonly path?: string;
@@ -148,7 +150,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly toolEvidence?: readonly ToolResultEnvelope[];
+  readonly toolEvidence?: readonly ToolCallEvidence[];
   readonly resolveSkillContexts?: (context: DesktopAgentSkillResolverContext) => Promise<readonly DesktopAgentSkillContext[]>;
   readonly modelCapabilities?: ModelCapabilities;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;

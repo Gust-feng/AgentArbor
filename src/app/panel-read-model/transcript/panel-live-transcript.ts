@@ -234,7 +234,7 @@ function liveBodyNode(runId: string, turn: LiveModelTurnBuffer, existing: LiveTr
 
 function liveOutputFollowsToolResult(turn: LiveModelTurnBuffer, nodes: readonly LiveTranscriptNode[]): boolean {
   const latestToolResultSequence = nodes.reduce((latest, node) => (
-    node.kind === "tool" && (node.eventType === "tool.completed" || node.eventType === "tool.failed")
+    node.kind === "tool" && (node.eventType === "tool.completed" || node.eventType === "tool.failed" || node.eventType === "tool.cancelled")
       ? Math.max(latest, node.sequence)
       : latest
   ), 0);

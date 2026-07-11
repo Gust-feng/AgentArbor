@@ -23,12 +23,6 @@ test("tool stream projection keeps command output as safe summary", () => {
         exitCode: 0,
         outputSummary: "测试已通过",
       },
-      envelope: {
-        agentSummary: "安全命令摘要",
-        evidenceRefs: ["tool:tool-1"],
-        rawRetention: "none",
-        redacted: false,
-      },
     },
   };
 
@@ -39,34 +33,26 @@ test("tool stream projection keeps command output as safe summary", () => {
   assert.equal(detail.preview, "pnpm test · exit 0 · 测试已通过");
   assert.equal(detail.display?.kind, "command_summary");
   assert.equal(detail.display?.kind === "command_summary" ? detail.display.commandLine : undefined, "pnpm test");
-  assert.equal(detail.envelope?.rawRetention, "none");
   assert.equal(JSON.stringify(detail).includes("RAW_STDOUT_SENTINEL"), false);
 });
 
-test("tool stream projection preserves failed envelope error facts", () => {
+test("tool stream projection preserves failed execution error facts", () => {
   const detail = toolStreamDetail("tool.failed", {
     toolName: "shell_command",
     input: { command: "pnpm", args: ["missing"] },
-    output: {
-      envelope: {
-        agentSummary: "spawn pnpm ENOENT",
-        evidenceRefs: ["tool:tool-shell-missing"],
-        rawRetention: "none",
-        redacted: false,
-        errorDomain: "process_error",
-        errorFacts: {
-          code: "ENOENT",
-          syscall: "spawn",
-          command: "pnpm",
-        },
-      },
+    error: "spawn pnpm ENOENT",
+    errorDomain: "process_error",
+    errorFacts: {
+      code: "ENOENT",
+      syscall: "spawn",
+      command: "pnpm",
     },
   });
 
-  assert.equal(detail.envelope?.errorDomain, "process_error");
-  assert.equal(detail.envelope?.errorFacts?.code, "ENOENT");
-  assert.equal(detail.envelope?.errorFacts?.syscall, "spawn");
-  assert.equal(detail.envelope?.errorFacts?.command, "pnpm");
+  assert.equal(detail.errorDomain, "process_error");
+  assert.equal(detail.errorFacts?.code, "ENOENT");
+  assert.equal(detail.errorFacts?.syscall, "spawn");
+  assert.equal(detail.errorFacts?.command, "pnpm");
 });
 
 test("tool stream projection surfaces read HTTP failure facts in preview and detail", () => {
@@ -93,13 +79,6 @@ test("tool stream projection surfaces read HTTP failure facts in preview and det
         error: "http_request failed: ECONNREFUSED 127.0.0.1:54321",
         errorFacts,
       },
-      envelope: {
-        agentSummary: "资料读取已完成。\n错误：http_request failed: ECONNREFUSED 127.0.0.1:54321",
-        evidenceRefs: ["tool:read-fail", "http://127.0.0.1:54321/status"],
-        rawRetention: "none",
-        redacted: false,
-        errorFacts,
-      },
       result: {},
     },
   });
@@ -107,7 +86,7 @@ test("tool stream projection surfaces read HTTP failure facts in preview and det
   assert.equal(detail.display?.kind, "read_result");
   assert.equal(detail.display?.kind === "read_result" ? detail.display.errorFacts?.code : undefined, "ECONNREFUSED");
   assert.equal(detail.errorFacts?.code, "ECONNREFUSED");
-  assert.equal(detail.envelope?.errorFacts?.port, 54321);
+  assert.equal(detail.errorFacts?.port, 54321);
   assert.equal(detail.preview?.includes("ECONNREFUSED"), true);
   assert.equal(detail.preview?.includes("errorFacts"), true);
 });
@@ -427,18 +406,11 @@ test("tool stream projection shows MCP preview without raw media payload", () =>
           "非文本内容：image，MIME：image/png，约 128 字节",
         ],
       },
-      envelope: {
-        agentSummary: "找到 MCP 能力底座说明。",
-        evidenceRefs: ["tool:call-mcp"],
-        rawRetention: "none",
-        redacted: false,
-      },
     },
   });
 
   assert.equal(detail.preview?.includes("冻结快照"), true);
   assert.equal(detail.display?.kind, "generic_tool_summary");
-  assert.equal(detail.envelope?.rawRetention, "none");
   assert.equal(JSON.stringify(detail).includes("RAW_BASE64_SENTINEL"), false);
 });
 

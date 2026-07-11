@@ -312,17 +312,9 @@ test("call_sub_agent projection exposes full output to parent model continuation
     readonly result?: { readonly full_output?: string };
     readonly summary?: string;
   };
-  const agentContent = result.projection?.agentContent as {
-    readonly full_output?: string;
-    readonly result?: { readonly full_output?: string };
-    readonly summary?: string;
-  };
-
   assert.equal(result.status, "completed");
   assert.equal(output.result?.full_output, fullOutput);
-  assert.equal(agentContent.full_output, fullOutput);
-  assert.equal(agentContent.result?.full_output, fullOutput);
-  assert.equal(agentContent.summary?.includes(sentinel), false);
+  assert.equal(output.summary?.includes(sentinel), false);
 });
 
 test("read_sub_agent_output reads current-run sub-agent output slices", async () => {

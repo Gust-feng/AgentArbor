@@ -42,7 +42,7 @@ test("panel run tracking derives safe provider context and event totals", () => 
 
   assert.equal(tracking.provider.status, "ready");
   assert.deepEqual(tracking.modelTotals, { requested: 1, completed: 0, failed: 0 });
-  assert.deepEqual(tracking.toolTotals, { requested: 1, completed: 1, failed: 0 });
+  assert.deepEqual(tracking.toolTotals, { requested: 1, completed: 1, failed: 0, cancelled: 0 });
   assert.equal(tracking.run.phase, "agent");
   assert.equal(tracking.context.compaction.latest?.summary, "Earlier context was safely summarized.");
   assert.equal(JSON.stringify(tracking).includes("sk-secret"), false);
@@ -292,6 +292,7 @@ function deepSummaryFixture(): PanelRunSummary {
         requested: 2,
         completed: 2,
         failed: 0,
+        cancelled: 0,
       },
       toolCallRefs: [],
     },

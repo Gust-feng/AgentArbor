@@ -280,6 +280,7 @@ function isModelOutputBoundaryEvent(event: PanelRunTranscript["events"][number])
     event.type === "run.resumed" ||
     event.type === "tool.completed" ||
     event.type === "tool.failed" ||
+    event.type === "tool.cancelled" ||
     event.type === "user.guidance" ||
     event.type === "context.compaction.requested" ||
     event.type === "context.compaction.completed" ||

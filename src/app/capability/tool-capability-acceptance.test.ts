@@ -5,11 +5,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { modelVisibleToolDescription } from "../../domain/tools/index.js";
+import { modelVisibleToolDescription, type ToolCallResult } from "../../domain/tools/index.js";
 import { createDesktopBasicToolRegistry } from "../basic-agent-runtime/index.js";
 import { ensurePidExited } from "../tool-center/adapters/background-process-test-utils.js";
+import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+
+function resultFact(result: ToolCallResult): Readonly<Record<string, unknown>> {
+  const output = typeof result.output === "object" && result.output !== null ? result.output as Readonly<Record<string, unknown>> : {};
+  const nested = typeof output.result === "object" && output.result !== null ? output.result as Readonly<Record<string, unknown>> : {};
+  return { ...output, ...nested };
+}
 
 test("tool capability acceptance supports a demo-building workflow without command micro-tools or hangs", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-acceptance-"));
@@ -77,11 +84,11 @@ test("tool capability acceptance supports a demo-building workflow without comma
     const write = await executeTool("call-write", "write_file", { path: "demo/index.html", content: html });
     assert.equal(write.status, "completed");
     assert.equal(((write.output as { result?: { path?: string } }).result?.path), "demo/index.html");
-    assert.equal(write.projection?.display?.kind, "file_change_summary");
+    assert.equal(projectToolDisplay({ callId: write.callId, toolName: write.toolName, input: write.input }, write.output).kind, "file_change_summary");
 
     const read = await executeTool("call-read", "read_file", { path: "demo/index.html" });
     assert.equal(read.status, "completed");
-    assert.match(String((read.projection?.agentContent as { content?: string }).content), /demo-ready/);
+    assert.match(String(resultFact(read).content), /demo-ready/);
 
     const validate = await executeTool("call-validate", "shell_command", {
       commandLine: `${process.execPath} -e "const fs=require('fs'); console.log(fs.readFileSync('index.html','utf8').includes('demo-ready') ? 'validated' : 'missing')"`,
@@ -90,14 +97,14 @@ test("tool capability acceptance supports a demo-building workflow without comma
       cwd: "demo",
     });
     assert.equal(validate.status, "completed");
-    assert.equal((validate.projection?.agentContent as { cwd?: string }).cwd, "demo");
-    assert.match(String((validate.projection?.agentContent as { stdout?: string }).stdout), /validated/);
+    assert.equal(resultFact(validate).cwd, "demo");
+    assert.match(String(resultFact(validate).stdout), /validated/);
 
     const commandFailure = await executeTool("call-command-failure", "shell_command", {
       command: process.execPath,
       args: ["-e", "console.error('structured command failure'); process.exit(7);"],
     });
-    const commandFailureContent = commandFailure.projection?.agentContent as {
+    const commandFailureContent = resultFact(commandFailure) as {
       readonly exitCode?: number;
       readonly stderr?: string;
     };
@@ -137,7 +144,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       waitForPort: port,
       waitForPortTimeoutMs: 5_000,
     });
-    const serverContent = server.projection?.agentContent as {
+    const serverContent = resultFact(server) as {
       readonly background?: boolean;
       readonly portReady?: boolean;
       readonly waitForPort?: number;
@@ -158,7 +165,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       url: `http://127.0.0.1:${port}/ready`,
       timeoutMs: 2_000,
     });
-    const httpOkContent = httpOk.projection?.agentContent as {
+    const httpOkContent = resultFact(httpOk) as {
       readonly statusCode?: number;
       readonly body?: string;
       readonly method?: string;
@@ -172,7 +179,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       url: `http://127.0.0.1:${port}/missing`,
       timeoutMs: 2_000,
     });
-    const httpNotFoundContent = httpNotFound.projection?.agentContent as {
+    const httpNotFoundContent = resultFact(httpNotFound) as {
       readonly statusCode?: number;
       readonly body?: string;
     };
@@ -194,7 +201,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       command: process.execPath,
       args: ["-e", "process.stdout.write('x'.repeat(140000));"],
     });
-    const largeContent = largeOutput.projection?.agentContent as {
+    const largeContent = resultFact(largeOutput) as {
       readonly truncated?: boolean;
       readonly stdout?: string;
     };
@@ -208,7 +215,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       args: ["-e", "console.log('before-timeout'); setTimeout(() => {}, 5000);"],
       timeoutMs: 200,
     });
-    const timedOutContent = timedOut.projection?.agentContent as {
+    const timedOutContent = resultFact(timedOut) as {
       readonly timedOut?: boolean;
       readonly exitCode?: number;
       readonly stdout?: string;
@@ -227,7 +234,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       background: true,
       backgroundWaitMs: 1_000,
     });
-    const backgroundContent = background.projection?.agentContent as {
+    const backgroundContent = resultFact(background) as {
       readonly background?: boolean;
       readonly pid?: number;
       readonly logPath?: string;
@@ -265,7 +272,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       background: true,
       backgroundWaitMs: 1_000,
     });
-    const shellBackgroundContent = shellBackground.projection?.agentContent as {
+    const shellBackgroundContent = resultFact(shellBackground) as {
       readonly background?: boolean;
       readonly pid?: number;
       readonly logPath?: string;

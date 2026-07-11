@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { createTaskSoil } from "../../domain/soil/index.js";
-import type { ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-prompts.js";
 import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";
 import {
-  appendToolEnvelopeToContextLedger,
+  appendToolEvidenceToContextLedger,
   createBasicAgentContextLedger,
 } from "./context-ledger.js";
 
@@ -219,7 +219,7 @@ test("context ledger append preserves existing context and adds tool evidence wi
     conversationHistory: [{ role: "user", content: "history survives", ref: "turn:user:1" }],
   });
 
-  const appended = appendToolEnvelopeToContextLedger(ledger, toolEnvelope());
+  const appended = appendToolEvidenceToContextLedger(ledger, toolEvidence());
 
   assert.equal(appended.items.some((item) => item.sourceKind === "user_message"), true);
   assert.equal(appended.items.some((item) => item.sourceKind === "conversation_recent_turn" && item.summary.includes("history survives")), true);
@@ -542,20 +542,13 @@ function structuredSkillContext(): DesktopAgentSkillContext {
   };
 }
 
-function toolEnvelope(): ToolResultEnvelope {
+function toolEvidence(): ToolCallEvidence {
   return {
-    agentSummary: "Search found a safe project reference. sk-tool-secret",
+    callId: "tool:search:1",
+    toolName: "search",
+    status: "completed",
+    summary: "Search found a safe project reference. sk-tool-secret",
     evidenceRefs: ["web:https://example.test"],
-    tokenEstimate: 12,
     truncated: false,
-    redacted: false,
-    diagnosticRef: "tool:search:1",
-    rawRetention: "none",
-    uiDisplay: {
-      kind: "generic_tool_summary",
-      action: "search",
-      summary: "safe summary",
-      items: ["result one"],
-    },
   };
 }

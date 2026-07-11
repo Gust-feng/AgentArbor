@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { toolExecutionModelAttachments, toolExecutionResult } from "./tool-result-test-support.js";
 import {
   contextAttachmentToolCenter,
   createTinyPngBuffer,
@@ -60,11 +61,11 @@ test("context attachment image tool reads selected local image as ephemeral mode
       permission
     );
     const projected = JSON.stringify([
-      listed.projection?.agentContent,
-      read.projection?.agentContent,
+      toolExecutionResult(listed),
+      toolExecutionResult(read),
     ]);
     const output = JSON.stringify(read.output);
-    const attachment = read.projection?.modelAttachments?.[0];
+    const attachment = toolExecutionModelAttachments(read)?.[0];
 
     assert.equal(listed.status, "completed");
     assert.equal(read.status, "completed");
@@ -124,8 +125,8 @@ test("context attachment image tool reads image inside selected local project by
         allowedTools: ["read_context_attachment_image"],
       }
     );
-    const modelVisible = JSON.stringify(result.projection?.agentContent);
-    const attachment = result.projection?.modelAttachments?.[0];
+    const modelVisible = JSON.stringify(toolExecutionResult(result));
+    const attachment = toolExecutionModelAttachments(result)?.[0];
 
     assert.equal(result.status, "completed");
     assert.equal(modelVisible.includes("assets/screen.jpg"), true);
@@ -176,13 +177,13 @@ test("context attachment image tool reports unsupported when model lacks vision 
         allowedTools: ["read_context_attachment_image"],
       }
     );
-    const modelVisible = JSON.stringify(result.projection?.agentContent);
+    const modelVisible = JSON.stringify(toolExecutionResult(result));
 
     assert.equal(result.status, "completed");
     assert.equal(modelVisible.includes("model_does_not_support_vision_input"), true);
     assert.equal(modelVisible.includes("\"attached\":false"), true);
     assert.equal(modelVisible.includes(imageFile), false);
-    assert.equal(result.projection?.modelAttachments, undefined);
+    assert.equal(toolExecutionModelAttachments(result), undefined);
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
     await fs.rm(localRoot, { recursive: true, force: true });

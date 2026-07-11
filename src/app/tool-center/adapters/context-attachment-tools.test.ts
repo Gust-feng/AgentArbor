@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { toolExecutionContinuation, toolExecutionResult } from "./tool-result-test-support.js";
 import {
   asRecord,
   contextAttachmentToolCenter,
@@ -48,7 +49,7 @@ test("context attachment tools read selected local file by attachmentId without 
         allowedTools: ["read_context_attachment_text"],
       }
     );
-    const modelVisible = JSON.stringify(result.projection?.agentContent);
+    const modelVisible = JSON.stringify(toolExecutionResult(result));
 
     assert.equal(result.status, "completed");
     assert.equal(modelVisible.includes("attached local text"), true);
@@ -100,7 +101,7 @@ test("context attachment text read returns executable character continuation", a
       permission
     );
     const firstResult = asRecord(asRecord(firstRead.output).result);
-    const firstNextInput = asRecord(asRecord(asRecord(firstRead.projection?.modelResult).continuation).nextInput);
+    const firstNextInput = asRecord(toolExecutionContinuation(firstRead)?.nextInput);
 
     assert.equal(firstRead.status, "completed");
     assert.equal(firstResult.content, "abcd…");
@@ -227,8 +228,8 @@ test("context attachment PDF tool extracts text-native PDF content without expos
       permission
     );
     const modelVisible = JSON.stringify([
-      listed.projection?.agentContent,
-      read.projection?.agentContent,
+      toolExecutionResult(listed),
+      toolExecutionResult(read),
     ]);
 
     assert.equal(listed.status, "completed");
@@ -303,9 +304,9 @@ test("context attachment tools browse search and read files inside selected loca
       permission
     );
     const projected = JSON.stringify([
-      listed.projection?.agentContent,
-      searched.projection?.agentContent,
-      read.projection?.agentContent,
+      toolExecutionResult(listed),
+      toolExecutionResult(searched),
+      toolExecutionResult(read),
     ]);
 
     assert.equal(listed.status, "completed");
@@ -357,12 +358,11 @@ test("context attachment list and search tools expose executable continuation of
       TOOL_CONTEXT,
       permission
     );
-    const listModelResult = asRecord(listed.projection?.modelResult);
-    const listNextInput = asRecord(asRecord(listModelResult.continuation).nextInput);
-    const listAgentContent = asRecord(listed.projection?.agentContent);
+    const listNextInput = asRecord(toolExecutionContinuation(listed)?.nextInput);
+    const listAgentContent = toolExecutionResult(listed);
 
     assert.equal(listed.status, "completed");
-    assert.equal(asRecord(listModelResult.truncation).truncated, true);
+    assert.equal(listAgentContent.truncated, true);
     assert.equal(listNextInput.attachmentId, "ctx_project");
     assert.equal(listNextInput.path, "src");
     assert.equal(listNextInput.offset, 2);
@@ -393,12 +393,11 @@ test("context attachment list and search tools expose executable continuation of
       TOOL_CONTEXT,
       permission
     );
-    const searchModelResult = asRecord(searched.projection?.modelResult);
-    const searchNextInput = asRecord(asRecord(searchModelResult.continuation).nextInput);
-    const searchAgentContent = asRecord(searched.projection?.agentContent);
+    const searchNextInput = asRecord(toolExecutionContinuation(searched)?.nextInput);
+    const searchAgentContent = toolExecutionResult(searched);
 
     assert.equal(searched.status, "completed");
-    assert.equal(asRecord(searchModelResult.truncation).truncated, true);
+    assert.equal(searchAgentContent.truncated, true);
     assert.equal(searchNextInput.attachmentId, "ctx_project");
     assert.equal(searchNextInput.query, "needle");
     assert.equal(searchNextInput.path, "src");
@@ -470,9 +469,8 @@ test("context attachment list and search tools stop continuation at the offset c
     );
     const listOutput = asRecord(listed.output);
     const listResult = asRecord(listOutput.result);
-    const listModelResult = asRecord(listed.projection?.modelResult);
-    const listStructuredContent = asRecord(listModelResult.structuredContent);
-    const listAgentContent = asRecord(listed.projection?.agentContent);
+    const listStructuredContent = toolExecutionResult(listed);
+    const listAgentContent = toolExecutionResult(listed);
 
     assert.equal(listed.status, "completed");
     assert.equal(listOutput.truncated, true);
@@ -481,8 +479,8 @@ test("context attachment list and search tools stop continuation at the offset c
     assert.equal(listResult.nextOffset, undefined);
     assert.equal(listResult.reachedOffsetCeiling, true);
     assert.equal(listResult.offsetCeiling, 10_000);
-    assert.equal(listModelResult.continuation, undefined);
-    assert.equal(asRecord(listModelResult.truncation).truncated, true);
+    assert.equal(toolExecutionContinuation(listed), undefined);
+    assert.equal(listStructuredContent.truncated, true);
     assert.equal(listStructuredContent.hasMoreAfter, true);
     assert.equal(listStructuredContent.nextOffset, undefined);
     assert.equal(listStructuredContent.reachedOffsetCeiling, true);
@@ -505,9 +503,8 @@ test("context attachment list and search tools stop continuation at the offset c
     );
     const searchOutput = asRecord(searched.output);
     const searchResult = asRecord(searchOutput.result);
-    const searchModelResult = asRecord(searched.projection?.modelResult);
-    const searchStructuredContent = asRecord(searchModelResult.structuredContent);
-    const searchAgentContent = asRecord(searched.projection?.agentContent);
+    const searchStructuredContent = toolExecutionResult(searched);
+    const searchAgentContent = toolExecutionResult(searched);
 
     assert.equal(searched.status, "completed");
     assert.equal(searchOutput.truncated, true);
@@ -516,8 +513,8 @@ test("context attachment list and search tools stop continuation at the offset c
     assert.equal(searchResult.nextOffset, undefined);
     assert.equal(searchResult.reachedOffsetCeiling, true);
     assert.equal(searchResult.offsetCeiling, 10_000);
-    assert.equal(searchModelResult.continuation, undefined);
-    assert.equal(asRecord(searchModelResult.truncation).truncated, true);
+    assert.equal(toolExecutionContinuation(searched), undefined);
+    assert.equal(searchStructuredContent.truncated, true);
     assert.equal(searchStructuredContent.hasMoreAfter, true);
     assert.equal(searchStructuredContent.nextOffset, undefined);
     assert.equal(searchStructuredContent.reachedOffsetCeiling, true);
@@ -565,7 +562,7 @@ test("context attachment tools reject refs outside current Task Soil permissions
         allowedTools: ["read_context_attachment_text"],
       }
     );
-    const modelVisible = JSON.stringify(result.projection?.agentContent);
+    const modelVisible = JSON.stringify(toolExecutionResult(result));
 
     assert.equal(result.status, "failed");
     assert.equal(modelVisible.includes("not authorized"), true);

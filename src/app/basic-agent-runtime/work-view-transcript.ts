@@ -4,8 +4,7 @@ import type {
   TranscriptNode,
   TranscriptNodePhase,
 } from "../../domain/basic-agent/index.js";
-import type { ObservationRef } from "../../domain/observation/index.js";
-import type { ToolDisplayProjection } from "../../domain/tools/index.js";
+import type { ObservationRef, ToolDisplayProjection } from "../../domain/observation/index.js";
 import {
   toolTranscriptTitleFromRunEvent,
   transcriptToolSummaryFromRunEvent,
@@ -140,8 +139,8 @@ function transcriptNodeFromRunEvent(
       display: event.detail?.display,
     });
   }
-  if (event.type === "tool.completed" || event.type === "tool.failed") {
-    const phase: TranscriptNodePhase = event.type === "tool.completed" ? "completed" : "failed";
+  if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled") {
+    const phase: TranscriptNodePhase = event.type === "tool.completed" ? "completed" : event.type === "tool.cancelled" ? "cancelled" : "failed";
     return transcriptNode(event, {
       kind: "tool",
       phase,
@@ -380,7 +379,7 @@ function requestSequencesBeforeConfirmations(events: readonly RunEvent[]): Reado
       latestRequested = undefined;
       continue;
     }
-    if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "final.result") {
+    if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled" || event.type === "final.result") {
       latestRequested = undefined;
     }
   }

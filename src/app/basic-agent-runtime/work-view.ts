@@ -12,9 +12,9 @@ import type {
   SkillSelectionDecisionFacts,
   SkillSelectionDecisionReason,
   TranscriptNode,
+  ToolCallEvidence,
 } from "../../domain/basic-agent/index.js";
-import type { ObservationRef } from "../../domain/observation/index.js";
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { ObservationRef, ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { SubAgentRunView } from "../../domain/sub-agents/contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
@@ -30,7 +30,7 @@ import {
 import {
   contextAttachmentsFor,
   contextLedgerFor,
-  envelopeSafeToolEvidence,
+  normalizeToolEvidence,
   isToolDisplay,
   mergeToolDisplays,
   observationRefs,
@@ -98,7 +98,7 @@ export type CreateDesktopWorkViewReadModelInput = {
   readonly canvas?: DesktopWorkViewCanvasLike;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
-  readonly toolEvidence?: readonly ToolResultEnvelope[];
+  readonly toolEvidence?: readonly ToolCallEvidence[];
   readonly transcriptNodes?: readonly TranscriptNode[];
   readonly pendingConfirmation?: ConfirmationRequest;
   readonly restoredResult?: {
@@ -115,8 +115,8 @@ export function createDesktopWorkViewReadModel(
 ): DesktopWorkViewReadModel {
   const visibleEvents = visibleWorkViewEvents(input.events);
   const contextAttachments = contextAttachmentsFor(input);
-  const toolEvidence = envelopeSafeToolEvidence(input.toolEvidence ?? []);
-  const toolDisplays = mergeToolDisplays(toolEvidence.map((envelope) => envelope.uiDisplay).filter(isToolDisplay), input.toolDisplays ?? []);
+  const toolEvidence = normalizeToolEvidence(input.toolEvidence ?? []);
+  const toolDisplays = mergeToolDisplays([], input.toolDisplays ?? []);
   const contextLedger = input.restoredContextLedger ?? contextLedgerFor(input, contextAttachments, toolEvidence, toolDisplays);
   const triggeredSkills = triggeredSkillsFor(input);
   const pendingConfirmation = input.pendingConfirmation ?? pendingConfirmationFor(input.run, input.canvas);

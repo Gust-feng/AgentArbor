@@ -73,7 +73,7 @@ while not cancelled:
 - 普通开发工具结果回传。
 - tool event 审计。
 
-ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一防线。AgentTurnRuntime / tool-use-loop 必须在进入具体执行 broker 前先按本轮 `allowedTools` 拦截未授权工具；ToolCenter 和 adapter 可以重复校验、命令确认和投影，但不能成为唯一依赖。模型可以决定“要不要调用某个已暴露工具”，但不能绕过 ToolCenter 获得未授权工具、未裁剪参数、未确认的命令执行或未记录审计事件。工具失败、拒绝、取消和确认等待都应以标准结果回传模型，让模型基于真实工具世界继续判断。除用户显式中止或外部系统硬失败外，这些结果不应终止普通 loop。
+ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一防线。AgentTurnRuntime / tool-use-loop 必须在进入具体执行 broker 前先按本轮 `allowedTools` 拦截未授权工具；ToolCenter 和 adapter 可以重复校验与命令确认，但只能返回执行事实，不能生产模型或 UI 投影。模型可以决定“要不要调用某个已暴露工具”，但不能绕过 ToolCenter 获得未授权工具、未裁剪参数、未确认的命令执行或未记录审计事件。工具失败、拒绝、取消和确认等待都应以标准结果回传模型，让模型基于真实工具世界继续判断。除用户显式中止或外部系统硬失败外，这些结果不应终止普通 loop。
 
 工具结果回到模型时，应优先提供足以继续开发判断的真实内容。前端展示同一工具调用事实的紧凑视图即可，不要求工具生成解释性文本，也不得用 UI 标题、摘要或固定建议替代模型消息、正文、stdout/stderr、文件片段或错误信息。
 

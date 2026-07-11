@@ -2,18 +2,21 @@ import type {
   BasicAgentRun,
   DesktopWorkViewReadModel,
   RunEvent,
+  ToolCallEvidence,
 } from "../../domain/basic-agent/index.js";
 import type {
   RuntimeConfirmationRecord,
   RuntimeRunSnapshot,
+  RuntimeToolCallRecord,
 } from "../../domain/runtime-database/index.js";
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import {
   basicRunFromRuntimeSnapshot,
   basicRunReplayFromRuntimeSnapshot,
   createDesktopWorkViewReadModel,
 } from "../basic-agent-runtime/index.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
+import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { panelRunPayloadForStatus, type PanelRunJob } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import { restoredRunResultProjection } from "../run-read-model/restored-run-projection.js";
@@ -30,7 +33,7 @@ export function createLiveBasicAgentWorkViewReadModel(input: {
     events: input.events,
     canvas: statusPayload?.canvas,
     taskSoilInput: input.job.taskSoilInput,
-    toolEvidence: toolEnvelopesFromStreamEvents(input.streamEvents),
+    toolEvidence: toolEvidenceFromStreamEvents(input.streamEvents),
     toolDisplays: toolDisplaysFromStreamEvents(input.streamEvents),
     subAgentRuns: input.job.runtime?.subAgentRunTraceStore.list() ?? [],
   }) satisfies DesktopWorkViewReadModel;
@@ -52,16 +55,38 @@ export function createPersistedBasicAgentWorkViewReadModel(
     run,
     events: replay.events,
     pendingConfirmation: restoredPendingConfirmation(snapshot.confirmations),
-    toolEvidence: snapshot.toolCalls
-      .map((call) => call.envelope)
-      .filter((envelope): envelope is ToolResultEnvelope => envelope !== undefined),
+    toolEvidence: toolEvidenceFromRuntimeToolCalls(snapshot.toolCalls),
     toolDisplays: snapshot.toolCalls
-      .map((call) => call.display)
+      .filter((call) => call.toolName !== undefined)
+      .map((call) => call.toolName === "shell_command" || call.toolName === "run_command"
+        ? { kind: "command_summary" as const, commandLine: call.command, exitCode: call.exitCode }
+        : projectToolDisplay(
+          { callId: call.callId, toolName: call.toolName!, input: { path: call.path, query: call.query, command: call.command } },
+          { action: call.action, summary: call.summary, preview: call.preview, truncated: call.truncated, result: { path: call.path, query: call.query, command: call.command, exitCode: call.exitCode, preview: call.preview } },
+        ))
       .filter((display): display is ToolDisplayProjection => display !== undefined),
     restoredResult: restoredRunResultProjection(snapshot.run),
     restoredContextLedger: snapshot.contextLedger,
     subAgentRuns: snapshot.subAgentRuns,
   }) satisfies DesktopWorkViewReadModel;
+}
+
+export function toolEvidenceFromRuntimeToolCalls(
+  calls: readonly RuntimeToolCallRecord[],
+): readonly ToolCallEvidence[] {
+  return calls
+    .filter((call) => call.status === "completed" || call.status === "failed" || call.status === "cancelled")
+    .map((call): ToolCallEvidence => ({
+        callId: call.callId,
+        toolName: call.toolName,
+        status: call.status as ToolCallEvidence["status"],
+        summary: call.summary,
+        evidenceRefs: call.eventRefs,
+        truncated: call.truncated,
+        error: call.error,
+        errorDomain: call.errorDomain,
+        errorFacts: call.errorFacts,
+      }));
 }
 
 /**
@@ -118,25 +143,31 @@ function toolDisplaysFromStreamEvents(
   return displays;
 }
 
-function toolEnvelopesFromStreamEvents(
+export function toolEvidenceFromStreamEvents(
   events: readonly PanelRunStreamEvent[]
-): readonly ToolResultEnvelope[] {
-  const envelopes: ToolResultEnvelope[] = [];
+): readonly ToolCallEvidence[] {
+  const evidence: ToolCallEvidence[] = [];
   const seen = new Set<string>();
   for (const event of events) {
-    const envelope = event.detail?.envelope;
-    if (envelope === undefined) {
+    if (event.type !== "tool.completed" && event.type !== "tool.failed" && event.type !== "tool.cancelled") {
       continue;
     }
-    const key = envelope.diagnosticRef ?? JSON.stringify({
-      summary: envelope.agentSummary,
-      evidenceRefs: envelope.evidenceRefs,
+    const callId = event.toolCallRefs[0];
+    if (callId === undefined || seen.has(callId)) {
+      continue;
+    }
+    seen.add(callId);
+    evidence.push({
+      callId,
+      toolName: event.toolName,
+      status: event.type === "tool.completed" ? "completed" : event.type === "tool.cancelled" ? "cancelled" : "failed",
+      summary: event.summary,
+      evidenceRefs: event.sourceRefs.length > 0 ? event.sourceRefs : event.toolCallRefs,
+      truncated: event.detail?.truncated,
+      error: event.detail?.error,
+      errorDomain: event.detail?.errorDomain,
+      errorFacts: event.detail?.errorFacts,
     });
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    envelopes.push(envelope);
   }
-  return envelopes;
+  return evidence;
 }

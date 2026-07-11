@@ -2,9 +2,7 @@
 import type { ModelMessage, ModelUsage } from "../intelligence/contracts.js";
 import type {
   ToolCallRequest,
-  ToolDisplayProjection,
   ToolErrorFacts,
-  ToolResultEnvelope,
 } from "../tools/contracts.js";
 
 export type SubAgentSourceKind = "builtin" | "project" | "user" | "plugin" | "custom";
@@ -95,8 +93,6 @@ export type SubAgentToolTrace = {
   readonly durationMs?: number;
   readonly confirmationId?: string;
   readonly outputSummary?: string;
-  readonly display?: ToolDisplayProjection;
-  readonly envelope?: ToolResultEnvelope;
   readonly error?: string;
   readonly errorFacts?: ToolErrorFacts;
 };

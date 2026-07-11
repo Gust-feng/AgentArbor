@@ -1,4 +1,5 @@
-import type { ToolCallRequest, ToolDisplayProjection } from "../../domain/tools/index.js";
+import type { ToolDisplayProjection } from "../../domain/observation/index.js";
+import type { ToolCallRequest } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 import { commandProgramFromToolResult, commandTextFromToolResult } from "./command-text.js";
 import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";

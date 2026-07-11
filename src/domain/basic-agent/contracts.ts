@@ -1,12 +1,11 @@
 import type { RunAgentDefinitionRef } from "../config/contracts.js";
 import type { ModelUsage } from "../intelligence/contracts.js";
 import type { ObservationRef } from "../observation/contracts.js";
+import type { ToolDisplayProjection } from "../observation/tool-display.js";
 import type { SubAgentRunView } from "../sub-agents/contracts.js";
 import type {
-  ToolDisplayProjection,
   ToolErrorDomain,
   ToolErrorFacts,
-  ToolResultEnvelope,
 } from "../tools/contracts.js";
 import type { ConfirmationRequest } from "./confirmation-contracts.js";
 export type { ConfirmationDecision, ConfirmationRequest, ConfirmationRiskLevel } from "./confirmation-contracts.js";
@@ -73,7 +72,6 @@ export type RunEvent = {
     readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
-    readonly envelope?: ToolResultEnvelope;
     readonly truncated?: boolean;
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;
@@ -368,6 +366,18 @@ export type TriggeredSkillReadModel = {
   readonly selection?: SkillSelectionDecisionFacts;
 };
 
+export type ToolCallEvidence = {
+  readonly callId: string;
+  readonly toolName?: string;
+  readonly status: "completed" | "failed" | "cancelled";
+  readonly summary?: string;
+  readonly evidenceRefs: readonly string[];
+  readonly truncated?: boolean;
+  readonly error?: string;
+  readonly errorDomain?: ToolErrorDomain;
+  readonly errorFacts?: ToolErrorFacts;
+};
+
 export type DesktopWorkViewReadModel = {
   readonly run: BasicAgentRun;
   readonly stage: DesktopWorkViewStage;
@@ -379,7 +389,7 @@ export type DesktopWorkViewReadModel = {
   readonly pendingConfirmation?: ConfirmationRequest;
   readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;
-  readonly toolEvidence: readonly ToolResultEnvelope[];
+  readonly toolEvidence: readonly ToolCallEvidence[];
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly subAgentRuns?: readonly SubAgentRunView[];

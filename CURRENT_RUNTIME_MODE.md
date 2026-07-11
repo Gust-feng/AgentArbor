@@ -8,7 +8,7 @@
 
 - 用户入口：`Desktop Shell / Panel`
 - 默认运行模式：`agent`
-- 默认执行主线：`用户消息 -> Task Soil -> 普通 Agent 主循环 -> 工具调用/命令确认 -> 结果投影`
+- 默认执行主线：`用户消息 -> Task Soil -> 普通 Agent 主循环 -> 工具调用/命令确认 -> 事实 read-model`
 - 默认交互形态：线性会话驱动；用户在同一个 conversation 中一轮接一轮补充上下文、要求和判断
 - 当前已暴露显式 Agent 集群 beta 模块：用户先在 `设置 -> 关于` 启用“Agent 集群（beta）”，Panel 侧栏“新任务”下方才显示 `Agent 集群` 入口；正式后端入口为 `/api/deep/*`；内部仍沿用 `deep` / `DeepRuntime` 命名（当前为 manager 自由决策循环 + 一层 child 的最小协作闭环，见 ADR-0025）
 - 默认仍为普通 `agent`，启动后不因历史 Agent 集群运行抢占普通入口，也不自动把普通请求升级为 Agent 集群；`deep` 只能由用户显式触发，不存在自动升级
@@ -76,6 +76,9 @@
 - 工程决定本轮 Agent 能看见哪些工具
 - 当前默认普通 `agent` 的工具可见性由后端结构化能力快照与 `AgentDefinition.toolVisibilityProfile` 共同裁剪，不再依赖工具名前缀约定
 - 普通 `agent` 只有在后端已经冻结 `capabilitySnapshot` 后，才会把工具暴露给模型；裸 `ToolCenter` 只负责执行，不再单独决定模型可见工具
+- `ToolCenter` 只执行工具、权限/策略校验与命令确认，并返回 `ToolCallResult` 执行事实；不保存逐 run 调用计数或预算，不生成模型消息、UI display、envelope 或持久化投影。轮次/预算由 Agent loop 决策，模型、事件和 Panel 分别从同一事实单向派生自己的消费视图
+- 新写入的工具事件与 run record 只保留稳定事实、引用和错误域；工具原始大内容由工具结果的 continuation/reference 机制按需提供。旧 `projection / envelope / display` 记录不再读取或迁移，旧 snapshot 不满足新契约时属于开发期失效数据
+- 工具生命周期固定为 `tool.requested / tool.completed / tool.failed / tool.cancelled`，确认等待使用 `user_approval.requested`；live、replay、conversation history 和持久化视图从同一 append-only 事件归约语义消费调用事实
 - 普通 `agent` 的本轮模型配置事实来自 run 创建时冻结的 `capabilitySnapshot.activeModel`；执行、持久化、恢复和用户可见 read-model 不能再用当前全局模型配置覆盖它
 - 普通 `agent` 的本轮模型能力事实来自 run 创建时冻结的 `capabilitySnapshot.modelCapabilities`；直接调用参数里的临时 `modelCapabilities` 只能服务没有冻结快照的测试或兼容调用，不能覆盖已创建 run 的上下文窗口、输出预算、工具调用能力或流式能力
 - 普通 `agent` 的附件读图工具只在本轮模型能力支持视觉输入时进入可用工具集合；工具读取的图片字节只作为临时 `ModelMessage.attachments` 进入下一轮模型请求，不进入事件、run record 或 Panel read-model，工具 JSON 结果只保留图片元数据和本轮模型输入状态

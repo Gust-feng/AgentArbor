@@ -19,6 +19,7 @@ export type PanelRunStreamEventType =
   | "tool.requested"
   | "tool.completed"
   | "tool.failed"
+  | "tool.cancelled"
   | "sub_agent.started"
   | "sub_agent.completed"
   | "sub_agent_batch.started"

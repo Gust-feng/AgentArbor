@@ -311,7 +311,7 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
     assert.equal(readEvent.detail?.preview?.includes("文件正文只进入本轮工具上下文"), false);
     assert.equal(readEvent.detail?.preview?.includes(rawToolOutput), false);
     assert.equal(persistedCall.path, "notes.md");
-    assert.equal(persistedCall.display?.kind, "generic_tool_summary");
+    assert.equal("display" in persistedCall, false);
     assert.equal(typeof persistedCall.preview, "string");
     assert.equal((persistedCall.preview ?? "").length > 0, true);
     assert.equal(persistedCall.preview.includes("notes.md"), true);

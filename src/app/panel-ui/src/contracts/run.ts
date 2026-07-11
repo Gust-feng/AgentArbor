@@ -5,7 +5,7 @@ import type {
   ToolDisplayProjection,
   ToolErrorFacts,
   ToolFileDisplayOperation,
-  ToolResultEnvelope,
+  ToolCallEvidence,
 } from "./tools";
 import type {
   PanelBasicAgentReplay,
@@ -153,7 +153,6 @@ export type RunEvent = {
     readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
-    readonly envelope?: ToolResultEnvelope;
     readonly truncated?: boolean;
     readonly error?: string;
     readonly errorDomain?: string;
@@ -236,7 +235,6 @@ export type SubAgentToolTrace = {
   readonly confirmationId?: string;
   readonly outputSummary?: string;
   readonly display?: ToolDisplayProjection;
-  readonly envelope?: ToolResultEnvelope;
   readonly error?: string;
   readonly errorFacts?: ToolErrorFacts;
 };
@@ -282,7 +280,6 @@ export type PanelStreamEvent = {
     readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
-    readonly envelope?: ToolResultEnvelope;
     readonly error?: string;
     readonly errorDomain?: string;
     readonly errorFacts?: ToolErrorFacts;
@@ -533,7 +530,7 @@ export type DesktopWorkView = {
   };
   readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;
-  readonly toolEvidence: readonly ToolResultEnvelope[];
+  readonly toolEvidence: readonly ToolCallEvidence[];
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes?: readonly TranscriptNode[];
   readonly subAgentRuns?: readonly SubAgentRunView[];

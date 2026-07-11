@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
-import type { ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { BasicAgentRun, RunEvent, ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import { createDesktopWorkViewReadModel } from "./work-view.js";
 import { transcriptNodesFromRunEvents } from "./work-view-transcript.js";
 
@@ -679,11 +678,12 @@ test("work view read model keeps tool evidence out of ordinary message deliverab
         observationPanelRole: "safe",
       },
     },
-    toolEvidence: [searchEnvelope()],
+    toolEvidence: [searchEvidence()],
+    toolDisplays: [searchDisplay()],
   });
 
   assert.equal(workView.toolEvidence.length, 1);
-  assert.equal(workView.toolEvidence[0]?.uiDisplay?.kind, "search_results");
+  assert.equal(workView.toolEvidence[0]?.toolName, "search");
   assert.equal(workView.answer?.content, "已根据搜索证据回答。");
   assert.equal(workView.deliverable, undefined);
   const toolEntry = workView.contextLedger.entries.find((entry) => entry.kind === "tool_evidence");
@@ -696,10 +696,12 @@ test("work view read model keeps tool evidence out of ordinary message deliverab
 
 test("work view tool evidence preserves tool error facts", () => {
   const run = basicRun("failed");
-  const failedEvidence: ToolResultEnvelope = {
-    ...searchEnvelope(),
-    agentSummary: "read_file failed for missing.md",
-    diagnosticRef: "tool:call-read-missing",
+  const failedEvidence: ToolCallEvidence = {
+    ...searchEvidence(),
+    callId: "tool:call-read-missing",
+    toolName: "read_file",
+    status: "failed",
+    summary: "read_file failed for missing.md",
     errorDomain: "tool_error",
     errorFacts: {
       code: "ENOENT",
@@ -1222,24 +1224,26 @@ function event(runId: string, type: string, summary: string, status: BasicAgentR
   };
 }
 
-function searchEnvelope(): ToolResultEnvelope {
+function searchEvidence(): ToolCallEvidence {
   return {
-    agentSummary: "Search found one relevant source. sk-tool-secret",
+    callId: "tool:call-search",
+    toolName: "search",
+    status: "completed",
+    summary: "Search found one relevant source. sk-tool-secret",
     evidenceRefs: ["tool:call-search", "web:https://example.test/agentarbor"],
-    uiDisplay: {
-      kind: "search_results",
-      query: "AgentArbor",
-      message: "search source message",
-      results: [{
-        title: "AgentArbor docs",
-        url: "https://example.test/agentarbor",
-        snippet: "safe snippet",
-      }],
-    },
-    tokenEstimate: 16,
     truncated: false,
-    redacted: false,
-    diagnosticRef: "tool:call-search",
-    rawRetention: "none",
+  };
+}
+
+function searchDisplay() {
+  return {
+    kind: "search_results" as const,
+    query: "AgentArbor",
+    message: "search source message",
+    results: [{
+      title: "AgentArbor docs",
+      url: "https://example.test/agentarbor",
+      snippet: "safe snippet",
+    }],
   };
 }

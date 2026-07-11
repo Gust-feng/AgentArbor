@@ -1,8 +1,8 @@
 import type { ModelMessage, ModelResponse } from "../../domain/intelligence/index.js";
 import type { ToolCallRequest, ToolCallResult, ToolContinuation } from "../../domain/tools/index.js";
-import { redactOrdinaryToolText } from "../tools/index.js";
-import { toSafeToolEventValue } from "./tool-events.js";
+import { toolModelAttachmentsFromOutput } from "../../domain/tools/index.js";
 import { cloneModelMessage, cloneToolCallRequest } from "./tool-use-loop-cloning.js";
+import { toolCallResultToModelToolResult } from "./tool-call-result-model-view.js";
 
 export function assistantToolCallMessage(
   response: ModelResponse,
@@ -23,21 +23,8 @@ export function assistantToolCallMessage(
 }
 
 export function toolResultMessage(result: ToolCallResult): ModelMessage {
-  const envelope = result.projection?.envelope;
-  const attachments = result.projection?.modelAttachments;
-  const modelOutput = result.projection?.modelResult !== undefined
-    ? sanitizeProjectedAgentContent(result.projection.modelResult)
-    : result.projection?.agentContent !== undefined
-      ? sanitizeProjectedAgentContent(result.projection.agentContent)
-      : envelope !== undefined
-        ? {
-            summary: envelope.agentSummary,
-            evidenceRefs: envelope.evidenceRefs,
-            truncated: envelope.truncated,
-            redacted: envelope.redacted,
-            diagnosticRef: envelope.diagnosticRef,
-          }
-        : toSafeToolEventValue(result.output);
+  const attachments = toolModelAttachmentsFromOutput(result.output);
+  const modelOutput = toolCallResultToModelToolResult(result);
   const payload = {
     callId: result.callId,
     toolName: result.toolName,
@@ -61,39 +48,15 @@ export function toolResultMessages(results: readonly ToolCallResult[]): ModelMes
   return results.map(toolResultMessage);
 }
 
-// Final transport guard after ToolSafeProjection.agentContent has already
-// shaped model-visible tool content. Keep this larger than the projection caps
-// so stdout/stderr and file bodies are not silently replaced by a short message.
+// Final transport guard after factual model content has been formed. Keep this
+// large enough that stdout/stderr and file bodies are not silently summarized.
 const MAX_TOOL_MESSAGE_CHARS = 220_000;
 const MAX_SUB_AGENT_TOOL_MESSAGE_CHARS = 1_000_000;
 const MAX_TRANSPORT_CONTINUATIONS = 32;
 const SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
 
 function safeToolErrorForModel(error: string | undefined): string | undefined {
-  return error === undefined ? undefined : redactOrdinaryToolText(error, 1_000);
-}
-
-function sanitizeProjectedAgentContent(value: unknown): unknown {
-  if (value === undefined || value === null) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(sanitizeProjectedAgentContent);
-  }
-  if (typeof value === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      result[key] = sanitizeProjectedAgentContent(item);
-    }
-    return result;
-  }
-  return String(value);
+  return error;
 }
 
 function toolMessageContentBudget(result: ToolCallResult): number {
@@ -285,7 +248,7 @@ function toolContinuationFromUnknown(value: unknown): ToolContinuation | undefin
   const record = asRecord(value);
   const ref = typeof record.ref === "string" && record.ref.trim().length > 0 ? record.ref : undefined;
   const note = typeof record.note === "string" && record.note.trim().length > 0 ? record.note : undefined;
-  const nextInput = record.nextInput === undefined ? undefined : sanitizeProjectedAgentContent(record.nextInput);
+  const nextInput = record.nextInput === undefined ? undefined : cloneToolFactValue(record.nextInput);
   if (ref === undefined && note === undefined && nextInput === undefined) {
     return undefined;
   }
@@ -294,6 +257,15 @@ function toolContinuationFromUnknown(value: unknown): ToolContinuation | undefin
   if (nextInput !== undefined) continuation.nextInput = nextInput;
   if (note !== undefined) continuation.note = note;
   return continuation as ToolContinuation;
+}
+
+function cloneToolFactValue(value: unknown): unknown {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map(cloneToolFactValue);
+  if (typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, cloneToolFactValue(item)]));
+  }
+  return String(value);
 }
 
 function compactJsonPreview(value: unknown, maxChars: number): string {

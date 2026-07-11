@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ToolExecutor } from "../../domain/tools/index.js";
+import type { ToolCallResult, ToolExecutor } from "../../domain/tools/index.js";
+import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { ToolCenter } from "./tool-center.js";
 
 test("ToolCenter registers, lists, executes, and unregisters tools", async () => {
@@ -18,7 +19,6 @@ test("ToolCenter registers, lists, executes, and unregisters tools", async () =>
 
   assert.equal(result.status, "completed");
   assert.deepEqual(result.output, { input: { value: "hello" } });
-  assert.equal(center.getCallCount(), 1);
 
   center.unregister("echo");
   assert.equal(center.has("echo"), false);
@@ -59,7 +59,6 @@ test("ToolCenter enforces allowedTools permissions", async () => {
 
   assert.equal(result.status, "failed");
   assert.match(result.error ?? "", /未授权/);
-  assert.equal(center.getCallCount(), 0);
 });
 
 test("ToolCenter rejects permission records for a different caller agent", async () => {
@@ -74,11 +73,10 @@ test("ToolCenter rejects permission records for a different caller agent", async
 
   assert.equal(result.status, "failed");
   assert.match(result.error ?? "", /调用者身份与本轮工具授权不一致/);
-  assert.equal(center.getCallCount(), 0);
 });
 
-test("ToolCenter enforces maxCallsPerRun", async () => {
-  const center = new ToolCenter({ maxCallsPerRun: 1 });
+test("ToolCenter does not retain run call budgets between executions", async () => {
+  const center = new ToolCenter();
   center.register(testTool("echo", async () => ({ ok: true })));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
@@ -86,12 +84,7 @@ test("ToolCenter enforces maxCallsPerRun", async () => {
   const second = await center.execute({ callId: "call-2", toolName: "echo", input: {} }, context, allowTools("echo"));
 
   assert.equal(first.status, "completed");
-  assert.equal(second.status, "failed");
-  assert.match(second.error ?? "", /保护上限/);
-  assert.equal(center.getCallCount(), 1);
-
-  center.resetCallCount();
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(second.status, "completed");
 });
 
 test("ToolCenter default does not add a small tool-call budget", async () => {
@@ -103,7 +96,6 @@ test("ToolCenter default does not add a small tool-call budget", async () => {
     const result = await center.execute({ callId: `call-${index}`, toolName: "echo", input: {} }, context, allowTools("echo"));
     assert.equal(result.status, "completed");
   }
-  assert.equal(center.getCallCount(), 25);
 });
 
 test("ToolCenter gates any tool metadata that requires confirmation before execution", async () => {
@@ -151,8 +143,6 @@ test("ToolCenter gates any tool metadata that requires confirmation before execu
   assert.equal(writes, 1);
   assert.equal(deletes, 0);
   assert.equal(executes, 0);
-  assert.equal(center.getCallCount(), 1);
-  assert.equal(deleteResult.projection?.diagnosticRef, "tool:call-delete:confirmation-required");
 });
 
 test("ToolCenter keeps shell_command behind confirmation until the same confirmation id is approved", async () => {
@@ -185,8 +175,7 @@ test("ToolCenter keeps shell_command behind confirmation until the same confirma
   assert.equal(pending.confirmationRequest?.actionSummary, "Shell 命令：pnpm test");
   assert.equal(result.status, "completed");
   assert.equal(executes, 1);
-  assert.equal(center.getCallCount(), 1);
-  assert.equal(result.projection?.uiSummary, "safe command summary");
+  assert.deepEqual(result.output, { summary: "safe command summary" });
 });
 
 test("ToolCenter can accept a tool executor supplied approval_required result", async () => {
@@ -225,7 +214,6 @@ test("ToolCenter can accept a tool executor supplied approval_required result", 
   assert.deepEqual(result.input, { task: "delegate" });
   assert.equal(result.confirmationRequest?.confirmationId, "confirmation-inner-call");
   assert.deepEqual(result.confirmationRequest?.affectedResources, ["inner-resource"]);
-  assert.equal(center.getCallCount(), 0);
 });
 
 test("ToolCenter lets full access mode execute confirmation-gated shell commands", async () => {
@@ -246,7 +234,6 @@ test("ToolCenter lets full access mode execute confirmation-gated shell commands
   assert.equal(result.status, "completed");
   assert.equal(result.confirmationRequest, undefined);
   assert.equal(executes, 1);
-  assert.equal(center.getCallCount(), 1);
 });
 
 test("ToolCenter executes the same non-command tool call only after matching confirmation approval", async () => {
@@ -275,7 +262,6 @@ test("ToolCenter executes the same non-command tool call only after matching con
   assert.equal(wrongApproval.status, "approval_required");
   assert.equal(approved.status, "completed");
   assert.equal(deletes, 1);
-  assert.equal(center.getCallCount(), 1);
 });
 
 test("ToolCenter adds typed display projections for command output without redaction", async () => {
@@ -299,9 +285,9 @@ test("ToolCenter adds typed display projections for command output without redac
   );
 
   assert.equal(result.status, "completed");
-  assert.equal(result.projection?.display?.kind, "command_summary");
-  assert.equal(result.projection?.redacted, false);
-  assert.equal(JSON.stringify(result.projection?.display).includes("sk-test-secret-token"), true);
+  const display = displayFor(result);
+  assert.equal(display.kind, "command_summary");
+  assert.equal(JSON.stringify(display).includes("sk-test-secret-token"), true);
 });
 
 test("ToolCenter adds typed display projections for search results", async () => {
@@ -328,8 +314,9 @@ test("ToolCenter adds typed display projections for search results", async () =>
   );
 
   assert.equal(result.status, "completed");
-  assert.equal(result.projection?.display?.kind, "search_results");
-  assert.equal(result.projection?.display?.kind === "search_results" ? result.projection.display.results[0]?.title : "", "AgentArbor result");
+  const display = displayFor(result);
+  assert.equal(display.kind, "search_results");
+  assert.equal(display.kind === "search_results" ? display.results[0]?.title : "", "AgentArbor result");
 });
 
 test("ToolCenter file diff display ignores legacy oldText/newText preview fields", async () => {
@@ -359,13 +346,14 @@ test("ToolCenter file diff display ignores legacy oldText/newText preview fields
     allowTools("edit_file")
   );
 
-  const displayJson = JSON.stringify(result.projection?.display);
+  const display = displayFor(result);
+  const displayJson = JSON.stringify(display);
   assert.equal(result.status, "completed");
-  assert.equal(result.projection?.display?.kind, "file_diff_preview");
+  assert.equal(display.kind, "file_diff_preview");
   assert.equal(displayJson.includes("old file body"), false);
   assert.equal(displayJson.includes("new file body"), false);
   assert.equal(displayJson.includes("sk-edit-secret"), false);
-  assert.equal(result.projection?.display?.kind === "file_diff_preview" ? result.projection.display.replacements : 0, 1);
+  assert.equal(display.kind === "file_diff_preview" ? display.replacements : 0, 1);
 });
 
 test("ToolCenter file diff display exposes bounded edit preview without redaction", async () => {
@@ -394,7 +382,7 @@ test("ToolCenter file diff display exposes bounded edit preview without redactio
     allowTools("edit_file")
   );
 
-  const display = result.projection?.display;
+  const display = displayFor(result);
   const displayJson = JSON.stringify(display);
   assert.equal(result.status, "completed");
   assert.equal(display?.kind, "file_diff_preview");
@@ -429,7 +417,7 @@ test("ToolCenter file diff display prefers precise edit parameters in preview la
     allowTools("edit_file")
   );
 
-  const display = result.projection?.display;
+  const display = displayFor(result);
   assert.equal(result.status, "completed");
   assert.equal(display?.kind, "file_diff_preview");
   assert.equal(display?.kind === "file_diff_preview" ? display.preview?.includes("@@ occurrence 2 · line 3") : false, true);
@@ -461,7 +449,7 @@ test("ToolCenter file change display exposes bounded create preview without reda
     allowTools("create_file")
   );
 
-  const display = result.projection?.display;
+  const display = displayFor(result);
   const displayJson = JSON.stringify(display);
   assert.equal(result.status, "completed");
   assert.equal(display?.kind, "file_change_summary");
@@ -489,31 +477,12 @@ test("ToolCenter preserves adapter error facts in failed results and projections
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
     allowTools("shell_command")
   );
-  const agentContent = result.projection?.agentContent as {
-    readonly status?: string;
-    readonly toolName?: string;
-    readonly callId?: string;
-    readonly error?: string;
-    readonly errorDomain?: string;
-    readonly facts?: Record<string, unknown>;
-    readonly durationMs?: number;
-  };
-
   assert.equal(result.status, "failed");
   assert.equal(result.errorDomain, "process_error");
   assert.equal(result.errorFacts?.code, "ENOENT");
   assert.equal(result.errorFacts?.syscall, "spawn");
   assert.equal(result.errorFacts?.command, "pnpm");
   assert.deepEqual(result.errorFacts?.args, ["missing"]);
-  assert.equal(result.projection?.envelope?.errorDomain, "process_error");
-  assert.equal(result.projection?.envelope?.errorFacts?.code, "ENOENT");
-  assert.equal(agentContent.status, "failed");
-  assert.equal(agentContent.toolName, "shell_command");
-  assert.equal(agentContent.callId, "call-shell-failed");
-  assert.equal(agentContent.error, "spawn pnpm ENOENT");
-  assert.equal(agentContent.errorDomain, "process_error");
-  assert.equal(agentContent.facts?.code, "ENOENT");
-  assert.equal(agentContent.durationMs, result.durationMs);
 });
 
 test("ToolCenter list returns cloned metadata", () => {
@@ -597,4 +566,12 @@ function allowTools(...allowedTools: readonly string[]) {
     callerAgentId: "agent-test",
     allowedTools,
   };
+}
+
+function displayFor(result: ToolCallResult) {
+  return projectToolDisplay({
+    callId: result.callId,
+    toolName: result.toolName,
+    input: result.input,
+  }, result.output);
 }

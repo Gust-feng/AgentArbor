@@ -1,7 +1,6 @@
-import type { ContextLedger } from "../../domain/basic-agent/index.js";
+import type { ContextLedger, ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import { createId } from "../../kernel/id.js";
 import type {
   DesktopAgentConversationMessage,
@@ -51,7 +50,7 @@ export type CreateBasicAgentContextLedgerInput = {
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly toolEvidence?: readonly ToolResultEnvelope[];
+  readonly toolEvidence?: readonly ToolCallEvidence[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly tokenCounter?: BasicAgentTokenCounter;
   readonly maxMessages?: number;
@@ -97,13 +96,13 @@ export function createBasicAgentContextLedger(input: CreateBasicAgentContextLedg
   });
 }
 
-export function appendToolEnvelopeToContextLedger(
+export function appendToolEvidenceToContextLedger(
   ledger: BasicAgentContextLedger,
-  envelope: ToolResultEnvelope
+  evidence: ToolCallEvidence
 ): BasicAgentContextLedger {
   return buildContextLedgerFromItems({
     runId: ledger.runId,
-    draft: insertBeforeCurrentUser(ledger.items, toolEvidenceItems([envelope])),
+    draft: insertBeforeCurrentUser(ledger.items, toolEvidenceItems([evidence])),
     maxMessages: ledger.budget.maxMessages,
     maxInputTokens: ledger.budget.maxInputTokens,
     maxChars: ledger.budget.maxChars,
@@ -113,7 +112,7 @@ export function appendToolEnvelopeToContextLedger(
       reservedOutputTokens: ledger.budget.reservedOutputTokens,
       budgetSource: ledger.budget.budgetSource,
     },
-    extraEvidenceRefs: envelope.evidenceRefs,
+    extraEvidenceRefs: evidence.evidenceRefs,
   });
 }
 

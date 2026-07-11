@@ -421,7 +421,6 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
     );
     assert.equal(readResult.status, "completed");
     assert.match(JSON.stringify(readResult.output), /Frozen: agent/);
-    assert.equal(readResult.projection?.envelope?.rawRetention, "none");
 
     const denied = await toolCenter.execute(
       { callId: "call-denied", toolName: "frozen__lookup", input: { query: "agent" } },

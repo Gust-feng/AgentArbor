@@ -1,4 +1,4 @@
-import type { ToolDisplayProjection } from "../../domain/tools/index.js";
+import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 
 export type AgentRunTreeAttachmentStatus = "running" | "completed" | "failed" | "stopped";
 

@@ -46,8 +46,6 @@ export function cloneToolResults(results: readonly ToolCallResult[]): ToolCallRe
     ...result,
     input: globalThis.structuredClone(result.input),
     output: globalThis.structuredClone(result.output),
-    projection:
-      result.projection === undefined ? undefined : globalThis.structuredClone(result.projection),
     confirmationRequest:
       result.confirmationRequest === undefined ? undefined : globalThis.structuredClone(result.confirmationRequest),
   }));

@@ -478,12 +478,6 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
             exitCode: 0,
             stdout: "RAW_STDOUT_SENTINEL",
           },
-          envelope: {
-            agentSummary: "safe command summary",
-            evidenceRefs: ["tool:tool-call-1"],
-            rawRetention: "none",
-            redacted: false,
-          },
         },
       },
     }),
@@ -525,8 +519,7 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
   assert.equal(runtimeEvent.summary.includes("hidden-token"), true);
   assert.equal(modelCall.requestId, "request-1");
   assert.equal(toolCalls[0]?.command, "pnpm test");
-  assert.equal(toolCalls[0]?.display?.kind, "command_summary");
-  assert.equal(toolCalls[0]?.envelope?.rawRetention, "none");
+  assert.equal(JSON.stringify(toolCalls).includes('"display"'), false);
   assert.equal(JSON.stringify(toolCalls).includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(confirmations[0]?.status, "guidance");
   assert.equal(confirmations[0]?.actionSummary, "是否运行命令？");
@@ -682,13 +675,7 @@ test("runtime record mapper persists ordinary tool previews without diagnostic c
   assert.equal(toolCalls.find((call) => call.callId === "tool-edit")?.preview, "- old visible line\n+ new visible line");
   assert.equal(toolCalls.find((call) => call.callId === "tool-create")?.preview, "created.md · 已创建\n文件：created.md");
   assert.equal(toolCalls.find((call) => call.callId === "tool-delete")?.preview, "old.md · 已删除\n文件：old.md");
-  assert.equal(listedCall?.display?.kind, "directory_listing");
-  assert.equal(
-    listedCall?.display?.kind === "directory_listing"
-      ? listedCall.display.totalEntries
-      : undefined,
-    2,
-  );
+  assert.equal(serialized.includes('"display"'), false);
   assert.equal(serialized.includes("exit 0"), false);
   assert.equal(serialized.includes("32 -> 18 chars"), false);
   assert.equal(serialized.includes("RAW_STDOUT_SENTINEL"), false);
@@ -729,18 +716,9 @@ test("runtime tool call records preserve tool and process error domains", () => 
         toolName: "read_file",
         input: { path: "missing.md" },
         error: "ENOENT: no such file or directory, open missing.md",
+        errorDomain: "tool_error",
+        errorFacts: { code: "ENOENT", path: "missing.md" },
         output: {
-          envelope: {
-            agentSummary: "ENOENT: no such file or directory, open missing.md",
-            evidenceRefs: ["tool:tool-read-missing"],
-            rawRetention: "none",
-            redacted: false,
-            errorDomain: "tool_error",
-            errorFacts: {
-              code: "ENOENT",
-              path: "missing.md",
-            },
-          },
         },
       },
     }),
@@ -763,9 +741,7 @@ test("runtime tool call records preserve tool and process error domains", () => 
   ]);
 
   assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.errorDomain, "tool_error");
-  assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.envelope?.errorDomain, "tool_error");
   assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.errorFacts?.code, "ENOENT");
-  assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.envelope?.errorFacts?.path, "missing.md");
   assert.equal(toolCalls.find((call) => call.callId === "tool-shell-missing")?.errorDomain, "process_error");
 });
 
@@ -786,31 +762,6 @@ test("runtime record mapper preserves projected failure facts from real tool.fai
     errorDomain: "process_error",
     errorFacts,
     durationMs: 7,
-    projection: {
-      agentContent: {
-        status: "failed",
-        toolName: "shell_command",
-        callId: "tool-shell-missing",
-        error: "spawn pnpm ENOENT",
-        errorDomain: "process_error",
-        errorFacts,
-      },
-      uiSummary: "spawn pnpm ENOENT",
-      diagnosticRef: "tool:tool-shell-missing:failed",
-      envelope: {
-        agentSummary: "spawn pnpm ENOENT",
-        evidenceRefs: ["tool:tool-shell-missing"],
-        tokenEstimate: 8,
-        truncated: false,
-        redacted: false,
-        diagnosticRef: "tool:tool-shell-missing:failed",
-        rawRetention: "none",
-        errorDomain: "process_error",
-        errorFacts,
-      },
-      truncated: false,
-      redacted: false,
-    },
   };
   const message = createToolFailedMessage({
     result,
@@ -820,15 +771,6 @@ test("runtime record mapper preserves projected failure facts from real tool.fai
       goalId: "goal-test",
     },
   });
-  const projectedOutput = message.payload.output as {
-    readonly envelope?: {
-      readonly errorDomain?: string;
-      readonly errorFacts?: {
-        readonly code?: string;
-        readonly command?: string;
-      };
-    };
-  };
   const eventEntries: readonly EventLogEntry[] = [
     {
       sequence: 1,
@@ -856,22 +798,16 @@ test("runtime record mapper preserves projected failure facts from real tool.fai
 
   assert.equal(message.payload.errorDomain, "process_error");
   assert.equal(message.payload.errorFacts?.code, "ENOENT");
-  assert.equal(projectedOutput.envelope?.errorDomain, "process_error");
-  assert.equal(projectedOutput.envelope?.errorFacts?.command, "pnpm");
   assert.equal(failedStreamEvent?.detail?.errorDomain, "process_error");
-  assert.equal(failedStreamEvent?.detail?.envelope?.errorFacts?.code, "ENOENT");
   assert.equal(failedStreamEvent?.detail?.errorFacts?.syscall, "spawn");
   assert.equal(failedNode?.phase, "failed");
   assert.equal(failedNode?.refs.some((ref) => ref.kind === "tool_call" && ref.id === "tool-shell-missing"), true);
   assert.equal(call?.errorDomain, "process_error");
   assert.equal(call?.errorFacts?.code, "ENOENT");
   assert.deepEqual(call?.errorFacts?.args, ["missing"]);
-  assert.equal(call?.envelope?.errorDomain, "process_error");
-  assert.equal(call?.envelope?.errorFacts?.command, "pnpm");
 });
 
 test("runtime record mapper omits ephemeral tool model attachments", () => {
-  const attachmentData = "BASE64_IMAGE_SENTINEL";
   const result: ToolCallResult = {
     callId: "tool-read-image",
     toolName: "read_context_attachment_image",
@@ -889,30 +825,6 @@ test("runtime record mapper omits ephemeral tool model attachments", () => {
     },
     status: "completed",
     durationMs: 5,
-    projection: {
-      agentContent: {
-        summary: "image metadata returned",
-        attachmentId: "ctx-image",
-        modelInput: { attached: true, detail: "auto" },
-      },
-      modelAttachments: [{
-        kind: "image",
-        attachmentId: "ctx-image",
-        inputRef: "local-file:C:/secret/screenshot.png",
-        filename: "screenshot.png",
-        detail: "auto",
-        byteLength: 12,
-        source: { kind: "data", mimeType: "image/png", data: attachmentData },
-      }],
-      uiSummary: "Image attached for model input.",
-      display: {
-        kind: "generic_tool_summary",
-        action: "read_context_attachment_image",
-        summary: "Image attached for model input.",
-      },
-      truncated: false,
-      redacted: false,
-    },
   };
   const message = createToolCompletedMessage({
     result,
@@ -943,8 +855,7 @@ test("runtime record mapper omits ephemeral tool model attachments", () => {
   const call = toolCalls.find((item) => item.callId === "tool-read-image");
 
   assert.equal(call?.toolName, "read_context_attachment_image");
-  assert.equal(call?.display?.kind, "generic_tool_summary");
-  assert.equal(serialized.includes("Image attached for model input."), true);
+  assert.equal(serialized.includes("Image attached for model input."), false);
   assert.equal(serialized.includes("BASE64_IMAGE_SENTINEL"), false);
   assert.equal(serialized.includes("modelAttachments"), false);
   assert.equal(serialized.includes("local-file:"), false);
@@ -969,15 +880,6 @@ test("runtime record mapper persists completed read provider failure facts", () 
     error: "http_request failed: ECONNREFUSED 127.0.0.1:54321",
     errorFacts,
   };
-  const envelope = {
-    agentSummary: "资料读取已完成。\n错误：http_request failed: ECONNREFUSED 127.0.0.1:54321",
-    evidenceRefs: ["tool:tool-read-http", "http://127.0.0.1:54321/status"],
-    tokenEstimate: 24,
-    truncated: false,
-    rawRetention: "none" as const,
-    redacted: false,
-    errorFacts,
-  };
   const toolCalls = toRuntimeToolCallRecords("run-1", [
     streamEvent({
       sequence: 1,
@@ -988,7 +890,6 @@ test("runtime record mapper persists completed read provider failure facts", () 
         kind: "tool",
         action: "读取资料",
         display,
-        envelope,
         errorFacts,
       },
     }),
@@ -1002,9 +903,14 @@ test("runtime record mapper persists completed read provider failure facts", () 
         input: { ref: "http://127.0.0.1:54321/status" },
         output: {
           summary: "资料读取已完成。",
-          display,
-          envelope,
-          result: {},
+          error: display.error,
+          errorFacts,
+          result: {
+            status: display.status,
+            error: display.error,
+            errorFacts,
+            uri: display.ref,
+          },
         },
       },
     }),
@@ -1012,9 +918,7 @@ test("runtime record mapper persists completed read provider failure facts", () 
   const call = toolCalls.find((item) => item.callId === "tool-read-http");
 
   assert.equal(call?.status, "completed");
-  assert.equal(call?.display?.kind, "read_result");
   assert.equal(call?.errorFacts?.code, "ECONNREFUSED");
-  assert.equal(call?.envelope?.errorFacts?.port, 54321);
   assert.equal(call?.preview?.includes("ECONNREFUSED"), true);
 });
 
@@ -1054,8 +958,7 @@ test("runtime record mapper persists search invalid-input messages", () => {
   ]);
   const call = toolCalls.find((item) => item.callId === "tool-search-empty");
 
-  assert.equal(call?.display?.kind, "search_results");
-  assert.equal(call?.display?.kind === "search_results" ? call.display.message : undefined, "search requires a non-empty query.");
+  assert.equal(JSON.stringify(call).includes('"display"'), false);
   assert.equal(call?.preview?.includes("invalid-input"), true);
   assert.equal(call?.preview?.includes("search requires a non-empty query."), true);
 });

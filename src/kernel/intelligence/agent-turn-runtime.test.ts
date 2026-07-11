@@ -694,11 +694,7 @@ class PermissionAwareToolBroker implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {
-    this.executedCount = 0;
-  }
-
-  getCallCount(): number {
+  executionCount(): number {
     return this.executedCount;
   }
 }

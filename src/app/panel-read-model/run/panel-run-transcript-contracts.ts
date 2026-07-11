@@ -1,5 +1,5 @@
 import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../../../domain/config/index.js";
-import type { ToolDisplayProjection } from "../../../domain/tools/index.js";
+import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
 import type { TranscriptNode } from "../../../domain/basic-agent/index.js";
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../../run-read-model/agent-run-tree-attachment.js";
@@ -19,7 +19,7 @@ export type PanelRunStepToolItem = {
   readonly exitCode?: number;
   readonly truncated?: boolean;
   readonly error?: string;
-  readonly status: "running" | "completed" | "failed";
+  readonly status: "running" | "completed" | "failed" | "cancelled";
 };
 
 export type PanelRunStep = {

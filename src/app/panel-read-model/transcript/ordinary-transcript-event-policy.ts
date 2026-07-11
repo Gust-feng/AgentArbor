@@ -18,6 +18,7 @@ export function isOrdinaryTranscriptReasoningSettlementEvent(type: string): bool
     type === "tool.requested" ||
     type === "tool.completed" ||
     type === "tool.failed" ||
+    type === "tool.cancelled" ||
     type === "sub_agent.started" ||
     type === "sub_agent.completed" ||
     type === "sub_agent_batch.started" ||

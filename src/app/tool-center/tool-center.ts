@@ -16,30 +16,18 @@ import type { ConfirmationRequest } from "../../domain/basic-agent/index.js";
 import {
   confirmationRequestFromSecurityDecision,
   evaluateToolCallSecurity,
-  projectToolStatusEnvelope,
 } from "../../kernel/tools/index.js";
-import {
-  projectToolApprovalRequired,
-  projectToolFailure,
-  projectToolResult,
-  redactOrdinaryText,
-} from "../safe-projection.js";
+import { redactOrdinaryText } from "../safe-projection.js";
 
 export type ToolCenterOptions = {
-  readonly maxCallsPerRun?: number;
   readonly platform?: NodeJS.Platform;
 };
 
-const DEFAULT_MAX_CALLS_PER_RUN = Number.MAX_SAFE_INTEGER;
-
 export class ToolCenter {
   private readonly tools = new Map<string, ToolExecutor>();
-  private callCount = 0;
-  private readonly maxCallsPerRun: number;
   private readonly platform: NodeJS.Platform;
 
   constructor(options: ToolCenterOptions = {}) {
-    this.maxCallsPerRun = Math.max(0, Math.floor(options.maxCallsPerRun ?? DEFAULT_MAX_CALLS_PER_RUN));
     this.platform = options.platform ?? process.platform;
   }
 
@@ -105,14 +93,6 @@ export class ToolCenter {
       );
     }
 
-    if (this.callCount >= this.maxCallsPerRun) {
-      return failedToolResult(request, startedAt, {
-        message: `工具调用保护上限已触发：maxCallsPerRun=${this.maxCallsPerRun}。`,
-        errorDomain: "runtime_error",
-        facts: { maxCallsPerRun: this.maxCallsPerRun },
-      });
-    }
-
     const metadata = normalizeToolMetadata(executor.definition);
     const securityDecision = evaluateToolCallSecurity({
       request,
@@ -132,14 +112,12 @@ export class ToolCenter {
           code: securityDecision.code,
           affectedResources: [...securityDecision.affectedResources],
         },
-        diagnosticRef: `tool:${request.callId}:${securityDecision.code}`,
       });
     }
     if (securityDecision.decision === "approval_required") {
       return approvalRequiredToolResult(request, startedAt, securityDecision);
     }
 
-    this.callCount += 1;
     try {
       const output = await executor.execute(request.input, {
         ...context,
@@ -151,11 +129,7 @@ export class ToolCenter {
         return cancelledToolResult(request, startedAt);
       }
       if (isToolExecutorResult(output)) {
-        const result = normalizeExecutorResult(output.result, request, startedAt);
-        if (result.status === "approval_required") {
-          this.callCount = Math.max(0, this.callCount - 1);
-        }
-        return result;
+        return normalizeExecutorResult(output.result, request, startedAt);
       }
       return {
         callId: request.callId,
@@ -164,11 +138,6 @@ export class ToolCenter {
         output,
         status: "completed",
         durationMs: Date.now() - startedAt,
-        projection: projectToolResult({
-          request,
-          output,
-          maxPreviewChars: metadata.visibleResultPolicy.maxPreviewChars,
-        }),
       };
     } catch (error) {
       if (isAbortSignalAborted(context.abortSignal)) {
@@ -178,13 +147,6 @@ export class ToolCenter {
     }
   }
 
-  resetCallCount(): void {
-    this.callCount = 0;
-  }
-
-  getCallCount(): number {
-    return this.callCount;
-  }
 }
 
 function isToolExecutorResult(value: unknown): value is ToolExecutorResult {
@@ -217,7 +179,6 @@ function failedToolResult(
   error: SanitizedToolError
 ): ToolCallResult {
   const durationMs = Date.now() - startedAt;
-  const diagnosticRef = error.diagnosticRef ?? `tool:${request.callId}:failed`;
   return {
     callId: request.callId,
     toolName: request.toolName,
@@ -228,14 +189,6 @@ function failedToolResult(
     errorDomain: error.errorDomain,
     errorFacts: error.facts,
     durationMs,
-    projection: projectToolFailure({
-      request,
-      error: error.message,
-      diagnosticRef,
-      errorDomain: error.errorDomain,
-      errorFacts: error.facts,
-      durationMs,
-    }),
   };
 }
 
@@ -253,18 +206,11 @@ function approvalRequiredToolResult(
     status: "approval_required",
     error: decision.reason,
     durationMs: Date.now() - startedAt,
-    projection: projectToolApprovalRequired({
-      request,
-      toolName: request.toolName,
-      operationType: "confirmation_required",
-      actionSummary: decision.actionSummary,
-    }),
     confirmationRequest,
   };
 }
 
 function cancelledToolResult(request: ToolCallRequest, startedAt: number): ToolCallResult {
-  const diagnosticRef = `tool:${request.callId}:cancelled`;
   return {
     callId: request.callId,
     toolName: request.toolName,
@@ -273,18 +219,6 @@ function cancelledToolResult(request: ToolCallRequest, startedAt: number): ToolC
     status: "cancelled",
     error: "Tool execution cancelled.",
     durationMs: Date.now() - startedAt,
-    projection: {
-      uiSummary: "工具执行已取消。",
-      diagnosticRef,
-      envelope: projectToolStatusEnvelope({
-        request,
-        status: "cancelled",
-        summary: "Tool execution cancelled.",
-        diagnosticRef,
-      }),
-      truncated: false,
-      redacted: false,
-    },
   };
 }
 
@@ -362,7 +296,6 @@ type SanitizedToolError = {
   readonly message: string;
   readonly errorDomain: ToolErrorDomain;
   readonly facts?: ToolErrorFacts;
-  readonly diagnosticRef?: string;
 };
 
 function sanitizeError(error: unknown, toolName: string): SanitizedToolError {

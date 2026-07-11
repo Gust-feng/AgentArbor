@@ -539,8 +539,6 @@ function executableToolBroker(names: readonly string[]): ToolExecutionBroker {
       status: "completed",
       durationMs: 0,
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 0,
   };
 }
 

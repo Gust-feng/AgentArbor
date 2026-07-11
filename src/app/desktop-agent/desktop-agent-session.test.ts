@@ -166,7 +166,7 @@ test("Desktop Agent Session can use authorized tools before answering", async ()
   assert.equal(result.answer?.evidenceRefs.some((ref) => ref.includes("research:codebase:desktop-agent")), true);
   assert.equal(result.toolCallRefs.includes("call-desktop-agent-search"), true);
   assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "tool_summary"), true);
-  assert.equal(toolCenter.getCallCount(), 1);
+  assert.equal(toolCenter.executionCount(), 1);
   assert.equal(result.eventTypes.includes("tool.requested"), true);
   assert.equal(result.eventTypes.includes("tool.completed"), true);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
@@ -600,7 +600,7 @@ test("Desktop Agent Session blocks hidden tool calls before broker execution and
   assert.deepEqual(channel.requests[1]?.tools?.map((tool) => tool.name), ["search"]);
   assert.equal(result.eventTypes.includes("tool.failed"), true);
   assert.equal(result.eventTypes.includes("tool.completed"), false);
-  assert.equal(toolCenter.getCallCount(), 0);
+  assert.equal(toolCenter.executionCount(), 0);
   const toolFeedback = channel.requests[1]?.sanitizedMessages.find(
     (message) => message.role === "tool" && message.toolCallId === "call-hidden-read"
   );
@@ -997,7 +997,7 @@ test("Desktop Agent Session does not let fake mode override snapshot tool-callin
   assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), []);
   assert.deepEqual(result.capabilityResolution?.allowedTools, []);
   assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "search")?.reason, "当前模型不支持工具调用。");
-  assert.equal(toolCenter.getCallCount(), 0);
+  assert.equal(toolCenter.executionCount(), 0);
   assert.equal(toolCenterCreated, false);
 });
 
@@ -1501,9 +1501,7 @@ class BulkyToolCenter implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {}
-
-  getCallCount(): number {
+  executionCount(): number {
     return 0;
   }
 }
@@ -1555,9 +1553,7 @@ class MixedToolCenter implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {}
-
-  getCallCount(): number {
+  executionCount(): number {
     return 0;
   }
 }
@@ -1634,11 +1630,7 @@ class LocalToolCenter implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {
-    this.calls = 0;
-  }
-
-  getCallCount(): number {
+  executionCount(): number {
     return this.calls;
   }
 }
@@ -1834,9 +1826,7 @@ class ApprovalRequiredToolCenter implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {}
-
-  getCallCount(): number {
+  executionCount(): number {
     return 0;
   }
 }
@@ -1902,11 +1892,7 @@ class FixtureToolCenter implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {
-    this.calls = 0;
-  }
-
-  getCallCount(): number {
+  executionCount(): number {
     return this.calls;
   }
 }

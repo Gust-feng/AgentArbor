@@ -10,6 +10,7 @@ import type {
   ToolExecutor,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
+import { withToolModelAttachments } from "../../domain/tools/index.js";
 import { InMemoryEventLog } from "../events/in-memory-event-log.js";
 import { nowIso } from "../id.js";
 import { pendingModelOutputValidation } from "./validation.js";
@@ -99,7 +100,7 @@ test("executeToolUseLoop exposes only allowed registered tools to the model", as
 
   assert.equal(result.stoppedReason, "no_tool_calls");
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
 });
 
 test("executeToolUseLoop uses frozen tool definitions instead of current broker definitions", async () => {
@@ -254,7 +255,7 @@ test("executeToolUseLoop rejects blocked internal tool calls before broker execu
   assert.equal(result.stoppedReason, "completed");
   assert.equal(result.toolCalls[0]?.status, "failed");
   assert.match(result.toolCalls[0]?.error ?? "", /当前不可用/);
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.deepEqual(channel.requests[1]?.tools?.map((tool) => tool.name), []);
 });
 
@@ -283,7 +284,7 @@ test("executeToolUseLoop returns tool results to the model before natural comple
   assert.equal(result.toolCalls.length, 1);
   assert.equal(result.finalOutput.textOutput, "Final answer with tool result.");
   assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.role === "tool"), true);
-  assert.equal(center.getCallCount(), 1);
+  assert.equal(center.executionCount(), 1);
 });
 
 test("executeToolUseLoop preserves user message attachments across tool rounds", async () => {
@@ -332,7 +333,7 @@ test("executeToolUseLoop preserves user message attachments across tool rounds",
   assert.equal(JSON.stringify(secondUser).includes("aW1hZ2U="), true);
 });
 
-test("executeToolUseLoop keeps projected model attachments on tool result messages", async () => {
+test("executeToolUseLoop carries model attachments from the execution output", async () => {
   const attachmentData = "aW1hZ2UtYnl0ZXM=";
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-read-image", "read_context_attachment_image"),
@@ -351,31 +352,24 @@ test("executeToolUseLoop keeps projected model attachments on tool result messag
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { raw: "raw output without image bytes" },
-      status: "completed",
-      durationMs: 1,
-      projection: {
-        agentContent: {
-          summary: "image metadata returned",
+      output: withToolModelAttachments({
+        action: "read_context_attachment_image",
+        result: {
           attachmentId: "ctx-image",
           modelInput: { attached: true, detail: "auto" },
         },
-        modelAttachments: [{
-          kind: "image",
-          attachmentId: "ctx-image",
-          inputRef: "local-file:C:/secret/screenshot.png",
-          filename: "screenshot.png",
-          detail: "auto",
-          byteLength: 11,
-          source: { kind: "data", mimeType: "image/png", data: attachmentData },
-        }],
-        uiSummary: "Image attached for model input.",
-        truncated: false,
-        redacted: false,
-      },
+      }, [{
+        kind: "image",
+        attachmentId: "ctx-image",
+        inputRef: "local-file:C:/secret/screenshot.png",
+        filename: "screenshot.png",
+        detail: "auto",
+        byteLength: 11,
+        source: { kind: "data", mimeType: "image/png", data: attachmentData },
+      }]),
+      status: "completed",
+      durationMs: 1,
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
   };
 
   await executeToolUseLoop(
@@ -395,7 +389,7 @@ test("executeToolUseLoop keeps projected model attachments on tool result messag
   const toolMessage = messages[toolMessageIndex];
 
   assert.ok(toolMessageIndex >= 0);
-  assert.equal(toolMessage?.content.includes("image metadata returned"), true);
+  assert.equal(toolMessage?.content.includes("ctx-image"), true);
   assert.equal(toolMessage?.content.includes(attachmentData), false);
   assert.equal(toolMessage?.attachments?.[0]?.kind, "image");
   assert.equal(toolMessage?.attachments?.[0]?.attachmentId, "ctx-image");
@@ -438,7 +432,7 @@ test("executeToolUseLoop returns tool execution failures as model-visible observ
   assert.equal(toolMessage?.toolCallId, "call-search");
   assert.match(toolMessage?.content ?? "", /"status":"failed"/);
   assert.match(toolMessage?.content ?? "", /fixture backend unavailable/);
-  assert.equal(center.getCallCount(), 1);
+  assert.equal(center.executionCount(), 1);
 });
 
 test("executeToolUseLoop runs context maintenance before continuing after tool results", async () => {
@@ -531,7 +525,7 @@ test("executeToolUseLoop pauses out_of_fuel instead of forcing synthesis when to
 
   assert.equal(result.stoppedReason, "out_of_fuel");
   assert.equal(result.toolCalls.length, 0);
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.equal(channel.requests.length, 1);
 });
 
@@ -641,7 +635,7 @@ test("executeToolUseLoop rejects unauthorized tool calls before broker execution
   assert.equal(result.stoppedReason, "completed");
   assert.equal(result.toolCalls[0]?.status, "failed");
   assert.match(result.toolCalls[0]?.error ?? "", /未授权/);
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.deepEqual(eventLog.types(), ["tool.requested", "tool.failed"]);
   assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.role, "tool");
 });
@@ -714,39 +708,34 @@ test("executeToolUseLoop does not inject iteration warning near round limits", a
 
 test("executeToolUseLoop keeps transport-truncated tool messages recoverable with refs", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-1", "read"),
+    toolCallResponse("model-request-test", "call-1", "shell_command"),
     completedResponse("model-request-final", { summary: "Final answer after truncation." }),
   ]);
   const verboseText = Array.from({ length: 240_000 }, (_, index) => String(index % 10)).join("");
   const center: ToolExecutionBroker = {
     list: () => [
       {
-        name: "read",
-        description: "Projected verbose read tool.",
+        name: "shell_command",
+        description: "Verbose command tool.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
-    has: (name) => name === "read",
+    has: (name) => name === "shell_command",
     execute: async (request, _context, _permission) => ({
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { raw: "raw output omitted from model continuation" },
-      status: "completed",
-      durationMs: 1,
-      projection: {
-        agentContent: {
-          truncated: false,
+      output: {
+        result: {
+          command: "verbose-command",
+          exitCode: 0,
           stdout: verboseText,
           logRef: "command-log://tool-loop-verbose-output",
         },
-        uiSummary: "UI summary",
-        truncated: false,
-        redacted: false,
       },
+      status: "completed",
+      durationMs: 1,
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
   };
 
   await executeToolUseLoop(
@@ -756,7 +745,7 @@ test("executeToolUseLoop keeps transport-truncated tool messages recoverable wit
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["read"],
+      allowedTools: ["shell_command"],
     },
     createValidModelRequest()
   );
@@ -822,24 +811,7 @@ test("executeToolUseLoop gives sub-agent full output a larger model-continuation
       output: { result: { full_output: fullOutput } },
       status: "completed",
       durationMs: 1,
-      projection: {
-        agentContent: {
-          status: "completed",
-          summary: "子 Agent 已完成，完整输出 240026 字。",
-          result: {
-            status: "completed",
-            full_output: fullOutput,
-          },
-          full_output: fullOutput,
-          truncated: false,
-        },
-        uiSummary: "子 Agent 已完成。",
-        truncated: false,
-        redacted: false,
-      },
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
   };
 
   await executeToolUseLoop(
@@ -891,25 +863,7 @@ test("executeToolUseLoop keeps oversized sub-agent output recoverable with conti
       output: { result: { full_output: fullOutput, continuation } },
       status: "completed",
       durationMs: 1,
-      projection: {
-        modelResult: {
-          content: [{ type: "text" as const, text: "sub-agent completed" }],
-          structuredContent: {
-            status: "completed",
-            result: {
-              full_output: fullOutput,
-              continuation,
-            },
-          },
-          continuation,
-        },
-        uiSummary: "子 Agent 已完成。",
-        truncated: false,
-        redacted: false,
-      },
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
   };
 
   await executeToolUseLoop(
@@ -1008,43 +962,7 @@ test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable wit
       },
       status: "completed",
       durationMs: 1,
-      projection: {
-        modelResult: {
-          content: [{ type: "text" as const, text: "batch sub-agents completed" }],
-          structuredContent: {
-            status: "completed",
-            result: {
-              results: [
-                {
-                  index: 0,
-                  sub_agent_name: "research-expert",
-                  full_output: firstOutput,
-                  continuation: firstContinuation,
-                  run_id: "batch-sub-run-first",
-                },
-                {
-                  index: 1,
-                  sub_agent_name: "review-expert",
-                  full_output: secondOutput,
-                  continuation: secondContinuation,
-                  run_id: "batch-sub-run-second",
-                },
-              ],
-            },
-            continuations: [
-              { index: 0, continuation: firstContinuation },
-              { index: 1, continuation: secondContinuation },
-            ],
-          },
-          continuation: firstContinuation,
-        },
-        uiSummary: "子 Agent 批次已完成。",
-        truncated: false,
-        redacted: false,
-      },
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
   };
 
   await executeToolUseLoop(
@@ -1101,7 +1019,7 @@ test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable wit
   assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 1_000_000);
 });
 
-test("executeToolUseLoop keeps verbose tool output out of EventLog while preserving model tool messages", async () => {
+test("executeToolUseLoop preserves the same read fact for event and model consumers", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-read", "read"),
@@ -1148,24 +1066,13 @@ test("executeToolUseLoop keeps verbose tool output out of EventLog while preserv
     createValidModelRequest()
   );
 
-  const completedPayloadText = JSON.stringify(eventLog.list().at(-1)?.message.payload);
   const toolMessage = channel.requests[1]?.sanitizedMessages.at(-1);
-  const toolMessageText = JSON.stringify(toolMessage);
 
-  assert.equal(completedPayloadText.includes("contentPreview"), false);
-  assert.equal(completedPayloadText.includes("Complete page body must not enter EventLog"), false);
-  assert.equal(completedPayloadText.includes("sk-event-secret-token"), false);
-  assert.equal(completedPayloadText.includes("Bearer event-token-value"), false);
-  assert.equal(completedPayloadText.includes("research:page:secret"), true);
-  assert.equal(completedPayloadText.includes("verboseOutputOmitted"), true);
+  assert.deepEqual(eventLog.types(), ["tool.requested", "tool.completed"]);
   assert.equal(toolMessage?.role, "tool");
-  assert.equal(toolMessageText.includes("sk-preview-secret-token"), true);
-  assert.equal(toolMessageText.includes("Bearer event-token-value"), true);
-  assert.equal(toolMessageText.includes("[redacted-secret]"), false);
-  assert.equal(toolMessageText.includes("contentPreview"), true);
 });
 
-test("executeToolUseLoop uses projected agentContent for model tool continuation", async () => {
+test("executeToolUseLoop derives model continuation from execution facts", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-read", "read"),
     completedResponse("model-request-final", { summary: "Final answer with projected tool result." }),
@@ -1194,28 +1101,16 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { raw: "raw-secret-output sk-raw-tool-secret" },
+      output: {
+        result: {
+          refId: "research:page:raw",
+          source: "page",
+          contentPreview: "raw-secret-output sk-raw-tool-secret",
+        },
+      },
       status: "completed",
       durationMs: 1,
-      projection: {
-        agentContent: { summary: "projected model content" },
-        uiSummary: "UI summary",
-        diagnosticRef: "tool:projected",
-        envelope: {
-          agentSummary: "envelope model summary",
-          evidenceRefs: ["tool:projected"],
-          tokenEstimate: 8,
-          truncated: false,
-          redacted: false,
-          diagnosticRef: "tool:projected",
-          rawRetention: "none",
-        },
-        truncated: false,
-        redacted: false,
-      },
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
   };
 
   await executeToolUseLoop(
@@ -1231,70 +1126,11 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
   );
 
   const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
-  assert.equal(toolMessageText.includes("projected model content"), true);
-  assert.equal(toolMessageText.includes("envelope model summary"), false);
-  assert.equal(toolMessageText.includes("raw-secret-output"), false);
-  assert.equal(toolMessageText.includes("sk-raw-tool-secret"), false);
+  assert.equal(toolMessageText.includes("raw-secret-output"), true);
+  assert.equal(toolMessageText.includes("sk-raw-tool-secret"), true);
 });
 
-test("executeToolUseLoop preserves projected agentContent before model continuation", async () => {
-  const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-read", "read"),
-    completedResponse("model-request-final", { summary: "Final answer with projected content." }),
-  ]);
-  const broker: ToolExecutionBroker = {
-    list: () => [
-      {
-        name: "read",
-        description: "Projected read tool.",
-        inputSchema: { type: "object", properties: {} },
-      },
-    ],
-    has: (name) => name === "read",
-    execute: async (request, _context, _permission) => ({
-      callId: request.callId,
-      toolName: request.toolName,
-      input: request.input,
-      output: { raw: "adapter raw output must not be used" },
-      status: "completed",
-      durationMs: 1,
-      projection: {
-        agentContent: {
-          summary: "safe projected summary api_key=sk-agent-content-secret-123456",
-          nested: {
-            token: "sk-agent-content-token-123456",
-          },
-        },
-        uiSummary: "UI summary",
-        truncated: false,
-        redacted: false,
-      },
-    }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
-  };
-
-  await executeToolUseLoop(
-    {
-      intelligenceChannel: channel,
-      toolCenter: broker,
-      callerAgentId: "agent-test",
-      traceId: "trace-test",
-      goalId: "goal-test",
-      allowedTools: ["read"],
-    },
-    createValidModelRequest()
-  );
-
-  const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
-  assert.equal(toolMessageText.includes("safe projected summary"), true);
-  assert.equal(toolMessageText.includes("sk-agent-content-secret"), true);
-  assert.equal(toolMessageText.includes("sk-agent-content-token"), true);
-  assert.equal(toolMessageText.includes("[redacted-secret]"), false);
-  assert.equal(toolMessageText.includes("[redacted]"), false);
-});
-
-test("executeToolUseLoop preserves projected command stdout and stderr for model continuation", async () => {
+test("executeToolUseLoop preserves command stdout and stderr from execution facts", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-shell", "shell_command"),
     completedResponse("model-request-final", { summary: "Final answer with command output." }),
@@ -1312,24 +1148,17 @@ test("executeToolUseLoop preserves projected command stdout and stderr for model
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { raw: "adapter raw output must not be used" },
-      status: "completed",
-      durationMs: 1,
-      projection: {
-        agentContent: {
-          commandLine: "print-secret",
+      output: {
+        result: {
+          command: "print-secret",
           exitCode: 1,
-          truncated: false,
           stdout: "stdout token=sk-loop-token password=hunter2",
           stderr: "stderr Bearer sk-loop-error api_key=abc123",
         },
-        uiSummary: "Short UI summary",
-        truncated: false,
-        redacted: false,
       },
+      status: "completed",
+      durationMs: 1,
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
   };
 
   await executeToolUseLoop(
@@ -1351,7 +1180,7 @@ test("executeToolUseLoop preserves projected command stdout and stderr for model
   assert.equal(toolMessageText.includes("[redacted"), false);
 });
 
-test("executeToolUseLoop keeps projected raw refs in tool result message and does not fall back to UI summary", async () => {
+test("executeToolUseLoop keeps raw continuation refs from execution facts", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-read-file", "read_file"),
     completedResponse("model-request-final", { summary: "Final answer with evidence ref." }),
@@ -1369,22 +1198,18 @@ test("executeToolUseLoop keeps projected raw refs in tool result message and doe
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { raw: "adapter raw output must not be used" },
-      status: "completed",
-      durationMs: 1,
-      projection: {
-        agentContent: {
+      output: {
+        result: {
+          path: "README.md",
           truncated: true,
-          content: "password=hunter2\napi_key=sk-loop-file-secret\n[truncated to 128000 chars]",
+          content: `password=hunter2\napi_key=sk-loop-file-secret\n${"x".repeat(140_000)}`,
           rawContentRef: "tool:call-read-file:raw:read_file:content",
         },
-        uiSummary: "Summary only for UI",
         truncated: true,
-        redacted: false,
       },
+      status: "completed",
+      durationMs: 1,
     }),
-    resetCallCount: () => undefined,
-    getCallCount: () => 1,
   };
 
   await executeToolUseLoop(
@@ -1404,7 +1229,6 @@ test("executeToolUseLoop keeps projected raw refs in tool result message and doe
   assert.equal(toolMessageText.includes("api_key=sk-loop-file-secret"), true);
   assert.equal(toolMessageText.includes("tool:call-read-file:raw:read_file:content"), true);
   assert.equal(toolMessageText.includes("Summary only for UI"), false);
-  assert.equal(toolMessageText.includes("adapter raw output must not be used"), false);
 });
 
 test("executeToolUseLoop preserves tool failure errors before model continuation", async () => {
@@ -1449,7 +1273,7 @@ test("executeToolUseLoop sends full workspace tool facts to the next model turn"
     },
     textResponse("model-request-final", "Final answer with tool facts."),
   ]);
-  const center = new ProjectedToolBroker({
+  const center = new ExecutionFactToolBroker({
     read_file: {
       path: "README.md",
       bytes: 42,
@@ -1681,7 +1505,7 @@ test("executeToolUseLoop does not send unauthorized read-only batch calls to the
   assert.deepEqual(result.toolCalls.map((call) => call.status), ["completed", "failed"]);
   assert.match(result.toolCalls[1]?.error ?? "", /未授权/);
   assert.deepEqual(executedTools, ["read_a"]);
-  assert.equal(center.getCallCount(), 1);
+  assert.equal(center.executionCount(), 1);
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
 });
 
@@ -1806,7 +1630,7 @@ test("executeToolUseLoop pauses on approval_required without final synthesis", a
   assert.equal(result.stoppedReason, "approval_required");
   assert.equal(result.pendingApproval?.confirmationId, "confirmation-call-delete");
   assert.equal(result.toolCalls[0]?.status, "approval_required");
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.equal(channel.requests.length, 1);
   assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested"]);
   const approvalEvent = eventLog.list().find((entry) => entry.type === "user_approval.requested");
@@ -1852,7 +1676,7 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
   assert.equal(resumed.stoppedReason, "completed");
   assert.equal(resumed.toolCalls.some((call) => call.status === "approval_required"), false);
   assert.equal(resumed.toolCalls[0]?.status, "completed");
-  assert.equal(center.getCallCount(), 1);
+  assert.equal(center.executionCount(), 1);
   assert.equal(channel.requests.length, 2);
 });
 
@@ -1911,7 +1735,7 @@ test("resumeToolUseLoopFromApproval waits for tool completion before requesting 
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  assert.equal(center.getCallCount(), 1);
+  assert.equal(center.executionCount(), 1);
   assert.equal(channel.requests.length, 1);
   releaseCommand?.();
   const resumed = await resumedPromise;
@@ -2024,7 +1848,7 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
   assert.equal(paused.stoppedReason, "approval_required");
   assert.equal(paused.pendingApproval?.confirmationId, "confirmation-call-shell-a");
   assert.equal(paused.pendingApproval?.remainingToolCallsAfterApproval.length, 1);
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.equal(channel.requests.length, 1);
 
   const afterFirstApproval = await resumeToolUseLoopFromApproval(
@@ -2045,7 +1869,7 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
   assert.equal(afterFirstApproval.pendingApproval?.confirmationId, "confirmation-call-shell-b");
   assert.equal(afterFirstApproval.pendingApproval?.completedToolResults.length, 1);
   assert.deepEqual(executedCommands, ["cat a.txt"]);
-  assert.equal(center.getCallCount(), 1);
+  assert.equal(center.executionCount(), 1);
   assert.equal(channel.requests.length, 1);
 
   const afterSecondApproval = await resumeToolUseLoopFromApproval(
@@ -2064,7 +1888,7 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
 
   assert.equal(afterSecondApproval.stoppedReason, "completed");
   assert.deepEqual(executedCommands, ["cat a.txt", "cat b.txt"]);
-  assert.equal(center.getCallCount(), 2);
+  assert.equal(center.executionCount(), 2);
   assert.equal(channel.requests.length, 2);
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
   const nextModelRequestText = JSON.stringify(channel.requests[1]?.sanitizedMessages);
@@ -2122,7 +1946,7 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
   assert.equal(confirmation?.title, "删除文件");
   assert.equal(confirmation?.actionSummary, "删除文件：src/app.ts");
   assert.deepEqual(confirmation?.affectedResources, ["src/app.ts"]);
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.equal(channel.requests.length, 1);
 });
 
@@ -2161,7 +1985,7 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
     paused.pendingApproval!
   );
   assert.equal(wrong.stoppedReason, "approval_required");
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
 
   const resumed = await resumeToolUseLoopFromApproval(
     {
@@ -2179,7 +2003,7 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
 
   assert.equal(resumed.stoppedReason, "completed");
   assert.equal(resumed.finalOutput.textOutput, "Final answer after approved delete.");
-  assert.equal(center.getCallCount(), 1);
+  assert.equal(center.executionCount(), 1);
 });
 
 test("resumeToolUseLoopFromApproval does not execute pending tool if resumed policy no longer allows it", async () => {
@@ -2221,7 +2045,7 @@ test("resumeToolUseLoopFromApproval does not execute pending tool if resumed pol
   assert.equal(resumed.stoppedReason, "completed");
   assert.equal(resumed.toolCalls[0]?.status, "failed");
   assert.match(resumed.toolCalls[0]?.error ?? "", /未授权/);
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.equal(channel.requests.length, 2);
   assert.equal(channel.requests[1]?.tools?.length, 0);
 });
@@ -2265,13 +2089,13 @@ test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible 
 
   assert.equal(resumed.stoppedReason, "completed");
   assert.equal(resumed.finalOutput.textOutput, "我不会执行删除，改为说明可选方案。");
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.equal(resumed.toolCalls.at(-1)?.status, "cancelled");
   assert.equal(channel.requests.length, 2);
   const toolMessage = channel.requests[1]?.sanitizedMessages.at(-1);
   assert.equal(toolMessage?.role, "tool");
   assert.equal(toolMessage?.content.includes("用户拒绝了本次工具执行"), true);
-  assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested", "tool.failed"]);
+  assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested", "tool.cancelled"]);
 });
 
 test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped batch calls to the model", async () => {
@@ -2321,7 +2145,7 @@ test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped bat
   );
 
   assert.equal(resumed.stoppedReason, "completed");
-  assert.equal(center.getCallCount(), 0);
+  assert.equal(center.executionCount(), 0);
   assert.deepEqual(resumed.toolCalls.map((call) => call.status), ["failed", "cancelled"]);
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
   const requestText = JSON.stringify(channel.requests[1]?.sanitizedMessages);
@@ -2441,17 +2265,17 @@ function testToolDefinition(
   };
 }
 
-class ProjectedToolBroker implements ToolExecutionBroker {
+class ExecutionFactToolBroker implements ToolExecutionBroker {
   private callCount = 0;
 
-  constructor(private readonly projectedContent: Readonly<Record<string, unknown>>) {}
+  constructor(private readonly factsByToolName: Readonly<Record<string, unknown>>) {}
 
   list(): ToolDefinition[] {
-    return Object.keys(this.projectedContent).map((name) => testToolDefinition(name, name === "run_command" ? "execute" : "read-only"));
+    return Object.keys(this.factsByToolName).map((name) => testToolDefinition(name, name === "run_command" ? "execute" : "read-only"));
   }
 
   has(name: string): boolean {
-    return name in this.projectedContent;
+    return name in this.factsByToolName;
   }
 
   async execute(request: ToolCallRequest, _context: ToolExecutionContext, permission: ToolPermissionCheck): Promise<ToolCallResult> {
@@ -2463,23 +2287,13 @@ class ProjectedToolBroker implements ToolExecutionBroker {
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { omitted: true },
+      output: { result: this.factsByToolName[request.toolName] },
       status: "completed",
       durationMs: 1,
-      projection: {
-        agentContent: this.projectedContent[request.toolName],
-        uiSummary: `${request.toolName} completed`,
-        truncated: false,
-        redacted: false,
-      },
     };
   }
 
-  resetCallCount(): void {
-    this.callCount = 0;
-  }
-
-  getCallCount(): number {
+  executionCount(): number {
     return this.callCount;
   }
 }
@@ -2565,11 +2379,7 @@ class PermissionIgnoringToolBroker implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {
-    this.callCount = 0;
-  }
-
-  getCallCount(): number {
+  executionCount(): number {
     return this.callCount;
   }
 }
@@ -2691,11 +2501,7 @@ class TestToolBroker implements ToolExecutionBroker {
     };
   }
 
-  resetCallCount(): void {
-    this.callCount = 0;
-  }
-
-  getCallCount(): number {
+  executionCount(): number {
     return this.callCount;
   }
 }

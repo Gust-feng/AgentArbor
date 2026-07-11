@@ -1,4 +1,4 @@
-import type { ArborMessageType } from "../common.js";
+import { isToolLifecycleMessageType, type ArborMessageType } from "../common.js";
 import type {
   ObservationProgress,
   ObservationRef,
@@ -138,7 +138,7 @@ function pushToolCallRefs(
   type: ArborMessageType,
   payload: Readonly<Record<string, unknown>>
 ): void {
-  if (type !== "tool.requested" && type !== "tool.completed" && type !== "tool.failed") {
+  if (!isToolLifecycleMessageType(type)) {
     return;
   }
   pushStringRef(refs, payload, "callId", "tool_call");

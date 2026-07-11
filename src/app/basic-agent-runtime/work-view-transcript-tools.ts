@@ -2,7 +2,8 @@ import type {
   RunEvent,
   TranscriptNodePhase,
 } from "../../domain/basic-agent/index.js";
-import { commandDisplayText, type ToolDisplayProjection } from "../../domain/tools/index.js";
+import type { ToolDisplayProjection } from "../../domain/observation/index.js";
+import { commandDisplayText } from "../../domain/tools/index.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 
 export function transcriptToolSummaryFromRunEvent(event: RunEvent): string | undefined {

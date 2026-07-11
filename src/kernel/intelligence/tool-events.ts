@@ -27,6 +27,12 @@ export type ToolFailedEventPayload = ToolRequestedEventPayload & {
   readonly durationMs: number;
 };
 
+export type ToolCancelledEventPayload = ToolRequestedEventPayload & {
+  readonly output?: unknown;
+  readonly reason: string;
+  readonly durationMs: number;
+};
+
 export function createToolRequestedMessage(input: {
   readonly request: ToolCallRequest;
   readonly context: ToolExecutionContext;
@@ -44,7 +50,7 @@ export function createToolRequestedMessage(input: {
       callId: input.request.callId,
       toolName: input.request.toolName,
       toolDisplayName: toolDisplayName(input.request.toolName),
-      input: toSafeToolEventSummaryValue(input.request.input),
+      input: toSafeToolEventValue(input.request.input),
     },
   });
 }
@@ -66,8 +72,8 @@ export function createToolCompletedMessage(input: {
       callId: input.result.callId,
       toolName: input.result.toolName,
       toolDisplayName: toolDisplayName(input.result.toolName),
-      input: toSafeToolEventSummaryValue(input.result.input),
-      output: toSafeToolEventSummaryValue(toProjectedToolEventOutput(input.result)),
+      input: toSafeToolEventValue(input.result.input),
+      output: toStableToolEventFact(input.result.output),
       durationMs: input.result.durationMs,
     },
   });
@@ -77,9 +83,8 @@ export function createToolFailedMessage(input: {
   readonly result: ToolCallResult;
   readonly context: ToolExecutionContext;
 }): ArborMessage<ToolFailedEventPayload> {
-  const errorDomain = input.result.errorDomain ?? input.result.projection?.envelope?.errorDomain;
-  const errorFacts = normalizeToolErrorFacts(input.result.errorFacts ?? input.result.projection?.envelope?.errorFacts);
-  const output = toProjectedToolEventOutput(input.result);
+  const errorDomain = input.result.errorDomain;
+  const errorFacts = normalizeToolErrorFacts(input.result.errorFacts);
   return createMessage({
     traceId: input.context.traceId,
     from: { id: "tool-center", role: "runtime" },
@@ -93,11 +98,36 @@ export function createToolFailedMessage(input: {
       callId: input.result.callId,
       toolName: input.result.toolName,
       toolDisplayName: toolDisplayName(input.result.toolName),
-      input: toSafeToolEventSummaryValue(input.result.input),
-      output: output === undefined ? undefined : toSafeToolEventSummaryValue(output),
+      input: toSafeToolEventValue(input.result.input),
+      output: input.result.output === undefined ? undefined : toStableToolEventFact(input.result.output),
       error: sanitizeError(input.result.error ?? "Tool execution failed."),
       errorDomain,
       errorFacts,
+      durationMs: input.result.durationMs,
+    },
+  });
+}
+
+export function createToolCancelledMessage(input: {
+  readonly result: ToolCallResult;
+  readonly context: ToolExecutionContext;
+}): ArborMessage<ToolCancelledEventPayload> {
+  return createMessage({
+    traceId: input.context.traceId,
+    from: { id: "tool-center", role: "runtime" },
+    to: { role: "runtime" },
+    type: "tool.cancelled",
+    intent: "cancel_tool_execution",
+    payload: {
+      traceId: input.context.traceId,
+      goalId: input.context.goalId,
+      callerAgentId: input.context.callerAgentId,
+      callId: input.result.callId,
+      toolName: input.result.toolName,
+      toolDisplayName: toolDisplayName(input.result.toolName),
+      input: toSafeToolEventValue(input.result.input),
+      output: input.result.output === undefined ? undefined : toStableToolEventFact(input.result.output),
+      reason: sanitizeError(input.result.error ?? "Tool execution was cancelled."),
       durationMs: input.result.durationMs,
     },
   });
@@ -152,111 +182,9 @@ export function toSafeToolEventValue(value: unknown): unknown {
   return truncateDeep(toJsonSafe(value), 0, { omitVerboseOutput: false });
 }
 
-function toSafeToolEventSummaryValue(value: unknown): unknown {
+/** Keeps durable metadata and continuation refs without copying large bodies. */
+function toStableToolEventFact(value: unknown): unknown {
   return truncateDeep(toJsonSafe(value), 0, { omitVerboseOutput: true });
-}
-
-function toProjectedToolEventOutput(result: ToolCallResult): unknown {
-  if (result.projection === undefined) {
-    return result.output;
-  }
-  return {
-    action: toolDisplayName(result.toolName),
-    summary: result.projection.uiSummary,
-    diagnosticRef: result.projection.diagnosticRef,
-    display: result.projection.display,
-    envelope: result.projection.envelope,
-    result: safeToolResultEnvelope(result.output),
-    truncated: result.projection.truncated === true,
-    redacted: result.projection.redacted === true,
-  };
-}
-
-function safeToolResultEnvelope(output: unknown): Readonly<Record<string, unknown>> | undefined {
-  const record = asRecord(output);
-  const result = asRecord(record.result);
-  if (Object.keys(result).length === 0) {
-    return undefined;
-  }
-  const entries = Array.isArray(result.entries)
-    ? result.entries.slice(0, 12).map((entry) => {
-        const entryRecord = asRecord(entry);
-        return {
-          path: typeof entryRecord.path === "string" ? entryRecord.path : undefined,
-          name: typeof entryRecord.name === "string" ? entryRecord.name : undefined,
-          kind: typeof entryRecord.kind === "string" ? entryRecord.kind : undefined,
-          bytes: typeof entryRecord.bytes === "number" ? entryRecord.bytes : undefined,
-          depth: typeof entryRecord.depth === "number" ? entryRecord.depth : undefined,
-        };
-      })
-    : undefined;
-  const matches = Array.isArray(result.matches)
-    ? result.matches.slice(0, 12).map((match) => {
-        const matchRecord = asRecord(match);
-        return {
-          path: typeof matchRecord.path === "string" ? matchRecord.path : undefined,
-          line: typeof matchRecord.line === "number" ? matchRecord.line : undefined,
-        };
-      })
-    : undefined;
-  const skippedSamples = Array.isArray(result.skippedSamples)
-    ? result.skippedSamples.slice(0, 8).map((sample) => {
-        const sampleRecord = asRecord(sample);
-        return {
-          path: typeof sampleRecord.path === "string" ? sampleRecord.path : undefined,
-          reason: typeof sampleRecord.reason === "string" ? sampleRecord.reason : undefined,
-          bytes: typeof sampleRecord.bytes === "number" ? sampleRecord.bytes : undefined,
-          errorCode: typeof sampleRecord.errorCode === "string" ? sampleRecord.errorCode : undefined,
-        };
-      })
-    : undefined;
-  return {
-    path: typeof result.path === "string" ? result.path : undefined,
-    query: typeof result.query === "string" ? result.query : undefined,
-    engine: typeof result.engine === "string" ? result.engine : undefined,
-    command: typeof result.command === "string" ? result.command : undefined,
-    args: Array.isArray(result.args) ? result.args.filter((value): value is string => typeof value === "string") : undefined,
-    cwd: typeof result.cwd === "string" ? result.cwd : undefined,
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
-    timedOut: result.timedOut === true ? true : undefined,
-    background: result.background === true ? true : undefined,
-    pid: typeof result.pid === "number" ? result.pid : undefined,
-    logPath: typeof result.logPath === "string" ? result.logPath : undefined,
-    stopCommand: typeof result.stopCommand === "string" ? result.stopCommand : undefined,
-    durationMs: typeof result.durationMs === "number" ? result.durationMs : undefined,
-    waitForPort: typeof result.waitForPort === "number" ? result.waitForPort : undefined,
-    portReady: typeof result.portReady === "boolean" ? result.portReady : undefined,
-    stdoutTruncated: typeof result.stdoutTruncated === "boolean" ? result.stdoutTruncated : undefined,
-    stderrTruncated: typeof result.stderrTruncated === "boolean" ? result.stderrTruncated : undefined,
-    stdoutChars: typeof result.stdoutChars === "number" ? result.stdoutChars : undefined,
-    stderrChars: typeof result.stderrChars === "number" ? result.stderrChars : undefined,
-    stdoutOmittedChars: typeof result.stdoutOmittedChars === "number" ? result.stdoutOmittedChars : undefined,
-    stderrOmittedChars: typeof result.stderrOmittedChars === "number" ? result.stderrOmittedChars : undefined,
-    bytes: typeof result.bytes === "number" ? result.bytes : undefined,
-    append: typeof result.append === "boolean" ? result.append : undefined,
-    overwrite: typeof result.overwrite === "boolean" ? result.overwrite : undefined,
-    dryRun: typeof result.dryRun === "boolean" ? result.dryRun : undefined,
-    replacements: typeof result.replacements === "number" ? result.replacements : undefined,
-    wouldReplace: typeof result.wouldReplace === "number" ? result.wouldReplace : undefined,
-    previousLength: typeof result.previousLength === "number" ? result.previousLength : undefined,
-    nextLength: typeof result.nextLength === "number" ? result.nextLength : undefined,
-    depth: typeof result.depth === "number" ? result.depth : undefined,
-    maxDepth: typeof result.maxDepth === "number" ? result.maxDepth : undefined,
-    entries,
-    entriesReturned: typeof result.entriesReturned === "number" ? result.entriesReturned : undefined,
-    matches,
-    totalEntries: typeof result.totalEntries === "number" ? result.totalEntries : undefined,
-    searchedFiles: typeof result.searchedFiles === "number" ? result.searchedFiles : undefined,
-    skippedFactsAvailable: typeof result.skippedFactsAvailable === "boolean" ? result.skippedFactsAvailable : undefined,
-    skippedFactsComplete: typeof result.skippedFactsComplete === "boolean" ? result.skippedFactsComplete : undefined,
-    skippedFiles: typeof result.skippedFiles === "number" ? result.skippedFiles : undefined,
-    skippedBinaryFiles: typeof result.skippedBinaryFiles === "number" ? result.skippedBinaryFiles : undefined,
-    skippedTooLargeFiles: typeof result.skippedTooLargeFiles === "number" ? result.skippedTooLargeFiles : undefined,
-    skippedUnreadableFiles: typeof result.skippedUnreadableFiles === "number" ? result.skippedUnreadableFiles : undefined,
-    skippedDirectories: typeof result.skippedDirectories === "number" ? result.skippedDirectories : undefined,
-    skippedOtherEntries: typeof result.skippedOtherEntries === "number" ? result.skippedOtherEntries : undefined,
-    skippedSamples,
-  };
 }
 
 function toJsonSafe(value: unknown): unknown {
@@ -348,8 +276,4 @@ function isVerboseToolOutputKey(key: string): boolean {
 function isDerivedVerboseSummaryKey(key: string): boolean {
   const normalized = key.toLowerCase();
   return normalized === "summary" || normalized === "title";
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }

@@ -163,6 +163,7 @@ function isLiveReasoningSettlementEvent(event: RunEventLike): boolean {
     event.type === "agent.note.completed" ||
     event.type === "tool.completed" ||
     event.type === "tool.failed" ||
+    event.type === "tool.cancelled" ||
     event.type === "sub_agent.started" ||
     event.type === "sub_agent.completed" ||
     event.type === "sub_agent_batch.started" ||

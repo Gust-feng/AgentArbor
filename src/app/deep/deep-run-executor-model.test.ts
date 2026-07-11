@@ -38,7 +38,10 @@ test("无可用模型时拒绝运行：stopReason=no_model_rejected，run.status
 
 test("manager 决策经 AgentTurnRuntime 调模型产出，source=ai，direct_answer 分支产出 SynthesizedConclusion", async () => {
   // 轻量问题 → content-aware 默认 fake 选 direct_answer（无需 responses 序列）。
-  const config = makeTurnRuntime();
+  const config = makeTurnRuntime([
+    { output: { action: "direct_answer", childSpecs: [], decisionSummary: "直接回答。", rationale: "无需协作。", uncertainty: "无。", confidence: 0.9, reasoningRefs: [] } },
+    { output: { conclusion: "TypeScript 会根据表达式和上下文推导类型。", oneLineRationale: "类型可由赋值和使用位置确定。", keyEvidenceRefs: [], mainUncertainty: "具体行为取决于上下文。", confidence: 0.9 } },
+  ]);
   const input = makeStartInput("什么是 TypeScript 的类型推断", true);
 
   const result = await startDeepRun(input, config);

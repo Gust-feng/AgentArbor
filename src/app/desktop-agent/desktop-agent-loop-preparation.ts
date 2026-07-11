@@ -63,8 +63,6 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
         taskSoil: input.taskSoil,
       })
     : undefined;
-  toolCenter?.resetCallCount();
-
   let parentAllowedTools: readonly string[] = [];
   if (toolCenter !== undefined && input.options.subAgentRoots !== undefined && toolCenter.register !== undefined) {
     const subAgentRegistry = new SubAgentRegistry(

@@ -408,7 +408,7 @@ test("child detail workflow renders model output and collapsed desktop Agent too
     readPanelUiSource("deep-view-model.ts"),
     readPanelUiSource("deep-work-detail-model.ts"),
     readPanelUiSource(path.join("contracts", "deep.ts")),
-    readAppSource(path.join("deep", "deep-child-agent-runner.ts")),
+    readAppSource(path.join("deep", "deep-child-run-result-mapping.ts")),
     readAppSource(path.join("deep", "deep-runtime.ts")),
     readAppSource(path.join("deep", "deep-read-model.ts")),
     readAppSource(path.join("run-read-model", "agent-run-tree-attachment.ts")),
@@ -429,7 +429,7 @@ test("child detail workflow renders model output and collapsed desktop Agent too
   includes(deepWorkDetailModel, "function mergeActivityBadges");
   includes(deepContract, "import type { ToolDisplayProjection } from \"./tools\";");
   includes(deepContract, "readonly display?: ToolDisplayProjection;");
-  includes(childRunner, "display: toolCall.projection?.display ?? toolCall.projection?.envelope?.uiDisplay");
+  includes(childRunner, "display: projectToolDisplay({ callId: toolCall.callId, toolName: toolCall.toolName, input: toolCall.input }, toolCall.output)");
   excludes(deepRuntime, "模型发起");
   excludes(deepReadModel, "模型发起");
   includes(treeAttachment, "readonly display?: ToolDisplayProjection;");

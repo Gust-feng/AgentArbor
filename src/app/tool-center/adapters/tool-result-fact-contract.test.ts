@@ -9,6 +9,11 @@ import { createHttpRequestTool, type HttpRequestFetchLike } from "./http-request
 import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
 import { createLocalGrepFilesTool, createLocalListDirTool, createLocalReadFileTool } from "./local-workspace-read-tools.js";
 import { createLocalEditFileTool } from "./local-workspace-write-tools.js";
+import {
+  toolExecutionContinuation,
+  toolExecutionDisplay,
+  toolExecutionResult,
+} from "./tool-result-test-support.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 const suggestionPattern = /\btry\b|\bprovide\b|\bsuggest|\brecommend\b|recoveryHint|\u5efa\u8bae/iu;
@@ -91,7 +96,7 @@ test("ToolCenter preserves command logRef in model-visible command facts", async
       }
     );
 
-    const agentContent = asRecord(result.projection?.agentContent);
+    const agentContent = toolExecutionResult(result);
 
     assert.equal(result.status, "completed");
     assert.equal(agentContent.truncated, true);
@@ -184,9 +189,8 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
       }
     );
 
-    const agentContent = asRecord(result.projection?.agentContent);
-    const display = asRecord(result.projection?.display);
-    const envelope = asRecord(result.projection?.envelope);
+    const agentContent = toolExecutionResult(result);
+    const display = toolExecutionDisplay(result);
 
     assert.equal(result.status, "completed");
     assert.equal(agentContent.stdout, stdout);
@@ -194,9 +198,8 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
     assert.equal(agentContent.truncated, false);
     assert.equal(display.kind, "command_summary");
     assert.equal(String(display.outputSummary).length < stdout.length, true);
-    assert.equal(String(envelope.agentSummary).length < stdout.length, true);
-    assert.equal(JSON.stringify(result.projection).includes("start-"), true);
-    assert.equal(JSON.stringify(result.projection).includes("-end"), true);
+    assert.equal(JSON.stringify(result.output).includes("start-"), true);
+    assert.equal(JSON.stringify(result.output).includes("-end"), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -279,11 +282,11 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       context,
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
-    const readModelResult = asRecord(read.projection?.modelResult);
-    const readNextInput = asRecord(asRecord(readModelResult.continuation).nextInput);
+    const readResult = toolExecutionResult(read);
+    const readNextInput = asRecord(toolExecutionContinuation(read)?.nextInput);
 
     assert.equal(read.status, "completed");
-    assert.equal(asRecord(readModelResult.truncation).truncated, true);
+    assert.equal(readResult.truncated, true);
     assert.equal(readNextInput.path, "note-1.txt");
     assert.equal(readNextInput.startLine, 2);
 
@@ -293,11 +296,11 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       context,
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
-    const charReadModelResult = asRecord(charRead.projection?.modelResult);
-    const charReadNextInput = asRecord(asRecord(charReadModelResult.continuation).nextInput);
+    const charReadResult = toolExecutionResult(charRead);
+    const charReadNextInput = asRecord(toolExecutionContinuation(charRead)?.nextInput);
 
     assert.equal(charRead.status, "completed");
-    assert.equal(asRecord(charReadModelResult.truncation).truncated, true);
+    assert.equal(charReadResult.truncated, true);
     assert.equal(charReadNextInput.path, "long.txt");
     assert.equal(charReadNextInput.maxLength, 5);
     assert.equal(charReadNextInput.startChar, 4);
@@ -308,13 +311,12 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       context,
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
-    const listModelResult = asRecord(listed.projection?.modelResult);
-    const listContinuation = asRecord(listModelResult.continuation);
+    const listContinuation = asRecord(toolExecutionContinuation(listed));
     const listNextInput = asRecord(listContinuation.nextInput);
-    const listAgentContent = asRecord(listed.projection?.agentContent);
+    const listAgentContent = toolExecutionResult(listed);
 
     assert.equal(listed.status, "completed");
-    assert.equal(asRecord(listModelResult.truncation).truncated, true);
+    assert.equal(listAgentContent.truncated, true);
     assert.equal(listNextInput.path, ".");
     assert.equal(listNextInput.limit, 2);
     assert.equal(listNextInput.offset, 2);
@@ -325,13 +327,12 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       context,
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
-    const grepModelResult = asRecord(grep.projection?.modelResult);
-    const grepContinuation = asRecord(grepModelResult.continuation);
+    const grepContinuation = asRecord(toolExecutionContinuation(grep));
     const grepNextInput = asRecord(grepContinuation.nextInput);
-    const grepAgentContent = asRecord(grep.projection?.agentContent);
+    const grepAgentContent = toolExecutionResult(grep);
 
     assert.equal(grep.status, "completed");
-    assert.equal(asRecord(grepModelResult.truncation).truncated, true);
+    assert.equal(grepAgentContent.truncated, true);
     assert.equal(grepNextInput.query, "needle");
     assert.equal(grepNextInput.path, ".");
     assert.equal(grepNextInput.limit, 2);
@@ -385,7 +386,7 @@ test("http_request network errors expose OS facts without recoveryHint", async (
   );
 });
 
-test("ToolCenter http_request failures preserve network facts in result, projection, and envelope", async () => {
+test("ToolCenter http_request failures preserve network facts in the execution result", async () => {
   const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:43210"), {
     code: "ECONNREFUSED",
     errno: -4078,
@@ -401,12 +402,7 @@ test("ToolCenter http_request failures preserve network facts in result, project
     context,
     { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] }
   );
-  const agentContent = asRecord(result.projection?.agentContent);
-  const envelope = asRecord(result.projection?.envelope);
   const errorFacts = asRecord(result.errorFacts);
-  const projectedFacts = asRecord(agentContent.errorFacts);
-  const agentFacts = asRecord(agentContent.facts);
-  const envelopeFacts = asRecord(envelope.errorFacts);
 
   assert.equal(result.status, "failed");
   assert.match(result.error ?? "", /ECONNREFUSED/);
@@ -419,9 +415,6 @@ test("ToolCenter http_request failures preserve network facts in result, project
   assert.equal(errorFacts.method, "GET");
   assert.equal(errorFacts.url, "http://127.0.0.1:43210/status");
   assert.equal(typeof errorFacts.durationMs, "number");
-  assert.equal(projectedFacts.code, "ECONNREFUSED");
-  assert.equal(agentFacts.syscall, "connect");
-  assert.equal(envelopeFacts.address, "127.0.0.1");
   assert.doesNotMatch(JSON.stringify(result), suggestionPattern);
 });
 

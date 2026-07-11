@@ -245,7 +245,6 @@ test("conversation tool evidence rehydrates completed run envelopes for follow-u
       kind: "tool",
       action: "运行命令",
       preview: "pnpm test · exit 1",
-      envelope: toolEnvelope(),
     },
     sourceRefs: ["tool:call-test"],
     modelCallRefs: [],
@@ -268,7 +267,7 @@ test("conversation tool evidence rehydrates completed run envelopes for follow-u
   });
 
   assert.equal(evidence.length, 1);
-  assert.equal(evidence[0]?.agentSummary.includes("pnpm test failed"), true);
+  assert.equal(evidence[0]?.summary?.includes("exit 1"), true);
   assert.deepEqual(evidence[0]?.evidenceRefs, ["tool:call-test"]);
 });
 
@@ -297,7 +296,6 @@ test("conversation tool evidence preserves blocked live run envelopes without tr
       kind: "tool",
       action: "运行命令",
       preview: "pnpm test · exit 1",
-      envelope: toolEnvelope("tool:call-blocked"),
     },
     sourceRefs: ["tool:call-blocked"],
     modelCallRefs: [],
@@ -338,8 +336,8 @@ test("conversation tool evidence preserves blocked live run envelopes without tr
 
   assert.deepEqual(history.map((message) => message.content), ["运行测试"]);
   assert.equal(evidence.length, 1);
-  assert.equal(evidence[0]?.diagnosticRef, "tool:call-blocked");
-  assert.equal(evidence[0]?.agentSummary.includes("pnpm test failed"), true);
+  assert.equal(evidence[0]?.callId, "call-blocked");
+  assert.equal(evidence[0]?.summary?.includes("exit 1"), true);
 });
 
 test("conversation history exposes blocked run facts as interruption context", async () => {
@@ -418,7 +416,7 @@ test("conversation tool evidence rehydrates persisted blocked run envelopes", as
   const runtimeDatabase = runtimeDatabaseWithToolSnapshot({
     runId: "persisted-blocked-run",
     status: "blocked",
-    envelope: toolEnvelope("tool:call-persisted-blocked"),
+    callId: "tool:call-persisted-blocked",
   });
 
   const evidence = await buildConversationToolEvidence({
@@ -428,7 +426,7 @@ test("conversation tool evidence rehydrates persisted blocked run envelopes", as
   });
 
   assert.equal(evidence.length, 1);
-  assert.equal(evidence[0]?.diagnosticRef, "tool:call-persisted-blocked");
+  assert.equal(evidence[0]?.callId, "tool:call-persisted-blocked");
   assert.deepEqual(evidence[0]?.evidenceRefs, ["tool:call-persisted-blocked"]);
 });
 
@@ -478,22 +476,10 @@ function modelConfig(): SanitizedModelProviderConfig {
   };
 }
 
-function toolEnvelope(diagnosticRef = "tool:call-test") {
-  return {
-    agentSummary: "pnpm test failed with exit code 1. stderr includes AssertionError.",
-    evidenceRefs: [diagnosticRef],
-    tokenEstimate: 32,
-    truncated: false,
-    redacted: false,
-    diagnosticRef,
-    rawRetention: "diagnostic_ref_only" as const,
-  };
-}
-
 function runtimeDatabaseWithToolSnapshot(input: {
   readonly runId: string;
   readonly status: "completed" | "failed" | "cancelled" | "blocked" | "needs_input" | "stopped";
-  readonly envelope: ReturnType<typeof toolEnvelope>;
+  readonly callId: string;
 }): RuntimeDatabase {
   return {
     getRun: async (runId: string) =>
@@ -505,11 +491,12 @@ function runtimeDatabaseWithToolSnapshot(input: {
             },
             toolCalls: [
               {
-                callId: input.envelope.diagnosticRef,
+                callId: input.callId,
                 runId,
+                toolName: "read_file",
                 status: "completed",
-                envelope: input.envelope,
-                eventRefs: [],
+                summary: "read_file completed",
+                eventRefs: [input.callId],
               },
             ],
           }

@@ -104,7 +104,6 @@ export async function runUndergroundDirectionSessionWithIntelligence(
   const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
   const intelligenceChannel = options.createIntelligenceChannel(runtime);
   const toolCenter = options.createToolCenter?.(runtime);
-  toolCenter?.resetCallCount();
   const agentTurnRuntime = new AgentTurnRuntime({
     intelligenceChannel,
     toolCenter,

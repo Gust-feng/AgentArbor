@@ -263,6 +263,30 @@ test("ToolCenter execution requires explicit run permissions", async () => {
 }
 );
 
+test("tool execution facts stay independent from display and legacy compatibility contracts", async () => {
+  const root = process.cwd();
+  const [contracts, toolCenter, modelView, runtimeDatabase] = await Promise.all([
+    readSource(path.join(root, "src", "domain", "tools", "contracts.ts")),
+    readSource(path.join(root, "src", "app", "tool-center", "tool-center.ts")),
+    readSource(path.join(root, "src", "kernel", "intelligence", "tool-call-result-model-view.ts")),
+    readSource(path.join(root, "src", "domain", "runtime-database", "contracts.ts")),
+  ]);
+
+  for (const source of [contracts, toolCenter]) {
+    assert.equal(source.includes("ToolDisplayProjection"), false);
+    assert.equal(source.includes("ToolSafeProjection"), false);
+    assert.equal(source.includes("ToolResultEnvelope"), false);
+    assert.equal(source.includes("projection:"), false);
+  }
+  assert.equal(contracts.includes("resetCallCount"), false);
+  assert.equal(contracts.includes("getCallCount"), false);
+  assert.equal(modelView.includes('from "../../app/'), false);
+  assert.equal(runtimeDatabase.includes("panel-ui"), false);
+  assert.equal(runtimeDatabase.includes("ToolResultEnvelope"), false);
+  assert.equal(fileExistsSync(path.join(root, "src", "kernel", "tools", "tool-result-envelope.ts")), false);
+  assert.equal(fileExistsSync(path.join(root, "src", "app", "tool-result-continuation.ts")), false);
+});
+
 test("Basic Agent context pack does not own model-visible tool exposure", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const basicRuntimeRoot = path.join(appRoot, "basic-agent-runtime");

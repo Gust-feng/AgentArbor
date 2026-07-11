@@ -22,7 +22,7 @@ export function deriveRunSteps(
           stepId: `${event.runId}:step:${stepNumber}`,
           stepNumber,
           toolCalls: currentToolCalls,
-          status: currentToolCalls.some((toolCall) => toolCall.status === "failed") ? "failed" : "completed",
+          status: currentToolCalls.some((toolCall) => toolCall.status === "failed" || toolCall.status === "cancelled") ? "failed" : "completed",
         });
         currentToolCalls = [];
       }
@@ -31,10 +31,12 @@ export function deriveRunSteps(
     if (
       event.type === "tool.requested" ||
       event.type === "tool.completed" ||
-      event.type === "tool.failed"
+      event.type === "tool.failed" ||
+      event.type === "tool.cancelled"
     ) {
-      const status: "running" | "completed" | "failed" =
+      const status: PanelRunStepToolItem["status"] =
         event.type === "tool.failed" ? "failed" :
+        event.type === "tool.cancelled" ? "cancelled" :
         event.type === "tool.completed" ? "completed" :
         "running";
 
@@ -60,7 +62,7 @@ export function deriveRunSteps(
       stepId: `${streamEvents[0]?.runId ?? "unknown"}:step:${stepNumber}`,
       stepNumber,
       toolCalls: currentToolCalls,
-      status: currentToolCalls.some((toolCall) => toolCall.status === "failed") ? "failed" : "completed",
+      status: currentToolCalls.some((toolCall) => toolCall.status === "failed" || toolCall.status === "cancelled") ? "failed" : "completed",
     });
   }
 

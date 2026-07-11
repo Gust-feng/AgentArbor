@@ -1,7 +1,7 @@
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
-import type { ToolDisplayProjection, ToolErrorDomain, ToolErrorFacts, ToolResultEnvelope } from "../../../domain/tools/index.js";
+import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
+import type { ToolErrorDomain, ToolErrorFacts } from "../../../domain/tools/index.js";
 import { isToolErrorDomain, normalizeToolErrorFacts, toolDisplayName } from "../../../domain/tools/index.js";
-import { redactSensitiveText } from "../../../kernel/redaction.js";
 import { commandTextFromToolInput, commandTextFromToolResult } from "../../command-text.js";
 import { cleanOrdinaryToolText } from "../../ordinary-tool-copy.js";
 import { asRecord, stringArray, stringOrUndefined } from "../../run-read-model/value-utils.js";
@@ -21,7 +21,6 @@ export type PanelRunStreamEventDetail = {
   readonly exitCode?: number;
   readonly preview?: string;
   readonly display?: ToolDisplayProjection;
-  readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;
@@ -45,7 +44,7 @@ export type PanelRunStreamEventDetail = {
 };
 
 export function toolSummary(
-  type: "tool.requested" | "tool.completed" | "tool.failed",
+  type: "tool.requested" | "tool.completed" | "tool.failed" | "tool.cancelled",
   payload: Readonly<Record<string, unknown>>
 ): string {
   const toolName = stringOrUndefined(payload.toolName) ?? "unknown";
@@ -65,11 +64,13 @@ export function toolSummary(
       ? `${displayName}完成${targetText}。`
       : `${displayName}完成${targetText}：${resultSummary}`;
   }
-  return `${displayName}未完成${targetText}。`;
+  return type === "tool.cancelled"
+    ? `${displayName}已取消${targetText}。`
+    : `${displayName}未完成${targetText}。`;
 }
 
 export function toolStreamDetail(
-  type: "tool.requested" | "tool.completed" | "tool.failed",
+  type: "tool.requested" | "tool.completed" | "tool.failed" | "tool.cancelled",
   payload: Readonly<Record<string, unknown>>
 ): PanelRunStreamEventDetail {
   const toolName = stringOrUndefined(payload.toolName) ?? "tool";
@@ -84,9 +85,8 @@ export function toolStreamDetail(
       existingDisplay: output.display,
       truncated: output.truncated === true,
     });
-  const envelope = toolResultEnvelopeOrUndefined(output.envelope);
-  const errorDomain = errorDomainFromToolProjection(payload, output, envelope);
-  const errorFacts = errorFactsFromToolProjection(payload, output, display, envelope);
+  const errorDomain = errorDomainFromToolFacts(payload, output);
+  const errorFacts = errorFactsFromToolFacts(payload, output, display);
   return {
     kind: "tool",
     action: displayActionLabel(stringOrUndefined(output.action) ?? localToolLabel(toolName)),
@@ -96,9 +96,12 @@ export function toolStreamDetail(
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
     preview: type === "tool.requested" ? toolRequestPreview(toolName, input) : toolResultPreview(toolName, output, result, payload),
     display,
-    envelope,
     truncated: output.truncated === true,
-    error: type === "tool.failed" ? stringOrUndefined(payload.error) : undefined,
+    error: type === "tool.failed"
+      ? stringOrUndefined(payload.error)
+      : type === "tool.cancelled"
+        ? stringOrUndefined(payload.reason)
+        : undefined,
     errorDomain,
     errorFacts,
   };
@@ -164,50 +167,22 @@ function displayActionLabel(value: string): string {
   return /^[a-z][a-z0-9_:-]*$/i.test(value) ? toolDisplayName(value) : value;
 }
 
-function toolResultEnvelopeOrUndefined(value: unknown): ToolResultEnvelope | undefined {
-  const record = asRecord(value);
-  const agentSummary = stringOrUndefined(record.agentSummary);
-  const rawRetention = stringOrUndefined(record.rawRetention);
-  if (agentSummary === undefined || (rawRetention !== "none" && rawRetention !== "diagnostic_ref_only")) {
-    return undefined;
-  }
-  return {
-    agentSummary: redactAndCompact(agentSummary, 1_800),
-    evidenceRefs: stringArray(record.evidenceRefs).map((ref) => redactAndCompact(ref, 220)).slice(0, 12),
-    uiDisplay: toolDisplayOrUndefined(record.uiDisplay),
-    tokenEstimate: typeof record.tokenEstimate === "number" && Number.isFinite(record.tokenEstimate)
-      ? Math.max(1, Math.floor(record.tokenEstimate))
-      : Math.max(1, Math.ceil(agentSummary.length / 4)),
-    truncated: record.truncated === true,
-    redacted: false,
-    diagnosticRef: stringOrUndefined(record.diagnosticRef),
-    rawRetention,
-    errorDomain: toolErrorDomainOrUndefined(record.errorDomain),
-    errorFacts: normalizeToolErrorFacts(record.errorFacts),
-  };
-}
-
 function toolErrorDomainOrUndefined(value: unknown): ToolErrorDomain | undefined {
   return isToolErrorDomain(value) ? value : undefined;
 }
 
-function errorDomainFromToolProjection(
+function errorDomainFromToolFacts(
   payload: Readonly<Record<string, unknown>>,
   output: Readonly<Record<string, unknown>>,
-  envelope: ToolResultEnvelope | undefined
 ): ToolErrorDomain | undefined {
-  return envelope?.errorDomain ?? toolErrorDomainOrUndefined(output.errorDomain) ?? toolErrorDomainOrUndefined(payload.errorDomain);
+  return toolErrorDomainOrUndefined(output.errorDomain) ?? toolErrorDomainOrUndefined(payload.errorDomain);
 }
 
-function errorFactsFromToolProjection(
+function errorFactsFromToolFacts(
   payload: Readonly<Record<string, unknown>>,
   output: Readonly<Record<string, unknown>>,
   display: ToolDisplayProjection | undefined,
-  envelope: ToolResultEnvelope | undefined
 ): ToolErrorFacts | undefined {
-  if (envelope?.errorFacts !== undefined) {
-    return envelope.errorFacts;
-  }
   if (display?.kind === "read_result" && display.errorFacts !== undefined) {
     return display.errorFacts;
   }
@@ -347,10 +322,6 @@ function toolResultPreview(
     if (displaySummary !== undefined) {
       return displaySummary;
     }
-    const envelope = toolResultEnvelopeOrUndefined(output.envelope);
-    if (envelope?.agentSummary !== undefined) {
-      return compactStreamDetailText(envelope.agentSummary, 900);
-    }
     const text = stringOrUndefined(result.text);
     if (text !== undefined) {
       return compactStreamDetailText(text, 900);
@@ -367,10 +338,6 @@ function safeReadPreview(
   const display = toolDisplayOrUndefined(output.display);
   if (display?.kind === "read_result") {
     return readDisplayPreview(display, input);
-  }
-  const envelope = toolResultEnvelopeOrUndefined(output.envelope);
-  if (envelope?.agentSummary !== undefined) {
-    return compactStreamDetailText(envelope.agentSummary, 900);
   }
   const error = readErrorMessageFromOutput(output);
   const facts = readErrorFactsFromOutput(output);
@@ -516,11 +483,6 @@ export function compactStreamDetailText(value: string | undefined, maxLength: nu
     return undefined;
   }
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function redactAndCompact(value: string, maxLength: number): string {
-  const redacted = redactSensitiveText(value).replace(/\s+/g, " ").trim();
-  return redacted.length <= maxLength ? redacted : `${redacted.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function localToolLabel(toolName: string): string {

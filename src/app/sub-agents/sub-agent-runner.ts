@@ -1,4 +1,4 @@
-import type { ArborMessage } from "../../domain/common.js";
+import { isToolLifecycleMessageType, type ArborMessage } from "../../domain/common.js";
 import type {
   IntelligenceChannel,
   ModelMessage,
@@ -251,7 +251,7 @@ class SubAgentTraceRecorder {
   }
 
   observeToolEvent(message: ArborMessage): void {
-    if (message.type !== "tool.requested" && message.type !== "tool.completed" && message.type !== "tool.failed") {
+    if (!isToolLifecycleMessageType(message.type)) {
       return;
     }
     const payload = asRecord(message.payload);
@@ -284,11 +284,9 @@ class SubAgentTraceRecorder {
       completedAt: message.createdAt,
       durationMs: numberFrom(payload.durationMs) ?? numberFrom(output.durationMs) ?? previous?.durationMs,
       confirmationId: stringFrom(asRecord(output.confirmationRequest).confirmationId) ?? previous?.confirmationId,
-      outputSummary: stringFrom(output.summary) ?? stringFrom(asRecord(output.envelope).agentSummary) ?? previous?.outputSummary,
-      display: toolDisplayFrom(output.display) ?? toolDisplayFrom(asRecord(output.envelope).uiDisplay) ?? previous?.display,
-      envelope: toolEnvelopeFrom(output.envelope) ?? previous?.envelope,
+      outputSummary: stringFrom(output.summary) ?? previous?.outputSummary,
       error: stringFrom(payload.error) ?? stringFrom(output.error) ?? previous?.error,
-      errorFacts: toolErrorFactsFrom(output.errorFacts) ?? toolErrorFactsFrom(asRecord(output.envelope).errorFacts) ?? previous?.errorFacts,
+      errorFacts: toolErrorFactsFrom(output.errorFacts) ?? previous?.errorFacts,
     });
   }
 
@@ -305,11 +303,9 @@ class SubAgentTraceRecorder {
         completedAt: previous?.completedAt,
         durationMs: result.durationMs,
         confirmationId: result.confirmationRequest?.confirmationId ?? previous?.confirmationId,
-        outputSummary: stringFrom(asRecord(result.output).summary) ?? result.projection?.envelope?.agentSummary ?? previous?.outputSummary,
-        display: result.projection?.display ?? result.projection?.envelope?.uiDisplay ?? previous?.display,
-        envelope: result.projection?.envelope ?? previous?.envelope,
+        outputSummary: stringFrom(asRecord(result.output).summary) ?? previous?.outputSummary,
         error: result.error ?? previous?.error,
-        errorFacts: result.errorFacts ?? result.projection?.envelope?.errorFacts ?? previous?.errorFacts,
+        errorFacts: result.errorFacts ?? previous?.errorFacts,
       });
     }
   }
@@ -707,19 +703,10 @@ function toolStatusFromEvent(
   if (type === "tool.completed") {
     return "completed";
   }
+  if (type === "tool.cancelled") {
+    return "cancelled";
+  }
   return "failed";
-}
-
-function toolDisplayFrom(value: unknown): SubAgentToolTrace["display"] | undefined {
-  const display = asRecord(value);
-  const kind = stringFrom(display.kind);
-  return kind === undefined ? undefined : value as SubAgentToolTrace["display"];
-}
-
-function toolEnvelopeFrom(value: unknown): SubAgentToolTrace["envelope"] | undefined {
-  const envelope = asRecord(value);
-  const agentSummary = stringFrom(envelope.agentSummary);
-  return agentSummary === undefined ? undefined : value as SubAgentToolTrace["envelope"];
 }
 
 function toolErrorFactsFrom(value: unknown): SubAgentToolTrace["errorFacts"] | undefined {

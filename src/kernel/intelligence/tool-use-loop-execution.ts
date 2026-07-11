@@ -6,6 +6,7 @@ import type {
 } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 import {
+  createToolCancelledMessage,
   createToolCompletedMessage,
   createToolApprovalRequiredMessage,
   createToolFailedMessage,
@@ -14,7 +15,6 @@ import {
 import type { ToolUseLoopOptions } from "./tool-use-loop-contracts.js";
 import { cloneToolCallRequest, cloneToolResults } from "./tool-use-loop-cloning.js";
 import { cancelledToolResult } from "./tool-use-loop-results.js";
-import { projectToolStatusEnvelope } from "../tools/index.js";
 
 export type ToolUseLoopBatchExecutionResult = {
   readonly results: readonly ToolCallResult[];
@@ -106,7 +106,9 @@ export function publishToolResultEvent(
       ? createToolCompletedMessage({ result, context })
       : result.status === "approval_required"
         ? createToolApprovalRequiredMessage({ result, context })
-        : createToolFailedMessage({ result, context })
+        : result.status === "cancelled"
+          ? createToolCancelledMessage({ result, context })
+          : createToolFailedMessage({ result, context })
   );
 }
 
@@ -186,7 +188,6 @@ function isBlockedToolName(options: ToolUseLoopOptions, toolName: string): boole
 
 function unauthorizedToolResult(request: ToolCallRequest): ToolCallResult {
   const summary = `${toolDisplayName(request.toolName)}未授权给当前 Agent。`;
-  const diagnosticRef = `tool:${request.callId}:not-allowed`;
   return {
     callId: request.callId,
     toolName: request.toolName,
@@ -195,17 +196,5 @@ function unauthorizedToolResult(request: ToolCallRequest): ToolCallResult {
     status: "failed",
     error: summary,
     durationMs: 0,
-    projection: {
-      uiSummary: summary,
-      diagnosticRef,
-      envelope: projectToolStatusEnvelope({
-        request,
-        status: "failed",
-        summary,
-        diagnosticRef,
-      }),
-      truncated: false,
-      redacted: false,
-    },
   };
 }

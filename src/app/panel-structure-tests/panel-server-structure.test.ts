@@ -62,7 +62,10 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-server", "run-mode-routing.ts")),
     readAppSource(path.join("panel-server", "deep-routes.ts")),
     readAppSource(path.join("deep", "deep-read-model.ts")),
-    readAppSource(path.join("deep", "deep-model-io.ts")),
+    Promise.all([
+      readAppSource(path.join("deep", "deep-model-contracts.ts")),
+      readAppSource(path.join("deep", "deep-model-messages.ts")),
+    ]).then((sources) => sources.join("\n")),
     readAppSource(path.join("panel-server", "live-model-stream.ts")),
     readAppSource(path.join("panel-server", "run-job-response.ts")),
     readAppSource(path.join("panel-server", "run-jobs.ts")),
@@ -230,8 +233,8 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(basicAgentRunViewRouteSource.includes("syncLiveRunEvents"), false);
   assert.equal(basicAgentRunViewRouteSource.includes("runtime.runJobs.get"), false);
   assert.equal(basicAgentRunView.includes("export async function createBasicAgentRunViewReadModel"), true);
-  assert.equal(basicAgentRunView.includes("function createLiveBasicAgentRunViewReadModel"), true);
-  assert.equal(basicAgentRunView.includes("function createPersistedBasicAgentRunViewReadModel"), true);
+  assert.equal(basicAgentRunView.includes("async function createLiveBasicAgentRunViewReadModel"), true);
+  assert.equal(basicAgentRunView.includes("async function createPersistedBasicAgentRunViewReadModel"), true);
   assert.equal(basicAgentRunView.includes("type BasicAgentRunViewCoreReadModel = Omit<PanelBasicAgentRunViewReadModel, \"workSession\">"), false);
   assert.equal(basicAgentRunView.includes("function addLegacyWorkSessionAlias"), false);
   assert.equal(basicAgentRunView.includes("workSession: view.workView"), false);

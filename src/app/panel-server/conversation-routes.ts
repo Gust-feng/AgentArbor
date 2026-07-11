@@ -21,7 +21,6 @@ import {
 import { persistPanelConversation, persistPanelRunInBackground } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
 import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
-import { syncConversationPreviewsForRunningJobs } from "./conversation-sync.js";
 import { createConversationCurrentRunReadModel } from "./conversation-current-run.js";
 import type { PanelRuntime } from "./runtime.js";
 import type { PanelContextAttachmentMediaEntry } from "./types.js";
@@ -347,11 +346,6 @@ async function listPanelConversations(
       await restorePersistedPanelConversation(runtime, record);
     }
   }
-  syncConversationPreviewsForRunningJobs({
-    conversations: runtime.conversations,
-    jobs: runtime.runJobs.list(),
-    createResponse: (job) => createPanelRunJobResponse(runtime, job),
-  });
   return enrichPanelConversationSummaries(
     runtime,
     runtime.conversations.list().slice(0, Math.max(0, Math.floor(limit)))

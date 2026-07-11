@@ -131,7 +131,7 @@ export function createLiveRunUpdateController(
         return;
       }
       appendOnlyBatcher.flush();
-      const runView = await fetchBasicRunView(runId, 0);
+      const runView = await fetchBasicRunView(runId, lastSequence);
       const run = runView.run;
       const workView = ordinaryWorkViewFromRunView(runView);
       const capabilityResolution = runView.capabilityResolution;

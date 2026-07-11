@@ -15,7 +15,11 @@ import type {
   BasicAgentRunTerminalPayload,
 } from "./run-job.js";
 
-type BasicAgentRunStreamEventInput = Omit<BasicAgentRunStreamEvent, "sequence"> | BasicAgentRunStreamEvent;
+type BasicAgentRunStreamEventInput = Omit<BasicAgentRunStreamEvent, "sequence">;
+
+export type InMemoryBasicAgentRunJobStoreOptions = {
+  readonly idPrefix?: string;
+};
 
 type StoredBasicAgentRunJob = Omit<
   BasicAgentRunJob,
@@ -36,6 +40,8 @@ type StoredBasicAgentRunJob = Omit<
 export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
   private readonly jobs = new Map<string, StoredBasicAgentRunJob>();
 
+  constructor(private readonly options: InMemoryBasicAgentRunJobStoreOptions = {}) {}
+
   create(input: BasicAgentRunJobCreateInput): BasicAgentRunJob {
     const now = nowIso();
     const runMode = resolveBasicAgentRunMode(input.runKind, input.runMode);
@@ -46,7 +52,7 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
       agentDefinitionRef: input.agentDefinitionRef,
     });
     const job: StoredBasicAgentRunJob = {
-      runId: createId("basic-run"),
+      runId: createId(this.options.idPrefix ?? "basic-run"),
       runKind: input.runKind,
       runMode,
       goal: input.goal,
@@ -112,6 +118,30 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
       return;
     }
     job.status = "needs_input";
+    job.updatedAt = nowIso();
+  }
+
+  recordActivity(runId: string): void {
+    const job = this.requireJob(runId);
+    if (isTerminalBasicAgentJobStatus(job.status)) {
+      return;
+    }
+    job.updatedAt = nowIso();
+  }
+
+  attachRuntime(input: {
+    readonly runId: string;
+    readonly runtime: NonNullable<BasicAgentRunJob["runtime"]>;
+    readonly traceId: string;
+    readonly goalId: string;
+  }): void {
+    const job = this.requireJob(input.runId);
+    job.runtime = input.runtime;
+    job.traceId = input.traceId;
+    job.goalId = input.goalId;
+    if (job.status === "pending") {
+      job.status = "running";
+    }
     job.updatedAt = nowIso();
   }
 
@@ -212,6 +242,7 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
       modelCallRefs: [],
       toolCallRefs: [],
       detail: {
+        kind: "confirmation",
         action: decision.decision,
         preview: decision.guidance,
       },
@@ -247,7 +278,7 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
     return appendStreamEventToJob(this.requireJob(runId), event);
   }
 
-  syncStreamEvents(runId: string, events: readonly BasicAgentRunStreamEventInput[]): readonly BasicAgentRunStreamEvent[] {
+  appendStreamEvents(runId: string, events: readonly BasicAgentRunStreamEventInput[]): readonly BasicAgentRunStreamEvent[] {
     const job = this.requireJob(runId);
     for (const event of events) {
       appendStreamEventToJob(job, event);
@@ -340,12 +371,11 @@ function appendStreamEventToJob(
   }
   const next: BasicAgentRunStreamEvent = {
     ...event,
-    sequence: "sequence" in event ? event.sequence : job.nextStreamSequence,
+    sequence: job.nextStreamSequence,
   };
-  job.nextStreamSequence = Math.max(job.nextStreamSequence, next.sequence + 1);
-  job.streamEvents = [...job.streamEvents, next];
+  job.nextStreamSequence += 1;
+  job.streamEvents.push(next);
   job.streamEventIds.add(next.eventId);
-  job.updatedAt = nowIso();
   return next;
 }
 

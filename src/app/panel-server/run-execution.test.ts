@@ -394,8 +394,6 @@ function panelRunJob() {
     config: modelConfig("frozen-profile", "frozen-model"),
     informationAccess: informationAccess(5),
     streamEvents: [],
-    streamEventIds: new Set<string>(),
-    nextStreamSequence: 1,
     confirmationDecisions: [],
   };
 }

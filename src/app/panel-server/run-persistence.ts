@@ -1,7 +1,7 @@
 import type { FileSystemRuntimeDatabasePaths } from "../../adapters/runtime-database/index.js";
 import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import type { ToolErrorFacts } from "../../domain/tools/index.js";
-import { nowIso } from "../../kernel/id.js";
+import { createId, nowIso } from "../../kernel/id.js";
 import type { BasicAgentRunExecutor } from "../basic-agent-runtime/index.js";
 import type { PanelConversationReadModel } from "../panel-conversation/panel-conversations.js";
 import { toRuntimeConversationRecord } from "../panel-conversation/panel-conversations.js";
@@ -23,7 +23,7 @@ import {
   toRuntimeModelCallRecord,
   toRuntimeToolCallRecords,
 } from "./runtime-records.js";
-import { persistentPanelRunStreamEvents, syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
+import { persistentPanelRunStreamEvents } from "./run-stream-sync.js";
 
 export type PanelRunPersistenceRuntime = {
   readonly runJobs: PanelRunJobStore;
@@ -113,13 +113,14 @@ async function persistPanelRunNow(
   });
   const statusPayload = panelRunPayloadForStatus(job);
   const transcriptPayload = statusPayload === undefined || !("observation" in statusPayload) ? undefined : statusPayload;
-  const streamEvents = persistentPanelRunStreamEvents(syncPanelRunStreamEventsForJob(runtime, job));
+  const streamEvents = persistentPanelRunStreamEvents(job.streamEvents);
   const basicRun = runtime.runExecutor.get(job.runId);
   const basicReplay = runtime.runExecutor.replayEvents(job.runId, 0);
   const transcript = createPanelRunTranscript({
     runId: job.runId,
     status: job.status,
     eventEntries,
+    streamEvents,
     summary: transcriptPayload?.summary,
     observation: transcriptPayload?.observation,
     agentRunTree: transcriptPayload?.agentRunTree,
@@ -179,7 +180,7 @@ function recordBackgroundPersistenceFailure(
   );
   const createdAt = nowIso();
   const event = runtime.runJobs.appendStreamEvent(job.runId, {
-    eventId: `${job.runId}:persistence.failed:${job.nextStreamSequence}`,
+    eventId: `${job.runId}:persistence.failed:${createId("diagnostic")}`,
     runId: job.runId,
     type: "agent.note.completed",
     createdAt,

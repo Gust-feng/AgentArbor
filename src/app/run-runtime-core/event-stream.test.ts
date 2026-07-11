@@ -23,18 +23,19 @@ test("AppRunEventHub deduplicates event ids within one run", () => {
   assert.deepEqual(hub.replay("run-1").events.map((event) => event.type), ["started", "running"]);
 });
 
-test("AppRunEventHub replaces existing events and keeps sequence order", () => {
+test("AppRunEventHub keeps duplicate facts immutable", () => {
   const hub = new AppRunEventHub<TestRunEvent>();
 
   const first = hub.publish({ id: "event-1", runId: "run-1", type: "first" });
   hub.publish({ id: "event-2", runId: "run-1", type: "second" });
-  hub.replace({ ...first, sequence: 3, value: "replaced" });
+  const duplicate = hub.publish({ ...first, sequence: 3, value: "replaced" });
   const third = hub.publish({ id: "event-3", runId: "run-1", type: "third" });
 
-  assert.equal(third.sequence, 4);
-  assert.deepEqual(hub.cursor("run-1"), { runId: "run-1", lastSequence: 4, eventCount: 3 });
-  assert.deepEqual(hub.replay("run-1").events.map((event) => event.id), ["event-2", "event-1", "event-3"]);
-  assert.equal(hub.replay("run-1").events[1]?.value, "replaced");
+  assert.equal(duplicate, first);
+  assert.equal(third.sequence, 3);
+  assert.deepEqual(hub.cursor("run-1"), { runId: "run-1", lastSequence: 3, eventCount: 3 });
+  assert.deepEqual(hub.replay("run-1").events.map((event) => event.id), ["event-1", "event-2", "event-3"]);
+  assert.equal(hub.replay("run-1").events[0]?.value, undefined);
 });
 
 test("AppRunEventHub isolates streams by runId", () => {

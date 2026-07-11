@@ -2,6 +2,7 @@ import type { ArborMessageType } from "../../../domain/common.js";
 import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../../../domain/config/index.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import {
+  createRunObservationEventView,
   createRunObservationEventViews,
   type RunObservationEventView,
 } from "../../../domain/observation/index.js";
@@ -57,7 +58,7 @@ import {
 
 export type { PanelRunStreamEvent, PanelRunStreamEventDetail, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 
-export function createPanelRunStreamEvents(input: {
+export type PanelRunStreamProjectionInput = {
   readonly runId: string;
   readonly status: PanelRunStatus;
   readonly eventEntries: readonly EventLogEntry[];
@@ -69,7 +70,106 @@ export function createPanelRunStreamEvents(input: {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly error?: { readonly code: string; readonly message: string };
-}): readonly PanelRunStreamEvent[] {
+};
+
+type UnsequencedPanelRunStreamEvent = Omit<PanelRunStreamEvent, "sequence">;
+
+/**
+ * Incrementally projects runtime facts into transport events.
+ *
+ * A projector instance belongs to exactly one run. Raw runtime entries are
+ * consumed once in source-sequence order; later reads only observe the events
+ * already appended to the run store. This keeps GET/SSE polling out of the
+ * business-state synchronization path.
+ */
+export class IncrementalPanelRunStreamProjector {
+  private initialized = false;
+  private lastRawSequence = 0;
+  private hasVisibleWorkActivity = false;
+  private readonly terminalFactEntries: EventLogEntry[] = [];
+  private readonly pendingOrdinaryChatEntries: EventLogEntry[] = [];
+  private readonly purposeByModelRequestId = new Map<string, string>();
+  private readonly emittedEventIds = new Set<string>();
+
+  get lastSourceSequence(): number {
+    return this.lastRawSequence;
+  }
+
+  project(input: PanelRunStreamProjectionInput): readonly UnsequencedPanelRunStreamEvent[] {
+    const projected: UnsequencedPanelRunStreamEvent[] = [];
+    const push = (event: UnsequencedPanelRunStreamEvent): void => {
+      if (this.emittedEventIds.has(event.eventId)) {
+        return;
+      }
+      this.emittedEventIds.add(event.eventId);
+      projected.push(event);
+    };
+    const agentLabel = agentSelfLabel(input.agentDefinitionRef);
+    const ordinaryAgentProjection = isOrdinaryAgentProjection(input.desktopMode);
+
+    if (!this.initialized) {
+      this.initialized = true;
+      push(runStartedStreamEvent(input, agentLabel));
+    }
+
+    const newEntries = input.eventEntries
+      .filter((entry) => entry.sequence > this.lastRawSequence)
+      .sort((left, right) => left.sequence - right.sequence);
+    for (const entry of newEntries) {
+      if (isTerminalProjectionFact(entry)) {
+        this.terminalFactEntries.push(entry);
+      }
+      recordModelRequestPurpose(this.purposeByModelRequestId, entry);
+      const startsVisibleWork = isUserVisibleWorkActivity(entry, ordinaryAgentProjection);
+      if (startsVisibleWork) {
+        this.hasVisibleWorkActivity = true;
+      }
+      this.lastRawSequence = Math.max(this.lastRawSequence, entry.sequence);
+      if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode)) {
+        continue;
+      }
+      if (ordinaryAgentProjection && !isOrdinaryAgentStreamEvent(entry.type)) {
+        continue;
+      }
+      if (
+        ordinaryAgentProjection &&
+        !this.hasVisibleWorkActivity &&
+        shouldSuppressOrdinaryChatEvent(entry)
+      ) {
+        this.pendingOrdinaryChatEntries.push(entry);
+        continue;
+      }
+      if (startsVisibleWork) {
+        for (const pending of this.pendingOrdinaryChatEntries.splice(0)) {
+          this.appendEntry(input.runId, pending, push);
+        }
+      }
+      this.appendEntry(input.runId, entry, push);
+    }
+
+    appendTerminalStreamEvents({ ...input, eventEntries: this.terminalFactEntries }, agentLabel, push);
+    if (isTerminalPanelRunStatus(input.status)) {
+      this.pendingOrdinaryChatEntries.length = 0;
+    }
+    return projected;
+  }
+
+  private appendEntry(
+    runId: string,
+    entry: EventLogEntry,
+    push: (event: UnsequencedPanelRunStreamEvent) => void
+  ): void {
+    appendStreamEventsForEvent({
+      runId,
+      entry,
+      view: createRunObservationEventView(entry),
+      purposeByModelRequestId: this.purposeByModelRequestId,
+      push,
+    });
+  }
+}
+
+export function createPanelRunStreamEvents(input: PanelRunStreamProjectionInput): readonly PanelRunStreamEvent[] {
   const events: PanelRunStreamEvent[] = [];
   const agentLabel = agentSelfLabel(input.agentDefinitionRef);
   const observationViews = createRunObservationEventViews(input.eventEntries);
@@ -82,18 +182,7 @@ export function createPanelRunStreamEvents(input: {
     events.push({ ...event, sequence: events.length + 1 });
   };
 
-  push({
-    eventId: `${input.runId}:run.started`,
-    runId: input.runId,
-    type: "run.started",
-    createdAt: input.createdAt,
-    agentLabel,
-    summary: runStartedSummary(input.desktopMode),
-    status: input.status === "pending" ? "pending" : "running",
-    sourceRefs: [],
-    modelCallRefs: [],
-    toolCallRefs: [],
-  });
+  push(runStartedStreamEvent(input, agentLabel));
 
   for (const entry of input.eventEntries) {
     if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode)) {
@@ -115,6 +204,33 @@ export function createPanelRunStreamEvents(input: {
     });
   }
 
+  appendTerminalStreamEvents(input, agentLabel, push);
+  return events;
+}
+
+function runStartedStreamEvent(
+  input: PanelRunStreamProjectionInput,
+  agentLabel: string
+): UnsequencedPanelRunStreamEvent {
+  return {
+    eventId: `${input.runId}:run.started`,
+    runId: input.runId,
+    type: "run.started",
+    createdAt: input.createdAt,
+    agentLabel,
+    summary: runStartedSummary(input.desktopMode),
+    status: input.status === "pending" ? "pending" : "running",
+    sourceRefs: [],
+    modelCallRefs: [],
+    toolCallRefs: [],
+  };
+}
+
+function appendTerminalStreamEvents(
+  input: PanelRunStreamProjectionInput,
+  agentLabel: string,
+  push: (event: UnsequencedPanelRunStreamEvent) => void
+): void {
   if (input.status === "completed") {
     const finalSummary = finalResultSummary(input);
     if (finalSummary !== undefined) {
@@ -183,8 +299,14 @@ export function createPanelRunStreamEvents(input: {
       toolCallRefs: [],
     });
   }
+}
 
-  return events;
+function isTerminalPanelRunStatus(status: PanelRunStatus): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
+}
+
+function isTerminalProjectionFact(entry: EventLogEntry): boolean {
+  return entry.type === "model.completed" || entry.type === "artifact.produced";
 }
 
 function agentSelfLabel(ref: Pick<RunAgentDefinitionRef, "agentDisplayName"> | undefined): string {
@@ -207,26 +329,31 @@ function hasUserVisibleWorkActivity(
   eventEntries: readonly EventLogEntry[],
   ordinaryAgentProjection: boolean
 ): boolean {
-  return eventEntries.some((entry) => {
-    if (entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed") {
-      return true;
-    }
-    if (entry.type === "user_approval.requested") {
-      return true;
-    }
-    if (entry.type === "user_approval.received") {
-      return userApprovalReceivedKind(asRecord(entry.message.payload)) !== "approved";
-    }
-    if (
-      entry.type === "sub_agent.started" ||
-      entry.type === "sub_agent.completed" ||
-      entry.type === "sub_agent_batch.started" ||
-      entry.type === "sub_agent_batch.completed"
-    ) {
-      return true;
-    }
-    return !ordinaryAgentProjection && isAgentFabricStreamType(entry.type);
-  });
+  return eventEntries.some((entry) => isUserVisibleWorkActivity(entry, ordinaryAgentProjection));
+}
+
+function isUserVisibleWorkActivity(
+  entry: EventLogEntry,
+  ordinaryAgentProjection: boolean
+): boolean {
+  if (entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed") {
+    return true;
+  }
+  if (entry.type === "user_approval.requested") {
+    return true;
+  }
+  if (entry.type === "user_approval.received") {
+    return userApprovalReceivedKind(asRecord(entry.message.payload)) !== "approved";
+  }
+  if (
+    entry.type === "sub_agent.started" ||
+    entry.type === "sub_agent.completed" ||
+    entry.type === "sub_agent_batch.started" ||
+    entry.type === "sub_agent_batch.completed"
+  ) {
+    return true;
+  }
+  return !ordinaryAgentProjection && isAgentFabricStreamType(entry.type);
 }
 
 function isOrdinaryAgentStreamEvent(type: ArborMessageType): boolean {
@@ -250,17 +377,21 @@ function isOrdinaryAgentStreamEvent(type: ArborMessageType): boolean {
 function modelRequestPurposes(eventEntries: readonly EventLogEntry[]): ReadonlyMap<string, string> {
   const result = new Map<string, string>();
   for (const entry of eventEntries) {
-    if (entry.type !== "model.requested") {
-      continue;
-    }
-    const payload = asRecord(entry.message.payload);
-    const requestId = stringOrUndefined(payload.requestId);
-    const purpose = stringOrUndefined(payload.purpose);
-    if (requestId !== undefined && purpose !== undefined) {
-      result.set(requestId, purpose);
-    }
+    recordModelRequestPurpose(result, entry);
   }
   return result;
+}
+
+function recordModelRequestPurpose(result: Map<string, string>, entry: EventLogEntry): void {
+  if (entry.type !== "model.requested") {
+    return;
+  }
+  const payload = asRecord(entry.message.payload);
+  const requestId = stringOrUndefined(payload.requestId);
+  const purpose = stringOrUndefined(payload.purpose);
+  if (requestId !== undefined && purpose !== undefined) {
+    result.set(requestId, purpose);
+  }
 }
 
 function shouldSuppressOrdinaryChatEvent(entry: EventLogEntry): boolean {

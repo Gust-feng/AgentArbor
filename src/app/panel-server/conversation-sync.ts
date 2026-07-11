@@ -154,23 +154,6 @@ export function syncConversationTurnForJob(input: {
   });
 }
 
-export function syncConversationPreviewsForRunningJobs(input: {
-  readonly conversations: PanelConversationStore;
-  readonly jobs: readonly PanelRunJob[];
-  readonly createResponse: (job: PanelRunJob) => PanelConversationSyncRunResponse;
-}): void {
-  for (const job of input.jobs) {
-    if (job.status !== "running" && job.status !== "approval_needed" && job.status !== "needs_input") {
-      continue;
-    }
-    syncConversationTurnForJob({
-      conversations: input.conversations,
-      job,
-      response: input.createResponse(job),
-    });
-  }
-}
-
 function turnModelFromRunResponse(response: PanelConversationSyncRunResponse): PanelConversationTurnModel {
   return turnModelFromConfigAndModelCall(
     response.config,

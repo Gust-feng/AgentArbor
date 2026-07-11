@@ -13,6 +13,7 @@ test("live model stream preserves long output deltas without low UI truncation",
 
   appendLiveModelOutputDelta({
     runJobs: {
+      recordActivity() {},
       get(candidateRunId) {
         return candidateRunId === runId ? job : undefined;
       },
@@ -66,6 +67,7 @@ function appendDeltaToJob(job: PanelRunJob, modelDelta: ModelOutputDelta): reado
   const events: PanelRunStreamEvent[] = [];
   appendLiveModelOutputDelta({
     runJobs: {
+      recordActivity() {},
       get(candidateRunId) {
         return candidateRunId === job.runId ? job : undefined;
       },

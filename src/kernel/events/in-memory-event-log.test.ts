@@ -47,3 +47,20 @@ test("EventLog list and replay do not expose mutable internal message facts", ()
   assert.equal(storedAgain[0]?.message.payload.nested.count, 1);
   assert.deepEqual(storedAgain[0]?.message.payload.nested.labels, ["original"]);
 });
+
+test("EventLog lists only entries after an acknowledged source sequence", () => {
+  const eventLog = new InMemoryEventLog();
+  for (let index = 1; index <= 3; index += 1) {
+    eventLog.append(createMessage({
+      traceId: "trace-eventlog-cursor",
+      from: { id: "test-agent", role: "underground_center" },
+      to: { group: "runtime" },
+      type: "goal.received",
+      intent: `event_${index}`,
+      payload: { index },
+    }));
+  }
+
+  assert.deepEqual(eventLog.list(1).map((entry) => entry.sequence), [2, 3]);
+  assert.deepEqual(eventLog.list(3), []);
+});

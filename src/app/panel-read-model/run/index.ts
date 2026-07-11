@@ -2,7 +2,11 @@ export { deriveRunSteps } from "./panel-run-steps.js";
 export { createPanelTranscriptNodes } from "../transcript/panel-transcript-nodes.js";
 export { createPanelRunTranscript } from "./panel-run-transcript.js";
 export type { PanelTranscriptModelCall } from "../transcript/panel-transcript-model-calls.js";
-export { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
+export {
+  createPanelRunStreamEvents,
+  IncrementalPanelRunStreamProjector,
+} from "./panel-run-stream-events.js";
+export type { PanelRunStreamProjectionInput } from "./panel-run-stream-events.js";
 export { summarizePanelRuntimeVisibility } from "./panel-runtime-summary.js";
 export type { PanelRunStreamEvent, PanelRunStreamEventDetail, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 export type {

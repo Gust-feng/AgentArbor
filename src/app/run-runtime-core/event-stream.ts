@@ -41,23 +41,11 @@ export class AppRunEventHub<TEvent extends AppRunEventBase> {
     return next;
   }
 
-  replace(event: TEvent): TEvent {
-    const events = this.eventsByRunId.get(event.runId) ?? [];
-    const index = events.findIndex((item) => item.id === event.id);
-    if (index < 0) {
-      return this.publish(event);
-    }
-    events[index] = event;
-    sortBySequence(events);
-    this.eventsByRunId.set(event.runId, events);
-    return event;
-  }
-
   replay(runId: string, afterSequence = 0): AppRunEventReplay<TEvent> {
     const events = this.eventsByRunId.get(runId) ?? [];
     return {
       cursor: this.cursor(runId),
-      events: events.filter((event) => event.sequence > afterSequence),
+      events: appRunEventsAfterSequence(events, afterSequence),
     };
   }
 
@@ -77,6 +65,24 @@ export class AppRunEventHub<TEvent extends AppRunEventBase> {
       eventCount: events.length,
     };
   }
+}
+
+/** Returns the append-only suffix without rescanning the already-consumed prefix. */
+export function appRunEventsAfterSequence<TEvent extends Pick<AppRunEventBase, "sequence">>(
+  events: readonly TEvent[],
+  afterSequence: number
+): readonly TEvent[] {
+  let low = 0;
+  let high = events.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((events[middle]?.sequence ?? 0) <= afterSequence) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return events.slice(low);
 }
 
 function nextSequence(events: readonly AppRunEventBase[]): number {

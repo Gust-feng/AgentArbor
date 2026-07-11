@@ -1080,8 +1080,6 @@ function job(overrides: Partial<PanelRunJob> = {}): PanelRunJob {
     config: modelConfig(),
     informationAccess: informationAccess(),
     streamEvents: [],
-    streamEventIds: new Set(),
-    nextStreamSequence: 1,
     confirmationDecisions: [],
     ...overrides,
   };

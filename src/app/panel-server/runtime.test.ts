@@ -4,7 +4,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { BasicAgentRunExecutionResult } from "../basic-agent-runtime/index.js";
+import type {
+  BasicAgentRunExecutionInput,
+  BasicAgentRunExecutionResult,
+} from "../basic-agent-runtime/index.js";
+import { createMinimalRuntime } from "../runtime.js";
 import { createPanelRuntime, resolveDefaultPanelSkillRoots, resolveDefaultPanelSubAgentRoots } from "./runtime.js";
 
 test("panel runtime appends explicit additional skill roots without replacing default roots", () => {
@@ -128,6 +132,54 @@ test("panel runtime records process residue summaries when ordinary runs reach t
   assert.equal(summaries.length, 1);
   assert.equal(summaries[0]?.kind, "process_run_residue_summary");
   assert.equal(summaries[0]?.runId, run.runId);
+});
+
+test("panel runtime projects published runtime facts once before read paths observe them", async () => {
+  const runtime = createPanelRuntime({}, {
+    async executeRun(_runtime, execution: BasicAgentRunExecutionInput): Promise<BasicAgentRunExecutionResult> {
+      const sourceRuntime = createMinimalRuntime();
+      execution.onRuntimeReady({
+        runtime: sourceRuntime,
+        traceId: "trace-write-side-projection",
+        goalId: "goal-write-side-projection",
+      });
+      sourceRuntime.bus.publish({
+        id: "message-write-side-tool",
+        traceId: "trace-write-side-projection",
+        from: { id: "desktop-agent", role: "desktop_agent" },
+        to: { group: "underground-center" },
+        type: "tool.requested",
+        intent: "request_tool",
+        payload: {
+          callId: "tool-call-write-side",
+          toolName: "read_file",
+          input: { path: "README.md" },
+        },
+        createdAt: "2026-06-16T00:00:01.000Z",
+      });
+      return { completed: true };
+    },
+    async failRun(): Promise<void> {
+      throw new Error("write-side projection test should not fail a run");
+    },
+    scheduleNextQueuedConversationRun(): void {
+      return undefined;
+    },
+  });
+
+  const run = await runtime.runExecutor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "project events on publication",
+    aiMode: "fake",
+  });
+  await waitUntil(() => runtime.runJobs.get(run.runId)?.status === "completed", 5_000);
+
+  const job = runtime.runJobs.get(run.runId);
+  const replay = runtime.runExecutor.replayEvents(run.runId, 0);
+  assert.deepEqual(job?.streamEvents.map((event) => event.type), ["run.started", "tool.requested"]);
+  assert.deepEqual(replay?.events.map((event) => event.type), ["run.started", "tool.requested"]);
+  assert.equal(new Set(job?.streamEvents.map((event) => event.eventId)).size, 2);
 });
 
 function noopHooks() {

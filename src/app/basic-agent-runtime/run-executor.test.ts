@@ -190,7 +190,7 @@ test("BasicAgentRunExecutor owns basic run projection and replay cursor", async 
   assert.equal(run.status, "queued");
   assert.ok(job);
 
-  runJobs.syncStreamEvents(run.runId, [{
+  runJobs.appendStreamEvents(run.runId, [{
     eventId: `${run.runId}:tool.completed`,
     runId: run.runId,
     type: "tool.completed",

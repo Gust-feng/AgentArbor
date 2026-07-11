@@ -22,8 +22,9 @@ export class InMemoryEventLog {
     return cloneEventLogEntry(entry);
   }
 
-  list(): EventLogEntry[] {
-    return this.entries.map(cloneEventLogEntry);
+  list(afterSequence = 0): EventLogEntry[] {
+    const startIndex = Math.max(0, Math.floor(afterSequence));
+    return this.entries.slice(startIndex).map(cloneEventLogEntry);
   }
 
   replay(): ArborMessage[] {

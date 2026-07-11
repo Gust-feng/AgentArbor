@@ -54,6 +54,7 @@ import { syncConversationTurnForJob } from "./conversation-sync.js";
 import { appendLiveModelOutputDelta } from "./live-model-stream.js";
 import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
+import { projectPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 import { desktopCapabilitySnapshotForRunStart } from "./desktop-run-model-settings.js";
 import { PanelHttpError } from "./http-utils.js";
 
@@ -230,8 +231,14 @@ function assemblePanelRuntime(input: {
     runJobs,
     activeRunJobs,
     abortControllers,
-    persistRun: (job) => persistPanelRun(runtime as PanelRuntime, job as PanelRunJob),
-    persistRunInBackground: (job) => persistPanelRunInBackground(runtime as PanelRuntime, job as PanelRunJob),
+    persistRun: (job) => {
+      syncNonTerminalPanelConversation(runtime as PanelRuntime, job as PanelRunJob);
+      return persistPanelRun(runtime as PanelRuntime, job as PanelRunJob);
+    },
+    persistRunInBackground: (job) => {
+      syncNonTerminalPanelConversation(runtime as PanelRuntime, job as PanelRunJob);
+      persistPanelRunInBackground(runtime as PanelRuntime, job as PanelRunJob);
+    },
     cleanupRunResources: (runId) =>
       runtime.processRegistry.cleanupByRun(runId, runtime.processTerminator),
     inspectRunResources: (runId) =>
@@ -239,6 +246,10 @@ function assemblePanelRuntime(input: {
     executionAdapter: {
       execute: (execution) => input.hooks.executeRun(runtime as PanelRuntime, execution),
     },
+    projectRunEvents: (job) => projectPanelRunStreamEventsForJob(
+      { runJobs: runtime.runJobs },
+      job as PanelRunJob
+    ),
     failRun: (job, error) => input.hooks.failRun(runtime as PanelRuntime, job as PanelRunJob, error),
     onRuntimeReady: (runId, context) => {
       runtime.runJobs.attachRuntime({
@@ -249,7 +260,19 @@ function assemblePanelRuntime(input: {
       });
       const job = runtime.runJobs.get(runId);
       if (job !== undefined) {
-        runtime.runExecutor?.syncRun(job);
+        context.runtime.bus.subscribe("*", () => {
+          const current = runtime.runJobs.get(runId);
+          if (current === undefined) {
+            return;
+          }
+          try {
+            runtime.runJobs.recordActivity(runId);
+            runtime.runExecutor?.syncRunEvents(current);
+          } catch (error) {
+            console.error(`[panel-server] run event projection failed for ${runId}:`, error);
+          }
+        });
+        runtime.runExecutor?.syncRunEvents(job);
       }
     },
     onModelOutputDelta: (runId, delta: ModelOutputDelta) => appendLiveModelOutputDelta(runtime as PanelRuntime, runId, delta),
@@ -263,6 +286,22 @@ function assemblePanelRuntime(input: {
     },
   });
   return runtime as PanelRuntime;
+}
+
+function syncNonTerminalPanelConversation(runtime: PanelRuntime, job: PanelRunJob): void {
+  if (
+    job.status === "completed" ||
+    job.status === "failed" ||
+    job.status === "cancelled" ||
+    job.status === "blocked"
+  ) {
+    return;
+  }
+  syncConversationTurnForJob({
+    conversations: runtime.conversations,
+    job,
+    response: createPanelRunJobResponse(runtime, job),
+  });
 }
 
 function resolveAppUpdateService(options: PanelServerOptions): AppUpdateServiceLike {

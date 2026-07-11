@@ -19,12 +19,6 @@ export class BasicAgentRunEventHub {
     return published;
   }
 
-  replace(event: RunEvent): RunEvent {
-    const replaced = this.events.replace(event);
-    this.refreshStatus(event.runId);
-    return replaced;
-  }
-
   replay(runId: string, afterSequence = 0): BasicAgentRunReplay {
     return this.events.replay(runId, afterSequence);
   }

@@ -12,7 +12,7 @@ import { InMemoryProcessRegistry } from "../runtime-guard/index.js";
 import { createRunCapabilityPlan } from "../model-capability-registry.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
 
-test("panel run job response derives events, transcript nodes, and steps from synced stream events", () => {
+test("panel run job response derives events, transcript nodes, and steps without mutating the run", () => {
   const syncedToolEvent: PanelRunStreamEvent = {
     eventId: "run-response:event:2:tool.completed",
     runId: "run-response",
@@ -34,21 +34,17 @@ test("panel run job response derives events, transcript nodes, and steps from sy
     toolCallRefs: ["tool-call-readme"],
   };
   const runtime = {
-    runJobs: {
-      syncStreamEvents: (_runId: string, events: readonly PanelRunStreamEvent[]) => [
-        ...events,
-        syncedToolEvent,
-      ],
-    },
-    runExecutor: {
-      syncRunEvents: () => [],
-    },
     conversations: {
       getReadModel: () => undefined,
     },
   } satisfies Parameters<typeof createPanelRunJobResponse>[0];
 
-  const response = createPanelRunJobResponse(runtime, panelRunJob());
+  const job: PanelRunJob = {
+    ...panelRunJob(),
+    streamEvents: [syncedToolEvent],
+  };
+  const before = structuredClone(job.streamEvents);
+  const response = createPanelRunJobResponse(runtime, job);
 
   assert.equal(response.transcript.events.some((event) => event.eventId === syncedToolEvent.eventId), true);
   assert.equal(response.transcriptNodes.some((node) => node.eventType === "tool.completed"), true);
@@ -56,6 +52,7 @@ test("panel run job response derives events, transcript nodes, and steps from sy
   assert.deepEqual(response.transcript.steps, response.steps);
   assert.deepEqual(response.transcript.transcriptNodes, response.transcriptNodes);
   assert.equal(response.streamCursor.lastSequence, 2);
+  assert.deepEqual(job.streamEvents, before);
 });
 
 test("panel run job response uses the payload matching the current status", () => {
@@ -206,12 +203,6 @@ test("panel run job response exposes runtime visibility summary from process reg
 
 function emptyRuntime(): Parameters<typeof createPanelRunJobResponse>[0] {
   return {
-    runJobs: {
-      syncStreamEvents: (_runId: string, events: readonly PanelRunStreamEvent[]) => events,
-    },
-    runExecutor: {
-      syncRunEvents: () => [],
-    },
     conversations: {
       getReadModel: () => undefined,
     },
@@ -231,8 +222,6 @@ function panelRunJob(): PanelRunJob {
     config: modelConfig(),
     informationAccess: informationAccess(),
     streamEvents: [],
-    streamEventIds: new Set<string>(),
-    nextStreamSequence: 1,
     confirmationDecisions: [],
   };
 }

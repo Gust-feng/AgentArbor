@@ -76,7 +76,7 @@ test("BasicAgentRunEventHub keeps run streams isolated", () => {
   assert.equal(hub.status("run-b"), "failed");
 });
 
-test("BasicAgentRunEventHub replaces events while preserving status projection", () => {
+test("BasicAgentRunEventHub cannot replace a previously published fact", () => {
   const hub = new BasicAgentRunEventHub();
 
   hub.publish({
@@ -100,7 +100,7 @@ test("BasicAgentRunEventHub replaces events while preserving status projection",
     visibility: "expanded",
   });
 
-  hub.replace({
+  const duplicate = hub.publish({
     ...running,
     sequence: 3,
     type: "run.completed",
@@ -108,7 +108,8 @@ test("BasicAgentRunEventHub replaces events while preserving status projection",
     status: "completed",
   });
 
-  assert.deepEqual(hub.cursor("run-1"), { runId: "run-1", lastSequence: 3, eventCount: 2 });
+  assert.equal(duplicate, running);
+  assert.deepEqual(hub.cursor("run-1"), { runId: "run-1", lastSequence: 2, eventCount: 2 });
   assert.deepEqual(hub.replay("run-1").events.map((event) => event.id), ["event-1", "event-2"]);
-  assert.equal(hub.status("run-1"), "completed");
+  assert.equal(hub.status("run-1"), "running");
 });

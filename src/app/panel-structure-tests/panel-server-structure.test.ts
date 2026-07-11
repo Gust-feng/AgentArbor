@@ -92,7 +92,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(requestHandler.includes('from "./persisted-run-response.js"'), false);
   assert.equal(requestHandler.includes('from "./runtime-records.js"'), false);
   assert.equal(requestHandler.includes('from "./run-persistence.js"'), false);
-  assert.equal(requestHandler.includes('from "./run-stream-sync.js"'), true);
+  assert.equal(requestHandler.includes('from "./run-stream-sync.js"'), false);
   assert.equal(requestHandler.includes('from "./run-routes.js"'), true);
   assert.equal(requestHandler.includes('from "./live-model-stream.js"'), false);
   assert.equal(requestHandler.includes('from "./run-job-response.js"'), false);
@@ -196,10 +196,16 @@ test("panel server source keeps conversation restore and persistence split", asy
     "runtime result summaries must prefer desktop_agent_canvas before legacy work_session_canvas"
   );
   assert.equal(runPersistence.includes("export async function persistPanelRun"), true);
-  assert.equal(runStreamSync.includes("export function syncPanelRunStreamEventsForJob"), true);
+  assert.equal(runStreamSync.includes("export function projectPanelRunStreamEventsForJob"), true);
+  assert.equal(runStreamSync.includes("export function syncPanelRunStreamEventsForJob"), false);
   assert.equal(runStreamSync.includes("agentDefinitionRef: job.agentDefinitionRef"), true);
-  assert.equal(panelRunJobs.includes("function panelJobAgentLabel"), true);
-  assert.equal(panelRunJobs.includes("job.agentDefinitionRef?.agentDisplayName"), true);
+  assert.equal(panelRunJobs.includes("new InMemoryBasicAgentRunJobStore"), true);
+  assert.equal(panelRunJobs.includes("function appendStreamEventToJob"), false);
+  assert.equal(basicAgentRunView.includes("projectPanelRunStreamEventsForJob"), false);
+  assert.equal(runJobResponse.includes("projectPanelRunStreamEventsForJob"), false);
+  assert.equal(runPersistence.includes("projectPanelRunStreamEventsForJob"), false);
+  assert.equal(basicAgentRoutes.includes("projectPanelRunStreamEventsForJob"), false);
+  assert.equal(runRoutes.includes("projectPanelRunStreamEventsForJob"), false);
   assert.equal(basicAgentRoutes.includes('from "./basic-agent-run-view.js"'), true);
   assert.equal(basicAgentRoutes.includes('from "./conversation-current-run.js"'), false);
   const basicAgentWorkViewRouteSource = sourceBetween(

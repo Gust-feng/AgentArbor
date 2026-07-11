@@ -5,7 +5,6 @@ import {
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
 import type { PanelRunJob, PanelRunKind } from "./run-jobs.js";
 import { getPanelConversation } from "./conversation-routes.js";
-import { syncConversationTurnForJob } from "./conversation-sync.js";
 import {
   PanelHttpError,
   readJsonBody,
@@ -27,11 +26,10 @@ import {
   type PanelRunResponse,
 } from "./run-execution.js";
 import { createPanelRunJobResponse, type PanelRunJobResponse } from "./run-job-response.js";
-import { persistPanelConversation, persistPanelRun } from "./run-persistence.js";
-import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
+import { appRunEventsAfterSequence } from "../run-runtime-core/event-stream.js";
 
 export type RuntimeRunSummaryView = ReturnType<typeof projectRuntimeRunSummary>;
 
@@ -101,6 +99,9 @@ export async function handlePanelRunRoute(
   const runtimeRunMatch = /^\/api\/runtime\/runs\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && runtimeRunMatch !== null) {
     const runId = decodeURIComponent(runtimeRunMatch[1] ?? "");
+    if (isTerminalPanelRunStatus(runtime.runJobs.get(runId)?.status ?? "running")) {
+      await runtime.runExecutor.waitForTerminalCommit(runId);
+    }
     const snapshot = await runtime.runtimeDatabase?.getRun(runId);
     if (snapshot === undefined) {
       throw new PanelHttpError(404, "run_not_found", "未找到持久化运行记录。");
@@ -263,24 +264,9 @@ async function handleGetRunRequest(
   const job = runtime.runJobs.get(runId);
   if (job !== undefined && job.runKind === expectedRunKind) {
     if (isTerminalPanelRunStatus(job.status)) {
-      await persistPanelRun(runtime, job);
+      await runtime.runExecutor.waitForTerminalCommit(runId);
     }
-    let jobResponse = createPanelRunJobResponse(runtime, job);
-    if (job.status === "approval_needed" || job.status === "needs_input") {
-      syncConversationTurnForJob({
-        conversations: runtime.conversations,
-        job,
-        response: jobResponse,
-      });
-      if (job.conversationId !== undefined) {
-        await persistPanelConversation(runtime, job.conversationId);
-      }
-      jobResponse = {
-        ...jobResponse,
-        conversation: job.conversationId === undefined ? undefined : runtime.conversations.getReadModel(job.conversationId),
-      };
-    }
-    writeJson(response, 200, jobResponse);
+    writeJson(response, 200, createPanelRunJobResponse(runtime, runtime.runJobs.get(runId) ?? job));
     return;
   }
   const snapshot = await runtime.runtimeDatabase?.getRun(runId);
@@ -331,7 +317,7 @@ function handleGetRunStreamRequest(
         };
       }
       return {
-        events: syncPanelRunStreamEventsForJob(runtime, current),
+        events: appRunEventsAfterSequence(current.streamEvents, lastSequence),
         terminal: isTerminalPanelRunStatus(current.status),
       };
     },

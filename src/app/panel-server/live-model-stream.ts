@@ -5,10 +5,10 @@ import type { PanelRunJob, PanelRunJobStore } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
 import { asRecord, optionalString } from "./request-parsers.js";
 
-type PanelRunStreamEventInput = Omit<PanelRunStreamEvent, "sequence"> | PanelRunStreamEvent;
+type PanelRunStreamEventInput = Omit<PanelRunStreamEvent, "sequence">;
 
 export type PanelLiveModelStreamRuntime = {
-  readonly runJobs: Pick<PanelRunJobStore, "get" | "appendStreamEvent">;
+  readonly runJobs: Pick<PanelRunJobStore, "get" | "appendStreamEvent" | "recordActivity">;
 };
 
 export function appendLiveModelOutputDelta(
@@ -28,6 +28,7 @@ export function appendLiveModelOutputDelta(
   if (!isUserFacingStreamingPurpose(job, purpose)) {
     return;
   }
+  runtime.runJobs.recordActivity(runId);
   runtime.runJobs.appendStreamEvent(runId, streamEventFromLiveModelDelta(job, delta, safeDelta));
 }
 

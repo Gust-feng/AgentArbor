@@ -15,11 +15,11 @@ import { restoredRunResultProjection } from "../run-read-model/restored-run-proj
 import { createLiveBasicAgentWorkViewReadModel, createPersistedBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
 import { createPersistedStreamEvents, panelStatusFromRuntimeStatus } from "./persisted-run-response.js";
 import type { PanelRuntime } from "./runtime.js";
-import { persistentPanelRunStreamEvents, syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
+import { persistentPanelRunStreamEvents } from "./run-stream-sync.js";
 
 export type BasicAgentRunViewRuntime = {
-  readonly runExecutor: Pick<PanelRuntime["runExecutor"], "get" | "replayEvents" | "syncRunEvents">;
-  readonly runJobs: Pick<PanelRuntime["runJobs"], "get" | "syncStreamEvents">;
+  readonly runExecutor: Pick<PanelRuntime["runExecutor"], "get" | "replayEvents">;
+  readonly runJobs: Pick<PanelRuntime["runJobs"], "get">;
   readonly runtimeDatabase?: Pick<NonNullable<PanelRuntime["runtimeDatabase"]>, "getRun">;
   readonly processRegistry?: PanelRuntimeSummaryRegistry;
 };
@@ -45,7 +45,7 @@ async function createLiveBasicAgentRunViewReadModel(
   job: PanelRunJob,
   afterSequence: number
 ): Promise<PanelBasicAgentRunViewReadModel | undefined> {
-  const streamEvents = persistentPanelRunStreamEvents(syncPanelRunStreamEventsForJob(runtime, job));
+  const streamEvents = persistentPanelRunStreamEvents(job.streamEvents);
   const run = runtime.runExecutor.get(job.runId);
   const fullReplay = runtime.runExecutor.replayEvents(job.runId, 0);
   const replay = runtime.runExecutor.replayEvents(job.runId, afterSequence);

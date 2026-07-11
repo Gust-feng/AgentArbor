@@ -21,7 +21,14 @@ import type { DesktopAgentConversationMessage } from "../desktop-agent/desktop-a
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { RunSummary } from "../run-read-model/run-summary.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import type { BasicAgentCanvasProjection, BasicAgentRunJob, BasicAgentRunJobStore, BasicAgentRunKind, BasicAgentRunMode } from "./run-job.js";
+import type {
+  BasicAgentCanvasProjection,
+  BasicAgentRunJob,
+  BasicAgentRunJobStore,
+  BasicAgentRunKind,
+  BasicAgentRunMode,
+  BasicAgentRunStreamEvent,
+} from "./run-job.js";
 
 export type BasicAgentContextSourceKind =
   | "system"
@@ -156,6 +163,8 @@ export type BasicAgentRunExecutorConfig = {
   readonly cleanupRunResources?: (runId: string, context?: BasicAgentRunResourceCleanupContext) => Promise<unknown> | unknown;
   readonly inspectRunResources?: (runId: string, context: BasicAgentRunResourceInspectionContext) => Promise<unknown> | unknown;
   readonly executionAdapter: BasicAgentExecutionAdapter;
+  /** Projects newly available runtime facts after a write-side state change. */
+  readonly projectRunEvents?: (job: BasicAgentRunJob) => readonly BasicAgentRunStreamEvent[];
   readonly failRun: (job: BasicAgentRunJob, error: unknown) => Promise<void>;
   readonly onRuntimeReady: (runId: string, context: BasicAgentRuntimeReadyContext) => void;
   readonly onModelOutputDelta: (runId: string, delta: ModelOutputDelta) => void;

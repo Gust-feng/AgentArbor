@@ -162,7 +162,7 @@ test("panel UI app shell delegates settings and sidebar ownership", async () => 
   assert.equal(appLiveRunUpdates.includes("appStateWithAppendOnlyRunEvents"), true);
   assert.equal(appLiveRunUpdates.includes("appendOnlyBatcher.enqueue({ subscription, event })"), true);
   assert.equal(
-    appLiveRunUpdates.includes("appendOnlyBatcher.flush();\n      const runView = await fetchBasicRunView(runId, 0);"),
+    appLiveRunUpdates.includes("appendOnlyBatcher.flush();\n      const runView = await fetchBasicRunView(runId, lastSequence);"),
     true
   );
   assert.equal(appLiveRunUpdates.includes("requestAnimationFrame"), true);

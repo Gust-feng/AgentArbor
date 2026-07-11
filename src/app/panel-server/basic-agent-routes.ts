@@ -10,7 +10,6 @@ import {
   type BasicAgentRunExecutor,
 } from "../basic-agent-runtime/index.js";
 import type { PanelRunJob } from "./run-jobs.js";
-import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
 import { createBasicAgentRunViewReadModel } from "./basic-agent-run-view.js";
 import {
   PanelHttpError,
@@ -20,11 +19,11 @@ import {
   writeJson,
 } from "./http-utils.js";
 import { parseConfirmationDecision } from "./request-parsers.js";
+import { appRunEventsAfterSequence } from "../run-runtime-core/event-stream.js";
 
 export type PanelBasicAgentRouteRuntime = {
   readonly runJobs: {
     get(runId: string): PanelRunJob | undefined;
-    syncStreamEvents(runId: string, events: readonly PanelRunStreamEvent[]): readonly PanelRunStreamEvent[];
   };
   readonly runExecutor: BasicAgentRunExecutor;
   readonly runtimeDatabase?: RuntimeDatabase;
@@ -34,8 +33,7 @@ export async function handlePanelBasicAgentRoute(
   runtime: PanelBasicAgentRouteRuntime,
   request: IncomingMessage,
   response: ServerResponse,
-  url: URL,
-  syncLiveRunEvents: (job: PanelRunJob) => void
+  url: URL
 ): Promise<boolean> {
   const basicWorkViewMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/work-view$/.exec(url.pathname);
   if (request.method === "GET" && basicWorkViewMatch !== null) {
@@ -66,8 +64,7 @@ export async function handlePanelBasicAgentRoute(
       decodeURIComponent(basicRunEventsMatch[1] ?? ""),
       url,
       request,
-      response,
-      syncLiveRunEvents
+      response
     );
     return true;
   }
@@ -91,8 +88,7 @@ export async function handlePanelBasicAgentRoute(
       decodeURIComponent(basicRunStreamMatch[1] ?? ""),
       url,
       request,
-      response,
-      syncLiveRunEvents
+      response
     );
     return true;
   }
@@ -102,8 +98,7 @@ export async function handlePanelBasicAgentRoute(
     await handleGetBasicRunRequest(
       runtime,
       decodeURIComponent(basicRunMatch[1] ?? ""),
-      response,
-      syncLiveRunEvents
+      response
     );
     return true;
   }
@@ -158,13 +153,8 @@ async function handleGetBasicRunEventsRequest(
   runId: string,
   url: URL,
   request: IncomingMessage,
-  response: ServerResponse,
-  syncLiveRunEvents: (job: PanelRunJob) => void
+  response: ServerResponse
 ): Promise<void> {
-  const job = runtime.runJobs.get(runId);
-  if (job !== undefined) {
-    syncLiveRunEvents(job);
-  }
   const cursor = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
   const replay = runtime.runExecutor.replayEvents(runId, cursor);
   if (replay !== undefined) {
@@ -213,8 +203,7 @@ async function handleGetBasicRunStreamRequest(
   runId: string,
   url: URL,
   request: IncomingMessage,
-  response: ServerResponse,
-  syncLiveRunEvents: (job: PanelRunJob) => void
+  response: ServerResponse
 ): Promise<void> {
   let restoredReplay: ReturnType<typeof basicRunReplayFromRuntimeSnapshot> | undefined;
   if (runtime.runJobs.get(runId) === undefined) {
@@ -258,11 +247,7 @@ async function handleGetBasicRunStreamRequest(
       flushRestored();
       return;
     }
-    syncLiveRunEvents(job);
-    for (const event of job.streamEvents) {
-      if (event.sequence <= lastSequence) {
-        continue;
-      }
+    for (const event of appRunEventsAfterSequence(job.streamEvents, lastSequence)) {
       const runEvent = projectRunStreamEventToRunEvent(event);
       writeSseEvent(response, runEvent);
       lastSequence = runEvent.sequence;
@@ -290,12 +275,13 @@ async function handleGetBasicRunStreamRequest(
 async function handleGetBasicRunRequest(
   runtime: PanelBasicAgentRouteRuntime,
   runId: string,
-  response: ServerResponse,
-  syncLiveRunEvents: (job: PanelRunJob) => void
+  response: ServerResponse
 ): Promise<void> {
   const job = runtime.runJobs.get(runId);
   if (job !== undefined) {
-    syncLiveRunEvents(job);
+    if (isTerminalPanelJobStatus(job.status)) {
+      await runtime.runExecutor.waitForTerminalCommit(runId);
+    }
     writeJson(response, 200, {
       ok: true,
       run: requireBasicRun(runtime, runId),
@@ -376,4 +362,8 @@ function shouldCloseBasicRunStream(status: BasicAgentRun["status"]): boolean {
     status === "blocked" ||
     status === "approval_needed" ||
     status === "needs_input";
+}
+
+function isTerminalPanelJobStatus(status: PanelRunJob["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
 }

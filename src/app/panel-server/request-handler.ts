@@ -25,7 +25,6 @@ import {
 import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 import { asRecord } from "./request-parsers.js";
 import { waitForPanelPersistenceIdle as waitForPanelPersistenceChainsIdle } from "./persistence.js";
-import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 import {
   cleanupPanelRuntimeOwnedBackgroundProcesses,
   createPanelRuntime,
@@ -184,9 +183,7 @@ async function handlePanelRequest(
     return;
   }
 
-  if (await handlePanelBasicAgentRoute(runtime, request, response, url, (job) => {
-    syncPanelRunStreamEventsForJob(runtime, job);
-  })) {
+  if (await handlePanelBasicAgentRoute(runtime, request, response, url)) {
     return;
   }
 

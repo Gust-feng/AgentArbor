@@ -39,6 +39,7 @@ export { BasicAgentConfirmationDecisionError } from "./run-executor-continuation
 export class BasicAgentRunExecutor {
   private readonly pendingContinuations = new BasicAgentPendingContinuationStore();
   private readonly basicRuns = new BasicAgentRunStore();
+  private readonly terminalCommitsByRunId = new Map<string, Promise<void>>();
 
   constructor(private readonly config: BasicAgentRunExecutorConfig) {}
 
@@ -67,7 +68,7 @@ export class BasicAgentRunExecutor {
       informationAccess: startFacts.informationAccess,
       capabilitySnapshot: startFacts.capabilitySnapshot,
     });
-    this.syncRun(job);
+    this.syncRunEvents(job);
     if (input.deferInitialPersistence !== true) {
       if (this.config.persistRunInBackground !== undefined) {
         this.config.persistRunInBackground(job);
@@ -89,6 +90,10 @@ export class BasicAgentRunExecutor {
     return this.basicRuns.get(runId) === undefined ? undefined : this.basicRuns.replayEvents(runId, afterSequence);
   }
 
+  async waitForTerminalCommit(runId: string): Promise<void> {
+    await this.terminalCommitsByRunId.get(runId);
+  }
+
   restore(input: {
     readonly run: BasicAgentRun;
     readonly events: readonly RunEvent[];
@@ -100,13 +105,13 @@ export class BasicAgentRunExecutor {
     return this.basicRuns.upsert(projectRunJobToBasicRun(job));
   }
 
-  syncRunEvents(job: BasicAgentRunJob, events: readonly BasicAgentRunStreamEvent[] = job.streamEvents): readonly RunEvent[] {
+  syncRunEvents(job: BasicAgentRunJob, events?: readonly BasicAgentRunStreamEvent[]): readonly RunEvent[] {
+    const sourceEvents = events ?? this.config.projectRunEvents?.(job) ?? job.streamEvents;
     this.syncRun(job);
-    const projected = events.map(projectRunStreamEventToRunEvent);
+    const projected = sourceEvents.map(projectRunStreamEventToRunEvent);
     for (const event of projected) {
-      this.basicRuns.replaceEvent(event);
+      this.basicRuns.publishEvent(event);
     }
-    this.syncRun(job);
     return projected;
   }
 
@@ -118,10 +123,7 @@ export class BasicAgentRunExecutor {
           .finally(resolve);
       });
     });
-    this.config.activeRunJobs.add(activeRunJob);
-    void activeRunJob.then(() => {
-      this.config.activeRunJobs.delete(activeRunJob);
-    });
+    this.trackActiveJob(activeRunJob);
   }
 
   async cancel(runId: string): Promise<BasicAgentRun> {
@@ -145,9 +147,6 @@ export class BasicAgentRunExecutor {
     });
     const cancelled = this.requireJob(runId);
     this.syncRunEvents(cancelled);
-    if (cancelled.status === "cancelled") {
-      await this.cleanupRunResources(runId);
-    }
     await this.finalizeTerminalJob(cancelled);
     return this.requireBasicRun(runId);
   }
@@ -333,6 +332,26 @@ export class BasicAgentRunExecutor {
   }
 
   private async finalizeTerminalJob(job: BasicAgentRunJob): Promise<void> {
+    const existing = this.terminalCommitsByRunId.get(job.runId);
+    if (existing !== undefined) {
+      await existing;
+      return;
+    }
+    const commit = this.commitTerminalJob(job);
+    this.terminalCommitsByRunId.set(job.runId, commit);
+    try {
+      await commit;
+    } finally {
+      if (this.terminalCommitsByRunId.get(job.runId) === commit) {
+        this.terminalCommitsByRunId.delete(job.runId);
+      }
+    }
+  }
+
+  private async commitTerminalJob(job: BasicAgentRunJob): Promise<void> {
+    if (job.status === "cancelled") {
+      await this.cleanupRunResources(job.runId);
+    }
     const terminalStatus = inspectableTerminalStatus(job.status);
     if (terminalStatus !== undefined) {
       await this.inspectRunResources(job.runId, terminalStatus);
@@ -364,9 +383,13 @@ export class BasicAgentRunExecutor {
           .finally(resolve);
       });
     });
-    this.config.activeRunJobs.add(activeRunJob);
-    void activeRunJob.then(() => {
-      this.config.activeRunJobs.delete(activeRunJob);
+    this.trackActiveJob(activeRunJob);
+  }
+
+  private trackActiveJob(job: Promise<void>): void {
+    this.config.activeRunJobs.add(job);
+    void job.finally(() => {
+      this.config.activeRunJobs.delete(job);
     });
   }
 

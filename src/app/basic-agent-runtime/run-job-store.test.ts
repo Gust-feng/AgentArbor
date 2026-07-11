@@ -149,6 +149,42 @@ test("InMemoryBasicAgentRunJobStore keeps approved confirmations out of ordinary
   assert.equal(streamText.includes("继续处理"), false);
 });
 
+test("InMemoryBasicAgentRunJobStore owns monotonic sequence and keeps duplicate events immutable", () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const job = createDesktopAgentJob(runJobs);
+  const event = {
+    eventId: `${job.runId}:tool.completed`,
+    runId: job.runId,
+    type: "tool.completed",
+    createdAt: "2026-06-07T00:01:00.000Z",
+    agentLabel: "工具",
+    summary: "读取完成。",
+    status: "completed" as const,
+    sourceRefs: [],
+    modelCallRefs: [],
+    toolCallRefs: ["tool-call-read"],
+  };
+
+  const first = runJobs.appendStreamEvent(job.runId, event);
+  const duplicate = runJobs.appendStreamEvent(job.runId, {
+    ...event,
+    summary: "不应覆盖既有事实。",
+  });
+  const second = runJobs.appendStreamEvent(job.runId, {
+    ...event,
+    eventId: `${job.runId}:tool.failed`,
+    type: "tool.failed",
+    summary: "读取失败。",
+    status: "failed",
+  });
+
+  assert.equal(first.sequence, 1);
+  assert.equal(second.sequence, 2);
+  assert.equal(duplicate, first);
+  assert.equal(duplicate.summary, "读取完成。");
+  assert.deepEqual(runJobs.get(job.runId)?.streamEvents.map((item) => item.sequence), [1, 2]);
+});
+
 function createDesktopAgentJob(runJobs: InMemoryBasicAgentRunJobStore): BasicAgentRunJob {
   const snapshot = capabilitySnapshot({
     snapshotId: "snapshot-created",

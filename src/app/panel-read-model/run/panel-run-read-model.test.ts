@@ -4,7 +4,10 @@ import type { ArborMessage, ArborMessageType } from "../../../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../../../domain/intelligence/index.js";
 import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.js";
 import type { PanelRunSummary } from "./panel-run-summary.js";
-import { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
+import {
+  createPanelRunStreamEvents,
+  IncrementalPanelRunStreamProjector,
+} from "./panel-run-stream-events.js";
 import { createPanelRunTranscript } from "./panel-run-transcript.js";
 import { createPanelTranscriptNodes } from "../transcript/panel-transcript-nodes.js";
 
@@ -580,6 +583,55 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
   assert.equal(completedTool?.detail?.preview?.includes("文件正文只进入本轮工具上下文"), false);
   assert.equal(JSON.stringify(withTool).includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
+});
+
+test("incremental panel stream projection consumes each source fact once and preserves full-projection order", () => {
+  const projector = new IncrementalPanelRunStreamProjector();
+  const bufferedEntries = [
+    eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-incremental" } }),
+    eventEntry({
+      sequence: 2,
+      type: "model.requested",
+      payload: { requestId: "request-incremental", purpose: "desktop_chat" },
+    }),
+    modelCompletedEntry({
+      sequence: 3,
+      requestId: "request-incremental",
+      purpose: "desktop_chat",
+      contractId: "desktop.chat.answer.v1",
+      decisionSummary: "Answer before visible tool work.",
+    }),
+  ];
+  const toolEntry = eventEntry({
+    sequence: 4,
+    type: "tool.requested",
+    payload: { callId: "tool-call-incremental", toolName: "read_file", input: { path: "README.md" } },
+  });
+  const base = {
+    runId: "run-incremental",
+    status: "running" as const,
+    desktopMode: "agent" as const,
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:04.000Z",
+  };
+
+  const first = projector.project({ ...base, eventEntries: bufferedEntries });
+  const duplicate = projector.project({ ...base, eventEntries: bufferedEntries });
+  const second = projector.project({ ...base, eventEntries: [toolEntry] });
+  const duplicateTool = projector.project({ ...base, eventEntries: [toolEntry] });
+  const full = createPanelRunStreamEvents({
+    ...base,
+    eventEntries: [...bufferedEntries, toolEntry],
+  });
+
+  assert.deepEqual(first.map((event) => event.type), ["run.started"]);
+  assert.deepEqual(duplicate, []);
+  assert.deepEqual(duplicateTool, []);
+  assert.deepEqual(
+    [...first, ...second].map((event) => [event.eventId, event.type, event.summary, event.delta]),
+    full.map((event) => [event.eventId, event.type, event.summary, event.delta])
+  );
+  assert.equal(projector.lastSourceSequence, 4);
 });
 
 test("ordinary agent stream exposes sub-agent runs as user-visible tool activity", () => {

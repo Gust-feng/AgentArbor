@@ -25,11 +25,9 @@ test("basic agent run view for live runs exposes the job birth agent definition 
     runExecutor: {
       get: () => run,
       replayEvents: () => basicReplay(run.runId),
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => basicJob(jobAgentDefinitionRef),
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
   } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
 
@@ -55,7 +53,6 @@ test("basic agent run view prefers completed live run facts over stale job facts
     runExecutor: {
       get: () => run,
       replayEvents: () => basicReplay(run.runId),
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => ({
@@ -88,7 +85,6 @@ test("basic agent run view prefers completed live run facts over stale job facts
           },
         },
       }),
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
   } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
 
@@ -114,7 +110,6 @@ test("basic agent run view exposes failed live desktop canvas from the backend r
     runExecutor: {
       get: () => run,
       replayEvents: () => basicReplay(run.runId),
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => ({
@@ -175,7 +170,6 @@ test("basic agent run view exposes failed live desktop canvas from the backend r
           },
         },
       }),
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
   } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
 
@@ -203,7 +197,6 @@ test("basic agent run view exposes cancelled live desktop canvas from the backen
     runExecutor: {
       get: () => run,
       replayEvents: () => basicReplay(run.runId),
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => ({
@@ -263,7 +256,6 @@ test("basic agent run view exposes cancelled live desktop canvas from the backen
           },
         },
       }),
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
   } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
 
@@ -278,7 +270,7 @@ test("basic agent run view exposes cancelled live desktop canvas from the backen
   assert.notEqual(view?.capabilityResolution?.snapshotId, "snapshot-stale-job");
 });
 
-test("basic agent live work view builds transcript nodes from synced backend stream events", async () => {
+test("basic agent live work view builds transcript nodes from stored backend stream events", async () => {
   const runAgentDefinitionRef = agentRef("run-agent", "Run Agent");
   const run = {
     ...basicRun(runAgentDefinitionRef),
@@ -301,13 +293,12 @@ test("basic agent live work view builds transcript nodes from synced backend str
     runExecutor: {
       get: () => run,
       replayEvents: () => basicReplay(run.runId),
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => ({
         ...basicJob(runAgentDefinitionRef),
         status: "approval_needed" as const,
-        streamEvents: [],
+        streamEvents: [syncedConfirmationEvent],
         completed: {
           config: modelConfig(),
           informationAccess: informationAccess(),
@@ -343,7 +334,6 @@ test("basic agent live work view builds transcript nodes from synced backend str
           },
         },
       }),
-      syncStreamEvents: () => [syncedConfirmationEvent],
     },
   } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
 
@@ -389,11 +379,9 @@ test("basic agent run view exposes live runtime guard facts as a read-only detai
     runExecutor: {
       get: () => run,
       replayEvents: () => basicReplay(run.runId),
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => basicJob(runAgentDefinitionRef),
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
     processRegistry: registry,
   } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
@@ -442,11 +430,9 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
     runExecutor: {
       get: () => undefined,
       replayEvents: () => undefined,
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => undefined,
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
     runtimeDatabase: {
       getRun: async () => snapshot,
@@ -515,11 +501,9 @@ test("basic agent run view restores full persisted ordinary answers", async () =
     runExecutor: {
       get: () => undefined,
       replayEvents: () => undefined,
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => undefined,
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
     runtimeDatabase: {
       getRun: async () => snapshot,
@@ -536,8 +520,10 @@ test("basic agent run view restores full persisted ordinary answers", async () =
 
 test("live basic agent work view exposes sub-agent run traces", () => {
   const agentDefinitionRef = agentRef("live-agent", "Live Agent");
-  const job = basicJob(agentDefinitionRef);
-  job.runtime = createMinimalRuntime();
+  const job = {
+    ...basicJob(agentDefinitionRef),
+    runtime: createMinimalRuntime(),
+  };
   job.runtime.subAgentRunTraceStore.upsert({
     parentRunId: job.runId,
     parentToolCallId: "tool-call-sub-agent",
@@ -598,11 +584,9 @@ test("basic agent panel read-model restores pending confirmations after refresh"
     runExecutor: {
       get: () => undefined,
       replayEvents: () => undefined,
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => undefined,
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
     runtimeDatabase: {
       getRun: async () => snapshot,
@@ -636,11 +620,9 @@ test("basic agent run view does not invent restored result titles", async () => 
     runExecutor: {
       get: () => undefined,
       replayEvents: () => undefined,
-      syncRunEvents: () => [],
     },
     runJobs: {
       get: () => undefined,
-      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
     },
     runtimeDatabase: {
       getRun: async () => snapshot,
@@ -715,8 +697,6 @@ function basicJob(agentDefinitionRef: RunAgentDefinitionRef): PanelRunJob {
     informationAccess: informationAccess(),
     capabilityResolution: capabilityResolution("snapshot-live", ["search"]),
     streamEvents: [],
-    streamEventIds: new Set<string>(),
-    nextStreamSequence: 1,
     confirmationDecisions: [],
   };
 }

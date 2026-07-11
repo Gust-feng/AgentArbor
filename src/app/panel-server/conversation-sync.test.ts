@@ -4,7 +4,6 @@ import { PanelConversationStore } from "../panel-conversation/panel-conversation
 import type { PanelRunJob } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import {
-  syncConversationPreviewsForRunningJobs,
   syncConversationTurnForJob,
   type PanelConversationSyncRunResponse,
 } from "./conversation-sync.js";
@@ -839,35 +838,6 @@ test("syncConversationTurnForJob preserves repeated replay output chunks", () =>
   assert.equal(assistant?.content, "haha");
 });
 
-test("syncConversationPreviewsForRunningJobs skips queued and terminal jobs while updating active jobs", () => {
-  const { conversations, job } = startedConversationJob();
-  const terminal = { ...job, runId: "run-terminal", status: "completed" as const };
-  const queued = { ...job, runId: "run-queued", status: "pending" as const };
-
-  job.status = "running";
-  syncConversationPreviewsForRunningJobs({
-    conversations,
-    jobs: [terminal, queued, job],
-    createResponse: (candidate) => response({
-      status: candidate.status,
-      transcriptEvents: [
-        streamEvent({
-          type: "tool.requested",
-          summary: "正在读取文件：README.md。",
-          detail: {
-            kind: "tool",
-            preview: "目标：README.md",
-          },
-        }),
-      ],
-    }),
-  });
-
-  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "");
-  assert.equal(assistant?.content, "");
-});
-
 test("syncConversationTurnForJob prefers HTTP event errors for failed turns", () => {
   const { conversations, job } = startedConversationJob();
   const secret = "sk-sync-secret";
@@ -1070,7 +1040,7 @@ test("syncConversationTurnForJob keeps streamed output on failure even before pr
 
 function startedConversationJob(): {
   readonly conversations: PanelConversationStore;
-  readonly job: PanelRunJob;
+  readonly job: MutablePanelRunJob;
 } {
   const conversations = new PanelConversationStore();
   const start = conversations.startDesktopMessage({ goal: "整理当前任务" });
@@ -1099,8 +1069,6 @@ function startedConversationJob(): {
       config: config(),
       informationAccess: informationAccess(),
       streamEvents: [],
-      streamEventIds: new Set<string>(),
-      nextStreamSequence: 1,
       confirmationDecisions: [],
     },
   };
@@ -1206,3 +1174,6 @@ function streamEvent(input: {
     toolCallRefs: input.toolCallRefs ?? [],
   };
 }
+type MutablePanelRunJob = {
+  -readonly [Key in keyof PanelRunJob]: PanelRunJob[Key];
+};

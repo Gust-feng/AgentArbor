@@ -70,7 +70,9 @@ Workbench
 
 ### 4. 唯一后端 Composition Root
 
-后端只有一个 Composition Root。`createPanelRuntime()` 负责创建 Host 级资源、装配 `OrdinaryAgentFeature` 与 `MultiAgentFeature`，并把精确端口交给 HTTP/SSE adapter。
+后端只有一个 Composition Root。目标边界是由它创建 Host 级资源，装配 Ordinary Agent 与 Multi-Agent 各自的精确公开端口，并把这些端口交给 HTTP/SSE adapter。
+
+当前实现中，`createPanelRuntime()` 已直接创建 `MultiAgentFeature`；Ordinary Agent 则仍通过 `BasicAgentRunExecutor` 与 Panel runtime 持有的会话、运行和持久化资源完成装配，尚不存在独立的 `OrdinaryAgentFeature`。这是需要诚实记录的过渡实现，不影响唯一组合根与依赖方向成立；后续只有在 Ordinary 的 command/query/event 边界形成真实职责时才建立对应 feature factory，不为了匹配文档制造空 facade。
 
 - 只有 Composition Root 可以同时导入并装配多个 feature 和具体 adapter。
 - route 只解析 HTTP、调用 feature command/query、映射协议响应；不得创建 feature store、provider、ToolCenter 或隐藏的 runtime。

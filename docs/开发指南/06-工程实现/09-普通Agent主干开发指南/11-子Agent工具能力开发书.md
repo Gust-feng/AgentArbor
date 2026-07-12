@@ -129,7 +129,7 @@ maxSteps: 50
 
 ## 四个工具
 
-子 Agent 通过四个工具暴露给模型，工具定义见 `src/app/sub-agents/sub-agent-tools.ts`。`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 注册到 `desktop-basic` scope，`riskLevel: medium`、`operationType: read-write`、`requiresConfirmation: false`、`visibleResultPolicy: summary-only`。`read_sub_agent_output` 是只读续读工具，`riskLevel: low`、`operationType: read-only`、`requiresConfirmation: false`。
+子 Agent 通过四个工具暴露给模型，工具定义见 `src/app/sub-agents/sub-agent-tools.ts`。`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 注册到 `desktop-basic` scope，`riskLevel: medium`、`operationType: read-write`、`requiresConfirmation: false`。`read_sub_agent_output` 是只读续读工具，`riskLevel: low`、`operationType: read-only`、`requiresConfirmation: false`。子 Agent 工具 metadata 不携带 Panel 预览策略。
 
 ### 1. `call_sub_agent`
 
@@ -145,8 +145,8 @@ maxSteps: 50
 
 - 通过 `SubAgentRegistry.getByName` 解析子 Agent；不存在时抛 `Sub-agent not found`。
 - `enabled: false` 时抛 `Sub-agent is disabled`。
-- 调用 `runSubAgent` 执行，返回 `status` / `summary` / `full_output` / `full_output_chars` / `full_output_ref` / `continuation` / `tool_calls` / `model_rounds` / `duration_ms` / `run_id` / `error`。
-- `full_output_ref` 形如 `sub-agent-output:<run_id>`；`continuation.nextInput` 可直接传给 `read_sub_agent_output`，用于 transport 截断后继续读取。
+- 调用 `runSubAgent` 执行，返回 `sub_agent_status / full_output / full_output_chars / truncated / tool_calls / model_rounds / duration_ms / run_id / error`，只有正文被切分时才在顶层返回 `continuation`。外层 `ToolCallResult.status` 表示工具调用是否完成，`sub_agent_status` 表示子运行结果，二者语义不同。
+- 单调用正文不超过 100,000 字时完整返回且没有冗余 continuation；更长时先返回 100,000 字首段、`truncated: true`，`continuation.nextInput` 从首段末尾继续调用 `read_sub_agent_output`。不再返回 synthetic `full_output_ref`。
 
 ### 2. `call_sub_agents`
 
@@ -272,7 +272,7 @@ maxSteps: 50
 - 子 Agent 的 turn policy：`allowModel: true`、`fallback: "disabled"`、`purpose: "desktop_agent"`、`sensitivity: "internal"`、`outputContract: sub_agent.free_text.v1`（`explanation` + `text`）；`maxModelRounds` 与 `maxToolRounds` 均取 `maxSteps`（默认 30）。
 - 子 Agent 不能递归派生：`spawn_sub_agent` 仅注册到顶层普通 Agent（`includeSpawnTool: true` 在 `prepareDesktopAgentLoop` 与 `builtin-tool-runtime.ts` 中显式传入），子 Agent 的 turn policy 不包含 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` / `read_sub_agent_output` 工具，因此子 Agent 内部无法再调用、派生或读取其他子 Agent 输出。
 - 子 Agent 输出是局部材料：`SubAgentCallResult.summary` / `fullOutput` 作为工具结果回到父层模型上下文，由父层模型决定如何使用、是否采纳、是否综合；子 Agent 不直接写 RuntimeDatabase 主 run 表，不修改 Task Soil，不触发 Governance 回流。
-- 子 Agent 调用工具的 `visibleResultPolicy` 为 `summary-only` 且 `omitRawOutput: true`：默认 UI 投影只展示摘要，不展示完整 `full_output`；`maxPreviewChars` 单调用 1200、批量 1600。这与普通 Agent“不削弱模型能力”原则不冲突——完整输出仍作为 tool result 进入模型上下文供 continuation 使用，只是默认 UI 不展示原文。若 transport 预算截断，`full_output_ref` / `continuation` 指向 `read_sub_agent_output`，父模型可以继续读取。
+- 子 Agent 的 UI 标题、摘要和预览仅由 Panel/read-model 从调用事实派生，不由工具 metadata 决定，也不回写工具结果。模型工具结果对短正文完整返回；长正文由 producer 在进入共享 transport 前主动切首段，并提供从未读字符位置开始的 `read_sub_agent_output` continuation。批量结果共享 120,000 字首段预算，只为真正被切分的 child 返回 continuation。
 - 子 Agent 调用的命令类工具仍走父 run 的命令确认策略；子 Agent 工具本身不额外触发确认。内部工具触发确认时，`SubAgentRunner` 返回 `approval_required` 与 `pendingApproval`，子 Agent 工具 executor 将其转成父工具调用的 `approval_required`，父 run 进入既有 `confirmation_needed` 流程；approve 后恢复同一个子 Agent pending turn，deny/guidance 走父 run 现有确认决策路径。
 - 子 Agent 的 `model` 字段当前作为意图声明进入冻结 catalog；实际模型调用复用父 Agent 的 `IntelligenceChannel` 与 `activeModel`，子 Agent 不自行选择 provider 或模型实例。
 
@@ -283,16 +283,17 @@ maxSteps: 50
 数据流：
 
 1. `SubAgentRunner` 为每次调用创建 `SubAgentRunTrace`，记录 `parentRunId`、父工具调用 `parentToolCallId`、`subRunId`、`batchId` / `batchIndex`、子 Agent 名称、任务、上下文、状态、时间、模型轮次、工具次数、摘要和错误。
-2. runner 包装 `IntelligenceChannel`，按轮记录模型 request messages 与 response 文本、工具请求、失败类型、失败消息、usage、requestId / responseId。
-3. runner 观察内部工具事件和 turn tool call 结果，记录工具 name、input、status、duration、confirmation、display、envelope、errorFacts。
+2. runner 包装 `IntelligenceChannel`，按轮只记录 requestId / responseId、message refs/count、可见工具数量、tool-call refs、状态、失败事实、finish reason 和 usage；不保存每轮累计 messages、附件或 response 正文。
+3. runner 观察内部工具事件和 turn tool call 结果，只记录 callId、tool name、status、duration、confirmation、error/errorDomain/errorFacts；工具 input、output summary、display 和 envelope 不进入 trace。
 4. runtime 内存 trace store 汇总本轮 `subAgentRuns`；run persistence 在保存父 run snapshot 时调用 `replaceSubAgentRuns` 写入 `sub-agent-runs.jsonl`。
 5. live read model 从 runtime trace store 读取 `subAgentRuns`；persisted read model 从 RuntimeDatabase snapshot 读取 `subAgentRuns`。
 6. transcript 中 `sub_agent.*` 事件形成 `kind: "sub_agent"` 的 activity node；UI 用 `subAgentRunId` / `subAgentBatchId` 关联到 `subAgentRuns`，渲染内联卡片和右侧详情抽屉。
 
 保存边界：
 
-- 保存模型可见 messages、模型输出文本、工具请求、失败信息、usage 和工具事实投影。
-- 保存工具结果时复用现有模型可见 / 用户可见投影，不额外保存 raw stdout / stderr 全量。
+- `fullOutput` 是子 Agent 正文的唯一 continuation owner；短摘要只表达状态和长度，不逐字复制短正文。
+- 模型 exchange 只保存引用、计数、状态、失败信息和 usage，不保存累计模型上下文或逐轮正文。
+- 工具 trace 只记录终态/错误/确认/引用；模型正文与用户展示分别从事实消费，不保存第二份 input、envelope/display，也不额外复制 raw stdout / stderr 全量。
 - 命令长输出仍通过既有 `logRef` / `logPath` 机制查看。
 - 不保存 provider 原始 HTTP JSON，不把 trace 当作 provider 级审计日志。
 

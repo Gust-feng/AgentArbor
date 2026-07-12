@@ -35,7 +35,7 @@
 
 ### 2. 唯一后端 Composition Root
 
-- `createPanelRuntime()` 装配 `OrdinaryAgentFeature` 与 `MultiAgentFeature`。
+- `createPanelRuntime()` 装配 Ordinary Agent 的精确运行端口与 `MultiAgentFeature`；当前 Ordinary 仍是 `BasicAgentRunExecutor` 加 Panel runtime 资源，待真实业务 facade 成熟后再建立独立 feature。
 - Multi-Agent factory 拥有 Deep store、control/continuation registry、instruction queue、active run tracking 和资源释放。
 - `/api/deep/*` route 只解析 HTTP、调用 feature facade、映射响应。
 - route 不得创建 `MinimalRuntime`、store、provider 或 ToolCenter 工厂，也不得以 `WeakMap` 保存 feature 状态。

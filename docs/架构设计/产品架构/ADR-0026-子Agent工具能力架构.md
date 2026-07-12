@@ -104,7 +104,7 @@ ADR-0024 确立了 Ordinary 与基础能力优先路线，ADR-0025 定义了 Mul
 - 子 Agent 拥有普通 Agent 内的专门运行视图，但它仍是普通 Agent 工具能力，不升级为 deep / Underground 运行树。
 - read model 新增 `subAgentRuns`，作为 UI 展示子 Agent 内联卡片、批次卡片和右侧详情抽屉的唯一数据源；前端不从散落的 `tool.*` / `model.*` 事件中猜测归属。
 - `SubAgentRunner` 为每个子运行生成 `SubAgentRunTrace`，显式记录父 run id、父工具调用 `toolCallId`、`subRunId`、`batchId` / `batchIndex`、任务、上下文、状态、耗时、模型轮次、内部工具事实和摘要。
-- trace 记录的是 Agent 可复盘的调试投影：模型 request messages、模型 response 文本 / 工具请求 / 失败类型 / usage，以及工具 name、input、status、duration、确认和现有 display / envelope / errorFacts。它不保存底层 provider 原始 HTTP JSON，也不额外保存命令 stdout/stderr 全量；长输出仍通过既有 logRef / logPath 查看。
+- trace 记录的是 Agent 可复盘的调试事实：模型 request messages、模型 response 文本 / 工具请求 / 失败类型 / usage，以及工具 name、input、status、duration、确认、error/errorFacts 与必要引用。展示字段只由 `subAgentRuns` read-model 派生，不保存已删除的 display/envelope。trace 不保存底层 provider 原始 HTTP JSON，也不额外复制命令 stdout/stderr 全量；长输出通过真实 `logRef / logPath` 或子 Agent 输出续读工具查看。
 - RuntimeDatabase 持久化 `sub-agent-runs.jsonl`，历史 run 恢复时继续展示子 Agent 详情；老 run 没有该文件时只显示原有普通工具节点。
 - 第一版运行视图只读，不提供重试、续跑、取消或子 Agent 生命周期控制。子 Agent 内部工具确认仍展示为父 run 既有确认卡，详情视图只标注其等待父 run 确认。
 

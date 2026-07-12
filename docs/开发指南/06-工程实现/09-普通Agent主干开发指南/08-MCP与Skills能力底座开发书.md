@@ -61,7 +61,7 @@ AgentArbor 应承担：
 - Task Soil 权限裁剪。
 - ToolCenter 执行边界。
 - Confirmation Gate。
-- Run Projection / ToolResultEnvelope。
+- `ToolCallResult` JSON 事实归一化与 append-only 工具事件。
 - RuntimeDatabase 运行持久化。
 - Panel read-model。
 
@@ -203,7 +203,7 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 要求：
 
 - `CapabilityMcpCatalogItem` 增加 server runtime status、安全 `errorSummary`、discovered tool projections。
-- discovered tool projection 只能包含内部安全字段：name、displayName、description、riskLevel、operationType、requiresConfirmation、visibleResultPolicy、scopes、availability。
+- discovered tool projection 只能包含内部安全字段：name、displayName、description、riskLevel、operationType、requiresConfirmation、scopes、availability。用户预览策略属于 Panel/read-model，不随 MCP 工具定义进入执行域或 capability snapshot。
 - `BasicAgentCapabilitySnapshot.skillCatalog` 改为表达 enabled / disabled 全量 skills。
 - `RunCapabilityResolution` 保留 `enabledSkills` 作为本轮可触发技能冻结摘要。
 - 增加 `triggeredSkills` 或等价 run view 字段，用于表达实际注入过的技能。
@@ -254,20 +254,24 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 
 如果不能可靠地从冻结 snapshot 重建 MCP executor，不要把 MCP tool 标成 executable。宁可让 policy 暴露后再由 executable restriction 隐藏，也不能执行当前配置里后加的 MCP tool。
 
-### 4. MCP run projection
+### 4. MCP 工具结果边界
 
 文件：
 
 - `src/adapters/mcp/mcp-tool-adapter.ts`
-- `src/app/tool-projection/safe-projection.ts`（`src/app/safe-projection.ts` 只保留兼容导出）
-- `src/kernel/tools/tool-result-envelope.ts`
+- `src/domain/tools/fact-value.ts`
+- `src/kernel/intelligence/tool-call-result-model-view.ts`
+- `src/app/tool-projection/tool-display-projection.ts`
 
 要求：
 
-- MCP output 进入现有 `ToolResultEnvelope`。
-- 文本内容按 `visibleResultPolicy.maxPreviewChars` 截断。
-- 图片、音频、base64、多模态 payload 默认不进入 UI raw channel；只保留类型、mime、运行摘要或 diagnostic ref。
-- MCP error 归一成安全错误，不展示 raw stack、secret、env、完整 command args。
+- MCP adapter 只生成一次 canonical 工具事实：服务端原生 `content[]` 加可选 `structuredContent`，不得再制造 `summary / mcpResult / result` 等等价包装。
+- `content[]` 与 `structuredContent` 同时存在时，只有 text part 可解析为 JSON 且解析值与 `structuredContent` 深度完全相等，才删除该 text 精确镜像；解析失败、部分重叠、顺序/类型不同或正文不同都完整保留。禁止模糊相似、摘要或关键词去重。
+- MCP adapter 不自行调用 `normalizeToolFactValue`；MCP executor output 与其他工具一样由 ToolCenter 统一归一成 `ToolFactValue`。循环引用、非 plain object 和其他非 JSON 值在 ToolCenter 明确失败，不能静默 stringify。
+- `isError=true` 必须形成 failed `ToolCallResult`，错误正文保留一次；连接、协议和 transport 异常同样走标准工具失败。
+- 文本不由 MCP adapter 为模型截断。若服务端工具可能超过共享 transport budget，它自身必须返回明确分页、引用或顶层 continuation；缺少 continuation 时应诚实失败。
+- 图片 base64 只通过带外模型附件进入下一轮请求，JSON 仅保存 mime、byteLength 和附件索引；audio 与当前不支持的二进制必须标记 `unsupported / not_retained`，不得塞入 JSON 或持久化记录。
+- UI 需要标题、摘要或预览时，只能在 Observation/Panel read-model 边界从工具调用事实派生，不能写回 MCP output、事件或 RuntimeDatabase。
 
 ### 5. Skills snapshot 与触发闭环
 
@@ -325,12 +329,11 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 - `src/app/cognitive-work-session*.ts`
 - `src/app/underground/**`
 - `src/domain/underground/**`
-- `src/app/basic-agent-runtime/work-session.ts`
 - `src/app/panel-server/basic-agent-read-models.ts`
 
 要求：
 
-- 不删除这些代码。
+- 只保留仍由 Legacy Underground / deep 明确拥有的运行语义；已删除的 Ordinary work-session 入口和 `basic-agent-runtime/work-session.ts` 不得以兼容名义恢复。
 - 不让普通 Agent 新增依赖这些文件。
 - 补测试证明 `/api/conversations` 默认仍是 `agent`。
 - 补测试证明 `work_session_*`、`underground_deep_canvas` 不进入普通执行路径。

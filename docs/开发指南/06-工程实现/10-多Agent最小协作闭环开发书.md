@@ -428,7 +428,7 @@ Panel explicit 多 Agent入口
 - `liveProjection.children` 在 run 进行中更新。
 - final report 与 task board child 状态一致。
 - `approval_required` child run 在 report / run tree 中暴露 `pendingApproval` 安全投影，并且不会因等待确认被标记 failed。
-- blocked child 的 runtime-only pending continuation 会进入 `DeepChildPendingContinuationStore`；确认决策可恢复同一个 child loop，continuation 丢失时返回明确 409。
+- blocked child 的 runtime-only pending continuation 会进入 `DeepChildPendingContinuationStore`；feature 统一施加 24 小时 TTL、全局 256 项和单 run 16 项上限，run 终态只保留仍有 `pendingApproval` 的 child continuation；确认决策可恢复同一个 child loop，过期、淘汰、删除或重启导致 continuation 丢失时返回明确 409。
 - 父层追加 child message 时复用同一个 `ChildAgentRun` 与 `DeepChildSpec`，追加指令进入模型消息，并继续使用标准 ToolCenter loop。
 - manager 自主 `continue_child` 时同样复用同一个 `ChildAgentRun` 与标准 ToolCenter loop，不创建新 child。
 - `continue_child`、控制 API 追加消息和确认恢复都会在同一 `ChildAgentRun` 上追加 `executionHistory` 段；测试应断言历史段数、outcome 顺序和最新 `execution` 一致。

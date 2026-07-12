@@ -66,13 +66,15 @@ test("Ordinary runtime does not restore unused internal compatibility facades", 
   assert.equal(existsSync(path.join(appRoot, "desktop-agent", "desktop-chat-session.ts")), false);
 });
 
-test("ToolCenter remains the only production executor fact-normalization caller", async () => {
+test("ToolCenter owns executor fact normalization while protocol adapters only validate promoted facts", async () => {
   const root = process.cwd();
   const sourceRoot = path.join(root, "src");
+  const mcpAdapter = path.join(sourceRoot, "adapters", "mcp", "mcp-tool-adapter.ts");
   const allowedCallers = new Set([
     path.join(sourceRoot, "app", "tool-center", "tool-center.ts"),
     path.join(sourceRoot, "domain", "tools", "fact-value.ts"),
     path.join(sourceRoot, "domain", "tools", "error-facts.ts"),
+    mcpAdapter,
   ]);
   const violations: string[] = [];
   const files = (await collectSourceFiles(sourceRoot)).filter((file) => !isTestAssetSource(file));
@@ -91,6 +93,17 @@ test("ToolCenter remains the only production executor fact-normalization caller"
     violations,
     [],
     "production consumers must trust ToolCallResult facts instead of normalizing them again",
+  );
+  const mcpAdapterSource = await fs.readFile(mcpAdapter, "utf8");
+  assert.equal(
+    mcpAdapterSource.match(/normalizeToolFactValue\s*\(/g)?.length ?? 0,
+    1,
+    "the MCP adapter may validate only the canonical continuation input it promotes",
+  );
+  assert.match(
+    mcpAdapterSource,
+    /normalizeToolFactValue\(record\.nextInput\)/,
+    "the MCP adapter normalization exception must stay scoped to continuation.nextInput",
   );
   assert.equal(
     existsSync(path.join(sourceRoot, "domain", "basic-agent", "confirmation-contracts.ts")),

@@ -10,7 +10,10 @@ import {
   toolModelAttachmentsFromOutput,
 } from "../../domain/tools/index.js";
 import { cloneModelMessage, cloneToolCallRequest } from "./tool-use-loop-cloning.js";
-import { toolCallResultToModelToolResult } from "./tool-call-result-model-view.js";
+import {
+  toolCallOutputToModelBody,
+  toolCallResultToModelToolResult,
+} from "./tool-call-result-model-view.js";
 
 export function assistantToolCallMessage(
   response: ModelResponse,
@@ -53,6 +56,24 @@ export function toolResultMessages(results: readonly ToolCallResult[]): ModelMes
   return results.map(toolResultMessage);
 }
 
+export function toolResultMessagesWithResolvedApprovals(
+  results: readonly ToolCallResult[],
+  preApprovalResults: readonly ToolCallResult[] = [],
+): ModelMessage[] {
+  const preApprovalByCallId = new Map<string, ToolCallResult[]>();
+  for (const result of preApprovalResults) {
+    const existing = preApprovalByCallId.get(result.callId) ?? [];
+    existing.push(result);
+    preApprovalByCallId.set(result.callId, existing);
+  }
+  return results.map((result) => {
+    const preApprovals = preApprovalByCallId.get(result.callId);
+    return preApprovals === undefined
+      ? toolResultMessage(result)
+      : resolvedApprovalToolResultMessage(preApprovals, result);
+  });
+}
+
 // Final provider-transport guard. Larger facts continue through an explicit
 // tool-owned reference instead of consuming an unbounded parent context.
 const MAX_TOOL_MESSAGE_CHARS = 220_000;
@@ -64,7 +85,45 @@ const MAX_TRANSPORT_CONTINUATION_NOTE_CHARS = 2_000;
 
 type ToolMessagePayload = {
   readonly status: ToolCallResult["status"];
+  readonly preApprovals?: readonly {
+    readonly status: "approval_required";
+    readonly body: ToolResult["body"];
+    readonly error?: ToolResult["error"];
+    readonly confirmation?: ToolCallResult["confirmationRequest"];
+  }[];
 } & ToolResult;
+
+function resolvedApprovalToolResultMessage(
+  preApprovalResults: readonly ToolCallResult[],
+  resolvedResult: ToolCallResult,
+): ModelMessage {
+  const resolvedModelResult = toolCallResultToModelToolResult(resolvedResult);
+  const payload: ToolMessagePayload = {
+    status: resolvedResult.status,
+    body: resolvedModelResult.body,
+    error: resolvedModelResult.error,
+    preApprovals: preApprovalResults.map((preApprovalResult) => {
+      const preApprovalModelResult = toolCallResultToModelToolResult(preApprovalResult);
+      return {
+        status: "approval_required",
+        body: toolCallOutputToModelBody(preApprovalResult.output),
+        error: preApprovalModelResult.error,
+        confirmation: preApprovalResult.confirmationRequest,
+      };
+    }),
+  };
+  const attachments = uniqueModelAttachments([
+    ...(toolModelAttachmentsFromOutput(resolvedResult.output) ?? []),
+    ...preApprovalResults.flatMap((result) => toolModelAttachmentsFromOutput(result.output) ?? []),
+  ]);
+  return {
+    role: "tool",
+    content: stringifyToolMessagePayload(payload, MAX_TOOL_MESSAGE_CHARS),
+    toolCallId: resolvedResult.callId,
+    toolName: resolvedResult.toolName,
+    attachments: attachments.length === 0 ? undefined : attachments,
+  };
+}
 
 function stringifyToolMessagePayload(payload: ToolMessagePayload, maxChars: number): string {
   try {
@@ -85,7 +144,12 @@ function stringifyToolMessagePayload(payload: ToolMessagePayload, maxChars: numb
 function transportTruncatedToolPayload(
   payload: ToolMessagePayload
 ): ToolMessagePayload {
-  const continuations = modelOutputContinuations(canonicalModelBody(payload.body));
+  const continuations = fitContinuationsWithinTransportBudget(uniqueContinuations([
+    ...modelOutputContinuationCandidates(canonicalModelBody(payload.body)),
+    ...(payload.preApprovals ?? []).flatMap((preApproval) =>
+      modelOutputContinuationCandidates(canonicalModelBody(preApproval.body))
+    ),
+  ]).slice(0, MAX_TRANSPORT_CONTINUATIONS));
   const continuationFacts = continuations.length === 1
     ? { continuation: continuations[0] }
     : continuations.length > 1
@@ -109,15 +173,22 @@ function transportTruncatedToolPayload(
         truncated: true,
         reason: "tool_message_transport_budget_exceeded",
         ...continuationFacts,
-        preview: compactJsonPreview(canonicalModelBody(payload.body), 4_000),
+        preview: compactJsonPreview({
+          body: canonicalModelBody(payload.body),
+          preApprovals: payload.preApprovals,
+        }, 4_000),
       },
     },
     error: contractError ?? payload.error,
   };
 }
 
-function modelOutputContinuations(value: unknown): readonly ToolContinuation[] {
+function modelOutputContinuationCandidates(value: unknown): readonly ToolContinuation[] {
   const record = asRecord(value);
+  return continuationsFromRecord(record);
+}
+
+function continuationsFromRecord(record: Readonly<Record<string, unknown>>): readonly ToolContinuation[] {
   const single = toolContinuationFromUnknown(record.continuation);
   const multiple = Array.isArray(record.continuations)
     ? record.continuations
@@ -125,10 +196,7 @@ function modelOutputContinuations(value: unknown): readonly ToolContinuation[] {
       .map(toolContinuationFromUnknown)
       .filter((item): item is ToolContinuation => item !== undefined)
     : [];
-  return fitContinuationsWithinTransportBudget(
-    uniqueContinuations(single === undefined ? multiple : [single, ...multiple])
-      .slice(0, MAX_TRANSPORT_CONTINUATIONS)
-  );
+  return single === undefined ? multiple : [single, ...multiple];
 }
 
 function uniqueContinuations(continuations: readonly ToolContinuation[]): readonly ToolContinuation[] {
@@ -268,4 +336,24 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function uniqueModelAttachments(
+  attachments: NonNullable<ModelMessage["attachments"]>,
+): NonNullable<ModelMessage["attachments"]> {
+  const selected: NonNullable<ModelMessage["attachments"]>[number][] = [];
+  const seen = new Set<string>();
+  for (const attachment of attachments) {
+    const key = attachment.attachmentId === undefined
+      ? attachment.inputRef === undefined ? undefined : `input:${attachment.kind}:${attachment.inputRef}`
+      : `attachment:${attachment.kind}:${attachment.attachmentId}`;
+    if (key !== undefined && seen.has(key)) {
+      continue;
+    }
+    if (key !== undefined) {
+      seen.add(key);
+    }
+    selected.push(globalThis.structuredClone(attachment));
+  }
+  return selected;
 }

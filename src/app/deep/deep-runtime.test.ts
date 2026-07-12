@@ -91,6 +91,7 @@ function makeRuntimeInput(goal: string, modelAvailable: boolean): StartDeepRunti
           run_memory: "stub",
         },
       },
+      taskSoilInput: {},
       permissionBoundaryRefs: [],
       confirmationPolicy: "prompt",
     },

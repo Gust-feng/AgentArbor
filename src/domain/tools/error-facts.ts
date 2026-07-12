@@ -24,7 +24,12 @@ export function normalizeToolErrorFacts(
   for (const [key, item] of Object.entries(record).slice(0, MAX_FACT_ENTRIES)) {
     const fact = normalizeToolErrorFactValue(item, options);
     if (fact !== undefined) {
-      result[key] = fact;
+      Object.defineProperty(result, key, {
+        value: fact,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
   }
   return Object.keys(result).length === 0 ? undefined : result;
@@ -82,7 +87,12 @@ function normalizeToolErrorFactValueInternal(
       for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, MAX_FACT_ENTRIES)) {
         const fact = normalizeToolErrorFactValueInternal(item, options, ancestors, depth + 1);
         if (fact !== undefined) {
-          result[key] = fact;
+          Object.defineProperty(result, key, {
+            value: fact,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          });
         }
       }
       return result;

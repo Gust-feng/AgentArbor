@@ -298,6 +298,73 @@ test("local read_file returns executable character continuation for maxLength wi
   }
 });
 
+test("local read_file continuation keeps emoji surrogate pairs intact", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-read-unicode-window-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "src", "unicode.txt"), "A😀BC", "utf8");
+    const readFileTool = createLocalReadFileTool(root);
+
+    const first = asDirectToolFacts(await readFileTool.execute(
+      { path: "src/unicode.txt", maxLength: 3 },
+      context,
+    ));
+    const secondInput = asRecord(asRecord(first.continuation).nextInput);
+    const second = asDirectToolFacts(await readFileTool.execute(secondInput, context));
+
+    assert.equal(first.content, "A…");
+    assert.equal(first.textChars, 1);
+    assert.equal(second.content, "😀…");
+    assert.equal(second.textChars, 2);
+    await assert.rejects(
+      () => readFileTool.execute({ path: "src/unicode.txt", maxLength: 3, startChar: 2 }, context),
+      /must not split a UTF-16 surrogate pair/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read_file rejects a character window too small to advance continuation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-char-minimum-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "src", "long.txt"), "abcdefghij", "utf8");
+    const readFileTool = createLocalReadFileTool(root);
+
+    await assert.rejects(
+      () => readFileTool.execute({ path: "src/long.txt", maxLength: 2 }, context),
+      /read_file maxLength must be at least 3/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read_file rejects invalid explicit maxLength values instead of using the default", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-read-invalid-window-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "src", "long.txt"), "abcdefghij", "utf8");
+    const readFileTool = createLocalReadFileTool(root);
+
+    for (const maxLength of [0, -1, 1, 2, 1.5, "1"] as const) {
+      await assert.rejects(
+        () => readFileTool.execute({ path: "src/long.txt", maxLength }, context),
+        /read_file maxLength must be at least 3 and a safe integer/,
+      );
+    }
+    for (const startChar of [-1, 1.5, "1", 11] as const) {
+      await assert.rejects(
+        () => readFileTool.execute({ path: "src/long.txt", startChar }, context),
+        /read_file startChar/,
+      );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("local read_file rejects line ranges with maxLength to avoid skipped continuation", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-line-maxlength-"));
   try {

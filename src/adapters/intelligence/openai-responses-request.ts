@@ -10,6 +10,7 @@ import { modelVisibleToolDescription } from "../../domain/tools/index.js";
 import { buildOpenAIResponsesControlFields } from "./openai-request-settings.js";
 import { removeUndefinedValues } from "./provider-value-utils.js";
 import { openAIResponsesContinuationItems } from "./openai-responses-continuation.js";
+import { OpenAIModelInputError } from "./openai-model-input-error.js";
 
 export function buildResponsesRequestBody(
   request: ModelRequest,
@@ -152,12 +153,19 @@ function toResponsesInputContentPart(attachment: ModelInputAttachment): Record<s
           : undefined,
     });
   }
+  if (attachment.kind === "audio") {
+    throw new OpenAIModelInputError(
+      "OpenAI Responses does not currently accept audio input attachments; use an audio-capable Chat Completions model.",
+    );
+  }
   return removeUndefinedValues({
     type: "input_file",
     detail: attachment.detail,
     file_id: attachment.source.kind === "file_id" ? attachment.source.fileId : undefined,
     file_url: attachment.source.kind === "url" ? attachment.source.url : undefined,
-    file_data: attachment.source.kind === "data" ? attachment.source.data : undefined,
+    file_data: attachment.source.kind === "data"
+      ? dataUrl(attachment.source.mimeType, attachment.source.data)
+      : undefined,
     filename: attachment.filename,
   });
 }

@@ -29,6 +29,7 @@ import {
 import { applyAgentToolRegistryContributions } from "../tool-center/factory.js";
 import { normalizeWorkspaceDirectory } from "../config-center/workspace-settings.js";
 import { ToolRegistry, type ToolCatalogItem } from "../tool-center/tool-registry.js";
+import type { ToolOutputStore } from "../tool-center/tool-output-store.js";
 import { discoverSkills, normalizeSkillRoots, parseSkillMarkdown, type SkillRootInput } from "../skills/skill-loader.js";
 import type { SkillStateStore } from "../skills/skill-state-store.js";
 import { discoverSubAgents, normalizeSubAgentRoots, type SubAgentDiscoveryOptions } from "../sub-agents/sub-agent-loader.js";
@@ -56,6 +57,7 @@ export type CapabilityCenterOptions = {
   readonly resolveSubAgentRoots?: (input: CapabilitySubAgentRootsInput) => readonly SubAgentRootInput[];
   readonly fetch?: ToolRegistryFetchLike;
   readonly playwrightAvailable?: boolean;
+  readonly toolOutputStore?: ToolOutputStore;
 };
 
 export type CapabilityCenterSnapshotInput = {
@@ -187,8 +189,11 @@ export class CapabilityCenter {
       commandShell,
       modelCapabilities,
       baseToolScopes: ["desktop-basic"],
+      toolOutputStore: this.options.toolOutputStore,
     };
-    const registry = new ToolRegistry();
+    const registry = new ToolRegistry({
+      toolCenter: { outputStore: this.options.toolOutputStore },
+    });
     applyAgentToolRegistryContributions(registry, { toolStates }, [
       createResearchToolRegistryContribution({
         env,

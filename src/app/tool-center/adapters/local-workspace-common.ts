@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { utf16SafePrefixLength } from "../text-window.js";
 
 export const DEFAULT_LOCAL_WORKSPACE_ROOT = process.cwd();
 export const MAX_LOCAL_WORKSPACE_FILE_BYTES = 512_000;
@@ -47,7 +48,11 @@ export function isLikelyBinaryPath(value: string): boolean {
 }
 
 export function truncateText(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const prefixLength = utf16SafePrefixLength(value, Math.max(0, maxLength - 1));
+  return `${value.slice(0, prefixLength)}…`;
 }
 
 export function asRecord(value: unknown): Readonly<Record<string, unknown>> {
@@ -60,6 +65,20 @@ export function stringOrFallback(value: unknown, fallback: string): string {
 
 export function positiveInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+export function optionalSafeIntegerAtLeast(
+  value: unknown,
+  fieldName: string,
+  minimum: number,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) < minimum) {
+    throw new Error(`${fieldName} must be at least ${minimum} and a safe integer.`);
+  }
+  return value as number;
 }
 
 export function requireText(value: unknown, fieldName: string, options: { readonly allowEmpty: boolean }): string {

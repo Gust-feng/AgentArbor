@@ -33,7 +33,9 @@ import {
 import {
   createLocalWorkspaceSandboxPolicy,
 } from "./adapters/local-workspace-sandbox.js";
+import { createReadToolOutputTool } from "./adapters/tool-output-read-tool.js";
 import { ToolRegistry, type ToolRegistryScope } from "./tool-registry.js";
+import type { ToolOutputStore } from "./tool-output-store.js";
 
 export type CreateAgentToolRegistryOptions = {
   readonly runtime?: { readonly constraints?: readonly Constraint[] };
@@ -49,6 +51,7 @@ export type CreateAgentToolRegistryOptions = {
   readonly processRegistry?: LocalCommandProcessRegistry;
   readonly taskSoil?: TaskSoil;
   readonly modelCapabilities?: ModelCapabilities;
+  readonly toolOutputStore?: ToolOutputStore;
 };
 
 export type ToolRegistryFetchLike = (
@@ -68,8 +71,11 @@ export type ToolRegistryFetchLike = (
 
 export function createAgentToolRegistry(
   options: CreateAgentToolRegistryOptions = {},
-  registry: ToolRegistry = new ToolRegistry(),
+  registry?: ToolRegistry,
 ): ToolRegistry {
+  const targetRegistry = registry ?? new ToolRegistry({
+    toolCenter: { outputStore: options.toolOutputStore },
+  });
   const env = options.env ?? process.env;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
@@ -92,6 +98,7 @@ export function createAgentToolRegistry(
     }),
     createHttpRequestTool(),
     createBrowserSnapshotTool(),
+    ...(options.toolOutputStore === undefined ? [] : [createReadToolOutputTool(options.toolOutputStore)]),
   ];
   const toolCatalogNames =
     options.toolCatalogNames === undefined ? undefined : new Set(options.toolCatalogNames);
@@ -109,14 +116,14 @@ export function createAgentToolRegistry(
         : executor.definition.name === "read_context_attachment_image" && options.modelCapabilities?.supportsVisionInput === false
           ? { status: "unavailable" as const, disabledReason: "Current model does not support vision input." }
           : { status: "available" as const };
-    registry.register({
+    targetRegistry.register({
       executor,
       scopes: [...baseToolScopes, toolScopeFor(executor.definition.metadata?.category)],
       enabledByDefault,
       availability: frozenAvailability ?? currentAvailability,
     });
   }
-  return registry;
+  return targetRegistry;
 }
 
 function toolAvailabilityByName(

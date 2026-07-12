@@ -48,6 +48,7 @@ import {
   type SkillStateStore,
 } from "../skills/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
+import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import type {
   PanelContextAttachmentMediaEntry,
   PanelContextAttachmentSelection,
@@ -65,6 +66,8 @@ import { PanelHttpError } from "./http-utils.js";
 import { createMultiAgentRunResourceAcquirer } from "./multi-agent-run-resources.js";
 
 export type PanelRuntime = {
+  /** True once server shutdown starts; terminal callbacks must not admit new work. */
+  isQuiescing: boolean;
   readonly configCenter: ConfigCenter;
   readonly capabilityCenter: CapabilityCenter;
   readonly desktopAgentDefinition: AgentDefinition;
@@ -78,6 +81,7 @@ export type PanelRuntime = {
   readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
   readonly runJobs: PanelRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
+  readonly activeRequestJobs: Set<Promise<void>>;
   readonly abortControllers: Map<string, AbortController>;
   readonly persistenceChains: Map<string, Promise<void>>;
   readonly runExecutor: BasicAgentRunExecutor;
@@ -91,6 +95,7 @@ export type PanelRuntime = {
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
   readonly multiAgentFeature: MultiAgentFeature;
+  readonly toolOutputStore: InMemoryToolOutputStore;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
 
@@ -164,7 +169,9 @@ export function isPanelRuntime(value: PanelServerOptions | PanelRuntime): value 
     "runJobs" in value &&
     value.runJobs instanceof PanelRunJobStore &&
     "activeRunJobs" in value &&
-    value.activeRunJobs instanceof Set
+    value.activeRunJobs instanceof Set &&
+    "activeRequestJobs" in value &&
+    value.activeRequestJobs instanceof Set
   );
 }
 
@@ -190,12 +197,14 @@ function assemblePanelRuntime(input: {
 }): PanelRuntime {
   const runJobs = new PanelRunJobStore();
   const activeRunJobs = new Set<Promise<void>>();
+  const activeRequestJobs = new Set<Promise<void>>();
   const abortControllers = new Map<string, AbortController>();
   const persistenceChains = new Map<string, Promise<void>>();
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
   const agentDefinitionOverrides = new Map<string, AgentDefinition>();
   const conversations = new PanelConversationStore();
   const processRegistry = new InMemoryProcessRegistry();
+  const toolOutputStore = new InMemoryToolOutputStore();
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
@@ -205,14 +214,17 @@ function assemblePanelRuntime(input: {
     subAgentRoots: input.subAgentRoots,
     resolveSubAgentRoots: input.resolveSubAgentRoots,
     fetch: input.providerFetch,
+    toolOutputStore,
   });
   const multiAgentFeature = createMultiAgentFeature({
     runtimeHome: input.runtimePaths?.runtimeHome,
+    releaseToolOutputOwner: (ownerId) => toolOutputStore.releaseOwner(ownerId).then(() => undefined),
     acquireRunResources: createMultiAgentRunResourceAcquirer({
       host: {
         configCenter: input.configCenter,
         providerFetch: input.providerFetch,
         processRegistry,
+        toolOutputStore,
       },
       agentDefinition: MULTI_AGENT_CAPABILITY_PROFILE,
     }),
@@ -230,6 +242,7 @@ function assemblePanelRuntime(input: {
     },
   });
   const runtime: Omit<PanelRuntime, "runExecutor"> & { runExecutor?: BasicAgentRunExecutor } = {
+    isQuiescing: false,
     configCenter: input.configCenter,
     capabilityCenter,
     desktopAgentDefinition: input.desktopAgentDefinition,
@@ -243,6 +256,7 @@ function assemblePanelRuntime(input: {
     contextAttachmentMedia,
     runJobs,
     activeRunJobs,
+    activeRequestJobs,
     abortControllers,
     persistenceChains,
     conversations,
@@ -256,6 +270,7 @@ function assemblePanelRuntime(input: {
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
     multiAgentFeature,
+    toolOutputStore,
   };
   runtime.runExecutor = new BasicAgentRunExecutor({
     prepareRunStart: (startInput) => preparePanelBasicRunStart(runtime as PanelRuntime, startInput),
@@ -313,7 +328,13 @@ function assemblePanelRuntime(input: {
         job: job as PanelRunJob,
         response: createPanelRunJobResponse(runtime as PanelRuntime, job as PanelRunJob),
       });
-      input.hooks.scheduleNextQueuedConversationRun(runtime as PanelRuntime, job as PanelRunJob);
+      const traceId = (job as PanelRunJob).traceId;
+      if (traceId !== undefined) {
+        await runtime.toolOutputStore.releaseOwner(traceId);
+      }
+      if (!runtime.isQuiescing) {
+        input.hooks.scheduleNextQueuedConversationRun(runtime as PanelRuntime, job as PanelRunJob);
+      }
     },
   });
   return runtime as PanelRuntime;

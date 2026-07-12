@@ -45,6 +45,16 @@ export class BasicAgentPendingContinuationStore {
     return Promise.allSettled(releases).then(() => undefined);
   }
 
+  clearAll(): Promise<void> {
+    const continuations = [...this.continuations.values()];
+    // Clear synchronously so concurrent cancellation or shutdown cannot
+    // acquire and release the same continuation a second time.
+    this.continuations.clear();
+    return Promise.allSettled(
+      continuations.map((continuation) => Promise.resolve().then(() => continuation.release()))
+    ).then(() => undefined);
+  }
+
   assertPendingConfirmation(job: BasicAgentRunJob, confirmationId: string): void {
     if (job.status !== "approval_needed") {
       throw new BasicAgentConfirmationDecisionError(

@@ -134,6 +134,170 @@ test("context attachment text read returns executable character continuation", a
   }
 });
 
+test("context attachment text continuation keeps emoji surrogate pairs intact", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
+  const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-text-unicode-"));
+  const localFile = path.join(localRoot, "unicode.txt");
+  await fs.writeFile(localFile, "A😀BC", "utf8");
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [{
+        attachmentId: "ctx_unicode_text",
+        ref: `local-file:${localFile}`,
+        kind: "file",
+        title: "unicode.txt",
+      }],
+      permissionBoundaryRefs: [`read:local-file:${localFile}`],
+    });
+    const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
+    const permission = {
+      callerAgentId: TOOL_CONTEXT.callerAgentId,
+      allowedTools: ["read_context_attachment_text"],
+    };
+
+    const first = await center.execute(
+      {
+        callId: "call:read-unicode-window-1",
+        toolName: "read_context_attachment_text",
+        input: { attachmentId: "ctx_unicode_text", maxLength: 3 },
+      },
+      TOOL_CONTEXT,
+      permission,
+    );
+    const firstFacts = asRecord(first.output);
+    const second = await center.execute(
+      {
+        callId: "call:read-unicode-window-2",
+        toolName: "read_context_attachment_text",
+        input: normalizeToolFactValue(asRecord(asRecord(firstFacts.continuation).nextInput)),
+      },
+      TOOL_CONTEXT,
+      permission,
+    );
+    const secondFacts = asRecord(second.output);
+
+    assert.equal(firstFacts.content, "A…");
+    assert.equal(firstFacts.textChars, 1);
+    assert.equal(secondFacts.content, "😀…");
+    assert.equal(secondFacts.textChars, 2);
+    const split = await center.execute(
+      {
+        callId: "call:read-unicode-window-split",
+        toolName: "read_context_attachment_text",
+        input: { attachmentId: "ctx_unicode_text", maxLength: 3, startChar: 2 },
+      },
+      TOOL_CONTEXT,
+      permission,
+    );
+    assert.equal(split.status, "failed");
+    assert.match(String(split.error), /must not split a UTF-16 surrogate pair/);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(localRoot, { recursive: true, force: true });
+  }
+});
+
+test("context attachment text read rejects a character window too small to advance continuation", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
+  const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-text-minimum-"));
+  const localFile = path.join(localRoot, "long-notes.txt");
+  await fs.writeFile(localFile, "abcdefghij", "utf8");
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [
+        {
+          attachmentId: "ctx_small_text_window",
+          ref: `local-file:${localFile}`,
+          kind: "file",
+          title: "long-notes.txt",
+          summary: "Selected long text file.",
+          metadata: {
+            byteLength: 10,
+            mimeType: "text/plain",
+            available: true,
+          },
+        },
+      ],
+      permissionBoundaryRefs: [`read:local-file:${localFile}`],
+    });
+    const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
+
+    const result = await center.execute(
+      {
+        callId: "call:read-text-minimum",
+        toolName: "read_context_attachment_text",
+        input: { attachmentId: "ctx_small_text_window", maxLength: 2 },
+      },
+      TOOL_CONTEXT,
+      {
+        callerAgentId: TOOL_CONTEXT.callerAgentId,
+        allowedTools: ["read_context_attachment_text"],
+      }
+    );
+
+    assert.equal(result.status, "failed");
+    assert.match(String(result.error), /read_context_attachment_text maxLength must be at least 3/);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(localRoot, { recursive: true, force: true });
+  }
+});
+
+test("context attachment text read rejects invalid explicit maxLength values", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
+  const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-text-invalid-window-"));
+  const localFile = path.join(localRoot, "long-notes.txt");
+  await fs.writeFile(localFile, "abcdefghij", "utf8");
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [{
+        attachmentId: "ctx_invalid_text_window",
+        ref: `local-file:${localFile}`,
+        kind: "file",
+        title: "long-notes.txt",
+      }],
+      permissionBoundaryRefs: [`read:local-file:${localFile}`],
+    });
+    const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
+
+    for (const maxLength of [0, -1, 1, 2, 1.5, "1"] as const) {
+      const result = await center.execute(
+        {
+          callId: `call:invalid-attachment-max-length:${String(maxLength)}`,
+          toolName: "read_context_attachment_text",
+          input: { attachmentId: "ctx_invalid_text_window", maxLength },
+        },
+        TOOL_CONTEXT,
+        {
+          callerAgentId: TOOL_CONTEXT.callerAgentId,
+          allowedTools: ["read_context_attachment_text"],
+        },
+      );
+      assert.equal(result.status, "failed");
+      assert.match(String(result.error), /maxLength must be at least 3 and a safe integer/);
+    }
+    for (const startChar of [-1, 1.5, "1", 11] as const) {
+      const result = await center.execute(
+        {
+          callId: `call:invalid-attachment-start-char:${String(startChar)}`,
+          toolName: "read_context_attachment_text",
+          input: { attachmentId: "ctx_invalid_text_window", startChar },
+        },
+        TOOL_CONTEXT,
+        {
+          callerAgentId: TOOL_CONTEXT.callerAgentId,
+          allowedTools: ["read_context_attachment_text"],
+        },
+      );
+      assert.equal(result.status, "failed");
+      assert.match(String(result.error), /read_context_attachment_text startChar/);
+    }
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(localRoot, { recursive: true, force: true });
+  }
+});
+
 test("context attachment text read rejects line ranges with maxLength to avoid skipped continuation", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
   const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-text-line-maxlength-"));
@@ -179,7 +343,7 @@ test("context attachment text read rejects line ranges with maxLength to avoid s
   }
 });
 
-test("context attachment PDF tool extracts text-native PDF content without exposing local paths", async () => {
+test("context attachment PDF tool extracts text-native PDF content and rejects invalid windows", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
   const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-pdf-"));
   const pdfFile = path.join(localRoot, "report.pdf");
@@ -241,6 +405,19 @@ test("context attachment PDF tool extracts text-native PDF content without expos
     assert.equal(modelVisible.includes("Revenue is 1200"), true);
     assert.equal(modelVisible.includes(pdfFile), false);
     assert.equal(modelVisible.includes("local-file:"), false);
+    for (const maxLength of [0, -1, 1, 2, 1.5, "1"] as const) {
+      const invalid = await center.execute(
+        {
+          callId: `call:read-pdf-invalid-${String(maxLength)}`,
+          toolName: "read_context_attachment_pdf_text",
+          input: { attachmentId: "ctx_report_pdf", maxLength },
+        },
+        TOOL_CONTEXT,
+        permission,
+      );
+      assert.equal(invalid.status, "failed");
+      assert.match(String(invalid.error), /maxLength must be at least 3 and a safe integer/);
+    }
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
     await fs.rm(localRoot, { recursive: true, force: true });

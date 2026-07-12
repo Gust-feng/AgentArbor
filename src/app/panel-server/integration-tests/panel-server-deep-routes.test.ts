@@ -31,6 +31,7 @@ import {
   DEEP_RUN_MODE,
   type DeepConversation,
   type DeepRun,
+  type DeepRunContinuationFacts,
 } from "../../deep/contracts.js";
 import type { DeepRunStreamEvent } from "../../deep/deep-events.js";
 import { createFileSystemDeepConversationStore } from "../../deep/deep-conversation.js";
@@ -53,6 +54,10 @@ import {
 const COMPLEX_GOAL = "分析当前 AgentArbor 项目并产出优化方向报告";
 /** 轻量问题：触发 fake provider 的 direct_answer 分支（无 child，直接结论）。 */
 const LIGHTWEIGHT_GOAL = "你是什么模型？";
+// The full suite runs CPU-heavy context tests in parallel. Deep completion is
+// eventual and normally finishes in a few seconds, but must not become flaky
+// merely because timer callbacks are delayed under the configured test load.
+const DEEP_RUN_VIEW_TIMEOUT_MS = 60_000;
 
 /** 创建独立 deep 会话，返回会话 id。aiMode 必须显式传入（与 desktop 测试一致，避免依赖
  *  config POST 持久化的全局默认）。 */
@@ -158,7 +163,7 @@ async function intakeDeep(
 async function waitForDeepRunView(
   baseUrl: string,
   runId: string,
-  timeoutMs = 30_000,
+  timeoutMs = DEEP_RUN_VIEW_TIMEOUT_MS,
 ): Promise<{ status: number; body: any; text: string }> {
   const startedAt = Date.now();
   let last: { status: number; body: any; text: string } | undefined;
@@ -1323,11 +1328,15 @@ test("post-terminal child operations reject records missing frozen continuation 
     const runStore = createFileSystemDeepRunRecordStore(path.join(directory, "runtime"));
     const persisted = await runStore.get(run.runId);
     assert.ok(persisted !== undefined);
+    const legacyContinuationFacts = {
+      ...persisted.run.continuationFacts,
+    } as Record<string, unknown>;
+    delete legacyContinuationFacts.taskSoilInput;
     await runStore.upsert({
       ...persisted,
       run: {
         ...persisted.run,
-        continuationFacts: undefined,
+        continuationFacts: legacyContinuationFacts as DeepRunContinuationFacts,
       },
     });
 
@@ -1347,6 +1356,23 @@ test("post-terminal child operations reject records missing frozen continuation 
     );
     assert.equal(resynthesis.status, 409, resynthesis.text);
     assert.equal(resynthesis.body.error.code, "deep_run_continuation_facts_missing");
+
+    await server.close();
+    await runStore.upsert({
+      ...persisted,
+      run: {
+        ...persisted.run,
+        continuationFacts: undefined,
+      },
+    });
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const missingContinuationFacts = await requestJson(
+      server.url,
+      `/api/deep/runs/${encodeURIComponent(run.runId)}/children/${encodeURIComponent(childRunId)}/messages`,
+      { method: "POST", body: { message: "缺少整个冻结事实对象时也不能回退当前配置。" } },
+    );
+    assert.equal(missingContinuationFacts.status, 409, missingContinuationFacts.text);
+    assert.equal(missingContinuationFacts.body.error.code, "deep_run_continuation_facts_missing");
 
     await server.close();
     await runStore.upsert({

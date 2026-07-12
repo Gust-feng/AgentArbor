@@ -105,7 +105,7 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
   });
 });
 
-test("OpenAI Responses adapter maps image attachments to input_image parts", async () => {
+test("OpenAI Responses adapter maps user image and file attachments to input content parts", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
     calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
@@ -142,6 +142,11 @@ test("OpenAI Responses adapter maps image attachments to input_image parts", asy
         source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
         filename: "screenshot.png",
         detail: "auto",
+      }, {
+        kind: "file",
+        source: { kind: "data", mimeType: "application/pdf", data: "JVBERi0xLjQ=" },
+        filename: "report.pdf",
+        detail: "high",
       }],
     }],
   }));
@@ -152,6 +157,12 @@ test("OpenAI Responses adapter maps image attachments to input_image parts", asy
     content: [
       { type: "input_text", text: "Describe this screenshot." },
       { type: "input_image", detail: "auto", image_url: "data:image/png;base64,aW1hZ2U=" },
+      {
+        type: "input_file",
+        detail: "high",
+        file_data: "data:application/pdf;base64,JVBERi0xLjQ=",
+        filename: "report.pdf",
+      },
     ],
   }]);
 });
@@ -521,7 +532,7 @@ test("OpenAI Responses adapter maps tool results to function_call_output format"
   ]);
 });
 
-test("OpenAI Responses adapter replays native output items before tool outputs", async () => {
+test("OpenAI Responses adapter replays native output items and tool attachments", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
     calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
@@ -587,6 +598,12 @@ test("OpenAI Responses adapter replays native output items before tool outputs",
             filename: "screenshot.png",
             detail: "low",
             source: { kind: "data", mimeType: "image/png", data: "iVBORw0KGgo=" },
+          }, {
+            kind: "file",
+            inputRef: "memory://report.pdf",
+            filename: "report.pdf",
+            detail: "high",
+            source: { kind: "data", mimeType: "application/pdf", data: "JVBERi0xLjQ=" },
           }],
         },
       ],
@@ -611,9 +628,45 @@ test("OpenAI Responses adapter replays native output items before tool outputs",
           detail: "low",
           image_url: "data:image/png;base64,iVBORw0KGgo=",
         },
+        {
+          type: "input_file",
+          detail: "high",
+          file_data: "data:application/pdf;base64,JVBERi0xLjQ=",
+          filename: "report.pdf",
+        },
       ],
     },
   ]);
+});
+
+test("OpenAI Responses rejects audio attachments before transport", async () => {
+  let fetchCalls = 0;
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Inspect this audio.",
+      attachments: [{
+        kind: "audio",
+        filename: "clip.wav",
+        source: { kind: "data", mimeType: "audio/wav", data: "UklGRg==" },
+      }],
+    }],
+  }));
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "request_validation");
+  assert.match(response.failure?.message ?? "", /does not currently accept audio input attachments/);
 });
 
 test("OpenAI Responses adapter handles assistant message with both text and tool calls", async () => {

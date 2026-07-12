@@ -36,14 +36,28 @@ export type {
 
 export { BasicAgentConfirmationDecisionError } from "./run-executor-continuations.js";
 
+export class BasicAgentRunAdmissionClosedError extends Error {
+  readonly code = "basic_agent_runtime_quiescing";
+
+  constructor() {
+    super("Basic Agent runtime is shutting down and cannot accept new work.");
+    this.name = "BasicAgentRunAdmissionClosedError";
+  }
+}
+
 export class BasicAgentRunExecutor {
   private readonly pendingContinuations = new BasicAgentPendingContinuationStore();
   private readonly basicRuns = new BasicAgentRunStore();
   private readonly terminalCommitsByRunId = new Map<string, Promise<void>>();
+  private readonly scheduledRunIds = new Set<string>();
+  private readonly scheduledConfirmationResumeRunIds = new Set<string>();
+  private disposePromise: Promise<void> | undefined;
+  private acceptingNewWork = true;
 
   constructor(private readonly config: BasicAgentRunExecutorConfig) {}
 
   async start(input: BasicAgentRunStartInput): Promise<BasicAgentRun> {
+    this.assertAcceptingNewWork();
     const runMode = resolveBasicAgentRunMode(input.runKind, input.runMode);
     const startInput: BasicAgentRunStartInput = { ...input, runMode };
     const startImmediately = input.startImmediately !== false;
@@ -51,6 +65,7 @@ export class BasicAgentRunExecutor {
       throw new Error("BasicAgentRunExecutor deferInitialPersistence requires deferred scheduling.");
     }
     const startFacts = await this.config.prepareRunStart(startInput);
+    this.assertAcceptingNewWork();
     const toolConfirmationPolicy = startInput.toolConfirmationPolicy ?? startFacts.toolConfirmationPolicy;
     const job = this.config.runJobs.create({
       runKind: startInput.runKind,
@@ -94,6 +109,22 @@ export class BasicAgentRunExecutor {
     await this.terminalCommitsByRunId.get(runId);
   }
 
+  dispose(): Promise<void> {
+    this.quiesce();
+    this.disposePromise ??= this.pendingContinuations.clearAll();
+    return this.disposePromise;
+  }
+
+  quiesce(): void {
+    if (!this.acceptingNewWork) {
+      return;
+    }
+    this.acceptingNewWork = false;
+    for (const controller of this.config.abortControllers.values()) {
+      controller.abort();
+    }
+  }
+
   restore(input: {
     readonly run: BasicAgentRun;
     readonly events: readonly RunEvent[];
@@ -116,11 +147,30 @@ export class BasicAgentRunExecutor {
   }
 
   schedule(runId: string): void {
+    const job = this.config.runJobs.get(runId);
+    if (job === undefined || job.status !== "pending") {
+      return;
+    }
+    if (!this.acceptingNewWork) {
+      const cancellation = this.cancel(runId).then(() => undefined).catch(() => undefined);
+      this.trackActiveJob(cancellation);
+      return;
+    }
+    if (this.scheduledRunIds.has(runId)) {
+      return;
+    }
+    this.scheduledRunIds.add(runId);
+    const abort = new AbortController();
+    this.config.abortControllers.set(runId, abort);
     const activeRunJob = new Promise<void>((resolve) => {
       setImmediate(() => {
-        this.execute(runId)
+        this.execute(runId, abort)
           .catch(() => undefined)
-          .finally(resolve);
+          .finally(() => {
+            this.scheduledRunIds.delete(runId);
+            this.deleteAbortController(runId, abort);
+            resolve();
+          });
       });
     });
     this.trackActiveJob(activeRunJob);
@@ -158,6 +208,7 @@ export class BasicAgentRunExecutor {
     readonly decision: ConfirmationDecision["decision"];
     readonly guidance?: string;
   }): Promise<BasicAgentRun> {
+    this.assertAcceptingNewWork();
     const job = this.requireJob(input.runId);
     this.pendingContinuations.assertPendingConfirmation(job, input.confirmationId);
     const decidedAt = nowIso();
@@ -200,7 +251,7 @@ export class BasicAgentRunExecutor {
     return run;
   }
 
-  private async execute(runId: string): Promise<void> {
+  private async execute(runId: string, abort: AbortController): Promise<void> {
     const job = this.config.runJobs.get(runId);
     if (job === undefined) {
       return;
@@ -208,8 +259,10 @@ export class BasicAgentRunExecutor {
     if (job.status !== "pending") {
       return;
     }
-    const abort = new AbortController();
-    this.config.abortControllers.set(runId, abort);
+    if (abort.signal.aborted) {
+      await this.cancel(runId);
+      return;
+    }
     this.config.runJobs.markRunning(runId);
     const running = this.config.runJobs.get(runId);
     if (running !== undefined) {
@@ -289,8 +342,6 @@ export class BasicAgentRunExecutor {
         this.syncRunEvents(failed);
         await this.finalizeTerminalJob(failed);
       }
-    } finally {
-      this.config.abortControllers.delete(runId);
     }
   }
 
@@ -372,9 +423,20 @@ export class BasicAgentRunExecutor {
     readonly guidance?: string;
     readonly job: BasicAgentRunJob;
   }): void {
+    if (!this.acceptingNewWork) {
+      const cancellation = this.cancel(input.runId).then(() => undefined).catch(() => undefined);
+      this.trackActiveJob(cancellation);
+      return;
+    }
+    if (this.scheduledConfirmationResumeRunIds.has(input.runId)) {
+      return;
+    }
+    this.scheduledConfirmationResumeRunIds.add(input.runId);
+    const abort = new AbortController();
+    this.config.abortControllers.set(input.runId, abort);
     const activeRunJob = new Promise<void>((resolve) => {
       setImmediate(() => {
-        this.resumeConfirmationContinuation(input)
+        this.resumeConfirmationContinuation(input, abort)
           .catch(async (error: unknown) => {
             console.error(`[run-executor] async confirmation resume failed for ${input.runId}:`, error);
             // Convergence guard: resumeConfirmationContinuation self-finalizes inside its
@@ -385,7 +447,11 @@ export class BasicAgentRunExecutor {
             // that is still non-terminal so every scheduled resume reaches a terminal state.
             await this.finalizeConfirmationResumeFailure(input.runId, input.job, error);
           })
-          .finally(resolve);
+          .finally(() => {
+            this.scheduledConfirmationResumeRunIds.delete(input.runId);
+            this.deleteAbortController(input.runId, abort);
+            resolve();
+          });
       });
     });
     this.trackActiveJob(activeRunJob);
@@ -396,6 +462,18 @@ export class BasicAgentRunExecutor {
     void job.finally(() => {
       this.config.activeRunJobs.delete(job);
     });
+  }
+
+  private deleteAbortController(runId: string, abort: AbortController): void {
+    if (this.config.abortControllers.get(runId) === abort) {
+      this.config.abortControllers.delete(runId);
+    }
+  }
+
+  private assertAcceptingNewWork(): void {
+    if (!this.acceptingNewWork) {
+      throw new BasicAgentRunAdmissionClosedError();
+    }
   }
 
   private async finalizeConfirmationResumeFailure(
@@ -424,7 +502,11 @@ export class BasicAgentRunExecutor {
     readonly decision: ConfirmationDecision["decision"];
     readonly guidance?: string;
     readonly job: BasicAgentRunJob;
-  }): Promise<BasicAgentRun> {
+  }, abort: AbortController): Promise<BasicAgentRun> {
+    if (abort.signal.aborted) {
+      await this.cancel(input.runId);
+      return this.requireBasicRun(input.runId);
+    }
     const continuation = this.pendingContinuations.consume(input.runId, input.confirmationId);
     if (continuation === undefined) {
       // 并发竞态防御：若 job 已被 cancel 等路径收口为终态，
@@ -456,8 +538,6 @@ export class BasicAgentRunExecutor {
       return this.requireBasicRun(input.runId);
     }
 
-    const abort = new AbortController();
-    this.config.abortControllers.set(input.runId, abort);
     this.config.runJobs.markResuming(input.runId);
     this.config.runJobs.recordRunResumed(input.runId, {
       confirmationId: input.confirmationId,
@@ -543,8 +623,6 @@ export class BasicAgentRunExecutor {
         await this.finalizeTerminalJob(failed);
       }
       return this.requireBasicRun(input.runId);
-    } finally {
-      this.config.abortControllers.delete(input.runId);
     }
   }
 

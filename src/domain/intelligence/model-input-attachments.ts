@@ -24,6 +24,14 @@ export type ModelInputAttachment =
       readonly byteLength?: number;
     }
   | {
+      readonly kind: "audio";
+      readonly source: ModelInputAttachmentSource;
+      readonly attachmentId?: string;
+      readonly inputRef?: string;
+      readonly filename: string;
+      readonly byteLength?: number;
+    }
+  | {
       readonly kind: "file";
       readonly source: ModelInputAttachmentSource;
       readonly attachmentId?: string;

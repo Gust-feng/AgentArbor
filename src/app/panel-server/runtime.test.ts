@@ -134,6 +134,49 @@ test("panel runtime records process residue summaries when ordinary runs reach t
   assert.equal(summaries[0]?.runId, run.runId);
 });
 
+test("panel runtime releases Ordinary-owned retained tool outputs at run terminal", async () => {
+  const traceId = "trace-tool-output-owner";
+  let retainedRef: string | undefined;
+  const runtime = createPanelRuntime({}, {
+    async executeRun(panelRuntime, execution): Promise<BasicAgentRunExecutionResult> {
+      execution.onRuntimeReady({
+        runtime: createMinimalRuntime(),
+        traceId,
+        goalId: "goal-tool-output-owner",
+      });
+      const retained = await panelRuntime.toolOutputStore.retain({
+        mediaType: "text/plain",
+        content: "ordinary-owned-output",
+        sourceToolName: "ordinary_fixture",
+        sourceCallId: "ordinary-fixture-call",
+        ownerId: traceId,
+      });
+      retainedRef = retained.ref;
+      return { completed: true };
+    },
+    async failRun(): Promise<void> {
+      throw new Error("tool output owner cleanup test should not fail a run");
+    },
+    scheduleNextQueuedConversationRun(): void {
+      return undefined;
+    },
+  });
+
+  await runtime.runExecutor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "release retained output at terminal",
+    aiMode: "fake",
+  });
+  await Promise.allSettled([...runtime.activeRunJobs]);
+
+  assert.equal(typeof retainedRef, "string");
+  assert.equal(
+    await runtime.toolOutputStore.read(retainedRef!, { startChar: 0, maxChars: 30_000 }),
+    undefined,
+  );
+});
+
 test("panel runtime projects published runtime facts once before read paths observe them", async () => {
   const runtime = createPanelRuntime({}, {
     async executeRun(_runtime, execution: BasicAgentRunExecutionInput): Promise<BasicAgentRunExecutionResult> {

@@ -27,6 +27,7 @@ import { buildOpenAICompatibleChatRequestBody } from "./openai-compatible-chat-r
 import { normalizeOpenAICompatibleResponse } from "./openai-compatible-chat-response.js";
 import { normalizeOpenAICompatibleStreamResponse } from "./openai-compatible-chat-stream.js";
 import { providerErrorMessage } from "./provider-error-message.js";
+import { OpenAIModelInputError } from "./openai-model-input-error.js";
 import {
   classifyProviderFailureKind,
   isContextWindowExceededMessage,
@@ -196,6 +197,18 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           },
           completedAt: nowIso(),
         };
+      }
+      if (error instanceof OpenAIModelInputError) {
+        return createFailedModelResponse({
+          requestId: request.requestId,
+          providerId: this.providerId,
+          providerKind: this.providerKind,
+          protocolKind: this.protocolKind,
+          model: this.model,
+          outputKind: request.outputContract.outputKind,
+          failureKind: "request_validation",
+          message: error.message,
+        });
       }
       const status = statusFromError(error);
       if (status !== undefined) {

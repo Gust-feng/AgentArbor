@@ -700,6 +700,8 @@ function mapMultiAgentFeatureError(error: unknown): never {
     throw error;
   }
   switch (error.code) {
+    case "feature_quiescing":
+      throw new PanelHttpError(503, "deep_feature_quiescing", "多 Agent 功能正在关闭，不能接受新的命令。");
     case "conversation_not_found":
       throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
     case "conversation_busy":

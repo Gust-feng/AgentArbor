@@ -7,6 +7,7 @@ import type { ToolCallResult, ToolExecutor } from "../../../domain/tools/index.j
 import { withToolModelAttachments } from "../../../domain/tools/index.js";
 import { toolResultMessage } from "../../../kernel/intelligence/tool-use-loop-messages.js";
 import { ToolCenter } from "../tool-center.js";
+import { DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS } from "../tool-output-limits.js";
 import { createHttpRequestTool } from "./http-request-tool.js";
 import { createLocalReadFileTool } from "./local-workspace-read-tools.js";
 
@@ -39,6 +40,7 @@ test("real read_file results from 110k through 128k reach the model once and in 
       };
 
       assert.equal(result.status, "completed");
+      assert.equal(JSON.stringify(result.output).length <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS, true);
       assert.equal(payload.status, "completed");
       assert.equal(payload.body?.format, "json");
       assert.equal(payload.body?.value?.content, content);
@@ -78,6 +80,7 @@ test("escaped read_file content stays model-visible through explicit character c
       const rawChars = Number(output.textChars ?? returned.length);
 
       assert.equal(result.status, "completed");
+      assert.equal(JSON.stringify(result.output).length <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS, true);
       assert.equal(payload.status, "completed");
       assert.equal(message.content.length < 220_000, true);
       assert.equal(asRecord(payload.body?.value).content, returned);
@@ -124,6 +127,7 @@ test("escaped 110k through 128k GET bodies stay model-visible through executable
       const output = asRecord(result.output);
 
       assert.equal(result.status, "completed");
+      assert.equal(JSON.stringify(result.output).length <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS, true);
       assert.equal(payload.status, "completed");
       assert.equal(message.content.length < 220_000, true);
       assert.equal(asRecord(payload.body?.value).body, output.body);

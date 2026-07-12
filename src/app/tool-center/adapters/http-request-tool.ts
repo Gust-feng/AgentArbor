@@ -5,6 +5,7 @@ import type {
   ToolExecutionContext,
   ToolFactValue,
 } from "../../../domain/tools/index.js";
+import { DEFAULT_MAX_INLINE_TOOL_CONTENT_JSON_CHARS } from "../tool-output-limits.js";
 
 export type HttpRequestMethod = "GET" | "HEAD" | "POST" | "PUT" | "DELETE";
 
@@ -111,7 +112,7 @@ type MutableNetworkFacts = {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_BODY_CHARS = 128_000;
-const MAX_BODY_JSON_CHARS = 180_000;
+const MAX_BODY_JSON_CHARS = DEFAULT_MAX_INLINE_TOOL_CONTENT_JSON_CHARS;
 const MAX_BODY_START_CHAR = 2_000_000;
 const ALLOWED_METHODS = new Set<HttpRequestMethod>(["GET", "HEAD", "POST", "PUT", "DELETE"]);
 

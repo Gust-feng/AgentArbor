@@ -177,6 +177,35 @@ test("BasicAgentPendingContinuationStore removes continuations before awaiting r
   await assert.doesNotReject(deletion);
 });
 
+test("BasicAgentPendingContinuationStore clears every continuation exactly once", async () => {
+  const store = new BasicAgentPendingContinuationStore();
+  const releaseCalls = new Map<string, number>();
+  for (const confirmationId of ["confirmation-a", "confirmation-b"]) {
+    store.remember(`run-${confirmationId}`, {
+      confirmationId,
+      async release() {
+        releaseCalls.set(confirmationId, (releaseCalls.get(confirmationId) ?? 0) + 1);
+      },
+      async resume() {
+        return {};
+      },
+      async resumeWithDecision() {
+        return {};
+      },
+    });
+  }
+
+  await store.clearAll();
+  await store.clearAll();
+
+  assert.deepEqual([...releaseCalls.entries()], [
+    ["confirmation-a", 1],
+    ["confirmation-b", 1],
+  ]);
+  assert.equal(store.consume("run-confirmation-a", "confirmation-a"), undefined);
+  assert.equal(store.consume("run-confirmation-b", "confirmation-b"), undefined);
+});
+
 test("BasicAgentPendingContinuationStore accepts canvas pending confirmation and rejects stale decisions", () => {
   const store = new BasicAgentPendingContinuationStore();
   const job = jobFixture({
@@ -301,6 +330,55 @@ test("BasicAgentRunExecutor can defer scheduling until the caller has responded"
   await waitUntil(() => executed);
 
   assert.equal(runJobs.get(run.runId)?.status, "completed");
+});
+
+test("BasicAgentRunExecutor ignores duplicate scheduling and preserves cancellation", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const activeRunJobs = new Set<Promise<void>>();
+  let executionCalls = 0;
+  let executionSignal: AbortSignal | undefined;
+  let releaseExecution!: () => void;
+  const executionGate = new Promise<void>((resolve) => {
+    releaseExecution = resolve;
+  });
+  let markExecutionStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markExecutionStarted = resolve;
+  });
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    activeRunJobs,
+    execute: async ({ abortSignal }) => {
+      executionCalls += 1;
+      executionSignal = abortSignal;
+      markExecutionStarted();
+      await executionGate;
+      return { completed: true };
+    },
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "ignore duplicate schedules",
+    aiMode: "fake",
+    deferSchedule: true,
+  });
+  executor.schedule(run.runId);
+  executor.schedule(run.runId);
+
+  assert.equal(activeRunJobs.size, 1);
+  await started;
+  assert.equal(executionCalls, 1);
+
+  const cancellation = executor.cancel(run.runId);
+  assert.equal(executionSignal?.aborted, true);
+  releaseExecution();
+  await cancellation;
+  await waitUntil(() => activeRunJobs.size === 0);
+
+  assert.equal(runJobs.get(run.runId)?.status, "cancelled");
+  assert.equal(executionCalls, 1);
 });
 
 test("BasicAgentRunExecutor does not complete when execution result has no terminal state", async () => {
@@ -2090,13 +2168,15 @@ test("BasicAgentRunExecutor avoids double finalize when cancel races with confir
   const runJobs = new InMemoryBasicAgentRunJobStore();
   let finishedCount = 0;
   let releaseResume: (() => void) | undefined;
+  let resumeSignal: AbortSignal | undefined;
   const executor = new BasicAgentRunExecutor(executorConfig({
     runJobs,
     execute: async () => ({
       pendingApproval: {
         confirmationId: "confirmation-race",
         async release() {},
-        async resume() {
+        async resume(input) {
+          resumeSignal = input.abortSignal;
           await new Promise<void>((resolve) => { releaseResume = resolve; });
           return { completed: true };
         },
@@ -2133,7 +2213,9 @@ test("BasicAgentRunExecutor avoids double finalize when cancel races with confir
   });
   await waitUntil(() => releaseResume !== undefined);
 
+  executor.schedule(run.runId);
   await executor.cancel(run.runId);
+  assert.equal(resumeSignal?.aborted, true);
   assert.equal(runJobs.get(run.runId)?.status, "cancelled");
   assert.equal(finishedCount, 1);
 

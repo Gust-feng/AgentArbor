@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ToolCallRequest, ToolCallResult, ToolExecutor } from "../../domain/tools/index.js";
+import { toolModelAttachmentsFromOutput, withToolModelAttachments } from "../../domain/tools/index.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
+import { createReadToolOutputTool } from "./adapters/tool-output-read-tool.js";
 import { ToolCenter } from "./tool-center.js";
+import { InMemoryToolOutputStore } from "./tool-output-store.js";
 
 test("ToolCenter registers, lists, executes, and unregisters tools", async () => {
   const center = new ToolCenter();
@@ -186,7 +189,14 @@ test("ToolCenter can accept a tool executor supplied approval_required result", 
       callId: context.toolCallId ?? "missing-call-id",
       toolName: "delegating_tool",
       input: { original: true },
-      output: { delegated: true },
+      output: withToolModelAttachments(
+        { delegated: true },
+        [{
+          kind: "image",
+          source: { kind: "data", mimeType: "image/png", data: "cGFydGlhbA==" },
+          attachmentId: "partial-attachment",
+        }]
+      ),
       status: "approval_required",
       error: "Delegated tool requires approval.",
       durationMs: 12,
@@ -215,13 +225,55 @@ test("ToolCenter can accept a tool executor supplied approval_required result", 
   assert.equal(result.status, "approval_required");
   assert.equal(result.callId, "call-parent");
   assert.deepEqual(result.input, { task: "delegate" });
-  assert.equal(result.output, undefined);
+  assert.deepEqual(result.output, { delegated: true });
+  assert.equal(toolModelAttachmentsFromOutput(result.output)?.[0]?.attachmentId, "partial-attachment");
   assert.equal(result.error, undefined);
   assert.equal("projection" in result, false);
   assert.equal("envelope" in result, false);
   assert.equal(result.confirmationRequest?.confirmationId, "confirmation-inner-call");
   assert.deepEqual(result.confirmationRequest?.affectedResources, ["inner-resource"]);
   assert.equal(result.confirmationRequest === undefined ? true : "display" in result.confirmationRequest, false);
+});
+
+test("ToolCenter preserves approval_required when partial output retention fails", async () => {
+  const store = new InMemoryToolOutputStore({ maxItemChars: 8 });
+  const center = new ToolCenter({ outputStore: store, maxInlineOutputChars: 4 });
+  center.register(createReadToolOutputTool(store));
+  center.register(testTool("delegating_tool", async (_input, context) => ({
+    kind: "tool_call_result",
+    result: {
+      callId: context.toolCallId ?? "missing-call-id",
+      toolName: "delegating_tool",
+      input: {},
+      output: { partial: "must remain recoverable" },
+      status: "approval_required",
+      durationMs: 1,
+      confirmationRequest: {
+        confirmationId: "confirmation-partial-output",
+        runId: "inner-call",
+        title: "内部工具确认",
+        actionSummary: "内部工具需要确认",
+        affectedResources: ["inner-resource"],
+        riskLevel: "high",
+        requestedAt: "2026-07-12T00:00:00.000Z",
+        sourceRefs: ["tool:inner-call"],
+      },
+    },
+  })));
+
+  const result = await center.execute(
+    { callId: "call-parent", toolName: "delegating_tool", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("delegating_tool", "read_tool_output"),
+  );
+
+  assert.equal(result.status, "approval_required");
+  assert.equal(result.confirmationRequest?.confirmationId, "confirmation-partial-output");
+  assert.equal(result.errorDomain, "runtime_error");
+  assert.equal(result.errorFacts?.outputDeliveryPhase, "output_retention");
+  assert.equal(result.errorFacts?.outputDeliveryCode, "tool_output_item_too_large");
+  assert.equal(result.errorFacts?.originalStatus, "approval_required");
+  assert.equal((result.output as { readonly retentionFailed?: unknown }).retentionFailed, true);
 });
 
 test("ToolCenter rebuilds explicit failed results with JSON-safe error facts", async () => {
@@ -270,6 +322,301 @@ test("ToolCenter rebuilds explicit failed results with JSON-safe error facts", a
   assert.equal("envelope" in result, false);
   assert.equal("display" in result, false);
   assert.doesNotThrow(() => JSON.stringify(result));
+});
+
+test("ToolCenter preserves complete errors from explicit executor results", async () => {
+  const error = `explicit-error-${"x".repeat(800)}`;
+  const detail = `explicit-fact-${"y".repeat(800)}`;
+  const center = new ToolCenter();
+  center.register(testTool("explicit_long_failure", async (_input, context) => ({
+    kind: "tool_call_result",
+    result: {
+      callId: context.toolCallId ?? "missing-call-id",
+      toolName: "explicit_long_failure",
+      input: {},
+      output: { observed: true },
+      status: "failed",
+      error,
+      errorFacts: { detail },
+      durationMs: 1,
+    },
+  })));
+
+  const result = await center.execute(
+    { callId: "call-explicit-long-failure", toolName: "explicit_long_failure", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("explicit_long_failure")
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, error);
+  assert.equal(result.errorFacts?.detail, detail);
+});
+
+test("ToolCenter retains oversized explicit failure evidence without losing original facts", async () => {
+  const error = `explicit-error-start\n${"x".repeat(6_000)}\nexplicit-error-end`;
+  const detail = `explicit-detail-start\n${"y".repeat(6_000)}\nexplicit-detail-end`;
+  const store = new InMemoryToolOutputStore();
+  const center = new ToolCenter({ outputStore: store, maxInlineOutputChars: 256 });
+  center.register(createReadToolOutputTool(store));
+  center.register(testTool("explicit_retained_failure", async (_input, context) => ({
+    kind: "tool_call_result",
+    result: {
+      callId: context.toolCallId ?? "missing-call-id",
+      toolName: "explicit_retained_failure",
+      input: {},
+      output: withToolModelAttachments(
+        { observed: "upstream failure output" },
+        [{
+          kind: "image",
+          source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+          attachmentId: "failure-attachment",
+        }],
+      ),
+      status: "failed",
+      error,
+      errorDomain: "tool_error",
+      errorFacts: { code: "upstream_failure", detail },
+      durationMs: 1,
+    },
+  })));
+  const permission = allowTools("explicit_retained_failure", "read_tool_output");
+
+  const result = await center.execute(
+    { callId: "call-explicit-retained-failure", toolName: "explicit_retained_failure", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    permission,
+  );
+  const delivery = result.output as {
+    readonly continuation?: { readonly nextInput?: ToolCallRequest["input"] };
+  };
+  const read = await center.execute(
+    {
+      callId: "read-explicit-retained-failure",
+      toolName: "read_tool_output",
+      input: delivery.continuation?.nextInput,
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    permission,
+  );
+  const retained = JSON.parse((read.output as { readonly content: string }).content) as {
+    readonly status: string;
+    readonly output: { readonly observed: string };
+    readonly error: string;
+    readonly errorDomain: string;
+    readonly errorFacts: { readonly code: string; readonly detail: string };
+  };
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorDomain, "tool_error");
+  assert.equal(result.errorFacts?.code, "upstream_failure");
+  assert.equal(result.errorFacts?.detail === detail, false);
+  assert.equal(typeof result.errorFacts?.errorEvidenceRef, "string");
+  assert.equal(toolModelAttachmentsFromOutput(result.output)?.[0]?.attachmentId, "failure-attachment");
+  assert.equal(read.status, "completed");
+  assert.deepEqual(retained, {
+    status: "failed",
+    output: { observed: "upstream failure output" },
+    error,
+    errorDomain: "tool_error",
+    errorFacts: { code: "upstream_failure", detail },
+  });
+});
+
+test("ToolCenter keeps original explicit failure semantics when evidence retention is unavailable", async () => {
+  const center = new ToolCenter({ maxInlineOutputChars: 64 });
+  center.register(testTool("explicit_unretained_failure", async (_input, context) => ({
+    kind: "tool_call_result",
+    result: {
+      callId: context.toolCallId ?? "missing-call-id",
+      toolName: "explicit_unretained_failure",
+      input: {},
+      output: { body: "z".repeat(2_000) },
+      status: "failed",
+      error: "MCP server reported its original failure.",
+      errorDomain: "tool_error",
+      errorFacts: { code: "mcp_tool_error", serverId: "fixture-server" },
+      durationMs: 1,
+    },
+  })));
+
+  const result = await center.execute(
+    { callId: "call-explicit-unretained-failure", toolName: "explicit_unretained_failure", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("explicit_unretained_failure"),
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "MCP server reported its original failure.");
+  assert.equal(result.errorDomain, "tool_error");
+  assert.equal(result.errorFacts?.code, "mcp_tool_error");
+  assert.equal(result.errorFacts?.serverId, "fixture-server");
+  assert.equal(result.errorFacts?.errorEvidenceCode, "tool_error_reader_unavailable");
+  assert.equal((result.output as { readonly retentionFailed?: unknown }).retentionFailed, true);
+});
+
+test("ToolCenter preserves complete thrown errors that fit the inline result budget", async () => {
+  const message = `thrown-message-${"x".repeat(800)}`;
+  const detail = `thrown-fact-${"y".repeat(800)}`;
+  const center = new ToolCenter({ maxInlineOutputChars: 5_000 });
+  center.register(testTool("inline_thrown_failure", async () => {
+    throw Object.assign(new Error(message), {
+      errorDomain: "tool_error",
+      facts: { detail },
+    });
+  }));
+
+  const result = await center.execute(
+    { callId: "call-inline-thrown-failure", toolName: "inline_thrown_failure", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("inline_thrown_failure"),
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, message);
+  assert.equal(result.errorFacts?.detail, detail);
+  assert.equal(result.output, undefined);
+});
+
+test("ToolCenter retains oversized thrown stderr and HTTP-like bodies behind read_tool_output", async () => {
+  const cases = [
+    {
+      toolName: "shell_command",
+      message: "shell command failed with exit code 1",
+      errorDomain: "process_error" as const,
+      evidenceName: "stderr",
+      evidence: `stderr-start\n${"s".repeat(6_000)}\nstderr-end`,
+      facts: { exitCode: 1 },
+    },
+    {
+      toolName: "http_like_failure",
+      message: "HTTP request failed with status 502",
+      errorDomain: "tool_error" as const,
+      evidenceName: "body",
+      evidence: `response-start\n${"b".repeat(6_000)}\nresponse-end`,
+      facts: { statusCode: 502, url: "https://example.test/failure" },
+    },
+  ];
+
+  for (const fixture of cases) {
+    let executions = 0;
+    const store = new InMemoryToolOutputStore();
+    const center = new ToolCenter({ outputStore: store, maxInlineOutputChars: 256 });
+    center.register(createReadToolOutputTool(store));
+    center.register(testTool(fixture.toolName, async () => {
+      executions += 1;
+      throw Object.assign(new Error(fixture.message), {
+        errorDomain: fixture.errorDomain,
+        facts: {
+          ...fixture.facts,
+          [fixture.evidenceName]: fixture.evidence,
+        },
+      });
+    }));
+
+    const permission = allowTools(fixture.toolName, "read_tool_output");
+    const result = await center.execute(
+      { callId: `call-${fixture.toolName}`, toolName: fixture.toolName, input: {} },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      permission,
+    );
+    const delivery = result.output as {
+      readonly contentRef?: unknown;
+      readonly truncated?: unknown;
+      readonly continuation?: { readonly nextInput?: ToolCallRequest["input"] };
+    };
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.error, fixture.message);
+    assert.equal(result.errorDomain, fixture.errorDomain);
+    assert.notEqual(result.errorFacts?.[fixture.evidenceName], fixture.evidence);
+    assert.equal(typeof delivery.contentRef, "string");
+    assert.equal(delivery.truncated, true);
+    assert.notEqual(delivery.continuation?.nextInput, undefined);
+
+    const read = await center.execute(
+      {
+        callId: `read-${fixture.toolName}`,
+        toolName: "read_tool_output",
+        input: delivery.continuation?.nextInput,
+      },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      permission,
+    );
+    const retained = JSON.parse((read.output as { readonly content: string }).content) as {
+      readonly message: string;
+      readonly errorDomain: string;
+      readonly facts: Readonly<Record<string, unknown>>;
+    };
+
+    assert.equal(read.status, "completed");
+    assert.equal(retained.message, fixture.message);
+    assert.equal(retained.errorDomain, fixture.errorDomain);
+    assert.equal(retained.facts[fixture.evidenceName], fixture.evidence);
+    assert.equal(executions, 1, "reading retained error evidence must not rerun the failed tool");
+  }
+});
+
+test("ToolCenter retained output and error previews do not split UTF-16 surrogate pairs", async () => {
+  const store = new InMemoryToolOutputStore();
+  const center = new ToolCenter({ outputStore: store, maxInlineOutputChars: 10 });
+  center.register(createReadToolOutputTool(store));
+  center.register(testTool("large_unicode_output", async () => `${"a".repeat(3_998)}😀tail`));
+  center.register(testTool("large_unicode_error", async () => {
+    throw new Error(`${"e".repeat(3_998)}😀error-tail`);
+  }));
+  const permission = allowTools("large_unicode_output", "large_unicode_error", "read_tool_output");
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+
+  const output = await center.execute(
+    { callId: "call-large-unicode-output", toolName: "large_unicode_output", input: {} },
+    context,
+    permission,
+  );
+  const failure = await center.execute(
+    { callId: "call-large-unicode-error", toolName: "large_unicode_error", input: {} },
+    context,
+    permission,
+  );
+  const outputPreview = (output.output as { readonly contentPreview: string }).contentPreview;
+
+  assert.equal(outputPreview, `${"a".repeat(3_998)}…`);
+  assert.equal(hasUnpairedSurrogate(outputPreview), false);
+  assert.equal(failure.error, `${"e".repeat(3_998)}…`);
+  assert.equal(hasUnpairedSurrogate(failure.error ?? ""), false);
+});
+
+test("ToolCenter safely merges prototype-shaped facts from thrown errors", async () => {
+  const facts = JSON.parse(`{
+    "__proto__": { "polluted": true },
+    "constructor": { "kind": "tool-error" },
+    "prototype": "tool-prototype"
+  }`) as Record<string, unknown>;
+  const thrown = new Error("prototype-shaped tool failure");
+  Object.defineProperty(thrown, "facts", {
+    value: facts,
+    enumerable: true,
+  });
+  const center = new ToolCenter();
+  center.register(testTool("prototype_failure", async () => {
+    throw thrown;
+  }));
+
+  const result = await center.execute(
+    { callId: "call-prototype-failure", toolName: "prototype_failure", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("prototype_failure")
+  );
+  const errorFacts = result.errorFacts as Record<string, unknown>;
+
+  assert.equal(result.status, "failed");
+  assert.equal(Object.getPrototypeOf(errorFacts), Object.prototype);
+  assert.equal(Object.prototype.hasOwnProperty.call(errorFacts, "__proto__"), true);
+  assert.deepEqual(errorFacts["__proto__"], { polluted: true });
+  assert.deepEqual(errorFacts.constructor, { kind: "tool-error" });
+  assert.equal(errorFacts.prototype, "tool-prototype");
+  assert.equal((errorFacts as { readonly polluted?: boolean }).polluted, undefined);
+  assert.equal(({} as { readonly polluted?: boolean }).polluted, undefined);
 });
 
 test("ToolCenter rejects invalid explicit statuses and approval requests", async () => {
@@ -707,6 +1054,24 @@ function allowTools(...allowedTools: readonly string[]) {
     callerAgentId: "agent-test",
     allowedTools,
   };
+}
+
+function hasUnpairedSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) {
+        return true;
+      }
+      index += 1;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function displayFor(result: ToolCallResult) {

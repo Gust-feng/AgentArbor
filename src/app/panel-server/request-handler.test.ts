@@ -18,6 +18,12 @@ test("panel server close aborts active runs and cleans owned background processe
       },
     },
   }, panelRuntimeHooks());
+  const retainedOutput = await runtime.toolOutputStore.retain({
+    mediaType: "text/plain",
+    content: "shutdown-retained-output",
+    sourceToolName: "shutdown_fixture",
+    sourceCallId: "shutdown-call",
+  });
   const abort = new AbortController();
   runtime.abortControllers.set("run-shutdown-a", abort);
   runtime.processRegistry.register({
@@ -77,6 +83,10 @@ test("panel server close aborts active runs and cleans owned background processe
   assert.equal(runtime.processRegistry.get("shutdown-owned-unknown")?.status, "exited");
   assert.equal(runtime.processRegistry.get("shutdown-unowned-background")?.status, "running");
   assert.equal(runtime.processRegistry.get("shutdown-owned-foreground")?.status, "running");
+  assert.equal(
+    await runtime.toolOutputStore.read(retainedOutput.ref, { startChar: 0, maxChars: 30_000 }),
+    undefined,
+  );
   const cleanupFacts = runtime.processRegistry.listCleanupFacts();
   assert.equal(cleanupFacts[0]?.scope, "registry");
   assert.equal(cleanupFacts[0]?.reason, "shutdown");
@@ -143,6 +153,157 @@ test("panel server close runs shutdown cleanup before server close callback reso
   closeCallback?.();
   await closing;
   assert.equal(closeSettled, true);
+});
+
+test("panel server close cancels a scheduled Ordinary run before its deferred execution starts", async () => {
+  let executionCalls = 0;
+  const runtime = createPanelRuntime({}, {
+    ...panelRuntimeHooks(),
+    async executeRun(): Promise<BasicAgentRunExecutionResult> {
+      executionCalls += 1;
+      return { completed: true };
+    },
+  });
+  const server = createServer((_request, response) => {
+    response.end("ok");
+  });
+  await listen(server);
+
+  const run = await runtime.runExecutor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "close before scheduled execution starts",
+    aiMode: "fake",
+  });
+  assert.equal(runtime.abortControllers.has(run.runId), true);
+  runtime.runExecutor.schedule(run.runId);
+  assert.equal(runtime.activeRunJobs.size, 1);
+
+  await closePanelServer(server, runtime);
+
+  assert.equal(executionCalls, 0);
+  assert.equal(runtime.runJobs.get(run.runId)?.status, "cancelled");
+  assert.equal(runtime.abortControllers.has(run.runId), false);
+  assert.equal(runtime.activeRunJobs.size, 0);
+});
+
+test("panel server close quiesces Ordinary queue scheduling before active runs finish", async () => {
+  let executionStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    executionStarted = resolve;
+  });
+  let queuedScheduleCalls = 0;
+  const runtime = createPanelRuntime({}, {
+    ...panelRuntimeHooks(),
+    async executeRun(_runtime, execution): Promise<BasicAgentRunExecutionResult> {
+      executionStarted();
+      if (!execution.abortSignal.aborted) {
+        await new Promise<void>((resolve) => {
+          execution.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      }
+      return { completed: true };
+    },
+    scheduleNextQueuedConversationRun(): void {
+      queuedScheduleCalls += 1;
+    },
+  });
+  const server = createServer((_request, response) => {
+    response.end("ok");
+  });
+  await listen(server);
+
+  await runtime.runExecutor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "do not admit queued work during close",
+    aiMode: "fake",
+  });
+  await started;
+  await closePanelServer(server, runtime);
+
+  assert.equal(runtime.isQuiescing, true);
+  assert.equal(queuedScheduleCalls, 0);
+  assert.equal(runtime.activeRunJobs.size, 0);
+});
+
+test("panel server close repeatedly aborts controllers that appear while waiting for idle", async () => {
+  const runtime = createPanelRuntime({}, panelRuntimeHooks());
+  const server = createServer((_request, response) => {
+    response.end("ok");
+  });
+  await listen(server);
+
+  let lateControllerAborted = false;
+  let releaseLateJob!: () => void;
+  const lateJob = new Promise<void>((resolve) => {
+    releaseLateJob = resolve;
+  });
+  const safetyTimer = setTimeout(releaseLateJob, 250);
+  const introduceLateJob = Promise.resolve().then(() => {
+    const controller = new AbortController();
+    controller.signal.addEventListener("abort", () => {
+      lateControllerAborted = true;
+      clearTimeout(safetyTimer);
+      releaseLateJob();
+    }, { once: true });
+    runtime.abortControllers.set("run-late-during-close", controller);
+    runtime.activeRunJobs.add(lateJob);
+    void lateJob.finally(() => {
+      runtime.activeRunJobs.delete(lateJob);
+      runtime.abortControllers.delete("run-late-during-close");
+    });
+  });
+  runtime.activeRunJobs.add(introduceLateJob);
+  void introduceLateJob.finally(() => {
+    runtime.activeRunJobs.delete(introduceLateJob);
+  });
+
+  await closePanelServer(server, runtime);
+
+  assert.equal(lateControllerAborted, true);
+  assert.equal(runtime.abortControllers.size, 0);
+  assert.equal(runtime.activeRunJobs.size, 0);
+});
+
+test("panel server close releases a pending Ordinary approval continuation exactly once", async () => {
+  let releaseCalls = 0;
+  const runtime = createPanelRuntime({}, {
+    ...panelRuntimeHooks(),
+    async executeRun(): Promise<BasicAgentRunExecutionResult> {
+      return {
+        pendingApproval: {
+          confirmationId: "confirmation-shutdown",
+          async release() {
+            releaseCalls += 1;
+          },
+          async resume() {
+            return { completed: true };
+          },
+          async resumeWithDecision() {
+            return { completed: true };
+          },
+        },
+      };
+    },
+  });
+  const run = await runtime.runExecutor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "wait for shutdown approval cleanup",
+    aiMode: "fake",
+  });
+  await Promise.allSettled([...runtime.activeRunJobs]);
+  assert.equal(runtime.runJobs.get(run.runId)?.status, "approval_needed");
+  const server = createServer((_request, response) => {
+    response.end("ok");
+  });
+  await listen(server);
+
+  await closePanelServer(server, runtime);
+  await runtime.runExecutor.dispose();
+
+  assert.equal(releaseCalls, 1);
 });
 
 function panelRuntimeHooks() {

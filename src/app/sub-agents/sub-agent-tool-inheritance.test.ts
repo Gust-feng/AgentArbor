@@ -11,7 +11,9 @@ import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { nowIso } from "../../kernel/id.js";
 import { toolResultMessage } from "../../kernel/intelligence/tool-use-loop-messages.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
+import { createReadToolOutputTool } from "../tool-center/adapters/tool-output-read-tool.js";
 import { ToolCenter } from "../tool-center/tool-center.js";
+import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import { SubAgentRegistry, type SubAgentDefinition } from "./sub-agent-registry.js";
 import { InMemorySubAgentRunTraceStore } from "./sub-agent-trace-store.js";
 import { createSubAgentToolExecutors } from "./sub-agent-tools.js";
@@ -65,6 +67,63 @@ test("runSubAgent intersects declared sub-agent tools with parent tools", async 
 
   assert.equal(result.status, "completed");
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["read_file"]);
+});
+
+test("runSubAgent inherits read_tool_output as a transport companion without expanding business tools", async () => {
+  const sourceToolName = "synthetic_large_output";
+  const forbiddenToolName = "parent_only_business_tool";
+  const retainedRef = "tool-output://sub-agent-large-output";
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-large", "call-large", sourceToolName, {}),
+    toolCallResponse("model-request-read", "call-read", "read_tool_output", {
+      ref: retainedRef,
+      startChar: 0,
+      maxChars: 30_000,
+    }),
+    textResponse("model-request-final", "transport reader consumed the retained output"),
+  ]);
+  const store = new InMemoryToolOutputStore({
+    createRefToken: () => "sub-agent-large-output",
+  });
+  let sourceExecutions = 0;
+  let forbiddenExecutions = 0;
+  const center = new ToolCenter({ outputStore: store });
+  center.register(testTool(sourceToolName, async () => {
+    sourceExecutions += 1;
+    return { payload: `sub-agent-evidence:${"x".repeat(190_000)}` };
+  }));
+  center.register(testTool(forbiddenToolName, async () => {
+    forbiddenExecutions += 1;
+    return { shouldNotRun: true };
+  }));
+  center.register(createReadToolOutputTool(store));
+
+  const result = await runSubAgent({
+    subAgent: testSubAgent({ allowedTools: [sourceToolName] }),
+    task: "read a synthetic large tool result",
+    toolBroker: center,
+    channel,
+    allowedTools: [sourceToolName, forbiddenToolName, "read_tool_output"],
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(sourceExecutions, 1);
+  assert.equal(forbiddenExecutions, 0);
+  assert.equal(result.toolCalls, 2);
+  assert.deepEqual(
+    channel.requests.map((request) => request.tools?.map((tool) => tool.name)),
+    [
+      [sourceToolName, "read_tool_output"],
+      [sourceToolName, "read_tool_output"],
+      [sourceToolName, "read_tool_output"],
+    ],
+  );
+  assert.equal(
+    channel.requests[2]?.sanitizedMessages.some((message) =>
+      message.role === "tool" && message.content.includes("sub-agent-evidence")
+    ),
+    true,
+  );
 });
 
 test("runSubAgent policy overrides cannot reopen sub-agent recursion tools", async () => {

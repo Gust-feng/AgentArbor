@@ -47,3 +47,24 @@ test("normalizeToolFactValue preserves the explicit out-of-band model attachment
   ]);
   assert.equal(JSON.stringify(normalized).includes("aGVsbG8="), false);
 });
+
+test("normalizeToolFactValue preserves prototype-shaped JSON keys as own facts", () => {
+  const source = JSON.parse(`{
+    "__proto__": { "polluted": true },
+    "constructor": { "name": "tool-fact" },
+    "prototype": { "kind": "fact" },
+    "nested": { "__proto__": "nested-fact" }
+  }`) as Record<string, unknown>;
+
+  const normalized = normalizeToolFactValue(source) as Record<string, unknown>;
+  const nested = normalized.nested as Record<string, unknown>;
+
+  assert.deepEqual(normalized, source);
+  assert.equal(Object.getPrototypeOf(normalized), Object.prototype);
+  assert.equal(Object.prototype.hasOwnProperty.call(normalized, "__proto__"), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(normalized, "constructor"), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(normalized, "prototype"), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(nested, "__proto__"), true);
+  assert.equal((normalized as { readonly polluted?: boolean }).polluted, undefined);
+  assert.equal(({} as { readonly polluted?: boolean }).polluted, undefined);
+});

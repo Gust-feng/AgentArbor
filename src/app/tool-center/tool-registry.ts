@@ -15,7 +15,7 @@ import {
   toolPresentationForDefinition,
   validateModelVisibleToolContract,
 } from "../../domain/tools/index.js";
-import { ToolCenter } from "./tool-center.js";
+import { ToolCenter, type ToolCenterOptions } from "./tool-center.js";
 
 export type ToolRegistryScope = string;
 
@@ -59,8 +59,14 @@ export type ToolCatalogSnapshot = {
   readonly allowedTools: readonly string[];
 };
 
+export type ToolRegistryOptions = {
+  readonly toolCenter?: ToolCenterOptions;
+};
+
 export class ToolRegistry {
   private readonly entries = new Map<string, ToolRegistryEntry>();
+
+  constructor(private readonly options: ToolRegistryOptions = {}) {}
 
   register(entry: ToolRegistryEntry): void {
     const metadata = requireToolMetadata(entry.executor.definition);
@@ -91,7 +97,7 @@ export class ToolRegistry {
   }
 
   createToolCenterForScopes(scopes: readonly ToolRegistryScope[]): ToolExecutionBroker {
-    const center = new ToolCenter();
+    const center = new ToolCenter(this.options.toolCenter);
     for (const entry of this.entriesForAnyScope(scopes)) {
       const availability = entry.availability ?? { status: "available" as const };
       if (entry.enabledByDefault && availability.status === "available") {

@@ -100,7 +100,12 @@ function normalize(
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
       const normalized = normalize(item, `${path}.${key}`, ancestors, depth + 1);
       if (normalized !== undefined) {
-        result[key] = normalized;
+        Object.defineProperty(result, key, {
+          value: normalized,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
       }
     }
     return result;

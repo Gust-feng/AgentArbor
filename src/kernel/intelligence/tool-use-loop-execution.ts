@@ -13,7 +13,7 @@ import {
   createToolRequestedMessage,
 } from "./tool-events.js";
 import type { ToolUseLoopOptions } from "./tool-use-loop-contracts.js";
-import { cloneToolCallRequest, cloneToolResults } from "./tool-use-loop-cloning.js";
+import { cloneToolCallRequest, cloneToolResult, cloneToolResults } from "./tool-use-loop-cloning.js";
 import { cancelledToolResult } from "./tool-use-loop-results.js";
 
 export type ToolUseLoopBatchExecutionResult = {
@@ -21,6 +21,7 @@ export type ToolUseLoopBatchExecutionResult = {
   readonly pendingApproval?: {
     readonly confirmationId: string;
     readonly pendingToolCall: ToolCallRequest;
+    readonly pendingToolResult: ToolCallResult;
     readonly confirmationRequest?: NonNullable<ToolCallResult["confirmationRequest"]>;
     readonly remainingToolCallsAfterApproval: readonly ToolCallRequest[];
     readonly completedToolResults: readonly ToolCallResult[];
@@ -90,6 +91,7 @@ export async function executeToolCalls(input: {
         pendingApproval: {
           confirmationId: result.confirmationRequest?.confirmationId ?? `confirmation-${result.callId}`,
           pendingToolCall: cloneToolCallRequest(request),
+          pendingToolResult: cloneToolResult(result),
           confirmationRequest:
             result.confirmationRequest === undefined ? undefined : globalThis.structuredClone(result.confirmationRequest),
           remainingToolCallsAfterApproval: input.requests.slice(index + 1).map(cloneToolCallRequest),
@@ -123,6 +125,14 @@ export function publishToolResultEvent(
     default:
       assertNever(result.status);
   }
+}
+
+export function publishToolRequestEvent(
+  options: ToolUseLoopOptions,
+  request: ToolCallRequest,
+  context: ToolExecutionContext
+): void {
+  options.publishToolEvent?.(createToolRequestedMessage({ request, context }));
 }
 
 export async function executeToolCallSafely(

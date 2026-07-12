@@ -78,7 +78,7 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
   assert.equal(JSON.stringify(eventLog.list()).includes("token"), false);
 });
 
-test("OpenAI-compatible Chat Completions adapter maps image attachments to image_url parts", async () => {
+test("OpenAI-compatible Chat Completions adapter maps user image and file attachments to provider content parts", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
     calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
@@ -113,6 +113,10 @@ test("OpenAI-compatible Chat Completions adapter maps image attachments to image
         source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
         filename: "screenshot.png",
         detail: "auto",
+      }, {
+        kind: "file",
+        source: { kind: "data", mimeType: "application/pdf", data: "JVBERi0xLjQ=" },
+        filename: "report.pdf",
       }],
     }],
   }));
@@ -122,8 +126,39 @@ test("OpenAI-compatible Chat Completions adapter maps image attachments to image
     content: [
       { type: "text", text: "Describe this screenshot." },
       { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=", detail: "auto" } },
+      { type: "file", file: { file_data: "data:application/pdf;base64,JVBERi0xLjQ=", filename: "report.pdf" } },
     ],
   }]);
+});
+
+test("OpenAI-compatible Chat Completions rejects URL-backed user file attachments before transport", async () => {
+  let fetchCalls = 0;
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test/",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Inspect this report.",
+      attachments: [{
+        kind: "file",
+        filename: "report.pdf",
+        source: { kind: "url", url: "https://files.example.test/report.pdf" },
+      }],
+    }],
+  }));
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "request_validation");
+  assert.match(response.failure?.message ?? "", /does not support URL-backed file attachments/);
 });
 
 test("OpenAI-compatible Chat Completions adapter maps MiniMax image auto detail to default", async () => {
@@ -173,6 +208,130 @@ test("OpenAI-compatible Chat Completions adapter maps MiniMax image auto detail 
       { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=", detail: "default" } },
     ],
   }]);
+});
+
+test("OpenAI-compatible Chat Completions rejects tool-origin binary attachments before transport", async () => {
+  let fetchCalls = 0;
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test/",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { callId: "call-file", toolName: "mcp__read", input: {} },
+          { callId: "call-status", toolName: "mcp__status", input: {} },
+        ],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-file",
+        toolName: "mcp__read",
+        content: JSON.stringify({ content: [{ type: "resource", uri: "memory://report.pdf" }] }),
+        attachments: [{
+          kind: "file",
+          inputRef: "memory://report.pdf",
+          filename: "report.pdf",
+          source: { kind: "data", mimeType: "application/pdf", data: "JVBERi0xLjQ=" },
+        }, {
+          kind: "audio",
+          inputRef: "mcp-content:audio:0",
+          filename: "clip.wav",
+          source: { kind: "data", mimeType: "audio/wav", data: "UklGRg==" },
+        }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-status",
+        toolName: "mcp__status",
+        content: JSON.stringify({ status: "ready" }),
+      },
+    ],
+  }));
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "request_validation");
+  assert.match(response.failure?.message ?? "", /use the Responses protocol/);
+});
+
+test("OpenAI-compatible Chat Completions rejects URL-backed tool attachments without role promotion", async () => {
+  let fetchCalls = 0;
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test/",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ callId: "call-file-url", toolName: "mcp__read", input: {} }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-file-url",
+        toolName: "mcp__read",
+        content: JSON.stringify({ resource: "https://files.example.test/report.pdf" }),
+        attachments: [{
+          kind: "file",
+          inputRef: "https://files.example.test/report.pdf",
+          filename: "report.pdf",
+          source: { kind: "url", url: "https://files.example.test/report.pdf" },
+        }],
+      },
+    ],
+  }));
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "request_validation");
+  assert.match(response.failure?.message ?? "", /use the Responses protocol/);
+});
+
+test("OpenAI-compatible Chat Completions rejects unsupported audio formats before transport", async () => {
+  let fetchCalls = 0;
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test/",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Inspect this audio.",
+      attachments: [{
+        kind: "audio",
+        filename: "clip.ogg",
+        source: { kind: "data", mimeType: "audio/ogg", data: "T2dnUw==" },
+      }],
+    }],
+  }));
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "request_validation");
+  assert.match(response.failure?.message ?? "", /only accepts wav or mp3 audio input/);
 });
 
 test("OpenAI-compatible Chat Completions adapter appends /v1 only for bare OpenAI base URL", async () => {

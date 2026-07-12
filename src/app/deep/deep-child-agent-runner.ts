@@ -23,6 +23,10 @@ import type { AgentTurnRuntimeResult } from "../../kernel/intelligence/agent-tur
 import { nowIso } from "../../kernel/id.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import {
+  frozenSnapshotHasToolOutputReader,
+  inheritToolOutputReader,
+} from "../capability/tool-output-reader-capability.js";
+import {
   createDeepChildLoopContextRef,
   createDeepChildLoopContextRecord,
   type DeepChildLoopContextStore,
@@ -147,6 +151,11 @@ async function executeDeepChildAgentLoop(input: DeepChildAgentRunInput & {
   readonly messages: readonly ModelMessage[];
 }): Promise<DeepChildAgentRunResult> {
   const childSpec = input.childSpec;
+  const allowedTools = inheritToolOutputReader({
+    businessAllowedTools: childSpec.allowedTools,
+    parentAllowedTools: input.capabilitySnapshot?.toolCatalog.allowedTools ?? [],
+    readerExecutable: frozenSnapshotHasToolOutputReader(input.capabilitySnapshot),
+  });
   const callerRef: ObservationRef = {
     kind: "agent_run",
     id: input.childRun.childRunId,
@@ -155,7 +164,7 @@ async function executeDeepChildAgentLoop(input: DeepChildAgentRunInput & {
   const turn = await input.turnRuntime.execute({
     policy: {
       allowModel: true,
-      allowedTools: childSpec.allowedTools,
+      allowedTools,
       maxModelRounds: childSpec.maxModelRounds,
       maxToolRounds: childSpec.maxToolRounds,
       confirmationPolicy: input.confirmationPolicy,

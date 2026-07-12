@@ -1,6 +1,9 @@
 /** Initial deep child execution and terminal result mapping. */
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createReadToolOutputTool } from "../tool-center/adapters/tool-output-read-tool.js";
+import { ToolCenter } from "../tool-center/tool-center.js";
+import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import {
   DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
   DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,
@@ -9,12 +12,14 @@ import {
 } from "./deep-child-agent-runner.js";
 import { createDeepTurnRuntime } from "./deep-turn.js";
 import {
+  capabilitySnapshotWithTools,
   completedJsonResponse,
   failedModelResponse,
   makeChildRun,
   RecordingToolBroker,
   sampleChildSpec,
   SequenceChannel,
+  testTool,
   toolCallResponse,
 } from "./deep-child-agent-runner-test-support.js";
 
@@ -178,6 +183,92 @@ test("runDeepChildAgent intersects parent prompt tools with the frozen child run
   assert.equal(result.execution.toolCalls[0]?.toolName, "read_file");
   assert.equal(result.execution.toolCalls[0]?.status, "failed");
   assert.equal(result.summary.status, "completed");
+});
+
+test("runDeepChildAgent inherits read_tool_output as a transport companion without expanding business tools", async () => {
+  const sourceToolName = "synthetic_large_output";
+  const forbiddenToolName = "parent_only_business_tool";
+  const retainedRef = "tool-output://deep-child-large-output";
+  const childSpec = sampleChildSpec({
+    allowedTools: [sourceToolName],
+    objective: "读取大型工具结果并保留业务工具边界。",
+  });
+  const childRun = makeChildRun(childSpec);
+  const channel = new SequenceChannel([
+    toolCallResponse("call-large-output", sourceToolName, {}),
+    toolCallResponse("call-read-output", "read_tool_output", {
+      ref: retainedRef,
+      startChar: 0,
+      maxChars: 30_000,
+    }),
+    completedJsonResponse({
+      summary: "已通过 transport reader 读取大型工具结果。",
+      findings: ["reader companion 不改变 child 的业务工具授权"],
+      evidenceRefs: [retainedRef],
+      uncertainty: "仅验证 transport 续读边界。",
+      confidence: 0.9,
+    }),
+  ]);
+  const store = new InMemoryToolOutputStore({
+    createRefToken: () => "deep-child-large-output",
+  });
+  let sourceExecutions = 0;
+  let forbiddenExecutions = 0;
+  const broker = new ToolCenter({ outputStore: store });
+  broker.register(testTool(sourceToolName, async () => {
+    sourceExecutions += 1;
+    return { payload: `deep-child-evidence:${"x".repeat(190_000)}` };
+  }));
+  broker.register(testTool(forbiddenToolName, async () => {
+    forbiddenExecutions += 1;
+    return { shouldNotRun: true };
+  }));
+  broker.register(createReadToolOutputTool(store));
+  const turnRuntime = createDeepTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+  });
+
+  const result = await runDeepChildAgent({
+    childRun,
+    childSpec,
+    goal: "验证 Deep child 的大型结果续读",
+    permissionBoundaryRefs: [],
+    turnRuntime,
+    traceId: "trace-large-output",
+    goalId: "goal-large-output",
+    capabilitySnapshot: capabilitySnapshotWithTools([
+      sourceToolName,
+      forbiddenToolName,
+      "read_tool_output",
+    ]),
+  });
+
+  assert.equal(result.summary.status, "completed");
+  assert.equal(sourceExecutions, 1);
+  assert.equal(forbiddenExecutions, 0);
+  assert.deepEqual(
+    channel.requests.map((request) => request.tools?.map((tool) => tool.name)),
+    [
+      [sourceToolName, "read_tool_output"],
+      [sourceToolName, "read_tool_output"],
+      [sourceToolName, "read_tool_output"],
+    ],
+  );
+  assert.deepEqual(
+    result.execution.toolCalls.map((toolCall) => [toolCall.toolName, toolCall.status]),
+    [
+      [sourceToolName, "completed"],
+      ["read_tool_output", "completed"],
+    ],
+  );
+  assert.deepEqual(result.summary.spec.allowedTools, [sourceToolName]);
+  assert.equal(
+    channel.requests[2]?.sanitizedMessages.some((message) =>
+      message.role === "tool" && message.content.includes("deep-child-evidence")
+    ),
+    true,
+  );
 });
 
 test("runDeepChildAgent maps approval_required to a blocked child Agent run", async () => {

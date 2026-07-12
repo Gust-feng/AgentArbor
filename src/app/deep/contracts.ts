@@ -173,6 +173,8 @@ export type DeepRunStatus =
  */
 export type DeepRunContinuationFacts = {
   readonly informationAccess: SanitizedInformationAccessConfig;
+  /** Run-start Task Soil input. An empty object is persisted when no user context was supplied. */
+  readonly taskSoilInput: DesktopTaskSoilInput;
   readonly permissionBoundaryRefs: readonly string[];
   readonly confirmationPolicy: ToolConfirmationPolicy;
 };

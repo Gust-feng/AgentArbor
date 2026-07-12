@@ -7,6 +7,8 @@ export function clonePendingApproval(pendingApproval: ToolUseLoopPendingApproval
   return {
     confirmationId: pendingApproval.confirmationId,
     pendingToolCall: cloneToolCallRequest(pendingApproval.pendingToolCall),
+    pendingToolResult: cloneToolResult(pendingApproval.pendingToolResult),
+    resolvedPreApprovalResults: pendingApproval.resolvedPreApprovalResults?.map(cloneToolResult),
     confirmationRequest:
       pendingApproval.confirmationRequest === undefined ? undefined : globalThis.structuredClone(pendingApproval.confirmationRequest),
     remainingToolCallsAfterApproval: pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
@@ -43,13 +45,17 @@ export function cloneToolCallRequest(request: ToolCallRequest): ToolCallRequest 
 }
 
 export function cloneToolResults(results: readonly ToolCallResult[]): ToolCallResult[] {
-  return results.map((result) => ({
+  return results.map(cloneToolResult);
+}
+
+export function cloneToolResult(result: ToolCallResult): ToolCallResult {
+  return {
     ...result,
     input: cloneToolFact(result.input),
     output: cloneToolFact(result.output),
     confirmationRequest:
       result.confirmationRequest === undefined ? undefined : globalThis.structuredClone(result.confirmationRequest),
-  }));
+  };
 }
 
 function cloneToolFact<T extends ToolFactValue | undefined>(value: T): T {

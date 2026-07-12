@@ -23,6 +23,7 @@ import {
   normalizeOpenAIResponsesStreamResponse,
 } from "./openai-responses-response.js";
 import { providerErrorMessage } from "./provider-error-message.js";
+import { OpenAIModelInputError } from "./openai-model-input-error.js";
 import {
   classifyProviderFailureKind,
   isContextWindowExceededMessage,
@@ -142,6 +143,19 @@ export class OpenAIResponsesProvider implements ModelProvider {
     } catch (error) {
       if (options.abortSignal?.aborted === true) {
         return cancelledResponse({ request, providerId: this.providerId, providerKind: this.providerKind, protocolKind: this.protocolKind, model: this.model });
+      }
+
+      if (error instanceof OpenAIModelInputError) {
+        return createFailedModelResponse({
+          requestId: request.requestId,
+          providerId: this.providerId,
+          providerKind: this.providerKind,
+          protocolKind: this.protocolKind,
+          model: this.model,
+          outputKind: request.outputContract.outputKind,
+          failureKind: "request_validation",
+          message: error.message,
+        });
       }
 
       const status = statusFromError(error);

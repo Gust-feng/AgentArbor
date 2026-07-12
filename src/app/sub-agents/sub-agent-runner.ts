@@ -26,6 +26,10 @@ import {
   type ToolCallEventEntry,
 } from "../run-read-model/tool-call-event-reducer.js";
 import {
+  inheritToolOutputReader,
+  TOOL_OUTPUT_READER_TOOL_NAME,
+} from "../capability/tool-output-reader-capability.js";
+import {
   createSubAgentCompletedMessage,
   createSubAgentStartedMessage,
 } from "./sub-agent-events.js";
@@ -133,6 +137,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
       traceId,
       runId,
       allowedTools: input.allowedTools,
+      toolOutputReaderExecutable: input.toolBroker.has(TOOL_OUTPUT_READER_TOOL_NAME),
       confirmationPolicy: input.confirmationPolicy,
       overrides: input.policyOverrides,
     });
@@ -395,12 +400,18 @@ function buildSubAgentPolicy(input: {
   readonly traceId: string;
   readonly runId: string;
   readonly allowedTools: readonly string[];
+  readonly toolOutputReaderExecutable: boolean;
   readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly overrides?: Partial<AgentTurnPolicy>;
 }): AgentTurnPolicy {
-  const allowedTools = effectiveSubAgentAllowedTools({
+  const businessAllowedTools = effectiveSubAgentAllowedTools({
     parentAllowedTools: input.allowedTools,
     subAgentAllowedTools: input.subAgent.allowedTools,
+  });
+  const allowedTools = inheritToolOutputReader({
+    businessAllowedTools,
+    parentAllowedTools: input.allowedTools,
+    readerExecutable: input.toolOutputReaderExecutable,
   });
 
   const maxSteps = normalizeOptionalRoundLimit(input.subAgent.maxSteps) ?? SUB_AGENT_DEFAULT_MAX_STEPS;

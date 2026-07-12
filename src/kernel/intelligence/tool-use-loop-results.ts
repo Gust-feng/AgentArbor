@@ -8,6 +8,7 @@ import type {
   ToolUseLoopPendingApproval,
   ToolUseLoopResult,
 } from "./tool-use-loop-contracts.js";
+import { cloneToolResult } from "./tool-use-loop-cloning.js";
 
 export function outOfFuelLoopResult(
   initialRequest: ModelRequest,
@@ -125,15 +126,11 @@ export function approvalStillRequiredModelResponse(
 }
 
 export function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPendingApproval): ToolCallResult {
-  const request = pendingApproval.pendingToolCall;
   const confirmationRequest = pendingApproval.confirmationRequest ?? fallbackConfirmationRequest(pendingApproval);
+  const pendingResult = cloneToolResult(pendingApproval.pendingToolResult);
   return {
-    callId: request.callId,
-    toolName: request.toolName,
-    input: globalThis.structuredClone(request.input),
-    output: undefined,
+    ...pendingResult,
     status: "approval_required",
-    durationMs: 0,
     confirmationRequest: globalThis.structuredClone(confirmationRequest),
   };
 }
@@ -153,15 +150,16 @@ function fallbackConfirmationRequest(pendingApproval: ToolUseLoopPendingApproval
 }
 
 export function confirmationDecisionToolResult(
-  request: ToolCallRequest,
+  pendingResult: ToolCallResult,
   decision: ToolUseLoopConfirmationDecision
 ): ToolCallResult {
   const summary = confirmationDecisionSummary(decision);
+  const clonedResult = cloneToolResult(pendingResult);
   return {
-    callId: request.callId,
-    toolName: request.toolName,
-    input: globalThis.structuredClone(request.input),
-    output: undefined,
+    callId: clonedResult.callId,
+    toolName: clonedResult.toolName,
+    input: clonedResult.input,
+    output: clonedResult.output,
     status: "cancelled",
     error: summary,
     errorFacts: {
@@ -169,7 +167,7 @@ export function confirmationDecisionToolResult(
       confirmationId: decision.confirmationId,
       decision: decision.decision,
     },
-    durationMs: 0,
+    durationMs: clonedResult.durationMs,
   };
 }
 

@@ -269,6 +269,14 @@ export function fakePendingApproval(confirmationId: string): AgentTurnPendingApp
         toolName: "search",
         input: {},
       },
+      pendingToolResult: {
+        callId: "call-needs-approval",
+        toolName: "search",
+        input: {},
+        output: undefined,
+        status: "approval_required",
+        durationMs: 0,
+      },
       remainingToolCallsAfterApproval: [],
       messagesBeforeToolCall: [{ role: "user", content: "continue" }],
       assistantMessage: {

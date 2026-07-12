@@ -1,6 +1,10 @@
 import { createReadStream, promises as fs } from "node:fs";
 import { createInterface } from "node:readline";
 import { positiveInteger } from "./local-workspace-common.js";
+import {
+  isUtf16CodeUnitBoundary,
+  utf16SafePrefixLength,
+} from "../text-window.js";
 
 const MAX_READ_LINE_COUNT = 2_000;
 const DEFAULT_READ_LINE_COUNT = 200;
@@ -43,7 +47,15 @@ export function parseLineRange(
 }
 
 export function charWindowContent(raw: string, requestedStartChar: number): ReadContentWindow {
-  const startChar = Math.min(Math.max(0, requestedStartChar), raw.length);
+  if (requestedStartChar > raw.length) {
+    throw new Error(
+      `read_context_attachment_text startChar ${requestedStartChar} exceeds charCount ${raw.length}.`,
+    );
+  }
+  const startChar = requestedStartChar;
+  if (!isUtf16CodeUnitBoundary(raw, startChar)) {
+    throw new Error("read_context_attachment_text startChar must not split a UTF-16 surrogate pair.");
+  }
   return {
     content: raw.slice(startChar),
     range: undefined,
@@ -72,7 +84,9 @@ export function sliceLines(
 }
 
 export function returnedRawTextChars(value: string, maxLength: number): number {
-  return value.length <= maxLength ? value.length : Math.max(0, maxLength - 1);
+  return value.length <= maxLength
+    ? value.length
+    : utf16SafePrefixLength(value, Math.max(0, maxLength - 1));
 }
 
 export async function readLineRange(

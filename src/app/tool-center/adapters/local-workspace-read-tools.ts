@@ -8,6 +8,7 @@ import {
   DEFAULT_LOCAL_WORKSPACE_ROOT,
   isLikelyBinaryPath,
   MAX_LOCAL_WORKSPACE_FILE_BYTES,
+  optionalSafeIntegerAtLeast,
   positiveInteger,
   resolveWorkspacePath,
   safeRefToken,
@@ -19,13 +20,19 @@ import {
   type LocalWorkspaceToolOptions,
 } from "./local-workspace-common.js";
 import {
+  isUtf16CodeUnitBoundary,
+  utf16SafePrefixLength,
+} from "../text-window.js";
+import { DEFAULT_MAX_INLINE_TOOL_CONTENT_JSON_CHARS } from "../tool-output-limits.js";
+import {
   assertSandboxAllowed,
   createLocalWorkspaceSandboxPolicy,
   sandboxRequest,
 } from "./local-workspace-sandbox.js";
 
 const DEFAULT_MAX_CHARS = 128_000;
-const READ_FILE_CONTENT_JSON_MAX_CHARS = 180_000;
+const MIN_CHARACTER_WINDOW_CHARS = 3;
+const READ_FILE_CONTENT_JSON_MAX_CHARS = DEFAULT_MAX_INLINE_TOOL_CONTENT_JSON_CHARS;
 const MAX_LIST_ENTRIES = 200;
 const DEFAULT_LIST_DEPTH = 1;
 const MAX_LIST_DEPTH = 3;
@@ -137,10 +144,10 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         type: "object",
         properties: {
           path: { type: "string", description: "Workspace-relative file path." },
-          maxLength: { type: "number", description: "Maximum characters to return." },
+          maxLength: { type: "number", minimum: MIN_CHARACTER_WINDOW_CHARS, description: "Maximum characters to return; must be at least 3 so every truncated UTF-16 window can advance." },
           startLine: { type: "number", description: "Optional 1-based first line to return." },
           endLine: { type: "number", description: "Optional 1-based last line to return. When omitted with startLine, returns a bounded window." },
-          startChar: { type: "number", description: "Optional zero-based character offset for continuing a truncated text window." },
+          startChar: { type: "number", minimum: 0, description: "Optional zero-based character offset for continuing a truncated text window." },
         },
         required: ["path"],
       },
@@ -170,7 +177,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         };
       }
       const lineRange = parseLineRange(record);
-      const startChar = nonNegativeInteger(record.startChar);
+      const startChar = optionalSafeIntegerAtLeast(record.startChar, "read_file startChar", 0);
       if (lineRange !== undefined && startChar !== undefined) {
         throw new Error("read_file cannot combine startChar with startLine/endLine.");
       }
@@ -180,7 +187,11 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES && lineRange === undefined) {
         throw new Error(`File is too large to read safely without a line range: ${target.relativePath}`);
       }
-      const maxLength = positiveInteger(record.maxLength) ?? DEFAULT_MAX_CHARS;
+      const maxLength = optionalSafeIntegerAtLeast(
+        record.maxLength,
+        "read_file maxLength",
+        MIN_CHARACTER_WINDOW_CHARS,
+      ) ?? DEFAULT_MAX_CHARS;
       const content = lineRange === undefined
         ? charWindowContent(await fs.readFile(target.absolutePath, "utf8"), startChar ?? 0)
         : stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES
@@ -737,7 +748,13 @@ function boundedOffset(value: unknown, maxOffset: number): number {
 }
 
 function charWindowContent(raw: string, requestedStartChar: number): ReadContentWindow {
-  const startChar = Math.min(Math.max(0, requestedStartChar), raw.length);
+  if (requestedStartChar > raw.length) {
+    throw new Error(`read_file startChar ${requestedStartChar} exceeds charCount ${raw.length}.`);
+  }
+  const startChar = requestedStartChar;
+  if (!isUtf16CodeUnitBoundary(raw, startChar)) {
+    throw new Error("read_file startChar must not split a UTF-16 surrogate pair.");
+  }
   return {
     content: raw.slice(startChar),
     range: undefined,
@@ -786,9 +803,10 @@ function truncateReadFileContent(value: string, maxLength: number): {
       high = middle - 1;
     }
   }
+  const rawChars = utf16SafePrefixLength(value, low);
   return {
-    text: `${value.slice(0, low)}…`,
-    rawChars: low,
+    text: `${value.slice(0, rawChars)}…`,
+    rawChars,
     truncated: true,
   };
 }

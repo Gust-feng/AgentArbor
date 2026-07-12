@@ -18,12 +18,14 @@ import type {
   ToolExecutionContext,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
+import type { TaskSoil } from "../../domain/soil/index.js";
 import { normalizeToolFactValue } from "../../domain/tools/index.js";
 import {
   DeepChildPendingContinuationStore,
   type DeepChildPendingContinuation,
   type DeepChildPendingContinuationRetentionOptions,
 } from "./deep-child-continuations.js";
+import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import { createMultiAgentFeature } from "./multi-agent-feature.js";
 
 test("MultiAgentFeature gives each operation a fresh bus and awaits lease release", async () => {
@@ -126,6 +128,9 @@ test("MultiAgentFeature owns background release failures through an explicit rep
   assert.equal(persisted?.run.status, "completed");
   assert.deepEqual(persisted?.run.continuationFacts, {
     informationAccess: frozenInformationAccess,
+    taskSoilInput: {
+      permissionBoundaryRefs: ["read:workspace:fixture"],
+    },
     permissionBoundaryRefs: ["read:workspace:fixture"],
     confirmationPolicy: "full_access",
   });
@@ -140,6 +145,98 @@ test("MultiAgentFeature owns background release failures through an explicit rep
     "terminal runs must reject control instead of acknowledging a stale handle",
   );
 
+  await feature.dispose();
+});
+
+test("MultiAgentFeature restores run-start TaskSoil for child follow-up and resynthesis", async () => {
+  const acquiredTaskSoils: TaskSoil[] = [];
+  let acquisitionCount = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot, taskSoil }) => {
+      acquisitionCount += 1;
+      acquiredTaskSoils.push(taskSoil);
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : acquisitionCount === 3
+            ? resumedChildChannel()
+            : directRunChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : emptyToolBroker(),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const attachmentRef = "local-file:C:/fixture/requirements.md";
+  const attachmentId = "attachment-requirements";
+  const conversation = await feature.createConversation({
+    aiMode: "fake",
+    goal: "核查附件后给出综合结论。",
+    taskSoilInput: {
+      contextRefs: [{
+        attachmentId,
+        ref: attachmentRef,
+        kind: "file",
+        title: "requirements.md",
+        readonlyPreview: {
+          title: "需求附件",
+          text: "必须保留到后续 child 指令与重新综合。",
+        },
+      }],
+      permissionBoundaryRefs: ["read:local-file:C:/fixture/requirements.md"],
+    },
+  });
+  const started = await feature.startRun({
+    conversationId: conversation.conversationId,
+    aiMode: "fake",
+  });
+  await feature.waitForIdle();
+  const initialRecord = await feature.getRun(started.runId);
+  const child = initialRecord?.agentRunTree.childRuns[0];
+  assert.ok(child);
+  assert.equal(child.status, "blocked");
+
+  const laterAttachmentRef = "local-file:C:/fixture/later-turn.md";
+  const followUp = await feature.followUp({
+    runId: started.runId,
+    aiMode: "fake",
+    message: "这是后续一轮的新附件。",
+    taskSoilInput: {
+      contextRefs: [{
+        attachmentId: "attachment-later-turn",
+        ref: laterAttachmentRef,
+        kind: "file",
+        title: "later-turn.md",
+      }],
+      permissionBoundaryRefs: ["read:local-file:C:/fixture/later-turn.md"],
+    },
+  });
+  await feature.waitForIdle();
+  assert.notEqual(followUp.runId, started.runId);
+
+  const continued = await feature.sendChildInstruction({
+    runId: started.runId,
+    childRunId: child.childRunId,
+    message: "请结合最初附件继续完成核查。",
+  });
+  assert.equal(continued.status, "continued");
+  await feature.resynthesize({ runId: started.runId });
+
+  assert.equal(acquiredTaskSoils.length, 4);
+  assert.equal(acquiredTaskSoils[1]?.contextRefs.some((ref) => ref.ref === laterAttachmentRef), true);
+  for (const taskSoil of acquiredTaskSoils.slice(2)) {
+    const attachment = taskSoil.contextRefs.find((ref) => ref.ref === attachmentRef);
+    assert.equal(attachment?.attachmentId, attachmentId);
+    assert.equal(attachment?.readonlyPreview?.text, "必须保留到后续 child 指令与重新综合。");
+    assert.equal(taskSoil.contextRefs.some((ref) => ref.ref === laterAttachmentRef), false);
+  }
   await feature.dispose();
 });
 
@@ -374,6 +471,58 @@ test("MultiAgentFeature reports continuation_lost after capacity eviction and co
       decision: { decision: "approve_once" },
     }),
     continuationLostError,
+  );
+  await feature.dispose();
+});
+
+test("MultiAgentFeature keeps Deep-owned tool output through terminal approval and reclaims it on conversation deletion", async () => {
+  const outputStore = new InMemoryToolOutputStore({
+    createRefToken: () => "deep-pending-output",
+  });
+  let retainedRef: string | undefined;
+  let retainedOwner: string | undefined;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot, taskSoil }) => {
+      if (retainedRef === undefined) {
+        retainedOwner = taskSoil.traceId;
+        const retained = await outputStore.retain({
+          mediaType: "text/plain",
+          content: "retained across terminal child approval",
+          sourceToolName: "deep_fixture",
+          sourceCallId: "deep-fixture-call",
+          ownerId: taskSoil.traceId,
+        });
+        retainedRef = retained.ref;
+      }
+      return {
+        intelligenceChannel: pendingApprovalRunChannel(),
+        toolCenter: new ApprovalFixtureToolBroker("approval"),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+    releaseToolOutputOwner: (ownerId) => outputStore.releaseOwner(ownerId).then(() => undefined),
+  });
+
+  const pending = await createPendingApprovalChild(feature);
+
+  assert.equal(retainedOwner, `deep-run:${pending.runId}`);
+  assert.equal(
+    (await outputStore.read(retainedRef!, { startChar: 0, maxChars: 30_000 }))?.content,
+    "retained across terminal child approval",
+    "terminal must not reclaim output needed by a live child continuation",
+  );
+
+  await feature.deleteConversation(pending.conversationId);
+
+  assert.equal(
+    await outputStore.read(retainedRef!, { startChar: 0, maxChars: 30_000 }),
+    undefined,
   );
   await feature.dispose();
 });

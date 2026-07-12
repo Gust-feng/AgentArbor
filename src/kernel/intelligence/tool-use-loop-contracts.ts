@@ -60,6 +60,10 @@ export type ToolUseLoopContextMaintenanceResult =
 export type ToolUseLoopPendingApproval = {
   readonly confirmationId: string;
   readonly pendingToolCall: ToolCallRequest;
+  /** Exact tool fact returned before the pause, including partial output and model attachments. */
+  readonly pendingToolResult: ToolCallResult;
+  /** Earlier calls in the same model batch that resumed after an approval pause. */
+  readonly resolvedPreApprovalResults?: readonly ToolCallResult[];
   readonly confirmationRequest?: NonNullable<ToolCallResult["confirmationRequest"]>;
   readonly remainingToolCallsAfterApproval: readonly ToolCallRequest[];
   readonly messagesBeforeToolCall: readonly ModelMessage[];

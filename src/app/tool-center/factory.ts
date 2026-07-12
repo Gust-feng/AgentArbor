@@ -15,6 +15,7 @@ import type { ToolRegistryScope } from "./tool-registry.js";
 import type { ConfigCenter } from "../config-center/index.js";
 import { ToolRegistry, type ToolRegistryEntry } from "./tool-registry.js";
 import type { LocalCommandProcessRegistry } from "./adapters/local-workspace-command-tools.js";
+import type { ToolOutputStore } from "./tool-output-store.js";
 
 export type AgentToolRuntimeContext = {
   readonly constraints?: readonly Constraint[];
@@ -42,6 +43,7 @@ export type CreateAgentToolCenterOptions = {
   readonly contributions?: readonly AgentToolRegistryContribution[];
   readonly taskSoil?: TaskSoil;
   readonly modelCapabilities?: ModelCapabilities;
+  readonly toolOutputStore?: ToolOutputStore;
 };
 
 export function createDefaultToolCenter(
@@ -69,7 +71,9 @@ export async function createConfiguredToolCenterFactory(
 }
 
 function createToolCenter(input: CreateAgentToolCenterOptions): ToolExecutionBroker {
-  const registry = new ToolRegistry();
+  const registry = new ToolRegistry({
+    toolCenter: { outputStore: input.toolOutputStore },
+  });
   applyAgentToolRegistryContributions(registry, input, input.contributions ?? []);
   createAgentToolRegistry(input, registry);
   return registry.createToolCenterForScopes(

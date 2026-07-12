@@ -1,4 +1,8 @@
 import type {
+  BasicAgentCapabilitySnapshot,
+  CapabilityToolCatalogItem,
+} from "../../domain/config/index.js";
+import type {
   IntelligenceChannel,
   ModelOutputValidationResult,
   ModelRequest,
@@ -11,6 +15,7 @@ import type {
   ToolDefinition,
   ToolExecutionBroker,
   ToolExecutionContext,
+  ToolExecutor,
   ToolFactValue,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
@@ -171,6 +176,90 @@ export function completedJsonResponse(output: unknown): ResponseStep {
     structuredOutput: output,
     finishReason: "stop",
   });
+}
+
+export function testTool(name: string, execute: ToolExecutor["execute"]): ToolExecutor {
+  return {
+    definition: {
+      name,
+      description: `${name} test tool`,
+      metadata: {
+        category: "other",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+      },
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+    execute,
+  };
+}
+
+export function capabilitySnapshotWithTools(toolNames: readonly string[]): BasicAgentCapabilitySnapshot {
+  const tools = toolNames.map(capabilityTool);
+  return {
+    snapshotId: "snapshot-deep-child-tool-output",
+    createdAt: "2026-05-01T00:00:00.000Z",
+    activeModel: {
+      profileId: "fake",
+      providerKind: "local",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "http://localhost",
+      defaultAiMode: "fake",
+      secretRef: "secret:test",
+      secretConfigured: true,
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    },
+    modelCapabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 4_096,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: true,
+      supportsStructuredOutputs: true,
+      supportsStreaming: true,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "openai_compatible",
+      stability: "stable",
+    },
+    toolCatalog: {
+      scope: "desktop-basic",
+      tools,
+      allowedTools: toolNames,
+    },
+    skillCatalog: [],
+    subAgentCatalog: [],
+    mcpCatalog: [],
+    workspace: {
+      workspaceDirectory: "Z:\\AgentArbor",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    },
+    securitySummary: "test",
+    warnings: [],
+  };
+}
+
+function capabilityTool(name: string): CapabilityToolCatalogItem {
+  return {
+    name,
+    displayName: name,
+    displayDescription: `${name} tool`,
+    description: `${name} tool`,
+    category: "other",
+    categoryLabel: "Other",
+    riskLevel: "low",
+    riskLabel: "Low",
+    operationType: "read-only",
+    operationLabel: "Read only",
+    requiresConfirmation: false,
+    confirmationLabel: "No confirmation required",
+    scopes: ["desktop-basic"],
+    enabled: true,
+    availability: "available",
+  };
 }
 
 export function failedModelResponse(

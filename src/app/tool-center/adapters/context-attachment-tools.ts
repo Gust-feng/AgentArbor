@@ -4,6 +4,7 @@ import {
   asRecord,
   isLikelyBinaryPath,
   MAX_LOCAL_WORKSPACE_FILE_BYTES,
+  optionalSafeIntegerAtLeast,
   positiveInteger,
   safeRefToken,
   stringOrFallback,
@@ -52,6 +53,10 @@ import {
   createInspectContextAttachmentTableTool,
   createReadContextAttachmentTableTool,
 } from "./context-attachment-table.js";
+import {
+  isUtf16CodeUnitBoundary,
+  utf16SafeWindowEnd,
+} from "../text-window.js";
 
 export type { ContextAttachmentToolOptions } from "./context-attachment-access.js";
 export {
@@ -62,6 +67,7 @@ export {
 };
 
 const DEFAULT_MAX_CHARS = 128_000;
+const MIN_CHARACTER_WINDOW_CHARS = 3;
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
 const DEFAULT_PDF_MAX_CHARS = 128_000;
 
@@ -169,10 +175,10 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
           attachmentId: { type: "string", description: "Attachment id from Task Soil context, preferred over ref." },
           ref: { type: "string", description: "Exact non-local context ref when attachmentId is unavailable." },
           path: { type: "string", description: "Relative file path inside a project attachment." },
-          maxLength: { type: "number", description: "Maximum characters to return." },
+          maxLength: { type: "number", minimum: MIN_CHARACTER_WINDOW_CHARS, description: "Maximum characters to return; must be at least 3 so every truncated UTF-16 window can advance." },
           startLine: { type: "number", description: "Optional 1-based first line to return." },
           endLine: { type: "number", description: "Optional 1-based last line to return." },
-          startChar: { type: "number", description: "Optional zero-based character offset for continuing a truncated text window." },
+          startChar: { type: "number", minimum: 0, description: "Optional zero-based character offset for continuing a truncated text window." },
         },
       },
     },
@@ -209,7 +215,11 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
       }
       const lineRange = parseLineRange(record);
       const hasStartChar = record.startChar !== undefined;
-      const startChar = boundedOffset(record.startChar, Number.MAX_SAFE_INTEGER);
+      const startChar = optionalSafeIntegerAtLeast(
+        record.startChar,
+        "read_context_attachment_text startChar",
+        0,
+      ) ?? 0;
       if (lineRange !== undefined && hasStartChar) {
         throw new Error("read_context_attachment_text cannot combine startChar with startLine/endLine.");
       }
@@ -219,7 +229,11 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
       if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES && lineRange === undefined) {
         throw new Error("Attachment text target is too large to read safely without a line range.");
       }
-      const maxLength = positiveInteger(record.maxLength) ?? DEFAULT_MAX_CHARS;
+      const maxLength = optionalSafeIntegerAtLeast(
+        record.maxLength,
+        "read_context_attachment_text maxLength",
+        MIN_CHARACTER_WINDOW_CHARS,
+      ) ?? DEFAULT_MAX_CHARS;
       const content = lineRange === undefined
         ? charWindowContent(await readAttachmentTextFile(target.targetAbsolutePath), startChar)
         : stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES
@@ -321,8 +335,8 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
           attachmentId: { type: "string", description: "Attachment id from Task Soil context, preferred over ref." },
           ref: { type: "string", description: "Exact non-local context ref when attachmentId is unavailable." },
           path: { type: "string", description: "Relative PDF path inside a project attachment." },
-          maxLength: { type: "number", description: "Maximum extracted characters to return." },
-          startChar: { type: "number", description: "Zero-based extracted-text character offset for continuing a truncated PDF read." },
+          maxLength: { type: "number", minimum: MIN_CHARACTER_WINDOW_CHARS, description: "Maximum extracted characters to return; must be at least 3." },
+          startChar: { type: "number", minimum: 0, description: "Zero-based extracted-text character offset for continuing a truncated PDF read." },
         },
       },
     },
@@ -378,9 +392,26 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
           facts: extracted.facts,
         });
       }
-      const maxLength = positiveInteger(record.maxLength) ?? DEFAULT_PDF_MAX_CHARS;
-      const startChar = boundedOffset(record.startChar, extracted.text.length);
-      const returned = extracted.text.slice(startChar, startChar + maxLength);
+      const maxLength = optionalSafeIntegerAtLeast(
+        record.maxLength,
+        "read_context_attachment_pdf_text maxLength",
+        MIN_CHARACTER_WINDOW_CHARS,
+      ) ?? DEFAULT_PDF_MAX_CHARS;
+      const startChar = optionalSafeIntegerAtLeast(
+        record.startChar,
+        "read_context_attachment_pdf_text startChar",
+        0,
+      ) ?? 0;
+      if (startChar > extracted.text.length) {
+        throw new Error(
+          `read_context_attachment_pdf_text startChar ${startChar} exceeds charCount ${extracted.text.length}.`,
+        );
+      }
+      if (!isUtf16CodeUnitBoundary(extracted.text, startChar)) {
+        throw new Error("read_context_attachment_pdf_text startChar must not split a UTF-16 surrogate pair.");
+      }
+      const endChar = utf16SafeWindowEnd(extracted.text, startChar, maxLength);
+      const returned = extracted.text.slice(startChar, endChar);
       const hasMoreAfter = extracted.text.length > startChar + returned.length;
       const nextStartChar = hasMoreAfter ? startChar + returned.length : undefined;
       return {

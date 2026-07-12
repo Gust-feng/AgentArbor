@@ -267,10 +267,11 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 
 - MCP adapter 只生成一次 canonical 工具事实：服务端原生 `content[]` 加可选 `structuredContent`，不得再制造 `summary / mcpResult / result` 等等价包装。
 - `content[]` 与 `structuredContent` 同时存在时，只有 text part 可解析为 JSON 且解析值与 `structuredContent` 深度完全相等，才删除该 text 精确镜像；解析失败、部分重叠、顺序/类型不同或正文不同都完整保留。禁止模糊相似、摘要或关键词去重。
-- MCP adapter 不自行调用 `normalizeToolFactValue`；MCP executor output 与其他工具一样由 ToolCenter 统一归一成 `ToolFactValue`。循环引用、非 plain object 和其他非 JSON 值在 ToolCenter 明确失败，不能静默 stringify。
+- MCP adapter 不对整份 executor output 再执行 `normalizeToolFactValue`；完整输出与其他工具一样由 ToolCenter 统一归一成 `ToolFactValue`。只有被提升为 canonical continuation 的 `nextInput` 会在 adapter 边界先按 JSON-safe 事实校验，避免续读契约绕过统一事实类型。循环引用、非 plain object 和其他非 JSON 值必须明确失败，不能静默 stringify。
 - `isError=true` 必须形成 failed `ToolCallResult`，错误正文保留一次；连接、协议和 transport 异常同样走标准工具失败。
-- 文本不由 MCP adapter 为模型截断。若服务端工具可能超过共享 transport budget，它自身必须返回明确分页、引用或顶层 continuation；缺少 continuation 时应诚实失败。
-- 图片 base64 只通过带外模型附件进入下一轮请求，JSON 仅保存 mime、byteLength 和附件索引；audio 与当前不支持的二进制必须标记 `unsupported / not_retained`，不得塞入 JSON 或持久化记录。
+- 文本不由 MCP adapter 为模型截断。服务端工具自己的分页或显式 continuation 只负责其后续页；当前完整结果序列化后仍超过共享内联预算时，必须先由 Host `ToolOutputStore` 保存当前页，原 continuation 留在已保存 JSON 中，不能直接用下一页 cursor 替代当前页正文。store 或 reader 不可用时应诚实失败，外置后原结果携带的模型附件仍必须保留。
+- 图片 base64 只通过带外 image attachment 进入下一轮请求，audio 保留为独立 audio attachment，非图片 embedded resource blob 保留为 file attachment；JSON 仅保存 mime、byteLength、文件名/URI 和附件索引，每个 MCP 媒体附件当前最多 20 MiB。Chat Completions 等 tool message 不能直接承载媒体时，由 provider adapter 在保持所有 tool result 配对后追加合法的 user attachment message；其中仅内联 wav/mp3 音频映射为 `input_audio`，内联 file 的 `file_data` 按 OpenAI 官方契约编码为 `data:<mime>;base64,<data>`。Responses 当前明确拒绝 audio attachment；无法映射的媒体必须明确失败，不能把 audio 伪装成 file 或静默丢失。
+- MCP 标准只定义 `content[]` 与可选 `structuredContent`，没有定义工具结果 continuation。AgentArbor MCP adapter 仅将 `structuredContent.continuation / continuations` 中含可执行 `nextInput` 的直属对象作为一层项目约定提升到 canonical 顶层；ref-only 字段和更深 nested 对象不会被猜测。结果超过 transport budget 时，Host-owned `ToolOutputStore` 提供当前完整结果的预览与 `read_tool_output` 引用，读取引用不会重新调用 MCP；Deep child / Sub-Agent 仅在父 run 已冻结授权且 broker 真实具备 reader 时自动继承这一 transport companion。
 - UI 需要标题、摘要或预览时，只能在 Observation/Panel read-model 边界从工具调用事实派生，不能写回 MCP output、事件或 RuntimeDatabase。
 
 ### 5. Skills snapshot 与触发闭环
@@ -373,6 +374,8 @@ MCP tests：
 - destructive MCP tool 必须触发 confirmation。
 - run 创建后，后续 MCP 配置变化不影响已创建 run。
 - MCP raw multimodal/base64 payload 不进入默认 UI 投影。
+- MCP image/audio/file attachment 必须覆盖 20 MiB 单附件边界；Chat Completions wav/mp3 映射、其他音频格式失败、Responses audio 明确失败都必须有 provider/adapter 回归测试。
+- `structuredContent` 直属且包含 `nextInput` 的 continuation 会被提升到 canonical 顶层；ref-only 与更深 nested continuation 不会被通用工具层猜测。超大当前页必须先通过 `read_tool_output` 完整重建，再取得原 MCP 下一页 continuation。
 
 Skills tests：
 

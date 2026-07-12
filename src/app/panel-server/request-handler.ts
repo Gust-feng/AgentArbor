@@ -41,6 +41,7 @@ import { handlePanelDeepRoute } from "./deep-routes.js";
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
 import { handlePanelAppUpdateRoute } from "./app-update-routes.js";
 import { OrdinaryRuntimeSnapshotContractError } from "../basic-agent-runtime/persistence-snapshot-contract.js";
+import { BasicAgentRunAdmissionClosedError } from "../basic-agent-runtime/run-executor.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 export async function startLocalPanelServer(options: PanelServerOptions = {}): Promise<StartedPanelServer> {
@@ -63,9 +64,14 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
   const runtime = isPanelRuntime(options) ? options : createPanelRuntime(options, createPanelRuntimeHooks());
 
   return (request, response) => {
-    handlePanelRequest(runtime, request, response).catch((error) => {
+    let requestJob: Promise<void>;
+    requestJob = handlePanelRequest(runtime, request, response).catch((error) => {
       if (error instanceof PanelHttpError) {
         writePanelError(response, error);
+        return;
+      }
+      if (error instanceof BasicAgentRunAdmissionClosedError) {
+        writePanelError(response, new PanelHttpError(503, error.code, error.message));
         return;
       }
       if (error instanceof OrdinaryRuntimeSnapshotContractError) {
@@ -74,7 +80,10 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
       }
       logUnhandledPanelRequestError(request, error);
       writePanelError(response, new PanelHttpError(500, "panel_internal_error", "面板请求失败。"));
+    }).finally(() => {
+      runtime.activeRequestJobs.delete(requestJob);
     });
+    runtime.activeRequestJobs.add(requestJob);
   };
 }
 
@@ -139,6 +148,10 @@ async function handlePanelRequest(
       configDirectory: runtime.configDirectory,
     });
     return;
+  }
+
+  if (runtime.isQuiescing) {
+    throw new PanelHttpError(503, "panel_runtime_quiescing", "面板正在关闭，不能接受新的请求。");
   }
 
   // /api/deep/* —— deep 产品 API 端点族（T3-1/T3-2/T3-3）。前缀明确，置于分发链靠前。
@@ -246,6 +259,11 @@ function listen(server: Server, port: number, host: string): Promise<void> {
 }
 
 export async function closePanelServer(server: Server, runtime: PanelRuntime): Promise<void> {
+  // Enter quiescing before any asynchronous shutdown work. Ordinary terminal
+  // callbacks may still run while active jobs converge, but they must not
+  // admit the next queued conversation run.
+  runtime.isQuiescing = true;
+  runtime.runExecutor.quiesce();
   let serverCloseError: unknown;
   const serverClosed = close(server).catch((error: unknown) => {
     serverCloseError = error;
@@ -254,10 +272,14 @@ export async function closePanelServer(server: Server, runtime: PanelRuntime): P
   try {
     abortPanelRuntimeActiveRuns(runtime);
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
+    await waitForPanelRequestIdle(runtime);
+    abortPanelRuntimeActiveRuns(runtime);
     await Promise.all([
       waitForPanelRuntimeIdle(runtime),
       runtime.multiAgentFeature.dispose(),
     ]);
+    await runtime.runExecutor.dispose();
+    await runtime.toolOutputStore.clear();
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
     await waitForPanelPersistenceIdle(runtime);
   } finally {
@@ -269,10 +291,21 @@ export async function closePanelServer(server: Server, runtime: PanelRuntime): P
   }
 }
 
+async function waitForPanelRequestIdle(runtime: PanelRuntime): Promise<void> {
+  while (runtime.activeRequestJobs.size > 0) {
+    await Promise.allSettled([...runtime.activeRequestJobs]);
+  }
+}
+
 async function waitForPanelRuntimeIdle(runtime: PanelRuntime): Promise<void> {
   while (runtime.activeRunJobs.size > 0) {
+    // A job that was already converging when shutdown started can register a
+    // replacement controller before the active-job set reaches zero. Abort on
+    // every pass so late controllers do not escape the one-time initial scan.
+    abortPanelRuntimeActiveRuns(runtime);
     await Promise.allSettled([...runtime.activeRunJobs]);
   }
+  abortPanelRuntimeActiveRuns(runtime);
 }
 
 async function waitForPanelPersistenceIdle(runtime: PanelRuntime): Promise<void> {

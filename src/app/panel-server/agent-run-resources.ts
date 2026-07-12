@@ -27,6 +27,7 @@ import { persistContextWindowFallback } from "../model-context-window-fallback.j
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ConfigCenter } from "../config-center/index.js";
 import type { LocalCommandProcessRegistry } from "../tool-center/adapters/local-workspace-command-tools.js";
+import type { ToolOutputStore } from "../tool-center/tool-output-store.js";
 import type { PanelProviderFetch } from "./types.js";
 import {
   createMcpToolRegistryContribution,
@@ -37,6 +38,7 @@ export type AgentRunResourceHost = {
   readonly configCenter: ConfigCenter;
   readonly providerFetch?: PanelProviderFetch;
   readonly processRegistry: LocalCommandProcessRegistry;
+  readonly toolOutputStore?: ToolOutputStore;
 };
 
 export type AgentRunResources = {
@@ -54,6 +56,7 @@ export type AgentRunResources = {
   readonly toolContributions: readonly AgentToolRegistryContribution[];
   readonly release: () => Promise<void>;
   readonly processRegistry?: LocalCommandProcessRegistry;
+  readonly toolOutputStore?: ToolOutputStore;
 };
 
 function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly ToolStateSettings[] {
@@ -148,6 +151,7 @@ export async function prepareAgentRunResources(
       await mcpManager?.disconnectAll?.().catch(() => undefined);
     },
     processRegistry: runtime.processRegistry,
+    toolOutputStore: runtime.toolOutputStore,
   };
 }
 
@@ -228,5 +232,6 @@ export function createAgentToolCenterFactory(
     contributions: [...resources.toolContributions, ...(context?.contributions ?? [])],
     taskSoil: context?.taskSoil,
     modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
+    toolOutputStore: resources.toolOutputStore,
   });
 }

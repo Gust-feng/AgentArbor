@@ -51,6 +51,10 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayName: "读取文件",
     displayDescription: "读取授权工作区内的文本文件，用于理解项目上下文。",
   },
+  read_tool_output: {
+    displayName: "读取工具结果",
+    displayDescription: "按引用继续读取已保存的大工具结果，不会重新执行原工具。",
+  },
   list_dir: {
     displayName: "浏览目录",
     displayDescription: "查看工作区目录结构，帮助定位相关文件。",

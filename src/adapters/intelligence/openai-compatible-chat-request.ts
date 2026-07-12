@@ -15,6 +15,7 @@ import {
 import { buildOpenAIChatCompletionsControlFields } from "./openai-request-settings.js";
 import { removeUndefinedValues } from "./provider-value-utils.js";
 import { filterOpenAIChatProtocolExtensions } from "./openai-compatible-chat-protocol-extensions.js";
+import { OpenAIModelInputError } from "./openai-model-input-error.js";
 
 export function buildOpenAICompatibleChatRequestBody(input: {
   readonly request: ModelRequest;
@@ -36,7 +37,7 @@ export function buildOpenAICompatibleChatRequestBody(input: {
     dialect: input.dialect,
     fields: {
       model: input.model,
-      messages: input.request.sanitizedMessages.map((message) => toOpenAIMessage(message, input.dialect)),
+      messages: toOpenAIMessages(input.request.sanitizedMessages, input.dialect),
       tools: input.request.tools === undefined || input.request.tools.length === 0 ? undefined : input.request.tools.map(toOpenAITool),
       tool_choice: toOpenAIToolChoice(input.request.toolChoice),
       response_format:
@@ -46,6 +47,20 @@ export function buildOpenAICompatibleChatRequestBody(input: {
       stream_options: input.stream && input.dialect.supportsStreamUsage ? { include_usage: true } : undefined,
     },
   }));
+}
+
+function toOpenAIMessages(
+  messages: readonly ModelMessage[],
+  dialect: OpenAICompatibleChatDialect
+): readonly Record<string, unknown>[] {
+  return messages.map((message) => {
+    if (message.role === "tool" && (message.attachments?.length ?? 0) > 0) {
+      throw new OpenAIModelInputError(
+        "OpenAI-compatible Chat Completions cannot attach binary media to a tool result without changing its message role; use the Responses protocol for tool-origin image, audio, or file attachments.",
+      );
+    }
+    return toOpenAIMessage(message, dialect);
+  });
 }
 
 function toOpenAIMessage(
@@ -87,10 +102,7 @@ function toOpenAIMessageContent(
     parts.push({ type: "text", text: message.content });
   }
   for (const attachment of message.attachments) {
-    const part = toOpenAIContentPart(attachment, dialect);
-    if (part !== undefined) {
-      parts.push(part);
-    }
+    parts.push(toOpenAIContentPart(attachment, dialect));
   }
   return parts.length === 0 ? message.content : parts;
 }
@@ -98,7 +110,7 @@ function toOpenAIMessageContent(
 function toOpenAIContentPart(
   attachment: ModelInputAttachment,
   dialect: OpenAICompatibleChatDialect
-): Record<string, unknown> | undefined {
+): Record<string, unknown> {
   if (attachment.kind === "image") {
     if (attachment.source.kind === "file_id") {
       return {
@@ -120,17 +132,54 @@ function toOpenAIContentPart(
       }),
     };
   }
+  if (attachment.kind === "audio") {
+    if (attachment.source.kind !== "data") {
+      throw new OpenAIModelInputError(
+        "OpenAI-compatible Chat Completions audio input requires inline base64 data.",
+      );
+    }
+    const format = chatAudioFormat(attachment.source.mimeType);
+    if (format === undefined) {
+      throw new OpenAIModelInputError(
+        `OpenAI-compatible Chat Completions only accepts wav or mp3 audio input, received ${attachment.source.mimeType}.`,
+      );
+    }
+    return {
+      type: "input_audio",
+      input_audio: {
+        data: attachment.source.data,
+        format,
+      },
+    };
+  }
   if (attachment.source.kind === "url") {
-    return undefined;
+    throw new OpenAIModelInputError(
+      "OpenAI-compatible Chat Completions does not support URL-backed file attachments; use inline base64 data or a provider file_id.",
+    );
   }
   return {
     type: "file",
     file: removeUndefinedValues({
       file_id: attachment.source.kind === "file_id" ? attachment.source.fileId : undefined,
-      file_data: attachment.source.kind === "data" ? attachment.source.data : undefined,
+      file_data: attachment.source.kind === "data"
+        ? dataUrl(attachment.source.mimeType, attachment.source.data)
+        : undefined,
       filename: attachment.filename,
     }),
   };
+}
+
+function chatAudioFormat(mimeType: string): "wav" | "mp3" | undefined {
+  switch (mimeType.toLowerCase().split(";", 1)[0]?.trim()) {
+    case "audio/wav":
+    case "audio/x-wav":
+      return "wav";
+    case "audio/mpeg":
+    case "audio/mp3":
+      return "mp3";
+    default:
+      return undefined;
+  }
 }
 
 function toOpenAITool(definition: ToolDefinition): Record<string, unknown> {

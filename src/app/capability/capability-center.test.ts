@@ -8,6 +8,30 @@ import { CapabilityCenter } from "./capability-center.js";
 import { ConfigCenter } from "../config-center.js";
 import type { SkillRootInput } from "../skills/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
+import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
+
+test("CapabilityCenter exposes the shared tool-output reader when the Host provides its store", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-tool-output-"));
+  try {
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    const snapshot = await new CapabilityCenter({
+      configCenter,
+      skillRoots: [],
+      playwrightAvailable: false,
+      toolOutputStore: new InMemoryToolOutputStore(),
+    }).snapshot();
+
+    const reader = snapshot.toolCatalog.tools.find((tool) => tool.name === "read_tool_output");
+    assert.equal(reader?.availability, "available");
+    assert.equal(reader?.enabled, true);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("read_tool_output"), true);
+  } finally {
+    await removeTestDirectory(directory);
+  }
+});
 
 test("CapabilityCenter freezes transient run workspace without changing the default workspace", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-"));

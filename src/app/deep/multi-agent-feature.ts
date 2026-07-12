@@ -137,6 +137,13 @@ export const MULTI_AGENT_CAPABILITY_PROFILE: CapabilityAgentProfile = {
   },
 };
 
+const MULTI_AGENT_TOOL_OUTPUT_OWNER_PREFIX = "deep-run:";
+
+/** Stable process-local owner shared by the initial run and later child operations. */
+function multiAgentToolOutputOwnerId(runId: string): string {
+  return `${MULTI_AGENT_TOOL_OUTPUT_OWNER_PREFIX}${runId}`;
+}
+
 export type MultiAgentRunResourceLease = {
   readonly intelligenceChannel: IntelligenceChannel;
   readonly toolCenter: ToolExecutionBroker;
@@ -170,6 +177,7 @@ export class MultiAgentFeatureError extends Error {
   constructor(
     readonly code:
       | "resource_port_unavailable"
+      | "feature_quiescing"
       | "capability_snapshot_missing"
       | "conversation_not_found"
       | "conversation_busy"
@@ -304,6 +312,7 @@ type MultiAgentFeatureRuntime = MultiAgentFeature & {
   readonly hasActiveRunForConversation: (conversationId: string) => boolean;
   readonly activeConversationIdForRun: (runId: string) => string | undefined;
   readonly forgetRun: (runId: string) => void;
+  readonly releaseToolOutputOwner: (ownerId: string) => void | Promise<void>;
 };
 
 export function createMultiAgentFeature(options: {
@@ -312,6 +321,8 @@ export function createMultiAgentFeature(options: {
   readonly resolveRunStartFacts?: MultiAgentRunStartFactsResolver;
   readonly reportBackgroundFailure?: MultiAgentBackgroundFailureReporter;
   readonly childContinuationRetention?: DeepChildPendingContinuationRetentionOptions;
+  /** Host cleanup port for process-local retained tool output; no store leaks into the feature. */
+  readonly releaseToolOutputOwner?: (ownerId: string) => void | Promise<void>;
 } = {}): MultiAgentFeature {
   const controlHandles = new Map<string, DeepRunControlHandle>();
   const activeRunConversationIds = new Map<string, string>();
@@ -321,7 +332,24 @@ export function createMultiAgentFeature(options: {
   const constraints = createMinimalSoilConstraints();
   const soilStore = createMinimalReadonlySoilStore(constraints);
   const reportBackgroundFailure = options.reportBackgroundFailure ?? defaultBackgroundFailureReporter;
+  const activeOperations = new Set<Promise<unknown>>();
+  let isQuiescing = false;
   let disposePromise: Promise<void> | undefined;
+
+  const runCommand = <T>(command: () => Promise<T>): Promise<T> => {
+    if (isQuiescing) {
+      return Promise.reject(new MultiAgentFeatureError(
+        "feature_quiescing",
+        "Multi-Agent feature is shutting down and cannot accept new commands.",
+      ));
+    }
+    let operation: Promise<T>;
+    operation = Promise.resolve().then(command).finally(() => {
+      activeOperations.delete(operation);
+    });
+    activeOperations.add(operation);
+    return operation;
+  };
 
   const feature: MultiAgentFeatureRuntime = {
     constraints: soilStore.listConstraints(),
@@ -332,9 +360,10 @@ export function createMultiAgentFeature(options: {
     childLoopContextStore: createChildLoopContextStore(options.runtimeHome),
     childContinuations,
     childInstructionQueues,
+    releaseToolOutputOwner: options.releaseToolOutputOwner ?? (() => undefined),
     getConversation: (conversationId) => feature.conversationStore.get(conversationId),
     listConversations: (limit) => feature.conversationStore.list(limit),
-    renameConversation: async (conversationId, title) => {
+    renameConversation: (conversationId, title) => runCommand(async () => {
       const conversation = await requireMultiAgentConversation(feature, conversationId);
       if (conversation.title === title) {
         return conversation;
@@ -344,15 +373,15 @@ export function createMultiAgentFeature(options: {
         title,
         titleEditedAt: nowIso(),
       });
-    },
-    pinConversation: async (conversationId, pinned) => {
+    }),
+    pinConversation: (conversationId, pinned) => runCommand(async () => {
       const conversation = await requireMultiAgentConversation(feature, conversationId);
       return feature.conversationStore.upsert({
         ...conversation,
         pinnedAt: pinned ? (conversation.pinnedAt ?? nowIso()) : undefined,
       });
-    },
-    deleteConversation: (conversationId) => deleteMultiAgentConversation(feature, conversationId),
+    }),
+    deleteConversation: (conversationId) => runCommand(() => deleteMultiAgentConversation(feature, conversationId)),
     getRun: (runId) => feature.runRecordStore.get(runId),
     listRuns: (limit) => feature.runRecordStore.list(limit),
     listRunsForConversation: async (conversationId, limit) => {
@@ -360,7 +389,7 @@ export function createMultiAgentFeature(options: {
       return (await feature.runRecordStore.list(limit))
         .filter((record) => record.run.conversationId === conversationId);
     },
-    createConversation: (input) => createDeepConversationService({
+    createConversation: (input) => runCommand(() => createDeepConversationService({
       store: feature.conversationStore,
       constraints: feature.constraints,
       soilStore: feature.soilStore,
@@ -370,33 +399,33 @@ export function createMultiAgentFeature(options: {
       goal: input.goal,
       birthWorkspaceDirectory: input.birthWorkspaceDirectory,
       taskSoilInput: input.taskSoilInput,
-    }),
-    intake: (input) => intakeMultiAgentConversation(
+    })),
+    intake: (input) => runCommand(() => intakeMultiAgentConversation(
       feature,
       requireResourceAcquirer(options),
       requireStartFactsResolver(options),
       input,
-    ),
-    startRun: (input) => startMultiAgentConversationRun(
+    )),
+    startRun: (input) => runCommand(() => startMultiAgentConversationRun(
       feature,
       requireResourceAcquirer(options),
       requireStartFactsResolver(options),
       input,
-    ),
-    followUp: (input) => followUpMultiAgentRun(
+    )),
+    followUp: (input) => runCommand(() => followUpMultiAgentRun(
       feature,
       requireResourceAcquirer(options),
       requireStartFactsResolver(options),
       input,
-    ),
-    resumeChild: (input) => resumeMultiAgentChild(feature, requireResourceAcquirer(options), input),
-    sendChildInstruction: (input) => sendMultiAgentChildInstruction(
+    )),
+    resumeChild: (input) => runCommand(() => resumeMultiAgentChild(feature, requireResourceAcquirer(options), input)),
+    sendChildInstruction: (input) => runCommand(() => sendMultiAgentChildInstruction(
       feature,
       requireResourceAcquirer(options),
       input,
-    ),
-    resynthesize: (input) => resynthesizeMultiAgentRun(feature, requireResourceAcquirer(options), input),
-    requestRunControl: (input) => requestMultiAgentRunControl(feature, input),
+    )),
+    resynthesize: (input) => runCommand(() => resynthesizeMultiAgentRun(feature, requireResourceAcquirer(options), input)),
+    requestRunControl: (input) => runCommand(() => requestMultiAgentRunControl(feature, input)),
     registerControlHandle(runId, handle): void {
       controlHandles.set(runId, handle);
     },
@@ -449,7 +478,11 @@ export function createMultiAgentFeature(options: {
       }
     },
     dispose(): Promise<void> {
+      isQuiescing = true;
       disposePromise ??= (async () => {
+        while (activeOperations.size > 0) {
+          await Promise.allSettled([...activeOperations]);
+        }
         for (const handle of controlHandles.values()) {
           handle.requestStop("panel_shutdown");
         }
@@ -735,7 +768,10 @@ async function startMultiAgentRun(
   const controlHandle = createDeepRunControlHandle();
   feature.registerControlHandle(runId, controlHandle);
 
-  const traceId = createId("trace");
+  // Deep supports post-terminal child continuation and resynthesis. Use one
+  // stable owner for every operation of the run so explicit conversation
+  // deletion can reclaim retained tool output without ending it at terminal.
+  const traceId = multiAgentToolOutputOwnerId(runId);
   const goalId = createId("goal");
   const facts = await resolveRunStartFacts({
     workspaceDirectory: input.conversation.birthWorkspaceDirectory,
@@ -765,6 +801,7 @@ async function startMultiAgentRun(
   });
   const continuationFacts = {
     informationAccess: facts.informationAccess,
+    taskSoilInput: structuredClone(input.conversation.taskSoilInput ?? {}),
     permissionBoundaryRefs: input.conversation.permissionBoundaryRefs,
     confirmationPolicy: facts.confirmationPolicy,
   } as const;
@@ -1024,13 +1061,7 @@ async function createExistingMultiAgentTurnRuntime(
       "Multi-Agent run has no frozen capability snapshot.",
     );
   }
-  const continuationFacts = record.run.continuationFacts;
-  if (continuationFacts === undefined) {
-    throw new MultiAgentFeatureError(
-      "run_continuation_facts_missing",
-      "Multi-Agent run has no durable continuation facts.",
-    );
-  }
+  const continuationFacts = requireMultiAgentContinuationFacts(record);
   const aiMode = record.run.aiMode;
   if (aiMode === undefined) {
     throw new MultiAgentFeatureError(
@@ -1038,13 +1069,16 @@ async function createExistingMultiAgentTurnRuntime(
       "Multi-Agent run has no frozen model runtime mode.",
     );
   }
+  // Existing-run operations must use the exact task context frozen when this
+  // run started. The owning conversation may already contain later-turn input.
   const taskSoil = createTaskSoilFromDesktopInput({
     goal: record.run.goal,
     goalId: record.run.conversationId,
-    traceId: record.run.runId,
+    traceId: multiAgentToolOutputOwnerId(record.run.runId),
     aiMode,
     constraints: feature.constraints,
     soilStore: feature.soilStore,
+    taskSoilInput: continuationFacts.taskSoilInput,
   });
   const bus = createMultiAgentOperationBus();
   const resources = await acquireRunResources({
@@ -1228,7 +1262,7 @@ async function sendMultiAgentChildInstruction(
       goal: record.run.goal,
       permissionBoundaryRefs: requireMultiAgentContinuationFacts(record).permissionBoundaryRefs,
       turnRuntime: childRuntime.turnRuntime,
-      traceId: input.runId,
+      traceId: multiAgentToolOutputOwnerId(input.runId),
       goalId: record.run.conversationId,
       confirmationPolicy: requireMultiAgentContinuationFacts(record).confirmationPolicy,
       capabilitySnapshot: childRuntime.capabilitySnapshot,
@@ -1340,6 +1374,7 @@ async function deleteMultiAgentConversation(
     await feature.runRecordStore.delete(record.run.runId);
     await feature.childMessageStore.deleteForRun(record.run.runId);
     await feature.childLoopContextStore.deleteForRun(record.run.runId);
+    await feature.releaseToolOutputOwner(multiAgentToolOutputOwnerId(record.run.runId));
     feature.forgetRun(record.run.runId);
   }
   await feature.conversationStore.delete(conversationId);
@@ -1476,7 +1511,10 @@ async function requireMultiAgentRunRecord(
 function requireMultiAgentContinuationFacts(
   record: DeepRunRecord,
 ): NonNullable<DeepRunRecord["run"]["continuationFacts"]> {
-  if (record.run.continuationFacts === undefined) {
+  if (
+    record.run.continuationFacts === undefined ||
+    record.run.continuationFacts.taskSoilInput === undefined
+  ) {
     throw new MultiAgentFeatureError(
       "run_continuation_facts_missing",
       "Multi-Agent run has no durable continuation facts.",

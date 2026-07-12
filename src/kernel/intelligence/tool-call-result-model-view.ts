@@ -4,7 +4,7 @@ import type { ToolCallResult, ToolResult } from "../../domain/tools/index.js";
 export function toolCallResultToModelToolResult(result: ToolCallResult): ToolResult {
   if (result.status === "failed" || result.status === "cancelled") {
     return {
-      body: modelBody(result.output),
+      body: toolCallOutputToModelBody(result.output),
       error: {
         message: result.error ?? (result.status === "cancelled"
           ? "Tool execution was cancelled."
@@ -20,14 +20,22 @@ export function toolCallResultToModelToolResult(result: ToolCallResult): ToolRes
         format: "json",
         value: {
           confirmation: result.confirmationRequest,
+          ...(result.output === undefined ? {} : { partialOutput: result.output }),
         },
       },
+      error: result.error === undefined && result.errorFacts === undefined
+        ? undefined
+        : {
+            message: result.error ?? "Approval pause could not deliver all partial tool output.",
+            domain: result.errorDomain,
+            facts: result.errorFacts,
+          },
     };
   }
-  return { body: modelBody(result.output) };
+  return { body: toolCallOutputToModelBody(result.output) };
 }
 
-function modelBody(output: ToolCallResult["output"]): ToolResult["body"] {
+export function toolCallOutputToModelBody(output: ToolCallResult["output"]): ToolResult["body"] {
   if (output === undefined) {
     return { format: "none" };
   }

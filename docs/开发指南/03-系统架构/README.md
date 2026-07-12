@@ -1,8 +1,8 @@
 # 系统架构
 
-本章定义 AgentArbor 的主要系统层和边界。当前架构必须支持 `Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil` 的桌面任务闭环。
+本章定义 AgentArbor 的主要功能边界。当前产品只有一个 Workbench；Ordinary Agent 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是 Ordinary 的工具能力。三类功能只共享中性模型、工具、确认、上下文算法和系统适配，不共享业务状态。
 
-架构重点不是堆更多角色，而是保证用户有统一桌面入口、agent 语义判断走 AI-first 主线、Plan 能被执行 runtime 消费、运行过程可监督、候选经验经治理后才进入长期土壤。
+架构重点是保证功能闭环有明确 owner、调用只经过公开端口、后端只有一个 Composition Root、事件和状态不被多层重复加工。Plan、Aboveground、Governance 和 Global Soil 仍可按真实需求演进，但不是每次请求必经链路。
 
 ## 文档列表
 

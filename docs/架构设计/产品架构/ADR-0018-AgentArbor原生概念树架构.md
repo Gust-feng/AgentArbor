@@ -2,24 +2,18 @@
 
 日期：2026-05-01
 
-状态：Superseded by [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)
+状态：Superseded by [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md); current fact source is [ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)
 
 ## 现状说明
 
-本 ADR 保留 AgentArbor 早期原生概念树、植物学职责边界和历史术语来源，但不再作为当前产品架构事实源。当前事实源是 ADR-0022：
+本 ADR 保留 AgentArbor 早期原生概念树、植物学职责边界和历史术语来源，但不再作为当前产品架构事实源。当前事实源是 ADR-0028：
 
 ```text
-Desktop Shell
-  -> Task Soil
-  -> Underground Cognitive Runtime
-  -> Plan
-  -> Aboveground Execution Runtime
-  -> Fruits
-  -> Governance Pipeline
-  -> Global Soil
+Workbench -> Ordinary Agent（默认）/ Multi-Agent（显式功能） -> 结果与活动
+                         Ordinary Agent -> Sub-Agent（按需工具）
 ```
 
-后续文档和实现应优先使用 Task Soil、Global Soil、Plan、Shared Agent Kernel、Underground Cognitive Runtime、Aboveground Execution Runtime 和 Governance Pipeline。`.agentarbor` 只作为 Plan Package 的实现/存储形态或目录名保留。
+Task Soil、Global Soil、Plan、Underground、Aboveground 和 Governance 继续保留为按需长期能力；它们不构成每次请求必经链路。`.agentarbor` 只作为 Plan Package 的实现/存储形态或目录名保留。
 
 ## 原始决策
 

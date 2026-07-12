@@ -2,14 +2,15 @@
 
 AgentArbor 是一个面向本地工作区的桌面通用 Agent 项目。它把任务输入、文件上下文、工具调用、命令确认和结果展示放在同一个桌面工作台里处理，让用户不必反复组织上下文，也不必把简单动作拆成零散流程。
 
-当前默认运行方式仍是普通桌面 `agent`：会话、工具、确认、事件和持久化先闭环；显式 `deep` / Agent 集群作为独立入口保留，内部仍可使用 `deep`、`DeepRuntime` 和 `/api/deep/*`。
+产品边界统一为一个 Workbench：普通桌面 `agent` 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是普通 Agent 的工具能力。它们共享中性基础能力，但分别拥有业务流程、状态、事件、仓储和 read-model。
 
 ## 当前状态
 
 - 默认入口：`Desktop Shell / Panel`
 - 默认模式：`agent`
 - 默认主线：`用户消息 -> Task Soil -> 普通 Agent 主循环 -> 工具调用/命令确认 -> 结果投影`
-- 显式 `deep` / Agent 集群：设置启用后从侧栏进入
+- 目标产品边界：Multi-Agent 是 Workbench 内的显式“深入协作”功能
+- 当前过渡实现：设置启用后仍从侧栏 `Agent 集群` 进入，后端仍使用 `/api/deep/*` 和独立数据分区
 - 默认请求不会自动升级为 deep
 
 ## 主要能力
@@ -93,11 +94,15 @@ pnpm panel:dev
 8. [系统架构](docs/开发指南/03-系统架构/README.md)
 9. [模型与契约](docs/开发指南/04-模型与契约/README.md)
 10. [架构设计](docs/架构设计/README.md)
+11. [ADR-0028：统一 Workbench 与功能模块化单体](docs/架构设计/产品架构/ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)
+12. [功能模块边界与组合根](docs/开发指南/06-工程实现/11-功能模块边界与组合根.md)
 
 ## 当前原则
 
 - 普通路径先可用、可审阅、可恢复。
-- 默认请求不自动升级为 deep。
+- Workbench 只组合展示，不拥有 Ordinary 或 Multi-Agent 业务状态。
+- 默认请求不自动升级为 Multi-Agent；深入协作必须由用户显式选择。
+- 功能通过公开端口调用中性能力，不建设统一 Run runtime 或全局业务状态。
 - helper、adapter、formatter、文件编辑动作不应被包装成 agent。
 - `Plan` 不是普通回答，也不是临时摘要。
 - `atomic` 只用于真实事务边界。

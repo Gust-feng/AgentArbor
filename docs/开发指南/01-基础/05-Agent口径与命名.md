@@ -4,12 +4,13 @@
 
 AgentArbor 的 `agent` 不是所有自动化逻辑的泛称。只有具备目标理解、上下文判断、工具选择、行动反馈和可观察运行边界的执行主体，才应被称为 agent。
 
-当前产品同时保留两层能力：
+当前产品只有一个 Workbench，并包含三类明确能力：
 
-- 默认普通 Agent：当前默认桌面会话入口，负责连续对话、模型工具循环、授权工具执行、命令确认、运行投影、持久化和用户可见结果。
-- 深入 Agent 集群：长期 `deep` 能力边界，负责目标成形、多路探索、child/rootlet 派生、父层综合、裁决、Plan 形成和后续执行组织；它不是废弃方向，但必须等显式 deep 项目重启后按契约推进。
+- Ordinary Agent：默认工作方式，负责连续对话、模型工具循环、授权工具执行、命令确认、运行投影、持久化和用户可见结果。
+- Multi-Agent：用户显式选择的深入协作功能，当前内部沿用 `deep` / `DeepRuntime`，负责 intake、manager、多路 child 探索、父层综合、纠正和停止。
+- Sub-Agent：Ordinary Agent 按需调用的工具能力，不是独立模式或 Multi-Agent child。
 
-二者共享 AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase、Skill Context、模型运行时和 Workbench Panel read-model；二者隔离的是编排策略、用户入口和可见语义。
+三者只共享模型、工具、确认、上下文机械算法和系统适配等中性能力。Ordinary、Multi-Agent 和 Sub-Agent 分别拥有业务流程、状态、事件、仓储与 read-model；Workbench Shell 只组合导航和展示。不得以共享为名建设统一 Run runtime、RuntimeDatabase 业务仓储、全局状态或跨 feature Panel read-model。
 
 默认普通 Agent 的产品交互是线性会话驱动，不是任务驱动。它可以处理用户以“任务”形式输入的请求，但运行时只把每一轮用户消息、历史对话、上下文引用、工具结果和确认决定串成同一条 conversation 时间线；它不维护独立任务生命周期、任务拆解状态机、Plan 交接对象或多 agent 协作状态。任务驱动、目标成形、多候选探索和 Plan 交接留给后续显式 deep / Agent 集群能力。
 
@@ -25,9 +26,9 @@ AgentArbor 的 `agent` 不是所有自动化逻辑的泛称。只有具备目标
 
 ## 深入 Agent 集群
 
-深入 Agent 集群是 AgentArbor 的长期产品能力，不因为当前先打磨普通 Agent 而删除。它适用于需要方向成形、多候选比较、证据探索、父层综合、Plan 交接、执行组织和治理回流的任务。
+Multi-Agent 是统一 Workbench 内的显式功能，适用于需要方向成形、多候选比较、证据探索和父层综合的任务。当前一期产物可以是综合结论，不要求伪造 Plan、执行组织或治理回流。
 
-deep 重启时必须复用共享基础设施，不能另起平行运行时。它可以拥有自己的 Underground / Aboveground 编排策略、Agent Fabric、Plan Package、Nutrient Request 和 Governance 流程，但这些能力不能反向污染普通 Agent 的默认工具可见性、事件投影、确认语义和用户文案。
+Multi-Agent 必须通过中性能力端口复用模型、工具、确认和系统适配，同时完整拥有自己的 DeepConversation、TaskBoard、scheduler、child、synthesis、事件、仓储和 read-model。未来 Plan、Aboveground、Nutrient Request 和 Governance 只有在真实契约出生后按独立模块接入，不能提前写进每次 Multi-Agent 流程，也不能反向污染 Ordinary。
 
 ## 什么是这里的过度设计
 

@@ -4,13 +4,13 @@
 
 状态：Accepted
 
-承接关系：Refines [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)（长期架构）、阶段演进了 [ADR-0024-桌面基础Agent与基础设施优先路线](ADR-0024-桌面基础Agent与基础设施优先路线.md)（基础 Agent 路线稳定后重启 deep 为显式入口）、Supersedes [ADR-0021-地下Agent集群AI优先架构重构](ADR-0021-地下Agent集群AI优先架构重构.md) 的本期 deep 实现决策（保留 ADR-0021 的 AI 优先诊断价值，详见 ADR-0021）。本 ADR 是 Underground Cognitive Runtime 一期（一层 child 最小闭环）的权威决策，是 DeepRuntime 代码实现的契约依据；不含 Plan / Aboveground / Fruits / Governance / Global Soil 回流。
+承接关系：Refines [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md) 的 Multi-Agent 内部语义、阶段演进了 [ADR-0024-桌面基础Agent与基础设施优先路线](ADR-0024-桌面基础Agent与基础设施优先路线.md)，并 Supersedes [ADR-0021-地下Agent集群AI优先架构重构](ADR-0021-地下Agent集群AI优先架构重构.md) 的本期 deep 实现决策。[ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md) 保留本文的 manager、TaskBoard、scheduler、child 与 parent synthesis 契约，但取消其独立产品定位。本文仍是 Multi-Agent 一层 child 闭环的实现依据；不含 Plan / Aboveground / Fruits / Governance / Global Soil 回流。
 
 > 命名口径：遵循 [05-Agent口径与命名](../../开发指南/01-基础/05-Agent口径与命名.md)。`deep / Underground` 只在真正做多 child 探索并由父层综合时使用，本期成立；产品对用户统一显示“多 Agent”，`DeepRuntime` / `/api/deep/*` / `runMode: "deep"` 保留为内部实现与 API 命名。
 
 ## 决策
 
-在普通桌面 Agent 默认路线稳定（ADR-0024）后，重启 `deep` 作为**显式多 Agent 入口**，交付 Underground Cognitive Runtime **一层 child 最小闭环**。本期 deep 不另起平行运行时，而是**新建一个 DeepRuntime 编排策略边界**（DeepConversation / DeepRuntime / DeepRunExecutor + Child Delegation + Parent Synthesis），复用普通 Agent 已成熟的共享设施。
+在普通桌面 Agent 默认路线稳定（ADR-0024）后，以 `deep` 内部实现交付 Multi-Agent **一层 child 最小闭环**。该闭环是统一 Workbench 内的显式功能；它拥有自己的 DeepConversation / DeepRuntime / DeepRunExecutor、Child Delegation 与 Parent Synthesis 业务事实，只通过中性端口使用模型、工具、确认和系统适配能力，不依赖 Ordinary 的业务实现。
 
 本 ADR 记录四项核心决策：
 

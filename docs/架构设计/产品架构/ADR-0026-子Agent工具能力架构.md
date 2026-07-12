@@ -4,7 +4,7 @@
 
 状态：Accepted
 
-承接关系：补充 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)（双运行时长期架构）、演进 [ADR-0024-桌面基础Agent与基础设施优先路线](ADR-0024-桌面基础Agent与基础设施优先路线.md)（基础 Agent 工具体系扩展）、与 [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)（deep 一期最小闭环）互补不冲突。本 ADR 是子 Agent（Sub-Agent）作为普通 Agent 工具能力的权威决策，是 `src/app/sub-agents/` 代码实现的契约依据；不引入新的运行时概念，不维护独立任务生命周期。
+承接关系：演进 [ADR-0024-桌面基础Agent与基础设施优先路线](ADR-0024-桌面基础Agent与基础设施优先路线.md) 的 Ordinary 工具体系，与 [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 的 Multi-Agent 闭环互补不冲突。[ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md) 继续确认 Sub-Agent 是 Ordinary Agent 的工具能力，而不是产品模式。本 ADR 是 `src/app/sub-agents/` 代码实现的契约依据；不引入独立产品入口或任务生命周期。
 
 > 命名口径：遵循 [05-Agent口径与命名](../../开发指南/01-基础/05-Agent口径与命名.md)。子 Agent（Sub-Agent）是普通 Agent 会话中的工具能力扩展，不是 deep / Underground 多 Agent 编排；不维护独立任务生命周期，不替换 deep 编排。产品对用户统一显示“子 Agent”或“专家助手”，`sub-agent` / `SubAgent` 保留为内部实现与代码命名。
 
@@ -26,7 +26,7 @@
 
 ## 动机
 
-ADR-0022 定义了双运行时架构（普通 Agent + deep / Underground），ADR-0024 确立了基础设施优先路线，ADR-0025 定义了 deep 一期一层 child 最小闭环。但在实际开发中发现，很多场景需要的不是完整的 deep 编排流程，而是**轻量级的专家助手能力**：
+ADR-0024 确立了 Ordinary 与基础能力优先路线，ADR-0025 定义了 Multi-Agent 一层 child 最小闭环，ADR-0028 将两者收口到同一个 Workbench。很多场景需要的不是完整的 Multi-Agent 编排，而是**轻量级的专家助手能力**：
 
 - deep 架构（`DeepRuntime` / `DeepTaskBoard` / child / rootlet 派生 / Plan 交接 / run tree 综合）对普通用户来说过于沉重；它要求显式入口、manager 决策循环、task board 调度、parent synthesis 与 `SynthesizedConclusion` 产物，适合需要多路探索并由父层综合的复杂任务。
 - 用户更需要的是：模型在普通会话中能**自主调用专家助手**完成特定子任务（例如代码审查、测试生成、文档整理），不需要显式切换到 deep 模式，也不需要维护一个完整的 run tree。

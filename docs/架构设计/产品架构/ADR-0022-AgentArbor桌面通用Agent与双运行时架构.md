@@ -2,9 +2,11 @@
 
 日期：2026-05-07
 
-状态：Accepted
+状态：Partially Superseded by [ADR-0028-AgentArbor统一Workbench与功能模块化单体架构](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)
 
-取代关系：Partially supersedes [ADR-0018-AgentArbor原生概念树架构](ADR-0018-AgentArbor原生概念树架构.md)。ADR-0018 保留为历史概念树和植物语义来源；当前产品事实源以本 ADR 为准。
+取代关系：Partially supersedes [ADR-0018-AgentArbor原生概念树架构](ADR-0018-AgentArbor原生概念树架构.md)。ADR-0018 保留为历史概念树和植物语义来源。自 2026-07-12 起，统一 Workbench、功能模块所有权和唯一 Composition Root 以 ADR-0028 为当前事实源；本文保留 Soil、Plan、Aboveground、Fruits、Governance 和 Global Soil 等长期能力边界，不再定义两个并列产品 runtime。
+
+> 阅读提示：下文“双运行时”与完整流水线描述是本 ADR 当时的架构判断。当前实现不能据此建设 universal Run runtime、全局业务状态或每次请求必经的 Underground -> Plan -> Aboveground 流程。
 
 ## 决策
 
@@ -246,7 +248,7 @@ Governance Pipeline 负责筛选、验证、归因、去重、版本化和退役
 
 ## 后果
 
-- 活跃开发指南必须以 Desktop Shell 和双运行时架构为当前事实源。
+- 历史结论：当时要求活跃开发指南以 Desktop Shell 和双运行时架构为事实源；该要求现由 ADR-0028 的统一 Workbench 与功能模块化单体取代。
 - ADR-0018 保留历史脉络，但不再作为当前产品主线。
 - `.agentarbor` 只作为 Plan Package 的实现/存储形态出现。
 - 地下 runtime 的成功标准从“交接包复杂”转为“能形成可执行、可解释、可监督的 Plan”。

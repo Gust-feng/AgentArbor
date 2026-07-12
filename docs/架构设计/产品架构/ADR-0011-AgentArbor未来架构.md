@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted as historical architecture material, amended by [ADR-0022](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md).
+Accepted as historical architecture material, amended by [ADR-0022](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md) and [ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md).
 
-本 ADR 记录 Agent 集群、动态发育、分层通信和能力治理的结构原则；当前产品全景以 ADR-0022 的桌面通用 Agent 与双运行时架构为准。
+本 ADR 记录 Agent 集群、动态发育、分层通信和能力治理的历史结构原则；当前产品全景以 ADR-0028 的统一 Workbench 与功能模块化单体为准。
 
 ## Context
 

@@ -2,92 +2,145 @@
 
 ## 目标
 
-当前开发先补稳两种模式共享的基础设施，再在这套基础设施上完成默认普通桌面 Agent。`agent` 和显式多 Agent（内部 `deep` / `DeepRuntime`）共享 AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase、Skill Context 和 Workbench Panel read-model；二者隔离的是编排策略、用户入口和可见语义，而不是运行平台。
+后续开发沿统一 Workbench 主线推进：Ordinary Agent 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是 Ordinary 的工具能力。不同功能共享中性模型、工具、确认、上下文算法和系统 adapter，不共享业务状态、事件、仓储或 read-model。
 
-默认入口仍是普通 `agent`。显式多 Agent 已通过 Panel 模块和 `/api/deep/*` 暴露，用户文案使用“多 Agent”，内部 API / 实现仍可叫 `deep` / `DeepRuntime`；普通会话入口始终默认创建 `agent` 运行，不因复杂输入、关键词、文件数量或模型判断自动升级到多 Agent。默认 Agent 开发不能顺手夹带 deep 编排变更；显式多 Agent 变更必须按 ADR-0025 的边界推进，并证明不污染普通路径。这里反对的过度设计是普通路径概念命名和流程包装过重，不是删除 deep 长期方向。
+每轮开发先回答：
 
-后续每一轮开发都必须能回答：
+1. 变更由哪个 feature 或中性能力拥有？
+2. 是否只通过公开 command/query/event facade 或中性端口调用？
+3. 是否创建了第二个组合根、service locator、全局业务状态或通用 Run 抽象？
+4. 同一个执行事实是否被 route、runtime、event、read-model 或 UI 重复加工？
+5. 是否保持模型正文、工具输出、错误和 continuation 完整可用？
+6. 是否有行为测试与依赖测试证明边界？
 
-1. 这是否直接提升默认 Agent 的可用性。
-2. 这是否复用了现有 AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase 和 Workbench Panel。
-3. 这是否避免把历史 `.trellis/tasks`、deep 编排或平台适配文件重新变成当前事实源。
-4. 这是否使用了和真实职责匹配的朴素命名，而不是把普通动作包装成 agent / Plan / Handoff / atomic 概念。
-5. 这是否保持用户文案“多 Agent”和内部实现 `deep` / `DeepRuntime` 的边界，不把 deep 术语泄漏到普通用户路径。
+## 当前默认行为
+
+- 启动和普通提交默认走 Ordinary Agent。
+- Multi-Agent 只能由用户显式选择，不根据关键词、长度、文件数或模型判断自动升级。
+- Sub-Agent 由 Ordinary 模型按工具契约自主调用，不要求用户切换模式。
+- 当前 Multi-Agent 仍通过设置 beta 开关和侧栏 `Agent 集群` 入口进入，后端仍使用 `/api/deep/*` 和独立数据分区；这是待收口实现，不能提前写成已经迁移。
 
 ## 开发顺序
 
-### 1. 共享基础设施基线
+### 1. 事实源与架构依赖门
 
-- 固化 `runMode: "agent" | "deep"` 的语义：它只表示编排策略选择，不代表两套工具、事件、确认、持久化或投影实现。
-- 默认会话 API、工作台输入、普通回答和命令确认卡固定走 `agent`；显式多 Agent 只能通过独立模块和 `/api/deep/*` 进入，并复用同一套基础设施，不能另起平行运行时。
-- 模型运行只产出模型响应、流式增量、模型 refs 和失败归一化。
-- 工程边界只作为运行守卫和诊断投影存在，不能被包装成模型的能力限制；普通回答应表达可做什么、需要什么上下文或下一步怎么继续。
-- 工程动作使用朴素名称：文件编辑叫编辑或补丁，批量变更叫变更集，helper / adapter 保持 helper / adapter；只有真正具有全成功/全失败、回滚或一致性边界时才使用 atomic。
-- ToolCenter 统一声明工具用途、参数、operation type、确认策略和用户可见结果策略。
-- Confirmation Gate 在默认普通 Agent 路径只处理命令执行确认；普通工作区文件创建、编辑、删除、写入、MCP 工具、搜索读取和本地/私网访问不默认打断用户。
-- RuntimeDatabase 保存结构化 read-model，不保存 raw prompt、raw provider response、raw tool output、stdout/stderr、文件正文或 secret。
-- 验收：普通 Agent 路径仍复用共享 runtime；没有出现普通模式专用的第二套工具、事件、确认或持久化实现。
+- ADR-0028 与《功能模块边界与组合根》是当前事实源。
+- 约束 neutral capability 不依赖 feature。
+- 约束 Multi-Agent 不依赖 Ordinary/Desktop 实现。
+- 约束 feature 不依赖 Panel。
+- 约束只有 Composition Root 能装配多个 feature。
+- 先补 Ordinary、Sub-Agent 与 Deep 行为测试，再移除只锁定 legacy facade、文件名或源码字符串的测试。
 
-### 2. 默认会话闭环
+验收：依赖越界能被测试稳定阻止，现有三条行为基线不变。
 
-- 稳定新会话、连续追问、历史可见消息回填和取消。
-- 普通问题直接由默认普通 `agent` 主循环返回自然语言回答；当前模型目的使用 `desktop_agent`，`desktop_chat` 只作为历史事件和旧记录读取兼容名称。
-- 复杂输入也先进入普通 Agent，由模型决定回答、请求补充、调用授权工具或说明需要的上下文与下一步。
-- 验收：普通问答不产生 fake report、不进入多 Agent / Underground、不展示 deep / Plan / child agent 文案。
+### 2. 唯一后端 Composition Root
 
-### 3. 工具和确认闭环
+- `createPanelRuntime()` 装配 `OrdinaryAgentFeature` 与 `MultiAgentFeature`。
+- Multi-Agent factory 拥有 Deep store、control/continuation registry、instruction queue、active run tracking 和资源释放。
+- `/api/deep/*` route 只解析 HTTP、调用 feature facade、映射响应。
+- route 不得创建 `MinimalRuntime`、store、provider 或 ToolCenter 工厂，也不得以 `WeakMap` 保存 feature 状态。
+- Deep DTO、API、SSE、存储格式和 manager/TaskBoard/scheduler/child/synthesis 行为保持不变。
 
-- 优先打磨 `search`、`read`、文件引用短预览和工具可见结果。
-- 命令执行必须进入 Confirmation Gate；普通工作区文件创建、编辑、删除、写入、MCP 工具和搜索读取走执行边界、运行摘要和审计事件，不做逐次确认。
-- 工具失败、取消、拒绝和预算耗尽必须回到用户可理解的回答，不能在普通回答中暴露轮次、预算、provider、raw output 或投影规则。
-- 验收：工具结果、refs、stdout/stderr、文件正文和可见输出可以进入会话；运行投影可按体积截断，但不能以摘要替代模型可继续使用的真实工具结果。
+验收：Deep route 薄适配测试、共享资源释放测试与正式 Deep smoke 通过。
 
-### 4. 工作台结果呈现
+### 3. 共享能力中性化
 
-- 主工作区优先展示回答、结果摘要、关键证据、不确定性和下一步。
-- 详情抽屉承载模型 refs、工具 refs、运行 trace、诊断和错误边界。
-- Skills、Tools、Settings 只展示真实可用能力；多 Agent 已是真实模块，不再作为占位；Routines、团队 agent 和未完成 deep 能力不做占位。
-- 验收：空态、运行态、待确认、完成态、失败态都可读，不出现内部架构菜单或调试面板首屏化。
+- `model-runtime` 只创建 provider/channel 与协议能力，不创建 ToolCenter、Desktop Skill 或 feature registry。
+- ToolCenter 工厂回归工具能力模块；Host 装配文件、命令、浏览器、HTTP、研究、MCP、Skills 和 Sub-Agent contribution。
+- `AgentTurnRuntime` 使用显式调用参数，不硬编码 Ordinary 专用方法或 `finish_task`。
+- Deep 只共享 tokenizer、消息完整性和压缩执行等机械能力，不依赖 Ordinary compaction facade。
+- 拆除 `MinimalRuntime` service locator，改为精确依赖注入；不新建 `RuntimeServices` 属性包。
 
-### 5. 持久化和恢复
+验收：共享模块不包含 feature import，Ordinary 与 Deep 行为测试不变。
 
-- RuntimeDatabase 持久化会话、运行、事件、确认请求、模型调用和工具调用的结构化 read-model。
-- 前端断开后能恢复运行状态、待确认事项和已完成结果。
-- 配置不完整时停在配置边界，不自动 fallback 成 fake 成功。
-- 验收：重载面板后不丢失最近会话、待确认、失败原因和运行事件。
+### 4. Workbench 入口收口
 
-### 6. Skills 与配置中心
+- 前端拆分 shell/config、ordinary surface、multi-agent surface 状态。
+- Ordinary 与 Multi-Agent 分别拥有 controller、SSE/poll cursor、busy、confirmation 和 view projection。
+- 用 `ActiveWorkbenchSurface` 判别联合导航，用 `WorkbenchItemSummary` 判别联合按更新时间展示历史。
+- 底层 conversation/store 继续分离，不新增 `/api/work`、`WorkAggregate` 或统一 Run API。
+- 移除持久化全局 AgentMode 与独立侧栏入口；beta 开关只控制输入区单次“深入协作”动作是否可用。
 
-- Skills 作为官方兼容能力包加载：`SKILL.md` 元数据进入 run-created frozen catalog；普通 agent 默认通过显式 `$skill` 与本地关键词/触发器选择 skill，不发起 `skill_routing` 前置模型请求。用户可在设置页“基础能力 -> Skills 触发方式”显式切换为语义路由；只有该设置冻结到新 run 后，`skill_routing` 才作为 opt-in 前置路由使用。内部评测仍可显式使用该 router。
-- 默认发现用户级和项目级 `.agents/skills`；宿主可以显式追加 admin/plugin skill roots，但这是受管来源接入，不是 marketplace、installer、自动更新或回滚；当前不自动扫描 marketplace 或 managed skills。
-- 被选中 skill 的 body 按需注入 Context Ledger；正文和 resource 读取都校验冻结 hash，hash 不一致 fail closed。
-- `references/`、`assets/`、`scripts/` 只通过 `read_skill_resource` 按需读取；reference 内容作为 tool result 回到模型，asset/script 不返回 raw body，script 不自动执行。
-- `evals/` 只作为 loader/doctor 本地质量 artifact 被索引和校验统计，不进入 frozen runtime resource index，不进入 Context Ledger / Context Pack，也不能通过 `read_skill_resource` 读取；doctor 默认做确定性 JSON 结构、case 数、routing 断言、quality/regression 的 `qualityBaseline` with/without skill 记录和字面量质量检查，显式传入模型通道时可通过 `skill_routing` 跑 routing eval；它仍不自动生成 with/without 输出、不调用 LLM judge、不评估运行时真实回答质量。
-- `allowed-tools` 是 skill 级工具意图声明：当前只冻结、展示、审计和报告不可用声明，不扩张工具，不隐藏普通 agent 原本可见的工具，也不是 Claude Code 风格免确认授权。
-- 当前新增或计划中的 local installer 只能作为本地分发治理原语，负责把明确来源的 skill 包安装到受管 root 并记录版本/来源/校验事实；它不等于 marketplace，也不表示已有远程 registry、自动更新、回滚或企业 managed skills。
-- 配置中心统一模型 profile、默认 AI mode、工具启用状态、MCP server 元数据和工作目录。
-- secret 只能进入本地 secret store，普通 settings 只保存 `secretRef` 与必要元数据。
-- 验收：禁用的 skill/tool 不进入模型上下文；选中 skill 的正文和资源只按需进入模型 continuation；配置状态可解释且不泄漏密钥。
+验收：默认提交走 Ordinary；深入协作只影响本次提交；切换 surface 后旧 SSE/poll 回调不能污染当前视图。
 
-### 7. 质量门
+### 5. Legacy 退役
 
-每个非琐碎改动至少完成：
+- 正式 Deep smoke 覆盖后删除 `/api/underground/*`、`runUndergroundForPanel`、旧 root exports、`demo:underground`、compat tests 和未被 Deep 使用的旧实现。
+- Deep 仍需要的少量领域契约迁回 Multi-Agent owner，不整包保留 legacy 目录。
+- RuntimeDatabase 拆分、Ordinary 持久化归位、Sub-Agent trace 解耦和重复事件加工分别作为独立纵向任务推进。
+- 不提前抽象通用 blob/journal/repository；出现两个稳定消费者后再提取。
 
-- `pnpm build`
-- `pnpm test`
-- 影响面涉及 panel 时运行 `pnpm panel:smoke`
-- 影响面涉及桌面壳时运行 `pnpm panel:desktop:smoke`
-- `git diff --check`
+验收：legacy 删除有行为测试替代，正式入口和本地有效数据不被误删。
 
-测试应优先覆盖普通 Agent 的真实路径：连续对话、工具调用、命令确认、失败、取消、配置边界、持久化恢复和运行投影。
+## Ordinary 纵向开发顺序
+
+普通 Agent 新功能必须覆盖完整 slice：
+
+1. 输入/输出契约与 AgentDefinition/capability snapshot。
+2. Context Ledger/Pack 与模型可见上下文。
+3. 工具执行、确认、取消和 continuation。
+4. Ordinary event 与业务 outcome。
+5. repository 与后端 read-model。
+6. Panel Ordinary surface 投影。
+7. 行为测试、依赖测试和必要文档。
+
+不能只修改 prompt、route 或 UI 文案来伪造一个完整能力。
+
+## Multi-Agent 纵向开发顺序
+
+Multi-Agent 新功能必须留在自身闭环：
+
+1. Deep command/query/event 契约。
+2. manager/TaskBoard/scheduler/child/synthesis 业务状态。
+3. Deep store 与恢复。
+4. `/api/deep/*` 薄适配。
+5. Multi-Agent surface read-model 与交互。
+6. child 调度、纠正、停止、综合和历史恢复测试。
+
+不能为了复用而调用 Ordinary store、conversation reducer 或完成语义。
+
+## Sub-Agent 纵向开发顺序
+
+- 父 run 权限始终是上限。
+- 子 Agent 工具集合强制排除递归与跨子运行读取能力。
+- 确认冒泡到父 Ordinary run，不能包装成普通失败。
+- 输出、工具事实和错误必须完整或可 continuation。
+- trace 是只读复盘投影，不成为 Ordinary 或 Deep 主状态。
+
+## 状态和事件规则
+
+- 一个 feature 只消费自己的业务 event。
+- 技术结果在调用 feature 边界映射一次 outcome。
+- `ToolCallResult` 是工具执行唯一事实，模型、事件和 UI 单向派生。
+- SSE 是通知或事件传输，不是前端业务状态事实源。
+- read-model 不写回业务状态，UI summary 不覆盖正式材料。
+
+## 质量门
+
+每阶段按影响面运行目标测试。阶段门至少完成：
+
+```text
+pnpm build:node
+pnpm typecheck:panel
+pnpm build:panel
+git diff --check
+```
+
+最终收口运行 `pnpm test`。核心回归包括：
+
+- Ordinary：完成、确认、取消、失败、恢复。
+- Sub-Agent：权限继承、禁止递归、完整输出、确认冒泡。
+- Multi-Agent：启动、child 调度、纠正、停止、综合、历史恢复。
+- Workbench：统一历史排序、单次深入协作、surface 回调隔离。
+
+非必要不进行浏览器视觉检查；UI 视觉或真实交互变化无法由结构/行为测试证明时再执行。
 
 ## 禁止回退
 
-- 不从 `.trellis/tasks` 创建、启动或续接当前任务。
-- 不新增绕过 Panel 显式“多 Agent”模块的隐式 deep 入口。
-- 不在默认 Agent 开发中夹带 DeepRuntime / `/api/deep/*` 编排变更；显式多 Agent 变更必须按 ADR-0025 单独说明边界和验证。
-- 不用关键词、长度、文件数量或工程规则把普通请求自动升级到多 Agent / Underground。
-- 不把 `deep`、`DeepRuntime`、`/api/deep/*` 写成用户可见主文案；用户侧称“多 Agent”，内部契约可继续沿用 deep 命名。
-- 不把普通文件编辑、helper、adapter、状态更新或一次工具循环命名为 deep、Plan、Handoff、Agent cluster 或 atomic mutation。
-- 不让平台适配目录、Codex / Claude / OpenCode agent 文件或历史 Trellis skill 反向定义 AgentArbor 产品语义。
-- 不为了演示效果创建假报告、假 artifact、假任务、假运行进度或未出生的能力入口。
+- 不从 `.trellis/tasks` 创建或续接当前任务。
+- 不恢复 Ordinary/Multi-Agent 并列产品或自动模式路由。
+- 不建设 universal Run API、统一业务状态机、全局 workflow 或事件总线重写。
+- 不以共享为名让 neutral capability 依赖 feature。
+- 不让 route、Panel 或兼容 facade 继续拥有 feature 状态。
+- 不把普通编辑、helper、adapter、状态更新或一次工具循环命名为 Plan、Handoff、Agent cluster 或 atomic mutation。
+- 不以摘要、脱敏或安全投影吞掉模型/工具事实。

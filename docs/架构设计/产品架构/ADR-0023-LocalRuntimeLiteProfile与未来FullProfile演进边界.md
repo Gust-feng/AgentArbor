@@ -1,8 +1,10 @@
 # ADR-0023：Local Runtime Lite Profile 与未来 Full Profile 演进边界
 
-Accepted
+状态：Historical / Superseded by [ADR-0028-AgentArbor统一Workbench与功能模块化单体架构](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)
 
 日期：2026-05-10
+
+> 本文保留为 Lite / Full Profile 的历史演进方案，不再作为当前产品分层或共享运行时设计依据。当前采用一个 Workbench 下的功能模块化单体，不以 Profile 或统一 runtime 规划功能边界。
 
 ## 背景
 
@@ -103,4 +105,4 @@ ToolCenter
 
 当前产品可以保持轻量体验：用户只需要选择文件夹、输入任务、查看结果和安全摘要。实现者也有明确承接路径：Lite Profile 先稳定垂直闭环，Full Profile 在同一套运行时契约上扩展能力，让“小软件”的当前体验和“大架构”的后续演进保持统一。
 
-后续代码应围绕 Lite Profile 的垂直闭环持续收敛：Desktop Shell、Local Runtime Foundation、AgentTurnRuntime、ToolCenter、本地策略沙盒、RuntimeDatabase 和 Observation 安全投影先形成稳定组合，再逐步承接 ADR-0022 的完整双运行时和治理回流。
+历史结论曾要求后续代码围绕 Lite Profile 收敛并演进到 Full Profile；当前不再使用 Profile 规划模块。后续代码以 ADR-0028 的 Workbench、feature ownership、中性能力和唯一 Composition Root 为准。

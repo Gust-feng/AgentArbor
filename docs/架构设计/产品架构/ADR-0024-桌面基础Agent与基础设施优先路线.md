@@ -4,9 +4,9 @@
 
 状态：Accepted
 
-承接关系：Refines [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md) 与 [ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界](ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界.md)。ADR-0022 保留长期产品愿景；本 ADR 定义当前活跃实现路线。
+承接关系：Refines [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)。[ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md) 保留本 ADR 的普通 Agent 默认地位与基础能力优先原则，并取代并列产品 runtime 与 Profile 演进口径；本 ADR 继续定义 Ordinary Agent 的活跃实现路线。
 
-阶段演进（2026-05 更新）：本 ADR 的基础 Agent 路线已稳定，普通桌面 Agent 默认主线地位与 Accepted 状态不变。在此基础之上，项目已重启 `deep` 作为**并行显式入口**（一期为 Underground Cognitive Runtime 一层 child 最小闭环），由 [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 承接 deep 一期决策。本 ADR 不废弃：基础 Agent 路线继续作为默认主线，deep 仅作为显式入口，不自动升级、不混入默认路径。下文"默认不做"列表中与 deep 入口相关的条目，其"默认不做"语义仍对普通路径有效——deep 不自动触发、不自动升级；显式 deep 入口本身已在 ADR-0025 中重启。
+阶段演进（2026-07 更新）：本 ADR 的基础 Agent 路线已稳定，普通桌面 Agent 默认主线地位与 Accepted 状态不变。`deep` 已按 [ADR-0025](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 实现一层 child 最小闭环；按 ADR-0028，它现在是统一 Workbench 内的显式 Multi-Agent 功能，不是并列产品或自动升级路径。下文“默认不做”仍约束 Ordinary：不得自动触发或混入 Multi-Agent 编排。
 
 ## 决策
 
@@ -14,7 +14,7 @@
 
 用户默认面对的是一个桌面基础 Agent：接收消息、理解上下文、直接回答或调用授权工具、常规工作区文件创建/编辑/写入直接执行，在删除、命令执行、外部提交、本机或内网访问等高影响动作前请求确认，持续展示安全进度，持久化会话和运行记录，并在完成后给出可用结果。
 
-Underground Cognitive Runtime、Aboveground Execution Runtime、Agent Fabric、Plan Package、Governance Pipeline 和 Global Soil 仍是长期架构，deep / Agent 集群不是废弃方向；但当前默认桌面会话不以“地下/地上组织”作为用户文案或首屏概念。deep / Agent 集群是未来项目边界：当前不新增默认可见 deep 入口，不主动改动 deep 后端路径，也不能污染普通桌面 Agent 会话、确认卡、面板首屏或基础 API。
+Underground Cognitive Runtime、Aboveground Execution Runtime、Agent Fabric、Plan Package、Governance Pipeline 和 Global Soil 仍是长期能力边界，但不是每次请求必经的流水线。Multi-Agent 在统一 Workbench 中显式触发；它不能污染普通桌面 Agent 会话、确认语义、状态或基础 API。
 
 ## 当前活跃主线
 

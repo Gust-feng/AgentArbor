@@ -8,11 +8,13 @@
 
 ## 功能模块化开发原则
 
-AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术层分层。`domain`、`app`、`kernel`、`adapters` 等横向层只能作为实现手段，不能取代功能所有权；每个长期功能模块都应尽量拥有自己的输入输出契约、运行过程、证据链、验证门、可观察投影和测试边界。
+AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术层分层。`domain`、`app`、`kernel`、`adapters` 等横向层只能作为实现手段，不能取代功能所有权；Ordinary Agent、Multi-Agent 和 Sub-Agent 必须分别拥有自己的输入输出契约、运行过程、业务状态、事件、仓储、可观察投影和测试边界。
 
-横向基础设施负责提供可复用能力，例如事件、消息、状态机、工具运行、模型运行、外部协议适配、配置和审计；纵向功能模块负责完成业务闭环，例如 Desktop Shell、Task Soil、Underground Cognitive Runtime、Plan、Aboveground Execution Runtime、Fruits、Governance Pipeline、Global Soil 和 Observation Panel。开发时必须优先判断当前变更属于哪个功能闭环，避免为了追随横向分层而把同一功能拆散到多个无主文件中。
+中性基础设施只提供可复用机械能力，例如模型接入、工具执行、确认、tokenizer、消息完整性、上下文压缩执行、外部协议适配和配置读取；业务事件、状态、完成语义、仓储和 read-model 留在 owning feature。Workbench Shell 只组合入口、导航和展示。Task Soil、Plan、Aboveground、Fruits、Governance 和 Global Soil 是按需演进的长期功能模块，不是每次请求必经的全局工作流。开发时必须优先判断当前变更属于哪个功能闭环，避免为了追随横向分层而把同一功能拆散到多个无主文件中。
 
-大模型接入层必须作为独立功能模块演进，而不是被视为普通 provider adapter 的附属实现。模型运行时应独立承担模型接入、provider 选择、配置边界、流式输出、模型-工具-模型多轮运行、结构化校验、可见输出投影、模型事件和失败归一化等职责。Underground、Aboveground、Verification、Governance、Panel 等模块只能通过模型运行时契约使用模型能力，不能直接绑定外部 LLM SDK、provider 私有字段或临时流式协议。
+项目采用同仓功能模块化单体，不拆 pnpm packages，不建设 universal `RunRuntime`、全局业务状态、统一工作流引擎或 service locator。只有后端 Composition Root 可以同时装配多个 feature；feature 只能通过公开 command/query/event facade 和中性能力端口协作，不能读取其他 feature 的 store、registry 或 read-model。
+
+大模型接入层必须作为中性能力模块演进，而不是被视为普通 provider adapter 的附属实现。模型能力层承担 provider 接入、选择、配置边界、协议能力、流式输出和失败归一化；模型-工具-模型循环、业务事件、完成语义和 read-model 留在调用 feature。Ordinary、Multi-Agent、Sub-Agent、未来 Aboveground/Verification/Governance 和 Panel adapter 只能通过模型能力契约使用模型，不能直接绑定外部 LLM SDK、provider 私有字段或临时流式协议。
 
 不同模块之间必须通过强契约互信：调用方应相信被调用模块会履行自己的契约，并按标准结果返回成功、失败、取消、预算耗尽或验证失败；调用方只处理本模块的业务决策，不能因为不信任其他模块而复制其职责、重建其内部规则或绕过其边界。确定性工程规则应保护 Agent 的权限、预算、证据、审计、验证和治理边界，不能替代 Agent 的目标理解、方案探索、工具选择、计划草案和反思能力。
 
@@ -40,15 +42,16 @@ AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术
 
 ## 项目定位
 
-AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户从统一 Desktop Shell 输入任务和工作区上下文；当前默认普通 `agent` 先完成连续会话、模型工具循环、命令确认、持久化和工作台结果展示；长期 deep / Agent 集群能力保留为显式深入模式，由 Underground Cognitive Runtime 做目标成形、动态派生 child/rootlet agent、多路探索、父层综合和裁决，形成 Plan，再由 Aboveground Execution Runtime 消费 Plan 执行交付，产出 Fruits；运行结果经过 Governance Pipeline 后，只有通过治理的经验才回流 Global Soil。
+AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户只面对一个 Workbench；Ordinary Agent 是默认工作方式，Multi-Agent 是用户显式选择的深入协作功能，Sub-Agent 是 Ordinary Agent 按需调用的工具能力。三者共享模型、工具、确认、上下文机械算法和系统适配，但不共享业务状态、事件、仓储或 read-model。
 
 当前正式产品主线是：
 
 ```text
-Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil
+Workbench -> Ordinary Agent（默认）/ Multi-Agent（显式功能） -> 结果与活动
+                         Ordinary Agent -> Sub-Agent（按需工具）
 ```
 
-长期产品架构事实源是 `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md`；当前活跃实现路线是 `docs/架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md`。当前阶段优先打磨默认普通 `agent`；deep / Agent 集群是长期能力边界，不是废弃方向，但当前不做默认入口、不自动触发、不主动扩展后端，除非用户重新明确启动 deep 工作。ADR-0018 只保留为历史概念树和植物语义来源。
+当前长期产品架构事实源是 `docs/架构设计/产品架构/ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md`；工程边界以 `docs/开发指南/06-工程实现/11-功能模块边界与组合根.md` 为准。ADR-0024 继续定义 Ordinary 默认和基础能力优先；ADR-0025 保留 Multi-Agent 内部闭环但不再定义独立产品；ADR-0026、ADR-0027 保持有效。Task Soil、Underground、Plan、Aboveground、Fruits、Governance 和 Global Soil 保留为按真实需求出生的长期能力，不得写成每次请求必经链路。ADR-0018、ADR-0022、ADR-0023 只保留相应历史和长期概念价值。
 
 Agent 口径必须区分产品架构和实现命名：保留 deep / Agent 集群长期架构，不等于把普通文件编辑、helper、adapter、状态更新或一次模型工具循环包装成 Underground、Plan、Handoff、atomic mutation 或其他超出实际职责的概念名。`atomic` 只能用于真正有全成功/全失败、回滚或一致性边界的场景；普通用户可见动作优先使用“编辑”“补丁”“变更集”等朴素名称。当前正式口径见 `docs/开发指南/01-基础/05-Agent口径与命名.md`。
 
@@ -62,6 +65,7 @@ Agent 口径必须区分产品架构和实现命名：保留 deep / Agent 集群
 - `docs/开发指南/02-核心闭环/README.md`
 - `docs/开发指南/03-系统架构/README.md`
 - `docs/开发指南/04-模型与契约/README.md`
+- `docs/开发指南/06-工程实现/11-功能模块边界与组合根.md`
 
 ## 标准结构
 
@@ -88,7 +92,7 @@ Agent 口径必须区分产品架构和实现命名：保留 deep / Agent 集群
 - `.opencode/`：OpenCode 开发适配层。
 - `.claude/`：Claude Code 开发适配层。
 - `.agentarbor/`：未来 Plan Package 的实现/存储形态或目录名，用于保存可持久化 Plan、引用、谱系、validation 和审计材料；不保存最终资产，不替代 Task Soil 或 Global Soil。只有契约稳定、有真实出生依据和显式写入授权时才增量创建。
-- `src/`：AgentArbor TypeScript 实现代码。当前已有确定性最小运行内核作为状态、验证、审计和兜底基础；Underground Cognitive Runtime 重构必须在该基础上推进 AI 驱动的 agent 协作主线。
+- `src/`：AgentArbor TypeScript 实现代码。当前按 Workbench Shell、Ordinary Agent、Multi-Agent、Sub-Agent、中性能力与 Host Composition Root 的功能所有权渐进收口；长期能力只能通过稳定端口按需出生。
 
 禁止把这些层混用。平台适配文件不是 AgentArbor 原生产品事实源，未来运行时资产也不能替代当前开发文档。
 

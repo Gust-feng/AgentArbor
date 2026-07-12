@@ -4,7 +4,7 @@
 
 AgentArbor 的 agent 集群依附于 Desktop 任务闭环，而不是独立漂浮的一组角色。
 
-Agent 集群是未来 deep / 深入模式的组织结构，不是当前默认普通 Agent 的隐式实现方式。普通会话、普通文件编辑、helper、adapter 和一次模型工具循环不应套用本章术语。
+Agent 集群是统一 Workbench 内 Multi-Agent 功能的内部组织结构，不是当前默认 Ordinary Agent 的隐式实现方式，也不是第二个产品。当前一期以 ADR-0025 的 manager + 一层 child + parent synthesis 为准；本章涉及 Plan/Aboveground 的部分只代表长期可选能力。普通会话、普通文件编辑、helper、adapter 和一次模型工具循环不应套用本章术语。
 
 ```text
 Desktop Shell

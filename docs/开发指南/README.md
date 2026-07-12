@@ -1,10 +1,10 @@
 # 开发指南
 
-本目录是 AgentArbor 开发前的正式指南。它采用分册结构，长期产品方向是桌面通用 Agent：用户通过统一 Desktop Shell 提交任务和工作区上下文；默认普通 Agent 先完成会话、模型工具循环、命令确认、持久化和工作台结果展示；普通 Agent 内置子 Agent 工具能力（`call_sub_agent` / `call_sub_agents` / `spawn_sub_agent`），模型可自主调用专家子 Agent 完成代码、文档、研究、评审和测试等子任务；Agent 集群 beta 模块已按 ADR-0025 暴露为设置启用后的独立入口，当前内部仍使用 `deep` / `DeepRuntime` / `/api/deep/*` 命名；长期完整 deep / Agent 集群再通过地下认知运行时成形 Plan，由地上执行运行时交付 Fruits，并把可复用经验经过治理回流 Global Soil。
+本目录是 AgentArbor 开发前的正式指南。产品只有一个 Workbench：Ordinary Agent 是默认工作方式，Multi-Agent 是用户显式选择的深入协作功能，Sub-Agent 是 Ordinary Agent 的工具能力。三者可以调用同一组中性模型、工具、确认、上下文算法和系统适配，但分别拥有业务流程、状态、事件、仓储和 read-model。
 
 开发指南不是过程归档、版本路线图或会议纪要。它只写稳定结论、工程边界和可执行契约。
 
-长期产品架构事实源是 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](../架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)，当前默认普通 Agent 路线是 [ADR-0024-桌面基础Agent与基础设施优先路线](../架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md)，Agent 集群 beta 最小协作闭环是 [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](../架构设计/产品架构/ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)，普通 Agent 的子 Agent 工具能力是 [ADR-0026-子Agent工具能力架构](../架构设计/产品架构/ADR-0026-子Agent工具能力架构.md)。[ADR-0018-AgentArbor原生概念树架构](../架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md) 保留历史脉络和术语背景；被产品架构索引标记为当前决策的 ADR 可作为 ADR-0022 的下位细化，研究资料只作为背景输入。
+长期产品架构事实源是 [ADR-0028-AgentArbor统一Workbench与功能模块化单体架构](../架构设计/产品架构/ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)，工程实现以 [功能模块边界与组合根](06-工程实现/11-功能模块边界与组合根.md) 为准。ADR-0024、ADR-0025、ADR-0026、ADR-0027 分别保留 Ordinary 默认、Multi-Agent 内部闭环、Sub-Agent 工具和工具事实链契约；ADR-0022 仅保留未被取代的长期能力边界，ADR-0023 是历史 Profile 方案。
 
 ## 阅读顺序
 
@@ -18,14 +18,15 @@
 8. [工程实现](06-工程实现/README.md)
 9. [普通 Agent 主干开发指南](06-工程实现/09-普通Agent主干开发指南/README.md)
 10. [子 Agent 工具能力开发书](06-工程实现/09-普通Agent主干开发指南/11-子Agent工具能力开发书.md)
+11. [功能模块边界与组合根](06-工程实现/11-功能模块边界与组合根.md)
 
 ## 一句话定位
 
-AgentArbor 是一个桌面通用 Agent。当前默认产品体验先像成熟桌面助手一样可用：用户可以连续提问、绑定工作区上下文、授权工具、等待命令确认并获得可审阅结果；Agent 集群作为 beta 功能从 `设置 -> 关于` 启用，并在侧栏“新任务”下方显示独立入口，内部 API / 实现仍可使用 `deep` / `DeepRuntime`。Underground、Plan、Aboveground、Governance 和完整 Agent 集群仍是长期架构边界。避免过度设计指的是普通路径命名和实现语义必须朴素准确，不是删除 deep 长期方向。
+AgentArbor 是一个桌面通用 Agent Workbench。用户默认直接使用 Ordinary Agent；需要多路探索时显式选择 Multi-Agent；Ordinary 也可以把局部任务交给 Sub-Agent 工具。当前 UI 仍以 beta 侧栏按钮进入 Agent 集群，后端仍使用 `/api/deep/*` 和独立数据分区，这是待迁移的实现事实，不是目标产品结构。
 
 ## 架构原则
 
-- 用户只面对 Desktop Shell 一个默认产品入口；主界面不提供“桌面 Agent / 多 Agent”顶部切换。Agent 集群只能作为 `设置 -> 关于` 中启用的 beta 侧栏入口出现，且不把 deep、Underground 或 Aboveground 作为用户可见产品文案或第二套默认入口。
+- 用户只面对一个 Workbench；Ordinary 与 Multi-Agent 是其中两种 surface，不是两个产品。目标入口是普通输入与单次“深入协作”动作；当前 beta 侧栏入口在 UI 收口完成前诚实保留。
 - Desktop Shell 包含 Task Inbox、Workspace Context、Main Canvas、Artifact Area 和 Observation Panel。
 - Task Soil 保存当前任务目标、文件引用、项目上下文、网页材料、临时约束、权限边界和本轮运行材料。
 - Global Soil 保存长期偏好、Capability Asset、Path Bias、历史约束、失败模式和治理后的长期事实。
@@ -34,7 +35,9 @@ AgentArbor 是一个桌面通用 Agent。当前默认产品体验先像成熟桌
 - 子 Agent 是普通 Agent 的工具能力，不是独立编排流程；模型在普通会话中通过 call_sub_agent / call_sub_agents / spawn_sub_agent 自主调用，子 Agent 不能递归派生，输出是局部材料由父层模型决定如何使用（见 [ADR-0026](../架构设计/产品架构/ADR-0026-子Agent工具能力架构.md)）。
 - Underground Cognitive Runtime 负责方向智能：目标成形、多路探索、动态派生 child agent、父层综合、裁决、追问或停止；当前通过 Agent 集群 beta 模块提供一层 child 最小闭环，仍不进入默认普通路径。
 - Aboveground Execution Runtime 负责执行智能：消费已成形 Plan，进行文件修改、文档生成、原型制作、工具调用和验证；当前作为长期架构边界保留。
-- 二者共享 Shared Agent Kernel，但业务语义不同；地下允许不确定、分叉、追问和停止，地上默认方向已经由 Plan 收束。
+- Ordinary、Multi-Agent 与 Sub-Agent 只共享中性模型、工具、确认、上下文算法和系统适配；业务状态、事件、仓储和 read-model 不共享。
+- Workbench Shell 只组合导航、输入、历史和展示，不推导 feature 运行事实。
+- 项目使用唯一后端 Composition Root 装配 feature；不建设 universal Run runtime、全局业务状态或统一工作流引擎。
 - Plan 是地下到地上的产品级交接对象；`.agentarbor` 只是 Plan Package 的实现/存储形态或目录名，不再作为独立产品节点。
 - Agent Fabric 是动态派生 child agent 的执行机制，不是独立产品入口；MVP 只允许一层 child agent。
 - child/rootlet 输出默认是局部材料，必须经过父层 synthesis / convergence 才能进入 Plan。

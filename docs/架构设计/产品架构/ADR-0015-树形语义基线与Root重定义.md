@@ -2,9 +2,9 @@
 
 ## 状态
 
-已采纳为历史语义材料，当前产品事实源为 [ADR-0022](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)。本 ADR 保留为植物学语义来源材料。
+已采纳为历史语义材料，当前产品事实源为 [ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)。本 ADR 保留为植物学语义来源材料。
 
-以下正文保留历史语义原貌。进入当前开发口径时，应以 ADR-0022 的 Desktop Shell、Task Soil、Underground Cognitive Runtime、Plan、Aboveground Execution Runtime、Fruits、Governance Pipeline 和 Global Soil 为准。
+以下正文保留历史语义原貌。进入当前开发口径时，应以 ADR-0028 的单一 Workbench、功能所有权和按需长期能力原则为准；文中的完整植物链路不是每次请求必经流程。
 
 本 ADR 的树形语义由 [ADR-0018](ADR-0018-AgentArbor原生概念树架构.md) 统一为 Soil、Underground Center、`.agentarbor`、Aboveground Center、Fruits、Governance 的原生概念树；约束工程由 [ADR-0017](ADR-0017-约束工程与可执行约束模型.md) 补充。
 

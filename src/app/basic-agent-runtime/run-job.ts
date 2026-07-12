@@ -11,7 +11,7 @@ import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-at
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { RunConfigurationFailureSummary, RunSummary } from "../run-read-model/run-summary.js";
-import type { MinimalRuntime } from "../runtime.js";
+import type { BasicAgentRuntimeContext } from "./runtime-context.js";
 import { resolveRunModeForKind } from "../run-runtime-core/run-mode-policy.js";
 import type { AgentArborRunKind, AgentArborRunMode } from "../run-runtime-core/run-mode-policy.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
@@ -90,7 +90,7 @@ export type BasicAgentRunJob = Omit<BasicAgentRunProjectionInput, "confirmationD
   informationAccess: SanitizedInformationAccessConfig;
   capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   capabilityResolution?: RunCapabilityResolution;
-  runtime?: MinimalRuntime;
+  runtime?: BasicAgentRuntimeContext;
   traceId?: string;
   goalId?: string;
   completed?: BasicAgentRunCompletedPayload;

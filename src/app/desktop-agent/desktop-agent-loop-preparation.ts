@@ -13,13 +13,13 @@ import {
   createDesktopAgentTurnRuntime,
   resolveActiveModelName,
 } from "./desktop-agent-session-runtime.js";
-import type { MinimalRuntime } from "../runtime.js";
+import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import { createRunCapabilityPlan } from "../model-runtime/model-capability-registry.js";
 import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
 
 export type DesktopAgentLoopPreparationInput = {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly agentDefinition: AgentDefinition;
   readonly goal: string;
   readonly taskSoil: TaskSoil;

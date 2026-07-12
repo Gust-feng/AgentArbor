@@ -12,6 +12,7 @@ import {
   type UndergroundAiEnvironment,
   type UndergroundAiProviderFetch,
 } from "../underground-ai-runtime.js";
+import { createResearchEnabledToolCenter } from "../research/research-tool-contribution.js";
 
 export type RealAiSmokeSummary =
   | {
@@ -103,7 +104,11 @@ export async function runRealAiSmoke(
       aiEnvironment: options.env,
       providerFetch: options.providerFetch,
       createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-      createToolCenter: options.createToolCenter ?? aiConfig.createToolCenter,
+      createToolCenter: options.createToolCenter ?? ((toolRuntime) => createResearchEnabledToolCenter({
+        runtime: toolRuntime,
+        env: options.env,
+        fetch: options.providerFetch,
+      })),
       taskSoilInput: {
         contextRefs: [
           {

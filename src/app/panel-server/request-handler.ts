@@ -249,7 +249,10 @@ export async function closePanelServer(server: Server, runtime: PanelRuntime): P
   try {
     abortPanelRuntimeActiveRuns(runtime);
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
-    await waitForPanelRuntimeIdle(runtime);
+    await Promise.all([
+      waitForPanelRuntimeIdle(runtime),
+      runtime.multiAgentFeature.dispose(),
+    ]);
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
     await waitForPanelPersistenceIdle(runtime);
   } finally {

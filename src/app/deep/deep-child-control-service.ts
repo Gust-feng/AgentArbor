@@ -18,21 +18,21 @@ import {
 } from "../../domain/underground/agent-fabric.js";
 import {
   DeepChildPendingContinuationStore,
-} from "../deep/deep-child-continuations.js";
+} from "./deep-child-continuations.js";
 import {
   createDeepChildMessageRecord,
   createDeepChildMessageRef,
   summarizeDeepChildMessage,
   type DeepChildMessageInput,
   type DeepChildMessageStore,
-} from "../deep/deep-child-messages.js";
-import type { DeepChildParentMessageContext, DeepChildAgentRunResult } from "../deep/deep-child-agent-runner.js";
-import type { DeepRunStreamEvent } from "../deep/deep-events.js";
+} from "./deep-child-messages.js";
+import type { DeepChildParentMessageContext, DeepChildAgentRunResult } from "./deep-child-agent-runner.js";
+import type { DeepRunStreamEvent } from "./deep-events.js";
 import {
   fallbackLiveProjectionForRecord,
   liveParentOperationFromInstruction,
-} from "../deep/deep-read-model.js";
-import type { DeepRunRecord, DeepRunRecordStore } from "../deep/deep-runtime.js";
+} from "./deep-read-model.js";
+import type { DeepRunRecord, DeepRunRecordStore } from "./deep-runtime.js";
 import type {
   DeepChildSpec,
   DeepChildSummary,
@@ -41,7 +41,7 @@ import type {
   DeepLiveChildWorkflowItem,
   DeepLiveProjection,
   SynthesizedConclusion,
-} from "../deep/contracts.js";
+} from "./contracts.js";
 
 /** The subset of route state required to update a child-control result. */
 export type DeepChildControlUpdateState = {

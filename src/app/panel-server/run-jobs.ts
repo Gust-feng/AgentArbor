@@ -14,7 +14,7 @@ import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-c
 import type { PanelRunConfigurationFailureSummary, PanelRunSummary } from "../panel-read-model/run/panel-run-summary.js";
 import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "../panel-read-model/run/index.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
-import type { MinimalRuntime } from "../runtime.js";
+import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 import { resolveRunModeForKind } from "../run-runtime-core/run-mode-policy.js";
 import type { AgentArborRunKind, AgentArborRunMode } from "../run-runtime-core/run-mode-policy.js";
@@ -91,7 +91,7 @@ export type PanelRunJob = {
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly capabilityResolution?: RunCapabilityResolution;
-  readonly runtime?: MinimalRuntime;
+  readonly runtime?: BasicAgentRuntimeContext;
   readonly traceId?: string;
   readonly goalId?: string;
   readonly streamEvents: readonly PanelRunStreamEvent[];
@@ -158,7 +158,7 @@ export class PanelRunJobStore {
 
   attachRuntime(input: {
     readonly runId: string;
-    readonly runtime: MinimalRuntime;
+    readonly runtime: BasicAgentRuntimeContext;
     readonly traceId: string;
     readonly goalId: string;
   }): void {

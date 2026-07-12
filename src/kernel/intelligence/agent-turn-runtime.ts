@@ -115,23 +115,19 @@ export type AgentTurnRuntimeOptions = {
   readonly maintainContext?: ToolUseLoopContextMaintainer;
 };
 
+export type AgentTurnExecutionSemantics = {
+  readonly blockedToolNames: readonly string[];
+  readonly exposeNonFinalOutput: boolean;
+};
+
 export class AgentTurnRuntime {
   constructor(private readonly options: AgentTurnRuntimeOptions) {}
 
-  async executeAutonomous(input: AgentTurnRuntimeInput): Promise<AgentTurnRuntimeResult> {
-    return this.executeCore(input, {
-      blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
-      exposeNonFinalOutput: false,
-      enforceRoundLimits: true,
-    });
-  }
-
-  async execute(input: AgentTurnRuntimeInput): Promise<AgentTurnRuntimeResult> {
-    return this.executeCore(input, {
-      blockedToolNames: [],
-      exposeNonFinalOutput: true,
-      enforceRoundLimits: true,
-    });
+  async execute(
+    input: AgentTurnRuntimeInput,
+    semantics: AgentTurnExecutionSemantics,
+  ): Promise<AgentTurnRuntimeResult> {
+    return this.executeCore(input, semantics);
   }
 
   private async executeCore(input: AgentTurnRuntimeInput, semantics: AgentTurnRuntimeSemantics): Promise<AgentTurnRuntimeResult> {
@@ -150,7 +146,7 @@ export class AgentTurnRuntime {
       };
     }
 
-    if (semantics.enforceRoundLimits && policy.maxModelRounds !== undefined && policy.maxModelRounds <= 0) {
+    if (policy.maxModelRounds !== undefined && policy.maxModelRounds <= 0) {
       return {
         status: "paused",
         stoppedReason: "out_of_fuel",
@@ -172,8 +168,8 @@ export class AgentTurnRuntime {
           callerAgentId: policy.callerAgentId,
           traceId: policy.traceId,
           goalId: policy.goalId,
-          maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
-          maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
+          maxModelRounds: policy.maxModelRounds,
+          maxToolRounds: policy.maxToolRounds,
           allowedTools: policy.allowedTools,
           toolDefinitions: policy.toolDefinitions,
           blockedToolNames: semantics.blockedToolNames,
@@ -195,40 +191,18 @@ export class AgentTurnRuntime {
     }
   }
 
-  async resumeAutonomous(input: AgentTurnResumeInput): Promise<AgentTurnRuntimeResult> {
-    return this.resumeCore(input, {
-      blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
-      exposeNonFinalOutput: false,
-      enforceRoundLimits: true,
-    });
-  }
-
-  async resume(input: AgentTurnResumeInput): Promise<AgentTurnRuntimeResult> {
-    return this.resumeCore(input, {
-      blockedToolNames: [],
-      exposeNonFinalOutput: true,
-      enforceRoundLimits: true,
-    });
-  }
-
-  async resumeAutonomousWithConfirmationDecision(
-    input: AgentTurnConfirmationDecisionResumeInput
+  async resume(
+    input: AgentTurnResumeInput,
+    semantics: AgentTurnExecutionSemantics,
   ): Promise<AgentTurnRuntimeResult> {
-    return this.resumeWithConfirmationDecisionCore(input, {
-      blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
-      exposeNonFinalOutput: false,
-      enforceRoundLimits: true,
-    });
+    return this.resumeCore(input, semantics);
   }
 
   async resumeWithConfirmationDecision(
-    input: AgentTurnConfirmationDecisionResumeInput
+    input: AgentTurnConfirmationDecisionResumeInput,
+    semantics: AgentTurnExecutionSemantics,
   ): Promise<AgentTurnRuntimeResult> {
-    return this.resumeWithConfirmationDecisionCore(input, {
-      blockedToolNames: [],
-      exposeNonFinalOutput: true,
-      enforceRoundLimits: true,
-    });
+    return this.resumeWithConfirmationDecisionCore(input, semantics);
   }
 
   private async resumeCore(input: AgentTurnResumeInput, semantics: AgentTurnRuntimeSemantics): Promise<AgentTurnRuntimeResult> {
@@ -241,8 +215,8 @@ export class AgentTurnRuntime {
           callerAgentId: policy.callerAgentId,
           traceId: policy.traceId,
           goalId: policy.goalId,
-          maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
-          maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
+          maxModelRounds: policy.maxModelRounds,
+          maxToolRounds: policy.maxToolRounds,
           allowedTools: policy.allowedTools,
           toolDefinitions: policy.toolDefinitions,
           blockedToolNames: semantics.blockedToolNames,
@@ -279,8 +253,8 @@ export class AgentTurnRuntime {
           callerAgentId: policy.callerAgentId,
           traceId: policy.traceId,
           goalId: policy.goalId,
-          maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
-          maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
+          maxModelRounds: policy.maxModelRounds,
+          maxToolRounds: policy.maxToolRounds,
           allowedTools: policy.allowedTools,
           toolDefinitions: policy.toolDefinitions,
           blockedToolNames: semantics.blockedToolNames,
@@ -305,11 +279,7 @@ export class AgentTurnRuntime {
   }
 }
 
-type AgentTurnRuntimeSemantics = {
-  readonly blockedToolNames: readonly string[];
-  readonly exposeNonFinalOutput: boolean;
-  readonly enforceRoundLimits: boolean;
-};
+type AgentTurnRuntimeSemantics = AgentTurnExecutionSemantics;
 
 function createModelRequest(input: {
   readonly input: AgentTurnRuntimeInput;
@@ -497,5 +467,3 @@ const NO_TOOL_BROKER: ToolExecutionBroker = {
     };
   },
 };
-
-const ORDINARY_AGENT_INTERNAL_TOOL_NAMES = ["finish_task"];

@@ -13,6 +13,7 @@ import { nowIso } from "../../../kernel/id.js";
 import { NativeIntelligenceChannel } from "../../../kernel/intelligence/channel.js";
 import { pendingModelOutputValidation } from "../../../kernel/intelligence/validation.js";
 import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
+import { createDefaultToolCenter } from "../../tool-center/index.js";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
 import { runUndergroundDirectionSessionWithIntelligence } from "./underground-direction-session.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
@@ -194,7 +195,7 @@ async function runFakeUndergroundDirectionSession(goal: string) {
   return {
     result: await runUndergroundDirectionSessionWithIntelligence(goal, {
       createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-      createToolCenter: aiConfig.createToolCenter,
+      createToolCenter: (runtime) => createDefaultToolCenter({ runtime }),
     }),
     aiInput: aiConfig.summaryInput,
   };

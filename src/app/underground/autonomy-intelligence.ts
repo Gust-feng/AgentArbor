@@ -159,7 +159,7 @@ export async function requestUndergroundAutonomyDecision(
       enforcementGate: constraint.enforcementGate,
     })),
     requestedAt: nowIso(),
-  });
+  }, FULL_TURN_OUTPUT);
 
   if (turn.status !== "completed" || turn.finalOutput?.status !== "completed" || turn.finalOutput.validation.status !== "passed") {
     return failedAutonomyDecision({
@@ -201,6 +201,8 @@ export async function requestUndergroundAutonomyDecision(
 
   return parsed;
 }
+
+const FULL_TURN_OUTPUT = { blockedToolNames: [], exposeNonFinalOutput: true } as const;
 
 export function buildAutonomyDecisionMessages(input: RequestUndergroundAutonomyDecisionInput): readonly ModelMessage[] {
   const candidateLines = input.candidatePool.candidates.map((candidate) =>

@@ -10,7 +10,9 @@ import { friendlyUserFacingFailureText } from "../text-projection/visible-text-s
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { resolveTriggeredSkillContexts, type ResolveTriggeredSkillContextsOptions } from "./skill-service.js";
-import { createDesktopToolCenterFactory } from "./desktop-run-resources.js";
+import { createAgentToolCenterFactory } from "./agent-run-resources.js";
+import { createHostAgentToolContributions } from "./agent-tool-contributions.js";
+import { createSkillToolRegistryContribution } from "../skills/skill-resource-tool.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillResolverContext } from "../desktop-agent/desktop-agent-session-contracts.js";
 import type {
   DesktopRunResources,
@@ -48,12 +50,25 @@ export async function executeOrdinaryDesktopRunForPanel(
     );
   }
   const releaseResources = () => {
-    void resources.mcpManager?.disconnectAll?.().catch(() => undefined);
+    void resources.release();
   };
+  const createSharedToolCenter = createAgentToolCenterFactory(runtime.providerFetch, resources);
   const agent = await runDesktopAgentSession(goal, {
     aiMode,
     createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
-    createToolCenter: createDesktopToolCenterFactory(runtime.providerFetch, resources),
+    createToolCenter: (toolRuntime, context) => createSharedToolCenter(toolRuntime, {
+      taskSoil: context?.taskSoil,
+      contributions: [
+        ...createHostAgentToolContributions({
+          runtime: toolRuntime,
+          resources,
+          providerFetch: runtime.providerFetch,
+        }),
+        ...(context === undefined
+          ? []
+          : [createSkillToolRegistryContribution(context.skillContexts)]),
+      ],
+    }),
     taskSoilInput,
     agentDefinition,
     conversationHistory: options.conversationHistory,

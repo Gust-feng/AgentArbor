@@ -10,6 +10,7 @@ import type {
 } from "../../../domain/underground/index.js";
 import type { MinimalRuntime } from "../../runtime.js";
 import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
+import { createResearchEnabledToolCenter } from "../../research/research-tool-contribution.js";
 import { recoverUndergroundDirectionSession } from "../compat/underground-direction-recovery.js";
 import {
   runUndergroundDirectionSessionWithIntelligence,
@@ -136,7 +137,7 @@ async function runFakeClarificationSession(goal: string): Promise<UndergroundDir
   }
   return runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-    createToolCenter: aiConfig.createToolCenter,
+    createToolCenter: (runtime) => createResearchEnabledToolCenter({ runtime }),
   });
 }
 

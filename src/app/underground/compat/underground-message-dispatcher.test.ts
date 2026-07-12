@@ -11,6 +11,7 @@ import type { IntelligenceChannel } from "../../../domain/intelligence/index.js"
 import { createMessage } from "../../../kernel/messages/create-message.js";
 import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
 import { createMinimalRuntime } from "../../runtime.js";
+import { createDefaultToolCenter } from "../../tool-center/index.js";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
 import {
   MessageDrivenUndergroundDispatcher,
@@ -36,7 +37,7 @@ test("dispatcher processes repeated goal messages once for a trace with fake AI"
   const dispatcher = new MessageDrivenUndergroundDispatcher({
     runtime,
     intelligenceChannel: aiConfig.createIntelligenceChannel(runtime),
-    toolCenter: aiConfig.createToolCenter(runtime),
+    toolCenter: createDefaultToolCenter({ runtime }),
   });
   try {
     const goalMessage = createGoalReceivedMessage({

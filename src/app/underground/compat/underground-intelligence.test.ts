@@ -12,7 +12,7 @@ import { nowIso } from "../../../kernel/id.js";
 import { NativeIntelligenceChannel } from "../../../kernel/intelligence/channel.js";
 import { createFailedModelResponse } from "../../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../../kernel/intelligence/validation.js";
-import { createDefaultToolCenter } from "../../model-runtime/index.js";
+import { createResearchEnabledToolCenter } from "../../research/research-tool-contribution.js";
 import type { FetchLike } from "../../tool-center/index.js";
 import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
 import { createUndergroundDemoSummary } from "./underground-demo-summary.js";
@@ -270,7 +270,7 @@ test("Rootlet AI can call unified search through ToolCenter before producing can
         bus: runtime.bus,
       }),
     createToolCenter: (runtime) =>
-      createDefaultToolCenter({
+      createResearchEnabledToolCenter({
         runtime,
         env: { AGENTARBOR_TAVILY_API_KEY: "tvly-test-secret" },
         fetch,
@@ -352,7 +352,7 @@ test("Rootlet AI can call unified search then read before producing candidate ou
         bus: runtime.bus,
       }),
     createToolCenter: (runtime) =>
-      createDefaultToolCenter({
+      createResearchEnabledToolCenter({
         runtime,
         env: { AGENTARBOR_TAVILY_API_KEY: "tvly-test-secret" },
         fetch,

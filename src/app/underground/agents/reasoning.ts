@@ -127,7 +127,7 @@ export async function reasonWithAgentTurn<T>(input: {
       enforcementGate: constraint.enforcementGate,
     })),
     requestedAt: nowIso(),
-  });
+  }, FULL_TURN_OUTPUT);
 
   if (turn.status !== "completed" || turn.finalOutput?.status !== "completed" || turn.finalOutput.validation.status !== "passed") {
     return failedReasoning({
@@ -186,6 +186,8 @@ export async function reasonWithAgentTurn<T>(input: {
     finalOutput: turn.finalOutput,
   };
 }
+
+const FULL_TURN_OUTPUT = { blockedToolNames: [], exposeNonFinalOutput: true } as const;
 
 export function fallbackReasoningTrace(input: {
   readonly agentId: string;

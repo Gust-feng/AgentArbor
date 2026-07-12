@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { resetIdsForTests } from "../../kernel/id.js";
-import { createMinimalRuntime } from "../runtime.js";
+import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../../domain/soil/index.js";
 import { TaskSoilInputValidationError } from "../task-soil-workspace.js";
 import {
   createDeepConversationService,
@@ -23,9 +23,11 @@ import type { DeepConversation } from "./contracts.js";
 // ---------------------------------------------------------------------------
 
 function makeService(store: DeepConversationStore) {
+  const soilStore = createMinimalReadonlySoilStore(createMinimalSoilConstraints());
   return createDeepConversationService({
     store,
-    runtime: createMinimalRuntime(),
+    constraints: soilStore.listConstraints(),
+    soilStore,
     aiMode: "fake",
   });
 }

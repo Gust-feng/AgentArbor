@@ -36,7 +36,7 @@ import { throwIfAborted } from "./request-parsers.js";
 import { canvasTraceId } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
 import { executeOrdinaryDesktopRunForPanel } from "./desktop-agent-execution.js";
-import { prepareDesktopRunResources } from "./desktop-run-resources.js";
+import { prepareOrdinaryAgentRunResources } from "./desktop-run-resources.js";
 import { runUndergroundForPanel } from "./underground-compat-execution.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import { runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
@@ -224,7 +224,7 @@ async function runDesktopForPanel(
   options: PanelRunExecutionOptions
 ): Promise<PanelRunExecutionResult> {
   throwIfAborted(options.abortSignal);
-  const resources = await prepareDesktopRunResources(runtime, aiMode, options);
+  const resources = await prepareOrdinaryAgentRunResources(runtime, aiMode, options);
   return executeOrdinaryDesktopRunForPanel({
     runtime,
     goal,

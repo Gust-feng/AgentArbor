@@ -33,8 +33,8 @@ import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
-import type { ModelRuntimeMode } from "../model-runtime/index.js";
-import type { MinimalRuntime } from "../runtime.js";
+import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
+import type { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import type {
@@ -153,12 +153,11 @@ export function buildDeepManagerSpec(createdAt: string): AgentSpec {
 // ---------------------------------------------------------------------------
 
 /**
- * DeepRuntime 配置。turnRuntime + runtime（事件 bus）+ store（持久化端口）+ executor 可选项。
- * runtime.bus 用于发布事件序列；store 用于持久化 deep 产物到隔离分区。
+ * DeepRuntime 配置。turnRuntime + bus + store（持久化端口）+ executor 可选项。
  */
 export type DeepRuntimeConfig = {
   readonly turnRuntime: AgentTurnRuntime;
-  readonly runtime: MinimalRuntime;
+  readonly bus: InMemoryMessageBus;
   readonly store: DeepRunRecordStore;
   readonly stepLimit?: number;
   readonly maxChildren?: number;
@@ -292,7 +291,7 @@ export async function executeDeepRun(
 
   // 创建 deep 事件发布器（EP2/EP3）：发布 deep.* 到 bus + 累积安全投影 eventSequence。
   const publisher = createDeepEventPublisher({
-    runtime: config.runtime,
+    bus: config.bus,
     traceId: input.traceId,
     runId: run.runId,
   });

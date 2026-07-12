@@ -18,7 +18,7 @@ export type DeepRunRuntimeHealthView = {
 };
 
 type DeepRunHealthState = {
-  readonly activeRunIds: ReadonlySet<string>;
+  readonly isRunActive: (runId: string) => boolean;
 };
 
 export function projectDeepRunSummaryWithHealth(
@@ -106,10 +106,13 @@ export function deepRunRuntimeHealth(
   record: DeepRunRecord,
   nowMs = Date.now(),
 ): DeepRunRuntimeHealthView {
+  const activeRunIds = state.isRunActive(record.run.runId)
+    ? new Set([record.run.runId])
+    : new Set<string>();
   return deriveDeepRunRuntimeHealth({
     status: record.run.status,
     runId: record.run.runId,
-    activeRunIds: state.activeRunIds,
+    activeRunIds,
     lastActivityAt: latestDeepRunActivityAt(record),
     nowMs,
     staleAfterMs: DEEP_RUN_STALE_AFTER_MS,

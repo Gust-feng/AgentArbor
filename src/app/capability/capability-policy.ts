@@ -1,4 +1,10 @@
-import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import type { AgentToolVisibilityProfile } from "../agent-prompts/contracts.js";
+
+export type CapabilityAgentProfile = {
+  readonly agentId: string;
+  readonly displayName: string;
+  readonly toolVisibilityProfile: AgentToolVisibilityProfile;
+};
 import {
   BasicAgentCapabilitySnapshot,
   CapabilityDraft,
@@ -17,7 +23,7 @@ import { createRunCapabilityPlan } from "../model-runtime/model-capability-regis
 export type ResolveRunCapabilitiesInput = {
   readonly snapshot: BasicAgentCapabilitySnapshot;
   readonly goal: string;
-  readonly agentDefinition: AgentDefinition;
+  readonly agentDefinition: CapabilityAgentProfile;
   readonly taskSoil?: TaskSoil;
   readonly platform?: NodeJS.Platform;
   readonly capabilityPlan?: RunCapabilityPlan;

@@ -14,7 +14,7 @@ import type {
 } from "../../domain/tools/contracts.js";
 import type { SubAgentRunTraceReader, SubAgentRunTraceSink } from "../../domain/sub-agents/contracts.js";
 import { createId, nowIso } from "../../kernel/id.js";
-import type { ToolRegistry, ToolRegistryScope } from "../basic-agent-runtime/tool-registry.js";
+import type { ToolRegistry, ToolRegistryScope } from "../tool-center/tool-registry.js";
 import {
   createSubAgentBatchCompletedMessage,
   createSubAgentBatchStartedMessage,
@@ -968,6 +968,24 @@ export function getSubAgentToolDefinitions(
   }
 
   return definitions;
+}
+
+export function registerSubAgentToolCatalog(
+  registry: ToolRegistry,
+  scopes: readonly ToolRegistryScope[] = ["desktop-basic"],
+): void {
+  for (const definition of getSubAgentToolDefinitions({ includeSpawnTool: true })) {
+    registry.register({
+      executor: {
+        definition,
+        execute: async () => {
+          throw new Error("Sub-agent tools require feature runtime dependencies before execution.");
+        },
+      },
+      scopes,
+      enabledByDefault: true,
+    });
+  }
 }
 
 function createCallSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): ToolExecutor {

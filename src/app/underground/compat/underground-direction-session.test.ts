@@ -14,6 +14,7 @@ import {
   InMemoryDirectionHandoffPackageStore,
 } from "../../../domain/agentarbor/direction-handoff-package.js";
 import { createUndergroundAiRuntimeConfig } from "../../underground-ai-runtime.js";
+import { createDefaultToolCenter } from "../../tool-center/index.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import {
   runUndergroundDirectionSession,
@@ -278,7 +279,7 @@ async function runFakeUndergroundDirectionSession(
   return runUndergroundDirectionSessionWithIntelligence(goal, {
     ...options,
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-    createToolCenter: aiConfig.createToolCenter,
+    createToolCenter: (runtime) => createDefaultToolCenter({ runtime }),
   });
 }
 

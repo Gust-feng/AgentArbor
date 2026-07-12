@@ -4,6 +4,7 @@ export * from "./skill-eval-artifact.js";
 export * from "./skill-installer.js";
 export * from "./skill-quality-eval.js";
 export * from "./skill-resource-resolver.js";
+export * from "./skill-resource-tool.js";
 export * from "./skill-routing-eval.js";
 export * from "./skill-router.js";
 export * from "./skill-state-store.js";

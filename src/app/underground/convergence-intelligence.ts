@@ -123,7 +123,7 @@ export async function requestConvergenceAiAdvisory(
         enforcementGate: constraint.enforcementGate,
       })),
       requestedAt: nowIso(),
-    });
+    }, FULL_TURN_OUTPUT);
 
     const response = turn.finalOutput;
     if (response === undefined || response.status !== "completed" || response.validation.status !== "passed") {
@@ -143,6 +143,8 @@ export async function requestConvergenceAiAdvisory(
     return failedAdvisory(advisoryId);
   }
 }
+
+const FULL_TURN_OUTPUT = { blockedToolNames: [], exposeNonFinalOutput: true } as const;
 
 function buildConvergenceAdvisoryMessages(
   input: RequestConvergenceAiAdvisoryInput

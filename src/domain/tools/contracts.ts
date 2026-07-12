@@ -1,4 +1,4 @@
-import type { ConfirmationRequest } from "../basic-agent/confirmation-contracts.js";
+import type { ConfirmationRequest } from "../confirmation/contracts.js";
 import type { ModelInputAttachment } from "../intelligence/model-input-attachments.js";
 
 export type ToolInputSchema = {

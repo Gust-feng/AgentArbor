@@ -43,6 +43,7 @@ import type { ModelOutputDelta } from "../../../domain/intelligence/index.js";
 import type { ToolExecutionBroker } from "../../../domain/tools/index.js";
 import type { UndergroundDirectionSessionRuntimeContext } from "../compat/underground-direction-session.js";
 import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "../../task-soil/task-soil-workspace.js";
+import { createResearchEnabledToolCenter } from "../../research/research-tool-contribution.js";
 
 export const EXPECTED_DEMO_EVENTS: ArborMessageType[] = [
   "goal.received",
@@ -115,7 +116,11 @@ export async function runMinimalLoop(
   const underground = await runUndergroundDirectionSessionWithIntelligence(goal, {
     constraints: options.constraints,
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-    createToolCenter: options.createToolCenter ?? aiConfig.createToolCenter,
+    createToolCenter: options.createToolCenter ?? ((runtime) => createResearchEnabledToolCenter({
+      runtime,
+      env: options.aiEnvironment,
+      fetch: options.providerFetch,
+    })),
     onRuntimeReady: options.onRuntimeReady,
   });
   const runtime = underground.runtime;

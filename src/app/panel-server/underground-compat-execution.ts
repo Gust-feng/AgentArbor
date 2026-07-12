@@ -1,9 +1,9 @@
 import {
-  createConfiguredToolCenterFactory,
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
+import { createConfiguredResearchToolCenterFactory } from "../research/research-tool-contribution.js";
 import { createUndergroundDeepCanvas } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import { createPanelRunTranscript, toPanelObservation } from "../panel-run-read-model.js";
 import {
@@ -139,7 +139,7 @@ export async function runUndergroundForPanel(
   }
 
   const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig()).workspaceDirectory;
-  const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
+  const createToolCenter = await createConfiguredResearchToolCenterFactory(runtime.configCenter, {
     fetch: runtime.providerFetch,
     workspaceRoot,
   });

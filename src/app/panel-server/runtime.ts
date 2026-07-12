@@ -14,6 +14,11 @@ import { runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
 import { desktopAgentDefinitionFromConfig } from "../agent-prompts/desktop-agent-configured-definition.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
+  createMultiAgentFeature,
+  MULTI_AGENT_CAPABILITY_PROFILE,
+  type MultiAgentFeature,
+} from "../deep/multi-agent-feature.js";
+import {
   createAppUpdateService,
   createUnsupportedAppUpdateService,
   type AppUpdateServiceLike,
@@ -57,6 +62,7 @@ import { createPanelRunJobResponse } from "./run-job-response.js";
 import { projectPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 import { desktopCapabilitySnapshotForRunStart } from "./desktop-run-model-settings.js";
 import { PanelHttpError } from "./http-utils.js";
+import { createMultiAgentRunResourceAcquirer } from "./multi-agent-run-resources.js";
 
 export type PanelRuntime = {
   readonly configCenter: ConfigCenter;
@@ -84,6 +90,7 @@ export type PanelRuntime = {
   readonly subAgentRoots: readonly SubAgentRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
+  readonly multiAgentFeature: MultiAgentFeature;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
 
@@ -199,6 +206,29 @@ function assemblePanelRuntime(input: {
     resolveSubAgentRoots: input.resolveSubAgentRoots,
     fetch: input.providerFetch,
   });
+  const multiAgentFeature = createMultiAgentFeature({
+    runtimeHome: input.runtimePaths?.runtimeHome,
+    acquireRunResources: createMultiAgentRunResourceAcquirer({
+      host: {
+        configCenter: input.configCenter,
+        providerFetch: input.providerFetch,
+        processRegistry,
+      },
+      agentDefinition: MULTI_AGENT_CAPABILITY_PROFILE,
+    }),
+    resolveRunStartFacts: async ({ workspaceDirectory }) => {
+      const [capabilitySnapshot, informationAccess, toolConfirmation] = await Promise.all([
+        capabilityCenter.snapshot(workspaceDirectory === undefined ? {} : { workspaceDirectory }),
+        input.configCenter.getInformationAccessConfig(),
+        input.configCenter.getToolConfirmationConfig(),
+      ]);
+      return {
+        capabilitySnapshot,
+        informationAccess,
+        confirmationPolicy: toolConfirmation.policy,
+      };
+    },
+  });
   const runtime: Omit<PanelRuntime, "runExecutor"> & { runExecutor?: BasicAgentRunExecutor } = {
     configCenter: input.configCenter,
     capabilityCenter,
@@ -225,6 +255,7 @@ function assemblePanelRuntime(input: {
     resolveSubAgentRoots: input.resolveSubAgentRoots,
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
+    multiAgentFeature,
   };
   runtime.runExecutor = new BasicAgentRunExecutor({
     prepareRunStart: (startInput) => preparePanelBasicRunStart(runtime as PanelRuntime, startInput),

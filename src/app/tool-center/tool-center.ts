@@ -12,12 +12,11 @@ import type {
   ToolSecurityDecision,
 } from "../../domain/tools/index.js";
 import { isToolErrorDomain, normalizeToolErrorFacts, normalizeToolErrorFactValue, toolDisplayName } from "../../domain/tools/index.js";
-import type { ConfirmationRequest } from "../../domain/basic-agent/index.js";
+import type { ConfirmationRequest } from "../../domain/confirmation/contracts.js";
 import {
   confirmationRequestFromSecurityDecision,
   evaluateToolCallSecurity,
 } from "../../kernel/tools/index.js";
-import { redactOrdinaryText } from "../safe-projection.js";
 
 export type ToolCenterOptions = {
   readonly platform?: NodeJS.Platform;
@@ -302,7 +301,7 @@ function sanitizeError(error: unknown, toolName: string): SanitizedToolError {
   const message = error instanceof Error ? error.message : "Tool execution failed.";
   const facts = toolErrorFactsFromUnknown(error);
   return {
-    message: redactOrdinaryText(message, 500),
+    message: compactToolErrorText(message, 500),
     errorDomain: toolErrorDomainFromUnknown(error) ?? defaultToolErrorDomain(toolName, facts),
     facts,
   };
@@ -333,7 +332,7 @@ function toolErrorDomainFromUnknown(value: unknown): ToolErrorDomain | undefined
 
 function toolErrorFactsFromUnknown(value: unknown): ToolErrorFacts | undefined {
   const record = asRecord(value);
-  const compactString = (text: string) => redactOrdinaryText(text, 500);
+  const compactString = (text: string) => compactToolErrorText(text, 500);
   const facts = normalizeToolErrorFacts(record.facts, { compactString });
   const code = normalizeToolErrorFactValue(record.code, { compactString });
   const name = typeof record.name === "string" && record.name.length > 0 ? record.name : undefined;
@@ -352,4 +351,11 @@ function toolErrorFactsFromUnknown(value: unknown): ToolErrorFacts | undefined {
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null ? value as Readonly<Record<string, unknown>> : {};
+}
+
+function compactToolErrorText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\r\n?/g, "\n").trim();
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }

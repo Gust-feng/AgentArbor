@@ -33,6 +33,12 @@ import {
   type DeepChildAgentRunResult,
   type DeepChildParentMessageContext,
 } from "./deep-child-run-contracts.js";
+
+const CHILD_AGENT_TURN_SEMANTICS = {
+  blockedToolNames: [],
+  exposeNonFinalOutput: false,
+} as const;
+
 export {
   DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID,
   DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
@@ -146,7 +152,7 @@ async function executeDeepChildAgentLoop(input: DeepChildAgentRunInput & {
     id: input.childRun.childRunId,
     label: `deep_child:${childSpec.role}`,
   };
-  const turn = await input.turnRuntime.executeAutonomous({
+  const turn = await input.turnRuntime.execute({
     policy: {
       allowModel: true,
       allowedTools: childSpec.allowedTools,
@@ -173,7 +179,7 @@ async function executeDeepChildAgentLoop(input: DeepChildAgentRunInput & {
     toolChoice: "auto",
     requestedAt: nowIso(),
     abortSignal: input.abortSignal,
-  });
+  }, CHILD_AGENT_TURN_SEMANTICS);
   const continuationContextRef = await persistContinuationContext(input, turn);
   return finalizeDeepChildTurn({
     childRun: input.activeRun,
@@ -212,12 +218,12 @@ export async function resumeDeepChildAgent(input: DeepChildAgentResumeInput): Pr
   const resumedRun = resumeChildAgentRun(input.childRun, nowIso());
   const confirmationId = input.pendingApproval.confirmationId;
   const turn = input.decision.decision === "approve_once"
-    ? await input.turnRuntime.resumeAutonomous({
+    ? await input.turnRuntime.resume({
         pendingApproval: input.pendingApproval,
         approvedConfirmationIds: [confirmationId],
         abortSignal: input.abortSignal,
-      })
-    : await input.turnRuntime.resumeAutonomousWithConfirmationDecision({
+      }, CHILD_AGENT_TURN_SEMANTICS)
+    : await input.turnRuntime.resumeWithConfirmationDecision({
         pendingApproval: input.pendingApproval,
         decision: {
           confirmationId,
@@ -225,7 +231,7 @@ export async function resumeDeepChildAgent(input: DeepChildAgentResumeInput): Pr
           guidance: input.decision.guidance,
         },
         abortSignal: input.abortSignal,
-      });
+      }, CHILD_AGENT_TURN_SEMANTICS);
   const continuationContextRef = await persistContinuationContext({
     runId: input.runId,
     childRun: input.childRun,

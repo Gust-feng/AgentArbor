@@ -11,9 +11,12 @@ import {
   WorkspaceDirectoryValidationError,
 } from "../config-center.js";
 import {
-  createDesktopBasicToolRegistry,
+  applyAgentToolRegistryContributions,
+  createAgentToolRegistry,
+  ToolRegistry,
   type ToolCatalogSnapshot,
-} from "../basic-agent-runtime/index.js";
+} from "../tool-center/index.js";
+import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import {
   parseConfigUpdate,
@@ -947,13 +950,24 @@ async function createPanelToolCatalog(runtime: PanelConfigRouteRuntime): Promise
   const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig().catch(() => undefined))?.workspaceDirectory;
   const toolStates = await runtime.configCenter.listToolStates();
   const commandShell = await runtime.configCenter.getCommandShellConfig();
-  return createDesktopBasicToolRegistry({
+  const toolRegistryOptions = {
     env,
     fetch: runtime.providerFetch,
     workspaceRoot,
     toolStates,
     commandShell,
-  }).catalog("desktop-basic");
+    baseToolScopes: ["desktop-basic"],
+  };
+  const registry = new ToolRegistry();
+  applyAgentToolRegistryContributions(registry, { toolStates }, [
+    createResearchToolRegistryContribution({
+      env,
+      fetch: runtime.providerFetch,
+      workspaceRoot,
+    }),
+  ]);
+  createAgentToolRegistry(toolRegistryOptions, registry);
+  return registry.catalog("desktop-basic");
 }
 
 function configCenterHttpError(error: unknown): PanelHttpError {

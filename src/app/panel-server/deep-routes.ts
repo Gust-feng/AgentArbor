@@ -22,8 +22,8 @@
  *     复用 desktop-run-resources 冻结模型环境、ToolCenter、MCP 与命令 shell 能力后构造
  *     IntelligenceChannel → AgentTurnRuntime → executeDeepRun；child 与普通桌面 Agent 共用
  *     标准模型-工具-模型循环和确认门，不绑定临时 provider 私有字段。
- *   - **EP4（controlHandle 注册表）**：`Map<runId, DeepRunControlHandle>` 持有每个在途 run 的
- *     handle；interrupt / correct / stop 端点经此转发到运行侧（T2-7 control point）。
+ *   - **EP4（controlHandle 注册表）**：MultiAgentFeature 持有每个在途 run 的控制句柄；
+ *     interrupt / correct / stop 端点经其显式查询契约转发到运行侧（T2-7 control point）。
  *   - **隔离边界**：deep 端点与普通 `/api/conversations` / `/api/basic-agent/*` 物理隔离；
  *     内部映射 `runKind="underground"` / `runMode="deep"`，复用 run-mode-policy 门控口径。
  *     默认入口仍普通 agent，deep 仅显式触发，不存在自动升级。
@@ -34,24 +34,15 @@
  * 不引入 Plan / artifact / Fruits。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createId, nowIso } from "../../kernel/id.js";
-import type { MinimalRuntime } from "../runtime.js";
-import { createMinimalRuntime } from "../runtime.js";
+import { nowIso } from "../../kernel/id.js";
 // 模型运行时统一入口：ModelRuntimeConfigurationError 经 model-runtime/index.ts
 // re-export，禁止 app 层直接 import intelligence-channel-factory（panel-runtime-structure 命名中性约束）。
 import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
 import {
-  createDesktopToolCenterFactory,
-  prepareDesktopRunResources,
-} from "./desktop-run-resources.js";
-import {
-  resolveRunModeForKind,
-  assertRunModeForKind,
   type AgentArborRunKind,
   type AgentArborRunMode,
 } from "../run-runtime-core/run-mode-policy.js";
 import {
-  createTaskSoilFromDesktopInput,
   parseDesktopTaskSoilInput,
   type DesktopTaskSoilInput,
 } from "../task-soil-workspace.js";
@@ -66,89 +57,32 @@ import { serveRunEventSse } from "./run-event-sse.js";
 import { projectConversationRunEnvelopeViewBase } from "../run-read-model/envelope.js";
 import type { PanelRuntime } from "./runtime.js";
 import {
-  InMemoryDeepConversationStore,
-  createFileSystemDeepConversationStore,
-  createDeepConversationService,
-  type DeepConversationStore,
-} from "../deep/deep-conversation.js";
-import {
-  executeDeepRun,
-  buildDeepManagerSpec,
-  InMemoryDeepRunRecordStore,
-  createFileSystemDeepRunRecordStore,
-  type DeepRuntimeConfig,
   type DeepRunRecord,
-  type DeepRunRecordStore,
-  type StartDeepRuntimeInput,
 } from "../deep/deep-runtime.js";
-import {
-  appendDeepRunFollowUpTurn,
-  createDeepRunFollowUpTurn,
-} from "../deep/deep-follow-up-turns.js";
 import type {
-  DeepChildInstructionQueueHandle,
   DeepChildInstructionQueueResult,
 } from "../deep/deep-child-scheduler-contracts.js";
 import {
-  createDeepRunControlHandle,
-  DEEP_MANAGER_MAX_MODEL_ROUNDS,
-  DEEP_MANAGER_MAX_TOOL_ROUNDS,
-  type DeepRunControlHandle,
-} from "../deep/deep-run-executor.js";
-import { createDeepTurnRuntime, executeDeepTurn } from "../deep/deep-turn.js";
-import { synthesizeDeepConclusion } from "../deep/parent-synthesis.js";
-import {
-  deepIntakeMessages,
-  deepIntakeOutputContract,
-  extractStructuredOutput,
-  parseDeepIntake,
-} from "../deep/deep-model-io.js";
-import { DeepChildPendingContinuationStore } from "../deep/deep-child-continuations.js";
-import {
-  continueDeepChildAgent,
-  resumeDeepChildAgent,
-  type DeepChildParentMessageContext,
   type DeepChildConfirmationDecision,
-  type DeepChildAgentRunResult,
 } from "../deep/deep-child-agent-runner.js";
 import {
-  InMemoryDeepChildMessageStore,
-  createFileSystemDeepChildMessageStore,
-  type DeepChildMessageStore,
-} from "../deep/deep-child-messages.js";
-import {
-  InMemoryDeepChildLoopContextStore,
-  createFileSystemDeepChildLoopContextStore,
-  type DeepChildLoopContextStore,
-} from "../deep/deep-child-loop-contexts.js";
+  MultiAgentFeatureError,
+  type MultiAgentFeature,
+} from "../deep/multi-agent-feature.js";
 import {
   buildDeepFollowUpContext,
-  fallbackLiveProjectionForRecord,
   latestDeepRunRecordsByRoot,
   projectDeepConversation,
   projectDeepRunView,
-  summarizeTaskSoilInputForIntake,
-  summarizeTerminalDeepRunForIntake,
   workspaceDirectoryFromDeepRunRecord,
 } from "../deep/deep-read-model.js";
 import {
-  DEEP_RUN_KIND,
-  DEEP_RUN_MODE,
   type DeepConversation,
   type DeepFollowUpContext,
   type DeepIntakeContext,
   type DeepIntakeTurn,
-  type DeepRunStatus,
-  type SynthesizedConclusion,
 } from "../deep/contracts.js";
 import type { DeepRunStreamEvent } from "../deep/deep-events.js";
-import {
-  createAgentRunTree,
-  recordChildAgentRunParentInstruction,
-  type ChildAgentRun,
-  type ParentSynthesisResult,
-} from "../../domain/underground/agent-fabric.js";
-import type { ObservationRef } from "../../domain/observation/contracts.js";
 import {
   parseConfirmationDecision,
   parseConversationPinInput,
@@ -161,112 +95,9 @@ import {
   projectDeepConversationSummaryWithHealth,
   projectDeepRunSummaryWithHealth,
 } from "./deep-run-health.js";
-import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
-import {
-  applyDeepChildOperationResult,
-  applyDeepResynthesisResult,
-  buildDeepResynthesisInputRefs,
-  collectDeepChildEvidenceRefs,
-  deepChildParentInstructionMessageRef,
-  loadDeepChildParentMessageContext,
-  recordDeepChildMessage,
-  recordDeepChildMessageForResult,
-  resolveDeepChildOperationTarget,
-  summarizeDeepChildParentInstruction,
-} from "./deep-child-control-service.js";
 
 export { deriveDeepRunRuntimeHealth } from "./deep-run-health.js";
 export type { DeepRunRuntimeHealthView } from "./deep-run-health.js";
-
-// ---------------------------------------------------------------------------
-// 路由状态（EP4 注册表 + 隔离 store + 后台 run 追踪）
-// ---------------------------------------------------------------------------
-
-/**
- * 每个 PanelRuntime 绑定一份 deep 路由状态。controlHandles 是 EP4 注册表；
- * conversationStore / runRecordStore 是 deep 隔离分区（内存态，C-1 口径）；
- * activeRuns 追踪后台执行中的 deep run，便于服务器优雅退出与错误归因；
- * minimalRuntime 是 deep 模块自有的 MinimalRuntime（事件 bus + soil/constraints），
- * 因 PanelRuntime 不暴露 bus / soilStore / constraints（survey 结论 C.3）。
- */
-type DeepRouteState = {
-  readonly minimalRuntime: MinimalRuntime;
-  readonly conversationStore: DeepConversationStore;
-  readonly runRecordStore: DeepRunRecordStore;
-  readonly childMessageStore: DeepChildMessageStore;
-  readonly childLoopContextStore: DeepChildLoopContextStore;
-  readonly controlHandles: Map<string, DeepRunControlHandle>;
-  readonly childContinuations: DeepChildPendingContinuationStore;
-  readonly childInstructionQueues: DeepChildInstructionQueueStore;
-  readonly runFacts: Map<string, DeepRouteRunFacts>;
-  readonly activeRunConversationIds: Map<string, string>;
-  readonly activeRunIds: Set<string>;
-  readonly activeRuns: Set<Promise<void>>;
-};
-
-type DeepRouteRunFacts = {
-  readonly aiMode: ModelRuntimeMode;
-  readonly informationAccess: Awaited<ReturnType<PanelRuntime["configCenter"]["getInformationAccessConfig"]>>;
-  readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-  readonly permissionBoundaryRefs: readonly string[];
-  readonly confirmationPolicy: NonNullable<StartDeepRuntimeInput["confirmationPolicy"]>;
-};
-
-/** PanelRuntime → DeepRouteState 绑定。WeakMap 使状态随 runtime 回收，避免跨实例泄漏。 */
-const deepRouteStates = new WeakMap<PanelRuntime, DeepRouteState>();
-
-/** 取或创建 PanelRuntime 绑定的 deep 路由状态（幂等，首次访问时惰性装配）。 */
-function getDeepRouteState(runtime: PanelRuntime): DeepRouteState {
-  let state = deepRouteStates.get(runtime);
-  if (state !== undefined) {
-    return state;
-  }
-  state = {
-    minimalRuntime: createMinimalRuntime(),
-    conversationStore: createDeepConversationStoreForRuntime(runtime),
-    runRecordStore: createDeepRunRecordStoreForRuntime(runtime),
-    childMessageStore: createDeepChildMessageStoreForRuntime(runtime),
-    childLoopContextStore: createDeepChildLoopContextStoreForRuntime(runtime),
-    controlHandles: new Map(),
-    childContinuations: new DeepChildPendingContinuationStore(),
-    childInstructionQueues: new DeepChildInstructionQueueStore(),
-    runFacts: new Map(),
-    activeRunConversationIds: new Map(),
-    activeRunIds: new Set(),
-    activeRuns: new Set(),
-  };
-  deepRouteStates.set(runtime, state);
-  return state;
-}
-
-function createDeepConversationStoreForRuntime(runtime: PanelRuntime): DeepConversationStore {
-  const runtimeHome = runtime.runtimePaths?.runtimeHome;
-  return runtimeHome === undefined
-    ? new InMemoryDeepConversationStore()
-    : createFileSystemDeepConversationStore(runtimeHome);
-}
-
-function createDeepRunRecordStoreForRuntime(runtime: PanelRuntime): DeepRunRecordStore {
-  const runtimeHome = runtime.runtimePaths?.runtimeHome;
-  return runtimeHome === undefined
-    ? new InMemoryDeepRunRecordStore()
-    : createFileSystemDeepRunRecordStore(runtimeHome);
-}
-
-function createDeepChildMessageStoreForRuntime(runtime: PanelRuntime): DeepChildMessageStore {
-  const runtimeHome = runtime.runtimePaths?.runtimeHome;
-  return runtimeHome === undefined
-    ? new InMemoryDeepChildMessageStore()
-    : createFileSystemDeepChildMessageStore(runtimeHome);
-}
-
-function createDeepChildLoopContextStoreForRuntime(runtime: PanelRuntime): DeepChildLoopContextStore {
-  const runtimeHome = runtime.runtimePaths?.runtimeHome;
-  return runtimeHome === undefined
-    ? new InMemoryDeepChildLoopContextStore()
-    : createFileSystemDeepChildLoopContextStore(runtimeHome);
-}
 
 // ---------------------------------------------------------------------------
 // 分发入口
@@ -285,9 +116,9 @@ export async function handlePanelDeepRoute(
   if (!url.pathname.startsWith("/api/deep/")) {
     return false;
   }
-  const state = getDeepRouteState(runtime);
+  const feature = runtime.multiAgentFeature;
   try {
-    return await dispatchDeepRoute(runtime, state, request, response, url);
+    return await dispatchDeepRoute(runtime, feature, request, response, url);
   } catch (error) {
     if (error instanceof PanelHttpError) {
       writePanelError(response, error);
@@ -304,7 +135,7 @@ export async function handlePanelDeepRoute(
 /** 按 pathname + method 分流到各子端点。返回 true 表示已处理。 */
 async function dispatchDeepRoute(
   runtime: PanelRuntime,
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
@@ -453,7 +284,7 @@ async function dispatchDeepRoute(
 
 async function handleDeepIntake(
   runtime: PanelRuntime,
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
@@ -474,9 +305,7 @@ async function handleDeepIntake(
   }
 
   const activeRunId = optionalStringField(record.activeRunId);
-  const previousRun = activeRunId === undefined
-    ? undefined
-    : await state.runRecordStore.get(activeRunId);
+  const previousRun = activeRunId === undefined ? undefined : await state.getRun(activeRunId);
   if (activeRunId !== undefined && previousRun === undefined) {
     throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行。");
   }
@@ -515,7 +344,7 @@ async function handleDeepIntake(
     terminalRun: previousRun,
   });
 
-  const conversationWithTurn = await state.conversationStore.upsert(
+  const conversationWithTurn = await state.saveConversation(
     appendDeepIntakeTurn(
       mergeDeepConversationTaskSoil(conversation, taskSoilInput),
       intake,
@@ -550,7 +379,7 @@ async function handleDeepIntake(
       "入口理解已要求协作，但缺少标准化目标。",
     );
   }
-  const collaborationConversation: DeepConversation = await state.conversationStore.upsert({
+  const collaborationConversation: DeepConversation = await state.saveConversation({
     ...conversationWithTurn,
     currentObjective: normalizedObjective,
     updatedAt: nowIso(),
@@ -569,7 +398,7 @@ async function handleDeepIntake(
 // ---------------------------------------------------------------------------
 
 async function handleCreateDeepConversation(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runtime: PanelRuntime,
   request: IncomingMessage,
   response: ServerResponse,
@@ -581,13 +410,8 @@ async function handleCreateDeepConversation(
     throw new PanelHttpError(400, "empty_goal", "多 Agent 需要非空目标。");
   }
   const aiMode = await resolveDeepAiMode(runtime, record.aiMode);
-  // DeepConversationService 复用 task-soil-workspace 的授权校验（拒绝未授权引用）。
-  const service = createDeepConversationService({
-    store: state.conversationStore,
-    runtime: state.minimalRuntime,
+  const conversation = await state.createConversation({
     aiMode,
-  });
-  const conversation = await service.create({
     title: optionalStringField(record.title),
     goal,
     birthWorkspaceDirectory: optionalStringField(record.workspaceDirectory),
@@ -605,13 +429,13 @@ async function handleCreateDeepConversation(
 // ---------------------------------------------------------------------------
 
 async function handleStartDeepRun(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runtime: PanelRuntime,
   conversationId: string,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  let conversation = await state.conversationStore.get(conversationId);
+  let conversation = await state.getConversation(conversationId);
   if (conversation === undefined) {
     throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
   }
@@ -625,7 +449,7 @@ async function handleStartDeepRun(
   const parentRun =
     parentRunId === undefined
       ? undefined
-      : await state.runRecordStore.get(parentRunId);
+      : await state.getRun(parentRunId);
   if (parentRunId !== undefined && parentRun === undefined) {
     throw new PanelHttpError(404, "deep_run_not_found", "未找到上一轮多 Agent 运行。");
   }
@@ -648,7 +472,7 @@ async function handleStartDeepRun(
     confirmedPlan,
   });
   if (confirmedObjective !== undefined && confirmedObjective !== conversation.currentObjective) {
-    conversation = await state.conversationStore.upsert({
+    conversation = await state.saveConversation({
       ...conversation,
       currentObjective: confirmedObjective,
       updatedAt: nowIso(),
@@ -656,10 +480,9 @@ async function handleStartDeepRun(
   }
 
   const rootRunId = parentRun?.run.rootRunId ?? parentRun?.run.runId;
-  const turnOrdinal = rootRunId === undefined ? undefined : await nextDeepRunTurnOrdinal(state, rootRunId);
+  const turnOrdinal = rootRunId === undefined ? undefined : await state.nextTurnOrdinal(rootRunId);
   const started = await startDeepRunBackground({
     state,
-    runtime,
     conversation,
     aiMode,
     parentRunId: parentRun?.run.runId,
@@ -692,8 +515,7 @@ async function handleStartDeepRun(
 }
 
 async function startDeepRunBackground(input: {
-  readonly state: DeepRouteState;
-  readonly runtime: PanelRuntime;
+  readonly state: MultiAgentFeature;
   readonly conversation: DeepConversation;
   readonly aiMode: ModelRuntimeMode;
   readonly parentRunId?: string;
@@ -708,113 +530,29 @@ async function startDeepRunBackground(input: {
   readonly rootRunId: string;
   readonly turnOrdinal: number;
 }> {
-  const { state, runtime, conversation, aiMode } = input;
-  // 复用 run-mode-policy 门控：underground → deep（survey 结论 A/B）。
-  const runKind: AgentArborRunKind = "underground";
-  const runMode: AgentArborRunMode = resolveRunModeForKind(runKind, undefined);
-  assertRunModeForKind(runKind, runMode);
-
-  // EP4：预创建 controlHandle 并注册，使 interrupt/correct/stop 可在 run 生命周期内转发。
-  const runId = createId("deep-run");
-  const controlHandle = createDeepRunControlHandle();
-  state.controlHandles.set(runId, controlHandle);
-
-  // 重新派生 TaskSoil（会话创建时已校验并写入 soil；此处为 run 输入构造 TaskSoil 对象）。
-  const goalId = createId("goal");
-  const traceId = createId("trace");
-  const createdAt = nowIso();
-  const [capabilitySnapshot, informationAccess, toolConfirmation] = await Promise.all([
-    runtime.capabilityCenter.snapshot(workspaceSnapshotInput(conversation.birthWorkspaceDirectory)),
-    runtime.configCenter.getInformationAccessConfig(),
-    runtime.configCenter.getToolConfirmationConfig(),
-  ]);
-  const taskSoil = createTaskSoilFromDesktopInput({
-    goal: deepConversationGoal(conversation),
-    goalId,
-    traceId,
-    aiMode,
-    constraints: state.minimalRuntime.constraints,
-    soilStore: state.minimalRuntime.soilStore,
-    taskSoilInput: conversation.taskSoilInput,
-    createdAt,
-  });
-
-  // EP1：构造真实模型接入 + 桌面 ToolCenter 的 DeepRuntimeConfig（严禁 mock fallback 伪装完成）。
-  const deepRuntime = await buildDeepRuntimeConfigForRun({
-    runtime,
-    state,
-    aiMode,
-    controlHandle,
-    taskSoil,
-    capabilitySnapshot,
-    informationAccess,
-  }).catch((error: unknown) => {
-    state.controlHandles.delete(runId);
-    throw error;
-  });
-  state.runFacts.set(runId, {
-    aiMode,
-    informationAccess,
-    taskSoil,
-    permissionBoundaryRefs: conversation.permissionBoundaryRefs,
-    confirmationPolicy: toolConfirmation.policy,
-  });
-  state.activeRunConversationIds.set(runId, conversation.conversationId);
-  state.activeRunIds.add(runId);
-
-  const startInput: StartDeepRuntimeInput = {
-    conversation,
-    taskSoil,
-    permissionBoundaryRefs: conversation.permissionBoundaryRefs,
-    confirmationPolicy: toolConfirmation.policy,
-    aiMode,
-    capabilitySnapshot: deepRuntime.capabilitySnapshot,
-    modelAvailable: aiMode !== "none",
-    traceId,
-    goalId,
-    runId,
+  return input.state.startRun({
+    conversation: input.conversation,
+    aiMode: input.aiMode,
     parentRunId: input.parentRunId,
-    rootRunId: input.rootRunId ?? runId,
-    turnOrdinal: input.turnOrdinal ?? 1,
+    rootRunId: input.rootRunId,
+    turnOrdinal: input.turnOrdinal,
     followUpContext: input.followUpContext,
     intakeContext: input.intakeContext,
-  };
-
-  // 后台执行：不阻塞 HTTP；run 完成后 record 写入 store，供 /view 与 /events 轮询读取。
-  const runPromise = executeDeepRun(startInput, deepRuntime.config).then(
-    () => {
-      /* run 完成：record 已由 executeDeepRun 写入 runRecordStore；controlHandle 保留以便
-         后续 interrupt/correct/stop 端点对已完成 run 返回明确状态（终态后请求为 no-op）。 */
-    },
-    (error: unknown) => {
-      // 后台 run 失败：记录失败 record（若有 result）或写入最小失败投影，保证 /view 可见终态。
-      void writeFailureRecord(state, runId, conversation, error, {
-        parentRunId: input.parentRunId,
-        rootRunId: input.rootRunId ?? runId,
-        turnOrdinal: input.turnOrdinal ?? 1,
-      });
-    },
-  );
-  runPromise.finally(() => {
-    deepRuntime.releaseResources();
-    state.activeRunConversationIds.delete(runId);
-    state.activeRunIds.delete(runId);
-    state.activeRuns.delete(runPromise);
+  }).catch((error: unknown) => {
+    if (error instanceof ModelRuntimeConfigurationError) {
+      throw new PanelHttpError(
+        409,
+        "deep_model_not_configured",
+        `多 Agent 运行所需模型未就绪：${error.issue.message}`,
+      );
+    }
+    throw error;
   });
-  state.activeRuns.add(runPromise);
-
-  return {
-    runId,
-    runKind,
-    runMode,
-    rootRunId: input.rootRunId ?? runId,
-    turnOrdinal: input.turnOrdinal ?? 1,
-  };
 }
 
 async function handleDeepRunFollowUp(
   runtime: PanelRuntime,
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runId: string,
   request: IncomingMessage,
   response: ServerResponse,
@@ -827,7 +565,7 @@ async function handleDeepRunFollowUp(
       "当前多 Agent 运行仍在进行中，请直接补充要求。",
     );
   }
-  const conversation = await state.conversationStore.get(previous.run.conversationId);
+  const conversation = await state.getConversation(previous.run.conversationId);
   if (conversation === undefined) {
     throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
   }
@@ -852,14 +590,13 @@ async function handleDeepRunFollowUp(
     permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs ?? conversation.permissionBoundaryRefs,
     updatedAt: nowIso(),
   };
-  await state.conversationStore.upsert(updatedConversation);
+  await state.saveConversation(updatedConversation);
 
   const rootRunId = previous.run.rootRunId ?? previous.run.runId;
-  const turnOrdinal = await nextDeepRunTurnOrdinal(state, rootRunId);
+  const turnOrdinal = await state.nextTurnOrdinal(rootRunId);
   const followUpContext = buildDeepFollowUpContext(previous, message);
   const started = await startDeepRunBackground({
     state,
-    runtime,
     conversation: updatedConversation,
     aiMode,
     parentRunId: previous.run.runId,
@@ -882,7 +619,7 @@ async function handleDeepRunFollowUp(
 // ---------------------------------------------------------------------------
 
 async function handleListDeepConversations(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   response: ServerResponse,
   url: URL,
 ): Promise<void> {
@@ -894,15 +631,15 @@ async function handleListDeepConversations(
 }
 
 async function handleGetDeepConversation(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
   const conversation = await ensureDeepConversationLoaded(state, conversationId);
-  const records = await state.runRecordStore.list(200);
+  const records = await state.listRunsForConversation(conversationId, 200);
   const runs = await projectLatestDeepRunSummaries(
     state,
-    records.filter((record) => record.run.conversationId === conversationId),
+    records,
   );
   writeJson(response, 200, {
     ok: true,
@@ -912,7 +649,7 @@ async function handleGetDeepConversation(
 }
 
 async function handleRenameDeepConversation(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   request: IncomingMessage,
   conversationId: string,
   response: ServerResponse,
@@ -923,13 +660,7 @@ async function handleRenameDeepConversation(
   if (title.length === 0) {
     throw new PanelHttpError(400, "missing_conversation_title", "会话标题不能为空。");
   }
-  const updated = title === conversation.title
-    ? conversation
-    : await state.conversationStore.upsert({
-      ...conversation,
-      title,
-      titleEditedAt: nowIso(),
-    });
+  const updated = await state.renameConversation(conversationId, title).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, {
     ok: true,
     conversation: projectDeepConversation(updated),
@@ -938,17 +669,14 @@ async function handleRenameDeepConversation(
 }
 
 async function handlePinDeepConversation(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   request: IncomingMessage,
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const conversation = await ensureDeepConversationLoaded(state, conversationId);
+  await ensureDeepConversationLoaded(state, conversationId);
   const input = parseConversationPinInput(await readJsonBody(request));
-  const updated = await state.conversationStore.upsert({
-    ...conversation,
-    pinnedAt: input.pinned ? (conversation.pinnedAt ?? nowIso()) : undefined,
-  });
+  const updated = await state.pinConversation(conversationId, input.pinned).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, {
     ok: true,
     conversation: projectDeepConversation(updated),
@@ -957,32 +685,11 @@ async function handlePinDeepConversation(
 }
 
 async function handleDeleteDeepConversation(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
-  await ensureDeepConversationLoaded(state, conversationId);
-  const hasActiveInMemoryRun = [...state.activeRunConversationIds.values()].some((id) => id === conversationId);
-  if (hasActiveInMemoryRun) {
-    throw new PanelHttpError(409, "deep_conversation_busy", "多 Agent 会话仍有运行中的协作，暂不能删除。");
-  }
-  const records = (await state.runRecordStore.list(500)).filter((record) => record.run.conversationId === conversationId);
-  const busyRecord = records.find((record) => !isTerminalDeepConversationStatus(record.run.status));
-  if (busyRecord !== undefined) {
-    throw new PanelHttpError(409, "deep_conversation_busy", "多 Agent 会话仍有运行中的协作，暂不能删除。");
-  }
-  for (const record of records) {
-    await state.runRecordStore.delete(record.run.runId);
-    await state.childMessageStore.deleteForRun(record.run.runId);
-    await state.childLoopContextStore.deleteForRun(record.run.runId);
-    state.childContinuations.deleteForRun(record.run.runId);
-    state.controlHandles.delete(record.run.runId);
-    state.childInstructionQueues.deleteForRun(record.run.runId);
-    state.activeRunConversationIds.delete(record.run.runId);
-    state.activeRunIds.delete(record.run.runId);
-    state.runFacts.delete(record.run.runId);
-  }
-  await state.conversationStore.delete(conversationId);
+  await state.deleteConversation(conversationId).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, {
     ok: true,
     deletedConversationId: conversationId,
@@ -991,28 +698,28 @@ async function handleDeleteDeepConversation(
 }
 
 async function handleListAllDeepRuns(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   response: ServerResponse,
   url: URL,
 ): Promise<void> {
-  const records = await state.runRecordStore.list(parseDeepRunListLimit(url));
+  const records = await state.listRuns(parseDeepRunListLimit(url));
   const runs = await projectLatestDeepRunSummaries(state, records);
   writeJson(response, 200, { ok: true, runs });
 }
 
 async function handleListDeepRuns(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const conversation = await state.conversationStore.get(conversationId);
+  const conversation = await state.getConversation(conversationId);
   if (conversation === undefined) {
     throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
   }
-  const records = await state.runRecordStore.list(200);
+  const records = await state.listRunsForConversation(conversationId, 200);
   const runs = await projectLatestDeepRunSummaries(
     state,
-    records.filter((record) => record.run.conversationId === conversationId),
+    records,
   );
   writeJson(response, 200, { ok: true, conversationId, runs });
 }
@@ -1022,11 +729,11 @@ async function handleListDeepRuns(
 // ---------------------------------------------------------------------------
 
 async function handleGetDeepRunView(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const record = await state.runRecordStore.get(runId);
+  const record = await state.getRun(runId);
   if (record === undefined) {
     throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行（可能仍在运行中）。");
   }
@@ -1038,7 +745,7 @@ async function handleGetDeepRunView(
 // ---------------------------------------------------------------------------
 
 /**
- * SSE 轮询模型（复用 run-routes 口径）：每 100ms 轮询 runRecordStore.get(runId)，
+ * SSE 轮询模型（复用 run-routes 口径）：每 100ms 通过 MultiAgentFeature 查询 run，
  * 增量写出 record.eventSequence 中尚未发送的事件；run 进入终态后写完剩余事件并关闭。
  *
  * 当前 deep-runtime 会在 manager 决策、child 启动/完成/失败、综合完成等节点实时 upsert
@@ -1046,7 +753,7 @@ async function handleGetDeepRunView(
  * 事件均为安全投影（EP3），不含 raw prompt/response/output。
  */
 function handleDeepRunEventsSse(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runId: string,
   request: IncomingMessage,
   response: ServerResponse,
@@ -1058,7 +765,7 @@ function handleDeepRunEventsSse(
     url,
     comment: `AgentArbor multi-agent run stream ${runId}`,
     poll: async () => {
-      const record = await state.runRecordStore.get(runId);
+      const record = await state.getRun(runId);
       if (record === undefined) {
         // run 仍在进行中：record 尚未写入，保持连接（无事件可推）。
         return { events: [], terminal: false };
@@ -1079,44 +786,29 @@ function handleDeepRunEventsSse(
 // ---------------------------------------------------------------------------
 
 async function handleDeepRunControl(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runId: string,
   action: "interrupt" | "correct" | "stop",
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const handle = state.controlHandles.get(runId);
   const body = await readJsonBody(request);
   const record = asRecord(body);
   const reason = optionalStringField(record.reason);
-  if (handle === undefined) {
-    if (action === "stop") {
-      const stopped = await stopOrphanedDeepRun(state, runId, reason);
-      if (stopped !== undefined) {
-        writeJson(response, 200, {
-          ok: true,
-          status: "stopped",
-          runId,
-          view: await projectDeepRunViewForResponse(state, stopped),
-        });
-        return;
-      }
-    }
-    throw new PanelHttpError(
-      404,
-      "deep_run_control_not_found",
-      "未找到该 run 的控制句柄（run 不存在或已被回收）。",
-    );
-  }
-  if (action === "interrupt") {
-    handle.requestInterrupt(reason);
-  } else if (action === "stop") {
-    handle.requestStop(reason);
-  } else {
-    // correct：必须携带补充上下文（注入下一 manager 决策 step）。
-    const correctionContext = parseCorrectionContext(record);
-    await persistActiveDeepRunFollowUp(state, runId, correctionContext);
-    handle.requestCorrect(correctionContext, reason);
+  const result = await state.requestRunControl({
+    runId,
+    action,
+    reason,
+    correctionContext: action === "correct" ? parseCorrectionContext(record) : undefined,
+  }).catch(mapMultiAgentFeatureError);
+  if (result.record !== undefined) {
+    writeJson(response, 200, {
+      ok: true,
+      status: "stopped",
+      runId,
+      view: await projectDeepRunViewForResponse(state, result.record),
+    });
+    return;
   }
   writeJson(response, 202, {
     ok: true,
@@ -1125,64 +817,13 @@ async function handleDeepRunControl(
   });
 }
 
-async function stopOrphanedDeepRun(
-  state: DeepRouteState,
-  runId: string,
-  reason: string | undefined,
-): Promise<DeepRunRecord | undefined> {
-  const record = await state.runRecordStore.get(runId);
-  if (record === undefined || record.run.status !== "running" || state.activeRunIds.has(runId)) {
-    return undefined;
-  }
-  const updatedAt = nowIso();
-  const nextSequence = (record.eventSequence.at(-1)?.sequence ?? 0) + 1;
-  const stoppedEvent: DeepRunStreamEvent = {
-    id: createId("deep-event"),
-    runId,
-    sequence: nextSequence,
-    type: "deep.stopped",
-    title: "运行已停止",
-    summary: reason ?? "该多 Agent 运行已失联，用户已停止本次运行。",
-    status: "stopped",
-    timestamp: updatedAt,
-    refs: [],
-    visibility: "public",
-  };
-  const updated: DeepRunRecord = {
-    ...record,
-    run: {
-      ...record.run,
-      status: "stopped",
-      updatedAt,
-    },
-    agentRunTree: {
-      ...record.agentRunTree,
-      status: "stopped",
-      updatedAt,
-    },
-    eventSequence: [...record.eventSequence, stoppedEvent],
-    liveProjection: {
-      ...(record.liveProjection ?? fallbackLiveProjectionForRecord(record)),
-      phase: "stopped",
-      updatedAt,
-    },
-    updatedAt,
-  };
-  await state.runRecordStore.upsert(updated);
-  state.activeRunConversationIds.delete(runId);
-  state.activeRunIds.delete(runId);
-  state.controlHandles.delete(runId);
-  state.childInstructionQueues.deleteForRun(runId);
-  return updated;
-}
-
 // ---------------------------------------------------------------------------
 // Child Agent operation endpoints: confirmation resume + parent follow-up
 // ---------------------------------------------------------------------------
 
 async function handleDeepChildConfirmationDecision(
   runtime: PanelRuntime,
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runId: string,
   childRunId: string,
   confirmationId: string,
@@ -1191,222 +832,60 @@ async function handleDeepChildConfirmationDecision(
 ): Promise<void> {
   const body = await readJsonBody(request);
   const parsed = parseConfirmationDecision(body);
-  const continuation = state.childContinuations.consume(runId, childRunId, confirmationId);
-  if (continuation === undefined) {
-    throw new PanelHttpError(
-      409,
-      "confirmation_continuation_lost",
-      "该子 Agent 的确认上下文已不可恢复，请让父 Agent 补充指令后继续该子任务。",
-    );
-  }
-  const record = await requireDeepRunRecord(state, runId);
-  const childRuntime = await createTurnRuntimeForExistingDeepRun(runtime, state, record);
-  let result: DeepChildAgentRunResult;
-  try {
-    result = await resumeDeepChildAgent({
-      runId,
-      childRun: continuation.childRun,
-      childSpec: continuation.childSpec,
-      pendingApproval: continuation.pendingApproval,
-      decision: parsed as DeepChildConfirmationDecision,
-      turnRuntime: childRuntime.turnRuntime,
-      childLoopContextStore: state.childLoopContextStore,
-    });
-  } finally {
-    childRuntime.releaseResources();
-  }
-  state.childContinuations.remember(runId, result.pendingContinuation);
-  const updated = await applyDeepChildOperationResult(state, record, result, {
-    eventTitle: result.completedRun.status === "completed" ? "子 Agent 已继续" : "子 Agent 继续受阻",
-    eventSummary:
-      result.completedRun.status === "completed"
-        ? result.summary.summary
-        : result.completedRun.failureReason ?? result.summary.uncertainty ?? "子 Agent 需要继续处理。",
-  });
+  const updated = await state.resumeChild({
+    runId,
+    childRunId,
+    confirmationId,
+    decision: parsed as DeepChildConfirmationDecision,
+    fallbackInformationAccess: await runtime.configCenter.getInformationAccessConfig(),
+  }).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, { ok: true, view: await projectDeepRunViewForResponse(state, updated) });
 }
 
 async function handleDeepChildParentMessage(
   runtime: PanelRuntime,
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runId: string,
   childRunId: string,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
   const body = await readJsonBody(request);
-  const record = await requireDeepRunRecord(state, runId);
   const message = parseParentChildMessage(body);
-  const queueHandle = state.childInstructionQueues.get(runId);
-  if (queueHandle !== undefined) {
-    const queued = queueHandle.queueChildInstruction({
-      childRunId,
-      instruction: message,
-    });
-    if (queued.status === "queued") {
-      await recordDeepChildMessage(state, {
-        runId,
-        childRunId,
-        instructionId: queued.instructionId,
-        messageRef: queued.messageRef,
-        source: "control_api",
-        status: "queued",
-        content: message,
-        requestedAt: queued.queuedAt,
-        queuedAt: queued.queuedAt,
-      });
-      writeJson(response, 202, {
-        ok: true,
-        status: "queued",
-        runId,
-        childRunId,
-        messageRef: queued.messageRef,
-        childStatus: queued.childStatus,
-        queuedCount: queued.queuedCount,
-        queuedAt: queued.queuedAt,
-        view: await projectDeepRunViewForResponse(state, record),
-      });
-      return;
-    }
-    if (isTerminalChildInstructionRejection(queued)) {
-      const continued = await queueHandle.continueChildInstruction({
-        childRunId,
-        instruction: message,
-      });
-      if (continued.status === "continued") {
-        const latest = await state.runRecordStore.get(runId);
-        await recordDeepChildMessageForResult(state, runId, message, continued.material.completedRun);
-        writeJson(response, 200, {
-          ok: true,
-          status: "continued",
-          runId,
-          childRunId,
-          messageRef: continued.material.completedRun.parentInstructions?.at(-1)?.messageRef,
-          view: await projectDeepRunViewForResponse(state, latest ?? record),
-        });
-        return;
-      }
-      throwDeepChildInstructionQueueRejection(continued);
-    }
-    throwDeepChildInstructionQueueRejection(queued);
-  }
-  const childState = resolveDeepChildOperationTarget(state, record, childRunId);
-  if (childState === undefined) {
-    throw new PanelHttpError(404, "deep_child_run_not_found", "未找到该子 Agent。");
-  }
-  state.childContinuations.deleteForChildRun(runId, childRunId);
-  const childRuntime = await createTurnRuntimeForExistingDeepRun(runtime, state, record);
-  let result: DeepChildAgentRunResult;
-  try {
-    const requestedAt = nowIso();
-    const instructionId = createId("deep-child-instruction");
-    const messageRef = deepChildParentInstructionMessageRef(instructionId);
-    const childRunWithInstruction = recordChildAgentRunParentInstruction(
-      childState.childRun,
-      {
-        instructionId,
-        messageRef,
-        source: "control_api",
-        status: "executed",
-        instructionSummary: summarizeDeepChildParentInstruction(message),
-        requestedAt,
-        executedAt: requestedAt,
-      },
-    );
-    result = await continueDeepChildAgent({
-      runId,
-      childRun: childRunWithInstruction,
-      childSpec: childState.childSpec,
-      previousSummary: childState.previousSummary,
-      parentInstruction: message,
-      currentParentInstructionRef: messageRef,
-      parentMessageHistory: await loadDeepChildParentMessageContext(state, runId, childRunId),
-      goal: record.run.goal,
-      permissionBoundaryRefs: state.runFacts.get(runId)?.permissionBoundaryRefs ?? [],
-      turnRuntime: childRuntime.turnRuntime,
-      traceId: runId,
-      goalId: record.run.conversationId,
-      confirmationPolicy: state.runFacts.get(runId)?.confirmationPolicy ?? "prompt",
-      capabilitySnapshot: childRuntime.capabilitySnapshot,
-      childLoopContextStore: state.childLoopContextStore,
-    });
-    await recordDeepChildMessage(state, {
-      runId,
-      childRunId,
-      instructionId,
-      messageRef,
-      source: "control_api",
-      status: "executed",
-      content: message,
-      requestedAt,
-      executedAt: requestedAt,
-    });
-  } finally {
-    childRuntime.releaseResources();
-  }
-  state.childContinuations.remember(runId, result.pendingContinuation);
-  const updated = await applyDeepChildOperationResult(state, record, result, {
-    eventTitle: "父 Agent 已补充子任务",
-    eventSummary: result.summary.summary,
-  });
-  writeJson(response, 200, {
-    ok: true,
-    status: "continued",
+  const result = await state.sendChildInstruction({
     runId,
     childRunId,
-    messageRef: result.completedRun.parentInstructions?.at(-1)?.messageRef,
-    view: await projectDeepRunViewForResponse(state, updated),
+    message,
+    fallbackInformationAccess: await runtime.configCenter.getInformationAccessConfig(),
+  }).catch(mapMultiAgentFeatureError);
+  if (result.status === "rejected") {
+    throwDeepChildInstructionQueueRejection(result.result);
+  }
+  writeJson(response, result.status === "queued" ? 202 : 200, {
+    ok: true,
+    status: result.status,
+    runId,
+    childRunId,
+    messageRef: result.messageRef,
+    ...(result.status === "queued" ? {
+      childStatus: result.childStatus,
+      queuedCount: result.queuedCount,
+      queuedAt: result.queuedAt,
+    } : {}),
+    view: await projectDeepRunViewForResponse(state, result.record),
   });
 }
 
 async function handleDeepRunResynthesize(
   runtime: PanelRuntime,
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const record = await requireDeepRunRecord(state, runId);
-  const childSummaries = record.report?.childSummaries;
-  if (childSummaries === undefined || childSummaries.length === 0) {
-    throw new PanelHttpError(
-      409,
-      "deep_resynthesis_no_child_material",
-      "该多 Agent 运行没有可供父层重新综合的子 Agent 材料。",
-    );
-  }
-  const childRuns = record.agentRunTree.childRuns;
-  if (childRuns.length === 0) {
-    throw new PanelHttpError(
-      409,
-      "deep_resynthesis_no_child_runs",
-      "该多 Agent 运行缺少子 Agent run 记录，无法重新综合。",
-    );
-  }
-  const childRuntime = await createTurnRuntimeForExistingDeepRun(runtime, state, record);
-  let synthesis: {
-    readonly conclusion: SynthesizedConclusion;
-    readonly synthesisRecord: ParentSynthesisResult;
-  };
-  try {
-    synthesis = await synthesizeDeepConclusion({
-      turnRuntime: childRuntime.turnRuntime,
-      traceId: childRuntime.taskSoil.traceId ?? record.run.runId,
-      goalId: childRuntime.taskSoil.goalId ?? record.run.conversationId,
-      runId: record.run.runId,
-      goal: record.run.goal,
-      taskSoil: childRuntime.taskSoil,
-      childSummaries,
-      completedChildRuns: childRuns,
-      evidenceRefs: collectDeepChildEvidenceRefs(childSummaries),
-      inputRefs: buildDeepResynthesisInputRefs(record),
-      maxModelRounds: DEEP_MANAGER_MAX_MODEL_ROUNDS,
-      maxToolRounds: DEEP_MANAGER_MAX_TOOL_ROUNDS,
-      createdAt: nowIso(),
-    });
-  } finally {
-    childRuntime.releaseResources();
-  }
-  const updated = await applyDeepResynthesisResult(state, record, synthesis);
+  const updated = await state.resynthesize({
+    runId,
+    fallbackInformationAccess: await runtime.configCenter.getInformationAccessConfig(),
+  }).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, { ok: true, view: await projectDeepRunViewForResponse(state, updated) });
 }
 
@@ -1416,7 +895,7 @@ async function handleDeepRunResynthesize(
 
 async function resolveDeepIntakeConversation(input: {
   readonly runtime: PanelRuntime;
-  readonly state: DeepRouteState;
+  readonly state: MultiAgentFeature;
   readonly aiMode: ModelRuntimeMode;
   readonly conversationId?: string;
   readonly message: string;
@@ -1424,18 +903,14 @@ async function resolveDeepIntakeConversation(input: {
   readonly workspaceDirectory?: string;
 }): Promise<DeepConversation> {
   if (input.conversationId !== undefined) {
-    const existing = await input.state.conversationStore.get(input.conversationId);
+    const existing = await input.state.getConversation(input.conversationId);
     if (existing === undefined) {
       throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
     }
     return mergeDeepConversationTaskSoil(existing, input.taskSoilInput, input.workspaceDirectory);
   }
-  const service = createDeepConversationService({
-    store: input.state.conversationStore,
-    runtime: input.state.minimalRuntime,
+  return input.state.createConversation({
     aiMode: input.aiMode,
-  });
-  return service.create({
     title: optionalStringField(input.message),
     goal: input.message,
     birthWorkspaceDirectory: input.workspaceDirectory,
@@ -1445,7 +920,7 @@ async function resolveDeepIntakeConversation(input: {
 
 async function executeDeepIntakeTurn(input: {
   readonly runtime: PanelRuntime;
-  readonly state: DeepRouteState;
+  readonly state: MultiAgentFeature;
   readonly aiMode: ModelRuntimeMode;
   readonly conversation: DeepConversation;
   readonly message: string;
@@ -1455,7 +930,11 @@ async function executeDeepIntakeTurn(input: {
     input.runtime.capabilityCenter.snapshot(workspaceSnapshotInput(input.conversation.birthWorkspaceDirectory)),
     input.runtime.configCenter.getInformationAccessConfig(),
   ]);
-  const resources = await prepareDesktopRunResources(input.runtime, input.aiMode, {
+  return input.state.executeIntake({
+    aiMode: input.aiMode,
+    conversation: input.conversation,
+    message: input.message,
+    terminalRun: input.terminalRun,
     capabilitySnapshot,
     informationAccess,
   }).catch((error: unknown) => {
@@ -1468,77 +947,6 @@ async function executeDeepIntakeTurn(input: {
     }
     throw error;
   });
-  try {
-    const turnRuntime = createDeepTurnRuntime({
-      intelligenceChannel: resources.aiConfig.createIntelligenceChannel(input.state.minimalRuntime),
-    });
-    const traceId = createId("trace");
-    const goalId = createId("goal");
-    const taskSoil = createTaskSoilFromDesktopInput({
-      goal: input.message,
-      goalId,
-      traceId,
-      aiMode: input.aiMode,
-      constraints: input.state.minimalRuntime.constraints,
-      soilStore: input.state.minimalRuntime.soilStore,
-      taskSoilInput: input.conversation.taskSoilInput,
-    });
-    const toolCenter = createDesktopToolCenterFactory(input.runtime.providerFetch, resources)(
-      input.state.minimalRuntime,
-      {
-        runtime: input.state.minimalRuntime,
-        traceId,
-        goalId,
-        skillContexts: [],
-        taskSoil,
-      },
-    );
-    const effectiveCapabilitySnapshot = deepCapabilitySnapshotWithExecutableTools({
-      runtime: input.runtime,
-      snapshot: resources.capabilitySnapshot,
-      taskSoil,
-      toolCenter,
-    });
-    const callerRef: ObservationRef = {
-      kind: "agent_run",
-      id: `deep-intake:${input.conversation.conversationId}`,
-      label: "deep-intake",
-    };
-    const turn = await executeDeepTurn({
-      turnRuntime,
-      traceId,
-      goalId,
-      callerAgentId: "deep-intake",
-      callerRef,
-      purpose: "deep_intake",
-      outputContract: deepIntakeOutputContract(),
-      inputRefs: [
-        { kind: "trace", id: traceId },
-        { kind: "goal", id: goalId, label: input.conversation.conversationId },
-      ],
-      messages: deepIntakeMessages({
-        message: input.message,
-        conversationGoal: input.conversation.goal,
-        currentObjective: input.conversation.currentObjective,
-        intakeTurns: input.conversation.intakeTurns,
-        terminalRunSummary: input.terminalRun === undefined
-          ? undefined
-          : summarizeTerminalDeepRunForIntake(input.terminalRun),
-        taskSoilSummary: summarizeTaskSoilInputForIntake(input.conversation.taskSoilInput),
-        capabilitySnapshot: effectiveCapabilitySnapshot,
-      }),
-      allowedTools: [],
-      maxModelRounds: 1,
-      maxToolRounds: 0,
-    });
-    return parseDeepIntake({
-      value: extractStructuredOutput(turn.finalOutput),
-      userMessage: input.message,
-      createdAt: nowIso(),
-    });
-  } finally {
-    void resources.mcpManager?.disconnectAll?.().catch(() => undefined);
-  }
 }
 
 function mergeDeepConversationTaskSoil(
@@ -1564,12 +972,12 @@ function mergeDeepConversationTaskSoil(
 }
 
 async function applyDeepBirthWorkspace(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   conversation: DeepConversation,
   birthWorkspaceDirectory: string | undefined,
 ): Promise<DeepConversation> {
   const updated = mergeDeepConversationTaskSoil(conversation, undefined, birthWorkspaceDirectory);
-  return updated === conversation ? conversation : state.conversationStore.upsert(updated);
+  return updated === conversation ? conversation : state.saveConversation(updated);
 }
 
 function workspaceSnapshotInput(
@@ -1588,31 +996,6 @@ function appendDeepIntakeTurn(
     intakeTurns: [...(conversation.intakeTurns ?? []), intake],
     updatedAt: intake.createdAt,
   };
-}
-
-async function persistActiveDeepRunFollowUp(
-  state: DeepRouteState,
-  runId: string,
-  correctionContext: readonly string[],
-): Promise<void> {
-  const conversationId = state.activeRunConversationIds.get(runId);
-  if (conversationId === undefined) {
-    return;
-  }
-  const conversation = await state.conversationStore.get(conversationId);
-  if (conversation === undefined) {
-    return;
-  }
-  await state.conversationStore.upsert(
-    appendDeepRunFollowUpTurn(
-      conversation,
-      createDeepRunFollowUpTurn({
-        runId,
-        correctionContext,
-        createdAt: nowIso(),
-      }),
-    ),
-  );
 }
 
 function intakeContextFromTurn(intake: DeepIntakeTurn): DeepIntakeContext {
@@ -1661,208 +1044,63 @@ function deepConversationGoal(conversation: DeepConversation): string {
   return conversation.currentObjective ?? conversation.goal;
 }
 
-// ---------------------------------------------------------------------------
-// EP1：DeepRuntimeConfig 构造链（严禁 mock）
-// ---------------------------------------------------------------------------
-
-/**
- * 从 PanelRuntime 的冻结 capability/information facts 构造真实模型接入的 DeepRuntimeConfig。
- * 复用 desktop-run-resources 链路：prepareDesktopRunResources → ToolCenter →
- * IntelligenceChannel → createDeepTurnRuntime。这样 manager 与 child 都走同一套模型、
- * 工具、MCP 和确认门边界。
- */
-async function buildDeepRuntimeConfigForRun(input: {
-  readonly runtime: PanelRuntime;
-  readonly state: DeepRouteState;
-  readonly aiMode: ModelRuntimeMode;
-  readonly controlHandle: DeepRunControlHandle;
-  readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-  readonly capabilitySnapshot: NonNullable<StartDeepRuntimeInput["capabilitySnapshot"]>;
-  readonly informationAccess: Awaited<ReturnType<PanelRuntime["configCenter"]["getInformationAccessConfig"]>>;
-}): Promise<{
-  readonly config: DeepRuntimeConfig;
-  readonly capabilitySnapshot: NonNullable<StartDeepRuntimeInput["capabilitySnapshot"]>;
-  readonly releaseResources: () => void;
-}> {
-  const { runtime, state, aiMode, controlHandle } = input;
-  if (aiMode === "none") {
-    // AI-first 边界（需求 A3）：显式 none 模式 = 无可用模型，拒绝启动 deep run，
-    // 返回明确客户端错误，不 fallback 伪装完成，也不以 500 internal error 暴露。
-    throw new PanelHttpError(
-      409,
-      "deep_model_not_configured",
-      "多 Agent 运行需要可用模型，当前未配置 AI 模式。",
-    );
-  }
-  const resources = await prepareDesktopRunResources(runtime, aiMode, {
-    capabilitySnapshot: input.capabilitySnapshot,
-    informationAccess: input.informationAccess,
-  }).catch((error: unknown) => {
-    if (error instanceof ModelRuntimeConfigurationError) {
-      throw new PanelHttpError(
-        409,
-        "deep_model_not_configured",
-        `多 Agent 运行所需模型未就绪：${error.issue.message}`,
-      );
-    }
-    throw error;
-  });
-  // prepareDesktopRunResources 统一处理 fake/real provider、MCP、命令 shell 与
-  // ToolCenter 资源；配置错误统一归一为客户端可恢复的 deep_model_not_configured。
-  const toolCenter = createDesktopToolCenterFactory(runtime.providerFetch, resources)(
-    state.minimalRuntime,
-    {
-      runtime: state.minimalRuntime,
-      traceId: input.taskSoil.traceId ?? "deep-run",
-      goalId: input.taskSoil.goalId ?? "deep-goal",
-      skillContexts: [],
-      taskSoil: input.taskSoil,
-    },
-  );
-  const capabilitySnapshot = deepCapabilitySnapshotWithExecutableTools({
-    runtime,
-    snapshot: resources.capabilitySnapshot,
-    taskSoil: input.taskSoil,
-    toolCenter,
-  });
-  const intelligenceChannel = resources.aiConfig.createIntelligenceChannel(state.minimalRuntime);
-  const turnRuntime = createDeepTurnRuntime({
-    intelligenceChannel,
-    toolCenter,
-    contextMaintenance: {
-      goal: input.taskSoil.rawGoal,
-      traceId: input.taskSoil.traceId ?? "deep-run",
-      goalId: input.taskSoil.goalId ?? "deep-goal",
-      agentIdentity: {
-        agentId: "deep-runtime",
-        displayName: "DeepRuntime",
-      },
-      activeModel: resources.capabilitySnapshot.activeModel.model,
-      modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
-    },
-  });
-  return {
-    config: {
-      turnRuntime,
-      runtime: state.minimalRuntime,
-      store: state.runRecordStore,
-      controlHandle,
-      childContinuations: state.childContinuations,
-      childInstructionQueues: state.childInstructionQueues,
-      childMessageStore: state.childMessageStore,
-      childLoopContextStore: state.childLoopContextStore,
-    },
-    capabilitySnapshot,
-    releaseResources: () => {
-      void resources.mcpManager?.disconnectAll?.().catch(() => undefined);
-    },
-  };
-}
-
-async function createTurnRuntimeForExistingDeepRun(
-  runtime: PanelRuntime,
-  state: DeepRouteState,
-  record: DeepRunRecord,
-): Promise<{
-  readonly turnRuntime: ReturnType<typeof createDeepTurnRuntime>;
-  readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-  readonly capabilitySnapshot: NonNullable<StartDeepRuntimeInput["capabilitySnapshot"]>;
-  readonly releaseResources: () => void;
-}> {
-  const capabilitySnapshot = record.run.capabilitySnapshot;
-  if (capabilitySnapshot === undefined) {
-    throw new PanelHttpError(
-      409,
-      "deep_capability_snapshot_missing",
-      "该多 Agent 运行缺少冻结能力快照，无法继续子 Agent。",
-    );
-  }
-  const facts = state.runFacts.get(record.run.runId);
-  const informationAccess = facts?.informationAccess ?? await runtime.configCenter.getInformationAccessConfig();
-  const aiMode = facts?.aiMode ?? record.run.aiMode ?? capabilitySnapshot.activeModel.defaultAiMode;
-  const taskSoil = facts?.taskSoil ?? createTaskSoilFromDesktopInput({
-    goal: record.run.goal,
-    goalId: record.run.conversationId,
-    traceId: record.run.runId,
-    aiMode,
-    constraints: state.minimalRuntime.constraints,
-    soilStore: state.minimalRuntime.soilStore,
-  });
-  const resources = await prepareDesktopRunResources(runtime, aiMode, {
-    capabilitySnapshot,
-    informationAccess,
-  });
-  const toolCenter = createDesktopToolCenterFactory(runtime.providerFetch, resources)(
-    state.minimalRuntime,
-    {
-      runtime: state.minimalRuntime,
-      traceId: taskSoil.traceId ?? record.run.runId,
-      goalId: taskSoil.goalId ?? record.run.conversationId,
-      skillContexts: [],
-      taskSoil,
-    },
-  );
-  const effectiveCapabilitySnapshot = deepCapabilitySnapshotWithExecutableTools({
-    runtime,
-    snapshot: resources.capabilitySnapshot,
-    taskSoil,
-    toolCenter,
-  });
-  return {
-    turnRuntime: createDeepTurnRuntime({
-      intelligenceChannel: resources.aiConfig.createIntelligenceChannel(state.minimalRuntime),
-      toolCenter,
-      contextMaintenance: {
-        goal: record.run.goal,
-        traceId: taskSoil.traceId ?? record.run.runId,
-        goalId: taskSoil.goalId ?? record.run.conversationId,
-        agentIdentity: {
-          agentId: "deep-runtime",
-          displayName: "DeepRuntime",
-        },
-        activeModel: resources.capabilitySnapshot.activeModel.model,
-        modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
-      },
-    }),
-    taskSoil,
-    capabilitySnapshot: effectiveCapabilitySnapshot,
-    releaseResources: () => {
-      void resources.mcpManager?.disconnectAll?.().catch(() => undefined);
-    },
-  };
-}
-
-function deepCapabilitySnapshotWithExecutableTools(input: {
-  readonly runtime: PanelRuntime;
-  readonly snapshot: BasicAgentCapabilitySnapshot;
-  readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-  readonly toolCenter: Parameters<typeof resolveRunToolBoundary>[0]["toolCenter"];
-}): BasicAgentCapabilitySnapshot {
-  const toolBoundary = resolveRunToolBoundary({
-    agentDefinition: input.runtime.desktopAgentDefinition,
-    snapshot: input.snapshot,
-    goal: input.taskSoil.rawGoal,
-    taskSoil: input.taskSoil,
-    toolCenter: input.toolCenter,
-  });
-  return {
-    ...input.snapshot,
-    toolCatalog: {
-      ...input.snapshot.toolCatalog,
-      allowedTools: toolBoundary.allowedTools,
-    },
-  };
-}
-
 async function requireDeepRunRecord(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   runId: string,
 ): Promise<DeepRunRecord> {
-  const record = await state.runRecordStore.get(runId);
+  const record = await state.getRun(runId);
   if (record === undefined) {
     throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行。");
   }
   return record;
+}
+
+function mapMultiAgentFeatureError(error: unknown): never {
+  if (!(error instanceof MultiAgentFeatureError)) {
+    throw error;
+  }
+  switch (error.code) {
+    case "conversation_not_found":
+      throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
+    case "conversation_busy":
+      throw new PanelHttpError(409, "deep_conversation_busy", "多 Agent 会话仍有运行中的协作，暂不能删除。");
+    case "run_not_found":
+      throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行。");
+    case "run_control_not_found":
+      throw new PanelHttpError(
+        404,
+        "deep_run_control_not_found",
+        "未找到该 run 的控制句柄（run 不存在或已被回收）。",
+      );
+    case "child_not_found":
+      throw new PanelHttpError(404, "deep_child_run_not_found", "未找到该子 Agent。");
+    case "confirmation_continuation_lost":
+      throw new PanelHttpError(
+        409,
+        "confirmation_continuation_lost",
+        "该子 Agent 的确认上下文已不可恢复，请让父 Agent 补充指令后继续该子任务。",
+      );
+    case "capability_snapshot_missing":
+      throw new PanelHttpError(
+        409,
+        "deep_capability_snapshot_missing",
+        "该多 Agent 运行缺少冻结能力快照，无法继续子 Agent。",
+      );
+    case "resynthesis_no_child_material":
+      throw new PanelHttpError(
+        409,
+        "deep_resynthesis_no_child_material",
+        "该多 Agent 运行没有可供父层重新综合的子 Agent 材料。",
+      );
+    case "resynthesis_no_child_runs":
+      throw new PanelHttpError(
+        409,
+        "deep_resynthesis_no_child_runs",
+        "该多 Agent 运行缺少子 Agent run 记录，无法重新综合。",
+      );
+    default:
+      throw new PanelHttpError(500, "deep_feature_unavailable", error.message);
+  }
 }
 
 function parseParentChildMessage(raw: unknown): string {
@@ -1878,18 +1116,6 @@ function throwDeepChildInstructionQueueRejection(
   result: Exclude<DeepChildInstructionQueueResult, { readonly status: "queued" }>,
 ): never {
   throw deepChildInstructionQueueRejectionError(result);
-}
-
-function isTerminalChildInstructionRejection(
-  result: Exclude<DeepChildInstructionQueueResult, { readonly status: "queued" }>,
-): boolean {
-  return result.status === "not_accepting" &&
-    (
-      result.childStatus === "completed" ||
-      result.childStatus === "failed" ||
-      result.childStatus === "blocked" ||
-      result.childStatus === "interrupted"
-    );
 }
 
 export function deepChildInstructionQueueRejectionError(
@@ -1924,7 +1150,7 @@ export function deepChildInstructionQueueRejectionError(
 // ---------------------------------------------------------------------------
 
 async function projectLatestDeepRunSummaries(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   records: readonly DeepRunRecord[],
 ): Promise<readonly Record<string, unknown>[]> {
   return Promise.all(
@@ -1936,7 +1162,7 @@ async function projectLatestDeepRunSummaries(
 }
 
 async function latestDeepRunRecordsByConversation(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   records: readonly DeepRunRecord[],
 ): Promise<ReadonlyMap<string, { readonly record: DeepRunRecord; readonly rootRecord?: DeepRunRecord }>> {
   const selected = new Map<string, { readonly record: DeepRunRecord; readonly rootRecord?: DeepRunRecord }>();
@@ -1953,12 +1179,12 @@ async function latestDeepRunRecordsByConversation(
 }
 
 async function projectDeepConversationSummaries(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   limit: number,
 ): Promise<readonly Record<string, unknown>[]> {
   const [conversations, records] = await Promise.all([
-    state.conversationStore.list(Math.max(limit, 200)),
-    state.runRecordStore.list(500),
+    state.listConversations(Math.max(limit, 200)),
+    state.listRuns(500),
   ]);
   const latestByConversation = await latestDeepRunRecordsByConversation(state, records);
   return conversations
@@ -1974,30 +1200,22 @@ async function projectDeepConversationSummaries(
 }
 
 async function ensureDeepConversationLoaded(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   conversationId: string,
 ): Promise<DeepConversation> {
-  const conversation = await state.conversationStore.get(conversationId);
+  const conversation = await state.getConversation(conversationId);
   if (conversation === undefined) {
     throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
   }
   return conversation;
 }
 
-function isTerminalDeepConversationStatus(status: DeepRunStatus): boolean {
-  return status === "completed" ||
-    status === "failed" ||
-    status === "interrupted" ||
-    status === "stopped" ||
-    status === "corrected";
-}
-
 async function rootDeepRunRecord(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   record: DeepRunRecord,
 ): Promise<DeepRunRecord | undefined> {
   const rootRunId = record.run.rootRunId ?? record.run.runId;
-  return rootRunId === record.run.runId ? record : state.runRecordStore.get(rootRunId);
+  return rootRunId === record.run.runId ? record : state.getRun(rootRunId);
 }
 
 function summaryUpdatedAt(summary: Record<string, unknown>): string {
@@ -2014,10 +1232,10 @@ function summaryPinnedAt(summary: Record<string, unknown>): string {
 }
 
 async function projectDeepRunViewForResponse(
-  state: DeepRouteState,
+  state: MultiAgentFeature,
   record: DeepRunRecord,
 ): Promise<Record<string, unknown>> {
-  const conversation = await state.conversationStore.get(record.run.conversationId);
+  const conversation = await state.getConversation(record.run.conversationId);
   const view = projectDeepRunView(record, conversation);
   const run = asRecord(view.run);
   return {
@@ -2053,28 +1271,6 @@ const VALID_AI_MODES: readonly ModelRuntimeMode[] = [
   "openai-responses",
 ];
 
-class DeepChildInstructionQueueStore {
-  private readonly handles = new Map<string, DeepChildInstructionQueueHandle>();
-
-  register(runId: string, handle: DeepChildInstructionQueueHandle): void {
-    this.handles.set(runId, handle);
-  }
-
-  unregister(runId: string, handle: DeepChildInstructionQueueHandle): void {
-    if (this.handles.get(runId) === handle) {
-      this.handles.delete(runId);
-    }
-  }
-
-  get(runId: string): DeepChildInstructionQueueHandle | undefined {
-    return this.handles.get(runId);
-  }
-
-  deleteForRun(runId: string): void {
-    this.handles.delete(runId);
-  }
-}
-
 function parseAiMode(value: unknown): ModelRuntimeMode | undefined {
   if (value === undefined || value === null || value === "") {
     return undefined;
@@ -2090,22 +1286,6 @@ function hasTaskSoilPayload(record: Record<string, unknown>): boolean {
     record.taskSoil !== undefined ||
     record.contextRefs !== undefined ||
     record.permissionBoundaryRefs !== undefined;
-}
-
-async function nextDeepRunTurnOrdinal(
-  state: DeepRouteState,
-  rootRunId: string,
-): Promise<number> {
-  const records = await state.runRecordStore.list(500);
-  const maxOrdinal = records.reduce((max, record) => {
-    const sameChain = (record.run.rootRunId ?? record.run.runId) === rootRunId;
-    if (!sameChain) {
-      return max;
-    }
-    const ordinal = record.run.turnOrdinal ?? (record.run.runId === rootRunId ? 1 : 0);
-    return Math.max(max, ordinal);
-  }, 0);
-  return Math.max(1, maxOrdinal + 1);
 }
 
 /**
@@ -2129,77 +1309,6 @@ function parseCorrectionContext(record: Record<string, unknown>): readonly strin
     throw new PanelHttpError(400, "empty_correction_context", "补充上下文不能为空。");
   }
   return items;
-}
-
-/** 后台 run 失败时写入最小失败 record，保证 /view 可见终态（status=failed）。 */
-async function writeFailureRecord(
-  state: DeepRouteState,
-  runId: string,
-  conversation: DeepConversation,
-  error: unknown,
-  lineage?: {
-    readonly parentRunId?: string;
-    readonly rootRunId?: string;
-    readonly turnOrdinal?: number;
-  },
-): Promise<void> {
-  try {
-    const now = nowIso();
-    await state.runRecordStore.upsert({
-      run: {
-        runId,
-        conversationId: conversation.conversationId,
-        parentRunId: lineage?.parentRunId,
-        rootRunId: lineage?.rootRunId ?? runId,
-        turnOrdinal: lineage?.turnOrdinal ?? 1,
-        goal: deepConversationGoal(conversation),
-        status: "failed",
-        isolation: {
-          kind: "deep_conversation",
-          runKind: DEEP_RUN_KIND,
-          runMode: DEEP_RUN_MODE,
-        },
-        capabilitySnapshot: undefined,
-        startedAt: now,
-        updatedAt: now,
-      },
-      agentRunTree: {
-        ...createAgentRunTree({
-          treeId: createId("deep-tree"),
-          rootRunId: runId,
-          rootAgentId: "deep-manager",
-          rootSpec: buildDeepManagerSpec(now),
-          createdAt: now,
-        }),
-        status: "failed",
-      },
-      report: undefined,
-      controlEvents: [],
-      eventSequence: [
-        {
-          id: createId("deep-event"),
-          runId,
-          sequence: 1,
-          type: "deep.failed",
-          title: "运行失败",
-          summary: errorMessage(error),
-          status: "failed",
-          timestamp: now,
-          refs: [],
-          visibility: "public",
-        },
-      ],
-      liveProjection: {
-        phase: "failed",
-        activeNodeId: "decision",
-        children: [],
-        updatedAt: now,
-      },
-      updatedAt: now,
-    });
-  } catch {
-    /* 写失败 record 本身失败时不影响主流程（已记录原始错误）。 */
-  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -22,7 +22,6 @@ import type {
   ToolExecutionContext,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
-import { createMinimalRuntime } from "../runtime.js";
 import { createDeepTurnRuntime } from "./deep-turn.js";
 import { createDeepConversationIsolationMark } from "./deep-conversation.js";
 import {
@@ -81,7 +80,7 @@ function makeRuntimeInput(goal: string, modelAvailable: boolean): StartDeepRunti
 }
 
 /**
- * 装配 DeepRuntimeConfig。channel 使用独立 bus（模型事件），runtime.bus 承载 deep
+ * 装配 DeepRuntimeConfig。channel 使用独立 bus（模型事件），另一个 bus 承载 deep
  * 事件序列（delegation/child/synthesis/control），二者分离使 eventLog 断言干净。
  * 返回 eventLog 引用供事件序列断言。
  */
@@ -100,7 +99,7 @@ function makeConfig(options: {
     responses: options.responses,
     onOutputDelta: options.onOutputDelta,
   });
-  const runtime = createMinimalRuntime();
+  const eventLog = new InMemoryEventLog();
   // channel 独立 bus：模型调用事件不混入 deep 事件序列断言。
   const channel = new NativeIntelligenceChannel({
     provider,
@@ -108,14 +107,14 @@ function makeConfig(options: {
   });
   const config: DeepRuntimeConfig = {
     turnRuntime: createDeepTurnRuntime({ intelligenceChannel: channel, toolCenter: options.toolCenter }),
-    runtime,
+    bus: new InMemoryMessageBus(eventLog),
     store: options.store ?? new InMemoryDeepRunRecordStore(),
     controlHandle: options.controlHandle,
     childContinuations: options.childContinuations,
     childInstructionQueues: options.childInstructionQueues,
     childMessageStore: options.childMessageStore,
   };
-  return { config, eventLog: runtime.eventLog };
+  return { config, eventLog };
 }
 
 function createInstructionQueueRegistry(): DeepChildInstructionQueueRegistry & {

@@ -26,6 +26,10 @@ import { runOrdinaryDesktopForPanel } from "../desktop-agent-execution.js";
 import { PanelHttpError } from "../http-utils.js";
 import type { DesktopRunResources } from "../run-execution-contracts.js";
 import type { PanelRuntime } from "../runtime.js";
+import {
+  createMcpToolRegistryContribution,
+  type McpToolExecutorProvider,
+} from "../../mcp/mcp-tool-contribution.js";
 
 test("ordinary desktop execution keeps frozen run facts on failed agent results", async () => {
   const snapshot = capabilitySnapshot();
@@ -531,7 +535,7 @@ function desktopRunResources(input: {
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly channel: IntelligenceChannel;
   readonly toolCenter?: ToolExecutionBroker;
-  readonly mcpManager?: DesktopRunResources["mcpManager"];
+  readonly mcpManager?: McpToolExecutorProvider;
 }): DesktopRunResources {
   return {
     capabilitySnapshot: input.capabilitySnapshot,
@@ -553,7 +557,6 @@ function desktopRunResources(input: {
         model: "fixture-model",
       },
       createIntelligenceChannel: () => input.channel,
-      createToolCenter: () => input.toolCenter ?? noToolBroker(),
     },
     workspaceRoot: input.capabilitySnapshot.workspace.workspaceDirectory,
     toolStates: input.capabilitySnapshot.toolCatalog.tools.map((tool) => ({
@@ -568,7 +571,15 @@ function desktopRunResources(input: {
       disabledReason: tool.disabledReason,
     })),
     playwrightAvailable: false,
-    mcpManager: input.mcpManager,
+    toolRegistryScopes: input.mcpManager === undefined
+      ? ["desktop-basic"]
+      : ["desktop-basic", "mcp"],
+    toolContributions: input.mcpManager === undefined
+      ? []
+      : [createMcpToolRegistryContribution(input.mcpManager)],
+    release: async () => {
+      await input.mcpManager?.disconnectAll?.();
+    },
   };
 }
 

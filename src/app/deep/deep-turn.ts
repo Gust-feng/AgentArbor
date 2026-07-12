@@ -17,7 +17,7 @@ import { AgentTurnRuntime, type AgentTurnRuntimeResult } from "../../kernel/inte
 import {
   compactAgentLoopContextIfNeeded,
   createOpenAITokenCounter,
-} from "../agent-loop-context-maintenance.js";
+} from "../context-maintenance/index.js";
 import type { DeepTurnMessage } from "./deep-model-io.js";
 
 export type ExecuteDeepTurnInput = {
@@ -80,6 +80,9 @@ export async function executeDeepTurn(input: ExecuteDeepTurnInput): Promise<Agen
     inputRefs: input.inputRefs,
     sanitizedMessages: input.messages,
     constraintRefs: [],
+  }, {
+    blockedToolNames: [],
+    exposeNonFinalOutput: true,
   });
   if (result.status !== "completed" || result.finalOutput?.status !== "completed") {
     throw new Error(

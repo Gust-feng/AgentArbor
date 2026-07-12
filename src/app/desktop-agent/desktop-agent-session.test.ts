@@ -23,7 +23,7 @@ import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { runDesktopAgentSession } from "./desktop-agent-session.js";
 import { createOpenAiStreamTextResponse } from "../testing/openai-test-fixtures.js";
-import { createReadSkillResourceTool } from "../tool-center/adapters/skill-resource-tool.js";
+import { createReadSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { ToolCenter } from "../tool-center/index.js";
 
 test("Desktop Agent Session answers ordinary questions without entering deep mode", async () => {

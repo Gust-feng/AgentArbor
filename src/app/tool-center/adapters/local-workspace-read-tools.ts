@@ -366,7 +366,7 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
           { label: "max offset", value: String(MAX_GREP_OFFSET) },
         ],
         examples: [
-          { title: "Find a function name", input: { query: "createDesktopBasicToolRegistry", path: "src", limit: 20 } },
+          { title: "Find a function name", input: { query: "createAgentToolRegistry", path: "src", limit: 20 } },
         ],
       },
       metadata: {

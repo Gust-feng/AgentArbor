@@ -1,13 +1,10 @@
 import type {
   BasicAgentCapabilitySnapshot,
-  CapabilityToolAvailability,
   ModelRunReasoningEffort,
   RunAgentDefinitionRef,
   RunCapabilityResolution,
   SanitizedInformationAccessConfig,
-  SanitizedCommandShellConfig,
   SanitizedModelProviderConfig,
-  ToolStateSettings,
 } from "../../domain/config/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
@@ -24,11 +21,8 @@ import type {
 import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
 import type { PanelRunSummary } from "../panel-read-model/run/panel-run-summary.js";
-import type { ModelRuntimeConfig } from "../model-runtime/index.js";
-import type { McpToolExecutorProvider } from "../basic-agent-runtime/builtin-tool-runtime.js";
-import type { LocalCommandProcessRegistry } from "../tool-center/adapters/local-workspace-command-tools.js";
 import type { UndergroundDirectionSessionRuntimeContext } from "../underground/compat/underground-direction-session.js";
-import type { PanelRuntime } from "./runtime.js";
+import type { AgentRunResources } from "./agent-run-resources.js";
 
 export type PanelRunExecutionResult = {
   readonly completed?: true;
@@ -79,17 +73,7 @@ export type PanelRuntimeReadyContext =
   | UndergroundDirectionSessionRuntimeContext
   | DesktopAgentSessionRuntimeContext;
 
-export type DesktopRunResources = {
-  readonly capabilitySnapshot: Awaited<ReturnType<PanelRuntime["capabilityCenter"]["snapshot"]>>;
-  readonly informationAccess: SanitizedInformationAccessConfig;
-  readonly aiEnvironment: Awaited<ReturnType<PanelRuntime["configCenter"]["createModelRuntimeEnvironment"]>>;
-  readonly aiConfig: Extract<ModelRuntimeConfig, { readonly enabled: true }>;
-  readonly workspaceRoot: string;
-  readonly commandShell?: SanitizedCommandShellConfig;
-  readonly toolStates: readonly ToolStateSettings[];
-  readonly toolCatalogNames: readonly string[];
-  readonly toolCatalogAvailability: readonly CapabilityToolAvailability[];
-  readonly playwrightAvailable: boolean;
-  readonly mcpManager?: McpToolExecutorProvider;
-  readonly processRegistry?: LocalCommandProcessRegistry;
-};
+export type { AgentRunResources } from "./agent-run-resources.js";
+
+/** @deprecated Use AgentRunResources. */
+export type DesktopRunResources = AgentRunResources;

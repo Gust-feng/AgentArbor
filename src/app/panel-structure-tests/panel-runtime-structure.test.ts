@@ -299,6 +299,7 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     modelProviderProfiles,
     modelRuntimeFactoryTest,
     modelRuntimeFactory,
+    modelRuntimeContracts,
     modelRuntimeFacade,
     undergroundAiRuntime,
     configContracts,
@@ -311,6 +312,7 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     readAppSource(path.join("config-center", "model-provider-profile-settings.ts")),
     readAppSource(path.join("model-runtime", "factory.test.ts")),
     readAppSource(path.join("model-runtime", "factory.ts")),
+    readAppSource(path.join("model-runtime", "contracts.ts")),
     readAppSource(path.join("model-runtime", "index.ts")),
     readAppSource("underground-ai-runtime.ts"),
     fs.readFile(path.join(process.cwd(), "src", "domain", "config", "contracts.ts"), "utf8"),
@@ -320,13 +322,17 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     panelRunJobs,
     panelRunTracking,
     panelRunTrackingContracts,
-    taskSoilWorkspace,
   ]) {
     assert.equal(source.includes("UndergroundAiMode"), false);
     assert.equal(source.includes("ModelRuntimeMode"), true);
     assert.equal(source.includes("model-runtime/index.js"), true);
     assert.equal(source.includes(directFactoryImport), false);
   }
+  assert.equal(taskSoilWorkspace.includes("UndergroundAiMode"), false);
+  assert.equal(taskSoilWorkspace.includes("ModelRuntimeMode"), true);
+  assert.equal(taskSoilWorkspace.includes("model-runtime/contracts.js"), true);
+  assert.equal(taskSoilWorkspace.includes("model-runtime/index.js"), false);
+  assert.equal(taskSoilWorkspace.includes(directFactoryImport), false);
   for (const source of [modelProviderCommon, modelProviderProfiles, configContracts]) {
     assert.equal(source.includes("ConfiguredUndergroundAiMode"), false);
     assert.equal(source.includes("ConfiguredModelRuntimeMode"), true);
@@ -341,8 +347,11 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
   assert.equal(modelRuntimeFactory.includes("underground-demo-summary.js"), false);
   assert.equal(modelRuntimeFactory.includes("UndergroundDemoAiInput"), false);
   assert.equal(modelRuntimeFactory.includes("ModelRuntimeSummaryInput"), true);
+  assert.equal(modelRuntimeFactory.includes('from "./contracts.js"'), true);
+  assert.equal(modelRuntimeContracts.includes("export type ModelRuntimeMode"), true);
   assert.equal(modelRuntimeFacade.includes(directFactoryImport), true);
   assert.equal(modelRuntimeFacade.includes("ModelRuntimeSummaryInput"), true);
+  assert.equal(modelRuntimeFacade.includes('from "./contracts.js"'), true);
   for (const source of [modelRuntimeFactory, modelRuntimeFacade]) {
     assert.equal(source.includes("UndergroundAiMode"), false);
     assert.equal(source.includes("UndergroundAiEnvironment"), false);
@@ -358,7 +367,9 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
   assert.equal(undergroundAiRuntime.includes("UndergroundAiMode"), true);
 
   const directFactoryImportUsers = (await readAppTypeScriptSources())
-    .filter(({ source }) => source.includes(directFactoryImport))
+    .filter(({ relativePath, source }) =>
+      relativePath.startsWith("model-runtime/") && source.includes(directFactoryImport)
+    )
     .map(({ relativePath }) => relativePath)
     .sort();
   assert.deepEqual(directFactoryImportUsers, ["model-runtime/index.ts"]);

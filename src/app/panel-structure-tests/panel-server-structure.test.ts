@@ -34,6 +34,8 @@ test("panel server source keeps conversation restore and persistence split", asy
     skillService,
     runExecution,
     runExecutionContracts,
+    agentRunResources,
+    multiAgentRunResources,
     desktopRunResources,
     desktopRunModelSettings,
     desktopAgentExecution,
@@ -76,6 +78,8 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-server", "skill-service.ts")),
     readAppSource(path.join("panel-server", "run-execution.ts")),
     readAppSource(path.join("panel-server", "run-execution-contracts.ts")),
+    readAppSource(path.join("panel-server", "agent-run-resources.ts")),
+    readAppSource(path.join("panel-server", "multi-agent-run-resources.ts")),
     readAppSource(path.join("panel-server", "desktop-run-resources.ts")),
     readAppSource(path.join("panel-server", "desktop-run-model-settings.ts")),
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
@@ -312,11 +316,12 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationRoutes.includes("resolvePanelRouteRunMode({"), true);
   assert.equal(conversationRoutes.includes('runKind: "desktop"'), true);
   assert.equal(conversationRoutes.includes("conversation_run_mode_not_supported"), true);
-  assert.equal(deepRoutes.includes('from "../capability/run-tool-boundary.js"'), true);
-  assert.equal(deepRoutes.includes("function deepCapabilitySnapshotWithExecutableTools"), true);
-  assert.equal(deepRoutes.includes("resolveRunToolBoundary({"), true);
-  assert.equal(deepRoutes.includes("allowedTools: toolBoundary.allowedTools"), true);
-  assert.equal(deepRoutes.includes("capabilitySnapshot: effectiveCapabilitySnapshot"), true);
+  assert.equal(deepRoutes.includes('from "../capability/run-tool-boundary.js"'), false);
+  assert.equal(deepRoutes.includes("function deepCapabilitySnapshotWithExecutableTools"), false);
+  assert.equal(multiAgentRunResources.includes("resolveRunToolBoundary({"), true);
+  assert.equal(multiAgentRunResources.includes("allowedTools: toolBoundary.allowedTools"), true);
+  assert.equal(agentRunResources.includes("../deep/"), false);
+  assert.equal(agentRunResources.includes("../skills/"), false);
   assert.equal(deepModelIo.includes("readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot"), true);
   assert.equal(deepModelIo.includes("不得声称没有文件、终端、工作区或底层工具"), true);
   assert.equal(deepModelIo.includes("需要列目录、读/改文件、执行命令、查看工作区"), true);
@@ -405,6 +410,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecution.includes("input.run.agentDefinitionRef === undefined"), true);
   assert.equal(runExecution.includes("export function createConfigurationFailedAiSummary"), true);
   assert.equal(runExecution.includes('from "./conversation-history.js"'), true);
+  assert.equal(runExecution.includes('from "./agent-run-resources.js"'), false);
   assert.equal(runExecution.includes('from "./desktop-run-resources.js"'), true);
   assert.equal(runExecution.includes('from "./desktop-agent-execution.js"'), true);
   assert.equal(runExecution.includes('from "./underground-compat-execution.js"'), true);
@@ -423,27 +429,29 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecutionContracts.includes("readonly agentDefinition?: AgentDefinition"), true);
   assert.equal(runExecutionContracts.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
   assert.equal(runExecutionContracts.includes("readonly informationAccess?: SanitizedInformationAccessConfig"), true);
-  assert.equal(runExecutionContracts.includes("export type DesktopRunResources"), true);
-  assert.equal(runExecutionContracts.includes("readonly informationAccess: SanitizedInformationAccessConfig"), true);
-  assert.equal(runExecutionContracts.includes("readonly toolCatalogAvailability:"), true);
+  assert.equal(runExecutionContracts.includes("export type { AgentRunResources }"), true);
+  assert.equal(runExecutionContracts.includes("export type DesktopRunResources = AgentRunResources"), true);
+  assert.equal(agentRunResources.includes("readonly informationAccess: SanitizedInformationAccessConfig"), true);
+  assert.equal(agentRunResources.includes("readonly toolCatalogAvailability:"), true);
   assert.equal(basicAgentContracts.includes("export type DesktopAgentRunSpec"), true);
   assert.equal(basicAgentContracts.includes("export type DesktopAgentRunBirthFacts"), true);
   assert.equal(basicAgentContracts.includes("export type DesktopAgentRunExecutionInput"), true);
   assert.equal(basicAgentContracts.includes("readonly runKind: \"desktop\""), true);
   assert.equal(basicAgentContracts.includes("readonly runMode: \"agent\""), true);
   assert.equal(basicAgentContracts.includes("export type DesktopAgentRunExecutionResult = BasicAgentRunExecutionResult"), true);
-  assert.equal(desktopRunResources.includes("export async function prepareDesktopRunResources"), true);
-  assert.equal(desktopRunResources.includes("export function desktopRuntimeMode"), true);
-  assert.equal(desktopRunResources.includes("export function createDesktopToolCenterFactory"), true);
-  assert.equal(desktopRunResources.includes("createConfiguredToolCenterFactory"), false);
-  assert.equal(desktopRunResources.includes("createDefaultToolCenter"), true);
-  assert.equal(desktopRunResources.includes("function toolStatesFromCapabilitySnapshot"), true);
+  assert.equal(desktopRunResources.includes("export async function prepareOrdinaryAgentRunResources"), true);
+  assert.equal(agentRunResources.includes("export async function prepareAgentRunResources"), true);
+  assert.equal(agentRunResources.includes("export function agentRuntimeMode"), true);
+  assert.equal(agentRunResources.includes("export function createAgentToolCenterFactory"), true);
+  assert.equal(agentRunResources.includes("createConfiguredToolCenterFactory"), false);
+  assert.equal(agentRunResources.includes("createDefaultToolCenter"), true);
+  assert.equal(agentRunResources.includes("function toolStatesFromCapabilitySnapshot"), true);
   assert.equal(desktopRunResources.includes("effectiveDesktopCapabilitySnapshotForRun"), true);
   assert.equal(desktopRunResources.includes("desktop_information_access_required"), true);
   assert.equal(desktopRunResources.includes("informationAccess: options.informationAccess"), true);
-  assert.equal(desktopRunResources.includes("modelCapabilities.supportsStreaming ? \"force_live\" : \"respect_profile\""), true);
-  assert.equal(desktopRunResources.includes("createModelRuntimeEnvironment({"), true);
-  assert.equal(desktopRunResources.includes("createUndergroundAiEnvironment"), false);
+  assert.equal(agentRunResources.includes("modelCapabilities.supportsStreaming ? \"force_live\" : \"respect_profile\""), true);
+  assert.equal(agentRunResources.includes("createModelRuntimeEnvironment({"), true);
+  assert.equal(agentRunResources.includes("createUndergroundAiEnvironment"), false);
   assert.equal(desktopRunModelSettings.includes("export function desktopCapabilitySnapshotForRunStart"), true);
   assert.equal(desktopRunModelSettings.includes("export function effectiveDesktopCapabilitySnapshotForRun"), true);
   assert.equal(desktopRunModelSettings.includes("function activeModelWithRunOpenAISettings"), true);
@@ -451,7 +459,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopRunModelSettings.includes("modelCapabilities.supportsReasoningEffort"), true);
   assert.equal(desktopRunModelSettings.includes("modelCapabilities.supportsStreaming ? profileStream : false"), true);
   assert.equal(desktopRunModelSettings.includes("unsupported_model_reasoning_effort"), true);
-  const desktopToolCenterFactorySource = sourceAfter(desktopRunResources, "export function createDesktopToolCenterFactory");
+  const desktopToolCenterFactorySource = sourceAfter(agentRunResources, "export function createAgentToolCenterFactory");
   assert.equal(desktopToolCenterFactorySource.includes("runtime.configCenter"), false);
   assert.equal(desktopToolCenterFactorySource.includes("runtime.capabilityCenter"), false);
   assert.equal(desktopToolCenterFactorySource.includes("runtime.providerFetch"), false);
@@ -465,7 +473,8 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopAgentExecution.includes("@deprecated Use executeOrdinaryDesktopRunForPanel with an object input"), true);
   assert.equal(desktopAgentExecution.includes("export async function runOrdinaryDesktopForPanel"), true);
   assert.equal(desktopAgentExecution.includes("runDesktopAgentSession"), true);
-  assert.equal(desktopAgentExecution.includes("createDesktopToolCenterFactory(runtime.providerFetch, resources)"), true);
+  assert.equal(desktopAgentExecution.includes("createAgentToolCenterFactory(runtime.providerFetch, resources)"), true);
+  assert.equal(desktopAgentExecution.includes("createDesktopToolCenterFactory"), false);
   assert.equal(desktopAgentExecution.includes("createDefaultToolCenter"), false);
   assert.equal(desktopAgentExecution.includes("createConfiguredToolCenter"), false);
   assert.equal(desktopAgentExecution.includes("const agentDefinition = options.agentDefinition ?? runtime.desktopAgentDefinition"), true);
@@ -607,7 +616,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     "function toolStatesFromCapabilitySnapshot",
   ]) {
     assert.equal(runExecution.includes(movedDesktopResourceDetail), false);
-    assert.equal(desktopRunResources.includes(movedDesktopResourceDetail), true);
+    assert.equal(agentRunResources.includes(movedDesktopResourceDetail), true);
   }
   for (const desktopRunModelSettingDetail of [
     "function activeModelWithRunOpenAISettings",

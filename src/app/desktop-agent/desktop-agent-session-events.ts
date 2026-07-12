@@ -2,10 +2,10 @@ import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import type { DesktopAgentPendingConfirmation } from "./desktop-agent-session-contracts.js";
 import type { DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
-import type { MinimalRuntime } from "../runtime.js";
+import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
 
 export function publishGoalReceived(input: {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly traceId: string;
   readonly goalId: string;
   readonly goal: string;
@@ -30,7 +30,7 @@ export function publishGoalReceived(input: {
 }
 
 export function publishConfirmationRequested(input: {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;
@@ -60,7 +60,7 @@ export function publishConfirmationRequested(input: {
 }
 
 export function publishTriggeredSkills(input: {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;
@@ -99,7 +99,7 @@ export function publishTriggeredSkills(input: {
 }
 
 export function publishContextCompactionCompleted(input: {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;
@@ -136,7 +136,7 @@ export function publishContextCompactionCompleted(input: {
 }
 
 export function publishContextCompactionFailed(input: {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;

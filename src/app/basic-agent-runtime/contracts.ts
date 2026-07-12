@@ -16,7 +16,7 @@ import type {
 } from "../../domain/basic-agent/index.js";
 import type { ToolConfirmationPolicy, ToolErrorDomain } from "../../domain/tools/index.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
-import type { MinimalRuntime } from "../runtime.js";
+import type { BasicAgentRuntimeContext } from "./runtime-context.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent/desktop-agent-contracts.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { RunSummary } from "../run-read-model/run-summary.js";
@@ -90,7 +90,7 @@ export type BasicAgentContextPack = {
 };
 
 export type BasicAgentRuntimeReadyContext = {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly traceId: string;
   readonly goalId: string;
 };

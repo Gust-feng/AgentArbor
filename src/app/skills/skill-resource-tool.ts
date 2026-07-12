@@ -1,19 +1,31 @@
 import path from "node:path";
-import type { SkillDefinition } from "../../../domain/basic-agent/index.js";
-import type { ToolExecutor } from "../../../domain/tools/index.js";
-import type { DesktopAgentSkillContext } from "../../desktop-agent/desktop-agent-contracts.js";
+import type { SkillDefinition } from "../../domain/basic-agent/index.js";
+import type { ToolExecutor } from "../../domain/tools/index.js";
+import type { AgentToolRegistryContribution } from "../tool-center/factory.js";
+import type { ToolRegistry, ToolRegistryScope } from "../tool-center/tool-registry.js";
 import {
   DEFAULT_SKILL_RESOURCE_MAX_CHARS,
   readSkillResource,
-  type SkillRuntimeResourceType,
-} from "../../skills/index.js";
-import { asRecord, positiveInteger, stringOrFallback, truncateText } from "./local-workspace-common.js";
+} from "./skill-resource-resolver.js";
+import type { SkillRuntimeResourceType } from "./skill-loader.js";
+import {
+  asRecord,
+  positiveInteger,
+  stringOrFallback,
+  truncateText,
+} from "../tool-center/adapters/local-workspace-common.js";
 
 const DEFAULT_MAX_CHARS = DEFAULT_SKILL_RESOURCE_MAX_CHARS;
 const MAX_MAX_CHARS = 64_000;
 
+export type SkillToolContext = {
+  readonly skill: SkillDefinition;
+  readonly loadStatus?: "loaded" | "failed";
+  readonly omitted?: boolean;
+};
+
 export function createReadSkillResourceTool(
-  skillContexts: readonly DesktopAgentSkillContext[] = []
+  skillContexts: readonly SkillToolContext[] = []
 ): ToolExecutor {
   const resources = selectedSkillResources(skillContexts);
   return {
@@ -164,9 +176,43 @@ export function createReadSkillResourceTool(
 }
 
 export function hasReadableSelectedSkillResources(
-  skillContexts: readonly DesktopAgentSkillContext[] = []
+  skillContexts: readonly SkillToolContext[] = []
 ): boolean {
   return selectedSkillResources(skillContexts).size > 0;
+}
+
+export function registerSkillResourceTool(
+  registry: ToolRegistry,
+  skillContexts: readonly SkillToolContext[],
+  options: {
+    readonly includeWhenEmpty?: boolean;
+    readonly scopes?: readonly ToolRegistryScope[];
+  } = {},
+): void {
+  if (options.includeWhenEmpty !== true && !hasReadableSelectedSkillResources(skillContexts)) {
+    return;
+  }
+  registry.register({
+    executor: createReadSkillResourceTool(skillContexts),
+    scopes: options.scopes ?? ["desktop-basic"],
+    enabledByDefault: true,
+  });
+}
+
+export function createSkillToolRegistryContribution(
+  skillContexts: readonly SkillToolContext[],
+  scopes: readonly ToolRegistryScope[] = ["desktop-basic"],
+): AgentToolRegistryContribution {
+  return (register) => {
+    if (!hasReadableSelectedSkillResources(skillContexts)) {
+      return;
+    }
+    register({
+      executor: createReadSkillResourceTool(skillContexts),
+      scopes,
+      enabledByDefault: true,
+    });
+  };
 }
 
 type SelectedSkillResource = {
@@ -179,7 +225,7 @@ type SelectedSkillResource = {
 };
 
 function selectedSkillResources(
-  skillContexts: readonly DesktopAgentSkillContext[]
+  skillContexts: readonly SkillToolContext[]
 ): ReadonlyMap<string, SelectedSkillResource> {
   const resources = new Map<string, SelectedSkillResource>();
   for (const context of skillContexts) {

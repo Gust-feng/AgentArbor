@@ -1,6 +1,6 @@
 import type { Constraint } from "../../domain/constraints.js";
 import { createTaskSoil, type ReadonlySoilStore, type TaskSoil, type TaskSoilContextRef } from "../../domain/soil/index.js";
-import type { ModelRuntimeMode } from "../model-runtime/index.js";
+import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 
 const MAX_REF_LENGTH = 220;
 const MAX_SUMMARY_LENGTH = 360;

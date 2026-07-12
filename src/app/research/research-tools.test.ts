@@ -13,17 +13,20 @@ import type {
   InformationSourceKind,
 } from "../../domain/research/index.js";
 import { ConfigCenter } from "../config-center.js";
-import { createConfiguredToolCenter, createDefaultToolCenter } from "../model-runtime/index.js";
 import type { FetchLike } from "../tool-center/index.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { createDefaultResearchRuntime } from "./research-runtime.js";
 import { createResearchReadTool, createResearchSearchTool } from "./research-tools.js";
+import {
+  createConfiguredResearchToolCenter,
+  createResearchEnabledToolCenter,
+} from "./research-tool-contribution.js";
 import type { PageFetchLike } from "./source-adapters.js";
 
 const suggestionPattern = /\btry\b|\bprovide\b|\bsuggest|\brecommend\b|recoveryHint|\u5efa\u8bae/iu;
 
 test("default ToolCenter exposes model-visible search and read tools", async () => {
-  const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
+  const center = createResearchEnabledToolCenter({ env: {}, playwrightAvailable: true });
   const names = center.list().map((tool) => tool.name);
 
   assertCoreDesktopToolNames(names);
@@ -334,7 +337,7 @@ test("ToolCenter read direct bad HTTP URL preserves page error facts through out
     error.cause = cause;
     throw error;
   };
-  const center = createDefaultToolCenter({
+  const center = createResearchEnabledToolCenter({
     env: {},
     fetch: pageFetch as unknown as FetchLike,
     playwrightAvailable: false,
@@ -390,7 +393,7 @@ test("ToolCenter read direct bad HTTP URL preserves page error facts through out
 });
 
 test("ToolCenter search empty query is invalid-input instead of empty results", async () => {
-  const center = createDefaultToolCenter({
+  const center = createResearchEnabledToolCenter({
     env: {},
     playwrightAvailable: false,
     toolCatalogNames: ["search"],
@@ -471,7 +474,7 @@ test("default ToolCenter passes configured Tavily max results into ResearchRunti
       }),
     };
   };
-  const center = createDefaultToolCenter({
+  const center = createResearchEnabledToolCenter({
     env: {
       AGENTARBOR_TAVILY_API_KEY: "tvly-configured-secret",
       AGENTARBOR_TAVILY_MAX_RESULTS: "2",
@@ -505,7 +508,7 @@ test("default ToolCenter folds search site into provider query without exposing 
       }),
     };
   };
-  const center = createDefaultToolCenter({
+  const center = createResearchEnabledToolCenter({
     env: {
       AGENTARBOR_TAVILY_API_KEY: "tvly-site-secret",
     },
@@ -554,7 +557,7 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
       maxResults: 1,
     });
 
-    const center = await createConfiguredToolCenter(configCenter, { fetch, playwrightAvailable: true });
+    const center = await createConfiguredResearchToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const names = center.list().map((tool) => tool.name);
     const search = await center.execute(
       { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
@@ -598,7 +601,7 @@ test("configured ToolCenter reads Exa web search config and routes search throug
       maxResults: 2,
     });
 
-    const center = await createConfiguredToolCenter(configCenter, { fetch, playwrightAvailable: true });
+    const center = await createConfiguredResearchToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const search = await center.execute(
       { callId: "call-search-exa", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -658,7 +661,7 @@ test("configured ToolCenter reads Metaso web search config and routes search thr
       maxResults: 2,
     });
 
-    const center = await createConfiguredToolCenter(configCenter, { fetch, playwrightAvailable: true });
+    const center = await createConfiguredResearchToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const search = await center.execute(
       { callId: "call-search-metaso", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -688,7 +691,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
       settingsStore: new FileSystemNormalSettingsStore(directory),
       secretStore: new FileSystemLocalDevSecretStore(directory),
     });
-    const center = await createConfiguredToolCenter(configCenter, { playwrightAvailable: true });
+    const center = await createConfiguredResearchToolCenter(configCenter, { playwrightAvailable: true });
     const names = center.list().map((tool) => tool.name);
     const search = await center.execute(
       { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
@@ -713,7 +716,7 @@ test("configured ToolCenter uses workspaceRoot for local tools", async () => {
       settingsStore: new FileSystemNormalSettingsStore(directory),
       secretStore: new FileSystemLocalDevSecretStore(directory),
     });
-    const center = await createConfiguredToolCenter(configCenter, { workspaceRoot: workspace, playwrightAvailable: true });
+    const center = await createConfiguredResearchToolCenter(configCenter, { workspaceRoot: workspace, playwrightAvailable: true });
     const read = await center.execute(
       { callId: "call-read-file", toolName: "read_file", input: { path: "note.txt" } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -739,7 +742,7 @@ test("configured ToolCenter uses workspaceRoot for codebase research search", as
       settingsStore: new FileSystemNormalSettingsStore(directory),
       secretStore: new FileSystemLocalDevSecretStore(directory),
     });
-    const center = await createConfiguredToolCenter(configCenter, { workspaceRoot: workspace, playwrightAvailable: true });
+    const center = await createConfiguredResearchToolCenter(configCenter, { workspaceRoot: workspace, playwrightAvailable: true });
     const search = await center.execute(
       { callId: "call-search-codebase", toolName: "search", input: { query, sources: ["codebase"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -780,7 +783,7 @@ test("configured ToolCenter keeps web search disabled even when a historical Tav
     });
     await configCenter.updateWebSearchConfig({ provider: "none" });
 
-    const center = await createConfiguredToolCenter(configCenter, { fetch, playwrightAvailable: true });
+    const center = await createConfiguredResearchToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const search = await center.execute(
       { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },

@@ -3,8 +3,8 @@ import type { IntelligenceChannel } from "../../domain/intelligence/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type { AgentTurnRuntime, AgentTurnRuntimeResult } from "../../kernel/intelligence/index.js";
-import type { MinimalRuntime } from "../runtime.js";
-import { createMinimalRuntime } from "../runtime.js";
+import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
+import { createOrdinaryAgentRuntime } from "./ordinary-agent-runtime.js";
 import {
   compactBasicAgentConversationIfNeeded,
   createOpenAITokenCounter,
@@ -73,7 +73,7 @@ export async function runDesktopAgentSession(
   const agentDefinition = options.agentDefinition ?? DESKTOP_ROOT_AGENT;
   assertOrdinaryDesktopAgentDefinition(agentDefinition);
   const aiMode = resolveDesktopAgentAiMode(options);
-  const runtime = options.runtime ?? createMinimalRuntime();
+  const runtime = options.runtime ?? createOrdinaryAgentRuntime();
   const traceId = createId("trace");
   const goalId = createId("goal");
   const createdAt = nowIso();
@@ -160,7 +160,7 @@ export async function runDesktopAgentSession(
     modelCapabilities: loop.modelCapabilities,
     workspaceRoot: options.workspaceRoot,
   });
-  const turn = await loop.turnRuntime.executeAutonomous({
+  const turn = await loop.turnRuntime.execute({
     policy: loop.turnPolicy,
     requestId: createId("model-request"),
     callerRef: { kind: "goal", id: goalId, label: "desktop_agent" },
@@ -170,7 +170,7 @@ export async function runDesktopAgentSession(
     toolChoice: "auto",
     requestedAt: nowIso(),
     abortSignal: options.abortSignal,
-  });
+  }, FINAL_OUTPUT_ONLY_TURN);
 
   return desktopAgentResultFromTurn({
     goal,
@@ -188,7 +188,7 @@ export async function runDesktopAgentSession(
 
 async function compactConversationHistoryForSession(input: {
   readonly goal: string;
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly traceId: string;
   readonly goalId: string;
   readonly agentDefinition: NonNullable<RunDesktopAgentSessionOptions["agentDefinition"]>;
@@ -280,7 +280,7 @@ async function compactConversationHistoryForSession(input: {
 
 function desktopAgentResultFromTurn(input: {
   readonly goal: string;
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly traceId: string;
   readonly goalId: string;
   readonly taskSoil: TaskSoil;
@@ -438,7 +438,7 @@ function desktopAgentResultFromTurn(input: {
 function pendingApprovalContinuation(
   input: {
     readonly goal: string;
-    readonly runtime: MinimalRuntime;
+    readonly runtime: BasicAgentRuntimeContext;
     readonly traceId: string;
     readonly goalId: string;
     readonly taskSoil: TaskSoil;
@@ -457,18 +457,18 @@ function pendingApprovalContinuation(
   return {
     confirmationId: pendingApproval.confirmationId,
     resume: async (resumeInput) => {
-      const resumed = await input.turnRuntime.resumeAutonomous({
+      const resumed = await input.turnRuntime.resume({
         pendingApproval,
         approvedConfirmationIds: resumeInput.approvedConfirmationIds,
         abortSignal: resumeInput.abortSignal,
-      });
+      }, FINAL_OUTPUT_ONLY_TURN);
       return desktopAgentResultFromTurn({
         ...input,
         turn: resumed,
       });
     },
     resumeWithDecision: async (resumeInput) => {
-      const resumed = await input.turnRuntime.resumeAutonomousWithConfirmationDecision({
+      const resumed = await input.turnRuntime.resumeWithConfirmationDecision({
         pendingApproval,
         decision: {
           confirmationId: pendingApproval.confirmationId,
@@ -476,7 +476,7 @@ function pendingApprovalContinuation(
           guidance: resumeInput.guidance,
         },
         abortSignal: resumeInput.abortSignal,
-      });
+      }, FINAL_OUTPUT_ONLY_TURN);
       return desktopAgentResultFromTurn({
         ...input,
         turn: resumed,
@@ -484,6 +484,11 @@ function pendingApprovalContinuation(
     },
   };
 }
+
+const FINAL_OUTPUT_ONLY_TURN = {
+  blockedToolNames: [],
+  exposeNonFinalOutput: false,
+} as const;
 
 function hasConfirmationRequested(entries: readonly EventLogEntry[], confirmationId: string): boolean {
   return entries.some((entry) => {

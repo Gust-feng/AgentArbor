@@ -25,7 +25,7 @@
  * 现有枚举（{@link DEEP_RUN_MODE}），不在此引入新的 runMode 语义。
  */
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
-import type { ModelRuntimeMode } from "../model-runtime/index.js";
+import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import type {
   AgentRunTree,
   AgentSpec,

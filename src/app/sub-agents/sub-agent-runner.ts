@@ -30,6 +30,10 @@ import type { SubAgentDefinition } from "./sub-agent-loader.js";
 import { loadSubAgentBody } from "./sub-agent-loader.js";
 
 const SUB_AGENT_OUTPUT_CONTRACT_ID = "sub_agent.free_text.v1";
+const SUB_AGENT_TURN_SEMANTICS = {
+  blockedToolNames: [],
+  exposeNonFinalOutput: false,
+} as const;
 export const SUB_AGENT_DEFAULT_MAX_STEPS = 30;
 const DISPLAY_SUMMARY_MAX_CHARS = 500;
 const SUB_AGENT_TOOL_NAMES = new Set([
@@ -147,7 +151,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     };
 
     const turn = input.pendingApproval === undefined
-      ? await turnRuntime.executeAutonomous({
+      ? await turnRuntime.execute({
           policy,
           callerRef,
           inputRefs: [],
@@ -156,12 +160,12 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
           toolChoice: "auto",
           requestedAt: nowIso(),
           abortSignal: input.abortSignal,
-        })
-      : await turnRuntime.resumeAutonomous({
+        }, SUB_AGENT_TURN_SEMANTICS)
+      : await turnRuntime.resume({
           pendingApproval: input.pendingApproval,
           approvedConfirmationIds: input.approvedConfirmationIds ?? [],
           abortSignal: input.abortSignal,
-        });
+        }, SUB_AGENT_TURN_SEMANTICS);
 
     result = buildResultFromTurn({
       turn,

@@ -1,16 +1,16 @@
 import type { BasicAgentCapabilitySnapshot, RunCapabilityPlan, RunCapabilityResolution } from "../../domain/config/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolDefinition, ToolExecutionBroker } from "../../domain/tools/index.js";
-import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import type { CapabilityAgentProfile } from "./capability-policy.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-contracts.js";
 import { frozenToolDefinitionsForRun } from "./capability-tool-definitions.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 import { createRunCapabilityPlan } from "../model-runtime/model-capability-registry.js";
 import { toolDefinitionContractHash } from "./tool-definition-contract.js";
-import { hasReadableSelectedSkillResources } from "../tool-center/adapters/skill-resource-tool.js";
+import { hasReadableSelectedSkillResources } from "../skills/skill-resource-tool.js";
 
 export type ResolveRunToolBoundaryInput = {
-  readonly agentDefinition: AgentDefinition;
+  readonly agentDefinition: CapabilityAgentProfile;
   readonly snapshot?: BasicAgentCapabilitySnapshot;
   readonly goal: string;
   readonly taskSoil: TaskSoil;

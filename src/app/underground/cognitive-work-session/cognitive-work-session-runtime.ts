@@ -77,9 +77,11 @@ export async function executeRequiredTurn(input: {
     inputRefs: input.inputRefs,
     sanitizedMessages: input.messages,
     constraintRefs: [],
-  });
+  }, FULL_TURN_OUTPUT);
   if (result.status !== "completed" || result.finalOutput?.status !== "completed") {
     throw new Error(`Work Session model turn failed: ${input.purpose} / ${input.outputContract.contractId}`);
   }
   return result;
 }
+
+const FULL_TURN_OUTPUT = { blockedToolNames: [], exposeNonFinalOutput: true } as const;

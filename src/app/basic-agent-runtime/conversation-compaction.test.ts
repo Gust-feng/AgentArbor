@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import test from "node:test";
 import type {
   IntelligenceChannel,
@@ -12,41 +10,6 @@ import {
   compactBasicAgentLoopContextIfNeeded,
 } from "./conversation-compaction.js";
 import type { BasicAgentTokenCounter } from "./token-counter.js";
-
-const sourceDirectory = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
-
-test("conversation compaction keeps facade, contracts, history, and loop paths split", async () => {
-  const [facade, contracts, common, history, loop] = await Promise.all([
-    readFile(path.join(sourceDirectory, "conversation-compaction.ts"), "utf8"),
-    readFile(path.join(sourceDirectory, "conversation-compaction-contracts.ts"), "utf8"),
-    readFile(path.join(sourceDirectory, "conversation-compaction-common.ts"), "utf8"),
-    readFile(path.join(sourceDirectory, "conversation-history-compaction.ts"), "utf8"),
-    readFile(path.join(sourceDirectory, "loop-context-compaction.ts"), "utf8"),
-  ]);
-
-  assert.equal(facade.includes("export * from \"./conversation-compaction-contracts.js\""), true);
-  assert.equal(facade.includes("compactBasicAgentConversationIfNeeded"), true);
-  assert.equal(facade.includes("compactBasicAgentLoopContextIfNeeded"), true);
-  assert.equal(facade.includes("async function compactBasicAgentConversationIfNeeded"), false);
-  assert.equal(facade.includes("async function compactBasicAgentLoopContextIfNeeded"), false);
-  assert.equal(contracts.includes("export type BasicAgentConversationSummary"), true);
-  assert.equal(contracts.includes("export type BasicAgentCompactionAgentIdentity"), true);
-  assert.equal(contracts.includes("export type CompactBasicAgentConversationInput"), true);
-  assert.equal(contracts.includes("export type CompactBasicAgentLoopContextInput"), true);
-  assert.equal(contracts.includes("readonly agentIdentity?: BasicAgentCompactionAgentIdentity"), true);
-  assert.equal(common.includes("export function conversationCompactionOutputContract"), true);
-  assert.equal(common.includes("export function inputTokenBudgetFor"), true);
-  assert.equal(common.includes("export function compactionAgentDisplayName"), true);
-  assert.equal(history.includes("export async function compactBasicAgentConversationIfNeeded"), true);
-  assert.equal(history.includes("function compactionMessages"), true);
-  assert.equal(history.includes("compactionAgentDisplayName(input.agentIdentity)"), true);
-  assert.equal(history.includes("function splitLoopMessagesForCompaction"), false);
-  assert.equal(loop.includes("export async function compactBasicAgentLoopContextIfNeeded"), true);
-  assert.equal(loop.includes("compactionAgentDisplayName(input.agentIdentity)"), true);
-  assert.equal(loop.includes("function splitLoopMessagesForCompaction"), true);
-  assert.equal(loop.includes("function assembleCompactedLoopMessages"), true);
-  assert.equal(loop.includes("function compactionMessages"), false);
-});
 
 test("conversation history compaction summarizes older turns and keeps recent turns", async () => {
   const channel = new TestIntelligenceChannel("Older decisions preserved.");

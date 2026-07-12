@@ -3,9 +3,6 @@ import type { ModelRequest, ModelToolChoice } from "../../domain/intelligence/in
 import type { ToolDefinition, ToolDefinitionMetadata } from "../../domain/tools/index.js";
 
 export {
-  createConfiguredToolCenter,
-  createConfiguredToolCenterFactory,
-  createDefaultToolCenter,
   fetchModelRuntimeModelCatalog,
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
@@ -16,12 +13,13 @@ export type {
   ModelRuntimeConfig,
   ModelRuntimeConfigurationIssueCode,
   ModelRuntimeContextWindowExceededEvent,
+  ModelRuntimeChannelContext,
   ModelRuntimeEnvironment,
   ModelRuntimeModelCatalogFetch,
-  ModelRuntimeMode,
   ModelRuntimeProviderFetch,
   ModelRuntimeSummaryInput,
 } from "./factory.js";
+export type { ModelRuntimeMode } from "./contracts.js";
 
 export type ModelRuntimeRequestPlan = {
   readonly requestId: string;

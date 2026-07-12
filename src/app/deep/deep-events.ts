@@ -21,7 +21,7 @@
  *
  * 命名红线：消费 contracts.ts 的 SynthesizedConclusion；不引入 Plan/artifact/Fruits。
  */
-import type { MinimalRuntime } from "../runtime.js";
+import type { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import { AppRunEventHub } from "../run-runtime-core/event-stream.js";
@@ -192,7 +192,7 @@ export interface DeepEventPublisher {
  * 每条事件同时落入 bus + 安全投影序列。
  */
 export function createDeepEventPublisher(options: {
-  readonly runtime: MinimalRuntime;
+  readonly bus: InMemoryMessageBus;
   readonly traceId: string;
   readonly runId: string;
 }): DeepEventPublisher {
@@ -214,7 +214,7 @@ export function createDeepEventPublisher(options: {
       refs: projection.refs,
       visibility: "public",
     });
-    options.runtime.bus.publish(
+    options.bus.publish(
       createMessage({
         traceId: options.traceId,
         from: { id: DEEP_MANAGER_AGENT_ID, role: "deep_manager" },

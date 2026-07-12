@@ -18,7 +18,7 @@ import type {
   ModelRuntimeMode,
   ModelRuntimeProviderFetch,
 } from "../model-runtime/index.js";
-import type { MinimalRuntime } from "../runtime.js";
+import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 
 export type DesktopAgentSessionStatus = "completed" | "confirmation_needed" | "stopped" | "failed" | "paused";
@@ -89,7 +89,7 @@ export type DesktopAgentAnswer = {
 export type DesktopAgentSessionResult = {
   readonly status: DesktopAgentSessionStatus;
   readonly stopReason?: DesktopAgentStopReason;
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly traceId: string;
   readonly goalId: string;
   readonly taskSoil: TaskSoil;
@@ -119,7 +119,7 @@ export type DesktopAgentPendingApprovalContinuation = {
 };
 
 export type DesktopAgentSessionRuntimeContext = {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly traceId: string;
   readonly goalId: string;
 };
@@ -137,8 +137,8 @@ export type DesktopAgentToolCenterContext = DesktopAgentSessionRuntimeContext & 
 };
 
 export type DesktopAgentToolCenterFactory =
-  ((runtime: MinimalRuntime, context?: DesktopAgentToolCenterContext) => ToolExecutionBroker) |
-  ((runtime: MinimalRuntime) => ToolExecutionBroker);
+  ((runtime: BasicAgentRuntimeContext, context?: DesktopAgentToolCenterContext) => ToolExecutionBroker) |
+  ((runtime: BasicAgentRuntimeContext) => ToolExecutionBroker);
 
 export type RunDesktopAgentSessionOptions = {
   readonly aiMode?: ModelRuntimeMode;
@@ -158,8 +158,8 @@ export type RunDesktopAgentSessionOptions = {
   readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly platform?: NodeJS.Platform;
   readonly abortSignal?: AbortSignal;
-  readonly runtime?: MinimalRuntime;
-  readonly createIntelligenceChannel?: (runtime: MinimalRuntime) => IntelligenceChannel;
+  readonly runtime?: BasicAgentRuntimeContext;
+  readonly createIntelligenceChannel?: (runtime: BasicAgentRuntimeContext) => IntelligenceChannel;
   readonly createToolCenter?: DesktopAgentToolCenterFactory;
   readonly subAgentRoots?: readonly SubAgentRootInput[];
   readonly onRuntimeReady?: (context: DesktopAgentSessionRuntimeContext) => void;

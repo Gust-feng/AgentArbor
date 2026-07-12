@@ -334,7 +334,6 @@ test("capability boundary modules stay under capability ownership", async () => 
     readSource(path.join(appRoot, "agent-definitions", "agent-definition-runtime.ts")),
     readSource(path.join(appRoot, "desktop-agent", "desktop-agent-loop-preparation.ts")),
     readSource(path.join(appRoot, "panel-server", "config-routes.ts")),
-    readSource(path.join(appRoot, "panel-server", "deep-routes.ts")),
     readSource(path.join(appRoot, "panel-server", "mcp-management-service.ts")),
     readSource(path.join(appRoot, "panel-server", "runtime.ts")),
   ]);
@@ -533,10 +532,8 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
     readSource(path.join(appRoot, "basic-agent-runtime", "context-pack.test.ts")),
     readSource(path.join(appRoot, "basic-agent-runtime", "context-ledger.ts")),
     readSource(path.join(appRoot, "basic-agent-runtime", "context-ledger-items.ts")),
-    readSource(path.join(appRoot, "basic-agent-runtime", "builtin-tool-runtime.ts")),
     readSource(path.join(appRoot, "panel-read-model", "canvas", "panel-desktop-agent-canvas.ts")),
     readSource(path.join(appRoot, "panel-server", "conversation-history.ts")),
-    readSource(path.join(appRoot, "panel-server", "desktop-run-resources.ts")),
     readSource(path.join(appRoot, "panel-server", "desktop-agent-execution.ts")),
     readSource(path.join(appRoot, "panel-server", "run-execution-contracts.ts")),
     readSource(path.join(appRoot, "panel-server", "skill-service.ts")),

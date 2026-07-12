@@ -10,6 +10,7 @@ import { createId } from "../../kernel/id.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import { createMinimalRuntime } from "../runtime.js";
 import { createUndergroundAiRuntimeConfig } from "../underground-ai-runtime.js";
+import { createDefaultToolCenter } from "../tool-center/index.js";
 import { runUndergroundDirectionSessionWithIntelligence } from "./compat/underground-direction-session.js";
 import { UndergroundAgentOrchestrator } from "./orchestrator.js";
 
@@ -102,7 +103,7 @@ async function runFakeUndergroundDirectionSession(goal: string) {
   }
   return runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-    createToolCenter: aiConfig.createToolCenter,
+    createToolCenter: (runtime) => createDefaultToolCenter({ runtime }),
   });
 }
 

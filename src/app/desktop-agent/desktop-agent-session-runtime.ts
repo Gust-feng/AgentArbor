@@ -22,7 +22,7 @@ import {
   createModelRuntimeDisabledConfigurationError,
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
-import type { MinimalRuntime } from "../runtime.js";
+import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
 import type { RunDesktopAgentSessionOptions } from "./desktop-agent-session-contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import {
@@ -35,7 +35,7 @@ type DesktopAgentDefinition = NonNullable<RunDesktopAgentSessionOptions["agentDe
 export function createIntelligenceChannelFromOptions(
   aiMode: ModelRuntimeMode,
   options: RunDesktopAgentSessionOptions
-): ((runtime: MinimalRuntime) => IntelligenceChannel) | undefined {
+): ((runtime: BasicAgentRuntimeContext) => IntelligenceChannel) | undefined {
   if (aiMode === "none") {
     return undefined;
   }
@@ -75,7 +75,7 @@ export function createDesktopAgentTurnPolicy(input: {
 }
 
 export function createDesktopAgentTurnRuntime(input: {
-  readonly runtime: MinimalRuntime;
+  readonly runtime: BasicAgentRuntimeContext;
   readonly agentId: string;
   readonly agentDisplayName: string;
   readonly channel: IntelligenceChannel;

@@ -1,7 +1,20 @@
 import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 
 export type SourceGraph = ReadonlyMap<string, readonly string[]>;
+
+export type SourceImportBinding = {
+  readonly moduleSpecifier: string;
+  readonly importedName: string;
+  readonly localName: string;
+  readonly typeOnly: boolean;
+};
+
+export type SourceInvocationNames = {
+  readonly called: readonly string[];
+  readonly constructed: readonly string[];
+};
 
 const SOURCE_EXTENSIONS = [".ts", ".tsx"] as const;
 const IMPORT_SPECIFIER_PATTERN =
@@ -97,6 +110,80 @@ export function importSpecifiersFrom(source: string): string[] {
   return [...source.matchAll(IMPORT_SPECIFIER_PATTERN)].map((match) => match[1]);
 }
 
+export function sourceImportBindings(source: string, fileName: string): readonly SourceImportBinding[] {
+  const sourceFile = parseTypeScriptSource(source, fileName);
+  const bindings: SourceImportBinding[] = [];
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteralLike(statement.moduleSpecifier)) {
+      continue;
+    }
+    const importClause = statement.importClause;
+    if (importClause === undefined) {
+      continue;
+    }
+    const moduleSpecifier = statement.moduleSpecifier.text;
+    if (importClause.name !== undefined) {
+      bindings.push({
+        moduleSpecifier,
+        importedName: "default",
+        localName: importClause.name.text,
+        typeOnly: importClause.isTypeOnly,
+      });
+    }
+    const namedBindings = importClause.namedBindings;
+    if (namedBindings === undefined) {
+      continue;
+    }
+    if (ts.isNamespaceImport(namedBindings)) {
+      bindings.push({
+        moduleSpecifier,
+        importedName: "*",
+        localName: namedBindings.name.text,
+        typeOnly: importClause.isTypeOnly,
+      });
+      continue;
+    }
+    for (const element of namedBindings.elements) {
+      bindings.push({
+        moduleSpecifier,
+        importedName: element.propertyName?.text ?? element.name.text,
+        localName: element.name.text,
+        typeOnly: importClause.isTypeOnly || element.isTypeOnly,
+      });
+    }
+  }
+
+  return bindings;
+}
+
+export function sourceInvocationNames(source: string, fileName: string): SourceInvocationNames {
+  const sourceFile = parseTypeScriptSource(source, fileName);
+  const called = new Set<string>();
+  const constructed = new Set<string>();
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const name = invokedExpressionName(node.expression);
+      if (name !== undefined) {
+        called.add(name);
+      }
+    } else if (ts.isNewExpression(node)) {
+      const name = invokedExpressionName(node.expression);
+      if (name !== undefined) {
+        constructed.add(name);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  return {
+    called: [...called].sort(),
+    constructed: [...constructed].sort(),
+  };
+}
+
 export function isSiblingBarrelImport(specifier: string): boolean {
   return /^(\.\.\/|\.\/)[^/]+\/index\.js$/.test(specifier);
 }
@@ -123,6 +210,44 @@ export function findDependencyCycles(graph: SourceGraph, maxLength: number): str
   return [...cycles.values()].sort(compareCycle);
 }
 
+export function findDependencyPathsTo(
+  graph: SourceGraph,
+  startFiles: readonly string[],
+  isForbiddenTarget: (file: string) => boolean
+): string[][] {
+  const violations: string[][] = [];
+  const queue = startFiles.map((start) => [start]);
+  const visited = new Set(startFiles);
+  const foundTargets = new Set<string>();
+
+  while (queue.length > 0) {
+    const currentPath = queue.shift();
+    if (currentPath === undefined) {
+      break;
+    }
+    const current = currentPath[currentPath.length - 1];
+    if (current === undefined) {
+      continue;
+    }
+    for (const next of graph.get(current) ?? []) {
+      if (isForbiddenTarget(next)) {
+        if (!foundTargets.has(next)) {
+          foundTargets.add(next);
+          violations.push([...currentPath, next]);
+        }
+        continue;
+      }
+      if (visited.has(next)) {
+        continue;
+      }
+      visited.add(next);
+      queue.push([...currentPath, next]);
+    }
+  }
+
+  return violations;
+}
+
 export function relativePath(file: string): string {
   return path.relative(process.cwd(), file).replaceAll(path.sep, "/");
 }
@@ -137,6 +262,33 @@ function resolveSourceSpecifier(file: string, specifier: string): string | undef
   ];
 
   return candidates.find((candidate) => fileExistsSync(candidate));
+}
+
+function parseTypeScriptSource(source: string, fileName: string): ts.SourceFile {
+  return ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  );
+}
+
+function invokedExpressionName(expression: ts.LeftHandSideExpression): string | undefined {
+  if (ts.isIdentifier(expression)) {
+    return expression.text;
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text;
+  }
+  if (
+    ts.isElementAccessExpression(expression) &&
+    expression.argumentExpression !== undefined &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return expression.argumentExpression.text;
+  }
+  return undefined;
 }
 
 function searchDependencyCycles(

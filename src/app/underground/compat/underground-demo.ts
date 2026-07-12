@@ -17,6 +17,7 @@ import {
   UndergroundAiConfigurationError,
   type UndergroundAiMode,
 } from "../../underground-ai-runtime.js";
+import { createResearchEnabledToolCenter } from "../../research/research-tool-contribution.js";
 
 const DEFAULT_GOAL = "Build a small deterministic helper.";
 
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
     const result = await runUndergroundDirectionSessionWithIntelligence(args.goal, {
       outputDirectory: args.outputDirectory,
       createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-      createToolCenter: aiConfig.createToolCenter,
+      createToolCenter: (runtime) => createResearchEnabledToolCenter({ runtime }),
     });
     const recovery =
       args.autoAnswer && result.terminalStatus === "awaiting_user"

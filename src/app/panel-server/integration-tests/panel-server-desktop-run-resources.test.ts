@@ -408,7 +408,7 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
       }),
       informationAccess: informationAccess(),
     });
-    disconnectAll = resources.mcpManager?.disconnectAll?.bind(resources.mcpManager);
+    disconnectAll = resources.release;
     const factory = createDesktopToolCenterFactory(undefined, resources);
     const toolCenter = factory(createMinimalRuntime());
 

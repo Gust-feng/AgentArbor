@@ -11,7 +11,7 @@
  *
  * 复用边界（FR-010，复用而非另起）：
  *   - Task Soil 装配复用 task-soil-workspace.ts（含 workspace 上下文授权校验）
- *   - MinimalRuntime 的 soilStore / constraints 复用（Task Soil 装配输入）
+ *   - 只通过显式 soilStore / constraints 端口装配 Task Soil
  *   - RuntimeDatabase 的存储根（runtimeHome）与文件持久化模式复用——deep 会话
  *     写入 `${runtimeHome}/deep-conversations/` 独立分区，物理隔离于普通会话的
  *     `${runtimeHome}/conversations/`。DeepConversationStore 是 deep 模块自己的
@@ -21,8 +21,9 @@
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { createId, nowIso } from "../../kernel/id.js";
-import type { MinimalRuntime } from "../runtime.js";
-import type { ModelRuntimeMode } from "../model-runtime/index.js";
+import type { Constraint } from "../../domain/constraints.js";
+import type { ReadonlySoilStore } from "../../domain/soil/index.js";
+import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import {
   createTaskSoilFromDesktopInput,
   parseDesktopTaskSoilInput,
@@ -159,17 +160,18 @@ export type DeepConversationService = {
 /**
  * 创建 DeepConversationService。
  *
- * `runtime` 用于 Task Soil 装配（soilStore / constraints）；`aiMode` 决定权限边界
+ * `constraints` 与 `soilStore` 只用于 Task Soil 装配；`aiMode` 决定权限边界
  * 默认值（复用 createTaskSoilFromDesktopInput 的 permission 推导）。
  * DeepConversationService 不持有也不调用 RuntimeDatabase 的会话方法——会话读写
  * 完全经 `store`（deep 专属分区），从而与普通会话 store 隔离。
  */
 export function createDeepConversationService(options: {
   readonly store: DeepConversationStore;
-  readonly runtime: MinimalRuntime;
+  readonly constraints: readonly Constraint[];
+  readonly soilStore: ReadonlySoilStore;
   readonly aiMode: ModelRuntimeMode;
 }): DeepConversationService {
-  const { store, runtime, aiMode } = options;
+  const { store, constraints, soilStore, aiMode } = options;
   return {
     async create(input: CreateDeepConversationInput): Promise<DeepConversation> {
       const goal = input.goal.trim();
@@ -196,8 +198,8 @@ export function createDeepConversationService(options: {
         goalId,
         traceId,
         aiMode,
-        constraints: runtime.constraints,
-        soilStore: runtime.soilStore,
+        constraints,
+        soilStore,
         taskSoilInput: validatedTaskSoilInput,
         createdAt,
       });

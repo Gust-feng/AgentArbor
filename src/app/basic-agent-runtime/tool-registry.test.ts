@@ -8,6 +8,7 @@ import {
 } from "../../domain/tools/index.js";
 import { createDesktopBasicToolRegistry } from "./builtin-tool-runtime.js";
 import { ToolRegistry } from "./tool-registry.js";
+import { registerSkillResourceTool } from "../skills/skill-resource-tool.js";
 
 test("desktop-basic tool registry exposes catalog and allowed tools from scoped metadata", () => {
   const registry = createDesktopBasicToolRegistry({ env: {}, workspaceRoot: process.cwd(), playwrightAvailable: true });
@@ -289,7 +290,8 @@ test("desktop-basic tool registry registers read_skill_resource for frozen skill
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
     toolCatalogNames: ["read_skill_resource"],
-    skillContexts: [{
+  });
+  registerSkillResourceTool(registry, [{
       skill: {
         id: "repo-review",
         name: "Repo Review",
@@ -306,12 +308,9 @@ test("desktop-basic tool registry registers read_skill_resource for frozen skill
           contentHash: "sha256:reference",
         }],
       },
-      body: "Use the checklist only when needed.",
-      triggerReason: "model selected repo-review",
       loadStatus: "loaded",
       omitted: false,
-    }],
-  });
+    }]);
 
   const catalog = registry.catalog("desktop-basic");
   const center = registry.createToolCenter("desktop-basic");
@@ -329,7 +328,8 @@ test("desktop-basic tool registry does not register read_skill_resource for omit
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
     toolCatalogNames: ["read_skill_resource"],
-    skillContexts: [{
+  });
+  registerSkillResourceTool(registry, [{
       skill: {
         id: "repo-review",
         name: "Repo Review",
@@ -344,12 +344,9 @@ test("desktop-basic tool registry does not register read_skill_resource for omit
           sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/references/checklist.md",
         }],
       },
-      body: "",
-      triggerReason: "model selected repo-review",
       loadStatus: "failed",
       omitted: true,
-    }],
-  });
+    }]);
 
   assert.deepEqual(registry.catalog("desktop-basic").tools, []);
   assert.equal(registry.createToolCenter("desktop-basic").has("read_skill_resource"), false);

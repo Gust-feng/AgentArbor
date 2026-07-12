@@ -1,11 +1,10 @@
+/** @deprecated Import the neutral context-maintenance module directly. */
 export {
-  compactBasicAgentLoopContextIfNeeded as compactAgentLoopContextIfNeeded,
-} from "./basic-agent-runtime/loop-context-compaction.js";
-export type {
-  BasicAgentLoopContextCompactionResult as AgentLoopContextMaintenanceResult,
-  CompactBasicAgentLoopContextInput as MaintainAgentLoopContextInput,
-} from "./basic-agent-runtime/conversation-compaction-contracts.js";
-export {
+  compactAgentLoopContextIfNeeded,
   createOpenAITokenCounter,
-  type BasicAgentTokenCounter as AgentLoopTokenCounter,
-} from "./basic-agent-runtime/token-counter.js";
+} from "./context-maintenance/index.js";
+export type {
+  AgentLoopContextMaintenanceResult,
+  AgentLoopTokenCounter,
+  MaintainAgentLoopContextInput,
+} from "./context-maintenance/index.js";

@@ -16,11 +16,30 @@ import { nowIso } from "../id.js";
 import { pendingModelOutputValidation } from "./validation.js";
 import { AgentTurnRuntime, type AgentTurnPolicy } from "./agent-turn-runtime.js";
 
+const FULL_TURN_OUTPUT = { blockedToolNames: [], exposeNonFinalOutput: true } as const;
+const FINAL_OUTPUT_ONLY = { blockedToolNames: [], exposeNonFinalOutput: false } as const;
+
+function executeFull(runtime: AgentTurnRuntime, input: Parameters<AgentTurnRuntime["execute"]>[0]) {
+  return runtime.execute(input, FULL_TURN_OUTPUT);
+}
+
+function executeFinal(runtime: AgentTurnRuntime, input: Parameters<AgentTurnRuntime["execute"]>[0]) {
+  return runtime.execute(input, FINAL_OUTPUT_ONLY);
+}
+
+function resumeFull(runtime: AgentTurnRuntime, input: Parameters<AgentTurnRuntime["resume"]>[0]) {
+  return runtime.resume(input, FULL_TURN_OUTPUT);
+}
+
+function resumeFinal(runtime: AgentTurnRuntime, input: Parameters<AgentTurnRuntime["resume"]>[0]) {
+  return runtime.resume(input, FINAL_OUTPUT_ONLY);
+}
+
 test("AgentTurnRuntime skips model calls when policy disables model access", async () => {
   const channel = new SequenceIntelligenceChannel([]);
   const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
 
-  const result = await runtime.execute(createTurnInput({
+  const result = await executeFull(runtime, createTurnInput({
     allowModel: false,
     allowedTools: [],
     maxModelRounds: 0,
@@ -48,7 +67,7 @@ test("AgentTurnRuntime rejects unauthorized tool calls and publishes safe tool f
     publishToolEvent: (message) => eventLog.append(message),
   });
 
-  const result = await runtime.execute(createTurnInput({ allowedTools: [], maxModelRounds: 2 }));
+  const result = await executeFull(runtime, createTurnInput({ allowedTools: [], maxModelRounds: 2 }));
 
   assert.equal(result.status, "completed");
   assert.equal(result.toolCalls.length, 1);
@@ -70,7 +89,7 @@ test("AgentTurnRuntime executes one tool round and returns final model output", 
     publishToolEvent: (message) => eventLog.append(message),
   });
 
-  const result = await runtime.execute(createTurnInput({ allowedTools: ["web_search"], maxModelRounds: 2 }));
+  const result = await executeFull(runtime, createTurnInput({ allowedTools: ["web_search"], maxModelRounds: 2 }));
 
   assert.equal(result.status, "completed");
   assert.equal(result.stoppedReason, "completed");
@@ -91,7 +110,7 @@ test("AgentTurnRuntime completes on no-tool provider stop", async () => {
     toolCenter: broker,
   });
 
-  const result = await runtime.execute(createTurnInput({
+  const result = await executeFull(runtime, createTurnInput({
     allowedTools: [],
     maxModelRounds: 2,
   }));
@@ -113,7 +132,7 @@ test("AgentTurnRuntime executeAutonomous fails on incomplete no-tool provider st
     ]);
     const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
 
-    const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await executeFinal(runtime, createTurnInput({
       allowedTools: [],
       maxModelRounds: 2,
     }));
@@ -132,7 +151,7 @@ test("AgentTurnRuntime executeAutonomous maps failed model responses to non-comp
   ]);
   const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await executeFinal(runtime, createTurnInput({
     allowedTools: [],
     maxModelRounds: 2,
   }));
@@ -156,7 +175,7 @@ test("AgentTurnRuntime returns a failed model response when the model request th
   };
   const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await executeFinal(runtime, createTurnInput({
     allowedTools: [],
     maxModelRounds: 1,
   }));
@@ -188,7 +207,7 @@ test("AgentTurnRuntime executeAutonomous pauses on context_overflow without expo
     }),
   });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await executeFinal(runtime, createTurnInput({
     allowedTools: [],
     maxModelRounds: 2,
   }));
@@ -209,7 +228,7 @@ test("AgentTurnRuntime executeAutonomous returns cancelled without completing wh
   ]);
   const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
 
-  const result = await runtime.executeAutonomous({
+  const result = await executeFinal(runtime, {
     ...createTurnInput({
       allowedTools: [],
       maxModelRounds: 2,
@@ -234,7 +253,7 @@ test("AgentTurnRuntime exposes allowed external tools without finish_task", asyn
     toolCenter: new PermissionAwareToolBroker(["web_search"]),
   });
 
-  const result = await runtime.execute(createTurnInput({
+  const result = await executeFull(runtime, createTurnInput({
     allowedTools: ["web_search"],
     maxModelRounds: 1,
   }));
@@ -244,7 +263,7 @@ test("AgentTurnRuntime exposes allowed external tools without finish_task", asyn
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
 });
 
-test("AgentTurnRuntime executeAutonomous hides internal completion tools from ordinary model-visible tools", async () => {
+test("AgentTurnRuntime applies the caller-supplied blocked tool set", async () => {
   const channel = new SequenceIntelligenceChannel([
     textResponse("model-request-test", "Plain text is the natural stop signal."),
   ]);
@@ -253,17 +272,17 @@ test("AgentTurnRuntime executeAutonomous hides internal completion tools from or
     toolCenter: new PermissionAwareToolBroker(["web_search", "finish_task"]),
   });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await runtime.execute(createTurnInput({
     allowedTools: ["web_search", "finish_task"],
     maxModelRounds: 1,
-  }));
+  }), { blockedToolNames: ["finish_task"], exposeNonFinalOutput: false });
 
   assert.equal(result.status, "completed");
   assert.equal(result.stoppedReason, "no_tool_calls");
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
 });
 
-test("AgentTurnRuntime executeAutonomous does not complete via finish_task tool calls", async () => {
+test("AgentTurnRuntime rejects a tool call blocked explicitly by its caller", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-finish", "finish_task"),
     textResponse("model-request-final", "Final answer after natural provider stop."),
@@ -274,10 +293,10 @@ test("AgentTurnRuntime executeAutonomous does not complete via finish_task tool 
     toolCenter: broker,
   });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await runtime.execute(createTurnInput({
     allowedTools: ["finish_task"],
     maxModelRounds: 3,
-  }));
+  }), { blockedToolNames: ["finish_task"], exposeNonFinalOutput: false });
 
   assert.equal(result.status, "completed");
   assert.equal(result.stoppedReason, "completed");
@@ -301,7 +320,7 @@ test("AgentTurnRuntime completes after a tool round when the model stops calling
     toolCenter: broker,
   });
 
-  const result = await runtime.execute(createTurnInput({
+  const result = await executeFull(runtime, createTurnInput({
     allowedTools: ["web_search"],
     maxModelRounds: 3,
   }));
@@ -325,7 +344,7 @@ test("AgentTurnRuntime executeAutonomous returns natural provider-stop after too
     toolCenter: broker,
   });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await executeFinal(runtime, createTurnInput({
     allowedTools: ["web_search"],
     maxModelRounds: 3,
   }));
@@ -346,7 +365,7 @@ test("AgentTurnRuntime pauses out_of_fuel when budgets end before provider stop"
     toolCenter: new PermissionAwareToolBroker(["web_search"]),
   });
 
-  const result = await runtime.execute(createTurnInput({
+  const result = await executeFull(runtime, createTurnInput({
     allowedTools: ["web_search"],
     maxModelRounds: 1,
     maxToolRounds: 2,
@@ -369,7 +388,7 @@ test("AgentTurnRuntime executeAutonomous pauses on tool fuel exhaustion without 
     toolCenter: broker,
   });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await executeFinal(runtime, createTurnInput({
     allowedTools: ["web_search"],
     maxModelRounds: 3,
     maxToolRounds: 0,
@@ -394,7 +413,7 @@ test("AgentTurnRuntime executeAutonomous pauses on explicit fuel limits before p
     toolCenter: new PermissionAwareToolBroker(["web_search"]),
   });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await executeFinal(runtime, createTurnInput({
     allowedTools: ["web_search"],
     maxModelRounds: 1,
     maxToolRounds: 2,
@@ -420,7 +439,7 @@ test("AgentTurnRuntime returns approval_required and resumes with a matching con
     publishToolEvent: (message) => eventLog.append(message),
   });
 
-  const paused = await runtime.execute(createTurnInput({
+  const paused = await executeFull(runtime, createTurnInput({
     allowedTools: ["delete_file"],
     maxModelRounds: 3,
   }));
@@ -434,7 +453,7 @@ test("AgentTurnRuntime returns approval_required and resumes with a matching con
   assert.equal(approvalEvent?.message.from.id, "agent-test");
   assert.equal(approvalEvent?.message.from.role, "agent");
 
-  const resumed = await runtime.resume({
+  const resumed = await resumeFull(runtime, {
     pendingApproval: paused.pendingApproval!,
     approvedConfirmationIds: ["confirmation-call-delete"],
   });
@@ -456,7 +475,7 @@ test("AgentTurnRuntime resumeAutonomous requires matching confirmation and then 
     toolCenter: broker,
   });
 
-  const paused = await runtime.executeAutonomous(createTurnInput({
+  const paused = await executeFinal(runtime, createTurnInput({
     allowedTools: ["delete_file"],
     maxModelRounds: 3,
   }));
@@ -464,7 +483,7 @@ test("AgentTurnRuntime resumeAutonomous requires matching confirmation and then 
   assert.equal(paused.status, "approval_required");
   assert.equal(paused.finalOutput, undefined);
 
-  const resumed = await runtime.resumeAutonomous({
+  const resumed = await resumeFinal(runtime, {
     pendingApproval: paused.pendingApproval!,
     approvedConfirmationIds: ["confirmation-call-delete"],
   });
@@ -482,8 +501,9 @@ test("AgentTurnRuntime enforces tool and model round limits", async () => {
     ]),
     toolCenter: new PermissionAwareToolBroker(["web_search"]),
   });
-  const toolLimited = await toolLimitRuntime.execute(
-    createTurnInput({ allowedTools: ["web_search"], maxToolRounds: 0 })
+  const toolLimited = await executeFull(
+    toolLimitRuntime,
+    createTurnInput({ allowedTools: ["web_search"], maxToolRounds: 0 }),
   );
 
   assert.equal(toolLimited.status, "paused");
@@ -494,10 +514,14 @@ test("AgentTurnRuntime enforces tool and model round limits", async () => {
     toolCallResponse("model-request-test", "call-search", "web_search"),
     completedResponse("unused", { summary: "unused" }),
   ]);
-  const modelLimited = await new AgentTurnRuntime({
+  const modelLimitRuntime = new AgentTurnRuntime({
     intelligenceChannel: modelLimitChannel,
     toolCenter: new PermissionAwareToolBroker(["web_search"]),
-  }).execute(createTurnInput({ allowedTools: ["web_search"], maxModelRounds: 1 }));
+  });
+  const modelLimited = await executeFull(
+    modelLimitRuntime,
+    createTurnInput({ allowedTools: ["web_search"], maxModelRounds: 1 }),
+  );
 
   assert.equal(modelLimited.status, "paused");
   assert.equal(modelLimited.stoppedReason, "out_of_fuel");

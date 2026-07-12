@@ -7,33 +7,36 @@ import {
   type ModelCatalogFetchLike,
 } from "../../adapters/intelligence/index.js";
 import { NativeIntelligenceChannel } from "../../kernel/intelligence/channel.js";
+import type { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../../domain/intelligence/index.js";
-import type { InformationSourceKind } from "../../domain/research/index.js";
-import type { TaskSoil } from "../../domain/soil/index.js";
 import type {
-  CapabilityToolAvailability,
-  ModelCapabilities,
   ModelProviderModelCatalog,
   ProviderProtocolProfileId,
-  SanitizedCommandShellConfig,
   SanitizedModelProviderConfig,
-  ToolStateSettings,
 } from "../../domain/config/index.js";
-import type { ToolExecutionBroker } from "../../domain/tools/index.js";
-import type { ConfigCenter } from "../config-center/index.js";
-import type { MinimalRuntime } from "../runtime.js";
-import { createDesktopBasicToolRegistry, type ToolRegistryFetchLike } from "../basic-agent-runtime/builtin-tool-runtime.js";
-import type { McpToolExecutorProvider } from "../basic-agent-runtime/builtin-tool-runtime.js";
-import type { ToolRegistryScope } from "../basic-agent-runtime/tool-registry.js";
-import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-contracts.js";
-import type { LocalCommandProcessRegistry } from "../tool-center/adapters/local-workspace-command-tools.js";
+import type { ModelRuntimeMode } from "./contracts.js";
 
-export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 export type ModelRuntimeStreamingMode = "respect_profile" | "force_live";
 
 export type ModelRuntimeEnvironment = Readonly<Record<string, string | undefined>>;
-export type ModelRuntimeProviderFetch = ToolRegistryFetchLike;
+export type ModelRuntimeProviderFetch = (
+  url: string,
+  init: {
+    readonly method: "GET" | "POST";
+    readonly headers: Record<string, string>;
+    readonly body?: string;
+    readonly signal?: AbortSignal;
+  }
+) => Promise<{
+  readonly ok: boolean;
+  readonly status: number;
+  readonly json: () => Promise<unknown>;
+  readonly text?: () => Promise<string>;
+}>;
 export type ModelRuntimeModelCatalogFetch = ModelCatalogFetchLike;
+export type ModelRuntimeChannelContext = {
+  readonly bus: InMemoryMessageBus;
+};
 export type ModelRuntimeSummaryInput = {
   readonly enabled: boolean;
   readonly mode: ModelRuntimeMode;
@@ -65,8 +68,7 @@ export type ModelRuntimeConfig =
       readonly enabled: true;
       readonly mode: Exclude<ModelRuntimeMode, "none">;
       readonly summaryInput: ModelRuntimeSummaryInput;
-      createIntelligenceChannel(runtime: MinimalRuntime): IntelligenceChannel;
-      createToolCenter(runtime: MinimalRuntime): ToolExecutionBroker;
+      createIntelligenceChannel(context: ModelRuntimeChannelContext): IntelligenceChannel;
     };
 
 export type ModelRuntimeConfigurationIssueCode = "ai_disabled" | "missing_api_key" | "missing_model_name";
@@ -143,7 +145,6 @@ export function createModelRuntimeConfig(input: {
           provider: new FakeModelProvider({ onOutputDelta: input.onModelOutputDelta }),
           bus: runtime.bus,
         }),
-      createToolCenter: (runtime) => createDefaultToolCenter({ runtime, env: input.env ?? process.env, fetch: input.fetch }),
     };
   }
 
@@ -248,7 +249,6 @@ function createOpenAICompatibleConfig(input: {
         }),
         bus: runtime.bus,
       }),
-    createToolCenter: (runtime) => createDefaultToolCenter({ runtime, env: input.env, fetch: input.fetch }),
   };
 }
 
@@ -320,109 +320,7 @@ function createOpenAIResponsesConfig(input: {
         }),
         bus: runtime.bus,
       }),
-    createToolCenter: (runtime) => createDefaultToolCenter({ runtime, env: input.env, fetch: input.fetch }),
   };
-}
-
-export function createDefaultToolCenter(input: {
-  readonly runtime?: MinimalRuntime;
-  readonly env?: ModelRuntimeEnvironment;
-  readonly fetch?: ModelRuntimeProviderFetch;
-  readonly sourcePreference?: readonly InformationSourceKind[];
-  readonly tavilyMaxResults?: number;
-  readonly workspaceRoot?: string;
-  readonly playwrightAvailable?: boolean;
-  readonly toolStates?: readonly ToolStateSettings[];
-  readonly toolCatalogNames?: readonly string[];
-  readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
-  readonly mcpManager?: McpToolExecutorProvider;
-  readonly toolRegistryScopes?: readonly ToolRegistryScope[];
-  readonly commandShell?: SanitizedCommandShellConfig;
-  readonly processRegistry?: LocalCommandProcessRegistry;
-  readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly includeSkillResourceToolCatalog?: boolean;
-  readonly taskSoil?: TaskSoil;
-  readonly modelCapabilities?: ModelCapabilities;
-} = {}): ToolExecutionBroker {
-  return createToolCenterFromEnvironment(input);
-}
-
-export async function createConfiguredToolCenter(
-  configCenter: ConfigCenter,
-  input: {
-    readonly runtime?: MinimalRuntime;
-    readonly env?: ModelRuntimeEnvironment;
-    readonly fetch?: ModelRuntimeProviderFetch;
-    readonly sourcePreference?: readonly InformationSourceKind[];
-    readonly tavilyMaxResults?: number;
-    readonly workspaceRoot?: string;
-    readonly playwrightAvailable?: boolean;
-    readonly toolStates?: readonly ToolStateSettings[];
-    readonly toolCatalogNames?: readonly string[];
-    readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
-    readonly mcpManager?: McpToolExecutorProvider;
-    readonly toolRegistryScopes?: readonly ToolRegistryScope[];
-    readonly commandShell?: SanitizedCommandShellConfig;
-    readonly processRegistry?: LocalCommandProcessRegistry;
-    readonly skillContexts?: readonly DesktopAgentSkillContext[];
-    readonly includeSkillResourceToolCatalog?: boolean;
-    readonly taskSoil?: TaskSoil;
-    readonly modelCapabilities?: ModelCapabilities;
-  } = {}
-): Promise<ToolExecutionBroker> {
-  return createToolCenterFromEnvironment({
-    ...input,
-    env: input.env ?? await configCenter.createModelRuntimeEnvironment(),
-  });
-}
-
-export async function createConfiguredToolCenterFactory(
-  configCenter: ConfigCenter,
-  input: {
-    readonly env?: ModelRuntimeEnvironment;
-    readonly fetch?: ModelRuntimeProviderFetch;
-    readonly sourcePreference?: readonly InformationSourceKind[];
-    readonly tavilyMaxResults?: number;
-    readonly workspaceRoot?: string;
-    readonly playwrightAvailable?: boolean;
-    readonly toolStates?: readonly ToolStateSettings[];
-    readonly toolCatalogNames?: readonly string[];
-    readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
-    readonly mcpManager?: McpToolExecutorProvider;
-    readonly toolRegistryScopes?: readonly ToolRegistryScope[];
-    readonly commandShell?: SanitizedCommandShellConfig;
-    readonly processRegistry?: LocalCommandProcessRegistry;
-    readonly skillContexts?: readonly DesktopAgentSkillContext[];
-    readonly includeSkillResourceToolCatalog?: boolean;
-    readonly taskSoil?: TaskSoil;
-    readonly modelCapabilities?: ModelCapabilities;
-  } = {}
-): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
-  const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
-  return (runtime) => createToolCenterFromEnvironment({ ...input, runtime, env });
-}
-
-function createToolCenterFromEnvironment(input: {
-  readonly runtime?: MinimalRuntime;
-  readonly env?: ModelRuntimeEnvironment;
-  readonly fetch?: ModelRuntimeProviderFetch;
-  readonly sourcePreference?: readonly InformationSourceKind[];
-  readonly tavilyMaxResults?: number;
-  readonly workspaceRoot?: string;
-  readonly playwrightAvailable?: boolean;
-  readonly toolStates?: readonly ToolStateSettings[];
-  readonly toolCatalogNames?: readonly string[];
-  readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
-  readonly mcpManager?: McpToolExecutorProvider;
-  readonly toolRegistryScopes?: readonly ToolRegistryScope[];
-  readonly commandShell?: SanitizedCommandShellConfig;
-  readonly processRegistry?: LocalCommandProcessRegistry;
-  readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly includeSkillResourceToolCatalog?: boolean;
-  readonly taskSoil?: TaskSoil;
-  readonly modelCapabilities?: ModelCapabilities;
-}): ToolExecutionBroker {
-  return createDesktopBasicToolRegistry(input).createToolCenterForScopes(input.toolRegistryScopes ?? ["desktop-basic"]);
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

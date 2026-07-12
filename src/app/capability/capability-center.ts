@@ -11,6 +11,7 @@ import type {
   CapabilitySkillResourceIndexItem,
   CapabilityMcpCatalogItem,
   CapabilityToolCatalogItem,
+  CapabilityToolScope,
   CapabilitySubAgentCatalogItem,
   McpServerSettings,
   SanitizedModelProviderConfig,
@@ -22,15 +23,20 @@ import { LazyMcpToolExecutorProvider } from "../../adapters/mcp/index.js";
 import type { ConfigCenter } from "../config-center.js";
 import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import {
-  createDesktopBasicToolRegistry,
+  createAgentToolRegistry,
   type ToolRegistryFetchLike,
-} from "../basic-agent-runtime/builtin-tool-runtime.js";
+} from "../tool-center/builtin-tool-runtime.js";
+import { applyAgentToolRegistryContributions } from "../tool-center/factory.js";
 import { normalizeWorkspaceDirectory } from "../config-center/workspace-settings.js";
-import type { ToolCatalogItem } from "../basic-agent-runtime/tool-registry.js";
+import { ToolRegistry, type ToolCatalogItem } from "../tool-center/tool-registry.js";
 import { discoverSkills, normalizeSkillRoots, parseSkillMarkdown, type SkillRootInput } from "../skills/skill-loader.js";
 import type { SkillStateStore } from "../skills/skill-state-store.js";
 import { discoverSubAgents, normalizeSubAgentRoots, type SubAgentDiscoveryOptions } from "../sub-agents/sub-agent-loader.js";
 import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
+import { registerSubAgentToolCatalog } from "../sub-agents/sub-agent-tools.js";
+import { registerSkillResourceTool } from "../skills/skill-resource-tool.js";
+import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
+import { createMcpToolRegistryContribution } from "../mcp/mcp-tool-contribution.js";
 import { toolCatalogContractHash } from "./tool-definition-contract.js";
 
 export type CapabilitySkillRootsInput = {
@@ -172,18 +178,34 @@ export class CapabilityCenter {
     const subAgentRegistry = subAgentRoots.length > 0
       ? new SubAgentRegistry({ roots: subAgentRoots })
       : undefined;
-    const registry = createDesktopBasicToolRegistry({
+    const toolRegistryOptions = {
       env,
       fetch: this.options.fetch,
       workspaceRoot: workspace.workspaceDirectory,
       playwrightAvailable: this.options.playwrightAvailable,
       toolStates,
-      mcpManager: mcpToolProvider,
       commandShell,
-      includeSkillResourceToolCatalog: true,
       modelCapabilities,
-      subAgentRegistry,
-    });
+      baseToolScopes: ["desktop-basic"],
+    };
+    const registry = new ToolRegistry();
+    applyAgentToolRegistryContributions(registry, { toolStates }, [
+      createResearchToolRegistryContribution({
+        env,
+        fetch: this.options.fetch,
+        workspaceRoot: workspace.workspaceDirectory,
+      }),
+    ]);
+    createAgentToolRegistry(toolRegistryOptions, registry);
+    if (mcpToolProvider !== undefined) {
+      applyAgentToolRegistryContributions(registry, { toolStates }, [
+        createMcpToolRegistryContribution(mcpToolProvider, { useDiscoveredTools: true }),
+      ]);
+    }
+    registerSkillResourceTool(registry, [], { includeWhenEmpty: true });
+    if (subAgentRegistry !== undefined) {
+      registerSubAgentToolCatalog(registry);
+    }
     const desktopToolCatalog = registry.catalog("desktop-basic");
     const mcpToolCatalog = registry.catalog("mcp");
     const exposedMcpToolCatalog = filteredMcpToolCatalog(mcpToolCatalog, mcpServers);
@@ -560,11 +582,16 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     visibleResultPolicy: tool.visibleResultPolicy,
     runtimeHints: tool.runtimeHints,
     definitionHash: toolCatalogContractHash(tool),
-    scopes: tool.scopes,
+    scopes: tool.scopes.filter(isCapabilityToolScope),
     enabled: tool.enabledByDefault,
     availability: tool.availability,
     disabledReason: tool.disabledReason,
   };
+}
+
+function isCapabilityToolScope(value: string): value is CapabilityToolScope {
+  return value === "desktop-basic" || value === "underground" || value === "research" ||
+    value === "workspace" || value === "mcp";
 }
 
 function mcpCatalogItemForServer(

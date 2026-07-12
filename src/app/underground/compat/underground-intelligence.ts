@@ -104,7 +104,7 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
       enforcementGate: constraint.enforcementGate,
     })),
     requestedAt: nowIso(),
-  });
+  }, FULL_TURN_OUTPUT);
   const response: ModelResponse | undefined = turn.finalOutput;
   const toolCalls = turn.toolCalls;
 
@@ -211,6 +211,8 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
     fallbackSourceRefs: [],
   };
 }
+
+const FULL_TURN_OUTPUT = { blockedToolNames: [], exposeNonFinalOutput: true } as const;
 
 function toolCallSourceRefs(toolCalls: readonly ToolCallResult[]): string[] {
   return toolCalls.flatMap((toolCall) => [

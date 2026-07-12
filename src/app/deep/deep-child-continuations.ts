@@ -79,6 +79,10 @@ export class DeepChildPendingContinuationStore {
     }
   }
 
+  clear(): void {
+    this.continuations.clear();
+  }
+
   assertPending(runId: string, childRunId: string, confirmationId: string): void {
     if (this.get(runId, childRunId, confirmationId) !== undefined) {
       return;

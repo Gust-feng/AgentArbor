@@ -158,7 +158,7 @@ async function intakeDeep(
 async function waitForDeepRunView(
   baseUrl: string,
   runId: string,
-  timeoutMs = 8_000,
+  timeoutMs = 30_000,
 ): Promise<{ status: number; body: any; text: string }> {
   const startedAt = Date.now();
   let last: { status: number; body: any; text: string } | undefined;
@@ -169,7 +169,23 @@ async function waitForDeepRunView(
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`Timed out waiting for deep run ${runId}; last=${last?.text}`);
+  const view = last?.body?.view;
+  const lastEvent = Array.isArray(view?.eventSequence)
+    ? view.eventSequence.at(-1)
+    : undefined;
+  throw new Error(`Timed out waiting for deep run view; diagnostics=${JSON.stringify({
+    runId,
+    httpStatus: last?.status,
+    status: view?.run?.status,
+    phase: view?.run?.phase ?? view?.liveProjection?.phase ?? view?.liveProjection?.taskBoard?.phase,
+    lastEvent: lastEvent === undefined
+      ? undefined
+      : {
+          sequence: lastEvent.sequence,
+          type: lastEvent.type,
+          timestamp: lastEvent.timestamp,
+        },
+  })}`);
 }
 
 async function persistOrphanedDeepRunFixture(

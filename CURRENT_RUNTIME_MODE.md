@@ -8,7 +8,7 @@
 
 UI 收口尚未完成。当前仍有设置中的 Agent 集群 beta 开关、侧栏 `Agent 集群` 按钮、持久化 Agent mode、独立 `/api/deep/*`、Deep DTO 以及与 Ordinary 物理分离的数据目录。以下章节按真实代码记录这些行为；它们是统一 Workbench 下的过渡实现，不能被解释为两个产品，也不能提前声称已经移除。
 
-后端第一阶段已建立单一装配点：`createPanelRuntime()` 创建 `MultiAgentFeature`，Deep conversation/run/child store、control/continuation registry、instruction queue 与 active run tracking 不再由 route 级 `WeakMap` 或 route 内 `new Store` 隐式持有；Panel runtime 关闭时会释放该 feature。`/api/deep/*` 目前仍是较厚的 HTTP/应用适配文件，后续才会继续收敛为完整 command/query/event facade；当前不能声称 route 已全部薄化或中性能力拆分已经完成。
+后端阶段一至阶段三已经完成：`createPanelRuntime()` 是唯一生产组合根并创建 `MultiAgentFeature`；Deep conversation/run/child store、control/continuation registry、instruction queue 与 active run tracking 均由 feature 内部持有并在 Panel runtime 关闭时释放；`/api/deep/*` 只通过 feature command/query facade 访问 Multi-Agent 业务能力，不再创建 runtime、store 或 ToolCenter。模型运行时、ToolCenter contribution、上下文机械算法与 `AgentTurnRuntime` 执行语义也已完成中性化。当前尚未完成的是阶段四 Workbench/UI 入口收口和阶段五 Legacy Underground 删除。
 
 ## 当前默认运行方式
 

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createDesktopBasicToolRegistry } from "../../basic-agent-runtime/index.js";
+import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../../testing/desktop-basic-tool-registry.js";
 import { ToolCenter } from "../tool-center.js";
 import { createHttpRequestTool, type HttpRequestFetchLike } from "./http-request-tool.js";
 import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";

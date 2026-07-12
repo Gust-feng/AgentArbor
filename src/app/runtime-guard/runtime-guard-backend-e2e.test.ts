@@ -8,10 +8,10 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import {
-  createDesktopBasicToolRegistry,
   type BasicAgentRunExecutionInput,
   type BasicAgentRunExecutionResult,
 } from "../basic-agent-runtime/index.js";
+import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../testing/desktop-basic-tool-registry.js";
 import type { PanelRunJob } from "../panel-server/run-jobs.js";
 import { closePanelServer } from "../panel-server/request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "../panel-server/runtime.js";

@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { modelVisibleToolDescription, type ToolCallResult } from "../../domain/tools/index.js";
-import { createDesktopBasicToolRegistry } from "../basic-agent-runtime/index.js";
+import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../testing/desktop-basic-tool-registry.js";
 import { ensurePidExited } from "../tool-center/adapters/background-process-test-utils.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 

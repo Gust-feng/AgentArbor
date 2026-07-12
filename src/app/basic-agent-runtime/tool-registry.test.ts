@@ -6,7 +6,7 @@ import {
   modelVisibleToolDescription,
   validateModelVisibleToolContract,
 } from "../../domain/tools/index.js";
-import { createDesktopBasicToolRegistry } from "./builtin-tool-runtime.js";
+import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../testing/desktop-basic-tool-registry.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { registerSkillResourceTool } from "../skills/skill-resource-tool.js";
 

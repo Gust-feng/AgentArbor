@@ -1,24 +1,24 @@
-/** @deprecated Import neutral tool assembly from ../tool-center/index.js. */
-export * from "../tool-center/builtin-tool-runtime.js";
-
-import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
 import {
   createMcpToolRegistryContribution,
   type McpToolExecutorProvider,
 } from "../mcp/mcp-tool-contribution.js";
-import { applyAgentToolRegistryContributions } from "../tool-center/factory.js";
+import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
 import {
   createAgentToolRegistry,
   type CreateAgentToolRegistryOptions,
 } from "../tool-center/builtin-tool-runtime.js";
+import { applyAgentToolRegistryContributions } from "../tool-center/factory.js";
 import { ToolRegistry } from "../tool-center/tool-registry.js";
 
-/** @deprecated Ordinary compatibility facade; new features compose contributions explicitly. */
-export function createDesktopBasicToolRegistry(
+/**
+ * Test-only registry fixture for the current Host `desktop-basic` wire scope.
+ * Production features must use composition-root contributions instead.
+ */
+export function createDesktopBasicToolRegistryForTest(
   options: CreateAgentToolRegistryOptions & {
     readonly mcpManager?: McpToolExecutorProvider;
   } = {},
-) {
+): ToolRegistry {
   const compatibilityOptions = {
     ...options,
     baseToolScopes: options.baseToolScopes ?? ["desktop-basic"],

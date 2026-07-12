@@ -99,7 +99,6 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["desktop-agent-session-contracts.ts", 'export * from "./desktop-agent/desktop-agent-session-contracts.js";'],
     ["desktop-agent-session-projection.ts", 'export * from "./desktop-agent/desktop-agent-session-projection.js";'],
     ["desktop-agent-session-events.ts", 'export * from "./desktop-agent/desktop-agent-session-events.js";'],
-    ["desktop-agent-session-runtime.ts", 'export * from "./desktop-agent/desktop-agent-session-runtime.js";'],
     ["desktop-agent-loop-preparation.ts", 'export * from "./desktop-agent/desktop-agent-loop-preparation.js";'],
     ["run-tool-boundary.ts", 'export * from "./capability/run-tool-boundary.js";'],
     ["tool-definition-contract.ts", 'export * from "./capability/tool-definition-contract.js";'],
@@ -541,7 +540,9 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
   ]);
 
   for (const fileName of desktopAgentFiles) {
-    assert.equal(fileExistsSync(path.join(appRoot, fileName)), true, `${fileName} should keep a top-level compatibility facade`);
+    if (fileName !== "desktop-agent-session-runtime.ts") {
+      assert.equal(fileExistsSync(path.join(appRoot, fileName)), true, `${fileName} should keep a top-level compatibility facade`);
+    }
     assert.equal(fileExistsSync(path.join(desktopAgentRoot, fileName)), true, `${fileName} should live in desktop-agent`);
   }
 
@@ -559,8 +560,7 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
   assert.equal(sessionProjectionFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-projection.js";');
   const sessionEventsFacade = await readSource(path.join(appRoot, "desktop-agent-session-events.ts"));
   assert.equal(sessionEventsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-events.js";');
-  const sessionRuntimeFacade = await readSource(path.join(appRoot, "desktop-agent-session-runtime.ts"));
-  assert.equal(sessionRuntimeFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-runtime.js";');
+  assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-session-runtime.ts")), false);
   const loopPreparationFacade = await readSource(path.join(appRoot, "desktop-agent-loop-preparation.ts"));
   assert.equal(loopPreparationFacade.trim(), 'export * from "./desktop-agent/desktop-agent-loop-preparation.js";');
   assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-session.test.ts")), false);

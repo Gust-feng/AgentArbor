@@ -10,7 +10,7 @@ import {
 import {
   compactAgentLoopContextIfNeeded,
   createOpenAITokenCounter,
-} from "../agent-loop-context-maintenance.js";
+} from "../context-maintenance/index.js";
 import {
   DESKTOP_ROOT_AGENT,
 } from "../agent-prompts/desktop-root-agent.js";

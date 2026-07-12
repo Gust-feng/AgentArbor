@@ -28,11 +28,17 @@ import type { EventLogEntry } from "../../../kernel/events/in-memory-event-log.j
 import type { PanelRunSummaryPayload } from "./panel-run-summary.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 import {
+  reduceToolCallEventTimeline,
+  toolCallEventFactPayload,
+  type ToolCallEventFact,
+} from "../../run-read-model/tool-call-event-reducer.js";
+import {
   subAgentStreamDetailFromPayload,
   subAgentStreamLabel,
   subAgentStreamStatusFromPayload,
   subAgentStreamSummaryFromPayload,
 } from "../../run-read-model/sub-agent-stream-projection.js";
+import { runtimeEventRecordId } from "../../run-runtime-core/event-stream.js";
 import {
   agentFabricLabel,
   agentFabricSummary,
@@ -87,6 +93,7 @@ export class IncrementalPanelRunStreamProjector {
   private lastRawSequence = 0;
   private hasVisibleWorkActivity = false;
   private readonly terminalFactEntries: EventLogEntry[] = [];
+  private readonly toolFactEntries: EventLogEntry[] = [];
   private readonly pendingOrdinaryChatEntries: EventLogEntry[] = [];
   private readonly purposeByModelRequestId = new Map<string, string>();
   private readonly emittedEventIds = new Set<string>();
@@ -116,6 +123,12 @@ export class IncrementalPanelRunStreamProjector {
       .filter((entry) => entry.sequence > this.lastRawSequence)
       .sort((left, right) => left.sequence - right.sequence);
     for (const entry of newEntries) {
+      if (isToolLifecycleMessageType(entry.type) || entry.type === "user_approval.requested") {
+        this.toolFactEntries.push(entry);
+      }
+    }
+    const toolFactBySequence = reduceToolCallEventTimeline(this.toolFactEntries).factBySequence;
+    for (const entry of newEntries) {
       if (isTerminalProjectionFact(entry)) {
         this.terminalFactEntries.push(entry);
       }
@@ -141,10 +154,10 @@ export class IncrementalPanelRunStreamProjector {
       }
       if (startsVisibleWork) {
         for (const pending of this.pendingOrdinaryChatEntries.splice(0)) {
-          this.appendEntry(input.runId, pending, push);
+          this.appendEntry(input.runId, pending, toolFactBySequence.get(pending.sequence), push);
         }
       }
-      this.appendEntry(input.runId, entry, push);
+      this.appendEntry(input.runId, entry, toolFactBySequence.get(entry.sequence), push);
     }
 
     appendTerminalStreamEvents({ ...input, eventEntries: this.terminalFactEntries }, agentLabel, push);
@@ -157,11 +170,13 @@ export class IncrementalPanelRunStreamProjector {
   private appendEntry(
     runId: string,
     entry: EventLogEntry,
+    toolFact: ToolCallEventFact | undefined,
     push: (event: UnsequencedPanelRunStreamEvent) => void
   ): void {
     appendStreamEventsForEvent({
       runId,
       entry,
+      toolFact,
       view: createRunObservationEventView(entry),
       purposeByModelRequestId: this.purposeByModelRequestId,
       push,
@@ -175,6 +190,7 @@ export function createPanelRunStreamEvents(input: PanelRunStreamProjectionInput)
   const observationViews = createRunObservationEventViews(input.eventEntries);
   const viewBySequence = new Map(observationViews.map((view) => [view.sequence, view]));
   const purposeByModelRequestId = modelRequestPurposes(input.eventEntries);
+  const toolFactBySequence = reduceToolCallEventTimeline(input.eventEntries).factBySequence;
   const ordinaryAgentProjection = isOrdinaryAgentProjection(input.desktopMode);
   const suppressOrdinaryChatProgress =
     ordinaryAgentProjection && !hasUserVisibleWorkActivity(input.eventEntries, ordinaryAgentProjection);
@@ -198,6 +214,7 @@ export function createPanelRunStreamEvents(input: PanelRunStreamProjectionInput)
     appendStreamEventsForEvent({
       runId: input.runId,
       entry,
+      toolFact: toolFactBySequence.get(entry.sequence),
       view,
       purposeByModelRequestId,
       push,
@@ -415,15 +432,17 @@ function shouldSuppressOrdinaryChatEvent(entry: EventLogEntry): boolean {
 function appendStreamEventsForEvent(input: {
   readonly runId: string;
   readonly entry: EventLogEntry;
+  readonly toolFact?: ToolCallEventFact;
   readonly view?: RunObservationEventView;
   readonly purposeByModelRequestId: ReadonlyMap<string, string>;
   readonly push: (event: Omit<PanelRunStreamEvent, "sequence">) => void;
 }): void {
   const payload = asRecord(input.entry.message.payload);
+  const runtimeEventRef = `event:${runtimeEventRecordId(input.runId, input.entry.sequence)}`;
   const base = {
     runId: input.runId,
     createdAt: input.entry.recordedAt,
-    sourceRefs: sourceRefsForView(input.view),
+    sourceRefs: unique([...sourceRefsForView(input.view), runtimeEventRef]),
     modelCallRefs: modelCallRefsFor(input.entry, payload),
     toolCallRefs: toolCallRefsFor(input.entry, payload),
   };
@@ -543,13 +562,17 @@ function appendStreamEventsForEvent(input: {
   }
 
   if (isToolLifecycleMessageType(input.entry.type)) {
+    if (input.toolFact === undefined) {
+      return;
+    }
+    const toolPayload = toolCallEventFactPayload(input.toolFact, input.entry.type);
     input.push({
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
       type: input.entry.type,
       agentLabel: "工具",
-      toolName: stringOrUndefined(payload.toolName),
-      summary: toolSummary(input.entry.type, payload),
+      toolName: input.toolFact.toolName,
+      summary: toolSummary(input.entry.type, toolPayload),
       status: input.entry.type === "tool.requested"
         ? "running"
         : input.entry.type === "tool.completed"
@@ -557,7 +580,7 @@ function appendStreamEventsForEvent(input: {
           : input.entry.type === "tool.cancelled"
             ? "cancelled"
             : "failed",
-      detail: toolStreamDetail(input.entry.type, payload),
+      detail: toolStreamDetail(input.entry.type, toolPayload),
     });
     return;
   }

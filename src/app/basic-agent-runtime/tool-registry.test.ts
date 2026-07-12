@@ -3,11 +3,12 @@ import test from "node:test";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
 import {
+  MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS,
   modelVisibleToolDescription,
   validateModelVisibleToolContract,
 } from "../../domain/tools/index.js";
 import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../testing/desktop-basic-tool-registry.js";
-import { ToolRegistry } from "./tool-registry.js";
+import { ToolRegistry } from "../tool-center/tool-registry.js";
 import { registerSkillResourceTool } from "../skills/skill-resource-tool.js";
 
 test("desktop-basic tool registry exposes catalog and allowed tools from scoped metadata", () => {
@@ -45,8 +46,6 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.fileOperation, "delete");
   assert.equal(catalog.tools.find((tool) => tool.name === "write_file")?.fileOperation, undefined);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.enabledByDefault, true);
-  assert.equal(catalog.tools.some((tool) => tool.name === "run_command"), false);
-  assert.equal(registry.createToolCenter("desktop-basic").has("run_command"), false);
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), true);
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.operationType, "read-only");
   assert.equal(catalog.tools.find((tool) => tool.name === "http_request")?.operationType, "external-submit");
@@ -67,7 +66,7 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(shellCommand?.runtimeHints?.[0]?.kind, "command_shell");
 });
 
-test("desktop-basic model-visible tools carry structured model contracts", () => {
+test("desktop-basic model-visible tools satisfy the executable factual contract", () => {
   const registry = createDesktopBasicToolRegistry({ env: {}, workspaceRoot: process.cwd(), playwrightAvailable: true });
   const center = registry.createToolCenter("desktop-basic");
   const modelVisibleTools = center.list();
@@ -102,7 +101,7 @@ test("desktop-basic model-visible tools carry structured model contracts", () =>
   }
 });
 
-test("model-visible tool description is concise and structured for the model", () => {
+test("model-visible tool description prioritizes factual limits within an explicit budget", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: process.cwd(),
@@ -113,14 +112,14 @@ test("model-visible tool description is concise and structured for the model", (
   assert.notEqual(shellCommand, undefined);
   const description = modelVisibleToolDescription(shellCommand!);
 
-  assert.match(description, /^Run a real command/m);
-  assert.match(description, /\nUse for: /);
-  assert.match(description, /\nInputs: commandLine/);
+  assert.match(description, /^Run a real workspace command/m);
+  assert.match(description, /\nAvoid for: /);
+  assert.match(description, /\nOutputs: .*stdout/);
   assert.match(description, /\nRuntime: current shell=/);
-  assert.match(description, /\nOutputs: result\.stdout/);
-  assert.match(description, /builds, tests, git, package managers/);
+  assert.match(description, /continuation\.nextInput/);
+  assert.match(description, /package manager, build, test, git/);
   assert.doesNotMatch(description, /HTTP requests/);
-  assert.match(description, /\nExample: \{"commandLine":"pnpm test","timeoutMs":120000\}/);
+  assert.equal(description.length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS, true);
   assert.equal(description.includes("When to use"), false);
   assert.doesNotMatch(description, /Shell 命令|需确认|终端命令|风险|运行时工具/);
   assert.equal(description.includes("Allowed tools:"), false);
@@ -142,7 +141,7 @@ test("web tool descriptions clearly separate raw HTTP from rendered browser read
   const httpDescription = modelVisibleToolDescription(httpRequest!);
   const browserDescription = modelVisibleToolDescription(browserSnapshot!);
 
-  assert.match(httpDescription, /^Send a stateless HTTP or HTTPS request/m);
+  assert.match(httpDescription, /^Send a bounded stateless HTTP or HTTPS request/m);
   assert.match(httpDescription, /session state=no OAuth flow, no cookie jar/);
   assert.match(httpDescription, /Avoid for: Do not use for rendered page inspection/);
   assert.match(browserDescription, /^Open an HTTP or HTTPS page in a fresh Playwright browser session/m);
@@ -235,38 +234,6 @@ test("desktop-basic tool registry applies configured tool disabled state", () =>
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), false);
 });
 
-test("desktop-basic tool registry does not surface legacy run_command alias in live catalogs", () => {
-  const registry = createDesktopBasicToolRegistry({
-    env: {},
-    workspaceRoot: process.cwd(),
-    playwrightAvailable: true,
-    toolStates: [{ name: "run_command", enabled: true, updatedAt: "2026-05-12T00:00:00.000Z" }],
-  });
-  const catalog = registry.catalog("desktop-basic");
-
-  assert.equal(catalog.tools.some((tool) => tool.name === "run_command"), false);
-  assert.equal(catalog.allowedTools.includes("run_command"), false);
-  assert.equal(registry.createToolCenter("desktop-basic").has("run_command"), false);
-});
-
-test("desktop-basic tool registry can keep compatibility executors enabled from frozen tool state", () => {
-  const registry = createDesktopBasicToolRegistry({
-    env: {},
-    workspaceRoot: process.cwd(),
-    playwrightAvailable: true,
-    toolStates: [{ name: "run_command", enabled: true, updatedAt: "2026-05-12T00:00:00.000Z" }],
-    toolCatalogNames: ["run_command"],
-  });
-  const catalog = registry.catalog("desktop-basic");
-  const center = registry.createToolCenter("desktop-basic");
-
-  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["run_command"]);
-  assert.deepEqual(catalog.allowedTools, ["run_command"]);
-  assert.equal(catalog.tools[0]?.enabledByDefault, true);
-  assert.equal(catalog.tools[0]?.requiresConfirmation, true);
-  assert.equal(center.has("run_command"), true);
-});
-
 test("desktop-basic tool registry can restrict executors to a frozen tool catalog", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
@@ -281,7 +248,6 @@ test("desktop-basic tool registry can restrict executors to a frozen tool catalo
   assert.deepEqual(catalog.allowedTools, ["read_file"]);
   assert.equal(center.has("read_file"), true);
   assert.equal(center.has("search"), false);
-  assert.equal(center.has("run_command"), false);
 });
 
 test("desktop-basic tool registry registers read_skill_resource for frozen skill resources", () => {
@@ -415,7 +381,7 @@ test("tool registry rejects tools without complete metadata", () => {
   assert.throws(() => registry.register({ executor, scopes: ["desktop-basic"], enabledByDefault: true }), /without metadata/);
 });
 
-test("tool registry rejects enabled built-in-scope tools without model-visible contract guidance", () => {
+test("tool registry accepts enabled built-in tools without optional model guidance", () => {
   const registry = new ToolRegistry();
   const executor: ToolExecutor = {
     definition: {
@@ -427,11 +393,6 @@ test("tool registry rejects enabled built-in-scope tools without model-visible c
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 400,
-          omitRawOutput: true,
-        },
       },
     },
     async execute() {
@@ -439,13 +400,12 @@ test("tool registry rejects enabled built-in-scope tools without model-visible c
     },
   };
 
-  assert.throws(
-    () => registry.register({ executor, scopes: ["desktop-basic"], enabledByDefault: true }),
-    /missing model contract fields: modelContract/
-  );
+  registry.register({ executor, scopes: ["desktop-basic"], enabledByDefault: true });
+  assert.equal(registry.createToolCenter("desktop-basic").has("thin_visible_tool"), true);
+  assert.deepEqual(registry.catalog("desktop-basic").allowedTools, ["thin_visible_tool"]);
 });
 
-test("tool registry rejects enabled MCP tools without model-visible contract guidance", () => {
+test("tool registry accepts enabled MCP tools without optional model guidance", () => {
   const registry = new ToolRegistry();
   const executor: ToolExecutor = {
     definition: {
@@ -457,11 +417,6 @@ test("tool registry rejects enabled MCP tools without model-visible contract gui
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 400,
-          omitRawOutput: true,
-        },
       },
     },
     async execute() {
@@ -469,10 +424,9 @@ test("tool registry rejects enabled MCP tools without model-visible contract gui
     },
   };
 
-  assert.throws(
-    () => registry.register({ executor, scopes: ["mcp"], enabledByDefault: true }),
-    /missing model contract fields: modelContract/
-  );
+  registry.register({ executor, scopes: ["mcp"], enabledByDefault: true });
+  assert.equal(registry.createToolCenter("mcp").has("mcp_thin_tool"), true);
+  assert.deepEqual(registry.catalog("mcp").allowedTools, ["mcp_thin_tool"]);
 });
 
 function mcpToolExecutor(): ToolExecutor {
@@ -499,11 +453,6 @@ function mcpToolExecutor(): ToolExecutor {
         riskLevel: "medium",
         operationType: "external-submit",
         requiresConfirmation: true,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 400,
-          omitRawOutput: true,
-        },
       },
     },
     async execute() {

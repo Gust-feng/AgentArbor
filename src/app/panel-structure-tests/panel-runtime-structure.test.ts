@@ -5,12 +5,11 @@ import test from "node:test";
 import { readAppSource } from "./panel-structure-test-utils.js";
 
 test("basic agent work view keeps projection modules split", async () => {
-  const [workView, transcriptProjection, transcriptTools, contextProjection, workSessionCompat] = await Promise.all([
+  const [workView, transcriptProjection, transcriptTools, contextProjection] = await Promise.all([
     readAppSource(path.join("basic-agent-runtime", "work-view.ts")),
     readAppSource(path.join("basic-agent-runtime", "work-view-transcript.ts")),
     readAppSource(path.join("basic-agent-runtime", "work-view-transcript-tools.ts")),
     readAppSource(path.join("basic-agent-runtime", "work-view-context.ts")),
-    readAppSource(path.join("basic-agent-runtime", "work-session.ts")),
   ]);
 
   assert.equal(workView.includes('from "./work-view-transcript.js"'), true);
@@ -21,9 +20,9 @@ test("basic agent work view keeps projection modules split", async () => {
   assert.equal(workView.includes("DesktopWorkSessionCanvasLike"), false);
   assert.equal(workView.includes("visibleWorkSessionEvents"), false);
   assert.equal(workView.includes("isProductWorkSessionEvent"), false);
-  assert.equal(workView.includes("type LegacyWorkSessionCanvasLike"), true);
+  assert.equal(workView.includes("type LegacyWorkSessionCanvasLike"), false);
   assert.equal(workView.includes("canvas.workSession"), false);
-  assert.equal(workView.includes("legacyWorkSessionCanvasFor"), true);
+  assert.equal(workView.includes("legacyWorkSessionCanvasFor"), false);
   assert.equal(workView.includes("transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation)"), true);
   assert.equal(workView.includes("function transcriptNodesFromRunEvents"), false);
   assert.equal(workView.includes("function transcriptNodeFromRunEvent"), false);
@@ -41,19 +40,17 @@ test("basic agent work view keeps projection modules split", async () => {
   assert.equal(transcriptProjection.includes("function fileDisplaySummary"), false);
   assert.equal(transcriptTools.includes("export function toolTranscriptTitleFromRunEvent"), true);
   assert.equal(transcriptTools.includes("export function transcriptToolSummaryFromRunEvent"), true);
-  assert.equal(transcriptTools.includes("function fileDisplaySummary"), true);
+  assert.equal(transcriptTools.includes("function fileDisplaySummary"), false);
   assert.equal(contextProjection.includes("export function contextAttachmentsFor"), true);
   assert.equal(contextProjection.includes("export function contextLedgerFor"), true);
-  assert.equal(contextProjection.includes("export function normalizeToolEvidence"), true);
+  assert.equal(contextProjection.includes("export function normalizeToolEvidence"), false);
+  assert.equal(contextProjection.includes("export function mergeToolDisplays"), true);
   assert.equal(contextProjection.includes("export type WorkViewContextProjectionInput"), true);
   assert.equal(contextProjection.includes("WorkSessionContextProjectionInput"), false);
   assert.equal(contextProjection.includes("function taskSoilContextAttachments"), true);
   assert.equal(contextProjection.includes("function taskSoilCanvasForWorkViewContext"), true);
-  assert.equal(contextProjection.includes("function legacyWorkSessionTaskSoilCanvasFor"), true);
+  assert.equal(contextProjection.includes("function legacyWorkSessionTaskSoilCanvasFor"), false);
   assert.equal(contextProjection.includes('canvas?.kind === "desktop_agent_canvas" || canvas?.kind === "work_session_canvas"'), false);
-  assert.equal(workSessionCompat.includes('from "./work-view.js"'), true);
-  assert.equal(workSessionCompat.includes("createDesktopWorkSessionReadModel"), true);
-  assert.equal(workSessionCompat.includes("export function createDesktopWorkViewReadModel"), false);
 });
 
 test("desktop agent session keeps projection and contracts split", async () => {
@@ -707,8 +704,6 @@ test("ordinary desktop runtime does not adopt legacy model purposes", async () =
     runExecution,
     desktopAgentExecution,
     turnPolicyAsset,
-    desktopChatFacade,
-    desktopChatCompatibility,
   ] = await Promise.all([
     readAppSource(path.join("desktop-agent", "desktop-agent-session.ts")),
     readAppSource(path.join("desktop-agent", "desktop-agent-session-runtime.ts")),
@@ -716,8 +711,6 @@ test("ordinary desktop runtime does not adopt legacy model purposes", async () =
     readAppSource(path.join("panel-server", "run-execution.ts")),
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
     readAppSource(path.join("agent-prompts", "desktop-root-agent-turn-policy.ts")),
-    readAppSource("desktop-chat-session.ts"),
-    readAppSource(path.join("desktop-agent", "desktop-chat-session.ts")),
   ]);
 
   for (const [sourceName, source] of [
@@ -736,9 +729,6 @@ test("ordinary desktop runtime does not adopt legacy model purposes", async () =
 
   assert.equal(turnPolicyAsset.includes('purpose: "desktop_agent"'), true);
   assert.equal(session.includes('label: "desktop_agent"'), true);
-  assert.equal(desktopChatFacade.trim(), 'export * from "./desktop-agent/desktop-chat-session.js";');
-  assert.equal(desktopChatCompatibility.includes("@deprecated Compatibility exports for older callers"), true);
-  assert.equal(desktopChatCompatibility.includes("runDesktopAgentSession as runDesktopChatSession"), true);
 });
 
 type AppTypeScriptSource = {

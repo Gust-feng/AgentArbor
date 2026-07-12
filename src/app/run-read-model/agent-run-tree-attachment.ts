@@ -1,5 +1,3 @@
-import type { ToolDisplayProjection } from "../../domain/observation/index.js";
-
 export type AgentRunTreeAttachmentStatus = "running" | "completed" | "failed" | "stopped";
 
 export type AgentRunTreeAttachmentRootletKind =
@@ -53,7 +51,6 @@ export type AgentRunTreeChildExecutionAttachment = {
     readonly summary?: string;
     readonly inputSummary?: string;
     readonly durationMs?: number;
-    readonly display?: ToolDisplayProjection;
   }[];
 };
 

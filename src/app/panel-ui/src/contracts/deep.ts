@@ -19,7 +19,6 @@
  */
 
 import type { WorkspaceFolderSummary } from "./common";
-import type { ToolDisplayProjection } from "./tools";
 
 // ---------------------------------------------------------------------------
 // 隔离标记与状态枚举（镜像 DEEP_RUN_KIND / DEEP_RUN_MODE / DeepRunStatus）
@@ -554,7 +553,6 @@ export type DeepChildAgentRunToolCallTraceView = {
   readonly summary?: string;
   readonly inputSummary?: string;
   readonly durationMs?: number;
-  readonly display?: ToolDisplayProjection;
 };
 
 export type DeepChildAgentRunModelMessageTraceView = {

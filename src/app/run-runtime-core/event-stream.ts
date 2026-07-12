@@ -18,6 +18,10 @@ export type AppRunEventReplay<TEvent extends AppRunEventBase> = {
   readonly events: readonly TEvent[];
 };
 
+export function runtimeEventRecordId(runId: string, sourceSequence: number): string {
+  return `${runId}:event:${sourceSequence}`;
+}
+
 export class AppRunEventHub<TEvent extends AppRunEventBase> {
   private readonly eventsByRunId = new Map<string, TEvent[]>();
   private readonly eventIdsByRunId = new Map<string, Set<string>>();

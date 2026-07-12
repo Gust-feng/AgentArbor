@@ -10,7 +10,7 @@ import { safeText, taskSoilCanvas, unique, type PanelTaskSoilCanvasReadModel } f
 import type { DesktopAgentCanvasReadModel } from "./panel-desktop-agent-canvas.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "../run/panel-agent-run-tree-view.js";
 
-export { createDesktopAgentCanvas, createDesktopChatCanvas } from "./panel-desktop-agent-canvas.js";
+export { createDesktopAgentCanvas } from "./panel-desktop-agent-canvas.js";
 export type { DesktopAgentCanvasReadModel } from "./panel-desktop-agent-canvas.js";
 export { createSafeAgentRunTreeView } from "../run/panel-agent-run-tree-view.js";
 export type { SafeAgentRunTreeView } from "../run/panel-agent-run-tree-view.js";

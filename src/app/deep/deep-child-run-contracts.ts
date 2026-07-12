@@ -46,12 +46,8 @@ export type DeepChildAgentExecutionStats = {
 export type DeepChildAgentRunInput = {
   readonly runId?: string;
   readonly childRun: ChildAgentRun;
-  /**
-   * The parent-created child spec. Passing this keeps the child prompt exactly
-   * aligned with manager delegation. When omitted, the runner falls back to the
-   * persisted ChildAgentRun spec for compatibility with older callers.
-   */
-  readonly childSpec?: DeepChildSpec;
+  /** The parent-created semantic delegation used to build this child run. */
+  readonly childSpec: DeepChildSpec;
   readonly goal: string;
   readonly permissionBoundaryRefs: readonly string[];
   readonly turnRuntime: AgentTurnRuntime;
@@ -110,7 +106,7 @@ export type DeepChildConfirmationDecision = {
 export type DeepChildAgentResumeInput = {
   readonly runId?: string;
   readonly childRun: ChildAgentRun;
-  readonly childSpec?: DeepChildSpec;
+  readonly childSpec: DeepChildSpec;
   readonly pendingApproval: AgentTurnPendingApproval;
   readonly decision: DeepChildConfirmationDecision;
   readonly turnRuntime: AgentTurnRuntime;

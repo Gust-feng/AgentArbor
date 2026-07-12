@@ -32,3 +32,9 @@ export function toolModelAttachmentsFromOutput(output: unknown): readonly ModelI
   }
   return attachments.map((attachment) => globalThis.structuredClone(attachment));
 }
+
+/** Preserves the out-of-band model carrier while the JSON fact body is normalized. */
+export function copyToolModelAttachments<T extends object>(source: unknown, target: T): T {
+  const attachments = toolModelAttachmentsFromOutput(source);
+  return attachments === undefined ? target : withToolModelAttachments(target, attachments);
+}

@@ -1609,7 +1609,7 @@ function toolVerb(node: ProjectableTranscriptNode): string {
   const toolName = normalizedToolName(node.toolName);
   const action = display?.kind === "generic_tool_summary" ? display.action?.toLowerCase() ?? "" : "";
   const fileMutationVerb = fileMutationVerbForTool(toolName, display);
-  if (display?.kind === "command_summary" || toolName === "run_command" || toolName === "shell_command" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) return "命令";
+  if (display?.kind === "command_summary" || toolName === "shell_command" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) return "命令";
   if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search" || toolName.includes("grep")) return "搜索";
   if (display?.kind === "file_search_results") return "搜索";
   if (display?.kind === "directory_listing") return "查看";

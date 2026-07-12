@@ -3,13 +3,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { createTaskSoil } from "../../domain/soil/index.js";
-import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-prompts.js";
 import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";
-import {
-  appendToolEvidenceToContextLedger,
-  createBasicAgentContextLedger,
-} from "./context-ledger.js";
+import { createBasicAgentContextLedger } from "./context-ledger.js";
 
 const sourceDirectory = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
 const promptDirectory = path.join(process.cwd(), "src", "app", "agent-prompts");
@@ -51,7 +47,7 @@ test("context ledger keeps safe text and read model projection split from select
   assert.equal(ledgerSource.includes("function safeConversationText"), false);
   assert.equal(ledgerSource.includes("function safePlain"), false);
   assert.equal(itemsSource.includes("export function buildContextLedgerDraftItems"), true);
-  assert.equal(itemsSource.includes("export function toolEvidenceItems"), true);
+  assert.equal(itemsSource.includes("toolEvidenceItems"), false);
   assert.equal(itemsSource.includes("DESKTOP_ROOT_AGENT"), false);
   assert.equal(itemsSource.includes("desktop-root-agent"), false);
   assert.equal(itemsSource.includes("BasicAgentContextAgentDefinition"), true);
@@ -203,31 +199,6 @@ test("context ledger marks omitted loaded skills without counting them as inject
   assert.equal(skillEntry?.skill?.injectionStatus, "omitted");
   assert.equal(skillEntry?.skill?.omitted, true);
   assert.equal(JSON.stringify(ledger.readModel).includes("FULL PRIVATE SKILL BODY"), false);
-});
-
-test("context ledger append preserves existing context and adds tool evidence without redaction", () => {
-  const taskSoil = createTaskSoil({
-    rawGoal: "answer with evidence",
-    goalId: "goal-append",
-    traceId: "trace-append",
-  });
-  const ledger = createBasicAgentContextLedger({
-    agentDefinition: LEDGER_TEST_AGENT,
-    runId: "run-append",
-    goal: "answer with evidence",
-    taskSoil,
-    conversationHistory: [{ role: "user", content: "history survives", ref: "turn:user:1" }],
-  });
-
-  const appended = appendToolEvidenceToContextLedger(ledger, toolEvidence());
-
-  assert.equal(appended.items.some((item) => item.sourceKind === "user_message"), true);
-  assert.equal(appended.items.some((item) => item.sourceKind === "conversation_recent_turn" && item.summary.includes("history survives")), true);
-  assert.equal(appended.items.some((item) => item.sourceKind === "tool_evidence"), true);
-  assert.equal(appended.evidenceRefs.includes("web:https://example.test"), true);
-  const json = JSON.stringify(appended);
-  assert.equal(json.includes("raw stdout body"), false);
-  assert.equal(json.includes("sk-tool-secret"), true);
 });
 
 test("context ledger reports truncation when messages or chars exceed budget", () => {
@@ -539,16 +510,5 @@ function structuredSkillContext(): DesktopAgentSkillContext {
       confidence: 0.82,
       reasonSummary: "模型选择 repo-review，并保留 keyword fallback 候选事实。",
     },
-  };
-}
-
-function toolEvidence(): ToolCallEvidence {
-  return {
-    callId: "tool:search:1",
-    toolName: "search",
-    status: "completed",
-    summary: "Search found a safe project reference. sk-tool-secret",
-    evidenceRefs: ["web:https://example.test"],
-    truncated: false,
   };
 }

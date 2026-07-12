@@ -599,11 +599,6 @@ test("OpenAI-compatible Chat adapter gates parallel tool calls by visible tool r
           riskLevel: "low",
           operationType: "read-only",
           requiresConfirmation: false,
-          visibleResultPolicy: {
-            userVisible: "summary-only",
-            maxPreviewChars: 800,
-            omitRawOutput: true,
-          },
         },
       },
     ],
@@ -620,11 +615,6 @@ test("OpenAI-compatible Chat adapter gates parallel tool calls by visible tool r
           riskLevel: "high",
           operationType: "execute",
           requiresConfirmation: true,
-          visibleResultPolicy: {
-            userVisible: "summary-only",
-            maxPreviewChars: 800,
-            omitRawOutput: true,
-          },
         },
       },
     ],

@@ -65,7 +65,7 @@ test("thinking copy keeps the entire thought in the expanded detail", () => {
     "",
     "**list_dir**: Workspace has37 entries, mostly markdown files related to capability demos.",
     "**search**: Successfully returned web search results about AI Agent capabilities in2025.",
-    "**run_command**: Failed - python3 was rejected by sandbox policy.",
+    "**shell_command**: Failed - python3 was rejected by sandbox policy.",
   ].join("\n");
   const copy = readableThinkingCopy(text);
 

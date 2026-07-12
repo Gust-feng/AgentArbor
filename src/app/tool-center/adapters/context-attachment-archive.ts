@@ -36,13 +36,15 @@ export function createInspectContextAttachmentArchiveTool(
           "Inspect a ZIP archive from a current context attachment selected by attachmentId or ref.",
           "For project attachments, path is required and must point to the archive file inside the attached project.",
           "This tool only lists ZIP entries; it does not extract files or read archive contents.",
+          "offset continues a truncated archive listing.",
           "Use this before deciding whether an archive needs explicit extraction or a project attachment workflow.",
           "Local absolute paths are not accepted as input and are not returned in output.",
         ],
         outputNotes: [
-          "result.archive=true means the archive directory was parsed.",
-          "result.entries[] contains archive-internal path, kind, byte size, compressed byte size, and unsafePath when a name is not safe to extract.",
-          "result.reason explains unsupported archive formats such as tar/gz/7z without returning local paths.",
+          "archive=true means the archive directory was parsed.",
+          "entries[] contains archive-internal path, kind, byte size, compressed byte size, and unsafePath when a name is not safe to extract.",
+          "continuation.nextInput provides the next executable archive entry window when truncated is true.",
+          "reason explains unsupported archive formats such as tar/gz/7z without returning local paths.",
         ],
         runtimeHints: [
           { label: "supported formats", value: "zip" },
@@ -58,11 +60,6 @@ export function createInspectContextAttachmentArchiveTool(
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_400,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -71,6 +68,7 @@ export function createInspectContextAttachmentArchiveTool(
           ref: { type: "string", description: "Exact non-local context ref when attachmentId is unavailable." },
           path: { type: "string", description: "Relative archive path inside a project attachment." },
           limit: { type: "number", description: "Maximum archive entries to return." },
+          offset: { type: "number", description: "Zero-based archive entry offset for continuation." },
         },
       },
     },
@@ -117,37 +115,37 @@ export function createInspectContextAttachmentArchiveTool(
         return unsupportedArchiveResult({ entry, target, reason: parsed.reason, bytes: stat.size });
       }
       const limit = Math.min(MAX_ARCHIVE_LIST_ENTRIES, positiveInteger(record.limit) ?? MAX_ARCHIVE_LIST_ENTRIES);
+      const offset = nonNegativeInteger(record.offset) ?? 0;
       const archiveEntries = parsed.entries.map(archiveEntrySummary);
-      const returned = archiveEntries.slice(0, limit);
-      const truncated = archiveEntries.length > returned.length;
-      const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · zip archive · ${returned.length}${truncated ? ` of ${archiveEntries.length}` : ""} entries`;
+      const returned = archiveEntries.slice(offset, offset + limit);
+      const nextOffset = offset + returned.length < archiveEntries.length ? offset + returned.length : undefined;
+      const truncated = nextOffset !== undefined;
       return {
-        action: "inspect_context_attachment_archive",
-        status: "completed",
         refId: `context-attachment:${entry.attachmentId}:archive:${safeRefToken(target.targetPath)}`,
-        summary,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          path: target.targetPath,
-          mimeType: entry.ref.metadata?.mimeType,
-          bytes: stat.size,
-          archive: true,
-          format: "zip",
-          entryCount: archiveEntries.length,
-          entriesReturned: returned.length,
-          entries: returned,
-        },
-        display: {
-          kind: "generic_tool_summary",
-          action: "inspect_context_attachment_archive",
-          summary,
-          items: returned.slice(0, 12).map((item) =>
-            [item.kind, item.path, item.bytes === undefined ? undefined : `${item.bytes} bytes`].filter(isString).join(" ")
-          ),
-        },
+        attachmentId: entry.attachmentId,
+        kind: entry.ref.kind,
+        title: attachmentTitle(entry),
+        path: target.targetPath,
+        mimeType: entry.ref.metadata?.mimeType,
+        bytes: stat.size,
+        archive: true,
+        format: "zip",
+        offset,
+        limit,
+        entryCount: archiveEntries.length,
+        entriesReturned: returned.length,
+        entries: returned,
         truncated,
+        continuation: nextOffset === undefined
+          ? undefined
+          : {
+              nextInput: compactRecord({
+                attachmentId: entry.attachmentId,
+                path: target.targetPath,
+                limit,
+                offset: nextOffset,
+              }),
+            },
       };
     },
   };
@@ -159,25 +157,18 @@ function unsupportedArchiveResult(input: {
   readonly reason: string;
   readonly bytes?: number;
 }): Readonly<Record<string, unknown>> {
-  const summary = `${attachmentTitle(input.entry)}${input.target.targetPath === "." ? "" : `:${input.target.targetPath}`} · not readable as a ZIP archive · ${input.reason}`;
   return {
-    action: "inspect_context_attachment_archive",
-    status: "completed",
     refId: `context-attachment:${input.entry.attachmentId}:archive:${safeRefToken(input.target.targetPath)}`,
-    summary,
-    result: {
-      attachmentId: input.entry.attachmentId,
-      kind: input.entry.ref.kind,
-      title: attachmentTitle(input.entry),
-      path: input.target.targetPath,
-      mimeType: input.entry.ref.metadata?.mimeType,
-      bytes: input.bytes,
-      archive: false,
-      format: tableTargetFormat(input.entry.ref, input.target.targetPath),
-      readable: false,
-      reason: input.reason,
-    },
-    display: { kind: "generic_tool_summary", action: "inspect_context_attachment_archive", summary },
+    attachmentId: input.entry.attachmentId,
+    kind: input.entry.ref.kind,
+    title: attachmentTitle(input.entry),
+    path: input.target.targetPath,
+    mimeType: input.entry.ref.metadata?.mimeType,
+    bytes: input.bytes,
+    archive: false,
+    format: tableTargetFormat(input.entry.ref, input.target.targetPath),
+    readable: false,
+    reason: input.reason,
   };
 }
 
@@ -219,6 +210,12 @@ function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function isString(value: unknown): value is string {
-  return typeof value === "string";
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+function compactRecord(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }

@@ -20,7 +20,6 @@ import {
 import type { AgentTurnRuntimeResult } from "../../kernel/intelligence/agent-turn-runtime.js";
 import { nowIso } from "../../kernel/id.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
-import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import {
   DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID,
   DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
@@ -184,7 +183,7 @@ export function buildInterruptedDeepChildAgentRun(input: {
 
 export function buildFailedDeepChildAgentRun(input: {
   readonly childRun: ChildAgentRun;
-  readonly childSpec?: DeepChildSpec;
+  readonly childSpec: DeepChildSpec;
   readonly reason: string;
   readonly failedAt: string;
   readonly execution?: ChildAgentRunExecution;
@@ -298,24 +297,11 @@ export function failureDetailFromTurn(turn: AgentTurnRuntimeResult): ChildAgentR
   };
 }
 
-export function deepChildSpecFromRun(run: ChildAgentRun): DeepChildSpec {
-  return {
-    specId: run.spec.specId,
-    displayName: run.spec.displayName,
-    role: run.spec.role,
-    objective: run.spec.instructions?.objective ?? `Explore from angle: ${run.spec.role}`,
-    allowedTools: [...run.spec.permissions.allowedTools],
-    inputRefs: [...run.spec.inputRefs],
-    maxModelRounds: run.spec.permissions.maxModelRounds ?? run.spec.budget.maxModelRounds,
-    maxToolRounds: run.spec.permissions.maxToolRounds ?? run.spec.budget.maxToolRounds,
-  };
-}
-
 export function resolveRuntimeChildSpec(input: {
   readonly childRun: ChildAgentRun;
-  readonly childSpec?: DeepChildSpec;
+  readonly childSpec: DeepChildSpec;
 }): DeepChildSpec {
-  const delegated = input.childSpec ?? deepChildSpecFromRun(input.childRun);
+  const delegated = input.childSpec;
   return {
     ...delegated,
     allowedTools: intersectPreserveLeftOrder(
@@ -350,15 +336,18 @@ export function executionStatsFromTurn(turn: AgentTurnRuntimeResult): ChildAgent
       finishReason: response.finishReason,
       completedAt: response.completedAt,
     })),
-    toolCalls: turn.toolCalls.map((toolCall) => ({
-      callId: toolCall.callId,
-      toolName: toolCall.toolName,
-      status: toolCall.status,
-      summary: toolCallSummary(toolCall),
-      inputSummary: summarizeToolInput(toolCall.input),
-      durationMs: toolCall.durationMs,
-      display: projectToolDisplay({ callId: toolCall.callId, toolName: toolCall.toolName, input: toolCall.input }, toolCall.output),
-    })),
+    toolCalls: turn.toolCalls.map((toolCall) => {
+      const summary = toolCallSummary(toolCall);
+      const inputSummary = summarizeToolInput(toolCall.input);
+      return {
+        callId: toolCall.callId,
+        toolName: toolCall.toolName,
+        status: toolCall.status,
+        ...(summary === undefined ? {} : { summary }),
+        ...(inputSummary === undefined ? {} : { inputSummary }),
+        durationMs: toolCall.durationMs,
+      };
+    }),
   };
 }
 
@@ -480,9 +469,7 @@ function pendingApprovalFromTurn(turn: AgentTurnRuntimeResult): ChildAgentRunPen
 }
 
 function toolCallSummary(toolCall: AgentTurnRuntimeResult["toolCalls"][number]): string | undefined {
-  const output = recordValue(toolCall.output);
-  const summary = stringValue(output.summary) ?? stringValue(output.message) ?? toolCall.error;
-  return compactTraceText(summary, 500);
+  return compactTraceText(toolCall.error, 500);
 }
 
 function recordValue(value: unknown): Readonly<Record<string, unknown>> {

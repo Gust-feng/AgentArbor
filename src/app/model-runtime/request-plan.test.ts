@@ -92,11 +92,6 @@ function tool(name: string, operationType: ToolOperationType): ToolDefinition {
       riskLevel: operationType === "read-only" ? "low" : "high",
       operationType,
       requiresConfirmation: operationType !== "read-only",
-      visibleResultPolicy: {
-        userVisible: "safe-preview",
-        maxPreviewChars: 800,
-        omitRawOutput: true,
-      },
     },
   };
 }

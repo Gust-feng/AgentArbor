@@ -20,8 +20,6 @@ import { compactSafeText, redactOrdinaryText } from "./tool-projection-text.js";
 const SEARCH_DISPLAY_RESULTS_LIMIT = 20;
 export function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
   const record = asRecord(output);
-  const result = asRecord(record.result);
-  const action = displayActionForTool(stringOrUndefined(record.action), request.toolName);
   if (request.toolName === "search" && Array.isArray(record.results)) {
     const results = record.results
       .slice(0, SEARCH_DISPLAY_RESULTS_LIMIT)
@@ -30,19 +28,19 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
     return {
       kind: "search_results",
       query: stringOrUndefined(record.query),
-      status: stringOrUndefined(record.status),
+      status: stringOrUndefined(record.researchStatus),
       message: compactSafeText(searchMessageFromOutput(record), 500),
       results,
       resultsReturned: record.results.length,
       truncated: record.results.length > results.length || record.truncated === true,
     };
   }
-  if (request.toolName === "read" && Array.isArray(output)) {
+  if (request.toolName === "read" && Array.isArray(record.items)) {
     return {
       kind: "generic_tool_summary",
-      action,
-      summary: `读取 ${output.length} 个 ref。`,
-      items: output.slice(0, 8).map(batchReadDisplayItem).filter(isString),
+      action: toolDisplayName(request.toolName),
+      summary: `读取 ${record.items.length} 个 ref。`,
+      items: record.items.slice(0, 8).map(batchReadDisplayItem).filter(isString),
     };
   }
   if (request.toolName === "read") {
@@ -51,108 +49,111 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
     return {
       kind: "read_result",
       ref: stringOrUndefined(record.ref) ?? stringOrUndefined(asRecord(request.input).ref),
-      source: stringOrUndefined(result.source),
-      status: stringOrUndefined(record.status) ?? stringOrUndefined(result.status),
-      title: stringOrUndefined(result.title),
-      url: stringOrUndefined(result.uri),
-      uri: stringOrUndefined(result.uri),
-      sourceSearchRef: stringOrUndefined(result.sourceSearchRef),
-      contentPreview: compactSafeText(stringOrUndefined(result.contentPreview) ?? stringOrUndefined(result.summary), 1_200),
+      source: stringOrUndefined(record.source),
+      status: stringOrUndefined(record.researchStatus),
+      title: stringOrUndefined(record.title),
+      url: stringOrUndefined(record.uri),
+      uri: stringOrUndefined(record.uri),
+      sourceSearchRef: stringOrUndefined(record.sourceSearchRef),
+      contentPreview: compactSafeText(stringOrUndefined(record.contentPreview), 1_200),
       error,
       errorFacts,
-      truncated: result.truncated === true || record.truncated === true,
+      truncated: record.truncated === true,
+    };
+  }
+  if (isContentReadTool(request.toolName)) {
+    return {
+      kind: "read_result",
+      ref: stringOrUndefined(record.refId),
+      source: stringOrUndefined(record.source),
+      status: stringOrUndefined(record.status) ?? "completed",
+      title: stringOrUndefined(record.title) ?? stringOrUndefined(record.path),
+      url: stringOrUndefined(record.url),
+      uri: stringOrUndefined(record.uri),
+      contentPreview: compactSafeText(stringOrUndefined(record.content) ?? stringOrUndefined(record.text), 1_200),
+      truncated: record.truncated === true,
     };
   }
   if (request.toolName === "browser_snapshot") {
     return {
       kind: "browser_snapshot",
-      title: stringOrUndefined(result.title),
-      url: stringOrUndefined(result.url),
-      text: compactSafeText(stringOrUndefined(result.text), 900),
+      title: stringOrUndefined(record.title),
+      url: stringOrUndefined(record.url),
+      text: compactSafeText(stringOrUndefined(record.text), 900),
       truncated: record.truncated === true,
     };
   }
   if (request.toolName === "http_request") {
     return {
       kind: "http_response",
-      method: stringOrUndefined(result.method),
-      url: stringOrUndefined(result.url),
-      statusCode: numberOrUndefined(result.statusCode),
-      statusText: stringOrUndefined(result.statusText),
-      durationMs: numberOrUndefined(result.durationMs),
-      bodyPreview: compactSafeText(stringOrUndefined(result.body), 900),
-      truncated: result.truncated === true || record.truncated === true,
+      method: stringOrUndefined(record.method),
+      url: stringOrUndefined(record.url),
+      statusCode: numberOrUndefined(record.statusCode),
+      statusText: stringOrUndefined(record.statusText),
+      durationMs: numberOrUndefined(record.durationMs),
+      bodyPreview: compactSafeText(stringOrUndefined(record.body), 900),
+      truncated: record.truncated === true,
     };
   }
-  if (record.result !== undefined && isMcpToolName(request.toolName)) {
+  if (isMcpToolName(request.toolName)) {
     return normalizeToolDisplayForOperation({
       toolName: request.toolName,
       input: request.input,
       output,
-      existingDisplay: record.display,
       truncated: record.truncated === true,
     });
   }
-  const normalizedDisplay = normalizeToolDisplayForOperation({
-    toolName: request.toolName,
-    input: request.input,
-    output,
-    existingDisplay: record.display,
-    truncated: record.truncated === true,
-  });
-  if (
-    (normalizedDisplay.kind === "file_change_summary" || normalizedDisplay.kind === "file_diff_preview") &&
-    request.toolName !== "write_file" &&
-    request.toolName !== "create_file" &&
-    request.toolName !== "delete_file" &&
-    request.toolName !== "edit_file"
-  ) {
-    return normalizedDisplay;
-  }
-  if (request.toolName === "write_file" || request.toolName === "create_file" || request.toolName === "delete_file") {
-    return normalizedDisplay;
-  }
-  if (request.toolName === "edit_file") {
-    return normalizedDisplay;
-  }
-  if (request.toolName === "run_command" || request.toolName === "shell_command") {
-    const stdout = stringOrUndefined(result.stdout);
-    const stderr = stringOrUndefined(result.stderr);
-    const commandLine = commandTextFromToolResult(result, request.input);
+  if (request.toolName === "shell_command") {
+    const stdout = stringOrUndefined(record.stdout);
+    const stderr = stringOrUndefined(record.stderr);
+    const commandLine = commandTextFromToolResult(record, request.input);
     return {
       kind: "command_summary",
-      command: commandProgramFromToolResult(result, request.input),
-      args: stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(asRecord(request.input).args),
+      command: commandProgramFromToolResult(record, request.input),
+      args: stringArray(record.args).length > 0 ? stringArray(record.args) : stringArray(asRecord(request.input).args),
       commandLine,
-      cwd: stringOrUndefined(result.cwd),
-      shell: stringOrUndefined(asRecord(result.shell).label),
-      exitCode: numberOrUndefined(result.exitCode),
-      timedOut: result.timedOut === true,
-      background: result.background === true,
-      pid: numberOrUndefined(result.pid),
-      logRef: stringOrUndefined(result.logRef),
-      logPath: stringOrUndefined(result.logPath),
-      stopCommand: stringOrUndefined(result.stopCommand),
-      durationMs: numberOrUndefined(result.durationMs),
-      waitForPort: numberOrUndefined(result.waitForPort),
-      portReady: result.portReady === true ? true : result.portReady === false ? false : undefined,
-      stdoutTruncated: result.stdoutTruncated === true ? true : result.stdoutTruncated === false ? false : undefined,
-      stderrTruncated: result.stderrTruncated === true ? true : result.stderrTruncated === false ? false : undefined,
-      stdoutChars: numberOrUndefined(result.stdoutChars),
-      stderrChars: numberOrUndefined(result.stderrChars),
-      stdoutOmittedChars: numberOrUndefined(result.stdoutOmittedChars),
-      stderrOmittedChars: numberOrUndefined(result.stderrOmittedChars),
+      cwd: stringOrUndefined(record.cwd),
+      shell: stringOrUndefined(asRecord(record.shell).label),
+      exitCode: numberOrUndefined(record.exitCode),
+      timedOut: record.timedOut === true,
+      background: record.background === true,
+      pid: numberOrUndefined(record.pid),
+      logRef: stringOrUndefined(record.logRef),
+      logPath: stringOrUndefined(record.logPath),
+      stopCommand: stringOrUndefined(record.stopCommand),
+      durationMs: numberOrUndefined(record.durationMs),
+      waitForPort: numberOrUndefined(record.waitForPort),
+      portReady: record.portReady === true ? true : record.portReady === false ? false : undefined,
+      stdoutTruncated: record.stdoutTruncated === true ? true : record.stdoutTruncated === false ? false : undefined,
+      stderrTruncated: record.stderrTruncated === true ? true : record.stderrTruncated === false ? false : undefined,
+      stdoutChars: numberOrUndefined(record.stdoutChars),
+      stderrChars: numberOrUndefined(record.stderrChars),
+      stdoutOmittedChars: numberOrUndefined(record.stdoutOmittedChars),
+      stderrOmittedChars: numberOrUndefined(record.stderrOmittedChars),
       outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
       errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
     };
   }
-  return normalizedDisplay;
+  return normalizeToolDisplayForOperation({
+    toolName: request.toolName,
+    input: request.input,
+    output,
+    truncated: record.truncated === true,
+  });
+}
+
+function isContentReadTool(toolName: string): boolean {
+  return toolName === "read_file" ||
+    toolName === "read_context_attachment_text" ||
+    toolName === "read_context_attachment_pdf_text" ||
+    toolName === "read_skill_resource" ||
+    toolName === "read_sub_agent_output";
 }
 
 function batchReadDisplayItem(value: unknown): string | undefined {
   const item = asRecord(value);
   const ref = stringOrUndefined(item.ref);
-  const status = stringOrUndefined(item.status);
+  const status = stringOrUndefined(item.researchStatus);
   const title = stringOrUndefined(item.title);
   const error = stringOrUndefined(item.error);
   const headline = title ?? ref;
@@ -160,13 +161,6 @@ function batchReadDisplayItem(value: unknown): string | undefined {
     return undefined;
   }
   return [status, headline, error].filter(isString).join(" · ");
-}
-
-function displayActionForTool(action: string | undefined, toolName: string): string {
-  if (action === undefined || action === toolName || /^[a-z][a-z0-9_:-]*$/i.test(action)) {
-    return toolDisplayName(action ?? toolName);
-  }
-  return action;
 }
 
 export function projectSearchDisplayItem(value: unknown): Extract<ToolDisplayProjection, { readonly kind: "search_results" }>["results"][number] | undefined {

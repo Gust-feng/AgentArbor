@@ -99,7 +99,6 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     conversationSummary: input.options.conversationSummary,
     interruptedRunContexts: input.options.interruptedRunContexts,
     skillContexts,
-    toolEvidence: input.options.toolEvidence,
     modelCapabilities,
     tokenCounter,
   });

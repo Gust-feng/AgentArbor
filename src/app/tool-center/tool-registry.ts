@@ -10,7 +10,6 @@ import type {
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
-  ToolVisibleResultPolicy,
 } from "../../domain/tools/index.js";
 import {
   toolPresentationForDefinition,
@@ -47,7 +46,6 @@ export type ToolCatalogItem = {
   readonly operationLabel: string;
   readonly requiresConfirmation: boolean;
   readonly confirmationLabel: string;
-  readonly visibleResultPolicy: ToolVisibleResultPolicy;
   readonly runtimeHints?: readonly ToolRuntimeHint[];
   readonly scopes: readonly ToolRegistryScope[];
   readonly enabledByDefault: boolean;
@@ -129,7 +127,6 @@ export class ToolRegistry {
           operationLabel: presentation.operationLabel,
           requiresConfirmation: metadata.requiresConfirmation,
           confirmationLabel: presentation.confirmationLabel,
-          visibleResultPolicy: { ...metadata.visibleResultPolicy },
           runtimeHints: cloneRuntimeHints(metadata.runtimeHints),
           scopes: [...entry.scopes],
           enabledByDefault: entry.enabledByDefault,
@@ -184,11 +181,6 @@ export function requireToolMetadata(definition: ToolDefinition): ToolDefinitionM
     operationType: metadata.operationType,
     fileOperation: metadata.fileOperation,
     requiresConfirmation: metadata.requiresConfirmation,
-    visibleResultPolicy: {
-      userVisible: metadata.visibleResultPolicy.userVisible,
-      maxPreviewChars: metadata.visibleResultPolicy.maxPreviewChars,
-      omitRawOutput: metadata.visibleResultPolicy.omitRawOutput,
-    },
     runtimeHints: cloneRuntimeHints(metadata.runtimeHints),
   };
 }
@@ -217,13 +209,13 @@ function uniqueScopes(scopes: readonly ToolRegistryScope[]): readonly ToolRegist
 /**
  * 「进模型可见集合」的硬门槛（FR-TOOL-001 / FR-TOOL-002）。
  *
- * 这是工具进入模型可见集合（进而进入本轮 `allowedTools`）的统一完备校验：
- * 缺模型可见功能性契约字段或能力契约元数据字段的工具不得进入模型可见集合。
- * 校验只依赖工具自身的显式契约字段（{@link validateModelVisibleToolContract}），
- * 不依赖工具名前缀、关键字或硬编码白名单。
+ * 这里只校验 executor identity、客观 description、input schema 和执行/副作用元数据。
+ * `modelContract` 的推荐用法、参数/输出说明、runtime hints 和 examples 都是可选增强，
+ * 不得因为缺失这些描述而隐藏可执行工具。真实 result/continuation 边界由 ToolCenter
+ * 与 executor 行为契约验证，不用散文字段代替。
  *
  * scope 是 Host 自定义的路由标签，不能决定契约是否完整；所有默认启用且可用的
- * registry entry 都必须满足同一模型可见契约。
+ * registry entry 都必须满足同一事实契约，不依赖工具名关键词或硬编码白名单。
  */
 export function assertModelVisibleToolContract(input: {
   readonly definition: ToolDefinition;
@@ -237,7 +229,7 @@ export function assertModelVisibleToolContract(input: {
   const validation = validateModelVisibleToolContract(input.definition);
   if (!validation.ok) {
     throw new Error(
-      `Model-visible tool ${input.definition.name} is missing model contract fields: ${validation.missing.join(", ")}.`
+      `Model-visible tool ${input.definition.name} is missing required contract fields: ${validation.missing.join(", ")}.`
     );
   }
 }

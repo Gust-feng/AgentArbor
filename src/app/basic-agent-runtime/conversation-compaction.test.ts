@@ -5,10 +5,8 @@ import type {
   ModelRequest,
   ModelResponse,
 } from "../../domain/intelligence/index.js";
-import {
-  compactBasicAgentConversationIfNeeded,
-  compactBasicAgentLoopContextIfNeeded,
-} from "./conversation-compaction.js";
+import { compactAgentLoopContextIfNeeded } from "../context-maintenance/index.js";
+import { compactBasicAgentConversationIfNeeded } from "./conversation-compaction.js";
 import type { BasicAgentTokenCounter } from "./token-counter.js";
 
 test("conversation history compaction summarizes older turns and keeps recent turns", async () => {
@@ -60,9 +58,9 @@ test("conversation history compaction summarizes older turns and keeps recent tu
   assert.equal(channel.requests[0]?.purpose, "desktop_context_compaction");
 });
 
-test("loop context compaction replaces compactible messages with a continuation prompt", async () => {
+test("neutral loop context compaction replaces compactible messages with a continuation prompt", async () => {
   const channel = new TestIntelligenceChannel("## Goal\nContinue safely.\n\n## Next Steps\nUse preserved context.");
-  const result = await compactBasicAgentLoopContextIfNeeded({
+  const result = await compactAgentLoopContextIfNeeded({
     goal: "current task",
     traceId: "trace-loop-compaction",
     goalId: "goal-loop-compaction",
@@ -86,11 +84,6 @@ test("loop context compaction replaces compactible messages with a continuation 
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 500,
-          omitRawOutput: true,
-        },
       },
     }],
     intelligenceChannel: channel,

@@ -402,6 +402,46 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   const snapshot: RuntimeRunSnapshot = {
     ...runtimeSnapshot(),
     contextLedger: skillContextLedger("run-restored"),
+    basicRun: {
+      ...runtimeSnapshot().basicRun!,
+      eventCursor: {
+        lastSequence: 2,
+        eventCount: 2,
+      },
+    },
+    basicEvents: [
+      {
+        id: "run-restored:basic:sub-agent-completed",
+        runId: "run-restored",
+        sequence: 1,
+        type: "sub_agent.completed",
+        title: "子 Agent",
+        summary: "Restored Helper 已完成。",
+        status: "completed",
+        timestamp: "2026-06-06T00:00:03.000Z",
+        refs: [{ kind: "sub_agent_run", id: "sub-run-restored" }],
+        visibility: "expanded",
+        detail: {
+          subAgentRunId: "sub-run-restored",
+          subAgentName: "Restored Helper",
+          subAgentStatus: "completed",
+          subAgentModelRounds: 1,
+          subAgentToolCalls: 0,
+        },
+      },
+      {
+        id: "run-restored:basic:final-result",
+        runId: "run-restored",
+        sequence: 2,
+        type: "final.result",
+        title: "结果",
+        summary: "历史运行摘要",
+        status: "completed",
+        timestamp: "2026-06-06T00:00:10.000Z",
+        refs: [],
+        visibility: "compact",
+      },
+    ],
     events: [
       runtimeEvent(1, "sub_agent.completed", "Sub-agent completed execution.", [
         { kind: "sub_agent_run", id: "sub-run-restored" },
@@ -468,9 +508,11 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   assert.equal(view?.detail.restoredResult?.title, "已完成");
   assert.equal(view === undefined ? false : "result" in view, false);
   assert.equal(view?.replay.events.some((event) => event.type === "sub_agent.completed"), true);
+  const replayedSubAgentEvent = view?.replay.events.find((event) => event.type === "sub_agent.completed");
+  assert.equal(replayedSubAgentEvent?.detail, undefined);
   assert.equal(
-    view?.replay.events.find((event) => event.type === "sub_agent.completed")?.detail?.subAgentRunId,
-    "sub-run-restored",
+    replayedSubAgentEvent?.refs.some((ref) => ref.kind === "sub_agent_run" && ref.id === "sub-run-restored"),
+    true,
   );
   assert.equal(view?.replay.events.some((event) => event.type === "final.result"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "sub_agent.completed"), true);
@@ -563,6 +605,41 @@ test("basic agent panel read-model restores pending confirmations after refresh"
       resultTitle: "待处理",
       resultSummary: "删除文件：old.txt",
     },
+    basicRun: {
+      ...base.basicRun!,
+      status: "approval_needed",
+      requiresUserAction: true,
+      eventCursor: {
+        lastSequence: 2,
+        eventCount: 2,
+      },
+    },
+    basicEvents: [
+      {
+        id: "run-restored:basic:started",
+        runId: "run-restored",
+        sequence: 1,
+        type: "run.started",
+        title: "任务",
+        summary: "已开始。",
+        status: "running",
+        timestamp: "2026-06-06T00:00:00.000Z",
+        refs: [],
+        visibility: "compact",
+      },
+      {
+        id: "run-restored:basic:confirmation-needed",
+        runId: "run-restored",
+        sequence: 2,
+        type: "confirmation.needed",
+        title: "需要你判断",
+        summary: "删除文件：old.txt",
+        status: "approval_needed",
+        timestamp: "2026-06-06T00:00:05.000Z",
+        refs: [{ kind: "event", id: "confirmation:confirmation-refresh" }],
+        visibility: "expanded",
+      },
+    ],
     confirmations: [
       {
         confirmationId: "confirmation-refresh",
@@ -743,7 +820,41 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
       capabilityResolution: capabilityResolution("snapshot-restored", ["read"]),
       informationAccess: informationAccess(),
     },
-    basicEvents: [],
+    basicRun: {
+      runId: "run-restored",
+      conversationId: "conversation-restored",
+      title: "已完成",
+      goalSummary: "恢复历史运行",
+      status: "completed",
+      runMode: "agent",
+      agentDefinitionRef: {
+        agentId: "restored-basic-agent",
+        agentDisplayName: "Restored Basic Agent",
+        promptRef: "prompt:restored-basic-agent:v1",
+        promptVersion: "1",
+        outputContractId: "desktop.agent_response.v1",
+        toolVisibilityProfileId: "restored-basic-agent:ordinary-visible-tools:v1",
+      },
+      createdAt: "2026-06-06T00:00:00.000Z",
+      updatedAt: "2026-06-06T00:00:10.000Z",
+      requiresUserAction: false,
+      eventCursor: {
+        lastSequence: 1,
+        eventCount: 1,
+      },
+    },
+    basicEvents: [{
+      id: "run-restored:basic:final.result",
+      runId: "run-restored",
+      sequence: 1,
+      type: "final.result",
+      title: "结果",
+      summary: "历史运行摘要",
+      status: "completed",
+      timestamp: "2026-06-06T00:00:10.000Z",
+      refs: [],
+      visibility: "compact",
+    }],
     events: [],
     modelCalls: [],
     toolCalls: [],

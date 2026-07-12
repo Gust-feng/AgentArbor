@@ -1,14 +1,16 @@
+import { isDeepStrictEqual } from "node:util";
 import type {
   ToolDefinitionMetadata,
   ToolExecutionContext,
   ToolExecutor,
+  ToolExecutorResult,
+  ToolFactValue,
   ToolInputSchema,
   ToolModelContract,
 } from "../../domain/tools/index.js";
+import { withToolModelAttachments } from "../../domain/tools/index.js";
 import type { McpConfirmationMode } from "../../domain/config/index.js";
 import type { McpClientWrapper, McpContentPart, McpToolInfo } from "./mcp-client.js";
-
-const MAX_MCP_TEXT_CHARS = 128_000;
 
 export type McpToolConfirmationStrategy = {
   readonly confirmationMode: McpConfirmationMode;
@@ -28,8 +30,8 @@ export function createMcpToolExecutor(
 ): ToolExecutor {
   return {
     definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
-    async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
-      return executeMcpTool(client, tool, input);
+    async execute(input: unknown, context: ToolExecutionContext): Promise<unknown | ToolExecutorResult> {
+      return executeMcpToolForExecutor(client, tool, serverId, input, context);
     },
   };
 }
@@ -42,8 +44,8 @@ export function createLazyMcpToolExecutor(
 ): ToolExecutor {
   return {
     definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
-    async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
-      return executeMcpTool(await getClient(), tool, input);
+    async execute(input: unknown, context: ToolExecutionContext): Promise<unknown | ToolExecutorResult> {
+      return executeMcpToolForExecutor(await getClient(), tool, serverId, input, context);
     },
   };
 }
@@ -61,13 +63,37 @@ export function createCachedMcpToolExecutor(
   };
 }
 
-export async function executeMcpTool(
+async function executeMcpToolForExecutor(
   client: McpClientWrapper,
   tool: Pick<McpToolInfo, "name">,
-  input: unknown
-): Promise<unknown> {
-  const result = await client.callTool(tool.name, input);
-  return buildToolOutput(result);
+  serverId: string,
+  input: unknown,
+  context: ToolExecutionContext
+): Promise<McpToolOutput | ToolExecutorResult> {
+  const startedAt = Date.now();
+  const mcpResult = await client.callTool(tool.name, input);
+  const output = buildToolOutput(mcpResult);
+  if (mcpResult.isError !== true) {
+    return output;
+  }
+  return {
+    kind: "tool_call_result",
+    result: {
+      callId: context.toolCallId ?? `${serverId}__${tool.name}`,
+      toolName: `${serverId}__${tool.name}`,
+      input: input as ToolFactValue | undefined,
+      output: output as ToolFactValue,
+      status: "failed",
+      error: `MCP tool ${serverId}__${tool.name} reported an error.`,
+      errorDomain: "tool_error",
+      errorFacts: {
+        code: "mcp_tool_error",
+        serverId,
+        mcpToolName: tool.name,
+      },
+      durationMs: Date.now() - startedAt,
+    },
+  };
 }
 
 function createMcpToolDefinition(
@@ -137,7 +163,7 @@ function createMcpToolModelContract(input: {
       "Use only for the operation described by the MCP tool description and input schema.",
     ],
     whenNotToUse: [
-      "Do not use when a built-in workspace, shell, research, HTTP, or browser tool directly fits the task.",
+      "Do not use for operations outside the capability described by this MCP tool.",
     ],
     inputNotes,
     usageNotes: [
@@ -145,8 +171,10 @@ function createMcpToolModelContract(input: {
       "MCP annotations are advisory; rely on the tool description, schema, and returned result when deciding follow-up steps.",
     ],
     outputNotes: [
-      "MCP tool calls preserve an MCP-like canonical result with content[], structuredContent, and isError.",
-      "MCP isError=true is returned as tool result content for the model and UI; protocol, connection, or transport exceptions fail the tool call.",
+      "Returns one canonical fact body: content[] plus optional structuredContent; a content text block is omitted only when it is parseable JSON and deeply identical to structuredContent, and no duplicate summary or result wrapper is added.",
+      "Text content is preserved once and is not truncated by the MCP adapter. MCP has no standard tool-result continuation, so results beyond the shared transport budget fail honestly unless the server tool itself returns an explicit paging or reference contract.",
+      "Image bytes are passed out of band as model attachments while content[] retains only image metadata. Audio remains metadata-only and non-image embedded resource blobs may also be unavailable because the current model attachment contract has no safe input type for them; unforwarded bytes are explicitly marked not_retained and never placed in the JSON fact body.",
+      "MCP isError=true produces a failed ToolCallResult while preserving the canonical MCP error content once; protocol, connection, or transport exceptions also fail the tool call.",
     ],
     runtimeHints: [
       { label: "MCP server", value: input.serverId },
@@ -211,32 +239,61 @@ function truncateAtWordBoundary(value: string, maxChars: number): string {
   return `${trimmed}\u2026`;
 }
 
-type McpToolOutput = {
-  readonly summary: string;
-  readonly mcpResult: {
-    readonly content: readonly McpContentPart[];
-    readonly structuredContent?: unknown;
-    readonly isError?: boolean;
-  };
-  readonly result: {
-    readonly text?: string;
-    readonly multimodal?: readonly McpToolMultimodalSummary[];
-    readonly structuredContent?: unknown;
-  };
-  readonly isError?: boolean;
-  readonly truncated: boolean;
+export type McpToolOutput = {
+  readonly content: readonly McpToolOutputContentPart[];
+  readonly structuredContent?: ToolFactValue;
 };
 
-type McpToolMultimodalSummary =
+export type McpToolOutputContentPart =
+  | {
+      readonly type: "text";
+      readonly text: string;
+    }
   | {
       readonly type: "image";
       readonly mimeType: string;
-      readonly bytesApprox: number;
+      readonly byteLength: number;
+      readonly modelInput: "attached";
+      readonly modelAttachmentIndex: number;
     }
   | {
       readonly type: "audio";
       readonly mimeType: string;
-      readonly bytesApprox: number;
+      readonly byteLength: number;
+      readonly modelInput: "unsupported";
+      readonly dataRetention: "not_retained";
+    }
+  | {
+      readonly type: "resource_link";
+      readonly uri: string;
+      readonly name: string;
+      readonly title?: string;
+      readonly description?: string;
+      readonly mimeType?: string;
+      readonly size?: number;
+    }
+  | {
+      readonly type: "resource";
+      readonly resource:
+        | {
+            readonly uri: string;
+            readonly mimeType?: string;
+            readonly text: string;
+          }
+        | {
+            readonly uri: string;
+            readonly mimeType?: string;
+            readonly byteLength: number;
+            readonly modelInput: "attached";
+            readonly modelAttachmentIndex: number;
+          }
+        | {
+            readonly uri: string;
+            readonly mimeType?: string;
+            readonly byteLength: number;
+            readonly modelInput: "unsupported";
+            readonly dataRetention: "not_retained";
+          };
     };
 
 function inferToolMetadataFromMcpAnnotations(
@@ -263,11 +320,6 @@ function inferToolMetadataFromMcpAnnotations(
       riskLevel,
       operationType,
     }),
-    visibleResultPolicy: {
-      userVisible: "summary-only",
-      maxPreviewChars: 1_200,
-      omitRawOutput: false,
-    },
   };
 }
 
@@ -306,58 +358,127 @@ function mcpToolNameSetHas(tools: readonly string[], serverId: string, toolName:
 function buildToolOutput(result: {
   readonly content: readonly McpContentPart[];
   readonly structuredContent?: unknown;
-  readonly isError?: boolean;
 }): McpToolOutput {
-  const textParts: string[] = [];
-  const multimodalParts: McpToolMultimodalSummary[] = [];
-  for (const part of result.content) {
-    if (part.type === "text") {
-      textParts.push(part.text);
-    } else if (part.type === "image") {
-      multimodalParts.push({
-        type: "image",
-        mimeType: part.mimeType,
-        bytesApprox: approximateBase64Bytes(part.data),
-      });
-    } else if (part.type === "audio") {
-      multimodalParts.push({
-        type: "audio",
-        mimeType: part.mimeType,
-        bytesApprox: approximateBase64Bytes(part.data),
-      });
+  const content: McpToolOutputContentPart[] = [];
+  const protocolContent = result.structuredContent === undefined
+    ? result.content
+    : result.content.filter((part) => !isExactStructuredContentMirror(part, result.structuredContent));
+  const modelAttachments: Array<{
+    readonly kind: "image";
+    readonly source: {
+      readonly kind: "data";
+      readonly mimeType: string;
+      readonly data: string;
+    };
+    readonly byteLength: number;
+  }> = [];
+  const attachImage = (data: string, mimeType: string) => {
+    const byteLength = approximateBase64Bytes(data);
+    const modelAttachmentIndex = modelAttachments.length;
+    modelAttachments.push({
+      kind: "image",
+      source: { kind: "data", mimeType, data },
+      byteLength,
+    });
+    return { byteLength, modelAttachmentIndex };
+  };
+  for (const part of protocolContent) {
+    switch (part.type) {
+      case "text":
+        content.push({ type: "text", text: part.text });
+        break;
+      case "image": {
+        const attachment = attachImage(part.data, part.mimeType);
+        content.push({
+          type: "image",
+          mimeType: part.mimeType,
+          ...attachment,
+          modelInput: "attached",
+        });
+        break;
+      }
+      case "audio":
+        content.push({
+          type: "audio",
+          mimeType: part.mimeType,
+          byteLength: approximateBase64Bytes(part.data),
+          modelInput: "unsupported",
+          dataRetention: "not_retained",
+        });
+        break;
+      case "resource_link":
+        content.push({
+          type: "resource_link",
+          uri: part.uri,
+          name: part.name,
+          ...(part.title === undefined ? {} : { title: part.title }),
+          ...(part.description === undefined ? {} : { description: part.description }),
+          ...(part.mimeType === undefined ? {} : { mimeType: part.mimeType }),
+          ...(part.size === undefined ? {} : { size: part.size }),
+        });
+        break;
+      case "resource":
+        if ("text" in part.resource) {
+          content.push({
+            type: "resource",
+            resource: {
+              uri: part.resource.uri,
+              ...(part.resource.mimeType === undefined ? {} : { mimeType: part.resource.mimeType }),
+              text: part.resource.text,
+            },
+          });
+          break;
+        }
+        if (part.resource.mimeType?.toLowerCase().startsWith("image/") === true) {
+          const attachment = attachImage(part.resource.blob, part.resource.mimeType);
+          content.push({
+            type: "resource",
+            resource: {
+              uri: part.resource.uri,
+              mimeType: part.resource.mimeType,
+              ...attachment,
+              modelInput: "attached",
+            },
+          });
+          break;
+        }
+        content.push({
+          type: "resource",
+          resource: {
+            uri: part.resource.uri,
+            ...(part.resource.mimeType === undefined ? {} : { mimeType: part.resource.mimeType }),
+            byteLength: approximateBase64Bytes(part.resource.blob),
+            modelInput: "unsupported",
+            dataRetention: "not_retained",
+          },
+        });
+        break;
+      default:
+        throw unsupportedMcpContentPart(part);
     }
   }
-  const text = textParts.join("\n").trim();
-  const visibleText = truncateText(text, MAX_MCP_TEXT_CHARS);
-  const mediaSummary = multimodalParts.length === 0
-    ? undefined
-    : `MCP returned ${multimodalParts.length} non-text content item(s); raw media bytes are retained by the MCP server, not AgentArbor.`;
-  const summary = [visibleText.text, mediaSummary].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
-  return {
-    summary: summary.length === 0 ? "MCP tool returned no text content." : summary,
-    mcpResult: {
-      content: result.content,
-      structuredContent: result.structuredContent,
-      isError: result.isError,
-    },
-    result: {
-      text: visibleText.text.length > 0 ? visibleText.text : undefined,
-      multimodal: multimodalParts.length === 0 ? undefined : multimodalParts,
-      structuredContent: result.structuredContent,
-    },
-    isError: result.isError,
-    truncated: visibleText.truncated,
+  const output: McpToolOutput = {
+    content,
+    ...(result.structuredContent === undefined
+      ? {}
+      : { structuredContent: result.structuredContent as ToolFactValue }),
   };
+  return withToolModelAttachments(output, modelAttachments);
 }
 
-function truncateText(value: string, maxLength: number): { readonly text: string; readonly truncated: boolean } {
-  if (value.length <= maxLength) {
-    return { text: value, truncated: false };
+function isExactStructuredContentMirror(part: McpContentPart, structuredContent: unknown): boolean {
+  if (part.type !== "text") {
+    return false;
   }
-  return {
-    text: `${value.slice(0, Math.max(0, maxLength - 1))}…`,
-    truncated: true,
-  };
+  try {
+    return isDeepStrictEqual(JSON.parse(part.text), structuredContent);
+  } catch {
+    return false;
+  }
+}
+
+function unsupportedMcpContentPart(value: never): Error {
+  return new Error(`Unsupported MCP content part: ${String((value as { readonly type?: unknown }).type ?? "unknown")}.`);
 }
 
 function approximateBase64Bytes(value: string): number {

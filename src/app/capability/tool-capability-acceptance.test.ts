@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { modelVisibleToolDescription, type ToolCallResult } from "../../domain/tools/index.js";
+import { modelVisibleToolDescription, normalizeToolFactValue, type ToolCallResult } from "../../domain/tools/index.js";
 import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../testing/desktop-basic-tool-registry.js";
 import { ensurePidExited } from "../tool-center/adapters/background-process-test-utils.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
@@ -83,7 +83,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     ].join("\n");
     const write = await executeTool("call-write", "write_file", { path: "demo/index.html", content: html });
     assert.equal(write.status, "completed");
-    assert.equal(((write.output as { result?: { path?: string } }).result?.path), "demo/index.html");
+    assert.equal(resultFact(write).path, "demo/index.html");
     assert.equal(projectToolDisplay({ callId: write.callId, toolName: write.toolName, input: write.input }, write.output).kind, "file_change_summary");
 
     const read = await executeTool("call-read", "read_file", { path: "demo/index.html" });
@@ -326,7 +326,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
 
   async function executeTool(callId: string, toolName: string, input: Record<string, unknown>) {
     return center.execute(
-      { callId, toolName, input },
+      { callId, toolName, input: normalizeToolFactValue(input) },
       context,
       {
         callerAgentId: context.callerAgentId,

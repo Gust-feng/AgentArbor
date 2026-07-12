@@ -27,7 +27,6 @@ import {
 } from "./adapters/local-workspace-tools.js";
 import {
   createDefaultCommandShellConfig,
-  createLocalRunCommandTool,
   createLocalShellCommandTool,
   type LocalCommandProcessRegistry,
 } from "./adapters/local-workspace-command-tools.js";
@@ -76,7 +75,6 @@ export function createAgentToolRegistry(
   const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
   const commandShell = options.commandShell ?? createDefaultCommandShellConfig(process.platform, env);
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
-  const includeLegacyRunCommand = options.toolCatalogNames?.includes("run_command") === true;
   const baseToolScopes = options.baseToolScopes ?? ["agent-basic"];
   const executors: readonly ToolExecutor[] = [
     createLocalReadFileTool(workspaceRoot, { sandboxPolicy }),
@@ -87,9 +85,6 @@ export function createAgentToolRegistry(
     createLocalEditFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
-    ...(includeLegacyRunCommand
-      ? [createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry })]
-      : []),
     ...createContextAttachmentTools({
       taskSoil: options.taskSoil,
       workspaceRoot,
@@ -106,7 +101,7 @@ export function createAgentToolRegistry(
       continue;
     }
     const state = options.toolStates?.find((item) => item.name === executor.definition.name);
-    const enabledByDefault = state?.enabled ?? executor.definition.name !== "run_command";
+    const enabledByDefault = state?.enabled ?? true;
     const frozenAvailability = toolCatalogAvailability.get(executor.definition.name);
     const currentAvailability =
       executor.definition.name === "browser_snapshot" && !playwrightAvailable

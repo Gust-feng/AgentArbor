@@ -37,9 +37,11 @@ test("default ToolCenter exposes model-visible search and read tools", async () 
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
     { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
   );
+  const output = search.output as { readonly researchStatus?: string };
 
   assert.equal(search.status, "completed");
-  assert.equal((search.output as { status?: string }).status, "no-provider");
+  assertDirectToolFacts(search.output);
+  assert.equal(output.researchStatus, "no-provider");
 });
 
 test("research tool definitions describe only currently model-visible sources", () => {
@@ -91,19 +93,30 @@ test("research tools keep explicitly requested hidden sources as no-provider fac
     { ref: "research:soil:unavailable", source: "soil" },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
   );
+  const searchFacts = search as {
+    readonly researchStatus?: string;
+    readonly requestedSources?: readonly string[];
+  };
+  const readFacts = read as {
+    readonly researchStatus?: string;
+    readonly requestedSources?: readonly string[];
+  };
 
-  assert.equal((search as { status?: string }).status, "no-provider");
-  assert.deepEqual((search as { trace?: { requestedSources?: readonly string[] } }).trace?.requestedSources, ["soil", "run_memory"]);
-  assert.equal((read as { status?: string }).status, "no-provider");
-  assert.deepEqual((read as { trace?: { requestedSources?: readonly string[] } }).trace?.requestedSources, ["soil"]);
+  assertDirectToolFacts(search);
+  assertDirectToolFacts(read);
+  assert.equal(searchFacts.researchStatus, "no-provider");
+  assert.deepEqual(searchFacts.requestedSources, ["soil", "run_memory"]);
+  assert.equal(readFacts.researchStatus, "no-provider");
+  assert.deepEqual(readFacts.requestedSources, ["soil"]);
 });
 
-test("research read tool keeps single ref output compatible", async () => {
+test("research read tool returns direct single-ref facts", async () => {
+  const contentPreview = "single ref content";
   const expected = fixedReadResult({
     ref: "research:codebase:one",
     status: "completed",
     source: "codebase",
-    contentPreview: "single compatible content",
+    contentPreview,
   });
   const runtime = fixedResearchRuntime({
     read: async () => expected,
@@ -115,7 +128,60 @@ test("research read tool keeps single ref output compatible", async () => {
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
   );
 
-  assert.deepEqual(read, expected);
+  assertDirectToolFacts(read);
+  const facts = read as {
+    readonly ref?: string;
+    readonly researchStatus?: string;
+    readonly refId?: string;
+    readonly source?: string;
+    readonly contentPreview?: string;
+    readonly truncated?: boolean;
+  };
+  assert.equal(facts.ref, expected.ref);
+  assert.equal(facts.researchStatus, expected.status);
+  assert.equal(facts.refId, "read:research:codebase:one");
+  assert.equal(facts.source, "codebase");
+  assert.equal(facts.contentPreview, contentPreview);
+  assert.equal(facts.truncated, false);
+});
+
+test("research read tool continues from the first unread character without repeating content", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-research-read-continuation-"));
+  const source = `${"a".repeat(200)}${"b".repeat(200)}${"c".repeat(50)}`;
+  await fs.writeFile(path.join(directory, "long.txt"), source, "utf8");
+  try {
+    const readTool = createResearchReadTool(createDefaultResearchRuntime({ codebaseRoot: directory }));
+    let nextInput: Readonly<Record<string, unknown>> = {
+      ref: "long.txt",
+      source: "codebase",
+      maxLength: 200,
+    };
+    const chunks: string[] = [];
+    const starts: number[] = [];
+
+    for (;;) {
+      const output = await readTool.execute(nextInput, {
+        callerAgentId: "agent-test",
+        traceId: "trace-test",
+        goalId: "goal-test",
+      }) as Readonly<Record<string, unknown>>;
+      const preview = String(output.contentPreview ?? "");
+      chunks.push(preview);
+      starts.push(Number(output.startChar));
+      if (output.truncated !== true) {
+        assert.equal(output.continuation, undefined);
+        break;
+      }
+      const continuation = asRecord(output.continuation);
+      nextInput = asRecord(continuation.nextInput);
+      assert.equal(Number(nextInput.startChar), starts.at(-1)! + preview.length);
+    }
+
+    assert.deepEqual(starts, [0, 200, 400]);
+    assert.equal(chunks.join(""), source);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("research read tool exposes single-ref failure facts", async () => {
@@ -143,12 +209,14 @@ test("research read tool exposes single-ref failure facts", async () => {
   const read = await readTool.execute(
     { ref: "http://127.0.0.1:43210/status" },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
-  ) as InformationReadResult & {
+  ) as {
+    readonly researchStatus?: string;
     readonly error?: string;
     readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
   };
 
-  assert.equal(read.status, "provider-failed");
+  assertDirectToolFacts(read);
+  assert.equal(read.researchStatus, "provider-failed");
   assert.match(read.error ?? "", /ECONNREFUSED/);
   assert.equal(read.errorFacts?.code, "ECONNREFUSED");
   assert.equal(read.errorFacts?.errno, -4078);
@@ -175,26 +243,60 @@ test("research read tool batches multiple refs without changing per-item content
   });
   const readTool = createResearchReadTool(runtime);
 
-  const read = await readTool.execute(
+  const output = await readTool.execute(
     { ref: ["src/a.ts", "src/b.ts"], source: "codebase", maxLength: 200 },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
-  ) as readonly {
-    readonly ref: string;
-    readonly status: string;
-    readonly contentPreview?: string;
-    readonly truncated: boolean;
-    readonly source?: string;
-  }[];
+  ) as {
+    readonly items: readonly {
+      readonly ref: string;
+      readonly researchStatus: string;
+      readonly contentPreview?: string;
+      readonly truncated: boolean;
+      readonly source?: string;
+    }[];
+    readonly continuations?: readonly unknown[];
+  };
+  const read = output.items;
 
-  assert.equal(Array.isArray(read), true);
-  assert.deepEqual(calls.map((call) => ({ ref: call.ref, source: call.source, maxLength: call.maxLength })), [
-    { ref: "src/a.ts", source: "codebase", maxLength: 200 },
-    { ref: "src/b.ts", source: "codebase", maxLength: 200 },
+  assertDirectToolFacts(output);
+  read.forEach(assertDirectToolFacts);
+  assert.deepEqual(calls.map((call) => ({ ref: call.ref, source: call.source, maxLength: call.maxLength, startChar: call.startChar })), [
+    { ref: "src/a.ts", source: "codebase", maxLength: 200, startChar: 0 },
+    { ref: "src/b.ts", source: "codebase", maxLength: 200, startChar: 0 },
   ]);
   assert.deepEqual(read.map((item) => item.ref), ["src/a.ts", "src/b.ts"]);
-  assert.deepEqual(read.map((item) => item.status), ["completed", "completed"]);
+  assert.deepEqual(read.map((item) => item.researchStatus), ["completed", "completed"]);
   assert.deepEqual(read.map((item) => item.contentPreview), ["content for src/a.ts", "content for src/b.ts"]);
   assert.deepEqual(read.map((item) => item.truncated), [false, false]);
+  assert.equal(output.continuations, undefined);
+});
+
+test("research batch read exposes each executable continuation only at the top level", async () => {
+  const runtime = fixedResearchRuntime({
+    read: async (request) => fixedReadResult({
+      ref: request.ref,
+      status: "completed",
+      source: "codebase",
+      contentPreview: request.ref === "a.md" ? "aaaa" : "bbbb",
+      startChar: request.startChar ?? 0,
+      charCount: 12,
+      truncated: true,
+    }),
+  });
+  const output = await createResearchReadTool(runtime).execute(
+    { ref: ["a.md", "b.md"], source: "codebase", maxLength: 4 },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+  ) as {
+    readonly items: readonly Readonly<Record<string, unknown>>[];
+    readonly continuations?: readonly { readonly nextInput: Readonly<Record<string, unknown>> }[];
+  };
+
+  assert.deepEqual(output.items.map((item) => item.truncated), [true, true]);
+  assert.equal(output.items.every((item) => item.continuation === undefined), true);
+  assert.deepEqual(output.continuations?.map((item) => item.nextInput), [
+    { ref: "a.md", source: "codebase", maxLength: 4, startChar: 4 },
+    { ref: "b.md", source: "codebase", maxLength: 4, startChar: 4 },
+  ]);
 });
 
 test("research read tool returns an empty batch without provider calls", async () => {
@@ -212,7 +314,7 @@ test("research read tool returns an empty batch without provider calls", async (
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
   );
 
-  assert.deepEqual(read, []);
+  assert.deepEqual(read, { items: [] });
   assert.equal(calls, 0);
 });
 
@@ -239,19 +341,22 @@ test("research read tool batch reports partial failures per ref", async () => {
   });
   const readTool = createResearchReadTool(runtime);
 
-  const read = await readTool.execute(
+  const output = await readTool.execute(
     { ref: ["ok.md", "missing.md", "throws.md"], source: "codebase" },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
-  ) as readonly {
-    readonly ref: string;
-    readonly status: string;
-    readonly contentPreview?: string;
-    readonly truncated: boolean;
-    readonly error?: string;
-  }[];
+  ) as { readonly items: readonly {
+      readonly ref: string;
+      readonly researchStatus: string;
+      readonly contentPreview?: string;
+      readonly truncated: boolean;
+      readonly error?: string;
+    }[] };
+  const read = output.items;
 
+  assertDirectToolFacts(output);
+  read.forEach(assertDirectToolFacts);
   assert.deepEqual(read.map((item) => item.ref), ["ok.md", "missing.md", "throws.md"]);
-  assert.deepEqual(read.map((item) => item.status), ["completed", "provider-failed", "provider-failed"]);
+  assert.deepEqual(read.map((item) => item.researchStatus), ["completed", "provider-failed", "provider-failed"]);
   assert.equal(read[0]?.contentPreview, "available content");
   assert.equal(read[1]?.error, "codebase read could not read the requested text file.");
   assert.equal(read[2]?.error, "adapter exploded");
@@ -289,7 +394,7 @@ test("research read tool batch preserves command-log successes and HTTP failure 
   });
   const readTool = createResearchReadTool(runtime);
 
-  const read = await readTool.execute(
+  const output = await readTool.execute(
     {
       ref: [
         "command-log://shell-batch",
@@ -299,15 +404,18 @@ test("research read tool batch preserves command-log successes and HTTP failure 
       ],
     },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
-  ) as readonly {
-    readonly ref: string;
-    readonly status: string;
-    readonly contentPreview?: string;
-    readonly error?: string;
-    readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
-  }[];
+  ) as { readonly items: readonly {
+      readonly ref: string;
+      readonly researchStatus: string;
+      readonly contentPreview?: string;
+      readonly error?: string;
+      readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
+    }[] };
+  const read = output.items;
 
-  assert.deepEqual(read.map((item) => item.status), ["completed", "provider-failed", "provider-failed", "invalid-input"]);
+  assertDirectToolFacts(output);
+  read.forEach(assertDirectToolFacts);
+  assert.deepEqual(read.map((item) => item.researchStatus), ["completed", "provider-failed", "provider-failed", "invalid-input"]);
   assert.equal(read[0]?.contentPreview, "shell batch log\n");
   assert.match(read[1]?.error ?? "", /ECONNREFUSED/);
   assert.equal(read[1]?.errorFacts?.code, "ECONNREFUSED");
@@ -324,7 +432,7 @@ test("research read tool batch preserves command-log successes and HTTP failure 
   assert.equal(read[3]?.error, "Unknown or unregistered command log ref.");
 });
 
-test("ToolCenter read direct bad HTTP URL preserves page error facts through output, projection, and envelope", async () => {
+test("ToolCenter read direct bad HTTP URL preserves page error facts through output and display", async () => {
   const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:43210"), {
     code: "ECONNREFUSED",
     errno: -4078,
@@ -350,25 +458,19 @@ test("ToolCenter read direct bad HTTP URL preserves page error facts through out
     { callerAgentId: "agent-test", allowedTools: ["read"] }
   );
   const output = result.output as {
-    readonly status?: string;
+    readonly researchStatus?: string;
     readonly error?: string;
     readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
-    readonly trace?: {
-      readonly sourceSteps?: readonly {
-        readonly status?: string;
-        readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
-      }[];
-    };
-  };
-  const agentContent = output as {
-    readonly status?: string;
-    readonly error?: string;
-    readonly errorFacts?: Readonly<Record<string, unknown>>;
+    readonly sourceSteps?: readonly {
+      readonly status?: string;
+      readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
+    }[];
   };
   const display = projectToolDisplay({ callId: result.callId, toolName: result.toolName, input: result.input }, result.output);
 
   assert.equal(result.status, "completed");
-  assert.equal(output.status, "provider-failed");
+  assertDirectToolFacts(output);
+  assert.equal(output.researchStatus, "provider-failed");
   assert.match(output.error ?? "", /ECONNREFUSED/);
   assert.equal(output.errorFacts?.code, "ECONNREFUSED");
   assert.equal(output.errorFacts?.errno, -4078);
@@ -378,11 +480,8 @@ test("ToolCenter read direct bad HTTP URL preserves page error facts through out
   assert.equal(output.errorFacts?.method, "GET");
   assert.equal(output.errorFacts?.url, "http://127.0.0.1:43210/status");
   assert.equal(typeof output.errorFacts?.durationMs, "number");
-  assert.equal(output.trace?.sourceSteps?.[0]?.status, "provider-failed");
-  assert.equal(output.trace?.sourceSteps?.[0]?.errorFacts?.code, "ECONNREFUSED");
-  assert.equal(agentContent.status, "provider-failed");
-  assert.match(agentContent.error ?? "", /ECONNREFUSED/);
-  assert.equal(agentContent.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(output.sourceSteps?.[0]?.status, "provider-failed");
+  assert.equal(output.sourceSteps?.[0]?.errorFacts?.code, "ECONNREFUSED");
   assert.equal(display?.kind, "read_result");
   if (display?.kind !== "read_result") {
     throw new Error("expected read_result display");
@@ -405,26 +504,23 @@ test("ToolCenter search empty query is invalid-input instead of empty results", 
     { callerAgentId: "agent-test", allowedTools: ["search"] }
   );
   const output = result.output as {
-    readonly status?: string;
+    readonly researchStatus?: string;
     readonly message?: string;
     readonly results?: readonly unknown[];
-    readonly trace?: {
+    readonly sourceSteps?: readonly {
       readonly status?: string;
-      readonly sourceSteps?: readonly {
-        readonly status?: string;
-        readonly message?: string;
-      }[];
-    };
+      readonly message?: string;
+    }[];
   };
   const display = projectToolDisplay({ callId: result.callId, toolName: result.toolName, input: result.input }, result.output);
 
   assert.equal(result.status, "completed");
-  assert.equal(output.status, "invalid-input");
+  assertDirectToolFacts(output);
+  assert.equal(output.researchStatus, "invalid-input");
   assert.equal(output.message, "search requires a non-empty query.");
   assert.equal(output.results?.length, 0);
-  assert.equal(output.trace?.status, "invalid-input");
-  assert.equal(output.trace?.sourceSteps?.[0]?.status, "invalid-input");
-  assert.equal(output.trace?.sourceSteps?.[0]?.message, "search requires a non-empty query.");
+  assert.equal(output.sourceSteps?.[0]?.status, "invalid-input");
+  assert.equal(output.sourceSteps?.[0]?.message, "search requires a non-empty query.");
   assert.equal(display?.kind, "search_results");
   if (display?.kind !== "search_results") {
     throw new Error("expected search_results display");
@@ -701,7 +797,8 @@ test("configured ToolCenter still registers search/read and degrades web search 
 
     assertCoreDesktopToolNames(names);
     assert.equal(search.status, "completed");
-    assert.equal((search.output as { status?: string }).status, "no-provider");
+    assertDirectToolFacts(search.output);
+    assert.equal((search.output as { researchStatus?: string }).researchStatus, "no-provider");
   } finally {
     await removeTestDirectory(directory);
   }
@@ -791,7 +888,8 @@ test("configured ToolCenter keeps web search disabled even when a historical Tav
     );
 
     assert.equal(search.status, "completed");
-    assert.equal((search.output as { status?: string }).status, "no-provider");
+    assertDirectToolFacts(search.output);
+    assert.equal((search.output as { researchStatus?: string }).researchStatus, "no-provider");
     assert.equal(JSON.stringify(search.output).includes("tvly-disabled-tool-secret"), false);
     assert.equal(fetchCalls, 0);
   } finally {
@@ -864,11 +962,30 @@ function fixedSearchResult(query: InformationQuery): InformationSearchResult {
   };
 }
 
+function assertDirectToolFacts(value: unknown): void {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+  const output = value as Readonly<Record<string, unknown>>;
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `research tool output must not contain ${legacyField}`);
+  }
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+}
+
 function fixedReadResult(input: {
   readonly ref: string;
   readonly status: InformationReadResult["status"];
   readonly source?: InformationSourceKind;
   readonly contentPreview?: string;
+  readonly startChar?: number;
+  readonly charCount?: number;
+  readonly truncated?: boolean;
   readonly message?: string;
   readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
 }): InformationReadResult {
@@ -885,7 +1002,11 @@ function fixedReadResult(input: {
           status: "completed",
           summary: input.contentPreview ?? "",
           contentPreview: input.contentPreview,
-          truncated: false,
+          startChar: input.startChar ?? 0,
+          contentChars: input.contentPreview?.length ?? 0,
+          charCount: input.charCount ?? input.contentPreview?.length ?? 0,
+          hasMoreAfter: input.truncated ?? false,
+          truncated: input.truncated ?? false,
           metadata: { fixture: true },
         }
       : undefined,

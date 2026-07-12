@@ -462,6 +462,10 @@ test("basic agent shell_command executes after confirmation without command-shap
     const commandCall = runtimeRun.body.snapshot.toolCalls.find(
       (call: { toolName?: string; status: string }) => call.toolName === "shell_command"
     );
+    const commandCompletedEvent = runtimeRun.body.transcript.events.find(
+      (event: { type: string; toolName?: string; detail?: { display?: { commandLine?: string } } }) =>
+        event.type === "tool.completed" && event.toolName === "shell_command"
+    );
 
     assert.equal(approved.status, 200);
     assert.equal(runningAfterApproval.body.run.status, "running");
@@ -472,7 +476,8 @@ test("basic agent shell_command executes after confirmation without command-shap
     );
     assert.equal(completed.body.status, "completed");
     assert.equal(commandCall?.status, "completed");
-    assert.equal(commandCall?.commandLine ?? commandCall?.command, "echo approval-review");
+    assert.equal(Object.hasOwn(commandCall, "command"), false);
+    assert.equal(commandCompletedEvent?.detail?.display?.commandLine, "echo approval-review");
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "confirmation.needed"), true);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "run.resumed"), false);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "user_approval.received"), false);
@@ -621,6 +626,10 @@ test("basic agent approve after restart blocks because executable continuation i
       server.url,
       `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
     );
+    const restoredView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/view?cursor=0`
+    );
     const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
 
     assert.equal(restoredWorkView.body.workView.pendingConfirmation.resumeAvailability, "lost_after_restart");
@@ -629,8 +638,13 @@ test("basic agent approve after restart blocks because executable continuation i
     assert.equal(approved.body.run.status, "blocked");
     assert.equal(runtimeRun.body.snapshot.run.status, "blocked");
     assert.equal(runtimeRun.body.snapshot.confirmations[0].status, "approved");
+    assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "confirmation.needed"), false);
     assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), true);
-    assertSafePanelJsonText(`${approved.text}\n${restoredEvents.text}\n${runtimeRun.text}`);
+    assert.equal(
+      restoredView.body.view.detail.transcript.events.some((event: { type: string }) => event.type === "confirmation.needed"),
+      false,
+    );
+    assertSafePanelJsonText(`${approved.text}\n${restoredEvents.text}\n${restoredView.text}\n${runtimeRun.text}`);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -738,13 +752,18 @@ test("basic agent confirmation survives prior edit_file failures before shell_co
     const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
     const events = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`);
     const commandCall = runtimeRun.body.snapshot.toolCalls.find(
-      (call: { toolName?: string; command?: string; status: string }) => call.toolName === "shell_command"
+      (call: { toolName?: string; status: string }) => call.toolName === "shell_command"
+    );
+    const commandCompletedEvent = runtimeRun.body.transcript.events.find(
+      (event: { type: string; toolName?: string; detail?: { display?: { commandLine?: string } } }) =>
+        event.type === "tool.completed" && event.toolName === "shell_command"
     );
 
     assert.equal(approved.status, 200);
     assert.equal(completed.body.status, "completed");
     assert.equal(commandCall?.status, "completed");
-    assert.equal(commandCall?.command, `echo "start" && echo "middle" && echo "end"`);
+    assert.equal(Object.hasOwn(commandCall, "command"), false);
+    assert.equal(commandCompletedEvent?.detail?.display?.commandLine, `echo "start" && echo "middle" && echo "end"`);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.failed"), true);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(events.text.includes("面板请求失败"), false);

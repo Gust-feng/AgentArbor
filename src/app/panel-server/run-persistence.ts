@@ -2,7 +2,10 @@ import type { FileSystemRuntimeDatabasePaths } from "../../adapters/runtime-data
 import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import type { ToolErrorFacts } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
-import type { BasicAgentRunExecutor } from "../basic-agent-runtime/index.js";
+import {
+  durableBasicRunEvents,
+  type BasicAgentRunExecutor,
+} from "../basic-agent-runtime/index.js";
 import type { PanelConversationReadModel } from "../panel-conversation/panel-conversations.js";
 import { toRuntimeConversationRecord } from "../panel-conversation/panel-conversations.js";
 import { panelRunPayloadForStatus, PanelRunJobStore, type PanelRunJob } from "./run-jobs.js";
@@ -134,7 +137,10 @@ async function persistPanelRunNow(
     await runtime.runtimeDatabase.upsertBasicRun(basicRun);
   }
   if (basicReplay !== undefined) {
-    await runtime.runtimeDatabase.replaceBasicRunEvents(job.runId, basicReplay.events);
+    await runtime.runtimeDatabase.replaceBasicRunEvents(
+      job.runId,
+      durableBasicRunEvents(basicReplay.events)
+    );
   }
   if (basicRun !== undefined && basicReplay !== undefined) {
     await runtime.runtimeDatabase.upsertContextLedger(
@@ -146,7 +152,11 @@ async function persistPanelRunNow(
       }).contextLedger
     );
   }
-  await runtime.runtimeDatabase.replaceRunEvents(job.runId, trace.events.map((event) => toRuntimeEventRecord(job.runId, event)));
+  const eventEntriesBySequence = new Map(eventEntries.map((entry) => [entry.sequence, entry]));
+  await runtime.runtimeDatabase.replaceRunEvents(
+    job.runId,
+    trace.events.map((event) => toRuntimeEventRecord(job.runId, event, eventEntriesBySequence.get(event.sequence)))
+  );
   await runtime.runtimeDatabase.replaceModelCalls(
     job.runId,
     transcript.modelCalls.map((call) => toRuntimeModelCallRecord(job.runId, call))

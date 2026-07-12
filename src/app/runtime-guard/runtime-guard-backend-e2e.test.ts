@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
+import { normalizeToolFactValue } from "../../domain/tools/index.js";
 import {
   type BasicAgentRunExecutionInput,
   type BasicAgentRunExecutionResult,
@@ -88,8 +89,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
       "completed",
       `start server failed: ${JSON.stringify({ error: startServer.error, errorFacts: startServer.errorFacts })}`
     );
-    const startOutput = asRecord(startServer.output);
-    const startResult = asRecord(startOutput.result);
+    const startResult = asRecord(startServer.output);
     serverPid = numberField(startResult.pid);
     const logRef = stringField(startResult.logRef);
 
@@ -113,7 +113,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
       url: `http://127.0.0.1:${port}/`,
       timeoutMs: 2_000,
     });
-    const httpIndexResult = asRecord(asRecord(httpIndex.output).result);
+    const httpIndexResult = asRecord(httpIndex.output);
     assert.equal(httpIndex.status, "completed");
     assert.equal(httpIndexResult.statusCode, 200);
     assert.match(String(httpIndexResult.body), /runtime-guard-demo-ready/);
@@ -122,7 +122,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
       url: `http://127.0.0.1:${port}/api/status`,
       timeoutMs: 2_000,
     });
-    const httpStatusResult = asRecord(asRecord(httpStatus.output).result);
+    const httpStatusResult = asRecord(httpStatus.output);
     assert.equal(httpStatus.status, "completed");
     assert.equal(httpStatusResult.statusCode, 200);
     assert.match(String(httpStatusResult.body), /"ok":true/);
@@ -131,7 +131,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     const logRead = await waitForCommandLogContent(logRef!, /DEMO_SERVER_READY:/, async (callId) =>
       executeTool(callId, "read", { ref: logRef, maxLength: 30_000 })
     );
-    const logReadResult = asRecord(asRecord(logRead.output).result);
+    const logReadResult = asRecord(logRead.output);
     assert.equal(logRead.status, "completed");
     assert.equal(logReadResult.source, "command_log");
     assert.equal(logReadResult.uri, logRef);
@@ -160,7 +160,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
   async function executeTool(callId: string, toolName: string, input: Record<string, unknown>) {
     const executionContext = { ...context, runId, toolCallId: callId };
     return center.execute(
-      { callId, toolName, input },
+      { callId, toolName, input: normalizeToolFactValue(input) },
       executionContext,
       {
         callerAgentId: context.callerAgentId,
@@ -174,10 +174,10 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
 test("runtime guard starts a background dev server, records waitForPort, and cleans it by run", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-runtime-guard-e2e-"));
   const runId = "run-runtime-guard-e2e-cleanup";
+  const registry = new InMemoryProcessRegistry();
   let ownedPid: number | undefined;
   try {
     const port = await unusedLocalPort();
-    const registry = new InMemoryProcessRegistry();
     const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
     const output = await shellCommand.execute(
       {
@@ -190,7 +190,7 @@ test("runtime guard starts a background dev server, records waitForPort, and cle
       },
       toolContext(runId, "tool-call-runtime-guard-start")
     );
-    const result = asRecord(asRecord(output).result);
+    const result = asRecord(output);
     ownedPid = numberField(result.pid);
 
     assert.equal(result.exitCode, 0);
@@ -230,6 +230,7 @@ test("runtime guard starts a background dev server, records waitForPort, and cle
     });
     assert.equal(portAfterCleanup.ready, false);
   } finally {
+    await registry.cleanupByRun(runId, createPlatformProcessTerminator()).catch(() => undefined);
     await ensurePidExited(ownedPid, 2_000);
     await removeTempTree(root);
   }
@@ -264,7 +265,7 @@ test("shell_command reports an external occupied port as notStarted without spaw
       },
       toolContext("run-runtime-guard-e2e-occupied", "tool-call-duplicate-start")
     );
-    const result = asRecord(asRecord(output).result);
+    const result = asRecord(output);
     const occupancy = asRecord(result.preStartPortOccupancy);
 
     assert.equal(result.notStarted, true);
@@ -313,7 +314,7 @@ test("panel server close cleans owned background processes and leaves unowned ex
       },
       toolContext("run-panel-close-owned", "tool-call-panel-owned")
     );
-    const result = asRecord(asRecord(output).result);
+    const result = asRecord(output);
     ownedPid = numberField(result.pid);
     assert.equal(result.portReady, true);
     assert.equal(typeof ownedPid, "number");
@@ -372,6 +373,10 @@ test("panel server close cleans owned background processes and leaves unowned ex
     if (panelServer.listening) {
       await closeHttpServer(panelServer);
     }
+    await runtime.processRegistry.cleanupByRun(
+      "run-panel-close-owned",
+      createPlatformProcessTerminator()
+    ).catch(() => undefined);
     if (externalChild?.pid !== undefined) {
       externalChild.kill();
       await ensurePidExited(externalChild.pid, 2_000);
@@ -491,7 +496,7 @@ async function waitForCommandLogContent<T extends { readonly output?: unknown; r
   for (;;) {
     attempt += 1;
     const output = await read(`call-read-command-log-${attempt}`);
-    const content = String(asRecord(asRecord(output.output).result).contentPreview ?? "");
+    const content = String(asRecord(output.output).contentPreview ?? "");
     if (output.status === "completed" && pattern.test(content)) {
       return output;
     }

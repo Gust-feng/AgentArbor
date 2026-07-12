@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CapabilityToolCatalogItem } from "../../domain/config/index.js";
-import type { ToolDefinition, ToolInputSchema, ToolVisibleResultPolicy } from "../../domain/tools/index.js";
+import type { ToolDefinition, ToolInputSchema } from "../../domain/tools/index.js";
 
 type ToolDefinitionContract = {
   readonly name: string;
@@ -11,7 +11,6 @@ type ToolDefinitionContract = {
     readonly operationType: NonNullable<ToolDefinition["metadata"]>["operationType"];
     readonly fileOperation?: NonNullable<ToolDefinition["metadata"]>["fileOperation"];
     readonly requiresConfirmation: boolean;
-    readonly visibleResultPolicy: ToolVisibleResultPolicy;
   };
 };
 
@@ -28,7 +27,6 @@ export function toolDefinitionContractHash(definition: ToolDefinition): string |
       operationType: definition.metadata.operationType,
       fileOperation: definition.metadata.fileOperation,
       requiresConfirmation: definition.metadata.requiresConfirmation,
-      visibleResultPolicy: definition.metadata.visibleResultPolicy,
     },
   });
 }
@@ -43,7 +41,6 @@ export function toolCatalogContractHash(
     | "operationType"
     | "fileOperation"
     | "requiresConfirmation"
-    | "visibleResultPolicy"
     | "runtimeHints"
   >
 ): string {
@@ -56,7 +53,6 @@ export function toolCatalogContractHash(
       operationType: tool.operationType,
       fileOperation: tool.fileOperation,
       requiresConfirmation: tool.requiresConfirmation,
-      visibleResultPolicy: tool.visibleResultPolicy,
     },
   });
 }

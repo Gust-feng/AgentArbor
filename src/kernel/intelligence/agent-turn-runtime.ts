@@ -421,7 +421,6 @@ function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {
         ? undefined
         : {
             ...definition.metadata,
-            visibleResultPolicy: { ...definition.metadata.visibleResultPolicy },
             runtimeHints:
               definition.metadata.runtimeHints === undefined
                 ? undefined

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
+import { ToolCenter } from "../tool-center.js";
 import { createHttpRequestTool, type HttpRequestErrorFacts, type HttpRequestFetchLike } from "./http-request-tool.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
@@ -21,13 +22,13 @@ test("http_request GET returns JSON and text responses", async () => {
     const json = asHttpOutput(await tool.execute({ url: `${server.origin}/json` }, context));
     const text = asHttpOutput(await tool.execute({ url: `${server.origin}/text` }, context));
 
-    assert.equal(json.result.method, "GET");
-    assert.equal(json.result.statusCode, 200);
-    assert.equal(json.result.headers["content-type"]?.includes("application/json"), true);
-    assert.equal(json.result.headers["x-test"], "json");
-    assert.equal(json.result.body, '{"ok":true,"path":"/json"}');
-    assert.equal(json.result.truncated, false);
-    assert.equal(text.result.body, "plain text response");
+    assert.equal(json.method, "GET");
+    assert.equal(json.statusCode, 200);
+    assert.equal(json.headers["content-type"]?.includes("application/json"), true);
+    assert.equal(json.headers["x-test"], "json");
+    assert.equal(json.body, '{"ok":true,"path":"/json"}');
+    assert.equal(json.truncated, false);
+    assert.equal(text.body, "plain text response");
   } finally {
     await server.close();
   }
@@ -42,11 +43,11 @@ test("http_request HEAD returns headers and empty body without reading response 
   try {
     const output = asHttpOutput(await tool.execute({ method: "HEAD", url: `${server.origin}/head` }, context));
 
-    assert.equal(output.result.method, "HEAD");
-    assert.equal(output.result.statusCode, 204);
-    assert.equal(output.result.headers["x-head"], "ok");
-    assert.equal(output.result.body, "");
-    assert.equal(output.result.truncated, false);
+    assert.equal(output.method, "HEAD");
+    assert.equal(output.statusCode, 204);
+    assert.equal(output.headers["x-head"], "ok");
+    assert.equal(output.body, "");
+    assert.equal(output.truncated, false);
   } finally {
     await server.close();
   }
@@ -70,11 +71,11 @@ test("http_request POST sends JSON body and preserves non-2xx as structured resu
       body: { name: "demo" },
     }, context));
 
-    assert.equal(output.result.statusCode, 422);
-    assert.equal(output.result.method, "POST");
-    assert.match(output.result.body, /"method":"POST"/);
-    assert.match(output.result.body, /"contentType":"application\/json"/);
-    assert.match(output.result.body, /"body":"\{\\"name\\":\\"demo\\"\}"/);
+    assert.equal(output.statusCode, 422);
+    assert.equal(output.method, "POST");
+    assert.match(output.body, /"method":"POST"/);
+    assert.match(output.body, /"contentType":"application\/json"/);
+    assert.match(output.body, /"body":"\{\\"name\\":\\"demo\\"\}"/);
   } finally {
     await server.close();
   }
@@ -215,12 +216,12 @@ test("http_request truncates large response bodies at the configured limit", asy
   try {
     const output = asHttpOutput(await tool.execute({ url: `${server.origin}/large` }, context));
 
-    assert.equal(output.result.body, "x".repeat(12));
-    assert.equal(output.result.truncated, true);
-    assert.equal(output.result.startChar, 0);
-    assert.equal(output.result.bodyChars, 12);
-    assert.equal(output.result.hasMoreAfter, true);
-    assert.equal(output.result.nextStartChar, 12);
+    assert.equal(output.body, "x".repeat(12));
+    assert.equal(output.truncated, true);
+    assert.equal(output.startChar, 0);
+    assert.equal(output.bodyChars, 12);
+    assert.equal(output.hasMoreAfter, true);
+    assert.equal(output.continuation?.nextInput?.startChar, 12);
     assert.equal(output.truncated, true);
   } finally {
     await server.close();
@@ -236,19 +237,40 @@ test("http_request continues truncated GET response bodies with startChar", asyn
   try {
     const output = asHttpOutput(await tool.execute({ url: `${server.origin}/large`, startChar: 5 }, context));
 
-    assert.equal(output.result.body, "56789");
-    assert.equal(output.result.startChar, 5);
-    assert.equal(output.result.bodyChars, 5);
-    assert.equal(output.result.hasMoreAfter, true);
-    assert.equal(output.result.nextStartChar, 10);
+    assert.equal(output.body, "56789");
+    assert.equal(output.startChar, 5);
+    assert.equal(output.bodyChars, 5);
+    assert.equal(output.hasMoreAfter, true);
+    assert.equal(output.continuation?.nextInput?.startChar, 10);
     assert.equal(output.truncated, true);
   } finally {
     await server.close();
   }
 });
 
-test("http_request stops continuation at the startChar ceiling without hiding overflow", async () => {
+test("http_request clamps zero body budgets so every GET truncation advances", async () => {
   const tool = createHttpRequestTool({
+    maxBodyChars: 0,
+    fetch: async () => ({
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: async () => "abc",
+    }),
+  });
+
+  const output = asHttpOutput(await tool.execute({ url: "https://example.test/zero-budget" }, context));
+
+  assert.equal(output.body.length >= 1, true);
+  assert.equal(output.truncated, true);
+  assert.equal(output.hasMoreAfter, true);
+  assert.equal(output.continuation?.nextInput?.startChar, output.bodyChars);
+  assert.equal((output.continuation?.nextInput?.startChar ?? 0) > output.startChar, true);
+});
+
+test("http_request stops continuation at the startChar ceiling without hiding overflow", async () => {
+  const center = new ToolCenter();
+  center.register(createHttpRequestTool({
     maxBodyChars: 5,
     fetch: async () => ({
       status: 200,
@@ -256,22 +278,66 @@ test("http_request stops continuation at the startChar ceiling without hiding ov
       headers: new Headers({ "content-type": "text/plain" }),
       text: async () => `${"x".repeat(2_000_000)}abcdeTAIL`,
     }),
-  });
+  }));
 
-  const output = asHttpOutput(await tool.execute({
-    url: "https://example.test/ceiling",
-    startChar: 2_000_000,
-  }, context));
+  const result = await center.execute(
+    {
+      callId: "call-http-ceiling",
+      toolName: "http_request",
+      input: { url: "https://example.test/ceiling", startChar: 2_000_000 },
+    },
+    context,
+    { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] }
+  );
+  const output = asIncompleteHttpOutput(result.output);
 
-  assert.equal(output.result.body, "abcde");
-  assert.equal(output.result.startChar, 2_000_000);
-  assert.equal(output.result.bodyChars, 5);
-  assert.equal(output.result.hasMoreAfter, true);
-  assert.equal(output.result.nextStartChar, undefined);
-  assert.equal(output.result.reachedStartCharCeiling, true);
-  assert.equal(output.result.startCharCeiling, 2_000_000);
-  assert.equal(output.result.truncated, true);
-  assert.equal(output.truncated, true);
+  assert.equal(result.status, "failed");
+  assert.equal(output.bodyPreview, "abcde");
+  assert.equal(output.startChar, 2_000_000);
+  assert.equal(output.bodyChars, 5);
+  assert.equal(output.responseBodyComplete, false);
+  assert.equal(output.startCharCeiling, 2_000_000);
+  assert.equal("truncated" in output, false);
+  assert.equal("continuation" in output, false);
+  assert.equal(result.errorFacts?.code, "http_response_continuation_limit_reached");
+  assert.equal(result.errorFacts?.requestCompleted, true);
+  assert.equal(result.errorFacts?.retryable, false);
+});
+
+test("http_request fails partial side-effecting responses without a replay continuation", async () => {
+  for (const method of ["POST", "PUT", "DELETE"] as const) {
+    const center = new ToolCenter();
+    center.register(createHttpRequestTool({
+      maxBodyChars: 5,
+      fetch: async () => ({
+        status: 200,
+        statusText: "OK",
+        headers: new Headers({ "content-type": "text/plain" }),
+        text: async () => "0123456789",
+      }),
+    }));
+
+    const result = await center.execute(
+      {
+        callId: `call-${method.toLowerCase()}-partial-response`,
+        toolName: "http_request",
+        input: { method, url: "https://example.test/items", body: { name: "demo" } },
+      },
+      context,
+      { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] }
+    );
+    const output = asIncompleteHttpOutput(result.output);
+    const errorFacts = result.errorFacts as Readonly<Record<string, unknown>> | undefined;
+
+    assert.equal(result.status, "failed");
+    assert.equal(output.bodyPreview, "01234");
+    assert.equal(output.responseBodyComplete, false);
+    assert.equal("truncated" in output, false);
+    assert.equal("continuation" in output, false);
+    assert.equal(errorFacts?.code, "http_response_continuation_unavailable");
+    assert.equal(errorFacts?.requestCompleted, true);
+    assert.equal(errorFacts?.retryable, false);
+  }
 });
 
 type TestServer = {
@@ -311,36 +377,59 @@ async function readRequestBody(request: http.IncomingMessage): Promise<string> {
 }
 
 type HttpOutputForTest = {
-  readonly action: "http_request";
+  readonly url: string;
+  readonly method: string;
+  readonly statusCode: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+  readonly startChar: number;
+  readonly bodyChars: number;
+  readonly hasMoreAfter: boolean;
+  readonly reachedStartCharCeiling: boolean;
+  readonly startCharCeiling: number;
   readonly truncated: boolean;
-  readonly result: {
-    readonly method: string;
-    readonly statusCode: number;
-    readonly headers: Readonly<Record<string, string>>;
-    readonly body: string;
-    readonly startChar: number;
-    readonly bodyChars: number;
-    readonly hasMoreAfter: boolean;
-    readonly nextStartChar?: number;
-    readonly reachedStartCharCeiling: boolean;
-    readonly startCharCeiling: number;
-    readonly truncated: boolean;
+  readonly continuation?: {
+    readonly nextInput?: { readonly startChar?: number };
   };
+};
+
+type IncompleteHttpOutputForTest = {
+  readonly url: string;
+  readonly method: string;
+  readonly statusCode: number;
+  readonly bodyPreview: string;
+  readonly responseBodyComplete: false;
+  readonly startChar: number;
+  readonly bodyChars: number;
+  readonly startCharCeiling: number;
 };
 
 function asHttpOutput(value: unknown): HttpOutputForTest {
   assert.equal(typeof value, "object");
   assert.notEqual(value, null);
-  const output = value as {
-    readonly action?: unknown;
-    readonly truncated?: unknown;
-    readonly result?: unknown;
-  };
-  assert.equal(output.action, "http_request");
+  const output = value as Readonly<Record<string, unknown>>;
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `http output must not contain ${legacyField}`);
+  }
+  assert.equal(typeof output.url, "string");
+  assert.equal(typeof output.method, "string");
+  assert.equal(typeof output.statusCode, "number");
+  assert.equal(typeof output.headers, "object");
+  assert.equal(typeof output.body, "string");
   assert.equal(typeof output.truncated, "boolean");
-  assert.equal(typeof output.result, "object");
-  assert.notEqual(output.result, null);
   return value as HttpOutputForTest;
+}
+
+function asIncompleteHttpOutput(value: unknown): IncompleteHttpOutputForTest {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  const output = value as Readonly<Record<string, unknown>>;
+  for (const legacyField of ["action", "status", "summary", "result", "truncated", "continuation"]) {
+    assert.equal(legacyField in output, false, `incomplete HTTP output must not contain ${legacyField}`);
+  }
+  assert.equal(typeof output.bodyPreview, "string");
+  assert.equal(output.responseBodyComplete, false);
+  return value as IncompleteHttpOutputForTest;
 }
 
 function rejectingFetch(error: unknown): HttpRequestFetchLike {

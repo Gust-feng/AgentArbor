@@ -10,7 +10,7 @@ import type {
   ToolExecutor,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
-import { withToolModelAttachments } from "../../domain/tools/index.js";
+import { normalizeToolFactValue, withToolModelAttachments } from "../../domain/tools/index.js";
 import { InMemoryEventLog } from "../events/in-memory-event-log.js";
 import { nowIso } from "../id.js";
 import { pendingModelOutputValidation } from "./validation.js";
@@ -19,6 +19,7 @@ import {
   resumeToolUseLoopFromApproval,
   resumeToolUseLoopFromConfirmationDecision,
 } from "./tool-use-loop.js";
+import { executeToolCalls } from "./tool-use-loop-execution.js";
 
 test("executeToolUseLoop executes one tool round and returns final model output", async () => {
   const eventLog = new InMemoryEventLog();
@@ -133,11 +134,6 @@ test("executeToolUseLoop uses frozen tool definitions instead of current broker 
       riskLevel: "low",
       operationType: "read-only",
       requiresConfirmation: false,
-      visibleResultPolicy: {
-        userVisible: "summary-only",
-        maxPreviewChars: 800,
-        omitRawOutput: true,
-      },
     },
   };
 
@@ -353,11 +349,8 @@ test("executeToolUseLoop carries model attachments from the execution output", a
       toolName: request.toolName,
       input: request.input,
       output: withToolModelAttachments({
-        action: "read_context_attachment_image",
-        result: {
-          attachmentId: "ctx-image",
-          modelInput: { attached: true, detail: "auto" },
-        },
+        attachmentId: "ctx-image",
+        modelInput: { attached: true, detail: "auto" },
       }, [{
         kind: "image",
         attachmentId: "ctx-image",
@@ -726,11 +719,13 @@ test("executeToolUseLoop keeps transport-truncated tool messages recoverable wit
       toolName: request.toolName,
       input: request.input,
       output: {
-        result: {
-          command: "verbose-command",
-          exitCode: 0,
-          stdout: verboseText,
-          logRef: "command-log://tool-loop-verbose-output",
+        command: "verbose-command",
+        exitCode: 0,
+        stdout: verboseText,
+        logRef: "command-log://tool-loop-verbose-output",
+        continuation: {
+          ref: "command-log://tool-loop-verbose-output",
+          nextInput: { ref: "command-log://tool-loop-verbose-output", maxLength: 30_000 },
         },
       },
       status: "completed",
@@ -752,12 +747,11 @@ test("executeToolUseLoop keeps transport-truncated tool messages recoverable wit
 
   const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
   const parsed = JSON.parse(toolMessage?.content ?? "{}") as {
-    readonly output?: {
-      readonly structuredContent?: {
+    readonly body?: {
+      readonly format?: string;
+      readonly value?: {
         readonly truncated?: boolean;
         readonly reason?: string;
-        readonly continuationAvailable?: boolean;
-        readonly unrecoverable?: boolean;
         readonly continuation?: {
           readonly nextInput?: {
             readonly ref?: string;
@@ -765,35 +759,26 @@ test("executeToolUseLoop keeps transport-truncated tool messages recoverable wit
           };
         };
       };
-      readonly truncation?: {
-        readonly truncated?: boolean;
-        readonly reason?: string;
-        readonly continuation?: {
-          readonly nextInput?: {
-            readonly ref?: string;
-          };
-        };
-      };
     };
   };
-  assert.equal(parsed.output?.structuredContent?.truncated, true);
-  assert.equal(parsed.output?.structuredContent?.reason, "tool_message_transport_budget_exceeded");
-  assert.equal(parsed.output?.structuredContent?.continuationAvailable, true);
-  assert.equal(parsed.output?.structuredContent?.unrecoverable, false);
-  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.ref, "command-log://tool-loop-verbose-output");
-  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.maxLength, 30_000);
-  assert.equal(parsed.output?.truncation?.truncated, true);
-  assert.equal(parsed.output?.truncation?.reason, "tool_message_transport_budget_exceeded");
-  assert.equal(parsed.output?.truncation?.continuation?.nextInput?.ref, "command-log://tool-loop-verbose-output");
+  assert.equal(parsed.body?.format, "json");
+  assert.equal(parsed.body?.value?.truncated, true);
+  assert.equal(parsed.body?.value?.reason, "tool_message_transport_budget_exceeded");
+  assert.equal(parsed.body?.value?.continuation?.nextInput?.ref, "command-log://tool-loop-verbose-output");
+  assert.equal(parsed.body?.value?.continuation?.nextInput?.maxLength, 30_000);
   assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 221_000);
 });
 
-test("executeToolUseLoop gives sub-agent full output a larger model-continuation budget", async () => {
+test("executeToolUseLoop bounds sub-agent output and keeps explicit continuation", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-1", "call_sub_agent"),
     completedResponse("model-request-final", { summary: "Final answer after sub-agent result." }),
   ]);
   const tail = "SUB_AGENT_LONG_OUTPUT_TAIL";
+  const continuation = {
+    ref: "sub-agent-output:sub-agent-run-budget",
+    nextInput: { sub_run_id: "sub-agent-run-budget", start_char: 0, max_chars: 100_000 },
+  };
   const fullOutput = `${Array.from({ length: 240_000 }, (_, index) => String(index % 10)).join("")}${tail}`;
   const center: ToolExecutionBroker = {
     list: () => [
@@ -808,7 +793,7 @@ test("executeToolUseLoop gives sub-agent full output a larger model-continuation
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { result: { full_output: fullOutput } },
+      output: { full_output: fullOutput, continuation },
       status: "completed",
       durationMs: 1,
     }),
@@ -827,8 +812,12 @@ test("executeToolUseLoop gives sub-agent full output a larger model-continuation
   );
 
   const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
-  assert.equal(toolMessage?.content.includes("tool message truncated"), false);
-  assert.equal(toolMessage?.content.includes(tail), true);
+  const parsed = JSON.parse(toolMessage?.content ?? "{}") as {
+    readonly body?: { readonly value?: { readonly continuation?: { readonly ref?: string } } };
+  };
+  assert.equal(toolMessage?.content.includes(tail), false);
+  assert.equal(parsed.body?.value?.continuation?.ref, "sub-agent-output:sub-agent-run-budget");
+  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 221_000);
 });
 
 test("executeToolUseLoop keeps oversized sub-agent output recoverable with continuation", async () => {
@@ -860,7 +849,7 @@ test("executeToolUseLoop keeps oversized sub-agent output recoverable with conti
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { result: { full_output: fullOutput, continuation } },
+      output: { full_output: fullOutput, continuation },
       status: "completed",
       durationMs: 1,
     }),
@@ -880,12 +869,10 @@ test("executeToolUseLoop keeps oversized sub-agent output recoverable with conti
 
   const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
   const parsed = JSON.parse(toolMessage?.content ?? "{}") as {
-    readonly output?: {
-      readonly structuredContent?: {
+    readonly body?: {
+      readonly value?: {
         readonly truncated?: boolean;
         readonly reason?: string;
-        readonly continuationAvailable?: boolean;
-        readonly unrecoverable?: boolean;
         readonly continuation?: {
           readonly nextInput?: {
             readonly sub_run_id?: string;
@@ -894,24 +881,14 @@ test("executeToolUseLoop keeps oversized sub-agent output recoverable with conti
           };
         };
       };
-      readonly truncation?: {
-        readonly continuation?: {
-          readonly nextInput?: {
-            readonly sub_run_id?: string;
-          };
-        };
-      };
     };
   };
-  assert.equal(parsed.output?.structuredContent?.truncated, true);
-  assert.equal(parsed.output?.structuredContent?.reason, "tool_message_transport_budget_exceeded");
-  assert.equal(parsed.output?.structuredContent?.continuationAvailable, true);
-  assert.equal(parsed.output?.structuredContent?.unrecoverable, false);
-  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.sub_run_id, subRunId);
-  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.start_char, 0);
-  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.max_chars, 100_000);
-  assert.equal(parsed.output?.truncation?.continuation?.nextInput?.sub_run_id, subRunId);
-  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 1_000_000);
+  assert.equal(parsed.body?.value?.truncated, true);
+  assert.equal(parsed.body?.value?.reason, "tool_message_transport_budget_exceeded");
+  assert.equal(parsed.body?.value?.continuation?.nextInput?.sub_run_id, subRunId);
+  assert.equal(parsed.body?.value?.continuation?.nextInput?.start_char, 0);
+  assert.equal(parsed.body?.value?.continuation?.nextInput?.max_chars, 100_000);
+  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 221_000);
 });
 
 test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable with every continuation", async () => {
@@ -953,12 +930,11 @@ test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable wit
       toolName: request.toolName,
       input: request.input,
       output: {
-        result: {
-          results: [
-            { full_output: firstOutput, continuation: firstContinuation },
-            { full_output: secondOutput, continuation: secondContinuation },
-          ],
-        },
+        results: [
+          { full_output: firstOutput },
+          { full_output: secondOutput },
+        ],
+        continuations: [firstContinuation, secondContinuation],
       },
       status: "completed",
       durationMs: 1,
@@ -979,44 +955,24 @@ test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable wit
 
   const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
   const parsed = JSON.parse(toolMessage?.content ?? "{}") as {
-    readonly output?: {
-      readonly structuredContent?: {
+    readonly body?: {
+      readonly value?: {
         readonly truncated?: boolean;
         readonly reason?: string;
-        readonly continuationAvailable?: boolean;
-        readonly unrecoverable?: boolean;
-        readonly continuationCount?: number;
-        readonly continuation?: {
-          readonly nextInput?: { readonly sub_run_id?: string };
-        };
-        readonly continuations?: readonly {
-          readonly nextInput?: { readonly sub_run_id?: string };
-        }[];
-      };
-      readonly truncation?: {
         readonly continuations?: readonly {
           readonly nextInput?: { readonly sub_run_id?: string };
         }[];
       };
     };
   };
-  const structuredContinuations = parsed.output?.structuredContent?.continuations ?? [];
-  const truncationContinuations = parsed.output?.truncation?.continuations ?? [];
-  assert.equal(parsed.output?.structuredContent?.truncated, true);
-  assert.equal(parsed.output?.structuredContent?.reason, "tool_message_transport_budget_exceeded");
-  assert.equal(parsed.output?.structuredContent?.continuationAvailable, true);
-  assert.equal(parsed.output?.structuredContent?.unrecoverable, false);
-  assert.equal(parsed.output?.structuredContent?.continuationCount, 2);
-  assert.equal(parsed.output?.structuredContent?.continuation?.nextInput?.sub_run_id, "batch-sub-run-first");
+  const structuredContinuations = parsed.body?.value?.continuations ?? [];
+  assert.equal(parsed.body?.value?.truncated, true);
+  assert.equal(parsed.body?.value?.reason, "tool_message_transport_budget_exceeded");
   assert.deepEqual(
     structuredContinuations.map((continuation) => continuation.nextInput?.sub_run_id),
     ["batch-sub-run-first", "batch-sub-run-second"]
   );
-  assert.deepEqual(
-    truncationContinuations.map((continuation) => continuation.nextInput?.sub_run_id),
-    ["batch-sub-run-first", "batch-sub-run-second"]
-  );
-  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 1_000_000);
+  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 221_000);
 });
 
 test("executeToolUseLoop preserves the same read fact for event and model consumers", async () => {
@@ -1027,28 +983,18 @@ test("executeToolUseLoop preserves the same read fact for event and model consum
   ]);
   const center = new TestToolBroker();
   center.register("read", async () => ({
-    action: "read",
     ref: "https://example.test/secret",
-    status: "completed",
-    result: {
-      refId: "research:page:secret",
-      source: "page",
-      title: "Secret page",
-      status: "completed",
-      summary: "Short page summary with sk-event-secret-token and Bearer event-token-value.",
-      contentPreview: "Complete page body must not enter EventLog. sk-preview-secret-token",
-      truncated: false,
-    },
-    trace: {
-      traceId: "research-trace-secret",
-      action: "read",
-      ref: "https://example.test/secret",
-      requestedSources: ["page"],
-      status: "completed",
-      startedAt: "2026-05-04T00:00:00.000Z",
-      completedAt: "2026-05-04T00:00:00.001Z",
-      sourceSteps: [{ source: "page", status: "completed", resultRefs: ["research:page:secret"] }],
-    },
+    researchStatus: "completed",
+    refId: "research:page:secret",
+    source: "page",
+    title: "Secret page",
+    contentPreview: "Complete page body must not enter EventLog. sk-preview-secret-token",
+    truncated: false,
+    traceId: "research-trace-secret",
+    requestedSources: ["page"],
+    startedAt: "2026-05-04T00:00:00.000Z",
+    completedAt: "2026-05-04T00:00:00.001Z",
+    sourceSteps: [{ source: "page", status: "completed", resultRefs: ["research:page:secret"] }],
   }));
 
   await executeToolUseLoop(
@@ -1087,11 +1033,6 @@ test("executeToolUseLoop derives model continuation from execution facts", async
           riskLevel: "low",
           operationType: "read-only",
           requiresConfirmation: false,
-          visibleResultPolicy: {
-            userVisible: "summary-only",
-            maxPreviewChars: 800,
-            omitRawOutput: true,
-          },
         },
         inputSchema: { type: "object", properties: {} },
       },
@@ -1102,11 +1043,9 @@ test("executeToolUseLoop derives model continuation from execution facts", async
       toolName: request.toolName,
       input: request.input,
       output: {
-        result: {
-          refId: "research:page:raw",
-          source: "page",
-          contentPreview: "raw-secret-output sk-raw-tool-secret",
-        },
+        refId: "research:page:raw",
+        source: "page",
+        contentPreview: "raw-secret-output sk-raw-tool-secret",
       },
       status: "completed",
       durationMs: 1,
@@ -1149,12 +1088,10 @@ test("executeToolUseLoop preserves command stdout and stderr from execution fact
       toolName: request.toolName,
       input: request.input,
       output: {
-        result: {
-          command: "print-secret",
-          exitCode: 1,
-          stdout: "stdout token=sk-loop-token password=hunter2",
-          stderr: "stderr Bearer sk-loop-error api_key=abc123",
-        },
+        command: "print-secret",
+        exitCode: 1,
+        stdout: "stdout token=sk-loop-token password=hunter2",
+        stderr: "stderr Bearer sk-loop-error api_key=abc123",
       },
       status: "completed",
       durationMs: 1,
@@ -1178,57 +1115,6 @@ test("executeToolUseLoop preserves command stdout and stderr from execution fact
   assert.equal(toolMessageText.includes("stderr Bearer sk-loop-error api_key=abc123"), true);
   assert.equal(toolMessageText.includes("Short UI summary"), false);
   assert.equal(toolMessageText.includes("[redacted"), false);
-});
-
-test("executeToolUseLoop keeps raw continuation refs from execution facts", async () => {
-  const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-read-file", "read_file"),
-    completedResponse("model-request-final", { summary: "Final answer with evidence ref." }),
-  ]);
-  const broker: ToolExecutionBroker = {
-    list: () => [
-      {
-        name: "read_file",
-        description: "Projected read_file tool.",
-        inputSchema: { type: "object", properties: {} },
-      },
-    ],
-    has: (name) => name === "read_file",
-    execute: async (request, _context, _permission) => ({
-      callId: request.callId,
-      toolName: request.toolName,
-      input: request.input,
-      output: {
-        result: {
-          path: "README.md",
-          truncated: true,
-          content: `password=hunter2\napi_key=sk-loop-file-secret\n${"x".repeat(140_000)}`,
-          rawContentRef: "tool:call-read-file:raw:read_file:content",
-        },
-        truncated: true,
-      },
-      status: "completed",
-      durationMs: 1,
-    }),
-  };
-
-  await executeToolUseLoop(
-    {
-      intelligenceChannel: channel,
-      toolCenter: broker,
-      callerAgentId: "agent-test",
-      traceId: "trace-test",
-      goalId: "goal-test",
-      allowedTools: ["read_file"],
-    },
-    createValidModelRequest()
-  );
-
-  const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
-  assert.equal(toolMessageText.includes("password=hunter2"), true);
-  assert.equal(toolMessageText.includes("api_key=sk-loop-file-secret"), true);
-  assert.equal(toolMessageText.includes("tool:call-read-file:raw:read_file:content"), true);
-  assert.equal(toolMessageText.includes("Summary only for UI"), false);
 });
 
 test("executeToolUseLoop preserves tool failure errors before model continuation", async () => {
@@ -1267,7 +1153,7 @@ test("executeToolUseLoop sends full workspace tool facts to the next model turn"
       toolCalls: [
         { callId: "call-read-file", toolName: "read_file", input: { path: "README.md" } },
         { callId: "call-grep", toolName: "grep_files", input: { query: "AgentArbor" } },
-        { callId: "call-command", toolName: "run_command", input: { command: "pnpm", args: ["test"] } },
+        { callId: "call-command", toolName: "shell_command", input: { command: "pnpm", args: ["test"] } },
       ],
       finishReason: "tool_call",
     },
@@ -1286,7 +1172,7 @@ test("executeToolUseLoop sends full workspace tool facts to the next model turn"
       matches: [{ path: "README.md", line: 1, preview: "# AgentArbor" }],
       truncated: false,
     },
-    run_command: {
+    shell_command: {
       command: "pnpm",
       args: ["test"],
       exitCode: 0,
@@ -1303,7 +1189,7 @@ test("executeToolUseLoop sends full workspace tool facts to the next model turn"
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["read_file", "grep_files", "run_command"],
+      allowedTools: ["read_file", "grep_files", "shell_command"],
       approvedConfirmationIds: ["confirmation-call-command"],
     },
     createValidModelRequest()
@@ -1422,6 +1308,70 @@ test("executeToolUseLoop returns a cancelled response when aborted before a mode
   assert.equal(result.stoppedReason, "cancelled");
   assert.equal(result.finalOutput.validation.issues[0]?.code, "cancelled");
   assert.equal(channel.requests.length, 0);
+});
+
+test("executeToolCalls emits a complete lifecycle for serial calls skipped after abort", async () => {
+  const abort = new AbortController();
+  const executedCallIds: string[] = [];
+  const eventLog = new InMemoryEventLog();
+  const requests: readonly ToolCallRequest[] = [
+    { callId: "call-first", toolName: "serial_first", input: {} },
+    { callId: "call-second", toolName: "serial_second", input: {} },
+    { callId: "call-third", toolName: "serial_third", input: {} },
+  ];
+  const definitions: readonly ToolDefinition[] = requests.map((request) =>
+    testToolDefinition(request.toolName, "execute")
+  );
+  const center: ToolExecutionBroker = {
+    list: () => [...definitions],
+    has: (name) => definitions.some((definition) => definition.name === name),
+    execute: async (request) => {
+      executedCallIds.push(request.callId);
+      abort.abort();
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: normalizeToolFactValue({ completed: true }),
+        status: "completed",
+        durationMs: 1,
+      };
+    },
+  };
+
+  const result = await executeToolCalls({
+    options: {
+      intelligenceChannel: new SequenceIntelligenceChannel([]),
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: definitions.map((definition) => definition.name),
+      abortSignal: abort.signal,
+      publishToolEvent: (message) => eventLog.append(message),
+    },
+    requests,
+    toolDefinitions: definitions,
+  });
+
+  assert.deepEqual(executedCallIds, ["call-first"]);
+  assert.deepEqual(result.results.map((toolResult) => toolResult.status), [
+    "completed",
+    "cancelled",
+    "cancelled",
+  ]);
+  assert.deepEqual(eventLog.types(), [
+    "tool.requested",
+    "tool.completed",
+    "tool.requested",
+    "tool.cancelled",
+    "tool.requested",
+    "tool.cancelled",
+  ]);
+  assert.deepEqual(
+    eventLog.list().map((entry) => (entry.message.payload as { readonly callId: string }).callId),
+    ["call-first", "call-first", "call-second", "call-second", "call-third", "call-third"],
+  );
 });
 
 test("executeToolUseLoop executes explicitly read-only tool calls in parallel", async () => {
@@ -1644,6 +1594,7 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
     completedResponse("model-request-final", { summary: "Final answer after approved delete." }),
   ]);
   const center = new TestToolBroker();
+  const eventLog = new InMemoryEventLog();
   center.register("delete_file", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
@@ -1654,6 +1605,7 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
       traceId: "trace-test",
       goalId: "goal-test",
       allowedTools: ["delete_file"],
+      publishToolEvent: (message) => eventLog.append(message),
     },
     request
   );
@@ -1668,6 +1620,7 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
       goalId: "goal-test",
       allowedTools: ["delete_file"],
       approvedConfirmationIds: ["confirmation-call-delete"],
+      publishToolEvent: (message) => eventLog.append(message),
     },
     request,
     paused.pendingApproval!
@@ -1678,6 +1631,11 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
   assert.equal(resumed.toolCalls[0]?.status, "completed");
   assert.equal(center.executionCount(), 1);
   assert.equal(channel.requests.length, 2);
+  assert.deepEqual(eventLog.types(), [
+    "tool.requested",
+    "user_approval.requested",
+    "tool.completed",
+  ]);
 });
 
 test("resumeToolUseLoopFromApproval waits for tool completion before requesting the next model turn", async () => {
@@ -1697,13 +1655,9 @@ test("resumeToolUseLoopFromApproval waits for tool completion before requesting 
   center.register("shell_command", async () => {
     await commandFinished;
     return {
-      action: "shell_command",
-      summary: "dir · exit 0",
-      result: {
-        stdout: "README.md\nsrc\n",
-        stderr: "",
-        exitCode: 0,
-      },
+      stdout: "README.md\nsrc\n",
+      stderr: "",
+      exitCode: 0,
     };
   }, "execute");
   const request = createValidModelRequest();
@@ -1805,6 +1759,70 @@ test("resumeToolUseLoopFromApproval continues the remaining tool calls in the sa
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
 });
 
+test("approval pause cloning preserves attachments from tools completed earlier in the batch", async () => {
+  const attachmentData = Buffer.from("approval-image").toString("base64");
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [
+        { callId: "call-image", toolName: "read_context_attachment_image", input: { attachmentId: "ctx-image" } },
+        { callId: "call-shell", toolName: "shell_command", input: { command: "echo approved" } },
+      ],
+      finishReason: "tool_call",
+    },
+    textResponse("model-request-final", "Final answer after image and command."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("read_context_attachment_image", async () => withToolModelAttachments(
+    { attachmentId: "ctx-image", readable: true },
+    [{
+      kind: "image",
+      source: { kind: "data", mimeType: "image/png", data: attachmentData },
+      attachmentId: "ctx-image",
+    }]
+  ), "read-only");
+  center.register("shell_command", async () => ({ exitCode: 0 }), "execute");
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read_context_attachment_image", "shell_command"],
+    },
+    request
+  );
+
+  assert.equal(paused.stoppedReason, "approval_required");
+  assert.equal(paused.pendingApproval?.completedToolResults.length, 1);
+
+  const resumed = await resumeToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read_context_attachment_image", "shell_command"],
+      approvedConfirmationIds: ["confirmation-call-shell"],
+    },
+    request,
+    paused.pendingApproval!
+  );
+  const imageMessage = channel.requests[1]?.sanitizedMessages
+    .find((message) => message.role === "tool" && message.toolCallId === "call-image");
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.equal(imageMessage?.attachments?.[0]?.kind, "image");
+  assert.equal(imageMessage?.attachments?.[0]?.attachmentId, "ctx-image");
+  assert.equal(imageMessage?.attachments?.[0]?.source.kind, "data");
+  if (imageMessage?.attachments?.[0]?.source.kind === "data") {
+    assert.equal(imageMessage.attachments[0].source.data, attachmentData);
+  }
+});
+
 test("resumeToolUseLoopFromApproval waits for every approval in a model-requested batch before model continuation", async () => {
   const channel = new SequenceIntelligenceChannel([
     {
@@ -1823,13 +1841,9 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
     const command = String((input as { readonly command?: string }).command ?? "");
     executedCommands.push(command);
     return {
-      action: "shell_command",
-      summary: `${command} · exit 0`,
-      result: {
-        stdout: `${command}\n`,
-        stderr: "",
-        exitCode: 0,
-      },
+      stdout: `${command}\n`,
+      stderr: "",
+      exitCode: 0,
     };
   }, "execute");
   const request = createValidModelRequest();
@@ -2095,6 +2109,8 @@ test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible 
   const toolMessage = channel.requests[1]?.sanitizedMessages.at(-1);
   assert.equal(toolMessage?.role, "tool");
   assert.equal(toolMessage?.content.includes("用户拒绝了本次工具执行"), true);
+  assert.equal(toolMessage?.content.includes("confirmation_decision"), false);
+  assert.equal(occurrences(toolMessage?.content ?? "", "用户拒绝了本次工具执行"), 1);
   assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested", "tool.cancelled"]);
 });
 
@@ -2146,10 +2162,12 @@ test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped bat
 
   assert.equal(resumed.stoppedReason, "completed");
   assert.equal(center.executionCount(), 0);
-  assert.deepEqual(resumed.toolCalls.map((call) => call.status), ["failed", "cancelled"]);
+  assert.deepEqual(resumed.toolCalls.map((call) => call.status), ["cancelled", "cancelled"]);
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
   const requestText = JSON.stringify(channel.requests[1]?.sanitizedMessages);
   assert.equal(requestText.includes("sk-guidance-secret-token"), true);
+  assert.equal(occurrences(requestText, "sk-guidance-secret-token"), 1);
+  assert.equal(requestText.includes("confirmation_decision"), false);
   assert.equal(requestText.includes("[redacted-secret]"), false);
 });
 
@@ -2255,11 +2273,6 @@ function testToolDefinition(
       riskLevel: operationType === "read-only" ? "low" : operationType === "read-write" ? "medium" : "high",
       operationType,
       requiresConfirmation,
-      visibleResultPolicy: {
-        userVisible: "summary-only",
-        maxPreviewChars: 800,
-        omitRawOutput: true,
-      },
     },
     inputSchema: { type: "object", properties: {} },
   };
@@ -2271,7 +2284,7 @@ class ExecutionFactToolBroker implements ToolExecutionBroker {
   constructor(private readonly factsByToolName: Readonly<Record<string, unknown>>) {}
 
   list(): ToolDefinition[] {
-    return Object.keys(this.factsByToolName).map((name) => testToolDefinition(name, name === "run_command" ? "execute" : "read-only"));
+    return Object.keys(this.factsByToolName).map((name) => testToolDefinition(name, name === "shell_command" ? "execute" : "read-only"));
   }
 
   has(name: string): boolean {
@@ -2287,7 +2300,7 @@ class ExecutionFactToolBroker implements ToolExecutionBroker {
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: { result: this.factsByToolName[request.toolName] },
+      output: normalizeToolFactValue(this.factsByToolName[request.toolName]),
       status: "completed",
       durationMs: 1,
     };
@@ -2373,7 +2386,7 @@ class PermissionIgnoringToolBroker implements ToolExecutionBroker {
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: await execute(request.input, context),
+      output: normalizeToolFactValue(await execute(request.input, context)),
       status: "completed",
       durationMs: 1,
     };
@@ -2420,11 +2433,6 @@ class TestToolBroker implements ToolExecutionBroker {
         riskLevel: this.operationTypes.get(name) === "read-only" ? "low" : "high",
         operationType: this.operationTypes.get(name) ?? "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 800,
-          omitRawOutput: true,
-        },
       },
       inputSchema: { type: "object", properties: {} },
     }));
@@ -2495,7 +2503,7 @@ class TestToolBroker implements ToolExecutionBroker {
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
-      output: await execute(request.input, context),
+      output: normalizeToolFactValue(await execute(request.input, context)),
       status: "completed",
       durationMs: 1,
     };
@@ -2517,6 +2525,10 @@ function privateUrlFromInput(input: unknown): string | undefined {
   return /^https?:\/\/(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[0-1])\.)/i.test(url)
     ? url
     : undefined;
+}
+
+function occurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1;
 }
 
 function failedToolResult(request: ToolCallRequest, error: string): ToolCallResult {

@@ -22,7 +22,7 @@ export function normalizeToolErrorFacts(
   const record = asRecord(value);
   const result: Record<string, ToolErrorFactValue> = {};
   for (const [key, item] of Object.entries(record).slice(0, MAX_FACT_ENTRIES)) {
-    const fact = normalizeToolErrorFactValue(item, options, 0);
+    const fact = normalizeToolErrorFactValue(item, options);
     if (fact !== undefined) {
       result[key] = fact;
     }
@@ -32,33 +32,63 @@ export function normalizeToolErrorFacts(
 
 export function normalizeToolErrorFactValue(
   value: unknown,
-  options: NormalizeToolErrorFactsOptions = {},
-  depth = 0
+  options: NormalizeToolErrorFactsOptions = {}
+): ToolErrorFactValue | undefined {
+  return normalizeToolErrorFactValueInternal(value, options, new Set<object>(), 0);
+}
+
+function normalizeToolErrorFactValueInternal(
+  value: unknown,
+  options: NormalizeToolErrorFactsOptions,
+  ancestors: Set<object>,
+  depth: number
 ): ToolErrorFactValue | undefined {
   if (value === null || typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      return String(value);
+    }
     return value;
   }
   if (typeof value === "string") {
     return options.compactString?.(value) ?? value;
   }
+  if (typeof value === "bigint") {
+    return `${value.toString()}n`;
+  }
   if (depth >= MAX_FACT_DEPTH) {
-    return undefined;
+    return "[max_depth]";
   }
   if (Array.isArray(value)) {
-    return value
-      .slice(0, MAX_FACT_ENTRIES)
-      .map((item) => normalizeToolErrorFactValue(item, options, depth + 1))
-      .filter((item): item is ToolErrorFactValue => item !== undefined);
+    if (ancestors.has(value)) {
+      return "[circular]";
+    }
+    ancestors.add(value);
+    try {
+      return value
+        .slice(0, MAX_FACT_ENTRIES)
+        .map((item) => normalizeToolErrorFactValueInternal(item, options, ancestors, depth + 1))
+        .filter((item): item is ToolErrorFactValue => item !== undefined);
+    } finally {
+      ancestors.delete(value);
+    }
   }
   if (typeof value === "object" && value !== null) {
-    const result: Record<string, ToolErrorFactValue> = {};
-    for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, MAX_FACT_ENTRIES)) {
-      const fact = normalizeToolErrorFactValue(item, options, depth + 1);
-      if (fact !== undefined) {
-        result[key] = fact;
-      }
+    if (ancestors.has(value)) {
+      return "[circular]";
     }
-    return result;
+    ancestors.add(value);
+    const result: Record<string, ToolErrorFactValue> = {};
+    try {
+      for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, MAX_FACT_ENTRIES)) {
+        const fact = normalizeToolErrorFactValueInternal(item, options, ancestors, depth + 1);
+        if (fact !== undefined) {
+          result[key] = fact;
+        }
+      }
+      return result;
+    } finally {
+      ancestors.delete(value);
+    }
   }
   return undefined;
 }

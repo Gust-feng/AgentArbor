@@ -3,8 +3,9 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { toolExecutionModelAttachments, toolExecutionResult } from "./tool-result-test-support.js";
+import { toolExecutionModelAttachments } from "./tool-result-test-support.js";
 import {
+  asRecord,
   contextAttachmentToolCenter,
   createTinyPngBuffer,
   taskSoilWithContext,
@@ -60,15 +61,13 @@ test("context attachment image tool reads selected local image as ephemeral mode
       TOOL_CONTEXT,
       permission
     );
-    const projected = JSON.stringify([
-      toolExecutionResult(listed),
-      toolExecutionResult(read),
-    ]);
+    const projected = JSON.stringify([listed.output, read.output]);
     const output = JSON.stringify(read.output);
     const attachment = toolExecutionModelAttachments(read)?.[0];
 
     assert.equal(listed.status, "completed");
     assert.equal(read.status, "completed");
+    assertDirectAttachmentFacts(read.output);
     assert.equal(projected.includes("\"format\":\"image\""), true);
     assert.equal(projected.includes("\"canReadImage\":true"), true);
     assert.equal(projected.includes("\"attached\":true"), true);
@@ -125,10 +124,11 @@ test("context attachment image tool reads image inside selected local project by
         allowedTools: ["read_context_attachment_image"],
       }
     );
-    const modelVisible = JSON.stringify(toolExecutionResult(result));
+    const modelVisible = JSON.stringify(result.output);
     const attachment = toolExecutionModelAttachments(result)?.[0];
 
     assert.equal(result.status, "completed");
+    assertDirectAttachmentFacts(result.output);
     assert.equal(modelVisible.includes("assets/screen.jpg"), true);
     assert.equal(modelVisible.includes(projectRoot), false);
     assert.equal(modelVisible.includes("local-project:"), false);
@@ -177,9 +177,10 @@ test("context attachment image tool reports unsupported when model lacks vision 
         allowedTools: ["read_context_attachment_image"],
       }
     );
-    const modelVisible = JSON.stringify(toolExecutionResult(result));
+    const modelVisible = JSON.stringify(result.output);
 
     assert.equal(result.status, "completed");
+    assertDirectAttachmentFacts(result.output);
     assert.equal(modelVisible.includes("model_does_not_support_vision_input"), true);
     assert.equal(modelVisible.includes("\"attached\":false"), true);
     assert.equal(modelVisible.includes(imageFile), false);
@@ -189,3 +190,10 @@ test("context attachment image tool reports unsupported when model lacks vision 
     await fs.rm(localRoot, { recursive: true, force: true });
   }
 });
+
+function assertDirectAttachmentFacts(value: unknown): void {
+  const output = asRecord(value);
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `image output must not contain ${legacyField}`);
+  }
+}

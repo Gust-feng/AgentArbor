@@ -657,7 +657,6 @@ function toolCallActivityItem(
     summary: call.summary ?? call.inputSummary ?? childToolCallStatusLabel(call.status),
     timestamp: recordedAt,
     toolName: call.toolName,
-    display: call.display,
     refs: call.callId.trim().length === 0 ? [] : [{ kind: "tool_call", id: call.callId }],
   };
   return displayActivityItemsForNodes([node])[0];

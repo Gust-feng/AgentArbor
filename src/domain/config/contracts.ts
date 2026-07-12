@@ -7,7 +7,6 @@ import type {
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
-  ToolVisibleResultPolicy,
 } from "../tools/contracts.js";
 import type { SubAgentSourceKind } from "../sub-agents/contracts.js";
 
@@ -471,7 +470,6 @@ export type CapabilityToolCatalogItem = {
   readonly operationLabel: string;
   readonly requiresConfirmation: boolean;
   readonly confirmationLabel: string;
-  readonly visibleResultPolicy: ToolVisibleResultPolicy;
   readonly runtimeHints?: readonly ToolRuntimeHint[];
   readonly definitionHash?: string;
   readonly scopes: readonly CapabilityToolScope[];

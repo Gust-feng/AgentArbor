@@ -77,7 +77,30 @@ export type McpReferenceInfo = {
 export type McpContentPart =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "image"; readonly data: string; readonly mimeType: string }
-  | { readonly type: "audio"; readonly data: string; readonly mimeType: string };
+  | { readonly type: "audio"; readonly data: string; readonly mimeType: string }
+  | {
+      readonly type: "resource_link";
+      readonly uri: string;
+      readonly name: string;
+      readonly title?: string;
+      readonly description?: string;
+      readonly mimeType?: string;
+      readonly size?: number;
+    }
+  | {
+      readonly type: "resource";
+      readonly resource:
+        | {
+            readonly uri: string;
+            readonly mimeType?: string;
+            readonly text: string;
+          }
+        | {
+            readonly uri: string;
+            readonly mimeType?: string;
+            readonly blob: string;
+          };
+    };
 
 export class McpClientWrapper {
   private client: Client | undefined;
@@ -154,9 +177,7 @@ export class McpClientWrapper {
     const isError = "isError" in result ? (result.isError as boolean) : undefined;
     const structuredContent = "structuredContent" in result ? result.structuredContent : undefined;
     const rawContent = "content" in result ? (result.content as readonly unknown[]) : [];
-    const content = rawContent
-      .filter(isMcpContentPart)
-      .map(toMcpContentPart);
+    const content = rawContent.map(toMcpContentPart);
     return { content, structuredContent, isError };
   }
 
@@ -296,23 +317,8 @@ function platformPathEnvironment(env: NodeJS.ProcessEnv): Record<string, string>
   return result;
 }
 
-type RawMcpContent = {
-  readonly type: string;
-  readonly text?: string;
-  readonly data?: string;
-  readonly mimeType?: string;
-};
-
-function isMcpContentPart(value: unknown): value is RawMcpContent {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "type" in value &&
-    typeof (value as RawMcpContent).type === "string"
-  );
-}
-
-function toMcpContentPart(raw: RawMcpContent): McpContentPart {
+function toMcpContentPart(value: unknown): McpContentPart {
+  const raw = mcpContentRecord(value);
   if (raw.type === "text" && typeof raw.text === "string") {
     return { type: "text", text: raw.text };
   }
@@ -322,5 +328,47 @@ function toMcpContentPart(raw: RawMcpContent): McpContentPart {
   if (raw.type === "audio" && typeof raw.data === "string" && typeof raw.mimeType === "string") {
     return { type: "audio", data: raw.data, mimeType: raw.mimeType };
   }
-  return { type: "text", text: JSON.stringify(raw) };
+  if (raw.type === "resource_link" && typeof raw.uri === "string" && typeof raw.name === "string") {
+    return {
+      type: "resource_link",
+      uri: raw.uri,
+      name: raw.name,
+      ...(typeof raw.title === "string" ? { title: raw.title } : {}),
+      ...(typeof raw.description === "string" ? { description: raw.description } : {}),
+      ...(typeof raw.mimeType === "string" ? { mimeType: raw.mimeType } : {}),
+      ...(typeof raw.size === "number" && Number.isFinite(raw.size) ? { size: raw.size } : {}),
+    };
+  }
+  if (raw.type === "resource") {
+    const resource = mcpContentRecord(raw.resource);
+    if (typeof resource.uri === "string" && typeof resource.text === "string") {
+      return {
+        type: "resource",
+        resource: {
+          uri: resource.uri,
+          ...(typeof resource.mimeType === "string" ? { mimeType: resource.mimeType } : {}),
+          text: resource.text,
+        },
+      };
+    }
+    if (typeof resource.uri === "string" && typeof resource.blob === "string") {
+      return {
+        type: "resource",
+        resource: {
+          uri: resource.uri,
+          ...(typeof resource.mimeType === "string" ? { mimeType: resource.mimeType } : {}),
+          blob: resource.blob,
+        },
+      };
+    }
+  }
+  const type = typeof raw.type === "string" ? raw.type : "missing";
+  throw new Error(`Unsupported or malformed MCP tool content block: ${type}.`);
+}
+
+function mcpContentRecord(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Unsupported or malformed MCP tool content block: non-object.");
+  }
+  return value as Readonly<Record<string, unknown>>;
 }

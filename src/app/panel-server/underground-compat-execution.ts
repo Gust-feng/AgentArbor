@@ -12,9 +12,9 @@ import {
 import { runUndergroundDirectionSessionWithIntelligence } from "../underground/compat/underground-direction-session.js";
 import { persistContextWindowFallback } from "../model-context-window-fallback.js";
 import type { PanelRuntime } from "./runtime.js";
-import { createDesktopToolCenterFactory, desktopRuntimeMode } from "./desktop-run-resources.js";
+import { agentRuntimeMode, createAgentToolCenterFactory } from "./agent-run-resources.js";
 import type {
-  DesktopRunResources,
+  AgentRunResources,
   PanelRunExecutionOptions,
   PanelRunExecutionResult,
 } from "./run-execution-contracts.js";
@@ -40,10 +40,10 @@ import { throwIfAborted } from "./request-parsers.js";
 export async function runDeepDesktopForPanel(
   runtime: PanelRuntime,
   goal: string,
-  resources: DesktopRunResources,
+  resources: AgentRunResources,
   options: PanelRunExecutionOptions
 ): Promise<PanelRunExecutionResult> {
-  const createToolCenter = createDesktopToolCenterFactory(runtime.providerFetch, resources);
+  const createToolCenter = createAgentToolCenterFactory(runtime.providerFetch, resources);
   throwIfAborted(options.abortSignal);
   const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
@@ -116,7 +116,7 @@ export async function runUndergroundForPanel(
     modelProvider: activeModel,
     informationAccess,
   });
-  const runtimeMode = desktopRuntimeMode(aiMode, activeModel);
+  const runtimeMode = agentRuntimeMode(aiMode, activeModel);
   const aiConfig =
     aiMode === "fake"
       ? createModelRuntimeConfig({ mode: "fake", env: aiEnvironment, onModelOutputDelta: options.onModelOutputDelta })

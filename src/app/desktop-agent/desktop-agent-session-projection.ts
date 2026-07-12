@@ -1,6 +1,7 @@
 import type { ModelResponse } from "../../domain/intelligence/index.js";
+import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { ToolCallResult } from "../../domain/tools/index.js";
+import type { ToolCallRequest, ToolCallResult, ToolFileDisplayOperation } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { createId, nowIso } from "../../kernel/id.js";
@@ -14,6 +15,12 @@ import type {
 } from "./desktop-agent-session-contracts.js";
 import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "../run-read-model/value-utils.js";
 import { friendlyUserFacingModelFailureText, sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
+import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
+import {
+  reduceToolCallEventTimeline,
+  toolCallEventFactPayload,
+  type ToolCallEventFact,
+} from "../run-read-model/tool-call-event-reducer.js";
 
 const DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS = 128_000;
 
@@ -188,13 +195,22 @@ export function activityFromEventEntries(
   entries: readonly EventLogEntry[],
   terminalStatus: DesktopAgentSessionStatus
 ): readonly DesktopAgentActivity[] {
-  const activities = entries.flatMap(activityFromEventEntry);
+  const toolFactBySequence = reduceToolCallEventTimeline(entries).factBySequence;
+  const activities = entries.flatMap((entry) =>
+    activityFromEventEntry(entry, toolFactBySequence.get(entry.sequence))
+  );
   const terminal = terminalActivity(entries.at(-1), terminalStatus);
   return terminal === undefined ? activities : [...activities, terminal];
 }
 
-function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActivity[] {
-  const payload = asRecord(entry.message.payload);
+function activityFromEventEntry(
+  entry: EventLogEntry,
+  toolFact: ToolCallEventFact | undefined,
+): readonly DesktopAgentActivity[] {
+  const rawPayload = asRecord(entry.message.payload);
+  const payload = toolFact === undefined
+    ? rawPayload
+    : toolCallEventFactPayload(toolFact, entry.type);
   const sourceRefs = [`event:${entry.message.id}`];
   switch (entry.type) {
     case "goal.received":
@@ -243,11 +259,15 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
     case "tool.completed":
     case "tool.failed":
     case "tool.cancelled": {
+      if (!toolEventTransitionMatches(entry, toolFact)) {
+        return [];
+      }
       const toolName = stringOrUndefined(payload.toolName) ?? "tool";
       const toolLabel = toolDisplayName(toolName);
-      const output = asRecord(payload.output);
       const input = asRecord(payload.input);
-      const result = asRecord(output.result);
+      const projection = entry.type === "tool.completed"
+        ? toolActivityProjection(toolName, payload)
+        : undefined;
       const type =
         entry.type === "tool.requested"
           ? "tool_requested"
@@ -260,11 +280,11 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
           type,
           entry.type === "tool.requested" ? toolActivityTitle(toolName, "start") : entry.type === "tool.completed" ? toolActivityTitle(toolName, "completed") : entry.type === "tool.cancelled" ? `${toolLabel}已取消` : toolActivityTitle(toolName, "failed"),
           entry.type === "tool.completed"
-            ? completedToolActivitySummary(toolName, payload)
+            ? projection?.summary ?? `${toolLabel}已完成。`
             : entry.type === "tool.failed"
-              ? `${toolLabel}失败，错误信息已整理。`
+              ? failedToolActivitySummary(toolLabel, payload)
               : entry.type === "tool.cancelled"
-                ? `${toolLabel}已取消。`
+                ? cancelledToolActivitySummary(toolLabel, payload)
               : `${toolLabel}开始执行。`,
           entry.type === "tool.requested" ? "running" : entry.type === "tool.completed" ? "completed" : entry.type === "tool.cancelled" ? "cancelled" : "failed",
           sourceRefs,
@@ -272,15 +292,18 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
           stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string],
           toolName,
           {
-            action: stringOrUndefined(output.action) ?? toolLabel,
-            path: stringOrUndefined(result.path) ?? stringOrUndefined(input.path),
-            truncated: output.truncated === true,
+            action: projection?.action ?? toolLabel,
+            path: projection?.path ?? stringOrUndefined(input.path),
+            truncated: projection?.truncated,
             error: stringOrUndefined(payload.error),
           },
         ),
       ];
     }
     case "user_approval.requested":
+      if (!toolEventTransitionMatches(entry, toolFact)) {
+        return [];
+      }
       return [
         activity(
           entry,
@@ -296,18 +319,37 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
   }
 }
 
+function toolEventTransitionMatches(
+  entry: EventLogEntry,
+  fact: ToolCallEventFact | undefined,
+): boolean {
+  if (fact === undefined) {
+    return false;
+  }
+  switch (entry.type) {
+    case "tool.requested":
+      return fact.status === "requested" && fact.eventSequences[0] === entry.sequence;
+    case "tool.completed":
+      return fact.status === "completed" && fact.terminalAt === entry.recordedAt;
+    case "tool.failed":
+      return fact.status === "failed" && fact.terminalAt === entry.recordedAt;
+    case "tool.cancelled":
+      return fact.status === "cancelled" && fact.terminalAt === entry.recordedAt;
+    case "user_approval.requested":
+      return fact.status === "approval_required";
+    default:
+      return true;
+  }
+}
+
 function joinDisplayText(...parts: readonly string[]): string {
   return parts.map((part) => part.trim()).filter((part) => part.length > 0).join(" ");
 }
 
 function toolSummaryText(toolCalls: readonly ToolCallResult[], completed: number, failed: number, approvalRequired: number): string {
   const localSummaries = toolCalls
-    .map((call) => {
-      const output = asRecord(call.output);
-      const action = stringOrUndefined(output.action);
-      const summary = stringOrUndefined(output.summary);
-      return action !== undefined && summary !== undefined ? `${action}: ${summary}` : undefined;
-    })
+    .filter((call) => call.status === "completed")
+    .map((call) => toolActivityProjection(call.toolName, call)?.summary)
     .filter((value): value is string => value !== undefined)
     .slice(0, 4);
   const base = `工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次，待处理 ${approvalRequired} 次。`;
@@ -338,7 +380,6 @@ function toolActivityTitle(toolName: string, phase: "start" | "completed" | "fai
   if (toolName === "create_file") return phase === "start" ? "正在创建文件" : phase === "completed" ? "文件已创建" : "文件创建失败";
   if (toolName === "edit_file") return phase === "start" ? "正在编辑文件" : phase === "completed" ? "文件已编辑" : "文件编辑失败";
   if (toolName === "delete_file") return phase === "start" ? "正在删除文件" : phase === "completed" ? "文件已删除" : "文件删除失败";
-  if (toolName === "run_command") return phase === "start" ? "正在执行命令" : phase === "completed" ? "命令已执行" : "命令执行失败";
   if (toolName === "shell_command") return phase === "start" ? "正在执行 Shell" : phase === "completed" ? "Shell 已执行" : "Shell 执行失败";
   if (toolName === "browser_snapshot") return phase === "start" ? "正在浏览网页" : phase === "completed" ? "网页已浏览" : "网页浏览失败";
   if (toolName === "http_request") return phase === "start" ? "正在发送 HTTP 请求" : phase === "completed" ? "HTTP 请求已完成" : "HTTP 请求失败";
@@ -347,13 +388,154 @@ function toolActivityTitle(toolName: string, phase: "start" | "completed" | "fai
   return phase === "start" ? "正在执行工具" : phase === "completed" ? "工具已完成" : "工具执行失败";
 }
 
-function completedToolActivitySummary(toolName: string, payload: Readonly<Record<string, unknown>>): string {
-  const output = asRecord(payload.output);
-  const summary = stringOrUndefined(output.summary);
-  if (summary !== undefined) {
-    return summary;
+type ToolActivityProjection = {
+  readonly action: string;
+  readonly summary: string;
+  readonly path?: string;
+  readonly truncated?: boolean;
+};
+
+function toolActivityProjection(
+  toolName: string,
+  facts: Pick<ToolCallResult, "callId" | "input" | "output"> | Readonly<Record<string, unknown>>,
+): ToolActivityProjection | undefined {
+  const callId = stringOrUndefined(facts.callId) ?? "tool-call";
+  const input = facts.input as ToolCallRequest["input"];
+  const display = projectToolDisplay({ callId, toolName, input }, facts.output);
+  const summary = toolDisplaySummary(toolName, display);
+  if (summary === undefined) {
+    return undefined;
   }
-  return `${toolDisplayName(toolName)}已返回结果摘要。`;
+  return {
+    action: display.kind === "generic_tool_summary" ? display.action ?? toolDisplayName(toolName) : toolDisplayName(toolName),
+    summary,
+    path: toolDisplayPath(display),
+    truncated: toolDisplayTruncated(display),
+  };
+}
+
+function toolDisplaySummary(toolName: string, display: ToolDisplayProjection): string | undefined {
+  switch (display.kind) {
+    case "search_results":
+      return joinFactSummary([
+        display.query === undefined ? undefined : `搜索：${safeText(display.query, 160)}`,
+        `${display.resultsReturned ?? display.results.length} 条结果`,
+        display.truncated === true ? "结果已截断" : undefined,
+      ]);
+    case "directory_listing":
+      return joinFactSummary([
+        display.path,
+        `${display.entriesReturned ?? display.entries.length}${display.totalEntries === undefined ? "" : `/${display.totalEntries}`} 项`,
+        display.truncated === true ? "还有后续" : undefined,
+      ]);
+    case "file_search_results":
+      return joinFactSummary([
+        display.query === undefined ? undefined : `搜索：${safeText(display.query, 160)}`,
+        display.path,
+        `${display.matchesReturned ?? display.matches.length} 处匹配`,
+        display.searchedFiles === undefined ? undefined : `${display.searchedFiles} 个文件`,
+        display.truncated === true ? "还有后续" : undefined,
+      ]);
+    case "read_result":
+      return joinFactSummary([
+        display.title ?? display.ref ?? display.uri,
+        display.source,
+        display.status,
+        display.truncated === true ? "内容已截断" : undefined,
+      ]) ?? `${toolDisplayName(toolName)}已完成。`;
+    case "browser_snapshot":
+      return joinFactSummary([
+        display.title,
+        display.url,
+        display.truncated === true ? "正文已截断" : undefined,
+      ]) ?? "网页已读取。";
+    case "http_response":
+      return joinFactSummary([
+        [display.method, display.url].filter(isString).join(" ") || undefined,
+        display.statusCode === undefined ? undefined : `HTTP ${display.statusCode}${display.statusText === undefined ? "" : ` ${display.statusText}`}`,
+        display.durationMs === undefined ? undefined : `${display.durationMs} ms`,
+        display.truncated === true ? "正文已截断" : undefined,
+      ]);
+    case "file_change_summary":
+      return joinFactSummary([
+        display.path,
+        fileOperationLabel(display.operation),
+        display.bytes === undefined ? undefined : `${display.bytes} bytes`,
+        display.replacements === undefined ? undefined : `${display.replacements} 处修改`,
+      ]);
+    case "file_diff_preview":
+      return joinFactSummary([
+        display.path,
+        fileOperationLabel(display.operation),
+        display.replacements === undefined ? undefined : `${display.replacements} 处修改`,
+        display.truncated === true ? "预览已截断" : undefined,
+      ]);
+    case "command_summary":
+      return joinFactSummary([
+        display.commandLine === undefined ? display.command : safeText(display.commandLine, 220),
+        display.background === true
+          ? display.pid === undefined ? "后台运行" : `后台运行，PID ${display.pid}`
+          : display.exitCode === undefined ? undefined : `退出码 ${display.exitCode}`,
+        display.timedOut === true ? "已超时" : undefined,
+        display.stdoutTruncated === true || display.stderrTruncated === true ? "输出已截断" : undefined,
+      ]);
+    case "generic_tool_summary":
+      return display.summary ?? `${display.action ?? toolDisplayName(toolName)}已完成。`;
+  }
+}
+
+function toolDisplayPath(display: ToolDisplayProjection): string | undefined {
+  switch (display.kind) {
+    case "directory_listing":
+    case "file_search_results":
+    case "file_change_summary":
+    case "file_diff_preview":
+      return display.path;
+    default:
+      return undefined;
+  }
+}
+
+function toolDisplayTruncated(display: ToolDisplayProjection): boolean | undefined {
+  switch (display.kind) {
+    case "search_results":
+    case "directory_listing":
+    case "file_search_results":
+    case "read_result":
+    case "browser_snapshot":
+    case "http_response":
+    case "file_change_summary":
+    case "file_diff_preview":
+      return display.truncated;
+    case "command_summary":
+      return display.stdoutTruncated === true || display.stderrTruncated === true ? true : undefined;
+    case "generic_tool_summary":
+      return undefined;
+  }
+}
+
+function fileOperationLabel(operation: ToolFileDisplayOperation | undefined): string | undefined {
+  if (operation === "create") return "已创建";
+  if (operation === "write") return "已写入";
+  if (operation === "append") return "已追加";
+  if (operation === "edit") return "已编辑";
+  if (operation === "delete") return "已删除";
+  return undefined;
+}
+
+function failedToolActivitySummary(toolLabel: string, payload: Readonly<Record<string, unknown>>): string {
+  const error = stringOrUndefined(payload.error);
+  return error === undefined ? `${toolLabel}失败。` : `${toolLabel}失败：${safeText(error, 500)}`;
+}
+
+function cancelledToolActivitySummary(toolLabel: string, payload: Readonly<Record<string, unknown>>): string {
+  const reason = stringOrUndefined(payload.reason);
+  return reason === undefined ? `${toolLabel}已取消。` : `${toolLabel}已取消：${safeText(reason, 500)}`;
+}
+
+function joinFactSummary(parts: readonly (string | undefined)[]): string | undefined {
+  const values = unique(parts.filter((part): part is string => part !== undefined && part.trim().length > 0));
+  return values.length === 0 ? undefined : safeText(values.join(" · "), 600);
 }
 
 function terminalActivity(

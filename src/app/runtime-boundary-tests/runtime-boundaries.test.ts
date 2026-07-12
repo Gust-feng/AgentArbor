@@ -143,10 +143,27 @@ test("ordinary panel mainline stays clear of legacy work-session and underground
   }
 });
 
-test("panel-server work-session aliases stay in explicit compatibility files", () => {
+test("removed ordinary compatibility entrypoints cannot return", () => {
+  const routeSource = readFileSync(join("src", "app", "panel-server", "basic-agent-routes.ts"), "utf8");
+  assert.doesNotMatch(routeSource, /\/work-session/);
+  assert.doesNotMatch(routeSource, /workSession:\s*view\.workView/);
+
+  const staleDesktopChatSources = sourceFiles([join("src")])
+    .filter((file) => !file.endsWith(".test.ts"))
+    .filter((file) => /desktop_chat|desktop\.chat|DesktopChat|desktop-chat/.test(readFileSync(file, "utf8")))
+    .map(normalizedPath);
+  assert.deepEqual(staleDesktopChatSources, []);
+
+  const staleIntentGateSources = sourceFiles([join("src")])
+    .filter((file) => !file.endsWith(".test.ts"))
+    .filter((file) => /desktop_intent_gate|desktop\.intent_gate\.v1/.test(readFileSync(file, "utf8")))
+    .map(normalizedPath);
+  assert.deepEqual(staleIntentGateSources, []);
+});
+
+test("active legacy work-session replay aliases stay in explicit compatibility files", () => {
   const allowedCompatFiles = new Set([
     "src/app/panel-server/basic-agent-read-models.ts",
-    "src/app/panel-server/basic-agent-routes.ts",
     "src/app/panel-server/conversation-sync.ts",
     "src/app/panel-server/live-model-stream.ts",
     "src/app/panel-server/runtime-records.ts",
@@ -159,12 +176,9 @@ test("panel-server work-session aliases stay in explicit compatibility files", (
     .filter((file) => !allowedCompatFiles.has(file));
 
   assert.deepEqual(unexpectedFiles, []);
-  const compatRouteSource = readFileSync(join("src", "app", "panel-server", "basic-agent-routes.ts"), "utf8");
-  assert.match(compatRouteSource, /\/work-session/);
-  assert.match(compatRouteSource, /workSession:\s*view\.workView/);
 });
 
-test("restored ordinary run views keep frozen capability facts ahead of fallback config", () => {
+test("restored ordinary run views require frozen facts while legacy runs keep scoped fallback config", () => {
   const runViewSource = readFileSync(join("src", "app", "panel-server", "basic-agent-run-view.ts"), "utf8");
   const persistedResponseSource = readFileSync(join("src", "app", "panel-server", "persisted-run-response.ts"), "utf8");
 
@@ -172,11 +186,15 @@ test("restored ordinary run views keep frozen capability facts ahead of fallback
   assert.equal(/configCenter|getModelProviderConfig|getInformationAccessConfig/.test(runViewSource), false);
   assert.match(
     persistedResponseSource,
-    /const config\s*=\s*input\.snapshot\.run\.capabilitySnapshot\?\.activeModel\s*\?\?\s*input\.config;/
+    /const ordinarySnapshot\s*=\s*input\.snapshot\.run\.runMode\s*===\s*"agent"[\s\S]*?requireRestorableOrdinaryRuntimeSnapshot\(input\.snapshot\)/
   );
   assert.match(
     persistedResponseSource,
-    /const informationAccess\s*=\s*input\.snapshot\.run\.informationAccess\s*\?\?\s*input\.informationAccess;/
+    /const config\s*=\s*ordinarySnapshot\s*===\s*undefined[\s\S]*?input\.snapshot\.run\.capabilitySnapshot\?\.activeModel\s*\?\?\s*input\.config[\s\S]*?:\s*ordinarySnapshot\.run\.capabilitySnapshot\.activeModel;/
+  );
+  assert.match(
+    persistedResponseSource,
+    /const informationAccess\s*=\s*ordinarySnapshot\s*===\s*undefined[\s\S]*?input\.snapshot\.run\.informationAccess\s*\?\?\s*input\.informationAccess[\s\S]*?:\s*ordinarySnapshot\.run\.informationAccess;/
   );
   assert.match(persistedResponseSource, /capabilityResolution:\s*input\.snapshot\.run\.capabilityResolution/);
 });

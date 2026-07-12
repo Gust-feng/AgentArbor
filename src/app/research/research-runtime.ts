@@ -241,6 +241,7 @@ export class ResearchRuntime implements InformationAccess {
       uri: sourceResult?.uri,
       title: sourceResult?.title,
       maxLength: Math.max(200, Math.floor(request.maxLength ?? this.defaultReadMaxLength)),
+      startChar: nonNegativeInteger(request.startChar),
       sourceResult,
       abortSignal: request.abortSignal,
     });
@@ -311,6 +312,10 @@ export class ResearchRuntime implements InformationAccess {
       unavailableReason: adapter.capability?.unavailableReason,
     }));
   }
+}
+
+function nonNegativeInteger(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value ?? 0)) : 0;
 }
 
 export function createDefaultResearchRuntime(options: CreateDefaultResearchRuntimeOptions = {}): ResearchRuntime {

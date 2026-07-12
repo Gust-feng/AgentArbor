@@ -136,7 +136,6 @@ function transcriptNodeFromRunEvent(
       phase,
       title: toolTranscriptTitleFromRunEvent(event, phase),
       summary: transcriptToolSummaryFromRunEvent(event),
-      display: event.detail?.display,
     });
   }
   if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled") {
@@ -146,7 +145,6 @@ function transcriptNodeFromRunEvent(
       phase,
       title: toolTranscriptTitleFromRunEvent(event, phase),
       summary: transcriptToolSummaryFromRunEvent(event),
-      display: event.detail?.display,
     });
   }
   if (

@@ -1,211 +1,46 @@
 import type { ToolDisplayProjection } from "../../domain/observation/index.js";
-import type { ToolErrorFacts, ToolFileDisplayOperation } from "../../domain/tools/index.js";
+import type { ToolFileDisplayOperation } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 
 export type ToolDisplayNormalizationInput = {
   readonly toolName: string;
   readonly input?: unknown;
   readonly output?: unknown;
-  readonly existingDisplay?: unknown;
   readonly truncated?: boolean;
 };
 
 export function normalizeToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection {
-  const output = asRecord(input.output);
-  const existing = normalizedExistingDisplay(input.toolName, input.existingDisplay ?? output.display);
-  if (existing !== undefined && existing.kind !== "generic_tool_summary" && !isFileDisplay(existing)) {
-    return existing;
-  }
-  const fileDisplay = fileToolDisplayForOperation(input, existing);
-  if (fileDisplay !== undefined) {
-    return fileDisplay;
-  }
   const structuredDisplay = structuredToolDisplayForOperation(input);
   if (structuredDisplay !== undefined) {
     return structuredDisplay;
   }
-  if (existing !== undefined) {
-    return existing;
+  const fileDisplay = fileToolDisplayForOperation(input);
+  if (fileDisplay !== undefined) {
+    return fileDisplay;
   }
   return genericToolDisplayForOperation(input);
-}
-
-function normalizedExistingDisplay(toolName: string, value: unknown): ToolDisplayProjection | undefined {
-  const existing = toolDisplayProjectionOrUndefined(value);
-  if (existing?.kind !== "generic_tool_summary") {
-    return existing;
-  }
-  return {
-    ...existing,
-    action: displayActionForTool(existing.action, toolName),
-  };
-}
-
-export function toolDisplayProjectionOrUndefined(value: unknown): ToolDisplayProjection | undefined {
-  const record = asRecord(value);
-  const kind = stringOrUndefined(record.kind);
-  if (kind === "search_results") {
-    return {
-      kind,
-      query: stringOrUndefined(record.query),
-      status: stringOrUndefined(record.status),
-      message: stringOrUndefined(record.message),
-      results: Array.isArray(record.results)
-        ? record.results.map(searchResultItem).filter((item): item is NonNullable<ReturnType<typeof searchResultItem>> => item !== undefined)
-        : [],
-      resultsReturned: numberOrUndefined(record.resultsReturned),
-      truncated: booleanOrUndefined(record.truncated),
-    };
-  }
-  if (kind === "read_result") {
-    return {
-      kind,
-      ref: stringOrUndefined(record.ref),
-      source: stringOrUndefined(record.source),
-      status: stringOrUndefined(record.status),
-      title: stringOrUndefined(record.title),
-      url: stringOrUndefined(record.url),
-      uri: stringOrUndefined(record.uri),
-      sourceSearchRef: stringOrUndefined(record.sourceSearchRef),
-      contentPreview: stringOrUndefined(record.contentPreview),
-      summary: stringOrUndefined(record.summary),
-      preview: stringOrUndefined(record.preview),
-      error: stringOrUndefined(record.error),
-      errorFacts: errorFactsOrUndefined(record.errorFacts),
-      truncated: booleanOrUndefined(record.truncated),
-    };
-  }
-  if (kind === "directory_listing") {
-    return {
-      kind,
-      path: stringOrUndefined(record.path),
-      depth: numberOrUndefined(record.depth),
-      entriesReturned: numberOrUndefined(record.entriesReturned),
-      totalEntries: numberOrUndefined(record.totalEntries),
-      unreadableDirectories: numberOrUndefined(record.unreadableDirectories),
-      unreadableSamples: Array.isArray(record.unreadableSamples)
-        ? record.unreadableSamples
-          .map(unreadableDirectorySample)
-          .filter((item): item is NonNullable<ReturnType<typeof unreadableDirectorySample>> => item !== undefined)
-        : undefined,
-      entries: Array.isArray(record.entries)
-        ? record.entries
-          .map(directoryEntryDisplayItem)
-          .filter((item): item is NonNullable<ReturnType<typeof directoryEntryDisplayItem>> => item !== undefined)
-        : [],
-      truncated: booleanOrUndefined(record.truncated),
-    };
-  }
-  if (kind === "file_search_results") {
-    return {
-      kind,
-      query: stringOrUndefined(record.query),
-      path: stringOrUndefined(record.path),
-      engine: stringOrUndefined(record.engine),
-      searchedFiles: numberOrUndefined(record.searchedFiles),
-      skippedFactsAvailable: booleanOrUndefined(record.skippedFactsAvailable),
-      skippedFiles: numberOrUndefined(record.skippedFiles),
-      skippedBinaryFiles: numberOrUndefined(record.skippedBinaryFiles),
-      skippedTooLargeFiles: numberOrUndefined(record.skippedTooLargeFiles),
-      skippedUnreadableFiles: numberOrUndefined(record.skippedUnreadableFiles),
-      skippedDirectories: numberOrUndefined(record.skippedDirectories),
-      skippedOtherEntries: numberOrUndefined(record.skippedOtherEntries),
-      skippedSamples: Array.isArray(record.skippedSamples)
-        ? record.skippedSamples
-          .map(fileSearchSkippedSample)
-          .filter((item): item is NonNullable<ReturnType<typeof fileSearchSkippedSample>> => item !== undefined)
-        : undefined,
-      matches: Array.isArray(record.matches)
-        ? record.matches
-          .map(fileSearchMatchDisplayItem)
-          .filter((item): item is NonNullable<ReturnType<typeof fileSearchMatchDisplayItem>> => item !== undefined)
-        : [],
-      matchesReturned: numberOrUndefined(record.matchesReturned),
-      truncated: booleanOrUndefined(record.truncated),
-    };
-  }
-  if (kind === "browser_snapshot") {
-    return {
-      kind,
-      title: stringOrUndefined(record.title),
-      url: stringOrUndefined(record.url),
-      text: stringOrUndefined(record.text),
-      truncated: booleanOrUndefined(record.truncated),
-    };
-  }
-  if (kind === "http_response") {
-    return {
-      kind,
-      method: stringOrUndefined(record.method),
-      url: stringOrUndefined(record.url),
-      statusCode: numberOrUndefined(record.statusCode),
-      statusText: stringOrUndefined(record.statusText),
-      durationMs: numberOrUndefined(record.durationMs),
-      bodyPreview: stringOrUndefined(record.bodyPreview),
-      truncated: booleanOrUndefined(record.truncated),
-    };
-  }
-  if (kind === "file_change_summary") {
-    return {
-      kind,
-      path: stringOrUndefined(record.path),
-      operation: fileDisplayOperationOrUndefined(record.operation),
-      bytes: numberOrUndefined(record.bytes),
-      append: booleanOrUndefined(record.append),
-      replacements: numberOrUndefined(record.replacements),
-      previousLength: numberOrUndefined(record.previousLength),
-      nextLength: numberOrUndefined(record.nextLength),
-      preview: stringOrUndefined(record.preview),
-      truncated: booleanOrUndefined(record.truncated),
-    };
-  }
-  if (kind === "file_diff_preview") {
-    return {
-      kind,
-      path: stringOrUndefined(record.path),
-      operation: fileDisplayOperationOrUndefined(record.operation),
-      replacements: numberOrUndefined(record.replacements),
-      previousLength: numberOrUndefined(record.previousLength),
-      nextLength: numberOrUndefined(record.nextLength),
-      preview: stringOrUndefined(record.preview),
-      truncated: booleanOrUndefined(record.truncated),
-    };
-  }
-  if (kind === "command_summary") {
-    return value as ToolDisplayProjection;
-  }
-  if (kind === "generic_tool_summary") {
-    return {
-      kind,
-      action: stringOrUndefined(record.action),
-      summary: stringOrUndefined(record.summary),
-      items: stringArray(record.items).length === 0 ? undefined : stringArray(record.items),
-    };
-  }
-  return undefined;
 }
 
 function structuredToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection | undefined {
   const toolName = input.toolName.trim().toLowerCase();
   const output = asRecord(input.output);
-  const result = asRecord(output.result);
-  const truncated = booleanOrUndefined(result.truncated) ??
-    booleanOrUndefined(output.truncated) ??
+  const inputRecord = asRecord(input.input);
+  const truncated = booleanOrUndefined(output.truncated) ??
     (input.truncated === true ? true : undefined);
-  if (isDirectoryListingTool(toolName, output) && Array.isArray(result.entries)) {
-    const entries = result.entries
+  if (isDirectoryListingTool(toolName) && Array.isArray(output.entries)) {
+    const entries = output.entries
       .map(directoryEntryDisplayItem)
       .filter((item): item is NonNullable<ReturnType<typeof directoryEntryDisplayItem>> => item !== undefined);
-    const entriesReturned = numberOrUndefined(result.entriesReturned) ?? entries.length;
+    const entriesReturned = numberOrUndefined(output.entriesReturned) ?? entries.length;
     return {
       kind: "directory_listing",
-      path: stringOrUndefined(result.path) ?? stringOrUndefined(asRecord(input.input).path),
-      depth: numberOrUndefined(result.depth) ?? numberOrUndefined(asRecord(input.input).depth),
+      path: stringOrUndefined(output.path) ?? stringOrUndefined(inputRecord.path),
+      depth: numberOrUndefined(output.depth) ?? numberOrUndefined(inputRecord.depth),
       entriesReturned,
-      totalEntries: numberOrUndefined(result.totalEntries) ?? (truncated === true ? undefined : entriesReturned),
-      unreadableDirectories: numberOrUndefined(result.unreadableDirectories),
-      unreadableSamples: Array.isArray(result.unreadableSamples)
-        ? result.unreadableSamples
+      totalEntries: numberOrUndefined(output.totalEntries) ?? (truncated === true ? undefined : entriesReturned),
+      unreadableDirectories: numberOrUndefined(output.unreadableDirectories),
+      unreadableSamples: Array.isArray(output.unreadableSamples)
+        ? output.unreadableSamples
           .map(unreadableDirectorySample)
           .filter((item): item is NonNullable<ReturnType<typeof unreadableDirectorySample>> => item !== undefined)
         : undefined,
@@ -213,93 +48,77 @@ function structuredToolDisplayForOperation(input: ToolDisplayNormalizationInput)
       truncated,
     };
   }
-  if (isFileSearchTool(toolName, output) && Array.isArray(result.matches)) {
-    const matches = result.matches
+  if (isFileSearchTool(toolName) && Array.isArray(output.matches)) {
+    const matches = output.matches
       .map(fileSearchMatchDisplayItem)
       .filter((item): item is NonNullable<ReturnType<typeof fileSearchMatchDisplayItem>> => item !== undefined);
     return {
       kind: "file_search_results",
-      query: stringOrUndefined(result.query) ?? stringOrUndefined(asRecord(input.input).query),
-      path: stringOrUndefined(result.path) ?? stringOrUndefined(asRecord(input.input).path),
-      engine: stringOrUndefined(result.engine),
-      searchedFiles: numberOrUndefined(result.searchedFiles),
-      skippedFactsAvailable: booleanOrUndefined(result.skippedFactsAvailable),
-      skippedFiles: numberOrUndefined(result.skippedFiles),
-      skippedBinaryFiles: numberOrUndefined(result.skippedBinaryFiles),
-      skippedTooLargeFiles: numberOrUndefined(result.skippedTooLargeFiles),
-      skippedUnreadableFiles: numberOrUndefined(result.skippedUnreadableFiles),
-      skippedDirectories: numberOrUndefined(result.skippedDirectories),
-      skippedOtherEntries: numberOrUndefined(result.skippedOtherEntries),
-      skippedSamples: Array.isArray(result.skippedSamples)
-        ? result.skippedSamples
+      query: stringOrUndefined(output.query) ?? stringOrUndefined(inputRecord.query),
+      path: stringOrUndefined(output.path) ?? stringOrUndefined(inputRecord.path),
+      engine: stringOrUndefined(output.engine),
+      searchedFiles: numberOrUndefined(output.searchedFiles),
+      skippedFactsAvailable: booleanOrUndefined(output.skippedFactsAvailable),
+      skippedFiles: numberOrUndefined(output.skippedFiles),
+      skippedBinaryFiles: numberOrUndefined(output.skippedBinaryFiles),
+      skippedTooLargeFiles: numberOrUndefined(output.skippedTooLargeFiles),
+      skippedUnreadableFiles: numberOrUndefined(output.skippedUnreadableFiles),
+      skippedDirectories: numberOrUndefined(output.skippedDirectories),
+      skippedOtherEntries: numberOrUndefined(output.skippedOtherEntries),
+      skippedSamples: Array.isArray(output.skippedSamples)
+        ? output.skippedSamples
           .map(fileSearchSkippedSample)
           .filter((item): item is NonNullable<ReturnType<typeof fileSearchSkippedSample>> => item !== undefined)
         : undefined,
       matches,
-      matchesReturned: numberOrUndefined(result.matchesReturned) ?? matches.length,
+      matchesReturned: numberOrUndefined(output.matchesReturned) ?? matches.length,
       truncated,
     };
   }
   return undefined;
 }
 
-function isDirectoryListingTool(toolName: string, output: Readonly<Record<string, unknown>>): boolean {
-  const action = stringOrUndefined(output.action)?.toLowerCase();
+function isDirectoryListingTool(toolName: string): boolean {
   return toolName === "list_dir" ||
     toolName === "list_files" ||
     toolName === "list_context_attachment_files" ||
-    action === "list_dir" ||
-    action === "list_files" ||
-    action === "list_context_attachment_files";
+    toolName === "inspect_context_attachment_archive";
 }
 
-function isFileSearchTool(toolName: string, output: Readonly<Record<string, unknown>>): boolean {
-  const action = stringOrUndefined(output.action)?.toLowerCase();
+function isFileSearchTool(toolName: string): boolean {
   return toolName === "grep_files" ||
-    toolName === "search_context_attachment_files" ||
-    action === "grep_files" ||
-    action === "search_context_attachment_files";
+    toolName === "search_context_attachment_files";
 }
 
 function fileToolDisplayForOperation(
-  input: ToolDisplayNormalizationInput,
-  existing: ToolDisplayProjection | undefined
+  input: ToolDisplayNormalizationInput
 ): ToolDisplayProjection | undefined {
   const toolName = input.toolName.trim().toLowerCase();
   const inputRecord = asRecord(input.input);
   const outputRecord = asRecord(input.output);
-  const result = asRecord(outputRecord.result);
-  const action = (stringOrUndefined(outputRecord.action) ?? "").trim().toLowerCase();
-  const operation = fileOperationKind(toolName, action, inputRecord, outputRecord, result, existing);
+  const operation = fileOperationKind(toolName, inputRecord, outputRecord);
   if (operation === undefined) {
     return undefined;
   }
-  const path = stringOrUndefined(result.path) ??
-    stringOrUndefined(outputRecord.path) ??
+  const path = stringOrUndefined(outputRecord.path) ??
     stringOrUndefined(inputRecord.path);
-  const existingPath = existing?.kind === "file_change_summary" || existing?.kind === "file_diff_preview"
-    ? existing.path
-    : undefined;
-  if (path === undefined && existingPath === undefined) {
+  if (path === undefined) {
     return undefined;
   }
   if (operation.kind === "edit") {
-    return fileDiffDisplay(input, inputRecord, outputRecord, result, existing, operation.operation);
+    return fileDiffDisplay(input, inputRecord, outputRecord, operation.operation);
   }
-  return fileChangeDisplay(input, inputRecord, outputRecord, result, existing, operation.operation);
+  return fileChangeDisplay(input, inputRecord, outputRecord, operation.operation);
 }
 
 function fileChangeDisplay(
   input: ToolDisplayNormalizationInput,
   inputRecord: Readonly<Record<string, unknown>>,
   outputRecord: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>,
-  existing: ToolDisplayProjection | undefined,
   operation: ToolFileDisplayOperation
 ): ToolDisplayProjection {
-  const existingChange = existing?.kind === "file_change_summary" ? existing : undefined;
   const content = stringOrUndefined(inputRecord.content);
-  const append = booleanOrUndefined(result.append) ?? booleanOrUndefined(outputRecord.append) ?? booleanOrUndefined(inputRecord.append);
+  const append = booleanOrUndefined(outputRecord.append) ?? booleanOrUndefined(inputRecord.append);
   const allowDerivedPreview = isBuiltInFileToolName(input.toolName);
   const preview = operation === "delete" || !allowDerivedPreview
     ? undefined
@@ -309,15 +128,15 @@ function fileChangeDisplay(
       });
   return {
     kind: "file_change_summary",
-    path: existingChange?.path ?? stringOrUndefined(result.path) ?? stringOrUndefined(outputRecord.path) ?? stringOrUndefined(inputRecord.path),
-    operation: existingChange?.operation ?? operation,
-    bytes: existingChange?.bytes ?? numberOrUndefined(result.bytes) ?? numberOrUndefined(outputRecord.bytes) ?? contentByteLength(content),
-    append: existingChange?.append ?? append,
-    replacements: existingChange?.replacements ?? numberOrUndefined(result.replacements) ?? numberOrUndefined(outputRecord.replacements),
-    previousLength: existingChange?.previousLength ?? numberOrUndefined(result.previousLength) ?? numberOrUndefined(outputRecord.previousLength),
-    nextLength: existingChange?.nextLength ?? numberOrUndefined(result.nextLength) ?? numberOrUndefined(outputRecord.nextLength) ?? content?.length,
-    preview: existingChange?.preview ?? (allowDerivedPreview ? stringOrUndefined(outputRecord.preview) ?? stringOrUndefined(result.preview) ?? preview?.text : undefined),
-    truncated: existingChange?.truncated ?? booleanOrUndefined(result.truncated) ?? booleanOrUndefined(outputRecord.truncated) ?? (input.truncated === true || preview?.truncated === true ? true : undefined),
+    path: stringOrUndefined(outputRecord.path) ?? stringOrUndefined(inputRecord.path),
+    operation,
+    bytes: numberOrUndefined(outputRecord.bytes) ?? contentByteLength(content),
+    append,
+    replacements: numberOrUndefined(outputRecord.replacements),
+    previousLength: numberOrUndefined(outputRecord.previousLength),
+    nextLength: numberOrUndefined(outputRecord.nextLength) ?? content?.length,
+    preview: allowDerivedPreview ? stringOrUndefined(outputRecord.preview) ?? preview?.text : undefined,
+    truncated: booleanOrUndefined(outputRecord.truncated) ?? (input.truncated === true || preview?.truncated === true ? true : undefined),
   };
 }
 
@@ -325,145 +144,77 @@ function fileDiffDisplay(
   input: ToolDisplayNormalizationInput,
   inputRecord: Readonly<Record<string, unknown>>,
   outputRecord: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>,
-  existing: ToolDisplayProjection | undefined,
   operation: ToolFileDisplayOperation
 ): ToolDisplayProjection {
-  const existingDiff = existing?.kind === "file_diff_preview" ? existing : undefined;
   const allowDerivedPreview = isBuiltInFileToolName(input.toolName);
   const preview = allowDerivedPreview
-    ? fileEditDiffPreview(inputRecord) ?? directDiffPreview(outputRecord) ?? directDiffPreview(result) ?? diffSummaryPreview(result.diffSummary)
-    : directDiffPreview(outputRecord) ?? directDiffPreview(result) ?? diffSummaryPreview(result.diffSummary);
+    ? fileEditDiffPreview(inputRecord) ?? directDiffPreview(outputRecord) ?? diffSummaryPreview(outputRecord.diffSummary)
+    : directDiffPreview(outputRecord) ?? diffSummaryPreview(outputRecord.diffSummary);
   return {
     kind: "file_diff_preview",
-    path: existingDiff?.path ?? stringOrUndefined(result.path) ?? stringOrUndefined(outputRecord.path) ?? stringOrUndefined(inputRecord.path),
-    operation: existingDiff?.operation ?? operation,
-    replacements: existingDiff?.replacements ?? numberOrUndefined(result.replacements) ?? numberOrUndefined(outputRecord.replacements) ?? numberOrUndefined(result.wouldReplace) ?? editCount(inputRecord.edits),
-    previousLength: existingDiff?.previousLength ?? numberOrUndefined(result.previousLength) ?? numberOrUndefined(outputRecord.previousLength),
-    nextLength: existingDiff?.nextLength ?? numberOrUndefined(result.nextLength) ?? numberOrUndefined(outputRecord.nextLength),
-    preview: existingDiff?.preview ?? preview?.text,
-    truncated: existingDiff?.truncated ?? booleanOrUndefined(result.truncated) ?? booleanOrUndefined(outputRecord.truncated) ?? (input.truncated === true || preview?.truncated === true ? true : undefined),
+    path: stringOrUndefined(outputRecord.path) ?? stringOrUndefined(inputRecord.path),
+    operation,
+    replacements: numberOrUndefined(outputRecord.replacements) ?? numberOrUndefined(outputRecord.wouldReplace) ?? editCount(inputRecord.edits),
+    previousLength: numberOrUndefined(outputRecord.previousLength),
+    nextLength: numberOrUndefined(outputRecord.nextLength),
+    preview: preview?.text,
+    truncated: booleanOrUndefined(outputRecord.truncated) ?? (input.truncated === true || preview?.truncated === true ? true : undefined),
   };
 }
 
 function genericToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection {
   const output = asRecord(input.output);
-  const result = asRecord(output.result);
-  const action = displayActionForTool(stringOrUndefined(output.action), input.toolName);
-  const text = stringOrUndefined(result.text) ?? stringOrUndefined(output.text);
+  const text = stringOrUndefined(output.text) ?? stringOrUndefined(output.content);
   const items = [
     ...stringArray(output.items),
-    ...stringArray(result.items),
     ...(text === undefined ? [] : [text]),
-    ...mcpMultimodalItems(result.multimodal),
+    ...mcpContentItems(output.content),
+    ...structuredContentItems(output.structuredContent),
   ]
     .map((item) => compactText(item, 500))
     .filter((item): item is string => item !== undefined)
     .slice(0, 8);
   return {
     kind: "generic_tool_summary",
-    action,
-    summary: compactText(stringOrUndefined(output.summary) ?? stringOrUndefined(result.summary) ?? text, 500),
+    action: toolDisplayName(input.toolName),
+    summary: genericFactSummary(output),
     items: items.length === 0 ? undefined : items,
   };
 }
 
 function fileOperationKind(
   toolName: string,
-  action: string,
   inputRecord: Readonly<Record<string, unknown>>,
-  outputRecord: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>,
-  existing: ToolDisplayProjection | undefined
+  outputRecord: Readonly<Record<string, unknown>>
 ): {
   readonly kind: "write" | "edit";
   readonly operation: ToolFileDisplayOperation;
-  readonly explicit: boolean;
 } | undefined {
   const explicitOperation =
-    fileDisplayOperationOrUndefined(result.operation) ??
     fileDisplayOperationOrUndefined(outputRecord.operation) ??
     fileDisplayOperationOrUndefined(inputRecord.operation);
   if (explicitOperation !== undefined) {
     return {
       kind: explicitOperation === "edit" ? "edit" : "write",
       operation: explicitOperation,
-      explicit: true,
     };
   }
-  if (existing !== undefined && isFileDisplay(existing) && existing.operation !== undefined) {
-    return {
-      kind: existing.kind === "file_diff_preview" || existing.operation === "edit" ? "edit" : "write",
-      operation: existing.operation,
-      explicit: true,
-    };
+  if (toolName === "edit_file") {
+    return { kind: "edit", operation: "edit" };
   }
-  const marker = `${toolName} ${action}`;
-  const hasPath = stringOrUndefined(result.path) !== undefined ||
-    stringOrUndefined(outputRecord.path) !== undefined ||
-    stringOrUndefined(inputRecord.path) !== undefined;
-  if (toolName === "edit_file" || marker.includes("edit_file")) {
-    return { kind: "edit", operation: "edit", explicit: true };
+  if (toolName === "create_file") {
+    return { kind: "write", operation: "create" };
   }
-  if (toolName === "create_file" || marker.includes("create_file") || marker.includes("创建文件")) {
-    return { kind: "write", operation: "create", explicit: true };
+  if (toolName === "delete_file") {
+    return { kind: "write", operation: "delete" };
   }
-  if (toolName === "delete_file" || marker.includes("delete_file") || marker.includes("remove_file") || marker.includes("删除文件")) {
-    return { kind: "write", operation: "delete", explicit: true };
-  }
-  if (
-    toolName === "write_file" ||
-    marker.includes("write_file") ||
-    marker.includes("写入文件")
-  ) {
+  if (toolName === "write_file") {
     return {
       kind: "write",
-      operation: booleanOrUndefined(result.append) ?? booleanOrUndefined(outputRecord.append) ?? booleanOrUndefined(inputRecord.append) ? "append" : "write",
-      explicit: true,
+      operation: booleanOrUndefined(outputRecord.append) ?? booleanOrUndefined(inputRecord.append) ? "append" : "write",
     };
-  }
-  if ((marker.includes("create") || marker.includes("创建")) && marker.includes("file")) {
-    return { kind: "write", operation: "create", explicit: false };
-  }
-  if ((marker.includes("delete") || marker.includes("remove") || marker.includes("删除")) && marker.includes("file")) {
-    return { kind: "write", operation: "delete", explicit: false };
-  }
-  if ((marker.includes("write") || marker.includes("写入")) && marker.includes("file")) {
-    return {
-      kind: "write",
-      operation: booleanOrUndefined(result.append) ?? booleanOrUndefined(outputRecord.append) ?? booleanOrUndefined(inputRecord.append) ? "append" : "write",
-      explicit: false,
-    };
-  }
-  if (hasPath && (action === "create" || action === "created")) {
-    return { kind: "write", operation: "create", explicit: false };
-  }
-  if (hasPath && (action === "delete" || action === "deleted" || action === "remove" || action === "removed")) {
-    return { kind: "write", operation: "delete", explicit: false };
-  }
-  if (hasPath && (action === "append" || action === "appended")) {
-    return { kind: "write", operation: "append", explicit: false };
-  }
-  if (hasPath && (action === "write" || action === "written")) {
-    return { kind: "write", operation: "write", explicit: false };
-  }
-  if (hasPath && (action === "edit" || action === "edited" || action === "patch" || action === "patched" || action === "replace" || action === "replaced")) {
-    return { kind: "edit", operation: "edit", explicit: false };
-  }
-  if (
-    ((marker.includes("edit") || marker.includes("patch") || marker.includes("replace")) && marker.includes("file")) ||
-    marker.includes("编辑文件") ||
-    marker.includes("修改文件")
-  ) {
-    return { kind: "edit", operation: "edit", explicit: false };
   }
   return undefined;
-}
-
-function isFileDisplay(
-  display: ToolDisplayProjection
-): display is Extract<ToolDisplayProjection, { readonly kind: "file_change_summary" | "file_diff_preview" }> {
-  return display.kind === "file_change_summary" || display.kind === "file_diff_preview";
 }
 
 function isBuiltInFileToolName(toolName: string): boolean {
@@ -488,11 +239,6 @@ function fileDisplayOperationOrUndefined(value: unknown): ToolFileDisplayOperati
   ) {
     return normalized;
   }
-  if (normalized === "created") return "create";
-  if (normalized === "written" || normalized === "overwrite" || normalized === "overwritten") return "write";
-  if (normalized === "appended") return "append";
-  if (normalized === "edited" || normalized === "patch" || normalized === "patched" || normalized === "replace" || normalized === "replaced") return "edit";
-  if (normalized === "deleted" || normalized === "remove" || normalized === "removed") return "delete";
   return undefined;
 }
 
@@ -676,29 +422,110 @@ function fileFragment(value: string, maxLength: number): string {
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
 }
 
-function mcpMultimodalItems(value: unknown): readonly string[] {
+function mcpContentItems(value: unknown): readonly string[] {
   if (!Array.isArray(value)) {
     return [];
   }
   return value
-    .slice(0, 6)
-    .map(mcpMultimodalSummary)
+    .slice(0, 8)
+    .map(mcpContentSummary)
     .filter((item): item is string => item !== undefined);
 }
 
-function mcpMultimodalSummary(value: unknown): string | undefined {
+function mcpContentSummary(value: unknown): string | undefined {
   const record = asRecord(value);
   const type = stringOrUndefined(record.type);
+  if (type === "text") {
+    return stringOrUndefined(record.text);
+  }
+  if (type === "resource_link") {
+    return compactText([
+      stringOrUndefined(record.title) ?? stringOrUndefined(record.name),
+      stringOrUndefined(record.uri),
+      stringOrUndefined(record.mimeType),
+      numberOrUndefined(record.size) === undefined ? undefined : `${numberOrUndefined(record.size)} bytes`,
+    ].filter((item): item is string => item !== undefined).join(" · "), 500);
+  }
+  if (type === "resource") {
+    const resource = asRecord(record.resource);
+    const resourceText = stringOrUndefined(resource.text);
+    return resourceText ?? compactText([
+      stringOrUndefined(resource.uri),
+      stringOrUndefined(resource.mimeType),
+      numberOrUndefined(resource.byteLength) === undefined ? undefined : `${numberOrUndefined(resource.byteLength)} bytes`,
+    ].filter((item): item is string => item !== undefined).join(" · "), 500);
+  }
   const mimeType = stringOrUndefined(record.mimeType);
-  const bytesApprox = numberOrUndefined(record.bytesApprox);
+  const byteLength = numberOrUndefined(record.byteLength);
   if (type === undefined) {
     return undefined;
   }
   return [
     `非文本内容：${type}`,
     mimeType === undefined ? undefined : `MIME：${mimeType}`,
-    bytesApprox === undefined ? undefined : `约 ${bytesApprox} 字节`,
+    byteLength === undefined ? undefined : `${byteLength} 字节`,
   ].filter((item): item is string => item !== undefined).join("，");
+}
+
+function structuredContentItems(value: unknown): readonly string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 8)
+      .map(structuredFactText)
+      .filter((item): item is string => item !== undefined);
+  }
+  const item = structuredFactText(value);
+  return item === undefined ? [] : [item];
+}
+
+function structuredFactText(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  const record = asRecord(value);
+  const parts = uniqueStrings([
+    stringOrUndefined(record.title) ?? stringOrUndefined(record.name),
+    stringOrUndefined(record.path) ?? stringOrUndefined(record.url) ?? stringOrUndefined(record.uri),
+    stringOrUndefined(record.status) ?? stringOrUndefined(record.researchStatus),
+    countFact("results", record.resultsReturned, record.results),
+    countFact("entries", record.entriesReturned, record.entries),
+    countFact("matches", record.matchesReturned, record.matches),
+  ]);
+  return compactText(parts.join(" · "), 500);
+}
+
+function genericFactSummary(output: Readonly<Record<string, unknown>>): string | undefined {
+  const parts = uniqueStrings([
+    stringOrUndefined(output.title) ?? stringOrUndefined(output.name),
+    stringOrUndefined(output.path) ?? stringOrUndefined(output.url) ?? stringOrUndefined(output.uri),
+    stringOrUndefined(output.refId) ?? stringOrUndefined(output.ref),
+    stringOrUndefined(output.status) ?? stringOrUndefined(output.researchStatus),
+    numberOrUndefined(output.statusCode) === undefined ? undefined : `HTTP ${numberOrUndefined(output.statusCode)}`,
+    numberOrUndefined(output.bytes) === undefined ? undefined : `${numberOrUndefined(output.bytes)} bytes`,
+    countFact("results", output.resultsReturned, output.results),
+    countFact("entries", output.entriesReturned, output.entries),
+    countFact("matches", output.matchesReturned, output.matches),
+    countFact("rows", output.rowsReturned, output.rows),
+  ]);
+  if (parts.length > 0) {
+    return compactText(parts.join(" · "), 500);
+  }
+  return compactText(stringOrUndefined(output.message), 500);
+}
+
+function countFact(label: string, explicitCount: unknown, values: unknown): string | undefined {
+  const count = numberOrUndefined(explicitCount) ?? (Array.isArray(values) ? values.length : undefined);
+  return count === undefined ? undefined : `${count} ${label}`;
+}
+
+function uniqueStrings(values: readonly (string | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => value !== undefined))];
 }
 
 function directoryEntryDisplayItem(value: unknown): {
@@ -777,26 +604,6 @@ function fileSearchSkippedSample(value: unknown): {
   };
 }
 
-function searchResultItem(value: unknown): { readonly title: string; readonly url?: string; readonly refId?: string; readonly source?: string; readonly snippet?: string } | undefined {
-  const record = asRecord(value);
-  const title = stringOrUndefined(record.title);
-  if (title === undefined) return undefined;
-  return {
-    title,
-    url: stringOrUndefined(record.url),
-    refId: stringOrUndefined(record.refId),
-    source: stringOrUndefined(record.source),
-    snippet: stringOrUndefined(record.snippet),
-  };
-}
-
-function displayActionForTool(action: string | undefined, toolName: string): string {
-  if (action === undefined || action === toolName || /^[a-z][a-z0-9_:-]*$/i.test(action)) {
-    return toolDisplayName(action ?? toolName);
-  }
-  return action;
-}
-
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }
@@ -817,12 +624,6 @@ function booleanOrUndefined(value: unknown): boolean | undefined {
   if (value === true) return true;
   if (value === false) return false;
   return undefined;
-}
-
-function errorFactsOrUndefined(value: unknown): ToolErrorFacts | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as ToolErrorFacts
-    : undefined;
 }
 
 function contentByteLength(value: string | undefined): number | undefined {

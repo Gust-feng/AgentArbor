@@ -1,5 +1,6 @@
 import type { ModelMessage } from "../../domain/intelligence/index.js";
-import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
+import type { ToolCallRequest, ToolCallResult, ToolFactValue } from "../../domain/tools/index.js";
+import { copyToolModelAttachments } from "../../domain/tools/index.js";
 import type { ToolUseLoopPendingApproval } from "./tool-use-loop-contracts.js";
 
 export function clonePendingApproval(pendingApproval: ToolUseLoopPendingApproval): ToolUseLoopPendingApproval {
@@ -37,16 +38,24 @@ export function cloneToolCallRequest(request: ToolCallRequest): ToolCallRequest 
   return {
     callId: request.callId,
     toolName: request.toolName,
-    input: globalThis.structuredClone(request.input),
+    input: cloneToolFact(request.input),
   };
 }
 
 export function cloneToolResults(results: readonly ToolCallResult[]): ToolCallResult[] {
   return results.map((result) => ({
     ...result,
-    input: globalThis.structuredClone(result.input),
-    output: globalThis.structuredClone(result.output),
+    input: cloneToolFact(result.input),
+    output: cloneToolFact(result.output),
     confirmationRequest:
       result.confirmationRequest === undefined ? undefined : globalThis.structuredClone(result.confirmationRequest),
   }));
+}
+
+function cloneToolFact<T extends ToolFactValue | undefined>(value: T): T {
+  if (value === undefined || value === null || typeof value !== "object") {
+    return value;
+  }
+  const cloned = globalThis.structuredClone(value) as T;
+  return copyToolModelAttachments(value, cloned as object) as T;
 }

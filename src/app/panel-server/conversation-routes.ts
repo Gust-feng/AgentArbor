@@ -6,6 +6,7 @@ import {
   type PanelConversationSummaryReadModel,
 } from "../panel-conversation/panel-conversations.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
+import { readRuntimeSnapshotWithOrdinaryContract } from "../basic-agent-runtime/persistence-snapshot-contract.js";
 import type { PanelRunJob } from "./run-jobs.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import { restorePersistedPanelConversation } from "./conversation-restore.js";
@@ -384,7 +385,7 @@ async function workspaceFolderForConversation(
     if (liveRunWorkspace !== undefined) {
       return workspaceFolderSummaryFromPath(liveRunWorkspace);
     }
-    const persistedRun = await runtime.runtimeDatabase?.getRun(runId);
+    const persistedRun = await readRuntimeSnapshotWithOrdinaryContract(runtime.runtimeDatabase, runId);
     const runWorkspace = workspaceFolderSummaryFromPath(
       persistedRun?.run.workspacePath ?? persistedRun?.run.capabilitySnapshot?.workspace.workspaceDirectory
     );

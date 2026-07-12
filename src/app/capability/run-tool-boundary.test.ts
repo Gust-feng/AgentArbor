@@ -473,11 +473,6 @@ function tool(
     riskLevel: operationType === "read-only" ? "low" as const : "high" as const,
     operationType,
     requiresConfirmation: operationType !== "read-only",
-    visibleResultPolicy: {
-      userVisible: "safe-preview" as const,
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
   };
   const presentation = toolPresentationForName(name, metadata);
   return {
@@ -507,7 +502,6 @@ function tool(
     operationLabel: presentation.operationLabel,
     requiresConfirmation: metadata.requiresConfirmation,
     confirmationLabel: presentation.confirmationLabel,
-    visibleResultPolicy: metadata.visibleResultPolicy,
     scopes: defaultScopesFor(operationType),
     enabled: true,
     availability: "available",
@@ -555,11 +549,6 @@ function toolDefinition(name: string): ToolDefinition {
       riskLevel: "low",
       operationType: "read-only",
       requiresConfirmation: false,
-      visibleResultPolicy: {
-        userVisible: "summary-only",
-        maxPreviewChars: 800,
-        omitRawOutput: true,
-      },
     },
   };
 }

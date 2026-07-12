@@ -34,17 +34,11 @@
  * 不引入 Plan / artifact / Fruits。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { nowIso } from "../../kernel/id.js";
 // 模型运行时统一入口：ModelRuntimeConfigurationError 经 model-runtime/index.ts
 // re-export，禁止 app 层直接 import intelligence-channel-factory（panel-runtime-structure 命名中性约束）。
 import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
 import {
-  type AgentArborRunKind,
-  type AgentArborRunMode,
-} from "../run-runtime-core/run-mode-policy.js";
-import {
   parseDesktopTaskSoilInput,
-  type DesktopTaskSoilInput,
 } from "../task-soil-workspace.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import {
@@ -70,17 +64,12 @@ import {
   type MultiAgentFeature,
 } from "../deep/multi-agent-feature.js";
 import {
-  buildDeepFollowUpContext,
   latestDeepRunRecordsByRoot,
   projectDeepConversation,
   projectDeepRunView,
-  workspaceDirectoryFromDeepRunRecord,
 } from "../deep/deep-read-model.js";
 import {
   type DeepConversation,
-  type DeepFollowUpContext,
-  type DeepIntakeContext,
-  type DeepIntakeTurn,
 } from "../deep/contracts.js";
 import type { DeepRunStreamEvent } from "../deep/deep-events.js";
 import {
@@ -231,7 +220,6 @@ async function dispatchDeepRoute(
     method === "POST"
   ) {
     await handleDeepChildConfirmationDecision(
-      runtime,
       state,
       rest[1],
       rest[3],
@@ -250,13 +238,13 @@ async function dispatchDeepRoute(
     rest[4] === "messages" &&
     method === "POST"
   ) {
-    await handleDeepChildParentMessage(runtime, state, rest[1], rest[3], request, response);
+    await handleDeepChildParentMessage(state, rest[1], rest[3], request, response);
     return true;
   }
 
   // POST /api/deep/runs/:runId/resynthesize
   if (rest.length === 3 && rest[0] === "runs" && rest[2] === "resynthesize" && method === "POST") {
-    await handleDeepRunResynthesize(runtime, state, rest[1], response);
+    await handleDeepRunResynthesize(state, rest[1], response);
     return true;
   }
 
@@ -269,11 +257,11 @@ async function dispatchDeepRoute(
   // POST /api/deep/runs/:runId/interrupt|correct|stop
   if (rest.length === 3 && rest[0] === "runs" && method === "POST") {
     const action = rest[2];
-  if (action === "interrupt" || action === "correct" || action === "stop") {
-    await handleDeepRunControl(state, rest[1], action, request, response);
-    return true;
+    if (action === "interrupt" || action === "correct" || action === "stop") {
+      await handleDeepRunControl(state, rest[1], action, request, response);
+      return true;
+    }
   }
-}
 
   throw new PanelHttpError(404, "deep_route_not_found", "未找到对应的多 Agent 端点。");
 }
@@ -304,92 +292,22 @@ async function handleDeepIntake(
     );
   }
 
-  const activeRunId = optionalStringField(record.activeRunId);
-  const previousRun = activeRunId === undefined ? undefined : await state.getRun(activeRunId);
-  if (activeRunId !== undefined && previousRun === undefined) {
-    throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行。");
-  }
-  if (previousRun !== undefined && !isTerminalDeepRunStatus(previousRun.run.status)) {
-    throw new PanelHttpError(
-      409,
-      "deep_intake_active_run_not_terminal",
-      "当前多 Agent 运行仍在进行中，请直接补充要求。",
-    );
-  }
-
-  const requestedConversationId =
-    optionalStringField(record.conversationId) ?? previousRun?.run.conversationId;
   const taskSoilInput = hasTaskSoilPayload(record)
     ? parseDesktopTaskSoilInput(record)
     : undefined;
-  const workspaceDirectory = previousRun === undefined
-    ? optionalStringField(record.workspaceDirectory)
-    : workspaceDirectoryFromDeepRunRecord(previousRun) ?? optionalStringField(record.workspaceDirectory);
-  const conversation = await resolveDeepIntakeConversation({
-    runtime,
-    state,
+  const result = await state.intake({
     aiMode,
-    conversationId: requestedConversationId,
+    conversationId: optionalStringField(record.conversationId),
+    activeRunId: optionalStringField(record.activeRunId),
     message,
     taskSoilInput,
-    workspaceDirectory,
-  });
-
-  const intake = await executeDeepIntakeTurn({
-    runtime,
-    state,
-    aiMode,
-    conversation,
-    message,
-    terminalRun: previousRun,
-  });
-
-  const conversationWithTurn = await state.saveConversation(
-    appendDeepIntakeTurn(
-      mergeDeepConversationTaskSoil(conversation, taskSoilInput),
-      intake,
-    ),
-  );
-
-  if (intake.action === "ask_user") {
-    writeJson(response, 200, {
-      ok: true,
-      status: "needs_input",
-      conversation: projectDeepConversation(conversationWithTurn),
-      intake,
-    });
-    return;
-  }
-
-  if (intake.action === "direct_answer") {
-    writeJson(response, 200, {
-      ok: true,
-      status: "answered",
-      conversation: projectDeepConversation(conversationWithTurn),
-      intake,
-    });
-    return;
-  }
-
-  const normalizedObjective = intake.normalizedObjective;
-  if (normalizedObjective === undefined) {
-    throw new PanelHttpError(
-      500,
-      "deep_intake_missing_objective",
-      "入口理解已要求协作，但缺少标准化目标。",
-    );
-  }
-  const collaborationConversation: DeepConversation = await state.saveConversation({
-    ...conversationWithTurn,
-    currentObjective: normalizedObjective,
-    updatedAt: nowIso(),
-  });
-
+    workspaceDirectory: optionalStringField(record.workspaceDirectory),
+  }).catch((error: unknown) => mapMultiAgentCommandError(error, "intake"));
   writeJson(response, 200, {
     ok: true,
-    status: "plan_ready",
-    conversation: projectDeepConversation(collaborationConversation),
-    intake,
+    status: result.status,
+    conversation: projectDeepConversation(result.conversation),
+    intake: result.intake,
   });
 }
 
@@ -435,118 +353,32 @@ async function handleStartDeepRun(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  let conversation = await state.getConversation(conversationId);
-  if (conversation === undefined) {
-    throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
-  }
   const body = await readJsonBody(request);
   const record = asRecord(body);
   const aiMode = await resolveDeepAiMode(runtime, record.aiMode);
-  const intakeTurnId = optionalStringField(record.intakeTurnId);
-  const confirmedObjective = optionalStringField(record.confirmedObjective);
-  const confirmedPlan = optionalStringField(record.confirmedPlan);
-  const parentRunId = optionalStringField(record.parentRunId);
-  const parentRun =
-    parentRunId === undefined
-      ? undefined
-      : await state.getRun(parentRunId);
-  if (parentRunId !== undefined && parentRun === undefined) {
-    throw new PanelHttpError(404, "deep_run_not_found", "未找到上一轮多 Agent 运行。");
-  }
-  if (parentRun !== undefined && parentRun.run.conversationId !== conversation.conversationId) {
-    throw new PanelHttpError(409, "deep_parent_run_conversation_mismatch", "上一轮运行不属于当前多 Agent 会话。");
-  }
-  if (parentRun !== undefined && !isTerminalDeepRunStatus(parentRun.run.status)) {
-    throw new PanelHttpError(409, "deep_follow_up_requires_terminal_run", "当前多 Agent 运行仍在进行中，请直接补充要求。");
-  }
-  conversation = await applyDeepBirthWorkspace(
-    state,
-    conversation,
-    optionalStringField(record.workspaceDirectory) ?? (parentRun === undefined ? undefined : workspaceDirectoryFromDeepRunRecord(parentRun)),
-  );
-  const sourceIntakeTurn = confirmedDeepIntakeSourceTurn(conversation, intakeTurnId);
-  const confirmedIntakeContext = confirmedDeepIntakeContext({
-    conversation,
-    intakeTurnId,
-    confirmedObjective,
-    confirmedPlan,
-  });
-  if (confirmedObjective !== undefined && confirmedObjective !== conversation.currentObjective) {
-    conversation = await state.saveConversation({
-      ...conversation,
-      currentObjective: confirmedObjective,
-      updatedAt: nowIso(),
-    });
-  }
-
-  const rootRunId = parentRun?.run.rootRunId ?? parentRun?.run.runId;
-  const turnOrdinal = rootRunId === undefined ? undefined : await state.nextTurnOrdinal(rootRunId);
-  const started = await startDeepRunBackground({
-    state,
-    conversation,
+  const started = await state.startRun({
+    conversationId,
     aiMode,
-    parentRunId: parentRun?.run.runId,
-    rootRunId,
-    turnOrdinal,
-    followUpContext:
-      parentRun === undefined
-        ? undefined
-        : buildDeepFollowUpContext(
-            parentRun,
-            sourceIntakeTurn?.userMessage ?? confirmedObjective ?? deepConversationGoal(conversation),
-          ),
-    intakeContext: confirmedIntakeContext,
-  });
+    intakeTurnId: optionalStringField(record.intakeTurnId),
+    confirmedObjective: optionalStringField(record.confirmedObjective),
+    confirmedPlan: optionalStringField(record.confirmedPlan),
+    parentRunId: optionalStringField(record.parentRunId),
+    workspaceDirectory: optionalStringField(record.workspaceDirectory),
+  }).catch((error: unknown) => mapMultiAgentCommandError(error, "run"));
 
   writeJson(response, 202, {
     ok: true,
     status: "running",
-    conversation: projectDeepConversation(conversation),
+    conversation: projectDeepConversation(started.conversation),
     run: projectConversationRunEnvelopeViewBase({
       runId: started.runId,
-      conversationId: conversation.conversationId,
+      conversationId: started.conversation.conversationId,
       status: "running",
       runKind: started.runKind,
       runMode: started.runMode,
       rootRunId: started.rootRunId,
       turnOrdinal: started.turnOrdinal,
     }),
-  });
-}
-
-async function startDeepRunBackground(input: {
-  readonly state: MultiAgentFeature;
-  readonly conversation: DeepConversation;
-  readonly aiMode: ModelRuntimeMode;
-  readonly parentRunId?: string;
-  readonly rootRunId?: string;
-  readonly turnOrdinal?: number;
-  readonly followUpContext?: DeepFollowUpContext;
-  readonly intakeContext?: DeepIntakeContext;
-}): Promise<{
-  readonly runId: string;
-  readonly runKind: AgentArborRunKind;
-  readonly runMode: AgentArborRunMode;
-  readonly rootRunId: string;
-  readonly turnOrdinal: number;
-}> {
-  return input.state.startRun({
-    conversation: input.conversation,
-    aiMode: input.aiMode,
-    parentRunId: input.parentRunId,
-    rootRunId: input.rootRunId,
-    turnOrdinal: input.turnOrdinal,
-    followUpContext: input.followUpContext,
-    intakeContext: input.intakeContext,
-  }).catch((error: unknown) => {
-    if (error instanceof ModelRuntimeConfigurationError) {
-      throw new PanelHttpError(
-        409,
-        "deep_model_not_configured",
-        `多 Agent 运行所需模型未就绪：${error.issue.message}`,
-      );
-    }
-    throw error;
   });
 }
 
@@ -557,18 +389,6 @@ async function handleDeepRunFollowUp(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const previous = await requireDeepRunRecord(state, runId);
-  if (!isTerminalDeepRunStatus(previous.run.status)) {
-    throw new PanelHttpError(
-      409,
-      "deep_follow_up_requires_terminal_run",
-      "当前多 Agent 运行仍在进行中，请直接补充要求。",
-    );
-  }
-  const conversation = await state.getConversation(previous.run.conversationId);
-  if (conversation === undefined) {
-    throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
-  }
   const body = await readJsonBody(request);
   const record = asRecord(body);
   const message = stringField(record.message);
@@ -576,41 +396,20 @@ async function handleDeepRunFollowUp(
     throw new PanelHttpError(400, "empty_follow_up_message", "继续多 Agent 任务需要非空补充。");
   }
   const aiMode = await resolveDeepAiMode(runtime, record.aiMode);
-  const taskSoilInput = hasTaskSoilPayload(record)
-    ? parseDesktopTaskSoilInput(record)
-    : conversation.taskSoilInput;
-  const birthWorkspaceDirectory =
-    conversation.birthWorkspaceDirectory ??
-    workspaceDirectoryFromDeepRunRecord(previous) ??
-    optionalStringField(record.workspaceDirectory);
-  const updatedConversation: DeepConversation = {
-    ...conversation,
-    birthWorkspaceDirectory,
-    taskSoilInput,
-    permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs ?? conversation.permissionBoundaryRefs,
-    updatedAt: nowIso(),
-  };
-  await state.saveConversation(updatedConversation);
-
-  const rootRunId = previous.run.rootRunId ?? previous.run.runId;
-  const turnOrdinal = await state.nextTurnOrdinal(rootRunId);
-  const followUpContext = buildDeepFollowUpContext(previous, message);
-  const started = await startDeepRunBackground({
-    state,
-    conversation: updatedConversation,
+  const started = await state.followUp({
+    runId,
     aiMode,
-    parentRunId: previous.run.runId,
-    rootRunId,
-    turnOrdinal,
-    followUpContext,
-  });
+    message,
+    taskSoilInput: hasTaskSoilPayload(record) ? parseDesktopTaskSoilInput(record) : undefined,
+    workspaceDirectory: optionalStringField(record.workspaceDirectory),
+  }).catch((error: unknown) => mapMultiAgentCommandError(error, "run"));
 
   writeJson(response, 202, {
     ok: true,
     status: "running",
-    conversationId: updatedConversation.conversationId,
+    conversationId: started.conversation.conversationId,
     runId: started.runId,
-    parentRunId: previous.run.runId,
+    parentRunId: started.parentRunId,
   });
 }
 
@@ -822,7 +621,6 @@ async function handleDeepRunControl(
 // ---------------------------------------------------------------------------
 
 async function handleDeepChildConfirmationDecision(
-  runtime: PanelRuntime,
   state: MultiAgentFeature,
   runId: string,
   childRunId: string,
@@ -837,13 +635,11 @@ async function handleDeepChildConfirmationDecision(
     childRunId,
     confirmationId,
     decision: parsed as DeepChildConfirmationDecision,
-    fallbackInformationAccess: await runtime.configCenter.getInformationAccessConfig(),
   }).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, { ok: true, view: await projectDeepRunViewForResponse(state, updated) });
 }
 
 async function handleDeepChildParentMessage(
-  runtime: PanelRuntime,
   state: MultiAgentFeature,
   runId: string,
   childRunId: string,
@@ -856,7 +652,6 @@ async function handleDeepChildParentMessage(
     runId,
     childRunId,
     message,
-    fallbackInformationAccess: await runtime.configCenter.getInformationAccessConfig(),
   }).catch(mapMultiAgentFeatureError);
   if (result.status === "rejected") {
     throwDeepChildInstructionQueueRejection(result.result);
@@ -877,182 +672,27 @@ async function handleDeepChildParentMessage(
 }
 
 async function handleDeepRunResynthesize(
-  runtime: PanelRuntime,
   state: MultiAgentFeature,
   runId: string,
   response: ServerResponse,
 ): Promise<void> {
   const updated = await state.resynthesize({
     runId,
-    fallbackInformationAccess: await runtime.configCenter.getInformationAccessConfig(),
   }).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, { ok: true, view: await projectDeepRunViewForResponse(state, updated) });
 }
 
-// ---------------------------------------------------------------------------
-// Intake 辅助：会话解析 / 模型 turn / 安全上下文
-// ---------------------------------------------------------------------------
-
-async function resolveDeepIntakeConversation(input: {
-  readonly runtime: PanelRuntime;
-  readonly state: MultiAgentFeature;
-  readonly aiMode: ModelRuntimeMode;
-  readonly conversationId?: string;
-  readonly message: string;
-  readonly taskSoilInput?: DesktopTaskSoilInput;
-  readonly workspaceDirectory?: string;
-}): Promise<DeepConversation> {
-  if (input.conversationId !== undefined) {
-    const existing = await input.state.getConversation(input.conversationId);
-    if (existing === undefined) {
-      throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
-    }
-    return mergeDeepConversationTaskSoil(existing, input.taskSoilInput, input.workspaceDirectory);
+function mapMultiAgentCommandError(error: unknown, operation: "intake" | "run"): never {
+  if (error instanceof ModelRuntimeConfigurationError) {
+    throw new PanelHttpError(
+      409,
+      "deep_model_not_configured",
+      operation === "intake"
+        ? `多 Agent 入口理解所需模型未就绪：${error.issue.message}`
+        : `多 Agent 运行所需模型未就绪：${error.issue.message}`,
+    );
   }
-  return input.state.createConversation({
-    aiMode: input.aiMode,
-    title: optionalStringField(input.message),
-    goal: input.message,
-    birthWorkspaceDirectory: input.workspaceDirectory,
-    taskSoilInput: input.taskSoilInput,
-  });
-}
-
-async function executeDeepIntakeTurn(input: {
-  readonly runtime: PanelRuntime;
-  readonly state: MultiAgentFeature;
-  readonly aiMode: ModelRuntimeMode;
-  readonly conversation: DeepConversation;
-  readonly message: string;
-  readonly terminalRun?: DeepRunRecord;
-}): Promise<DeepIntakeTurn> {
-  const [capabilitySnapshot, informationAccess] = await Promise.all([
-    input.runtime.capabilityCenter.snapshot(workspaceSnapshotInput(input.conversation.birthWorkspaceDirectory)),
-    input.runtime.configCenter.getInformationAccessConfig(),
-  ]);
-  return input.state.executeIntake({
-    aiMode: input.aiMode,
-    conversation: input.conversation,
-    message: input.message,
-    terminalRun: input.terminalRun,
-    capabilitySnapshot,
-    informationAccess,
-  }).catch((error: unknown) => {
-    if (error instanceof ModelRuntimeConfigurationError) {
-      throw new PanelHttpError(
-        409,
-        "deep_model_not_configured",
-        `多 Agent 入口理解所需模型未就绪：${error.issue.message}`,
-      );
-    }
-    throw error;
-  });
-}
-
-function mergeDeepConversationTaskSoil(
-  conversation: DeepConversation,
-  taskSoilInput: DesktopTaskSoilInput | undefined,
-  birthWorkspaceDirectory?: string,
-): DeepConversation {
-  const nextBirthWorkspaceDirectory =
-    conversation.birthWorkspaceDirectory ?? optionalStringField(birthWorkspaceDirectory);
-  if (
-    taskSoilInput === undefined &&
-    nextBirthWorkspaceDirectory === conversation.birthWorkspaceDirectory
-  ) {
-    return conversation;
-  }
-  return {
-    ...conversation,
-    birthWorkspaceDirectory: nextBirthWorkspaceDirectory,
-    taskSoilInput: taskSoilInput ?? conversation.taskSoilInput,
-    permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs ?? conversation.permissionBoundaryRefs,
-    updatedAt: nowIso(),
-  };
-}
-
-async function applyDeepBirthWorkspace(
-  state: MultiAgentFeature,
-  conversation: DeepConversation,
-  birthWorkspaceDirectory: string | undefined,
-): Promise<DeepConversation> {
-  const updated = mergeDeepConversationTaskSoil(conversation, undefined, birthWorkspaceDirectory);
-  return updated === conversation ? conversation : state.saveConversation(updated);
-}
-
-function workspaceSnapshotInput(
-  workspaceDirectory: string | undefined,
-): { readonly workspaceDirectory?: string } {
-  const normalized = optionalStringField(workspaceDirectory);
-  return normalized === undefined ? {} : { workspaceDirectory: normalized };
-}
-
-function appendDeepIntakeTurn(
-  conversation: DeepConversation,
-  intake: DeepIntakeTurn,
-): DeepConversation {
-  return {
-    ...conversation,
-    intakeTurns: [...(conversation.intakeTurns ?? []), intake],
-    updatedAt: intake.createdAt,
-  };
-}
-
-function intakeContextFromTurn(intake: DeepIntakeTurn): DeepIntakeContext {
-  return {
-    normalizedObjective: intake.normalizedObjective,
-    plan: intake.plan,
-    assistantMessage: intake.assistantMessage,
-    uncertainty: intake.uncertainty,
-    confidence: intake.confidence,
-  };
-}
-
-function confirmedDeepIntakeContext(input: {
-  readonly conversation: DeepConversation;
-  readonly intakeTurnId?: string;
-  readonly confirmedObjective?: string;
-  readonly confirmedPlan?: string;
-}): DeepIntakeContext | undefined {
-  const sourceTurn = confirmedDeepIntakeSourceTurn(input.conversation, input.intakeTurnId);
-  if (
-    sourceTurn === undefined &&
-    input.confirmedObjective === undefined &&
-    input.confirmedPlan === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    normalizedObjective: input.confirmedObjective ?? sourceTurn?.normalizedObjective ?? input.conversation.currentObjective,
-    plan: input.confirmedPlan ?? sourceTurn?.plan,
-    assistantMessage: sourceTurn?.assistantMessage ?? "用户已确认计划，开始深度研究。",
-    uncertainty: sourceTurn?.uncertainty,
-    confidence: sourceTurn?.confidence,
-  };
-}
-
-function confirmedDeepIntakeSourceTurn(
-  conversation: DeepConversation,
-  intakeTurnId: string | undefined,
-): DeepIntakeTurn | undefined {
-  return intakeTurnId === undefined
-    ? [...(conversation.intakeTurns ?? [])].reverse().find((turn) => turn.action === "start_collaboration")
-    : conversation.intakeTurns?.find((turn) => turn.turnId === intakeTurnId);
-}
-
-function deepConversationGoal(conversation: DeepConversation): string {
-  return conversation.currentObjective ?? conversation.goal;
-}
-
-async function requireDeepRunRecord(
-  state: MultiAgentFeature,
-  runId: string,
-): Promise<DeepRunRecord> {
-  const record = await state.getRun(runId);
-  if (record === undefined) {
-    throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行。");
-  }
-  return record;
+  return mapMultiAgentFeatureError(error);
 }
 
 function mapMultiAgentFeatureError(error: unknown): never {
@@ -1064,13 +704,55 @@ function mapMultiAgentFeatureError(error: unknown): never {
       throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
     case "conversation_busy":
       throw new PanelHttpError(409, "deep_conversation_busy", "多 Agent 会话仍有运行中的协作，暂不能删除。");
+    case "intake_active_run_not_terminal":
+      throw new PanelHttpError(
+        409,
+        "deep_intake_active_run_not_terminal",
+        "当前多 Agent 运行仍在进行中，请直接补充要求。",
+      );
+    case "intake_missing_objective":
+      throw new PanelHttpError(
+        500,
+        "deep_intake_missing_objective",
+        "入口理解已要求协作，但缺少标准化目标。",
+      );
     case "run_not_found":
       throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行。");
+    case "run_not_active":
+      throw new PanelHttpError(
+        409,
+        "deep_run_not_active",
+        "该多 Agent 运行已结束，不能再接收运行控制请求。",
+      );
+    case "run_ai_mode_missing":
+      throw new PanelHttpError(
+        409,
+        "deep_run_ai_mode_missing",
+        "该多 Agent 运行缺少冻结的模型运行模式，属于失效开发期数据，无法继续执行。",
+      );
+    case "run_continuation_facts_missing":
+      throw new PanelHttpError(
+        409,
+        "deep_run_continuation_facts_missing",
+        "该多 Agent 运行缺少冻结的继续执行事实，无法安全恢复子 Agent 或重新综合。",
+      );
     case "run_control_not_found":
       throw new PanelHttpError(
         404,
         "deep_run_control_not_found",
         "未找到该 run 的控制句柄（run 不存在或已被回收）。",
+      );
+    case "parent_run_conversation_mismatch":
+      throw new PanelHttpError(
+        409,
+        "deep_parent_run_conversation_mismatch",
+        "上一轮运行不属于当前多 Agent 会话。",
+      );
+    case "follow_up_requires_terminal_run":
+      throw new PanelHttpError(
+        409,
+        "deep_follow_up_requires_terminal_run",
+        "当前多 Agent 运行仍在进行中，请直接补充要求。",
       );
     case "child_not_found":
       throw new PanelHttpError(404, "deep_child_run_not_found", "未找到该子 Agent。");

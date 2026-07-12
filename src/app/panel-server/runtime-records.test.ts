@@ -518,7 +518,8 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
 
   assert.equal(runtimeEvent.summary.includes("hidden-token"), true);
   assert.equal(modelCall.requestId, "request-1");
-  assert.equal(toolCalls[0]?.command, "pnpm test");
+  assert.equal(toolCalls[0]?.status, "completed");
+  assert.deepEqual(toolCalls[0]?.eventRefs, ["run-1:event:1"]);
   assert.equal(JSON.stringify(toolCalls).includes('"display"'), false);
   assert.equal(JSON.stringify(toolCalls).includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(confirmations[0]?.status, "guidance");
@@ -531,7 +532,56 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
   assert.deepEqual(confirmations[0]?.sourceRefs, ["tool:call-shell-confirmed"]);
 });
 
-test("runtime record mapper keeps commandLine as the persisted command fact", () => {
+test("runtime event persistence clones the canonical tool fact snapshot without a second projection", () => {
+  const source = eventEntry({
+    sequence: 1,
+    type: "tool.completed",
+    payload: {
+      callId: "tool-large-read",
+      toolName: "read_file",
+      input: { path: "large.txt" },
+      output: {
+        continuation: {
+          toolName: "read_file",
+          input: { path: "large.txt", startChar: 64_000 },
+        },
+        factTruncation: { output: true, originalChars: 120_000 },
+        result: { path: "large.txt", content: `SINGLE_DURABLE_BODY_SENTINEL${"x".repeat(4_000)}` },
+      },
+      durationMs: 12,
+    },
+  });
+  const record = toRuntimeEventRecord("run-1", {
+    sequence: 1,
+    type: "tool.completed",
+    summary: "large read completed",
+    scope: "aboveground",
+    severity: "info",
+    progress: { status: "completed", label: "Completed" },
+    refs: [{ kind: "tool_call", id: "tool-large-read" }],
+    traceId: "trace-1",
+    intent: "tool_completed",
+    from: { id: "runtime", role: "runtime" },
+    createdAt: "2026-05-31T00:00:02.000Z",
+    recordedAt: "2026-05-31T00:00:03.000Z",
+  }, source);
+  const payload = record.payload as Readonly<Record<string, unknown>>;
+  const output = payload.output as Readonly<Record<string, unknown>>;
+
+  assert.deepEqual(payload, source.message.payload);
+  assert.notEqual(payload, source.message.payload);
+  assert.equal(payload.callId, "tool-large-read");
+  assert.deepEqual(output.continuation, {
+    toolName: "read_file",
+    input: { path: "large.txt", startChar: 64_000 },
+  });
+  const toolCalls = toRuntimeToolCallRecords("run-1", [], [source]);
+  const serializedSnapshot = JSON.stringify({ events: [record], toolCalls });
+  assert.equal(serializedSnapshot.match(/SINGLE_DURABLE_BODY_SENTINEL/g)?.length, 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(toolCalls[0] ?? {}, "output"), false);
+});
+
+test("runtime tool-call index does not duplicate command input or output", () => {
   const toolCalls = toRuntimeToolCallRecords("run-1", [
     streamEvent({
       sequence: 1,
@@ -570,9 +620,56 @@ test("runtime record mapper keeps commandLine as the persisted command fact", ()
     }),
   ]);
 
-  assert.equal(toolCalls[0]?.command, `node -e "console.log('fragile quoted shell')"`);
-  assert.equal(toolCalls[0]?.command?.includes(`-e console.log('fragile quoted shell')`), false);
-  assert.equal(toolCalls[0]?.preview, `node -e "console.log('fragile quoted shell')"`);
+  assert.equal(toolCalls[0]?.status, "completed");
+  assert.equal(Object.prototype.hasOwnProperty.call(toolCalls[0] ?? {}, "input"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(toolCalls[0] ?? {}, "output"), false);
+  assert.equal(JSON.stringify(toolCalls[0]).includes("fragile quoted shell"), false);
+});
+
+test("runtime tool records keep the first terminal fact and its matching details", () => {
+  const entries: readonly EventLogEntry[] = [
+    eventEntry({
+      sequence: 1,
+      type: "tool.requested",
+      payload: { callId: "call-terminal", toolName: "read_file", input: { path: "first.md" } },
+    }),
+    eventEntry({
+      sequence: 2,
+      type: "tool.completed",
+      payload: {
+        callId: "call-terminal",
+        toolName: "read_file",
+        input: { path: "first.md" },
+        output: {
+          action: "read_file",
+          summary: "first.md read",
+          result: { path: "first.md", bytes: 12 },
+        },
+        durationMs: 2,
+      },
+    }),
+    eventEntry({
+      sequence: 3,
+      type: "tool.failed",
+      payload: {
+        callId: "call-terminal",
+        toolName: "shell_command",
+        input: { command: "late command" },
+        output: { action: "shell_command", result: { commandLine: "late command", exitCode: 1 } },
+        error: "late failure must not replace completion",
+        durationMs: 3,
+      },
+    }),
+  ];
+
+  const calls = toRuntimeToolCallRecords("run-first-terminal", [], entries);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.status, "completed");
+  assert.equal(calls[0]?.toolName, "read_file");
+  assert.equal(calls[0]?.error, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(calls[0] ?? {}, "input"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(calls[0] ?? {}, "output"), false);
 });
 
 test("runtime confirmation records title decisions without generic continue copy", () => {
@@ -670,17 +767,20 @@ test("runtime record mapper persists ordinary tool previews without diagnostic c
   const serialized = JSON.stringify(toolCalls);
   const listedCall = toolCalls.find((call) => call.callId === "tool-list");
 
-  assert.equal(toolCalls.find((call) => call.callId === "tool-command")?.preview, "pnpm test");
-  assert.equal(listedCall?.preview, "file README.md\nfile package.json");
-  assert.equal(toolCalls.find((call) => call.callId === "tool-edit")?.preview, "- old visible line\n+ new visible line");
-  assert.equal(toolCalls.find((call) => call.callId === "tool-create")?.preview, "created.md · 已创建\n文件：created.md");
-  assert.equal(toolCalls.find((call) => call.callId === "tool-delete")?.preview, "old.md · 已删除\n文件：old.md");
+  for (const call of toolCalls) {
+    for (const legacyKey of ["input", "output", "action", "path", "query", "command", "exitCode", "summary", "preview", "truncated", "display", "projection", "envelope"]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(call, legacyKey), false);
+    }
+  }
+
+  assert.equal(toolCalls.find((call) => call.callId === "tool-command")?.status, "completed");
+  assert.equal(listedCall?.status, "completed");
   assert.equal(serialized.includes('"display"'), false);
   assert.equal(serialized.includes("exit 0"), false);
   assert.equal(serialized.includes("32 -> 18 chars"), false);
   assert.equal(serialized.includes("RAW_STDOUT_SENTINEL"), false);
-  assert.equal(serialized.includes("old visible line"), true);
-  assert.equal(serialized.includes("new visible line"), true);
+  assert.equal(serialized.includes("old visible line"), false);
+  assert.equal(serialized.includes("new visible line"), false);
 });
 
 test("runtime tool call records preserve tool and process error domains", () => {
@@ -730,6 +830,8 @@ test("runtime tool call records preserve tool and process error domains", () => 
         toolName: "shell_command",
         input: { command: "pnpm", args: ["missing"] },
         error: "spawn pnpm ENOENT",
+        errorDomain: "process_error",
+        errorFacts: { code: "ENOENT", command: "pnpm" },
         output: {
           result: {
             command: "pnpm",
@@ -901,6 +1003,7 @@ test("runtime record mapper persists completed read provider failure facts", () 
         callId: "tool-read-http",
         toolName: "read",
         input: { ref: "http://127.0.0.1:54321/status" },
+        errorFacts,
         output: {
           summary: "资料读取已完成。",
           error: display.error,
@@ -919,17 +1022,10 @@ test("runtime record mapper persists completed read provider failure facts", () 
 
   assert.equal(call?.status, "completed");
   assert.equal(call?.errorFacts?.code, "ECONNREFUSED");
-  assert.equal(call?.preview?.includes("ECONNREFUSED"), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(call ?? {}, "output"), false);
 });
 
 test("runtime record mapper persists search invalid-input messages", () => {
-  const display = {
-    kind: "search_results" as const,
-    query: "",
-    status: "invalid-input",
-    message: "search requires a non-empty query.",
-    results: [],
-  };
   const toolCalls = toRuntimeToolCallRecords("run-1", [
     streamEvent({
       sequence: 1,
@@ -951,7 +1047,10 @@ test("runtime record mapper persists search invalid-input messages", () => {
         input: { query: "" },
         output: {
           action: "search",
-          display,
+          query: "",
+          status: "invalid-input",
+          message: "search requires a non-empty query.",
+          results: [],
         },
       },
     }),
@@ -959,8 +1058,8 @@ test("runtime record mapper persists search invalid-input messages", () => {
   const call = toolCalls.find((item) => item.callId === "tool-search-empty");
 
   assert.equal(JSON.stringify(call).includes('"display"'), false);
-  assert.equal(call?.preview?.includes("invalid-input"), true);
-  assert.equal(call?.preview?.includes("search requires a non-empty query."), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(call ?? {}, "input"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(call ?? {}, "output"), false);
 });
 
 test("runtime text compaction preserves text before truncating", () => {

@@ -1,11 +1,12 @@
 import path from "node:path";
+import { isToolCallEventMessageType } from "../../domain/common.js";
 import type { SanitizedWorkspaceConfig } from "../../domain/config/index.js";
-import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import type {
   ToolErrorDomain,
   ToolErrorFacts,
+  ToolFactValue,
 } from "../../domain/tools/index.js";
-import { isToolErrorDomain, normalizeToolErrorFacts, toolDisplayName } from "../../domain/tools/index.js";
+import { isToolErrorDomain } from "../../domain/tools/index.js";
 import type {
   RuntimeRunContinuationAvailability,
   RuntimeArtifactRecord,
@@ -30,14 +31,8 @@ import type {
   PanelRunTraceReadModel,
   PanelRunTranscript,
 } from "../panel-run-read-model.js";
-import { commandTextFromToolResult } from "../command-text.js";
-import { safeCommandToolPreview, safeReadFileToolPreview } from "../safe-tool-preview.js";
-import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 import { reduceToolCallEventFacts } from "../run-read-model/tool-call-event-reducer.js";
-import {
-  normalizeToolDisplayForOperation,
-  toolDisplayProjectionOrUndefined,
-} from "../tool-display-normalization.js";
+import { runtimeEventRecordId } from "../run-runtime-core/event-stream.js";
 import { normalizeModelFacingText, sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import { confirmationActionSummaryText } from "../text-projection/confirmation-copy.js";
 import { asRecord, optionalString, unique } from "./request-parsers.js";
@@ -53,10 +48,6 @@ export type RuntimeRunRecordWithErrorDomain = RuntimeRunRecord & {
 export type RuntimeToolCallRecordWithErrorDomain = RuntimeToolCallRecord & {
   readonly errorDomain?: RuntimeErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
-};
-
-type LocalToolDetails = Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "truncated" | "error" | "errorDomain" | "errorFacts"> & {
-  readonly display?: ToolDisplayProjection;
 };
 
 export function createRuntimeWorkspaceRecord(
@@ -121,10 +112,11 @@ export function isTerminalPanelRunStatus(status: PanelRunStatus): boolean {
 
 export function toRuntimeEventRecord(
   runId: string,
-  event: PanelRunTraceReadModel["events"][number]
+  event: PanelRunTraceReadModel["events"][number],
+  sourceEntry?: EventLogEntry
 ): RuntimeEventRecord {
   return {
-    eventId: `${runId}:event:${event.sequence}`,
+    eventId: runtimeEventRecordId(runId, event.sequence),
     runId,
     sequence: event.sequence,
     type: event.type,
@@ -136,10 +128,23 @@ export function toRuntimeEventRecord(
     traceId: event.traceId,
     taskId: event.taskId,
     intent: event.intent,
+    payload: durableToolLifecyclePayload(sourceEntry),
     createdAt: event.createdAt,
     recordedAt: event.recordedAt,
   };
 }
+
+function durableToolLifecyclePayload(entry: EventLogEntry | undefined): RuntimeEventRecord["payload"] {
+  if (entry === undefined || !isToolCallEventMessageType(entry.type)) {
+    return undefined;
+  }
+  const payload = entry.message.payload as ToolFactValue | undefined;
+  if (payload === undefined) {
+    return undefined;
+  }
+  return globalThis.structuredClone(payload);
+}
+
 
 export function toRuntimeModelCallRecord(
   runId: string,
@@ -169,29 +174,20 @@ export function toRuntimeToolCallRecords(
   _events: readonly PanelRunStreamEvent[],
   eventEntries: readonly EventLogEntry[]
 ): readonly RuntimeToolCallRecordWithErrorDomain[] {
-  const detailsByCallId = localToolDetailsByCallId(eventEntries);
-  return reduceToolCallEventFacts(eventEntries).map((fact) => {
-    const detail = detailsByCallId.get(fact.callId);
-    return {
-      callId: fact.callId,
-      runId,
-      toolName: fact.toolName,
-      status: fact.status,
-      action: detail?.action,
-      path: detail?.path,
-      query: detail?.query,
-      command: detail?.command,
-      exitCode: detail?.exitCode,
-      summary: cleanOrdinaryToolText(detail?.summary),
-      preview: cleanOrdinaryToolText(detail?.preview),
-      truncated: detail?.truncated,
-      error: detail?.error ?? fact.error,
-      errorFacts: detail?.errorFacts ?? fact.errorFacts,
-      errorDomain: detail?.errorDomain ?? fact.errorDomain,
-      eventRefs: fact.eventSequences.map((sequence) => `${runId}:event:${sequence}`),
-      createdAt: fact.createdAt,
-    };
-  });
+  return reduceToolCallEventFacts(eventEntries).map((fact) => ({
+    callId: fact.callId,
+    runId,
+    toolName: fact.toolName,
+    status: fact.status,
+    error: fact.error,
+    errorFacts: fact.errorFacts,
+    errorDomain: fact.errorDomain,
+    durationMs: fact.durationMs,
+    confirmationId: fact.confirmationId,
+    eventRefs: fact.eventSequences.map((sequence) => runtimeEventRecordId(runId, sequence)),
+    createdAt: fact.createdAt,
+    terminalAt: fact.terminalAt,
+  }));
 }
 
 export function toRuntimeArtifactRecords(job: PanelRunJob): readonly RuntimeArtifactRecord[] {
@@ -312,10 +308,6 @@ export function compactRuntimeText(value: string, maxLength: number): string {
   return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
-function compactFactsText(facts: ToolErrorFacts): string {
-  return JSON.stringify(facts).slice(0, 500);
-}
-
 function confirmationRecordTitle(status: RuntimeConfirmationRecord["status"]): string {
   if (status === "guidance") return "补充要求";
   if (status === "denied") return "已不执行";
@@ -397,21 +389,6 @@ function resultSummaryForJob(job: PanelRunJob): {
       ),
     };
   }
-  const legacyCanvas = legacyWorkSessionCanvasForRuntimeRecord(canvas);
-  if (legacyCanvas?.workSession.directAnswer !== undefined) {
-    const answer = preserveRuntimeAnswerText(legacyCanvas.workSession.directAnswer.answer, 128_000);
-    return {
-      title: "已回答",
-      summary: compactRuntimeText(answer, 900),
-      answer,
-    };
-  }
-  if (legacyCanvas?.workSession.report !== undefined) {
-    return {
-      title: legacyCanvas.workSession.report.title,
-      summary: compactRuntimeText(legacyCanvas.workSession.report.decisionSummary, 900),
-    };
-  }
   if (canvas?.kind === "underground_deep_canvas") {
     return {
       title: canvas.underground.status === "approved_package_created" ? "方向已形成" : "深度模式已停止",
@@ -422,14 +399,6 @@ function resultSummaryForJob(job: PanelRunJob): {
     };
   }
   return undefined;
-}
-
-type RuntimeRecordLegacyWorkSessionCanvas = Extract<PanelRunCanvasReadModel, { readonly kind: "work_session_canvas" }>;
-
-function legacyWorkSessionCanvasForRuntimeRecord(
-  canvas: PanelRunCanvasReadModel | undefined
-): RuntimeRecordLegacyWorkSessionCanvas | undefined {
-  return canvas?.kind === "work_session_canvas" ? canvas : undefined;
 }
 
 function runtimeStopReasonForJob(job: PanelRunJob): string | undefined {
@@ -603,357 +572,7 @@ function isUiSubmitErrorCode(code: string): boolean {
 }
 
 function isProcessTool(toolName: string | undefined): boolean {
-  return toolName === "run_command" || toolName === "shell_command";
-}
-
-function localToolDetailsByCallId(
-  eventEntries: readonly EventLogEntry[]
-): Map<string, LocalToolDetails> {
-  const details = new Map<string, LocalToolDetails>();
-  for (const entry of eventEntries) {
-    if (entry.type !== "tool.completed" && entry.type !== "tool.failed" && entry.type !== "tool.cancelled") {
-      continue;
-    }
-    const payload = asRecord(entry.message.payload);
-    const callId = optionalString(payload.callId);
-    if (callId === undefined) {
-      continue;
-    }
-    const output = asRecord(payload.output);
-    const input = asRecord(payload.input);
-    const result = asRecord(output.result);
-    const toolName = optionalString(payload.toolName) ?? optionalString(output.action);
-    const pathValue = optionalString(result.path) ?? optionalString(input.path);
-    const error = optionalString(payload.error) ?? optionalString(payload.reason);
-    const payloadErrorDomain = errorDomainOrUndefined(payload.errorDomain);
-    const payloadErrorFacts = normalizeToolErrorFacts(payload.errorFacts);
-    const outputErrorFacts = normalizeToolErrorFacts(output.errorFacts) ?? normalizeToolErrorFacts(result.errorFacts);
-    const display = toolDisplayForRuntimeCall(toolName, input, output);
-    const preview = persistedToolPreview(optionalString(payload.toolName), output, result, payload);
-    details.set(callId, {
-      action: optionalString(output.action) ?? toolName,
-      path: pathValue,
-      query: optionalString(result.query) ?? optionalString(input.query),
-      command: commandTextFromToolResult(result, input),
-      exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
-      summary: persistedToolSummary(toolName, display, output, preview),
-      preview,
-      display,
-      truncated: output.truncated === true,
-      error,
-      errorFacts: outputErrorFacts ?? payloadErrorFacts,
-      errorDomain: payloadErrorDomain ?? inferToolCallErrorDomain({
-        eventType: entry.type === "tool.failed" ? "tool.failed" : "tool.completed",
-        toolName,
-        error,
-        exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
-      }),
-    });
-  }
-  return details;
-}
-
-function toolDisplayOrUndefined(value: unknown): ToolDisplayProjection | undefined {
-  const display = toolDisplayProjectionOrUndefined(value);
-  if (display === undefined) {
-    return undefined;
-  }
-  if (display.kind !== "generic_tool_summary") {
-    return display;
-  }
-  return {
-    ...display,
-    action: display.action === undefined ? undefined : displayActionLabel(display.action),
-  };
-}
-
-function toolDisplayForRuntimeCall(
-  toolName: string | undefined,
-  input: Readonly<Record<string, unknown>>,
-  output: Readonly<Record<string, unknown>>,
-): ToolDisplayProjection | undefined {
-  const result = asRecord(output.result);
-  if (toolName === undefined) {
-    return toolDisplayOrUndefined(output.display);
-  }
-  if (toolName === "read") {
-    return {
-      kind: "read_result",
-      ref: optionalString(input.ref),
-      status: optionalString(result.status),
-      title: optionalString(result.title),
-      url: optionalString(result.url),
-      uri: optionalString(result.uri),
-      contentPreview: optionalString(result.contentPreview),
-      error: optionalString(result.error) ?? optionalString(output.error),
-      errorFacts: normalizeToolErrorFacts(result.errorFacts) ?? normalizeToolErrorFacts(output.errorFacts),
-      truncated: booleanOrUndefined(result.truncated),
-    };
-  }
-  if (toolName === "run_command" || toolName === "shell_command") {
-    return {
-      kind: "command_summary",
-      command: optionalString(result.command) ?? optionalString(input.command),
-      args: stringArrayFrom(result.args).length > 0 ? stringArrayFrom(result.args) : stringArrayFrom(input.args),
-      commandLine: commandTextFromToolResult(result, input),
-      cwd: optionalString(result.cwd) ?? optionalString(input.cwd),
-      shell: optionalString(asRecord(result.shell).label),
-      exitCode: numberOrUndefined(result.exitCode),
-      timedOut: booleanOrUndefined(result.timedOut),
-      background: booleanOrUndefined(result.background),
-      pid: numberOrUndefined(result.pid),
-      logRef: optionalString(result.logRef),
-      logPath: optionalString(result.logPath),
-      stopCommand: optionalString(result.stopCommand),
-      durationMs: numberOrUndefined(result.durationMs),
-      waitForPort: numberOrUndefined(result.waitForPort),
-      portReady: booleanOrUndefined(result.portReady),
-      stdoutTruncated: booleanOrUndefined(result.stdoutTruncated),
-      stderrTruncated: booleanOrUndefined(result.stderrTruncated),
-      stdoutChars: numberOrUndefined(result.stdoutChars),
-      stderrChars: numberOrUndefined(result.stderrChars),
-      stdoutOmittedChars: numberOrUndefined(result.stdoutOmittedChars),
-      stderrOmittedChars: numberOrUndefined(result.stderrOmittedChars),
-    };
-  }
-  return normalizeToolDisplayForOperation({
-    toolName,
-    input,
-    output,
-    existingDisplay: output.display,
-    truncated: output.truncated === true,
-  });
-}
-
-function displayActionLabel(value: string): string {
-  return /^[a-z][a-z0-9_:-]*$/i.test(value) ? toolDisplayName(value) : value;
-}
-
-function persistedToolPreview(
-  toolName: string | undefined,
-  output: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>,
-  payload: Readonly<Record<string, unknown>>
-): string | undefined {
-  const error = optionalString(payload.error);
-  if (error !== undefined) {
-    return compactRuntimeText(error, 800);
-  }
-  if (toolName === "read_file") {
-    return persistedReadFilePreview(output, result);
-  }
-  if (toolName === "list_dir") {
-    const entries = Array.isArray(result.entries) ? result.entries : [];
-    const lines = entries.slice(0, 12).map((entry) => {
-      const record = asRecord(entry);
-      const name = optionalString(record.name) ?? "unknown";
-      const kind = optionalString(record.kind) ?? "entry";
-      return `${kind} ${name}`;
-    });
-    return lines.length === 0 ? cleanOrdinaryToolText(optionalString(output.summary)) : lines.join("\n");
-  }
-  if (toolName === "grep_files") {
-    const matches = Array.isArray(result.matches) ? result.matches : [];
-    const lines = matches.slice(0, 12).map((match) => {
-      const record = asRecord(match);
-      const matchPath = optionalString(record.path) ?? "unknown";
-      const line = typeof record.line === "number" ? record.line : "?";
-      const preview = optionalString(record.preview) ?? "";
-      return `${matchPath}:${line} ${preview}`;
-    });
-    return lines.length === 0 ? cleanOrdinaryToolText(optionalString(output.summary)) : lines.join("\n");
-  }
-  if (toolName === "search") {
-    const display = toolDisplayOrUndefined(output.display);
-    if (display?.kind === "search_results") {
-      return compactRuntimeText([
-        display.query,
-        display.status,
-        display.message,
-        `results: ${display.resultsReturned ?? display.results.length}`,
-      ].filter((item): item is string => item !== undefined && item.length > 0).join(" · "), 900);
-    }
-    return cleanOrdinaryToolText(optionalString(output.summary));
-  }
-  if (toolName === "write_file" || toolName === "create_file" || toolName === "edit_file" || toolName === "delete_file") {
-    return persistedFileChangePreview(toolName, asRecord(payload.input), output, result);
-  }
-  if (toolName === "run_command" || toolName === "shell_command") {
-    return persistedCommandPreview(output, result);
-  }
-  if (toolName === "browser_snapshot") {
-    const title = optionalString(result.title);
-    const url = optionalString(result.url);
-    const text = optionalString(result.text);
-    const headline = [title, url].filter((item): item is string => item !== undefined).join(" · ");
-    return compactRuntimeText(
-      [headline, text].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
-      900
-    );
-  }
-  if (toolName === "http_request") {
-    const method = optionalString(result.method);
-    const url = optionalString(result.url);
-    const statusCode = typeof result.statusCode === "number" ? result.statusCode : undefined;
-    const statusText = optionalString(result.statusText);
-    const body = optionalString(result.body);
-    const headline = [
-      method,
-      url,
-      statusCode === undefined ? undefined : `${statusCode}${statusText === undefined ? "" : ` ${statusText}`}`,
-    ].filter((item): item is string => item !== undefined).join(" · ");
-    return compactRuntimeText(
-      [headline, body].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
-      900
-    );
-  }
-  if (toolName === "read") {
-    const display = toolDisplayOrUndefined(output.display);
-    if (display?.kind === "read_result") {
-      return persistedReadPreviewFromDisplay(display, asRecord(payload.input));
-    }
-    const title = optionalString(result.title);
-    const uri = optionalString(result.uri);
-    const contentPreview = optionalString(result.contentPreview);
-    const error = optionalString(output.error);
-    const errorFacts = normalizeToolErrorFacts(output.errorFacts);
-    const headline = [title, uri].filter((item): item is string => item !== undefined).join(" · ");
-    return compactRuntimeText(
-      [
-        headline,
-        error,
-        errorFacts === undefined ? undefined : `errorFacts: ${compactFactsText(errorFacts)}`,
-        contentPreview,
-      ].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
-      900
-    );
-  }
-  return cleanOrdinaryToolText(optionalString(output.summary));
-}
-
-function persistedToolSummary(
-  toolName: string | undefined,
-  display: ToolDisplayProjection | undefined,
-  output: Readonly<Record<string, unknown>>,
-  preview: string | undefined,
-): string | undefined {
-  if (display?.kind === "directory_listing") {
-    return compactRuntimeText([
-      toolPathLabel(display.path),
-      `${display.totalEntries ?? display.entriesReturned ?? display.entries.length} 项`,
-      display.depth === undefined ? undefined : `深度 ${display.depth}`,
-    ].filter((item): item is string => item !== undefined && item.length > 0).join(" · "), 240);
-  }
-  if (display?.kind === "file_search_results") {
-    return compactRuntimeText([
-      cleanOrdinaryToolText(display.query),
-      toolPathLabel(display.path),
-      `${display.matchesReturned ?? display.matches.length} 处匹配`,
-    ].filter((item): item is string => item !== undefined && item.length > 0).join(" · "), 240);
-  }
-  if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
-    return compactRuntimeText(fileMutationSummary(display), 240);
-  }
-  if (display?.kind === "command_summary" && display.commandLine !== undefined) {
-    return compactRuntimeText(display.commandLine, 240);
-  }
-  if (display?.kind === "generic_tool_summary") {
-    return cleanOrdinaryToolText(display.summary ?? display.action);
-  }
-  if (toolName === "run_command" || toolName === "shell_command") {
-    return preview === undefined ? cleanOrdinaryToolText(optionalString(output.summary)) : compactRuntimeText(preview.split("\n")[0] ?? preview, 240);
-  }
-  return cleanOrdinaryToolText(optionalString(output.summary));
-}
-
-function persistedReadPreviewFromDisplay(
-  display: Extract<ToolDisplayProjection, { readonly kind: "read_result" }>,
-  input: Readonly<Record<string, unknown>>
-): string | undefined {
-  const headline = [
-    display.status,
-    display.title ?? display.uri ?? display.url ?? display.ref ?? optionalString(input.ref),
-  ].filter((item): item is string => item !== undefined).join(" · ");
-  return compactRuntimeText([
-    headline,
-    display.error,
-    display.errorFacts === undefined ? undefined : `errorFacts: ${compactFactsText(display.errorFacts)}`,
-    display.contentPreview,
-  ].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"), 900);
-}
-
-function fileMutationSummary(
-  display: Extract<ToolDisplayProjection, { readonly kind: "file_change_summary" | "file_diff_preview" }>,
-): string {
-  if (display.kind === "file_diff_preview") {
-    return [
-      display.path,
-      display.replacements === undefined ? undefined : `${display.replacements} 处修改`,
-    ].filter((item): item is string => item !== undefined && item.length > 0).join(" · ") || "文件已编辑。";
-  }
-  const operationLabel = display.operation === "create"
-    ? "已创建"
-    : display.operation === "delete"
-      ? "已删除"
-      : display.append === true || display.operation === "append"
-        ? "已追加"
-        : "已写入";
-  return [display.path, operationLabel]
-    .filter((item): item is string => item !== undefined && item.length > 0)
-    .join(" · ") || "文件已写入。";
-}
-
-function toolPathLabel(value: string | undefined): string | undefined {
-  if (value === ".") {
-    return "当前目录";
-  }
-  return cleanOrdinaryToolText(value);
-}
-
-function persistedFileChangePreview(
-  toolName: string,
-  input: Readonly<Record<string, unknown>>,
-  output: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>
-): string | undefined {
-  const display = normalizeToolDisplayForOperation({
-    toolName,
-    input,
-    output,
-    existingDisplay: output.display,
-    truncated: output.truncated === true,
-  });
-  if ((display.kind === "file_change_summary" || display.kind === "file_diff_preview") && display.preview !== undefined) {
-    return display.preview;
-  }
-  const resultPath = optionalString(result.path) ?? optionalString(input.path);
-  const summary = cleanOrdinaryToolText(optionalString(output.summary));
-  if (toolName === "edit_file") {
-    return resultPath ?? summary;
-  }
-  return [summary, resultPath === undefined ? undefined : `文件：${resultPath}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
-}
-
-function persistedReadFilePreview(
-  output: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>
-): string | undefined {
-  return safeReadFileToolPreview({
-    summary: optionalString(output.summary),
-    path: optionalString(result.path),
-    bytes: typeof result.bytes === "number" ? result.bytes : undefined,
-  });
-}
-
-function persistedCommandPreview(
-  output: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>
-): string | undefined {
-  return safeCommandToolPreview({
-    summary: optionalString(output.summary),
-    command: commandTextFromToolResult(result),
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
-  });
+  return toolName === "shell_command";
 }
 
 function affectedResourcesFrom(payload: Readonly<Record<string, unknown>>): readonly string[] {
@@ -1039,14 +658,4 @@ function guidanceFrom(payload: Readonly<Record<string, unknown>>): string | unde
 
 function stringArrayFrom(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
-}
-
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function booleanOrUndefined(value: unknown): boolean | undefined {
-  if (value === true) return true;
-  if (value === false) return false;
-  return undefined;
 }

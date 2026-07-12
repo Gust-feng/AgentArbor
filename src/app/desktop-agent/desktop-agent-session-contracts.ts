@@ -1,7 +1,6 @@
 import type { BasicAgentCapabilitySnapshot, ModelCapabilities, RunCapabilityResolution } from "../../domain/config/index.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../../domain/tools/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
@@ -150,7 +149,6 @@ export type RunDesktopAgentSessionOptions = {
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly toolEvidence?: readonly ToolCallEvidence[];
   readonly resolveSkillContexts?: (context: DesktopAgentSkillResolverContext) => Promise<readonly DesktopAgentSkillContext[]>;
   readonly modelCapabilities?: ModelCapabilities;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;

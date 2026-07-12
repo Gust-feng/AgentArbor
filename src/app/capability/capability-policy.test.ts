@@ -495,11 +495,6 @@ function tool(
     riskLevel: operationType === "read-only" ? "low" : "high",
     operationType,
     requiresConfirmation: operationType !== "read-only",
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
   });
   return {
     name,
@@ -514,11 +509,6 @@ function tool(
     operationLabel: presentation.operationLabel,
     requiresConfirmation: operationType !== "read-only",
     confirmationLabel: presentation.confirmationLabel,
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
     scopes: defaultScopesFor(operationType),
     enabled: true,
     availability: "available",

@@ -579,7 +579,6 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     operationLabel: tool.operationLabel,
     requiresConfirmation: tool.requiresConfirmation,
     confirmationLabel: tool.confirmationLabel,
-    visibleResultPolicy: tool.visibleResultPolicy,
     runtimeHints: tool.runtimeHints,
     definitionHash: toolCatalogContractHash(tool),
     scopes: tool.scopes.filter(isCapabilityToolScope),

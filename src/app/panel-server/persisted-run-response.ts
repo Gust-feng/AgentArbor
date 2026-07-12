@@ -4,6 +4,10 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
+import {
+  isToolCallEventMessageType,
+  isToolLifecycleMessageType,
+} from "../../domain/common.js";
 import type {
   RuntimeConfirmationRecord,
   RuntimeEventRecord,
@@ -11,9 +15,7 @@ import type {
   RuntimeRunContinuationAvailability,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
-  RuntimeToolCallRecord,
 } from "../../domain/runtime-database/index.js";
-import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import {
   createPanelRunTracking,
   createPanelTranscriptNodes,
@@ -29,8 +31,6 @@ import { isContextCompactionPurpose } from "../panel-read-model/run/panel-run-st
 import { friendlyUserFacingFailureText } from "../text-projection/visible-text-safety.js";
 import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversation/panel-conversations.js";
-import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
-import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "../text-projection/confirmation-copy.js";
 import { projectPanelRunResponseBase, type PanelRunResponseBase } from "./run-response-base.js";
 import {
@@ -44,6 +44,14 @@ import {
   subAgentStreamStatusFromDetail,
   subAgentStreamSummaryFromDetail,
 } from "../run-read-model/sub-agent-stream-projection.js";
+import { requireRestorableOrdinaryRuntimeSnapshot } from "../basic-agent-runtime/persistence-snapshot-contract.js";
+import { restoredConfirmationContinuationIsLost } from "../basic-agent-runtime/persistence-confirmations.js";
+import {
+  reduceToolCallEventFacts,
+  reduceToolCallEventTimeline,
+  toolCallEventFactPayload,
+} from "../run-read-model/tool-call-event-reducer.js";
+import { toolStreamDetail, toolSummary } from "../panel-read-model/run/panel-stream-tool-projection.js";
 
 export type PanelPersistedRunResponse = Omit<PanelRunResponseBase, "error"> & {
   readonly trace: PanelRunTraceReadModel;
@@ -72,14 +80,23 @@ export type PanelPersistedRunResponse = Omit<PanelRunResponseBase, "error"> & {
 
 export function createPersistedPanelRunResponse(input: {
   readonly snapshot: RuntimeRunSnapshot;
+  /** Legacy Underground fallback only; Ordinary snapshots must carry frozen facts. */
   readonly config: SanitizedModelProviderConfig;
+  /** Legacy Underground fallback only; Ordinary snapshots must carry frozen facts. */
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly conversation?: PanelConversationReadModel;
 }): PanelPersistedRunResponse {
+  const ordinarySnapshot = input.snapshot.run.runMode === "agent"
+    ? requireRestorableOrdinaryRuntimeSnapshot(input.snapshot)
+    : undefined;
   const status = panelStatusFromRuntimeStatus(input.snapshot.run.status);
   const trace = createPersistedRunTrace(input.snapshot, status);
-  const config = input.snapshot.run.capabilitySnapshot?.activeModel ?? input.config;
-  const informationAccess = input.snapshot.run.informationAccess ?? input.informationAccess;
+  const config = ordinarySnapshot === undefined
+    ? input.snapshot.run.capabilitySnapshot?.activeModel ?? input.config
+    : ordinarySnapshot.run.capabilitySnapshot.activeModel;
+  const informationAccess = ordinarySnapshot === undefined
+    ? input.snapshot.run.informationAccess ?? input.informationAccess
+    : ordinarySnapshot.run.informationAccess;
   const trackingBase = createPanelRunTracking({
     status,
     runMode: input.snapshot.run.runMode,
@@ -131,7 +148,7 @@ export function createPersistedPanelRunResponse(input: {
         waitingPoint: trace.waitingPoint,
       },
       modelTotals: countPersistedModelCalls(input.snapshot.modelCalls),
-      toolTotals: countPersistedToolCalls(input.snapshot.toolCalls),
+      toolTotals: countPersistedToolCalls(input.snapshot.events),
     },
     transcript: {
       runId: input.snapshot.run.runId,
@@ -211,7 +228,19 @@ export function createPersistedStreamEvents(
   snapshot: RuntimeRunSnapshot,
   status: PanelRunStatus
 ): readonly PanelRunStreamEvent[] {
+  if (snapshot.run.runMode === "agent") {
+    requireRestorableOrdinaryRuntimeSnapshot(snapshot);
+  }
   const agentLabel = persistedRunAgentLabel(snapshot);
+  const toolTimeline = reduceToolCallEventTimeline(snapshot.events);
+  const persistedConfirmationById = new Map(
+    snapshot.confirmations.map((confirmation) => [confirmation.confirmationId, confirmation])
+  );
+  const persistedConfirmationByToolCallId = new Map(
+    snapshot.confirmations
+      .filter((confirmation) => confirmation.toolCallId !== undefined)
+      .map((confirmation) => [confirmation.toolCallId!, confirmation])
+  );
   const suppressOrdinaryChatProgress =
     snapshot.run.runMode === "agent" && !hasPersistedUserVisibleWorkActivity(snapshot.events);
   const events: PanelRunStreamEvent[] = [];
@@ -265,8 +294,31 @@ export function createPersistedStreamEvents(
     if (streamType === "agent.note.delta" && record.type === "model.requested" && restoredProgressSummary === undefined) {
       continue;
     }
-    const toolCall = toolCallForPersistedEvent(record, snapshot.toolCalls);
-    const detail = subAgentDetail ?? (toolCall === undefined ? undefined : persistedToolStreamDetail(toolCall));
+    const toolFact = toolTimeline.factBySequence.get(record.sequence);
+    const persistedConfirmation = toolFact === undefined
+      ? undefined
+      : (
+          (toolFact.confirmationId === undefined
+            ? undefined
+            : persistedConfirmationById.get(toolFact.confirmationId)) ??
+          persistedConfirmationByToolCallId.get(toolFact.callId)
+        );
+    if (
+      record.type === "user_approval.requested" &&
+      persistedConfirmation !== undefined &&
+      (
+        persistedConfirmation.status === "pending" ||
+        restoredConfirmationContinuationIsLost(snapshot, persistedConfirmation)
+      )
+    ) {
+      continue;
+    }
+    const toolPayload = toolFact === undefined ? undefined : toolCallEventFactPayload(toolFact, record.type);
+    const detail = subAgentDetail ?? (
+      toolPayload === undefined || !isToolLifecycleMessageType(record.type)
+        ? undefined
+        : toolStreamDetail(record.type, toolPayload)
+    );
     events.push({
       eventId: `${snapshot.run.runId}:restored:event:${record.sequence}:${streamType}`,
       runId: snapshot.run.runId,
@@ -274,9 +326,9 @@ export function createPersistedStreamEvents(
       type: streamType,
       createdAt: record.recordedAt,
       agentLabel: persistedStreamAgentLabel(streamType),
-      summary: restoredProgressSummary ?? persistedStreamSummary(record, streamType, subAgentDetail),
-      status: streamStatusFor(streamType, subAgentDetail),
-      toolName: toolCall?.toolName,
+      summary: restoredProgressSummary ?? persistedStreamSummary(record, streamType, subAgentDetail, toolPayload),
+      status: streamStatusFor(streamType, detail),
+      toolName: toolFact?.toolName,
       detail,
       sourceRefs: record.refs
         .filter((ref) => ref.kind !== "model_call" && ref.kind !== "tool_call")
@@ -296,9 +348,10 @@ export function createPersistedStreamEvents(
         agentLabel: "待处理",
         summary: cleanConfirmationSummary(confirmation.actionSummary),
         status: "pending",
+        toolName: confirmation.toolName,
         sourceRefs: [`confirmation:${confirmation.confirmationId}`],
         modelCallRefs: [],
-        toolCallRefs: [],
+        toolCallRefs: confirmation.toolCallId === undefined ? [] : [confirmation.toolCallId],
       });
       continue;
     }
@@ -323,9 +376,10 @@ export function createPersistedStreamEvents(
       agentLabel: type === "run.resumed" ? agentLabel : type === "user_approval.received" ? "用户" : "补充要求",
       summary: restoredConfirmationDecisionSummary(confirmation),
       status: confirmation.status === "denied" ? "blocked" : confirmation.status === "guidance" ? "pending" : "completed",
+      toolName: confirmation.toolName,
       sourceRefs: [`confirmation:${confirmation.confirmationId}`],
       modelCallRefs: [],
-      toolCallRefs: [],
+      toolCallRefs: confirmation.toolCallId === undefined ? [] : [confirmation.toolCallId],
     });
   }
   const completedSummary = restoredCompletedSummary(snapshot);
@@ -444,7 +498,7 @@ function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRe
 
 function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord[]): boolean {
   return events.some((event) => {
-    if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled") {
+    if (isToolCallEventMessageType(event.type)) {
       return true;
     }
     if (
@@ -453,9 +507,6 @@ function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord
       event.type === "sub_agent_batch.started" ||
       event.type === "sub_agent_batch.completed"
     ) {
-      return true;
-    }
-    if (event.type === "user_approval.requested") {
       return true;
     }
     if (event.type === "user_approval.received" && !isGenericApprovalDecisionText(event.summary)) {
@@ -502,13 +553,14 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
 function persistedStreamSummary(
   record: RuntimeEventRecord,
   type: PanelRunStreamEvent["type"],
-  subAgentDetail: PanelRunStreamEvent["detail"] | undefined
+  subAgentDetail: PanelRunStreamEvent["detail"] | undefined,
+  toolPayload: Readonly<Record<string, unknown>> | undefined,
 ): string {
   if (isSubAgentStreamEventType(type)) {
     return subAgentStreamSummaryFromDetail(type, subAgentDetail, record.summary);
   }
-  if (record.type === "tool.requested" || record.type === "tool.completed" || record.type === "tool.failed" || record.type === "tool.cancelled") {
-    return cleanOrdinaryToolText(record.summary) ?? record.summary;
+  if (isToolLifecycleMessageType(record.type) && toolPayload !== undefined) {
+    return toolSummary(record.type, toolPayload);
   }
   return record.summary;
 }
@@ -559,15 +611,11 @@ function isPersistedOrdinaryAgentRuntimeEvent(type: RuntimeEventRecord["type"]):
     type === "model.failed" ||
     type === "context.compaction.completed" ||
     type === "context.compaction.failed" ||
-    type === "tool.requested" ||
-    type === "tool.completed" ||
-    type === "tool.failed" ||
-    type === "tool.cancelled" ||
+    isToolCallEventMessageType(type) ||
     type === "sub_agent.started" ||
     type === "sub_agent.completed" ||
     type === "sub_agent_batch.started" ||
     type === "sub_agent_batch.completed" ||
-    type === "user_approval.requested" ||
     type === "user_approval.received";
 }
 
@@ -700,7 +748,7 @@ function streamTypeForRuntimeEvent(
   if (type === "context.compaction.completed" || type === "context.compaction.failed") {
     return type;
   }
-  if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed" || type === "tool.cancelled") {
+  if (isToolLifecycleMessageType(type)) {
     return type;
   }
   if (isSubAgentStreamEventType(type)) {
@@ -759,48 +807,6 @@ function streamStatusFor(
   return "completed";
 }
 
-function toolCallForPersistedEvent(
-  event: RuntimeEventRecord,
-  toolCalls: readonly RuntimeToolCallRecord[]
-): RuntimeToolCallRecord | undefined {
-  const toolRef = event.refs.find((ref) => ref.kind === "tool_call");
-  return toolRef === undefined ? undefined : toolCalls.find((call) => call.callId === toolRef.id);
-}
-
-function persistedToolStreamDetail(call: RuntimeToolCallRecord): PanelRunStreamEvent["detail"] {
-  const display = persistedToolDisplay(call);
-  return {
-    kind: "tool",
-    action: call.action ?? call.toolName,
-    path: call.path,
-    query: call.query,
-    command: display?.kind === "command_summary"
-      ? display.commandLine ?? call.command
-      : call.command,
-    exitCode: call.exitCode,
-    preview: call.error ?? cleanOrdinaryToolText(call.preview) ?? cleanOrdinaryToolText(call.summary),
-    display,
-    truncated: call.truncated,
-    error: call.error,
-    errorDomain: call.errorDomain,
-    errorFacts: call.errorFacts,
-  };
-}
-
-function persistedToolDisplay(call: RuntimeToolCallRecord): ToolDisplayProjection | undefined {
-  if (call.toolName === undefined) return undefined;
-  if (call.toolName === "edit_file") {
-    return { kind: "file_diff_preview", path: call.path, operation: "edit", preview: call.preview, truncated: call.truncated };
-  }
-  if (call.toolName === "shell_command" || call.toolName === "run_command") {
-    return { kind: "command_summary", commandLine: call.command, exitCode: call.exitCode };
-  }
-  return projectToolDisplay(
-    { callId: call.callId, toolName: call.toolName, input: { path: call.path, query: call.query, command: call.command } },
-    { action: call.action, summary: call.summary, preview: call.preview, truncated: call.truncated, result: { path: call.path, query: call.query, command: call.command, exitCode: call.exitCode, preview: call.preview } },
-  );
-}
-
 function countPersistedModelCalls(
   calls: readonly RuntimeModelCallRecord[]
 ): PanelRunTrackingReadModel["modelTotals"] {
@@ -812,8 +818,9 @@ function countPersistedModelCalls(
 }
 
 function countPersistedToolCalls(
-  calls: readonly RuntimeToolCallRecord[]
+  events: readonly RuntimeEventRecord[]
 ): PanelRunTrackingReadModel["toolTotals"] {
+  const calls = reduceToolCallEventFacts(events);
   return {
     requested: calls.length,
     completed: calls.filter((call) => call.status === "completed").length,

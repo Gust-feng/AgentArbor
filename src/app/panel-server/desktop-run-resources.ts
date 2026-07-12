@@ -1,7 +1,5 @@
 import { createModelRuntimeDisabledConfigurationError, type ModelRuntimeMode } from "../model-runtime/index.js";
 import {
-  agentRuntimeMode,
-  createAgentToolCenterFactory,
   prepareAgentRunResources,
   type AgentRunResourceHost,
   type AgentRunResources,
@@ -41,10 +39,3 @@ export async function prepareOrdinaryAgentRunResources(
     onModelOutputDelta: options.onModelOutputDelta,
   });
 }
-
-/** @deprecated Use prepareOrdinaryAgentRunResources. */
-export const prepareDesktopRunResources = prepareOrdinaryAgentRunResources;
-/** @deprecated Use agentRuntimeMode. */
-export const desktopRuntimeMode = agentRuntimeMode;
-/** @deprecated Use createAgentToolCenterFactory. */
-export const createDesktopToolCenterFactory = createAgentToolCenterFactory;

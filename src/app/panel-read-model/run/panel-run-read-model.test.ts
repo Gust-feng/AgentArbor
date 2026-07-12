@@ -487,12 +487,12 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
       eventEntry({
         sequence: 2,
         type: "model.requested",
-        payload: { requestId: "request-direct", purpose: "desktop_chat" },
+        payload: { requestId: "request-direct", purpose: "desktop_agent" },
       }),
       modelCompletedEntry({
         sequence: 3,
         requestId: "request-direct",
-        contractId: "desktop.chat.answer.v1",
+        contractId: "desktop.agent.answer.v1",
         decisionSummary: "Direct answer text.",
         usage: {
           inputTokens: 40,
@@ -532,18 +532,9 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
           toolName: "read_file",
           input: { path: "notes.md" },
           output: {
-            action: "read_file",
-            summary: "notes.md · 34 bytes",
-            display: {
-              kind: "generic_tool_summary",
-              action: "read_file",
-              summary: "notes.md · 34 bytes",
-            },
-            result: {
-              path: "notes.md",
-              bytes: 34,
-              content: "RAW_TOOL_OUTPUT_SENTINEL must stay out of panel events.",
-            },
+            path: "notes.md",
+            bytes: 34,
+            content: "RAW_TOOL_OUTPUT_SENTINEL must stay out of panel events.",
             truncated: false,
           },
         },
@@ -577,8 +568,9 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
   assert.equal(withTool.some((event) => event.type === "tool.requested"), true);
   assert.equal(withTool.some((event) => event.type === "model.output.completed"), true);
   assert.equal(completedTool?.detail?.kind, "tool");
-  assert.equal(completedTool?.detail?.display?.kind, "generic_tool_summary");
-  assert.equal(withTool.find((event) => event.type === "tool.completed")?.detail?.display?.kind, "generic_tool_summary");
+  assert.equal(completedTool?.detail?.display?.kind, "read_result");
+  assert.equal(completedTool?.sourceRefs.includes("event:run-tool-work:event:4"), true);
+  assert.equal(withTool.find((event) => event.type === "tool.completed")?.detail?.display?.kind, "read_result");
   assert.equal(completedTool?.detail?.preview?.includes("notes.md"), true);
   assert.equal(completedTool?.detail?.preview?.includes("文件正文只进入本轮工具上下文"), false);
   assert.equal(JSON.stringify(withTool).includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
@@ -592,13 +584,13 @@ test("incremental panel stream projection consumes each source fact once and pre
     eventEntry({
       sequence: 2,
       type: "model.requested",
-      payload: { requestId: "request-incremental", purpose: "desktop_chat" },
+      payload: { requestId: "request-incremental", purpose: "desktop_agent" },
     }),
     modelCompletedEntry({
       sequence: 3,
       requestId: "request-incremental",
-      purpose: "desktop_chat",
-      contractId: "desktop.chat.answer.v1",
+      purpose: "desktop_agent",
+      contractId: "desktop.agent.answer.v1",
       decisionSummary: "Answer before visible tool work.",
     }),
   ];
@@ -699,9 +691,9 @@ test("ordinary agent stream preserves typed model failures after tool work", () 
           toolName: "shell_command",
           input: { command: "python", args: ["hello_agent.py"] },
           output: {
-            action: "shell_command",
-            summary: "python hello_agent.py · exit 0",
-            result: { command: "python", args: ["hello_agent.py"], exitCode: 0 },
+            command: "python",
+            args: ["hello_agent.py"],
+            exitCode: 0,
           },
         },
       }),
@@ -1161,22 +1153,11 @@ test("panel transcript preserves typed safe tool display without raw command out
           toolName: "shell_command",
           input: { command: "pnpm", args: ["test"] },
           output: {
-            action: "shell_command",
-            summary: "pnpm test · exit 0",
-            display: {
-              kind: "command_summary",
-              command: "pnpm",
-              args: ["test"],
-              exitCode: 0,
-              outputSummary: "tests passed",
-            },
-            result: {
-              command: "pnpm",
-              args: ["test"],
-              exitCode: 0,
-              stdout: "RAW_STDOUT_SENTINEL",
-              stderr: "",
-            },
+            command: "pnpm",
+            args: ["test"],
+            exitCode: 0,
+            stdout: "RAW_STDOUT_SENTINEL",
+            stderr: "",
           },
         },
       }),
@@ -1191,7 +1172,7 @@ test("panel transcript preserves typed safe tool display without raw command out
   assert.equal(completedTool?.toolCallRefs.includes("tool-call-shell"), true);
   assert.equal(JSON.stringify(transcript).includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(completedNode?.display?.kind, "command_summary");
-  assert.equal(completedNode?.summary?.includes("tests passed"), true);
+  assert.equal(completedNode?.summary?.includes("pnpm test"), true);
   assert.equal(completedNode?.summary?.includes("exit 0"), true);
   assert.equal(JSON.stringify(transcript.transcriptNodes).includes("RAW_STDOUT_SENTINEL"), false);
 });
@@ -1215,14 +1196,10 @@ test("panel transcript edit fallback omits raw replacement text", () => {
             newText: "RAW_NEW_TEXT_SENTINEL sk-edit-secret",
           },
           output: {
-            action: "edit_file",
-            summary: "notes.md · 32 -> 18 chars · 1 replacement",
-            result: {
-              path: "notes.md",
-              previousLength: 32,
-              nextLength: 18,
-              replacements: 1,
-            },
+            path: "notes.md",
+            previousLength: 32,
+            nextLength: 18,
+            replacements: 1,
           },
         },
       }),

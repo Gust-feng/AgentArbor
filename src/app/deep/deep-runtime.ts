@@ -57,6 +57,7 @@ import type {
   DeepIntakeContext,
   DeepLiveProjection,
   DeepRun,
+  DeepRunContinuationFacts,
 } from "./contracts.js";
 import { DEEP_RUN_KIND, DEEP_RUN_MODE } from "./contracts.js";
 import {
@@ -192,6 +193,7 @@ export type StartDeepRuntimeInput = {
   readonly taskSoil: TaskSoil;
   readonly permissionBoundaryRefs: readonly string[];
   readonly confirmationPolicy?: ToolConfirmationPolicy;
+  readonly continuationFacts: DeepRunContinuationFacts;
   readonly aiMode?: ModelRuntimeMode;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly modelAvailable: boolean;
@@ -263,6 +265,7 @@ export async function executeDeepRun(
     },
     aiMode: input.aiMode,
     capabilitySnapshot: input.capabilitySnapshot,
+    continuationFacts: input.continuationFacts,
     startedAt,
     updatedAt: startedAt,
   };

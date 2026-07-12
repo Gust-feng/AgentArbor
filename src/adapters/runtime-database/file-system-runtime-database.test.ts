@@ -115,10 +115,6 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         runId: "panel-run-0001",
         toolName: "read_file",
         status: "completed",
-        action: "read_file",
-        path: "README.md",
-        summary: "README.md · 12 bytes",
-        truncated: false,
         eventRefs: ["event:msg-0002"],
         createdAt: "2026-05-10T00:00:01.000Z",
       },
@@ -203,7 +199,7 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
       cachedInputTokens: 3,
     });
     assert.equal(snapshot?.toolCalls[0]?.toolName, "read_file");
-    assert.equal(snapshot?.toolCalls[0]?.path, "README.md");
+    assert.deepEqual(snapshot?.toolCalls[0]?.eventRefs, ["event:msg-0002"]);
     assert.equal(snapshot?.artifacts[0]?.ref.id, "artifact-0001");
     assert.equal(snapshot?.confirmations[0]?.confirmationId, "confirmation-0001");
     assert.equal(snapshot?.confirmations[0]?.status, "pending");

@@ -15,7 +15,7 @@ import { createHostAgentToolContributions } from "./agent-tool-contributions.js"
 import { createSkillToolRegistryContribution } from "../skills/skill-resource-tool.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillResolverContext } from "../desktop-agent/desktop-agent-session-contracts.js";
 import type {
-  DesktopRunResources,
+  AgentRunResources,
   PanelRunExecutionOptions,
   PanelRunExecutionResult,
 } from "./run-execution-contracts.js";
@@ -25,7 +25,7 @@ export type OrdinaryDesktopPanelRunExecutionInput = {
   readonly goal: string;
   readonly aiMode: ModelRuntimeMode;
   readonly taskSoilInput: DesktopTaskSoilInput | undefined;
-  readonly resources: DesktopRunResources;
+  readonly resources: AgentRunResources;
   readonly options: PanelRunExecutionOptions;
 };
 
@@ -49,48 +49,55 @@ export async function executeOrdinaryDesktopRunForPanel(
       "运行记录中的 Agent 定义与当前执行定义不一致。"
     );
   }
-  const releaseResources = () => {
-    void resources.release();
+  let releasePromise: Promise<void> | undefined;
+  const releaseResources = (): Promise<void> => {
+    releasePromise ??= resources.release();
+    return releasePromise;
   };
   const createSharedToolCenter = createAgentToolCenterFactory(runtime.providerFetch, resources);
-  const agent = await runDesktopAgentSession(goal, {
-    aiMode,
-    createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
-    createToolCenter: (toolRuntime, context) => createSharedToolCenter(toolRuntime, {
-      taskSoil: context?.taskSoil,
-      contributions: [
-        ...createHostAgentToolContributions({
-          runtime: toolRuntime,
-          resources,
-          providerFetch: runtime.providerFetch,
-        }),
-        ...(context === undefined
-          ? []
-          : [createSkillToolRegistryContribution(context.skillContexts)]),
-      ],
-    }),
-    taskSoilInput,
-    agentDefinition,
-    conversationHistory: options.conversationHistory,
-    interruptedRunContexts: options.interruptedRunContexts,
-    toolEvidence: options.toolEvidence,
-    resolveSkillContexts: (context) =>
-      resolveTriggeredSkillContexts(
-        runtime,
-        goal,
-        resources.capabilitySnapshot.skillCatalog,
-        skillTriggerOptions(resources.capabilitySnapshot.skillTrigger?.mode ?? "keyword", context)
-      ),
-    modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
-    capabilitySnapshot: resources.capabilitySnapshot,
-    workspaceRoot: resources.workspaceRoot,
-    toolConfirmationPolicy: options.toolConfirmationPolicy,
-    platform: process.platform,
-    subAgentRoots: runtime.resolveSubAgentRoots?.({ workspaceDirectory: resources.workspaceRoot }) ?? runtime.subAgentRoots,
-    abortSignal: options.abortSignal,
-    onRuntimeReady: options.onRuntimeReady,
-    onModelOutputDelta: options.onModelOutputDelta,
-  });
+  let agent: Awaited<ReturnType<typeof runDesktopAgentSession>>;
+  try {
+    agent = await runDesktopAgentSession(goal, {
+      aiMode,
+      createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
+      createToolCenter: (toolRuntime, context) => createSharedToolCenter(toolRuntime, {
+        taskSoil: context?.taskSoil,
+        contributions: [
+          ...createHostAgentToolContributions({
+            runtime: toolRuntime,
+            resources,
+            providerFetch: runtime.providerFetch,
+          }),
+          ...(context === undefined
+            ? []
+            : [createSkillToolRegistryContribution(context.skillContexts)]),
+        ],
+      }),
+      taskSoilInput,
+      agentDefinition,
+      conversationHistory: options.conversationHistory,
+      interruptedRunContexts: options.interruptedRunContexts,
+      resolveSkillContexts: (context) =>
+        resolveTriggeredSkillContexts(
+          runtime,
+          goal,
+          resources.capabilitySnapshot.skillCatalog,
+          skillTriggerOptions(resources.capabilitySnapshot.skillTrigger?.mode ?? "keyword", context)
+        ),
+      modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
+      capabilitySnapshot: resources.capabilitySnapshot,
+      workspaceRoot: resources.workspaceRoot,
+      toolConfirmationPolicy: options.toolConfirmationPolicy,
+      platform: process.platform,
+      subAgentRoots: runtime.resolveSubAgentRoots?.({ workspaceDirectory: resources.workspaceRoot }) ?? runtime.subAgentRoots,
+      abortSignal: options.abortSignal,
+      onRuntimeReady: options.onRuntimeReady,
+      onModelOutputDelta: options.onModelOutputDelta,
+    });
+  } catch (error) {
+    await releaseResources();
+    throw error;
+  }
   return desktopPanelResultFromAgent(agent, {
     config: resources.capabilitySnapshot.activeModel,
     informationAccess: resources.informationAccess,
@@ -140,28 +147,6 @@ function compactSkillRouterHistoryText(value: string, maxLength: number): string
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
-/**
- * @deprecated Use executeOrdinaryDesktopRunForPanel with an object input. This
- * wrapper exists for old callers while Phase 2 narrows the runtime boundary.
- */
-export async function runOrdinaryDesktopForPanel(
-  runtime: PanelRuntime,
-  goal: string,
-  aiMode: ModelRuntimeMode,
-  taskSoilInput: DesktopTaskSoilInput | undefined,
-  resources: DesktopRunResources,
-  options: PanelRunExecutionOptions
-): Promise<PanelRunExecutionResult> {
-  return executeOrdinaryDesktopRunForPanel({
-    runtime,
-    goal,
-    aiMode,
-    taskSoilInput,
-    resources,
-    options,
-  });
-}
-
 type OrdinaryDesktopPanelFacts = {
   readonly config: NonNullable<PanelRunExecutionResult["config"]>;
   readonly informationAccess: NonNullable<PanelRunExecutionResult["informationAccess"]>;
@@ -169,12 +154,12 @@ type OrdinaryDesktopPanelFacts = {
   readonly agentDefinitionRef: NonNullable<PanelRunExecutionResult["agentDefinitionRef"]>;
 };
 
-function desktopPanelResultFromAgent(
+async function desktopPanelResultFromAgent(
   agent: Awaited<ReturnType<typeof runDesktopAgentSession>>,
   facts: OrdinaryDesktopPanelFacts,
-  reasoningEffort?: ModelRunReasoningEffort,
-  releaseResources?: () => void
-): PanelRunExecutionResult {
+  reasoningEffort: ModelRunReasoningEffort | undefined,
+  releaseResources: () => Promise<void>
+): Promise<PanelRunExecutionResult> {
   if (
     agent.status === "completed" ||
     agent.status === "confirmation_needed" ||
@@ -201,7 +186,7 @@ function desktopPanelResultFromAgent(
       updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
     });
     if (agent.pendingApproval === undefined) {
-      releaseResources?.();
+      await releaseResources();
     }
     return {
       ...facts,
@@ -225,19 +210,30 @@ function desktopPanelResultFromAgent(
           ? undefined
           : {
               confirmationId: agent.pendingApproval.confirmationId,
+              release: releaseResources,
               resume: async (resumeInput) => {
-                const resumed = await agent.pendingApproval!.resume(resumeInput);
-                return desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources);
+                try {
+                  const resumed = await agent.pendingApproval!.resume(resumeInput);
+                  return await desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources);
+                } catch (error) {
+                  await releaseResources();
+                  throw error;
+                }
               },
               resumeWithDecision: async (resumeInput) => {
-                const resumed = await agent.pendingApproval!.resumeWithDecision(resumeInput);
-                return desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources);
+                try {
+                  const resumed = await agent.pendingApproval!.resumeWithDecision(resumeInput);
+                  return await desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources);
+                } catch (error) {
+                  await releaseResources();
+                  throw error;
+                }
               },
             },
     };
   }
 
-  releaseResources?.();
+  await releaseResources();
   throw new PanelHttpError(500, "desktop_agent_stopped", agent.failureMessage ?? "桌面 Agent 运行已停止。");
 }
 

@@ -599,10 +599,5 @@ function subAgentRun(subRunId: string, textOutput: string, fullOutput?: string):
     status: "completed",
     summary: textOutput,
     fullOutput,
-    modelExchanges: [{
-      requestedAt: "2026-06-18T00:00:00.000Z",
-      completedAt: "2026-06-18T00:00:02.000Z",
-      textOutput,
-    }],
   };
 }

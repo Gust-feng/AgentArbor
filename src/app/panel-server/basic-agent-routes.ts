@@ -40,19 +40,7 @@ export async function handlePanelBasicAgentRoute(
     await handleGetBasicWorkViewRequest(
       runtime,
       decodeURIComponent(basicWorkViewMatch[1] ?? ""),
-      response,
-      false
-    );
-    return true;
-  }
-
-  const basicWorkSessionMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/work-session$/.exec(url.pathname);
-  if (request.method === "GET" && basicWorkSessionMatch !== null) {
-    await handleGetBasicWorkViewRequest(
-      runtime,
-      decodeURIComponent(basicWorkSessionMatch[1] ?? ""),
-      response,
-      true
+      response
     );
     return true;
   }
@@ -127,24 +115,15 @@ export async function handlePanelBasicAgentRoute(
 async function handleGetBasicWorkViewRequest(
   runtime: PanelBasicAgentRouteRuntime,
   runId: string,
-  response: ServerResponse,
-  includeLegacyWorkSessionAlias: boolean
+  response: ServerResponse
 ): Promise<void> {
   const view = await createBasicAgentRunViewReadModel(runtime, runId, 0);
   if (view === undefined) {
     throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
   }
-  if (!includeLegacyWorkSessionAlias) {
-    writeJson(response, 200, {
-      ok: true,
-      workView: view.workView,
-    });
-    return;
-  }
   writeJson(response, 200, {
     ok: true,
     workView: view.workView,
-    workSession: view.workView,
   });
 }
 

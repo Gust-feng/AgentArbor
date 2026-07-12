@@ -3,8 +3,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { toolExecutionResult } from "./tool-result-test-support.js";
 import {
+  asRecord,
   contextAttachmentToolCenter,
   createZipBuffer,
   taskSoilWithContext,
@@ -63,13 +63,14 @@ test("context attachment archive tools inspect selected ZIP without extracting o
       TOOL_CONTEXT,
       permission
     );
-    const modelVisible = JSON.stringify([
-      toolExecutionResult(listed),
-      toolExecutionResult(inspected),
-    ]);
+    const modelVisible = JSON.stringify([listed.output, inspected.output]);
 
     assert.equal(listed.status, "completed");
     assert.equal(inspected.status, "completed");
+    const archiveFacts = asRecord(inspected.output);
+    for (const legacyField of ["action", "status", "summary", "result"]) {
+      assert.equal(legacyField in archiveFacts, false, `archive output must not contain ${legacyField}`);
+    }
     assert.equal(modelVisible.includes("\"format\":\"archive\""), true);
     assert.equal(modelVisible.includes("\"canInspectArchive\":true"), true);
     assert.equal(modelVisible.includes("\"archive\":true"), true);

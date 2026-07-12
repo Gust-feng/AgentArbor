@@ -29,7 +29,6 @@ import { friendlyUserFacingFailureText } from "../text-projection/visible-text-s
 import {
   buildConversationHistoryMessages,
   buildConversationInterruptedRunContexts,
-  buildConversationToolEvidence,
 } from "./conversation-history.js";
 import { PanelHttpError } from "./http-utils.js";
 import { throwIfAborted } from "./request-parsers.js";
@@ -84,10 +83,9 @@ export async function executeBasicPanelRun(
     conversationId: job.conversationId,
     assistantTurnId: job.assistantTurnId,
   };
-  const [conversationHistory, interruptedRunContexts, toolEvidence] = await Promise.all([
+  const [conversationHistory, interruptedRunContexts] = await Promise.all([
     buildConversationHistoryMessages(conversationContext),
     buildConversationInterruptedRunContexts(conversationContext),
-    buildConversationToolEvidence(conversationContext),
   ]);
   return executePanelRunFromFrozenJob(runtime, {
     runKind: job.runKind,
@@ -98,7 +96,6 @@ export async function executeBasicPanelRun(
     options: {
       conversationHistory,
       interruptedRunContexts,
-      toolEvidence,
       agentDefinition: resolveExecutionAgentDefinition(runtime, job),
       agentDefinitionRef: job.agentDefinitionRef,
       config: job.config,
@@ -164,12 +161,8 @@ export async function failPanelRunJob(
   });
 }
 
-/**
- * @deprecated Compatibility helper for legacy synchronous run routes. Default
- * ordinary Desktop Agent runs must be created through BasicAgentRunExecutor.start
- * so run birth facts are frozen before execution.
- */
-export async function runForPanel(
+/** Explicit Legacy Underground route adapter; Ordinary runs never enter this path. */
+export async function runLegacyUndergroundForPanel(
   runtime: PanelRuntime,
   runKind: PanelRunKind,
   goal: string,
@@ -445,7 +438,7 @@ export function panelConfigurationErrorMessage(code: ModelRuntimeConfigurationEr
 }
 
 function panelJobErrorMessage(error: PanelHttpError): string {
-  if (error.code === "desktop_agent_failed" || error.code === "desktop_chat_failed" || error.statusCode >= 500) {
+  if (error.code === "desktop_agent_failed" || error.statusCode >= 500) {
     return friendlyUserFacingFailureText(error.message);
   }
   return error.message;

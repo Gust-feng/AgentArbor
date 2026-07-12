@@ -238,10 +238,5 @@ function readOnlyMetadata(): ToolDefinitionMetadata {
     operationType: "read-only",
     riskLevel: "low",
     requiresConfirmation: false,
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
   };
 }

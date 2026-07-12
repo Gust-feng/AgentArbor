@@ -78,13 +78,9 @@ function modelPurposeForRequest(job: PanelRunJob, requestId: string): string | u
 
 function isUserFacingStreamingPurpose(job: PanelRunJob, purpose: string | undefined): boolean {
   if (job.runMode === "agent") {
-    return purpose === "desktop_agent" ||
-      // Historical persisted runs used desktop_chat for the same ordinary
-      // user-facing answer stream. Keep replay compatibility here only.
-      purpose === "desktop_chat";
+    return purpose === "desktop_agent";
   }
   return purpose === "desktop_agent" ||
-    purpose === "desktop_chat" ||
     purpose === "work_session_direct_answer" ||
     purpose === "work_session_synthesis";
 }

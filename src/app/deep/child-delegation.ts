@@ -243,7 +243,7 @@ export async function exploreDeepChild(input: ExploreDeepChildInput): Promise<Ex
  */
 export function buildFailedChildExploration(input: {
   readonly childRun: ChildAgentRun;
-  readonly childSpec?: DeepChildSpec;
+  readonly childSpec: DeepChildSpec;
   readonly reason: string;
   readonly failedAt: string;
 }): ExploreDeepChildResult {

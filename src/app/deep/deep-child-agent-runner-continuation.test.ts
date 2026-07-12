@@ -8,7 +8,10 @@ import {
   runDeepChildAgent,
 } from "./deep-child-agent-runner.js";
 import { createDeepTurnRuntime } from "./deep-turn.js";
-import { InMemoryDeepChildLoopContextStore } from "./deep-child-loop-contexts.js";
+import {
+  createDeepChildLoopContextRef,
+  InMemoryDeepChildLoopContextStore,
+} from "./deep-child-loop-contexts.js";
 import {
   completedJsonResponse,
   failedModelResponse,
@@ -53,10 +56,11 @@ test("continueDeepChildAgent resumes from stored tool context after provider int
   });
 
   assert.equal(interrupted.completedRun.status, "interrupted");
-  assert.equal(interrupted.completedRun.continuationContextRef?.startsWith("child_loop_context:"), true);
+  const contextRef = createDeepChildLoopContextRef(childRun.childRunId);
+  assert.equal(interrupted.completedRun.continuationContextRef, contextRef);
   const stored = await contextStore.getByRef(
     "deep-run-context-test",
-    interrupted.completedRun.continuationContextRef!,
+    contextRef,
   );
   assert.equal(stored?.messages.some((message) => message.role === "assistant" && message.toolCalls?.[0]?.callId === "call-search-context"), true);
   assert.equal(stored?.messages.some((message) => message.role === "tool" && message.toolCallId === "call-search-context"), true);
@@ -90,6 +94,11 @@ test("continueDeepChildAgent resumes from stored tool context after provider int
     ),
     true,
   );
+  const records = await contextStore.listForChild("deep-run-context-test", childRun.childRunId);
+  assert.equal(continued.completedRun.continuationContextRef, contextRef);
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.contextRef, contextRef);
+  assert.equal(records[0]?.createdAt, stored?.createdAt);
 });
 
 test("resumeDeepChildAgent approves a blocked child confirmation and completes the same child run", async () => {
@@ -109,12 +118,14 @@ test("resumeDeepChildAgent approves a blocked child confirmation and completes t
     }),
   ]);
   const broker = new RecordingToolBroker(["write_file"], ["write_file"]);
+  const contextStore = new InMemoryDeepChildLoopContextStore();
   const turnRuntime = createDeepTurnRuntime({
     intelligenceChannel: channel,
     toolCenter: broker,
   });
 
   const blocked = await runDeepChildAgent({
+    runId: "deep-run-confirmation-context-test",
     childRun,
     childSpec,
     goal: "整理迁移风险笔记",
@@ -123,17 +134,20 @@ test("resumeDeepChildAgent approves a blocked child confirmation and completes t
     traceId: "trace-test",
     goalId: "goal-test",
     confirmationPolicy: "prompt",
+    childLoopContextStore: contextStore,
   });
 
   assert.equal(blocked.completedRun.status, "blocked");
   assert.equal(blocked.pendingContinuation?.confirmationId, "confirm-call-write");
 
   const resumed = await resumeDeepChildAgent({
+    runId: "deep-run-confirmation-context-test",
     childRun: blocked.completedRun,
     childSpec,
     pendingApproval: blocked.pendingContinuation!.pendingApproval,
     decision: { decision: "approve_once" },
     turnRuntime,
+    childLoopContextStore: contextStore,
   });
 
   assert.equal(resumed.completedRun.childRunId, childRun.childRunId);
@@ -152,6 +166,12 @@ test("resumeDeepChildAgent approves a blocked child confirmation and completes t
   assert.deepEqual(broker.executedToolNames(), ["write_file"]);
   assert.equal(channel.requests.length, 2);
   assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.role === "tool"), true);
+  const contextRef = createDeepChildLoopContextRef(childRun.childRunId);
+  const records = await contextStore.listForChild("deep-run-confirmation-context-test", childRun.childRunId);
+  assert.equal(blocked.completedRun.continuationContextRef, contextRef);
+  assert.equal(resumed.completedRun.continuationContextRef, contextRef);
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.contextRef, contextRef);
 });
 
 test("continueDeepChildAgent appends parent instruction and keeps the same child standard loop", async () => {

@@ -10,17 +10,15 @@ import type {
   SanitizedInformationAccessConfig,
 } from "../../../domain/config/index.js";
 import { createMinimalRuntime } from "../../runtime.js";
-import {
-  createDesktopToolCenterFactory,
-  prepareDesktopRunResources,
-} from "../desktop-run-resources.js";
+import { createAgentToolCenterFactory } from "../agent-run-resources.js";
+import { prepareOrdinaryAgentRunResources } from "../desktop-run-resources.js";
 import { desktopCapabilitySnapshotForRunStart } from "../desktop-run-model-settings.js";
 import { PanelHttpError } from "../http-utils.js";
 import type { PanelRuntime } from "../runtime.js";
 
 test("desktop run resources require the run-created capability snapshot", async () => {
   await assert.rejects(
-    () => prepareDesktopRunResources({} as PanelRuntime, "fake", {}),
+    () => prepareOrdinaryAgentRunResources({} as PanelRuntime, "fake", {}),
     (error) =>
       error instanceof PanelHttpError &&
       error.code === "desktop_capability_snapshot_required" &&
@@ -31,7 +29,7 @@ test("desktop run resources require the run-created capability snapshot", async 
 test("desktop run resources require the run-created information access settings", async () => {
   await assert.rejects(
     () =>
-      prepareDesktopRunResources({} as PanelRuntime, "fake", {
+      prepareOrdinaryAgentRunResources({} as PanelRuntime, "fake", {
         capabilitySnapshot: {
           ...capabilitySnapshot(),
         },
@@ -45,7 +43,7 @@ test("desktop run resources require the run-created information access settings"
 
 test("desktop run resources carry the run-created information access settings", async () => {
   const frozenInformationAccess = informationAccess();
-  const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment(), "fake", {
+  const resources = await prepareOrdinaryAgentRunResources(runtimeWithAiEnvironment(), "fake", {
     capabilitySnapshot: capabilitySnapshot(),
     informationAccess: frozenInformationAccess,
   });
@@ -55,7 +53,7 @@ test("desktop run resources carry the run-created information access settings", 
 
 test("desktop run resources remove unsupported saved OpenAI request settings from the frozen run model", async () => {
   const runtime = runtimeWithAiEnvironment();
-  const resources = await prepareDesktopRunResources(runtime, "openai-compatible", {
+  const resources = await prepareOrdinaryAgentRunResources(runtime, "openai-compatible", {
     capabilitySnapshot: capabilitySnapshot({
       activeModel: {
         openAI: {
@@ -88,7 +86,7 @@ test("desktop run resources remove unsupported saved OpenAI request settings fro
 
 test("desktop run resources keep supported OpenAI request settings and explicit run reasoning effort", async () => {
   const runtime = runtimeWithAiEnvironment();
-  const resources = await prepareDesktopRunResources(runtime, "openai-responses", {
+  const resources = await prepareOrdinaryAgentRunResources(runtime, "openai-responses", {
     capabilitySnapshot: capabilitySnapshot({
       activeModel: {
         protocolKind: "openai_responses",
@@ -128,7 +126,7 @@ test("desktop run resources keep supported OpenAI request settings and explicit 
 test("desktop run resources reject explicit reasoning effort when the frozen model cannot support it", async () => {
   await assert.rejects(
     () =>
-      prepareDesktopRunResources(runtimeWithAiEnvironment(), "openai-responses", {
+      prepareOrdinaryAgentRunResources(runtimeWithAiEnvironment(), "openai-responses", {
         capabilitySnapshot: capabilitySnapshot({
           activeModel: {
             protocolKind: "openai_responses",
@@ -198,7 +196,7 @@ test("desktop run start snapshot freezes supported request settings without reje
 });
 
 test("desktop tool center factory uses frozen run resources instead of rereading current model environment", async () => {
-  const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment(), "fake", {
+  const resources = await prepareOrdinaryAgentRunResources(runtimeWithAiEnvironment(), "fake", {
     capabilitySnapshot: capabilitySnapshot({
       toolCatalog: {
         scope: "desktop-basic",
@@ -217,11 +215,6 @@ test("desktop tool center factory uses frozen run resources instead of rereading
             operationLabel: "Read only",
             requiresConfirmation: false,
             confirmationLabel: "No confirmation",
-            visibleResultPolicy: {
-              userVisible: "summary-only",
-              maxPreviewChars: 0,
-              omitRawOutput: true,
-            },
             scopes: ["desktop-basic", "research"],
             enabled: false,
             availability: "available",
@@ -231,14 +224,14 @@ test("desktop tool center factory uses frozen run resources instead of rereading
     }),
     informationAccess: informationAccess(),
   });
-  const factory = createDesktopToolCenterFactory(undefined, resources);
+  const factory = createAgentToolCenterFactory(undefined, resources);
   const toolCenter = factory(createMinimalRuntime());
 
   assert.equal(toolCenter.list().some((tool) => tool.name === "search"), false);
 });
 
 test("desktop tool center factory restricts executors to the frozen run tool catalog", async () => {
-  const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment(), "fake", {
+  const resources = await prepareOrdinaryAgentRunResources(runtimeWithAiEnvironment(), "fake", {
     capabilitySnapshot: capabilitySnapshot({
       toolCatalog: {
         scope: "desktop-basic",
@@ -257,11 +250,6 @@ test("desktop tool center factory restricts executors to the frozen run tool cat
             operationLabel: "Read only",
             requiresConfirmation: false,
             confirmationLabel: "No confirmation",
-            visibleResultPolicy: {
-              userVisible: "summary-only",
-              maxPreviewChars: 800,
-              omitRawOutput: true,
-            },
             scopes: ["desktop-basic", "workspace"],
             enabled: true,
             availability: "available",
@@ -271,17 +259,16 @@ test("desktop tool center factory restricts executors to the frozen run tool cat
     }),
     informationAccess: informationAccess(),
   });
-  const factory = createDesktopToolCenterFactory(undefined, resources);
+  const factory = createAgentToolCenterFactory(undefined, resources);
   const toolCenter = factory(createMinimalRuntime());
 
   assert.deepEqual(toolCenter.list().map((tool) => tool.name), ["read_file"]);
   assert.equal(toolCenter.has("read_file"), true);
   assert.equal(toolCenter.has("search"), false);
-  assert.equal(toolCenter.has("run_command"), false);
 });
 
 test("desktop tool center factory keeps frozen unavailable tools unavailable", async () => {
-  const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment(), "fake", {
+  const resources = await prepareOrdinaryAgentRunResources(runtimeWithAiEnvironment(), "fake", {
     capabilitySnapshot: capabilitySnapshot({
       toolCatalog: {
         scope: "desktop-basic",
@@ -300,11 +287,6 @@ test("desktop tool center factory keeps frozen unavailable tools unavailable", a
             operationLabel: "Read only",
             requiresConfirmation: false,
             confirmationLabel: "No confirmation",
-            visibleResultPolicy: {
-              userVisible: "summary-only",
-              maxPreviewChars: 800,
-              omitRawOutput: true,
-            },
             scopes: ["desktop-basic", "workspace"],
             enabled: true,
             availability: "unavailable",
@@ -315,7 +297,7 @@ test("desktop tool center factory keeps frozen unavailable tools unavailable", a
     }),
     informationAccess: informationAccess(),
   });
-  const factory = createDesktopToolCenterFactory(undefined, resources);
+  const factory = createAgentToolCenterFactory(undefined, resources);
   const toolCenter = factory(createMinimalRuntime());
 
   assert.deepEqual(resources.toolCatalogAvailability, [
@@ -337,7 +319,7 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
   try {
     const lookup = mcpCapabilityTool("frozen__lookup", "read-only");
     const mutate = mcpCapabilityTool("frozen__mutate", "read-write");
-    const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment({
+    const resources = await prepareOrdinaryAgentRunResources(runtimeWithAiEnvironment({
       createMcpRuntimeEnvironment: async (input) => ({
         ...(input?.baseEnv ?? {}),
         // MCP stdio startup may import process.execPath into the managed runtime bin.
@@ -409,7 +391,7 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
       informationAccess: informationAccess(),
     });
     disconnectAll = resources.release;
-    const factory = createDesktopToolCenterFactory(undefined, resources);
+    const factory = createAgentToolCenterFactory(undefined, resources);
     const toolCenter = factory(createMinimalRuntime());
 
     assert.deepEqual(toolCenter.list().map((tool) => tool.name).sort(), ["frozen__lookup", "frozen__mutate"]);
@@ -528,11 +510,6 @@ function mcpCapabilityTool(
     operationLabel: readOnly ? "Read only" : "Write",
     requiresConfirmation: !readOnly,
     confirmationLabel: readOnly ? "No confirmation" : "Requires confirmation",
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
     scopes: ["mcp"],
     enabled: true,
     availability: "available",

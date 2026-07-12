@@ -77,11 +77,6 @@ export function createWebSearchTool(options: WebSearchToolOptions = {}): ToolExe
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 800,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",

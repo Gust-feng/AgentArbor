@@ -130,6 +130,7 @@ test("ResearchRuntime searches web refs and reads selected pages through preview
   assert.equal(search.results[0]?.source, "web");
   assert.equal(read.status, "completed");
   assert.equal(read.result?.source, "page");
+  assert.equal(read.result?.title, "Research Runtime");
   assert.equal(read.result?.sourceSearchRef, search.results[0]?.refId);
   assert.equal(read.result?.contentPreview?.includes("Clean page body"), true);
   assert.equal(read.result?.contentPreview?.includes("secret()"), false);
@@ -144,8 +145,8 @@ test("ResearchRuntime page source rejects invalid URLs and degrades when fetch i
   try {
     const adapter = createPageInformationSourceAdapter();
 
-    const invalid = await adapter.read!({ ref: "repo://README.md", maxLength: 200 });
-    const missingProvider = await adapter.read!({ ref: "https://example.test/research", maxLength: 200 });
+    const invalid = await adapter.read!({ ref: "repo://README.md", maxLength: 200, startChar: 0 });
+    const missingProvider = await adapter.read!({ ref: "https://example.test/research", maxLength: 200, startChar: 0 });
 
     assert.equal(invalid.status, "invalid-input");
     assert.equal(missingProvider.status, "no-provider");
@@ -347,7 +348,7 @@ test("ResearchRuntime codebase adapter rejects path traversal reads", async () =
   try {
     const adapter = createCodebaseInformationSourceAdapter({ rootDirectory: directory });
 
-    const read = await adapter.read!({ ref: "../outside.txt", maxLength: 200 });
+    const read = await adapter.read!({ ref: "../outside.txt", maxLength: 200, startChar: 0 });
 
     assert.equal(read.status, "invalid-input");
     assert.equal(read.message?.includes("escapes repository root"), true);

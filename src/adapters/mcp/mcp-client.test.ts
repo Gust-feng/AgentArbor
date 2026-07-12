@@ -9,11 +9,25 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { modelVisibleToolDescription, validateModelVisibleToolContract } from "../../domain/tools/index.js";
+import {
+  modelVisibleToolDescription,
+  toolModelAttachmentsFromOutput,
+  type ToolExecutorResult,
+  validateModelVisibleToolContract,
+} from "../../domain/tools/index.js";
+import { toolResultMessage } from "../../kernel/intelligence/tool-use-loop-messages.js";
+import { ToolCenter } from "../../app/tool-center/tool-center.js";
 import { McpClientWrapper } from "./mcp-client.js";
-import { createCachedMcpToolExecutor, createMcpToolExecutor } from "./mcp-tool-adapter.js";
+import {
+  createCachedMcpToolExecutor,
+  createMcpToolExecutor,
+  type McpToolOutput,
+} from "./mcp-tool-adapter.js";
 import { McpManager } from "./mcp-manager.js";
 import { ensureManagedMcpExecutable, mcpManagedRuntimeDirectories, resolveMcpExecutable } from "./mcp-local-runtime.js";
+
+const RESOURCE_IMAGE_DATA = Buffer.from("resource-image", "utf8").toString("base64");
+const RESOURCE_BINARY_DATA = Buffer.from("binary", "utf8").toString("base64");
 
 function createTestServer() {
   const server = new McpServer({ name: "test-server", version: "1.0.0" });
@@ -63,6 +77,49 @@ function createTestServer() {
     })
   );
   server.registerTool(
+    "resource_tool",
+    {
+      description: "Returns current MCP resource content types",
+    },
+    async () => ({
+      content: [
+        {
+          type: "resource_link" as const,
+          uri: "memory://records/1",
+          name: "record-1",
+          title: "Record one",
+          description: "Retrievable record",
+          mimeType: "text/plain",
+          size: 12,
+        },
+        {
+          type: "resource" as const,
+          resource: {
+            uri: "memory://records/1/body",
+            mimeType: "text/plain",
+            text: "Resource body",
+          },
+        },
+        {
+          type: "resource" as const,
+          resource: {
+            uri: "memory://records/1/image",
+            mimeType: "image/png",
+            blob: RESOURCE_IMAGE_DATA,
+          },
+        },
+        {
+          type: "resource" as const,
+          resource: {
+            uri: "memory://records/1/binary",
+            mimeType: "application/octet-stream",
+            blob: RESOURCE_BINARY_DATA,
+          },
+        },
+      ],
+    })
+  );
+  server.registerTool(
     "destructive_tool",
     {
       description: "Mutates external state",
@@ -102,6 +159,18 @@ async function createConnectedPair() {
   return { client, server };
 }
 
+function createFakeMcpExecutor(client: McpClientWrapper, name: string) {
+  return createMcpToolExecutor(
+    client,
+    {
+      name,
+      description: `Test MCP tool ${name}`,
+      inputSchema: { type: "object", properties: {} },
+    },
+    "fake-server"
+  );
+}
+
 test("McpClientWrapper connects and disconnects", async () => {
   const server = createTestServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -125,7 +194,7 @@ test("McpClientWrapper listTools returns expected format", async () => {
   const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
-  assert.equal(tools.length, 6);
+  assert.equal(tools.length, 7);
 
   const echo = tools.find((t) => t.name === "echo");
   assert.ok(echo);
@@ -350,6 +419,12 @@ test("createMcpToolExecutor creates correct namespaced ToolExecutor", async () =
   const validation = validateModelVisibleToolContract(executor.definition);
   assert.equal(validation.ok, true, validation.missing.join(", "));
   assert.equal(executor.definition.modelContract?.runtimeHints?.some((hint) => hint.value === "my-server"), true);
+  const outputNotes = executor.definition.modelContract?.outputNotes?.join("\n") ?? "";
+  assert.match(outputNotes, /one canonical fact body/i);
+  assert.match(outputNotes, /not truncated/i);
+  assert.match(outputNotes, /not_retained/i);
+  assert.match(outputNotes, /failed ToolCallResult/i);
+  assert.equal(executor.definition.modelContract?.whenNotToUse?.join("\n").includes("built-in"), false);
 
   await client.disconnect();
 });
@@ -472,22 +547,109 @@ test("createMcpToolExecutor execute returns text output", async () => {
   );
 
   assert.deepEqual(output, {
-    summary: "Echo: test",
-    mcpResult: {
-      content: [{ type: "text", text: "Echo: test" }],
-      structuredContent: undefined,
-      isError: undefined,
-    },
-    result: {
-      text: "Echo: test",
-      multimodal: undefined,
-      structuredContent: undefined,
-    },
-    isError: undefined,
-    truncated: false,
+    content: [{ type: "text", text: "Echo: test" }],
   });
+  assert.equal(JSON.stringify(output).split("Echo: test").length - 1, 1);
 
   await client.disconnect();
+});
+
+test("createMcpToolExecutor preserves distinct text and structured facts exactly once", async () => {
+  const { client } = await createConnectedPair();
+  const tools = await client.listTools();
+  const structuredTool = tools.find((tool) => tool.name === "structured_tool")!;
+  const executor = createMcpToolExecutor(client, structuredTool, "my-server");
+
+  const output = await executor.execute(
+    { id: "record-1" },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
+  );
+
+  assert.deepEqual(output, {
+    content: [{ type: "text", text: "Loaded record-1" }],
+    structuredContent: {
+      id: "record-1",
+      records: [{ title: "Structured record", score: 1 }],
+    },
+  });
+  const serialized = JSON.stringify(output);
+  assert.equal(serialized.split("Loaded record-1").length - 1, 1);
+  assert.equal(serialized.split("Structured record").length - 1, 1);
+  assert.equal(serialized.includes("summary"), false);
+  assert.equal(serialized.includes("mcpResult"), false);
+
+  await client.disconnect();
+});
+
+test("MCP tool adapter preserves parseable JSON text when it differs from structured content", async () => {
+  const structuredContent = { id: "record-1", records: [{ score: 1 }] };
+  const distinctTextFact = { id: "record-1", records: [{ score: 2 }] };
+  const client = {
+    async callTool() {
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(distinctTextFact) }],
+        structuredContent,
+      };
+    },
+  } as unknown as McpClientWrapper;
+
+  const output = await createFakeMcpExecutor(client, "distinct_json").execute(
+    {},
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
+  );
+
+  assert.deepEqual(output, {
+    content: [{ type: "text", text: JSON.stringify(distinctTextFact) }],
+    structuredContent,
+  });
+});
+
+test("MCP exact JSON mirror is kept once and stays below the model transport budget", async () => {
+  const largeText = "x".repeat(120_000);
+  const structuredContent = {
+    id: "large-record",
+    payload: largeText,
+    facts: { complete: true },
+  };
+  const client = {
+    async callTool() {
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+        structuredContent,
+      };
+    },
+  } as unknown as McpClientWrapper;
+  const executor = createFakeMcpExecutor(client, "large_exact_mirror");
+  const center = new ToolCenter();
+  center.register(executor);
+
+  const result = await center.execute(
+    { callId: "mcp-large-mirror-call", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
+  );
+  const serializedOutput = JSON.stringify(result.output);
+  const modelMessage = toolResultMessage(result);
+  const modelPayload = JSON.parse(modelMessage.content) as {
+    readonly status: string;
+    readonly body: {
+      readonly format: string;
+      readonly value: {
+        readonly content: readonly unknown[];
+        readonly structuredContent: typeof structuredContent;
+      };
+    };
+  };
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.output, { content: [], structuredContent });
+  assert.equal(serializedOutput.split(largeText).length - 1, 1);
+  assert.equal(modelMessage.content.length < 220_000, true);
+  assert.equal(modelMessage.content.includes("tool_message_transport_budget_exceeded"), false);
+  assert.equal(modelPayload.status, "completed");
+  assert.equal(modelPayload.body.format, "json");
+  assert.deepEqual(modelPayload.body.value.content, []);
+  assert.deepEqual(modelPayload.body.value.structuredContent, structuredContent);
 });
 
 test("createMcpToolExecutor execute preserves MCP error content", async () => {
@@ -499,25 +661,258 @@ test("createMcpToolExecutor execute preserves MCP error content", async () => {
 
   const output = await executor.execute(
     {},
-    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1", toolCallId: "call-fail" }
   );
-  assert.deepEqual(output, {
-    summary: "Something went wrong.",
-    mcpResult: {
-      content: [{ type: "text", text: "Something went wrong." }],
-      structuredContent: undefined,
-      isError: true,
-    },
-    result: {
-      text: "Something went wrong.",
-      multimodal: undefined,
-      structuredContent: undefined,
-    },
-    isError: true,
-    truncated: false,
+  const executorResult = output as ToolExecutorResult;
+  assert.equal(executorResult.kind, "tool_call_result");
+  assert.equal(executorResult.result.callId, "call-fail");
+  assert.equal(executorResult.result.toolName, "my-server__fail_tool");
+  assert.deepEqual(executorResult.result.input, {});
+  assert.equal(executorResult.result.status, "failed");
+  assert.equal(executorResult.result.error, "MCP tool my-server__fail_tool reported an error.");
+  assert.equal(executorResult.result.errorDomain, "tool_error");
+  assert.deepEqual(executorResult.result.errorFacts, {
+    code: "mcp_tool_error",
+    serverId: "my-server",
+    mcpToolName: "fail_tool",
   });
+  assert.equal(executorResult.result.durationMs >= 0, true);
+  assert.deepEqual(executorResult.result.output, {
+    content: [{ type: "text", text: "Something went wrong." }],
+  });
+  const serialized = JSON.stringify(executorResult.result.output);
+  assert.equal(serialized.split("Something went wrong.").length - 1, 1);
+  assert.equal(serialized.includes("isError"), false);
+
+  const center = new ToolCenter();
+  center.register(executor);
+  const normalized = await center.execute(
+    { callId: "call-fail-normalized", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
+  );
+  const modelMessage = toolResultMessage(normalized);
+  assert.equal(normalized.status, "failed");
+  assert.equal(modelMessage.content.split("Something went wrong.").length - 1, 1);
+  assert.equal(modelMessage.content.includes("mcpResult"), false);
+  assert.equal(modelMessage.content.includes("isError"), false);
 
   await client.disconnect();
+});
+
+test("MCP tool adapter carries image bytes out of band and reports unsupported audio honestly", async () => {
+  const imageData = Buffer.from("image-bytes", "utf8").toString("base64");
+  const audioData = Buffer.from("audio-bytes", "utf8").toString("base64");
+  const client = {
+    async callTool() {
+      return {
+        content: [
+          { type: "text" as const, text: "Media result" },
+          { type: "image" as const, data: imageData, mimeType: "image/png" },
+          { type: "audio" as const, data: audioData, mimeType: "audio/wav" },
+        ],
+      };
+    },
+  } as unknown as McpClientWrapper;
+
+  const output = await createFakeMcpExecutor(client, "media").execute(
+    {},
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
+  ) as McpToolOutput;
+  assert.deepEqual(output, {
+    content: [
+      { type: "text", text: "Media result" },
+      {
+        type: "image",
+        mimeType: "image/png",
+        byteLength: 11,
+        modelInput: "attached",
+        modelAttachmentIndex: 0,
+      },
+      {
+        type: "audio",
+        mimeType: "audio/wav",
+        byteLength: 11,
+        modelInput: "unsupported",
+        dataRetention: "not_retained",
+      },
+    ],
+  });
+  const serialized = JSON.stringify(output);
+  assert.equal(serialized.includes(imageData), false);
+  assert.equal(serialized.includes(audioData), false);
+  const attachments = toolModelAttachmentsFromOutput(output);
+  assert.equal(attachments?.length, 1);
+  assert.equal(attachments?.[0]?.kind, "image");
+  assert.equal(attachments?.[0]?.byteLength, 11);
+  assert.equal(attachments?.[0]?.source.kind, "data");
+  if (attachments?.[0]?.source.kind === "data") {
+    assert.equal(attachments[0].source.mimeType, "image/png");
+    assert.equal(attachments[0].source.data, imageData);
+  }
+});
+
+test("MCP image output survives ToolCenter normalization and reaches the model once out of band", async () => {
+  const imageData = Buffer.from("model-image-bytes", "utf8").toString("base64");
+  const client = {
+    async callTool() {
+      return {
+        content: [
+          { type: "text" as const, text: "Image observation" },
+          { type: "image" as const, data: imageData, mimeType: "image/png" },
+        ],
+      };
+    },
+  } as unknown as McpClientWrapper;
+  const executor = createFakeMcpExecutor(client, "image_observation");
+  const center = new ToolCenter();
+  center.register(executor);
+
+  const result = await center.execute(
+    { callId: "mcp-image-call", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
+  );
+  const message = toolResultMessage(result);
+
+  assert.equal(result.status, "completed");
+  assert.equal(message.attachments?.length, 1);
+  assert.equal(message.attachments?.[0]?.kind, "image");
+  assert.equal(message.attachments?.[0]?.source.kind, "data");
+  if (message.attachments?.[0]?.source.kind === "data") {
+    assert.equal(message.attachments[0].source.data, imageData);
+  }
+  assert.equal(message.content.includes(imageData), false);
+  assert.equal(message.content.split("Image observation").length - 1, 1);
+});
+
+test("createMcpToolExecutor preserves current MCP resource types without binary JSON fallbacks", async () => {
+  const { client } = await createConnectedPair();
+  const tools = await client.listTools();
+  const resourceTool = tools.find((tool) => tool.name === "resource_tool")!;
+  const executor = createMcpToolExecutor(client, resourceTool, "my-server");
+
+  const output = await executor.execute(
+    {},
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
+  ) as McpToolOutput;
+
+  assert.deepEqual(output, {
+    content: [
+      {
+        type: "resource_link",
+        uri: "memory://records/1",
+        name: "record-1",
+        title: "Record one",
+        description: "Retrievable record",
+        mimeType: "text/plain",
+        size: 12,
+      },
+      {
+        type: "resource",
+        resource: {
+          uri: "memory://records/1/body",
+          mimeType: "text/plain",
+          text: "Resource body",
+        },
+      },
+      {
+        type: "resource",
+        resource: {
+          uri: "memory://records/1/image",
+          mimeType: "image/png",
+          byteLength: Buffer.from("resource-image", "utf8").byteLength,
+          modelAttachmentIndex: 0,
+          modelInput: "attached",
+        },
+      },
+      {
+        type: "resource",
+        resource: {
+          uri: "memory://records/1/binary",
+          mimeType: "application/octet-stream",
+          byteLength: Buffer.from("binary", "utf8").byteLength,
+          modelInput: "unsupported",
+          dataRetention: "not_retained",
+        },
+      },
+    ],
+  });
+  const serialized = JSON.stringify(output);
+  assert.equal(serialized.includes(RESOURCE_IMAGE_DATA), false);
+  assert.equal(serialized.includes(RESOURCE_BINARY_DATA), false);
+  assert.equal(serialized.split("Resource body").length - 1, 1);
+  const attachments = toolModelAttachmentsFromOutput(output);
+  assert.equal(attachments?.length, 1);
+  assert.equal(attachments?.[0]?.kind, "image");
+  assert.equal(attachments?.[0]?.source.kind, "data");
+  if (attachments?.[0]?.source.kind === "data") {
+    assert.equal(attachments[0].source.data, RESOURCE_IMAGE_DATA);
+  }
+
+  await client.disconnect();
+});
+
+test("MCP tool adapter rejects unknown content instead of disguising it as text", async () => {
+  const client = {
+    async callTool() {
+      return {
+        content: [{ type: "legacy_blob", data: "opaque" }],
+      };
+    },
+  } as unknown as McpClientWrapper;
+
+  await assert.rejects(
+    () => createFakeMcpExecutor(client, "unknown_content").execute(
+      {},
+      { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
+    ),
+    /Unsupported MCP content part: legacy_blob/
+  );
+});
+
+test("ToolCenter rejects non-JSON-safe MCP structured content at the executor fact boundary", async () => {
+  const structuredContent: Record<string, unknown> = { id: "record-1" };
+  structuredContent.self = structuredContent;
+  const client = {
+    async callTool() {
+      return {
+        content: [{ type: "text" as const, text: "Loaded record-1" }],
+        structuredContent,
+      };
+    },
+  } as unknown as McpClientWrapper;
+  const executor = createFakeMcpExecutor(client, "invalid_structured_content");
+  const center = new ToolCenter();
+  center.register(executor);
+
+  const result = await center.execute(
+    { callId: "mcp-invalid-structured-content", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
+  );
+
+  assert.equal(result.status, "failed");
+  assert.match(result.error ?? "", /Tool fact is not JSON-safe at \$\.structuredContent\.self: circular references are not supported/);
+  assert.equal(result.errorDomain, "runtime_error");
+  assert.equal((result.errorFacts as Readonly<Record<string, unknown>> | undefined)?.code, "invalid_tool_output_fact");
+});
+
+test("MCP tool adapter does not silently truncate text without a continuation", async () => {
+  const text = "x".repeat(128_001);
+  const client = {
+    async callTool() {
+      return { content: [{ type: "text" as const, text }] };
+    },
+  } as unknown as McpClientWrapper;
+
+  const output = await createFakeMcpExecutor(client, "large_text").execute(
+    {},
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
+  ) as McpToolOutput;
+  assert.deepEqual(output, { content: [{ type: "text", text }] });
+  assert.equal(JSON.stringify(output).split(text).length - 1, 1);
+  assert.equal("truncated" in output, false);
 });
 
 test("McpManager connectAll connects enabled servers and tracks statuses", async () => {
@@ -618,7 +1013,7 @@ test("McpManager separates discovered tools from exposed registry tools", async 
   await manager.connectAll();
 
   const discoveredTools = manager.getDiscoveredToolsForRegistry();
-  assert.equal(discoveredTools.length, 6);
+  assert.equal(discoveredTools.length, 7);
   const names = discoveredTools.map((t) => t.definition.name).sort();
   assert.deepEqual(names, [
     "srv__destructive_tool",
@@ -626,6 +1021,7 @@ test("McpManager separates discovered tools from exposed registry tools", async 
     "srv__fail_tool",
     "srv__open_world_tool",
     "srv__read_only_tool",
+    "srv__resource_tool",
     "srv__structured_tool",
   ]);
   assert.equal(discoveredTools[0].definition.metadata?.category, "mcp");

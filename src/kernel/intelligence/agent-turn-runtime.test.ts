@@ -660,11 +660,6 @@ class PermissionAwareToolBroker implements ToolExecutionBroker {
         riskLevel: this.operationTypes[name] === undefined || this.operationTypes[name] === "read-only" ? "low" : "high",
         operationType: this.operationTypes[name] ?? "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 800,
-          omitRawOutput: true,
-        },
       },
     }));
   }

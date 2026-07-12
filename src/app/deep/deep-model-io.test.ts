@@ -428,11 +428,6 @@ function capabilityTool(name: string): CapabilityToolCatalogItem {
     operationLabel: name === "shell_command" ? "Execute command" : "Read file",
     requiresConfirmation: name === "shell_command",
     confirmationLabel: name === "shell_command" ? "Requires confirmation" : "No confirmation required",
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 2000,
-      omitRawOutput: false,
-    },
     scopes: ["desktop-basic"],
     enabled: true,
     availability: "available",

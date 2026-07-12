@@ -12,6 +12,7 @@ import type {
   ToolExecutorResult,
   ToolInputSchema,
 } from "../../domain/tools/contracts.js";
+import type { ToolFactValue } from "../../domain/tools/fact-value.js";
 import type { SubAgentRunTraceReader, SubAgentRunTraceSink } from "../../domain/sub-agents/contracts.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type { ToolRegistry, ToolRegistryScope } from "../tool-center/tool-registry.js";
@@ -137,6 +138,8 @@ type BatchStats = {
 
 const READ_SUB_AGENT_OUTPUT_DEFAULT_CHARS = 100_000;
 const READ_SUB_AGENT_OUTPUT_MAX_CHARS = 120_000;
+const SUB_AGENT_INITIAL_OUTPUT_MAX_CHARS = READ_SUB_AGENT_OUTPUT_DEFAULT_CHARS;
+const SUB_AGENT_BATCH_INITIAL_OUTPUT_TOTAL_CHARS = 120_000;
 
 class SubAgentPendingApprovalStore {
   private readonly continuations = new Map<string, PendingSubAgentContinuation>();
@@ -257,30 +260,24 @@ function tasksArrayOrThrow(value: unknown): readonly CallSubAgentsTaskInput[] {
   return tasks;
 }
 
-function buildSubAgentResultOutput(result: SubAgentRunnerResult) {
-  const outputRef = subAgentOutputRef(result);
-  const continuation = result.fullOutput === undefined
-    ? undefined
-    : subAgentOutputContinuation(result.runId, 0);
+function buildSubAgentResultOutput(
+  result: SubAgentRunnerResult,
+  maxOutputChars = SUB_AGENT_INITIAL_OUTPUT_MAX_CHARS,
+) {
+  const fullOutput = result.fullOutput;
+  const returnedOutput = fullOutput?.slice(0, maxOutputChars);
+  const fullOutputTruncated = fullOutput !== undefined && returnedOutput !== undefined && returnedOutput.length < fullOutput.length;
   return {
-    status: result.status,
-    summary: result.summary,
-    full_output: result.fullOutput,
-    full_output_chars: result.fullOutput?.length,
-    full_output_ref: outputRef,
-    continuation,
+    sub_agent_status: result.status,
+    full_output: returnedOutput,
+    full_output_chars: fullOutput?.length,
+    truncated: fullOutputTruncated ? true : undefined,
     tool_calls: result.toolCalls,
     model_rounds: result.modelRounds,
     duration_ms: result.durationMs,
     run_id: result.runId,
     error: result.error,
   };
-}
-
-function subAgentOutputRef(result: SubAgentRunnerResult): string | undefined {
-  return result.runId !== undefined && result.fullOutput !== undefined
-    ? `sub-agent-output:${result.runId}`
-    : undefined;
 }
 
 function subAgentOutputContinuation(
@@ -300,6 +297,16 @@ function subAgentOutputContinuation(
     } satisfies ReadSubAgentOutputInput,
     note: "Use read_sub_agent_output with nextInput to read this sub-agent output by character range.",
   };
+}
+
+function continuationForSubAgentResult(
+  result: SubAgentRunnerResult,
+  maxOutputChars = SUB_AGENT_INITIAL_OUTPUT_MAX_CHARS,
+): ToolContinuation | undefined {
+  if (result.fullOutput === undefined || result.fullOutput.length <= maxOutputChars) {
+    return undefined;
+  }
+  return subAgentOutputContinuation(result.runId, maxOutputChars);
 }
 
 function parentRunOptions(deps: SubAgentToolDependencies, context: ToolExecutionContext) {
@@ -387,10 +394,12 @@ function approvalRequiredExecutorResult(input: {
   return toolExecutorResult({
     callId: input.context.toolCallId ?? createId("sub-agent-tool-call"),
     toolName: input.toolName,
-    input: input.toolInput,
-    output: buildSubAgentResultOutput(input.result),
+    input: input.toolInput as ToolFactValue | undefined,
+    output: {
+      ...buildSubAgentResultOutput(input.result),
+      continuation: continuationForSubAgentResult(input.result),
+    },
     status: "approval_required",
-    error: input.result.summary,
     durationMs: input.result.durationMs,
     confirmationRequest,
   });
@@ -456,38 +465,40 @@ function buildBatchToolOutput(input: {
 }) {
   const results = [...input.results].sort((a, b) => a.index - b.index);
   const stats = batchStats(input.tasks, results);
-  const resultOutputs = results.map((r) => ({
-    index: r.index,
-    sub_agent_id: r.sub_agent_id,
-    sub_agent_name: r.sub_agent_name,
-    task: r.task,
-    ...buildSubAgentResultOutput(r.result),
-  }));
-  const summary =
-    `执行 ${input.tasks.length} 个子 Agent 任务：${stats.completedCount} 成功，${stats.failedCount} 失败，` +
-    `${stats.cancelledCount} 取消，${stats.approvalRequiredCount} 等待确认，${stats.notStartedCount} 未启动，` +
-    `总耗时 ${input.totalDurationMs}ms`;
-
+  const outputCharsPerResult = Math.max(
+    1,
+    Math.min(
+      SUB_AGENT_INITIAL_OUTPUT_MAX_CHARS,
+      Math.floor(SUB_AGENT_BATCH_INITIAL_OUTPUT_TOTAL_CHARS / Math.max(1, results.length)),
+    ),
+  );
+  const resultOutputs = results.map((r) => {
+    const output = buildSubAgentResultOutput(r.result, outputCharsPerResult);
+    return {
+      index: r.index,
+      sub_agent_id: r.sub_agent_id,
+      sub_agent_name: r.sub_agent_name,
+      ...output,
+    };
+  });
+  const continuations = results
+    .map((result) => continuationForSubAgentResult(result.result, outputCharsPerResult))
+    .filter((value): value is ToolContinuation => value !== undefined);
   return {
-    action: "call_sub_agents",
-    status: stats.failedCount > 0 || stats.cancelledCount > 0 || stats.approvalRequiredCount > 0 || stats.notStartedCount > 0
-      ? "partial_failure"
-      : "completed",
-    summary,
-    result: {
-      results: resultOutputs,
-      stats: {
-        total: input.tasks.length,
-        completed: stats.completedCount,
-        failed: stats.failedCount,
-        cancelled: stats.cancelledCount,
-        approval_required: stats.approvalRequiredCount,
-        not_started: stats.notStartedCount,
-        total_duration_ms: input.totalDurationMs,
-        max_concurrency: input.maxConcurrency,
-        interrupted_for_approval: input.interruptedForApproval,
-      },
+    results: resultOutputs,
+    stats: {
+      total: input.tasks.length,
+      completed: stats.completedCount,
+      failed: stats.failedCount,
+      cancelled: stats.cancelledCount,
+      approval_required: stats.approvalRequiredCount,
+      not_started: stats.notStartedCount,
+      total_duration_ms: input.totalDurationMs,
+      max_concurrency: input.maxConcurrency,
+      interrupted_for_approval: input.interruptedForApproval,
     },
+    truncated: continuations.length > 0 ? true : undefined,
+    continuations: continuations.length === 0 ? undefined : continuations,
   };
 }
 
@@ -658,10 +669,10 @@ const callSubAgentToolDefinition: ToolDefinition = {
       "context: 可选，提供额外的背景信息帮助子 Agent 理解任务。",
     ],
     outputNotes: [
-      "status: 执行状态，completed/failed/cancelled。",
-      "summary: 轻量展示状态，不作为完整结果正文。",
-      "full_output: 子 Agent 的完整输出内容；需要引用结果时优先使用该字段。",
-      "full_output_ref/continuation: 当输出过长或需要精确续读时，用 continuation.nextInput 调用 read_sub_agent_output。",
+      "sub_agent_status: 子 Agent 执行状态，completed/failed/cancelled。",
+      `full_output: 输出不超过 ${SUB_AGENT_INITIAL_OUTPUT_MAX_CHARS} 字时返回完整正文；更长时返回首段。`,
+      "truncated: 为 true 时正文仍有未返回部分。",
+      "continuation.nextInput: 仅在正文被截断时提供，并从首段末尾继续调用 read_sub_agent_output。",
       "tool_calls: 子 Agent 调用工具的次数。",
       "model_rounds: 模型交互轮数。",
       "duration_ms: 执行耗时（毫秒）。",
@@ -687,11 +698,6 @@ const callSubAgentToolDefinition: ToolDefinition = {
     riskLevel: "medium",
     operationType: "read-write",
     requiresConfirmation: false,
-    visibleResultPolicy: {
-      userVisible: "summary-only",
-      maxPreviewChars: 1200,
-      omitRawOutput: true,
-    },
   },
   inputSchema: callSubAgentInputSchema,
 };
@@ -750,9 +756,9 @@ const callSubAgentsToolDefinition: ToolDefinition = {
     ],
     outputNotes: [
       "results: 每个子 Agent 的执行结果数组。",
-      "summary: 批次轻量展示状态，不作为各子 Agent 的完整结果正文。",
-      "full_output: 每个 results 条目中的子 Agent 完整输出；需要引用结果时优先使用该字段。",
-      "full_output_ref/continuation: 每个 results 条目都可给出 read_sub_agent_output 续读输入。",
+      "full_output: 每个 results 条目返回完整短正文；长正文按批次总预算返回首段。",
+      "results[].truncated: 标记该条结果仍有未返回正文。",
+      "顶层 continuations[]: 仅为被截断的结果给出从未读位置开始的 read_sub_agent_output 输入。",
       "stats: 统计信息（总数、成功数、失败数、总耗时）。",
     ],
     examples: [
@@ -778,11 +784,6 @@ const callSubAgentsToolDefinition: ToolDefinition = {
     riskLevel: "medium",
     operationType: "read-write",
     requiresConfirmation: false,
-    visibleResultPolicy: {
-      userVisible: "summary-only",
-      maxPreviewChars: 1600,
-      omitRawOutput: true,
-    },
   },
   inputSchema: callSubAgentsInputSchema,
 };
@@ -860,10 +861,10 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
       "context: 可选，额外的上下文信息。",
     ],
     outputNotes: [
-      "status: 执行状态，completed/failed/cancelled。",
-      "summary: 轻量展示状态，不作为完整结果正文。",
-      "full_output: 子 Agent 的完整输出内容；需要引用结果时优先使用该字段。",
-      "full_output_ref/continuation: 当输出过长或需要精确续读时，用 continuation.nextInput 调用 read_sub_agent_output。",
+      "sub_agent_status: 子 Agent 执行状态，completed/failed/cancelled。",
+      `full_output: 输出不超过 ${SUB_AGENT_INITIAL_OUTPUT_MAX_CHARS} 字时返回完整正文；更长时返回首段。`,
+      "truncated: 为 true 时正文仍有未返回部分。",
+      "continuation.nextInput: 仅在正文被截断时提供，并从首段末尾继续调用 read_sub_agent_output。",
       "tool_calls: 子 Agent 调用工具的次数。",
       "model_rounds: 模型交互轮数。",
       "duration_ms: 执行耗时（毫秒）。",
@@ -890,11 +891,6 @@ const spawnSubAgentToolDefinition: ToolDefinition = {
     riskLevel: "medium",
     operationType: "read-write",
     requiresConfirmation: false,
-    visibleResultPolicy: {
-      userVisible: "summary-only",
-      maxPreviewChars: 1200,
-      omitRawOutput: true,
-    },
   },
   inputSchema: spawnSubAgentInputSchema,
 };
@@ -945,11 +941,6 @@ const readSubAgentOutputToolDefinition: ToolDefinition = {
     riskLevel: "low",
     operationType: "read-only",
     requiresConfirmation: false,
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 1200,
-      omitRawOutput: true,
-    },
   },
   inputSchema: readSubAgentOutputInputSchema,
 };
@@ -1013,12 +1004,10 @@ function createCallSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): Tool
         }
         deps.pendingApprovals.forget(context);
         return {
-          action: "call_sub_agent",
-          status: result.status,
           sub_agent_name: approvedContinuation.subAgent.name,
           sub_agent_id: approvedContinuation.subAgent.id,
-          summary: result.summary,
-          result: buildSubAgentResultOutput(result),
+          ...buildSubAgentResultOutput(result),
+          continuation: continuationForSubAgentResult(result),
         };
       }
 
@@ -1065,12 +1054,10 @@ function createCallSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): Tool
       }
 
       return {
-        action: "call_sub_agent",
-        status: result.status,
         sub_agent_name: subAgent.name,
         sub_agent_id: subAgent.id,
-        summary: result.summary,
-        result: buildSubAgentResultOutput(result),
+        ...buildSubAgentResultOutput(result),
+        continuation: continuationForSubAgentResult(result),
       };
     },
   };
@@ -1355,53 +1342,19 @@ function createReadSubAgentOutputExecutor(deps: SubAgentToolRuntimeDependencies)
       const continuation = hasMoreAfter
         ? subAgentOutputContinuation(subRunId, endChar, maxChars)
         : undefined;
-      const summary = hasMoreAfter
-        ? `读取子 Agent 输出 ${startChar}-${endChar} / ${trace.fullOutput.length} 字，仍有后续内容。`
-        : `读取子 Agent 输出 ${startChar}-${endChar} / ${trace.fullOutput.length} 字，已到末尾。`;
-      const result = {
+      return {
         sub_run_id: subRunId,
         sub_agent_id: trace.subAgentId,
         sub_agent_name: trace.subAgentName,
-        status: trace.status,
-        summary: trace.summary,
+        sub_agent_status: trace.status,
         start_char: startChar,
         end_char: endChar,
         chars_returned: content.length,
         total_chars: trace.fullOutput.length,
         has_more_after: hasMoreAfter,
         content,
-        continuation,
-      };
-      return {
-        action: "read_sub_agent_output",
-        status: "completed",
-        summary,
-        result,
         truncated: hasMoreAfter,
-        canonicalResult: {
-          content: [{ type: "text", text: content }],
-          structuredContent: {
-            sub_run_id: subRunId,
-            sub_agent_id: trace.subAgentId,
-            sub_agent_name: trace.subAgentName,
-            status: trace.status,
-            start_char: startChar,
-            end_char: endChar,
-            chars_returned: content.length,
-            total_chars: trace.fullOutput.length,
-            has_more_after: hasMoreAfter,
-            continuation,
-          },
-          truncation: hasMoreAfter
-            ? {
-              truncated: true,
-              reason: "sub_agent_output_window",
-              omittedChars: trace.fullOutput.length - endChar,
-              continuation,
-            }
-            : undefined,
-          continuation,
-        },
+        continuation,
       };
     },
   };
@@ -1432,12 +1385,10 @@ function createSpawnSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): Too
         }
         deps.pendingApprovals.forget(context);
         return {
-          action: "spawn_sub_agent",
-          status: result.status,
           spawned_role: approvedContinuation.subAgent.name,
           spawned_id: approvedContinuation.subAgent.id,
-          summary: result.summary,
-          result: buildSubAgentResultOutput(result),
+          ...buildSubAgentResultOutput(result),
+          continuation: continuationForSubAgentResult(result),
         };
       }
 
@@ -1505,12 +1456,10 @@ function createSpawnSubAgentExecutor(deps: SubAgentToolRuntimeDependencies): Too
       }
 
       return {
-        action: "spawn_sub_agent",
-        status: result.status,
         spawned_role: role,
         spawned_id: tempId,
-        summary: result.summary,
-        result: buildSubAgentResultOutput(result),
+        ...buildSubAgentResultOutput(result),
+        continuation: continuationForSubAgentResult(result),
       };
     },
   };

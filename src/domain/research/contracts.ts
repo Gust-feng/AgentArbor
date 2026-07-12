@@ -38,6 +38,7 @@ export type InformationReadRequest = {
   readonly source?: InformationSourceKind;
   readonly query?: string;
   readonly maxLength?: number;
+  readonly startChar?: number;
   readonly traceId?: string;
   readonly goalId?: string;
   readonly abortSignal?: AbortSignal;
@@ -62,6 +63,10 @@ export type ReadResultRef = {
   readonly status: InformationAccessStatus;
   readonly summary: string;
   readonly contentPreview?: string;
+  readonly startChar: number;
+  readonly contentChars: number;
+  readonly charCount: number;
+  readonly hasMoreAfter: boolean;
   readonly truncated: boolean;
   readonly sourceSearchRef?: string;
   readonly metadata?: Readonly<Record<string, string | number | boolean>>;

@@ -415,7 +415,9 @@ test("child detail workflow renders model output and collapsed desktop Agent too
   ]);
 
   includes(deepWorkDetailModel, "displayActivityItemsForNodes([node])");
-  includes(deepWorkDetailModel, "display: call.display");
+  includes(deepWorkDetailModel, "toolName: call.toolName");
+  includes(deepWorkDetailModel, "summary: call.summary ?? call.inputSummary");
+  excludes(deepWorkDetailModel, "display: call.display");
   includes(deepView, "view={detailTimelineView(segment.items)}");
   includes(deepView, "collapsed={true}");
   includes(deepView, "<RichText text={segment.text} />");
@@ -427,12 +429,17 @@ test("child detail workflow renders model output and collapsed desktop Agent too
   excludes(deepView, "模型工具调用决策");
   includes(deepWorkDetailModel, "function mergeExpandedSections");
   includes(deepWorkDetailModel, "function mergeActivityBadges");
-  includes(deepContract, "import type { ToolDisplayProjection } from \"./tools\";");
-  includes(deepContract, "readonly display?: ToolDisplayProjection;");
-  includes(childRunner, "display: projectToolDisplay({ callId: toolCall.callId, toolName: toolCall.toolName, input: toolCall.input }, toolCall.output)");
+  excludes(deepContract, "ToolDisplayProjection");
+  excludes(deepContract, "readonly display?:");
+  includes(childRunner, "const summary = toolCallSummary(toolCall);");
+  includes(childRunner, "const inputSummary = summarizeToolInput(toolCall.input);");
+  includes(childRunner, "...(summary === undefined ? {} : { summary })");
+  includes(childRunner, "...(inputSummary === undefined ? {} : { inputSummary })");
+  excludes(childRunner, "projectToolDisplay");
   excludes(deepRuntime, "模型发起");
   excludes(deepReadModel, "模型发起");
-  includes(treeAttachment, "readonly display?: ToolDisplayProjection;");
+  excludes(treeAttachment, "ToolDisplayProjection");
+  excludes(treeAttachment, "readonly display?:");
 });
 
 function includes(source: string, pattern: string): void {

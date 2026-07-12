@@ -60,9 +60,9 @@ export function createReadContextAttachmentImageTool(
           "If the selected model does not support vision input, the tool reports a non-readable reason instead of attaching bytes.",
         ],
         outputNotes: [
-          "result.modelInput.attached=true means the image was attached to the next model request.",
-          "result.path is relative to the attachment root for project attachments and never a local absolute path.",
-          "result.reason explains unsupported format, size, unreadable file, or missing model vision support.",
+          "modelInput.attached=true means the image was attached to the next model request.",
+          "path is relative to the attachment root for project attachments and never a local absolute path.",
+          "reason explains unsupported format, size, unreadable file, or missing model vision support.",
         ],
         runtimeHints: [
           { label: "max image bytes", value: String(MAX_IMAGE_ATTACHMENT_BYTES) },
@@ -78,11 +78,6 @@ export function createReadContextAttachmentImageTool(
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 900,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -145,28 +140,17 @@ export function createReadContextAttachmentImageTool(
           detail,
         });
       }
-      const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · image attached for model input · ${stat.size} bytes`;
       const output = {
-        action: "read_context_attachment_image",
-        status: "completed",
         refId: `context-attachment:${entry.attachmentId}:image:${safeRefToken(target.targetPath)}`,
-        summary,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          path: target.targetPath,
-          mimeType,
-          bytes: stat.size,
-          format: "image",
-          readable: true,
-          modelInput: { attached: true, detail },
-        },
-        display: {
-          kind: "generic_tool_summary",
-          action: "read_context_attachment_image",
-          summary,
-        },
+        attachmentId: entry.attachmentId,
+        kind: entry.ref.kind,
+        title: attachmentTitle(entry),
+        path: target.targetPath,
+        mimeType,
+        bytes: stat.size,
+        format: "image",
+        readable: true,
+        modelInput: { attached: true, detail },
       };
       return withToolModelAttachments(output, [
         imageModelAttachment({
@@ -191,29 +175,18 @@ function unsupportedImageResult(input: {
   readonly detail: "auto" | "low" | "high";
 }): Readonly<Record<string, unknown>> {
   const mimeType = input.mimeType ?? imageMimeTypeForTarget(input.entry.ref, input.target);
-  const summary = `${attachmentTitle(input.entry)}${input.target.targetPath === "." ? "" : `:${input.target.targetPath}`} · image input not available · ${input.reason}`;
   return {
-    action: "read_context_attachment_image",
-    status: "completed",
     refId: `context-attachment:${input.entry.attachmentId}:image:${safeRefToken(input.target.targetPath)}`,
-    summary,
-    result: {
-      attachmentId: input.entry.attachmentId,
-      kind: input.entry.ref.kind,
-      title: attachmentTitle(input.entry),
-      path: input.target.targetPath,
-      mimeType,
-      bytes: input.bytes,
-      format: mimeType === undefined ? tableTargetFormat(input.entry.ref, input.target.targetPath) : "image",
-      readable: false,
-      reason: input.reason,
-      modelInput: { attached: false, detail: input.detail },
-    },
-    display: {
-      kind: "generic_tool_summary",
-      action: "read_context_attachment_image",
-      summary,
-    },
+    attachmentId: input.entry.attachmentId,
+    kind: input.entry.ref.kind,
+    title: attachmentTitle(input.entry),
+    path: input.target.targetPath,
+    mimeType,
+    bytes: input.bytes,
+    format: mimeType === undefined ? tableTargetFormat(input.entry.ref, input.target.targetPath) : "image",
+    readable: false,
+    reason: input.reason,
+    modelInput: { attached: false, detail: input.detail },
   };
 }
 

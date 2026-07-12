@@ -38,8 +38,7 @@ export type BasicAgentContextSourceKind =
   | "conversation_recent_turn"
   | "run_interruption"
   | "user_message"
-  | "task_soil_ref"
-  | "tool_evidence";
+  | "task_soil_ref";
 
 export type BasicAgentContextSkillFacts = Omit<
   ContextLedgerSkillFacts,
@@ -138,6 +137,8 @@ export type BasicAgentRunExecutionResult = {
 
 export type BasicAgentPendingToolContinuation = {
   readonly confirmationId: string;
+  /** Releases the runtime resources retained while approval is pending. Must be idempotent. */
+  release(): Promise<void>;
   resume(input: {
     readonly approvedConfirmationIds: readonly string[];
     readonly abortSignal: AbortSignal;

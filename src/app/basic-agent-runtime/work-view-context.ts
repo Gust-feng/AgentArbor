@@ -4,11 +4,9 @@ import type {
   ContextLedger,
   ContextLedgerEntry,
   ContextLedgerSkillFacts,
-  ToolCallEvidence,
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef, ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 import type { BasicAgentContextSkillFacts } from "./contracts.js";
 
@@ -56,7 +54,6 @@ export type WorkViewContextProjectionInput = {
   readonly canvas?: WorkViewCanvasContextLike;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
-  readonly toolEvidence?: readonly ToolCallEvidence[];
 };
 
 export function contextAttachmentsFor(input: WorkViewContextProjectionInput): readonly ContextAttachment[] {
@@ -89,9 +86,7 @@ export function contextAttachmentsFor(input: WorkViewContextProjectionInput): re
 
 export function contextLedgerFor(
   input: WorkViewContextProjectionInput,
-  attachments: readonly ContextAttachment[],
-  toolEvidence: readonly ToolCallEvidence[],
-  toolDisplays: readonly ToolDisplayProjection[]
+  attachments: readonly ContextAttachment[]
 ): ContextLedger {
   const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent?.context : undefined;
   const contextItems = context?.items ?? [];
@@ -136,22 +131,6 @@ export function contextLedgerFor(
               truncated: item.truncated || item.skill.truncated,
             },
       })),
-    ...toolEvidence.slice(0, 12).map((evidence, index): ContextLedgerEntry => ({
-      entryId: `${input.run.runId}:ledger:tool-evidence:${evidence.callId || index}`,
-      kind: "tool_evidence",
-      title: evidence.toolName === undefined ? "工具证据" : `工具：${evidence.toolName}`,
-      summary: redactOrdinaryText(evidence.summary ?? evidence.error ?? evidence.status, 420),
-      refs: observationRefs(evidence.evidenceRefs),
-      status: evidence.status === "failed" ? "failed" : evidence.truncated === true ? "truncated" : "used",
-    })),
-    ...(toolEvidence.length > 0 ? [] : toolDisplays.slice(0, 12).map((display, index): ContextLedgerEntry => ({
-      entryId: `${input.run.runId}:ledger:tool:${index}`,
-      kind: "tool_evidence",
-      title: toolLedgerTitle(display),
-      summary: toolLedgerSummary(display),
-      refs: [],
-      status: "truncated" in display && display.truncated === true ? "truncated" : "used",
-    }))),
   ];
   const truncation = context?.truncationReport ?? {
     truncated: entries.some((entry) => entry.status === "truncated"),
@@ -167,27 +146,6 @@ export function contextLedgerFor(
     budget: context?.budget,
     truncation,
   };
-}
-
-export function normalizeToolEvidence(evidence: readonly ToolCallEvidence[]): readonly ToolCallEvidence[] {
-  const selected: ToolCallEvidence[] = [];
-  const seen = new Set<string>();
-  for (const item of evidence) {
-    const key = item.callId;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    selected.push({
-      ...item,
-      callId: redactOrdinaryText(item.callId, 220),
-      toolName: item.toolName === undefined ? undefined : redactOrdinaryText(item.toolName, 160),
-      summary: item.summary === undefined ? undefined : redactOrdinaryText(item.summary, 1_800),
-      evidenceRefs: item.evidenceRefs.map((ref) => redactOrdinaryText(ref, 220)).filter((ref) => ref.length > 0).slice(0, 12),
-      error: item.error === undefined ? undefined : redactOrdinaryText(item.error, 900),
-    });
-  }
-  return selected.slice(0, 24);
 }
 
 export function mergeToolDisplays(
@@ -277,7 +235,6 @@ function contextLedgerSummary(entries: readonly ContextLedgerEntry[]): string {
     attachment: "上下文",
     history: "历史",
     skill: "技能",
-    tool_evidence: "证据",
     budget: "范围",
     truncation: "压缩",
   };
@@ -302,70 +259,6 @@ function contextBudgetSummary(budget: ContextLedger["budget"]): string {
     budget?.usedInputTokens !== undefined && budget.usedInputTokens > 0 ? `约 ${budget.usedInputTokens} tokens` : undefined,
   ].filter(isString);
   return parts.length === 0 ? "已按当前任务整理上下文。" : parts.join("；");
-}
-
-function toolLedgerTitle(display: ToolDisplayProjection): string {
-  if (display.kind === "search_results") return "搜索证据";
-  if (display.kind === "directory_listing") return "目录列表";
-  if (display.kind === "file_search_results") return "文件搜索";
-  if (display.kind === "read_result") return "资料正文";
-  if (display.kind === "browser_snapshot") return "网页摘要";
-  if (display.kind === "http_response") return "HTTP 响应";
-  if (display.kind === "file_change_summary") return "文件变更";
-  if (display.kind === "file_diff_preview") return "差异预览";
-  if (display.kind === "command_summary") return "命令摘要";
-  return "工具摘要";
-}
-
-function toolLedgerSummary(display: ToolDisplayProjection): string {
-  if (display.kind === "search_results") return redactOrdinaryText(
-    [display.query, display.message, `搜索结果 ${display.resultsReturned ?? display.results.length} 条`].filter(isString).join(" · "),
-    300
-  );
-  if (display.kind === "directory_listing") return redactOrdinaryText(
-    [
-      toolPathLabel(display.path) ?? "目录已读取。",
-      `${display.totalEntries ?? display.entriesReturned ?? display.entries.length} 项`,
-      display.depth === undefined ? undefined : `深度 ${display.depth}`,
-    ].filter(isString).join(" · "),
-    300
-  );
-  if (display.kind === "file_search_results") return redactOrdinaryText(
-    [
-      display.query ?? "文件搜索已完成。",
-      toolPathLabel(display.path),
-      `${display.matchesReturned ?? display.matches.length} 处匹配`,
-      display.searchedFiles === undefined ? undefined : `${display.searchedFiles} 个文件`,
-    ].filter(isString).join(" · "),
-    300
-  );
-  if (display.kind === "read_result") return redactOrdinaryText(
-    [
-      display.title ?? display.uri ?? display.url ?? "资料已读取。",
-      display.error,
-      display.errorFacts === undefined ? undefined : `errorFacts: ${JSON.stringify(display.errorFacts)}`,
-    ].filter(isString).join(" · "),
-    420
-  );
-  if (display.kind === "browser_snapshot") return redactOrdinaryText(display.title ?? display.url ?? "网页已读取。", 240);
-  if (display.kind === "http_response") return redactOrdinaryText(
-    [
-      display.method,
-      display.url,
-      display.statusCode === undefined ? undefined : `${display.statusCode}${display.statusText === undefined ? "" : ` ${display.statusText}`}`,
-    ].filter(isString).join(" · ") || "HTTP 响应已返回。",
-    240
-  );
-  if (display.kind === "command_summary") return redactOrdinaryText(display.command ?? "命令已执行。", 240);
-  if (display.kind === "file_change_summary" || display.kind === "file_diff_preview") return redactOrdinaryText(display.path ?? "文件变更摘要。", 240);
-  return redactOrdinaryText(display.summary ?? display.action ?? "已处理。", 240);
-}
-
-function toolPathLabel(value: string | undefined): string | undefined {
-  if (value === ".") {
-    return "当前目录";
-  }
-  return cleanOrdinaryToolText(value);
 }
 
 function mergeContextAttachments(
@@ -413,15 +306,11 @@ function taskSoilContextAttachments(canvas: WorkViewCanvasContextLike | undefine
 }
 
 function taskSoilCanvasForWorkViewContext(canvas: WorkViewCanvasContextLike | undefined): WorkViewCanvasContextLike | undefined {
-  return ordinaryTaskSoilCanvasForWorkViewContext(canvas) ?? legacyWorkSessionTaskSoilCanvasFor(canvas);
+  return ordinaryTaskSoilCanvasForWorkViewContext(canvas);
 }
 
 function ordinaryTaskSoilCanvasForWorkViewContext(canvas: WorkViewCanvasContextLike | undefined): WorkViewCanvasContextLike | undefined {
   return canvas?.kind === "desktop_agent_canvas" || canvas?.kind === "desktop_shell_canvas" ? canvas : undefined;
-}
-
-function legacyWorkSessionTaskSoilCanvasFor(canvas: WorkViewCanvasContextLike | undefined): WorkViewCanvasContextLike | undefined {
-  return canvas?.kind === "work_session_canvas" ? canvas : undefined;
 }
 
 function contextRefDenied(kind: string, ref: string, permissionRefs: readonly string[]): boolean {

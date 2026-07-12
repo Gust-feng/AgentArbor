@@ -41,11 +41,14 @@ export async function executeSingleToolCall(input: {
   readonly options: ToolUseLoopOptions;
   readonly request: ToolCallRequest;
   readonly context: ToolExecutionContext;
+  readonly requestAlreadyPublished?: boolean;
 }): Promise<ToolCallResult> {
-  input.options.publishToolEvent?.(createToolRequestedMessage({
-    request: input.request,
-    context: input.context,
-  }));
+  if (input.requestAlreadyPublished !== true) {
+    input.options.publishToolEvent?.(createToolRequestedMessage({
+      request: input.request,
+      context: input.context,
+    }));
+  }
   const result = await executeToolCallSafely(input.options, input.request, input.context);
   publishToolResultEvent(input.options, result, input.context);
   return result;
@@ -71,7 +74,10 @@ export async function executeToolCalls(input: {
   for (let index = 0; index < input.requests.length; index += 1) {
     const request = input.requests[index]!;
     if (input.options.abortSignal?.aborted === true) {
-      results.push(cancelledToolResult(request));
+      input.options.publishToolEvent?.(createToolRequestedMessage({ request, context }));
+      const result = cancelledToolResult(request);
+      publishToolResultEvent(input.options, result, context);
+      results.push(result);
       continue;
     }
     input.options.publishToolEvent?.(createToolRequestedMessage({ request, context }));
@@ -101,15 +107,22 @@ export function publishToolResultEvent(
   result: ToolCallResult,
   context: ToolExecutionContext
 ): void {
-  options.publishToolEvent?.(
-    result.status === "completed"
-      ? createToolCompletedMessage({ result, context })
-      : result.status === "approval_required"
-        ? createToolApprovalRequiredMessage({ result, context })
-        : result.status === "cancelled"
-          ? createToolCancelledMessage({ result, context })
-          : createToolFailedMessage({ result, context })
-  );
+  switch (result.status) {
+    case "completed":
+      options.publishToolEvent?.(createToolCompletedMessage({ result, context }));
+      return;
+    case "failed":
+      options.publishToolEvent?.(createToolFailedMessage({ result, context }));
+      return;
+    case "approval_required":
+      options.publishToolEvent?.(createToolApprovalRequiredMessage({ result, context }));
+      return;
+    case "cancelled":
+      options.publishToolEvent?.(createToolCancelledMessage({ result, context }));
+      return;
+    default:
+      assertNever(result.status);
+  }
 }
 
 export async function executeToolCallSafely(
@@ -197,4 +210,8 @@ function unauthorizedToolResult(request: ToolCallRequest): ToolCallResult {
     error: summary,
     durationMs: 0,
   };
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unsupported tool result status: ${String(value)}`);
 }

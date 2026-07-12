@@ -66,11 +66,14 @@ test("runDeepChildAgent runs the standard model-tool-model loop and preserves th
   assert.equal(result.completedRun.executionHistory?.[0]?.modelMessages?.[0]?.text, "我会先检索 OAuth2 迁移风险资料，再根据工具结果归纳证据。");
   assert.equal(result.completedRun.execution?.toolCalls[0]?.toolName, "search");
   assert.equal(result.completedRun.execution?.toolCalls[0]?.status, "completed");
-  assert.equal(result.completedRun.execution?.toolCalls[0]?.summary, "search：OAuth2 migration risk");
+  assert.equal(result.completedRun.execution?.toolCalls[0]?.summary, undefined);
   assert.equal(result.completedRun.execution?.toolCalls[0]?.inputSummary, "{\"query\":\"OAuth2 migration risk\"}");
   assert.equal(result.completedRun.execution?.toolCalls[0]?.durationMs, 1);
-  assert.equal(result.completedRun.execution?.toolCalls[0]?.display?.kind, "search_results");
-  assert.equal(result.completedRun.execution?.toolCalls[0]?.display?.query, "OAuth2 migration risk");
+  assert.deepEqual(
+    Object.keys(result.completedRun.execution?.toolCalls[0] ?? {}).sort(),
+    ["callId", "durationMs", "inputSummary", "status", "toolName"].sort(),
+  );
+  assert.equal("display" in (result.completedRun.execution?.toolCalls[0] ?? {}), false);
   assert.deepEqual(broker.executedToolNames(), ["search"]);
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["search"]);
   assert.deepEqual(channel.requests[0]?.budget, {});
@@ -175,47 +178,6 @@ test("runDeepChildAgent intersects parent prompt tools with the frozen child run
   assert.equal(result.execution.toolCalls[0]?.toolName, "read_file");
   assert.equal(result.execution.toolCalls[0]?.status, "failed");
   assert.equal(result.summary.status, "completed");
-});
-
-test("runDeepChildAgent restores the frozen parent objective when childSpec is omitted", async () => {
-  const childSpec = sampleChildSpec({
-    allowedTools: [],
-    objective: "恢复运行时必须沿用父 Agent 生成的原始子任务目标。",
-  });
-  const childRun = makeChildRun(childSpec);
-  const channel = new SequenceChannel([
-    completedJsonResponse({
-      summary: "恢复路径沿用冻结目标完成探索。",
-      findings: ["冻结 objective 被注入 child prompt"],
-      evidenceRefs: ["child:restored-objective"],
-      uncertainty: "无",
-      confidence: 0.81,
-    }),
-  ]);
-  const turnRuntime = createDeepTurnRuntime({
-    intelligenceChannel: channel,
-    toolCenter: new RecordingToolBroker([]),
-  });
-
-  const result = await runDeepChildAgent({
-    childRun,
-    goal: "评估恢复路径",
-    permissionBoundaryRefs: [],
-    turnRuntime,
-    traceId: "trace-test",
-    goalId: "goal-test",
-  });
-
-  assert.equal(result.summary.status, "completed");
-  assert.equal(result.prompt.objective, childSpec.objective);
-  assert.equal(
-    channel.requests[0]?.sanitizedMessages.some((message) => message.content.includes(childSpec.objective)),
-    true,
-  );
-  assert.equal(
-    channel.requests[0]?.sanitizedMessages.some((message) => message.content.includes("Explore from angle")),
-    false,
-  );
 });
 
 test("runDeepChildAgent maps approval_required to a blocked child Agent run", async () => {

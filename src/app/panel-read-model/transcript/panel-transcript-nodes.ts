@@ -683,7 +683,7 @@ function toolTranscriptTitleSet(event: PanelTranscriptStreamEvent): {
   const display = event.detail?.display;
   const toolName = event.toolName?.trim().toLowerCase() ?? "";
   const fileMutationTitle = fileMutationTitleSet(toolName, display);
-  if (display?.kind === "command_summary" || toolName === "run_command") {
+  if (display?.kind === "command_summary") {
     return { action: "运行命令", completed: "命令完成", failed: "命令未完成" };
   }
   if (toolName === "shell_command" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) {

@@ -4,6 +4,11 @@ import path from "node:path";
 import test from "node:test";
 import type { BasicAgentRun } from "../../domain/basic-agent/index.js";
 import type {
+  BasicAgentCapabilitySnapshot,
+  SanitizedInformationAccessConfig,
+  SanitizedModelProviderConfig,
+} from "../../domain/config/index.js";
+import type {
   RuntimeArtifactRecord,
   RuntimeConfirmationRecord,
   RuntimeContextLedgerRecord,
@@ -22,6 +27,7 @@ import {
   restoredBasicEventsFromRuntimeSnapshot,
   submitRestoredBasicConfirmationDecision,
 } from "./persistence.js";
+import { OrdinaryRuntimeSnapshotContractError } from "./persistence-snapshot-contract.js";
 
 const sourceDirectory = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
 
@@ -40,13 +46,15 @@ test("basic agent persistence keeps restore projection helpers split from databa
   assert.equal(persistence.includes("function restoredConfirmationDecisionEvent"), false);
   assert.equal(persistence.includes("function agentTaskStatusFromRuntimeStatus"), false);
   assert.equal(restoredEvents.includes("export function restoredBasicEventsFromRuntimeSnapshot"), true);
-  assert.equal(restoredEvents.includes("function fallbackBasicEventsFromRuntimeSnapshot"), true);
+  assert.equal(restoredEvents.includes("function fallbackBasicEventsFromRuntimeSnapshot"), false);
+  assert.equal(restoredEvents.includes("createRestoredBasicTerminalEvent"), false);
+  assert.equal(restoredEvents.includes("requireRestorableOrdinaryRuntimeSnapshot"), true);
   assert.equal(confirmations.includes("export function upsertRestoredConfirmation"), true);
   assert.equal(confirmations.includes("export function restoredConfirmationDecisionEvent"), true);
   assert.equal(status.includes("export function agentTaskStatusFromSnapshot"), true);
 });
 
-test("restored basic events rebuild safe replay from runtime snapshot", () => {
+test("restored basic events join runtime summaries through stable event refs", () => {
   const events = restoredBasicEventsFromRuntimeSnapshot({
     ...snapshotFixture(),
     run: {
@@ -54,10 +62,22 @@ test("restored basic events rebuild safe replay from runtime snapshot", () => {
       status: "completed",
       resultSummary: "done with sk-hidden-secret-token",
     },
+    basicEvents: [
+      {
+        ...basicEvent(1, "tool.requested", "run command", "running"),
+        refs: [{ kind: "event", id: "event-11" }],
+      },
+      {
+        ...basicEvent(2, "tool.completed", "done with sk-hidden-secret-token", "running"),
+        refs: [{ kind: "event", id: "event-12" }],
+      },
+      basicEvent(3, "final.result", "done with sk-hidden-secret-token", "completed"),
+    ],
     events: [
       runtimeEvent(1, "goal.received", "raw goal ignored"),
-      runtimeEvent(2, "tool.requested", "run command"),
-      runtimeEvent(3, "tool.completed", "done with sk-hidden-secret-token"),
+      runtimeEvent(2, "model.requested", "same-number event must not be joined"),
+      runtimeEvent(11, "tool.requested", "runtime requested summary"),
+      runtimeEvent(12, "tool.completed", "runtime completed summary"),
     ],
   });
 
@@ -67,26 +87,131 @@ test("restored basic events rebuild safe replay from runtime snapshot", () => {
     "final.result",
   ]);
   assert.equal(events.at(-1)?.status, "completed");
-  assert.equal(JSON.stringify(events).includes("sk-hidden-secret-token"), true);
+  assert.equal(JSON.stringify(events).includes("sk-hidden-secret-token"), false);
+  assert.equal(events[0]?.summary, "runtime requested summary");
+  assert.equal(events[1]?.summary, "runtime completed summary");
+  assert.equal(events[2]?.summary, undefined);
+  assert.equal(JSON.stringify(events).includes("same-number event must not be joined"), false);
 });
 
-test("restored basic blocked fallback stays concise", () => {
-  const events = restoredBasicEventsFromRuntimeSnapshot({
-    ...snapshotFixture(),
-    run: {
-      ...runFixture(),
-      status: "blocked",
+test("restored basic events reject terminal Ordinary snapshots without their terminal event", () => {
+  assert.throws(
+    () => restoredBasicEventsFromRuntimeSnapshot({
+      ...snapshotFixture(),
+      run: {
+        ...runFixture(),
+        status: "blocked",
+      },
+    }),
+    (error: unknown) => {
+      assert.equal(error instanceof OrdinaryRuntimeSnapshotContractError, true);
+      assert.deepEqual(
+        (error as OrdinaryRuntimeSnapshotContractError).missingFacts,
+        ["basicEvents.run.blocked"]
+      );
+      return true;
+    }
+  );
+});
+
+test("ordinary snapshot clean break rejects tool lifecycle events without durable facts", () => {
+  const invalidEvent = {
+    ...runtimeEvent(1, "tool.completed", "completed"),
+    payload: undefined,
+  };
+  assert.throws(
+    () => basicRunFromRuntimeSnapshot({
+      ...snapshotFixture(),
+      events: [invalidEvent],
+    }),
+    (error) => error instanceof OrdinaryRuntimeSnapshotContractError &&
+      error.missingFacts.includes("events.1.payload"),
+  );
+});
+
+test("ordinary snapshot clean break rejects historical presentation caches", () => {
+  const legacyCall = {
+    callId: "tool-call-legacy",
+    runId: "run-1",
+    toolName: "read_file",
+    status: "completed",
+    summary: "legacy display cache",
+    eventRefs: ["run-1:event:1"],
+  } as unknown as RuntimeToolCallRecord;
+  const legacyBasicEvent = {
+    ...basicEvent(1, "tool.completed", "completed", "running"),
+    detail: {
+      display: { kind: "generic_tool_summary", summary: "legacy" },
     },
+  } as BasicAgentRunEvent;
+
+  assert.throws(
+    () => basicRunFromRuntimeSnapshot({
+      ...snapshotFixture(),
+      basicEvents: [legacyBasicEvent],
+      toolCalls: [legacyCall],
+    }),
+    (error) => error instanceof OrdinaryRuntimeSnapshotContractError &&
+      error.missingFacts.includes("toolCalls.tool-call-legacy.presentation"),
+  );
+});
+
+test("ordinary snapshot ignores historical Basic event display caches", () => {
+  const snapshot = snapshotFixture();
+  const restored = basicRunFromRuntimeSnapshot({
+    ...snapshot,
+    basicEvents: [{
+      ...basicEvent(1, "run.started", "legacy summary", "running"),
+      detail: { preview: "legacy preview", action: "legacy action" },
+    }],
   });
 
-  assert.equal(events.at(-1)?.type, "run.blocked");
-  assert.equal(events.at(-1)?.summary, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
-  assert.equal(JSON.stringify(events).includes("请重新发起或继续处理"), false);
+  assert.equal(restored.currentStep, undefined);
 });
 
-test("restored basic events omit approved confirmations from ordinary replay", () => {
+test("ordinary snapshot treats executor output field names as opaque tool facts", () => {
+  const snapshot = snapshotFixture();
+  assert.doesNotThrow(() => basicRunFromRuntimeSnapshot({
+    ...snapshot,
+    events: snapshot.events.map((event) => event.type === "tool.completed"
+      ? {
+          ...event,
+          payload: {
+            callId: "tool-call-domain-display",
+            toolName: "external_tool",
+            output: {
+              display: "domain-owned-display-mode",
+              projection: "domain-owned-projection-name",
+            },
+            durationMs: 1,
+          },
+        }
+      : event),
+  }));
+});
+
+test("restored basic events omit lost approvals while preserving denied history", () => {
   const events = restoredBasicEventsFromRuntimeSnapshot({
     ...snapshotFixture(),
+    basicEvents: [
+      basicEvent(1, "run.started", "started", "running"),
+      {
+        ...basicEvent(2, "confirmation.needed", "等待批准", "approval_needed"),
+        refs: [{ kind: "tool_call", id: "tool-call-approved" }],
+      },
+      {
+        ...basicEvent(3, "user_approval.received", "已确认。", "blocked"),
+        refs: [{ kind: "event", id: "confirmation:confirmation-approved" }],
+      },
+      {
+        ...basicEvent(4, "confirmation.needed", "等待拒绝", "approval_needed"),
+        refs: [{ kind: "tool_call", id: "tool-call-denied" }],
+      },
+      {
+        ...basicEvent(5, "user_approval.received", "已不执行。", "blocked"),
+        refs: [{ kind: "event", id: "confirmation:confirmation-denied" }],
+      },
+    ],
     confirmations: [
       {
         confirmationId: "confirmation-approved",
@@ -96,6 +221,7 @@ test("restored basic events omit approved confirmations from ordinary replay", (
         actionSummary: "运行命令：pnpm test",
         affectedResources: ["shell:test"],
         riskLevel: "medium",
+        toolCallId: "tool-call-approved",
         requestedAt: "2026-06-02T00:00:02.000Z",
         decidedAt: "2026-06-02T00:00:03.000Z",
         eventRefs: ["event:confirmation-approved"],
@@ -108,17 +234,39 @@ test("restored basic events omit approved confirmations from ordinary replay", (
         actionSummary: "删除文件：old.txt",
         affectedResources: ["file:old.txt"],
         riskLevel: "high",
+        toolCallId: "tool-call-denied",
         requestedAt: "2026-06-02T00:00:04.000Z",
         decidedAt: "2026-06-02T00:00:05.000Z",
         eventRefs: ["event:confirmation-denied"],
       },
     ],
+    toolCalls: [
+      {
+        callId: "tool-call-approved",
+        runId: "run-1",
+        toolName: "shell_command",
+        status: "approval_required",
+        confirmationId: "confirmation-approved",
+        eventRefs: [],
+      },
+      {
+        callId: "tool-call-denied",
+        runId: "run-1",
+        toolName: "delete_file",
+        status: "cancelled",
+        confirmationId: "confirmation-denied",
+        eventRefs: [],
+      },
+    ],
   });
   const serialized = JSON.stringify(events);
 
+  assert.equal(events.filter((event) => event.type === "confirmation.needed").length, 1);
+  assert.equal(events.find((event) => event.type === "confirmation.needed")?.summary, undefined);
   assert.equal(events.some((event) => event.type === "run.resumed"), false);
   assert.equal(events.some((event) => event.summary === "已确认。"), false);
-  assert.equal(events.some((event) => event.type === "user_approval.received"), true);
+  assert.equal(events.filter((event) => event.type === "user_approval.received").length, 1);
+  assert.equal(events.find((event) => event.type === "user_approval.received")?.summary, undefined);
   assert.equal(serialized.includes("继续处理"), false);
 });
 
@@ -183,11 +331,11 @@ test("restored approval without live continuation blocks with a new-turn recover
 
   assert.equal(run?.status, "blocked");
   assert.equal(database.snapshot.run.error?.message, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
-  assert.equal(database.snapshot.basicEvents.at(-1)?.summary, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
+  assert.equal(database.snapshot.basicEvents.at(-1)?.summary, undefined);
   assert.equal(JSON.stringify(database.snapshot.basicEvents).includes("无法继续原操作"), false);
 });
 
-test("restored basic run derives user-action state from pending confirmation", () => {
+test("restored basic run trusts frozen run status instead of inferring it from confirmation records", () => {
   const run = basicRunFromRuntimeSnapshot({
     ...snapshotFixture(),
     run: {
@@ -207,12 +355,12 @@ test("restored basic run derives user-action state from pending confirmation", (
     }],
   });
 
-  assert.equal(run.status, "approval_needed");
+  assert.equal(run.status, "blocked");
   assert.equal(run.requiresUserAction, true);
   assert.equal(run.nextStep, undefined);
 });
 
-test("restored basic run keeps the frozen runtime agent definition ref", () => {
+test("restored basic run rejects conflicting duplicated agent definition facts", () => {
   const snapshot = {
     ...snapshotFixture(),
     run: {
@@ -250,11 +398,11 @@ test("restored basic run keeps the frozen runtime agent definition ref", () => {
     },
   } satisfies RuntimeRunSnapshot;
 
-  const run = basicRunFromRuntimeSnapshot(snapshot);
-
-  assert.deepEqual(run.agentDefinitionRef, snapshot.run.agentDefinitionRef);
-  assert.notDeepEqual(run.agentDefinitionRef, snapshot.basicRun?.agentDefinitionRef);
-  assert.equal(JSON.stringify(run.agentDefinitionRef).includes("systemPrompt"), false);
+  assert.throws(
+    () => basicRunFromRuntimeSnapshot(snapshot),
+    (error) => error instanceof OrdinaryRuntimeSnapshotContractError &&
+      error.missingFacts.includes("basicRun.agentDefinitionRefMismatch"),
+  );
 });
 
 class MemoryRuntimeDatabase implements RuntimeDatabase {
@@ -342,9 +490,26 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
 type BasicAgentRunEvent = RuntimeRunSnapshot["basicEvents"][number];
 
 function snapshotFixture(): RuntimeRunSnapshot {
+  const run = runFixture();
   return {
-    run: runFixture(),
-    basicEvents: [],
+    run,
+    basicRun: {
+      runId: run.runId,
+      conversationId: run.conversationId,
+      title: "正在处理",
+      goalSummary: run.goalSummary,
+      status: "running",
+      runMode: "agent",
+      agentDefinitionRef: run.agentDefinitionRef,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      requiresUserAction: false,
+      eventCursor: {
+        lastSequence: 1,
+        eventCount: 1,
+      },
+    },
+    basicEvents: [basicEvent(1, "run.started", "started", "running")],
     events: [],
     modelCalls: [],
     toolCalls: [],
@@ -369,6 +534,37 @@ function runFixture(): RuntimeRunRecord {
     runHome: "C:\\AgentArbor\\runtime\\runs\\run-1",
     createdAt: "2026-06-02T00:00:00.000Z",
     updatedAt: "2026-06-02T00:00:05.000Z",
+    agentDefinitionRef: {
+      agentId: "desktop-agent-session",
+      agentDisplayName: "Desktop Agent",
+      promptRef: "prompt:desktop-root-agent:v1",
+      promptVersion: "v1",
+      outputContractId: "desktop.agent_response.v1",
+      toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+      definitionHash: "sha256:persistence-test",
+    },
+    capabilitySnapshot: capabilitySnapshot(),
+    informationAccess: informationAccess(),
+  };
+}
+
+function basicEvent(
+  sequence: number,
+  type: string,
+  summary: string,
+  status: BasicAgentRun["status"]
+): BasicAgentRunEvent {
+  return {
+    id: `basic-event-${sequence}`,
+    runId: "run-1",
+    sequence,
+    type,
+    title: type,
+    summary,
+    status,
+    timestamp: "2026-06-02T00:00:00.000Z",
+    refs: [],
+    visibility: "compact",
   };
 }
 
@@ -377,6 +573,20 @@ function runtimeEvent(
   type: RuntimeEventRecord["type"],
   summary: string
 ): RuntimeEventRecord {
+  const toolPayload = type === "tool.requested" || type === "tool.completed" || type === "tool.failed" || type === "tool.cancelled"
+    ? {
+        callId: "tool-call-1",
+        toolName: "shell_command",
+        input: { command: "pnpm test" },
+        ...(type === "tool.completed"
+          ? { output: { result: { command: "pnpm test", exitCode: 0 } }, durationMs: 5 }
+          : type === "tool.failed"
+            ? { error: "failed", durationMs: 5 }
+            : type === "tool.cancelled"
+              ? { reason: "cancelled", durationMs: 5 }
+              : {}),
+      }
+    : undefined;
   return {
     eventId: `event-${sequence}`,
     runId: "run-1",
@@ -386,10 +596,80 @@ function runtimeEvent(
     scope: "aboveground",
     severity: "info",
     progress: { status: "completed", label: "completed" },
-    refs: [],
+    refs: toolPayload === undefined ? [] : [{ kind: "tool_call", id: "tool-call-1" }],
+    payload: toolPayload,
     traceId: "trace-1",
     intent: type.replaceAll(".", "_"),
     createdAt: "2026-06-02T00:00:00.000Z",
     recordedAt: "2026-06-02T00:00:00.000Z",
+  };
+}
+
+function capabilitySnapshot(): BasicAgentCapabilitySnapshot {
+  return {
+    snapshotId: "snapshot-persistence-test",
+    createdAt: "2026-06-02T00:00:00.000Z",
+    activeModel: modelConfig(),
+    modelCapabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 4_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: false,
+      supportsStreaming: true,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "chat_completions",
+      stability: "stable",
+    },
+    toolCatalog: {
+      scope: "desktop-basic",
+      tools: [],
+      allowedTools: [],
+    },
+    skillCatalog: [],
+    subAgentCatalog: [],
+    mcpCatalog: [],
+    workspace: {
+      workspaceDirectory: "Z:\\AgentArbor",
+      updatedAt: "2026-06-02T00:00:00.000Z",
+    },
+    securitySummary: "Frozen persistence test facts.",
+    warnings: [],
+  };
+}
+
+function modelConfig(): SanitizedModelProviderConfig {
+  return {
+    defaultAiMode: "fake",
+    profileId: "fake",
+    providerKind: "openai_compatible",
+    protocolKind: "openai_compatible_chat_completions",
+    baseUrl: "https://example.test",
+    model: "fake-model",
+    secretRef: "secret://test/model",
+    secretConfigured: false,
+    updatedAt: "2026-06-02T00:00:00.000Z",
+  };
+}
+
+function informationAccess(): SanitizedInformationAccessConfig {
+  return {
+    sourcePreference: ["docs"],
+    web: {
+      provider: "none",
+      providerKind: "tavily",
+      maxResults: 0,
+      secretRef: "secret://test/tavily",
+      secretConfigured: false,
+      status: "disabled",
+      updatedAt: "2026-06-02T00:00:00.000Z",
+    },
+    stubs: {
+      docs: "stub",
+      packages: "stub",
+      github: "stub",
+      run_memory: "stub",
+    },
   };
 }

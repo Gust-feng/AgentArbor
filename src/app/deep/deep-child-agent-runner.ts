@@ -23,6 +23,7 @@ import type { AgentTurnRuntimeResult } from "../../kernel/intelligence/agent-tur
 import { nowIso } from "../../kernel/id.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import {
+  createDeepChildLoopContextRef,
   createDeepChildLoopContextRecord,
   type DeepChildLoopContextStore,
 } from "./deep-child-loop-contexts.js";
@@ -71,7 +72,6 @@ import {
 } from "./deep-child-run-result-mapping.js";
 export {
   buildFailedDeepChildAgentRun,
-  deepChildSpecFromRun,
 } from "./deep-child-run-result-mapping.js";
 import {
   deepChildMaterialMessages,
@@ -126,8 +126,8 @@ async function continuationBaseMessages(
   input: DeepChildAgentContinuationInput,
   childSpec: DeepChildSpec,
 ): Promise<readonly ModelMessage[]> {
-  const contextRef = input.childRun.continuationContextRef ?? input.previousSummary?.continuationContextRef;
-  if (input.runId !== undefined && input.childLoopContextStore !== undefined && contextRef !== undefined) {
+  if (input.runId !== undefined && input.childLoopContextStore !== undefined) {
+    const contextRef = createDeepChildLoopContextRef(input.childRun.childRunId);
     const record = await input.childLoopContextStore.getByRef(input.runId, contextRef);
     if (record !== undefined && record.messages.length > 0) {
       return record.messages;
@@ -214,7 +214,7 @@ async function persistContinuationContext(
 }
 
 export async function resumeDeepChildAgent(input: DeepChildAgentResumeInput): Promise<DeepChildAgentRunResult> {
-  const childSpec = resolveRuntimeChildSpec({ childRun: input.childRun, childSpec: input.childSpec });
+  const childSpec = resolveRuntimeChildSpec(input);
   const resumedRun = resumeChildAgentRun(input.childRun, nowIso());
   const confirmationId = input.pendingApproval.confirmationId;
   const turn = input.decision.decision === "approve_once"

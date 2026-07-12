@@ -57,11 +57,6 @@ export function createLocalWriteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         riskLevel: "medium",
         operationType: "read-write",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 600,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -90,16 +85,10 @@ export function createLocalWriteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
       }
       const stat = await fs.stat(target.absolutePath);
       return {
-        action: "write_file",
-        status: "completed",
         refId: `workspace:file:${target.relativePath}`,
-        summary: `${target.relativePath} · ${stat.size} bytes · ${append ? "appended" : "written"}`,
-        result: {
-          path: target.relativePath,
-          bytes: stat.size,
-          append,
-        },
-        truncated: false,
+        path: target.relativePath,
+        bytes: stat.size,
+        append,
       };
     },
   };
@@ -142,11 +131,6 @@ export function createLocalCreateFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
         riskLevel: "medium",
         operationType: "read-write",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 600,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -182,17 +166,11 @@ export function createLocalCreateFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
       const stat = await fs.stat(target.absolutePath);
       const afterHash = sha256Hex(content);
       return {
-        action: "create_file",
-        status: "completed",
         refId: `workspace:file:${target.relativePath}`,
-        summary: `${target.relativePath} · ${stat.size} bytes · ${overwrite ? "overwritten" : "created"}`,
-        result: {
-          path: target.relativePath,
-          bytes: stat.size,
-          afterHash,
-          overwrite,
-        },
-        truncated: false,
+        path: target.relativePath,
+        bytes: stat.size,
+        afterHash,
+        overwrite,
       };
     },
   };
@@ -246,11 +224,6 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         riskLevel: "medium",
         operationType: "read-write",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 600,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -306,22 +279,16 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       const beforeHash = sha256Hex(original);
       const afterHash = sha256Hex(updated);
       return {
-        action: "edit_file",
-        status: "completed",
         refId: `workspace:file:${target.relativePath}`,
-        summary: `${target.relativePath} · ${original.length} -> ${updated.length} chars · ${located.length} ${dryRun ? "would replace" : "replacements"}${dryRun ? " · dry run" : ""}`,
-        result: {
-          path: target.relativePath,
-          dryRun,
-          wouldReplace: located.length,
-          previousLength: original.length,
-          nextLength: updated.length,
-          replacements: dryRun ? 0 : located.length,
-          beforeHash,
-          afterHash,
-          diffSummary: diffSummaryForEdits(original, located),
-        },
-        truncated: false,
+        path: target.relativePath,
+        dryRun,
+        wouldReplace: located.length,
+        previousLength: original.length,
+        nextLength: updated.length,
+        replacements: dryRun ? 0 : located.length,
+        beforeHash,
+        afterHash,
+        diffSummary: diffSummaryForEdits(original, located),
       };
     },
   };
@@ -364,11 +331,6 @@ export function createLocalDeleteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
         operationType: "read-write",
         fileOperation: "delete",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 600,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -389,15 +351,9 @@ export function createLocalDeleteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
       }
       await fs.unlink(target.absolutePath);
       return {
-        action: "delete_file",
-        status: "completed",
         refId: `workspace:file:${target.relativePath}`,
-        summary: `${target.relativePath} · ${stat.size} bytes · deleted`,
-        result: {
-          path: target.relativePath,
-          bytes: stat.size,
-        },
-        truncated: false,
+        path: target.relativePath,
+        bytes: stat.size,
       };
     },
   };

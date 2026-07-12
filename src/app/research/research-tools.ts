@@ -8,18 +8,37 @@ import type { ToolExecutor } from "../../domain/tools/index.js";
 
 type BatchReadItem = {
   readonly ref: string;
-  readonly status: InformationAccessStatus;
+  readonly researchStatus: InformationAccessStatus;
   readonly refId?: string;
   readonly source?: InformationSourceKind;
   readonly title?: string;
   readonly uri?: string;
-  readonly summary?: string;
   readonly contentPreview?: string;
+  readonly startChar?: number;
+  readonly contentChars?: number;
+  readonly charCount?: number;
+  readonly hasMoreAfter?: boolean;
+  readonly contentComplete?: boolean;
   readonly truncated: boolean;
   readonly sourceSearchRef?: string;
   readonly metadata?: Readonly<Record<string, string | number | boolean>>;
   readonly error?: string;
   readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
+};
+
+type ResearchReadRequestFacts = {
+  readonly source?: InformationSourceKind;
+  readonly maxLength?: number;
+  readonly startChar: number;
+};
+
+type ResearchReadContinuation = {
+  readonly nextInput: {
+    readonly ref: string;
+    readonly source?: InformationSourceKind;
+    readonly maxLength?: number;
+    readonly startChar: number;
+  };
 };
 
 export function createResearchSearchTool(researchRuntime: InformationAccess): ToolExecutor {
@@ -75,11 +94,6 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 800,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -103,13 +117,21 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
     },
     execute: async (input, context) => {
       const record = asRecord(input);
-      return researchRuntime.search({
+      const search = await researchRuntime.search({
         query: stringOrFallback(record.query, ""),
         site: stringOrUndefined(record.site),
         sources: informationSourcesOrUndefined(record.sources),
         limit: numberOrUndefined(record.limit),
         abortSignal: context.abortSignal,
       });
+      return {
+        query: search.query,
+        site: search.site,
+        researchStatus: search.status,
+        message: search.message,
+        results: search.results,
+        ...researchTraceFacts(search.trace),
+      };
     },
   };
 }
@@ -123,9 +145,9 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
       name: "read",
       description: [
         "Read a research ref, HTTP/HTTPS URL, command-log:// ref, repo:// URI, or repository path and return the actual content preview for model use.",
-        "Pass ref as a string for the existing single-read output, or as a string array to read multiple refs in one call.",
+        "Pass ref as a string to read one source, or as a string array to read multiple refs in one call.",
         `Readable sources now: ${readableDescription || "none"}.`,
-        "Single-read output includes title, uri/url, source, status, contentPreview, truncated, and metadata when available. Batch output is an array with one item per ref and does not fail the whole batch when one ref fails.",
+        "Each item exposes contentPreview. Truncated reads always return a top-level executable continuation that starts at the first unread character. Batch output contains items and top-level continuations and does not fail the whole batch when one ref fails.",
       ].join(" "),
       modelContract: {
         purpose: "Read one or more research refs, URLs, command log refs, repo URIs, or repository paths and return contentPreview for model reasoning.",
@@ -140,21 +162,22 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
         inputNotes: [
           "ref is required and may be a returned refId, HTTP/HTTPS URL, command-log:// ref, repo:// URI, repository path, or an array of those strings.",
           "source is optional and should only disambiguate refs.",
-          "maxLength increases or bounds the returned preview.",
+          "maxLength bounds one returned character window.",
+          "startChar is a zero-based character offset used only to execute a returned continuation.",
         ],
         runtimeHints: [
           { label: "readable sources", value: readableDescription || "none" },
         ],
         usageNotes: [
           "Use read to expand a search ref, URL, command-log:// ref, repo:// URI, or repository path into content the model can continue reasoning over.",
-          "For batch reads, inspect each array item status and error instead of assuming every ref succeeded.",
+          "For batch reads, inspect each items[] status and error instead of assuming every ref succeeded.",
           "Do not treat UI activity text as the read result; inspect contentPreview and status.",
-          "Increase maxLength when the next step needs more source text.",
+          "Use continuation.nextInput or continuations[].nextInput to continue from unread text without repeating the previous window.",
         ],
         outputNotes: [
-          "Single ref calls keep the existing result.contentPreview shape.",
-          "Batch ref calls return an array; each item has ref, status, contentPreview, truncated, error, and errorFacts when available.",
-          "truncated indicates whether a longer read may be needed.",
+          "Single ref calls return contentPreview and an optional top-level continuation.",
+          "Batch ref calls return items[] and optional top-level continuations[].",
+          "truncated=true only appears with an executable continuation from the first unread character.",
           "sourceSearchRef links the read result back to a search result when available.",
         ],
         examples: [
@@ -168,11 +191,6 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1200,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -192,77 +210,150 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
               : "Optional source override. No readable source is currently configured.",
           },
           maxLength: { type: "number", description: "Maximum preview characters." },
+          startChar: { type: "number", description: "Zero-based character offset from a returned continuation.nextInput." },
         },
         required: ["ref"],
       },
     },
     execute: async (input, context) => {
       const record = asRecord(input);
+      const requestFacts: ResearchReadRequestFacts = {
+        source: informationSourceOrUndefined(record.source),
+        maxLength: numberOrUndefined(record.maxLength),
+        startChar: nonNegativeInteger(record.startChar),
+      };
       const refs = refsFromInput(record.ref);
       if (refs !== undefined) {
-        return Promise.all(refs.map(async (ref) => {
+        const results = await Promise.all(refs.map(async (ref) => {
           try {
             const result = await researchRuntime.read({
               ref,
-              source: informationSourceOrUndefined(record.source),
-              maxLength: numberOrUndefined(record.maxLength),
+              ...requestFacts,
               abortSignal: context.abortSignal,
             });
-            return batchReadItemFromResult(result);
+            return batchReadItemFromResult(result, requestFacts);
           } catch (error) {
             return {
-              ref,
-              status: "provider-failed",
-              truncated: false,
-              error: errorMessage(error),
-            } satisfies BatchReadItem;
+              item: {
+                ref,
+                researchStatus: "provider-failed",
+                truncated: false,
+                error: errorMessage(error),
+              } satisfies BatchReadItem,
+            };
           }
         }));
+        const continuations = results
+          .map((result) => result.continuation)
+          .filter((continuation): continuation is ResearchReadContinuation => continuation !== undefined);
+        return {
+          items: results.map((result) => result.item),
+          ...(continuations.length === 0 ? {} : { continuations }),
+        };
       }
       const result = await researchRuntime.read({
         ref: stringOrFallback(record.ref, ""),
-        source: informationSourceOrUndefined(record.source),
-        maxLength: numberOrUndefined(record.maxLength),
+        ...requestFacts,
         abortSignal: context.abortSignal,
       });
-      return singleReadOutputFromResult(result);
+      return singleReadOutputFromResult(result, requestFacts);
     },
   };
 }
 
-function singleReadOutputFromResult(read: InformationReadResult): InformationReadResult & {
-  readonly error?: string;
-  readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
-} {
+function singleReadOutputFromResult(read: InformationReadResult, request: ResearchReadRequestFacts) {
   const firstFailureStep = firstFailureSourceStep(read);
-  if (read.status === "completed" || firstFailureStep === undefined) {
-    return read;
-  }
+  const continuation = readContinuation(read, request);
   return {
-    ...read,
-    error: firstFailureStep.message,
-    errorFacts: firstFailureStep.errorFacts,
+    ref: read.ref,
+    researchStatus: read.status,
+    refId: read.result?.refId,
+    source: read.result?.source,
+    title: read.result?.title,
+    uri: read.result?.uri,
+    contentPreview: read.result?.contentPreview,
+    startChar: read.result?.startChar,
+    contentChars: read.result?.contentChars,
+    charCount: read.result?.charCount,
+    hasMoreAfter: read.result?.hasMoreAfter,
+    contentComplete: read.result === undefined ? undefined : !read.result.hasMoreAfter,
+    truncated: continuation !== undefined,
+    continuation,
+    sourceSearchRef: read.result?.sourceSearchRef,
+    metadata: read.result?.metadata,
+    ...researchTraceFacts(read.trace),
+    error: read.status === "completed" ? undefined : firstFailureStep?.message,
+    errorFacts: read.status === "completed" ? undefined : firstFailureStep?.errorFacts,
   };
 }
 
-function batchReadItemFromResult(read: InformationReadResult): BatchReadItem {
+function batchReadItemFromResult(
+  read: InformationReadResult,
+  request: ResearchReadRequestFacts,
+): { readonly item: BatchReadItem; readonly continuation?: ResearchReadContinuation } {
   const result = read.result;
   const firstFailureStep = firstFailureSourceStep(read);
   const error = read.status === "completed" ? undefined : firstFailureStep?.message;
+  const continuation = readContinuation(read, request);
   return {
-    ref: read.ref,
-    status: read.status,
-    refId: result?.refId,
-    source: result?.source,
-    title: result?.title,
-    uri: result?.uri,
-    summary: result?.summary,
-    contentPreview: result?.contentPreview,
-    truncated: result?.truncated ?? false,
-    sourceSearchRef: result?.sourceSearchRef,
-    metadata: result?.metadata,
-    error,
-    errorFacts: firstFailureStep?.errorFacts,
+    item: {
+      ref: read.ref,
+      researchStatus: read.status,
+      refId: result?.refId,
+      source: result?.source,
+      title: result?.title,
+      uri: result?.uri,
+      contentPreview: result?.contentPreview,
+      startChar: result?.startChar,
+      contentChars: result?.contentChars,
+      charCount: result?.charCount,
+      hasMoreAfter: result?.hasMoreAfter,
+      contentComplete: result === undefined ? undefined : !result.hasMoreAfter,
+      truncated: continuation !== undefined,
+      sourceSearchRef: result?.sourceSearchRef,
+      metadata: result?.metadata,
+      error,
+      errorFacts: firstFailureStep?.errorFacts,
+    },
+    continuation,
+  };
+}
+
+function readContinuation(
+  read: InformationReadResult,
+  request: ResearchReadRequestFacts,
+): ResearchReadContinuation | undefined {
+  const result = read.result;
+  if (read.status !== "completed" || result?.hasMoreAfter !== true || result.truncated !== true) {
+    return undefined;
+  }
+  const nextStartChar = result.startChar + result.contentChars;
+  if (!Number.isSafeInteger(nextStartChar) || nextStartChar <= result.startChar || nextStartChar >= result.charCount) {
+    return undefined;
+  }
+  return {
+    nextInput: {
+      ref: read.ref,
+      source: request.source ?? result.source,
+      maxLength: request.maxLength,
+      startChar: nextStartChar,
+    },
+  };
+}
+
+function researchTraceFacts(trace: InformationReadResult["trace"]): {
+  readonly traceId: string;
+  readonly requestedSources: readonly InformationSourceKind[];
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly sourceSteps: InformationReadResult["trace"]["sourceSteps"];
+} {
+  return {
+    traceId: trace.traceId,
+    requestedSources: trace.requestedSources,
+    startedAt: trace.startedAt,
+    completedAt: trace.completedAt,
+    sourceSteps: trace.sourceSteps,
   };
 }
 
@@ -330,4 +421,8 @@ function stringOrUndefined(value: unknown): string | undefined {
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function nonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }

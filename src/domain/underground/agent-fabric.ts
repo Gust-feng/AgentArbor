@@ -1,5 +1,4 @@
 import type { AgentTurnPermissionPolicy } from "../common.js";
-import type { ToolDisplayProjection } from "../observation/tool-display.js";
 import type { AgentProtocol } from "./agent-loop.js";
 import type { RootletClusterKind } from "./rootlet-contracts.js";
 import type { WorkspaceView } from "./workspace.js";
@@ -77,7 +76,6 @@ export type ChildAgentRunToolCallTrace = {
   readonly summary?: string;
   readonly inputSummary?: string;
   readonly durationMs?: number;
-  readonly display?: ToolDisplayProjection;
 };
 
 export type ChildAgentRunModelMessageTrace = {

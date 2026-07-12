@@ -73,6 +73,27 @@ function makeRuntimeInput(goal: string, modelAvailable: boolean): StartDeepRunti
     conversation: makeDeepConversation(goal),
     taskSoil: createTaskSoil({ rawGoal: goal }),
     permissionBoundaryRefs: [],
+    continuationFacts: {
+      informationAccess: {
+        sourcePreference: [],
+        web: {
+          provider: "none",
+          providerKind: "tavily",
+          maxResults: 5,
+          secretConfigured: false,
+          status: "disabled",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        stubs: {
+          docs: "stub",
+          packages: "stub",
+          github: "stub",
+          run_memory: "stub",
+        },
+      },
+      permissionBoundaryRefs: [],
+      confirmationPolicy: "prompt",
+    },
     modelAvailable,
     traceId: "trace-runtime-test",
     goalId: "goal-runtime-test",
@@ -401,6 +422,11 @@ test("executeDeepRun direct_answer：产出 AgentRunTree（root+parentSynthesis�
   assert.equal(persisted!.liveProjection?.conclusion?.conclusionId, result.report!.conclusion.conclusionId);
   assert.equal(persisted!.run.isolation.runKind, DEEP_RUN_KIND);
   assert.equal(persisted!.run.isolation.runMode, DEEP_RUN_MODE);
+  assert.deepEqual(
+    persisted!.run.continuationFacts,
+    input.continuationFacts,
+    "post-terminal continuation must use durable frozen run-start facts instead of process-local state",
+  );
 
   // 事件序列：goal_received + manager.decided + parent_synthesis.completed + conclusion.produced（deep.* 谱系）
   const types = eventLog.types();

@@ -111,10 +111,6 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayName: "写入文件",
     displayDescription: "写入工作区文本文件。",
   },
-  run_command: {
-    displayName: "运行命令",
-    displayDescription: "兼容旧命令入口，保留给历史运行与旧提示词。",
-  },
   read_skill_resource: {
     displayName: "读取技能资源",
     displayDescription: "按本轮已选中技能读取参考资源或查看资源元数据。",

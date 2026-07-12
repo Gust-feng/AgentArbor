@@ -11,7 +11,14 @@ import type {
   ToolPermissionCheck,
   ToolSecurityDecision,
 } from "../../domain/tools/index.js";
-import { isToolErrorDomain, normalizeToolErrorFacts, normalizeToolErrorFactValue, toolDisplayName } from "../../domain/tools/index.js";
+import {
+  isToolErrorDomain,
+  InvalidToolFactError,
+  normalizeToolErrorFacts,
+  normalizeToolErrorFactValue,
+  normalizeToolFactValue,
+  toolDisplayName,
+} from "../../domain/tools/index.js";
 import type { ConfirmationRequest } from "../../domain/confirmation/contracts.js";
 import {
   confirmationRequestFromSecurityDecision,
@@ -59,34 +66,47 @@ export class ToolCenter {
     permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
     const startedAt = Date.now();
-    if (isAbortSignalAborted(context.abortSignal)) {
-      return cancelledToolResult(request, startedAt);
+    let factRequest: ToolCallRequest;
+    try {
+      factRequest = { ...request, input: normalizeToolFactValue(request.input) };
+    } catch (error) {
+      if (!(error instanceof InvalidToolFactError)) {
+        throw error;
+      }
+      return failedToolResult({ ...request, input: undefined }, startedAt, {
+        message: `Tool input is not JSON-safe at ${error.path}: ${error.reason}.`,
+        errorDomain: "runtime_error",
+        facts: { ...error.facts, code: "invalid_tool_input_fact", phase: "input" },
+      });
     }
-    const executor = this.tools.get(request.toolName);
+    if (isAbortSignalAborted(context.abortSignal)) {
+      return cancelledToolResult(factRequest, startedAt);
+    }
+    const executor = this.tools.get(factRequest.toolName);
     if (executor === undefined) {
-      return failedToolResult(request, startedAt, {
-        message: `${toolDisplayName(request.toolName)}未注册。`,
+      return failedToolResult(factRequest, startedAt, {
+        message: `${toolDisplayName(factRequest.toolName)}未注册。`,
         errorDomain: "tool_error",
       });
     }
 
     if (permission.callerAgentId !== context.callerAgentId) {
       return failedToolResult(
-        request,
+        factRequest,
         startedAt,
         {
-          message: `${toolDisplayName(request.toolName)}调用者身份与本轮工具授权不一致。`,
+        message: `${toolDisplayName(factRequest.toolName)}调用者身份与本轮工具授权不一致。`,
           errorDomain: "tool_error",
         }
       );
     }
 
-    if (!permission.allowedTools.includes(request.toolName)) {
+    if (!permission.allowedTools.includes(factRequest.toolName)) {
       return failedToolResult(
-        request,
+        factRequest,
         startedAt,
         {
-          message: `${toolDisplayName(request.toolName)}未授权给当前 Agent。`,
+          message: `${toolDisplayName(factRequest.toolName)}未授权给当前 Agent。`,
           errorDomain: "tool_error",
         }
       );
@@ -94,7 +114,7 @@ export class ToolCenter {
 
     const metadata = normalizeToolMetadata(executor.definition);
     const securityDecision = evaluateToolCallSecurity({
-      request,
+      request: factRequest,
       definition: executor.definition,
       metadata,
       context: {
@@ -104,7 +124,7 @@ export class ToolCenter {
       },
     });
     if (securityDecision.decision === "blocked") {
-      return failedToolResult(request, startedAt, {
+      return failedToolResult(factRequest, startedAt, {
         message: securityDecision.reason,
         errorDomain: "tool_error",
         facts: {
@@ -114,35 +134,35 @@ export class ToolCenter {
       });
     }
     if (securityDecision.decision === "approval_required") {
-      return approvalRequiredToolResult(request, startedAt, securityDecision);
+      return approvalRequiredToolResult(factRequest, startedAt, securityDecision);
     }
 
     try {
-      const output = await executor.execute(request.input, {
+      const output = await executor.execute(factRequest.input, {
         ...context,
-        toolCallId: request.callId,
+        toolCallId: factRequest.callId,
         approvedConfirmationIds: permission.approvedConfirmationIds,
         confirmationPolicy: permission.confirmationPolicy,
       });
       if (isAbortSignalAborted(context.abortSignal)) {
-        return cancelledToolResult(request, startedAt);
+        return cancelledToolResult(factRequest, startedAt);
       }
       if (isToolExecutorResult(output)) {
-        return normalizeExecutorResult(output.result, request, startedAt);
+        return normalizeExecutorResult(output.result, factRequest, startedAt);
       }
       return {
-        callId: request.callId,
-        toolName: request.toolName,
-        input: request.input,
-        output,
+        callId: factRequest.callId,
+        toolName: factRequest.toolName,
+        input: factRequest.input,
+        output: normalizeToolFactValue(output),
         status: "completed",
         durationMs: Date.now() - startedAt,
       };
     } catch (error) {
       if (isAbortSignalAborted(context.abortSignal)) {
-        return cancelledToolResult(request, startedAt);
+        return cancelledToolResult(factRequest, startedAt);
       }
-      return failedToolResult(request, startedAt, sanitizeError(error, request.toolName));
+      return failedToolResult(factRequest, startedAt, sanitizeError(error, factRequest.toolName));
     }
   }
 
@@ -163,13 +183,192 @@ function normalizeExecutorResult(
   request: ToolCallRequest,
   startedAt: number
 ): ToolCallResult {
+  const raw = result as ToolCallResult & Readonly<Record<string, unknown>>;
+  const output = normalizeToolFactValue(raw.output);
+  const durationMs = finiteDuration(raw.durationMs, startedAt);
+  const status = toolCallStatus(raw.status);
+  if (status === undefined) {
+    return invalidExecutorResult({
+      request,
+      output,
+      durationMs,
+      code: "invalid_tool_result_status",
+      message: "Tool executor returned an invalid completion status.",
+    });
+  }
+
+  if (status === "approval_required") {
+    const confirmationRequest = normalizeConfirmationRequest(raw.confirmationRequest);
+    if (confirmationRequest === undefined) {
+      return invalidExecutorResult({
+        request,
+        output,
+        durationMs,
+        code: "invalid_tool_confirmation_request",
+        message: "Tool executor requested approval without a valid confirmation request.",
+      });
+    }
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: undefined,
+      status,
+      durationMs,
+      confirmationRequest,
+    };
+  }
+
+  if (status === "completed") {
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output,
+      status,
+      durationMs,
+    };
+  }
+
+  const compactString = (text: string) => compactToolErrorText(text, 500);
+  const errorFacts = normalizeToolErrorFacts(raw.errorFacts, { compactString });
+  const errorDomain = isToolErrorDomain(raw.errorDomain)
+    ? raw.errorDomain
+    : status === "failed"
+      ? defaultToolErrorDomain(request.toolName, errorFacts)
+      : undefined;
   return {
-    ...result,
     callId: request.callId,
     toolName: request.toolName,
     input: request.input,
-    durationMs: Number.isFinite(result.durationMs) ? result.durationMs : Date.now() - startedAt,
+    output,
+    status,
+    error: typeof raw.error === "string" && raw.error.trim().length > 0
+      ? compactToolErrorText(raw.error, 500)
+      : status === "cancelled"
+        ? "Tool execution cancelled."
+        : "Tool execution failed.",
+    errorDomain,
+    errorFacts,
+    durationMs,
   };
+}
+
+function invalidExecutorResult(input: {
+  readonly request: ToolCallRequest;
+  readonly output: ToolCallResult["output"];
+  readonly durationMs: number;
+  readonly code: string;
+  readonly message: string;
+}): ToolCallResult {
+  return {
+    callId: input.request.callId,
+    toolName: input.request.toolName,
+    input: input.request.input,
+    output: input.output,
+    status: "failed",
+    error: input.message,
+    errorDomain: "runtime_error",
+    errorFacts: {
+      code: input.code,
+      phase: "executor_result",
+    },
+    durationMs: input.durationMs,
+  };
+}
+
+function finiteDuration(value: unknown, startedAt: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : Date.now() - startedAt;
+}
+
+function toolCallStatus(value: unknown): ToolCallResult["status"] | undefined {
+  return value === "completed" || value === "failed" || value === "approval_required" || value === "cancelled"
+    ? value
+    : undefined;
+}
+
+function normalizeConfirmationRequest(value: unknown): ConfirmationRequest | undefined {
+  const record = asPlainRecord(value);
+  const confirmationId = nonEmptyString(record.confirmationId);
+  const runId = nonEmptyString(record.runId);
+  const title = nonEmptyString(record.title);
+  const actionSummary = nonEmptyString(record.actionSummary);
+  const requestedAt = nonEmptyString(record.requestedAt);
+  const affectedResources = stringArray(record.affectedResources);
+  const sourceRefs = stringArray(record.sourceRefs);
+  const riskLevel = confirmationRiskLevel(record.riskLevel);
+  const conversationId = optionalNonEmptyString(record.conversationId);
+  const consequence = optionalNonEmptyString(record.consequence);
+  const expiresAt = optionalNonEmptyString(record.expiresAt);
+  const resumeAvailability = confirmationResumeAvailability(record.resumeAvailability);
+  if (
+    confirmationId === undefined ||
+    runId === undefined ||
+    title === undefined ||
+    actionSummary === undefined ||
+    requestedAt === undefined ||
+    affectedResources === undefined ||
+    sourceRefs === undefined ||
+    riskLevel === undefined ||
+    (record.conversationId !== undefined && conversationId === undefined) ||
+    (record.consequence !== undefined && consequence === undefined) ||
+    (record.expiresAt !== undefined && expiresAt === undefined) ||
+    (record.resumeAvailability !== undefined && resumeAvailability === undefined)
+  ) {
+    return undefined;
+  }
+  return {
+    confirmationId,
+    runId,
+    conversationId,
+    title,
+    actionSummary,
+    consequence,
+    affectedResources,
+    riskLevel,
+    resumeAvailability,
+    requestedAt,
+    expiresAt,
+    sourceRefs,
+  };
+}
+
+function asPlainRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim();
+  return text.length > 0 ? text : undefined;
+}
+
+function optionalNonEmptyString(value: unknown): string | undefined {
+  return value === undefined ? undefined : nonEmptyString(value);
+}
+
+function stringArray(value: unknown): readonly string[] | undefined {
+  return Array.isArray(value) && value.every((item) => nonEmptyString(item) !== undefined)
+    ? value.map((item) => nonEmptyString(item)!)
+    : undefined;
+}
+
+function confirmationRiskLevel(value: unknown): ConfirmationRequest["riskLevel"] | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
+}
+
+function confirmationResumeAvailability(
+  value: unknown
+): ConfirmationRequest["resumeAvailability"] | undefined {
+  return value === undefined || value === "live" || value === "lost_after_restart"
+    ? value
+    : undefined;
 }
 
 function failedToolResult(
@@ -203,7 +402,6 @@ function approvalRequiredToolResult(
     input: request.input,
     output: undefined,
     status: "approval_required",
-    error: decision.reason,
     durationMs: Date.now() - startedAt,
     confirmationRequest,
   };
@@ -266,7 +464,6 @@ function normalizeToolMetadata(definition: ToolDefinition): ToolDefinitionMetada
   }
   return {
     ...definition.metadata,
-    visibleResultPolicy: { ...definition.metadata.visibleResultPolicy },
     runtimeHints: cloneRuntimeHints(definition.metadata.runtimeHints),
   };
 }
@@ -298,6 +495,13 @@ type SanitizedToolError = {
 };
 
 function sanitizeError(error: unknown, toolName: string): SanitizedToolError {
+  if (error instanceof InvalidToolFactError) {
+    return {
+      message: compactToolErrorText(error.message, 500),
+      errorDomain: error.errorDomain,
+      facts: { ...error.facts, code: "invalid_tool_output_fact", phase: "output" },
+    };
+  }
   const message = error instanceof Error ? error.message : "Tool execution failed.";
   const facts = toolErrorFactsFromUnknown(error);
   return {
@@ -308,7 +512,7 @@ function sanitizeError(error: unknown, toolName: string): SanitizedToolError {
 }
 
 function defaultToolErrorDomain(toolName: string, facts: ToolErrorFacts | undefined): ToolErrorDomain {
-  if (toolName === "shell_command" || toolName === "run_command") {
+  if (toolName === "shell_command") {
     return "process_error";
   }
   const code = typeof facts?.code === "string" ? facts.code.toLowerCase() : undefined;

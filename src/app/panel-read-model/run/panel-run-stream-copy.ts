@@ -412,9 +412,7 @@ function latestDirectAnswerPayload(eventEntries: readonly EventLogEntry[]): { re
 function isDirectAnswerOutput(visibleOutput: ModelVisibleOutputProjection | undefined): visibleOutput is ModelVisibleOutputProjection {
   return visibleOutput?.contractId === "work_session.direct_answer.v1" ||
     visibleOutput?.contractId === "desktop.agent_response.v1" ||
-    visibleOutput?.contractId === "desktop.agent.answer.v1" ||
-    visibleOutput?.contractId === "desktop.chat_response.v1" ||
-    visibleOutput?.contractId === "desktop.chat.answer.v1";
+    visibleOutput?.contractId === "desktop.agent.answer.v1";
 }
 
 function fullSummaryOrUndefined(value: PanelRunSummaryPayload | undefined): PanelRunSummary | undefined {

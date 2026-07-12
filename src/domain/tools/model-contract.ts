@@ -2,9 +2,9 @@ import type {
   ToolCategory,
   ToolDefinition,
   ToolFileDisplayOperation,
+  ToolInputSchema,
   ToolOperationType,
   ToolRiskLevel,
-  ToolVisibleResultPolicy,
 } from "./contracts.js";
 
 export type ModelVisibleToolContractValidation = {
@@ -12,47 +12,102 @@ export type ModelVisibleToolContractValidation = {
   readonly missing: readonly string[];
 };
 
-export function modelVisibleToolDescription(definition: ToolDefinition): string {
+export const MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS = 4_096;
+
+const DESCRIPTION_SECTION_BUDGET = {
+  objective: { ratio: 0.2, maxChars: 512 },
+  outputs: { ratio: 0.38, maxChars: 1_536 },
+  runtime: { ratio: 0.1, maxChars: 400 },
+  limits: { ratio: 0.1, maxChars: 400 },
+  notes: { ratio: 0.17, maxChars: 700 },
+} as const;
+
+export type ModelVisibleToolDescriptionOptions = {
+  readonly maxChars?: number;
+};
+
+/**
+ * 生成 provider function/tool 的描述正文。
+ *
+ * `description` 是客观能力说明，也是唯一必需正文。`modelContract` 只提供可选增强；增强项
+ * 按固定字段顺序进入显式字符预算，不按关键词、内容位置或推测的任务意图挑选。客观 description
+ * 有独立上限，不能吞掉结果/continuation、运行环境和副作用/限制事实。输入 schema
+ * 作为独立 provider 字段发送，因此参数提示、推荐用法和示例在上述事实之后再使用剩余预算。
+ */
+export function modelVisibleToolDescription(
+  definition: ToolDefinition,
+  options: ModelVisibleToolDescriptionOptions = {}
+): string {
+  const maxChars = normalizedDescriptionBudget(options.maxChars);
   const sections: string[] = [];
   const contract = definition.modelContract;
-  if (contract === undefined) {
-    return definition.description.trim();
-  }
-  const purpose = firstNonEmpty(definition.modelContract?.purpose, definition.description);
+  const purpose = firstNonEmpty(definition.description, contract?.purpose);
   if (purpose !== undefined) {
-    sections.push(purpose);
+    sections.push(fitSectionBudget(
+      purpose,
+      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.objective)
+    ));
   }
-  appendCompactSentence(sections, "Use for", firstItems(contract.whenToUse, 2));
-  appendCompactSentence(sections, "Avoid for", firstItems(contract.whenNotToUse, 1));
-  appendCompactSentence(sections, "Inputs", firstItems(contract.inputNotes, 3));
-  appendCompactSentence(sections, "Outputs", firstItems(contract.outputNotes, 3));
-  appendCompactRuntimeHints(sections, contract.runtimeHints, 2);
-  appendCompactSentence(sections, "Notes", importantUsageNotes(contract.usageNotes));
-  appendCompactExample(sections, contract.examples);
-  return sections.join("\n");
+  if (contract !== undefined) {
+    const seen = new Set(purpose === undefined ? [] : [normalizeComparableText(purpose)]);
+    appendDescriptionSection(
+      sections,
+      seen,
+      "Outputs",
+      contract.outputNotes,
+      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.outputs)
+    );
+    appendRuntimeHints(
+      sections,
+      seen,
+      contract.runtimeHints,
+      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.runtime)
+    );
+    appendDescriptionSection(
+      sections,
+      seen,
+      "Avoid for",
+      contract.whenNotToUse,
+      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.limits)
+    );
+    appendDescriptionSection(
+      sections,
+      seen,
+      "Notes",
+      contract.usageNotes,
+      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.notes)
+    );
+    appendDescriptionSection(sections, seen, "Inputs", contract.inputNotes);
+    appendDescriptionSection(sections, seen, "Use for", contract.whenToUse);
+    appendExamples(sections, seen, contract.examples);
+  }
+  return fitDescriptionBudget(sections.join("\n"), maxChars);
 }
 
 /**
- * 工具「进模型可见集合」的统一完备门槛（FR-TOOL-001 / FR-TOOL-002）。
+ * 工具「进模型可见集合」的统一事实门槛（FR-TOOL-001 / FR-TOOL-002）。
  *
- * 这是能力判定的单一事实来源：模型可见的工具必须同时满足
- *   - 模型可见功能性契约（`modelContract` + `description`）：用途 / 参数说明 / 输出说明 /
- *     runtimeHints / examples，使模型可依据契约本身区分相近工具并正确组装参数；
- *   - 能力契约元数据（`metadata`）：category / riskLevel / operationType /
- *     requiresConfirmation / visibleResultPolicy，使「是否只读 / 是否需要确认 / 可否并行 /
- *     是否具备删除子能力」等能力判定只依赖显式契约字段，而非工具名或硬编码白名单。
+ * 模型可见工具只必须具备可执行 identity、客观 description、有效 input schema 以及
+ * 执行/副作用元数据。`ToolRegistry.register` 只对真实 `ToolExecutor` 调用本校验；执行结果
+ * 另由 ToolCenter 归一化为 `ToolCallResult`，截断时必须在输出顶层提供真实
+ * `continuation / continuations`。这些运行时事实不能用一段 `outputNotes` 散文伪装成静态校验。
  *
- * 缺任一必备字段的工具不得进入模型可见集合。确认策略缺失时，调用方应通过
- * {@link resolveEffectiveConfirmationRequirement} 取保守默认（按需确认），而非自行猜测。
+ * `modelContract` 内的 whenToUse / usageNotes / inputNotes / outputNotes / runtimeHints / examples
+ * 都是可选描述增强，缺失或无法序列化时不能隐藏一个本来可执行的工具。
  */
 export function validateModelVisibleToolContract(
   definition: ToolDefinition
 ): ModelVisibleToolContractValidation {
   const missing: string[] = [];
-  if (definition.description.trim().length === 0) {
+  if (!hasText(definition.name)) {
+    missing.push("name");
+  }
+  if (!hasText(definition.description)) {
     missing.push("description");
   }
-  // 能力契约元数据完备性（FR-TOOL-002）：判定只依赖契约字段。
+  if (!isToolInputSchema(definition.inputSchema)) {
+    missing.push("inputSchema");
+  }
   const metadata = definition.metadata;
   if (metadata === undefined) {
     missing.push("metadata");
@@ -69,29 +124,9 @@ export function validateModelVisibleToolContract(
     if (typeof metadata.requiresConfirmation !== "boolean") {
       missing.push("metadata.requiresConfirmation");
     }
-    if (!isVisibleResultPolicy(metadata.visibleResultPolicy)) {
-      missing.push("metadata.visibleResultPolicy");
+    if (metadata.fileOperation !== undefined && !isFileOperation(metadata.fileOperation)) {
+      missing.push("metadata.fileOperation");
     }
-  }
-  const contract = definition.modelContract;
-  if (contract === undefined) {
-    missing.push("modelContract");
-    return { ok: false, missing };
-  }
-  if (!hasTextList(contract.whenToUse) && !hasTextList(contract.usageNotes)) {
-    missing.push("modelContract.whenToUse or usageNotes");
-  }
-  if (!hasTextList(contract.inputNotes) && !hasTextList(contract.usageNotes)) {
-    missing.push("modelContract.inputNotes or usageNotes");
-  }
-  if (!hasTextList(contract.outputNotes)) {
-    missing.push("modelContract.outputNotes");
-  }
-  if (!hasRuntimeHints(contract.runtimeHints)) {
-    missing.push("modelContract.runtimeHints");
-  }
-  if (contract.examples === undefined || contract.examples.length === 0) {
-    missing.push("modelContract.examples");
   }
   return {
     ok: missing.length === 0,
@@ -164,18 +199,38 @@ function isOperationType(value: unknown): value is ToolOperationType {
   );
 }
 
-function isVisibleResultPolicy(value: unknown): value is ToolVisibleResultPolicy {
-  if (typeof value !== "object" || value === null) {
+function isFileOperation(value: unknown): value is ToolFileDisplayOperation {
+  return (
+    value === "create" ||
+    value === "write" ||
+    value === "append" ||
+    value === "edit" ||
+    value === "delete"
+  );
+}
+
+function isToolInputSchema(value: unknown): value is ToolInputSchema {
+  if (!isRecord(value) || value.type !== "object" || !isRecord(value.properties)) {
     return false;
   }
-  const policy = value as { userVisible?: unknown; maxPreviewChars?: unknown; omitRawOutput?: unknown };
+  const properties = value.properties;
+  if (
+    value.required !== undefined &&
+    (!Array.isArray(value.required) ||
+      value.required.some(
+        (item) => typeof item !== "string" || item.length === 0 || !(item in properties)
+      ))
+  ) {
+    return false;
+  }
   return (
-    (policy.userVisible === "summary-only" ||
-      policy.userVisible === "safe-preview" ||
-      policy.userVisible === "hidden") &&
-    typeof policy.maxPreviewChars === "number" &&
-    typeof policy.omitRawOutput === "boolean"
+    value.additionalProperties === undefined ||
+    typeof value.additionalProperties === "boolean"
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function firstNonEmpty(...values: readonly (string | undefined)[]): string | undefined {
@@ -187,59 +242,149 @@ function firstNonEmpty(...values: readonly (string | undefined)[]): string | und
   return undefined;
 }
 
-function hasText(value: string | undefined): value is string {
-  return value !== undefined && value.trim().length > 0;
+function hasText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
-function hasTextList(value: readonly string[] | undefined): boolean {
-  return nonEmptyItems(value).length > 0;
-}
-
-function nonEmptyItems(value: readonly string[] | undefined): readonly string[] {
-  return (value ?? []).map((item) => item.trim()).filter((item) => item.length > 0);
-}
-
-function firstItems(value: readonly string[] | undefined, limit: number): readonly string[] {
-  return nonEmptyItems(value).slice(0, limit);
-}
-
-function importantUsageNotes(value: readonly string[] | undefined): readonly string[] {
-  const notes = nonEmptyItems(value);
-  const selected = notes.filter((item) => IMPORTANT_USAGE_NOTE_PATTERN.test(item));
-  return (selected.length > 0 ? selected : notes).slice(0, 2);
-}
-
-function appendCompactSentence(sections: string[], title: string, items: readonly string[]): void {
-  if (items.length > 0) {
-    sections.push(`${title}: ${items.join(" ")}`);
-  }
-}
-
-function appendCompactRuntimeHints(
+function appendDescriptionSection(
   sections: string[],
-  hints: readonly { readonly label: string; readonly value: string }[] | undefined,
-  limit: number
+  seen: Set<string>,
+  title: string,
+  value: readonly string[] | undefined,
+  maxChars?: number
 ): void {
-  const lines = (hints ?? [])
-    .filter((hint) => hasText(hint.label) && hasText(hint.value))
-    .slice(0, limit)
-    .map((hint) => `${hint.label}=${hint.value}`);
-  if (lines.length > 0) {
-    sections.push(`Runtime: ${lines.join("; ")}`);
+  const items = uniqueTextItems(value, seen);
+  if (items.length > 0) {
+    const section = `${title}: ${items.join(" ")}`;
+    sections.push(maxChars === undefined ? section : fitSectionBudget(section, maxChars));
   }
 }
 
-function appendCompactExample(sections: string[], examples: readonly { readonly input: Readonly<Record<string, unknown>> }[] | undefined): void {
-  const example = examples?.[0];
-  if (example !== undefined) {
-    sections.push(`Example: ${JSON.stringify(example.input)}`);
+function appendRuntimeHints(
+  sections: string[],
+  seen: Set<string>,
+  hints: readonly { readonly label: string; readonly value: string }[] | undefined,
+  maxChars: number
+): void {
+  if (!Array.isArray(hints)) {
+    return;
+  }
+  const items = uniqueTextItems(
+    hints
+      .filter((hint) => hasText(hint?.label) && hasText(hint?.value))
+      .map((hint) => `${hint.label.trim()}=${hint.value.trim()}`),
+    seen
+  );
+  if (items.length > 0) {
+    sections.push(fitSectionBudget(`Runtime: ${items.join("; ")}`, maxChars));
   }
 }
 
-function hasRuntimeHints(
-  value: readonly { readonly label: string; readonly value: string }[] | undefined
-): boolean {
-  return (value ?? []).some((hint) => hasText(hint.label) && hasText(hint.value));
+function appendExamples(
+  sections: string[],
+  seen: Set<string>,
+  examples: readonly { readonly input: Readonly<Record<string, unknown>> }[] | undefined
+): void {
+  if (!Array.isArray(examples)) {
+    return;
+  }
+  const serialized = examples
+    .map((example) => serializeExample(example?.input))
+    .filter((value): value is string => value !== undefined);
+  const items = uniqueTextItems(serialized, seen);
+  if (items.length > 0) {
+    sections.push(`Examples: ${items.join(" ")}`);
+  }
 }
 
-const IMPORTANT_USAGE_NOTE_PATTERN = /\b(background=true|dev servers?|non-2xx|status|read|search|truncated|maxLength|dryRun|commandLine|command and args|batch)\b/iu;
+function serializeExample(value: Readonly<Record<string, unknown>> | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function uniqueTextItems(
+  value: readonly string[] | undefined,
+  seen: Set<string>
+): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of value) {
+    if (!hasText(item)) {
+      continue;
+    }
+    const text = item.trim();
+    const comparable = normalizeComparableText(text);
+    if (seen.has(comparable)) {
+      continue;
+    }
+    seen.add(comparable);
+    result.push(text);
+  }
+  return result;
+}
+
+function normalizeComparableText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
+function normalizedDescriptionBudget(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+function sectionBudget(
+  total: number,
+  policy: { readonly ratio: number; readonly maxChars: number }
+): number {
+  return Math.max(1, Math.min(policy.maxChars, Math.floor(total * policy.ratio)));
+}
+
+function fitSectionBudget(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  const marker = " …[truncated]";
+  if (marker.length >= maxChars) {
+    return value.slice(0, maxChars);
+  }
+  const bodyLimit = maxChars - marker.length;
+  const candidate = value.slice(0, bodyLimit);
+  const completeBoundary = Math.max(candidate.lastIndexOf("\n"), candidate.lastIndexOf(".") + 1);
+  const wordBoundary = candidate.lastIndexOf(" ");
+  const cutoff = completeBoundary >= Math.floor(bodyLimit / 2)
+    ? completeBoundary
+    : wordBoundary > 0
+      ? wordBoundary
+      : bodyLimit;
+  return `${candidate.slice(0, cutoff).trimEnd()}${marker}`;
+}
+
+function fitDescriptionBudget(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  const marker = "\n[Additional tool guidance omitted by description budget.]";
+  if (marker.length >= maxChars) {
+    return value.slice(0, maxChars);
+  }
+  const bodyLimit = maxChars - marker.length;
+  const candidate = value.slice(0, bodyLimit);
+  const completeBoundary = Math.max(candidate.lastIndexOf("\n"), candidate.lastIndexOf(".") + 1);
+  const wordBoundary = candidate.lastIndexOf(" ");
+  const cutoff = completeBoundary >= Math.floor(bodyLimit / 2)
+    ? completeBoundary
+    : wordBoundary > 0
+      ? wordBoundary
+      : bodyLimit;
+  return `${candidate.slice(0, cutoff).trimEnd()}${marker}`;
+}

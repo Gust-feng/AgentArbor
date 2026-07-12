@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ensurePidExited } from "./background-process-test-utils.js";
-import { createLocalRunCommandTool, createLocalShellCommandTool } from "./local-workspace-command-tools.js";
+import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
 import {
   InMemoryProcessRegistry,
   type PortOccupantProbe,
@@ -38,16 +38,14 @@ test("shell_command returns stable foreground cancellation facts", async () => {
         },
         { ...processContext, abortSignal: controller.signal }
       );
-      const result = asRecord(asRecord(output).result);
+      const result = asDirectToolFacts(output);
 
-      assert.equal(asRecord(output).status, "completed");
       assert.equal(result.exitCode, 130);
       assert.equal(result.cancelled, true);
       assert.equal(result.timedOut, undefined);
       assert.equal("processId" in result, false);
       assert.match(String(result.stdout), /before-cancel/);
       assert.match(String(result.stderr), /Command execution cancelled\./);
-      assert.match(String(asRecord(output).summary), /cancelled \(exit 130\)/);
       assert.equal(registry.registered.length, 1);
       assert.equal(registry.registered[0]?.kind, "foreground");
       assert.equal(registry.registered[0]?.owned, true);
@@ -75,7 +73,7 @@ test("shell_command preserves foreground exit code and stdout stderr facts", asy
       command: process.execPath,
       args: ["-e", "console.log('known-stdout'); console.error('known-stderr'); process.exit(7);"],
     }, processContext);
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
 
     assert.equal(result.exitCode, 7);
     assert.equal(result.stdout, "known-stdout\n");
@@ -122,7 +120,7 @@ test("shell_command records background process facts and port wait facts", async
       },
       processContext
     );
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
 
     try {
       assert.equal(result.exitCode, 0);
@@ -182,7 +180,7 @@ test("shell_command returns background metadata when waitForPort is cancelled", 
         },
         { ...context, abortSignal: controller.signal }
       );
-      const result = asRecord(asRecord(output).result);
+      const result = asDirectToolFacts(output);
       stopCommand = typeof result.stopCommand === "string" ? result.stopCommand : undefined;
       backgroundPid = typeof result.pid === "number" ? result.pid : undefined;
 
@@ -230,7 +228,7 @@ test("shell_command returns a controlled logRef for background command logs", as
       background: true,
       backgroundWaitMs: 50,
     }, context);
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
 
     try {
       assert.equal(result.exitCode, 0);
@@ -259,7 +257,7 @@ test("shell_command returns a controlled logRef for truncated foreground output"
       command: process.execPath,
       args: ["-e", "process.stdout.write('x'.repeat(20000)); process.stderr.write('foreground-stderr-tail');"],
     }, context);
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
 
     assert.equal(asRecord(output).truncated, true);
     assert.equal(result.stdoutTruncated, true);
@@ -273,25 +271,7 @@ test("shell_command returns a controlled logRef for truncated foreground output"
   }
 });
 
-test("run_command alias preserves controlled logRef for truncated command output", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
-  try {
-    const runCommand = createLocalRunCommandTool(root);
-    const output = await runCommand.execute({
-      command: process.execPath,
-      args: ["-e", "process.stdout.write('r'.repeat(20000));"],
-    }, context);
-    const result = asRecord(asRecord(output).result);
-
-    assert.equal(asRecord(output).action, "run_command");
-    assert.equal(asRecord(output).truncated, true);
-    assertControlledLogRef(result);
-  } finally {
-    await removeTempTree(root);
-  }
-});
-
-test("shell_command makes background waitForPort timeout visible in summary and result", async () => {
+test("shell_command returns factual background waitForPort timeout state", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const port = await unusedLocalPort();
@@ -305,7 +285,7 @@ test("shell_command makes background waitForPort timeout visible in summary and 
       waitForPort: port,
       waitForPortTimeoutMs: 250,
     }, context);
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.background, true);
@@ -314,7 +294,6 @@ test("shell_command makes background waitForPort timeout visible in summary and 
     assert.equal(result.portReady, false);
     assert.equal("processId" in result, false);
     assert.match(String(result.stderr), new RegExp(`Port ${port} did not become ready within 250ms\\.`));
-    assert.match(String(asRecord(output).summary), new RegExp(`port ${port} not ready`));
     assert.equal(registry.registered.length, 1);
     assert.equal(registry.registered[0]?.kind, "background");
     assert.equal(registry.registered[0]?.status, "running");
@@ -366,7 +345,7 @@ test("shell_command records post-start external port occupant facts", async () =
       },
       processContext
     );
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
     stopCommand = typeof result.stopCommand === "string" ? result.stopCommand : undefined;
     backgroundPid = typeof result.pid === "number" ? result.pid : undefined;
 
@@ -438,7 +417,7 @@ test("shell_command returns pre-start occupied port facts without starting a dup
       },
       processContext
     );
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
     const occupancy = asRecord(result.preStartPortOccupancy);
 
     assert.equal(result.notStarted, true);
@@ -519,7 +498,7 @@ test("shell_command marks pre-start occupied ports as owned when registry has th
       },
       processContext
     );
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
     const occupancy = asRecord(result.preStartPortOccupancy);
 
     assert.equal(result.notStarted, true);
@@ -586,7 +565,7 @@ test("shell_command keeps pre-start port ownership unknown without an observed p
       },
       processContext
     );
-    const result = asRecord(asRecord(output).result);
+    const result = asDirectToolFacts(output);
     const occupancy = asRecord(result.preStartPortOccupancy);
 
     assert.equal(result.notStarted, true);
@@ -681,6 +660,14 @@ function asRecord(value: unknown): Record<string, unknown> {
   assert.notEqual(value, null);
   assert.equal(Array.isArray(value), false);
   return value as Record<string, unknown>;
+}
+
+function asDirectToolFacts(value: unknown): Record<string, unknown> {
+  const output = asRecord(value);
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `command output must not contain ${legacyField}`);
+  }
+  return output;
 }
 
 function assertControlledLogRef(result: Record<string, unknown>): void {

@@ -1,212 +1,132 @@
-import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
+import type { RunEvent } from "../../domain/basic-agent/index.js";
 import type {
   RuntimeConfirmationRecord,
+  RuntimeEventRecord,
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
-import { redactOrdinaryText } from "../safe-projection.js";
-import { restoredRunTerminalSummary } from "../run-read-model/restored-run-projection.js";
-import {
-  isSubAgentStreamEventType,
-  subAgentStreamDetailFromTraces,
-  subAgentStreamSummaryFromDetail,
-} from "../run-read-model/sub-agent-stream-projection.js";
-import {
-  agentTaskStatusFromSnapshot,
-  basicRunTitleFromStatus,
-} from "./persistence-status.js";
+import { restoredConfirmationContinuationIsLost } from "./persistence-confirmations.js";
+import { requireRestorableOrdinaryRuntimeSnapshot } from "./persistence-snapshot-contract.js";
 
-export function restoredBasicEventsFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): readonly RunEvent[] {
-  const status = agentTaskStatusFromSnapshot(snapshot);
-  const persisted = snapshot.basicEvents.length > 0
-    ? snapshot.basicEvents.filter((event) => event.visibility !== "debug")
-    : fallbackBasicEventsFromRuntimeSnapshot(snapshot);
-  const terminalType =
-    status === "blocked"
-      ? "run.blocked"
-      : status === "cancelled"
-        ? "run.cancelled"
-        : status === "failed"
-          ? "run.failed"
-          : status === "completed"
-            ? "final.result"
-            : undefined;
-  if (terminalType === undefined || persisted.some((event) => event.type === terminalType)) {
-    return persisted;
-  }
-  return [...persisted, createRestoredBasicTerminalEvent(snapshot, status, terminalType, persisted.at(-1)?.sequence ?? 0)];
+/** Durable Basic events are an index, not a persisted display/read-model cache. */
+export function durableBasicRunEvents(events: readonly RunEvent[]): readonly RunEvent[] {
+  return events
+    .filter((event) => event.visibility !== "debug")
+    .map((event) => ({
+      id: event.id,
+      runId: event.runId,
+      sequence: event.sequence,
+      type: event.type,
+      title: event.title,
+      status: event.status,
+      timestamp: event.timestamp,
+      toolName: event.toolName,
+      refs: event.refs,
+      visibility: event.visibility,
+    }));
 }
 
-function fallbackBasicEventsFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): readonly RunEvent[] {
-  const events: RunEvent[] = [];
-  for (const record of snapshot.events) {
-    if (record.type === "goal.received") {
-      continue;
-    }
-    const type = basicEventTypeForRuntimeEvent(record.type);
-    if (type === undefined) {
-      continue;
-    }
-    const detail = isSubAgentStreamEventType(type)
-      ? subAgentStreamDetailFromTraces({
-          type,
-          refs: record.refs,
-          fallbackSummary: record.summary,
-          runs: snapshot.subAgentRuns,
-        })
-      : undefined;
-    events.push({
-      id: `${snapshot.run.runId}:restored:event:${record.sequence}:${type}`,
-      runId: snapshot.run.runId,
-      sequence: events.length + 1,
-      type,
-      title: basicEventTitleFromType(type),
-      summary: isSubAgentStreamEventType(type)
-        ? redactOrdinaryText(subAgentStreamSummaryFromDetail(type, detail, record.summary), 1_200)
-        : redactOrdinaryText(record.summary, 1_200),
-      status: agentTaskStatusFromBasicEventType(type, detail),
-      timestamp: record.recordedAt,
-      refs: record.refs,
-      visibility: type.startsWith("tool.") || type.startsWith("sub_agent") || type === "confirmation.needed" ? "expanded" : "compact",
-      detail,
+export function restoredBasicEventsFromRuntimeSnapshot(
+  snapshot: RuntimeRunSnapshot
+): readonly RunEvent[] {
+  const persisted = requireRestorableOrdinaryRuntimeSnapshot(snapshot);
+  const runtimeById = new Map(persisted.events.map((event) => [event.eventId, event]));
+  const confirmationById = new Map(
+    persisted.confirmations.map((confirmation) => [confirmation.confirmationId, confirmation])
+  );
+  const confirmationByToolCallId = new Map(
+    persisted.confirmations
+      .filter((confirmation) => confirmation.toolCallId !== undefined)
+      .map((confirmation) => [confirmation.toolCallId!, confirmation])
+  );
+
+  return durableBasicRunEvents(persisted.basicEvents).flatMap((event) => {
+    const runtimeEvent = runtimeEventForBasicEvent(event, runtimeById);
+    const confirmation = confirmationForBasicEvent({
+      event,
+      runtimeEvent,
+      confirmationById,
+      confirmationByToolCallId,
     });
-  }
-  for (const confirmation of snapshot.confirmations) {
-    if (confirmation.status === "pending") {
-      events.push({
-        id: `${snapshot.run.runId}:restored:confirmation:${confirmation.confirmationId}:pending`,
-        runId: snapshot.run.runId,
-        sequence: events.length + 1,
-        type: "confirmation.needed",
-        title: basicEventTitleFromType("confirmation.needed"),
-        summary: redactOrdinaryText(confirmation.actionSummary, 1_200),
-        status: "approval_needed",
-        timestamp: confirmation.requestedAt,
-        refs: [{ kind: "event", id: `confirmation:${confirmation.confirmationId}` }],
-        visibility: "expanded",
-      });
-      continue;
+    if (shouldOmitDecidedConfirmationEvent(persisted, event, confirmation)) {
+      return [];
     }
-    if (confirmation.decidedAt === undefined) {
-      continue;
-    }
-    if (confirmation.status === "approved") {
-      continue;
-    }
-    const type = confirmation.status === "guidance" ? "user.guidance" : "user_approval.received";
-    events.push({
-      id: `${snapshot.run.runId}:restored:confirmation:${confirmation.confirmationId}:${confirmation.status}`,
-      runId: snapshot.run.runId,
-      sequence: events.length + 1,
-      type,
-      title: basicEventTitleFromType(type),
-      summary: restoredConfirmationDecisionSummary(confirmation),
-      status: "running",
-      timestamp: confirmation.decidedAt,
-      refs: [{ kind: "event", id: `confirmation:${confirmation.confirmationId}` }],
-      visibility: "expanded",
-    });
-  }
-  return events.filter((event) => event.visibility !== "debug");
+    return runtimeEvent === undefined
+      ? [event]
+      : [{
+          ...event,
+          summary: runtimeEvent.summary,
+        }];
+  });
 }
 
-function createRestoredBasicTerminalEvent(
-  snapshot: RuntimeRunSnapshot,
-  status: BasicAgentRun["status"],
-  type: string,
-  lastSequence: number
-): RunEvent {
-  return {
-    id: `${snapshot.run.runId}:restored:basic:${type}`,
-    runId: snapshot.run.runId,
-    sequence: lastSequence + 1,
-    type,
-    title: basicRunTitleFromStatus(status, undefined),
-    summary: restoredBasicTerminalSummary(snapshot, status),
-    status,
-    timestamp: snapshot.run.updatedAt,
-    refs: [],
-    visibility: "compact",
-  };
-}
-
-function restoredBasicTerminalSummary(
-  snapshot: RuntimeRunSnapshot,
-  status: BasicAgentRun["status"]
-): string {
-  if (
-    status === "blocked" ||
-    status === "cancelled" ||
-    status === "completed" ||
-    status === "failed"
-  ) {
-    return restoredRunTerminalSummary({ run: snapshot.run, status });
+function runtimeEventForBasicEvent(
+  event: RunEvent,
+  runtimeById: ReadonlyMap<string, RuntimeEventRecord>,
+): RuntimeEventRecord | undefined {
+  for (const ref of event.refs) {
+    if (ref.kind !== "event") {
+      continue;
+    }
+    const runtimeEvent = runtimeById.get(ref.id);
+    if (runtimeEvent !== undefined) {
+      return runtimeEvent;
+    }
   }
-  return "";
-}
-
-function basicEventTypeForRuntimeEvent(type: RuntimeRunSnapshot["events"][number]["type"]): string | undefined {
-  if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed" || type === "tool.cancelled") return type;
-  if (
-    type === "sub_agent.started" ||
-    type === "sub_agent.completed" ||
-    type === "sub_agent_batch.started" ||
-    type === "sub_agent_batch.completed"
-  ) {
-    return type;
-  }
-  if (type === "user_approval.requested") return "confirmation.needed";
-  if (type === "user_approval.received") return "user_approval.received";
-  if (type === "model.failed") return "run.failed";
   return undefined;
 }
 
-function basicEventTitleFromType(type: string): string {
-  if (type === "run.started") return "任务";
-  if (type === "run.cancelled") return "已取消";
-  if (type === "run.blocked") return "需要处理";
-  if (type === "run.resumed") return "运行恢复";
-  if (type === "tool.requested" || type === "tool.completed") return "动作";
-  if (type === "tool.failed") return "未完成";
-  if (type === "tool.cancelled") return "已取消";
-  if (type === "sub_agent.started" || type === "sub_agent.completed") return "子 Agent";
-  if (type === "sub_agent_batch.started" || type === "sub_agent_batch.completed") return "子 Agent 批次";
-  if (type === "confirmation.needed") return "需要你判断";
-  if (type === "user_approval.received") return "用户决定";
-  if (type === "user.guidance") return "补充要求";
-  if (type === "final.result") return "结果";
-  if (type === "run.failed") return "未完成";
-  return "更新";
+function confirmationForBasicEvent(input: {
+  readonly event: RunEvent;
+  readonly runtimeEvent?: RuntimeEventRecord;
+  readonly confirmationById: ReadonlyMap<string, RuntimeConfirmationRecord>;
+  readonly confirmationByToolCallId: ReadonlyMap<string, RuntimeConfirmationRecord>;
+}): RuntimeConfirmationRecord | undefined {
+  const confirmationId = confirmationIdFromEventRefs(input.event) ??
+    confirmationIdFromRuntimeEvent(input.runtimeEvent);
+  if (confirmationId !== undefined) {
+    const confirmation = input.confirmationById.get(confirmationId);
+    if (confirmation !== undefined) {
+      return confirmation;
+    }
+  }
+  const toolCallId = input.event.refs.find((ref) => ref.kind === "tool_call")?.id;
+  return toolCallId === undefined ? undefined : input.confirmationByToolCallId.get(toolCallId);
 }
 
-function agentTaskStatusFromBasicEventType(
-  type: string,
-  detail?: RunEvent["detail"]
-): BasicAgentRun["status"] {
-  if (type === "confirmation.needed") return "approval_needed";
-  if (type === "user.guidance") return "needs_input";
-  if (type === "sub_agent.started" || type === "sub_agent_batch.started") return "running";
-  if (type === "sub_agent.completed") {
-    if (detail?.subAgentStatus === "failed") return "failed";
-    if (detail?.subAgentStatus === "cancelled") return "cancelled";
-    if (detail?.subAgentStatus === "approval_required") return "approval_needed";
-    return "completed";
+function confirmationIdFromEventRefs(event: RunEvent): string | undefined {
+  for (const ref of event.refs) {
+    if (ref.kind === "event" && ref.id.startsWith("confirmation:")) {
+      return ref.id.slice("confirmation:".length);
+    }
   }
-  if (type === "sub_agent_batch.completed") return "completed";
-  if (type === "run.cancelled") return "cancelled";
-  if (type === "run.blocked") return "blocked";
-  if (type === "run.failed") return "failed";
-  if (type === "final.result") return "completed";
-  return "running";
+  return undefined;
 }
 
-function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRecord): string {
-  if (confirmation.status === "approved") {
-    return "已确认。";
+function confirmationIdFromRuntimeEvent(event: RuntimeEventRecord | undefined): string | undefined {
+  if (event === undefined || !isRecord(event.payload)) {
+    return undefined;
   }
-  if (confirmation.status === "denied") {
-    return "已不执行。";
+  return stringValue(event.payload.confirmationId) ?? stringValue(event.payload.requestId);
+}
+
+function shouldOmitDecidedConfirmationEvent(
+  snapshot: RuntimeRunSnapshot,
+  event: RunEvent,
+  confirmation: RuntimeConfirmationRecord | undefined,
+): boolean {
+  if (confirmation === undefined) {
+    return false;
   }
-  return confirmation.guidance === undefined || confirmation.guidance.trim().length === 0
-    ? "已补充要求。"
-    : redactOrdinaryText(confirmation.guidance, 240);
+  return (
+    (event.type === "confirmation.needed" || event.type === "user_approval.received") &&
+    restoredConfirmationContinuationIsLost(snapshot, confirmation)
+  );
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }

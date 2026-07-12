@@ -341,6 +341,11 @@ test("MultiAgentFeature facade does not expose owned stores or lifecycle registr
     "controlHandleForRun",
     "trackActiveRun",
     "rememberRunFacts",
+    "saveConversation",
+    "nextTurnOrdinal",
+    "executeIntake",
+    "createRuntimeConfigForRun",
+    "createTurnRuntimeForExistingRun",
   ]) {
     assert.equal(publicFacade.includes(forbidden), false, `${forbidden} must remain feature-internal`);
   }
@@ -366,6 +371,47 @@ test("deep routes consume composed Multi-Agent services without constructing run
     /\.(?:conversationStore|runRecordStore|childMessageStore|childLoopContextStore|childContinuations|childInstructionQueues)\b/.test(source),
     false,
     "deep-routes must use MultiAgentFeature commands/queries instead of reaching into feature-owned state",
+  );
+  for (const movedBusinessOperation of [
+    "buildDeepFollowUpContext",
+    "confirmedDeepIntakeContext",
+    "nextTurnOrdinal",
+    ".saveConversation(",
+  ]) {
+    assert.equal(
+      source.includes(movedBusinessOperation),
+      false,
+      `${movedBusinessOperation} belongs to MultiAgentFeature commands, not HTTP routes`,
+    );
+  }
+
+  const featureFile = path.join(process.cwd(), "src", "app", "deep", "multi-agent-feature.ts");
+  const featureSource = await fs.readFile(featureFile, "utf8");
+  const runtimeFacade = featureSource.slice(
+    featureSource.indexOf("type MultiAgentFeatureRuntime ="),
+    featureSource.indexOf("export function createMultiAgentFeature"),
+  );
+  assert.equal(
+    /readonly bus\s*:/.test(runtimeFacade),
+    false,
+    "MultiAgentFeature must create per-run or per-operation buses instead of retaining model history for its lifetime",
+  );
+  assert.equal(
+    featureSource.includes("const runFacts = new Map"),
+    false,
+    "post-terminal continuation facts must be durable DeepRun facts, not a process-lifetime map",
+  );
+  const releaseCalls = featureSource.match(/childRuntime\.releaseResources\(\);/g) ?? [];
+  const awaitedReleaseCalls = featureSource.match(/await childRuntime\.releaseResources\(\);/g) ?? [];
+  assert.equal(
+    awaitedReleaseCalls.length,
+    releaseCalls.length,
+    "every existing-run resource lease release must be awaited by its operation",
+  );
+  assert.equal(
+    featureSource.includes("void resources.release()"),
+    false,
+    "resource release failures must not be detached from their lifecycle owner",
   );
 });
 

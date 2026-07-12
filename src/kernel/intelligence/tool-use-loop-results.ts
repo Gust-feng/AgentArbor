@@ -127,14 +127,12 @@ export function approvalStillRequiredModelResponse(
 export function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPendingApproval): ToolCallResult {
   const request = pendingApproval.pendingToolCall;
   const confirmationRequest = pendingApproval.confirmationRequest ?? fallbackConfirmationRequest(pendingApproval);
-  const summary = `等待确认：${confirmationRequest.actionSummary}`;
   return {
     callId: request.callId,
     toolName: request.toolName,
     input: globalThis.structuredClone(request.input),
     output: undefined,
     status: "approval_required",
-    error: summary,
     durationMs: 0,
     confirmationRequest: globalThis.structuredClone(confirmationRequest),
   };
@@ -163,14 +161,14 @@ export function confirmationDecisionToolResult(
     callId: request.callId,
     toolName: request.toolName,
     input: globalThis.structuredClone(request.input),
-    output: {
-      action: "confirmation_decision",
-      status: decision.decision,
-      confirmationId: decision.confirmationId,
-      summary,
-    },
-    status: decision.decision === "deny" ? "cancelled" : "failed",
+    output: undefined,
+    status: "cancelled",
     error: summary,
+    errorFacts: {
+      code: decision.decision === "deny" ? "confirmation_denied" : "confirmation_guidance",
+      confirmationId: decision.confirmationId,
+      decision: decision.decision,
+    },
     durationMs: 0,
   };
 }
@@ -184,14 +182,14 @@ export function confirmationDecisionSkippedToolResult(
     callId: request.callId,
     toolName: request.toolName,
     input: globalThis.structuredClone(request.input),
-    output: {
-      action: "confirmation_decision_skip",
-      status: "skipped",
-      confirmationId: decision.confirmationId,
-      summary,
-    },
+    output: undefined,
     status: "cancelled",
     error: summary,
+    errorFacts: {
+      code: "confirmation_batch_call_skipped",
+      confirmationId: decision.confirmationId,
+      decision: decision.decision,
+    },
     durationMs: 0,
   };
 }

@@ -4,7 +4,6 @@ export type BrowserAutomation = {
   snapshot(input: {
     readonly url: string;
     readonly waitMs: number;
-    readonly maxTextChars: number;
     readonly abortSignal?: AbortSignal;
   }): Promise<BrowserSnapshotResult>;
 };
@@ -21,7 +20,6 @@ export type BrowserToolOptions = {
 
 const DEFAULT_BROWSER_TEXT_CHARS = 64_000;
 const MAX_BROWSER_TEXT_CHARS = 128_000;
-const MAX_BROWSER_START_CHAR = 2_000_000;
 
 export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): ToolExecutor {
   const automation = options.automation ?? createPlaywrightBrowserAutomation();
@@ -43,21 +41,19 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
           "url is required and must use http or https.",
           "waitMs optionally waits after load and is capped at 5000ms.",
           "maxTextChars optionally caps returned body text.",
-          "startChar continues a truncated body text snapshot from a zero-based character offset.",
+          "startChar continues a truncated body text snapshot from any non-negative safe character offset.",
         ],
         outputNotes: [
-          "result.url is the final page URL after navigation.",
-          "result.title is the browser page title when available.",
-          "result.text is the returned body text snapshot.",
-          "result.hasMoreAfter/result.nextStartChar provide the continuation point when truncated is true.",
-          "result.reachedStartCharCeiling=true means there is more text beyond the supported continuation window and no nextStartChar will be returned.",
-          "truncated tells whether the body text was capped.",
+          "url is the final page URL after navigation.",
+          "title is the browser page title when available.",
+          "text is the returned body text snapshot.",
+          "hasMoreAfter reports whether more text exists; continuation.nextInput provides the executable next snapshot.",
+          "truncated is true only when continuation.nextInput contains an executable, forward-only next snapshot.",
         ],
         runtimeHints: [
           { label: "browser engine", value: "Playwright Chromium when available" },
           { label: "session state", value: "fresh isolated browser session; no existing login state" },
           { label: "max text chars", value: String(MAX_BROWSER_TEXT_CHARS) },
-          { label: "max startChar", value: String(MAX_BROWSER_START_CHAR) },
         ],
         examples: [
           { title: "Read rendered page text", input: { url: "https://example.com", waitMs: 500, maxTextChars: 12000 } },
@@ -68,11 +64,6 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
         riskLevel: "medium",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_200,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -91,39 +82,29 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
       const url = requireHttpUrl(record.url);
       const waitMs = Math.min(5_000, positiveInteger(record.waitMs) ?? 500);
       const maxTextChars = Math.min(MAX_BROWSER_TEXT_CHARS, positiveInteger(record.maxTextChars) ?? DEFAULT_BROWSER_TEXT_CHARS);
-      const startChar = Math.min(MAX_BROWSER_START_CHAR, nonNegativeInteger(record.startChar) ?? 0);
+      const startChar = startCharFromInput(record.startChar);
       const snapshot = await automation.snapshot({
         url,
         waitMs,
-        maxTextChars: Math.min(MAX_BROWSER_START_CHAR + MAX_BROWSER_TEXT_CHARS + 1, startChar + maxTextChars + 1),
         abortSignal: context.abortSignal,
       });
       const fullText = snapshot.text ?? "";
-      const text = fullText.slice(startChar, startChar + maxTextChars);
+      const text = fullText.slice(startChar, safeWindowEnd(startChar, maxTextChars));
       const hasMoreAfter = fullText.length > startChar + text.length;
-      const rawNextStartChar = hasMoreAfter ? startChar + text.length : undefined;
-      const nextStartChar = rawNextStartChar !== undefined && rawNextStartChar <= MAX_BROWSER_START_CHAR
-        ? rawNextStartChar
-        : undefined;
-      const reachedStartCharCeiling = hasMoreAfter && nextStartChar === undefined;
+      const nextStartChar = hasMoreAfter ? startChar + text.length : undefined;
       return {
-        action: "browser_snapshot",
-        status: "completed",
         refId: `browser:page:${safeRefToken(snapshot.url)}`,
-        summary: `${snapshot.title ?? "浏览器页面"} · ${snapshot.url}`,
-        result: {
-          url: snapshot.url,
-          title: snapshot.title,
-          text,
-          startChar,
-          textChars: text.length,
-          totalTextChars: fullText.length,
-          hasMoreAfter,
-          nextStartChar,
-          reachedStartCharCeiling,
-          startCharCeiling: MAX_BROWSER_START_CHAR,
-        },
+        url: snapshot.url,
+        title: snapshot.title,
+        text,
+        startChar,
+        textChars: text.length,
+        totalTextChars: fullText.length,
+        hasMoreAfter,
         truncated: hasMoreAfter,
+        continuation: nextStartChar === undefined
+          ? undefined
+          : { nextInput: { url: snapshot.url, waitMs, maxTextChars, startChar: nextStartChar } },
       };
     },
   };
@@ -156,7 +137,7 @@ function createPlaywrightBrowserAutomation(): BrowserAutomation {
         return {
           url,
           title,
-          text: truncateText(text, input.maxTextChars),
+          text,
         };
       } finally {
         await browser.close().catch(() => undefined);
@@ -213,12 +194,18 @@ function positiveInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
 }
 
-function nonNegativeInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+function startCharFromInput(value: unknown): number {
+  if (value === undefined) {
+    return 0;
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error("browser_snapshot startChar must be a non-negative safe integer.");
+  }
+  return value;
 }
 
-function truncateText(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 1))}...`;
+function safeWindowEnd(startChar: number, maxTextChars: number): number {
+  return Math.min(Number.MAX_SAFE_INTEGER, startChar + maxTextChars);
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {

@@ -4,7 +4,7 @@ import { createBrowserSnapshotTool, type BrowserAutomation } from "./browser-too
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-test("browser_snapshot returns a safe browser page summary through injected automation", async () => {
+test("browser_snapshot returns bounded browser page facts through injected automation", async () => {
   const automation: BrowserAutomation = {
     async snapshot(input) {
       return {
@@ -18,18 +18,15 @@ test("browser_snapshot returns a safe browser page summary through injected auto
 
   const output = await tool.execute({ url: "https://example.com/path", waitMs: 10, maxTextChars: 20 }, context);
   const record = asRecord(output);
-  const result = asRecord(record.result);
 
   assert.equal(tool.definition.metadata?.operationType, "read-only");
-  assert.equal(tool.definition.metadata?.visibleResultPolicy.omitRawOutput, true);
-  assert.equal(record.action, "browser_snapshot");
-  assert.equal(record.summary, "Example Page · https://example.com/path");
-  assert.equal(result.url, "https://example.com/path");
-  assert.equal(result.title, "Example Page");
-  assert.equal(String(result.text).length <= 22, true);
-  assert.equal(result.startChar, 0);
-  assert.equal(result.hasMoreAfter, true);
-  assert.equal(result.nextStartChar, 20);
+  assertDirectToolFacts(record);
+  assert.equal(record.url, "https://example.com/path");
+  assert.equal(record.title, "Example Page");
+  assert.equal(String(record.text).length <= 22, true);
+  assert.equal(record.startChar, 0);
+  assert.equal(record.hasMoreAfter, true);
+  assert.equal(asRecord(asRecord(record.continuation).nextInput).startChar, 20);
   assert.equal(record.truncated, true);
 });
 
@@ -46,45 +43,49 @@ test("browser_snapshot continues truncated page text with startChar", async () =
   const tool = createBrowserSnapshotTool({ automation });
 
   const output = await tool.execute({ url: "https://example.com/long", maxTextChars: 5, startChar: 10 }, context);
-  const result = asRecord(asRecord(output).result);
+  const record = asRecord(output);
 
-  assert.equal(result.text, "klmno");
-  assert.equal(result.startChar, 10);
-  assert.equal(result.textChars, 5);
-  assert.equal(result.hasMoreAfter, true);
-  assert.equal(result.nextStartChar, 15);
+  assertDirectToolFacts(record);
+  assert.equal(record.text, "klmno");
+  assert.equal(record.startChar, 10);
+  assert.equal(record.textChars, 5);
+  assert.equal(record.hasMoreAfter, true);
+  assert.equal(asRecord(asRecord(record.continuation).nextInput).startChar, 15);
+  assert.equal(Number(asRecord(asRecord(record.continuation).nextInput).startChar) > Number(record.startChar), true);
 });
 
-test("browser_snapshot stops continuation at the startChar ceiling without hiding overflow", async () => {
+test("browser_snapshot continues beyond the former startChar ceiling without inserting ellipsis", async () => {
+  const pageText = `${"x".repeat(2_000_000)}abcdef`;
   const automation: BrowserAutomation = {
-    async snapshot(input) {
-      assert.equal(input.maxTextChars, 2_000_006);
+    async snapshot() {
       return {
         url: "https://example.com/ceiling",
         title: "Ceiling Page",
-        text: `${"x".repeat(2_000_000)}abcdeTAIL`,
+        text: pageText,
       };
     },
   };
   const tool = createBrowserSnapshotTool({ automation });
 
-  const output = await tool.execute({
+  const first = asRecord(await tool.execute({
     url: "https://example.com/ceiling",
-    maxTextChars: 5,
+    maxTextChars: 3,
     startChar: 2_000_000,
-  }, context);
-  const record = asRecord(output);
-  const result = asRecord(record.result);
+  }, context));
+  const nextInput = asRecord(asRecord(first.continuation).nextInput);
+  const second = asRecord(await tool.execute(nextInput, context));
 
-  assert.equal(result.text, "abcde");
-  assert.equal(result.startChar, 2_000_000);
-  assert.equal(result.textChars, 5);
-  assert.equal(result.totalTextChars, 2_000_009);
-  assert.equal(result.hasMoreAfter, true);
-  assert.equal(result.nextStartChar, undefined);
-  assert.equal(result.reachedStartCharCeiling, true);
-  assert.equal(result.startCharCeiling, 2_000_000);
-  assert.equal(record.truncated, true);
+  assertDirectToolFacts(first);
+  assert.equal(first.text, "abc");
+  assert.equal(first.truncated, true);
+  assert.equal(nextInput.startChar, 2_000_003);
+  assert.equal(Number(nextInput.startChar) > Number(first.startChar), true);
+  assertDirectToolFacts(second);
+  assert.equal(second.text, "def");
+  assert.equal(second.truncated, false);
+  assert.equal(second.continuation, undefined);
+  assert.equal(`${first.text}${second.text}`, "abcdef");
+  assert.equal(`${first.text}${second.text}`.includes("..."), false);
 });
 
 test("browser_snapshot rejects non-http urls", async () => {
@@ -99,9 +100,30 @@ test("browser_snapshot rejects non-http urls", async () => {
   await assert.rejects(() => tool.execute({ url: "file:///etc/passwd" }, context), /HTTP or HTTPS/);
 });
 
+test("browser_snapshot rejects fractional continuation offsets", async () => {
+  const tool = createBrowserSnapshotTool({
+    automation: {
+      async snapshot() {
+        throw new Error("automation must not run for invalid input");
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => tool.execute({ url: "https://example.com", startChar: 1.5 }, context),
+    /non-negative safe integer/
+  );
+});
+
 function asRecord(value: unknown): Record<string, unknown> {
   assert.equal(typeof value, "object");
   assert.notEqual(value, null);
   assert.equal(Array.isArray(value), false);
   return value as Record<string, unknown>;
+}
+
+function assertDirectToolFacts(output: Readonly<Record<string, unknown>>): void {
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `browser output must not contain ${legacyField}`);
+  }
 }

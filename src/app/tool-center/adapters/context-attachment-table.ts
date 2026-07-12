@@ -64,11 +64,11 @@ export function createInspectContextAttachmentTableTool(options: ContextAttachme
           "Local absolute paths are not accepted as input and are not returned in output.",
         ],
         outputNotes: [
-          "result.table=true means rows were parsed as a supported table format.",
-          "result.format is delimited or xlsx; XLSX results include sheetName, sheetIndex, and sheets.",
-          "result.columns contains header columns when headerRow is true.",
-          "result.sampleRows contains bounded row samples with rowNumber and values, plus record when headers are available.",
-          "result.reason explains unsupported or unreadable table targets without returning local paths.",
+          "table=true means rows were parsed as a supported table format.",
+          "format is delimited or xlsx; XLSX results include sheetName, sheetIndex, and sheets.",
+          "columns contains header columns when headerRow is true.",
+          "sampleRows contains bounded row samples with rowNumber and values, plus record when headers are available.",
+          "reason explains unsupported or unreadable table targets without returning local paths.",
         ],
         runtimeHints: [
           { label: "supported formats", value: "csv, tsv, semicolon-separated text, xlsx" },
@@ -84,11 +84,6 @@ export function createInspectContextAttachmentTableTool(options: ContextAttachme
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_400,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -121,7 +116,6 @@ export function createInspectContextAttachmentTableTool(options: ContextAttachme
       });
       if (!table.supported) {
         return unsupportedTableResult({
-          action: "inspect_context_attachment_table",
           entry,
           target,
           reason: table.reason,
@@ -138,41 +132,26 @@ export function createInspectContextAttachmentTableTool(options: ContextAttachme
         rowCount: sampleRows,
         includeRecord: headerRow,
       });
-      const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · ${tableFormatSummary(table.parsed)} · ${tableFacts.totalRows} rows · ${tableFacts.columnCount} columns`;
       return {
-        action: "inspect_context_attachment_table",
-        status: "completed",
         refId: `context-attachment:${entry.attachmentId}:table:${safeRefToken(target.targetPath)}`,
-        summary,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          path: target.targetPath,
-          mimeType: entry.ref.metadata?.mimeType,
-          bytes: table.bytes,
-          table: true,
-          format: table.parsed.kind,
-          delimiter: table.parsed.kind === "delimited" ? table.parsed.delimiter.kind : undefined,
-          sheetName: table.parsed.kind === "xlsx" ? table.parsed.sheetName : undefined,
-          sheetIndex: table.parsed.kind === "xlsx" ? table.parsed.sheetIndex : undefined,
-          sheets: table.parsed.kind === "xlsx" ? table.parsed.sheets : undefined,
-          headerRow,
-          totalRows: tableFacts.totalRows,
-          dataRows: tableFacts.dataRows,
-          columnCount: tableFacts.columnCount,
-          columns: tableFacts.columns,
-          sampleRows: samples,
-        },
-        display: {
-          kind: "generic_tool_summary",
-          action: "inspect_context_attachment_table",
-          summary,
-          items: [
-            `columns: ${tableFacts.columns.slice(0, 12).join(", ")}`,
-            ...samples.slice(0, 4).map((row) => `row ${row.rowNumber}: ${row.values.join(" | ")}`),
-          ],
-        },
+        attachmentId: entry.attachmentId,
+        kind: entry.ref.kind,
+        title: attachmentTitle(entry),
+        path: target.targetPath,
+        mimeType: entry.ref.metadata?.mimeType,
+        bytes: table.bytes,
+        table: true,
+        format: table.parsed.kind,
+        delimiter: table.parsed.kind === "delimited" ? table.parsed.delimiter.kind : undefined,
+        sheetName: table.parsed.kind === "xlsx" ? table.parsed.sheetName : undefined,
+        sheetIndex: table.parsed.kind === "xlsx" ? table.parsed.sheetIndex : undefined,
+        sheets: table.parsed.kind === "xlsx" ? table.parsed.sheets : undefined,
+        headerRow,
+        totalRows: tableFacts.totalRows,
+        dataRows: tableFacts.dataRows,
+        columnCount: tableFacts.columnCount,
+        columns: tableFacts.columns,
+        sampleRows: samples,
       };
     },
   };
@@ -193,12 +172,12 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
           "This tool does not parse legacy XLS binary spreadsheets, PDFs, images, or archives.",
         ],
         outputNotes: [
-          "result.rows[] contains rowNumber, values, and record when headers are available.",
-          "result.format is delimited or xlsx; XLSX results include sheetName, sheetIndex, and sheets.",
-          "result.columns contains header columns when headerRow is true.",
-          "result.hasMoreBefore/hasMoreAfter indicate whether another row window may be needed.",
-          "result.nextStartRow and continuation.nextInput provide the next executable row-window call when truncated is true.",
-          "result.reason explains unsupported or unreadable table targets without returning local paths.",
+          "rows[] contains rowNumber, values, and record when headers are available.",
+          "format is delimited or xlsx; XLSX results include sheetName, sheetIndex, and sheets.",
+          "columns contains header columns when headerRow is true.",
+          "hasMoreBefore/hasMoreAfter indicate whether another row window may be needed.",
+          "continuation.nextInput provides the next executable row-window call when truncated is true.",
+          "reason explains unsupported or unreadable table targets without returning local paths.",
         ],
         runtimeHints: [
           { label: "max rows per call", value: String(MAX_TABLE_READ_ROWS) },
@@ -213,11 +192,6 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_600,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -251,7 +225,6 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
       });
       if (!table.supported) {
         return unsupportedTableResult({
-          action: "read_context_attachment_table",
           entry,
           target,
           reason: table.reason,
@@ -284,10 +257,9 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
               rowCount,
               headerRow,
             }),
-            note: "Continue read_context_attachment_table with the same attachment/path/sheet/header settings and nextStartRow.",
+            note: "Continue read_context_attachment_table with the same attachment/path/sheet/header settings and startRow.",
           };
-      const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · rows ${startRow}-${actualEndRow} of ${tableFacts.totalRows} · ${rows.length} returned`;
-      const result = {
+      const facts = {
         attachmentId: entry.attachmentId,
         kind: entry.ref.kind,
         title: attachmentTitle(entry),
@@ -312,37 +284,11 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
         rowsReturned: rows.length,
         hasMoreBefore: startRow > 1,
         hasMoreAfter,
-        nextStartRow,
-        continuation,
       };
       return {
-        action: "read_context_attachment_table",
-        status: "completed",
         refId: `context-attachment:${entry.attachmentId}:table:${safeRefToken(target.targetPath)}:${startRow}`,
-        summary,
-        result,
-        display: {
-          kind: "generic_tool_summary",
-          action: "read_context_attachment_table",
-          summary,
-          items: rows.slice(0, 8).map((row) => `row ${row.rowNumber}: ${row.values.join(" | ")}`),
-        },
+        ...facts,
         continuation,
-        canonicalResult: continuation === undefined ? undefined : {
-          content: [
-            { type: "text", text: [summary, ...rows.slice(0, 8).map((row) => `row ${row.rowNumber}: ${row.values.join(" | ")}`)].join("\n") },
-          ],
-          structuredContent: {
-            action: "read_context_attachment_table",
-            result,
-            truncated: true,
-          },
-          truncation: {
-            truncated: true,
-            continuation,
-          },
-          continuation,
-        },
         truncated: hasMoreAfter,
       };
     },
@@ -412,68 +358,23 @@ async function loadTableTarget(
 }
 
 function unsupportedTableResult(input: {
-  readonly action: "inspect_context_attachment_table" | "read_context_attachment_table";
   readonly entry: AttachmentEntry;
   readonly target: AttachmentTarget;
   readonly reason: string;
   readonly bytes?: number;
 }): Readonly<Record<string, unknown>> {
-  const summary = `${attachmentTitle(input.entry)}${input.target.targetPath === "." ? "" : `:${input.target.targetPath}`} · not readable as a delimiter-separated table · ${input.reason}`;
   return {
-    action: input.action,
-    status: "completed",
     refId: `context-attachment:${input.entry.attachmentId}:table:${safeRefToken(input.target.targetPath)}`,
-    summary,
-    result: {
-      attachmentId: input.entry.attachmentId,
-      kind: input.entry.ref.kind,
-      title: attachmentTitle(input.entry),
-      path: input.target.targetPath,
-      mimeType: input.entry.ref.metadata?.mimeType,
-      bytes: input.bytes,
-      table: false,
-      format: tableTargetFormat(input.entry.ref, input.target.targetPath),
-      readable: false,
-      reason: input.reason,
-    },
-    display: {
-      kind: "generic_tool_summary",
-      action: input.action,
-      summary,
-    },
-  };
-}
-
-function unsupportedPdfResult(input: {
-  readonly entry: AttachmentEntry;
-  readonly target: AttachmentTarget;
-  readonly reason: string;
-  readonly bytes?: number;
-  readonly facts?: Readonly<Record<string, number>>;
-}): Readonly<Record<string, unknown>> {
-  const summary = `${attachmentTitle(input.entry)}${input.target.targetPath === "." ? "" : `:${input.target.targetPath}`} · PDF text not available · ${input.reason}`;
-  return {
-    action: "read_context_attachment_pdf_text",
-    status: "completed",
-    refId: `context-attachment:${input.entry.attachmentId}:pdf:${safeRefToken(input.target.targetPath)}`,
-    summary,
-    result: {
-      attachmentId: input.entry.attachmentId,
-      kind: input.entry.ref.kind,
-      title: attachmentTitle(input.entry),
-      path: input.target.targetPath,
-      mimeType: input.entry.ref.metadata?.mimeType,
-      bytes: input.bytes,
-      format: "pdf",
-      readable: false,
-      reason: input.reason,
-      ...input.facts,
-    },
-    display: {
-      kind: "generic_tool_summary",
-      action: "read_context_attachment_pdf_text",
-      summary,
-    },
+    attachmentId: input.entry.attachmentId,
+    kind: input.entry.ref.kind,
+    title: attachmentTitle(input.entry),
+    path: input.target.targetPath,
+    mimeType: input.entry.ref.metadata?.mimeType,
+    bytes: input.bytes,
+    table: false,
+    format: tableTargetFormat(input.entry.ref, input.target.targetPath),
+    readable: false,
+    reason: input.reason,
   };
 }
 
@@ -675,16 +576,6 @@ function countDelimiterOutsideQuotes(value: string, delimiter: "," | "\t" | ";")
   return count;
 }
 
-function tableFormatSummary(table: ParsedAttachmentTable): string {
-  return table.kind === "delimited"
-    ? `${table.delimiter.kind} table`
-    : `xlsx sheet "${table.sheetName}"`;
-}
-
-function boundedOffset(value: unknown, maxOffset: number): number {
-  return Math.min(maxOffset, Math.max(0, positiveInteger(value) ?? 0));
-}
-
 function compactRecord(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
@@ -701,8 +592,4 @@ function stringOrUndefined(value: unknown): string | undefined {
 
 function booleanOrDefault(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
-}
-
-function isString(value: unknown): value is string {
-  return typeof value === "string";
 }

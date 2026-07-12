@@ -1,6 +1,5 @@
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { ModelCapabilities } from "../../domain/config/index.js";
-import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type {
@@ -33,7 +32,6 @@ export type BuildBasicAgentContextPackInput = {
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly toolEvidence?: readonly ToolCallEvidence[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly tokenCounter?: BasicAgentTokenCounter;
   readonly maxMessages?: number;
@@ -51,7 +49,6 @@ export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInpu
     conversationSummary: input.conversationSummary,
     interruptedRunContexts: input.interruptedRunContexts,
     skillContexts: input.skillContexts,
-    toolEvidence: input.toolEvidence,
     modelCapabilities: input.modelCapabilities,
     tokenCounter: input.tokenCounter,
     maxMessages: input.maxMessages,
@@ -107,13 +104,6 @@ function contextMessageForItem(item: BasicAgentContextItem): ModelMessage | unde
   if (item.sourceKind === "user_message") {
     return {
       role: "user",
-      content,
-      ref: item.itemId,
-    };
-  }
-  if (item.sourceKind === "tool_evidence") {
-    return {
-      role: "system",
       content,
       ref: item.itemId,
     };

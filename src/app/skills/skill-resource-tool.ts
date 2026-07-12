@@ -12,7 +12,6 @@ import {
   asRecord,
   positiveInteger,
   stringOrFallback,
-  truncateText,
 } from "../tool-center/adapters/local-workspace-common.js";
 
 const DEFAULT_MAX_CHARS = DEFAULT_SKILL_RESOURCE_MAX_CHARS;
@@ -49,9 +48,11 @@ export function createReadSkillResourceTool(
           "path is required and must be one of that skill's indexed resources.",
           "type is required: reference, asset, or script.",
           "maxChars only applies to reference text and is capped by the runtime.",
+          "startChar continues a truncated reference from any non-negative safe character offset.",
         ],
         outputNotes: [
           "Reference resources include content, hash, byte length, char count, and truncation facts.",
+          "truncated is true only when continuation.nextInput contains an executable, forward-only next window.",
           "Assets and scripts never return raw file content; they return metadata and hashes only.",
           "Scripts include requiresToolExecution/notExecutableByResolver and must go through normal tool confirmation if executed elsewhere.",
         ],
@@ -72,11 +73,6 @@ export function createReadSkillResourceTool(
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1200,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -85,6 +81,7 @@ export function createReadSkillResourceTool(
           path: { type: "string", description: "Skill-package relative resource path, such as references/guide.md." },
           type: { type: "string", enum: ["reference", "asset", "script"], description: "Resource kind." },
           maxChars: { type: "number", description: "Maximum reference characters to return." },
+          startChar: { type: "number", description: "Zero-based character offset for continuing a truncated reference." },
         },
         required: ["skillId", "path", "type"],
       },
@@ -113,12 +110,14 @@ export function createReadSkillResourceTool(
       }
 
       const maxChars = Math.min(MAX_MAX_CHARS, positiveInteger(record.maxChars) ?? DEFAULT_MAX_CHARS);
+      const startChar = startCharFromInput(record.startChar);
+      const readEndChar = safeWindowEnd(startChar, maxChars);
       const result = await readSkillResource({
         packagePath: resource.packagePath,
         sourcePath: resource.sourcePath,
         relativePath,
         type,
-        maxChars,
+        maxChars: type === "reference" ? readEndChar : maxChars,
       });
       if (!result.ok) {
         throw Object.assign(new Error(result.errorMessage), {
@@ -143,36 +142,44 @@ export function createReadSkillResourceTool(
         });
       }
 
-      const contentPreview = result.content === undefined ? undefined : truncateText(result.content, 1000);
+      const content = result.content?.slice(startChar, readEndChar);
+      const endChar = startChar + (content?.length ?? 0);
+      const hasMoreAfter = result.type === "reference" && (result.charCount ?? 0) > endChar;
       return {
-        action: "read_skill_resource",
-        status: "completed",
         refId: `skill:${skillId}:${type}:${result.relativePath}`,
-        summary: [
-          `${skillId} · ${result.relativePath}`,
-          `${result.byteLength} bytes`,
-          result.charCount === undefined ? undefined : `${result.charCount} chars`,
-          result.truncated ? "truncated" : undefined,
-          result.requiresToolExecution === true ? "script metadata only" : undefined,
-        ].filter((part): part is string => part !== undefined).join(" · "),
-        result: {
-          skillId,
-          path: result.relativePath,
-          type: result.type,
-          contentHash: result.contentHash,
-          byteLength: result.byteLength,
-          charCount: result.charCount,
-          truncated: result.truncated,
-          content: result.content,
-          contentPreview,
-          requiresToolExecution: result.requiresToolExecution,
-          notExecutableByResolver: result.notExecutableByResolver,
-          executionNote: result.executionNote,
-        },
-        truncated: result.truncated,
+        skillId,
+        path: result.relativePath,
+        type: result.type,
+        contentHash: result.contentHash,
+        byteLength: result.byteLength,
+        charCount: result.charCount,
+        startChar: result.type === "reference" ? startChar : undefined,
+        endChar: result.type === "reference" ? endChar : undefined,
+        requiresToolExecution: result.requiresToolExecution,
+        notExecutableByResolver: result.notExecutableByResolver,
+        executionNote: result.executionNote,
+        content,
+        truncated: hasMoreAfter,
+        continuation: hasMoreAfter
+          ? { nextInput: { skillId, path: result.relativePath, type, maxChars, startChar: endChar } }
+          : undefined,
       };
     },
   };
+}
+
+function startCharFromInput(value: unknown): number {
+  if (value === undefined) {
+    return 0;
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error("read_skill_resource startChar must be a non-negative safe integer.");
+  }
+  return value;
+}
+
+function safeWindowEnd(startChar: number, maxChars: number): number {
+  return Math.min(Number.MAX_SAFE_INTEGER, startChar + maxChars);
 }
 
 export function hasReadableSelectedSkillResources(

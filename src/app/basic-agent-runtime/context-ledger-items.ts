@@ -1,5 +1,5 @@
 import type { ObservationRef } from "../../domain/observation/index.js";
-import type { SkillSelectionDecisionFacts, SkillSelectionDecisionReason, ToolCallEvidence } from "../../domain/basic-agent/index.js";
+import type { SkillSelectionDecisionFacts, SkillSelectionDecisionReason } from "../../domain/basic-agent/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type {
@@ -26,7 +26,6 @@ export type BuildContextLedgerDraftInput = {
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly toolEvidence?: readonly ToolCallEvidence[];
 };
 
 const MAX_HISTORY_CHARS = 1_200;
@@ -46,7 +45,6 @@ const MAX_SKILL_RESOURCE_NAME_CHARS = 120;
 const MAX_SKILL_RESOURCE_NOTE_CHARS = 1_200;
 const MAX_REF_SUMMARY_CHARS = 240;
 const MAX_PREVIEW_CHARS = 700;
-const MAX_TOOL_EVIDENCE_CHARS = 1_400;
 const MAX_INTERRUPTED_RUN_CONTEXT_CHARS = 1_600;
 
 type RuntimeSkillResourceType = "script" | "reference" | "asset";
@@ -58,7 +56,6 @@ export function buildContextLedgerDraftItems(input: BuildContextLedgerDraftInput
     ...historyContextItems(input.conversationHistory, input.conversationSummary),
     ...interruptedRunContextItems(input.interruptedRunContexts ?? []),
     ...taskSoilRefItems(input.taskSoil),
-    ...toolEvidenceItems(input.toolEvidence ?? []),
     currentUserMessageItem(input.goal, input.taskSoil),
   ];
 }
@@ -115,26 +112,6 @@ function interruptedRunRefs(context: DesktopAgentInterruptedRunContext): readonl
     .map((ref) => safePlain(ref, 220))
     .filter((ref) => ref.length > 0);
   return [...new Set(refs)].slice(0, 10).map((id): ObservationRef => ({ kind: "event", id }));
-}
-
-export function toolEvidenceItems(evidence: readonly ToolCallEvidence[]): readonly BasicAgentContextItem[] {
-  return evidence.slice(0, 12).map((item, index) => {
-    const summary = safeText(
-      [
-        item.summary,
-        item.evidenceRefs.length === 0 ? undefined : `Evidence refs: ${item.evidenceRefs.slice(0, 8).join("; ")}`,
-      ].filter(isString).join("\n"),
-      MAX_TOOL_EVIDENCE_CHARS
-    );
-    return {
-      itemId: item.callId || `context:tool-evidence:${index}`,
-      sourceKind: "tool_evidence",
-      summary: summary.text,
-      refs: item.evidenceRefs.slice(0, 8).map((ref): ObservationRef => ({ kind: "event", id: safeText(ref, 220).text })),
-      visibility: "model" as const,
-      truncated: summary.truncated || item.truncated === true,
-    };
-  });
 }
 
 function systemContextItem(agentDefinition: BasicAgentContextAgentDefinition): BasicAgentContextItem {

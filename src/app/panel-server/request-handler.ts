@@ -40,6 +40,7 @@ import { handlePanelRunRoute } from "./run-routes.js";
 import { handlePanelDeepRoute } from "./deep-routes.js";
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
 import { handlePanelAppUpdateRoute } from "./app-update-routes.js";
+import { OrdinaryRuntimeSnapshotContractError } from "../basic-agent-runtime/persistence-snapshot-contract.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 export async function startLocalPanelServer(options: PanelServerOptions = {}): Promise<StartedPanelServer> {
@@ -65,6 +66,10 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
     handlePanelRequest(runtime, request, response).catch((error) => {
       if (error instanceof PanelHttpError) {
         writePanelError(response, error);
+        return;
+      }
+      if (error instanceof OrdinaryRuntimeSnapshotContractError) {
+        writePanelError(response, new PanelHttpError(410, error.code, error.message));
         return;
       }
       logUnhandledPanelRequestError(request, error);

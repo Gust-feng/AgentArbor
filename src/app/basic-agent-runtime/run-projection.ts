@@ -1,5 +1,5 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
-import type { ObservationRef, ToolDisplayProjection } from "../../domain/observation/index.js";
+import type { ObservationRef } from "../../domain/observation/index.js";
 import type {
   ToolErrorDomain,
   ToolErrorFacts,
@@ -63,7 +63,6 @@ export type BasicAgentRunStreamEventProjectionInput = {
     readonly command?: string;
     readonly exitCode?: number;
     readonly preview?: string;
-    readonly display?: ToolDisplayProjection;
     readonly truncated?: boolean;
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;
@@ -284,7 +283,6 @@ function safeEventDetail(detail: BasicAgentRunStreamEventProjectionInput["detail
     command: safeEventSummary(detail.command),
     exitCode: detail.exitCode,
     preview: safeEventSummary(detail.preview),
-    display: detail.display,
     truncated: detail.truncated,
     error: safeEventSummary(detail.error),
     errorDomain: detail.errorDomain,

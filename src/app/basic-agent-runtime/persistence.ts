@@ -4,7 +4,6 @@ import type {
   RuntimeRunRecord,
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
-import { redactOrdinaryText } from "../safe-projection.js";
 import { isGenericApprovalDecisionText } from "../text-projection/confirmation-copy.js";
 import {
   nextBasicEventSequence,
@@ -12,15 +11,22 @@ import {
   restoredConfirmationDecisionEvent,
   upsertRestoredConfirmation,
 } from "./persistence-confirmations.js";
-import { restoredBasicEventsFromRuntimeSnapshot } from "./persistence-restored-events.js";
+import {
+  durableBasicRunEvents,
+  restoredBasicEventsFromRuntimeSnapshot,
+} from "./persistence-restored-events.js";
 import {
   agentTaskStatusFromSnapshot,
   basicRunNextStepFromStatus,
   basicRunTitleFromStatus,
 } from "./persistence-status.js";
 import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../run-read-model/restored-run-projection.js";
+import { requireRestorableOrdinaryRuntimeSnapshot } from "./persistence-snapshot-contract.js";
 
-export { restoredBasicEventsFromRuntimeSnapshot } from "./persistence-restored-events.js";
+export {
+  durableBasicRunEvents,
+  restoredBasicEventsFromRuntimeSnapshot,
+} from "./persistence-restored-events.js";
 
 export type BasicAgentPersistedReplay = {
   readonly cursor: {
@@ -32,20 +38,21 @@ export type BasicAgentPersistedReplay = {
 };
 
 export function basicRunFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRun {
-  const status = agentTaskStatusFromSnapshot(snapshot);
-  const events = restoredBasicEventsFromRuntimeSnapshot(snapshot);
+  const persistedSnapshot = requireRestorableOrdinaryRuntimeSnapshot(snapshot);
+  const status = agentTaskStatusFromSnapshot(persistedSnapshot);
+  const events = restoredBasicEventsFromRuntimeSnapshot(persistedSnapshot);
   const latestEvent = [...events].reverse().find((event) => event.summary !== undefined && !isLowValuePersistedCurrentStepEvent(event));
-  const persisted = snapshot.basicRun;
+  const persisted = persistedSnapshot.basicRun;
   return {
-    runId: persisted?.runId ?? snapshot.run.runId,
-    conversationId: persisted?.conversationId ?? snapshot.run.conversationId,
-    title: basicRunTitleFromStatus(status, snapshot.run.resultTitle),
-    goalSummary: persisted?.goalSummary ?? redactOrdinaryText(snapshot.run.goalSummary, 400),
+    runId: persisted.runId,
+    conversationId: persisted.conversationId,
+    title: basicRunTitleFromStatus(status, persistedSnapshot.run.resultTitle),
+    goalSummary: persisted.goalSummary,
     status,
-    runMode: persisted?.runMode ?? snapshot.run.runMode,
-    agentDefinitionRef: snapshot.run.agentDefinitionRef ?? persisted?.agentDefinitionRef,
-    createdAt: persisted?.createdAt ?? snapshot.run.createdAt,
-    updatedAt: persisted?.updatedAt ?? snapshot.run.updatedAt,
+    runMode: persisted.runMode,
+    agentDefinitionRef: persistedSnapshot.run.agentDefinitionRef,
+    createdAt: persisted.createdAt,
+    updatedAt: persisted.updatedAt,
     currentStep: latestEvent?.summary,
     nextStep: basicRunNextStepFromStatus(status),
     requiresUserAction: status === "approval_needed" || status === "blocked" || status === "needs_input",
@@ -124,15 +131,21 @@ export async function submitRestoredBasicConfirmationDecision(input: {
     decision: input.decision,
     decidedAt,
   });
+  const restoredEvents = restoredBasicEventsFromRuntimeSnapshot({
+    ...snapshot,
+    confirmations: nextConfirmations,
+  });
   const events = [
-    ...restoredBasicEventsFromRuntimeSnapshot(snapshot),
-    restoredConfirmationDecisionEvent({
-      runId: input.runId,
-      confirmationId: input.confirmationId,
-      decision: input.decision,
-      decidedAt,
-      sequence: nextBasicEventSequence(restoredBasicEventsFromRuntimeSnapshot(snapshot)),
-    }),
+    ...restoredEvents,
+    ...(input.decision.decision === "approve_once"
+      ? []
+      : [restoredConfirmationDecisionEvent({
+          runId: input.runId,
+          confirmationId: input.confirmationId,
+          decision: input.decision,
+          decidedAt,
+          sequence: nextBasicEventSequence(restoredEvents),
+        })]),
   ];
   const blockedEvents =
     input.decision.decision === "guidance"
@@ -156,7 +169,7 @@ export async function submitRestoredBasicConfirmationDecision(input: {
 
   await input.runtimeDatabase.upsertRun(nextRun);
   await input.runtimeDatabase.replaceConfirmations(input.runId, nextConfirmations);
-  await input.runtimeDatabase.replaceBasicRunEvents(input.runId, blockedEvents);
+  await input.runtimeDatabase.replaceBasicRunEvents(input.runId, durableBasicRunEvents(blockedEvents));
   await input.runtimeDatabase.upsertBasicRun(basicRun);
   return basicRun;
 }

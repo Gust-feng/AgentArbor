@@ -993,42 +993,39 @@ test("deep run runtime health distinguishes active stalled orphaned and terminal
   assert.equal(terminal.canStop, false);
 });
 
-test("deep control endpoints forward to control handle registry and validate requests", async () => {
+test("deep control endpoints reject terminal runs instead of accepting stale control handles", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-deep-control-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const conversation = await createDeepConversation(server.url, COMPLEX_GOAL, "fake");
     const run = await startDeepRun(server.url, conversation.conversationId, "fake");
-    // 等待 run 完成：controlHandle 在 run 生命周期内（及完成后）保留注册，控制端点可转发。
+    // 等待 run 完成：终态必须回收 controlHandle，不能返回虚假的 requested。
     await waitForDeepRunView(server.url, run.runId);
 
-    // interrupt → 202 interrupt_requested（EP4 注册表查找到 handle 并转发信号）
+    // interrupt / stop / correct 均明确返回 409，终态 run 不再接收运行控制。
     const interrupt = await requestJson(
       server.url,
       `/api/deep/runs/${encodeURIComponent(run.runId)}/interrupt`,
       { method: "POST", body: { reason: "需要调整方向" } },
     );
-    assert.equal(interrupt.status, 202);
-    assert.equal(interrupt.body.status, "interrupt_requested");
-    assert.equal(interrupt.body.runId, run.runId);
+    assert.equal(interrupt.status, 409);
+    assert.equal(interrupt.body.error.code, "deep_run_not_active");
 
-    // stop → 202 stop_requested
     const stop = await requestJson(
       server.url,
       `/api/deep/runs/${encodeURIComponent(run.runId)}/stop`,
       { method: "POST", body: { reason: "预算耗尽" } },
     );
-    assert.equal(stop.status, 202);
-    assert.equal(stop.body.status, "stop_requested");
+    assert.equal(stop.status, 409);
+    assert.equal(stop.body.error.code, "deep_run_not_active");
 
-    // correct 携带补充上下文 → 202 correct_requested（注入下一 manager 决策）
     const correct = await requestJson(
       server.url,
       `/api/deep/runs/${encodeURIComponent(run.runId)}/correct`,
       { method: "POST", body: { correctionContext: ["优先考虑性能", "忽略兼容性"] } },
     );
-    assert.equal(correct.status, 202);
-    assert.equal(correct.body.status, "correct_requested");
+    assert.equal(correct.status, 409);
+    assert.equal(correct.body.error.code, "deep_run_not_active");
 
     // correct 缺少补充上下文 → 400（empty_correction_context）
     const correctEmpty = await requestJson(
@@ -1306,6 +1303,67 @@ test("deep run records survive panel restart and allow continuing the same child
       false,
     );
     assertSafePanelJsonText(continued.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("post-terminal child operations reject records missing frozen continuation facts or ai mode", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-deep-missing-continuation-facts-"));
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const conversation = await createDeepConversation(server.url, COMPLEX_GOAL, "fake");
+    const run = await startDeepRun(server.url, conversation.conversationId, "fake");
+    const view = await waitForDeepRunView(server.url, run.runId);
+    const childRunId = view.body.view.report?.agentRunTree?.childRuns?.[0]?.childRunId;
+    assert.equal(typeof childRunId, "string");
+    await server.close();
+
+    const runStore = createFileSystemDeepRunRecordStore(path.join(directory, "runtime"));
+    const persisted = await runStore.get(run.runId);
+    assert.ok(persisted !== undefined);
+    await runStore.upsert({
+      ...persisted,
+      run: {
+        ...persisted.run,
+        continuationFacts: undefined,
+      },
+    });
+
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const childMessage = await requestJson(
+      server.url,
+      `/api/deep/runs/${encodeURIComponent(run.runId)}/children/${encodeURIComponent(childRunId)}/messages`,
+      { method: "POST", body: { message: "不要回退到重启后的当前配置。" } },
+    );
+    assert.equal(childMessage.status, 409, childMessage.text);
+    assert.equal(childMessage.body.error.code, "deep_run_continuation_facts_missing");
+
+    const resynthesis = await requestJson(
+      server.url,
+      `/api/deep/runs/${encodeURIComponent(run.runId)}/resynthesize`,
+      { method: "POST", body: {} },
+    );
+    assert.equal(resynthesis.status, 409, resynthesis.text);
+    assert.equal(resynthesis.body.error.code, "deep_run_continuation_facts_missing");
+
+    await server.close();
+    await runStore.upsert({
+      ...persisted,
+      run: {
+        ...persisted.run,
+        aiMode: undefined,
+      },
+    });
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const missingAiMode = await requestJson(
+      server.url,
+      `/api/deep/runs/${encodeURIComponent(run.runId)}/children/${encodeURIComponent(childRunId)}/messages`,
+      { method: "POST", body: { message: "不要猜测旧记录使用的模型运行模式。" } },
+    );
+    assert.equal(missingAiMode.status, 409, missingAiMode.text);
+    assert.equal(missingAiMode.body.error.code, "deep_run_ai_mode_missing");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

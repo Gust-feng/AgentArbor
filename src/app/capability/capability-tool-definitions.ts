@@ -34,7 +34,6 @@ export function toolDefinitionFromCapabilityTool(tool: CapabilityToolCatalogItem
       operationType: tool.operationType,
       fileOperation: tool.fileOperation,
       requiresConfirmation: tool.requiresConfirmation,
-      visibleResultPolicy: { ...tool.visibleResultPolicy },
       runtimeHints:
         tool.runtimeHints === undefined
           ? undefined

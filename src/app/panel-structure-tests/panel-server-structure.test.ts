@@ -107,9 +107,9 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(requestHandler.includes('from "./skill-service.js"'), true);
   assert.equal(requestHandler.includes('from "./run-execution.js"'), true);
   assert.equal(conversationSync.includes("canvas.workSession"), false);
-  assert.equal(conversationSync.includes("legacyWorkSessionCanvasForConversationSync"), true);
+  assert.equal(conversationSync.includes("legacyWorkSessionCanvasForConversationSync"), false);
   assert.equal(runtimeRecords.includes("canvas.workSession"), false);
-  assert.equal(runtimeRecords.includes("legacyWorkSessionCanvasForRuntimeRecord"), true);
+  assert.equal(runtimeRecords.includes("legacyWorkSessionCanvasForRuntimeRecord"), false);
   assert.equal(conversationHistory.includes("export async function buildConversationHistoryMessages"), true);
   assert.equal(conversationRoutes.includes("export async function handlePanelConversationRoute"), true);
   assert.equal(conversationRoutes.includes("startGuidanceFollowUpRun"), false);
@@ -117,7 +117,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationRoutes.includes("export async function getPanelConversation"), true);
   assert.equal(conversationRoutes.includes("async function handleConversationMessageRequest"), true);
   assert.equal(conversationRoutes.includes("runtime.runExecutor.start({"), true);
-  assert.equal(conversationRoutes.includes("runForPanel("), false);
+  assert.equal(conversationRoutes.includes("runLegacyUndergroundForPanel("), false);
   assert.equal(conversationRoutes.includes("runDesktopAgentSession"), false);
   assert.equal(conversationRoutes.includes("runOrdinaryDesktopForPanel"), false);
   assert.equal(conversationRoutes.includes("const config = await runtime.configCenter.getModelProviderConfig()"), false);
@@ -135,15 +135,10 @@ test("panel server source keeps conversation restore and persistence split", asy
     -1,
     "conversation sync should inspect desktop agent canvas"
   );
-  assert.notEqual(
-    conversationSync.indexOf('canvas?.kind === "work_session_canvas"'),
-    -1,
-    "conversation sync may keep legacy work_session_canvas only as a compatibility fallback"
-  );
   assert.equal(
-    conversationSync.indexOf('canvas?.kind === "desktop_agent_canvas"') < conversationSync.indexOf('canvas?.kind === "work_session_canvas"'),
-    true,
-    "ordinary conversation sync must prefer desktop_agent_canvas before legacy work_session_canvas"
+    conversationSync.includes('canvas?.kind === "work_session_canvas"'),
+    false,
+    "ordinary conversation sync must not read the legacy work_session_canvas"
   );
   assert.equal(persistedRunResponse.includes("export function createPersistedPanelRunResponse"), true);
   assert.equal(persistedRunResponse.includes("RunAgentDefinitionRef"), true);
@@ -192,15 +187,10 @@ test("panel server source keeps conversation restore and persistence split", asy
     -1,
     "runtime records should inspect desktop agent canvas"
   );
-  assert.notEqual(
-    runtimeRecords.indexOf('canvas?.kind === "work_session_canvas"'),
-    -1,
-    "runtime records may keep legacy work_session_canvas only as a compatibility fallback"
-  );
   assert.equal(
-    runtimeRecords.indexOf('canvas?.kind === "desktop_agent_canvas"') < runtimeRecords.indexOf('canvas?.kind === "work_session_canvas"'),
-    true,
-    "runtime result summaries must prefer desktop_agent_canvas before legacy work_session_canvas"
+    runtimeRecords.includes('canvas?.kind === "work_session_canvas"'),
+    false,
+    "ordinary runtime records must not read the legacy work_session_canvas"
   );
   assert.equal(runPersistence.includes("export async function persistPanelRun"), true);
   assert.equal(runStreamSync.includes("export function projectPanelRunStreamEventsForJob"), true);
@@ -289,7 +279,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(startRunRequestSource.includes("const runInput = parseRunInput(body);"), true);
   assert.equal(startRunRequestSource.includes("runtime.runExecutor.start({"), true);
   assert.equal(startRunRequestSource.includes("runtime.runExecutor.schedule"), true);
-  assert.equal(startRunRequestSource.includes("runForPanel("), false);
+  assert.equal(startRunRequestSource.includes("runLegacyUndergroundForPanel("), false);
   assert.equal(startRunRequestSource.includes("createPanelRunResponse("), false);
   assert.equal(startRunRequestSource.includes("defaultAiMode"), false);
   assert.equal(startRunRequestSource.includes("const config = await runtime.configCenter.getModelProviderConfig()"), false);
@@ -388,21 +378,21 @@ test("panel server source keeps conversation restore and persistence split", asy
     "export async function failPanelRunJob"
   );
   assert.equal(executeBasicPanelRunSource.includes("executePanelRunFromFrozenJob(runtime,"), true);
-  assert.equal(executeBasicPanelRunSource.includes("runForPanel("), false);
+  assert.equal(executeBasicPanelRunSource.includes("runLegacyUndergroundForPanel("), false);
   assert.equal(runExecution.includes("BasicAgentRunExecutor.start"), true);
   assert.equal(runExecution.includes("function executePanelRunFromFrozenJob"), true);
-  assert.equal(runExecution.includes("@deprecated Compatibility helper for legacy synchronous run routes"), true);
-  assert.equal(runExecution.includes("Default\n * ordinary Desktop Agent runs must be created through BasicAgentRunExecutor.start"), true);
-  const runForPanelSource = sourceBetween(
+  assert.equal(runExecution.includes("@deprecated Compatibility helper for legacy synchronous run routes"), false);
+  assert.equal(runExecution.includes("Explicit Legacy Underground route adapter"), true);
+  const legacyRunForPanelSource = sourceBetween(
     runExecution,
-    "export async function runForPanel",
+    "export async function runLegacyUndergroundForPanel",
     "type PanelRunFrozenExecutionInput"
   );
-  assert.equal(runForPanelSource.includes('if (runKind === "desktop")'), true);
-  assert.equal(runForPanelSource.includes("desktop_sync_run_not_supported"), true);
-  assert.equal(runForPanelSource.includes("runDesktopForPanel("), false);
+  assert.equal(legacyRunForPanelSource.includes('if (runKind === "desktop")'), true);
+  assert.equal(legacyRunForPanelSource.includes("desktop_sync_run_not_supported"), true);
+  assert.equal(legacyRunForPanelSource.includes("runDesktopForPanel("), false);
   assert.equal(runExecution.includes("export async function failPanelRunJob"), true);
-  assert.equal(runExecution.includes("export async function runForPanel"), true);
+  assert.equal(runExecution.includes("export async function runLegacyUndergroundForPanel"), true);
   assert.equal(runExecution.includes("export async function createPanelRunResponse"), true);
   assert.equal(runExecution.includes("function assertOrdinaryDesktopRunResponseFacts"), true);
   assert.equal(runExecution.includes("desktop_capability_snapshot_required"), true);
@@ -430,7 +420,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecutionContracts.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
   assert.equal(runExecutionContracts.includes("readonly informationAccess?: SanitizedInformationAccessConfig"), true);
   assert.equal(runExecutionContracts.includes("export type { AgentRunResources }"), true);
-  assert.equal(runExecutionContracts.includes("export type DesktopRunResources = AgentRunResources"), true);
+  assert.equal(runExecutionContracts.includes("export type DesktopRunResources = AgentRunResources"), false);
   assert.equal(agentRunResources.includes("readonly informationAccess: SanitizedInformationAccessConfig"), true);
   assert.equal(agentRunResources.includes("readonly toolCatalogAvailability:"), true);
   assert.equal(basicAgentContracts.includes("export type DesktopAgentRunSpec"), true);
@@ -470,8 +460,8 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopToolCenterFactorySource.includes("toolCatalogAvailability: resources.toolCatalogAvailability"), true);
   assert.equal(desktopAgentExecution.includes("export type OrdinaryDesktopPanelRunExecutionInput"), true);
   assert.equal(desktopAgentExecution.includes("export async function executeOrdinaryDesktopRunForPanel"), true);
-  assert.equal(desktopAgentExecution.includes("@deprecated Use executeOrdinaryDesktopRunForPanel with an object input"), true);
-  assert.equal(desktopAgentExecution.includes("export async function runOrdinaryDesktopForPanel"), true);
+  assert.equal(desktopAgentExecution.includes("@deprecated Use executeOrdinaryDesktopRunForPanel with an object input"), false);
+  assert.equal(desktopAgentExecution.includes("export async function runOrdinaryDesktopForPanel"), false);
   assert.equal(desktopAgentExecution.includes("runDesktopAgentSession"), true);
   assert.equal(desktopAgentExecution.includes("createAgentToolCenterFactory(runtime.providerFetch, resources)"), true);
   assert.equal(desktopAgentExecution.includes("createDesktopToolCenterFactory"), false);
@@ -540,15 +530,16 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runStreamCopy.includes("Rootlet 集群"), false);
   assert.equal(runStreamCopy.includes("动态 rootlet"), false);
 
-  for (const privateRestoreDetail of [
+  for (const removedCompatibilityRestoreDetail of [
     "backfillConversationResponseModels",
-    "completedAssistantRunIds",
     "conversationTurnModelFromRunSnapshot",
     "latestRuntimeModelCall",
   ]) {
-    assert.equal(requestHandler.includes(privateRestoreDetail), false);
-    assert.equal(conversationRestore.includes(privateRestoreDetail), true);
+    assert.equal(requestHandler.includes(removedCompatibilityRestoreDetail), false);
+    assert.equal(conversationRestore.includes(removedCompatibilityRestoreDetail), false);
   }
+  assert.equal(requestHandler.includes("completedAssistantRunIds"), false);
+  assert.equal(conversationRestore.includes("completedAssistantRunIds"), true);
   for (const privateLiveStreamDetail of ["modelPurposeForRequest", "isUserFacingStreamingPurpose"]) {
     assert.equal(requestHandler.includes(privateLiveStreamDetail), false);
     assert.equal(liveModelStream.includes(privateLiveStreamDetail), true);

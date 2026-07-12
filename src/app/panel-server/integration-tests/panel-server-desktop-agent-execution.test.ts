@@ -18,18 +18,39 @@ import type {
   ToolExecutionContext,
   ToolPermissionCheck,
 } from "../../../domain/tools/index.js";
-import { toolPresentationForName } from "../../../domain/tools/index.js";
+import { normalizeToolFactValue, toolPresentationForName } from "../../../domain/tools/index.js";
 import { runAgentDefinitionRef } from "../../agent-definition-runtime.js";
 import type { AgentDefinition } from "../../agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "../../agent-prompts/desktop-root-agent.js";
-import { runOrdinaryDesktopForPanel } from "../desktop-agent-execution.js";
+import { executeOrdinaryDesktopRunForPanel } from "../desktop-agent-execution.js";
 import { PanelHttpError } from "../http-utils.js";
-import type { DesktopRunResources } from "../run-execution-contracts.js";
+import type { AgentRunResources } from "../run-execution-contracts.js";
 import type { PanelRuntime } from "../runtime.js";
 import {
   createMcpToolRegistryContribution,
   type McpToolExecutorProvider,
 } from "../../mcp/mcp-tool-contribution.js";
+import type { AgentToolRegistryContribution } from "../../tool-center/index.js";
+
+type OrdinaryExecutionInput = Parameters<typeof executeOrdinaryDesktopRunForPanel>[0];
+
+function executeOrdinaryFixture(
+  runtime: OrdinaryExecutionInput["runtime"],
+  goal: OrdinaryExecutionInput["goal"],
+  aiMode: OrdinaryExecutionInput["aiMode"],
+  taskSoilInput: OrdinaryExecutionInput["taskSoilInput"],
+  resources: OrdinaryExecutionInput["resources"],
+  options: OrdinaryExecutionInput["options"],
+) {
+  return executeOrdinaryDesktopRunForPanel({
+    runtime,
+    goal,
+    aiMode,
+    taskSoilInput,
+    resources,
+    options,
+  });
+}
 
 test("ordinary desktop execution keeps frozen run facts on failed agent results", async () => {
   const snapshot = capabilitySnapshot();
@@ -40,7 +61,7 @@ test("ordinary desktop execution keeps frozen run facts on failed agent results"
     channel: failedChannel("fixture model failure"),
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "触发失败路径",
     "fake",
@@ -62,6 +83,122 @@ test("ordinary desktop execution keeps frozen run facts on failed agent results"
   assert.deepEqual(result.capabilityResolution?.allowedTools, []);
   assert.equal(result.canvas?.kind, "desktop_agent_canvas");
   assert.equal(result.canvas.kind === "desktop_agent_canvas" ? result.canvas.agent.status : undefined, "failed");
+});
+
+test("ordinary desktop execution awaits terminal resource release", async () => {
+  const snapshot = capabilitySnapshot();
+  let releaseStarted!: () => void;
+  let finishRelease!: () => void;
+  const releaseWasStarted = new Promise<void>((resolve) => {
+    releaseStarted = resolve;
+  });
+  const releaseGate = new Promise<void>((resolve) => {
+    finishRelease = resolve;
+  });
+  const resources = desktopRunResources({
+    capabilitySnapshot: snapshot,
+    informationAccess: informationAccess(),
+    channel: sequenceChannel([{ kind: "text", answer: "done" }]),
+    release: async () => {
+      releaseStarted();
+      await releaseGate;
+    },
+  });
+
+  let settled = false;
+  const execution = executeOrdinaryDesktopRunForPanel({
+    runtime: runtime(),
+    goal: "完成后释放资源",
+    aiMode: "fake",
+    taskSoilInput: undefined,
+    resources,
+    options: { agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT) },
+  }).finally(() => {
+    settled = true;
+  });
+
+  await releaseWasStarted;
+  assert.equal(settled, false);
+  finishRelease();
+  const result = await execution;
+  assert.equal(result.completed, true);
+  assert.equal(settled, true);
+});
+
+test("ordinary desktop approval continuation releases retained resources exactly once", async () => {
+  const toolName = "test_mutating_tool";
+  const snapshot = capabilitySnapshot({
+    tools: [capabilityTool(toolName, "read-write")],
+  });
+  let releaseCalls = 0;
+  let executions = 0;
+  const channel = sequenceChannel([
+    { kind: "tool", toolName, callId: "call-mutating", input: { value: "approved" } },
+    { kind: "text", answer: "确认后已完成。" },
+  ]);
+  const resources = desktopRunResources({
+    capabilitySnapshot: snapshot,
+    informationAccess: informationAccess(),
+    channel,
+    toolExecutor: {
+      definition: {
+        name: toolName,
+        description: "Mutate a fixture only after explicit confirmation.",
+        inputSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          required: ["value"],
+        },
+        modelContract: {
+          purpose: "Exercise the approval continuation resource lifecycle.",
+          whenToUse: ["Use when the fixture requests a confirmed mutation."],
+          inputNotes: ["value: fixture mutation value."],
+          outputNotes: ["Returns the accepted fixture value."],
+        },
+        metadata: {
+          category: "filesystem",
+          riskLevel: "high",
+          operationType: "read-write",
+          requiresConfirmation: true,
+        },
+      },
+      async execute(input) {
+        executions += 1;
+        return { accepted: input };
+      },
+    },
+    release: async () => {
+      releaseCalls += 1;
+    },
+  });
+
+  const pending = await executeOrdinaryDesktopRunForPanel({
+    runtime: runtime(),
+    goal: "执行需要确认的测试变更",
+    aiMode: "fake",
+    taskSoilInput: undefined,
+    resources,
+    options: {
+      agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT),
+      toolConfirmationPolicy: "prompt",
+    },
+  });
+
+  assert.ok(pending.pendingApproval);
+  assert.notEqual(pending.pendingApproval.confirmationId.length, 0);
+  assert.equal(executions, 0);
+  assert.equal(releaseCalls, 0);
+  const confirmationId = pending.pendingApproval.confirmationId;
+  const completed = await pending.pendingApproval.resume({
+    approvedConfirmationIds: [confirmationId],
+    abortSignal: new AbortController().signal,
+  });
+
+  assert.equal(completed.completed, true);
+  assert.equal(executions, 1);
+  assert.equal(releaseCalls, 1);
+  await pending.pendingApproval.release();
+  assert.equal(releaseCalls, 1);
 });
 
 test("ordinary desktop execution does not run skill routing for unmatched input", async () => {
@@ -86,7 +223,7 @@ test("ordinary desktop execution does not run skill routing for unmatched input"
     channel,
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "111222",
     "fake",
@@ -137,7 +274,7 @@ test("ordinary desktop execution runs skill routing only when the frozen trigger
     channel,
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "111222",
     "fake",
@@ -164,7 +301,7 @@ test("ordinary desktop execution requires a run-created agent ref", async () => 
 
   await assert.rejects(
     () =>
-      runOrdinaryDesktopForPanel(
+      executeOrdinaryFixture(
         runtime(),
         "普通 Agent 执行不能临时补默认定义引用",
         "fake",
@@ -198,7 +335,7 @@ test("ordinary desktop execution preserves the run-created agent ref after displ
     channel: failedChannel("fixture model failure"),
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "旧 run 使用冻结的 Agent 定义引用",
     "fake",
@@ -236,7 +373,7 @@ test("ordinary desktop execution uses the frozen user-configured system prompt",
     channel,
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "检查系统提示词",
     "fake",
@@ -267,7 +404,7 @@ test("ordinary desktop execution cannot expose tools outside the frozen capabili
     toolCenter: extraToolCenter(),
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "展示当前可见工具边界",
     "fake",
@@ -295,7 +432,7 @@ test("ordinary desktop execution can expose optional tools enabled in the frozen
     channel: textChannel("我会只在命令执行前等待确认。"),
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "展示本轮冻结的可执行工具边界",
     "fake",
@@ -355,7 +492,7 @@ test("ordinary desktop execution can run a frozen fake MCP tool through the defa
     },
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "用 MCP 查一下能力底座",
     "fake",
@@ -410,7 +547,7 @@ test("ordinary desktop execution projects paused context overflow as blocked", a
     toolCenter: bulkyToolCenter(),
   });
 
-  const result = await runOrdinaryDesktopForPanel(
+  const result = await executeOrdinaryFixture(
     runtime(),
     "持续读取大量材料直到可以回答",
     "fake",
@@ -446,7 +583,7 @@ test("ordinary desktop execution rejects a hashed ref that does not match the in
 
   await assert.rejects(
     () =>
-      runOrdinaryDesktopForPanel(
+      executeOrdinaryFixture(
         runtime(),
         "直接执行路径也必须校验 Agent 定义引用",
         "fake",
@@ -484,11 +621,6 @@ function capabilityTool(
     riskLevel: operationType === "read-only" ? "low" : "high",
     operationType,
     requiresConfirmation: operationType !== "read-only",
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
   });
   return {
     name,
@@ -503,11 +635,6 @@ function capabilityTool(
     operationLabel: presentation.operationLabel,
     requiresConfirmation: operationType !== "read-only",
     confirmationLabel: presentation.confirmationLabel,
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
     scopes: ["desktop-basic", "research"],
     enabled: true,
     availability: "available",
@@ -535,8 +662,10 @@ function desktopRunResources(input: {
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly channel: IntelligenceChannel;
   readonly toolCenter?: ToolExecutionBroker;
+  readonly toolExecutor?: ToolExecutor;
   readonly mcpManager?: McpToolExecutorProvider;
-}): DesktopRunResources {
+  readonly release?: () => Promise<void>;
+}): AgentRunResources {
   return {
     capabilitySnapshot: input.capabilitySnapshot,
     informationAccess: input.informationAccess,
@@ -574,13 +703,23 @@ function desktopRunResources(input: {
     toolRegistryScopes: input.mcpManager === undefined
       ? ["desktop-basic"]
       : ["desktop-basic", "mcp"],
-    toolContributions: input.mcpManager === undefined
-      ? []
-      : [createMcpToolRegistryContribution(input.mcpManager)],
+    toolContributions: [
+      ...(input.toolExecutor === undefined ? [] : [toolExecutorContribution(input.toolExecutor)]),
+      ...(input.mcpManager === undefined ? [] : [createMcpToolRegistryContribution(input.mcpManager)]),
+    ],
     release: async () => {
+      await input.release?.();
       await input.mcpManager?.disconnectAll?.();
     },
   };
+}
+
+function toolExecutorContribution(executor: ToolExecutor): AgentToolRegistryContribution {
+  return (register) => register({
+    executor,
+    scopes: ["desktop-basic"],
+    enabledByDefault: true,
+  });
 }
 
 function contextOverflowChannel(): IntelligenceChannel {
@@ -725,7 +864,7 @@ function sequenceChannel(
             {
               callId: step.callId,
               toolName: step.toolName,
-              input: step.input,
+              input: normalizeToolFactValue(step.input),
             },
           ],
           finishReason: "tool_call",
@@ -818,11 +957,6 @@ function mcpToolCenter(input: {
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 800,
-          omitRawOutput: true,
-        },
       },
     },
     async execute() {

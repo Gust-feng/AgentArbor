@@ -6,9 +6,10 @@ import test from "node:test";
 import type { CapabilitySubAgentCatalogItem } from "../../domain/config/index.js";
 import type { IntelligenceChannel, ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import type { SubAgentRunTrace } from "../../domain/sub-agents/contracts.js";
-import type { ToolExecutor } from "../../domain/tools/index.js";
+import { normalizeToolFactValue, type ToolExecutor } from "../../domain/tools/index.js";
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { nowIso } from "../../kernel/id.js";
+import { toolResultMessage } from "../../kernel/intelligence/tool-use-loop-messages.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import { ToolCenter } from "../tool-center/tool-center.js";
 import { SubAgentRegistry, type SubAgentDefinition } from "./sub-agent-registry.js";
@@ -22,7 +23,15 @@ test("runSubAgent inherits parent allowed tools and hides sub-agent recursion to
     textResponse("model-request-final", "read completed"),
   ]);
   const center = new ToolCenter();
-  center.register(testTool("read_file", async () => ({ content: "ok" })));
+  center.register(testTool("read_file", async () => ({
+    content: "ok",
+    status: "failed",
+    durationMs: 999,
+    error: "domain-owned output field",
+    errorDomain: "model_error",
+    errorFacts: { code: "domain_fact" },
+    confirmationRequest: { confirmationId: "domain-confirmation" },
+  })));
   center.register(testTool("spawn_sub_agent", async () => ({ should_not_run: true })));
 
   const result = await runSubAgent({
@@ -136,9 +145,15 @@ test("runSubAgent sends instructions as system and the delegated task as user in
   assert.match(messages[1]?.content ?? "", /## 额外上下文/);
   assert.match(messages[1]?.content ?? "", /Use today's schedule\./);
   assert.equal(result.trace?.subRunId, result.runId);
-  assert.equal(result.trace?.modelExchanges[0]?.messages[0]?.role, "system");
-  assert.match(result.trace?.modelExchanges[0]?.messages[1]?.content ?? "", /generate three ideas/);
-  assert.equal(result.trace?.modelExchanges[0]?.textOutput, "task completed");
+  assert.equal(result.trace?.modelExchanges[0]?.messageCount, 2);
+  assert.deepEqual(result.trace?.modelExchanges[0]?.messageRefs, [
+    "sub-agent:system:test-helper",
+    "sub-agent:task:test-helper",
+  ]);
+  assert.equal(result.trace?.fullOutput, "task completed");
+  const exchangeJson = JSON.stringify(result.trace?.modelExchanges);
+  assert.equal(exchangeJson.includes("generate three ideas"), false);
+  assert.equal(exchangeJson.includes("task completed"), false);
 });
 
 test("runSubAgent trace captures model tool calls and failed responses", async () => {
@@ -172,9 +187,15 @@ test("runSubAgent trace captures model tool calls and failed responses", async (
   });
 
   assert.equal(result.status, "completed");
-  assert.equal(result.trace?.modelExchanges[0]?.toolCalls[0]?.toolName, "read_file");
+  assert.equal(result.trace?.modelExchanges[0]?.toolCallRefs[0]?.toolName, "read_file");
+  assert.equal(JSON.stringify(result.trace?.modelExchanges).includes("README.md"), false);
   assert.equal(result.trace?.toolTraces[0]?.toolName, "read_file");
   assert.equal(result.trace?.toolTraces[0]?.status, "completed");
+  assert.notEqual(result.trace?.toolTraces[0]?.durationMs, 999);
+  assert.equal(result.trace?.toolTraces[0]?.error, undefined);
+  assert.equal(result.trace?.toolTraces[0]?.errorDomain, undefined);
+  assert.equal(result.trace?.toolTraces[0]?.errorFacts, undefined);
+  assert.equal(result.trace?.toolTraces[0]?.confirmationId, undefined);
 });
 
 test("runSubAgent preserves long output separately from display summary", async () => {
@@ -309,12 +330,91 @@ test("call_sub_agent projection exposes full output to parent model continuation
   );
 
   const output = result.output as {
-    readonly result?: { readonly full_output?: string };
+    readonly full_output?: string;
     readonly summary?: string;
+    readonly truncated?: boolean;
+    readonly continuation?: unknown;
   };
   assert.equal(result.status, "completed");
-  assert.equal(output.result?.full_output, fullOutput);
-  assert.equal(output.summary?.includes(sentinel), false);
+  assert.equal(output.full_output, fullOutput);
+  assert.equal(output.summary, undefined);
+  assert.equal(JSON.stringify(output).split(sentinel).length - 1, 1);
+  assert.equal(output.truncated, undefined);
+  assert.equal(output.continuation, undefined);
+});
+
+test("call_sub_agent returns one bounded first segment and continues from the unread character", async () => {
+  const tail = "SUB_AGENT_UNREAD_TAIL";
+  const fullOutput = `${"x".repeat(124_000)}${tail}`;
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-sub-agent", fullOutput),
+  ]);
+  const center = new ToolCenter();
+  const traces = new InMemorySubAgentRunTraceStore();
+  const registry = await tempRegistry();
+  for (const executor of createSubAgentToolExecutors({
+    subAgentRegistry: registry,
+    channel,
+    toolBroker: center,
+    allowedTools: () => ["call_sub_agent", "read_sub_agent_output"],
+    traceSink: traces,
+  })) {
+    center.register(executor);
+  }
+
+  const result = await center.execute(
+    {
+      callId: "call-parent-large-sub-agent",
+      toolName: "call_sub_agent",
+      input: { sub_agent_name: "test-helper", task: "return a large output" },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["call_sub_agent"] },
+  );
+  const output = result.output as {
+    readonly run_id?: string;
+    readonly full_output?: string;
+    readonly full_output_chars?: number;
+    readonly truncated?: boolean;
+    readonly continuation?: {
+      readonly nextInput?: {
+        readonly sub_run_id?: string;
+        readonly start_char?: number;
+        readonly max_chars?: number;
+      };
+    };
+  };
+
+  assert.equal(result.status, "completed");
+  assert.equal(output.full_output, fullOutput.slice(0, 100_000));
+  assert.equal(output.full_output_chars, fullOutput.length);
+  assert.equal(output.truncated, true);
+  assert.equal("full_output_truncated" in output, false);
+  assert.equal(output.continuation?.nextInput?.sub_run_id, output.run_id);
+  assert.equal(output.continuation?.nextInput?.start_char, 100_000);
+  assert.equal(output.continuation?.nextInput?.max_chars, 100_000);
+  assert.equal(toolResultMessage(result).content.includes("tool_message_transport_budget_exceeded"), false);
+
+  const readResult = await center.execute(
+    {
+      callId: "read-large-sub-agent-tail",
+      toolName: "read_sub_agent_output",
+      input: output.continuation?.nextInput ?? {},
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["read_sub_agent_output"] },
+  );
+  const readOutput = readResult.output as {
+    readonly start_char?: number;
+    readonly content?: string;
+    readonly has_more_after?: boolean;
+    readonly continuation?: unknown;
+  };
+  assert.equal(readOutput.start_char, 100_000);
+  assert.equal(readOutput.content, fullOutput.slice(100_000));
+  assert.equal(readOutput.content?.endsWith(tail), true);
+  assert.equal(readOutput.has_more_after, false);
+  assert.equal(readOutput.continuation, undefined);
 });
 
 test("read_sub_agent_output reads current-run sub-agent output slices", async () => {
@@ -345,17 +445,13 @@ test("read_sub_agent_output reads current-run sub-agent output slices", async ()
     { callerAgentId: "agent-test", allowedTools: ["call_sub_agent"] }
   );
   const subAgentOutput = subAgentResult.output as {
-    readonly result?: {
-      readonly run_id?: string;
-      readonly full_output_ref?: string;
-      readonly continuation?: { readonly nextInput?: { readonly sub_run_id?: string } };
-    };
+    readonly run_id?: string;
+    readonly continuation?: { readonly nextInput?: { readonly sub_run_id?: string } };
   };
-  const subRunId = subAgentOutput.result?.run_id;
+  const subRunId = subAgentOutput.run_id;
   assert.equal(subAgentResult.status, "completed");
   assert.ok(subRunId);
-  assert.equal(subAgentOutput.result?.full_output_ref, `sub-agent-output:${subRunId}`);
-  assert.equal(subAgentOutput.result?.continuation?.nextInput?.sub_run_id, subRunId);
+  assert.equal(subAgentOutput.continuation, undefined);
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name) ?? [], []);
 
   const readResult = await center.execute(
@@ -368,23 +464,21 @@ test("read_sub_agent_output reads current-run sub-agent output slices", async ()
     { callerAgentId: "agent-test", allowedTools: ["read_sub_agent_output"] }
   );
   const readOutput = readResult.output as {
-    readonly result?: {
-      readonly content?: string;
-      readonly start_char?: number;
-      readonly end_char?: number;
-      readonly total_chars?: number;
-      readonly has_more_after?: boolean;
-      readonly continuation?: { readonly nextInput?: { readonly start_char?: number } };
-    };
+    readonly content?: string;
+    readonly start_char?: number;
+    readonly end_char?: number;
+    readonly total_chars?: number;
+    readonly has_more_after?: boolean;
+    readonly continuation?: { readonly nextInput?: { readonly start_char?: number } };
   };
 
   assert.equal(readResult.status, "completed");
-  assert.equal(readOutput.result?.content, fullOutput.slice(10, 35));
-  assert.equal(readOutput.result?.start_char, 10);
-  assert.equal(readOutput.result?.end_char, 35);
-  assert.equal(readOutput.result?.total_chars, fullOutput.length);
-  assert.equal(readOutput.result?.has_more_after, true);
-  assert.equal(readOutput.result?.continuation?.nextInput?.start_char, 35);
+  assert.equal(readOutput.content, fullOutput.slice(10, 35));
+  assert.equal(readOutput.start_char, 10);
+  assert.equal(readOutput.end_char, 35);
+  assert.equal(readOutput.total_chars, fullOutput.length);
+  assert.equal(readOutput.has_more_after, true);
+  assert.equal(readOutput.continuation?.nextInput?.start_char, 35);
 
   const crossRunRead = await center.execute(
     {
@@ -469,7 +563,8 @@ test("sub-agent tool approval bubbles as the parent tool pending confirmation an
 
   assert.equal(resumed.status, "completed");
   assert.equal(shellRuns, 1);
-  assert.equal((resumed.output as { readonly status?: string }).status, "completed");
+  assert.equal((resumed.output as { readonly sub_agent_status?: string }).sub_agent_status, "completed");
+  assert.equal("status" in (resumed.output as Readonly<Record<string, unknown>>), false);
   assert.equal(channel.requests.length, 2);
   const mergedTrace = traces.list()[0];
   assert.equal(traces.list().length, 1);
@@ -539,6 +634,62 @@ test("call_sub_agent and batch calls link traces to parent tool calls and batch 
   assert.equal(batchTraces[0]?.batchId, batchTraces[1]?.batchId);
 });
 
+test("call_sub_agents shares a bounded first-segment budget and keeps every unread continuation", async () => {
+  const outputs = ["a", "b", "c"].map((value) => `${value.repeat(60_000)}-${value}-tail`);
+  const channel = new SequenceIntelligenceChannel(outputs.map((output, index) =>
+    textResponse(`model-request-batch-large-${index}`, output)
+  ));
+  const center = new ToolCenter();
+  const registry = await tempRegistry();
+  for (const executor of createSubAgentToolExecutors({
+    subAgentRegistry: registry,
+    channel,
+    toolBroker: center,
+    allowedTools: () => ["call_sub_agents", "read_sub_agent_output"],
+  })) {
+    center.register(executor);
+  }
+
+  const result = await center.execute(
+    {
+      callId: "call-large-batch-parent",
+      toolName: "call_sub_agents",
+      input: {
+        tasks: outputs.map((_, index) => ({ sub_agent_name: "test-helper", task: `large-${index}` })),
+        max_concurrency: 1,
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["call_sub_agents"] },
+  );
+  const output = result.output as {
+    readonly results?: readonly {
+      readonly full_output?: string;
+      readonly full_output_chars?: number;
+      readonly truncated?: boolean;
+      readonly task?: string;
+    }[];
+    readonly truncated?: boolean;
+    readonly continuations?: readonly {
+      readonly nextInput?: { readonly start_char?: number; readonly sub_run_id?: string };
+    }[];
+  };
+  const resultOutputs = output.results ?? [];
+  const continuations = output.continuations ?? [];
+
+  assert.equal(result.status, "completed");
+  assert.equal(output.truncated, true);
+  assert.deepEqual(resultOutputs.map((item) => item.full_output?.length), [40_000, 40_000, 40_000]);
+  assert.deepEqual(resultOutputs.map((item) => item.full_output_chars), outputs.map((value) => value.length));
+  assert.deepEqual(resultOutputs.map((item) => item.truncated), [true, true, true]);
+  assert.equal(resultOutputs.some((item) => "task" in item), false);
+  assert.equal(continuations.length, 3);
+  assert.deepEqual(continuations.map((item) => item.nextInput?.start_char), [40_000, 40_000, 40_000]);
+  const modelMessage = toolResultMessage(result);
+  assert.equal(modelMessage.content.includes("tool_message_transport_budget_exceeded"), false);
+  assert.equal(modelMessage.content.length < 220_000, true);
+});
+
 test("call_sub_agents honors max_concurrency and preserves result order", async () => {
   const channel = new ConcurrentIntelligenceChannel(2);
   const center = new ToolCenter();
@@ -570,15 +721,21 @@ test("call_sub_agents honors max_concurrency and preserves result order", async 
   );
 
   const output = result.output as {
-    readonly result?: {
-      readonly results?: readonly { readonly index?: number }[];
-      readonly stats?: { readonly max_concurrency?: number };
-    };
+    readonly results?: readonly {
+      readonly index?: number;
+      readonly summary?: string;
+      readonly full_output?: string;
+      readonly task?: string;
+    }[];
+    readonly stats?: { readonly max_concurrency?: number };
   };
   assert.equal(result.status, "completed");
   assert.equal(channel.maxActive, 2);
-  assert.equal(output.result?.stats?.max_concurrency, 2);
-  assert.deepEqual(output.result?.results?.map((item) => item.index), [0, 1, 2]);
+  assert.equal(output.stats?.max_concurrency, 2);
+  assert.deepEqual(output.results?.map((item) => item.index), [0, 1, 2]);
+  assert.deepEqual(output.results?.map((item) => item.summary), [undefined, undefined, undefined]);
+  assert.equal(output.results?.every((item) => typeof item.full_output === "string"), true);
+  assert.equal(output.results?.some((item) => "task" in item), false);
 });
 
 test("call_sub_agents records pending and not-started batch stats when approval pauses execution", async () => {
@@ -837,11 +994,6 @@ function testTool(
         riskLevel: operationType === "read-only" ? "low" : "high",
         operationType,
         requiresConfirmation,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 800,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -957,7 +1109,7 @@ function toolCallResponse(
 ): ModelResponse {
   return {
     ...completedResponse(requestId, undefined),
-    toolCalls: [{ callId, toolName, input }],
+    toolCalls: [{ callId, toolName, input: normalizeToolFactValue(input) }],
     finishReason: "tool_call",
   };
 }

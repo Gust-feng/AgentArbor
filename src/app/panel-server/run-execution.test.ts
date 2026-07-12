@@ -11,7 +11,7 @@ import { AgentDefinitionRegistry } from "../agent-definition-registry.js";
 import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { createRunCapabilityPlan } from "../model-capability-registry.js";
-import { createPanelRunResponse, executeBasicPanelRun, runForPanel } from "./run-execution.js";
+import { createPanelRunResponse, executeBasicPanelRun, runLegacyUndergroundForPanel } from "./run-execution.js";
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 
@@ -96,7 +96,7 @@ test("panel run response rejects ordinary desktop results without run-created fa
 test("legacy panel run helper rejects ordinary desktop sync execution below the route layer", async () => {
   await assert.rejects(
     () =>
-      runForPanel(
+      runLegacyUndergroundForPanel(
         runtimeWithCurrentConfig(modelConfig("current-profile", "current-model"), informationAccess(20)),
         "desktop",
         "不要从内部绕过 BasicAgentRunExecutor.start 执行普通 Desktop",
@@ -123,7 +123,7 @@ test("legacy panel run helper rejects ordinary desktop sync execution below the 
 test("panel run execution rejects desktop deep mode below the route layer", async () => {
   await assert.rejects(
     () =>
-      runForPanel(
+      runLegacyUndergroundForPanel(
         runtimeWithCurrentConfig(modelConfig("current-profile", "current-model"), informationAccess(20)),
         "desktop",
         "不要从内部把 Desktop 默认入口跑成 deep",
@@ -144,7 +144,7 @@ test("panel run execution rejects desktop deep mode below the route layer", asyn
 test("panel run execution rejects underground ordinary agent mode below the route layer", async () => {
   await assert.rejects(
     () =>
-      runForPanel(
+      runLegacyUndergroundForPanel(
         runtimeWithCurrentConfig(modelConfig("current-profile", "current-model"), informationAccess(20)),
         "underground",
         "不要从内部把 Underground 入口跑成普通 agent",
@@ -332,6 +332,7 @@ test("panel run response projects pending approval execution result as approval 
       eventEntries: [],
       pendingApproval: {
         confirmationId: "confirmation-test",
+        release: async () => undefined,
         resume: async () => ({
           failed: {
             code: "not_used",

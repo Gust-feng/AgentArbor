@@ -48,6 +48,17 @@ export const TOOL_LIFECYCLE_MESSAGE_TYPES = [
   "tool.cancelled",
 ] as const;
 
+export const TOOL_TERMINAL_MESSAGE_TYPES = [
+  "tool.completed",
+  "tool.failed",
+  "tool.cancelled",
+] as const;
+
+export const TOOL_CALL_EVENT_MESSAGE_TYPES = [
+  ...TOOL_LIFECYCLE_MESSAGE_TYPES,
+  "user_approval.requested",
+] as const;
+
 export const ARBOR_MESSAGE_TYPES = [
   "goal.received",
   "underground.exploration_planned",
@@ -59,7 +70,7 @@ export const ARBOR_MESSAGE_TYPES = [
   "model.failed",
   "context.compaction.completed",
   "context.compaction.failed",
-  ...TOOL_LIFECYCLE_MESSAGE_TYPES,
+  ...TOOL_CALL_EVENT_MESSAGE_TYPES,
   "skill.triggered",
   "agent.delegation.planned",
   "agent.child.started",
@@ -89,7 +100,6 @@ export const ARBOR_MESSAGE_TYPES = [
   "direction_handoff.requested",
   "direction_handoff.completed",
   "direction_handoff.revision_requested",
-  "user_approval.requested",
   "user_approval.received",
   "nutrient_request.requested",
   "nutrient_patch.supplied",
@@ -128,11 +138,23 @@ export const ARBOR_MESSAGE_TYPES = [
 
 export type ArborMessageType = (typeof ARBOR_MESSAGE_TYPES)[number];
 export type ToolLifecycleMessageType = (typeof TOOL_LIFECYCLE_MESSAGE_TYPES)[number];
+export type ToolTerminalMessageType = (typeof TOOL_TERMINAL_MESSAGE_TYPES)[number];
+export type ToolCallEventMessageType = (typeof TOOL_CALL_EVENT_MESSAGE_TYPES)[number];
 
 const TOOL_LIFECYCLE_MESSAGE_TYPE_SET = new Set<string>(TOOL_LIFECYCLE_MESSAGE_TYPES);
+const TOOL_TERMINAL_MESSAGE_TYPE_SET = new Set<string>(TOOL_TERMINAL_MESSAGE_TYPES);
+const TOOL_CALL_EVENT_MESSAGE_TYPE_SET = new Set<string>(TOOL_CALL_EVENT_MESSAGE_TYPES);
 
 export function isToolLifecycleMessageType(type: string): type is ToolLifecycleMessageType {
   return TOOL_LIFECYCLE_MESSAGE_TYPE_SET.has(type);
+}
+
+export function isToolTerminalMessageType(type: string): type is ToolTerminalMessageType {
+  return TOOL_TERMINAL_MESSAGE_TYPE_SET.has(type);
+}
+
+export function isToolCallEventMessageType(type: string): type is ToolCallEventMessageType {
+  return TOOL_CALL_EVENT_MESSAGE_TYPE_SET.has(type);
 }
 
 export type ArtifactRef = {

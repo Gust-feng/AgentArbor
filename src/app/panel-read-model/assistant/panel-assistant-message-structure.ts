@@ -383,7 +383,7 @@ function subAgentEchoSources<TNode extends ProjectableTranscriptNode>(
       continue;
     }
     pushSource(ownerKey, run.summary);
-    pushSource(ownerKey, latestSubAgentTextOutput(run));
+    pushSource(ownerKey, run.fullOutput);
   }
   return sources;
 }
@@ -400,17 +400,6 @@ function subAgentOwnerKey(input: {
     return `run:${input.subRunId}`;
   }
   return `node:${input.fallbackId}`;
-}
-
-function latestSubAgentTextOutput(run: AssistantSubAgentRunLike): string | undefined {
-  const fullOutput = run.fullOutput?.trim();
-  if (fullOutput !== undefined && fullOutput.length > 0) {
-    return fullOutput;
-  }
-  return [...run.modelExchanges]
-    .reverse()
-    .map((exchange) => exchange.textOutput?.trim())
-    .find((value): value is string => value !== undefined && value.length > 0);
 }
 
 function looksLikeSubAgentEcho(

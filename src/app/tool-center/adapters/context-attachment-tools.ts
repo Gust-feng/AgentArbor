@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import type { ToolExecutor } from "../../../domain/tools/index.js";
+import type { ToolExecutor, ToolFactValue } from "../../../domain/tools/index.js";
 import {
   asRecord,
   isLikelyBinaryPath,
@@ -92,8 +92,8 @@ export function createListContextAttachmentsTool(options: ContextAttachmentToolO
           "Local absolute paths are intentionally not returned. Use attachmentId with the attachment tools instead.",
         ],
         outputNotes: [
-          "result.attachments[] contains attachmentId, kind, title, summary, MIME type, byte length, authorization, and supported operations.",
-          "result.count is the number of returned attachments.",
+          "attachments[] contains attachmentId, kind, title, summary, MIME type, byte length, authorization, and supported operations.",
+          "count is the number of returned attachments.",
           "Attachments with authorized=false cannot be read by attachment tools in this run.",
         ],
         runtimeHints: [
@@ -108,11 +108,6 @@ export function createListContextAttachmentsTool(options: ContextAttachmentToolO
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_200,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -123,28 +118,9 @@ export function createListContextAttachmentsTool(options: ContextAttachmentToolO
       throwIfAborted(context.abortSignal);
       const attachments = attachmentEntries(options.taskSoil).map((entry) => attachmentSummary(entry));
       return {
-        action: "list_context_attachments",
-        status: "completed",
         refId: "context-attachments:index",
-        summary: `${attachments.length} context attachments available by reference.`,
-        result: {
-          count: attachments.length,
-          attachments,
-        },
-        display: {
-          kind: "generic_tool_summary",
-          action: "list_context_attachments",
-          summary: `${attachments.length} context attachments available by reference.`,
-          items: attachments.slice(0, 12).map((attachment) =>
-            [
-              attachment.attachmentId,
-              attachment.kind,
-              attachment.title,
-              attachment.mimeType,
-              attachment.byteLength === undefined ? undefined : `${attachment.byteLength} bytes`,
-            ].filter(isString).join(" · ")
-          ),
-        },
+        count: attachments.length,
+        attachments,
       };
     },
   };
@@ -160,16 +136,16 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
           "Read textual content from a current context attachment selected by attachmentId or ref.",
           "For file attachments, omit path. For project attachments, path is required and must be relative to the attached project root.",
           "Use startLine/endLine to inspect a focused range or continue through a large file.",
-          "Use startChar to continue a character-window read when result.nextStartChar is present.",
+          "Use continuation.nextInput to continue a truncated character or line window.",
           "maxLength applies to whole-file/startChar reads; do not combine maxLength with startLine/endLine.",
           "Do not use for images, PDFs, archives, spreadsheets, or binary files; the tool will return non-text metadata instead of content.",
           "Local absolute paths are not accepted as input and are not returned in output.",
         ],
         outputNotes: [
-          "result.content contains UTF-8 text when the attachment target is readable text.",
-          "result.binary or result.readable=false means the attachment cannot be read as text by this tool.",
-          "result.path is relative to the attachment root for project attachments and never a local absolute path.",
-          "result.hasMoreAfter/result.nextStartChar provide the continuation point for character-window reads.",
+          "content contains UTF-8 text when the attachment target is readable text.",
+          "binary or readable=false means the attachment cannot be read as text by this tool.",
+          "path is relative to the attachment root for project attachments and never a local absolute path.",
+          "hasMoreAfter reports whether more text exists; continuation.nextInput provides the executable next read.",
           "truncated and hasMoreAfter indicate whether another focused read may be needed.",
         ],
         runtimeHints: [
@@ -186,11 +162,6 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 900,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -224,21 +195,16 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
       const binary = isLikelyBinaryPath(target.targetAbsolutePath) || await fileHasNulByte(target.targetAbsolutePath, stat.size);
       if (binary) {
         return {
-          action: "read_context_attachment_text",
-          status: "completed",
           refId: `context-attachment:${entry.attachmentId}:text`,
-          summary: `${attachmentTitle(entry)} · ${stat.size} bytes · not readable as text`,
-          result: {
-            attachmentId: entry.attachmentId,
-            kind: entry.ref.kind,
-            title: attachmentTitle(entry),
-            path: target.targetPath,
-            mimeType: entry.ref.metadata?.mimeType,
-            bytes: stat.size,
-            readable: false,
-            binary: true,
-            reason: "binary_or_unsupported_text_format",
-          },
+          attachmentId: entry.attachmentId,
+          kind: entry.ref.kind,
+          title: attachmentTitle(entry),
+          path: target.targetPath,
+          mimeType: entry.ref.metadata?.mimeType,
+          bytes: stat.size,
+          readable: false,
+          binary: true,
+          reason: "binary_or_unsupported_text_format",
         };
       }
       const lineRange = parseLineRange(record);
@@ -270,34 +236,45 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
         : content.content.length > returnedTextChars
           ? content.startChar + returnedTextChars
           : content.nextStartChar;
-      const rangeSummary = content.range === undefined
-        ? ""
-        : ` · lines ${content.range.startLine}-${content.range.endLine}${content.totalLines === undefined ? "" : ` of ${content.totalLines}`}`;
+      const hasMoreAfter = content.hasMoreAfter || truncated;
+      const continuation = nextStartChar !== undefined
+        ? {
+            nextInput: compactRecord({
+              attachmentId: entry.attachmentId,
+              path: target.targetPath,
+              startChar: nextStartChar,
+              maxLength,
+            }),
+          }
+        : hasMoreAfter && content.range !== undefined
+          ? {
+              nextInput: compactRecord({
+                attachmentId: entry.attachmentId,
+                path: target.targetPath,
+                startLine: content.range.endLine + 1,
+              }),
+            }
+          : undefined;
       return {
-        action: "read_context_attachment_text",
-        status: "completed",
         refId: `context-attachment:${entry.attachmentId}:text`,
-        summary: `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · ${stat.size} bytes${rangeSummary}${truncated ? " · truncated" : ""}`,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          path: target.targetPath,
-          mimeType: entry.ref.metadata?.mimeType,
-          bytes: stat.size,
-          readable: true,
-          content: returned,
-          startLine: content.range?.startLine,
-          endLine: content.range?.endLine,
-          totalLines: content.totalLines,
-          hasMoreBefore: content.hasMoreBefore,
-          hasMoreAfter: content.hasMoreAfter || truncated,
-          startChar: content.startChar,
-          textChars: content.startChar === undefined ? undefined : returnedTextChars,
-          charCount: content.charCount,
-          nextStartChar,
-        },
-        truncated: truncated || content.hasMoreAfter,
+        attachmentId: entry.attachmentId,
+        kind: entry.ref.kind,
+        title: attachmentTitle(entry),
+        path: target.targetPath,
+        mimeType: entry.ref.metadata?.mimeType,
+        bytes: stat.size,
+        readable: true,
+        content: returned,
+        startLine: content.range?.startLine,
+        endLine: content.range?.endLine,
+        totalLines: content.totalLines,
+        hasMoreBefore: content.hasMoreBefore,
+        hasMoreAfter,
+        startChar: content.startChar,
+        textChars: content.startChar === undefined ? undefined : returnedTextChars,
+        charCount: content.charCount,
+        truncated: hasMoreAfter,
+        continuation,
       };
     },
   };
@@ -318,10 +295,10 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
           "Local absolute paths are not accepted as input and are not returned in output.",
         ],
         outputNotes: [
-          "result.readable=true means bounded PDF text was extracted for the model.",
-          "result.content contains best-effort text, with hasMoreAfter/truncated indicating whether content was clipped.",
-          "result.nextStartChar provides the continuation point when truncated is true.",
-          "result.reason explains unsupported, scanned, encrypted, or unreadable PDF cases without returning local paths.",
+          "readable=true means bounded PDF text was extracted for the model.",
+          "content contains best-effort text, with hasMoreAfter/truncated indicating whether content was clipped.",
+          "continuation.nextInput provides the executable next PDF text window when truncated is true.",
+          "reason explains unsupported, scanned, encrypted, or unreadable PDF cases without returning local paths.",
         ],
         runtimeHints: [
           { label: "max PDF bytes", value: String(MAX_PDF_BYTES) },
@@ -337,11 +314,6 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 900,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -410,31 +382,35 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
       const startChar = boundedOffset(record.startChar, extracted.text.length);
       const returned = extracted.text.slice(startChar, startChar + maxLength);
       const hasMoreAfter = extracted.text.length > startChar + returned.length;
-      const summary = `${attachmentTitle(entry)}${target.targetPath === "." ? "" : `:${target.targetPath}`} · PDF text · ${returned.length}${hasMoreAfter ? ` of ${extracted.text.length - startChar}` : ""} chars${startChar > 0 ? ` · offset ${startChar}` : ""}${hasMoreAfter ? " · truncated" : ""}`;
+      const nextStartChar = hasMoreAfter ? startChar + returned.length : undefined;
       return {
-        action: "read_context_attachment_pdf_text",
-        status: "completed",
         refId: `context-attachment:${entry.attachmentId}:pdf:${safeRefToken(target.targetPath)}`,
-        summary,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          path: target.targetPath,
-          mimeType: entry.ref.metadata?.mimeType,
-          bytes: stat.size,
-          format: "pdf",
-          readable: true,
-          extraction: "best_effort_pdf_text",
-          content: returned,
-          startChar,
-          textChars: returned.length,
-          charCount: extracted.text.length,
-          hasMoreAfter,
-          nextStartChar: hasMoreAfter ? startChar + returned.length : undefined,
-          ...extracted.facts,
-        },
+        attachmentId: entry.attachmentId,
+        kind: entry.ref.kind,
+        title: attachmentTitle(entry),
+        path: target.targetPath,
+        mimeType: entry.ref.metadata?.mimeType,
+        bytes: stat.size,
+        format: "pdf",
+        readable: true,
+        extraction: "best_effort_pdf_text",
+        content: returned,
+        startChar,
+        textChars: returned.length,
+        charCount: extracted.text.length,
+        hasMoreAfter,
+        ...extracted.facts,
         truncated: hasMoreAfter,
+        continuation: nextStartChar === undefined
+          ? undefined
+          : {
+              nextInput: compactRecord({
+                attachmentId: entry.attachmentId,
+                path: target.targetPath,
+                startChar: nextStartChar,
+                maxLength,
+              }),
+            },
       };
     },
   };
@@ -454,11 +430,11 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
           "Local absolute paths are not accepted or returned.",
         ],
         outputNotes: [
-          "result.entries[] contains attachment-relative path, name, kind, byte size, and depth.",
-          "result.totalEntries is the full enumerated count when traversal completes.",
-          "result.hasMoreAfter/result.nextOffset provide the continuation point when truncated is true.",
-          "result.reachedOffsetCeiling=true means there are more entries beyond the supported continuation window and no nextOffset will be returned.",
-          "truncated tells whether another continuation page is available.",
+          "entries[] contains attachment-relative path, name, kind, byte size, and depth.",
+          "totalEntries is the full enumerated count when traversal completes.",
+          "hasMoreAfter reports whether more entries exist; continuation.nextInput provides the executable next page.",
+          "If more entries exist beyond the supported offset range, the tool fails with entriesPreview and listingComplete=false.",
+          "truncated=true only appears with an executable continuation.",
         ],
         runtimeHints: [
           { label: "max depth", value: String(MAX_LIST_DEPTH) },
@@ -474,11 +450,6 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_200,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -526,46 +497,63 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
         nextOffset: listed.nextOffset,
         maxOffset: MAX_LIST_OFFSET,
       });
-      const continuationSummary = continuation.reachedOffsetCeiling
-        ? " · offset ceiling reached"
-        : continuation.hasMoreAfter
-          ? " · truncated"
-          : "";
-      const summary = `${attachmentTitle(entry)}:${target.targetPath} · ${listed.entries.length}${listed.truncated ? ` of ${listed.totalEntries}` : ""} entries · depth ${depth}${offset > 0 ? ` · offset ${offset}` : ""}${continuationSummary}`;
-      return {
-        action: "list_context_attachment_files",
-        status: "completed",
+      const observation = {
         refId: `context-attachment:${entry.attachmentId}:files:${safeRefToken(target.targetPath)}`,
-        summary,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          path: target.targetPath,
-          depth,
-          offset,
-          limit,
-          maxDepth: MAX_LIST_DEPTH,
-          maxEntries: MAX_LIST_ENTRIES,
-          entries: listed.entries,
-          entriesReturned: listed.entries.length,
-          totalEntries: listed.totalEntries,
-          unreadableDirectories: listed.unreadableDirectories,
-          unreadableSamples: listed.unreadableSamples,
-          hasMoreAfter: continuation.hasMoreAfter,
-          nextOffset: continuation.nextOffset,
-          reachedOffsetCeiling: continuation.reachedOffsetCeiling,
-          offsetCeiling: MAX_LIST_OFFSET,
-        },
-        display: {
-          kind: "generic_tool_summary",
-          action: "list_context_attachment_files",
-          summary,
-          items: listed.entries.slice(0, 12).map((entry) =>
-            [entry.kind, entry.path, entry.bytes === undefined ? undefined : `${entry.bytes} bytes`].filter(isString).join(" ")
-          ),
-        },
+        attachmentId: entry.attachmentId,
+        kind: entry.ref.kind,
+        title: attachmentTitle(entry),
+        path: target.targetPath,
+        depth,
+        offset,
+        limit,
+        maxDepth: MAX_LIST_DEPTH,
+        maxEntries: MAX_LIST_ENTRIES,
+        entriesReturned: listed.entries.length,
+        totalEntries: listed.totalEntries,
+        unreadableDirectories: listed.unreadableDirectories,
+        unreadableSamples: listed.unreadableSamples,
+        hasMoreAfter: continuation.hasMoreAfter,
+        reachedOffsetCeiling: continuation.reachedOffsetCeiling,
+        offsetCeiling: MAX_LIST_OFFSET,
+      };
+      if (continuation.reachedOffsetCeiling) {
+        return {
+          kind: "tool_call_result",
+          result: {
+            callId: context.toolCallId ?? "list_context_attachment_files",
+            toolName: "list_context_attachment_files",
+            input: input as ToolFactValue,
+            output: {
+              ...observation,
+              entriesPreview: listed.entries,
+              listingComplete: false,
+            },
+            status: "failed",
+            error: "Attachment listing found more entries than can be continued within the supported offset range.",
+            errorDomain: "runtime_error",
+            errorFacts: {
+              code: "context_attachment_list_continuation_limit_reached",
+              retryable: false,
+            },
+          },
+        };
+      }
+      return {
+        ...observation,
+        entries: listed.entries,
+        listingComplete: !continuation.hasMoreAfter,
         truncated: continuation.hasMoreAfter,
+        continuation: continuation.nextOffset === undefined
+          ? undefined
+          : {
+              nextInput: compactRecord({
+                attachmentId: entry.attachmentId,
+                path: target.targetPath,
+                depth,
+                limit,
+                offset: continuation.nextOffset,
+              }),
+            },
       };
     },
   };
@@ -586,11 +574,11 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
           "Do not use regular expressions. Local absolute paths are not accepted or returned.",
         ],
         outputNotes: [
-          "result.matches[] includes attachment-relative path, 1-based line, and preview.",
+          "matches[] includes attachment-relative path, 1-based line, and preview.",
           "Skipped binary, too-large, unreadable, generated, or non-file entries are counted.",
-          "result.hasMoreAfter/result.nextOffset provide the continuation point when truncated is true.",
-          "result.reachedOffsetCeiling=true means there are more matches beyond the supported continuation window and no nextOffset will be returned.",
-          "truncated tells whether another continuation page is available.",
+          "hasMoreAfter reports whether more matches exist; continuation.nextInput provides the executable next page.",
+          "If more matches exist beyond the supported offset range, the tool fails with matchesPreview and searchComplete=false.",
+          "truncated=true only appears with an executable continuation.",
         ],
         runtimeHints: [
           { label: "max matches", value: String(MAX_SEARCH_MATCHES) },
@@ -606,11 +594,6 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_600,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -662,47 +645,66 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
         nextOffset: rawHasMoreAfter ? offset + matches.length : undefined,
         maxOffset: MAX_SEARCH_OFFSET,
       });
-      const continuationSummary = continuation.reachedOffsetCeiling
-        ? " · offset ceiling reached"
-        : continuation.hasMoreAfter
-          ? " · truncated"
-          : "";
-      const summary = `${attachmentTitle(entry)}:${target.targetPath} · ${matches.length} matches for ${query}${offset > 0 ? ` · offset ${offset}` : ""}${continuationSummary}`;
-      return {
-        action: "search_context_attachment_files",
-        status: "completed",
+      const observation = {
         refId: `context-attachment:${entry.attachmentId}:search:${safeRefToken(query)}`,
-        summary,
-        result: {
-          attachmentId: entry.attachmentId,
-          kind: entry.ref.kind,
-          title: attachmentTitle(entry),
-          query,
-          path: target.targetPath,
-          offset,
-          limit,
-          matches,
-          matchesReturned: matches.length,
-          searchedFiles: facts.searchedFiles,
-          skippedFiles: facts.skippedFiles,
-          skippedBinaryFiles: facts.skippedBinaryFiles,
-          skippedTooLargeFiles: facts.skippedTooLargeFiles,
-          skippedUnreadableFiles: facts.skippedUnreadableFiles,
-          skippedDirectories: facts.skippedDirectories,
-          skippedOtherEntries: facts.skippedOtherEntries,
-          skippedSamples: facts.skippedSamples,
-          hasMoreAfter: continuation.hasMoreAfter,
-          nextOffset: continuation.nextOffset,
-          reachedOffsetCeiling: continuation.reachedOffsetCeiling,
-          offsetCeiling: MAX_SEARCH_OFFSET,
-        },
-        display: {
-          kind: "generic_tool_summary",
-          action: "search_context_attachment_files",
-          summary,
-          items: matches.slice(0, 12).map((match) => `${match.path}:${match.line}`),
-        },
+        attachmentId: entry.attachmentId,
+        kind: entry.ref.kind,
+        title: attachmentTitle(entry),
+        query,
+        path: target.targetPath,
+        offset,
+        limit,
+        matchesReturned: matches.length,
+        searchedFiles: facts.searchedFiles,
+        skippedFiles: facts.skippedFiles,
+        skippedBinaryFiles: facts.skippedBinaryFiles,
+        skippedTooLargeFiles: facts.skippedTooLargeFiles,
+        skippedUnreadableFiles: facts.skippedUnreadableFiles,
+        skippedDirectories: facts.skippedDirectories,
+        skippedOtherEntries: facts.skippedOtherEntries,
+        skippedSamples: facts.skippedSamples,
+        hasMoreAfter: continuation.hasMoreAfter,
+        reachedOffsetCeiling: continuation.reachedOffsetCeiling,
+        offsetCeiling: MAX_SEARCH_OFFSET,
+      };
+      if (continuation.reachedOffsetCeiling) {
+        return {
+          kind: "tool_call_result",
+          result: {
+            callId: context.toolCallId ?? "search_context_attachment_files",
+            toolName: "search_context_attachment_files",
+            input: input as ToolFactValue,
+            output: {
+              ...observation,
+              matchesPreview: matches,
+              searchComplete: false,
+            },
+            status: "failed",
+            error: "Attachment search found more matches than can be continued within the supported offset range.",
+            errorDomain: "runtime_error",
+            errorFacts: {
+              code: "context_attachment_search_continuation_limit_reached",
+              retryable: false,
+            },
+          },
+        };
+      }
+      return {
+        ...observation,
+        matches,
+        searchComplete: !continuation.hasMoreAfter,
         truncated: continuation.hasMoreAfter,
+        continuation: continuation.nextOffset === undefined
+          ? undefined
+          : {
+              nextInput: compactRecord({
+                attachmentId: entry.attachmentId,
+                query,
+                path: target.targetPath,
+                limit,
+                offset: continuation.nextOffset,
+              }),
+            },
       };
     },
   };
@@ -715,29 +717,18 @@ function unsupportedPdfResult(input: {
   readonly bytes?: number;
   readonly facts?: Readonly<Record<string, number>>;
 }): Readonly<Record<string, unknown>> {
-  const summary = `${attachmentTitle(input.entry)}${input.target.targetPath === "." ? "" : `:${input.target.targetPath}`} · PDF text not available · ${input.reason}`;
   return {
-    action: "read_context_attachment_pdf_text",
-    status: "completed",
     refId: `context-attachment:${input.entry.attachmentId}:pdf:${safeRefToken(input.target.targetPath)}`,
-    summary,
-    result: {
-      attachmentId: input.entry.attachmentId,
-      kind: input.entry.ref.kind,
-      title: attachmentTitle(input.entry),
-      path: input.target.targetPath,
-      mimeType: input.entry.ref.metadata?.mimeType,
-      bytes: input.bytes,
-      format: "pdf",
-      readable: false,
-      reason: input.reason,
-      ...input.facts,
-    },
-    display: {
-      kind: "generic_tool_summary",
-      action: "read_context_attachment_pdf_text",
-      summary,
-    },
+    attachmentId: input.entry.attachmentId,
+    kind: input.entry.ref.kind,
+    title: attachmentTitle(input.entry),
+    path: input.target.targetPath,
+    mimeType: input.entry.ref.metadata?.mimeType,
+    bytes: input.bytes,
+    format: "pdf",
+    readable: false,
+    reason: input.reason,
+    ...input.facts,
   };
 }
 
@@ -749,6 +740,6 @@ function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function isString(value: unknown): value is string {
-  return typeof value === "string";
+function compactRecord(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }

@@ -12,7 +12,6 @@ import {
   createLocalGrepFilesTool,
   createLocalListDirTool,
   createLocalReadFileTool,
-  createLocalRunCommandTool,
   createLocalShellCommandTool,
   createLocalWorkspaceSandboxPolicy,
   createLocalWriteFileTool,
@@ -46,7 +45,6 @@ test("local workspace adapter keeps sandbox policy and tool families split from 
   assert.equal(toolsSource.includes("export function createLocalCreateFileTool"), false);
   assert.equal(toolsSource.includes("export function createLocalEditFileTool"), false);
   assert.equal(toolsSource.includes("export function createLocalDeleteFileTool"), false);
-  assert.equal(toolsSource.includes("export function createLocalRunCommandTool"), false);
   assert.equal(toolsSource.includes("export function createLocalShellCommandTool"), false);
   assert.equal(toolsSource.includes("async function grepPath"), false);
   assert.equal(toolsSource.includes("function parseAnchorEdits"), false);
@@ -63,7 +61,6 @@ test("local workspace adapter keeps sandbox policy and tool families split from 
   assert.equal(sandboxSource.includes("function checkCommandArgs"), false);
   assert.equal(sandboxSource.includes("function checkSandboxPath"), true);
   assert.equal(sandboxSource.includes("function splitSimpleCommandLine"), false);
-  assert.equal(commandSource.includes("export function createLocalRunCommandTool"), true);
   assert.equal(commandSource.includes("export function createLocalShellCommandTool"), true);
   assert.equal(commandSource.includes("function runShellCommand"), true);
   assert.equal(commandSource.includes("function runProgramCommand"), true);
@@ -126,34 +123,32 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
     const grepFiles = createLocalGrepFilesTool(root);
 
     const read = await readFile.execute({ path: "src/note.txt" }, context);
-    assert.equal(asRecord(read).action, "read_file");
-    assert.equal(asRecord(read).refId, "workspace:file:src/note.txt");
-    assert.equal(asRecord(asRecord(read).result).path, "src/note.txt");
-    assert.match(String(asRecord(asRecord(read).result).content), /needle beta/);
-    assert.equal(asRecord(asRecord(read).result).totalLines, 3);
+    const readFacts = asDirectToolFacts(read);
+    assert.equal(readFacts.refId, "workspace:file:src/note.txt");
+    assert.equal(readFacts.path, "src/note.txt");
+    assert.match(String(readFacts.content), /needle beta/);
+    assert.equal(readFacts.totalLines, 3);
 
     const rangedRead = await readFile.execute({ path: "src/note.txt", startLine: 2, endLine: 2 }, context);
-    assert.equal(asRecord(rangedRead).summary, "src/note.txt · 18 bytes · lines 2-2 of 3");
-    assert.equal(asRecord(asRecord(rangedRead).result).content, "needle beta");
-    assert.equal(asRecord(asRecord(rangedRead).result).startLine, 2);
-    assert.equal(asRecord(asRecord(rangedRead).result).endLine, 2);
-    assert.equal(asRecord(asRecord(rangedRead).result).hasMoreBefore, true);
-    assert.equal(asRecord(asRecord(rangedRead).result).hasMoreAfter, true);
+    const rangedReadFacts = asDirectToolFacts(rangedRead);
+    assert.equal(rangedReadFacts.content, "needle beta");
+    assert.equal(rangedReadFacts.startLine, 2);
+    assert.equal(rangedReadFacts.endLine, 2);
+    assert.equal(rangedReadFacts.hasMoreBefore, true);
+    assert.equal(rangedReadFacts.hasMoreAfter, true);
 
     const emptyRangeRead = await readFile.execute({ path: "src/note.txt", startLine: 20, endLine: 21 }, context);
-    assert.equal(asRecord(emptyRangeRead).summary, "src/note.txt · 18 bytes · lines 20-20 of 3");
-    assert.equal(asRecord(asRecord(emptyRangeRead).result).content, "");
-    assert.equal(asRecord(asRecord(emptyRangeRead).result).hasMoreBefore, true);
-    assert.equal(asRecord(asRecord(emptyRangeRead).result).hasMoreAfter, false);
+    const emptyRangeFacts = asDirectToolFacts(emptyRangeRead);
+    assert.equal(emptyRangeFacts.content, "");
+    assert.equal(emptyRangeFacts.hasMoreBefore, true);
+    assert.equal(emptyRangeFacts.hasMoreAfter, false);
 
     const listed = await listDir.execute({ path: "src" }, context);
-    assert.equal(asRecord(listed).action, "list_dir");
-    const entries = asRecord(asRecord(listed).result).entries as readonly { readonly name: string }[];
+    const entries = asDirectToolFacts(listed).entries as readonly { readonly name: string }[];
     assert.deepEqual(entries.map((entry) => entry.name), ["note.txt"]);
 
     const grep = await grepFiles.execute({ path: "src", query: "needle" }, context);
-    assert.equal(asRecord(grep).action, "grep_files");
-    const matches = asRecord(asRecord(grep).result).matches as readonly { readonly path: string; readonly line: number }[];
+    const matches = asDirectToolFacts(grep).matches as readonly { readonly path: string; readonly line: number }[];
     assert.deepEqual(matches, [{ path: "src/note.txt", line: 2, preview: "needle beta" }]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -170,37 +165,37 @@ test("local list_dir and grep_files return executable continuation offsets when 
     const listDir = createLocalListDirTool(root);
     const grepFiles = createLocalGrepFilesTool(root, { ripgrepSearch: false });
 
-    const firstList = asRecord(await listDir.execute({ path: "src", limit: 2 }, context));
-    const firstListResult = asRecord(firstList.result);
+    const firstList = asDirectToolFacts(await listDir.execute({ path: "src", limit: 2 }, context));
+    const firstListResult = firstList;
     assert.equal(firstList.truncated, true);
     assert.equal(firstListResult.hasMoreAfter, true);
-    assert.equal(firstListResult.nextOffset, 2);
+    assert.equal(asRecord(asRecord(firstList.continuation).nextInput).offset, 2);
     assert.equal(firstListResult.entriesReturned, 2);
 
-    const secondList = asRecord(await listDir.execute({ path: "src", limit: 2, offset: 2 }, context));
-    const secondListResult = asRecord(secondList.result);
+    const secondList = asDirectToolFacts(await listDir.execute({ path: "src", limit: 2, offset: 2 }, context));
+    const secondListResult = secondList;
     assert.equal(secondListResult.offset, 2);
     assert.equal(secondListResult.entriesReturned, 2);
-    assert.equal(secondListResult.nextOffset, 4);
+    assert.equal(asRecord(asRecord(secondList.continuation).nextInput).offset, 4);
 
-    const firstGrep = asRecord(await grepFiles.execute({ path: "src", query: "needle", limit: 2 }, context));
-    const firstGrepResult = asRecord(firstGrep.result);
+    const firstGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 2 }, context));
+    const firstGrepResult = firstGrep;
     assert.equal(firstGrep.truncated, true);
     assert.equal(firstGrepResult.hasMoreAfter, true);
-    assert.equal(firstGrepResult.nextOffset, 2);
+    assert.equal(asRecord(asRecord(firstGrep.continuation).nextInput).offset, 2);
     assert.equal(firstGrepResult.matchesReturned, 2);
 
-    const secondGrep = asRecord(await grepFiles.execute({ path: "src", query: "needle", limit: 2, offset: 2 }, context));
-    const secondGrepResult = asRecord(secondGrep.result);
+    const secondGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 2, offset: 2 }, context));
+    const secondGrepResult = secondGrep;
     assert.equal(secondGrepResult.offset, 2);
     assert.equal(secondGrepResult.matchesReturned, 2);
-    assert.equal(secondGrepResult.nextOffset, 4);
+    assert.equal(asRecord(asRecord(secondGrep.continuation).nextInput).offset, 4);
 
-    const exactGrep = asRecord(await grepFiles.execute({ path: "src", query: "needle", limit: 5 }, context));
-    const exactGrepResult = asRecord(exactGrep.result);
+    const exactGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 5 }, context));
+    const exactGrepResult = exactGrep;
     assert.equal(exactGrep.truncated, false);
     assert.equal(exactGrepResult.hasMoreAfter, false);
-    assert.equal(exactGrepResult.nextOffset, undefined);
+    assert.equal(exactGrepResult.continuation, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -217,13 +212,13 @@ test("local grep_files caps oversized offsets before collecting matches", async 
       },
     });
 
-    const grep = asRecord(await grepFiles.execute({
+    const grep = asDirectToolFacts(await grepFiles.execute({
       path: ".",
       query: "needle",
       limit: 80,
       offset: Number.MAX_SAFE_INTEGER,
     }, context));
-    const result = asRecord(grep.result);
+    const result = grep;
 
     assert.equal(observedCollectLimit, 10_081);
     assert.equal(result.offset, 10_000);
@@ -232,13 +227,13 @@ test("local grep_files caps oversized offsets before collecting matches", async 
     assert.equal(result.matchesReturned, 0);
     assert.equal(result.hasMoreAfter, false);
     assert.equal(result.reachedOffsetCeiling, false);
-    assert.equal(result.nextOffset, undefined);
+    assert.equal(result.continuation, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local grep_files stops continuation at the offset ceiling without hiding overflow", async () => {
+test("local grep_files fails honestly when matches exceed the continuation offset ceiling", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-offset-boundary-"));
   try {
     const observedCollectLimits: number[] = [];
@@ -253,16 +248,23 @@ test("local grep_files stops continuation at the offset ceiling without hiding o
       },
     });
 
-    const firstGrep = asRecord(await grepFiles.execute({ path: ".", query: "needle", limit: 80, offset: 10_000 }, context));
-    const firstResult = asRecord(firstGrep.result);
-    const firstMatches = firstResult.matches as readonly { readonly path: string }[];
-    assert.equal(firstGrep.truncated, true);
-    assert.equal(firstResult.offset, 10_000);
-    assert.equal(firstResult.matchesReturned, 80);
-    assert.equal(firstResult.hasMoreAfter, true);
-    assert.equal(firstResult.nextOffset, undefined);
-    assert.equal(firstResult.reachedOffsetCeiling, true);
-    assert.equal(firstResult.offsetCeiling, 10_000);
+    const executed = asRecord(await grepFiles.execute({ path: ".", query: "needle", limit: 80, offset: 10_000 }, context));
+    const result = asRecord(executed.result);
+    const output = asRecord(result.output);
+    const firstMatches = output.matchesPreview as readonly { readonly path: string }[];
+
+    assert.equal(executed.kind, "tool_call_result");
+    assert.equal(result.status, "failed");
+    assert.equal(asRecord(result.errorFacts).code, "grep_files_continuation_limit_reached");
+    assert.equal(asRecord(result.errorFacts).retryable, false);
+    assert.equal(output.truncated, undefined);
+    assert.equal(output.continuation, undefined);
+    assert.equal(output.searchComplete, false);
+    assert.equal(output.offset, 10_000);
+    assert.equal(output.matchesReturned, 80);
+    assert.equal(output.hasMoreAfter, true);
+    assert.equal(output.reachedOffsetCeiling, true);
+    assert.equal(output.offsetCeiling, 10_000);
     assert.equal(firstMatches[0]?.path, "src/match-10000.txt");
     assert.deepEqual(observedCollectLimits, [10_081]);
   } finally {
@@ -277,20 +279,20 @@ test("local read_file returns executable character continuation for maxLength wi
     await writeFile(path.join(root, "src", "long.txt"), "abcdefghij", "utf8");
     const readFileTool = createLocalReadFileTool(root);
 
-    const firstRead = asRecord(await readFileTool.execute({ path: "src/long.txt", maxLength: 5 }, context));
-    const firstResult = asRecord(firstRead.result);
+    const firstRead = asDirectToolFacts(await readFileTool.execute({ path: "src/long.txt", maxLength: 5 }, context));
+    const firstResult = firstRead;
     assert.equal(firstRead.truncated, true);
     assert.equal(firstResult.content, "abcd…");
     assert.equal(firstResult.startChar, 0);
     assert.equal(firstResult.textChars, 4);
     assert.equal(firstResult.charCount, 10);
-    assert.equal(firstResult.nextStartChar, 4);
+    assert.equal(asRecord(asRecord(firstRead.continuation).nextInput).startChar, 4);
 
-    const secondRead = asRecord(await readFileTool.execute({ path: "src/long.txt", maxLength: 5, startChar: 4 }, context));
-    const secondResult = asRecord(secondRead.result);
+    const secondRead = asDirectToolFacts(await readFileTool.execute({ path: "src/long.txt", maxLength: 5, startChar: 4 }, context));
+    const secondResult = secondRead;
     assert.equal(secondResult.content, "efgh…");
     assert.equal(secondResult.startChar, 4);
-    assert.equal(secondResult.nextStartChar, 8);
+    assert.equal(asRecord(asRecord(secondRead.continuation).nextInput).startChar, 8);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -326,7 +328,7 @@ test("local grep_files prefers ripgrep runner and records the search engine", as
     });
 
     const grep = await grepFiles.execute({ path: ".", query: "Needle", limit: 1 }, context);
-    const result = asRecord(asRecord(grep).result);
+    const result = asDirectToolFacts(grep);
     const matches = result.matches as readonly { readonly path: string; readonly line: number; readonly preview: string }[];
 
     assert.equal(called, true);
@@ -347,7 +349,7 @@ test("local grep_files falls back to JS recursion when ripgrep is unavailable", 
     });
 
     const grep = await grepFiles.execute({ path: "src", query: "needle" }, context);
-    const result = asRecord(asRecord(grep).result);
+    const result = asDirectToolFacts(grep);
     const matches = result.matches as readonly { readonly path: string; readonly line: number }[];
 
     assert.equal(result.engine, "js");
@@ -381,12 +383,12 @@ test("local create_file and edit_file stay inside the local strategy sandbox", a
       path: "notes/result.md",
       edits: [{ anchor: "body", replacement: "updated body" }],
     }, context);
+    const createdFacts = asDirectToolFacts(created);
+    const editedFacts = asDirectToolFacts(edited);
 
-    assert.equal(asRecord(created).action, "create_file");
-    assert.equal(asRecord(created).refId, "workspace:file:notes/result.md");
-    assert.equal(asRecord(edited).action, "edit_file");
-    assert.equal(typeof asRecord(asRecord(edited).result).beforeHash, "string");
-    assert.equal(typeof asRecord(asRecord(edited).result).afterHash, "string");
+    assert.equal(createdFacts.refId, "workspace:file:notes/result.md");
+    assert.equal(typeof editedFacts.beforeHash, "string");
+    assert.equal(typeof editedFacts.afterHash, "string");
     assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "# Title\n\nupdated body\n");
 
     await assert.rejects(
@@ -399,9 +401,9 @@ test("local create_file and edit_file stay inside the local strategy sandbox", a
     );
     await mkdir(path.join(root, ".trellis"));
     const trellisCreated = await createFile.execute({ path: ".trellis/local.md", content: "allowed body" }, context);
-    assert.equal(asRecord(asRecord(trellisCreated).result).path, ".trellis/local.md");
+    assert.equal(asDirectToolFacts(trellisCreated).path, ".trellis/local.md");
     const overwritten = await createFile.execute({ path: "notes/result.md", content: "overwritten", overwrite: true }, context);
-    assert.equal(asRecord(asRecord(overwritten).result).overwrite, true);
+    assert.equal(asDirectToolFacts(overwritten).overwrite, true);
     assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "overwritten");
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -519,7 +521,7 @@ test("local delete_file deletes only regular files", async () => {
     const deleteFile = createLocalDeleteFileTool(root);
 
     const deleted = await deleteFile.execute({ path: "dir/note.txt" }, context);
-    assert.equal(asRecord(deleted).action, "delete_file");
+    assert.equal(asDirectToolFacts(deleted).path, "dir/note.txt");
     await assert.rejects(() => readFile(path.join(root, "dir", "note.txt"), "utf8"), /ENOENT/);
     await assert.rejects(
       () => deleteFile.execute({ path: "dir" }, context),
@@ -530,16 +532,14 @@ test("local delete_file deletes only regular files", async () => {
   }
 });
 
-test("local run_command uses the workspace shell and confirmation metadata", async () => {
+test("local shell_command uses the workspace shell and confirmation metadata", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     await mkdir(path.join(root, "src"));
     await writeFile(path.join(root, "src", "note.txt"), "alpha", "utf8");
-    const runCommand = createLocalRunCommandTool(root);
     const shellCommand = createLocalShellCommandTool(root);
     const syntax = shellSyntaxFromTool(shellCommand);
 
-    assert.equal(runCommand.definition.metadata?.requiresConfirmation, true);
     assert.equal(shellCommand.definition.metadata?.requiresConfirmation, true);
     assert.deepEqual(shellCommand.definition.inputSchema.required, []);
     assert.equal("args" in shellCommand.definition.inputSchema.properties, true);
@@ -548,37 +548,47 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
     assert.equal("backgroundWaitMs" in shellCommand.definition.inputSchema.properties, true);
     assert.equal(shellCommand.definition.metadata?.runtimeHints?.[0]?.kind, "command_shell");
 
-    const echoed = await runCommand.execute({ commandLine: shellEchoCommand("hello workspace", syntax) }, context);
-    const shellStyleEchoed = await runCommand.execute({ commandLine: shellEchoCommand("approval-review", syntax) }, context);
+    const echoed = await shellCommand.execute({ commandLine: shellEchoCommand("hello workspace", syntax) }, context);
+    const shellStyleEchoed = await shellCommand.execute({ commandLine: shellEchoCommand("approval-review", syntax) }, context);
     const quotedEchoed = await shellCommand.execute({ commandLine: shellEchoCommand("hello quoted shell", syntax) }, context);
     const shellEchoed = await shellCommand.execute({ commandLine: shellEchoCommand("hello shell", syntax) }, context);
-    const chained = await runCommand.execute({ commandLine: shellChainedEchoCommand(syntax) }, context);
+    const chained = await shellCommand.execute({ commandLine: shellChainedEchoCommand(syntax) }, context);
     const piped = await shellCommand.execute({ commandLine: shellPipeCommand(syntax) }, context);
-    const listed = await runCommand.execute({ commandLine: shellListCommand("src", syntax) }, context);
+    const listed = await shellCommand.execute({ commandLine: shellListCommand("src", syntax) }, context);
     const listedWithCwd = await shellCommand.execute({ commandLine: shellListCommand(".", syntax), cwd: "src" }, context);
-    const typed = await runCommand.execute({ commandLine: shellReadCommand(path.join("src", "note.txt"), syntax) }, context);
+    const typed = await shellCommand.execute({ commandLine: shellReadCommand(path.join("src", "note.txt"), syntax) }, context);
     const inlineScript = await shellCommand.execute({ commandLine: nodeInlineScriptCommand(syntax) }, context);
-    const legacyArgs = await shellCommand.execute({ command: process.execPath, args: ["-e", "console.log('hello legacy args')"] }, context);
+    const directArgs = await shellCommand.execute({ command: process.execPath, args: ["-e", "console.log('hello direct args')"] }, context);
     const madeDirectory = await shellCommand.execute({ commandLine: shellMakeDirectoryCommand("generated/nested", syntax) }, context);
+    const echoedFacts = asDirectToolFacts(echoed);
+    const shellStyleFacts = asDirectToolFacts(shellStyleEchoed);
+    const quotedFacts = asDirectToolFacts(quotedEchoed);
+    const shellFacts = asDirectToolFacts(shellEchoed);
+    const chainedFacts = asDirectToolFacts(chained);
+    const pipedFacts = asDirectToolFacts(piped);
+    const listedFacts = asDirectToolFacts(listed);
+    const listedWithCwdFacts = asDirectToolFacts(listedWithCwd);
+    const typedFacts = asDirectToolFacts(typed);
+    const inlineScriptFacts = asDirectToolFacts(inlineScript);
+    const directArgsFacts = asDirectToolFacts(directArgs);
+    const madeDirectoryFacts = asDirectToolFacts(madeDirectory);
 
-    assert.equal(asRecord(echoed).action, "run_command");
-    assert.equal(asRecord(shellEchoed).action, "shell_command");
-    assert.match(String(asRecord(shellEchoed).refId), /^workspace:shell:/);
-    assert.equal(asRecord(asRecord(shellEchoed).result).commandLine, shellEchoCommand("hello shell", syntax));
-    assert.equal(typeof asRecord(asRecord(shellEchoed).result).shell, "object");
-    assert.match(String(asRecord(asRecord(echoed).result).stdout), /hello workspace/);
-    assert.match(String(asRecord(asRecord(shellStyleEchoed).result).stdout), /approval-review/);
-    assert.match(String(asRecord(asRecord(quotedEchoed).result).stdout), /hello quoted shell/);
-    assert.match(String(asRecord(asRecord(chained).result).stdout), /safe/);
-    assert.match(String(asRecord(asRecord(chained).result).stdout), /unsafe/);
-    assert.match(String(asRecord(asRecord(piped).result).stdout), /needle/);
-    assert.match(String(asRecord(asRecord(listed).result).stdout), /note\.txt/);
-    assert.equal(asRecord(asRecord(listedWithCwd).result).cwd, "src");
-    assert.match(String(asRecord(asRecord(listedWithCwd).result).stdout), /note\.txt/);
-    assert.match(String(asRecord(asRecord(typed).result).stdout), /alpha/);
-    assert.match(String(asRecord(asRecord(inlineScript).result).stdout), /hello_inline_script/);
-    assert.match(String(asRecord(asRecord(legacyArgs).result).stdout), /hello legacy args/);
-    assert.equal(asRecord(asRecord(madeDirectory).result).exitCode, 0);
+    assert.match(String(shellFacts.refId), /^workspace:shell:/);
+    assert.equal(shellFacts.commandLine, shellEchoCommand("hello shell", syntax));
+    assert.equal(typeof shellFacts.shell, "object");
+    assert.match(String(echoedFacts.stdout), /hello workspace/);
+    assert.match(String(shellStyleFacts.stdout), /approval-review/);
+    assert.match(String(quotedFacts.stdout), /hello quoted shell/);
+    assert.match(String(chainedFacts.stdout), /safe/);
+    assert.match(String(chainedFacts.stdout), /unsafe/);
+    assert.match(String(pipedFacts.stdout), /needle/);
+    assert.match(String(listedFacts.stdout), /note\.txt/);
+    assert.equal(listedWithCwdFacts.cwd, "src");
+    assert.match(String(listedWithCwdFacts.stdout), /note\.txt/);
+    assert.match(String(typedFacts.stdout), /alpha/);
+    assert.match(String(inlineScriptFacts.stdout), /hello_inline_script/);
+    assert.match(String(directArgsFacts.stdout), /hello direct args/);
+    assert.equal(madeDirectoryFacts.exitCode, 0);
     assert.equal((await stat(path.join(root, "generated", "nested"))).isDirectory(), true);
 
     const quotedPython = await shellCommand.execute({
@@ -586,7 +596,7 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
       command: process.execPath,
       args: ["-e", "console.log('fragile quoted shell')"],
     }, context);
-    assert.match(String(asRecord(asRecord(quotedPython).result).stdout), /fragile quoted shell/);
+    assert.match(String(asDirectToolFacts(quotedPython).stdout), /fragile quoted shell/);
 
     await assert.rejects(
       () => shellCommand.execute({ commandLine: shellEchoCommand("nope", syntax), cwd: "../outside" }, context),
@@ -607,7 +617,7 @@ test("local shell_command bounds foreground process lifetime and output volume",
       args: ["-e", "console.log('before-timeout'); setTimeout(() => {}, 5000);"],
       timeoutMs: 200,
     }, context);
-    const timeoutResult = asRecord(asRecord(timedOut).result);
+    const timeoutResult = asDirectToolFacts(timedOut);
     assert.equal(timeoutResult.exitCode, 124);
     assert.equal(timeoutResult.timedOut, true);
     assert.match(String(timeoutResult.stdout), /before-timeout/);
@@ -617,7 +627,7 @@ test("local shell_command bounds foreground process lifetime and output volume",
       command: process.execPath,
       args: ["-e", "process.stdout.write('x'.repeat(140000)); process.stderr.write('y'.repeat(70000));"],
     }, context);
-    const largeResult = asRecord(asRecord(largeOutput).result);
+    const largeResult = asDirectToolFacts(largeOutput);
     assert.equal(asRecord(largeOutput).truncated, true);
     assert.equal(String(largeResult.stdout).length, 16_000);
     assert.equal(String(largeResult.stderr).length, 8_000);
@@ -641,7 +651,7 @@ test("local shell_command can start long-running commands in the background with
       args: ["-e", "console.log('background-ready'); setTimeout(() => {}, 5000);"],
       background: true,
     }, context);
-    const result = asRecord(asRecord(started).result);
+    const result = asDirectToolFacts(started);
     const logPath = String(result.logPath);
 
     assert.equal(result.exitCode, 0);
@@ -683,7 +693,7 @@ test("local shell_command waits for a background server port", async () => {
       waitForPort: port,
       waitForPortTimeoutMs: 3_000,
     }, context);
-    const result = asRecord(asRecord(started).result);
+    const result = asDirectToolFacts(started);
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.background, true);
@@ -712,7 +722,7 @@ test("local shell_command reports when a requested background port is not ready"
       waitForPort: port,
       waitForPortTimeoutMs: 300,
     }, context);
-    const result = asRecord(asRecord(started).result);
+    const result = asDirectToolFacts(started);
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.background, true);
@@ -737,7 +747,7 @@ test("local shell_command captures shell-native background command output", asyn
       background: true,
       backgroundWaitMs: 1_000,
     }, context);
-    const result = asRecord(asRecord(started).result);
+    const result = asDirectToolFacts(started);
     const logPath = String(result.logPath);
 
     assert.equal(result.exitCode, 0);
@@ -767,7 +777,7 @@ test("local shell_command reports background commands that exit immediately", as
       args: ["-e", "console.error('background failed fast'); process.exit(7);"],
       background: true,
     }, context);
-    const result = asRecord(asRecord(exited).result);
+    const result = asDirectToolFacts(exited);
 
     assert.equal(result.exitCode, 7);
     assert.equal(result.background, undefined);
@@ -789,7 +799,7 @@ test("local shell_command reports background commands that fail during the start
       background: true,
       backgroundWaitMs: 750,
     }, context);
-    const result = asRecord(asRecord(exited).result);
+    const result = asDirectToolFacts(exited);
 
     assert.equal(result.exitCode, 9);
     assert.equal(result.background, undefined);
@@ -846,9 +856,9 @@ test("local shell_command falls back to shell execution for Windows cmd shims wh
       args: ["-e", "console.log('direct argv')"],
     }, context);
 
-    assert.match(String(asRecord(asRecord(shim).result).stdout), /fakecmd:hello:world/i);
-    assert.match(String(asRecord(asRecord(shimArgvOnly).result).stdout), /fakecmd:hello space:A&B/i);
-    assert.match(String(asRecord(asRecord(direct).result).stdout), /direct argv/);
+    assert.match(String(asDirectToolFacts(shim).stdout), /fakecmd:hello:world/i);
+    assert.match(String(asDirectToolFacts(shimArgvOnly).stdout), /fakecmd:hello space:A&B/i);
+    assert.match(String(asDirectToolFacts(direct).stdout), /direct argv/);
   } finally {
     if (originalPath === undefined) {
       delete process.env.PATH;
@@ -864,14 +874,14 @@ test("local strategy sandbox can disable writes and command execution", async ()
   try {
     const sandboxPolicy = createLocalWorkspaceSandboxPolicy({ allowWrite: false, allowExecute: false });
     const writeFileTool = createLocalWriteFileTool(root, { sandboxPolicy });
-    const runCommand = createLocalRunCommandTool(root, { sandboxPolicy });
+    const shellCommand = createLocalShellCommandTool(root, { sandboxPolicy });
 
     await assert.rejects(
       () => writeFileTool.execute({ path: "note.txt", content: "nope" }, context),
       /does not allow local file writes/
     );
     await assert.rejects(
-      () => runCommand.execute({ commandLine: "echo nope" }, context),
+      () => shellCommand.execute({ commandLine: "echo nope" }, context),
       /does not allow local command execution/
     );
   } finally {
@@ -1011,4 +1021,12 @@ function asRecord(value: unknown): Record<string, unknown> {
   assert.notEqual(value, null);
   assert.equal(Array.isArray(value), false);
   return value as Record<string, unknown>;
+}
+
+function asDirectToolFacts(value: unknown): Record<string, unknown> {
+  const output = asRecord(value);
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `workspace output must not contain ${legacyField}`);
+  }
+  return output;
 }

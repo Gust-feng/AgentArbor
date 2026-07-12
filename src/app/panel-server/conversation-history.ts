@@ -1,19 +1,17 @@
 import type { RuntimeDatabase, RuntimeRunContinuationAvailability } from "../../domain/runtime-database/index.js";
-import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
 } from "../desktop-agent/desktop-agent-session-contracts.js";
+import { readRuntimeSnapshotWithOrdinaryContract } from "../basic-agent-runtime/persistence-snapshot-contract.js";
 import type { PanelConversation, PanelConversationReadModel, PanelConversationStore } from "../panel-conversation/panel-conversations.js";
-import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import type { PanelRunJob, PanelRunJobStore } from "./run-jobs.js";
 import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
-import { toolEvidenceFromRuntimeToolCalls, toolEvidenceFromStreamEvents } from "./basic-agent-read-models.js";
 
 export type PanelConversationHistorySource = {
   readonly conversations: PanelConversationStore;
   readonly runJobs: PanelRunJobStore;
-  readonly runtimeDatabase?: RuntimeDatabase;
+  readonly runtimeDatabase?: Pick<RuntimeDatabase, "getRun">;
 };
 
 export async function buildConversationHistoryMessages(input: {
@@ -61,43 +59,6 @@ export async function buildConversationHistoryMessages(input: {
       };
     })
     .filter((message): message is DesktopAgentConversationMessage => message !== undefined);
-}
-
-export async function buildConversationToolEvidence(input: {
-  readonly source: PanelConversationHistorySource;
-  readonly conversationId: string | undefined;
-  readonly assistantTurnId: string | undefined;
-}): Promise<readonly ToolCallEvidence[]> {
-  if (input.conversationId === undefined) {
-    return [];
-  }
-  const conversation = input.source.conversations.get(input.conversationId);
-  if (conversation === undefined) {
-    return [];
-  }
-  const assistantIndex =
-    input.assistantTurnId === undefined
-      ? conversation.turns.length
-      : conversation.turns.findIndex((turn) => turn.turnId === input.assistantTurnId);
-  if (input.assistantTurnId !== undefined && assistantIndex < 0) {
-    return [];
-  }
-  const evidence: ToolCallEvidence[] = [];
-  const seen = new Set<string>();
-  for (const turn of conversationHistoryTurnsBeforeCurrentUser(conversation, assistantIndex)) {
-    if (turn.role !== "assistant" || !(await assistantTurnCanProvideToolEvidence(input.source, turn))) {
-      continue;
-    }
-    for (const item of await toolEvidenceForAssistantTurn(input.source, turn)) {
-      const key = item.callId;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      evidence.push(item);
-    }
-  }
-  return evidence.slice(-12);
 }
 
 export async function buildConversationInterruptedRunContexts(input: {
@@ -154,47 +115,11 @@ async function assistantTurnCanEnterModelHistory(
   if (liveJob !== undefined) {
     return liveJob.status === "completed";
   }
-  const snapshot = await source.runtimeDatabase?.getRun(turn.runId);
+  const snapshot = await readRuntimeSnapshotWithOrdinaryContract(source.runtimeDatabase, turn.runId);
   if (snapshot !== undefined) {
     return snapshot.run.status === "completed";
   }
   return true;
-}
-
-async function assistantTurnCanProvideToolEvidence(
-  source: PanelConversationHistorySource,
-  turn: PanelConversationReadModel["turns"][number]
-): Promise<boolean> {
-  if (turn.role !== "assistant" || turn.runId === undefined) {
-    return false;
-  }
-  const liveJob = source.runJobs.get(turn.runId);
-  if (liveJob !== undefined) {
-    return liveRunCanProvideHistoricalToolEvidence(liveJob.status);
-  }
-  const snapshot = await source.runtimeDatabase?.getRun(turn.runId);
-  if (snapshot !== undefined) {
-    return persistedRunCanProvideHistoricalToolEvidence(snapshot.run.status);
-  }
-  return assistantTurnStatusCanProvideToolEvidence(turn.status);
-}
-
-async function toolEvidenceForAssistantTurn(
-  source: PanelConversationHistorySource,
-  turn: PanelConversationReadModel["turns"][number]
-): Promise<readonly ToolCallEvidence[]> {
-  if (turn.runId === undefined) {
-    return [];
-  }
-  const liveJob = source.runJobs.get(turn.runId);
-  if (liveJob !== undefined && liveRunCanProvideHistoricalToolEvidence(liveJob.status)) {
-    const liveEvidence = toolEvidenceFromStreamEvents(liveJob.streamEvents);
-    if (liveEvidence.length > 0) {
-      return liveEvidence;
-    }
-  }
-  const snapshot = await source.runtimeDatabase?.getRun(turn.runId);
-  return snapshot === undefined ? [] : toolEvidenceFromRuntimeToolCalls(snapshot.toolCalls);
 }
 
 async function interruptedRunContextForAssistantTurn(
@@ -206,7 +131,9 @@ async function interruptedRunContextForAssistantTurn(
     return undefined;
   }
   const liveJob = source.runJobs.get(turn.runId);
-  const snapshot = liveJob === undefined ? await source.runtimeDatabase?.getRun(turn.runId) : undefined;
+  const snapshot = liveJob === undefined
+    ? await readRuntimeSnapshotWithOrdinaryContract(source.runtimeDatabase, turn.runId)
+    : undefined;
   const turnContent = conversationHistoryContentForModel(turn);
   const stopReason = liveJob === undefined
     ? snapshot?.run.stopReason ?? snapshot?.run.error?.code ?? interruptedFallbackStopReason(turn.status)
@@ -325,23 +252,4 @@ function conversationHistoryContentForModel(
   turn: PanelConversationReadModel["turns"][number]
 ): string {
   return normalizeModelFacingText(turn.content).trim();
-}
-
-function liveRunCanProvideHistoricalToolEvidence(status: string): boolean {
-  return (
-    status === "approval_needed" ||
-    status === "needs_input" ||
-    status === "completed" ||
-    status === "failed" ||
-    status === "cancelled" ||
-    status === "blocked"
-  );
-}
-
-function persistedRunCanProvideHistoricalToolEvidence(status: string): boolean {
-  return liveRunCanProvideHistoricalToolEvidence(status) || status === "stopped";
-}
-
-function assistantTurnStatusCanProvideToolEvidence(status: string): boolean {
-  return status === "completed" || status === "failed" || status === "blocked" || status === "needs_input";
 }

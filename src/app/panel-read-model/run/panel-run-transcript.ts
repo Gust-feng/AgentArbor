@@ -54,13 +54,7 @@ export function createPanelRunTranscript(input: CreatePanelRunTranscriptInput): 
 function isOrdinaryDesktopAgentModelCall(call: ReturnType<typeof createPanelTranscriptModelCalls>[number]): boolean {
   return (
     call.outputContractId === "desktop.agent_response.v1" ||
-    // Historical persisted runs used the desktop.chat / intent gate contracts
-    // for ordinary desktop agent output. Treat them as replay compatibility only.
-    call.outputContractId === "desktop.chat_response.v1" ||
-    call.outputContractId === "desktop.intent_gate.v1" ||
-    call.purpose === "desktop_agent" ||
-    call.purpose === "desktop_chat" ||
-    call.purpose === "desktop_intent_gate"
+    call.purpose === "desktop_agent"
   );
 }
 

@@ -1,7 +1,6 @@
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import {
@@ -24,7 +23,6 @@ export type DesktopAgentContextPackInput = {
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  readonly toolEvidence?: readonly ToolCallEvidence[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly tokenCounter?: BasicAgentTokenCounter;
   readonly maxMessages?: number;

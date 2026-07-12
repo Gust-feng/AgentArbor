@@ -18,6 +18,5 @@ export {
 } from "./local-workspace-write-tools.js";
 
 export {
-  createLocalRunCommandTool,
   createLocalShellCommandTool,
 } from "./local-workspace-command-tools.js";

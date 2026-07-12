@@ -2,40 +2,40 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ToolDefinition } from "./contracts.js";
 import {
+  MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS,
+  modelVisibleToolDescription,
   resolveEffectiveConfirmationRequirement,
   validateModelVisibleToolContract,
 } from "./index.js";
 
-// 这些测试覆盖「进模型可见集合」的完备门槛（FR-TOOL-001 / FR-TOOL-002）：
-// 工具必须同时具备完整的能力契约元数据（metadata）与模型可见功能性契约
-// （modelContract），且确认要求在缺策略时取保守默认。完备门槛只依赖工具
-// 自身的显式契约字段，不依赖工具名前缀、关键字或硬编码白名单。
+// 模型可见准入只守可执行事实；推荐用法、运行提示和示例是可选描述增强。
+// 真实结果与 continuation 由 ToolCenter/executor 行为测试覆盖，不用散文字段伪装完备性。
 
 function completeToolDefinition(): ToolDefinition {
   return {
     name: "fixture_tool",
-    description: "A fixture tool that carries a complete model-visible contract.",
-    inputSchema: { type: "object", properties: {} },
+    description: "Read a fixture value and return the observed fact.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+      additionalProperties: false,
+    },
     metadata: {
       category: "workspace",
       riskLevel: "low",
-      operationType: "read-write",
+      operationType: "read-only",
       requiresConfirmation: false,
-      visibleResultPolicy: {
-        userVisible: "safe-preview",
-        maxPreviewChars: 800,
-        omitRawOutput: false,
-      },
     },
     modelContract: {
-      purpose: "Fixture purpose: demonstrate contract completeness.",
-      whenToUse: ["When you need fixture behavior."],
-      whenNotToUse: ["Avoid for unrelated tasks."],
-      inputNotes: ["Provide input X."],
-      usageNotes: ["Validate X before calling."],
-      outputNotes: ["Returns the fixture result payload."],
-      runtimeHints: [{ label: "maxCalls", value: "10" }],
-      examples: [{ input: { x: 1 } }],
+      purpose: "Fixture purpose.",
+      whenToUse: ["Use when a fixture value is required."],
+      whenNotToUse: ["Do not use for unrelated resources."],
+      inputNotes: ["key identifies the fixture value."],
+      usageNotes: ["The operation is read-only."],
+      outputNotes: ["Returns the observed value and an explicit continuation when truncated."],
+      runtimeHints: [{ label: "fixture source", value: "test" }],
+      examples: [{ input: { key: "demo" } }],
     },
   };
 }
@@ -47,57 +47,202 @@ function withMetadataFieldRemoved(field: string): ToolDefinition {
   return { ...base, metadata: metadata as ToolDefinition["metadata"] };
 }
 
-function withModelContractFieldRemoved(field: string): ToolDefinition {
-  const base = completeToolDefinition();
-  const contract = { ...(base.modelContract as object) } as Record<string, unknown>;
-  delete contract[field];
-  return { ...base, modelContract: contract as ToolDefinition["modelContract"] };
+function withInvalidInputSchema(inputSchema: unknown): ToolDefinition {
+  return {
+    ...completeToolDefinition(),
+    inputSchema: inputSchema as ToolDefinition["inputSchema"],
+  };
 }
 
-test("validateModelVisibleToolContract accepts a tool with complete contract and metadata", () => {
+test("validateModelVisibleToolContract accepts an executable factual contract", () => {
   const validation = validateModelVisibleToolContract(completeToolDefinition());
   assert.equal(validation.ok, true);
   assert.deepEqual(validation.missing, []);
 });
 
-test("validateModelVisibleToolContract flags a blank description", () => {
-  const validation = validateModelVisibleToolContract({ ...completeToolDefinition(), description: "   " });
-  assert.equal(validation.ok, false);
-  assert.ok(validation.missing.includes("description"));
+test("validateModelVisibleToolContract does not require optional model guidance", () => {
+  const base = completeToolDefinition();
+  const withoutGuidance = { ...base, modelContract: undefined };
+  assert.deepEqual(validateModelVisibleToolContract(withoutGuidance), { ok: true, missing: [] });
+
+  for (const field of [
+    "purpose",
+    "whenToUse",
+    "whenNotToUse",
+    "inputNotes",
+    "usageNotes",
+    "outputNotes",
+    "runtimeHints",
+    "examples",
+  ]) {
+    const contract = { ...(base.modelContract as object) } as Record<string, unknown>;
+    delete contract[field];
+    const validation = validateModelVisibleToolContract({
+      ...base,
+      modelContract: contract as ToolDefinition["modelContract"],
+    });
+    assert.equal(validation.ok, true, `${field}: ${validation.missing.join(", ")}`);
+  }
 });
 
-test("validateModelVisibleToolContract requires metadata presence (FR-TOOL-002)", () => {
-  const validation = validateModelVisibleToolContract({ ...completeToolDefinition(), metadata: undefined });
-  assert.equal(validation.ok, false);
-  assert.ok(validation.missing.includes("metadata"));
+test("validateModelVisibleToolContract requires identity and an objective description", () => {
+  const blankName = validateModelVisibleToolContract({ ...completeToolDefinition(), name: "   " });
+  assert.equal(blankName.ok, false);
+  assert.ok(blankName.missing.includes("name"));
+
+  const blankDescription = validateModelVisibleToolContract({
+    ...completeToolDefinition(),
+    description: "   ",
+  });
+  assert.equal(blankDescription.ok, false);
+  assert.ok(blankDescription.missing.includes("description"));
 });
 
-test("validateModelVisibleToolContract requires every capability metadata field", () => {
-  for (const field of ["category", "riskLevel", "operationType", "requiresConfirmation", "visibleResultPolicy"]) {
+test("validateModelVisibleToolContract requires an object input schema", () => {
+  const invalidSchemas: readonly unknown[] = [
+    undefined,
+    { type: "array", properties: {} },
+    { type: "object", properties: [] },
+    { type: "object", properties: { key: { type: "string" } }, required: ["missing"] },
+    { type: "object", properties: {}, additionalProperties: "yes" },
+  ];
+  for (const inputSchema of invalidSchemas) {
+    const validation = validateModelVisibleToolContract(withInvalidInputSchema(inputSchema));
+    assert.equal(validation.ok, false);
+    assert.ok(validation.missing.includes("inputSchema"));
+  }
+});
+
+test("validateModelVisibleToolContract requires execution and side-effect metadata", () => {
+  const missingMetadata = validateModelVisibleToolContract({
+    ...completeToolDefinition(),
+    metadata: undefined,
+  });
+  assert.equal(missingMetadata.ok, false);
+  assert.ok(missingMetadata.missing.includes("metadata"));
+
+  for (const field of ["category", "riskLevel", "operationType", "requiresConfirmation"]) {
     const validation = validateModelVisibleToolContract(withMetadataFieldRemoved(field));
-    assert.equal(validation.ok, false, `expected ${field} to be flagged as missing`);
-    assert.ok(
-      validation.missing.includes(`metadata.${field}`),
-      `expected missing to include metadata.${field}, got: ${validation.missing.join(", ")}`
-    );
+    assert.equal(validation.ok, false, `expected ${field} to be required`);
+    assert.ok(validation.missing.includes(`metadata.${field}`));
   }
-});
 
-test("validateModelVisibleToolContract requires modelContract presence", () => {
-  const validation = validateModelVisibleToolContract({ ...completeToolDefinition(), modelContract: undefined });
+  const invalidFileOperation = completeToolDefinition();
+  const validation = validateModelVisibleToolContract({
+    ...invalidFileOperation,
+    metadata: {
+      ...invalidFileOperation.metadata!,
+      fileOperation: "rename" as NonNullable<ToolDefinition["metadata"]>["fileOperation"],
+    },
+  });
   assert.equal(validation.ok, false);
-  assert.ok(validation.missing.includes("modelContract"));
+  assert.ok(validation.missing.includes("metadata.fileOperation"));
 });
 
-test("validateModelVisibleToolContract requires modelContract guidance fields", () => {
-  for (const field of ["outputNotes", "runtimeHints", "examples"]) {
-    const validation = validateModelVisibleToolContract(withModelContractFieldRemoved(field));
-    assert.equal(validation.ok, false, `expected ${field} to be flagged as missing`);
-    assert.ok(
-      validation.missing.some((item) => item.includes(`modelContract.${field}`)),
-      `expected missing to reference modelContract.${field}, got: ${validation.missing.join(", ")}`
-    );
+test("modelVisibleToolDescription uses stable field order without keyword selection", () => {
+  const definition: ToolDefinition = {
+    ...completeToolDefinition(),
+    modelContract: {
+      whenNotToUse: ["Limit fact."],
+      outputNotes: ["Result fact with continuation.nextInput."],
+      runtimeHints: [{ label: "shell", value: "PowerShell" }],
+      usageNotes: [
+        "Ordinary first note.",
+        "Second note contains background=true.",
+        "Ordinary final note.",
+      ],
+      inputNotes: ["Input fact."],
+      whenToUse: ["Optional recommendation.", "Ordinary first note."],
+      examples: [{ input: { key: "one" } }, { input: { key: "two" } }],
+    },
+  };
+  const description = modelVisibleToolDescription(definition);
+
+  const orderedFragments = [
+    definition.description,
+    "Outputs: Result fact with continuation.nextInput.",
+    "Runtime: shell=PowerShell",
+    "Avoid for: Limit fact.",
+    "Notes: Ordinary first note. Second note contains background=true. Ordinary final note.",
+    "Inputs: Input fact.",
+    "Use for: Optional recommendation.",
+    'Examples: {"key":"one"} {"key":"two"}',
+  ];
+  let previousIndex = -1;
+  for (const fragment of orderedFragments) {
+    const index = description.indexOf(fragment);
+    assert.ok(index > previousIndex, `expected stable order for: ${fragment}`);
+    previousIndex = index;
   }
+  assert.equal(description.match(/Ordinary first note\./gu)?.length, 1);
+});
+
+test("modelVisibleToolDescription applies an explicit budget after factual result guidance", () => {
+  const description = modelVisibleToolDescription(
+    {
+      ...completeToolDefinition(),
+      description: "Read a bounded resource.",
+      modelContract: {
+        outputNotes: ["truncated=true includes continuation.nextInput for the unread range."],
+        runtimeHints: [{ label: "source", value: "workspace" }],
+        whenToUse: [`Optional recommendation ${"x".repeat(400)}`],
+      },
+    },
+    { maxChars: 220 }
+  );
+
+  assert.equal(description.length <= 220, true);
+  assert.match(description, /continuation\.nextInput/);
+  assert.match(description, /Additional tool guidance omitted by description budget/);
+  assert.doesNotMatch(description, /x{100}/);
+});
+
+test("an oversized objective cannot consume result and continuation facts", () => {
+  const description = modelVisibleToolDescription({
+    ...completeToolDefinition(),
+    description: `Read a bounded resource. ${"objective detail ".repeat(800)}`,
+    modelContract: {
+      outputNotes: [
+        "truncated=true includes continuation.nextInput for the unread range.",
+      ],
+      runtimeHints: [{ label: "source", value: "workspace" }],
+      usageNotes: ["The operation is read-only and does not modify the resource."],
+    },
+  });
+
+  assert.equal(description.length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS, true);
+  assert.match(description, /^Read a bounded resource\./);
+  assert.match(description, /…\[truncated\]/);
+  assert.match(description, /Outputs: truncated=true includes continuation\.nextInput/);
+  assert.match(description, /Runtime: source=workspace/);
+  assert.match(description, /Notes: The operation is read-only/);
+});
+
+test("invalid optional examples cannot hide or break a factual tool description", () => {
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const definition: ToolDefinition = {
+    ...completeToolDefinition(),
+    modelContract: {
+      examples: [{ input: cyclic }],
+    },
+  };
+
+  assert.doesNotThrow(() => modelVisibleToolDescription(definition));
+  assert.equal(modelVisibleToolDescription(definition), definition.description);
+});
+
+test("default model-visible description budget remains explicit and bounded", () => {
+  const definition: ToolDefinition = {
+    ...completeToolDefinition(),
+    modelContract: {
+      outputNotes: ["y".repeat(MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS * 2)],
+    },
+  };
+  assert.equal(
+    modelVisibleToolDescription(definition).length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS,
+    true
+  );
 });
 
 test("resolveEffectiveConfirmationRequirement treats explicit requiresConfirmation as authoritative", () => {
@@ -105,7 +250,7 @@ test("resolveEffectiveConfirmationRequirement treats explicit requiresConfirmati
   assert.equal(resolveEffectiveConfirmationRequirement({ requiresConfirmation: false }), false);
 });
 
-test("resolveEffectiveConfirmationRequirement defaults to confirmation for high-impact actions when the field is missing (FR-TOOL-002)", () => {
+test("resolveEffectiveConfirmationRequirement defaults to confirmation for high-impact actions when the field is missing", () => {
   assert.equal(resolveEffectiveConfirmationRequirement({ operationType: "execute" }), true);
   assert.equal(resolveEffectiveConfirmationRequirement({ operationType: "external-submit" }), true);
   assert.equal(resolveEffectiveConfirmationRequirement({ fileOperation: "delete" }), true);

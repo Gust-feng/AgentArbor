@@ -4,16 +4,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../../testing/desktop-basic-tool-registry.js";
+import { projectToolDisplay } from "../../tool-projection/tool-display-projection.js";
 import { ToolCenter } from "../tool-center.js";
 import { createHttpRequestTool, type HttpRequestFetchLike } from "./http-request-tool.js";
 import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
 import { createLocalGrepFilesTool, createLocalListDirTool, createLocalReadFileTool } from "./local-workspace-read-tools.js";
 import { createLocalEditFileTool } from "./local-workspace-write-tools.js";
-import {
-  toolExecutionContinuation,
-  toolExecutionDisplay,
-  toolExecutionResult,
-} from "./tool-result-test-support.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 const suggestionPattern = /\btry\b|\bprovide\b|\bsuggest|\brecommend\b|recoveryHint|\u5efa\u8bae/iu;
@@ -22,21 +18,20 @@ test("shell_command returns small stdout and stderr exactly without truncation f
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-shell-small-"));
   try {
     const shell = createLocalShellCommandTool(root);
-    const output = asRecord(await shell.execute({
+    const output = asDirectToolFacts(await shell.execute({
       command: process.execPath,
       args: ["-e", "process.stdout.write('stdout-small'); process.stderr.write('stderr-small');"],
     }, context));
-    const result = asRecord(output.result);
 
     assert.equal(output.truncated, false);
-    assert.equal(result.stdout, "stdout-small");
-    assert.equal(result.stderr, "stderr-small");
-    assert.equal(result.stdoutTruncated, false);
-    assert.equal(result.stderrTruncated, false);
-    assert.equal(result.stdoutChars, "stdout-small".length);
-    assert.equal(result.stderrChars, "stderr-small".length);
-    assert.equal(result.stdoutOmittedChars, 0);
-    assert.equal(result.stderrOmittedChars, 0);
+    assert.equal(output.stdout, "stdout-small");
+    assert.equal(output.stderr, "stderr-small");
+    assert.equal(output.stdoutTruncated, false);
+    assert.equal(output.stderrTruncated, false);
+    assert.equal(output.stdoutChars, "stdout-small".length);
+    assert.equal(output.stderrChars, "stderr-small".length);
+    assert.equal(output.stdoutOmittedChars, 0);
+    assert.equal(output.stderrOmittedChars, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -48,21 +43,20 @@ test("shell_command reports factual truncation and omitted counts only after out
     const stdoutChars = 70_000;
     const stderrChars = 35_000;
     const shell = createLocalShellCommandTool(root);
-    const output = asRecord(await shell.execute({
+    const output = asDirectToolFacts(await shell.execute({
       command: process.execPath,
       args: ["-e", `process.stdout.write('x'.repeat(${stdoutChars})); process.stderr.write('e'.repeat(${stderrChars}));`],
     }, context));
-    const result = asRecord(output.result);
 
     assert.equal(output.truncated, true);
-    assert.equal(result.stdoutTruncated, true);
-    assert.equal(result.stderrTruncated, true);
-    assert.equal(String(result.stdout).length, 16_000);
-    assert.equal(String(result.stderr).length, 8_000);
-    assert.equal(result.stdoutChars, stdoutChars);
-    assert.equal(result.stderrChars, stderrChars);
-    assert.equal(result.stdoutOmittedChars, stdoutChars - 16_000);
-    assert.equal(result.stderrOmittedChars, stderrChars - 8_000);
+    assert.equal(output.stdoutTruncated, true);
+    assert.equal(output.stderrTruncated, true);
+    assert.equal(String(output.stdout).length, 16_000);
+    assert.equal(String(output.stderr).length, 8_000);
+    assert.equal(output.stdoutChars, stdoutChars);
+    assert.equal(output.stderrChars, stderrChars);
+    assert.equal(output.stdoutOmittedChars, stdoutChars - 16_000);
+    assert.equal(output.stderrOmittedChars, stderrChars - 8_000);
     assert.doesNotMatch(JSON.stringify(output), suggestionPattern);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -96,13 +90,16 @@ test("ToolCenter preserves command logRef in model-visible command facts", async
       }
     );
 
-    const agentContent = toolExecutionResult(result);
+    const output = asDirectToolFacts(result.output);
+    const continuation = asRecord(output.continuation);
 
     assert.equal(result.status, "completed");
-    assert.equal(agentContent.truncated, true);
-    assert.equal(agentContent.stdoutTruncated, true);
-    assert.match(String(agentContent.logRef), /^command-log:\/\/[^\\/]+$/);
-    assert.equal(typeof agentContent.logPath, "string");
+    assert.equal(output.truncated, true);
+    assert.equal(output.stdoutTruncated, true);
+    assert.match(String(output.logRef), /^command-log:\/\/[^\\/]+$/);
+    assert.equal(typeof output.logPath, "string");
+    assert.equal(continuation.ref, output.logRef);
+    assert.equal(asRecord(continuation.nextInput).ref, output.logRef);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -134,7 +131,8 @@ test("ToolCenter read can consume shell_command command-log refs", async () => {
         approvedConfirmationIds: ["confirmation-call-shell-log-readable"],
       }
     );
-    const logRef = String(asRecord(asRecord(shellResult.output).result).logRef);
+    const shellFacts = asDirectToolFacts(shellResult.output);
+    const logRef = String(shellFacts.logRef);
 
     const readResult = await center.execute(
       { callId: "call-read-command-log", toolName: "read", input: { ref: logRef, maxLength: 30_000 } },
@@ -144,18 +142,17 @@ test("ToolCenter read can consume shell_command command-log refs", async () => {
         allowedTools: ["shell_command", "read"],
       }
     );
-    const read = asRecord(readResult.output);
-    const readContent = asRecord(read.result);
+    const readContent = asDirectToolFacts(readResult.output);
 
     assert.equal(shellResult.status, "completed");
     assert.match(logRef, /^command-log:\/\/[^\\/]+$/);
     assert.equal(readResult.status, "completed");
-    assert.equal(read.status, "completed");
+    assert.equal(readContent.researchStatus, "completed");
     assert.equal(readContent.source, "command_log");
     assert.equal(readContent.uri, logRef);
     assert.match(String(readContent.contentPreview), /readable-log-start/);
     assert.match(String(readContent.contentPreview), /readable-log-end/);
-    assert.equal(JSON.stringify(readContent.metadata).includes(String(asRecord(asRecord(shellResult.output).result).logPath)), false);
+    assert.equal(JSON.stringify(readContent.metadata).includes(String(shellFacts.logPath)), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -189,13 +186,16 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
       }
     );
 
-    const agentContent = toolExecutionResult(result);
-    const display = toolExecutionDisplay(result);
+    const output = asDirectToolFacts(result.output);
+    const display = projectToolDisplay(
+      { callId: result.callId, toolName: result.toolName, input: result.input },
+      result.output,
+    );
 
     assert.equal(result.status, "completed");
-    assert.equal(agentContent.stdout, stdout);
-    assert.equal(agentContent.stdoutTruncated, false);
-    assert.equal(agentContent.truncated, false);
+    assert.equal(output.stdout, stdout);
+    assert.equal(output.stdoutTruncated, false);
+    assert.equal(output.truncated, false);
     assert.equal(display.kind, "command_summary");
     assert.equal(String(display.outputSummary).length < stdout.length, true);
     assert.equal(JSON.stringify(result.output).includes("start-"), true);
@@ -211,17 +211,16 @@ test("edit_file dryRun and failures return edit facts without recovery suggestio
     await writeFile(path.join(root, "notes.txt"), "same\nsame\n", "utf8");
     const editFile = createLocalEditFileTool(root);
 
-    const dryRun = asRecord(await editFile.execute({
+    const dryRun = asDirectToolFacts(await editFile.execute({
       path: "notes.txt",
       dryRun: true,
       edits: [{ oldText: "same\n", newText: "once\n", occurrence: 1 }],
     }, context));
-    const dryRunResult = asRecord(dryRun.result);
-    assert.equal(dryRunResult.dryRun, true);
-    assert.equal(dryRunResult.wouldReplace, 1);
-    assert.equal(dryRunResult.replacements, 0);
-    assert.equal(typeof dryRunResult.beforeHash, "string");
-    assert.equal(typeof dryRunResult.afterHash, "string");
+    assert.equal(dryRun.dryRun, true);
+    assert.equal(dryRun.wouldReplace, 1);
+    assert.equal(dryRun.replacements, 0);
+    assert.equal(typeof dryRun.beforeHash, "string");
+    assert.equal(typeof dryRun.afterHash, "string");
     assert.doesNotMatch(JSON.stringify(dryRun), suggestionPattern);
 
     await assert.rejects(
@@ -246,7 +245,7 @@ test("grep_files exposes skipped facts only when the search engine can observe t
     await writeFile(path.join(root, "match.txt"), "needle\n", "utf8");
 
     const jsGrep = createLocalGrepFilesTool(root, { ripgrepSearch: false });
-    const jsResult = asRecord(asRecord(await jsGrep.execute({ path: ".", query: "needle" }, context)).result);
+    const jsResult = asDirectToolFacts(await jsGrep.execute({ path: ".", query: "needle" }, context));
     assert.equal(jsResult.engine, "js");
     assert.equal(jsResult.skippedFactsAvailable, true);
     assert.equal(typeof jsResult.searchedFiles, "number");
@@ -255,7 +254,7 @@ test("grep_files exposes skipped facts only when the search engine can observe t
     const rgGrep = createLocalGrepFilesTool(root, {
       ripgrepSearch: async () => [{ path: "match.txt", line: 1, preview: "needle" }],
     });
-    const rgResult = asRecord(asRecord(await rgGrep.execute({ path: ".", query: "needle" }, context)).result);
+    const rgResult = asDirectToolFacts(await rgGrep.execute({ path: ".", query: "needle" }, context));
     assert.equal(rgResult.engine, "rg");
     assert.equal(rgResult.skippedFactsAvailable, false);
     assert.equal(rgResult.skippedFiles, undefined);
@@ -282,11 +281,11 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       context,
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
-    const readResult = toolExecutionResult(read);
-    const readNextInput = asRecord(toolExecutionContinuation(read)?.nextInput);
+    const readOutput = asDirectToolFacts(read.output);
+    const readNextInput = asRecord(asRecord(readOutput.continuation).nextInput);
 
     assert.equal(read.status, "completed");
-    assert.equal(readResult.truncated, true);
+    assert.equal(readOutput.truncated, true);
     assert.equal(readNextInput.path, "note-1.txt");
     assert.equal(readNextInput.startLine, 2);
 
@@ -296,11 +295,11 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       context,
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
-    const charReadResult = toolExecutionResult(charRead);
-    const charReadNextInput = asRecord(toolExecutionContinuation(charRead)?.nextInput);
+    const charReadOutput = asDirectToolFacts(charRead.output);
+    const charReadNextInput = asRecord(asRecord(charReadOutput.continuation).nextInput);
 
     assert.equal(charRead.status, "completed");
-    assert.equal(charReadResult.truncated, true);
+    assert.equal(charReadOutput.truncated, true);
     assert.equal(charReadNextInput.path, "long.txt");
     assert.equal(charReadNextInput.maxLength, 5);
     assert.equal(charReadNextInput.startChar, 4);
@@ -311,33 +310,31 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       context,
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
-    const listContinuation = asRecord(toolExecutionContinuation(listed));
+    const listOutput = asDirectToolFacts(listed.output);
+    const listContinuation = asRecord(listOutput.continuation);
     const listNextInput = asRecord(listContinuation.nextInput);
-    const listAgentContent = toolExecutionResult(listed);
 
     assert.equal(listed.status, "completed");
-    assert.equal(listAgentContent.truncated, true);
+    assert.equal(listOutput.truncated, true);
     assert.equal(listNextInput.path, ".");
     assert.equal(listNextInput.limit, 2);
     assert.equal(listNextInput.offset, 2);
-    assert.equal(asRecord(asRecord(listAgentContent.continuation).nextInput).offset, 2);
 
     const grep = await center.execute(
       { callId: "call-grep-continuation", toolName: "grep_files", input: { path: ".", query: "needle", limit: 2 } },
       context,
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
-    const grepContinuation = asRecord(toolExecutionContinuation(grep));
+    const grepOutput = asDirectToolFacts(grep.output);
+    const grepContinuation = asRecord(grepOutput.continuation);
     const grepNextInput = asRecord(grepContinuation.nextInput);
-    const grepAgentContent = toolExecutionResult(grep);
 
     assert.equal(grep.status, "completed");
-    assert.equal(grepAgentContent.truncated, true);
+    assert.equal(grepOutput.truncated, true);
     assert.equal(grepNextInput.query, "needle");
     assert.equal(grepNextInput.path, ".");
     assert.equal(grepNextInput.limit, 2);
     assert.equal(grepNextInput.offset, 2);
-    assert.equal(asRecord(asRecord(grepAgentContent.continuation).nextInput).offset, 2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -423,6 +420,14 @@ function asRecord(value: unknown): Record<string, unknown> {
   assert.notEqual(value, null);
   assert.equal(Array.isArray(value), false);
   return value as Record<string, unknown>;
+}
+
+function asDirectToolFacts(value: unknown): Record<string, unknown> {
+  const output = asRecord(value);
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `tool output must not contain ${legacyField}`);
+  }
+  return output;
 }
 
 function errorMessage(error: unknown): string {

@@ -7,30 +7,18 @@ test("tool stream projection keeps command output as safe summary", () => {
     toolName: "shell_command",
     input: { command: "pnpm", args: ["test"] },
     output: {
-      action: "shell_command",
-      summary: "测试已通过",
-      result: {
-        command: "pnpm",
-        args: ["test"],
-        exitCode: 0,
-        stdout: "RAW_STDOUT_SENTINEL",
-      },
-      display: {
-        kind: "command_summary",
-        command: "pnpm",
-        args: ["test"],
-        commandLine: "pnpm test",
-        exitCode: 0,
-        outputSummary: "测试已通过",
-      },
+      command: "pnpm",
+      args: ["test"],
+      exitCode: 0,
+      stdout: "RAW_STDOUT_SENTINEL",
     },
   };
 
   const detail = toolStreamDetail("tool.completed", payload);
 
-  assert.equal(toolSummary("tool.completed", payload).includes("测试已通过"), true);
+  assert.equal(toolSummary("tool.completed", payload), "Shell 命令完成：pnpm test。");
   assert.equal(detail.command, "pnpm test");
-  assert.equal(detail.preview, "pnpm test · exit 0 · 测试已通过");
+  assert.equal(detail.preview, "pnpm test · exit 0");
   assert.equal(detail.display?.kind, "command_summary");
   assert.equal(detail.display?.kind === "command_summary" ? detail.display.commandLine : undefined, "pnpm test");
   assert.equal(JSON.stringify(detail).includes("RAW_STDOUT_SENTINEL"), false);
@@ -70,16 +58,9 @@ test("tool stream projection surfaces read HTTP failure facts in preview and det
     toolName: "read",
     input: { ref: "http://127.0.0.1:54321/status" },
     output: {
-      action: "读取资料",
-      summary: "资料读取已完成。",
-      display: {
-        kind: "read_result",
-        ref: "http://127.0.0.1:54321/status",
-        status: "provider-failed",
-        error: "http_request failed: ECONNREFUSED 127.0.0.1:54321",
-        errorFacts,
-      },
-      result: {},
+      error: "http_request failed: ECONNREFUSED 127.0.0.1:54321",
+      errorFacts,
+      status: "provider-failed",
     },
   });
 
@@ -91,37 +72,20 @@ test("tool stream projection surfaces read HTTP failure facts in preview and det
   assert.equal(detail.preview?.includes("errorFacts"), true);
 });
 
-test("tool stream projection extracts read HTTP failure facts from raw trace output", () => {
+test("tool stream projection reads flat HTTP failure facts", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "read",
     input: { ref: "https://example.test/missing" },
     output: {
-      action: "read",
       ref: "https://example.test/missing",
       status: "provider-failed",
-      trace: {
-        traceId: "research-trace-http-404",
-        action: "read",
-        ref: "https://example.test/missing",
-        requestedSources: ["page"],
-        status: "provider-failed",
-        startedAt: "2026-01-01T00:00:00.000Z",
-        completedAt: "2026-01-01T00:00:00.010Z",
-        sourceSteps: [
-          {
-            source: "page",
-            status: "provider-failed",
-            resultRefs: [],
-            message: "Page read returned HTTP 404 Not Found.",
-            errorFacts: {
-              statusCode: 404,
-              statusText: "Not Found",
-              method: "GET",
-              url: "https://example.test/missing",
-              durationMs: 10,
-            },
-          },
-        ],
+      error: "Page read returned HTTP 404 Not Found.",
+      errorFacts: {
+        statusCode: 404,
+        statusText: "Not Found",
+        method: "GET",
+        url: "https://example.test/missing",
+        durationMs: 10,
       },
     },
   });
@@ -137,14 +101,10 @@ test("tool stream projection surfaces search invalid-input messages", () => {
     toolName: "search",
     input: { query: "" },
     output: {
-      action: "search",
-      display: {
-        kind: "search_results",
-        query: "",
-        status: "invalid-input",
-        message: "search requires a non-empty query.",
-        results: [],
-      },
+      query: "",
+      researchStatus: "invalid-input",
+      message: "search requires a non-empty query.",
+      results: [],
     },
   });
 
@@ -170,12 +130,9 @@ test("tool stream projection keeps ordinary tool copy free of diagnostic labels"
     },
     durationMs: 1234,
     output: {
-      summary: "pnpm test · exit 0",
-      result: {
-        command: "pnpm",
-        args: ["test"],
-        exitCode: 0,
-      },
+      command: "pnpm",
+      args: ["test"],
+      exitCode: 0,
     },
   });
 
@@ -194,13 +151,10 @@ test("tool stream projection prefers commandLine over recombining argv text", ()
       args: ["-e", "console.log('fragile quoted shell')"],
     },
     output: {
-      summary: `node -e "console.log('fragile quoted shell')" · exit 0`,
-      result: {
-        command: "node",
-        commandLine: `node -e "console.log('fragile quoted shell')"`,
-        args: ["-e", "console.log('fragile quoted shell')"],
-        exitCode: 0,
-      },
+      command: "node",
+      commandLine: `node -e "console.log('fragile quoted shell')"`,
+      args: ["-e", "console.log('fragile quoted shell')"],
+      exitCode: 0,
     },
   });
 
@@ -216,11 +170,8 @@ test("tool stream projection cleans restored ordinary tool preview labels", () =
       command: "dir",
     },
     output: {
-      summary: "运行命令：dir · exit 0",
-      result: {
-        command: "dir",
-        exitCode: 0,
-      },
+      command: "dir",
+      exitCode: 0,
     },
   });
 
@@ -236,24 +187,21 @@ test("tool stream projection exposes command execution facts for UI display", ()
     },
     durationMs: 1530,
     output: {
-      summary: "dev server started",
-      result: {
-        commandLine: "pnpm dev",
-        cwd: "apps/web",
-        exitCode: 0,
-        timedOut: false,
-        background: true,
-        pid: 1234,
-        logPath: "C:/Temp/agentarbor-command-logs/pnpm-dev.log",
-        stopCommand: "taskkill /pid 1234 /T /F",
-        waitForPort: 5173,
-        portReady: true,
-        stdoutTruncated: true,
-        stderrTruncated: false,
-        stdoutChars: 1200,
-        stderrChars: 0,
-        stdoutOmittedChars: 340,
-      },
+      commandLine: "pnpm dev",
+      cwd: "apps/web",
+      exitCode: 0,
+      timedOut: false,
+      background: true,
+      pid: 1234,
+      logPath: "C:/Temp/agentarbor-command-logs/pnpm-dev.log",
+      stopCommand: "taskkill /pid 1234 /T /F",
+      waitForPort: 5173,
+      portReady: true,
+      stdoutTruncated: true,
+      stderrTruncated: false,
+      stdoutChars: 1200,
+      stderrChars: 0,
+      stdoutOmittedChars: 340,
     },
   });
 
@@ -279,13 +227,10 @@ test("tool stream projection carries edit diff preview in the file display", () 
       edits: [{ oldText: "old text", newText: "new text" }],
     },
     output: {
-      summary: "文件已更新",
-      result: {
-        path: "src/app/example.ts",
-        replacements: 1,
-        previousLength: 15,
-        nextLength: 15,
-      },
+      path: "src/app/example.ts",
+      replacements: 1,
+      previousLength: 15,
+      nextLength: 15,
     },
   });
 
@@ -308,11 +253,8 @@ test("tool stream projection uses the file diff as the edit preview", () => {
       edits: [{ oldText: "old text", newText: "new text" }],
     },
     output: {
-      summary: "src/app/example.ts · 1 处修改",
-      result: {
-        path: "src/app/example.ts",
-        replacements: 1,
-      },
+      path: "src/app/example.ts",
+      replacements: 1,
     },
   });
 
@@ -330,13 +272,10 @@ test("tool stream projection keeps edit preview focused on file-level summary", 
       edits: [{ oldText: "same", newText: "updated", occurrence: 2, startLine: 4, endLine: 4 }],
     },
     output: {
-      summary: "src/app/example.ts · 1 处修改",
-      result: {
-        path: "src/app/example.ts",
-        replacements: 1,
-        previousLength: 15,
-        nextLength: 18,
-      },
+      path: "src/app/example.ts",
+      replacements: 1,
+      previousLength: 15,
+      nextLength: 18,
     },
   });
 
@@ -356,18 +295,14 @@ test("tool stream projection derives structured directory displays from attachme
       depth: 1,
     },
     output: {
-      action: "list_context_attachment_files",
-      summary: "项目:. · 9 of 29 entries · depth 1 · truncated",
-      result: {
-        path: ".",
-        depth: 1,
-        entriesReturned: 9,
-        totalEntries: 29,
-        entries: [
-          { path: "README.md", name: "README.md", kind: "file", bytes: 120, depth: 1 },
-          { path: "src", name: "src", kind: "directory", depth: 1 },
-        ],
-      },
+      path: ".",
+      depth: 1,
+      entriesReturned: 9,
+      totalEntries: 29,
+      entries: [
+        { path: "README.md", name: "README.md", kind: "file", bytes: 120, depth: 1 },
+        { path: "src", name: "src", kind: "directory", depth: 1 },
+      ],
       truncated: true,
     },
   });
@@ -375,7 +310,7 @@ test("tool stream projection derives structured directory displays from attachme
   assert.equal(detail.display?.kind, "directory_listing");
   assert.equal(detail.display?.kind === "directory_listing" ? detail.display.totalEntries : undefined, 29);
   assert.equal(detail.display?.kind === "directory_listing" ? detail.display.entries[0]?.path : undefined, "README.md");
-  assert.equal(detail.preview?.includes("项目"), true);
+  assert.equal(detail.truncated, true);
 });
 
 test("tool stream projection shows MCP preview without raw media payload", () => {
@@ -385,27 +320,15 @@ test("tool stream projection shows MCP preview without raw media payload", () =>
       query: "AgentArbor MCP",
     },
     output: {
-      summary: "找到 MCP 能力底座说明。",
-      result: {
-        text: "MCP 工具已通过冻结快照进入普通 Agent。",
-        multimodal: [
-          {
-            type: "image",
-            mimeType: "image/png",
-            bytesApprox: 128,
-            data: "RAW_BASE64_SENTINEL",
-          },
-        ],
-      },
-      display: {
-        kind: "generic_tool_summary",
-        action: "MCP 查询",
-        summary: "找到 MCP 能力底座说明。",
-        items: [
-          "MCP 工具已通过冻结快照进入普通 Agent。",
-          "非文本内容：image，MIME：image/png，约 128 字节",
-        ],
-      },
+      text: "MCP 工具已通过冻结快照进入普通 Agent。",
+      multimodal: [
+        {
+          type: "image",
+          mimeType: "image/png",
+          bytesApprox: 128,
+          data: "RAW_BASE64_SENTINEL",
+        },
+      ],
     },
   });
 
@@ -414,30 +337,14 @@ test("tool stream projection shows MCP preview without raw media payload", () =>
   assert.equal(JSON.stringify(detail).includes("RAW_BASE64_SENTINEL"), false);
 });
 
-test("tool stream projection keeps model result fields out of UI detail", () => {
+test("tool stream projection keeps raw command facts out of UI detail", () => {
   const payload = {
     toolName: "shell_command",
     input: { commandLine: "pnpm test" },
     output: {
-      canonicalResult: {
-        content: [{ type: "text", text: "stdout sentinel" }],
-        structuredContent: {
-          commandLine: "pnpm test",
-          exitCode: 0,
-          stdout: "stdout sentinel",
-        },
-      },
-      presentation: {
-        explanation: {
-          text: "测试命令返回了可查看的输出。",
-          source: "runtime_fallback",
-        },
-        displayShape: "terminal",
-      },
-      result: {
-        commandLine: "pnpm test",
-        exitCode: 0,
-      },
+      commandLine: "pnpm test",
+      exitCode: 0,
+      stdout: "stdout sentinel",
     },
   };
 
@@ -445,10 +352,8 @@ test("tool stream projection keeps model result fields out of UI detail", () => 
   const summary = toolSummary("tool.completed", payload);
   const detailRecord = detail as Readonly<Record<string, unknown>>;
 
-  assert.equal(summary.includes("测试命令返回了可查看的输出"), false);
   assert.equal(summary.includes("pnpm test"), true);
   assert.equal(detail.display?.kind, "command_summary");
   assert.equal(detail.command, "pnpm test");
-  assert.equal(detailRecord.presentation, undefined);
-  assert.equal(detailRecord.canonicalResult, undefined);
+  assert.equal(detailRecord.stdout, undefined);
 });

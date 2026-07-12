@@ -309,9 +309,9 @@ test("conversation provider tools come from backend AgentDefinition instead of r
 });
 
 test("context attachment preview feeds the Basic Agent work view read model with original text", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-work-session-"));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-work-view-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-workspace-"));
-  const fileBody = "private body with sk-work-session-secret";
+  const fileBody = "private body with sk-work-view-secret";
   await fs.writeFile(path.join(workspace, "notes.md"), fileBody, "utf8");
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
@@ -346,7 +346,6 @@ test("context attachment preview feeds the Basic Agent work view read model with
     const runId = start.body.run.runId;
     await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     const workView = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/work-view`);
-    const workSession = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/work-session`);
 
     assert.equal(preview.status, 200);
     assert.equal(preview.body.attachment.ref, "file:notes.md");
@@ -359,10 +358,7 @@ test("context attachment preview feeds the Basic Agent work view read model with
     assert.equal(typeof workView.body.workView.answer?.content, "string");
     assert.equal(workView.body.workView.deliverable, undefined);
     assert.equal("workSession" in workView.body, false);
-    assert.equal(workSession.status, 200);
-    assert.equal(workSession.body.workSession.stage, "completed");
-    assert.equal(workSession.text.includes("[redacted-secret]"), false);
-    assertSafePanelJsonText(`${workView.text}\n${workSession.text}`);
+    assertSafePanelJsonText(workView.text);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -432,6 +428,51 @@ test("conversation runs can use a transient workspace without updating the defau
     await removeTemporaryTree(defaultWorkspace);
     await removeTemporaryTree(runWorkspace);
     await removeTemporaryTree(followUpWorkspace);
+  }
+});
+
+test("conversation workspace projection rejects an invalid Ordinary snapshot after the conversation is loaded", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-invalid-workspace-snapshot-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-invalid-workspace-"));
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const started = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: {
+        goal: "验证会话工作区读取契约",
+        aiMode: "fake",
+        workspaceDirectory: workspace,
+      },
+    });
+    const runId = started.body.run.runId;
+    const conversationId = started.body.conversation.conversationId;
+    await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    await server.close();
+
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const loaded = await requestJson(server.url, "/api/conversations");
+    assert.equal(loaded.status, 200);
+    assert.equal(
+      loaded.body.conversations.some((conversation: { conversationId: string }) =>
+        conversation.conversationId === conversationId
+      ),
+      true
+    );
+
+    const runtimePaths = resolveAgentArborRuntimeDatabasePaths(directory);
+    const runPath = path.join(runtimePaths.runtimeHome, "runs", encodeURIComponent(runId), "run.json");
+    const invalidRun = JSON.parse(await fs.readFile(runPath, "utf8")) as { capabilitySnapshot?: unknown };
+    delete invalidRun.capabilitySnapshot;
+    await fs.writeFile(runPath, `${JSON.stringify(invalidRun, null, 2)}\n`, "utf8");
+
+    const invalidWorkspaceProjection = await requestJson(server.url, "/api/conversations");
+    assert.equal(invalidWorkspaceProjection.status, 410);
+    assert.equal(invalidWorkspaceProjection.body.error.code, "ordinary_runtime_snapshot_invalid");
+    assert.equal(invalidWorkspaceProjection.body.error.message.includes("capabilitySnapshot"), true);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(workspace);
   }
 });
 
@@ -901,7 +942,7 @@ test("conversation follow-up rejects deep mode and does not enqueue a run", asyn
   }
 });
 
-test("conversation and desktop run APIs recover safe history from RuntimeDatabase after restart", async () => {
+test("conversation and desktop run APIs restore complete new-contract history after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-runtime-recover-"));
   let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
@@ -922,11 +963,12 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
     await server.close();
     const runtimePaths = resolveAgentArborRuntimeDatabasePaths(directory);
     const conversationPath = path.join(runtimePaths.runtimeHome, "conversations", `${encodeURIComponent(conversationId)}.json`);
-    const legacyConversation = JSON.parse(await fs.readFile(conversationPath, "utf8")) as { turns?: Array<{ responseModel?: unknown }> };
-    for (const turn of legacyConversation.turns ?? []) {
-      delete turn.responseModel;
-    }
-    await fs.writeFile(conversationPath, `${JSON.stringify(legacyConversation, null, 2)}\n`, "utf8");
+    const persistedConversationText = await fs.readFile(conversationPath, "utf8");
+    const persistedConversation = JSON.parse(persistedConversationText) as { turns?: Array<{ role?: string; responseModel?: unknown }> };
+    assert.equal(
+      persistedConversation.turns?.filter((turn) => turn.role === "assistant").every((turn) => turn.responseModel !== undefined),
+      true
+    );
 
     server = await startLocalPanelServer({ port: 0, configDirectory: directory });
     const conversations = await requestJson(server.url, "/api/conversations");
@@ -954,8 +996,49 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
     assert.equal(run.body.transcript.events.some((event: { type: string }) => event.type === "model.output.completed"), false);
     assert.equal(run.body.conversation.conversationId, conversationId);
     assert.equal(runtimeRun.body.snapshot.run.runId, runId);
+    assert.equal(await fs.readFile(conversationPath, "utf8"), persistedConversationText);
     assertSafePanelJsonText(run.text);
     assertSafePanelJsonText(conversation.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("persisted Ordinary APIs reject pre-contract snapshots instead of using current Host configuration", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-snapshot-clean-break-"));
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const started = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "验证持久化契约", aiMode: "fake" },
+    });
+    const runId = started.body.run.runId;
+    await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    await server.close();
+
+    const runtimePaths = resolveAgentArborRuntimeDatabasePaths(directory);
+    const runPath = path.join(runtimePaths.runtimeHome, "runs", encodeURIComponent(runId), "run.json");
+    const invalidRun = JSON.parse(await fs.readFile(runPath, "utf8")) as {
+      capabilitySnapshot?: unknown;
+      informationAccess?: unknown;
+    };
+    delete invalidRun.capabilitySnapshot;
+    delete invalidRun.informationAccess;
+    await fs.writeFile(runPath, `${JSON.stringify(invalidRun, null, 2)}\n`, "utf8");
+
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const desktopRun = await requestJson(server.url, `/api/desktop/runs/${encodeURIComponent(runId)}`);
+    const basicView = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/view`);
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
+
+    for (const response of [desktopRun, basicView, runtimeRun]) {
+      assert.equal(response.status, 410);
+      assert.equal(response.body.error.code, "ordinary_runtime_snapshot_invalid");
+      assert.equal(response.body.error.message.includes("开发期失效数据"), true);
+      assert.equal(response.body.error.message.includes("capabilitySnapshot"), true);
+      assert.equal(response.body.error.message.includes("informationAccess"), true);
+    }
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

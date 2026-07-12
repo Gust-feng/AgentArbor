@@ -260,6 +260,7 @@ test("exploreDeepChild：经 child Agent runner 调模型产出 DeepChildSummary
 
   const result = await exploreDeepChild({
     childRun,
+    childSpec,
     goal: "重构认证模块并迁移到 OAuth2",
     permissionBoundaryRefs: [],
     turnRuntime,
@@ -304,6 +305,7 @@ test("exploreDeepChild：content-aware 默认 fake 也能产出 DeepChildSummary
 
   const result = await exploreDeepChild({
     childRun,
+    childSpec,
     goal: "评估目标可行性",
     permissionBoundaryRefs: [],
     turnRuntime,

@@ -32,12 +32,17 @@ export class BasicAgentPendingContinuationStore {
     this.continuations.delete(continuationKey(runId, confirmationId));
   }
 
-  deleteForRun(runId: string): void {
-    for (const key of this.continuations.keys()) {
+  deleteForRun(runId: string): Promise<void> {
+    const releases: Promise<void>[] = [];
+    for (const [key, continuation] of this.continuations) {
       if (key.startsWith(`${runId}:`)) {
         this.continuations.delete(key);
+        // Deletion is intentionally synchronous. A concurrent confirmation
+        // decision must not acquire a continuation once cancellation begins.
+        releases.push(Promise.resolve().then(() => continuation.release()));
       }
     }
+    return Promise.allSettled(releases).then(() => undefined);
   }
 
   assertPendingConfirmation(job: BasicAgentRunJob, confirmationId: string): void {

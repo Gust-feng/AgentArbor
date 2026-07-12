@@ -34,8 +34,6 @@ export function isStaleModelProgressSummary(value: string): boolean {
 
 function purposeProgressLabel(purpose: string): string | undefined {
   switch (purpose) {
-    case "desktop_intent_gate":
-      return "正在识别任务类型。";
     case "work_session_decision":
       return "正在整理任务。";
     case "work_session_child_material":
@@ -43,7 +41,6 @@ function purposeProgressLabel(purpose: string): string | undefined {
     case "work_session_synthesis":
       return "正在综合材料。";
     case "work_session_direct_answer":
-    case "desktop_chat":
     case "desktop_agent":
       return undefined;
     default:

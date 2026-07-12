@@ -9,6 +9,7 @@ import type {
 import type { ModelUsage } from "../intelligence/contracts.js";
 import type { SubAgentRunTrace } from "../sub-agents/contracts.js";
 import type { ToolErrorDomain, ToolErrorFacts } from "../tools/contracts.js";
+import type { ToolFactValue } from "../tools/fact-value.js";
 import type {
   ObservationProgress,
   ObservationRef,
@@ -157,6 +158,8 @@ export type RuntimeEventRecord = {
   readonly traceId: string;
   readonly taskId?: string;
   readonly intent: string;
+  /** Bounded canonical payload for durable tool lifecycle facts only. */
+  readonly payload?: ToolFactValue;
   readonly createdAt: string;
   readonly recordedAt: string;
 };
@@ -184,19 +187,14 @@ export type RuntimeToolCallRecord = {
   readonly runId: string;
   readonly toolName?: string;
   readonly status: "requested" | "approval_required" | "completed" | "failed" | "cancelled";
-  readonly action?: string;
-  readonly path?: string;
-  readonly query?: string;
-  readonly command?: string;
-  readonly exitCode?: number;
-  readonly summary?: string;
-  readonly preview?: string;
-  readonly truncated?: boolean;
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
+  readonly durationMs?: number;
+  readonly confirmationId?: string;
   readonly eventRefs: readonly string[];
   readonly createdAt?: string;
+  readonly terminalAt?: string;
 };
 
 export type RuntimeArtifactRecord = {

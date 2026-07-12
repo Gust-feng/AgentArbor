@@ -52,7 +52,7 @@ export type DeepChildControlUpdateState = {
 
 export type DeepChildOperationTarget = {
   readonly childRun: ChildAgentRun;
-  readonly childSpec: DeepChildSpec | undefined;
+  readonly childSpec: DeepChildSpec;
   readonly previousSummary: DeepChildSummary | undefined;
 };
 

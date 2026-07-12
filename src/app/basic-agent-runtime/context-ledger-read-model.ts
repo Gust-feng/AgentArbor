@@ -126,7 +126,7 @@ function contextLedgerEntryKind(kind: BasicAgentContextSourceKind): ContextLedge
   ) return "history";
   if (kind === "skill") return "skill";
   if (kind === "task_soil_ref") return "attachment";
-  return "tool_evidence";
+  return assertNever(kind);
 }
 
 function contextLedgerEntryTitle(item: BasicAgentContextItem): string {
@@ -139,7 +139,6 @@ function contextLedgerEntryTitle(item: BasicAgentContextItem): string {
     run_interruption: "运行中断",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
-    tool_evidence: "证据",
   };
   return labels[item.sourceKind];
 }
@@ -161,10 +160,13 @@ function contextUsageSummary(
     run_interruption: "运行中断",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
-    tool_evidence: "证据",
   };
   const summary = [...counts.entries()]
     .map(([kind, count]) => `${labels[kind]} ${count}`)
     .join("；");
   return omittedItems.length === 0 ? summary : `${summary}；暂未使用 ${omittedItems.length}`;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unsupported context source kind: ${String(value)}`);
 }

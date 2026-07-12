@@ -188,22 +188,6 @@ function assistantTurnFromResponse(
       ),
     };
   }
-  const legacyCanvas = legacyWorkSessionCanvasForConversationSync(canvas);
-  if (legacyCanvas?.workSession.directAnswer !== undefined) {
-    return {
-      title: "已回答",
-      content: sanitizeAssistantVisibleText(legacyCanvas.workSession.directAnswer.answer),
-    };
-  }
-  if (legacyCanvas?.workSession.report !== undefined) {
-    const report = legacyCanvas.workSession.report;
-    const summary = report.decisionSummary.trim().length > 0 ? report.decisionSummary : `已生成：${report.title}`;
-    const nextAction = report.nextActions[0];
-    return {
-      title: "已完成",
-      content: sanitizeAssistantVisibleText(nextAction === undefined ? summary : `${summary}\n下一步：${nextAction}`),
-    };
-  }
   if (canvas?.kind === "underground_deep_canvas") {
     const summary = canvas.underground.recommendedDirection.reason.trim().length > 0
       ? canvas.underground.recommendedDirection.reason
@@ -215,14 +199,6 @@ function assistantTurnFromResponse(
     };
   }
   return undefined;
-}
-
-type ConversationSyncLegacyWorkSessionCanvas = Extract<PanelRunCanvasReadModel, { readonly kind: "work_session_canvas" }>;
-
-function legacyWorkSessionCanvasForConversationSync(
-  canvas: PanelRunCanvasReadModel | undefined
-): ConversationSyncLegacyWorkSessionCanvas | undefined {
-  return canvas?.kind === "work_session_canvas" ? canvas : undefined;
 }
 
 function runningAssistantTurnFromResponse(

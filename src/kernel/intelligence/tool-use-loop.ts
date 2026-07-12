@@ -155,6 +155,7 @@ async function resumeApprovalCore(
     options,
     request: pendingApproval.pendingToolCall,
     context,
+    requestAlreadyPublished: true,
   });
   const toolDefinitions = modelVisibleToolDefinitions(options);
   let toolCalls = [...pendingApproval.toolCallsBeforeApproval, approvedResult];

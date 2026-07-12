@@ -33,11 +33,6 @@ export type AssistantSubAgentRunLike = {
   readonly summary: string;
   readonly fullOutput?: string;
   readonly error?: string;
-  readonly modelExchanges: readonly {
-    readonly requestedAt: string;
-    readonly completedAt?: string;
-    readonly textOutput?: string;
-  }[];
 };
 
 export type AssistantWorkViewOutput<TDeliverable extends AssistantDeliverableLike> = {

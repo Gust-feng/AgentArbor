@@ -21,15 +21,14 @@ test("local list_dir reports recursive entry facts without truncating small resu
 
     const listDir = createLocalListDirTool(root);
     const listed = await listDir.execute({ path: ".", depth: 3 }, context);
-    const output = asRecord(listed);
-    const result = asRecord(output.result);
-    const entries = (result.entries as readonly unknown[]).map(asRecord);
+    const output = asDirectToolFacts(listed);
+    const entries = (output.entries as readonly unknown[]).map(asRecord);
     const byPath = new Map(entries.map((entry) => [String(entry.path), entry]));
 
     assert.equal(output.truncated, false);
-    assert.equal(result.depth, 3);
-    assert.equal(result.entriesReturned, 4);
-    assert.equal(result.totalEntries, 4);
+    assert.equal(output.depth, 3);
+    assert.equal(output.entriesReturned, 4);
+    assert.equal(output.totalEntries, 4);
     assert.equal(byPath.get("readme.md")?.name, "readme.md");
     assert.equal(byPath.get("readme.md")?.kind, "file");
     assert.equal(byPath.get("readme.md")?.bytes, 4);
@@ -56,15 +55,14 @@ test("local list_dir caps large results at the tool maximum", async () => {
 
     const listDir = createLocalListDirTool(root);
     const listed = await listDir.execute({ path: "." }, context);
-    const output = asRecord(listed);
-    const result = asRecord(output.result);
-    const entries = result.entries as readonly unknown[];
+    const output = asDirectToolFacts(listed);
+    const entries = output.entries as readonly unknown[];
 
     assert.equal(output.truncated, true);
-    assert.equal(result.depth, 1);
-    assert.equal(result.maxEntries, 200);
-    assert.equal(result.entriesReturned, 200);
-    assert.equal(result.totalEntries, 205);
+    assert.equal(output.depth, 1);
+    assert.equal(output.maxEntries, 200);
+    assert.equal(output.entriesReturned, 200);
+    assert.equal(output.totalEntries, 205);
     assert.equal(entries.length, 200);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -83,7 +81,7 @@ test("local grep_files JS fallback reports factual skipped file counts", async (
 
     const grepFiles = createLocalGrepFilesTool(root, { ripgrepSearch: false });
     const grep = await grepFiles.execute({ path: ".", query: "needle" }, context);
-    const result = asRecord(asRecord(grep).result);
+    const result = asDirectToolFacts(grep);
     const matches = result.matches as readonly unknown[];
     const samples = (result.skippedSamples as readonly unknown[]).map(asRecord);
 
@@ -113,7 +111,7 @@ test("local grep_files rg engine leaves skipped facts unavailable", async () => 
     });
 
     const grep = await grepFiles.execute({ path: ".", query: "needle" }, context);
-    const result = asRecord(asRecord(grep).result);
+    const result = asDirectToolFacts(grep);
 
     assert.equal(result.engine, "rg");
     assert.equal(result.skippedFactsAvailable, false);
@@ -137,7 +135,7 @@ test("local edit_file dryRun reports replacement facts without writing", async (
       dryRun: true,
       edits: [{ oldText: "beta", newText: "BETA" }],
     }, context);
-    const result = asRecord(asRecord(edited).result);
+    const result = asDirectToolFacts(edited);
 
     assert.equal(result.dryRun, true);
     assert.equal(result.wouldReplace, 1);
@@ -194,6 +192,14 @@ function asRecord(value: unknown): Record<string, unknown> {
   assert.notEqual(value, null);
   assert.equal(Array.isArray(value), false);
   return value as Record<string, unknown>;
+}
+
+function asDirectToolFacts(value: unknown): Record<string, unknown> {
+  const output = asRecord(value);
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `workspace output must not contain ${legacyField}`);
+  }
+  return output;
 }
 
 function errorMessage(error: unknown): string {

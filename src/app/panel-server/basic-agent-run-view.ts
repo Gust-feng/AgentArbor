@@ -102,9 +102,11 @@ async function createPersistedBasicAgentRunViewReadModel(
 ): Promise<PanelBasicAgentRunViewReadModel> {
   const run = basicRunFromRuntimeSnapshot(snapshot);
   const fullReplay = basicRunReplayFromRuntimeSnapshot(snapshot);
-  const workView = createPersistedBasicAgentWorkViewReadModel(snapshot);
+  const status = panelStatusFromRuntimeStatus(snapshot.run.status);
+  const streamEvents = createPersistedStreamEvents(snapshot, status);
+  const workView = createPersistedBasicAgentWorkViewReadModel(snapshot, streamEvents);
   const replayEvents = fullReplay.events.filter((event) => event.sequence > afterSequence);
-  const detail = createPersistedBasicAgentRunDetailReadModel(snapshot);
+  const detail = createPersistedBasicAgentRunDetailReadModel(snapshot, status, streamEvents);
   return {
     run,
     agentDefinitionRef: run.agentDefinitionRef,
@@ -121,10 +123,10 @@ async function createPersistedBasicAgentRunViewReadModel(
 }
 
 function createPersistedBasicAgentRunDetailReadModel(
-  snapshot: RuntimeRunSnapshot
+  snapshot: RuntimeRunSnapshot,
+  status = panelStatusFromRuntimeStatus(snapshot.run.status),
+  streamEvents = createPersistedStreamEvents(snapshot, status),
 ): PanelBasicAgentRunDetailReadModel {
-  const status = panelStatusFromRuntimeStatus(snapshot.run.status);
-  const streamEvents = createPersistedStreamEvents(snapshot, status);
   return {
     runId: snapshot.run.runId,
     status,

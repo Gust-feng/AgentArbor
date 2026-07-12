@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { toolExecutionContinuation, toolExecutionResult } from "./tool-result-test-support.js";
+import { normalizeToolFactValue } from "../../../domain/tools/index.js";
 import {
   asRecord,
   contextAttachmentToolCenter,
@@ -77,15 +77,13 @@ test("context attachment table tools inspect and read selected CSV without expos
       TOOL_CONTEXT,
       permission
     );
-    const projected = JSON.stringify([
-      toolExecutionResult(listed),
-      toolExecutionResult(inspected),
-      toolExecutionResult(read),
-    ]);
+    const projected = JSON.stringify([listed.output, inspected.output, read.output]);
 
     assert.equal(listed.status, "completed");
     assert.equal(inspected.status, "completed");
     assert.equal(read.status, "completed");
+    assertDirectAttachmentFacts(inspected.output);
+    assertDirectAttachmentFacts(read.output);
     assert.equal(projected.includes("\"format\":\"table\""), true);
     assert.equal(projected.includes("\"canReadTable\":true"), true);
     assert.equal(projected.includes("region"), true);
@@ -137,39 +135,33 @@ test("context attachment table read returns executable row continuation facts", 
       permission
     );
     const output = asRecord(firstRead.output);
-    const result = asRecord(output.result);
     const continuation = asRecord(output.continuation);
     const nextInput = asRecord(continuation.nextInput);
-    const modelContinuation = asRecord(toolExecutionContinuation(firstRead));
-    const structuredContent = toolExecutionResult(firstRead);
-    const structuredResult = asRecord(structuredContent.result);
 
     assert.equal(firstRead.status, "completed");
     assert.equal(output.truncated, true);
-    assert.equal(result.hasMoreAfter, true);
-    assert.equal(result.nextStartRow, 3);
-    assert.equal(result.rowCount, 1);
-    assert.equal(result.path, "data/sales.csv");
-    assert.equal(result.headerRow, true);
+    assert.equal(output.hasMoreAfter, true);
+    assert.equal(output.nextStartRow, undefined);
+    assert.equal(output.rowCount, 1);
+    assert.equal(output.path, "data/sales.csv");
+    assert.equal(output.headerRow, true);
     assert.equal(nextInput.attachmentId, "ctx_project_table");
     assert.equal(nextInput.path, "data/sales.csv");
     assert.equal(nextInput.startRow, 3);
     assert.equal(nextInput.rowCount, 1);
     assert.equal(nextInput.headerRow, true);
-    assert.equal(asRecord(modelContinuation.nextInput).startRow, 3);
-    assert.equal(structuredResult.nextStartRow, 3);
-    assert.equal(asRecord(asRecord(structuredResult.continuation).nextInput).path, "data/sales.csv");
+    assertDirectAttachmentFacts(output);
 
     const secondRead = await center.execute(
       {
         callId: "call:read-table-continuation-2",
         toolName: "read_context_attachment_table",
-        input: nextInput,
+        input: normalizeToolFactValue(nextInput),
       },
       TOOL_CONTEXT,
       permission
     );
-    const secondRows = asRecord(asRecord(secondRead.output).result).rows as readonly unknown[];
+    const secondRows = asRecord(secondRead.output).rows as readonly unknown[];
 
     assert.equal(secondRead.status, "completed");
     assert.equal(asRecord(secondRows[0]).rowNumber, 3);
@@ -179,6 +171,13 @@ test("context attachment table read returns executable row continuation facts", 
     await fs.rm(projectRoot, { recursive: true, force: true });
   }
 });
+
+function assertDirectAttachmentFacts(value: unknown): void {
+  const output = asRecord(value);
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `attachment executor output must not contain ${legacyField}`);
+  }
+}
 
 test("context attachment table tools read TSV inside selected local project", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
@@ -211,7 +210,7 @@ test("context attachment table tools read TSV inside selected local project", as
         allowedTools: ["read_context_attachment_table"],
       }
     );
-    const modelVisible = JSON.stringify(toolExecutionResult(result));
+    const modelVisible = JSON.stringify(result.output);
 
     assert.equal(result.status, "completed");
     assert.equal(modelVisible.includes("tab"), true);
@@ -284,11 +283,7 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
       TOOL_CONTEXT,
       permission
     );
-    const modelVisible = JSON.stringify([
-      toolExecutionResult(listed),
-      toolExecutionResult(inspected),
-      toolExecutionResult(read),
-    ]);
+    const modelVisible = JSON.stringify([listed.output, inspected.output, read.output]);
 
     assert.equal(listed.status, "completed");
     assert.equal(inspected.status, "completed");
@@ -343,7 +338,7 @@ test("context attachment table tools report unsupported legacy XLS spreadsheet f
         allowedTools: ["inspect_context_attachment_table"],
       }
     );
-    const modelVisible = JSON.stringify(toolExecutionResult(result));
+    const modelVisible = JSON.stringify(result.output);
 
     assert.equal(result.status, "completed");
     assert.equal(modelVisible.includes("\"table\":false"), true);

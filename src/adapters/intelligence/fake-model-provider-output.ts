@@ -26,7 +26,7 @@ import {
 import { fakeGoalAnchorFromRequest } from "./fake-model-provider-common.js";
 
 export function defaultFakeStep(request: ModelRequest): FakeModelProviderStep {
-  if (request.outputContract.contractId === "desktop.agent_response.v1" || request.outputContract.contractId === "desktop.chat_response.v1") {
+  if (request.outputContract.contractId === "desktop.agent_response.v1") {
     return fakeDesktopAgentStep(request);
   }
   if (request.outputContract.contractId === "desktop.context_compaction.v1") {

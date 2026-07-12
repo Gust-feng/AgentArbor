@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ToolCallResult, ToolExecutor } from "../../domain/tools/index.js";
+import type { ToolCallRequest, ToolCallResult, ToolExecutor } from "../../domain/tools/index.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { ToolCenter } from "./tool-center.js";
 
@@ -111,35 +111,35 @@ test("ToolCenter gates any tool metadata that requires confirmation before execu
     deletes += 1;
     return { ok: true };
   }, "read-write", { requiresConfirmation: true }));
-  center.register(testTool("run_command", async () => {
+  center.register(testTool("shell_command", async () => {
     executes += 1;
     return { ok: true };
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-  const write = await center.execute({ callId: "call-write", toolName: "custom_write", input: {} }, context, allowTools("custom_write", "delete_file", "run_command"));
+  const write = await center.execute({ callId: "call-write", toolName: "custom_write", input: {} }, context, allowTools("custom_write", "delete_file", "shell_command"));
   const deleteResult = await center.execute(
     { callId: "call-delete", toolName: "delete_file", input: { path: "notes.txt" } },
     context,
-    allowTools("custom_write", "delete_file", "run_command")
+    allowTools("custom_write", "delete_file", "shell_command")
   );
   const execute = await center.execute(
-    { callId: "call-exec", toolName: "run_command", input: { commandLine: "pnpm test" } },
+    { callId: "call-exec", toolName: "shell_command", input: { commandLine: "pnpm test" } },
     context,
-    allowTools("custom_write", "delete_file", "run_command")
+    allowTools("custom_write", "delete_file", "shell_command")
   );
 
   assert.equal(write.status, "completed");
   assert.equal(deleteResult.status, "approval_required");
   assert.equal(execute.status, "approval_required");
-  assert.equal(deleteResult.error, "等待确认：删除文件：notes.txt");
-  assert.equal(execute.error, "等待确认：运行命令：pnpm test");
+  assert.equal(deleteResult.error, undefined);
+  assert.equal(execute.error, undefined);
   assert.equal(deleteResult.confirmationRequest?.confirmationId, "confirmation-call-delete");
   assert.equal(deleteResult.confirmationRequest?.affectedResources[0], "notes.txt");
   assert.equal(deleteResult.confirmationRequest?.consequence, "目标：notes.txt。批准后只执行本次删除文件。");
   assert.equal(execute.confirmationRequest?.confirmationId, "confirmation-call-exec");
   assert.equal(execute.confirmationRequest?.affectedResources[0], "pnpm test");
-  assert.equal(execute.confirmationRequest?.consequence, "目标：pnpm test。批准后只执行本次运行命令。");
+  assert.equal(execute.confirmationRequest?.consequence, "目标：pnpm test。批准后只执行本次Shell 命令。");
   assert.equal(writes, 1);
   assert.equal(deletes, 0);
   assert.equal(executes, 0);
@@ -150,7 +150,7 @@ test("ToolCenter keeps shell_command behind confirmation until the same confirma
   const center = new ToolCenter({ platform: "win32" });
   center.register(testTool("shell_command", async () => {
     executes += 1;
-    return { summary: "safe command summary" };
+    return { commandLine: "pnpm test", exitCode: 0 };
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
   const request = {
@@ -175,7 +175,7 @@ test("ToolCenter keeps shell_command behind confirmation until the same confirma
   assert.equal(pending.confirmationRequest?.actionSummary, "Shell 命令：pnpm test");
   assert.equal(result.status, "completed");
   assert.equal(executes, 1);
-  assert.deepEqual(result.output, { summary: "safe command summary" });
+  assert.deepEqual(result.output, { commandLine: "pnpm test", exitCode: 0 });
 });
 
 test("ToolCenter can accept a tool executor supplied approval_required result", async () => {
@@ -190,6 +190,8 @@ test("ToolCenter can accept a tool executor supplied approval_required result", 
       status: "approval_required",
       error: "Delegated tool requires approval.",
       durationMs: 12,
+      projection: { legacy: true },
+      envelope: { legacy: true },
       confirmationRequest: {
         confirmationId: "confirmation-inner-call",
         runId: "inner-call",
@@ -199,6 +201,7 @@ test("ToolCenter can accept a tool executor supplied approval_required result", 
         riskLevel: "high",
         requestedAt: "2026-06-30T00:00:00.000Z",
         sourceRefs: ["tool:inner-call"],
+        display: { legacy: true },
       },
     },
   })));
@@ -212,8 +215,104 @@ test("ToolCenter can accept a tool executor supplied approval_required result", 
   assert.equal(result.status, "approval_required");
   assert.equal(result.callId, "call-parent");
   assert.deepEqual(result.input, { task: "delegate" });
+  assert.equal(result.output, undefined);
+  assert.equal(result.error, undefined);
+  assert.equal("projection" in result, false);
+  assert.equal("envelope" in result, false);
   assert.equal(result.confirmationRequest?.confirmationId, "confirmation-inner-call");
   assert.deepEqual(result.confirmationRequest?.affectedResources, ["inner-resource"]);
+  assert.equal(result.confirmationRequest === undefined ? true : "display" in result.confirmationRequest, false);
+});
+
+test("ToolCenter rebuilds explicit failed results with JSON-safe error facts", async () => {
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  const center = new ToolCenter();
+  center.register(testTool("explicit_failure", async (_input, context) => ({
+    kind: "tool_call_result",
+    result: {
+      callId: context.toolCallId ?? "missing-call-id",
+      toolName: "explicit_failure",
+      input: { stale: true },
+      output: { observed: true },
+      status: "failed",
+      error: "explicit failure",
+      errorDomain: "invalid-domain",
+      errorFacts: {
+        nonFinite: Number.NaN,
+        infinity: Number.POSITIVE_INFINITY,
+        bigint: 7n,
+        circular,
+      },
+      durationMs: -1,
+      projection: { legacy: true },
+      envelope: { legacy: true },
+      display: { legacy: true },
+    },
+  })));
+
+  const result = await center.execute(
+    { callId: "call-explicit-failure", toolName: "explicit_failure", input: { current: true } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("explicit_failure")
+  );
+
+  assert.equal(result.status, "failed");
+  assert.deepEqual(result.input, { current: true });
+  assert.deepEqual(result.output, { observed: true });
+  assert.equal(result.errorDomain, "tool_error");
+  assert.equal(result.errorFacts?.nonFinite, "NaN");
+  assert.equal(result.errorFacts?.infinity, "Infinity");
+  assert.equal(result.errorFacts?.bigint, "7n");
+  assert.deepEqual(result.errorFacts?.circular, { self: "[circular]" });
+  assert.equal(result.durationMs >= 0, true);
+  assert.equal("projection" in result, false);
+  assert.equal("envelope" in result, false);
+  assert.equal("display" in result, false);
+  assert.doesNotThrow(() => JSON.stringify(result));
+});
+
+test("ToolCenter rejects invalid explicit statuses and approval requests", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("invalid_status", async () => ({
+    kind: "tool_call_result",
+    result: {
+      callId: "inner-status",
+      toolName: "invalid_status",
+      input: {},
+      output: { observed: true },
+      status: "done",
+      durationMs: 1,
+    },
+  })));
+  center.register(testTool("invalid_approval", async () => ({
+    kind: "tool_call_result",
+    result: {
+      callId: "inner-approval",
+      toolName: "invalid_approval",
+      input: {},
+      output: { paused: true },
+      status: "approval_required",
+      durationMs: 1,
+    },
+  })));
+
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+  const invalidStatus = await center.execute(
+    { callId: "call-invalid-status", toolName: "invalid_status", input: {} },
+    context,
+    allowTools("invalid_status")
+  );
+  const invalidApproval = await center.execute(
+    { callId: "call-invalid-approval", toolName: "invalid_approval", input: {} },
+    context,
+    allowTools("invalid_approval")
+  );
+
+  assert.equal(invalidStatus.status, "failed");
+  assert.equal(invalidStatus.errorFacts?.code, "invalid_tool_result_status");
+  assert.equal(invalidApproval.status, "failed");
+  assert.equal(invalidApproval.errorFacts?.code, "invalid_tool_confirmation_request");
 });
 
 test("ToolCenter lets full access mode execute confirmation-gated shell commands", async () => {
@@ -221,7 +320,7 @@ test("ToolCenter lets full access mode execute confirmation-gated shell commands
   const center = new ToolCenter({ platform: "win32" });
   center.register(testTool("shell_command", async () => {
     executes += 1;
-    return { summary: "safe command summary" };
+    return { commandLine: "pnpm test", exitCode: 0 };
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
@@ -264,18 +363,14 @@ test("ToolCenter executes the same non-command tool call only after matching con
   assert.equal(deletes, 1);
 });
 
-test("ToolCenter adds typed display projections for command output without redaction", async () => {
+test("tool display projection preserves command facts without redaction", async () => {
   const center = new ToolCenter();
   center.register(testTool("shell_command", async () => ({
-    action: "shell_command",
-    summary: "pnpm test · exit 0",
-    result: {
-      command: "pnpm",
-      args: ["test"],
-      exitCode: 0,
-      stdout: "ok\nAuthorization: Bearer sk-test-secret-token",
-      stderr: "",
-    },
+    command: "pnpm",
+    args: ["test"],
+    exitCode: 0,
+    stdout: "ok\nAuthorization: Bearer sk-test-secret-token",
+    stderr: "",
   }), "read-only"));
 
   const result = await center.execute(
@@ -290,12 +385,11 @@ test("ToolCenter adds typed display projections for command output without redac
   assert.equal(JSON.stringify(display).includes("sk-test-secret-token"), true);
 });
 
-test("ToolCenter adds typed display projections for search results", async () => {
+test("tool display projection preserves search facts", async () => {
   const center = new ToolCenter();
   center.register(testTool("search", async () => ({
-    action: "search",
     query: "AgentArbor",
-    status: "completed",
+    researchStatus: "completed",
     results: [
       {
         refId: "research:web:one",
@@ -319,17 +413,13 @@ test("ToolCenter adds typed display projections for search results", async () =>
   assert.equal(display.kind === "search_results" ? display.results[0]?.title : "", "AgentArbor result");
 });
 
-test("ToolCenter file diff display ignores legacy oldText/newText preview fields", async () => {
+test("tool display projection ignores oldText/newText preview fields", async () => {
   const center = new ToolCenter({ platform: "linux" });
   center.register(testTool("edit_file", async () => ({
-    action: "edit_file",
-    summary: "notes.md · 32 -> 18 chars · 1 replacement",
-    result: {
-      path: "notes.md",
-      previousLength: 32,
-      nextLength: 18,
-      replacements: 1,
-    },
+    path: "notes.md",
+    previousLength: 32,
+    nextLength: 18,
+    replacements: 1,
   }), "read-write"));
 
   const result = await center.execute(
@@ -359,14 +449,10 @@ test("ToolCenter file diff display ignores legacy oldText/newText preview fields
 test("ToolCenter file diff display exposes bounded edit preview without redaction", async () => {
   const center = new ToolCenter({ platform: "linux" });
   center.register(testTool("edit_file", async () => ({
-    action: "edit_file",
-    summary: "notes.md · 32 -> 36 chars · 1 replacement",
-    result: {
-      path: "notes.md",
-      previousLength: 32,
-      nextLength: 36,
-      replacements: 1,
-    },
+    path: "notes.md",
+    previousLength: 32,
+    nextLength: 36,
+    replacements: 1,
   }), "read-write"));
 
   const result = await center.execute(
@@ -394,14 +480,10 @@ test("ToolCenter file diff display exposes bounded edit preview without redactio
 test("ToolCenter file diff display prefers precise edit parameters in preview labels", async () => {
   const center = new ToolCenter({ platform: "linux" });
   center.register(testTool("edit_file", async () => ({
-    action: "edit_file",
-    summary: "notes.md · 20 -> 22 chars · 1 replacement",
-    result: {
-      path: "notes.md",
-      previousLength: 20,
-      nextLength: 22,
-      replacements: 1,
-    },
+    path: "notes.md",
+    previousLength: 20,
+    nextLength: 22,
+    replacements: 1,
   }), "read-write"));
 
   const result = await center.execute(
@@ -428,12 +510,8 @@ test("ToolCenter file diff display prefers precise edit parameters in preview la
 test("ToolCenter file change display exposes bounded create preview without redaction", async () => {
   const center = new ToolCenter({ platform: "linux" });
   center.register(testTool("create_file", async () => ({
-    action: "create_file",
-    summary: "created.md · 42 bytes · created",
-    result: {
-      path: "created.md",
-      bytes: 42,
-    },
+    path: "created.md",
+    bytes: 42,
   }), "read-write"));
 
   const result = await center.execute(
@@ -490,9 +568,9 @@ test("ToolCenter list returns cloned metadata", () => {
   center.register(testTool("read_file", async () => ({ ok: true }), "read-only"));
 
   const listed = center.list();
-  (listed[0]!.metadata!.visibleResultPolicy as { maxPreviewChars: number }).maxPreviewChars = 1;
+  (listed[0]!.metadata as { category: string }).category = "web";
 
-  assert.equal(center.list()[0]?.metadata?.visibleResultPolicy.maxPreviewChars, 800);
+  assert.equal(center.list()[0]?.metadata?.category, "other");
 });
 
 test("ToolCenter list returns cloned model contracts", () => {
@@ -531,6 +609,74 @@ test("ToolCenter list returns cloned model contracts", () => {
   assert.equal(fresh.runtimeHints?.[0]?.value, "current workspace");
 });
 
+test("ToolCenter keeps undefined as a valid completed result", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("no_result", async () => undefined));
+
+  const result = await center.execute(
+    { callId: "call-no-result", toolName: "no_result", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("no_result")
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.output, undefined);
+});
+
+test("ToolCenter fails non-JSON-safe executor results at the fact boundary", async () => {
+  for (const [name, output, expectedPath] of [
+    ["cycle", (() => { const value: Record<string, unknown> = {}; value.self = value; return value; })(), "$.self"],
+    ["bigint", { value: 1n }, "$.value"],
+    ["function", { value: () => undefined }, "$.value"],
+  ] as const) {
+    const center = new ToolCenter();
+    center.register(testTool(name, async () => output));
+
+    const result = await center.execute(
+      { callId: `call-${name}`, toolName: name, input: {} },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      allowTools(name)
+    );
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.output, undefined);
+    assert.equal(result.errorDomain, "runtime_error");
+    assert.equal(result.errorFacts?.code, "invalid_tool_output_fact");
+    assert.equal(result.errorFacts?.phase, "output");
+    assert.equal(result.errorFacts?.path, expectedPath);
+    assert.match(result.error ?? "", /not JSON-safe/);
+  }
+});
+
+test("ToolCenter rejects non-JSON-safe input before invoking an executor", async () => {
+  let executions = 0;
+  const center = new ToolCenter();
+  center.register(testTool("input_contract", async () => {
+    executions += 1;
+    return { ok: true };
+  }));
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+
+  const result = await center.execute(
+    {
+      callId: "call-invalid-input",
+      toolName: "input_contract",
+      input: circular as unknown as ToolCallRequest["input"],
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("input_contract")
+  );
+
+  assert.equal(executions, 0);
+  assert.equal(result.status, "failed");
+  assert.equal(result.input, undefined);
+  assert.equal(result.errorDomain, "runtime_error");
+  assert.equal(result.errorFacts?.code, "invalid_tool_input_fact");
+  assert.equal(result.errorFacts?.phase, "input");
+  assert.equal(result.errorFacts?.path, "$.self");
+});
+
 function testTool(
   name: string,
   execute: ToolExecutor["execute"],
@@ -546,11 +692,6 @@ function testTool(
         riskLevel: operationType === "read-only" ? "low" : "high",
         operationType,
         requiresConfirmation: options.requiresConfirmation ?? false,
-        visibleResultPolicy: {
-          userVisible: "summary-only",
-          maxPreviewChars: 800,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",

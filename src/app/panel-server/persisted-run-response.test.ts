@@ -4,11 +4,14 @@ import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } f
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
 import {
   createPersistedPanelRunResponse,
+  createPersistedStreamEvents,
   panelStatusFromRuntimeStatus,
 } from "./persisted-run-response.js";
+import { OrdinaryRuntimeSnapshotContractError } from "../basic-agent-runtime/persistence-snapshot-contract.js";
 import { displayActivityItemsForNodes } from "../panel-read-model/transcript/panel-transcript-activity-copy.js";
 import { activityVisibleNodes } from "../panel-read-model/transcript/panel-transcript-node-projection.js";
 import { createRunCapabilityPlan } from "../model-capability-registry.js";
+import { toolStreamDetail, toolSummary } from "../panel-read-model/run/panel-stream-tool-projection.js";
 
 test("persisted run response restores safe transcript and tracking projections", () => {
   const response = createPersistedPanelRunResponse({
@@ -76,9 +79,24 @@ test("persisted run response restores ordinary tool transcript from factual reco
     snapshot: {
       ...runtimeSnapshot(),
       events: [
-        runtimeEvent(1, "tool.completed", "运行命令：dir · exit 0", [{ kind: "tool_call", id: "tool-command" }]),
-        runtimeEvent(2, "tool.completed", "目标：README.md · 120 bytes", [{ kind: "tool_call", id: "tool-file" }]),
-        runtimeEvent(3, "tool.completed", "notes.md · 32 -> 18 chars · 1 replacement", [{ kind: "tool_call", id: "tool-edit" }]),
+        runtimeEvent(1, "tool.completed", "运行命令：dir · exit 0", [{ kind: "tool_call", id: "tool-command" }], {
+          callId: "tool-command",
+          toolName: "shell_command",
+          input: { command: "dir" },
+          output: { command: "dir", exitCode: 0 },
+        }),
+        runtimeEvent(2, "tool.completed", "目标：README.md · 120 bytes", [{ kind: "tool_call", id: "tool-file" }], {
+          callId: "tool-file",
+          toolName: "read_file",
+          input: { path: "README.md" },
+          output: { path: "README.md", bytes: 120 },
+        }),
+        runtimeEvent(3, "tool.completed", "notes.md · 32 -> 18 chars · 1 replacement", [{ kind: "tool_call", id: "tool-edit" }], {
+          callId: "tool-edit",
+          toolName: "edit_file",
+          input: { path: "notes.md" },
+          output: { path: "notes.md", replacements: 1, preview: "- old\n+ new" },
+        }),
       ],
       modelCalls: [],
       toolCalls: [
@@ -87,11 +105,6 @@ test("persisted run response restores ordinary tool transcript from factual reco
           runId: "run-1",
           toolName: "shell_command",
           status: "completed",
-          action: "执行 Shell",
-          command: "dir",
-          exitCode: 0,
-          summary: "运行命令：dir · exit 0",
-          preview: "运行命令：dir · exit 0",
           eventRefs: ["run-1:event:1"],
         },
         {
@@ -99,10 +112,6 @@ test("persisted run response restores ordinary tool transcript from factual reco
           runId: "run-1",
           toolName: "read_file",
           status: "completed",
-          action: "读取文件",
-          path: "README.md",
-          summary: "目标：README.md · 120 bytes",
-          preview: "目标：README.md · 120 bytes",
           eventRefs: ["run-1:event:2"],
         },
         {
@@ -110,10 +119,6 @@ test("persisted run response restores ordinary tool transcript from factual reco
           runId: "run-1",
           toolName: "edit_file",
           status: "completed",
-          action: "编辑文件",
-          path: "notes.md",
-          summary: "notes.md · 32 -> 18 chars · 1 replacement",
-          preview: "- old\n+ new",
           eventRefs: ["run-1:event:3"],
         },
       ],
@@ -124,12 +129,38 @@ test("persisted run response restores ordinary tool transcript from factual reco
   });
   const activityText = JSON.stringify(displayActivityItemsForNodes(activityVisibleNodes(response.transcriptNodes)));
 
-  assert.equal(response.transcript.events.some((event) => event.summary === "dir"), true);
+  assert.equal(response.transcript.events.some((event) =>
+    event.detail?.display?.kind === "command_summary" && event.detail.display.commandLine === "dir"
+  ), true);
   assert.equal(response.transcript.events.some((event) => event.detail?.preview === "README.md"), true);
   assert.equal(response.transcriptNodes.some((node) => node.summary?.includes("notes.md")), true);
   assert.equal(response.transcript.events.some((event) => event.detail?.preview?.includes("- old")), true);
   assert.equal(response.transcript.events.some((event) => event.detail?.preview?.includes("+ new")), true);
   assert.equal(activityText.includes("README.md"), true);
+});
+
+test("persisted tool stream derives the same display from lifecycle facts", () => {
+  const payload = {
+    callId: "tool-read-parity",
+    toolName: "read_file",
+    input: { path: "README.md" },
+    output: {
+      path: "README.md",
+      bytes: 120,
+    },
+    durationMs: 4,
+  } as const;
+  const snapshot = {
+    ...runtimeSnapshot(),
+    events: [
+      runtimeEvent(1, "tool.completed", "legacy summary must not own display", [{ kind: "tool_call", id: payload.callId }], payload),
+    ],
+  };
+  const restored = createPersistedStreamEvents(snapshot, "completed")
+    .find((event) => event.type === "tool.completed");
+
+  assert.deepEqual(restored?.detail, toolStreamDetail("tool.completed", payload));
+  assert.equal(restored?.summary, toolSummary("tool.completed", payload));
 });
 
 test("persisted run response restores model failures as typed failed events", () => {
@@ -148,8 +179,18 @@ test("persisted run response restores model failures as typed failed events", ()
           message: "工具已执行，但后续模型续跑失败。模型服务连接失败。",
         },
       },
+      basicRun: {
+        ...base.basicRun!,
+        status: "failed",
+      },
+      basicEvents: basicEventsForStatus("failed"),
       events: [
-        runtimeEvent(1, "tool.completed", "python hello_agent.py · exit 0", [{ kind: "tool_call", id: "tool-1" }]),
+        runtimeEvent(1, "tool.completed", "python hello_agent.py · exit 0", [{ kind: "tool_call", id: "tool-1" }], {
+          callId: "tool-1",
+          toolName: "shell_command",
+          input: { command: "python hello_agent.py" },
+          output: { command: "python hello_agent.py", exitCode: 0 },
+        }),
         runtimeEvent(2, "model.failed", "模型服务连接失败。", [{ kind: "model_call", id: "model-1" }]),
       ],
       modelCalls: [
@@ -255,6 +296,11 @@ test("persisted blocked ordinary responses explain the new-turn recovery path", 
           message: "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。",
         },
       },
+      basicRun: {
+        ...runtimeSnapshot().basicRun!,
+        status: "blocked",
+      },
+      basicEvents: basicEventsForStatus("blocked"),
     },
     config: modelConfig(),
     informationAccess: informationAccess(),
@@ -289,8 +335,30 @@ test("persisted run response exposes full restored answer separately from summar
 });
 
 test("persisted user-action statuses restore concrete confirmation without generic waiting points", () => {
+  const approvalSnapshot = runtimeSnapshotWithStatus("approval_needed");
   const approval = createPersistedPanelRunResponse({
-    snapshot: runtimeSnapshotWithStatus("approval_needed"),
+    snapshot: {
+      ...approvalSnapshot,
+      events: [
+        ...approvalSnapshot.events,
+        runtimeEvent(
+          10,
+          "user_approval.requested",
+          "legacy event summary must not duplicate the confirmation",
+          [{ kind: "tool_call", id: "tool-pending" }],
+          {
+            callId: "tool-pending",
+            toolName: "shell_command",
+            confirmationId: "confirmation-pending",
+          },
+        ),
+      ],
+      confirmations: approvalSnapshot.confirmations.map((confirmation) => ({
+        ...confirmation,
+        toolCallId: "tool-pending",
+        toolName: "shell_command",
+      })),
+    },
     config: modelConfig(),
     informationAccess: informationAccess(),
   });
@@ -305,9 +373,10 @@ test("persisted user-action statuses restore concrete confirmation without gener
   assert.equal(approval.tracking.run.phase, "agent");
   assert.equal(approval.trace.waitingPoint, "");
   assert.equal(approval.tracking.run.waitingPoint, "");
-  assert.equal(approval.transcript.events.some((event) => event.type === "confirmation.needed"), true);
+  assert.equal(approval.transcript.events.filter((event) => event.type === "confirmation.needed").length, 1);
   assert.equal(approval.transcript.events.at(-1)?.type, "confirmation.needed");
   assert.equal(approval.transcript.events.at(-1)?.summary, "删除文件：old.txt");
+  assert.deepEqual(approval.transcript.events.at(-1)?.toolCallRefs, ["tool-pending"]);
   assert.equal(needsInput.status, "needs_input");
   assert.equal(needsInput.trace.waitingPoint, "");
   assert.equal(needsInput.tracking.run.waitingPoint, "");
@@ -317,10 +386,44 @@ test("persisted user-action statuses restore concrete confirmation without gener
 });
 
 test("persisted ordinary responses omit restored approved confirmations from visible streams", () => {
-  const base = runtimeSnapshot();
+  const base = runtimeSnapshotWithStatus("blocked");
   const response = createPersistedPanelRunResponse({
     snapshot: {
       ...base,
+      run: {
+        ...base.run,
+        stopReason: "confirmation_continuation_lost",
+        continuationAvailability: "lost_after_restart",
+        error: {
+          code: "confirmation_continuation_lost",
+          message: "这次操作无法原地继续。",
+        },
+      },
+      events: [
+        ...base.events,
+        runtimeEvent(
+          10,
+          "user_approval.requested",
+          "等待批准",
+          [{ kind: "tool_call", id: "tool-approved" }],
+          {
+            callId: "tool-approved",
+            toolName: "shell_command",
+            confirmationId: "confirmation-approved",
+          },
+        ),
+        runtimeEvent(
+          11,
+          "user_approval.requested",
+          "等待拒绝",
+          [{ kind: "tool_call", id: "tool-denied" }],
+          {
+            callId: "tool-denied",
+            toolName: "delete_file",
+            confirmationId: "confirmation-denied",
+          },
+        ),
+      ],
       confirmations: [
         {
           confirmationId: "confirmation-approved",
@@ -331,6 +434,8 @@ test("persisted ordinary responses omit restored approved confirmations from vis
           actionSummary: "运行命令：pnpm test",
           affectedResources: [],
           riskLevel: "medium",
+          toolCallId: "tool-approved",
+          toolName: "shell_command",
           requestedAt: "2026-05-31T00:00:04.000Z",
           decidedAt: "2026-05-31T00:00:05.000Z",
           eventRefs: ["confirmation:confirmation-approved"],
@@ -344,6 +449,8 @@ test("persisted ordinary responses omit restored approved confirmations from vis
           actionSummary: "删除文件：old.txt",
           affectedResources: [],
           riskLevel: "medium",
+          toolCallId: "tool-denied",
+          toolName: "delete_file",
           requestedAt: "2026-05-31T00:00:06.000Z",
           decidedAt: "2026-05-31T00:00:07.000Z",
           eventRefs: ["confirmation:confirmation-denied"],
@@ -358,11 +465,14 @@ test("persisted ordinary responses omit restored approved confirmations from vis
     nodes: response.transcriptNodes,
   });
 
+  assert.equal(response.transcript.events.filter((event) => event.type === "confirmation.needed").length, 1);
+  assert.equal(response.transcript.events.find((event) => event.type === "confirmation.needed")?.summary, "等待拒绝");
   assert.equal(response.transcript.events.some((event) => event.type === "run.resumed"), false);
   assert.equal(response.transcript.events.some((event) => event.summary === "已继续。"), false);
   assert.equal(response.transcript.events.some((event) => event.type === "user_approval.received"), true);
   assert.equal(response.transcript.events.find((event) => event.type === "user_approval.received")?.agentLabel, "用户");
   assert.equal(serialized.includes("继续处理"), false);
+  assert.equal(serialized.includes("等待批准"), false);
   assert.equal(serialized.includes("已不执行"), true);
 });
 
@@ -443,6 +553,57 @@ test("persisted terminal run responses keep frozen run facts instead of current 
   }
 });
 
+test("persisted Ordinary response rejects snapshots missing frozen run facts", () => {
+  const snapshot = runtimeSnapshot();
+  assert.throws(
+    () => createPersistedPanelRunResponse({
+      snapshot: {
+        ...snapshot,
+        run: {
+          ...snapshot.run,
+          capabilitySnapshot: undefined,
+          informationAccess: undefined,
+        },
+      },
+      config: modelConfig(),
+      informationAccess: informationAccess(),
+    }),
+    (error: unknown) => {
+      assert.equal(error instanceof OrdinaryRuntimeSnapshotContractError, true);
+      const contractError = error as OrdinaryRuntimeSnapshotContractError;
+      assert.equal(contractError.code, "ordinary_runtime_snapshot_invalid");
+      assert.deepEqual(contractError.missingFacts, [
+        "run.capabilitySnapshot",
+        "run.informationAccess",
+      ]);
+      return true;
+    }
+  );
+});
+
+test("persisted Legacy Underground response keeps its owner-scoped Host fallback", () => {
+  const snapshot = runtimeSnapshot();
+  const response = createPersistedPanelRunResponse({
+    snapshot: {
+      ...snapshot,
+      run: {
+        ...snapshot.run,
+        runKind: "underground",
+        runMode: "deep",
+        capabilitySnapshot: undefined,
+        informationAccess: undefined,
+      },
+      basicRun: undefined,
+      basicEvents: [],
+    },
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+
+  assert.equal(response.config.profileId, "fake");
+  assert.deepEqual(response.informationAccess.sourcePreference, ["docs"]);
+});
+
 function runtimeSnapshot(): RuntimeRunSnapshot {
   return {
     run: {
@@ -482,12 +643,44 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
       selectedAt: "2026-05-31T00:00:00.000Z",
       updatedAt: "2026-05-31T00:00:00.000Z",
     },
-    basicEvents: [],
+    basicRun: {
+      runId: "run-1",
+      conversationId: "conversation-1",
+      title: "已完成",
+      goalSummary: "Safe task",
+      status: "completed",
+      runMode: "agent",
+      agentDefinitionRef: {
+        agentId: "custom-restored-agent",
+        agentDisplayName: "Custom Restored Agent",
+        promptRef: "prompt:custom-restored-agent:v1",
+        promptVersion: "1",
+        outputContractId: "desktop.agent_response.v1",
+        toolVisibilityProfileId: "custom-restored-agent:ordinary-visible-tools:v1",
+      },
+      createdAt: "2026-05-31T00:00:00.000Z",
+      updatedAt: "2026-05-31T00:00:10.000Z",
+      requiresUserAction: false,
+      eventCursor: {
+        lastSequence: 2,
+        eventCount: 2,
+      },
+    },
+    basicEvents: basicEventsForStatus("completed"),
     events: [
       runtimeEvent(1, "goal.received", "收到任务", []),
       runtimeEvent(2, "model.requested", "正在判断下一步", [{ kind: "model_call", id: "model-1" }]),
-      runtimeEvent(3, "tool.requested", "准备运行命令", [{ kind: "tool_call", id: "tool-1" }]),
-      runtimeEvent(4, "tool.completed", "命令已完成", [{ kind: "tool_call", id: "tool-1" }]),
+      runtimeEvent(3, "tool.requested", "准备运行命令", [{ kind: "tool_call", id: "tool-1" }], {
+        callId: "tool-1",
+        toolName: "shell_command",
+        input: { command: "pnpm test" },
+      }),
+      runtimeEvent(4, "tool.completed", "命令已完成", [{ kind: "tool_call", id: "tool-1" }], {
+        callId: "tool-1",
+        toolName: "shell_command",
+        input: { command: "pnpm test" },
+        output: { command: "pnpm test", exitCode: 0, stdout: "测试通过" },
+      }),
       runtimeEvent(5, "agent.delegation.planned", "已形成 legacy delegation", [{ kind: "agent_delegation", id: "delegation-legacy" }]),
       runtimeEvent(6, "agent.child.started", "已启动 legacy child", [{ kind: "agent_run", id: "child-run-legacy" }]),
       runtimeEvent(7, "agent.parent_synthesis.completed", "已完成 legacy parent synthesis", [{ kind: "parent_synthesis", id: "parent-synthesis-legacy" }]),
@@ -513,11 +706,6 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
         runId: "run-1",
         toolName: "shell_command",
         status: "completed",
-        action: "执行 Shell",
-        command: "pnpm test",
-        exitCode: 0,
-        summary: "命令完成",
-        preview: "测试通过",
         eventRefs: ["run-1:event:3", "run-1:event:4"],
       },
     ],
@@ -553,6 +741,12 @@ function runtimeSnapshotWithStatus(status: RuntimeRunSnapshot["run"]["status"]):
       resultTitle: undefined,
       resultSummary: undefined,
     },
+    basicRun: {
+      ...snapshot.basicRun!,
+      status: basicRunStatusForRuntimeStatus(status),
+      requiresUserAction: status === "approval_needed" || status === "needs_input" || status === "blocked",
+    },
+    basicEvents: basicEventsForStatus(status),
     confirmations: status === "approval_needed"
       ? [
           {
@@ -570,6 +764,59 @@ function runtimeSnapshotWithStatus(status: RuntimeRunSnapshot["run"]["status"]):
         ]
       : [],
   };
+}
+
+function basicEventsForStatus(
+  status: RuntimeRunSnapshot["run"]["status"]
+): RuntimeRunSnapshot["basicEvents"] {
+  const events: Array<RuntimeRunSnapshot["basicEvents"][number]> = [
+    {
+      id: "run-1:basic:started",
+      runId: "run-1",
+      sequence: 1,
+      type: "run.started",
+      title: "任务",
+      summary: "已开始。",
+      status: "running",
+      timestamp: "2026-05-31T00:00:00.000Z",
+      refs: [],
+      visibility: "compact",
+    },
+  ];
+  const terminal = status === "completed"
+    ? { type: "final.result", title: "结果", summary: "安全结果摘要", status: "completed" as const }
+    : status === "failed"
+      ? { type: "run.failed", title: "未完成", summary: "运行失败。", status: "failed" as const }
+      : status === "cancelled"
+        ? { type: "run.cancelled", title: "已取消", summary: "运行已取消。", status: "cancelled" as const }
+        : status === "blocked"
+          ? { type: "run.blocked", title: "需要处理", summary: "运行已阻塞。", status: "blocked" as const }
+          : undefined;
+  if (terminal !== undefined) {
+    events.push({
+      id: `run-1:basic:${terminal.type}`,
+      runId: "run-1",
+      sequence: 2,
+      ...terminal,
+      timestamp: "2026-05-31T00:00:10.000Z",
+      refs: [],
+      visibility: "compact",
+    });
+  }
+  return events;
+}
+
+function basicRunStatusForRuntimeStatus(
+  status: RuntimeRunSnapshot["run"]["status"]
+): NonNullable<RuntimeRunSnapshot["basicRun"]>["status"] {
+  if (status === "pending") return "queued";
+  if (status === "running") return "running";
+  if (status === "approval_needed") return "approval_needed";
+  if (status === "needs_input") return "needs_input";
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
+  return "blocked";
 }
 
 function frozenCapabilitySnapshot(): NonNullable<RuntimeRunSnapshot["run"]["capabilitySnapshot"]> {
@@ -676,7 +923,8 @@ function runtimeEvent(
   sequence: number,
   type: RuntimeRunSnapshot["events"][number]["type"],
   summary: string,
-  refs: RuntimeRunSnapshot["events"][number]["refs"]
+  refs: RuntimeRunSnapshot["events"][number]["refs"],
+  payload?: RuntimeRunSnapshot["events"][number]["payload"],
 ): RuntimeRunSnapshot["events"][number] {
   return {
     eventId: `run-1:event:${sequence}`,
@@ -688,6 +936,7 @@ function runtimeEvent(
     severity: "info",
     progress: { status: "completed", label: "Completed" },
     refs,
+    payload,
     traceId: "trace-1",
     intent: type.replaceAll(".", "_"),
     createdAt: "2026-05-31T00:00:00.000Z",

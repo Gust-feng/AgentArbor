@@ -24,7 +24,11 @@
  * `runMode: "deep"` 仅表示编排策略选择，通过 RuntimeRunRecord.runMode 复用
  * 现有枚举（{@link DEEP_RUN_MODE}），不在此引入新的 runMode 语义。
  */
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
+import type {
+  BasicAgentCapabilitySnapshot,
+  SanitizedInformationAccessConfig,
+} from "../../domain/config/index.js";
+import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import type {
   AgentRunTree,
@@ -163,6 +167,17 @@ export type DeepRunStatus =
   | "failed";
 
 /**
+ * Frozen run-start facts required by post-terminal child continuation and parent
+ * resynthesis. These facts are durable because a completed run must not depend
+ * on process-local maps or the host's later configuration.
+ */
+export type DeepRunContinuationFacts = {
+  readonly informationAccess: SanitizedInformationAccessConfig;
+  readonly permissionBoundaryRefs: readonly string[];
+  readonly confirmationPolicy: ToolConfirmationPolicy;
+};
+
+/**
  * DeepRun —— 一次 deep 运行的执行记录。对应一棵 AgentRunTree，由 DeepRunExecutor
  * 驱动 manager 决策循环产出。run 级元数据；run tree 持久化形态由
  * {@link DeepExplorationReport}.agentRunTree 承载（T2-6）。
@@ -183,6 +198,8 @@ export type DeepRun = {
   readonly aiMode?: ModelRuntimeMode;
   /** run 启动时冻结的能力快照（FR-003，保证运行中能力边界稳定）。 */
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  /** 新运行必须持久化；缺失时 post-terminal continuation 必须诚实失败。 */
+  readonly continuationFacts?: DeepRunContinuationFacts;
   readonly startedAt: string;
   readonly updatedAt: string;
   readonly completedAt?: string;

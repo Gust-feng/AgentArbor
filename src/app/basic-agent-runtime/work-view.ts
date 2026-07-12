@@ -2,7 +2,6 @@ import type {
   ContextLedger,
   ContextLedgerSkillFacts,
   AgentDeliverable,
-  AgentDeliverableSection,
   BasicAgentRun,
   ConfirmationRequest,
   DesktopWorkViewAnswer,
@@ -12,7 +11,6 @@ import type {
   SkillSelectionDecisionFacts,
   SkillSelectionDecisionReason,
   TranscriptNode,
-  ToolCallEvidence,
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef, ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { SubAgentRunView } from "../../domain/sub-agents/contracts.js";
@@ -30,7 +28,6 @@ import {
 import {
   contextAttachmentsFor,
   contextLedgerFor,
-  normalizeToolEvidence,
   isToolDisplay,
   mergeToolDisplays,
   observationRefs,
@@ -67,30 +64,7 @@ type DesktopAgentWorkViewCanvasLike = WorkViewCanvasContextLike & {
   };
 };
 
-type LegacyWorkSessionCanvasLike = WorkViewCanvasContextLike & {
-  readonly kind: "work_session_canvas";
-  readonly workSession?: {
-    readonly directAnswer?: {
-      readonly answer: string;
-      readonly evidenceRefs: readonly string[];
-      readonly followUpSuggestions: readonly string[];
-      readonly [key: string]: unknown;
-    };
-    readonly report?: {
-      readonly title: string;
-      readonly keyFindings: readonly string[];
-      readonly recommendations: readonly string[];
-      readonly evidenceRefs: readonly string[];
-      readonly nextActions: readonly string[];
-      readonly decisionSummary: string;
-      readonly [key: string]: unknown;
-    };
-    readonly [key: string]: unknown;
-  };
-  readonly [key: string]: unknown;
-};
-
-export type DesktopWorkViewCanvasLike = WorkViewCanvasContextLike | DesktopAgentWorkViewCanvasLike | LegacyWorkSessionCanvasLike;
+export type DesktopWorkViewCanvasLike = WorkViewCanvasContextLike | DesktopAgentWorkViewCanvasLike;
 
 export type CreateDesktopWorkViewReadModelInput = {
   readonly run: BasicAgentRun;
@@ -98,7 +72,7 @@ export type CreateDesktopWorkViewReadModelInput = {
   readonly canvas?: DesktopWorkViewCanvasLike;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
-  readonly toolEvidence?: readonly ToolCallEvidence[];
+  readonly toolResultCount?: number;
   readonly transcriptNodes?: readonly TranscriptNode[];
   readonly pendingConfirmation?: ConfirmationRequest;
   readonly restoredResult?: {
@@ -115,20 +89,14 @@ export function createDesktopWorkViewReadModel(
 ): DesktopWorkViewReadModel {
   const visibleEvents = visibleWorkViewEvents(input.events);
   const contextAttachments = contextAttachmentsFor(input);
-  const toolEvidence = normalizeToolEvidence(input.toolEvidence ?? []);
   const toolDisplays = mergeToolDisplays([], input.toolDisplays ?? []);
-  const contextLedger = input.restoredContextLedger ?? contextLedgerFor(input, contextAttachments, toolEvidence, toolDisplays);
+  const toolResultCount = input.toolResultCount ?? toolDisplays.length;
+  const contextLedger = input.restoredContextLedger ?? contextLedgerFor(input, contextAttachments);
   const triggeredSkills = triggeredSkillsFor(input);
   const pendingConfirmation = input.pendingConfirmation ?? pendingConfirmationFor(input.run, input.canvas);
   const answer = answerFor(input);
   const transcriptNodes = input.transcriptNodes ?? transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation);
-  const deliverable = deliverableFor({
-    run: input.run,
-    canvas: input.canvas,
-    toolDisplays,
-    restoredResult: input.restoredResult,
-    answer,
-  });
+  const deliverable: AgentDeliverable | undefined = undefined;
   const stage = stageFor(input.run, visibleEvents, pendingConfirmation, deliverable, answer);
   return {
     run: input.run,
@@ -141,18 +109,17 @@ export function createDesktopWorkViewReadModel(
     pendingConfirmation,
     answer,
     deliverable,
-    toolEvidence,
     visibleEvents,
     transcriptNodes,
     subAgentRuns: input.subAgentRuns ?? [],
     workSummary: {
       summary: workSummaryText({
         pendingActionCount: pendingConfirmation === undefined ? 0 : 1,
-        toolResultCount: toolEvidence.length > 0 ? toolEvidence.length : toolDisplays.length,
+        toolResultCount,
         contextAttachmentCount: contextAttachments.length,
       }),
       pendingActionCount: pendingConfirmation === undefined ? 0 : 1,
-      toolResultCount: toolEvidence.length > 0 ? toolEvidence.length : toolDisplays.length,
+      toolResultCount,
       contextAttachmentCount: contextAttachments.length,
     },
   };
@@ -470,50 +437,9 @@ function currentActionFor(
   return "";
 }
 
-function deliverableFor(input: {
-  readonly run: BasicAgentRun;
-  readonly canvas?: DesktopWorkViewCanvasLike;
-  readonly toolDisplays: readonly ToolDisplayProjection[];
-  readonly restoredResult?: {
-    readonly title: string;
-    readonly summary: string;
-  };
-  readonly answer?: DesktopWorkViewAnswer;
-}): AgentDeliverable | undefined {
-  const canvas = input.canvas;
-  const desktopCanvas = desktopAgentCanvasFor(canvas);
-  const legacyCanvas = legacyWorkSessionCanvasFor(canvas);
-  if (desktopCanvas?.agent?.answer !== undefined) {
-    return undefined;
-  }
-  if (legacyCanvas?.workSession?.report !== undefined) {
-    const report = legacyCanvas.workSession.report;
-    return deliverable({
-      run: input.run,
-      title: report.title,
-      summary: report.decisionSummary,
-      sections: [
-        section(`${input.run.runId}:findings`, "关键发现", report.keyFindings.join("\n"), report.evidenceRefs),
-        section(`${input.run.runId}:recommendations`, "建议", report.recommendations.join("\n"), report.evidenceRefs),
-      ],
-      evidenceRefs: observationRefs(report.evidenceRefs),
-      toolDisplays: input.toolDisplays,
-      nextActions: report.nextActions,
-    });
-  }
-  if (legacyCanvas?.workSession?.directAnswer !== undefined) {
-    return undefined;
-  }
-  if (input.restoredResult !== undefined && input.run.status === "completed") {
-    return undefined;
-  }
-  return undefined;
-}
-
 function answerFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewAnswer | undefined {
   const canvas = input.canvas;
   const desktopCanvas = desktopAgentCanvasFor(canvas);
-  const legacyCanvas = legacyWorkSessionCanvasFor(canvas);
   if (desktopCanvas?.agent?.answer !== undefined) {
     return {
       title: "已回答",
@@ -530,17 +456,6 @@ function answerFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewA
       nextActions: [],
     };
   }
-  if (legacyCanvas?.workSession?.directAnswer !== undefined) {
-    return {
-      title: "已回答",
-      content: redactOrdinaryText(legacyCanvas.workSession.directAnswer.answer, DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS),
-      evidenceRefs: observationRefs(legacyCanvas.workSession.directAnswer.evidenceRefs),
-      nextActions: legacyCanvas.workSession.directAnswer.followUpSuggestions
-        .map((item) => redactOrdinaryText(item, 220))
-        .filter((item) => item.length > 0)
-        .slice(0, 5),
-    };
-  }
   if (input.run.status === "completed" && input.restoredResult?.content !== undefined) {
     return {
       title: input.restoredResult.title.length > 0 ? input.restoredResult.title : "已回答",
@@ -550,44 +465,6 @@ function answerFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewA
     };
   }
   return undefined;
-}
-
-function deliverable(input: {
-  readonly run: BasicAgentRun;
-  readonly title: string;
-  readonly summary: string;
-  readonly sections: readonly AgentDeliverableSection[];
-  readonly evidenceRefs: readonly ObservationRef[];
-  readonly toolDisplays: readonly ToolDisplayProjection[];
-  readonly nextActions?: readonly string[];
-}): AgentDeliverable {
-  return {
-    deliverableId: `${input.run.runId}:deliverable`,
-    runId: input.run.runId,
-    title: redactOrdinaryText(input.title, 140),
-    summary: redactOrdinaryText(input.summary, 1_000),
-    sections: input.sections,
-    evidenceRefs: input.evidenceRefs,
-    toolDisplays: input.toolDisplays,
-    fileChanges: input.toolDisplays.filter((display) => display.kind === "file_change_summary" || display.kind === "file_diff_preview"),
-    commands: input.toolDisplays.filter((display) => display.kind === "command_summary"),
-    nextActions: (input.nextActions ?? []).map((item) => redactOrdinaryText(item, 220)).filter((item) => item.length > 0).slice(0, 5),
-    createdAt: input.run.updatedAt,
-  };
-}
-
-function section(
-  sectionId: string,
-  title: string,
-  content: string,
-  refs: readonly string[]
-): AgentDeliverableSection {
-  return {
-    sectionId,
-    title: redactOrdinaryText(title, 120),
-    content: redactOrdinaryText(content, 900),
-    evidenceRefs: observationRefs(refs),
-  };
 }
 
 function pendingConfirmationFor(
@@ -625,8 +502,4 @@ function pendingConfirmationFor(
 
 function desktopAgentCanvasFor(canvas: DesktopWorkViewCanvasLike | undefined): DesktopAgentWorkViewCanvasLike | undefined {
   return canvas?.kind === "desktop_agent_canvas" ? canvas as DesktopAgentWorkViewCanvasLike : undefined;
-}
-
-function legacyWorkSessionCanvasFor(canvas: DesktopWorkViewCanvasLike | undefined): LegacyWorkSessionCanvasLike | undefined {
-  return canvas?.kind === "work_session_canvas" ? canvas as LegacyWorkSessionCanvasLike : undefined;
 }

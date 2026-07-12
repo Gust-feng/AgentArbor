@@ -38,7 +38,10 @@ import {
   InMemoryDeepChildLoopContextStore,
   type DeepChildLoopContextStore,
 } from "./deep-child-loop-contexts.js";
-import { DeepChildPendingContinuationStore } from "./deep-child-continuations.js";
+import {
+  DeepChildPendingContinuationStore,
+  type DeepChildPendingContinuationRetentionOptions,
+} from "./deep-child-continuations.js";
 import type {
   DeepChildInstructionQueueHandle,
   DeepChildInstructionQueueResult,
@@ -65,9 +68,11 @@ import {
   parseDeepIntake,
 } from "./deep-model-io.js";
 import {
+  buildDeepFollowUpContext,
   summarizeTaskSoilInputForIntake,
   summarizeTerminalDeepRunForIntake,
   fallbackLiveProjectionForRecord,
+  workspaceDirectoryFromDeepRunRecord,
 } from "./deep-read-model.js";
 import type { DeepRunStreamEvent } from "./deep-events.js";
 import {
@@ -106,12 +111,19 @@ import {
   DEEP_MANAGER_MAX_TOOL_ROUNDS,
 } from "./deep-run-executor.js";
 
-export type MultiAgentRunFacts = {
-  readonly aiMode: ModelRuntimeMode;
-  readonly informationAccess: SanitizedInformationAccessConfig;
-  readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-  readonly permissionBoundaryRefs: readonly string[];
-  readonly confirmationPolicy: NonNullable<StartDeepRuntimeInput["confirmationPolicy"]>;
+export type MultiAgentIntakeResult = {
+  readonly status: "needs_input" | "answered" | "plan_ready";
+  readonly conversation: DeepConversation;
+  readonly intake: DeepIntakeTurn;
+};
+
+export type MultiAgentStartedRun = {
+  readonly conversation: DeepConversation;
+  readonly runId: string;
+  readonly runKind: AgentArborRunKind;
+  readonly runMode: AgentArborRunMode;
+  readonly rootRunId: string;
+  readonly turnOrdinal: number;
 };
 
 export const MULTI_AGENT_CAPABILITY_PROFILE: CapabilityAgentProfile = {
@@ -148,6 +160,12 @@ export type MultiAgentRunStartFactsResolver = (input: {
   readonly confirmationPolicy: ToolConfirmationPolicy;
 }>;
 
+export type MultiAgentBackgroundFailureReporter = (input: {
+  readonly runId: string;
+  readonly conversationId: string;
+  readonly error: unknown;
+}) => void;
+
 export class MultiAgentFeatureError extends Error {
   constructor(
     readonly code:
@@ -155,8 +173,15 @@ export class MultiAgentFeatureError extends Error {
       | "capability_snapshot_missing"
       | "conversation_not_found"
       | "conversation_busy"
+      | "intake_active_run_not_terminal"
+      | "intake_missing_objective"
       | "run_not_found"
+      | "run_not_active"
+      | "run_ai_mode_missing"
+      | "run_continuation_facts_missing"
       | "run_control_not_found"
+      | "parent_run_conversation_mismatch"
+      | "follow_up_requires_terminal_run"
       | "child_not_found"
       | "confirmation_continuation_lost"
       | "resynthesis_no_child_material"
@@ -179,7 +204,6 @@ export type MultiAgentChildInstructionQueueRegistry = {
 export type MultiAgentFeature = {
   readonly getConversation: (conversationId: string) => Promise<DeepConversation | undefined>;
   readonly listConversations: (limit: number) => Promise<readonly DeepConversation[]>;
-  readonly saveConversation: (conversation: DeepConversation) => Promise<DeepConversation>;
   readonly renameConversation: (conversationId: string, title: string) => Promise<DeepConversation>;
   readonly pinConversation: (conversationId: string, pinned: boolean) => Promise<DeepConversation>;
   readonly deleteConversation: (conversationId: string) => Promise<void>;
@@ -189,7 +213,6 @@ export type MultiAgentFeature = {
     conversationId: string,
     limit: number,
   ) => Promise<readonly DeepRunRecord[]>;
-  readonly nextTurnOrdinal: (rootRunId: string) => Promise<number>;
   readonly createConversation: (input: {
     readonly aiMode: ModelRuntimeMode;
     readonly title?: string;
@@ -197,61 +220,40 @@ export type MultiAgentFeature = {
     readonly birthWorkspaceDirectory?: string;
     readonly taskSoilInput?: DeepConversation["taskSoilInput"];
   }) => Promise<DeepConversation>;
-  readonly executeIntake: (input: {
+  readonly intake: (input: {
     readonly aiMode: ModelRuntimeMode;
-    readonly conversation: DeepConversation;
+    readonly conversationId?: string;
+    readonly activeRunId?: string;
     readonly message: string;
-    readonly terminalRun?: DeepRunRecord;
-    readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
-    readonly informationAccess: SanitizedInformationAccessConfig;
-  }) => Promise<DeepIntakeTurn>;
-  readonly createRuntimeConfigForRun: (input: {
-    readonly aiMode: ModelRuntimeMode;
-    readonly controlHandle: DeepRunControlHandle;
-    readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-    readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
-    readonly informationAccess: SanitizedInformationAccessConfig;
-  }) => Promise<{
-    readonly config: DeepRuntimeConfig;
-    readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
-    readonly releaseResources: () => Promise<void>;
-  }>;
-  readonly createTurnRuntimeForExistingRun: (input: {
-    readonly record: DeepRunRecord;
-    readonly fallbackInformationAccess: SanitizedInformationAccessConfig;
-  }) => Promise<{
-    readonly turnRuntime: ReturnType<typeof createDeepTurnRuntime>;
-    readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-    readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
-    readonly releaseResources: () => void;
-  }>;
+    readonly taskSoilInput?: DeepConversation["taskSoilInput"];
+    readonly workspaceDirectory?: string;
+  }) => Promise<MultiAgentIntakeResult>;
   readonly startRun: (input: {
-    readonly conversation: DeepConversation;
+    readonly conversationId: string;
     readonly aiMode: ModelRuntimeMode;
     readonly parentRunId?: string;
-    readonly rootRunId?: string;
-    readonly turnOrdinal?: number;
-    readonly followUpContext?: DeepFollowUpContext;
-    readonly intakeContext?: DeepIntakeContext;
-  }) => Promise<{
+    readonly intakeTurnId?: string;
+    readonly confirmedObjective?: string;
+    readonly confirmedPlan?: string;
+    readonly workspaceDirectory?: string;
+  }) => Promise<MultiAgentStartedRun>;
+  readonly followUp: (input: {
     readonly runId: string;
-    readonly runKind: AgentArborRunKind;
-    readonly runMode: AgentArborRunMode;
-    readonly rootRunId: string;
-    readonly turnOrdinal: number;
-  }>;
+    readonly aiMode: ModelRuntimeMode;
+    readonly message: string;
+    readonly taskSoilInput?: DeepConversation["taskSoilInput"];
+    readonly workspaceDirectory?: string;
+  }) => Promise<MultiAgentStartedRun & { readonly parentRunId: string }>;
   readonly resumeChild: (input: {
     readonly runId: string;
     readonly childRunId: string;
     readonly confirmationId: string;
     readonly decision: DeepChildConfirmationDecision;
-    readonly fallbackInformationAccess: SanitizedInformationAccessConfig;
   }) => Promise<DeepRunRecord>;
   readonly sendChildInstruction: (input: {
     readonly runId: string;
     readonly childRunId: string;
     readonly message: string;
-    readonly fallbackInformationAccess: SanitizedInformationAccessConfig;
   }) => Promise<
     | {
         readonly status: "queued";
@@ -269,7 +271,6 @@ export type MultiAgentFeature = {
   >;
   readonly resynthesize: (input: {
     readonly runId: string;
-    readonly fallbackInformationAccess: SanitizedInformationAccessConfig;
   }) => Promise<DeepRunRecord>;
   readonly requestRunControl: (input: {
     readonly runId: string;
@@ -285,7 +286,6 @@ export type MultiAgentFeature = {
 type MultiAgentFeatureRuntime = MultiAgentFeature & {
   readonly constraints: readonly Constraint[];
   readonly soilStore: ReadonlySoilStore;
-  readonly bus: InMemoryMessageBus;
   readonly conversationStore: DeepConversationStore;
   readonly runRecordStore: DeepRunRecordStore;
   readonly childMessageStore: DeepChildMessageStore;
@@ -295,8 +295,6 @@ type MultiAgentFeatureRuntime = MultiAgentFeature & {
   readonly registerControlHandle: (runId: string, handle: DeepRunControlHandle) => void;
   readonly controlHandleForRun: (runId: string) => DeepRunControlHandle | undefined;
   readonly deleteControlHandle: (runId: string) => void;
-  readonly rememberRunFacts: (runId: string, facts: MultiAgentRunFacts) => void;
-  readonly runFactsFor: (runId: string) => MultiAgentRunFacts | undefined;
   readonly trackActiveRun: (input: {
     readonly runId: string;
     readonly conversationId: string;
@@ -312,22 +310,22 @@ export function createMultiAgentFeature(options: {
   readonly runtimeHome?: string;
   readonly acquireRunResources?: MultiAgentRunResourceAcquirer;
   readonly resolveRunStartFacts?: MultiAgentRunStartFactsResolver;
+  readonly reportBackgroundFailure?: MultiAgentBackgroundFailureReporter;
+  readonly childContinuationRetention?: DeepChildPendingContinuationRetentionOptions;
 } = {}): MultiAgentFeature {
   const controlHandles = new Map<string, DeepRunControlHandle>();
-  const runFacts = new Map<string, MultiAgentRunFacts>();
   const activeRunConversationIds = new Map<string, string>();
   const activeRuns = new Map<string, Promise<void>>();
-  const childContinuations = new DeepChildPendingContinuationStore();
+  const childContinuations = new DeepChildPendingContinuationStore(options.childContinuationRetention);
   const childInstructionQueues = createChildInstructionQueueRegistry();
   const constraints = createMinimalSoilConstraints();
   const soilStore = createMinimalReadonlySoilStore(constraints);
-  const bus = new InMemoryMessageBus(new InMemoryEventLog());
+  const reportBackgroundFailure = options.reportBackgroundFailure ?? defaultBackgroundFailureReporter;
   let disposePromise: Promise<void> | undefined;
 
   const feature: MultiAgentFeatureRuntime = {
     constraints: soilStore.listConstraints(),
     soilStore,
-    bus,
     conversationStore: createConversationStore(options.runtimeHome),
     runRecordStore: createRunRecordStore(options.runtimeHome),
     childMessageStore: createChildMessageStore(options.runtimeHome),
@@ -336,7 +334,6 @@ export function createMultiAgentFeature(options: {
     childInstructionQueues,
     getConversation: (conversationId) => feature.conversationStore.get(conversationId),
     listConversations: (limit) => feature.conversationStore.list(limit),
-    saveConversation: (conversation) => feature.conversationStore.upsert(conversation),
     renameConversation: async (conversationId, title) => {
       const conversation = await requireMultiAgentConversation(feature, conversationId);
       if (conversation.title === title) {
@@ -363,7 +360,6 @@ export function createMultiAgentFeature(options: {
       return (await feature.runRecordStore.list(limit))
         .filter((record) => record.run.conversationId === conversationId);
     },
-    nextTurnOrdinal: (rootRunId) => nextMultiAgentTurnOrdinal(feature, rootRunId),
     createConversation: (input) => createDeepConversationService({
       store: feature.conversationStore,
       constraints: feature.constraints,
@@ -375,19 +371,19 @@ export function createMultiAgentFeature(options: {
       birthWorkspaceDirectory: input.birthWorkspaceDirectory,
       taskSoilInput: input.taskSoilInput,
     }),
-    executeIntake: (input) => executeMultiAgentIntake(feature, requireResourceAcquirer(options), input),
-    createRuntimeConfigForRun: (input) => createMultiAgentRuntimeConfig(
+    intake: (input) => intakeMultiAgentConversation(
       feature,
       requireResourceAcquirer(options),
+      requireStartFactsResolver(options),
       input,
     ),
-    createTurnRuntimeForExistingRun: (input) => createExistingMultiAgentTurnRuntime(
+    startRun: (input) => startMultiAgentConversationRun(
       feature,
       requireResourceAcquirer(options),
-      input.record,
-      input.fallbackInformationAccess,
+      requireStartFactsResolver(options),
+      input,
     ),
-    startRun: (input) => startMultiAgentRun(
+    followUp: (input) => followUpMultiAgentRun(
       feature,
       requireResourceAcquirer(options),
       requireStartFactsResolver(options),
@@ -410,12 +406,6 @@ export function createMultiAgentFeature(options: {
     deleteControlHandle(runId): void {
       controlHandles.delete(runId);
     },
-    rememberRunFacts(runId, facts): void {
-      runFacts.set(runId, facts);
-    },
-    runFactsFor(runId): MultiAgentRunFacts | undefined {
-      return runFacts.get(runId);
-    },
     trackActiveRun(input): void {
       activeRunConversationIds.set(input.runId, input.conversationId);
       const trackedPromise = input.promise.finally(async () => {
@@ -425,11 +415,18 @@ export function createMultiAgentFeature(options: {
           if (activeRuns.get(input.runId) === trackedPromise) {
             activeRuns.delete(input.runId);
             activeRunConversationIds.delete(input.runId);
+            controlHandles.delete(input.runId);
           }
         }
       });
       activeRuns.set(input.runId, trackedPromise);
-      void trackedPromise.catch(() => undefined);
+      void trackedPromise.catch((error: unknown) => {
+        reportMultiAgentBackgroundFailure(reportBackgroundFailure, {
+          runId: input.runId,
+          conversationId: input.conversationId,
+          error,
+        });
+      });
     },
     isRunActive(runId): boolean {
       return activeRuns.has(runId);
@@ -445,7 +442,6 @@ export function createMultiAgentFeature(options: {
       controlHandles.delete(runId);
       childContinuations.deleteForRun(runId);
       childInstructionQueues.deleteForRun(runId);
-      runFacts.delete(runId);
     },
     async waitForIdle(): Promise<void> {
       while (activeRuns.size > 0) {
@@ -461,7 +457,6 @@ export function createMultiAgentFeature(options: {
         controlHandles.clear();
         childContinuations.clear();
         childInstructionQueues.clear();
-        runFacts.clear();
         activeRunConversationIds.clear();
         activeRuns.clear();
       })();
@@ -542,6 +537,175 @@ function requireStartFactsResolver(
   return options.resolveRunStartFacts;
 }
 
+async function intakeMultiAgentConversation(
+  feature: MultiAgentFeatureRuntime,
+  acquireRunResources: MultiAgentRunResourceAcquirer,
+  resolveRunStartFacts: MultiAgentRunStartFactsResolver,
+  input: Parameters<MultiAgentFeature["intake"]>[0],
+): Promise<MultiAgentIntakeResult> {
+  const terminalRun = input.activeRunId === undefined
+    ? undefined
+    : await requireMultiAgentRunRecord(feature, input.activeRunId);
+  if (terminalRun !== undefined && !isTerminalMultiAgentRun(terminalRun)) {
+    throw new MultiAgentFeatureError(
+      "intake_active_run_not_terminal",
+      "The active Multi-Agent run is still running.",
+    );
+  }
+
+  const requestedConversationId = input.conversationId ?? terminalRun?.run.conversationId;
+  const workspaceDirectory = terminalRun === undefined
+    ? input.workspaceDirectory
+    : workspaceDirectoryFromDeepRunRecord(terminalRun) ?? input.workspaceDirectory;
+  const conversation = requestedConversationId === undefined
+    ? await feature.createConversation({
+        aiMode: input.aiMode,
+        title: input.message,
+        goal: input.message,
+        birthWorkspaceDirectory: workspaceDirectory,
+        taskSoilInput: input.taskSoilInput,
+      })
+    : mergeMultiAgentConversationTaskSoil(
+        await requireMultiAgentConversation(feature, requestedConversationId),
+        input.taskSoilInput,
+        workspaceDirectory,
+      );
+  const startFacts = await resolveRunStartFacts({
+    workspaceDirectory: conversation.birthWorkspaceDirectory,
+  });
+  const intake = await executeMultiAgentIntake(feature, acquireRunResources, {
+    aiMode: input.aiMode,
+    conversation,
+    message: input.message,
+    terminalRun,
+    capabilitySnapshot: startFacts.capabilitySnapshot,
+    informationAccess: startFacts.informationAccess,
+  });
+  const conversationWithTurn = appendMultiAgentIntakeTurn(conversation, intake);
+  const updatedConversation = intake.action === "start_collaboration"
+    ? await persistCollaborationObjective(feature, conversationWithTurn, intake)
+    : await feature.conversationStore.upsert(conversationWithTurn);
+  return {
+    status: intake.action === "ask_user"
+      ? "needs_input"
+      : intake.action === "direct_answer"
+      ? "answered"
+      : "plan_ready",
+    conversation: updatedConversation,
+    intake,
+  };
+}
+
+async function startMultiAgentConversationRun(
+  feature: MultiAgentFeatureRuntime,
+  acquireRunResources: MultiAgentRunResourceAcquirer,
+  resolveRunStartFacts: MultiAgentRunStartFactsResolver,
+  input: Parameters<MultiAgentFeature["startRun"]>[0],
+): Promise<MultiAgentStartedRun> {
+  let conversation = await requireMultiAgentConversation(feature, input.conversationId);
+  const parentRun = input.parentRunId === undefined
+    ? undefined
+    : await requireMultiAgentRunRecord(feature, input.parentRunId);
+  if (parentRun !== undefined && parentRun.run.conversationId !== conversation.conversationId) {
+    throw new MultiAgentFeatureError(
+      "parent_run_conversation_mismatch",
+      "The parent run does not belong to this Multi-Agent conversation.",
+    );
+  }
+  if (parentRun !== undefined && !isTerminalMultiAgentRun(parentRun)) {
+    throw new MultiAgentFeatureError(
+      "follow_up_requires_terminal_run",
+      "The parent Multi-Agent run is still running.",
+    );
+  }
+
+  const workspaceDirectory = input.workspaceDirectory ?? (
+    parentRun === undefined ? undefined : workspaceDirectoryFromDeepRunRecord(parentRun)
+  );
+  const conversationWithWorkspace = mergeMultiAgentConversationTaskSoil(
+    conversation,
+    undefined,
+    workspaceDirectory,
+  );
+  if (conversationWithWorkspace !== conversation) {
+    conversation = await feature.conversationStore.upsert(conversationWithWorkspace);
+  }
+  const sourceIntakeTurn = confirmedMultiAgentIntakeSourceTurn(conversation, input.intakeTurnId);
+  const intakeContext = confirmedMultiAgentIntakeContext({
+    conversation,
+    intakeTurnId: input.intakeTurnId,
+    confirmedObjective: input.confirmedObjective,
+    confirmedPlan: input.confirmedPlan,
+  });
+  if (input.confirmedObjective !== undefined && input.confirmedObjective !== conversation.currentObjective) {
+    conversation = await feature.conversationStore.upsert({
+      ...conversation,
+      currentObjective: input.confirmedObjective,
+      updatedAt: nowIso(),
+    });
+  }
+  const rootRunId = parentRun?.run.rootRunId ?? parentRun?.run.runId;
+  const turnOrdinal = rootRunId === undefined
+    ? undefined
+    : await nextMultiAgentTurnOrdinal(feature, rootRunId);
+  const started = await startMultiAgentRun(feature, acquireRunResources, resolveRunStartFacts, {
+    conversation,
+    aiMode: input.aiMode,
+    parentRunId: parentRun?.run.runId,
+    rootRunId,
+    turnOrdinal,
+    followUpContext: parentRun === undefined
+      ? undefined
+      : buildDeepFollowUpContext(
+          parentRun,
+          sourceIntakeTurn?.userMessage ?? input.confirmedObjective ?? multiAgentConversationGoal(conversation),
+        ),
+    intakeContext,
+  });
+  return { conversation, ...started };
+}
+
+async function followUpMultiAgentRun(
+  feature: MultiAgentFeatureRuntime,
+  acquireRunResources: MultiAgentRunResourceAcquirer,
+  resolveRunStartFacts: MultiAgentRunStartFactsResolver,
+  input: Parameters<MultiAgentFeature["followUp"]>[0],
+): Promise<MultiAgentStartedRun & { readonly parentRunId: string }> {
+  const previous = await requireMultiAgentRunRecord(feature, input.runId);
+  if (!isTerminalMultiAgentRun(previous)) {
+    throw new MultiAgentFeatureError(
+      "follow_up_requires_terminal_run",
+      "The current Multi-Agent run is still running.",
+    );
+  }
+  const conversation = await requireMultiAgentConversation(feature, previous.run.conversationId);
+  const taskSoilInput = input.taskSoilInput ?? conversation.taskSoilInput;
+  const updatedConversation = await feature.conversationStore.upsert({
+    ...conversation,
+    birthWorkspaceDirectory:
+      conversation.birthWorkspaceDirectory ??
+      workspaceDirectoryFromDeepRunRecord(previous) ??
+      input.workspaceDirectory,
+    taskSoilInput,
+    permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs ?? conversation.permissionBoundaryRefs,
+    updatedAt: nowIso(),
+  });
+  const rootRunId = previous.run.rootRunId ?? previous.run.runId;
+  const started = await startMultiAgentRun(feature, acquireRunResources, resolveRunStartFacts, {
+    conversation: updatedConversation,
+    aiMode: input.aiMode,
+    parentRunId: previous.run.runId,
+    rootRunId,
+    turnOrdinal: await nextMultiAgentTurnOrdinal(feature, rootRunId),
+    followUpContext: buildDeepFollowUpContext(previous, input.message),
+  });
+  return {
+    conversation: updatedConversation,
+    parentRunId: previous.run.runId,
+    ...started,
+  };
+}
+
 async function startMultiAgentRun(
   feature: MultiAgentFeatureRuntime,
   acquireRunResources: MultiAgentRunResourceAcquirer,
@@ -599,18 +763,17 @@ async function startMultiAgentRun(
     feature.deleteControlHandle(runId);
     throw error;
   });
-  feature.rememberRunFacts(runId, {
-    aiMode: input.aiMode,
+  const continuationFacts = {
     informationAccess: facts.informationAccess,
-    taskSoil,
     permissionBoundaryRefs: input.conversation.permissionBoundaryRefs,
     confirmationPolicy: facts.confirmationPolicy,
-  });
+  } as const;
   const startInput: StartDeepRuntimeInput = {
     conversation: input.conversation,
     taskSoil,
     permissionBoundaryRefs: input.conversation.permissionBoundaryRefs,
     confirmationPolicy: facts.confirmationPolicy,
+    continuationFacts,
     aiMode: input.aiMode,
     capabilitySnapshot: runtimeConfig.capabilitySnapshot,
     modelAvailable: input.aiMode !== "none",
@@ -624,14 +787,30 @@ async function startMultiAgentRun(
     intakeContext: input.intakeContext,
   };
   const runPromise = executeDeepRun(startInput, runtimeConfig.config).then(
-    () => undefined,
-    (error: unknown) => writeMultiAgentFailureRecord(
-      feature,
-      runId,
-      input.conversation,
-      error,
-      { parentRunId: input.parentRunId, rootRunId, turnOrdinal },
-    ),
+    (result) => {
+      feature.childContinuations.retainPendingForRun(
+        runId,
+        result.agentRunTree.childRuns.flatMap((childRun) => (
+          childRun.pendingApproval === undefined
+            ? []
+            : [{
+                childRunId: childRun.childRunId,
+                confirmationId: childRun.pendingApproval.confirmationId,
+              }]
+        )),
+      );
+    },
+    (error: unknown) => {
+      feature.childContinuations.deleteForRun(runId);
+      return writeMultiAgentFailureRecord(
+        feature,
+        runId,
+        input.conversation,
+        error,
+        { parentRunId: input.parentRunId, rootRunId, turnOrdinal },
+        continuationFacts,
+      );
+    },
   );
   feature.trackActiveRun({
     runId,
@@ -652,6 +831,7 @@ async function writeMultiAgentFailureRecord(
     readonly rootRunId: string;
     readonly turnOrdinal: number;
   },
+  continuationFacts: NonNullable<DeepRunRecord["run"]["continuationFacts"]>,
 ): Promise<void> {
   try {
     const timestamp = nowIso();
@@ -666,6 +846,7 @@ async function writeMultiAgentFailureRecord(
         status: "failed",
         isolation: { kind: "deep_conversation", runKind: DEEP_RUN_KIND, runMode: DEEP_RUN_MODE },
         capabilitySnapshot: undefined,
+        continuationFacts,
         startedAt: timestamp,
         updatedAt: timestamp,
       },
@@ -729,12 +910,13 @@ async function executeMultiAgentIntake(
     soilStore: feature.soilStore,
     taskSoilInput: input.conversation.taskSoilInput,
   });
+  const bus = createMultiAgentOperationBus();
   const resources = await acquireRunResources({
     aiMode: input.aiMode,
     capabilitySnapshot: input.capabilitySnapshot,
     informationAccess: input.informationAccess,
     taskSoil,
-    channelContext: { bus: feature.bus },
+    channelContext: { bus },
   });
   try {
     const turn = await executeDeepTurn({
@@ -793,9 +975,10 @@ async function createMultiAgentRuntimeConfig(
   readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
   readonly releaseResources: () => Promise<void>;
 }> {
+  const bus = createMultiAgentOperationBus();
   const resources = await acquireRunResources({
     ...input,
-    channelContext: { bus: feature.bus },
+    channelContext: { bus },
   });
   const turnRuntime = createDeepTurnRuntime({
     intelligenceChannel: resources.intelligenceChannel,
@@ -809,7 +992,7 @@ async function createMultiAgentRuntimeConfig(
   return {
     config: {
       turnRuntime,
-      bus: feature.bus,
+      bus,
       store: feature.runRecordStore,
       controlHandle: input.controlHandle,
       childContinuations: feature.childContinuations,
@@ -828,12 +1011,11 @@ async function createExistingMultiAgentTurnRuntime(
   feature: MultiAgentFeatureRuntime,
   acquireRunResources: MultiAgentRunResourceAcquirer,
   record: DeepRunRecord,
-  fallbackInformationAccess: SanitizedInformationAccessConfig,
 ): Promise<{
   readonly turnRuntime: ReturnType<typeof createDeepTurnRuntime>;
   readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
   readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
-  readonly releaseResources: () => void;
+  readonly releaseResources: () => Promise<void>;
 }> {
   const capabilitySnapshot = record.run.capabilitySnapshot;
   if (capabilitySnapshot === undefined) {
@@ -842,10 +1024,21 @@ async function createExistingMultiAgentTurnRuntime(
       "Multi-Agent run has no frozen capability snapshot.",
     );
   }
-  const facts = feature.runFactsFor(record.run.runId);
-  const informationAccess = facts?.informationAccess ?? fallbackInformationAccess;
-  const aiMode = facts?.aiMode ?? record.run.aiMode ?? capabilitySnapshot.activeModel.defaultAiMode;
-  const taskSoil = facts?.taskSoil ?? createTaskSoilFromDesktopInput({
+  const continuationFacts = record.run.continuationFacts;
+  if (continuationFacts === undefined) {
+    throw new MultiAgentFeatureError(
+      "run_continuation_facts_missing",
+      "Multi-Agent run has no durable continuation facts.",
+    );
+  }
+  const aiMode = record.run.aiMode;
+  if (aiMode === undefined) {
+    throw new MultiAgentFeatureError(
+      "run_ai_mode_missing",
+      "Multi-Agent run has no frozen model runtime mode.",
+    );
+  }
+  const taskSoil = createTaskSoilFromDesktopInput({
     goal: record.run.goal,
     goalId: record.run.conversationId,
     traceId: record.run.runId,
@@ -853,12 +1046,13 @@ async function createExistingMultiAgentTurnRuntime(
     constraints: feature.constraints,
     soilStore: feature.soilStore,
   });
+  const bus = createMultiAgentOperationBus();
   const resources = await acquireRunResources({
     aiMode,
     capabilitySnapshot,
-    informationAccess,
+    informationAccess: continuationFacts.informationAccess,
     taskSoil,
-    channelContext: { bus: feature.bus },
+    channelContext: { bus },
   });
   return {
     turnRuntime: createDeepTurnRuntime({
@@ -868,8 +1062,8 @@ async function createExistingMultiAgentTurnRuntime(
     }),
     taskSoil,
     capabilitySnapshot: resources.capabilitySnapshot,
-    releaseResources: () => {
-      void resources.release();
+    releaseResources: async () => {
+      await resources.release();
     },
   };
 }
@@ -882,15 +1076,14 @@ async function resumeMultiAgentChild(
     readonly childRunId: string;
     readonly confirmationId: string;
     readonly decision: DeepChildConfirmationDecision;
-    readonly fallbackInformationAccess: SanitizedInformationAccessConfig;
   },
 ): Promise<DeepRunRecord> {
-  const continuation = feature.childContinuations.consume(
+  const pendingContinuation = feature.childContinuations.get(
     input.runId,
     input.childRunId,
     input.confirmationId,
   );
-  if (continuation === undefined) {
+  if (pendingContinuation === undefined) {
     throw new MultiAgentFeatureError(
       "confirmation_continuation_lost",
       "The child Agent confirmation continuation is no longer available.",
@@ -901,8 +1094,19 @@ async function resumeMultiAgentChild(
     feature,
     acquireRunResources,
     record,
-    input.fallbackInformationAccess,
   );
+  const continuation = feature.childContinuations.consume(
+    input.runId,
+    input.childRunId,
+    input.confirmationId,
+  );
+  if (continuation === undefined) {
+    await childRuntime.releaseResources();
+    throw new MultiAgentFeatureError(
+      "confirmation_continuation_lost",
+      "The child Agent confirmation continuation is no longer available.",
+    );
+  }
   let result: DeepChildAgentRunResult;
   try {
     result = await resumeDeepChildAgent({
@@ -915,7 +1119,7 @@ async function resumeMultiAgentChild(
       childLoopContextStore: feature.childLoopContextStore,
     });
   } finally {
-    childRuntime.releaseResources();
+    await childRuntime.releaseResources();
   }
   feature.childContinuations.remember(input.runId, result.pendingContinuation);
   return applyDeepChildOperationResult(feature, record, result, {
@@ -933,7 +1137,6 @@ async function sendMultiAgentChildInstruction(
     readonly runId: string;
     readonly childRunId: string;
     readonly message: string;
-    readonly fallbackInformationAccess: SanitizedInformationAccessConfig;
   },
 ): ReturnType<MultiAgentFeature["sendChildInstruction"]> {
   const record = await requireMultiAgentRunRecord(feature, input.runId);
@@ -991,13 +1194,12 @@ async function sendMultiAgentChildInstruction(
   if (childState === undefined) {
     throw new MultiAgentFeatureError("child_not_found", "Multi-Agent child run was not found.");
   }
-  feature.childContinuations.deleteForChildRun(input.runId, input.childRunId);
   const childRuntime = await createExistingMultiAgentTurnRuntime(
     feature,
     acquireRunResources,
     record,
-    input.fallbackInformationAccess,
   );
+  feature.childContinuations.deleteForChildRun(input.runId, input.childRunId);
   let result: DeepChildAgentRunResult;
   try {
     const requestedAt = nowIso();
@@ -1024,11 +1226,11 @@ async function sendMultiAgentChildInstruction(
         input.childRunId,
       ),
       goal: record.run.goal,
-      permissionBoundaryRefs: feature.runFactsFor(input.runId)?.permissionBoundaryRefs ?? [],
+      permissionBoundaryRefs: requireMultiAgentContinuationFacts(record).permissionBoundaryRefs,
       turnRuntime: childRuntime.turnRuntime,
       traceId: input.runId,
       goalId: record.run.conversationId,
-      confirmationPolicy: feature.runFactsFor(input.runId)?.confirmationPolicy ?? "prompt",
+      confirmationPolicy: requireMultiAgentContinuationFacts(record).confirmationPolicy,
       capabilitySnapshot: childRuntime.capabilitySnapshot,
       childLoopContextStore: feature.childLoopContextStore,
     });
@@ -1044,7 +1246,7 @@ async function sendMultiAgentChildInstruction(
       executedAt: requestedAt,
     });
   } finally {
-    childRuntime.releaseResources();
+    await childRuntime.releaseResources();
   }
   feature.childContinuations.remember(input.runId, result.pendingContinuation);
   const updated = await applyDeepChildOperationResult(feature, record, result, {
@@ -1063,7 +1265,6 @@ async function resynthesizeMultiAgentRun(
   acquireRunResources: MultiAgentRunResourceAcquirer,
   input: {
     readonly runId: string;
-    readonly fallbackInformationAccess: SanitizedInformationAccessConfig;
   },
 ): Promise<DeepRunRecord> {
   const record = await requireMultiAgentRunRecord(feature, input.runId);
@@ -1079,7 +1280,6 @@ async function resynthesizeMultiAgentRun(
     feature,
     acquireRunResources,
     record,
-    input.fallbackInformationAccess,
   );
   try {
     const synthesis = await synthesizeDeepConclusion({
@@ -1099,7 +1299,7 @@ async function resynthesizeMultiAgentRun(
     });
     return applyDeepResynthesisResult(feature, record, synthesis);
   } finally {
-    childRuntime.releaseResources();
+    await childRuntime.releaseResources();
   }
 }
 
@@ -1170,6 +1370,13 @@ async function requestMultiAgentRunControl(
     readonly correctionContext?: readonly string[];
   },
 ): Promise<{ readonly status: "requested"; readonly record?: DeepRunRecord }> {
+  const record = await feature.runRecordStore.get(input.runId);
+  if (record !== undefined && record.run.status !== "running") {
+    throw new MultiAgentFeatureError(
+      "run_not_active",
+      "Multi-Agent run already reached a terminal status.",
+    );
+  }
   const handle = feature.controlHandleForRun(input.runId);
   if (handle === undefined) {
     const stopped = input.action === "stop"
@@ -1266,6 +1473,18 @@ async function requireMultiAgentRunRecord(
   return record;
 }
 
+function requireMultiAgentContinuationFacts(
+  record: DeepRunRecord,
+): NonNullable<DeepRunRecord["run"]["continuationFacts"]> {
+  if (record.run.continuationFacts === undefined) {
+    throw new MultiAgentFeatureError(
+      "run_continuation_facts_missing",
+      "Multi-Agent run has no durable continuation facts.",
+    );
+  }
+  return record.run.continuationFacts;
+}
+
 function isContinuableTerminalChildRejection(
   result: Exclude<DeepChildInstructionQueueResult, { readonly status: "queued" }>,
 ): boolean {
@@ -1275,7 +1494,127 @@ function isContinuableTerminalChildRejection(
       result.childStatus === "failed" ||
       result.childStatus === "blocked" ||
       result.childStatus === "interrupted"
+  );
+}
+
+function createMultiAgentOperationBus(): InMemoryMessageBus {
+  return new InMemoryMessageBus(new InMemoryEventLog());
+}
+
+function mergeMultiAgentConversationTaskSoil(
+  conversation: DeepConversation,
+  taskSoilInput: DeepConversation["taskSoilInput"] | undefined,
+  birthWorkspaceDirectory?: string,
+): DeepConversation {
+  const nextBirthWorkspaceDirectory = conversation.birthWorkspaceDirectory ?? birthWorkspaceDirectory;
+  if (
+    taskSoilInput === undefined &&
+    nextBirthWorkspaceDirectory === conversation.birthWorkspaceDirectory
+  ) {
+    return conversation;
+  }
+  return {
+    ...conversation,
+    birthWorkspaceDirectory: nextBirthWorkspaceDirectory,
+    taskSoilInput: taskSoilInput ?? conversation.taskSoilInput,
+    permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs ?? conversation.permissionBoundaryRefs,
+    updatedAt: nowIso(),
+  };
+}
+
+function appendMultiAgentIntakeTurn(
+  conversation: DeepConversation,
+  intake: DeepIntakeTurn,
+): DeepConversation {
+  return {
+    ...conversation,
+    intakeTurns: [...(conversation.intakeTurns ?? []), intake],
+    updatedAt: intake.createdAt,
+  };
+}
+
+async function persistCollaborationObjective(
+  feature: MultiAgentFeatureRuntime,
+  conversation: DeepConversation,
+  intake: DeepIntakeTurn,
+): Promise<DeepConversation> {
+  if (intake.normalizedObjective === undefined) {
+    throw new MultiAgentFeatureError(
+      "intake_missing_objective",
+      "Multi-Agent intake requested collaboration without a normalized objective.",
     );
+  }
+  return feature.conversationStore.upsert({
+    ...conversation,
+    currentObjective: intake.normalizedObjective,
+    updatedAt: nowIso(),
+  });
+}
+
+function confirmedMultiAgentIntakeContext(input: {
+  readonly conversation: DeepConversation;
+  readonly intakeTurnId?: string;
+  readonly confirmedObjective?: string;
+  readonly confirmedPlan?: string;
+}): DeepIntakeContext | undefined {
+  const sourceTurn = confirmedMultiAgentIntakeSourceTurn(input.conversation, input.intakeTurnId);
+  if (
+    sourceTurn === undefined &&
+    input.confirmedObjective === undefined &&
+    input.confirmedPlan === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    normalizedObjective: input.confirmedObjective ?? sourceTurn?.normalizedObjective ?? input.conversation.currentObjective,
+    plan: input.confirmedPlan ?? sourceTurn?.plan,
+    assistantMessage: sourceTurn?.assistantMessage ?? "用户已确认计划，开始深度研究。",
+    uncertainty: sourceTurn?.uncertainty,
+    confidence: sourceTurn?.confidence,
+  };
+}
+
+function confirmedMultiAgentIntakeSourceTurn(
+  conversation: DeepConversation,
+  intakeTurnId: string | undefined,
+): DeepIntakeTurn | undefined {
+  return intakeTurnId === undefined
+    ? [...(conversation.intakeTurns ?? [])].reverse().find((turn) => turn.action === "start_collaboration")
+    : conversation.intakeTurns?.find((turn) => turn.turnId === intakeTurnId);
+}
+
+function multiAgentConversationGoal(conversation: DeepConversation): string {
+  return conversation.currentObjective ?? conversation.goal;
+}
+
+function isTerminalMultiAgentRun(record: DeepRunRecord): boolean {
+  return record.run.status !== "running";
+}
+
+function defaultBackgroundFailureReporter(input: {
+  readonly runId: string;
+  readonly conversationId: string;
+  readonly error: unknown;
+}): void {
+  console.error(
+    `[multi-agent] background run lifecycle failed for ${input.runId} (${input.conversationId})`,
+    input.error,
+  );
+}
+
+function reportMultiAgentBackgroundFailure(
+  reporter: MultiAgentBackgroundFailureReporter,
+  input: Parameters<MultiAgentBackgroundFailureReporter>[0],
+): void {
+  try {
+    reporter(input);
+  } catch (reporterError) {
+    defaultBackgroundFailureReporter(input);
+    defaultBackgroundFailureReporter({
+      ...input,
+      error: reporterError,
+    });
+  }
 }
 
 function deepContextMaintenance(

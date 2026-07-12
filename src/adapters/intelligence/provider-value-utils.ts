@@ -1,3 +1,5 @@
+import type { ToolFactValue } from "../../domain/tools/index.js";
+
 /**
  * 适配器层共享的值处理工具。
  *
@@ -18,12 +20,12 @@ export function parseStructuredOutput(content: string): unknown {
   }
 }
 
-export function parseToolArguments(value: unknown): unknown {
+export function parseToolArguments(value: unknown): ToolFactValue {
   if (typeof value !== "string") {
-    return value ?? {};
+    return (value ?? {}) as ToolFactValue;
   }
   try {
-    return JSON.parse(value);
+    return JSON.parse(value) as ToolFactValue;
   } catch {
     return { rawArguments: value };
   }

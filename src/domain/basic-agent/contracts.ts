@@ -1,4 +1,5 @@
 import type { RunAgentDefinitionRef } from "../config/contracts.js";
+import type { ConfirmationRequest } from "../confirmation/contracts.js";
 import type { ModelUsage } from "../intelligence/contracts.js";
 import type { ObservationRef } from "../observation/contracts.js";
 import type { ToolDisplayProjection } from "../observation/tool-display.js";
@@ -7,8 +8,11 @@ import type {
   ToolErrorDomain,
   ToolErrorFacts,
 } from "../tools/contracts.js";
-import type { ConfirmationRequest } from "./confirmation-contracts.js";
-export type { ConfirmationDecision, ConfirmationRequest, ConfirmationRiskLevel } from "./confirmation-contracts.js";
+export type {
+  ConfirmationDecision,
+  ConfirmationRequest,
+  ConfirmationRiskLevel,
+} from "../confirmation/contracts.js";
 
 export type AgentTaskStatus =
   | "queued"
@@ -71,7 +75,6 @@ export type RunEvent = {
     readonly command?: string;
     readonly exitCode?: number;
     readonly preview?: string;
-    readonly display?: ToolDisplayProjection;
     readonly truncated?: boolean;
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;
@@ -309,7 +312,7 @@ export type ContextLedgerSkillFacts = {
 
 export type ContextLedgerEntry = {
   readonly entryId: string;
-  readonly kind: "goal" | "attachment" | "history" | "skill" | "tool_evidence" | "budget" | "truncation";
+  readonly kind: "goal" | "attachment" | "history" | "skill" | "budget" | "truncation";
   readonly title: string;
   readonly summary: string;
   readonly refs: readonly ObservationRef[];
@@ -366,18 +369,6 @@ export type TriggeredSkillReadModel = {
   readonly selection?: SkillSelectionDecisionFacts;
 };
 
-export type ToolCallEvidence = {
-  readonly callId: string;
-  readonly toolName?: string;
-  readonly status: "completed" | "failed" | "cancelled";
-  readonly summary?: string;
-  readonly evidenceRefs: readonly string[];
-  readonly truncated?: boolean;
-  readonly error?: string;
-  readonly errorDomain?: ToolErrorDomain;
-  readonly errorFacts?: ToolErrorFacts;
-};
-
 export type DesktopWorkViewReadModel = {
   readonly run: BasicAgentRun;
   readonly stage: DesktopWorkViewStage;
@@ -389,7 +380,6 @@ export type DesktopWorkViewReadModel = {
   readonly pendingConfirmation?: ConfirmationRequest;
   readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;
-  readonly toolEvidence: readonly ToolCallEvidence[];
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly subAgentRuns?: readonly SubAgentRunView[];
@@ -400,21 +390,3 @@ export type DesktopWorkViewReadModel = {
     readonly contextAttachmentCount: number;
   };
 };
-
-/**
- * @deprecated Historical panel state name. New ordinary Agent read-model code
- * should use DesktopWorkView* names.
- */
-export type DesktopWorkSessionStage = DesktopWorkViewStage;
-
-/**
- * @deprecated Historical panel state name. New ordinary Agent read-model code
- * should use DesktopWorkView* names.
- */
-export type DesktopWorkSessionAnswer = DesktopWorkViewAnswer;
-
-/**
- * @deprecated Historical panel state name. New ordinary Agent read-model code
- * should use DesktopWorkView* names.
- */
-export type DesktopWorkSessionReadModel = DesktopWorkViewReadModel;

@@ -1,4 +1,10 @@
-import type { ToolExecutor, ToolExecutionContext } from "../../../domain/tools/index.js";
+import type {
+  ToolContinuation,
+  ToolExecutor,
+  ToolExecutorResult,
+  ToolExecutionContext,
+  ToolFactValue,
+} from "../../../domain/tools/index.js";
 
 export type HttpRequestMethod = "GET" | "HEAD" | "POST" | "PUT" | "DELETE";
 
@@ -33,25 +39,34 @@ export type HttpRequestToolOptions = {
 };
 
 export type HttpRequestToolOutput = {
-  readonly action: "http_request";
-  readonly summary: string;
-  readonly result: {
-    readonly url: string;
-    readonly method: HttpRequestMethod;
-    readonly statusCode: number;
-    readonly statusText: string;
-    readonly headers: Readonly<Record<string, string>>;
-    readonly body: string;
-    readonly durationMs: number;
-    readonly startChar: number;
-    readonly bodyChars: number;
-    readonly hasMoreAfter: boolean;
-    readonly nextStartChar?: number;
-    readonly reachedStartCharCeiling: boolean;
-    readonly startCharCeiling: number;
-    readonly truncated: boolean;
-  };
+  readonly url: string;
+  readonly method: HttpRequestMethod;
+  readonly statusCode: number;
+  readonly statusText: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+  readonly durationMs: number;
+  readonly startChar: number;
+  readonly bodyChars: number;
+  readonly hasMoreAfter: boolean;
+  readonly reachedStartCharCeiling: boolean;
+  readonly startCharCeiling: number;
   readonly truncated: boolean;
+  readonly continuation?: ToolContinuation;
+};
+
+export type HttpRequestIncompleteOutput = {
+  readonly url: string;
+  readonly method: HttpRequestMethod;
+  readonly statusCode: number;
+  readonly statusText: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly bodyPreview: string;
+  readonly responseBodyComplete: false;
+  readonly durationMs: number;
+  readonly startChar: number;
+  readonly bodyChars: number;
+  readonly startCharCeiling: number;
 };
 
 export type HttpRequestErrorFacts = {
@@ -96,11 +111,12 @@ type MutableNetworkFacts = {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_BODY_CHARS = 128_000;
+const MAX_BODY_JSON_CHARS = 180_000;
 const MAX_BODY_START_CHAR = 2_000_000;
 const ALLOWED_METHODS = new Set<HttpRequestMethod>(["GET", "HEAD", "POST", "PUT", "DELETE"]);
 
 export function createHttpRequestTool(options: HttpRequestToolOptions = {}): ToolExecutor {
-  const maxBodyChars = Math.max(0, Math.floor(options.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS));
+  const maxBodyChars = Math.max(1, Math.floor(options.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS));
   return {
     definition: {
       name: "http_request",
@@ -131,13 +147,14 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
           "This tool does not persist cookies or authentication state between calls.",
         ],
         outputNotes: [
-          "result.statusCode and result.statusText contain the HTTP response status.",
-          "result.headers is a plain object of response headers.",
-          "result.body is bounded text and may be empty.",
-          "result.hasMoreAfter/result.nextStartChar provide the continuation point when a GET response body is truncated.",
-          "result.reachedStartCharCeiling=true means there is more body text beyond the supported continuation window and no nextStartChar will be returned.",
-          `result.truncated is true when the response body exceeds ${maxBodyChars} characters.`,
-          "result.durationMs is measured inside the HTTP tool and may differ slightly from the outer tool event duration.",
+          "statusCode and statusText contain the HTTP response status.",
+          "headers is a plain object of response headers.",
+          "body is bounded text and may be empty.",
+          "hasMoreAfter reports whether more body text exists; continuation.nextInput provides the executable next GET window.",
+          "A POST, PUT, or DELETE whose response body cannot fit completely returns a failed observation with bodyPreview and responseBodyComplete=false; requestCompleted/retryable facts are carried by the error and no continuation is emitted.",
+          "A GET that reaches the continuation ceiling while more body remains also returns a failed observation instead of completed+truncated without a continuation.",
+          `truncated is true only for a completed GET window that can continue, after exceeding ${maxBodyChars} characters or the shared serialized body budget.`,
+          "durationMs is measured inside the HTTP tool and may differ slightly from the outer tool event duration.",
         ],
         runtimeHints: [
           { label: "session state", value: "no OAuth flow, no cookie jar, no upload or download handling" },
@@ -156,11 +173,6 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
         riskLevel: "medium",
         operationType: "external-submit",
         requiresConfirmation: false,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 1_200,
-          omitRawOutput: true,
-        },
       },
       inputSchema: {
         type: "object",
@@ -189,7 +201,7 @@ async function executeHttpRequest(
   context: ToolExecutionContext,
   options: HttpRequestToolOptions,
   maxBodyChars: number
-): Promise<HttpRequestToolOutput> {
+): Promise<HttpRequestToolOutput | ToolExecutorResult> {
   throwIfAborted(context.abortSignal);
   const record = asRecord(input);
   const url = requireHttpUrl(record.url);
@@ -227,27 +239,59 @@ async function executeHttpRequest(
       : await readResponseBody(response, maxBodyChars, startChar);
     const durationMs = Date.now() - startedAt;
     const statusText = response.statusText ?? "";
-    return {
-      action: "http_request",
-      summary: `${method} ${url} -> ${response.status}${statusText.length === 0 ? "" : ` ${statusText}`} in ${durationMs}ms`,
-      result: {
-        url,
-        method,
-        statusCode: response.status,
-        statusText,
-        headers: headersToRecord(response.headers),
-        body: bodyResult.body,
-        durationMs,
-        startChar: bodyResult.startChar,
-        bodyChars: bodyResult.bodyChars,
-        hasMoreAfter: bodyResult.hasMoreAfter,
-        nextStartChar: bodyResult.nextStartChar,
-        reachedStartCharCeiling: bodyResult.reachedStartCharCeiling,
-        startCharCeiling: bodyResult.startCharCeiling,
-        truncated: bodyResult.truncated,
-      },
+    const output: HttpRequestToolOutput = {
+      url,
+      method,
+      statusCode: response.status,
+      statusText,
+      headers: headersToRecord(response.headers),
+      body: bodyResult.body,
+      durationMs,
+      startChar: bodyResult.startChar,
+      bodyChars: bodyResult.bodyChars,
+      hasMoreAfter: bodyResult.hasMoreAfter,
+      reachedStartCharCeiling: bodyResult.reachedStartCharCeiling,
+      startCharCeiling: bodyResult.startCharCeiling,
       truncated: bodyResult.truncated,
+      continuation: method !== "GET" || bodyResult.nextStartChar === undefined
+        ? undefined
+        : {
+            nextInput: {
+              url,
+              method,
+              ...(Object.keys(headers).length === 0 ? {} : { headers }),
+              startChar: bodyResult.nextStartChar,
+              timeoutMs,
+            },
+          },
     };
+    if (bodyResult.hasMoreAfter && (method !== "GET" || bodyResult.nextStartChar === undefined)) {
+      const continuationLimitReached = method === "GET";
+      return {
+        kind: "tool_call_result",
+        result: {
+          callId: context.toolCallId ?? "http_request",
+          toolName: "http_request",
+          input: input as ToolFactValue | undefined,
+          output: incompleteHttpResponseOutput(output),
+          status: "failed",
+          error: continuationLimitReached
+            ? "HTTP GET completed, but the response body exceeds the supported continuation range."
+            : "HTTP request completed, but the response body cannot be fully observed without replaying a side-effecting request.",
+          errorDomain: "runtime_error",
+          errorFacts: {
+            code: continuationLimitReached
+              ? "http_response_continuation_limit_reached"
+              : "http_response_continuation_unavailable",
+            requestCompleted: true,
+            retryable: false,
+            ...(continuationLimitReached ? { startCharCeiling: bodyResult.startCharCeiling } : {}),
+          },
+          durationMs,
+        },
+      };
+    }
+    return output;
   } catch (error) {
     if (controller.signal.aborted && controller.signal.reason === timeoutReason) {
       throw normalizeHttpRequestFailure({
@@ -270,6 +314,22 @@ async function executeHttpRequest(
     clearTimeout(timeout);
     detachAbort();
   }
+}
+
+function incompleteHttpResponseOutput(output: HttpRequestToolOutput): HttpRequestIncompleteOutput {
+  return {
+    url: output.url,
+    method: output.method,
+    statusCode: output.statusCode,
+    statusText: output.statusText,
+    headers: output.headers,
+    bodyPreview: output.body,
+    responseBodyComplete: false,
+    durationMs: output.durationMs,
+    startChar: output.startChar,
+    bodyChars: output.bodyChars,
+    startCharCeiling: output.startCharCeiling,
+  };
 }
 
 function requireHttpUrl(value: unknown): string {
@@ -367,18 +427,6 @@ async function readResponseBody(
   readonly startCharCeiling: number;
   readonly truncated: boolean;
 }> {
-  if (maxBodyChars <= 0) {
-    await cancelBody(response.body);
-    return {
-      body: "",
-      startChar,
-      bodyChars: 0,
-      hasMoreAfter: true,
-      reachedStartCharCeiling: startChar >= MAX_BODY_START_CHAR,
-      startCharCeiling: MAX_BODY_START_CHAR,
-      truncated: true,
-    };
-  }
   const readLimit = startChar + maxBodyChars + 1;
   if (response.body !== undefined && response.body !== null) {
     return bodyWindow(await readStreamBody(response.body, readLimit), startChar, maxBodyChars);
@@ -431,7 +479,8 @@ function bodyWindow(
   readonly startCharCeiling: number;
   readonly truncated: boolean;
 } {
-  const endChar = startChar + maxBodyChars;
+  const requestedEndChar = Math.min(text.length, startChar + maxBodyChars);
+  const endChar = transportSafeBodyEnd(text, startChar, requestedEndChar);
   const body = text.slice(startChar, endChar);
   const hasMoreAfter = text.length > endChar;
   const rawNextStartChar = hasMoreAfter ? startChar + body.length : undefined;
@@ -448,6 +497,26 @@ function bodyWindow(
     startCharCeiling: MAX_BODY_START_CHAR,
     truncated: hasMoreAfter,
   };
+}
+
+function transportSafeBodyEnd(text: string, startChar: number, requestedEndChar: number): number {
+  if (startChar >= requestedEndChar) {
+    return requestedEndChar;
+  }
+  if (JSON.stringify(text.slice(startChar, requestedEndChar)).length <= MAX_BODY_JSON_CHARS) {
+    return requestedEndChar;
+  }
+  let low = startChar;
+  let high = requestedEndChar;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (JSON.stringify(text.slice(startChar, middle)).length <= MAX_BODY_JSON_CHARS) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return low;
 }
 
 async function cancelBody(stream: ReadableStream<Uint8Array> | null | undefined): Promise<void> {

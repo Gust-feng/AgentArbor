@@ -4,7 +4,7 @@ import { closeSync, openSync, promises as fs, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SanitizedCommandShellConfig } from "../../../domain/config/index.js";
-import type { ToolDefinition, ToolExecutionContext, ToolExecutor } from "../../../domain/tools/index.js";
+import type { ToolContinuation, ToolDefinition, ToolExecutionContext, ToolExecutor } from "../../../domain/tools/index.js";
 import {
   createPlatformPortOccupantProbe,
   probeLocalPort,
@@ -167,12 +167,12 @@ export function createLocalShellCommandTool(
         relativePath: cwd.relativePath,
         command: normalized.command,
         commandLine: normalized.commandLine,
-        args: normalized.legacyArgs,
+        args: normalized.directArgs,
         bytes: timeoutMs,
       });
-      const executeDirectly = normalized.legacyProgram !== undefined &&
+      const executeDirectly = normalized.directProgram !== undefined &&
         await shouldExecuteDirectly({
-          command: normalized.legacyProgram,
+          command: normalized.directProgram,
           rootDirectory,
           platform: commandShell.platform,
         });
@@ -187,10 +187,9 @@ export function createLocalShellCommandTool(
       throwIfAborted(context.abortSignal);
       if (background && preStartPortOccupancy !== undefined) {
         return commandToolOutput({
-          action: "shell_command",
           command: normalized.command,
           commandLine: normalized.commandLine,
-          legacyArgs: normalized.legacyArgs,
+          directArgs: normalized.directArgs,
           shell: commandShell,
           result: commandNotStartedForOccupiedPort({
             cwd: cwd.relativePath,
@@ -202,12 +201,12 @@ export function createLocalShellCommandTool(
         });
       }
       const rawOutcome = background
-        ? normalized.legacyProgram === undefined || !executeDirectly
+        ? normalized.directProgram === undefined || !executeDirectly
           ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
-          : await runBackgroundProgramCommand(commandShell, normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
-        : normalized.legacyProgram === undefined || !executeDirectly
+          : await runBackgroundProgramCommand(commandShell, normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
+        : normalized.directProgram === undefined || !executeDirectly
           ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts)
-          : await runProgramCommand(normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts);
+          : await runProgramCommand(normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts);
       const result = await enrichCommandResult({
         result: rawOutcome.result,
         waitForPort,
@@ -220,72 +219,13 @@ export function createLocalShellCommandTool(
         portOccupantProbe: externalPortOccupantProbe,
       });
       return commandToolOutput({
-        action: "shell_command",
         command: normalized.command,
         commandLine: normalized.commandLine,
-        legacyArgs: normalized.legacyArgs,
+        directArgs: normalized.directArgs,
         shell: commandShell,
         result,
         truncated: false,
       });
-    },
-  };
-}
-
-export function createLocalRunCommandTool(
-  rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT,
-  options: LocalWorkspaceCommandToolOptions = {}
-): ToolExecutor {
-  const shellCommand = createLocalShellCommandTool(rootDirectory, options);
-  const commandShell = normalizeCommandShellConfig(options.commandShell);
-  return {
-    definition: {
-      ...shellCommand.definition,
-      name: "run_command",
-      description: [
-        "Legacy alias of shell_command kept for compatibility with older runs and prompts.",
-        "Use the same input contract and command behavior as shell_command.",
-      ].join(" "),
-      modelContract: {
-        purpose: "Compatibility alias for shell_command with the same command execution behavior.",
-        whenToUse: [
-          "Use only when resuming or honoring older prompts that call run_command.",
-        ],
-        whenNotToUse: [
-          "Prefer shell_command for new command calls.",
-        ],
-        inputNotes: [
-          "Use the same inputs as shell_command: commandLine for shell execution, or command plus args for direct argv execution.",
-          "timeoutMs optionally caps execution time.",
-          "background=true starts the command as a detached background process and returns pid, logRef, diagnostic logPath, and stopCommand.",
-          "waitForPort optionally waits for a localhost TCP port to become reachable after starting a background command.",
-          "cwd optionally selects a workspace-relative working directory for this command.",
-        ],
-        runtimeHints: [
-          { label: "current shell", value: `${commandShell.label} (${commandShell.syntax})` },
-          { label: "compatibility", value: "legacy alias of shell_command" },
-        ],
-        usageNotes: [
-          "Prefer shell_command for new command calls.",
-          "If command and args are provided, the runtime executes the program directly with argv instead of shell parsing.",
-        ],
-        outputNotes: [
-          "When stdout/stderr are under the preview caps, result.stdout and result.stderr contain the exact command text.",
-          "Returns result.commandLine, result.shell, result.exitCode, result.stdout/result.stderr previews, truncation facts, controlled logRef, and timeout/background metadata when relevant.",
-        ],
-        examples: [
-          { title: "Compatibility command", input: { commandLine: commandShell.syntax === "cmd" ? "dir" : "pwd" } },
-        ],
-      },
-    },
-    execute: async (input, context) => {
-      const output = await shellCommand.execute(input, context);
-      const record = asRecord(output);
-      return {
-        ...record,
-        action: "run_command",
-        refId: typeof record.refId === "string" ? record.refId.replace("workspace:shell:", "workspace:command:") : "workspace:command:compat",
-      };
     },
   };
 }
@@ -304,11 +244,6 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
       riskLevel: "medium",
       operationType: "execute",
       requiresConfirmation: true,
-      visibleResultPolicy: {
-        userVisible: "summary-only",
-        maxPreviewChars: 1200,
-        omitRawOutput: false,
-      },
       runtimeHints: [{
         kind: "command_shell",
         shellId: commandShell.kind,
@@ -349,7 +284,6 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "Use commandLine for normal shell commands, pipelines, redirection, chaining, environment expansion, shell builtins, and shell-native quoting.",
         "Use background=true for dev servers, file watchers, long-running demos, and other commands expected to keep running.",
         "Use command and args when quoting would be fragile, especially for inline scripts such as node -e, python -c, or paths and arguments that are easier to express as argv.",
-        "If curl is unavailable, use the installed runtime such as node or python for HTTP requests instead of waiting for a separate HTTP tool.",
         "Use this tool for normal filesystem commands such as mkdir, rmdir, copy, move, and recursive cleanup.",
         "For dev servers, combine background=true with waitForPort so the tool returns only after the local port is reachable or the port wait times out.",
         "When background=true, do not append shell-native background operators such as POSIX & just to detach the process; the tool already returns pid, logRef, diagnostic logPath, and stopCommand.",
@@ -357,16 +291,17 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "Before relying on a command, you may probe the environment with ordinary shell commands such as where, which, command -v, or version checks.",
       ],
       outputNotes: [
-        `result.stdout and result.stderr are model-visible previews capped at ${MAX_COMMAND_STDOUT_CHARS} and ${MAX_COMMAND_STDERR_CHARS} characters for foreground command output; under those caps they contain the exact command text.`,
-        "result.stdoutTruncated/result.stderrTruncated, result.stdoutChars/result.stderrChars, and result.stdoutOmittedChars/result.stderrOmittedChars report the concrete truncation facts for those previews.",
-        "result.shell records the shell that executed the command.",
-        "result.cwd records the workspace-relative working directory used for the command.",
-        "result.timedOut is true when the foreground command exceeded timeoutMs; stdout/stderr contain captured output before termination.",
-        "result.background, result.pid, result.logRef, result.logPath, and result.stopCommand describe detached background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
-        "Use result.logRef as the controlled command-log entry point. result.logPath is retained only as a diagnostic filesystem detail.",
-        "result.durationMs records total observed tool execution time; result.portReady records whether waitForPort became reachable.",
-        "If background=true and waitForPort is already occupied before start, result.notStarted is true, result.exitCode is null, and result.preStartPortOccupancy records the port, pid when known, owner status, and observation source.",
-        "result.cancelled records foreground command cancellation; result.portWaitCancelled records cancellation while waiting for a background port.",
+        `stdout and stderr are model-visible previews capped at ${MAX_COMMAND_STDOUT_CHARS} and ${MAX_COMMAND_STDERR_CHARS} characters for foreground command output; under those caps they contain the exact command text.`,
+        "stdoutTruncated/stderrTruncated, stdoutChars/stderrChars, and stdoutOmittedChars/stderrOmittedChars report the concrete truncation facts for those previews.",
+        "shell records the shell that executed the command.",
+        "cwd records the workspace-relative working directory used for the command.",
+        "timedOut is true when the foreground command exceeded timeoutMs; stdout/stderr contain captured output before termination.",
+        "background, pid, logRef, logPath, and stopCommand describe detached background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
+        "Use logRef as the controlled command-log entry point. logPath is retained only as a diagnostic filesystem detail.",
+        "When output is truncated or a background log can keep growing, continuation.nextInput reads the controlled logRef.",
+        "durationMs records total observed tool execution time; portReady records whether waitForPort became reachable.",
+        "If background=true and waitForPort is already occupied before start, notStarted is true, exitCode is null, and preStartPortOccupancy records the port, pid when known, owner status, and observation source.",
+        "cancelled records foreground command cancellation; portWaitCancelled records cancellation while waiting for a background port.",
         "If command and args are provided, execution bypasses shell parsing and uses direct argv execution.",
         "A non-zero exitCode is command feedback; stdout/stderr remain command output previews, not interpreted recommendations.",
       ],
@@ -453,55 +388,50 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
 }
 
 function commandToolOutput(input: {
-  readonly action: "run_command" | "shell_command";
   readonly command: string;
   readonly commandLine: string;
-  readonly legacyArgs: readonly string[];
+  readonly directArgs: readonly string[];
   readonly shell: SanitizedCommandShellConfig;
   readonly result: CommandExecutionResult;
   readonly truncated: boolean;
 }): {
-  readonly action: "run_command" | "shell_command";
-  readonly status: "completed";
   readonly refId: string;
-  readonly summary: string;
-  readonly result: {
-    readonly command: string;
-    readonly commandLine: string;
-    readonly args?: readonly string[];
-    readonly shell: {
-      readonly kind: SanitizedCommandShellConfig["kind"];
-      readonly label: string;
-      readonly executable: string;
-      readonly syntax: SanitizedCommandShellConfig["syntax"];
-      readonly invocation: readonly string[];
-    };
-    readonly cwd: string;
-    readonly exitCode: number | null;
-    readonly notStarted?: boolean;
-    readonly stdout: string;
-    readonly stderr: string;
-    readonly stdoutTruncated: boolean;
-    readonly stderrTruncated: boolean;
-    readonly stdoutChars: number;
-    readonly stderrChars: number;
-    readonly stdoutOmittedChars: number;
-    readonly stderrOmittedChars: number;
-    readonly timedOut?: boolean;
-    readonly cancelled?: boolean;
-    readonly signal?: string;
-    readonly background?: boolean;
-    readonly pid?: number;
-    readonly logRef?: string;
-    readonly logPath?: string;
-    readonly stopCommand?: string;
-    readonly durationMs?: number;
-    readonly waitForPort?: number;
-    readonly portReady?: boolean;
-    readonly preStartPortOccupancy?: LocalPortOccupancyFact;
-    readonly portWaitCancelled?: boolean;
+  readonly command: string;
+  readonly commandLine: string;
+  readonly args?: readonly string[];
+  readonly shell: {
+    readonly kind: SanitizedCommandShellConfig["kind"];
+    readonly label: string;
+    readonly executable: string;
+    readonly syntax: SanitizedCommandShellConfig["syntax"];
+    readonly invocation: readonly string[];
   };
+  readonly cwd: string;
+  readonly exitCode: number | null;
+  readonly notStarted?: boolean;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly stdoutTruncated: boolean;
+  readonly stderrTruncated: boolean;
+  readonly stdoutChars: number;
+  readonly stderrChars: number;
+  readonly stdoutOmittedChars: number;
+  readonly stderrOmittedChars: number;
+  readonly timedOut?: boolean;
+  readonly cancelled?: boolean;
+  readonly signal?: string;
+  readonly background?: boolean;
+  readonly pid?: number;
+  readonly logRef?: string;
+  readonly logPath?: string;
+  readonly stopCommand?: string;
+  readonly durationMs?: number;
+  readonly waitForPort?: number;
+  readonly portReady?: boolean;
+  readonly preStartPortOccupancy?: LocalPortOccupancyFact;
+  readonly portWaitCancelled?: boolean;
   readonly truncated: boolean;
+  readonly continuation?: ToolContinuation;
 } {
   const stdout = commandOutputPreview({
     text: input.result.stdout,
@@ -515,64 +445,51 @@ function commandToolOutput(input: {
     omittedChars: input.result.stderrOmittedChars,
     maxChars: MAX_COMMAND_STDERR_CHARS,
   });
-  const prefix = input.action === "shell_command" ? "workspace:shell" : "workspace:command";
-  const statusText = input.result.notStarted === true
-    ? input.result.preStartPortOccupancy !== undefined
-      ? `not started; port ${input.result.preStartPortOccupancy.port} occupied`
-      : "not started"
-    : input.result.background === true
-    ? input.result.waitForPort !== undefined && input.result.portReady !== true
-      ? `started background pid ${input.result.pid ?? "unknown"}; port ${input.result.waitForPort} not ready`
-      : input.result.waitForPort !== undefined
-        ? `started background pid ${input.result.pid ?? "unknown"}; port ${input.result.waitForPort} ready`
-        : `started background pid ${input.result.pid ?? "unknown"}`
-    : input.result.timedOut === true
-      ? `timed out (exit ${input.result.exitCode})`
-      : input.result.cancelled === true
-        ? `cancelled (exit ${input.result.exitCode})`
-      : `exit ${input.result.exitCode}`;
+  const truncated = input.truncated || input.result.truncated === true || stdout.truncated || stderr.truncated;
+  const continuation = input.result.logRef !== undefined && (truncated || input.result.background === true)
+    ? {
+        ref: input.result.logRef,
+        nextInput: { ref: input.result.logRef, maxLength: 30_000 },
+      }
+    : undefined;
   return {
-    action: input.action,
-    status: "completed",
-    refId: `${prefix}:${safeRefToken(input.commandLine)}`,
-    summary: `${input.commandLine} · ${statusText}`,
-    result: {
-      command: input.command,
-      commandLine: input.commandLine,
-      args: input.legacyArgs.length === 0 ? undefined : [...input.legacyArgs],
-      shell: {
-        kind: input.shell.kind,
-        label: input.shell.label,
-        executable: input.shell.executable,
-        syntax: input.shell.syntax,
-        invocation: [...input.shell.invocation],
-      },
-      cwd: input.result.cwd,
-      exitCode: input.result.exitCode,
-      notStarted: input.result.notStarted === true ? true : undefined,
-      stdout: stdout.text,
-      stderr: stderr.text,
-      stdoutTruncated: stdout.truncated,
-      stderrTruncated: stderr.truncated,
-      stdoutChars: stdout.chars,
-      stderrChars: stderr.chars,
-      stdoutOmittedChars: stdout.omittedChars,
-      stderrOmittedChars: stderr.omittedChars,
-      timedOut: input.result.timedOut === true ? true : undefined,
-      cancelled: input.result.cancelled === true ? true : undefined,
-      signal: input.result.signal,
-      background: input.result.background === true ? true : undefined,
-      pid: input.result.pid,
-      logRef: input.result.logRef,
-      logPath: input.result.logPath,
-      stopCommand: input.result.stopCommand,
-      durationMs: input.result.durationMs,
-      waitForPort: input.result.waitForPort,
-      portReady: input.result.portReady,
-      preStartPortOccupancy: input.result.preStartPortOccupancy,
-      portWaitCancelled: input.result.portWaitCancelled === true ? true : undefined,
+    refId: `workspace:shell:${safeRefToken(input.commandLine)}`,
+    command: input.command,
+    commandLine: input.commandLine,
+    args: input.directArgs.length === 0 ? undefined : [...input.directArgs],
+    shell: {
+      kind: input.shell.kind,
+      label: input.shell.label,
+      executable: input.shell.executable,
+      syntax: input.shell.syntax,
+      invocation: [...input.shell.invocation],
     },
-    truncated: input.truncated || input.result.truncated === true || stdout.truncated || stderr.truncated,
+    cwd: input.result.cwd,
+    exitCode: input.result.exitCode,
+    notStarted: input.result.notStarted === true ? true : undefined,
+    stdout: stdout.text,
+    stderr: stderr.text,
+    stdoutTruncated: stdout.truncated,
+    stderrTruncated: stderr.truncated,
+    stdoutChars: stdout.chars,
+    stderrChars: stderr.chars,
+    stdoutOmittedChars: stdout.omittedChars,
+    stderrOmittedChars: stderr.omittedChars,
+    timedOut: input.result.timedOut === true ? true : undefined,
+    cancelled: input.result.cancelled === true ? true : undefined,
+    signal: input.result.signal,
+    background: input.result.background === true ? true : undefined,
+    pid: input.result.pid,
+    logRef: input.result.logRef,
+    logPath: input.result.logPath,
+    stopCommand: input.result.stopCommand,
+    durationMs: input.result.durationMs,
+    waitForPort: input.result.waitForPort,
+    portReady: input.result.portReady,
+    preStartPortOccupancy: input.result.preStartPortOccupancy,
+    portWaitCancelled: input.result.portWaitCancelled === true ? true : undefined,
+    truncated,
+    continuation,
   };
 }
 
@@ -630,8 +547,8 @@ function normalizeShellCommandInput(
 ): {
   readonly command: string;
   readonly commandLine: string;
-  readonly legacyProgram?: string;
-  readonly legacyArgs: readonly string[];
+  readonly directProgram?: string;
+  readonly directArgs: readonly string[];
 } {
   const directCommand = stringField(record.command);
   const directArgs = toStringArray(record.args);
@@ -640,24 +557,23 @@ function normalizeShellCommandInput(
     return {
       command: directCommand,
       commandLine: commandLine ?? shellCommandLineFromArgv(directCommand, directArgs, shellSyntax),
-      legacyProgram: directCommand,
-      legacyArgs: directArgs,
+      directProgram: directCommand,
+      directArgs,
     };
   }
   if (commandLine !== undefined) {
     return {
       command: commandLine,
       commandLine,
-      legacyArgs: [],
+      directArgs: [],
     };
   }
   const command = requireCommand(record.command);
-  const legacyArgs = directArgs;
   return {
     command,
-    commandLine: legacyArgs.length === 0 ? command : [command, ...legacyArgs].join(" "),
-    legacyProgram: legacyArgs.length === 0 ? undefined : command,
-    legacyArgs,
+    commandLine: directArgs.length === 0 ? command : [command, ...directArgs].join(" "),
+    directProgram: directArgs.length === 0 ? undefined : command,
+    directArgs,
   };
 }
 

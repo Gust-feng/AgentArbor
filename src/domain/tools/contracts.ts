@@ -1,5 +1,6 @@
 import type { ConfirmationRequest } from "../confirmation/contracts.js";
 import type { ModelInputAttachment } from "../intelligence/model-input-attachments.js";
+import type { ToolFactValue } from "./fact-value.js";
 
 export type ToolInputSchema = {
   readonly type: "object";
@@ -19,30 +20,28 @@ export type ToolModelRuntimeHint = {
 };
 
 /**
- * 模型可见工具的「功能性契约」：用于让模型依据契约本身（而非记忆外部约定）区分相近工具、
- * 判断何时该用/不该用、正确组装参数与理解输出。
+ * 模型可见工具的可选描述增强。它可以补充适用边界、参数约束、结果事实和运行环境，
+ * 但不是工具进入模型可见集合的准入证明。
  *
- * 这些字段是工具在模型可见层具备「区分度」的来源（FR-TOOL-004 的功能性基础）。
- * 对模型可见的工具，`validateModelVisibleToolContract` 会把其中的关键字段
- * （用途/参数说明/输出说明/runtimeHints/examples）作为「进模型可见集合」的完备门槛；
- * 缺这些字段的工具不得进入模型可见集合（FR-TOOL-002）。
+ * 可见性由冻结权限、真实 executor/runtime 可用性、provider 协议能力和客观资源决定。
+ * 这里的推荐用法、运行提示和示例不得成为隐藏路由，也不得通过关键词规则替模型选工具。
  */
 export type ToolModelContract = {
-  /** 工具用途的一句话说明；缺省时回退到 `ToolDefinition.description`。 */
+  /** 可选补充目标说明；客观 `ToolDefinition.description` 始终是 provider 描述的主体。 */
   readonly purpose?: string;
-  /** 何时使用本工具，帮助模型在相近工具之间正向选择。 */
+  /** 可选适用性说明；只作信息补充，工具选择仍属于模型判断。 */
   readonly whenToUse?: readonly string[];
-  /** 何时不应使用本工具，帮助模型在相近工具之间反向排除（区分度的关键）。 */
+  /** 可选非能力/不适用边界。 */
   readonly whenNotToUse?: readonly string[];
-  /** 参数说明：每个关键参数的语义、单位、约束。 */
+  /** 可选参数补充；正式输入边界仍由 `inputSchema` 定义。 */
   readonly inputNotes?: readonly string[];
-  /** 使用注意：跨参数的通用约束、平台差异、副作用边界。 */
+  /** 可选跨参数约束、平台差异或副作用说明。 */
   readonly usageNotes?: readonly string[];
-  /** 输出说明：返回结构、字段含义、截断/省略行为。 */
+  /** 可选输出说明；真实结果/截断/continuation 边界由 `ToolCallResult` 与 executor 行为承担。 */
   readonly outputNotes?: readonly string[];
-  /** 可被模型直接复用的最小化参数示例。 */
+  /** 可选参数示例。 */
   readonly examples?: readonly ToolUsageExample[];
-  /** 运行时提示键值（如 current shell、平台），让模型无需记忆外部约定即可正确组装参数。 */
+  /** 可选冻结运行环境提示（如 current shell、平台）。 */
   readonly runtimeHints?: readonly ToolModelRuntimeHint[];
 };
 
@@ -62,12 +61,6 @@ export type ToolFileDisplayOperation =
   | "append"
   | "edit"
   | "delete";
-
-export type ToolVisibleResultPolicy = {
-  readonly userVisible: "summary-only" | "safe-preview" | "hidden";
-  readonly maxPreviewChars: number;
-  readonly omitRawOutput: boolean;
-};
 
 export type ToolErrorDomain =
   | "tool_error"
@@ -105,9 +98,9 @@ export type ToolRuntimeHint =
  * 这是「工具是否需要确认 / 是否只读 / 可否并行 / 是否具备删除子能力」等能力判定的
  * **唯一依据**。能力判定必须基于这些显式契约字段，而非工具名正则、关键字或硬编码白名单。
  *
- * 对模型可见的工具，`validateModelVisibleToolContract` 把 `category` / `riskLevel` /
- * `operationType` / `requiresConfirmation` / `visibleResultPolicy` 作为「进模型可见集合」的
- * 完备门槛：缺任一字段的工具不得进入模型可见集合。
+ * 对模型可见的工具，`validateModelVisibleToolContract` 只把 `category` / `riskLevel` /
+ * `operationType` / `requiresConfirmation` 以及可选的 `fileOperation` 作为执行/副作用事实校验。
+ * 预览长度、折叠和用户可见文案属于 Panel/read-model，不进入工具执行契约。
  *
  * 确认策略保守默认：当 `requiresConfirmation` 缺失（例如经松散运行时数据绕过完备门槛的
  * 兼容/MCP 路径）时，`resolveEffectiveConfirmationRequirement` 对高影响动作
@@ -123,8 +116,6 @@ export type ToolDefinitionMetadata = {
   readonly operationType: ToolOperationType;
   /** 显式确认策略：是否需要逐条确认。能力判定唯一依据，缺失时走保守默认。 */
   readonly requiresConfirmation: boolean;
-  /** 用户可见结果策略：摘要/预览/隐藏与截断上限。 */
-  readonly visibleResultPolicy: ToolVisibleResultPolicy;
   readonly runtimeHints?: readonly ToolRuntimeHint[];
   /**
    * 文件系统操作工具显式声明的文件操作子类型（create/write/append/edit/delete）。
@@ -139,42 +130,10 @@ export type ToolDefinitionMetadata = {
   readonly fileOperation?: ToolFileDisplayOperation;
 };
 
-export type ToolContentBlock =
-  | {
-      readonly type: "text";
-      readonly text: string;
-    }
-  | {
-      readonly type: "image";
-      readonly data?: string;
-      readonly mimeType: string;
-      readonly ref?: string;
-    }
-  | {
-      readonly type: "audio";
-      readonly data?: string;
-      readonly mimeType: string;
-      readonly ref?: string;
-    }
-  | {
-      readonly type: "resource";
-      readonly uri: string;
-      readonly mimeType?: string;
-      readonly text?: string;
-    };
-
 export type ToolContinuation = {
   readonly ref?: string;
-  readonly nextInput?: unknown;
+  readonly nextInput?: ToolFactValue;
   readonly note?: string;
-};
-
-export type ToolResultTruncation = {
-  readonly truncated: true;
-  readonly reason?: string;
-  readonly omittedChars?: number;
-  readonly omittedItems?: number;
-  readonly continuation?: ToolContinuation;
 };
 
 export type ToolResultError = {
@@ -185,12 +144,11 @@ export type ToolResultError = {
 };
 
 export type ToolResult = {
-  readonly content: readonly ToolContentBlock[];
-  readonly structuredContent?: unknown;
-  readonly isError?: boolean;
+  readonly body:
+    | { readonly format: "none" }
+    | { readonly format: "text"; readonly text: string }
+    | { readonly format: "json"; readonly value: ToolFactValue };
   readonly error?: ToolResultError;
-  readonly truncation?: ToolResultTruncation;
-  readonly continuation?: ToolContinuation;
 };
 
 export type ToolDefinition = {
@@ -204,14 +162,14 @@ export type ToolDefinition = {
 export type ToolCallRequest = {
   readonly callId: string;
   readonly toolName: string;
-  readonly input: unknown;
+  readonly input: ToolFactValue | undefined;
 };
 
 export type ToolCallResult = {
   readonly callId: string;
   readonly toolName: string;
-  readonly input: unknown;
-  readonly output: unknown;
+  readonly input: ToolFactValue | undefined;
+  readonly output: ToolFactValue | undefined;
   readonly status: "completed" | "failed" | "approval_required" | "cancelled";
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;

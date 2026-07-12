@@ -367,7 +367,11 @@ test("Rootlet AI can call unified search then read before producing candidate ou
   assert.deepEqual(toolEvents, ["tool.requested", "tool.completed", "tool.requested", "tool.completed"]);
   assert.notEqual(modelOutput, undefined);
   assert.equal(eventLogText.includes("tvly-test-secret"), false);
-  assert.equal(eventLogText.includes("Page read body should stay out of EventLog"), false);
+  assert.equal(
+    eventLogText.split("Page read body should stay out of EventLog").length - 1,
+    1,
+    "tool.completed should retain one bounded factual read result without duplicating it"
+  );
   assert.equal(JSON.stringify(modelOutput).includes("Page read body should stay out of EventLog"), false);
 });
 

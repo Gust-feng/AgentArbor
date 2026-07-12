@@ -1,4 +1,4 @@
-import { isToolLifecycleMessageType, type ArborMessage } from "../../domain/common.js";
+import { isToolCallEventMessageType, type ArborMessage } from "../../domain/common.js";
 import type {
   IntelligenceChannel,
   ModelMessage,
@@ -13,7 +13,6 @@ import type {
   SubAgentRunTraceSink,
   SubAgentToolTrace,
 } from "../../domain/sub-agents/contracts.js";
-import type { ToolCallResult } from "../../domain/tools/contracts.js";
 import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../../domain/tools/contracts.js";
 import type {
   AgentTurnPendingApproval,
@@ -22,6 +21,10 @@ import type {
 } from "../../kernel/intelligence/agent-turn-runtime.js";
 import { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
 import { createId, nowIso } from "../../kernel/id.js";
+import {
+  reduceToolCallEventFacts,
+  type ToolCallEventEntry,
+} from "../run-read-model/tool-call-event-reducer.js";
 import {
   createSubAgentCompletedMessage,
   createSubAgentStartedMessage,
@@ -35,7 +38,6 @@ const SUB_AGENT_TURN_SEMANTICS = {
   exposeNonFinalOutput: false,
 } as const;
 export const SUB_AGENT_DEFAULT_MAX_STEPS = 30;
-const DISPLAY_SUMMARY_MAX_CHARS = 500;
 const SUB_AGENT_TOOL_NAMES = new Set([
   "call_sub_agent",
   "call_sub_agents",
@@ -173,7 +175,6 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
       startTime,
       subAgentId: input.subAgent.id,
     });
-    recorder.observeToolResults(turn.toolCalls);
   } catch (error) {
     result = {
       status: "failed",
@@ -237,6 +238,8 @@ class SubAgentTraceRecorder {
   private readonly input: SubAgentTraceRecorderInput;
   private readonly exchanges = new Map<string, SubAgentModelExchange>();
   private readonly tools = new Map<string, SubAgentToolTrace>();
+  private readonly toolEvents: ToolCallEventEntry[] = [];
+  private nextToolEventSequence = 1;
 
   constructor(input: SubAgentTraceRecorderInput) {
     this.input = input;
@@ -255,61 +258,35 @@ class SubAgentTraceRecorder {
   }
 
   observeToolEvent(message: ArborMessage): void {
-    if (!isToolLifecycleMessageType(message.type)) {
+    if (!isToolCallEventMessageType(message.type)) {
       return;
     }
-    const payload = asRecord(message.payload);
-    const callId = stringFrom(payload.callId) ?? stringFrom(payload.requestId);
-    const toolName = stringFrom(payload.toolName);
-    if (callId === undefined || toolName === undefined) {
-      return;
-    }
-    const previous = this.tools.get(callId);
-    if (message.type === "tool.requested") {
-      this.tools.set(callId, {
-        ...previous,
-        callId,
-        toolName,
-        input: payload.input ?? previous?.input,
-        status: "requested",
-        startedAt: previous?.startedAt ?? message.createdAt,
-      });
-      return;
-    }
-    const output = asRecord(payload.output);
-    const status = toolStatusFromEvent(message.type, output.status);
-    this.tools.set(callId, {
-      ...previous,
-      callId,
-      toolName,
-      input: previous?.input ?? payload.input,
-      status,
-      startedAt: previous?.startedAt,
-      completedAt: message.createdAt,
-      durationMs: numberFrom(payload.durationMs) ?? numberFrom(output.durationMs) ?? previous?.durationMs,
-      confirmationId: stringFrom(asRecord(output.confirmationRequest).confirmationId) ?? previous?.confirmationId,
-      outputSummary: stringFrom(output.summary) ?? previous?.outputSummary,
-      error: stringFrom(payload.error) ?? stringFrom(output.error) ?? previous?.error,
-      errorFacts: toolErrorFactsFrom(output.errorFacts) ?? previous?.errorFacts,
+    this.toolEvents.push({
+      sequence: this.nextToolEventSequence++,
+      type: message.type,
+      recordedAt: message.createdAt,
+      message: { payload: message.payload },
     });
+    this.refreshToolTraces();
   }
 
-  observeToolResults(results: readonly ToolCallResult[]): void {
-    for (const result of results) {
-      const previous = this.tools.get(result.callId);
-      this.tools.set(result.callId, {
-        ...previous,
-        callId: result.callId,
-        toolName: result.toolName,
-        input: previous?.input ?? result.input,
-        status: result.status === "approval_required" ? "approval_required" : result.status,
-        startedAt: previous?.startedAt,
-        completedAt: previous?.completedAt,
-        durationMs: result.durationMs,
-        confirmationId: result.confirmationRequest?.confirmationId ?? previous?.confirmationId,
-        outputSummary: stringFrom(asRecord(result.output).summary) ?? previous?.outputSummary,
-        error: result.error ?? previous?.error,
-        errorFacts: result.errorFacts ?? previous?.errorFacts,
+  private refreshToolTraces(): void {
+    this.tools.clear();
+    for (const fact of reduceToolCallEventFacts(this.toolEvents)) {
+      if (fact.toolName === undefined) {
+        continue;
+      }
+      this.tools.set(fact.callId, {
+        callId: fact.callId,
+        toolName: fact.toolName,
+        status: fact.status,
+        startedAt: fact.createdAt,
+        completedAt: fact.terminalAt,
+        durationMs: fact.durationMs,
+        confirmationId: fact.confirmationId,
+        error: fact.error,
+        errorDomain: fact.errorDomain,
+        errorFacts: fact.errorFacts,
       });
     }
   }
@@ -345,9 +322,10 @@ class SubAgentTraceRecorder {
       status: "requested",
       purpose: request.purpose,
       requestedAt: request.requestedAt,
-      messages: request.sanitizedMessages.map(cloneModelMessage),
-      tools: (request.tools ?? []).map((tool) => tool.name),
-      toolCalls: [],
+      messageRefs: uniqueMessageRefs(request.sanitizedMessages),
+      messageCount: request.sanitizedMessages.length,
+      visibleToolCount: request.tools?.length ?? 0,
+      toolCallRefs: [],
     });
   }
 
@@ -360,13 +338,12 @@ class SubAgentTraceRecorder {
       purpose: previous?.purpose,
       requestedAt: previous?.requestedAt ?? response.completedAt,
       completedAt: response.completedAt,
-      messages: previous?.messages ?? [],
-      tools: previous?.tools ?? [],
-      textOutput: response.textOutput ?? response.assistantMessage?.content,
-      toolCalls: (response.toolCalls ?? []).map((call) => ({
+      messageRefs: previous?.messageRefs ?? [],
+      messageCount: previous?.messageCount ?? 0,
+      visibleToolCount: previous?.visibleToolCount ?? 0,
+      toolCallRefs: (response.toolCalls ?? []).map((call) => ({
         callId: call.callId,
         toolName: call.toolName,
-        input: cloneUnknown(call.input),
       })),
       failureKind: response.failure?.kind,
       failureMessage: response.failure?.message,
@@ -590,9 +567,6 @@ function extractTextOutput(turn: AgentTurnRuntimeResult): string | undefined {
 function generateSummary(fullOutput: string | undefined, turn: AgentTurnRuntimeResult): string {
   if (fullOutput !== undefined && fullOutput.trim().length > 0) {
     const trimmed = fullOutput.trim();
-    if (trimmed.length <= DISPLAY_SUMMARY_MAX_CHARS) {
-      return trimmed;
-    }
     if (turn.status === "cancelled" || turn.stoppedReason === "cancelled") {
       return `子 Agent 已取消，保留完整输出（${trimmed.length} 字）。`;
     }
@@ -662,60 +636,15 @@ function errorMessage(error: unknown): string {
   return typeof error === "string" ? error : String(error);
 }
 
-function cloneModelMessage(message: ModelMessage): ModelMessage {
-  return {
-    ...message,
-    attachments: message.attachments?.map(cloneUnknown),
-    protocolExtensions:
-      message.protocolExtensions === undefined ? undefined : cloneUnknown(message.protocolExtensions) as Readonly<Record<string, unknown>>,
-    toolCalls: message.toolCalls?.map((toolCall) => ({
-      callId: toolCall.callId,
-      toolName: toolCall.toolName,
-      input: cloneUnknown(toolCall.input),
-    })),
-  };
-}
-
-function cloneUnknown<T>(value: T): T {
-  if (value === undefined) {
-    return value;
+function uniqueMessageRefs(messages: readonly ModelMessage[]): readonly string[] {
+  const refs = new Set<string>();
+  for (const message of messages) {
+    const ref = message.ref?.trim();
+    if (ref !== undefined && ref.length > 0) {
+      refs.add(ref);
+    }
   }
-  return globalThis.structuredClone(value);
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : {};
-}
-
-function stringFrom(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function numberFrom(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function toolStatusFromEvent(
-  type: ArborMessage["type"],
-  outputStatus: unknown
-): SubAgentToolTrace["status"] {
-  if (outputStatus === "approval_required") {
-    return "approval_required";
-  }
-  if (type === "tool.completed") {
-    return "completed";
-  }
-  if (type === "tool.cancelled") {
-    return "cancelled";
-  }
-  return "failed";
-}
-
-function toolErrorFactsFrom(value: unknown): SubAgentToolTrace["errorFacts"] | undefined {
-  const facts = asRecord(value);
-  return Object.keys(facts).length === 0 ? undefined : facts as SubAgentToolTrace["errorFacts"];
+  return [...refs];
 }
 
 function normalizeOptionalRoundLimit(value: number | undefined): number | undefined {

@@ -287,11 +287,6 @@ function capabilitySnapshot(snapshotId: string, activeModel: SanitizedModelProvi
           operationLabel: "Read only",
           requiresConfirmation: false,
           confirmationLabel: "No confirmation",
-          visibleResultPolicy: {
-            userVisible: "safe-preview",
-            maxPreviewChars: 500,
-            omitRawOutput: true,
-          },
         },
         {
           name: "shell_command",
@@ -309,11 +304,6 @@ function capabilitySnapshot(snapshotId: string, activeModel: SanitizedModelProvi
           operationLabel: "Execute",
           requiresConfirmation: true,
           confirmationLabel: "Requires confirmation",
-          visibleResultPolicy: {
-            userVisible: "summary-only",
-            maxPreviewChars: 500,
-            omitRawOutput: true,
-          },
         },
       ],
     },

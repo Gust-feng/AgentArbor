@@ -94,7 +94,6 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["sub-agent-stream-projection.ts", 'export * from "./run-read-model/sub-agent-stream-projection.js";'],
     ["desktop-agent-contracts.ts", 'export * from "./desktop-agent/desktop-agent-contracts.js";'],
     ["desktop-agent-prompts.ts", 'export * from "./desktop-agent/desktop-agent-prompts.js";'],
-    ["desktop-chat-session.ts", 'export * from "./desktop-agent/desktop-chat-session.js";'],
     ["desktop-agent-session.ts", 'export * from "./desktop-agent/desktop-agent-session.js";'],
     ["desktop-agent-session-contracts.ts", 'export * from "./desktop-agent/desktop-agent-session-contracts.js";'],
     ["desktop-agent-session-projection.ts", 'export * from "./desktop-agent/desktop-agent-session-projection.js";'],
@@ -517,7 +516,6 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
   const desktopAgentFiles = [
     "desktop-agent-contracts.ts",
     "desktop-agent-prompts.ts",
-    "desktop-chat-session.ts",
     "desktop-agent-session.ts",
     "desktop-agent-session-contracts.ts",
     "desktop-agent-session-projection.ts",
@@ -550,8 +548,6 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
   assert.equal(contractsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-contracts.js";');
   const promptsFacade = await readSource(path.join(appRoot, "desktop-agent-prompts.ts"));
   assert.equal(promptsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-prompts.js";');
-  const chatFacade = await readSource(path.join(appRoot, "desktop-chat-session.ts"));
-  assert.equal(chatFacade.trim(), 'export * from "./desktop-agent/desktop-chat-session.js";');
   const sessionFacade = await readSource(path.join(appRoot, "desktop-agent-session.ts"));
   assert.equal(sessionFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session.js";');
   const sessionContractsFacade = await readSource(path.join(appRoot, "desktop-agent-session-contracts.ts"));

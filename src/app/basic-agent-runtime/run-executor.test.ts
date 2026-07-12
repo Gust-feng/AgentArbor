@@ -121,6 +121,7 @@ test("BasicAgentPendingContinuationStore validates and consumes pending confirma
   const store = new BasicAgentPendingContinuationStore();
   const continuation = {
     confirmationId: "confirmation-tool",
+    async release() {},
     async resume() {
       return {};
     },
@@ -139,6 +140,41 @@ test("BasicAgentPendingContinuationStore validates and consumes pending confirma
     () => store.assertPendingConfirmation(job, "confirmation-tool"),
     (error) => error instanceof BasicAgentConfirmationDecisionError && error.code === "confirmation_not_pending"
   );
+});
+
+test("BasicAgentPendingContinuationStore removes continuations before awaiting release", async () => {
+  const store = new BasicAgentPendingContinuationStore();
+  let releaseStarted!: () => void;
+  let finishRelease!: () => void;
+  let releaseCalls = 0;
+  const releaseWasStarted = new Promise<void>((resolve) => {
+    releaseStarted = resolve;
+  });
+  const releaseGate = new Promise<void>((resolve) => {
+    finishRelease = resolve;
+  });
+  store.remember("run-release", {
+    confirmationId: "confirmation-release",
+    async release() {
+      releaseCalls += 1;
+      releaseStarted();
+      await releaseGate;
+      throw new Error("cleanup failure must be isolated");
+    },
+    async resume() {
+      return {};
+    },
+    async resumeWithDecision() {
+      return {};
+    },
+  });
+
+  const deletion = store.deleteForRun("run-release");
+  assert.equal(store.consume("run-release", "confirmation-release"), undefined);
+  await releaseWasStarted;
+  assert.equal(releaseCalls, 1);
+  finishRelease();
+  await assert.doesNotReject(deletion);
 });
 
 test("BasicAgentPendingContinuationStore accepts canvas pending confirmation and rejects stale decisions", () => {
@@ -557,6 +593,7 @@ test("BasicAgentRunExecutor reject recovers through the same run", async () => {
     execute: async () => ({
       pendingApproval: {
         confirmationId: "confirmation-tool",
+        async release() {},
         async resume() {
           throw new Error("approval resume should not be used");
         },
@@ -613,6 +650,7 @@ test("BasicAgentRunExecutor approve continues before long command continuations 
     execute: async () => ({
       pendingApproval: {
         confirmationId: "confirmation-command",
+        async release() {},
         async resume() {
           continuationStarted = true;
           await continuationGate;
@@ -667,6 +705,67 @@ test("BasicAgentRunExecutor approve continues before long command continuations 
   await waitUntil(() => continuationFinished);
   await waitUntil(() => runJobs.get(run.runId)?.status === "completed");
   await waitUntil(() => activeRunJobs.size === 0);
+});
+
+test("BasicAgentRunExecutor cancel awaits the pending approval resource release", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  let releaseStarted!: () => void;
+  let finishRelease!: () => void;
+  let releaseCalls = 0;
+  const releaseWasStarted = new Promise<void>((resolve) => {
+    releaseStarted = resolve;
+  });
+  const releaseGate = new Promise<void>((resolve) => {
+    finishRelease = resolve;
+  });
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    execute: async () => ({
+      pendingApproval: {
+        confirmationId: "confirmation-cancel-release",
+        async release() {
+          releaseCalls += 1;
+          releaseStarted();
+          await releaseGate;
+        },
+        async resume() {
+          throw new Error("cancelled continuation must not resume");
+        },
+        async resumeWithDecision() {
+          throw new Error("cancelled continuation must not resume");
+        },
+      },
+      canvas: {
+        kind: "desktop_agent_canvas",
+        agent: {
+          pendingConfirmation: {
+            confirmationId: "confirmation-cancel-release",
+          },
+        },
+      },
+    }),
+  }));
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "cancel while waiting for approval",
+    aiMode: "fake",
+  });
+  await waitUntil(() => runJobs.get(run.runId)?.status === "approval_needed");
+
+  let cancelSettled = false;
+  const cancellation = executor.cancel(run.runId).finally(() => {
+    cancelSettled = true;
+  });
+  await releaseWasStarted;
+
+  assert.equal(runJobs.get(run.runId)?.status, "cancelled");
+  assert.equal(cancelSettled, false);
+  assert.equal(releaseCalls, 1);
+  finishRelease();
+  const cancelled = await cancellation;
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(releaseCalls, 1);
 });
 
 test("BasicAgentRunExecutor stores backend run capability resolution from execution result", async () => {
@@ -1322,6 +1421,7 @@ test("BasicAgentRunExecutor keeps frozen run facts when approval continuation is
     execute: async () => ({
       pendingApproval: {
         confirmationId: "confirmation-lost",
+        async release() {},
         async resume() {
           return {};
         },
@@ -1691,11 +1791,6 @@ function capabilitySnapshot(): BasicAgentCapabilitySnapshot {
           operationLabel: "Read only",
           requiresConfirmation: false,
           confirmationLabel: "No confirmation",
-          visibleResultPolicy: {
-            userVisible: "summary-only",
-            maxPreviewChars: 800,
-            omitRawOutput: true,
-          },
           scopes: ["desktop-basic", "research"],
           enabled: true,
           availability: "available",
@@ -1770,11 +1865,6 @@ function capabilitySnapshotWithReadFile(): BasicAgentCapabilitySnapshot {
           operationLabel: "Read only",
           requiresConfirmation: false,
           confirmationLabel: "No confirmation",
-          visibleResultPolicy: {
-            userVisible: "summary-only",
-            maxPreviewChars: 800,
-            omitRawOutput: true,
-          },
           scopes: ["desktop-basic", "workspace"],
           enabled: true,
           availability: "available",
@@ -1926,11 +2016,15 @@ test("BasicAgentRunExecutor maps paused execution result to blocked with preserv
 test("BasicAgentRunExecutor converges to failed when persistence fails after markResuming", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   let persistShouldFail = false;
+  let releaseCalls = 0;
   const executor = new BasicAgentRunExecutor(executorConfig({
     runJobs,
     execute: async () => ({
       pendingApproval: {
         confirmationId: "confirmation-persist-fail",
+        async release() {
+          releaseCalls += 1;
+        },
         async resume() {
           return { completed: true };
         },
@@ -1989,6 +2083,7 @@ test("BasicAgentRunExecutor converges to failed when persistence fails after mar
   assert.notEqual(job?.status, "running");
   assert.equal(job?.status, "failed");
   assert.equal(job?.failed?.error.code, "confirmation_resume_failed");
+  assert.equal(releaseCalls, 1);
 });
 
 test("BasicAgentRunExecutor avoids double finalize when cancel races with confirmation resume", async () => {
@@ -2000,6 +2095,7 @@ test("BasicAgentRunExecutor avoids double finalize when cancel races with confir
     execute: async () => ({
       pendingApproval: {
         confirmationId: "confirmation-race",
+        async release() {},
         async resume() {
           await new Promise<void>((resolve) => { releaseResume = resolve; });
           return { completed: true };

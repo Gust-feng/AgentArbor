@@ -7,7 +7,6 @@ import type {
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
-import type { ToolCallEvidence } from "../../domain/basic-agent/index.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
@@ -56,7 +55,6 @@ export type PanelRunExecutionResult = {
 export type PanelRunExecutionOptions = {
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
-  readonly toolEvidence?: readonly ToolCallEvidence[];
   readonly agentDefinition?: AgentDefinition;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly config?: SanitizedModelProviderConfig;
@@ -74,6 +72,3 @@ export type PanelRuntimeReadyContext =
   | DesktopAgentSessionRuntimeContext;
 
 export type { AgentRunResources } from "./agent-run-resources.js";
-
-/** @deprecated Use AgentRunResources. */
-export type DesktopRunResources = AgentRunResources;

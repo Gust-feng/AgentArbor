@@ -30,7 +30,7 @@ function compareSubAgentRuns(left: SubAgentRunTrace, right: SubAgentRunTrace): n
 
 function mergeSubAgentTrace(previous: SubAgentRunTrace, next: SubAgentRunTrace): SubAgentRunTrace {
   const modelExchanges = mergeByKey(previous.modelExchanges, next.modelExchanges, (exchange) => exchange.requestId);
-  const toolTraces = mergeByKey(previous.toolTraces, next.toolTraces, (tool) => tool.callId);
+  const toolTraces = mergeToolTraces(previous.toolTraces, next.toolTraces);
   return {
     ...previous,
     ...next,
@@ -47,6 +47,27 @@ function mergeSubAgentTrace(previous: SubAgentRunTrace, next: SubAgentRunTrace):
     modelExchanges,
     toolTraces,
   };
+}
+
+function mergeToolTraces(
+  previous: SubAgentRunTrace["toolTraces"],
+  next: SubAgentRunTrace["toolTraces"],
+): SubAgentRunTrace["toolTraces"] {
+  const merged = new Map(previous.map((tool) => [tool.callId, tool]));
+  for (const tool of next) {
+    const existing = merged.get(tool.callId);
+    merged.set(tool.callId, existing === undefined ? tool : {
+      ...existing,
+      ...tool,
+      startedAt: existing.startedAt ?? tool.startedAt,
+      completedAt: tool.completedAt ?? existing.completedAt,
+      confirmationId: tool.confirmationId ?? existing.confirmationId,
+      error: tool.error ?? existing.error,
+      errorDomain: tool.errorDomain ?? existing.errorDomain,
+      errorFacts: tool.errorFacts ?? existing.errorFacts,
+    });
+  }
+  return [...merged.values()];
 }
 
 function mergeByKey<T>(

@@ -18,27 +18,6 @@ export function turnModelFromConfigAndModelCall(
   };
 }
 
-export function turnModelFromModelCallFallback(
-  call: ConversationModelCallIdentity | undefined,
-  fallbackProfileId: string
-): PanelConversationTurnModel | undefined {
-  const concrete = turnModelFromConcreteModelCall(call);
-  if (concrete !== undefined) {
-    return concrete;
-  }
-  const model = nonEmpty(call?.model);
-  if (model === undefined) {
-    return undefined;
-  }
-  const providerKind = nonEmpty(call?.providerKind);
-  return {
-    profileId: providerKind ?? fallbackProfileId,
-    providerKind,
-    protocolKind: nonEmpty(call?.protocolKind),
-    model,
-  };
-}
-
 function turnModelFromConcreteModelCall(
   call: ConversationModelCallIdentity | undefined
 ): PanelConversationTurnModel | undefined {

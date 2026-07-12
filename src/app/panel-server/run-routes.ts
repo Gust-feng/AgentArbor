@@ -22,7 +22,7 @@ import {
   createPanelRunResponse,
   createConfigurationFailedAiSummary,
   panelConfigurationErrorMessage,
-  runForPanel,
+  runLegacyUndergroundForPanel,
   type PanelRunResponse,
 } from "./run-execution.js";
 import { createPanelRunJobResponse, type PanelRunJobResponse } from "./run-job-response.js";
@@ -30,6 +30,7 @@ import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
 import { appRunEventsAfterSequence } from "../run-runtime-core/event-stream.js";
+import { requireRestorableOrdinaryRuntimeSnapshot } from "../basic-agent-runtime/persistence-snapshot-contract.js";
 
 export type RuntimeRunSummaryView = ReturnType<typeof projectRuntimeRunSummary>;
 
@@ -148,7 +149,7 @@ async function handleRunRequest(
   try {
     // Legacy synchronous underground route. Desktop routes must use
     // BasicAgentRunExecutor.start so run birth facts are frozen before execution.
-    const run = await runForPanel(runtime, runKind, runInput.goal, aiMode, runInput.taskSoilInput, runMode, {
+    const run = await runLegacyUndergroundForPanel(runtime, runKind, runInput.goal, aiMode, runInput.taskSoilInput, runMode, {
       config,
       informationAccess,
       reasoningEffort: runInput.reasoningEffort,
@@ -328,12 +329,15 @@ async function createPersistedRunResponse(
   runtime: PanelRuntime,
   snapshot: RuntimeRunSnapshot
 ): Promise<PanelRunJobResponse> {
-  const config =
-    snapshot.run.capabilitySnapshot?.activeModel ??
-    await runtime.configCenter.getModelProviderConfig();
-  const informationAccess =
-    snapshot.run.informationAccess ??
-    await runtime.configCenter.getInformationAccessConfig();
+  const ordinarySnapshot = snapshot.run.runMode === "agent"
+    ? requireRestorableOrdinaryRuntimeSnapshot(snapshot)
+    : undefined;
+  const config = ordinarySnapshot === undefined
+    ? snapshot.run.capabilitySnapshot?.activeModel ?? await runtime.configCenter.getModelProviderConfig()
+    : ordinarySnapshot.run.capabilitySnapshot.activeModel;
+  const informationAccess = ordinarySnapshot === undefined
+    ? snapshot.run.informationAccess ?? await runtime.configCenter.getInformationAccessConfig()
+    : ordinarySnapshot.run.informationAccess;
   const conversation =
     snapshot.run.conversationId === undefined
       ? undefined

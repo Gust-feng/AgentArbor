@@ -3,9 +3,9 @@ import type { ModelCapabilities } from "./config";
 import type { ContextAttachment } from "./context";
 import type {
   ToolDisplayProjection,
+  ToolErrorDomain,
   ToolErrorFacts,
   ToolFileDisplayOperation,
-  ToolCallEvidence,
 } from "./tools";
 import type {
   PanelBasicAgentReplay,
@@ -198,24 +198,12 @@ export type SubAgentModelExchange = {
   readonly purpose?: string;
   readonly requestedAt: string;
   readonly completedAt?: string;
-  readonly messages: readonly {
-    readonly role: "system" | "user" | "assistant" | "tool";
-    readonly content: string;
-    readonly ref?: string;
-    readonly toolCallId?: string;
-    readonly toolName?: string;
-    readonly toolCalls?: readonly {
-      readonly callId: string;
-      readonly toolName: string;
-      readonly input: unknown;
-    }[];
-  }[];
-  readonly tools: readonly string[];
-  readonly textOutput?: string;
-  readonly toolCalls: readonly {
+  readonly messageRefs: readonly string[];
+  readonly messageCount: number;
+  readonly visibleToolCount: number;
+  readonly toolCallRefs: readonly {
     readonly callId: string;
     readonly toolName: string;
-    readonly input: unknown;
   }[];
   readonly failureKind?: string;
   readonly failureMessage?: string;
@@ -227,15 +215,13 @@ export type SubAgentModelExchange = {
 export type SubAgentToolTrace = {
   readonly callId: string;
   readonly toolName: string;
-  readonly input?: unknown;
   readonly status: "requested" | "approval_required" | "completed" | "failed" | "cancelled";
   readonly startedAt?: string;
   readonly completedAt?: string;
   readonly durationMs?: number;
   readonly confirmationId?: string;
-  readonly outputSummary?: string;
-  readonly display?: ToolDisplayProjection;
   readonly error?: string;
+  readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
 };
 
@@ -447,7 +433,7 @@ export type ContextLedgerSkillFacts = {
 
 export type ContextLedgerEntry = {
   readonly entryId: string;
-  readonly kind: "goal" | "attachment" | "history" | "skill" | "tool_evidence" | "budget" | "truncation";
+  readonly kind: "goal" | "attachment" | "history" | "skill" | "budget" | "truncation";
   readonly title: string;
   readonly summary: string;
   readonly refs: readonly ObservationRef[];
@@ -530,7 +516,6 @@ export type DesktopWorkView = {
   };
   readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;
-  readonly toolEvidence: readonly ToolCallEvidence[];
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes?: readonly TranscriptNode[];
   readonly subAgentRuns?: readonly SubAgentRunView[];

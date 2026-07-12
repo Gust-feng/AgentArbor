@@ -1,64 +1,125 @@
-import { isToolLifecycleMessageType, type ToolLifecycleMessageType } from "../../domain/common.js";
-import type { ToolCallResult, ToolErrorDomain, ToolErrorFacts } from "../../domain/tools/index.js";
-import { normalizeToolErrorFacts } from "../../domain/tools/index.js";
+import {
+  isToolCallEventMessageType,
+  type ToolCallEventMessageType,
+} from "../../domain/common.js";
+import type { ToolCallResult, ToolErrorDomain, ToolErrorFacts, ToolFactValue } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
+
+export type ToolCallEventEntry = {
+  readonly sequence: number;
+  readonly type: EventLogEntry["type"];
+  readonly recordedAt: string;
+  readonly message?: Pick<EventLogEntry["message"], "payload">;
+  readonly payload?: ToolFactValue;
+};
 
 export type ToolCallEventFact = {
   readonly callId: string;
   readonly toolName?: string;
-  readonly input?: unknown;
-  readonly output?: unknown;
+  readonly input?: ToolFactValue;
+  readonly output?: ToolFactValue;
   readonly status: "requested" | ToolCallResult["status"];
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
   readonly durationMs?: number;
   readonly confirmationId?: string;
+  readonly factTruncation?: {
+    readonly input?: true;
+    readonly output?: true;
+  };
   readonly eventSequences: readonly number[];
   readonly createdAt?: string;
   readonly terminalAt?: string;
 };
 
-export function reduceToolCallEventFacts(entries: readonly EventLogEntry[]): readonly ToolCallEventFact[] {
-  const calls = new Map<string, ToolCallEventFact>();
-  for (const entry of entries) {
-    if (!isToolLifecycleMessageType(entry.type) && entry.type !== "user_approval.requested") {
-      continue;
-    }
-    const payload = asRecord(entry.message.payload);
-    const callId = stringValue(payload.callId);
-    if (callId === undefined) {
-      continue;
-    }
-    const previous = calls.get(callId);
-    const nextStatus = statusFromEvent(entry.type);
-    if (previous !== undefined && isTerminalStatus(previous.status)) {
-      calls.set(callId, withEventSequence(previous, entry.sequence));
-      continue;
-    }
-    const terminal = isTerminalStatus(nextStatus);
-    calls.set(callId, {
-      callId,
-      toolName: stringValue(payload.toolName) ?? previous?.toolName,
-      input: payload.input ?? previous?.input,
-      output: payload.output ?? previous?.output,
-      status: nextStatus,
-      error: entry.type === "tool.cancelled"
-        ? stringValue(payload.reason) ?? previous?.error
-        : stringValue(payload.error) ?? previous?.error,
-      errorDomain: toolErrorDomain(payload.errorDomain) ?? previous?.errorDomain,
-      errorFacts: normalizeToolErrorFacts(payload.errorFacts) ?? previous?.errorFacts,
-      durationMs: numberValue(payload.durationMs) ?? previous?.durationMs,
-      confirmationId: stringValue(payload.confirmationId) ?? previous?.confirmationId,
-      eventSequences: uniqueNumbers([...(previous?.eventSequences ?? []), entry.sequence]),
-      createdAt: previous?.createdAt ?? entry.recordedAt,
-      terminalAt: terminal ? entry.recordedAt : previous?.terminalAt,
-    });
-  }
-  return [...calls.values()];
+export type ToolCallEventTimeline = {
+  readonly facts: readonly ToolCallEventFact[];
+  readonly factBySequence: ReadonlyMap<number, ToolCallEventFact>;
+};
+
+export function toolCallEventFactPayload(
+  fact: ToolCallEventFact,
+  eventType: ToolCallEventEntry["type"],
+): Readonly<Record<string, unknown>> {
+  return {
+    callId: fact.callId,
+    toolName: fact.toolName,
+    input: fact.input,
+    output: fact.output,
+    status: fact.status,
+    ...(eventType === "tool.cancelled" ? { reason: fact.error } : { error: fact.error }),
+    errorDomain: fact.errorDomain,
+    errorFacts: fact.errorFacts,
+    durationMs: fact.durationMs,
+    confirmationId: fact.confirmationId,
+    factTruncation: fact.factTruncation,
+  };
 }
 
-function statusFromEvent(type: ToolLifecycleMessageType | "user_approval.requested"): ToolCallEventFact["status"] {
+export function reduceToolCallEventFacts(entries: readonly ToolCallEventEntry[]): readonly ToolCallEventFact[] {
+  return reduceToolCallEventTimeline(entries).facts;
+}
+
+export function reduceToolCallEventTimeline(entries: readonly ToolCallEventEntry[]): ToolCallEventTimeline {
+  const calls = new Map<string, ToolCallEventFact>();
+  const factBySequence = new Map<number, ToolCallEventFact>();
+  for (const entry of entries) {
+    const transitioned = reduceToolCallEvent(calls, entry);
+    if (transitioned !== undefined) {
+      factBySequence.set(entry.sequence, transitioned);
+    }
+  }
+  return {
+    facts: [...calls.values()],
+    factBySequence,
+  };
+}
+
+function reduceToolCallEvent(
+  calls: Map<string, ToolCallEventFact>,
+  entry: ToolCallEventEntry,
+): ToolCallEventFact | undefined {
+  if (!isToolCallEventMessageType(entry.type)) {
+    return undefined;
+  }
+  const payload = asRecord(entry.message?.payload ?? entry.payload);
+  const callId = stringValue(payload.callId);
+  if (callId === undefined) {
+    return undefined;
+  }
+  const previous = calls.get(callId);
+  if (previous !== undefined && isTerminalStatus(previous.status)) {
+    const fact = withEventSequence(previous, entry.sequence);
+    calls.set(callId, fact);
+    return fact;
+  }
+  const nextStatus = statusFromEvent(entry.type);
+  const inputFact = factValue(payload.input);
+  const outputFact = factValue(payload.output);
+  const fact: ToolCallEventFact = {
+    callId,
+    toolName: stringValue(payload.toolName) ?? previous?.toolName,
+    input: inputFact === undefined ? previous?.input : inputFact,
+    output: outputFact === undefined ? previous?.output : outputFact,
+    status: nextStatus,
+    error: entry.type === "tool.cancelled"
+      ? stringValue(payload.reason) ?? previous?.error
+      : stringValue(payload.error) ?? previous?.error,
+    errorDomain: toolErrorDomain(payload.errorDomain) ?? previous?.errorDomain,
+    errorFacts: errorFactsValue(payload.errorFacts) ?? previous?.errorFacts,
+    durationMs: numberValue(payload.durationMs) ?? previous?.durationMs,
+    confirmationId: stringValue(payload.confirmationId) ?? previous?.confirmationId,
+    factTruncation: mergeFactTruncation(previous?.factTruncation, payload.factTruncation),
+    eventSequences: uniqueNumbers([...(previous?.eventSequences ?? []), entry.sequence]),
+    createdAt: previous?.createdAt ?? entry.recordedAt,
+    terminalAt: isTerminalStatus(nextStatus) ? entry.recordedAt : previous?.terminalAt,
+  };
+  calls.set(callId, fact);
+  return fact;
+}
+
+function statusFromEvent(type: ToolCallEventMessageType): ToolCallEventFact["status"] {
   switch (type) {
     case "tool.completed": return "completed";
     case "tool.failed": return "failed";
@@ -96,6 +157,28 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function factValue(value: unknown): ToolFactValue | undefined {
+  return value === undefined ? undefined : globalThis.structuredClone(value as ToolFactValue);
+}
+
+function errorFactsValue(value: unknown): ToolErrorFacts | undefined {
+  return isRecord(value) ? globalThis.structuredClone(value as ToolErrorFacts) : undefined;
+}
+
+function mergeFactTruncation(
+  previous: ToolCallEventFact["factTruncation"],
+  value: unknown,
+): ToolCallEventFact["factTruncation"] {
+  const record = asRecord(value);
+  const input = previous?.input === true || record.input === true ? true : undefined;
+  const output = previous?.output === true || record.output === true ? true : undefined;
+  return input === undefined && output === undefined ? undefined : { input, output };
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function toolErrorDomain(value: unknown): ToolErrorDomain | undefined {

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ModelMessage } from "../../domain/intelligence/index.js";
-import { createId, nowIso } from "../../kernel/id.js";
+import { nowIso } from "../../kernel/id.js";
 
 export const DEEP_CHILD_LOOP_CONTEXT_REF_PREFIX = "child_loop_context";
 
@@ -17,9 +17,9 @@ export type DeepChildLoopContextRecord = {
 export type DeepChildLoopContextInput = {
   readonly runId: string;
   readonly childRunId: string;
-  readonly contextRef?: string;
   readonly messages: readonly ModelMessage[];
   readonly createdAt?: string;
+  readonly updatedAt?: string;
 };
 
 export interface DeepChildLoopContextStore {
@@ -33,8 +33,11 @@ export class InMemoryDeepChildLoopContextStore implements DeepChildLoopContextSt
   private readonly records = new Map<string, DeepChildLoopContextRecord>();
 
   async upsert(record: DeepChildLoopContextRecord): Promise<DeepChildLoopContextRecord> {
-    this.records.set(contextKey(record.runId, record.contextRef), clone(record));
-    return clone(record);
+    assertCurrentContextRecord(record);
+    const key = contextKey(record.runId, record.contextRef);
+    const stored = latestContextRecord(this.records.get(key), record);
+    this.records.set(key, clone(stored));
+    return clone(stored);
   }
 
   async getByRef(runId: string, contextRef: string): Promise<DeepChildLoopContextRecord | undefined> {
@@ -62,12 +65,16 @@ export function createFileSystemDeepChildLoopContextStore(runtimeHome: string): 
   const root = path.join(runtimeHome, "deep-runs");
   return {
     async upsert(record: DeepChildLoopContextRecord): Promise<DeepChildLoopContextRecord> {
-      await writeJsonFile(contextPath(root, record.runId, record.contextRef), record);
-      return clone(record);
+      assertCurrentContextRecord(record);
+      const filePath = contextPath(root, record.runId, record.contextRef);
+      const existing = await readCurrentContextRecord(filePath, record.runId, record.contextRef);
+      const stored = latestContextRecord(existing, record);
+      await writeJsonFile(filePath, stored);
+      return clone(stored);
     },
 
     async getByRef(runId: string, contextRef: string): Promise<DeepChildLoopContextRecord | undefined> {
-      return readJsonFile<DeepChildLoopContextRecord>(contextPath(root, runId, contextRef));
+      return readCurrentContextRecord(contextPath(root, runId, contextRef), runId, contextRef);
     },
 
     async listForChild(runId: string, childRunId: string): Promise<readonly DeepChildLoopContextRecord[]> {
@@ -81,12 +88,11 @@ export function createFileSystemDeepChildLoopContextStore(runtimeHome: string): 
       const records = await Promise.all(
         entries
           .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-          .map((entry) => readJsonFile<DeepChildLoopContextRecord>(path.join(directory, entry.name))),
+          .map((entry) => readJsonFile<unknown>(path.join(directory, entry.name))),
       );
       return records
-        .filter((record): record is DeepChildLoopContextRecord =>
-          record !== undefined && record.childRunId === childRunId
-        )
+        .filter((record): record is DeepChildLoopContextRecord => isCurrentContextRecord(record))
+        .filter((record) => record.runId === runId && record.childRunId === childRunId)
         .sort(compareRecords);
     },
 
@@ -99,19 +105,20 @@ export function createFileSystemDeepChildLoopContextStore(runtimeHome: string): 
 export function createDeepChildLoopContextRecord(
   input: DeepChildLoopContextInput,
 ): DeepChildLoopContextRecord {
-  const createdAt = input.createdAt ?? nowIso();
+  const updatedAt = input.updatedAt ?? nowIso();
+  const createdAt = input.createdAt ?? updatedAt;
   return {
     runId: input.runId,
     childRunId: input.childRunId,
-    contextRef: input.contextRef ?? createDeepChildLoopContextRef(input.childRunId),
+    contextRef: createDeepChildLoopContextRef(input.childRunId),
     createdAt,
-    updatedAt: createdAt,
+    updatedAt,
     messages: cloneMessages(input.messages),
   };
 }
 
 export function createDeepChildLoopContextRef(childRunId: string): string {
-  return `${DEEP_CHILD_LOOP_CONTEXT_REF_PREFIX}:${childRunId}:${createId("context")}`;
+  return `${DEEP_CHILD_LOOP_CONTEXT_REF_PREFIX}:${childRunId}`;
 }
 
 function contextPath(root: string, runId: string, contextRef: string): string {
@@ -140,6 +147,54 @@ async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
     throw error;
   });
   return content === undefined ? undefined : JSON.parse(content) as T;
+}
+
+async function readCurrentContextRecord(
+  filePath: string,
+  runId: string,
+  contextRef: string,
+): Promise<DeepChildLoopContextRecord | undefined> {
+  const record = await readJsonFile<unknown>(filePath);
+  return isCurrentContextRecord(record) && record.runId === runId && record.contextRef === contextRef
+    ? record
+    : undefined;
+}
+
+function latestContextRecord(
+  existing: DeepChildLoopContextRecord | undefined,
+  next: DeepChildLoopContextRecord,
+): DeepChildLoopContextRecord {
+  if (existing !== undefined && existing.childRunId !== next.childRunId) {
+    throw new Error(`Deep child loop context ref collision: ${next.contextRef}`);
+  }
+  return {
+    ...next,
+    createdAt: existing?.createdAt ?? next.createdAt,
+    messages: cloneMessages(next.messages),
+  };
+}
+
+function assertCurrentContextRecord(record: unknown): asserts record is DeepChildLoopContextRecord {
+  if (!isCurrentContextRecord(record)) {
+    const contextRef = typeof record === "object" && record !== null && "contextRef" in record
+      ? String(record.contextRef)
+      : "(unknown)";
+    throw new Error(`Invalid Deep child loop context record: ${contextRef}`);
+  }
+}
+
+function isCurrentContextRecord(value: unknown): value is DeepChildLoopContextRecord {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Partial<DeepChildLoopContextRecord>;
+  return typeof record.runId === "string" &&
+    typeof record.childRunId === "string" &&
+    typeof record.contextRef === "string" &&
+    record.contextRef === createDeepChildLoopContextRef(record.childRunId) &&
+    typeof record.createdAt === "string" &&
+    typeof record.updatedAt === "string" &&
+    Array.isArray(record.messages);
 }
 
 function safeFileName(value: string): string {

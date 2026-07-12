@@ -47,6 +47,26 @@ export function upsertRestoredConfirmation(input: {
   ];
 }
 
+export function restoredConfirmationContinuationIsLost(
+  snapshot: Pick<RuntimeRunSnapshot, "run" | "toolCalls">,
+  confirmation: RuntimeConfirmationRecord,
+): boolean {
+  if (confirmation.status !== "approved") {
+    return false;
+  }
+  if (
+    snapshot.run.status === "approval_needed" ||
+    snapshot.run.stopReason === "confirmation_continuation_lost" ||
+    snapshot.run.continuationAvailability === "lost_after_restart"
+  ) {
+    return true;
+  }
+  const toolCall = confirmation.toolCallId === undefined
+    ? undefined
+    : snapshot.toolCalls.find((call) => call.callId === confirmation.toolCallId);
+  return toolCall?.status === "requested" || toolCall?.status === "approval_required";
+}
+
 export function restoredConfirmationDecisionEvent(input: {
   readonly runId: string;
   readonly confirmationId: string;

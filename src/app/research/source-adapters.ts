@@ -32,6 +32,7 @@ export type InformationSourceReadRequest = {
   readonly uri?: string;
   readonly title?: string;
   readonly maxLength: number;
+  readonly startChar: number;
   readonly sourceResult?: SearchResultRef;
   readonly abortSignal?: AbortSignal;
 };
@@ -83,6 +84,7 @@ export type CommandLogReadRegistry = {
     ref: string,
     request: {
       readonly maxLength: number;
+      readonly startChar: number;
       readonly abortSignal?: AbortSignal;
     }
   ): Promise<CommandLogReadEntry | undefined> | CommandLogReadEntry | undefined;
@@ -239,21 +241,22 @@ export function createPageInformationSourceAdapter(options: {
             errorFacts: researchErrorFactsFromHttpRequest(facts),
           };
         }
-        const text = normalizeWhitespace(cleanPageText(await response.text()));
+        const rawPage = await response.text();
+        const text = normalizeWhitespace(cleanPageText(rawPage));
         const maxLength = Math.max(200, request.maxLength || options.defaultMaxLength || 1_200);
-        const contentPreview = truncate(text, maxLength);
+        const window = contentWindow(text, request.startChar, maxLength);
         const refId = createResearchRefId("page", uri);
         return {
           status: "completed",
           result: {
             refId,
             source: "page",
-            title: request.title ?? titleFromHtmlText(text) ?? uri,
+            title: request.title ?? titleFromHtml(rawPage) ?? uri,
             uri,
             status: "completed",
-            summary: truncate(contentPreview, 260),
-            contentPreview,
-            truncated: text.length > contentPreview.length,
+            summary: truncate(window.contentPreview, 260),
+            ...window,
+            truncated: window.hasMoreAfter,
             sourceSearchRef: request.sourceResult?.refId,
             metadata: { contentLength: text.length },
           },
@@ -306,6 +309,7 @@ export function createCommandLogInformationSourceAdapter(options: {
       }
       const entry = await registry.read(request.ref, {
         maxLength: request.maxLength,
+        startChar: request.startChar,
         abortSignal: request.abortSignal,
       });
       if (entry === undefined) {
@@ -314,7 +318,7 @@ export function createCommandLogInformationSourceAdapter(options: {
           message: "Unknown or unregistered command log ref.",
         };
       }
-      const contentPreview = truncate(entry.content, request.maxLength);
+      const window = contentWindow(entry.content, request.startChar, request.maxLength);
       return {
         status: "completed",
         result: {
@@ -323,9 +327,9 @@ export function createCommandLogInformationSourceAdapter(options: {
           title: entry.title ?? `Command log ${commandLogId(request.ref)}`,
           uri: entry.uri ?? request.ref,
           status: "completed",
-          summary: truncate(contentPreview, 260),
-          contentPreview,
-          truncated: entry.content.length > contentPreview.length,
+          summary: truncate(window.contentPreview, 260),
+          ...window,
+          truncated: window.hasMoreAfter,
           sourceSearchRef: request.sourceResult?.refId,
           metadata: {
             ...entry.metadata,
@@ -399,7 +403,7 @@ export function createCodebaseInformationSourceAdapter(options: {
         return { status: "provider-failed", message: "codebase read could not read the requested text file." };
       }
       const normalized = normalizeWhitespace(text);
-      const contentPreview = truncate(normalized, request.maxLength);
+      const window = contentWindow(normalized, request.startChar, request.maxLength);
       const repoPath = toRepositoryPath(path.relative(rootDirectory, absolutePath));
       return {
         status: "completed",
@@ -409,9 +413,9 @@ export function createCodebaseInformationSourceAdapter(options: {
           title: repoPath,
           uri: `repo://${repoPath}`,
           status: "completed",
-          summary: truncate(contentPreview, 260),
-          contentPreview,
-          truncated: normalized.length > contentPreview.length,
+          summary: truncate(window.contentPreview, 260),
+          ...window,
+          truncated: window.hasMoreAfter,
           sourceSearchRef: request.sourceResult?.refId,
           metadata: { path: repoPath },
         },
@@ -510,6 +514,10 @@ export function createStubInformationSourceAdapter(
           title: `${label} stub`,
           status: "stub",
           summary: `${label} provider is not connected in this MVP.`,
+          startChar: request.startChar,
+          contentChars: 0,
+          charCount: 0,
+          hasMoreAfter: false,
           truncated: false,
           sourceSearchRef: request.sourceResult?.refId,
         },
@@ -567,6 +575,7 @@ function createReadonlyRefSourceAdapter(input: {
           message: input.emptyMessage,
         };
       }
+      const window = contentWindow(item.summary, request.startChar, request.maxLength);
       return {
         status: "completed",
         result: {
@@ -576,8 +585,8 @@ function createReadonlyRefSourceAdapter(input: {
           uri: item.id,
           status: "completed",
           summary: truncate(item.summary, 260),
-          contentPreview: truncate(item.summary, request.maxLength),
-          truncated: item.summary.length > request.maxLength,
+          ...window,
+          truncated: window.hasMoreAfter,
           sourceSearchRef: request.sourceResult?.refId,
           metadata: item.metadata,
         },
@@ -754,9 +763,17 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&#39;/gi, "'");
 }
 
-function titleFromHtmlText(value: string): string | undefined {
-  const firstSentence = normalizeWhitespace(value).split(/[.!?。！？]/)[0];
-  return firstSentence.length > 0 ? truncate(firstSentence, 90) : undefined;
+function titleFromHtml(value: string): string | undefined {
+  for (const pattern of [/<title\b[^>]*>([\s\S]*?)<\/title>/i, /<h1\b[^>]*>([\s\S]*?)<\/h1>/i]) {
+    const match = pattern.exec(value);
+    const title = match?.[1] === undefined
+      ? undefined
+      : normalizeWhitespace(cleanPageText(match[1]));
+    if (title !== undefined && title.length > 0) {
+      return truncate(title, 90);
+    }
+  }
+  return undefined;
 }
 
 function resolveGlobalPageFetch(): PageFetchLike | undefined {
@@ -841,4 +858,22 @@ function truncate(value: string, maxLength: number): string {
     return value;
   }
   return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function contentWindow(value: string, startChar: number, maxLength: number): {
+  readonly contentPreview: string;
+  readonly startChar: number;
+  readonly contentChars: number;
+  readonly charCount: number;
+  readonly hasMoreAfter: boolean;
+} {
+  const normalizedStart = Math.min(value.length, Math.max(0, Math.floor(startChar)));
+  const contentPreview = value.slice(normalizedStart, normalizedStart + Math.max(1, Math.floor(maxLength)));
+  return {
+    contentPreview,
+    startChar: normalizedStart,
+    contentChars: contentPreview.length,
+    charCount: value.length,
+    hasMoreAfter: normalizedStart + contentPreview.length < value.length,
+  };
 }

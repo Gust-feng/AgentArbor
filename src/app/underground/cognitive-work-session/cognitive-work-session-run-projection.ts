@@ -62,6 +62,10 @@ export function evidenceRefsFromToolCalls(toolCalls: readonly ToolCallResult[]):
   return unique(toolCalls.flatMap((call) => {
     const refs = [`tool-call:${call.callId}`];
     const output = asRecord(call.output);
+    const outputRefId = optionalString(output.refId);
+    if (outputRefId !== undefined) {
+      refs.push(outputRefId);
+    }
     const searchResults = Array.isArray(output.results) ? output.results.map(asRecord) : [];
     for (const result of searchResults) {
       const refId = optionalString(result.refId);
@@ -69,13 +73,14 @@ export function evidenceRefsFromToolCalls(toolCalls: readonly ToolCallResult[]):
         refs.push(refId);
       }
     }
-    const readResult = asRecord(output.result);
-    const readRefId = optionalString(readResult.refId);
-    if (readRefId !== undefined) {
-      refs.push(readRefId);
+    const batchReadItems = Array.isArray(output.items) ? output.items.map(asRecord) : [];
+    for (const item of batchReadItems) {
+      const refId = optionalString(item.refId);
+      if (refId !== undefined) {
+        refs.push(refId);
+      }
     }
-    const trace = asRecord(output.trace);
-    const traceId = optionalString(trace.traceId);
+    const traceId = optionalString(output.traceId);
     if (traceId !== undefined) {
       refs.push(`research-trace:${traceId}`);
     }

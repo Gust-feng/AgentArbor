@@ -1,7 +1,7 @@
 
-import type { ModelMessage, ModelUsage } from "../intelligence/contracts.js";
+import type { ModelUsage } from "../intelligence/contracts.js";
 import type {
-  ToolCallRequest,
+  ToolErrorDomain,
   ToolErrorFacts,
 } from "../tools/contracts.js";
 
@@ -72,10 +72,14 @@ export type SubAgentModelExchange = {
   readonly purpose?: string;
   readonly requestedAt: string;
   readonly completedAt?: string;
-  readonly messages: readonly ModelMessage[];
-  readonly tools: readonly string[];
-  readonly textOutput?: string;
-  readonly toolCalls: readonly ToolCallRequest[];
+  /** Message identities only. Persisting cumulative message bodies makes the trace grow quadratically. */
+  readonly messageRefs: readonly string[];
+  readonly messageCount: number;
+  readonly visibleToolCount: number;
+  readonly toolCallRefs: readonly {
+    readonly callId: string;
+    readonly toolName: string;
+  }[];
   readonly failureKind?: string;
   readonly failureMessage?: string;
   readonly retryable?: boolean;
@@ -86,14 +90,13 @@ export type SubAgentModelExchange = {
 export type SubAgentToolTrace = {
   readonly callId: string;
   readonly toolName: string;
-  readonly input?: unknown;
   readonly status: "requested" | "approval_required" | "completed" | "failed" | "cancelled";
   readonly startedAt?: string;
   readonly completedAt?: string;
   readonly durationMs?: number;
   readonly confirmationId?: string;
-  readonly outputSummary?: string;
   readonly error?: string;
+  readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
 };
 

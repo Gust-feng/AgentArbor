@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { BasicAgentRun, RunEvent, ToolCallEvidence } from "../../domain/basic-agent/index.js";
+import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
 import { createDesktopWorkViewReadModel } from "./work-view.js";
 import { transcriptNodesFromRunEvents } from "./work-view-transcript.js";
 
@@ -47,7 +47,7 @@ test("work view read model keeps ordinary completed answers separate from delive
   assert.equal(workView.deliverable, undefined);
   assert.equal(workView.contextAttachments[0]?.ref, "file:notes.md");
   assert.equal(workView.contextLedger.entries.some((entry) => entry.kind === "attachment"), true);
-  assert.equal(workView.contextLedger.entries.some((entry) => entry.kind === "tool_evidence"), true);
+  assert.equal(JSON.stringify(workView.contextLedger).includes("tool_evidence"), false);
   assert.equal(workView.workSummary.summary, "上下文 1；证据 1");
   assert.equal(JSON.stringify(workView).includes("普通视图"), false);
   assert.equal(JSON.stringify(workView).includes("模型输入"), false);
@@ -647,7 +647,7 @@ test("work view transcript only emits a confirmation node for the current pendin
   assert.equal(currentNodes.find((node) => node.kind === "confirmation")?.confirmation?.confirmationId, "confirmation-call-command");
 });
 
-test("work view read model keeps tool evidence out of ordinary message deliverables", () => {
+test("work view read model counts tool results without duplicating a tool evidence chain", () => {
   const run = basicRun("completed");
   const workView = createDesktopWorkViewReadModel({
     run,
@@ -678,47 +678,16 @@ test("work view read model keeps tool evidence out of ordinary message deliverab
         observationPanelRole: "safe",
       },
     },
-    toolEvidence: [searchEvidence()],
     toolDisplays: [searchDisplay()],
+    toolResultCount: 1,
   });
 
-  assert.equal(workView.toolEvidence.length, 1);
-  assert.equal(workView.toolEvidence[0]?.toolName, "search");
   assert.equal(workView.answer?.content, "已根据搜索证据回答。");
   assert.equal(workView.deliverable, undefined);
-  const toolEntry = workView.contextLedger.entries.find((entry) => entry.kind === "tool_evidence");
-  assert.equal(toolEntry?.status, "used");
-  assert.equal(toolEntry?.refs.some((ref) => ref.kind === "tool_call" && ref.id === "call-search"), true);
+  assert.equal(workView.workSummary.toolResultCount, 1);
   const json = JSON.stringify(workView);
-  assert.equal(json.includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
-  assert.equal(json.includes("sk-tool-secret"), true);
-});
-
-test("work view tool evidence preserves tool error facts", () => {
-  const run = basicRun("failed");
-  const failedEvidence: ToolCallEvidence = {
-    ...searchEvidence(),
-    callId: "tool:call-read-missing",
-    toolName: "read_file",
-    status: "failed",
-    summary: "read_file failed for missing.md",
-    errorDomain: "tool_error",
-    errorFacts: {
-      code: "ENOENT",
-      path: "missing.md",
-      operation: "read_file",
-    },
-  };
-  const workView = createDesktopWorkViewReadModel({
-    run,
-    events: [event(run.runId, "tool.failed", "read_file failed", "failed")],
-    toolEvidence: [failedEvidence],
-  });
-
-  assert.equal(workView.toolEvidence[0]?.errorDomain, "tool_error");
-  assert.equal(workView.toolEvidence[0]?.errorFacts?.code, "ENOENT");
-  assert.equal(workView.toolEvidence[0]?.errorFacts?.path, "missing.md");
-  assert.equal(workView.contextLedger.entries.some((entry) => entry.kind === "tool_evidence"), true);
+  assert.equal(json.includes("toolEvidence"), false);
+  assert.equal(json.includes("tool_evidence"), false);
 });
 
 test("work view visible events preserve product activity instead of tail model deltas", () => {
@@ -930,12 +899,6 @@ test("work view transcript carries tool names for readable workflow actions", ()
       ...event(run.runId, "tool.completed", "文件已删除。", "completed"),
       id: `${run.runId}:delete-file-completed`,
       toolName: "delete_file",
-      detail: {
-        display: {
-          kind: "file_change_summary",
-          path: "old.txt",
-        },
-      },
     },
   ], undefined);
   const tool = nodes.find((node) => node.kind === "tool");
@@ -1221,17 +1184,6 @@ function event(runId: string, type: string, summary: string, status: BasicAgentR
     timestamp: "2026-05-12T00:00:01.000Z",
     refs: [],
     visibility: "compact",
-  };
-}
-
-function searchEvidence(): ToolCallEvidence {
-  return {
-    callId: "tool:call-search",
-    toolName: "search",
-    status: "completed",
-    summary: "Search found one relevant source. sk-tool-secret",
-    evidenceRefs: ["tool:call-search", "web:https://example.test/agentarbor"],
-    truncated: false,
   };
 }
 

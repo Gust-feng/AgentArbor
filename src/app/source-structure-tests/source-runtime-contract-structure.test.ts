@@ -131,13 +131,34 @@ test("default Desktop Agent definition stays as separate prompt and policy asset
   assert.equal(toolVisibility.includes("export const DESKTOP_ROOT_AGENT_TOOL_VISIBILITY"), true);
 });
 
-test("Basic Agent run projection does not keep stale panel projection files", () => {
+test("Basic Agent run projection does not keep stale panel projection files or display contracts", async () => {
   const runtimeRoot = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
+  const runProjection = await readSource(path.join(runtimeRoot, "run-projection.ts"));
 
   assert.equal(fileExistsSync(path.join(runtimeRoot, "run-projection.ts")), true);
   assert.equal(fileExistsSync(path.join(runtimeRoot, "run-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(runtimeRoot, "panel-projection.ts")), false);
   assert.equal(fileExistsSync(path.join(runtimeRoot, "panel-projection.test.ts")), false);
+  assert.equal(runProjection.includes("ToolDisplayProjection"), false);
+  assert.equal(runProjection.includes("readonly display?:"), false);
+});
+
+test("Conversation persistence consumers use the single validated Ordinary snapshot reader", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const [contract, ...consumers] = await Promise.all([
+    readSource(path.join(appRoot, "basic-agent-runtime", "persistence-snapshot-contract.ts")),
+    readSource(path.join(appRoot, "panel-server", "conversation-restore.ts")),
+    readSource(path.join(appRoot, "panel-server", "conversation-history.ts")),
+    readSource(path.join(appRoot, "panel-server", "conversation-routes.ts")),
+  ]);
+
+  assert.equal(contract.includes("export async function readRuntimeSnapshotWithOrdinaryContract"), true);
+  assert.equal(contract.includes('snapshot?.run.runMode === "agent"'), true);
+  assert.equal(contract.includes("requireRestorableOrdinaryRuntimeSnapshot(snapshot)"), true);
+  for (const source of consumers) {
+    assert.equal(source.includes("readRuntimeSnapshotWithOrdinaryContract"), true);
+    assert.equal(source.includes(".getRun("), false);
+  }
 });
 
 test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
@@ -179,7 +200,7 @@ test("ordinary Desktop Agent entry does not import legacy desktop chat compatibi
 
   for (const file of files) {
     const relative = relativePath(file);
-    if (relative === "src/app/desktop-chat-session.ts" || relative.endsWith(".test.ts")) {
+    if (relative.endsWith(".test.ts")) {
       continue;
     }
 
@@ -257,19 +278,32 @@ test("ToolCenter execution requires explicit run permissions", async () => {
   assert.equal(toolCenter.includes("permission: ToolPermissionCheck"), true);
   assert.equal(toolCenter.includes("permission?: ToolPermissionCheck"), false);
   assert.equal(toolCenter.includes("permission.callerAgentId !== context.callerAgentId"), true);
-  assert.equal(toolCenter.includes("!permission.allowedTools.includes(request.toolName)"), true);
+  assert.equal(toolCenter.includes("!permission.allowedTools.includes(factRequest.toolName)"), true);
   assert.equal(toolCenter.includes("permission?.allowedTools"), false);
   assert.equal(toolCenter.includes("permission?.approvedConfirmationIds"), false);
 }
 );
 
-test("tool execution facts stay independent from display and legacy compatibility contracts", async () => {
+test("tool execution facts stay independent from display, compatibility, and repeated normalization", async () => {
   const root = process.cwd();
-  const [contracts, toolCenter, modelView, runtimeDatabase] = await Promise.all([
+  const [
+    contracts,
+    toolCenter,
+    modelView,
+    toolLoopExecution,
+    toolLoopMessages,
+    runtimeDatabase,
+    adapterFiles,
+    subAgentToolProducer,
+  ] = await Promise.all([
     readSource(path.join(root, "src", "domain", "tools", "contracts.ts")),
     readSource(path.join(root, "src", "app", "tool-center", "tool-center.ts")),
     readSource(path.join(root, "src", "kernel", "intelligence", "tool-call-result-model-view.ts")),
+    readSource(path.join(root, "src", "kernel", "intelligence", "tool-use-loop-execution.ts")),
+    readSource(path.join(root, "src", "kernel", "intelligence", "tool-use-loop-messages.ts")),
     readSource(path.join(root, "src", "domain", "runtime-database", "contracts.ts")),
+    collectSourceFiles(path.join(root, "src", "app", "tool-center", "adapters")),
+    readSource(path.join(root, "src", "app", "sub-agents", "sub-agent-tools.ts")),
   ]);
 
   for (const source of [contracts, toolCenter]) {
@@ -281,10 +315,54 @@ test("tool execution facts stay independent from display and legacy compatibilit
   assert.equal(contracts.includes("resetCallCount"), false);
   assert.equal(contracts.includes("getCallCount"), false);
   assert.equal(modelView.includes('from "../../app/'), false);
+  assert.equal(modelView.includes("structuredContent"), false);
+  assert.equal(modelView.includes("readonly content"), false);
+  assert.equal(modelView.includes("normalizeToolFactValue"), false, "the model consumer must trust ToolCallResult facts");
+  assert.equal(toolLoopExecution.includes("normalizeToolFactValue"), false, "the Agent loop must trust its ToolExecutionBroker contract");
+  assert.equal(toolLoopMessages.includes("normalizeToolFactValue"), false, "model message construction must not copy the same fact again");
+  assert.equal(toolCenter.includes("normalizeToolFactValue"), true, "ToolCenter remains the executor fact-normalization boundary");
   assert.equal(runtimeDatabase.includes("panel-ui"), false);
   assert.equal(runtimeDatabase.includes("ToolResultEnvelope"), false);
   assert.equal(fileExistsSync(path.join(root, "src", "kernel", "tools", "tool-result-envelope.ts")), false);
   assert.equal(fileExistsSync(path.join(root, "src", "app", "tool-result-continuation.ts")), false);
+  for (const file of adapterFiles.filter((value) => !value.endsWith(".test.ts"))) {
+    const source = await readSource(file);
+    assert.equal(/\bdisplay\s*:/u.test(source), false, `${relativePath(file)} must not produce display projections`);
+    assert.equal(source.includes("canonicalResult"), false, `${relativePath(file)} must not produce model result wrappers`);
+  }
+  const executionContractFiles = (await Promise.all([
+    path.join(root, "src", "domain", "tools"),
+    path.join(root, "src", "domain", "config"),
+    path.join(root, "src", "kernel"),
+    path.join(root, "src", "adapters"),
+    path.join(root, "src", "app", "tool-center"),
+    path.join(root, "src", "app", "capability"),
+    path.join(root, "src", "app", "model-runtime"),
+    path.join(root, "src", "app", "research"),
+    path.join(root, "src", "app", "sub-agents"),
+  ].map(collectSourceFiles))).flat().filter((file) => !file.endsWith(".test.ts"));
+  for (const file of executionContractFiles) {
+    const source = await readSource(file);
+    assert.equal(
+      source.includes("visibleResultPolicy") || source.includes("ToolVisibleResultPolicy"),
+      false,
+      `${relativePath(file)} must not carry Panel preview policy through the execution domain`
+    );
+  }
+  assert.equal(/\bdisplay\s*:/u.test(subAgentToolProducer), false, "sub-agent tool producers must not emit display projections");
+  assert.equal(subAgentToolProducer.includes("canonicalResult"), false, "sub-agent tool producers must not emit model wrappers");
+  assert.equal(subAgentToolProducer.includes("rawContentRef"), false, "sub-agent output refs must be executable continuations");
+  assert.equal(subAgentToolProducer.includes("full_output_ref"), false, "sub-agent output refs must be executable continuations");
+  const readModelConsumers = await Promise.all([
+    readSource(path.join(root, "src", "app", "tool-projection", "tool-display-normalization.ts")),
+    readSource(path.join(root, "src", "app", "panel-read-model", "run", "panel-stream-tool-projection.ts")),
+    readSource(path.join(root, "src", "app", "panel-server", "runtime-records.ts")),
+  ]);
+  for (const source of readModelConsumers) {
+    assert.equal(source.includes("output.display"), false);
+    assert.equal(source.includes("existingDisplay"), false);
+    assert.equal(source.includes("canonicalResult"), false);
+  }
 });
 
 test("Basic Agent context pack does not own model-visible tool exposure", async () => {

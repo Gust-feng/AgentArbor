@@ -11,6 +11,7 @@ import type {
   ToolDefinition,
   ToolExecutionBroker,
   ToolExecutionContext,
+  ToolFactValue,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
 import { createChildAgentRun, type ChildAgentRun } from "../../domain/underground/agent-fabric.js";
@@ -136,10 +137,7 @@ export class RecordingToolBroker implements ToolExecutionBroker {
       toolName: request.toolName,
       input: request.input,
       output: {
-        action: request.toolName,
         query,
-        status: "completed",
-        message: `${request.toolName}：${query}`,
         results: [{
           title: `${request.toolName} evidence`,
           refId: `tool:${request.toolName}:oauth-risk`,
@@ -161,7 +159,7 @@ export function toolCallResponse(callId: string, toolName: string, input: unknow
     ...baseResponse(request),
     responseId: `response-${callId}`,
     textOutput,
-    toolCalls: [{ callId, toolName, input }],
+    toolCalls: [{ callId, toolName, input: input as ToolFactValue | undefined }],
     finishReason: "tool_call",
   });
 }

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ArborMessageType } from "../../domain/common.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
-import { reduceToolCallEventFacts } from "./tool-call-event-reducer.js";
+import { reduceToolCallEventFacts, reduceToolCallEventTimeline } from "./tool-call-event-reducer.js";
 
 test("tool call event reducer preserves the first terminal fact", () => {
   const facts = reduceToolCallEventFacts([
@@ -48,6 +48,23 @@ test("tool call event reducer distinguishes approval, cancellation, and missing 
   assert.equal(facts[0]?.error, "User denied the command.");
   assert.equal(facts[1]?.status, "failed");
   assert.equal(facts[1]?.errorFacts?.code, "ENOENT");
+});
+
+test("tool call event timeline exposes each sequence without leaking later terminal facts", () => {
+  const timeline = reduceToolCallEventTimeline([
+    entry(1, "tool.requested", { callId: "call-timeline", toolName: "read_file", input: { path: "a.md" } }),
+    entry(2, "user_approval.requested", { callId: "call-timeline", toolName: "read_file", confirmationId: "confirm-1" }),
+    entry(3, "tool.completed", { callId: "call-timeline", toolName: "read_file", output: { path: "a.md" } }),
+    entry(4, "tool.failed", { callId: "call-timeline", error: "late failure" }),
+  ]);
+
+  assert.equal(timeline.factBySequence.get(1)?.status, "requested");
+  assert.equal(timeline.factBySequence.get(1)?.output, undefined);
+  assert.equal(timeline.factBySequence.get(2)?.status, "approval_required");
+  assert.equal(timeline.factBySequence.get(3)?.status, "completed");
+  assert.deepEqual(timeline.factBySequence.get(3)?.output, { path: "a.md" });
+  assert.equal(timeline.factBySequence.get(4)?.status, "completed");
+  assert.deepEqual(timeline.facts[0]?.eventSequences, [1, 2, 3, 4]);
 });
 
 function entry(

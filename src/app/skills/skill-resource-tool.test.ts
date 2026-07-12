@@ -4,6 +4,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import type { ToolFactValue } from "../../domain/tools/index.js";
+import { ToolCenter } from "../tool-center/tool-center.js";
 import { createReadSkillResourceTool } from "./skill-resource-tool.js";
 
 test("read_skill_resource reads only indexed resources from loaded selected skills", async () => {
@@ -18,11 +20,88 @@ test("read_skill_resource reads only indexed resources from loaded selected skil
       maxChars: 100,
     }, executionContext());
 
-    const result = asRecord(asRecord(output).result);
-    assert.equal(asRecord(output).action, "read_skill_resource");
+    const result = asRecord(output);
+    assertDirectToolFacts(result);
     assert.equal(result.content, "Use precise facts.");
     assert.equal(result.contentHash, hash("Use precise facts."));
     assert.equal(result.truncated, false);
+  } finally {
+    await fixture.remove();
+  }
+});
+
+test("read_skill_resource continues beyond the former startChar ceiling without repeating a window", async () => {
+  const referenceContent = `${"x".repeat(2_000_000)}abc`;
+  const fixture = await createFixture({ referenceContent });
+  try {
+    const center = new ToolCenter();
+    center.register(createReadSkillResourceTool([fixture.skillContext()]));
+    const permission = { callerAgentId: "agent", allowedTools: ["read_skill_resource"] };
+    const first = await center.execute({
+      callId: "call-skill-before-ceiling",
+      toolName: "read_skill_resource",
+      input: {
+        skillId: "sample-skill",
+        type: "reference",
+        path: "references/guide.md",
+        maxChars: 2,
+        startChar: 1_999_998,
+      },
+    }, executionContext(), permission);
+    const firstOutput = asRecord(first.output);
+    const nextInput = asRecord(asRecord(firstOutput.continuation).nextInput);
+
+    assert.equal(first.status, "completed");
+    assert.equal(firstOutput.content, "xx");
+    assert.equal(firstOutput.truncated, true);
+    assert.equal(nextInput.startChar, 2_000_000);
+    assert.equal(Number(nextInput.startChar) > Number(firstOutput.startChar), true);
+    assert.equal(Number(nextInput.startChar) <= 2_000_000, true);
+
+    const second = await center.execute({
+      callId: "call-skill-former-ceiling",
+      toolName: "read_skill_resource",
+      input: nextInput as ToolFactValue,
+    }, executionContext(), permission);
+    const secondOutput = asRecord(second.output);
+    const thirdInput = asRecord(asRecord(secondOutput.continuation).nextInput);
+
+    assert.equal(second.status, "completed");
+    assert.equal(secondOutput.content, "ab");
+    assert.equal(secondOutput.truncated, true);
+    assert.equal(thirdInput.startChar, 2_000_002);
+    assert.equal(Number(thirdInput.startChar) > Number(secondOutput.startChar), true);
+
+    const third = await center.execute({
+      callId: "call-skill-beyond-former-ceiling",
+      toolName: "read_skill_resource",
+      input: thirdInput as ToolFactValue,
+    }, executionContext(), permission);
+    const thirdOutput = asRecord(third.output);
+
+    assert.equal(third.status, "completed");
+    assert.equal(thirdOutput.content, "c");
+    assert.equal(thirdOutput.truncated, false);
+    assert.equal(thirdOutput.continuation, undefined);
+    assert.equal(`${firstOutput.content}${secondOutput.content}${thirdOutput.content}`, "xxabc");
+  } finally {
+    await fixture.remove();
+  }
+});
+
+test("read_skill_resource rejects fractional continuation offsets", async () => {
+  const fixture = await createFixture();
+  try {
+    const tool = createReadSkillResourceTool([fixture.skillContext()]);
+    await assert.rejects(
+      () => tool.execute({
+        skillId: "sample-skill",
+        type: "reference",
+        path: "references/guide.md",
+        startChar: 1.5,
+      }, executionContext()),
+      /non-negative safe integer/
+    );
   } finally {
     await fixture.remove();
   }
@@ -70,20 +149,19 @@ test("read_skill_resource reports assets and scripts without returning raw conte
       type: "asset",
       path: "assets/logo.bin",
     }, executionContext()));
-    const assetResult = asRecord(asset.result);
-    assert.equal("content" in assetResult, true);
-    assert.equal(assetResult.content, undefined);
-    assert.equal(assetResult.byteLength, 5);
+    assertDirectToolFacts(asset);
+    assert.equal(asset.content, undefined);
+    assert.equal(asset.byteLength, 5);
 
     const script = asRecord(await tool.execute({
       skillId: "sample-skill",
       type: "script",
       path: "scripts/run.js",
     }, executionContext()));
-    const scriptResult = asRecord(script.result);
-    assert.equal(scriptResult.requiresToolExecution, true);
-    assert.equal(scriptResult.notExecutableByResolver, true);
-    assert.equal(scriptResult.content, undefined);
+    assertDirectToolFacts(script);
+    assert.equal(script.requiresToolExecution, true);
+    assert.equal(script.notExecutableByResolver, true);
+    assert.equal(script.content, undefined);
   } finally {
     await fixture.remove();
   }
@@ -108,7 +186,7 @@ test("read_skill_resource fails closed when resource hash changed after run crea
   }
 });
 
-async function createFixture(): Promise<{
+async function createFixture(options: { readonly referenceContent?: string } = {}): Promise<{
   readonly packagePath: string;
   readonly sourcePath: string;
   skillContext(overrides?: { readonly omitted?: boolean; readonly loadStatus?: "loaded" | "failed" }): {
@@ -120,6 +198,7 @@ async function createFixture(): Promise<{
   };
   remove(): Promise<void>;
 }> {
+  const referenceContent = options.referenceContent ?? "Use precise facts.";
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-skill-resource-tool-"));
   const packagePath = path.join(root, "sample-skill");
   const sourcePath = path.join(packagePath, "SKILL.md");
@@ -128,7 +207,7 @@ async function createFixture(): Promise<{
   await fs.mkdir(path.join(packagePath, "scripts"), { recursive: true });
   await fs.mkdir(path.join(packagePath, "evals"), { recursive: true });
   await fs.writeFile(sourcePath, "---\nname: sample-skill\ndescription: Sample.\n---\n\nBody.", "utf8");
-  await fs.writeFile(path.join(packagePath, "references", "guide.md"), "Use precise facts.", "utf8");
+  await fs.writeFile(path.join(packagePath, "references", "guide.md"), referenceContent, "utf8");
   await fs.writeFile(path.join(packagePath, "assets", "logo.bin"), Buffer.from([1, 2, 3, 4, 5]));
   await fs.writeFile(path.join(packagePath, "scripts", "run.js"), "throw new Error('executed');", "utf8");
   await fs.writeFile(path.join(packagePath, "evals", "review-case.json"), "{\"input\":\"review\"}", "utf8");
@@ -150,8 +229,8 @@ async function createFixture(): Promise<{
               type: "reference",
               relativePath: "references/guide.md",
               exists: true,
-              contentHash: hash("Use precise facts."),
-              byteLength: Buffer.byteLength("Use precise facts.", "utf8"),
+              contentHash: hash(referenceContent),
+              byteLength: Buffer.byteLength(referenceContent, "utf8"),
             },
             {
               type: "asset",
@@ -181,8 +260,8 @@ async function createFixture(): Promise<{
               name: "guide.md",
               relativePath: "references/guide.md",
               sourcePath: path.join(packagePath, "references", "guide.md"),
-              contentHash: hash("Use precise facts."),
-              byteLength: Buffer.byteLength("Use precise facts.", "utf8"),
+              contentHash: hash(referenceContent),
+              byteLength: Buffer.byteLength(referenceContent, "utf8"),
             },
             {
               kind: "asset",
@@ -222,6 +301,12 @@ function executionContext() {
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null ? value as Readonly<Record<string, unknown>> : {};
+}
+
+function assertDirectToolFacts(output: Readonly<Record<string, unknown>>): void {
+  for (const legacyField of ["action", "status", "summary", "result"]) {
+    assert.equal(legacyField in output, false, `skill resource output must not contain ${legacyField}`);
+  }
 }
 
 function hash(value: string): string {

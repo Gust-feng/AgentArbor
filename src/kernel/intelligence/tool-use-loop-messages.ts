@@ -1,6 +1,14 @@
 import type { ModelMessage, ModelResponse } from "../../domain/intelligence/index.js";
-import type { ToolCallRequest, ToolCallResult, ToolContinuation } from "../../domain/tools/index.js";
-import { toolModelAttachmentsFromOutput } from "../../domain/tools/index.js";
+import type {
+  ToolCallRequest,
+  ToolCallResult,
+  ToolContinuation,
+  ToolFactValue,
+  ToolResult,
+} from "../../domain/tools/index.js";
+import {
+  toolModelAttachmentsFromOutput,
+} from "../../domain/tools/index.js";
 import { cloneModelMessage, cloneToolCallRequest } from "./tool-use-loop-cloning.js";
 import { toolCallResultToModelToolResult } from "./tool-call-result-model-view.js";
 
@@ -24,18 +32,15 @@ export function assistantToolCallMessage(
 
 export function toolResultMessage(result: ToolCallResult): ModelMessage {
   const attachments = toolModelAttachmentsFromOutput(result.output);
-  const modelOutput = toolCallResultToModelToolResult(result);
-  const payload = {
-    callId: result.callId,
-    toolName: result.toolName,
+  const modelResult = toolCallResultToModelToolResult(result);
+  const payload: ToolMessagePayload = {
     status: result.status,
-    output: modelOutput,
-    error: safeToolErrorForModel(result.error),
-    durationMs: result.durationMs,
+    body: modelResult.body,
+    error: modelResult.error,
   };
   return {
     role: "tool",
-    content: stringifyToolMessagePayload(payload, toolMessageContentBudget(result)),
+    content: stringifyToolMessagePayload(payload, MAX_TOOL_MESSAGE_CHARS),
     toolCallId: result.callId,
     toolName: result.toolName,
     attachments: attachments === undefined || attachments.length === 0
@@ -48,130 +53,82 @@ export function toolResultMessages(results: readonly ToolCallResult[]): ModelMes
   return results.map(toolResultMessage);
 }
 
-// Final transport guard after factual model content has been formed. Keep this
-// large enough that stdout/stderr and file bodies are not silently summarized.
+// Final provider-transport guard. Larger facts continue through an explicit
+// tool-owned reference instead of consuming an unbounded parent context.
 const MAX_TOOL_MESSAGE_CHARS = 220_000;
-const MAX_SUB_AGENT_TOOL_MESSAGE_CHARS = 1_000_000;
 const MAX_TRANSPORT_CONTINUATIONS = 32;
-const SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents", "spawn_sub_agent"]);
-
-function safeToolErrorForModel(error: string | undefined): string | undefined {
-  return error;
-}
-
-function toolMessageContentBudget(result: ToolCallResult): number {
-  return SUB_AGENT_TOOL_NAMES.has(result.toolName) ? MAX_SUB_AGENT_TOOL_MESSAGE_CHARS : MAX_TOOL_MESSAGE_CHARS;
-}
+const MAX_TRANSPORT_CONTINUATION_ITEM_CHARS = 16_000;
+const MAX_TRANSPORT_CONTINUATIONS_CHARS = 64_000;
+const MAX_TRANSPORT_CONTINUATION_REF_CHARS = 4_096;
+const MAX_TRANSPORT_CONTINUATION_NOTE_CHARS = 2_000;
 
 type ToolMessagePayload = {
-  readonly callId: string;
-  readonly toolName: string;
   readonly status: ToolCallResult["status"];
-  readonly output: unknown;
-  readonly error?: string;
-  readonly durationMs: number;
-};
+} & ToolResult;
 
 function stringifyToolMessagePayload(payload: ToolMessagePayload, maxChars: number): string {
-  const value = JSON.stringify(payload);
-  if (value.length <= maxChars) {
-    return value;
+  try {
+    const value = JSON.stringify(payload);
+    if (value.length <= maxChars) {
+      return value;
+    }
+    const truncated = JSON.stringify(transportTruncatedToolPayload(payload));
+    if (truncated.length <= maxChars) {
+      return truncated;
+    }
+    return JSON.stringify(transportGuardFailurePayload(payload));
+  } catch (error) {
+    return JSON.stringify(transportSerializationFailurePayload(error));
   }
-  return JSON.stringify(transportTruncatedToolPayload(payload, value.length, maxChars));
 }
 
 function transportTruncatedToolPayload(
-  payload: ToolMessagePayload,
-  originalChars: number,
-  maxChars: number
+  payload: ToolMessagePayload
 ): ToolMessagePayload {
-  const continuations = modelOutputContinuations(payload.output);
-  const continuation = continuations[0];
-  const continuationList = continuations.length === 0 ? undefined : continuations;
-  const omittedChars = Math.max(0, originalChars - maxChars);
+  const continuations = modelOutputContinuations(canonicalModelBody(payload.body));
+  const continuationFacts = continuations.length === 1
+    ? { continuation: continuations[0] }
+    : continuations.length > 1
+      ? { continuations }
+      : {};
+  const continuationAvailable = continuations.length > 0;
+  const contractError = continuationAvailable
+    ? undefined
+    : {
+        message: "Tool result exceeded the model transport budget without an explicit continuation.",
+        domain: "runtime_error" as const,
+        facts: {
+          code: "tool_result_continuation_required",
+        },
+      };
   return {
-    callId: payload.callId,
-    toolName: payload.toolName,
-    status: payload.status,
-    output: {
-      content: [{
-        type: "text",
-        text: continuation === undefined
-          ? "Tool result exceeded the model transport budget. No continuation reference was supplied by the tool result."
-          : "Tool result exceeded the model transport budget. Use the supplied continuation reference to inspect more.",
-      }],
-      structuredContent: {
+    status: continuationAvailable ? payload.status : "failed",
+    body: {
+      format: "json",
+      value: {
         truncated: true,
         reason: "tool_message_transport_budget_exceeded",
-        originalChars,
-        maxChars,
-        omittedChars,
-        continuationAvailable: continuations.length > 0,
-        unrecoverable: continuations.length === 0,
-        continuation,
-        continuations: continuationList,
-        continuationCount: continuations.length,
-        preview: compactJsonPreview(payload.output, 4_000),
+        ...continuationFacts,
+        preview: compactJsonPreview(canonicalModelBody(payload.body), 4_000),
       },
-      truncation: {
-        truncated: true,
-        reason: "tool_message_transport_budget_exceeded",
-        omittedChars,
-        continuation,
-        continuations: continuationList,
-      },
-      continuation,
     },
-    error: payload.error,
-    durationMs: payload.durationMs,
+    error: contractError ?? payload.error,
   };
 }
 
 function modelOutputContinuations(value: unknown): readonly ToolContinuation[] {
-  const knownRefContinuation = continuationFromKnownRef(value);
-  return uniqueContinuations([
-    ...collectExplicitContinuations(value),
-    ...(knownRefContinuation === undefined ? [] : [knownRefContinuation]),
-  ]).slice(0, MAX_TRANSPORT_CONTINUATIONS);
-}
-
-function collectExplicitContinuations(value: unknown): readonly ToolContinuation[] {
-  const continuations: ToolContinuation[] = [];
-  collectExplicitContinuationsInto(value, continuations);
-  return continuations;
-}
-
-function collectExplicitContinuationsInto(value: unknown, continuations: ToolContinuation[], depth = 0): void {
-  if (depth > 8 || value === null || typeof value !== "object") {
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 128)) {
-      collectExplicitContinuationsInto(item, continuations, depth + 1);
-    }
-    return;
-  }
   const record = asRecord(value);
-  for (const [key, item] of Object.entries(record).slice(0, 128)) {
-    if (key === "continuation") {
-      const continuation = toolContinuationFromUnknown(item);
-      if (continuation !== undefined) {
-        continuations.push(continuation);
-      }
-      continue;
-    }
-    if (key === "continuations" && Array.isArray(item)) {
-      for (const entry of item.slice(0, MAX_TRANSPORT_CONTINUATIONS)) {
-        const continuation =
-          toolContinuationFromUnknown(asRecord(entry).continuation) ??
-          toolContinuationFromUnknown(entry);
-        if (continuation !== undefined) {
-          continuations.push(continuation);
-        }
-      }
-    }
-    collectExplicitContinuationsInto(item, continuations, depth + 1);
-  }
+  const single = toolContinuationFromUnknown(record.continuation);
+  const multiple = Array.isArray(record.continuations)
+    ? record.continuations
+      .slice(0, MAX_TRANSPORT_CONTINUATIONS)
+      .map(toolContinuationFromUnknown)
+      .filter((item): item is ToolContinuation => item !== undefined)
+    : [];
+  return fitContinuationsWithinTransportBudget(
+    uniqueContinuations(single === undefined ? multiple : [single, ...multiple])
+      .slice(0, MAX_TRANSPORT_CONTINUATIONS)
+  );
 }
 
 function uniqueContinuations(continuations: readonly ToolContinuation[]): readonly ToolContinuation[] {
@@ -187,85 +144,112 @@ function uniqueContinuations(continuations: readonly ToolContinuation[]): readon
   return uniqueValues;
 }
 
-function continuationFromKnownRef(value: unknown): ToolContinuation | undefined {
-  const logRef = findStringField(value, new Set(["logRef"]));
-  if (logRef !== undefined) {
-    return {
-      ref: logRef,
-      nextInput: { ref: logRef, maxLength: 30_000 },
-      note: "Use the read tool with this logRef to inspect the complete tool output.",
-    };
-  }
-  const rawRef = findStringField(value, new Set([
-    "rawRef",
-    "rawTextRef",
-    "rawBodyRef",
-    "rawContentRef",
-    "rawContentPreviewRef",
-    "rawStdoutRef",
-    "rawStderrRef",
-  ]));
-  if (rawRef === undefined) {
+function toolContinuationFromUnknown(value: unknown): ToolContinuation | undefined {
+  const record = asRecord(value);
+  const rawRef = nonEmptyString(record.ref);
+  const ref = rawRef !== undefined && rawRef.length <= MAX_TRANSPORT_CONTINUATION_REF_CHARS
+    ? rawRef
+    : undefined;
+  const note = compactTransportText(nonEmptyString(record.note), MAX_TRANSPORT_CONTINUATION_NOTE_CHARS);
+  const nextInput = continuationInputWithinTransportBudget(record.nextInput);
+  if (ref === undefined && nextInput === undefined) {
     return undefined;
   }
+  const full: ToolContinuation = {
+    ...(ref === undefined ? {} : { ref }),
+    ...(nextInput === undefined ? {} : { nextInput }),
+    ...(note === undefined ? {} : { note }),
+  };
+  const candidates: ToolContinuation[] = [
+    full,
+    ...(note === undefined ? [] : [{
+      ...(ref === undefined ? {} : { ref }),
+      ...(nextInput === undefined ? {} : { nextInput }),
+    }]),
+    ...(nextInput === undefined ? [] : [{ nextInput }]),
+    ...(ref === undefined ? [] : [{ ref, ...(note === undefined ? {} : { note }) }, { ref }]),
+  ];
+  return candidates.find(continuationWithinItemBudget);
+}
+
+function continuationWithinItemBudget(continuation: ToolContinuation): boolean {
+  return JSON.stringify(continuation).length <= MAX_TRANSPORT_CONTINUATION_ITEM_CHARS;
+}
+
+function fitContinuationsWithinTransportBudget(
+  continuations: readonly ToolContinuation[]
+): readonly ToolContinuation[] {
+  const selected: ToolContinuation[] = [];
+  let remaining = MAX_TRANSPORT_CONTINUATIONS_CHARS;
+  for (const continuation of continuations) {
+    const chars = JSON.stringify(continuation).length;
+    if (chars > remaining) {
+      continue;
+    }
+    selected.push(continuation);
+    remaining -= chars;
+  }
+  return selected;
+}
+
+function continuationInputWithinTransportBudget(value: unknown): ToolFactValue | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const fact = value as ToolFactValue;
+  return JSON.stringify(fact).length <= MAX_TRANSPORT_CONTINUATION_ITEM_CHARS
+    ? globalThis.structuredClone(fact)
+    : undefined;
+}
+
+function compactTransportText(value: string | undefined, maxChars: number): string | undefined {
+  if (value === undefined || value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
+function transportGuardFailurePayload(payload: ToolMessagePayload): ToolMessagePayload {
   return {
-    ref: rawRef,
-    nextInput: { ref: rawRef, maxLength: 30_000 },
-    note: "Use the read tool with this raw ref to inspect the complete tool output.",
+    status: "failed",
+    body: {
+      format: "json",
+      value: {
+        truncated: true,
+        reason: "tool_message_transport_budget_exceeded",
+        preview: compactJsonPreview(canonicalModelBody(payload.body), 4_000),
+      },
+    },
+    error: {
+      message: "Tool result and its continuation metadata exceeded the model transport budget.",
+      domain: "runtime_error",
+      facts: {
+        code: "tool_result_transport_budget_exceeded",
+      },
+    },
   };
 }
 
-function findStringField(value: unknown, keys: ReadonlySet<string>, depth = 0): string | undefined {
-  if (depth > 6 || value === null || typeof value !== "object") {
-    return undefined;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 32)) {
-      const found = findStringField(item, keys, depth + 1);
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  for (const key of keys) {
-    const candidate = record[key];
-    if (typeof candidate === "string" && candidate.trim().length > 0) {
-      return candidate.trim();
-    }
-  }
-  for (const item of Object.values(record).slice(0, 64)) {
-    const found = findStringField(item, keys, depth + 1);
-    if (found !== undefined) {
-      return found;
-    }
-  }
-  return undefined;
+function transportSerializationFailurePayload(error: unknown): ToolMessagePayload {
+  const message = error instanceof Error && error.message.trim().length > 0
+    ? compactTransportText(error.message, 500)
+    : undefined;
+  return {
+    status: "failed",
+    body: { format: "none" },
+    error: {
+      message: "Tool result could not be serialized for the model transport.",
+      domain: "runtime_error",
+      facts: {
+        code: "tool_result_not_serializable",
+        ...(message === undefined ? {} : { reason: message }),
+      },
+    },
+  };
 }
 
-function toolContinuationFromUnknown(value: unknown): ToolContinuation | undefined {
-  const record = asRecord(value);
-  const ref = typeof record.ref === "string" && record.ref.trim().length > 0 ? record.ref : undefined;
-  const note = typeof record.note === "string" && record.note.trim().length > 0 ? record.note : undefined;
-  const nextInput = record.nextInput === undefined ? undefined : cloneToolFactValue(record.nextInput);
-  if (ref === undefined && note === undefined && nextInput === undefined) {
-    return undefined;
-  }
-  const continuation: Record<string, unknown> = {};
-  if (ref !== undefined) continuation.ref = ref;
-  if (nextInput !== undefined) continuation.nextInput = nextInput;
-  if (note !== undefined) continuation.note = note;
-  return continuation as ToolContinuation;
-}
-
-function cloneToolFactValue(value: unknown): unknown {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  if (Array.isArray(value)) return value.map(cloneToolFactValue);
-  if (typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, cloneToolFactValue(item)]));
-  }
-  return String(value);
+function canonicalModelBody(body: ToolResult["body"]): unknown {
+  return body.format === "json" ? body.value : body.format === "text" ? body.text : undefined;
 }
 
 function compactJsonPreview(value: unknown, maxChars: number): string {
@@ -276,8 +260,12 @@ function compactJsonPreview(value: unknown, maxChars: number): string {
   return `${serialized.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? value as Readonly<Record<string, unknown>>
     : {};
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }

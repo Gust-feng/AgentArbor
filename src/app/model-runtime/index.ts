@@ -95,7 +95,6 @@ function cloneToolDefinition(tool: ToolDefinition): ToolDefinition {
     modelContract: cloneToolModelContract(tool.modelContract),
     metadata: tool.metadata === undefined ? undefined : {
       ...tool.metadata,
-      visibleResultPolicy: { ...tool.metadata.visibleResultPolicy },
       runtimeHints: cloneRuntimeHints(tool.metadata.runtimeHints),
     },
   };

@@ -189,7 +189,7 @@ test("Desktop Agent Session projects local tool summaries and refs", async () =>
   assert.equal(result.answer?.evidenceRefs.includes("workspace:file:README.md"), true);
   const toolBlock = result.answer?.resultBlocks.find((block) => block.kind === "tool_summary");
   assert.notEqual(toolBlock, undefined);
-  assert.equal(toolBlock?.summary.includes("read_file: README.md · 12 bytes"), true);
+  assert.equal(toolBlock?.summary.includes("README.md"), true);
   assert.equal(result.activity.some((item) => item.toolName === "read_file" && item.summary.includes("README.md")), true);
   assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "read_file"), true);
 });
@@ -1618,11 +1618,10 @@ class LocalToolCenter implements ToolExecutionBroker {
       toolName: request.toolName,
       input: request.input,
       output: {
-        action: "read_file",
-        status: "completed",
         refId: "workspace:file:README.md",
-        summary: "README.md · 12 bytes",
-        result: { path: "README.md", bytes: 12, content: "hello world" },
+        path: "README.md",
+        bytes: 12,
+        content: "hello world",
         truncated: false,
       },
       status: "completed",
@@ -1726,11 +1725,6 @@ function confirmationAwareShellToolCenter(): ToolCenter {
         riskLevel: "high",
         operationType: "execute",
         requiresConfirmation: true,
-        visibleResultPolicy: {
-          userVisible: "safe-preview",
-          maxPreviewChars: 800,
-          omitRawOutput: true,
-        },
       },
     },
     async execute(input) {
@@ -1786,11 +1780,6 @@ class ApprovalRequiredToolCenter implements ToolExecutionBroker {
           riskLevel: "high",
           operationType: "read-write",
           requiresConfirmation: true,
-          visibleResultPolicy: {
-            userVisible: "summary-only",
-            maxPreviewChars: 0,
-            omitRawOutput: true,
-          },
         },
       },
     ];
@@ -2036,11 +2025,6 @@ function capabilityTool(
     riskLevel: operationType === "read-only" ? "low" : "high",
     operationType,
     requiresConfirmation: operationType !== "read-only",
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
   });
   return {
     name,
@@ -2055,11 +2039,6 @@ function capabilityTool(
     operationLabel: presentation.operationLabel,
     requiresConfirmation: operationType !== "read-only",
     confirmationLabel: presentation.confirmationLabel,
-    visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: 800,
-      omitRawOutput: true,
-    },
     scopes: defaultCapabilityToolScopes(operationType),
     enabled: true,
     availability: "available",

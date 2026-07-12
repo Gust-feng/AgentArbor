@@ -6,6 +6,7 @@ export * from "./token-counter.js";
 export * from "./event-hub.js";
 export * from "./execution-adapter.js";
 export * from "./persistence.js";
+export * from "./persistence-snapshot-contract.js";
 export * from "./run-executor.js";
 export * from "./run-job.js";
 export * from "./run-job-store.js";
@@ -13,12 +14,4 @@ export * from "./run-projection.js";
 export * from "./run-store.js";
 export * from "./runtime-context.js";
 export * from "./safe-projection.js";
-export * from "./tool-registry.js";
 export * from "./work-view.js";
-export {
-  createDesktopWorkViewReadModel as createDesktopWorkSessionReadModel,
-} from "./work-view.js";
-export type {
-  CreateDesktopWorkViewReadModelInput as CreateDesktopWorkSessionReadModelInput,
-  DesktopWorkViewCanvasLike as DesktopWorkSessionCanvasLike,
-} from "./work-view.js";

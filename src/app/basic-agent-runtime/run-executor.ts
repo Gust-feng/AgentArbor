@@ -133,7 +133,7 @@ export class BasicAgentRunExecutor {
       // 不再 cancel/finalize，避免 double-finalize。
       return this.requireBasicRun(runId);
     }
-    this.pendingContinuations.deleteForRun(runId);
+    const pendingContinuationRelease = this.pendingContinuations.deleteForRun(runId);
     this.config.abortControllers.get(runId)?.abort();
     this.config.runJobs.cancel(runId, {
       config: job.config,
@@ -147,6 +147,7 @@ export class BasicAgentRunExecutor {
     });
     const cancelled = this.requireJob(runId);
     this.syncRunEvents(cancelled);
+    await pendingContinuationRelease;
     await this.finalizeTerminalJob(cancelled);
     return this.requireBasicRun(runId);
   }
@@ -349,6 +350,10 @@ export class BasicAgentRunExecutor {
   }
 
   private async commitTerminalJob(job: BasicAgentRunJob): Promise<void> {
+    // Covers terminal paths that never resume a remembered continuation, such
+    // as persistence failure after markResuming. Cleanup failures are isolated
+    // by the continuation store and cannot rewrite the terminal outcome.
+    await this.pendingContinuations.deleteForRun(job.runId);
     if (job.status === "cancelled") {
       await this.cleanupRunResources(job.runId);
     }

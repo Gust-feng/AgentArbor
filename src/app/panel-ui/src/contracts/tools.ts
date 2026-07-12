@@ -8,6 +8,13 @@ export type ToolErrorFactValue =
 
 export type ToolErrorFacts = Readonly<Record<string, ToolErrorFactValue>>;
 
+export type ToolErrorDomain =
+  | "tool_error"
+  | "runtime_error"
+  | "model_error"
+  | "ui_submit_error"
+  | "process_error";
+
 export type ToolFileDisplayOperation =
   | "create"
   | "write"
@@ -150,18 +157,6 @@ export type ToolDisplayProjection =
       readonly summary?: string;
       readonly items?: readonly string[];
     };
-
-export type ToolCallEvidence = {
-  readonly callId: string;
-  readonly toolName?: string;
-  readonly status: "completed" | "failed" | "cancelled";
-  readonly summary?: string;
-  readonly evidenceRefs: readonly string[];
-  readonly truncated?: boolean;
-  readonly error?: string;
-  readonly errorDomain?: string;
-  readonly errorFacts?: ToolErrorFacts;
-};
 
 export type ToolCatalogItem = {
   readonly name: string;

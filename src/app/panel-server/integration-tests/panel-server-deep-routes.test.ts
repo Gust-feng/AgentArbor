@@ -54,9 +54,9 @@ import {
 const COMPLEX_GOAL = "分析当前 AgentArbor 项目并产出优化方向报告";
 /** 轻量问题：触发 fake provider 的 direct_answer 分支（无 child，直接结论）。 */
 const LIGHTWEIGHT_GOAL = "你是什么模型？";
-// The full suite runs CPU-heavy context tests in parallel. Deep completion is
-// eventual and normally finishes in a few seconds, but must not become flaky
-// merely because timer callbacks are delayed under the configured test load.
+// The package runner isolates this timing-sensitive integration file from the
+// parallel unit/component batch. Keep a generous local deadline as a diagnostic
+// boundary for genuinely slow CI hosts, not as a substitute for that isolation.
 const DEEP_RUN_VIEW_TIMEOUT_MS = 60_000;
 
 /** 创建独立 deep 会话，返回会话 id。aiMode 必须显式传入（与 desktop 测试一致，避免依赖

@@ -559,6 +559,7 @@ export function createMultiAgentFeature(options: {
       while (activeRuns.size > 0) {
         await Promise.allSettled([...activeRuns.values()]);
       }
+      await feature.runRecordWrites.drain();
     },
     dispose(): Promise<void> {
       isQuiescing = true;
@@ -576,9 +577,8 @@ export function createMultiAgentFeature(options: {
           requestActiveRunStop();
         }
         requestActiveRunStop();
-        await feature.waitForIdle();
         try {
-          await feature.runRecordWrites.drain();
+          await feature.waitForIdle();
         } finally {
           controlHandles.clear();
           childContinuations.clear();
@@ -730,6 +730,12 @@ async function startMultiAgentConversationRun(
   input: Parameters<MultiAgentFeature["startRun"]>[0],
 ): Promise<MultiAgentStartedRun> {
   let conversation = await requireMultiAgentConversation(feature, input.conversationId);
+  if (feature.hasActiveRunForConversation(input.conversationId)) {
+    throw new MultiAgentFeatureError(
+      "conversation_busy",
+      "Multi-Agent conversation already has an active run.",
+    );
+  }
   const parentRun = input.parentRunId === undefined
     ? undefined
     : await requireMultiAgentRunRecord(feature, input.parentRunId);
@@ -806,6 +812,12 @@ async function followUpMultiAgentRun(
     );
   }
   const conversation = await requireMultiAgentConversation(feature, previous.run.conversationId);
+  if (feature.hasActiveRunForConversation(conversation.conversationId)) {
+    throw new MultiAgentFeatureError(
+      "conversation_busy",
+      "Multi-Agent conversation already has an active run.",
+    );
+  }
   const taskSoilInput = input.taskSoilInput ?? conversation.taskSoilInput;
   const updatedConversation = await feature.conversationStore.upsert({
     ...conversation,

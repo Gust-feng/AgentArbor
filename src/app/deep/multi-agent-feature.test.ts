@@ -135,6 +135,33 @@ test("MultiAgentFeature stops admission synchronously and waits for in-flight co
   assert.equal(disposeSettled, true);
 });
 
+test("MultiAgentFeature waitForIdle waits for the run-record write drain", async () => {
+  const feature = createMultiAgentFeature();
+  const internal = feature as typeof feature & {
+    readonly runRecordWrites: {
+      drain: () => Promise<void>;
+    };
+  };
+  const drainStarted = deferred<void>();
+  const drainGate = deferred<void>();
+  const originalDrain = internal.runRecordWrites.drain;
+  internal.runRecordWrites.drain = async () => {
+    drainStarted.resolve();
+    await drainGate.promise;
+  };
+
+  let settled = false;
+  const waiting = feature.waitForIdle().finally(() => {
+    settled = true;
+  });
+  await drainStarted.promise;
+  assert.equal(settled, false);
+  drainGate.resolve();
+  await waiting;
+  internal.runRecordWrites.drain = originalDrain;
+  await feature.dispose();
+});
+
 test("MultiAgentFeature keeps immediate control working before a durable run lookup", async () => {
   const modelStarted = deferred<void>();
   const modelGate = deferred<void>();
@@ -795,6 +822,69 @@ test("MultiAgentFeature derives follow-up ordinal when the root is older than 50
   assert.equal(followUp.parentRunId, started.runId);
   assert.equal(followUp.rootRunId, started.runId);
   assert.equal(followUp.turnOrdinal, 2);
+  await feature.waitForIdle();
+  await feature.dispose();
+});
+
+test("MultiAgentFeature rejects a concurrent follow-up for the same conversation", async () => {
+  let acquisitionCount = 0;
+  const followUpModelStarted = deferred<void>();
+  const followUpModelGate = deferred<void>();
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: capabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "full_access",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      const channel = directRunChannel();
+      if (acquisitionCount === 1) {
+        return {
+          intelligenceChannel: channel,
+          toolCenter: emptyToolBroker(),
+          capabilitySnapshot,
+          release: async () => undefined,
+        };
+      }
+      return {
+        intelligenceChannel: {
+          async request(request: ModelRequest, options?: Parameters<IntelligenceChannel["request"]>[1]) {
+            followUpModelStarted.resolve();
+            await followUpModelGate.promise;
+            return channel.request(request, options);
+          },
+          validateResponse: (request: ModelRequest, response: ModelResponse) =>
+            channel.validateResponse(request, response),
+        },
+        toolCenter: emptyToolBroker(),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const conversation = await feature.createConversation({
+    aiMode: "fake",
+    goal: "验证同一会话不会并行启动两轮深入协作。",
+  });
+  const firstRun = await feature.startRun({
+    conversationId: conversation.conversationId,
+    aiMode: "fake",
+  });
+  await feature.waitForIdle();
+
+  const attempts = await Promise.allSettled([
+    feature.followUp({ runId: firstRun.runId, aiMode: "fake", message: "第一轮继续。" }),
+    feature.followUp({ runId: firstRun.runId, aiMode: "fake", message: "第二轮继续。" }),
+  ]);
+  const fulfilled = attempts.filter((attempt) => attempt.status === "fulfilled");
+  const rejected = attempts.filter((attempt) => attempt.status === "rejected");
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.equal((rejected[0]?.reason as { readonly code?: unknown }).code, "conversation_busy");
+  assert.equal(acquisitionCount, 2);
+  await followUpModelStarted.promise;
+  followUpModelGate.resolve();
   await feature.waitForIdle();
   await feature.dispose();
 });

@@ -243,15 +243,19 @@ function createStore(overrides: {
     async listByConversation(conversationId, limit) {
       const matching = [...records.values()].filter(
         (record) => record.run.conversationId === conversationId,
-      );
-      return (limit === undefined ? matching : matching.slice(0, limit))
+      ).sort(compareByUpdatedAt);
+      return (limit === undefined
+        ? matching
+        : matching.slice(0, Math.max(0, Math.floor(limit))))
         .map((record) => structuredClone(record));
     },
     async listByRootRun(rootRunId, limit) {
       const matching = [...records.values()].filter(
         (record) => (record.run.rootRunId ?? record.run.runId) === rootRunId,
-      );
-      return (limit === undefined ? matching : matching.slice(0, limit))
+      ).sort(compareByUpdatedAt);
+      return (limit === undefined
+        ? matching
+        : matching.slice(0, Math.max(0, Math.floor(limit))))
         .map((record) => structuredClone(record));
     },
     async delete(runId) {
@@ -353,3 +357,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 type Mutable<T> = {
   -readonly [Key in keyof T]: T[Key];
 };
+
+function compareByUpdatedAt(left: DeepRunRecord, right: DeepRunRecord): number {
+  return right.run.updatedAt.localeCompare(left.run.updatedAt);
+}

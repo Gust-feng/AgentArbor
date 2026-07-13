@@ -124,7 +124,7 @@ DeepRuntime 通过契约使用以下共享设施，不复制其实现：
 - DeepRuntime 通过 `liveProjectionFromBoard(...)` 从 board snapshot 派生 `liveProjection.children` 与展示相位；board 成为运行中 child 状态的单一事实源。
 - scheduler 生命周期回调在 child 真实状态变化时实时发布 `deep.child.started` / `deep.child.completed` / `deep.child.blocked` / `deep.child.failed`；`deep.child.blocked` 与 `deep.child.failed` 都使用安全字段投影，不依赖 run 结束后重建。
 - Panel 通过 `/api/deep/runs/:id/events` SSE 获得即时推进信号，再拉取 `/api/deep/runs/:id/view` 校准权威快照；SSE 不承担事实重建职责。
-- final `AgentRunTree` 的 child 状态与 `board.terminalSnapshot()` 对齐，`delegationDecisions[].childRunIds` 写真实 child run id；运行中投影、事件序列、终态 run tree 同源一致。
+- final `AgentRunTree` 只收录真实启动并形成 `ChildAgentRun` 的 child，其状态与 `board.terminalSnapshot()` 中对应任务对齐；从未启动就取消的计划任务保留在 TaskBoard / `liveProjection`，不得伪造 child run。`delegationDecisions[].childRunIds` 只写能在 tree 中解析的真实 child run id；运行中投影、事件序列和终态 run tree 仍从同一 scheduler 事实单向派生，但不要求展示任务与执行 run 一一等量。
 
 ### 4. 用户可见的多 Agent 投影已收口为入口理解 + 聊天态
 

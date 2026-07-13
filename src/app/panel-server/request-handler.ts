@@ -44,6 +44,23 @@ import { OrdinaryRuntimeSnapshotContractError } from "../basic-agent-runtime/per
 import { BasicAgentRunAdmissionClosedError } from "../basic-agent-runtime/run-executor.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
+const PANEL_REQUEST_DRAIN_TIMEOUT_MS = 1_000;
+const PANEL_RUNTIME_SHUTDOWN_TIMEOUT_MS = 30_000;
+
+export type PanelServerCloseOptions = {
+  /** Host-level graceful cleanup deadline; production callers use 30 seconds. */
+  readonly runtimeCleanupTimeoutMs?: number;
+};
+
+export class PanelShutdownTimeoutError extends Error {
+  readonly code = "panel_shutdown_timeout";
+
+  constructor(readonly timeoutMs: number) {
+    super(`Panel runtime cleanup did not finish within ${timeoutMs} ms.`);
+    this.name = "PanelShutdownTimeoutError";
+  }
+}
+
 export async function startLocalPanelServer(options: PanelServerOptions = {}): Promise<StartedPanelServer> {
   const runtime = createPanelRuntime(options, createPanelRuntimeHooks());
   const server = createServer(createPanelRequestHandler(runtime));
@@ -258,43 +275,102 @@ function listen(server: Server, port: number, host: string): Promise<void> {
   });
 }
 
-export async function closePanelServer(server: Server, runtime: PanelRuntime): Promise<void> {
+export async function closePanelServer(
+  server: Server,
+  runtime: PanelRuntime,
+  options: PanelServerCloseOptions = {},
+): Promise<void> {
+  const runtimeCleanupTimeoutMs = resolveRuntimeCleanupTimeout(options.runtimeCleanupTimeoutMs);
   // Enter quiescing before any asynchronous shutdown work. Ordinary terminal
   // callbacks may still run while active jobs converge, but they must not
   // admit the next queued conversation run.
   runtime.isQuiescing = true;
   runtime.runExecutor.quiesce();
+  // dispose() closes Multi-Agent command admission synchronously before its
+  // asynchronous cleanup starts. This covers requests that already passed the
+  // Panel gate but are still reading their body or resolving configuration.
+  const multiAgentDisposal = runtime.multiAgentFeature.dispose();
+  void multiAgentDisposal.catch(() => undefined);
   let serverCloseError: unknown;
   const serverClosed = close(server).catch((error: unknown) => {
     serverCloseError = error;
   });
 
-  try {
+  const runtimeCleanup = (async () => {
     abortPanelRuntimeActiveRuns(runtime);
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
-    await waitForPanelRequestIdle(runtime);
+    await waitForPanelRequestIdle(server, runtime);
     abortPanelRuntimeActiveRuns(runtime);
     await Promise.all([
       waitForPanelRuntimeIdle(runtime),
-      runtime.multiAgentFeature.dispose(),
+      multiAgentDisposal,
     ]);
     await runtime.runExecutor.dispose();
     await runtime.toolOutputStore.clear();
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
     await waitForPanelPersistenceIdle(runtime);
+  })();
+  // A forced timeout may return while a broken provider promise is still
+  // pending. Own its eventual rejection so shutdown never creates an unhandled
+  // promise rejection.
+  void runtimeCleanup.catch(() => undefined);
+  let shutdownTimeoutError: PanelShutdownTimeoutError | undefined;
+  try {
+    const cleaned = await settleWithin([runtimeCleanup], runtimeCleanupTimeoutMs);
+    if (cleaned) {
+      await runtimeCleanup;
+    } else {
+      shutdownTimeoutError = new PanelShutdownTimeoutError(runtimeCleanupTimeoutMs);
+    }
   } finally {
+    // SSE and other long-lived responses are not active request jobs after
+    // their handlers install listeners. Force-close any remaining sockets only
+    // after runtime cleanup has converged.
+    server.closeAllConnections();
     await serverClosed;
   }
 
+  if (shutdownTimeoutError !== undefined) {
+    throw shutdownTimeoutError;
+  }
   if (serverCloseError !== undefined) {
     throw serverCloseError;
   }
 }
 
-async function waitForPanelRequestIdle(runtime: PanelRuntime): Promise<void> {
-  while (runtime.activeRequestJobs.size > 0) {
-    await Promise.allSettled([...runtime.activeRequestJobs]);
+function resolveRuntimeCleanupTimeout(value: number | undefined): number {
+  const resolved = value ?? PANEL_RUNTIME_SHUTDOWN_TIMEOUT_MS;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new RangeError("Panel runtime cleanup timeout must be a positive safe integer.");
   }
+  return resolved;
+}
+
+async function waitForPanelRequestIdle(server: Server, runtime: PanelRuntime): Promise<void> {
+  let forcedConnectionsClosed = false;
+  while (runtime.activeRequestJobs.size > 0) {
+    const jobs = [...runtime.activeRequestJobs];
+    if (!forcedConnectionsClosed) {
+      const drained = await settleWithin(jobs, PANEL_REQUEST_DRAIN_TIMEOUT_MS);
+      if (drained) {
+        continue;
+      }
+      server.closeAllConnections();
+      forcedConnectionsClosed = true;
+      continue;
+    }
+    await Promise.allSettled(jobs);
+  }
+}
+
+function settleWithin(jobs: readonly Promise<void>[], timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    void Promise.allSettled(jobs).then(() => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
 }
 
 async function waitForPanelRuntimeIdle(runtime: PanelRuntime): Promise<void> {

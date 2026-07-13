@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import test from "node:test";
 import type { BasicAgentRunExecutionInput, BasicAgentRunExecutionResult } from "../basic-agent-runtime/index.js";
 import type { PanelRunJob } from "./run-jobs.js";
-import { closePanelServer } from "./request-handler.js";
+import {
+  closePanelServer,
+  createPanelRequestHandler,
+  PanelShutdownTimeoutError,
+} from "./request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "./runtime.js";
 
 test("panel server close aborts active runs and cleans owned background processes", async () => {
@@ -124,10 +128,14 @@ test("panel server close runs shutdown cleanup before server close callback reso
   });
 
   let closeCallback: ((error?: Error) => void) | undefined;
+  let closeAllConnectionsCalls = 0;
   const server = {
     close(callback?: (error?: Error) => void) {
       closeCallback = callback;
       return this as Server;
+    },
+    closeAllConnections() {
+      closeAllConnectionsCalls += 1;
     },
   } as Server;
 
@@ -153,6 +161,7 @@ test("panel server close runs shutdown cleanup before server close callback reso
   closeCallback?.();
   await closing;
   assert.equal(closeSettled, true);
+  assert.equal(closeAllConnectionsCalls, 1);
 });
 
 test("panel server close cancels a scheduled Ordinary run before its deferred execution starts", async () => {
@@ -304,6 +313,121 @@ test("panel server close releases a pending Ordinary approval continuation exact
   await runtime.runExecutor.dispose();
 
   assert.equal(releaseCalls, 1);
+});
+
+test("panel server close rejects a Deep request that passed the Panel gate before shutdown", async () => {
+  const runtime = createPanelRuntime({}, panelRuntimeHooks());
+  const conversationsBefore = await runtime.multiAgentFeature.listConversations(100);
+  const server = createServer(createPanelRequestHandler(runtime));
+  await listen(server);
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== "string");
+
+  let requestError: unknown;
+  let resolveResponse!: (value: { readonly status: number; readonly body: any }) => void;
+  let rejectResponse!: (error: unknown) => void;
+  const responsePromise = new Promise<{ readonly status: number; readonly body: any }>((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  const request = httpRequest({
+    host: "127.0.0.1",
+    port: address.port,
+    path: "/api/deep/conversations",
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  }, (response) => {
+    let text = "";
+    response.setEncoding("utf8");
+    response.on("data", (chunk) => {
+      text += chunk;
+    });
+    response.on("end", () => {
+      resolveResponse({
+        status: response.statusCode ?? 0,
+        body: JSON.parse(text),
+      });
+    });
+  });
+  request.on("error", (error) => {
+    requestError = error;
+    rejectResponse(error);
+  });
+  request.write('{"goal":"shutdown');
+  await waitFor(() => runtime.activeRequestJobs.size === 1);
+
+  const closing = closePanelServer(server, runtime);
+  request.end(' race","aiMode":"fake"}');
+  const response = await responsePromise;
+  await closing;
+
+  assert.equal(requestError, undefined);
+  assert.equal(response.status, 503);
+  assert.equal(response.body?.error?.code, "deep_feature_quiescing");
+  assert.deepEqual(
+    (await runtime.multiAgentFeature.listConversations(100)).map((conversation) => conversation.conversationId),
+    conversationsBefore.map((conversation) => conversation.conversationId),
+  );
+});
+
+test("panel server close force-closes a request body that never finishes", async () => {
+  const runtime = createPanelRuntime({}, panelRuntimeHooks());
+  const server = createServer(createPanelRequestHandler(runtime));
+  await listen(server);
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== "string");
+
+  let requestClosed!: () => void;
+  const requestWasClosed = new Promise<void>((resolve) => {
+    requestClosed = resolve;
+  });
+  const request = httpRequest({
+    host: "127.0.0.1",
+    port: address.port,
+    path: "/api/deep/conversations",
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  });
+  request.on("error", () => requestClosed());
+  request.on("close", () => requestClosed());
+  request.write('{"goal":"never finished');
+  await waitFor(() => runtime.activeRequestJobs.size === 1);
+
+  const startedAt = Date.now();
+  await closePanelServer(server, runtime);
+  await requestWasClosed;
+
+  assert.equal(runtime.activeRequestJobs.size, 0);
+  assert.equal(Date.now() - startedAt < 4_000, true);
+});
+
+test("panel server close has a hard deadline when runtime cleanup ignores cancellation", async () => {
+  const runtime = createPanelRuntime({}, panelRuntimeHooks());
+  Object.defineProperty(runtime.multiAgentFeature, "dispose", {
+    configurable: true,
+    value: () => new Promise<void>(() => undefined),
+  });
+  let closeAllConnectionsCalls = 0;
+  const server = {
+    close(callback?: (error?: Error) => void) {
+      callback?.();
+      return this as Server;
+    },
+    closeAllConnections() {
+      closeAllConnectionsCalls += 1;
+    },
+  } as Server;
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    closePanelServer(server, runtime, { runtimeCleanupTimeoutMs: 50 }),
+    (error: unknown) => error instanceof PanelShutdownTimeoutError
+      && error.code === "panel_shutdown_timeout"
+      && error.timeoutMs === 50,
+  );
+
+  assert.equal(Date.now() - startedAt < 1_000, true);
+  assert.equal(closeAllConnectionsCalls, 1);
 });
 
 function panelRuntimeHooks() {

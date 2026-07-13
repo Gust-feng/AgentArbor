@@ -109,12 +109,20 @@ export async function handlePanelDeepRoute(
   try {
     return await dispatchDeepRoute(runtime, feature, request, response, url);
   } catch (error) {
-    if (error instanceof PanelHttpError) {
-      writePanelError(response, error);
+    let routeError: unknown = error;
+    if (error instanceof MultiAgentFeatureError) {
+      try {
+        mapMultiAgentFeatureError(error);
+      } catch (mappedError) {
+        routeError = mappedError;
+      }
+    }
+    if (routeError instanceof PanelHttpError) {
+      writePanelError(response, routeError);
     } else {
       writePanelError(
         response,
-        new PanelHttpError(500, "deep_route_internal_error", errorMessage(error)),
+        new PanelHttpError(500, "deep_route_internal_error", errorMessage(routeError)),
       );
     }
     return true;

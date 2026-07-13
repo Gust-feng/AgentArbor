@@ -9,7 +9,10 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import { BasicAgentRunExecutor } from "./run-executor.js";
+import {
+  BasicAgentRunAdmissionClosedError,
+  BasicAgentRunExecutor,
+} from "./run-executor.js";
 import type {
   BasicAgentRunExecutorConfig,
   BasicAgentRunStartFacts,
@@ -115,6 +118,92 @@ test("BasicAgentRunExecutor keeps continuation state split from execution orches
   assert.equal(runJobStoreSource.includes("job.agentDefinitionRef?.agentDisplayName"), true);
   assert.equal(runJobStoreSource.includes("agentLabel: basicAgentJobLabel(job)"), true);
   assert.equal(runJobStoreSource.includes('agentLabel: "AgentArbor"'), false);
+});
+
+test("BasicAgentRunExecutor rejects a start whose preparation crosses quiesce", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const originalCreate = runJobs.create.bind(runJobs);
+  let createCalls = 0;
+  runJobs.create = (input) => {
+    createCalls += 1;
+    return originalCreate(input);
+  };
+  let markPreparationStarted!: () => void;
+  let releasePreparation!: () => void;
+  const preparationStarted = new Promise<void>((resolve) => {
+    markPreparationStarted = resolve;
+  });
+  const preparationGate = new Promise<void>((resolve) => {
+    releasePreparation = resolve;
+  });
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    prepareRunStart: async (input) => {
+      markPreparationStarted();
+      await preparationGate;
+      return preparedStartFacts(input);
+    },
+  }));
+
+  const starting = executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "do not admit after shutdown",
+    aiMode: "fake",
+  });
+  await preparationStarted;
+  executor.quiesce();
+  releasePreparation();
+
+  await assert.rejects(
+    starting,
+    (error) => error instanceof BasicAgentRunAdmissionClosedError,
+  );
+  assert.equal(createCalls, 0);
+});
+
+test("BasicAgentRunExecutor rejects confirmation decisions after quiesce", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  let releaseCalls = 0;
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    execute: async () => ({
+      pendingApproval: {
+        confirmationId: "confirmation-shutdown-admission",
+        async release() {
+          releaseCalls += 1;
+        },
+        async resume() {
+          throw new Error("quiescing runtime must not resume approval");
+        },
+        async resumeWithDecision() {
+          throw new Error("quiescing runtime must not resume a decision");
+        },
+      },
+    }),
+  }));
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "wait for approval then shutdown",
+    aiMode: "fake",
+  });
+  await waitUntil(() => runJobs.get(run.runId)?.status === "approval_needed");
+
+  executor.quiesce();
+  await assert.rejects(
+    executor.submitConfirmationDecision({
+      runId: run.runId,
+      confirmationId: "confirmation-shutdown-admission",
+      decision: "approve_once",
+    }),
+    (error) => error instanceof BasicAgentRunAdmissionClosedError,
+  );
+  assert.equal(runJobs.get(run.runId)?.status, "approval_needed");
+  assert.equal(runJobs.get(run.runId)?.confirmationDecisions.length, 0);
+
+  await executor.dispose();
+  assert.equal(releaseCalls, 1);
 });
 
 test("BasicAgentPendingContinuationStore validates and consumes pending confirmations", () => {

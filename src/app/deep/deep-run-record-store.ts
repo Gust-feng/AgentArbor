@@ -33,7 +33,17 @@ export type DeepRunRecord = {
 };
 
 /** Deep run 隔离持久化端口。 */
-export interface DeepRunRecordStore extends RunSnapshotStore<DeepRunRecord> {}
+export interface DeepRunRecordStore extends RunSnapshotStore<DeepRunRecord> {
+  /**
+   * 按会话查询完整 run 集合。省略 limit 时不截断；显式 limit 在筛选和排序后生效。
+   */
+  listByConversation(conversationId: string, limit?: number): Promise<readonly DeepRunRecord[]>;
+  /**
+   * 按任务链根 run 查询。兼容尚未携带 rootRunId 的首轮记录。
+   * 省略 limit 时不截断；显式 limit 在筛选和排序后生效。
+   */
+  listByRootRun(rootRunId: string, limit?: number): Promise<readonly DeepRunRecord[]>;
+}
 
 /** 内存实现用于测试和开发态运行。 */
 export class InMemoryDeepRunRecordStore implements DeepRunRecordStore {
@@ -53,6 +63,22 @@ export class InMemoryDeepRunRecordStore implements DeepRunRecordStore {
     return this.store.list(limit);
   }
 
+  async listByConversation(conversationId: string, limit?: number): Promise<readonly DeepRunRecord[]> {
+    return listMatchingDeepRunRecords(
+      this.store,
+      (record) => record.run.conversationId === conversationId,
+      limit,
+    );
+  }
+
+  async listByRootRun(rootRunId: string, limit?: number): Promise<readonly DeepRunRecord[]> {
+    return listMatchingDeepRunRecords(
+      this.store,
+      (record) => (record.run.rootRunId ?? record.run.runId) === rootRunId,
+      limit,
+    );
+  }
+
   async delete(runId: string): Promise<void> {
     return this.store.delete(runId);
   }
@@ -60,10 +86,42 @@ export class InMemoryDeepRunRecordStore implements DeepRunRecordStore {
 
 /** 文件系统实现写入 `${runtimeHome}/deep-runs/<runId>/record.json`。 */
 export function createFileSystemDeepRunRecordStore(runtimeHome: string): DeepRunRecordStore {
-  return createFileSystemRunSnapshotStore<DeepRunRecord>({
+  const store = createFileSystemRunSnapshotStore<DeepRunRecord>({
     rootDir: path.join(runtimeHome, DEEP_RUN_RECORD_PARTITION),
     getEnvelope: deepRunRecordEnvelope,
   });
+  return {
+    upsert: (record) => store.upsert(record),
+    get: (runId) => store.get(runId),
+    list: (limit) => store.list(limit),
+    delete: (runId) => store.delete(runId),
+    listByConversation: (conversationId, limit) => listMatchingDeepRunRecords(
+      store,
+      (record) => record.run.conversationId === conversationId,
+      limit,
+    ),
+    listByRootRun: (rootRunId, limit) => listMatchingDeepRunRecords(
+      store,
+      (record) => (record.run.rootRunId ?? record.run.runId) === rootRunId,
+      limit,
+    ),
+  };
+}
+
+async function listMatchingDeepRunRecords(
+  store: RunSnapshotStore<DeepRunRecord>,
+  matches: (record: DeepRunRecord) => boolean,
+  limit: number | undefined,
+): Promise<readonly DeepRunRecord[]> {
+  // RunSnapshotStore 的 list 是展示查询并有默认窗口；Deep 领域查询必须先取全量，
+  // 再按 owning feature 的键筛选和限量，避免旧记录被最近窗口遮蔽。索引尚未出生前，
+  // 全量扫描只存在于 store 内部，调用方不应再复制这个实现细节。
+  const matching = (await store.list(Number.MAX_SAFE_INTEGER))
+    .filter(matches)
+    .sort((left, right) => right.run.updatedAt.localeCompare(left.run.updatedAt));
+  return limit === undefined
+    ? matching
+    : matching.slice(0, Math.max(0, Math.floor(limit)));
 }
 
 function deepRunRecordEnvelope(record: DeepRunRecord): RunEnvelope {

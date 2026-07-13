@@ -29,6 +29,10 @@ import {
   type DeepRunRecordStore,
 } from "./deep-run-record-store.js";
 import {
+  createCoordinatedDeepRunRecordStore,
+  type DeepRunRecordWriteCoordinator,
+} from "./deep-run-record-write-coordinator.js";
+import {
   createFileSystemDeepChildMessageStore,
   InMemoryDeepChildMessageStore,
   type DeepChildMessageStore,
@@ -296,6 +300,7 @@ type MultiAgentFeatureRuntime = MultiAgentFeature & {
   readonly soilStore: ReadonlySoilStore;
   readonly conversationStore: DeepConversationStore;
   readonly runRecordStore: DeepRunRecordStore;
+  readonly runRecordWrites: DeepRunRecordWriteCoordinator;
   readonly childMessageStore: DeepChildMessageStore;
   readonly childLoopContextStore: DeepChildLoopContextStore;
   readonly childContinuations: DeepChildPendingContinuationStore;
@@ -315,6 +320,36 @@ type MultiAgentFeatureRuntime = MultiAgentFeature & {
   readonly releaseToolOutputOwner: (ownerId: string) => void | Promise<void>;
 };
 
+/**
+ * Serializes mutating commands for one Deep conversation while leaving
+ * unrelated conversations independent. The gate promise always resolves so a
+ * failed command cannot block the next command in the same conversation.
+ */
+type DeepConversationCommandGate = {
+  run<T>(conversationId: string, command: () => Promise<T>): Promise<T>;
+};
+
+function createDeepConversationCommandGate(): DeepConversationCommandGate {
+  const tails = new Map<string, Promise<void>>();
+  return {
+    run<T>(conversationId: string, command: () => Promise<T>): Promise<T> {
+      const previous = tails.get(conversationId) ?? Promise.resolve();
+      const result = previous.then(command);
+      const completion = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      tails.set(conversationId, completion);
+      void completion.then(() => {
+        if (tails.get(conversationId) === completion) {
+          tails.delete(conversationId);
+        }
+      });
+      return result;
+    },
+  };
+}
+
 export function createMultiAgentFeature(options: {
   readonly runtimeHome?: string;
   readonly acquireRunResources?: MultiAgentRunResourceAcquirer;
@@ -333,6 +368,10 @@ export function createMultiAgentFeature(options: {
   const soilStore = createMinimalReadonlySoilStore(constraints);
   const reportBackgroundFailure = options.reportBackgroundFailure ?? defaultBackgroundFailureReporter;
   const activeOperations = new Set<Promise<unknown>>();
+  const conversationCommandGate = createDeepConversationCommandGate();
+  const coordinatedRunRecords = createCoordinatedDeepRunRecordStore(
+    createRunRecordStore(options.runtimeHome),
+  );
   let isQuiescing = false;
   let disposePromise: Promise<void> | undefined;
 
@@ -351,11 +390,36 @@ export function createMultiAgentFeature(options: {
     return operation;
   };
 
+  const runForConversation = <T>(
+    conversationId: string,
+    command: () => Promise<T>,
+  ): Promise<T> => runCommand(() => conversationCommandGate.run(conversationId, command));
+
+  const runForRunId = <T>(
+    runId: string,
+    command: () => Promise<T>,
+  ): Promise<T> => runCommand(async () => {
+    // An active run is registered before its initial snapshot is necessarily
+    // durable. Prefer that birth-time mapping so an immediate stop/correct
+    // still reaches its control handle; fall back to the durable record after
+    // restart. If neither exists, preserve the command's own error semantics.
+    const conversationId = feature.activeConversationIdForRun(runId)
+      ?? (await feature.runRecordStore.get(runId))?.run.conversationId;
+    if (conversationId === undefined) {
+      return command();
+    }
+    // The command itself re-reads and validates its run after admission. This
+    // keeps legacy immediate-control behavior while ensuring a delete that won
+    // the gate cannot be followed by a late save.
+    return conversationCommandGate.run(conversationId, command);
+  });
+
   const feature: MultiAgentFeatureRuntime = {
     constraints: soilStore.listConstraints(),
     soilStore,
     conversationStore: createConversationStore(options.runtimeHome),
-    runRecordStore: createRunRecordStore(options.runtimeHome),
+    runRecordStore: coordinatedRunRecords.store,
+    runRecordWrites: coordinatedRunRecords.writes,
     childMessageStore: createChildMessageStore(options.runtimeHome),
     childLoopContextStore: createChildLoopContextStore(options.runtimeHome),
     childContinuations,
@@ -363,7 +427,7 @@ export function createMultiAgentFeature(options: {
     releaseToolOutputOwner: options.releaseToolOutputOwner ?? (() => undefined),
     getConversation: (conversationId) => feature.conversationStore.get(conversationId),
     listConversations: (limit) => feature.conversationStore.list(limit),
-    renameConversation: (conversationId, title) => runCommand(async () => {
+    renameConversation: (conversationId, title) => runForConversation(conversationId, async () => {
       const conversation = await requireMultiAgentConversation(feature, conversationId);
       if (conversation.title === title) {
         return conversation;
@@ -374,20 +438,22 @@ export function createMultiAgentFeature(options: {
         titleEditedAt: nowIso(),
       });
     }),
-    pinConversation: (conversationId, pinned) => runCommand(async () => {
+    pinConversation: (conversationId, pinned) => runForConversation(conversationId, async () => {
       const conversation = await requireMultiAgentConversation(feature, conversationId);
       return feature.conversationStore.upsert({
         ...conversation,
         pinnedAt: pinned ? (conversation.pinnedAt ?? nowIso()) : undefined,
       });
     }),
-    deleteConversation: (conversationId) => runCommand(() => deleteMultiAgentConversation(feature, conversationId)),
+    deleteConversation: (conversationId) => runForConversation(
+      conversationId,
+      () => deleteMultiAgentConversation(feature, conversationId),
+    ),
     getRun: (runId) => feature.runRecordStore.get(runId),
     listRuns: (limit) => feature.runRecordStore.list(limit),
     listRunsForConversation: async (conversationId, limit) => {
       await requireMultiAgentConversation(feature, conversationId);
-      return (await feature.runRecordStore.list(limit))
-        .filter((record) => record.run.conversationId === conversationId);
+      return feature.runRecordStore.listByConversation(conversationId, limit);
     },
     createConversation: (input) => runCommand(() => createDeepConversationService({
       store: feature.conversationStore,
@@ -400,32 +466,49 @@ export function createMultiAgentFeature(options: {
       birthWorkspaceDirectory: input.birthWorkspaceDirectory,
       taskSoilInput: input.taskSoilInput,
     })),
-    intake: (input) => runCommand(() => intakeMultiAgentConversation(
+    intake: (input) => {
+      const command = () => intakeMultiAgentConversation(
+        feature,
+        requireResourceAcquirer(options),
+        requireStartFactsResolver(options),
+        input,
+      );
+      if (input.conversationId !== undefined) {
+        return runForConversation(input.conversationId, command);
+      }
+      if (input.activeRunId !== undefined) {
+        return runForRunId(input.activeRunId, command);
+      }
+      return runCommand(command);
+    },
+    startRun: (input) => runForConversation(input.conversationId, () => startMultiAgentConversationRun(
       feature,
       requireResourceAcquirer(options),
       requireStartFactsResolver(options),
       input,
     )),
-    startRun: (input) => runCommand(() => startMultiAgentConversationRun(
+    followUp: (input) => runForRunId(input.runId, () => followUpMultiAgentRun(
       feature,
       requireResourceAcquirer(options),
       requireStartFactsResolver(options),
       input,
     )),
-    followUp: (input) => runCommand(() => followUpMultiAgentRun(
-      feature,
-      requireResourceAcquirer(options),
-      requireStartFactsResolver(options),
-      input,
-    )),
-    resumeChild: (input) => runCommand(() => resumeMultiAgentChild(feature, requireResourceAcquirer(options), input)),
-    sendChildInstruction: (input) => runCommand(() => sendMultiAgentChildInstruction(
+    resumeChild: (input) => runForRunId(input.runId, () => resumeMultiAgentChild(
       feature,
       requireResourceAcquirer(options),
       input,
     )),
-    resynthesize: (input) => runCommand(() => resynthesizeMultiAgentRun(feature, requireResourceAcquirer(options), input)),
-    requestRunControl: (input) => runCommand(() => requestMultiAgentRunControl(feature, input)),
+    sendChildInstruction: (input) => runForRunId(input.runId, () => sendMultiAgentChildInstruction(
+      feature,
+      requireResourceAcquirer(options),
+      input,
+    )),
+    resynthesize: (input) => runForRunId(input.runId, () => resynthesizeMultiAgentRun(
+      feature,
+      requireResourceAcquirer(options),
+      input,
+    )),
+    requestRunControl: (input) => runForRunId(input.runId, () => requestMultiAgentRunControl(feature, input)),
     registerControlHandle(runId, handle): void {
       controlHandles.set(runId, handle);
     },
@@ -480,18 +563,29 @@ export function createMultiAgentFeature(options: {
     dispose(): Promise<void> {
       isQuiescing = true;
       disposePromise ??= (async () => {
+        const requestActiveRunStop = () => {
+          for (const handle of controlHandles.values()) {
+            handle.requestStop("panel_shutdown");
+          }
+        };
+        // Stop already-created runs before waiting for command setup. Commands
+        // that finish setup while quiescing are stopped on the next pass.
+        requestActiveRunStop();
         while (activeOperations.size > 0) {
           await Promise.allSettled([...activeOperations]);
+          requestActiveRunStop();
         }
-        for (const handle of controlHandles.values()) {
-          handle.requestStop("panel_shutdown");
-        }
+        requestActiveRunStop();
         await feature.waitForIdle();
-        controlHandles.clear();
-        childContinuations.clear();
-        childInstructionQueues.clear();
-        activeRunConversationIds.clear();
-        activeRuns.clear();
+        try {
+          await feature.runRecordWrites.drain();
+        } finally {
+          controlHandles.clear();
+          childContinuations.clear();
+          childInstructionQueues.clear();
+          activeRunConversationIds.clear();
+          activeRuns.clear();
+        }
       })();
       return disposePromise;
     },
@@ -1362,8 +1456,10 @@ async function deleteMultiAgentConversation(
       "Multi-Agent conversation still has an active run.",
     );
   }
-  const records = (await feature.runRecordStore.list(500))
-    .filter((record) => record.run.conversationId === conversationId);
+  // Deletion is an ownership cleanup, not a recent-history query. Read every
+  // run so old child contexts and process-local output owners cannot be left
+  // behind after newer runs push them outside a presentation limit.
+  const records = await feature.runRecordStore.listByConversation(conversationId);
   if (records.some((record) => record.run.status === "running")) {
     throw new MultiAgentFeatureError(
       "conversation_busy",
@@ -1384,7 +1480,9 @@ async function nextMultiAgentTurnOrdinal(
   feature: MultiAgentFeatureRuntime,
   rootRunId: string,
 ): Promise<number> {
-  const records = await feature.runRecordStore.list(500);
+  // Turn ordinals are durable lineage facts. Presentation history limits must
+  // not make an older root disappear and cause a later turn to reuse ordinal 1.
+  const records = await feature.runRecordStore.listByRootRun(rootRunId);
   const maxOrdinal = records.reduce((max, record) => {
     const sameChain = (record.run.rootRunId ?? record.run.runId) === rootRunId;
     if (!sameChain) {

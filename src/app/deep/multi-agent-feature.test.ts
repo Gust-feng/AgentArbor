@@ -25,6 +25,7 @@ import {
   type DeepChildPendingContinuation,
   type DeepChildPendingContinuationRetentionOptions,
 } from "./deep-child-continuations.js";
+import type { DeepRunRecordStore } from "./deep-run-record-store.js";
 import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import { createMultiAgentFeature } from "./multi-agent-feature.js";
 
@@ -84,6 +85,109 @@ test("MultiAgentFeature gives each operation a fresh bus and awaits lease releas
   assert.equal(buses.length, 2);
   assert.notEqual(buses[0], buses[1], "operations must not share an unbounded feature-lifetime bus");
 
+  await feature.dispose();
+});
+
+test("MultiAgentFeature stops admission synchronously and waits for in-flight command setup", async () => {
+  const operationStarted = deferred<void>();
+  const operationGate = deferred<void>();
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => {
+      operationStarted.resolve();
+      await operationGate.promise;
+      return {
+        capabilitySnapshot: capabilitySnapshot(),
+        informationAccess: informationAccess(),
+        confirmationPolicy: "full_access",
+      };
+    },
+    acquireRunResources: async ({ capabilitySnapshot }) => ({
+      intelligenceChannel: directAnswerChannel(),
+      toolCenter: emptyToolBroker(),
+      capabilitySnapshot,
+      release: async () => undefined,
+    }),
+  });
+  const inFlight = feature.intake({
+    aiMode: "fake",
+    message: "请直接回答正在进入关闭阶段的问题。",
+  });
+  await operationStarted.promise;
+
+  let disposeSettled = false;
+  const disposing = feature.dispose().finally(() => {
+    disposeSettled = true;
+  });
+  await assert.rejects(
+    feature.createConversation({
+      aiMode: "fake",
+      goal: "关闭后不得创建会话。",
+    }),
+    (error) => error instanceof Error
+      && "code" in error
+      && error.code === "feature_quiescing",
+  );
+  assert.equal(disposeSettled, false);
+
+  operationGate.resolve();
+  assert.equal((await inFlight).status, "answered");
+  await disposing;
+  assert.equal(disposeSettled, true);
+});
+
+test("MultiAgentFeature keeps immediate control working before a durable run lookup", async () => {
+  const modelStarted = deferred<void>();
+  const modelGate = deferred<void>();
+  const baseChannel = directRunChannel();
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: capabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "full_access",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => ({
+      intelligenceChannel: {
+        async request(request: ModelRequest, options?: Parameters<IntelligenceChannel["request"]>[1]) {
+          modelStarted.resolve();
+          await modelGate.promise;
+          return baseChannel.request(request, options);
+        },
+        validateResponse: (request: ModelRequest, response: ModelResponse) =>
+          baseChannel.validateResponse(request, response),
+      },
+      toolCenter: emptyToolBroker(),
+      capabilitySnapshot,
+      release: async () => undefined,
+    }),
+  });
+  const conversation = await feature.createConversation({
+    aiMode: "fake",
+    goal: "在初始 run 记录查询不可用时仍能立即停止。",
+  });
+  const started = await feature.startRun({
+    conversationId: conversation.conversationId,
+    aiMode: "fake",
+  });
+  await modelStarted.promise;
+
+  const internal = feature as typeof feature & {
+    readonly runRecordStore: DeepRunRecordStore;
+  };
+  const originalGet = internal.runRecordStore.get;
+  (internal.runRecordStore as { get: DeepRunRecordStore["get"] }).get = async () => undefined;
+  try {
+    const control = await feature.requestRunControl({
+      runId: started.runId,
+      action: "stop",
+      reason: "立即停止测试",
+    });
+    assert.equal(control.status, "requested");
+  } finally {
+    (internal.runRecordStore as { get: DeepRunRecordStore["get"] }).get = originalGet;
+  }
+
+  modelGate.resolve();
+  await feature.waitForIdle();
   await feature.dispose();
 });
 
@@ -293,7 +397,7 @@ test("MultiAgentFeature keeps a child confirmation continuation when resource ac
   await feature.dispose();
 });
 
-test("MultiAgentFeature lets only one concurrent child resume consume the continuation and awaits both leases", async () => {
+test("MultiAgentFeature serializes concurrent child resumes within one conversation", async () => {
   let acquisitionCount = 0;
   let resumeAcquisitions = 0;
   let resumedToolExecutions = 0;
@@ -350,25 +454,21 @@ test("MultiAgentFeature lets only one concurrent child resume consume the contin
     secondSettled = true;
   });
 
-  await waitUntil(() => resumeAcquisitions === 2);
+  await waitUntil(() => resumeAcquisitions === 1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(resumeAcquisitions, 1, "the second same-conversation resume must wait behind the first");
   acquireGate.resolve();
-  await waitUntil(() => resumeReleasesStarted === 2);
+  await waitUntil(() => resumeReleasesStarted === 1);
   assert.equal(firstSettled, false);
   assert.equal(secondSettled, false);
   assert.equal(resumedToolExecutions, 1);
 
   releaseGate.resolve();
-  const results = await Promise.allSettled([first, second]);
-  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
-  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
-  const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-  assert.equal(
-    rejected?.reason instanceof Error && "code" in rejected.reason
-      ? rejected.reason.code
-      : undefined,
-    "confirmation_continuation_lost",
-  );
-  assert.deepEqual([...releaseCallsByLease.values()].sort(), [1, 1]);
+  const resumed = await first;
+  const child = resumed.agentRunTree.childRuns.find((candidate) => candidate.childRunId === pending.childRunId);
+  assert.equal(child?.status, "completed");
+  await assert.rejects(second, continuationLostError);
+  assert.deepEqual([...releaseCallsByLease.values()].sort(), [1]);
   await feature.dispose();
 });
 
@@ -475,6 +575,63 @@ test("MultiAgentFeature reports continuation_lost after capacity eviction and co
   await feature.dispose();
 });
 
+test("MultiAgentFeature serializes conversation deletion behind a post-terminal child operation", async () => {
+  const resumeStarted = deferred<void>();
+  const resumeGate = deferred<void>();
+  let acquisitionCount = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      const channel = acquisitionCount === 1
+        ? pendingApprovalRunChannel()
+        : resumedChildChannel();
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? channel
+          : {
+              async request(request: ModelRequest, options?: Parameters<IntelligenceChannel["request"]>[1]) {
+                resumeStarted.resolve();
+                await resumeGate.promise;
+                return channel.request(request, options);
+              },
+              validateResponse: (request: ModelRequest, response: ModelResponse) =>
+                channel.validateResponse(request, response),
+            },
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed"),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+
+  const resume = feature.resumeChild({
+    ...pending,
+    decision: { decision: "approve_once" },
+  });
+  await resumeStarted.promise;
+
+  let deletionSettled = false;
+  const deletion = feature.deleteConversation(pending.conversationId).finally(() => {
+    deletionSettled = true;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(deletionSettled, false, "deletion must wait for the same-conversation child operation");
+
+  resumeGate.resolve();
+  await resume;
+  await deletion;
+  assert.equal(await feature.getRun(pending.runId), undefined, "late child save must not recreate a deleted run");
+  await feature.dispose();
+});
+
 test("MultiAgentFeature keeps Deep-owned tool output through terminal approval and reclaims it on conversation deletion", async () => {
   const outputStore = new InMemoryToolOutputStore({
     createRefToken: () => "deep-pending-output",
@@ -524,6 +681,121 @@ test("MultiAgentFeature keeps Deep-owned tool output through terminal approval a
     await outputStore.read(retainedRef!, { startChar: 0, maxChars: 30_000 }),
     undefined,
   );
+  await feature.dispose();
+});
+
+test("MultiAgentFeature conversation deletion cleans runs older than the recent-history window", async () => {
+  const releasedOwners: string[] = [];
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: capabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "full_access",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => ({
+      intelligenceChannel: directRunChannel(),
+      toolCenter: emptyToolBroker(),
+      capabilitySnapshot,
+      release: async () => undefined,
+    }),
+    releaseToolOutputOwner: (ownerId) => {
+      releasedOwners.push(ownerId);
+    },
+  });
+  const conversation = await feature.createConversation({
+    aiMode: "fake",
+    goal: "创建一个随后会落到最近五百条之外的运行。",
+  });
+  const started = await feature.startRun({
+    conversationId: conversation.conversationId,
+    aiMode: "fake",
+  });
+  await feature.waitForIdle();
+  const oldestRecord = await feature.getRun(started.runId);
+  assert.ok(oldestRecord);
+
+  const internal = feature as typeof feature & {
+    readonly runRecordStore: DeepRunRecordStore;
+  };
+  for (let index = 0; index < 500; index += 1) {
+    const runId = `newer-deep-run-${index}`;
+    const updatedAt = `9999-12-31T23:59:${String(index % 60).padStart(2, "0")}.000Z`;
+    await internal.runRecordStore.upsert({
+      ...oldestRecord,
+      run: {
+        ...oldestRecord.run,
+        runId,
+        rootRunId: runId,
+        turnOrdinal: index + 2,
+        updatedAt,
+      },
+      updatedAt,
+    });
+  }
+
+  await feature.deleteConversation(conversation.conversationId);
+
+  assert.equal(await internal.runRecordStore.get(started.runId), undefined);
+  assert.equal(releasedOwners.includes(`deep-run:${started.runId}`), true);
+  assert.equal(releasedOwners.length, 501);
+  await feature.dispose();
+});
+
+test("MultiAgentFeature derives follow-up ordinal when the root is older than 500 recent runs", async () => {
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: capabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "full_access",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => ({
+      intelligenceChannel: directRunChannel(),
+      toolCenter: emptyToolBroker(),
+      capabilitySnapshot,
+      release: async () => undefined,
+    }),
+  });
+  const conversation = await feature.createConversation({
+    aiMode: "fake",
+    goal: "在完整任务链上继续下一轮。",
+  });
+  const started = await feature.startRun({
+    conversationId: conversation.conversationId,
+    aiMode: "fake",
+  });
+  await feature.waitForIdle();
+  const rootRecord = await feature.getRun(started.runId);
+  assert.ok(rootRecord);
+
+  const internal = feature as typeof feature & {
+    readonly runRecordStore: DeepRunRecordStore;
+  };
+  for (let index = 0; index < 500; index += 1) {
+    const runId = `unrelated-recent-run-${index}`;
+    const updatedAt = `9999-12-31T23:59:${String(index % 60).padStart(2, "0")}.000Z`;
+    await internal.runRecordStore.upsert({
+      ...rootRecord,
+      run: {
+        ...rootRecord.run,
+        runId,
+        rootRunId: runId,
+        turnOrdinal: index + 1,
+        updatedAt,
+      },
+      updatedAt,
+    });
+  }
+
+  const followUp = await feature.followUp({
+    runId: started.runId,
+    aiMode: "fake",
+    message: "继续完成第二轮。",
+  });
+
+  assert.equal(followUp.parentRunId, started.runId);
+  assert.equal(followUp.rootRunId, started.runId);
+  assert.equal(followUp.turnOrdinal, 2);
+  await feature.waitForIdle();
   await feature.dispose();
 });
 

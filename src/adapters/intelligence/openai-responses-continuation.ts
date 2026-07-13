@@ -1,7 +1,10 @@
-import type { ModelMessage } from "../../domain/intelligence/index.js";
+import {
+  OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION,
+  type ModelMessage,
+} from "../../domain/intelligence/index.js";
 import { isPlainRecord } from "./provider-value-utils.js";
 
-export const OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION = "openai_responses_output_items";
+export { OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION };
 
 export function openAIResponsesContinuationItems(
   message: Pick<ModelMessage, "protocolExtensions">,

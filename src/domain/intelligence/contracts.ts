@@ -63,7 +63,9 @@ export type ModelMessage = {
   /**
    * Opaque protocol continuation fields returned by an adapter and replayed only
    * to that adapter during a tool-use loop. These fields are never projected to
-   * EventLog, panel read models, Plan material, or user-visible output.
+   * EventLog, panel read models, Plan material, or user-visible output. Durable
+   * feature state may retain only the bounded whitelist produced by the model
+   * protocol persistence contract.
    */
   readonly protocolExtensions?: Readonly<Record<string, unknown>>;
 };

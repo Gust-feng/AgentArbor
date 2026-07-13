@@ -1,6 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ModelMessage } from "../../domain/intelligence/index.js";
+import {
+  persistedModelProtocolExtensions,
+  type ModelMessage,
+} from "../../domain/intelligence/index.js";
 import { nowIso } from "../../kernel/id.js";
 
 export const DEEP_CHILD_LOOP_CONTEXT_REF_PREFIX = "child_loop_context";
@@ -206,18 +209,22 @@ function isNodeError(error: unknown, code: string): boolean {
 }
 
 function cloneMessages(messages: readonly ModelMessage[]): readonly ModelMessage[] {
-  return messages.map((message) => ({
-    role: message.role,
-    content: message.content,
-    ...(message.ref === undefined ? {} : { ref: message.ref }),
-    ...(message.toolCallId === undefined ? {} : { toolCallId: message.toolCallId }),
-    ...(message.toolName === undefined ? {} : { toolName: message.toolName }),
-    toolCalls: message.toolCalls?.map((toolCall) => ({
-      callId: toolCall.callId,
-      toolName: toolCall.toolName,
-      input: globalThis.structuredClone(toolCall.input),
-    })),
-  }));
+  return messages.map((message) => {
+    const protocolExtensions = persistedModelProtocolExtensions(message.protocolExtensions);
+    return {
+      role: message.role,
+      content: message.content,
+      ...(message.ref === undefined ? {} : { ref: message.ref }),
+      ...(message.toolCallId === undefined ? {} : { toolCallId: message.toolCallId }),
+      ...(message.toolName === undefined ? {} : { toolName: message.toolName }),
+      toolCalls: message.toolCalls?.map((toolCall) => ({
+        callId: toolCall.callId,
+        toolName: toolCall.toolName,
+        input: globalThis.structuredClone(toolCall.input),
+      })),
+      ...(protocolExtensions === undefined ? {} : { protocolExtensions }),
+    };
+  });
 }
 
 function clone<T>(value: T): T {

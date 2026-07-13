@@ -14,7 +14,10 @@ import {
 } from "./tool-events.js";
 import type { ToolUseLoopOptions } from "./tool-use-loop-contracts.js";
 import { cloneToolCallRequest, cloneToolResult, cloneToolResults } from "./tool-use-loop-cloning.js";
-import { cancelledToolResult } from "./tool-use-loop-results.js";
+import {
+  cancelledAdditionalParallelApprovalToolResult,
+  cancelledToolResult,
+} from "./tool-use-loop-results.js";
 
 export type ToolUseLoopBatchExecutionResult = {
   readonly results: readonly ToolCallResult[];
@@ -62,14 +65,55 @@ export async function executeToolCalls(input: {
 }): Promise<ToolUseLoopBatchExecutionResult> {
   const context = createToolExecutionContext(input.options);
   if (canExecuteReadOnlyBatchInParallel(input.requests, input.toolDefinitions)) {
-    input.requests.forEach((request) => input.options.publishToolEvent?.(createToolRequestedMessage({ request, context })));
+    // `tool.requested` means the broker is about to receive this exact call.
+    // Publish every request before starting any promise so event order never
+    // makes a completed preflight look like work that had not begun.
+    input.requests.forEach((request) => publishToolRequestEvent(input.options, request, context));
     const results = await Promise.all(
       input.requests.map((request) => executeToolCallSafely(input.options, request, context))
     );
-    results.forEach((result) => {
-      publishToolResultEvent(input.options, result, context);
+    const pendingIndex = results.findIndex((result) => result.status === "approval_required");
+    if (pendingIndex < 0) {
+      results.forEach((result) => publishToolResultEvent(input.options, result, context));
+      return { results };
+    }
+
+    // A read-only definition can still discover a dynamic confirmation gate in
+    // its executor. Only the first such call becomes the resumable pause. Every
+    // additional approval preflight is closed as a factual cancellation with
+    // its partial output intact. This avoids silently replaying a call that the
+    // broker has already observed while keeping one unambiguous confirmation.
+    const pendingResult = results[pendingIndex]!;
+    const activeConfirmationId = pendingResult.confirmationRequest?.confirmationId
+      ?? `confirmation-${pendingResult.callId}`;
+    const settledResults = results.map((result, index) => {
+      if (index === pendingIndex || result.status !== "approval_required") {
+        return result;
+      }
+      return cancelledAdditionalParallelApprovalToolResult(result, activeConfirmationId);
     });
-    return { results };
+    settledResults.forEach((result) => publishToolResultEvent(input.options, result, context));
+    const completedToolResults: ToolCallResult[] = [];
+    settledResults.forEach((result, index) => {
+      if (index !== pendingIndex) {
+        completedToolResults.push(result);
+      }
+    });
+    return {
+      results: settledResults,
+      pendingApproval: {
+        confirmationId: activeConfirmationId,
+        pendingToolCall: cloneToolCallRequest(input.requests[pendingIndex]!),
+        pendingToolResult: cloneToolResult(pendingResult),
+        confirmationRequest:
+          pendingResult.confirmationRequest === undefined
+            ? undefined
+            : globalThis.structuredClone(pendingResult.confirmationRequest),
+        remainingToolCallsAfterApproval: [],
+        completedToolResults: cloneToolResults(completedToolResults),
+        requestsForAssistantMessage: input.requests.map(cloneToolCallRequest),
+      },
+    };
   }
   const results: ToolCallResult[] = [];
   for (let index = 0; index < input.requests.length; index += 1) {

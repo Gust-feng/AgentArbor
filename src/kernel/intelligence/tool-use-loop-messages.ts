@@ -82,6 +82,8 @@ const MAX_TRANSPORT_CONTINUATION_ITEM_CHARS = 16_000;
 const MAX_TRANSPORT_CONTINUATIONS_CHARS = 64_000;
 const MAX_TRANSPORT_CONTINUATION_REF_CHARS = 4_096;
 const MAX_TRANSPORT_CONTINUATION_NOTE_CHARS = 2_000;
+const MAX_TRANSPORT_STAGE_PREVIEWS = 64;
+const MAX_TRANSPORT_STAGE_PREVIEW_CHARS = 32_000;
 
 type ToolMessagePayload = {
   readonly status: ToolCallResult["status"];
@@ -173,19 +175,62 @@ function transportTruncatedToolPayload(
         truncated: true,
         reason: "tool_message_transport_budget_exceeded",
         ...continuationFacts,
-        preview: compactJsonPreview({
-          body: canonicalModelBody(payload.body),
-          preApprovals: payload.preApprovals,
-        }, 4_000),
+        preview: transportStagePreviews(payload),
       },
     },
     error: contractError ?? payload.error,
   };
 }
 
+function transportStagePreviews(payload: ToolMessagePayload): ToolFactValue {
+  const preApprovalStages = (payload.preApprovals ?? []).map((preApproval, index) => ({
+    phase: "pre_approval" as const,
+    index,
+    status: preApproval.status,
+    confirmationId: preApproval.confirmation?.confirmationId,
+    body: canonicalModelBody(preApproval.body),
+    error: preApproval.error,
+  }));
+  const stages = [
+    ...preApprovalStages,
+    {
+      phase: "resolved" as const,
+      index: preApprovalStages.length,
+      status: payload.status,
+      confirmationId: undefined,
+      body: canonicalModelBody(payload.body),
+      error: payload.error,
+    },
+  ];
+  const selectedStages = stages.length <= MAX_TRANSPORT_STAGE_PREVIEWS
+    ? stages
+    : [
+        ...stages.slice(0, MAX_TRANSPORT_STAGE_PREVIEWS / 2),
+        ...stages.slice(-(MAX_TRANSPORT_STAGE_PREVIEWS / 2)),
+      ];
+  const perStageChars = Math.max(
+    256,
+    Math.floor(MAX_TRANSPORT_STAGE_PREVIEW_CHARS / selectedStages.length),
+  );
+  return {
+    totalStages: stages.length,
+    omittedMiddleStages: stages.length - selectedStages.length,
+    stages: selectedStages.map((stage) => ({
+      phase: stage.phase,
+      index: stage.index,
+      status: stage.status,
+      ...(stage.confirmationId === undefined ? {} : { confirmationId: stage.confirmationId }),
+      content: compactJsonPreview({ body: stage.body, error: stage.error }, perStageChars),
+    })),
+  };
+}
+
 function modelOutputContinuationCandidates(value: unknown): readonly ToolContinuation[] {
   const record = asRecord(value);
-  return continuationsFromRecord(record);
+  return uniqueContinuations([
+    ...continuationsFromRecord(record),
+    ...continuationsFromRecord(asRecord(record.partialOutput)),
+  ]);
 }
 
 function continuationsFromRecord(record: Readonly<Record<string, unknown>>): readonly ToolContinuation[] {

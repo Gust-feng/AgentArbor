@@ -34,6 +34,9 @@ import {
   abortedLoopResult,
   approvalRequiredResultFromPending,
   approvalStillRequiredModelResponse,
+  cancelledApprovalAfterAbortToolResult,
+  cancelledPendingApprovalToolResult,
+  cancelledToolResult,
   contextOverflowLoopResult,
   confirmationDecisionSkippedToolResult,
   confirmationDecisionToolResult,
@@ -72,6 +75,7 @@ export async function resumeToolUseLoopFromApproval(
   initialRequest: ModelRequest,
   pendingApproval: ToolUseLoopPendingApproval
 ): Promise<ToolUseLoopResult> {
+  assertPendingApprovalContract(pendingApproval);
   return resumeApprovalCore(options, initialRequest, pendingApproval);
 }
 
@@ -81,18 +85,12 @@ export async function resumeToolUseLoopFromConfirmationDecision(
   pendingApproval: ToolUseLoopPendingApproval,
   decision: ToolUseLoopConfirmationDecision
 ): Promise<ToolUseLoopResult> {
-  if (decision.confirmationId !== pendingApproval.confirmationId) {
-    return resumeApprovalCore(options, initialRequest, pendingApproval);
-  }
+  assertPendingApprovalContract(pendingApproval);
   if (options.abortSignal?.aborted === true) {
-    return abortedLoopResult(
-      initialRequest,
-      pendingApproval.toolCallsBeforeApproval,
-      pendingApproval.modelRounds,
-      pendingApproval.rounds,
-      [],
-      cloneMessages(pendingApproval.messagesBeforeToolCall),
-    );
+    return abortPendingApprovalLoopResult(options, initialRequest, pendingApproval);
+  }
+  if (decision.confirmationId !== pendingApproval.confirmationId) {
+    return unresolvedPendingApprovalLoopResult(initialRequest, pendingApproval);
   }
 
   const decisionResult = confirmationDecisionToolResult(pendingApproval.pendingToolResult, decision);
@@ -131,30 +129,11 @@ async function resumeApprovalCore(
   initialRequest: ModelRequest,
   pendingApproval: ToolUseLoopPendingApproval
 ): Promise<ToolUseLoopResult> {
-  if (!options.approvedConfirmationIds?.includes(pendingApproval.confirmationId)) {
-    return {
-      finalOutput: approvalStillRequiredModelResponse(initialRequest, pendingApproval),
-      toolCalls: [
-        ...cloneToolResults(pendingApproval.toolCallsBeforeApproval),
-        approvalRequiredResultFromPending(pendingApproval),
-      ],
-      modelResponses: [],
-      contextMessages: cloneMessages(pendingApproval.messagesBeforeToolCall),
-      modelRounds: pendingApproval.modelRounds,
-      rounds: pendingApproval.rounds,
-      stoppedReason: "approval_required",
-      pendingApproval: clonePendingApproval(pendingApproval),
-    };
-  }
   if (options.abortSignal?.aborted === true) {
-    return abortedLoopResult(
-      initialRequest,
-      pendingApproval.toolCallsBeforeApproval,
-      pendingApproval.modelRounds,
-      pendingApproval.rounds,
-      [],
-      cloneMessages(pendingApproval.messagesBeforeToolCall),
-    );
+    return abortPendingApprovalLoopResult(options, initialRequest, pendingApproval);
+  }
+  if (!options.approvedConfirmationIds?.includes(pendingApproval.confirmationId)) {
+    return unresolvedPendingApprovalLoopResult(initialRequest, pendingApproval);
   }
 
   const context = createToolExecutionContext(options);
@@ -170,6 +149,15 @@ async function resumeApprovalCore(
     cloneToolResult(pendingApproval.pendingToolResult),
   ];
   let toolCalls = [...pendingApproval.toolCallsBeforeApproval, approvedResult];
+  if (approvedResult.status === "cancelled" || Boolean(options.abortSignal?.aborted)) {
+    return abortAfterApprovedToolResult(
+      options,
+      initialRequest,
+      pendingApproval,
+      approvedResult,
+      resolvedPreApprovalResults,
+    );
+  }
   if (approvedResult.status === "approval_required") {
     const nextPendingApproval: ToolUseLoopPendingApproval = {
       ...clonePendingApproval(pendingApproval),
@@ -191,16 +179,6 @@ async function resumeApprovalCore(
       stoppedReason: "approval_required",
       pendingApproval: nextPendingApproval,
     };
-  }
-  if (approvedResult.status === "cancelled" || Boolean(options.abortSignal?.aborted)) {
-    return abortedLoopResult(
-      initialRequest,
-      toolCalls,
-      pendingApproval.modelRounds,
-      pendingApproval.rounds,
-      [],
-      cloneMessages(pendingApproval.messagesBeforeToolCall),
-    );
   }
   let completedToolResults = [
     ...cloneToolResults(pendingApproval.completedToolResults),
@@ -240,6 +218,9 @@ async function resumeApprovalCore(
         rounds: pendingApproval.rounds,
         requestId: createId("model-request"),
       };
+      if (Boolean(options.abortSignal?.aborted)) {
+        return abortPendingApprovalLoopResult(options, initialRequest, nextPendingApproval);
+      }
       return {
         finalOutput: approvalStillRequiredModelResponse(initialRequest, nextPendingApproval),
         toolCalls,
@@ -271,6 +252,199 @@ async function resumeApprovalCore(
     rounds,
     requestId: pendingApproval.requestId,
   });
+}
+
+function unresolvedPendingApprovalLoopResult(
+  initialRequest: ModelRequest,
+  pendingApproval: ToolUseLoopPendingApproval,
+): ToolUseLoopResult {
+  return {
+    finalOutput: approvalStillRequiredModelResponse(initialRequest, pendingApproval),
+    toolCalls: [
+      ...cloneToolResults(pendingApproval.toolCallsBeforeApproval),
+      approvalRequiredResultFromPending(pendingApproval),
+    ],
+    modelResponses: [],
+    contextMessages: cloneMessages(pendingApproval.messagesBeforeToolCall),
+    modelRounds: pendingApproval.modelRounds,
+    rounds: pendingApproval.rounds,
+    stoppedReason: "approval_required",
+    pendingApproval: clonePendingApproval(pendingApproval),
+  };
+}
+
+function abortPendingApprovalLoopResult(
+  options: ToolUseLoopOptions,
+  initialRequest: ModelRequest,
+  pendingApproval: ToolUseLoopPendingApproval,
+): ToolUseLoopResult {
+  const context = createToolExecutionContext(options);
+  const pendingCancellation = cancelledPendingApprovalToolResult(pendingApproval);
+  publishToolResultEvent(options, pendingCancellation, context);
+  const skippedResults = pendingApproval.remainingToolCallsAfterApproval.map((request) => {
+    const result = cancelledToolResult(request);
+    publishToolRequestEvent(options, request, context);
+    publishToolResultEvent(options, result, context);
+    return result;
+  });
+  const roundResults = [
+    ...cloneToolResults(pendingApproval.completedToolResults),
+    pendingCancellation,
+    ...skippedResults,
+  ];
+  return abortedLoopResult(
+    initialRequest,
+    [
+      ...cloneToolResults(pendingApproval.toolCallsBeforeApproval),
+      pendingCancellation,
+      ...skippedResults,
+    ],
+    pendingApproval.modelRounds,
+    pendingApproval.rounds,
+    [],
+    [
+      ...cloneMessages(pendingApproval.messagesBeforeToolCall),
+      cloneModelMessage(pendingApproval.assistantMessage),
+      ...toolResultMessagesWithResolvedApprovals(
+        roundResults,
+        pendingApproval.resolvedPreApprovalResults,
+      ),
+    ],
+  );
+}
+
+function abortAfterApprovedToolResult(
+  options: ToolUseLoopOptions,
+  initialRequest: ModelRequest,
+  pendingApproval: ToolUseLoopPendingApproval,
+  approvedResult: ToolCallResult,
+  resolvedPreApprovalResults: readonly ToolCallResult[],
+): ToolUseLoopResult {
+  const context = createToolExecutionContext(options);
+  const settledApprovedResult = approvedResult.status === "approval_required"
+    ? cancelledApprovalAfterAbortToolResult(approvedResult)
+    : cloneToolResult(approvedResult);
+  if (approvedResult.status === "approval_required") {
+    // The broker already published the next approval request. Close that
+    // lifecycle explicitly when abort wins the race so no confirmation remains
+    // observable after the run has entered its cancelled terminal state.
+    publishToolResultEvent(options, settledApprovedResult, context);
+  }
+  const skippedResults = pendingApproval.remainingToolCallsAfterApproval.map((request) => {
+    const result = cancelledToolResult(request);
+    publishToolRequestEvent(options, request, context);
+    publishToolResultEvent(options, result, context);
+    return result;
+  });
+  const roundResults = [
+    ...cloneToolResults(pendingApproval.completedToolResults),
+    settledApprovedResult,
+    ...skippedResults,
+  ];
+  return abortedLoopResult(
+    initialRequest,
+    [
+      ...cloneToolResults(pendingApproval.toolCallsBeforeApproval),
+      settledApprovedResult,
+      ...skippedResults,
+    ],
+    pendingApproval.modelRounds,
+    pendingApproval.rounds,
+    [],
+    [
+      ...cloneMessages(pendingApproval.messagesBeforeToolCall),
+      cloneModelMessage(pendingApproval.assistantMessage),
+      ...toolResultMessagesWithResolvedApprovals(roundResults, resolvedPreApprovalResults),
+    ],
+  );
+}
+
+function assertPendingApprovalContract(pendingApproval: ToolUseLoopPendingApproval): void {
+  const pendingResult = pendingApproval.pendingToolResult;
+  const resultConfirmationId = pendingResult.confirmationRequest?.confirmationId;
+  const mirroredConfirmationId = pendingApproval.confirmationRequest?.confirmationId;
+  // The mirrored request is what downstream surfaces may show to the user.
+  // Bind every approval fact to the broker result before executing the call.
+  const confirmationFactsMatch = contractFactsEqual(
+    pendingResult.confirmationRequest,
+    pendingApproval.confirmationRequest,
+  );
+  const requestsThatMayExecute = [
+    pendingApproval.pendingToolCall,
+    ...pendingApproval.remainingToolCallsAfterApproval,
+  ];
+  const assistantToolCalls = pendingApproval.assistantMessage.role === "assistant"
+    ? pendingApproval.assistantMessage.toolCalls ?? []
+    : [];
+  const assistantCallIds = new Set<string>();
+  const assistantPairingIsValid = assistantToolCalls.every((assistantCall) => {
+    if (assistantCallIds.has(assistantCall.callId)) {
+      return false;
+    }
+    assistantCallIds.add(assistantCall.callId);
+    return true;
+  }) && requestsThatMayExecute.every((request, index, requests) => {
+    if (requests.findIndex((candidate) => candidate.callId === request.callId) !== index) {
+      return false;
+    }
+    const pairedAssistantCalls = assistantToolCalls.filter((assistantCall) =>
+      assistantCall.callId === request.callId
+    );
+    return pairedAssistantCalls.length === 1 && toolCallRequestsEqual(pairedAssistantCalls[0]!, request);
+  });
+  if (
+    pendingResult.status !== "approval_required" ||
+    pendingResult.callId !== pendingApproval.pendingToolCall.callId ||
+    pendingResult.toolName !== pendingApproval.pendingToolCall.toolName ||
+    !contractFactsEqual(pendingResult.input, pendingApproval.pendingToolCall.input) ||
+    !assistantPairingIsValid ||
+    !confirmationFactsMatch ||
+    (resultConfirmationId !== undefined && resultConfirmationId !== pendingApproval.confirmationId) ||
+    (mirroredConfirmationId !== undefined && mirroredConfirmationId !== pendingApproval.confirmationId)
+  ) {
+    throw new Error("Pending tool approval facts are inconsistent and cannot be resumed safely.");
+  }
+}
+
+function toolCallRequestsEqual(left: {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly input: ToolCallResult["input"];
+}, right: {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly input: ToolCallResult["input"];
+}): boolean {
+  return left.callId === right.callId &&
+    left.toolName === right.toolName &&
+    contractFactsEqual(left.input, right.input);
+}
+
+function contractFactsEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (
+    left === undefined || right === undefined ||
+    left === null || right === null ||
+    typeof left !== "object" || typeof right !== "object" ||
+    Array.isArray(left) !== Array.isArray(right)
+  ) {
+    return false;
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((item, index) =>
+      contractFactsEqual(item, right[index])
+    );
+  }
+  const leftRecord = left as Readonly<Record<string, unknown>>;
+  const rightRecord = right as Readonly<Record<string, unknown>>;
+  const leftKeys = Object.keys(leftRecord);
+  const rightKeys = Object.keys(rightRecord);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) =>
+    Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+    contractFactsEqual(leftRecord[key], rightRecord[key])
+  );
 }
 
 async function continueToolUseLoopAfterToolResults(input: {

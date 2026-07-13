@@ -61,6 +61,43 @@ export function cancelledToolResult(request: ToolCallRequest): ToolCallResult {
   };
 }
 
+export function cancelledPendingApprovalToolResult(
+  pendingApproval: ToolUseLoopPendingApproval,
+): ToolCallResult {
+  const pendingResult = cloneToolResult(pendingApproval.pendingToolResult);
+  return cancelledApprovalResult(pendingResult, {
+    message: "Agent turn was cancelled while this tool was waiting for approval.",
+    code: "approval_wait_cancelled",
+    confirmationId: pendingApproval.confirmationId,
+  });
+}
+
+export function cancelledApprovalAfterAbortToolResult(
+  approvalResult: ToolCallResult,
+): ToolCallResult {
+  const confirmationId = approvalResult.confirmationRequest?.confirmationId
+    ?? `confirmation-${approvalResult.callId}`;
+  return cancelledApprovalResult(cloneToolResult(approvalResult), {
+    message: "Agent turn was cancelled after the tool requested another approval.",
+    code: "approval_resumption_cancelled",
+    confirmationId,
+  });
+}
+
+export function cancelledAdditionalParallelApprovalToolResult(
+  approvalResult: ToolCallResult,
+  activeConfirmationId: string,
+): ToolCallResult {
+  const confirmationId = approvalResult.confirmationRequest?.confirmationId
+    ?? `confirmation-${approvalResult.callId}`;
+  return cancelledApprovalResult(cloneToolResult(approvalResult), {
+    message: "This read-only call also requested approval during the same parallel preflight. It was not executed and will not be resumed automatically.",
+    code: "parallel_approval_not_selected",
+    confirmationId,
+    activeConfirmationId,
+  });
+}
+
 export function abortedLoopResult(
   initialRequest: ModelRequest,
   toolCalls: readonly ToolCallResult[],
@@ -249,13 +286,43 @@ function confirmationDecisionSummary(decision: ToolUseLoopConfirmationDecision):
   if (decision.decision === "deny") {
     return "用户拒绝了本次工具执行。不要执行该工具；请基于当前上下文判断是否改用其他方式、请求更多信息或直接回答。";
   }
-  const guidance = decision.guidance === undefined ? undefined : compactConfirmationGuidance(decision.guidance);
+  const guidance = decision.guidance?.trim();
   return guidance === undefined || guidance.length === 0
     ? "用户没有批准本次工具执行，并补充了指导。不要执行该工具；请基于当前上下文继续判断下一步。"
     : `用户没有批准本次工具执行，并补充了指导：${guidance}。不要执行该工具；请基于该指导继续判断下一步。`;
 }
 
-function compactConfirmationGuidance(value: string): string {
-  const text = value.replace(/\s+/g, " ").trim();
-  return text.length <= 1_000 ? text : `${text.slice(0, 999)}…`;
+function cancelledApprovalResult(
+  approvalResult: ToolCallResult,
+  cancellation: {
+    readonly message: string;
+    readonly code: string;
+    readonly confirmationId: string;
+    readonly activeConfirmationId?: string;
+  },
+): ToolCallResult {
+  return {
+    callId: approvalResult.callId,
+    toolName: approvalResult.toolName,
+    input: approvalResult.input,
+    output: approvalResult.output,
+    status: "cancelled",
+    error: cancellation.message,
+    errorFacts: {
+      code: cancellation.code,
+      confirmationId: cancellation.confirmationId,
+      ...(cancellation.activeConfirmationId === undefined
+        ? {}
+        : { activeConfirmationId: cancellation.activeConfirmationId }),
+      ...(approvalResult.error === undefined ? {} : { preApprovalError: approvalResult.error }),
+      ...(approvalResult.errorDomain === undefined
+        ? {}
+        : { preApprovalErrorDomain: approvalResult.errorDomain }),
+      ...(approvalResult.errorFacts === undefined
+        ? {}
+        : { preApprovalErrorFacts: approvalResult.errorFacts }),
+    },
+    durationMs: approvalResult.durationMs,
+    confirmationRequest: approvalResult.confirmationRequest,
+  };
 }

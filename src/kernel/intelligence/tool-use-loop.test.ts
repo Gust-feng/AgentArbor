@@ -22,9 +22,13 @@ import {
   executeToolUseLoop,
   resumeToolUseLoopFromApproval,
   resumeToolUseLoopFromConfirmationDecision,
+  type ToolUseLoopOptions,
 } from "./tool-use-loop.js";
 import { executeToolCalls } from "./tool-use-loop-execution.js";
-import { toolResultMessage } from "./tool-use-loop-messages.js";
+import {
+  toolResultMessage,
+  toolResultMessagesWithResolvedApprovals,
+} from "./tool-use-loop-messages.js";
 
 test("executeToolUseLoop executes one tool round and returns final model output", async () => {
   const eventLog = new InMemoryEventLog();
@@ -1421,6 +1425,171 @@ test("executeToolUseLoop executes explicitly read-only tool calls in parallel", 
   assert.equal(maxActive, 2);
 });
 
+test("executeToolUseLoop pauses when a parallel read-only executor dynamically requires approval", async () => {
+  const channel = new SequenceIntelligenceChannel([{
+    ...completedResponse("model-request-test", undefined),
+    toolCalls: [
+      { callId: "call-read-ready", toolName: "read_ready", input: {} },
+      { callId: "call-read-gated", toolName: "read_gated", input: {} },
+    ],
+    finishReason: "tool_call",
+  }, completedResponse("model-request-final", { summary: "must not run before approval" })]);
+  const broker: ToolExecutionBroker = {
+    list: () => [
+      testToolDefinition("read_ready", "read-only"),
+      testToolDefinition("read_gated", "read-only"),
+    ],
+    has: (name) => name === "read_ready" || name === "read_gated",
+    execute: async (request) => request.toolName === "read_gated"
+      ? {
+          callId: request.callId,
+          toolName: request.toolName,
+          input: request.input,
+          output: { partial: "approval discovered during read preflight" },
+          status: "approval_required",
+          durationMs: 1,
+          confirmationRequest: {
+            confirmationId: "confirmation-read-gated",
+            runId: request.callId,
+            title: "Confirm gated read",
+            actionSummary: "Confirm access before continuing the read.",
+            affectedResources: ["fixture://gated-read"],
+            riskLevel: "medium",
+            requestedAt: nowIso(),
+            sourceRefs: [`tool:${request.callId}`],
+          },
+        }
+      : {
+          callId: request.callId,
+          toolName: request.toolName,
+          input: request.input,
+          output: { ready: true },
+          status: "completed",
+          durationMs: 1,
+        },
+  };
+
+  const result = await executeToolUseLoop({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["read_ready", "read_gated"],
+  }, createValidModelRequest());
+
+  assert.equal(result.stoppedReason, "approval_required");
+  assert.equal(result.pendingApproval?.confirmationId, "confirmation-read-gated");
+  assert.equal(result.pendingApproval?.completedToolResults[0]?.toolName, "read_ready");
+  assert.deepEqual(result.pendingApproval?.pendingToolResult.output, {
+    partial: "approval discovered during read preflight",
+  });
+  assert.equal(channel.requests.length, 1);
+});
+
+test("parallel read-only preflights publish requests first and never replay additional dynamic approvals", async () => {
+  const eventLog = new InMemoryEventLog();
+  const executionCounts = new Map<string, number>();
+  const channel = new SequenceIntelligenceChannel([{
+    ...completedResponse("model-request-test", undefined),
+    toolCalls: [
+      { callId: "call-gated-first", toolName: "read_gated_first", input: { target: "first" } },
+      { callId: "call-gated-second", toolName: "read_gated_second", input: { target: "second" } },
+    ],
+    finishReason: "tool_call",
+  }, textResponse("model-request-final", "Handled the dynamic approval facts once.")]);
+  const broker: ToolExecutionBroker = {
+    list: () => [
+      testToolDefinition("read_gated_first", "read-only"),
+      testToolDefinition("read_gated_second", "read-only"),
+    ],
+    has: (name) => name === "read_gated_first" || name === "read_gated_second",
+    execute: async (request, _context, permission) => {
+      const requestedCallIds = eventLog.list()
+        .filter((entry) => entry.type === "tool.requested")
+        .map((entry) => (entry.message.payload as { readonly callId?: string }).callId);
+      assert.equal(requestedCallIds.includes(request.callId), true);
+      executionCounts.set(request.callId, (executionCounts.get(request.callId) ?? 0) + 1);
+      const confirmationId = `confirmation-${request.callId}`;
+      if (permission.approvedConfirmationIds?.includes(confirmationId) === true) {
+        return {
+          callId: request.callId,
+          toolName: request.toolName,
+          input: request.input,
+          output: { completedAfterApproval: request.callId },
+          status: "completed",
+          durationMs: 1,
+        };
+      }
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: { partialFact: `preflight-${request.callId}` },
+        status: "approval_required",
+        durationMs: 1,
+        confirmationRequest: {
+          confirmationId,
+          runId: request.callId,
+          title: `Confirm ${request.toolName}`,
+          actionSummary: `Confirm ${request.toolName}.`,
+          affectedResources: [`fixture://${request.callId}`],
+          riskLevel: "medium",
+          requestedAt: nowIso(),
+          sourceRefs: [`tool:${request.callId}`],
+        },
+      };
+    },
+  };
+  const request = createValidModelRequest();
+  const baseOptions = {
+    intelligenceChannel: channel,
+    toolCenter: broker,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["read_gated_first", "read_gated_second"],
+    publishToolEvent: (message: Parameters<NonNullable<ToolUseLoopOptions["publishToolEvent"]>>[0]) =>
+      eventLog.append(message),
+  };
+
+  const paused = await executeToolUseLoop(baseOptions, request);
+
+  assert.equal(paused.stoppedReason, "approval_required");
+  assert.equal(paused.pendingApproval?.confirmationId, "confirmation-call-gated-first");
+  assert.deepEqual([...executionCounts.entries()], [
+    ["call-gated-first", 1],
+    ["call-gated-second", 1],
+  ]);
+  const secondFact = paused.pendingApproval?.completedToolResults.find((result) =>
+    result.callId === "call-gated-second"
+  );
+  assert.equal(secondFact?.status, "cancelled");
+  assert.deepEqual(secondFact?.output, { partialFact: "preflight-call-gated-second" });
+  assert.equal(secondFact?.errorFacts?.code, "parallel_approval_not_selected");
+  assert.equal(secondFact?.errorFacts?.confirmationId, "confirmation-call-gated-second");
+  assert.deepEqual(eventLog.types(), [
+    "tool.requested",
+    "tool.requested",
+    "user_approval.requested",
+    "tool.cancelled",
+  ]);
+
+  const resumed = await resumeToolUseLoopFromApproval({
+    ...baseOptions,
+    approvedConfirmationIds: ["confirmation-call-gated-first"],
+  }, request, paused.pendingApproval!);
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.deepEqual([...executionCounts.entries()], [
+    ["call-gated-first", 2],
+    ["call-gated-second", 1],
+  ]);
+  const resumedRequest = JSON.stringify(channel.requests[1]?.sanitizedMessages);
+  assert.equal(resumedRequest.includes("preflight-call-gated-second"), true);
+  assert.equal(resumedRequest.includes("parallel_approval_not_selected"), true);
+});
+
 test("executeToolUseLoop does not send unauthorized read-only batch calls to the broker", async () => {
   const channel = new SequenceIntelligenceChannel([
     {
@@ -1692,6 +1861,332 @@ test("approval pauses preserve partial sub-agent output across clones and unreso
     "The sub-agent completed its analysis before requesting confirmation."
   );
   assert.equal(resumedToolMessage?.attachments?.[0]?.attachmentId, "partial-image");
+});
+
+test("approval tool messages keep nested partial-output continuation when transport truncates", () => {
+  const message = toolResultMessage({
+    callId: "call-large-approval",
+    toolName: "call_sub_agent",
+    input: {},
+    output: {
+      evidence: "x".repeat(230_000),
+      continuation: {
+        ref: "sub-agent-output:large-approval",
+        nextInput: { sub_run_id: "large-approval", start_char: 0, max_chars: 30_000 },
+      },
+    },
+    status: "approval_required",
+    durationMs: 1,
+    confirmationRequest: {
+      confirmationId: "confirmation-large-approval",
+      runId: "run-large-approval",
+      title: "Continue large approval",
+      actionSummary: "Continue after inspecting the retained partial result.",
+      affectedResources: [],
+      riskLevel: "medium",
+      requestedAt: nowIso(),
+      sourceRefs: ["tool:call-large-approval"],
+    },
+  });
+  const payload = JSON.parse(message.content) as {
+    readonly status?: string;
+    readonly body?: {
+      readonly value?: {
+        readonly continuation?: { readonly ref?: string };
+      };
+    };
+  };
+
+  assert.equal(payload.status, "approval_required");
+  assert.equal(payload.body?.value?.continuation?.ref, "sub-agent-output:large-approval");
+});
+
+test("resolved approval history keeps every externalized continuation under aggregate transport pressure", () => {
+  const preApprovals: ToolCallResult[] = ["first", "second"].map((label) => ({
+    callId: "call-multi-stage",
+    toolName: "multi_stage_tool",
+    input: {},
+    output: {
+      evidence: label.repeat(60_000),
+      continuation: {
+        ref: `tool-output://${label}`,
+        nextInput: { ref: `tool-output://${label}`, startChar: 0, maxChars: 30_000 },
+      },
+    },
+    status: "approval_required",
+    durationMs: 1,
+    confirmationRequest: {
+      confirmationId: `confirmation-${label}`,
+      runId: "run-multi-stage",
+      title: `Confirm ${label}`,
+      actionSummary: `Confirm ${label} stage.`,
+      affectedResources: [],
+      riskLevel: "medium",
+      requestedAt: nowIso(),
+      sourceRefs: ["tool:call-multi-stage"],
+    },
+  }));
+  const [message] = toolResultMessagesWithResolvedApprovals([{
+    callId: "call-multi-stage",
+    toolName: "multi_stage_tool",
+    input: {},
+    output: { completed: true },
+    status: "completed",
+    durationMs: 1,
+  }], preApprovals);
+  const payload = JSON.parse(message!.content) as {
+    readonly status?: string;
+    readonly body?: {
+      readonly value?: {
+        readonly continuations?: readonly { readonly ref?: string }[];
+      };
+    };
+  };
+
+  assert.equal(payload.status, "completed");
+  assert.deepEqual(
+    payload.body?.value?.continuations?.map((continuation) => continuation.ref),
+    ["tool-output://first", "tool-output://second"],
+  );
+});
+
+test("resolved approval aggregate failure preserves a fair preview of every stage without dead refs", () => {
+  const preApprovals: ToolCallResult[] = ["first-stage-fact", "second-stage-fact"].map((marker, index) => ({
+    callId: "call-unretained-multi-stage",
+    toolName: "unretained_multi_stage_tool",
+    input: {},
+    output: { marker, evidence: String(index).repeat(120_000) },
+    status: "approval_required",
+    durationMs: 1,
+    confirmationRequest: {
+      confirmationId: `confirmation-unretained-${index}`,
+      runId: "run-unretained-multi-stage",
+      title: `Confirm stage ${index}`,
+      actionSummary: `Confirm stage ${index}.`,
+      affectedResources: [],
+      riskLevel: "medium",
+      requestedAt: nowIso(),
+      sourceRefs: ["tool:call-unretained-multi-stage"],
+    },
+  }));
+  const [message] = toolResultMessagesWithResolvedApprovals([{
+    callId: "call-unretained-multi-stage",
+    toolName: "unretained_multi_stage_tool",
+    input: {},
+    output: { completed: true },
+    status: "completed",
+    durationMs: 1,
+  }], preApprovals);
+  const payload = JSON.parse(message!.content) as {
+    readonly status?: string;
+    readonly body?: {
+      readonly value?: {
+        readonly continuation?: unknown;
+        readonly continuations?: unknown;
+        readonly preview?: {
+          readonly totalStages?: number;
+          readonly stages?: readonly { readonly content?: string }[];
+        };
+      };
+    };
+    readonly error?: { readonly facts?: { readonly code?: string } };
+  };
+
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.error?.facts?.code, "tool_result_continuation_required");
+  assert.equal(payload.body?.value?.continuation, undefined);
+  assert.equal(payload.body?.value?.continuations, undefined);
+  assert.equal(payload.body?.value?.preview?.totalStages, 3);
+  const previews = payload.body?.value?.preview?.stages?.map((stage) => stage.content) ?? [];
+  assert.equal(previews.some((content) => content?.includes("first-stage-fact")), true);
+  assert.equal(previews.some((content) => content?.includes("second-stage-fact")), true);
+});
+
+test("approval cancellation preserves pending partial output and attachments", async () => {
+  const attachmentData = Buffer.from("cancelled-approval-image").toString("base64");
+  const partialOutput = withToolModelAttachments({
+    summary: "Evidence produced before the approval was cancelled.",
+  }, [{
+    kind: "image",
+    attachmentId: "cancelled-approval-image",
+    source: { kind: "data", mimeType: "image/png", data: attachmentData },
+  }]);
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-sub-agent", "call_sub_agent"),
+    textResponse("model-request-final", "must not run after cancellation"),
+  ]);
+  const center = new PartialApprovalToolBroker(partialOutput);
+  const request = createValidModelRequest();
+  const baseOptions = {
+    intelligenceChannel: channel,
+    toolCenter: center,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["call_sub_agent"],
+  };
+  const paused = await executeToolUseLoop(baseOptions, request);
+  const abort = new AbortController();
+  abort.abort();
+
+  const cancelled = await resumeToolUseLoopFromApproval({
+    ...baseOptions,
+    approvedConfirmationIds: ["confirmation-call-sub-agent"],
+    abortSignal: abort.signal,
+  }, request, paused.pendingApproval!);
+
+  assert.equal(cancelled.stoppedReason, "cancelled");
+  assert.equal(cancelled.toolCalls.at(-1)?.status, "cancelled");
+  assert.equal(cancelled.toolCalls.at(-1)?.errorDomain, undefined);
+  assert.deepEqual(cancelled.toolCalls.at(-1)?.output, partialOutput);
+  const toolMessage = cancelled.contextMessages?.find((message) =>
+    message.role === "tool" && message.toolCallId === "call-sub-agent"
+  );
+  assert.equal(toolMessage?.content.includes("Evidence produced before the approval was cancelled."), true);
+  assert.equal(toolMessage?.attachments?.[0]?.attachmentId, "cancelled-approval-image");
+  assert.equal(channel.requests.length, 1);
+  assert.equal(center.executionCount(), 0);
+});
+
+test("confirmation decision cancellation preserves the pending tool fact", async () => {
+  const partialOutput = { summary: "Keep this decision-time partial fact." };
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-sub-agent", "call_sub_agent"),
+    textResponse("model-request-final", "must not run after cancellation"),
+  ]);
+  const center = new PartialApprovalToolBroker(partialOutput);
+  const request = createValidModelRequest();
+  const baseOptions = {
+    intelligenceChannel: channel,
+    toolCenter: center,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["call_sub_agent"],
+  };
+  const paused = await executeToolUseLoop(baseOptions, request);
+  const abort = new AbortController();
+  abort.abort();
+
+  const cancelled = await resumeToolUseLoopFromConfirmationDecision({
+    ...baseOptions,
+    abortSignal: abort.signal,
+  }, request, paused.pendingApproval!, {
+    confirmationId: "confirmation-call-sub-agent",
+    decision: "guidance",
+    guidance: "This guidance must not erase the partial fact.",
+  });
+
+  assert.equal(cancelled.stoppedReason, "cancelled");
+  assert.deepEqual(cancelled.toolCalls.at(-1)?.output, partialOutput);
+  assert.equal(JSON.stringify(cancelled.contextMessages).includes(partialOutput.summary), true);
+  assert.equal(channel.requests.length, 1);
+  assert.equal(center.executionCount(), 0);
+});
+
+test("abort after approved execution keeps both pre-approval and completed facts", async () => {
+  const abort = new AbortController();
+  const partialOutput = { summary: "Fact produced before approval." };
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-sub-agent", "call_sub_agent"),
+    textResponse("model-request-final", "must not run after cancellation"),
+  ]);
+  const center = new PartialApprovalToolBroker(partialOutput, () => abort.abort());
+  const request = createValidModelRequest();
+  const baseOptions = {
+    intelligenceChannel: channel,
+    toolCenter: center,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["call_sub_agent"],
+  };
+  const paused = await executeToolUseLoop(baseOptions, request);
+
+  const cancelled = await resumeToolUseLoopFromApproval({
+    ...baseOptions,
+    approvedConfirmationIds: ["confirmation-call-sub-agent"],
+    abortSignal: abort.signal,
+  }, request, paused.pendingApproval!);
+
+  assert.equal(cancelled.stoppedReason, "cancelled");
+  assert.equal(cancelled.toolCalls.at(-1)?.status, "completed");
+  assert.deepEqual(cancelled.toolCalls.at(-1)?.output, {
+    resumed: true,
+    reusedCompletedMaterial: true,
+  });
+  const contextText = JSON.stringify(cancelled.contextMessages);
+  assert.equal(contextText.includes("Fact produced before approval."), true);
+  assert.equal(contextText.includes("reusedCompletedMaterial"), true);
+  assert.equal(channel.requests.length, 1);
+  assert.equal(center.executionCount(), 1);
+});
+
+test("abort closes a new approval returned by approved execution as one cancelled fact", async () => {
+  const abort = new AbortController();
+  const eventLog = new InMemoryEventLog();
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-multi-approval", "multi_approval_tool"),
+  ]);
+  const broker: ToolExecutionBroker = {
+    list: () => [testToolDefinition("multi_approval_tool", "read-only")],
+    has: (name) => name === "multi_approval_tool",
+    execute: async (request, _context, permission) => {
+      const approved = permission.approvedConfirmationIds?.includes("confirmation-stage-one") === true;
+      if (approved) {
+        abort.abort();
+      }
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: { stageFact: approved ? "second-stage-partial" : "first-stage-partial" },
+        status: "approval_required",
+        durationMs: 1,
+        confirmationRequest: {
+          confirmationId: approved ? "confirmation-stage-two" : "confirmation-stage-one",
+          runId: request.callId,
+          title: approved ? "Confirm stage two" : "Confirm stage one",
+          actionSummary: approved ? "Confirm stage two." : "Confirm stage one.",
+          affectedResources: [],
+          riskLevel: "medium",
+          requestedAt: nowIso(),
+          sourceRefs: [`tool:${request.callId}`],
+        },
+      };
+    },
+  };
+  const request = createValidModelRequest();
+  const baseOptions: ToolUseLoopOptions = {
+    intelligenceChannel: channel,
+    toolCenter: broker,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["multi_approval_tool"],
+    publishToolEvent: (message) => eventLog.append(message),
+  };
+  const paused = await executeToolUseLoop(baseOptions, request);
+
+  const cancelled = await resumeToolUseLoopFromApproval({
+    ...baseOptions,
+    approvedConfirmationIds: ["confirmation-stage-one"],
+    abortSignal: abort.signal,
+  }, request, paused.pendingApproval!);
+
+  assert.equal(cancelled.stoppedReason, "cancelled");
+  assert.equal(cancelled.pendingApproval, undefined);
+  assert.equal(cancelled.toolCalls.at(-1)?.status, "cancelled");
+  assert.equal(cancelled.toolCalls.at(-1)?.errorDomain, undefined);
+  assert.equal(cancelled.toolCalls.at(-1)?.errorFacts?.code, "approval_resumption_cancelled");
+  assert.deepEqual(cancelled.toolCalls.at(-1)?.output, { stageFact: "second-stage-partial" });
+  assert.deepEqual(eventLog.types(), [
+    "tool.requested",
+    "user_approval.requested",
+    "user_approval.requested",
+    "tool.cancelled",
+  ]);
+  assert.equal(eventLog.list().at(-1)?.type, "tool.cancelled");
 });
 
 test("confirmation guidance returns partial sub-agent output and the decision to the parent model", async () => {
@@ -2136,14 +2631,19 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
   );
 
   assert.notEqual(paused.pendingApproval?.confirmationRequest, undefined);
+  const richConfirmationRequest = {
+    ...paused.pendingApproval!.confirmationRequest!,
+    title: "删除文件",
+    actionSummary: "删除文件：src/app.ts",
+    affectedResources: ["src/app.ts"],
+  };
   const richPendingApproval = {
     ...paused.pendingApproval!,
-    confirmationRequest: {
-      ...paused.pendingApproval!.confirmationRequest!,
-      title: "删除文件",
-      actionSummary: "删除文件：src/app.ts",
-      affectedResources: ["src/app.ts"],
+    pendingToolResult: {
+      ...paused.pendingApproval!.pendingToolResult,
+      confirmationRequest: richConfirmationRequest,
     },
+    confirmationRequest: richConfirmationRequest,
   };
 
   const resumed = await resumeToolUseLoopFromApproval(
@@ -2319,7 +2819,128 @@ test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible 
   assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested", "tool.cancelled"]);
 });
 
+test("confirmation decision with the wrong id never executes an otherwise approved tool", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    textResponse("model-request-final", "must not run for wrong confirmation id"),
+  ]);
+  const center = new TestToolBroker();
+  center.register("delete_file", async () => ({ deleted: true }), "read-write");
+  const request = createValidModelRequest();
+  const baseOptions = {
+    intelligenceChannel: channel,
+    toolCenter: center,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["delete_file"],
+  };
+  const paused = await executeToolUseLoop(baseOptions, request);
+
+  const unresolved = await resumeToolUseLoopFromConfirmationDecision({
+    ...baseOptions,
+    approvedConfirmationIds: ["confirmation-call-delete"],
+  }, request, paused.pendingApproval!, {
+    confirmationId: "confirmation-forged",
+    decision: "deny",
+  });
+
+  assert.equal(unresolved.stoppedReason, "approval_required");
+  assert.equal(unresolved.pendingApproval?.confirmationId, "confirmation-call-delete");
+  assert.equal(center.executionCount(), 0);
+  assert.equal(channel.requests.length, 1);
+});
+
+test("confirmation resume rejects inconsistent pending approval identity", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+  ]);
+  const center = new TestToolBroker();
+  center.register("delete_file", async () => ({ deleted: true }), "read-write");
+  const request = createValidModelRequest();
+  const options = {
+    intelligenceChannel: channel,
+    toolCenter: center,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["delete_file"],
+  };
+  const paused = await executeToolUseLoop(options, request);
+  const forged = {
+    ...paused.pendingApproval!,
+    pendingToolResult: {
+      ...paused.pendingApproval!.pendingToolResult,
+      callId: "call-forged",
+    },
+  };
+
+  await assert.rejects(
+    resumeToolUseLoopFromApproval({
+      ...options,
+      approvedConfirmationIds: ["confirmation-call-delete"],
+    }, request, forged),
+    /Pending tool approval facts are inconsistent/,
+  );
+
+  const forgedInput = {
+    ...paused.pendingApproval!,
+    pendingToolResult: {
+      ...paused.pendingApproval!.pendingToolResult,
+      input: { forged: true },
+    },
+  };
+  await assert.rejects(
+    resumeToolUseLoopFromApproval({
+      ...options,
+      approvedConfirmationIds: ["confirmation-call-delete"],
+    }, request, forgedInput),
+    /Pending tool approval facts are inconsistent/,
+  );
+
+  assert.ok(paused.pendingApproval!.confirmationRequest);
+  const forgedVisibleConfirmation = {
+    ...paused.pendingApproval!,
+    confirmationRequest: {
+      ...paused.pendingApproval!.confirmationRequest,
+      title: "读取文件",
+      actionSummary: "读取 README.md",
+      affectedResources: ["README.md"],
+      riskLevel: "low" as const,
+    },
+  };
+  await assert.rejects(
+    resumeToolUseLoopFromApproval({
+      ...options,
+      approvedConfirmationIds: ["confirmation-call-delete"],
+    }, request, forgedVisibleConfirmation),
+    /Pending tool approval facts are inconsistent/,
+  );
+
+  const forgedAssistantPairing = {
+    ...paused.pendingApproval!,
+    assistantMessage: {
+      ...paused.pendingApproval!.assistantMessage,
+      toolCalls: paused.pendingApproval!.assistantMessage.toolCalls?.map((call) =>
+        call.callId === paused.pendingApproval!.pendingToolCall.callId
+          ? { ...call, input: { forged: true } }
+          : call
+      ),
+    },
+  };
+  await assert.rejects(
+    resumeToolUseLoopFromApproval({
+      ...options,
+      approvedConfirmationIds: ["confirmation-call-delete"],
+    }, request, forgedAssistantPairing),
+    /Pending tool approval facts are inconsistent/,
+  );
+  assert.equal(center.executionCount(), 0);
+  assert.equal(channel.requests.length, 1);
+});
+
 test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped batch calls to the model", async () => {
+  const guidance = `不要执行命令，改为说明需要哪些材料。${"请保留完整指导。".repeat(180)}sk-guidance-secret-token`;
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
     {
@@ -2364,7 +2985,7 @@ test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped bat
     {
       confirmationId: "confirmation-call-shell",
       decision: "guidance",
-      guidance: "不要执行命令，改为说明需要哪些材料。sk-guidance-secret-token",
+      guidance,
     }
   );
 
@@ -2373,6 +2994,7 @@ test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped bat
   assert.deepEqual(resumed.toolCalls.map((call) => call.status), ["cancelled", "cancelled"]);
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
   const requestText = JSON.stringify(channel.requests[1]?.sanitizedMessages);
+  assert.equal(requestText.includes(guidance), true);
   assert.equal(requestText.includes("sk-guidance-secret-token"), true);
   assert.equal(occurrences(requestText, "sk-guidance-secret-token"), 1);
   assert.equal(requestText.includes("confirmation_decision"), false);
@@ -2740,7 +3362,10 @@ class TestToolBroker implements ToolExecutionBroker {
 class PartialApprovalToolBroker implements ToolExecutionBroker {
   private callCount = 0;
 
-  constructor(private readonly partialOutput: ToolCallResult["output"]) {}
+  constructor(
+    private readonly partialOutput: ToolCallResult["output"],
+    private readonly onApproved?: () => void,
+  ) {}
 
   list(): ToolDefinition[] {
     return [{
@@ -2787,6 +3412,7 @@ class PartialApprovalToolBroker implements ToolExecutionBroker {
       };
     }
     this.callCount += 1;
+    this.onApproved?.();
     return {
       callId: request.callId,
       toolName: request.toolName,

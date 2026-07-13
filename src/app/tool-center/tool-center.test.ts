@@ -692,8 +692,16 @@ test("ToolCenter rejects invalid explicit statuses and approval requests", async
 
   assert.equal(invalidStatus.status, "failed");
   assert.equal(invalidStatus.errorFacts?.code, "invalid_tool_result_status");
+  assert.equal(invalidStatus.errorFacts?.sourceExecutionStatus, "unknown");
+  assert.equal(invalidStatus.errorFacts?.doNotBlindlyRetry, true);
+  assert.equal(invalidStatus.errorFacts?.outputDeliveryPhase, "executor_result_normalization");
+  assert.equal(invalidStatus.errorFacts?.outputDeliveryCode, "invalid_tool_result_status");
   assert.equal(invalidApproval.status, "failed");
   assert.equal(invalidApproval.errorFacts?.code, "invalid_tool_confirmation_request");
+  assert.equal(invalidApproval.errorFacts?.sourceExecutionStatus, "unknown");
+  assert.equal(invalidApproval.errorFacts?.doNotBlindlyRetry, true);
+  assert.equal(invalidApproval.errorFacts?.outputDeliveryPhase, "executor_result_normalization");
+  assert.equal(invalidApproval.errorFacts?.outputDeliveryCode, "invalid_tool_confirmation_request");
 });
 
 test("ToolCenter lets full access mode execute confirmation-gated shell commands", async () => {
@@ -1002,6 +1010,86 @@ test("ToolCenter keeps undefined as a valid completed result", async () => {
 
   assert.equal(result.status, "completed");
   assert.equal(result.output, undefined);
+});
+
+test("ToolCenter preserves a completed side effect when abort arrives before the executor returns", async () => {
+  const abort = new AbortController();
+  let applied = 0;
+  const center = new ToolCenter();
+  center.register(testTool("submit_then_abort", async () => {
+    applied += 1;
+    abort.abort();
+    return { receipt: "applied-once" };
+  }, "external-submit"));
+
+  const result = await center.execute(
+    { callId: "call-submit-abort", toolName: "submit_then_abort", input: {} },
+    {
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      abortSignal: abort.signal,
+    },
+    allowTools("submit_then_abort"),
+  );
+
+  assert.equal(applied, 1);
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.output, { receipt: "applied-once" });
+});
+
+test("ToolCenter maps an aborted throw to cancelled only for an abort error", async () => {
+  const abort = new AbortController();
+  const center = new ToolCenter();
+  center.register(testTool("abort_error", async () => {
+    abort.abort();
+    throw Object.assign(new Error("operation aborted"), { name: "AbortError" });
+  }));
+
+  const result = await center.execute(
+    { callId: "call-abort-error", toolName: "abort_error", input: {} },
+    {
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      abortSignal: abort.signal,
+    },
+    allowTools("abort_error"),
+  );
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.errorFacts?.abortRequested, true);
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "unknown");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
+});
+
+test("ToolCenter preserves an ordinary error when abort races after an unknown side effect", async () => {
+  const abort = new AbortController();
+  const center = new ToolCenter();
+  center.register(testTool("submit_then_error", async () => {
+    abort.abort();
+    throw Object.assign(new Error("receipt was lost after submit"), {
+      facts: { mayHaveApplied: true },
+    });
+  }, "external-submit"));
+
+  const result = await center.execute(
+    { callId: "call-submit-error", toolName: "submit_then_error", input: {} },
+    {
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      abortSignal: abort.signal,
+    },
+    allowTools("submit_then_error"),
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "receipt was lost after submit");
+  assert.equal(result.errorFacts?.mayHaveApplied, true);
+  assert.equal(result.errorFacts?.abortRequested, true);
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "unknown");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
 });
 
 test("ToolCenter fails non-JSON-safe executor results at the fact boundary", async () => {

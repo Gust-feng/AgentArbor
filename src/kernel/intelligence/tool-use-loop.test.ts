@@ -27,6 +27,7 @@ import {
 import { executeToolCalls } from "./tool-use-loop-execution.js";
 import {
   toolResultMessage,
+  toolResultMessages,
   toolResultMessagesWithResolvedApprovals,
 } from "./tool-use-loop-messages.js";
 
@@ -1487,6 +1488,71 @@ test("executeToolUseLoop pauses when a parallel read-only executor dynamically r
   assert.equal(channel.requests.length, 1);
 });
 
+test("executeToolUseLoop closes an approval that races with initial cancellation", async () => {
+  const abort = new AbortController();
+  const eventLog = new InMemoryEventLog();
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-racing-approval", "racing_approval"),
+  ]);
+  const broker: ToolExecutionBroker = {
+    list: () => [testToolDefinition("racing_approval", "read-only")],
+    has: (name) => name === "racing_approval",
+    execute: async (request) => {
+      abort.abort();
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: { partialFact: "work completed before approval was discovered" },
+        status: "approval_required",
+        error: "The completed preflight discovered a gated follow-up.",
+        errorDomain: "runtime_error",
+        errorFacts: { code: "dynamic_approval_required" },
+        durationMs: 1,
+        confirmationRequest: {
+          confirmationId: "confirmation-racing-approval",
+          runId: request.callId,
+          title: "Confirm follow-up",
+          actionSummary: "Confirm the gated follow-up.",
+          affectedResources: [],
+          riskLevel: "medium",
+          requestedAt: nowIso(),
+          sourceRefs: [`tool:${request.callId}`],
+        },
+      };
+    },
+  };
+
+  const result = await executeToolUseLoop({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["racing_approval"],
+    abortSignal: abort.signal,
+    publishToolEvent: (message) => eventLog.append(message),
+  }, createValidModelRequest());
+
+  assert.equal(result.stoppedReason, "cancelled");
+  assert.equal(result.pendingApproval, undefined);
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(result.toolCalls[0]?.status, "cancelled");
+  assert.deepEqual(result.toolCalls[0]?.output, {
+    partialFact: "work completed before approval was discovered",
+  });
+  assert.equal(result.toolCalls[0]?.errorFacts?.code, "approval_wait_cancelled");
+  const preApprovalErrorFacts = result.toolCalls[0]?.errorFacts?.preApprovalErrorFacts as
+    | { readonly code?: string }
+    | undefined;
+  assert.equal(preApprovalErrorFacts?.code, "dynamic_approval_required");
+  assert.deepEqual(eventLog.types(), [
+    "tool.requested",
+    "user_approval.requested",
+    "tool.cancelled",
+  ]);
+});
+
 test("parallel read-only preflights publish requests first and never replay additional dynamic approvals", async () => {
   const eventLog = new InMemoryEventLog();
   const executionCounts = new Map<string, number>();
@@ -1574,6 +1640,16 @@ test("parallel read-only preflights publish requests first and never replay addi
     "user_approval.requested",
     "tool.cancelled",
   ]);
+  const replayedParallelCancellation = eventLog.replay().find((message) =>
+    message.type === "tool.cancelled" &&
+    (message.payload as { readonly callId?: unknown }).callId === "call-gated-second"
+  );
+  const replayedParallelFacts = (replayedParallelCancellation?.payload as {
+    readonly errorFacts?: Readonly<Record<string, unknown>>;
+  } | undefined)?.errorFacts;
+  assert.equal(replayedParallelFacts?.code, "parallel_approval_not_selected");
+  assert.equal(replayedParallelFacts?.confirmationId, "confirmation-call-gated-second");
+  assert.equal(replayedParallelFacts?.activeConfirmationId, "confirmation-call-gated-first");
 
   const resumed = await resumeToolUseLoopFromApproval({
     ...baseOptions,
@@ -2002,7 +2078,161 @@ test("resolved approval aggregate failure preserves a fair preview of every stag
   assert.equal(previews.some((content) => content?.includes("second-stage-fact")), true);
 });
 
+test("resolved approval aggregate fails when only one truncated stage has a continuation", () => {
+  const preApprovals: ToolCallResult[] = [
+    {
+      marker: "recoverable-stage",
+      evidence: "r".repeat(100_000),
+      continuation: { ref: "tool-output://recoverable-stage" },
+    },
+    { marker: "lost-stage-one", evidence: "1".repeat(100_000) },
+    { marker: "lost-stage-two", evidence: "2".repeat(100_000) },
+  ].map((output, index) => ({
+    callId: "call-partially-retained-multi-stage",
+    toolName: "partially_retained_multi_stage_tool",
+    input: {},
+    output,
+    status: "approval_required",
+    durationMs: 1,
+    confirmationRequest: {
+      confirmationId: `confirmation-partially-retained-${index}`,
+      runId: "run-partially-retained-multi-stage",
+      title: `Confirm stage ${index}`,
+      actionSummary: `Confirm stage ${index}.`,
+      affectedResources: [],
+      riskLevel: "medium",
+      requestedAt: nowIso(),
+      sourceRefs: ["tool:call-partially-retained-multi-stage"],
+    },
+  }));
+  const [message] = toolResultMessagesWithResolvedApprovals([{
+    callId: "call-partially-retained-multi-stage",
+    toolName: "partially_retained_multi_stage_tool",
+    input: {},
+    output: { marker: "lost-resolved-stage", evidence: "z".repeat(100_000) },
+    status: "completed",
+    durationMs: 1,
+  }], preApprovals);
+  const payload = JSON.parse(message!.content) as {
+    readonly status?: string;
+    readonly body?: {
+      readonly value?: {
+        readonly continuation?: { readonly ref?: string };
+        readonly continuations?: readonly { readonly ref?: string }[];
+      };
+    };
+    readonly error?: {
+      readonly facts?: {
+        readonly code?: string;
+        readonly sourceExecutionStatus?: string;
+        readonly doNotBlindlyRetry?: boolean;
+        readonly unrecoverableStageCount?: number;
+        readonly unrecoverableStages?: readonly {
+          readonly phase?: string;
+          readonly index?: number;
+          readonly confirmationId?: string;
+        }[];
+      };
+    };
+  };
+
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.error?.facts?.code, "tool_result_stage_continuation_required");
+  assert.equal(payload.error?.facts?.sourceExecutionStatus, "completed");
+  assert.equal(payload.error?.facts?.doNotBlindlyRetry, true);
+  assert.equal(payload.error?.facts?.unrecoverableStageCount, 3);
+  assert.deepEqual(payload.error?.facts?.unrecoverableStages, [
+    {
+      phase: "pre_approval",
+      index: 1,
+      confirmationId: "confirmation-partially-retained-1",
+    },
+    {
+      phase: "pre_approval",
+      index: 2,
+      confirmationId: "confirmation-partially-retained-2",
+    },
+    { phase: "resolved", index: 3 },
+  ]);
+  const availableContinuations = payload.body?.value?.continuations
+    ?? (payload.body?.value?.continuation === undefined ? [] : [payload.body.value.continuation]);
+  assert.deepEqual(availableContinuations.map((continuation) => continuation.ref), [
+    "tool-output://recoverable-stage",
+  ]);
+});
+
+test("tool result transport fails explicitly when more continuations exist than it can deliver", () => {
+  const continuations = Array.from({ length: 33 }, (_, index) => ({
+    ref: `tool-output://continuation-${index}`,
+  }));
+  const [message] = toolResultMessages([{
+    callId: "call-too-many-continuations",
+    toolName: "continuation_fanout",
+    input: {},
+    output: {
+      evidence: "x".repeat(240_000),
+      continuations,
+    },
+    status: "completed",
+    durationMs: 1,
+  }]);
+  const payload = JSON.parse(message!.content) as {
+    readonly status?: string;
+    readonly body?: {
+      readonly value?: {
+        readonly continuations?: readonly { readonly ref?: string }[];
+      };
+    };
+    readonly error?: {
+      readonly facts?: {
+        readonly code?: string;
+        readonly detectedContinuationCount?: number;
+        readonly detectedContinuationCountIsLowerBound?: boolean;
+        readonly deliveredContinuationCount?: number;
+      };
+    };
+  };
+
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.error?.facts?.code, "tool_result_continuations_incomplete");
+  assert.equal(payload.error?.facts?.detectedContinuationCount, 33);
+  assert.equal(payload.error?.facts?.detectedContinuationCountIsLowerBound, true);
+  assert.equal(payload.error?.facts?.deliveredContinuationCount, 32);
+  assert.equal(payload.body?.value?.continuations?.length, 32);
+});
+
+test("tool result serialization failure preserves the source execution fact", () => {
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const [message] = toolResultMessages([{
+    callId: "call-nonserializable-result",
+    toolName: "external_side_effect",
+    input: {},
+    output: cyclic as never,
+    status: "completed",
+    durationMs: 1,
+  }]);
+  const payload = JSON.parse(message!.content) as {
+    readonly status?: string;
+    readonly error?: {
+      readonly facts?: {
+        readonly code?: string;
+        readonly sourceExecutionStatus?: string;
+        readonly doNotBlindlyRetry?: boolean;
+        readonly outputDeliveryPhase?: string;
+      };
+    };
+  };
+
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.error?.facts?.code, "tool_result_not_serializable");
+  assert.equal(payload.error?.facts?.sourceExecutionStatus, "completed");
+  assert.equal(payload.error?.facts?.doNotBlindlyRetry, true);
+  assert.equal(payload.error?.facts?.outputDeliveryPhase, "model_transport_serialization");
+});
+
 test("approval cancellation preserves pending partial output and attachments", async () => {
+  const eventLog = new InMemoryEventLog();
   const attachmentData = Buffer.from("cancelled-approval-image").toString("base64");
   const partialOutput = withToolModelAttachments({
     summary: "Evidence produced before the approval was cancelled.",
@@ -2024,6 +2254,8 @@ test("approval cancellation preserves pending partial output and attachments", a
     traceId: "trace-test",
     goalId: "goal-test",
     allowedTools: ["call_sub_agent"],
+    publishToolEvent: (message: Parameters<NonNullable<ToolUseLoopOptions["publishToolEvent"]>>[0]) =>
+      eventLog.append(message),
   };
   const paused = await executeToolUseLoop(baseOptions, request);
   const abort = new AbortController();
@@ -2046,6 +2278,12 @@ test("approval cancellation preserves pending partial output and attachments", a
   assert.equal(toolMessage?.attachments?.[0]?.attachmentId, "cancelled-approval-image");
   assert.equal(channel.requests.length, 1);
   assert.equal(center.executionCount(), 0);
+  const replayedCancellation = eventLog.replay().find((message) => message.type === "tool.cancelled");
+  const replayedCancellationFacts = (replayedCancellation?.payload as {
+    readonly errorFacts?: Readonly<Record<string, unknown>>;
+  } | undefined)?.errorFacts;
+  assert.equal(replayedCancellationFacts?.code, "approval_wait_cancelled");
+  assert.equal(replayedCancellationFacts?.confirmationId, "confirmation-call-sub-agent");
 });
 
 test("confirmation decision cancellation preserves the pending tool fact", async () => {
@@ -2238,6 +2476,72 @@ test("confirmation guidance returns partial sub-agent output and the decision to
   assert.equal(payload.body?.value?.summary, "Completed evidence gathered before the confirmation pause.");
   assert.equal(payload.error?.facts?.decision, "guidance");
   assert.equal(payload.error?.message?.includes("Do not perform the pending write"), true);
+});
+
+test("confirmation guidance preserves the pre-approval error fact", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-guidance-error", "gated_analysis"),
+    textResponse("model-request-final", "I kept the diagnostic and followed the guidance."),
+  ]);
+  const broker: ToolExecutionBroker = {
+    list: () => [testToolDefinition("gated_analysis", "read-only")],
+    has: (name) => name === "gated_analysis",
+    execute: async (request) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { partialFact: "diagnostic material" },
+      status: "approval_required",
+      error: "A gated step remains after the diagnostic.",
+      errorDomain: "runtime_error",
+      errorFacts: { code: "gated_step_pending", diagnosticId: "diagnostic-1" },
+      durationMs: 1,
+      confirmationRequest: {
+        confirmationId: "confirmation-guidance-error",
+        runId: request.callId,
+        title: "Confirm gated step",
+        actionSummary: "Confirm the gated step.",
+        affectedResources: [],
+        riskLevel: "medium",
+        requestedAt: nowIso(),
+        sourceRefs: [`tool:${request.callId}`],
+      },
+    }),
+  };
+  const options: ToolUseLoopOptions = {
+    intelligenceChannel: channel,
+    toolCenter: broker,
+    callerAgentId: "agent-test",
+    traceId: "trace-test",
+    goalId: "goal-test",
+    allowedTools: ["gated_analysis"],
+  };
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(options, request);
+
+  const resumed = await resumeToolUseLoopFromConfirmationDecision(
+    options,
+    request,
+    paused.pendingApproval!,
+    {
+      confirmationId: "confirmation-guidance-error",
+      decision: "guidance",
+      guidance: "Use the diagnostic without the gated step.",
+    },
+  );
+
+  const decisionResult = resumed.toolCalls.at(-1);
+  assert.equal(decisionResult?.status, "cancelled");
+  assert.equal(decisionResult?.errorFacts?.preApprovalError, "A gated step remains after the diagnostic.");
+  assert.equal(decisionResult?.errorFacts?.preApprovalErrorDomain, "runtime_error");
+  assert.deepEqual(decisionResult?.errorFacts?.preApprovalErrorFacts, {
+    code: "gated_step_pending",
+    diagnosticId: "diagnostic-1",
+  });
+  assert.equal(decisionResult?.confirmationRequest?.confirmationId, "confirmation-guidance-error");
+  const modelRequest = JSON.stringify(channel.requests[1]?.sanitizedMessages);
+  assert.equal(modelRequest.includes("gated_step_pending"), true);
+  assert.equal(modelRequest.includes("diagnostic-1"), true);
 });
 
 test("confirmation denial returns partial sub-agent output and the denial to the parent model", async () => {

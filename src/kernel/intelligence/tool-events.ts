@@ -10,6 +10,7 @@ import { createMessage } from "../messages/create-message.js";
 
 const TOOL_EVENT_INPUT_FACT_MAX_CHARS = 12_000;
 const TOOL_EVENT_OUTPUT_FACT_MAX_CHARS = 24_000;
+const TOOL_EVENT_ERROR_FACT_MAX_CHARS = 12_000;
 const TOOL_EVENT_FIELD_STRING_MAX_CHARS = 8_000;
 const TOOL_EVENT_ARRAY_MAX_ITEMS = 64;
 const TOOL_EVENT_OBJECT_MAX_FIELDS = 96;
@@ -18,6 +19,7 @@ const TOOL_EVENT_MAX_DEPTH = 12;
 export type ToolEventFactTruncation = {
   readonly input?: true;
   readonly output?: true;
+  readonly errorFacts?: true;
 };
 
 type ToolEventIdentityPayload = {
@@ -52,6 +54,9 @@ export type ToolCancelledEventPayload = ToolEventIdentityPayload & {
   readonly output?: ToolFactValue;
   readonly factTruncation?: ToolEventFactTruncation;
   readonly reason: string;
+  readonly errorDomain?: ToolCallResult["errorDomain"];
+  readonly errorFacts?: ToolCallResult["errorFacts"];
+  readonly confirmationId?: string;
   readonly durationMs: number;
 };
 
@@ -136,6 +141,14 @@ export function createToolCancelledMessage(input: {
   readonly context: ToolExecutionContext;
 }): ArborMessage<ToolCancelledEventPayload> {
   const outputFact = snapshotToolEventFact(input.result.output, TOOL_EVENT_OUTPUT_FACT_MAX_CHARS);
+  const errorFact = snapshotToolEventFact(input.result.errorFacts, TOOL_EVENT_ERROR_FACT_MAX_CHARS);
+  const errorFacts = toolErrorFactsFromSnapshot(errorFact.value);
+  const factTruncation: ToolEventFactTruncation | undefined = outputFact.truncated || errorFact.truncated
+    ? {
+        ...(outputFact.truncated ? { output: true as const } : {}),
+        ...(errorFact.truncated ? { errorFacts: true as const } : {}),
+      }
+    : undefined;
   return createMessage({
     traceId: input.context.traceId,
     from: { id: "tool-center", role: "runtime" },
@@ -149,11 +162,22 @@ export function createToolCancelledMessage(input: {
       callId: input.result.callId,
       toolName: input.result.toolName,
       output: outputFact.value,
-      factTruncation: outputFact.truncated ? { output: true } : undefined,
+      factTruncation,
       reason: input.result.error ?? "Tool execution was cancelled.",
+      errorDomain: input.result.errorDomain,
+      errorFacts,
+      confirmationId: input.result.confirmationRequest?.confirmationId,
       durationMs: input.result.durationMs,
     },
   });
+}
+
+function toolErrorFactsFromSnapshot(
+  value: ToolFactValue | undefined,
+): ToolCallResult["errorFacts"] | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as ToolCallResult["errorFacts"]
+    : undefined;
 }
 
 export function createToolApprovalRequiredMessage(input: {

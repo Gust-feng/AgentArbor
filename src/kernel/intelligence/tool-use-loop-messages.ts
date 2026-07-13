@@ -84,6 +84,7 @@ const MAX_TRANSPORT_CONTINUATION_REF_CHARS = 4_096;
 const MAX_TRANSPORT_CONTINUATION_NOTE_CHARS = 2_000;
 const MAX_TRANSPORT_STAGE_PREVIEWS = 64;
 const MAX_TRANSPORT_STAGE_PREVIEW_CHARS = 32_000;
+const MAX_TRANSPORT_STAGE_CONFIRMATION_ID_CHARS = 512;
 
 type ToolMessagePayload = {
   readonly status: ToolCallResult["status"];
@@ -94,6 +95,27 @@ type ToolMessagePayload = {
     readonly confirmation?: ToolCallResult["confirmationRequest"];
   }[];
 } & ToolResult;
+
+type ToolMessageTransportStage = {
+  readonly phase: "pre_approval" | "resolved";
+  readonly index: number;
+  readonly status: ToolCallResult["status"];
+  readonly confirmationId?: string;
+  readonly body: unknown;
+  readonly error?: ToolResult["error"];
+};
+
+type ToolMessageTransportPreview = {
+  readonly value: ToolFactValue;
+  readonly truncatedStages: readonly ToolMessageTransportStage[];
+};
+
+type ToolMessageContinuationDelivery = {
+  readonly detectedCount: number;
+  readonly detectedCountIsLowerBound: boolean;
+  readonly deliveredCount: number;
+  readonly complete: boolean;
+};
 
 function resolvedApprovalToolResultMessage(
   preApprovalResults: readonly ToolCallResult[],
@@ -139,50 +161,71 @@ function stringifyToolMessagePayload(payload: ToolMessagePayload, maxChars: numb
     }
     return JSON.stringify(transportGuardFailurePayload(payload));
   } catch (error) {
-    return JSON.stringify(transportSerializationFailurePayload(error));
+    return JSON.stringify(transportSerializationFailurePayload(payload, error));
   }
 }
 
 function transportTruncatedToolPayload(
   payload: ToolMessagePayload
 ): ToolMessagePayload {
-  const continuations = fitContinuationsWithinTransportBudget(uniqueContinuations([
-    ...modelOutputContinuationCandidates(canonicalModelBody(payload.body)),
-    ...(payload.preApprovals ?? []).flatMap((preApproval) =>
-      modelOutputContinuationCandidates(canonicalModelBody(preApproval.body))
-    ),
-  ]).slice(0, MAX_TRANSPORT_CONTINUATIONS));
+  const stages = toolMessageTransportStages(payload);
+  const preview = transportStagePreview(stages);
+  const detectedContinuations = uniqueContinuations([
+    ...stages.flatMap((stage) => modelOutputContinuationCandidates(stage.body)),
+  ]).slice(0, MAX_TRANSPORT_CONTINUATIONS + 1);
+  const detectedCountIsLowerBound = detectedContinuations.length > MAX_TRANSPORT_CONTINUATIONS;
+  const eligibleContinuations = detectedContinuations.slice(0, MAX_TRANSPORT_CONTINUATIONS);
+  const continuations = fitContinuationsWithinTransportBudget(eligibleContinuations);
+  const continuationDelivery: ToolMessageContinuationDelivery = {
+    detectedCount: detectedContinuations.length,
+    detectedCountIsLowerBound,
+    deliveredCount: continuations.length,
+    complete: !detectedCountIsLowerBound && continuations.length === detectedContinuations.length,
+  };
   const continuationFacts = continuations.length === 1
     ? { continuation: continuations[0] }
     : continuations.length > 1
       ? { continuations }
       : {};
-  const continuationAvailable = continuations.length > 0;
-  const contractError = continuationAvailable
-    ? undefined
-    : {
-        message: "Tool result exceeded the model transport budget without an explicit continuation.",
-        domain: "runtime_error" as const,
-        facts: {
-          code: "tool_result_continuation_required",
-        },
-      };
+  const readableContinuationKeys = new Set(continuations.map((continuation) =>
+    JSON.stringify(continuation)
+  ));
+  // Aggregate approval history is recoverable only when every stage whose
+  // model body was shortened or omitted contributed a continuation that
+  // survived this same transport envelope. A ref from another stage cannot
+  // stand in for facts that ref does not own.
+  const unrecoverableStages = preview.truncatedStages.filter((stage) =>
+    !modelOutputContinuationCandidates(stage.body).some((continuation) =>
+      readableContinuationKeys.has(JSON.stringify(continuation))
+    )
+  );
+  const transportRecoverable = preview.truncatedStages.length > 0 &&
+    unrecoverableStages.length === 0 && continuationDelivery.complete;
   return {
-    status: continuationAvailable ? payload.status : "failed",
+    status: transportRecoverable ? payload.status : "failed",
     body: {
       format: "json",
       value: {
         truncated: true,
         reason: "tool_message_transport_budget_exceeded",
         ...continuationFacts,
-        preview: transportStagePreviews(payload),
+        preview: preview.value,
       },
     },
-    error: contractError ?? payload.error,
+    error: transportRecoverable
+      ? payload.error
+      : transportContinuationContractError(
+          payload,
+          continuations,
+          unrecoverableStages,
+          continuationDelivery,
+        ),
   };
 }
 
-function transportStagePreviews(payload: ToolMessagePayload): ToolFactValue {
+function toolMessageTransportStages(
+  payload: ToolMessagePayload,
+): readonly ToolMessageTransportStage[] {
   const preApprovalStages = (payload.preApprovals ?? []).map((preApproval, index) => ({
     phase: "pre_approval" as const,
     index,
@@ -191,7 +234,7 @@ function transportStagePreviews(payload: ToolMessagePayload): ToolFactValue {
     body: canonicalModelBody(preApproval.body),
     error: preApproval.error,
   }));
-  const stages = [
+  return [
     ...preApprovalStages,
     {
       phase: "resolved" as const,
@@ -202,6 +245,11 @@ function transportStagePreviews(payload: ToolMessagePayload): ToolFactValue {
       error: payload.error,
     },
   ];
+}
+
+function transportStagePreview(
+  stages: readonly ToolMessageTransportStage[],
+): ToolMessageTransportPreview {
   const selectedStages = stages.length <= MAX_TRANSPORT_STAGE_PREVIEWS
     ? stages
     : [
@@ -212,16 +260,109 @@ function transportStagePreviews(payload: ToolMessagePayload): ToolFactValue {
     256,
     Math.floor(MAX_TRANSPORT_STAGE_PREVIEW_CHARS / selectedStages.length),
   );
+  const selected = new Set(selectedStages);
+  const truncatedStages = stages.filter((stage) => {
+    const serialized = transportStageContent(stage);
+    return selected.has(stage)
+      ? serialized.length > perStageChars
+      : serialized !== "{}";
+  });
   return {
-    totalStages: stages.length,
-    omittedMiddleStages: stages.length - selectedStages.length,
-    stages: selectedStages.map((stage) => ({
-      phase: stage.phase,
-      index: stage.index,
-      status: stage.status,
-      ...(stage.confirmationId === undefined ? {} : { confirmationId: stage.confirmationId }),
-      content: compactJsonPreview({ body: stage.body, error: stage.error }, perStageChars),
-    })),
+    value: {
+      totalStages: stages.length,
+      omittedMiddleStages: stages.length - selectedStages.length,
+      stages: selectedStages.map((stage) => ({
+        phase: stage.phase,
+        index: stage.index,
+        status: stage.status,
+        ...(stage.confirmationId === undefined
+          ? {}
+          : {
+              confirmationId: compactTransportText(
+                stage.confirmationId,
+                MAX_TRANSPORT_STAGE_CONFIRMATION_ID_CHARS,
+              ),
+            }),
+        content: compactSerializedJsonPreview(transportStageContent(stage), perStageChars),
+      })),
+    },
+    truncatedStages,
+  };
+}
+
+function transportStageContent(stage: ToolMessageTransportStage): string {
+  return JSON.stringify({ body: stage.body, error: stage.error });
+}
+
+function transportContinuationContractError(
+  payload: ToolMessagePayload,
+  continuations: readonly ToolContinuation[],
+  unrecoverableStages: readonly ToolMessageTransportStage[],
+  continuationDelivery: ToolMessageContinuationDelivery,
+): NonNullable<ToolResult["error"]> {
+  if (continuationDelivery.detectedCount === 0) {
+    return {
+      message: "Tool result exceeded the model transport budget without an explicit continuation.",
+      domain: "runtime_error",
+      facts: {
+        code: "tool_result_continuation_required",
+        sourceExecutionStatus: payload.status,
+        doNotBlindlyRetry: true,
+        outputDeliveryPhase: "model_transport",
+      },
+    };
+  }
+  if (!continuationDelivery.complete) {
+    return {
+      message: "Tool result exceeded the model transport budget, and not every continuation could be delivered.",
+      domain: "runtime_error",
+      facts: {
+        code: "tool_result_continuations_incomplete",
+        sourceExecutionStatus: payload.status,
+        doNotBlindlyRetry: true,
+        outputDeliveryPhase: "model_transport",
+        detectedContinuationCount: continuationDelivery.detectedCount,
+        detectedContinuationCountIsLowerBound: continuationDelivery.detectedCountIsLowerBound,
+        deliveredContinuationCount: continuationDelivery.deliveredCount,
+      },
+    };
+  }
+  if (unrecoverableStages.length === 0) {
+    return {
+      message: "Tool result exceeded the model transport budget and could not preserve the complete aggregate facts.",
+      domain: "runtime_error",
+      facts: {
+        code: "tool_result_transport_budget_exceeded",
+        sourceExecutionStatus: payload.status,
+        doNotBlindlyRetry: true,
+        outputDeliveryPhase: "model_transport",
+      },
+    };
+  }
+  const visibleStages = unrecoverableStages.slice(0, MAX_TRANSPORT_STAGE_PREVIEWS);
+  return {
+    message: "Tool result exceeded the model transport budget, and one or more truncated stages have no readable continuation.",
+    domain: "runtime_error",
+    facts: {
+      code: "tool_result_stage_continuation_required",
+      sourceExecutionStatus: payload.status,
+      doNotBlindlyRetry: true,
+      outputDeliveryPhase: "model_transport",
+      unrecoverableStageCount: unrecoverableStages.length,
+      unrecoverableStages: visibleStages.map((stage) => ({
+        phase: stage.phase,
+        index: stage.index,
+        ...(stage.confirmationId === undefined
+          ? {}
+          : {
+              confirmationId: compactTransportText(
+                stage.confirmationId,
+                MAX_TRANSPORT_STAGE_CONFIRMATION_ID_CHARS,
+              ),
+            }),
+      })),
+      omittedUnrecoverableStages: unrecoverableStages.length - visibleStages.length,
+    },
   };
 }
 
@@ -237,7 +378,7 @@ function continuationsFromRecord(record: Readonly<Record<string, unknown>>): rea
   const single = toolContinuationFromUnknown(record.continuation);
   const multiple = Array.isArray(record.continuations)
     ? record.continuations
-      .slice(0, MAX_TRANSPORT_CONTINUATIONS)
+      .slice(0, MAX_TRANSPORT_CONTINUATIONS + 1)
       .map(toolContinuationFromUnknown)
       .filter((item): item is ToolContinuation => item !== undefined)
     : [];
@@ -338,12 +479,18 @@ function transportGuardFailurePayload(payload: ToolMessagePayload): ToolMessageP
       domain: "runtime_error",
       facts: {
         code: "tool_result_transport_budget_exceeded",
+        sourceExecutionStatus: payload.status,
+        doNotBlindlyRetry: true,
+        outputDeliveryPhase: "model_transport",
       },
     },
   };
 }
 
-function transportSerializationFailurePayload(error: unknown): ToolMessagePayload {
+function transportSerializationFailurePayload(
+  payload: ToolMessagePayload,
+  error: unknown,
+): ToolMessagePayload {
   const message = error instanceof Error && error.message.trim().length > 0
     ? compactTransportText(error.message, 500)
     : undefined;
@@ -355,6 +502,9 @@ function transportSerializationFailurePayload(error: unknown): ToolMessagePayloa
       domain: "runtime_error",
       facts: {
         code: "tool_result_not_serializable",
+        sourceExecutionStatus: payload.status,
+        doNotBlindlyRetry: true,
+        outputDeliveryPhase: "model_transport_serialization",
         ...(message === undefined ? {} : { reason: message }),
       },
     },
@@ -367,6 +517,10 @@ function canonicalModelBody(body: ToolResult["body"]): unknown {
 
 function compactJsonPreview(value: unknown, maxChars: number): string {
   const serialized = JSON.stringify(value) ?? "undefined";
+  return compactSerializedJsonPreview(serialized, maxChars);
+}
+
+function compactSerializedJsonPreview(serialized: string, maxChars: number): string {
   if (serialized.length <= maxChars) {
     return serialized;
   }

@@ -168,21 +168,36 @@ export class ToolCenter {
         confirmationPolicy: permission.confirmationPolicy,
       });
     } catch (error) {
-      if (isAbortSignalAborted(context.abortSignal)) {
-        return cancelledToolResult(factRequest, startedAt);
+      if (isAbortSignalAborted(context.abortSignal) && isAbortError(error)) {
+        return cancelledToolResult(factRequest, startedAt, {
+          abortRequested: true,
+          sourceExecutionStatus: "unknown",
+          doNotBlindlyRetry: true,
+        });
       }
       const sanitized = sanitizeError(error, factRequest.toolName);
+      const abortRequestedFacts: ToolErrorFacts = {
+        abortRequested: true,
+        sourceExecutionStatus: "unknown",
+        doNotBlindlyRetry: true,
+      };
+      const failure = !isAbortSignalAborted(context.abortSignal)
+        ? sanitized
+        : {
+            ...sanitized,
+            facts: mergeToolErrorFacts(sanitized.facts, abortRequestedFacts),
+            fullFacts: mergeToolErrorFacts(sanitized.fullFacts, abortRequestedFacts),
+          };
       return this.prepareThrownErrorForDelivery(
-        failedToolResult(factRequest, startedAt, sanitized),
+        failedToolResult(factRequest, startedAt, failure),
         permission,
-        sanitized,
+        failure,
         context.traceId,
       );
     }
-    if (isAbortSignalAborted(context.abortSignal)) {
-      return cancelledToolResult(factRequest, startedAt);
-    }
 
+    // Once the executor resolves, its returned value is the execution fact. A late abort
+    // belongs to the owning loop; replacing this fact with `cancelled` could replay a side effect.
     try {
       if (isToolExecutorResult(output)) {
         return this.prepareResultForDelivery(
@@ -200,9 +215,6 @@ export class ToolCenter {
         durationMs: Date.now() - startedAt,
       }, permission, context.traceId);
     } catch (error) {
-      if (isAbortSignalAborted(context.abortSignal)) {
-        return cancelledToolResult(factRequest, startedAt);
-      }
       const sanitized = sanitizeError(error, factRequest.toolName);
       const sourceExecutionStatus = isToolExecutorResult(output)
         ? toolCallStatus(output.result.status) ?? "unknown"
@@ -754,6 +766,10 @@ function invalidExecutorResult(input: {
     errorFacts: {
       code: input.code,
       phase: "executor_result",
+      sourceExecutionStatus: "unknown",
+      doNotBlindlyRetry: true,
+      outputDeliveryPhase: "executor_result_normalization",
+      outputDeliveryCode: input.code,
     },
     durationMs: input.durationMs,
   };
@@ -889,7 +905,11 @@ function approvalRequiredToolResult(
   };
 }
 
-function cancelledToolResult(request: ToolCallRequest, startedAt: number): ToolCallResult {
+function cancelledToolResult(
+  request: ToolCallRequest,
+  startedAt: number,
+  errorFacts?: ToolErrorFacts,
+): ToolCallResult {
   return {
     callId: request.callId,
     toolName: request.toolName,
@@ -897,6 +917,7 @@ function cancelledToolResult(request: ToolCallRequest, startedAt: number): ToolC
     output: undefined,
     status: "cancelled",
     error: "Tool execution cancelled.",
+    errorFacts,
     durationMs: Date.now() - startedAt,
   };
 }
@@ -968,6 +989,14 @@ function cloneRuntimeHints(value: ToolDefinitionMetadata["runtimeHints"]): ToolD
 
 function isAbortSignalAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
+}
+
+function isAbortError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const record = error as { readonly name?: unknown; readonly code?: unknown };
+  return record.name === "AbortError" || record.code === "ABORT_ERR";
 }
 
 type SanitizedToolError = {

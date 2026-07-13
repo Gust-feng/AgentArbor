@@ -259,7 +259,11 @@ function truncateAtWordBoundary(value: string, maxChars: number): string {
 
 export type McpToolOutput = {
   readonly content: readonly McpToolOutputContentPart[];
-  readonly structuredContent?: ToolFactValue;
+  readonly structuredContent?: McpStructuredContent;
+};
+
+type McpStructuredContent = {
+  readonly [key: string]: ToolFactValue | undefined;
 };
 
 export type McpToolOutputContentPart =
@@ -379,10 +383,13 @@ function buildToolOutput(result: {
   readonly content: readonly McpContentPart[];
   readonly structuredContent?: unknown;
 }): McpToolOutput {
+  const structuredContent = result.structuredContent === undefined
+    ? undefined
+    : normalizeMcpStructuredContent(result.structuredContent);
   const content: McpToolOutputContentPart[] = [];
-  const protocolContent = result.structuredContent === undefined
+  const protocolContent = structuredContent === undefined
     ? result.content
-    : result.content.filter((part) => !isExactStructuredContentMirror(part, result.structuredContent));
+    : result.content.filter((part) => !isExactStructuredContentMirror(part, structuredContent));
   const modelAttachments: ModelInputAttachment[] = [];
   let modelAttachmentBytes = 0;
   const reserveAttachment = (byteLength: number, mimeType: string) => {
@@ -553,11 +560,34 @@ function buildToolOutput(result: {
   }
   const output: McpToolOutput = {
     content,
-    ...(result.structuredContent === undefined
+    ...(structuredContent === undefined
       ? {}
-      : { structuredContent: result.structuredContent as ToolFactValue }),
+      : { structuredContent }),
   };
   return withToolModelAttachments(output, modelAttachments);
+}
+
+function normalizeMcpStructuredContent(value: unknown): McpStructuredContent {
+  const normalized = normalizeToolFactValue(value);
+  if (!isMcpStructuredContent(normalized)) {
+    throw Object.assign(
+      new Error("MCP structuredContent must be a JSON object."),
+      {
+        errorDomain: "runtime_error",
+        code: "mcp_structured_content_not_object",
+        facts: {
+          code: "mcp_structured_content_not_object",
+          expected: "object",
+          actual: normalized === null ? "null" : Array.isArray(normalized) ? "array" : typeof normalized,
+        },
+      },
+    );
+  }
+  return normalized;
+}
+
+function isMcpStructuredContent(value: ToolFactValue | undefined): value is McpStructuredContent {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function plainRecord(value: unknown): Readonly<Record<string, unknown>> {

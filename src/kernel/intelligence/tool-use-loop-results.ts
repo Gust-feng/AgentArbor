@@ -203,8 +203,16 @@ export function confirmationDecisionToolResult(
       code: decision.decision === "deny" ? "confirmation_denied" : "confirmation_guidance",
       confirmationId: decision.confirmationId,
       decision: decision.decision,
+      ...(clonedResult.error === undefined ? {} : { preApprovalError: clonedResult.error }),
+      ...(clonedResult.errorDomain === undefined
+        ? {}
+        : { preApprovalErrorDomain: clonedResult.errorDomain }),
+      ...(clonedResult.errorFacts === undefined
+        ? {}
+        : { preApprovalErrorFacts: clonedResult.errorFacts }),
     },
     durationMs: clonedResult.durationMs,
+    confirmationRequest: clonedResult.confirmationRequest,
   };
 }
 

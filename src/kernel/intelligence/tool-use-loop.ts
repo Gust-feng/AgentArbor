@@ -556,6 +556,29 @@ async function continueToolUseLoopAfterToolResults(input: {
     toolCalls.push(...roundResult.results);
     if (roundResult.pendingApproval !== undefined) {
       const requestIdForResume = createId("model-request");
+      const pendingApproval: ToolUseLoopPendingApproval = {
+        confirmationId: roundResult.pendingApproval.confirmationId,
+        pendingToolCall: cloneToolCallRequest(roundResult.pendingApproval.pendingToolCall),
+        pendingToolResult: cloneToolResult(roundResult.pendingApproval.pendingToolResult),
+        confirmationRequest:
+          roundResult.pendingApproval.confirmationRequest === undefined
+            ? undefined
+            : globalThis.structuredClone(roundResult.pendingApproval.confirmationRequest),
+        remainingToolCallsAfterApproval: roundResult.pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
+        messagesBeforeToolCall: cloneMessages(messages),
+        assistantMessage: assistantToolCallMessage(response, roundResult.pendingApproval.requestsForAssistantMessage),
+        completedToolResults: cloneToolResults(roundResult.pendingApproval.completedToolResults),
+        toolCallsBeforeApproval: cloneToolResults([
+          ...toolCalls.slice(0, Math.max(0, toolCalls.length - roundResult.results.length)),
+          ...roundResult.pendingApproval.completedToolResults,
+        ]),
+        modelRounds,
+        rounds,
+        requestId: requestIdForResume,
+      };
+      if (Boolean(input.options.abortSignal?.aborted)) {
+        return abortPendingApprovalLoopResult(input.options, input.initialRequest, pendingApproval);
+      }
       return {
         finalOutput: response,
         toolCalls,
@@ -564,26 +587,7 @@ async function continueToolUseLoopAfterToolResults(input: {
         modelRounds,
         rounds,
         stoppedReason: "approval_required",
-        pendingApproval: {
-          confirmationId: roundResult.pendingApproval.confirmationId,
-          pendingToolCall: cloneToolCallRequest(roundResult.pendingApproval.pendingToolCall),
-          pendingToolResult: cloneToolResult(roundResult.pendingApproval.pendingToolResult),
-          confirmationRequest:
-            roundResult.pendingApproval.confirmationRequest === undefined
-              ? undefined
-              : globalThis.structuredClone(roundResult.pendingApproval.confirmationRequest),
-          remainingToolCallsAfterApproval: roundResult.pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
-          messagesBeforeToolCall: cloneMessages(messages),
-          assistantMessage: assistantToolCallMessage(response, roundResult.pendingApproval.requestsForAssistantMessage),
-          completedToolResults: cloneToolResults(roundResult.pendingApproval.completedToolResults),
-          toolCallsBeforeApproval: cloneToolResults([
-            ...toolCalls.slice(0, Math.max(0, toolCalls.length - roundResult.results.length)),
-            ...roundResult.pendingApproval.completedToolResults,
-          ]),
-          modelRounds,
-          rounds,
-          requestId: requestIdForResume,
-        },
+        pendingApproval,
       };
     }
     const roundResults = roundResult.results;

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ToolCallResult, ToolExecutionContext } from "../../domain/tools/index.js";
-import { createToolCompletedMessage, createToolRequestedMessage } from "./tool-events.js";
+import {
+  createToolCancelledMessage,
+  createToolCompletedMessage,
+  createToolRequestedMessage,
+} from "./tool-events.js";
 
 test("tool completed event records the execution fact", () => {
   const plain = createToolCompletedMessage({
@@ -62,6 +66,39 @@ test("tool events preserve prototype-shaped JSON keys as own facts", () => {
   assert.deepEqual(record.__proto__, { polluted: true });
   assert.equal(record.constructor, "fact");
   assert.equal(({} as { polluted?: unknown }).polluted, undefined);
+});
+
+test("tool cancelled events preserve approval cancellation facts for replay", () => {
+  const cancelled = createToolCancelledMessage({
+    result: toolResult({
+      status: "cancelled",
+      error: "Agent turn was cancelled while this tool was waiting for approval.",
+      errorDomain: "runtime_error",
+      errorFacts: {
+        code: "approval_wait_cancelled",
+        confirmationId: "confirmation-cancelled",
+        detail: "x".repeat(120_000),
+      },
+      confirmationRequest: {
+        confirmationId: "confirmation-cancelled",
+        runId: "run-cancelled",
+        title: "Confirm tool",
+        actionSummary: "Confirm tool execution.",
+        affectedResources: [],
+        riskLevel: "medium",
+        requestedAt: "2026-07-13T00:00:00.000Z",
+        sourceRefs: ["tool:call-read"],
+      },
+    }),
+    context: toolContext(),
+  });
+
+  assert.equal(cancelled.payload.errorDomain, "runtime_error");
+  assert.equal(cancelled.payload.errorFacts?.code, "approval_wait_cancelled");
+  assert.equal(cancelled.payload.errorFacts?.confirmationId, "confirmation-cancelled");
+  assert.equal(cancelled.payload.confirmationId, "confirmation-cancelled");
+  assert.equal(cancelled.payload.factTruncation?.errorFacts, true);
+  assert.equal(JSON.stringify(cancelled.payload).length < 40_000, true);
 });
 
 test("tool events keep one bounded fact snapshot and preserve executable continuation", () => {

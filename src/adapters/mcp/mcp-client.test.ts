@@ -1052,7 +1052,7 @@ test("MCP tool adapter reports unknown post-execution content without inviting a
   assert.match(result.error ?? "", /Unsupported MCP content part: legacy_blob/);
 });
 
-test("ToolCenter rejects non-JSON-safe MCP structured content at the executor fact boundary", async () => {
+test("MCP adapter preserves valid content when structured content is not JSON-safe", async () => {
   const structuredContent: Record<string, unknown> = { id: "record-1" };
   structuredContent.self = structuredContent;
   const client = {
@@ -1074,11 +1074,49 @@ test("ToolCenter rejects non-JSON-safe MCP structured content at the executor fa
   );
 
   assert.equal(result.status, "failed");
-  assert.match(result.error ?? "", /Tool fact is not JSON-safe at \$\.structuredContent\.self: circular references are not supported/);
+  assert.match(result.error ?? "", /Tool fact is not JSON-safe at \$\.self: circular references are not supported/);
   assert.equal(result.errorDomain, "runtime_error");
-  assert.equal((result.errorFacts as Readonly<Record<string, unknown>> | undefined)?.code, "invalid_tool_output_fact");
+  assert.equal((result.errorFacts as Readonly<Record<string, unknown>> | undefined)?.code, "invalid_tool_fact");
   assert.equal(result.errorFacts?.sourceExecutionStatus, "completed");
   assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
+  assert.deepEqual(result.output, {
+    content: [{ type: "text", text: "Loaded record-1" }],
+    resultDelivery: {
+      status: "failed",
+      code: "invalid_tool_fact",
+      message: "Tool fact is not JSON-safe at $.self: circular references are not supported.",
+      mcpIsError: false,
+      sourceExecutionStatus: "completed",
+      doNotBlindlyRetry: true,
+    },
+  });
+  assert.equal(toolResultMessage(result).content.includes("Loaded record-1"), true);
+});
+
+test("MCP adapter rejects non-object structuredContent after the remote call returns", async () => {
+  const client = {
+    async callTool() {
+      return {
+        content: [{ type: "text" as const, text: "Loaded records" }],
+        structuredContent: ["record-1"],
+      };
+    },
+  } as unknown as McpClientWrapper;
+  const executor = createFakeMcpExecutor(client, "non_object_structured_content");
+  const center = new ToolCenter();
+  center.register(executor);
+
+  const result = await center.execute(
+    { callId: "mcp-non-object-structured-content", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorFacts?.code, "mcp_structured_content_not_object");
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "completed");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
+  assert.equal(toolResultMessage(result).content.includes("Loaded records"), true);
 });
 
 test("MCP tool adapter fails honestly when large text has no continuation reader", async () => {

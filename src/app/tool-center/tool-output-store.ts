@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isUtf16CodeUnitBoundary, utf16SafeWindowEnd } from "./text-window.js";
+import { MAX_TOOL_OUTPUT_SOURCE_METADATA_JSON_CHARS } from "./tool-output-limits.js";
 
 export const TOOL_OUTPUT_REF_PREFIX = "tool-output://";
 
@@ -53,7 +54,9 @@ export type ToolOutputStoreErrorCode =
   | "tool_output_item_too_large"
   | "tool_output_capacity_exceeded"
   | "tool_output_ref_generation_failed"
-  | "tool_output_not_found";
+  | "tool_output_not_found"
+  | "tool_output_read_budget_exceeded"
+  | "tool_output_source_metadata_too_large";
 
 export class ToolOutputStoreError extends Error {
   constructor(
@@ -329,6 +332,17 @@ function normalizeRetainInput(input: RetainToolOutputInput): RetainToolOutputInp
   const sourceToolName = nonEmptyText(input.sourceToolName, "sourceToolName");
   const sourceCallId = nonEmptyText(input.sourceCallId, "sourceCallId");
   const ownerId = input.ownerId === undefined ? undefined : nonEmptyText(input.ownerId, "ownerId");
+  const sourceMetadataChars = JSON.stringify({ sourceToolName, sourceCallId }).length;
+  if (sourceMetadataChars > MAX_TOOL_OUTPUT_SOURCE_METADATA_JSON_CHARS) {
+    throw new ToolOutputStoreError(
+      "tool_output_source_metadata_too_large",
+      "Tool output provenance metadata exceeds the readable continuation budget.",
+      {
+        sourceMetadataChars,
+        maxSourceMetadataChars: MAX_TOOL_OUTPUT_SOURCE_METADATA_JSON_CHARS,
+      },
+    );
+  }
   return {
     mediaType: input.mediaType,
     content: input.content,

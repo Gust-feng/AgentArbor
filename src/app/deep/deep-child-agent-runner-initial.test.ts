@@ -1,7 +1,10 @@
 /** Initial deep child execution and terminal result mapping. */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createReadToolOutputTool } from "../tool-center/adapters/tool-output-read-tool.js";
+import {
+  createReadToolOutputTool,
+  MAX_TOOL_OUTPUT_READ_CHARS,
+} from "../tool-center/adapters/tool-output-read-tool.js";
 import { ToolCenter } from "../tool-center/tool-center.js";
 import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import {
@@ -199,7 +202,7 @@ test("runDeepChildAgent inherits read_tool_output as a transport companion witho
     toolCallResponse("call-read-output", "read_tool_output", {
       ref: retainedRef,
       startChar: 0,
-      maxChars: 30_000,
+      maxChars: MAX_TOOL_OUTPUT_READ_CHARS,
     }),
     completedJsonResponse({
       summary: "已通过 transport reader 读取大型工具结果。",

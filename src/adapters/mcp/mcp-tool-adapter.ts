@@ -6,7 +6,6 @@ import type {
   ToolExecutorResult,
   ToolFactValue,
   ToolInputSchema,
-  ToolContinuation,
   ToolModelContract,
 } from "../../domain/tools/index.js";
 import { normalizeToolFactValue, withToolModelAttachments } from "../../domain/tools/index.js";
@@ -24,6 +23,8 @@ const DEFAULT_CONFIRMATION_STRATEGY: McpToolConfirmationStrategy = {
   autoApprovedTools: [],
 };
 const MAX_MCP_MODEL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const MAX_MCP_MODEL_ATTACHMENTS = 16;
+const MAX_MCP_MODEL_ATTACHMENT_TOTAL_BYTES = 32 * 1024 * 1024;
 
 export function createMcpToolExecutor(
   client: McpClientWrapper,
@@ -75,7 +76,20 @@ async function executeMcpToolForExecutor(
 ): Promise<McpToolOutput | ToolExecutorResult> {
   const startedAt = Date.now();
   const mcpResult = await client.callTool(tool.name, input);
-  const output = buildToolOutput(mcpResult);
+  let output: McpToolOutput;
+  try {
+    output = buildToolOutput(mcpResult);
+  } catch (error) {
+    return mcpPostExecutionDeliveryFailure({
+      error,
+      result: mcpResult,
+      input,
+      context,
+      serverId,
+      toolName: tool.name,
+      startedAt,
+    });
+  }
   if (mcpResult.isError !== true) {
     return output;
   }
@@ -175,9 +189,9 @@ function createMcpToolModelContract(input: {
     ],
     outputNotes: [
       "Returns one canonical fact body: content[] plus optional structuredContent; a content text block is omitted only when it is parseable JSON and deeply identical to structuredContent, and no duplicate summary or result wrapper is added.",
-      "Text content is preserved once and is not truncated by the MCP adapter. MCP has no standard tool-result continuation, so results beyond the shared transport budget fail honestly unless the server tool itself returns an explicit paging or reference contract.",
+      "Text content is preserved once and is not truncated by the MCP adapter. MCP structuredContent remains opaque because the protocol defines no generic continuation; when the current canonical result exceeds the shared inline budget, the Host ToolOutputStore retains that result for read_tool_output.",
       "Image, audio, and non-image embedded resource bytes are passed out of band as typed model attachments with MIME, filename or URI, and byte-length facts instead of being copied into the JSON body.",
-      "Audio remains an audio attachment: compatible Chat Completions providers map wav/mp3 to input_audio, while unsupported protocols or formats fail explicitly instead of treating audio as a generic file.",
+      "Tool-origin media keeps its tool-result role and factual provenance: Responses can carry image and file outputs directly, while Chat Completions rejects tool-origin binary attachments instead of changing their source role. The current OpenAI adapters reject tool-origin audio. Unsupported protocols or formats fail explicitly.",
       "MCP isError=true produces a failed ToolCallResult while preserving the canonical MCP error content once; protocol, connection, or transport exceptions also fail the tool call.",
     ],
     runtimeHints: [
@@ -246,8 +260,6 @@ function truncateAtWordBoundary(value: string, maxChars: number): string {
 export type McpToolOutput = {
   readonly content: readonly McpToolOutputContentPart[];
   readonly structuredContent?: ToolFactValue;
-  readonly continuation?: ToolContinuation;
-  readonly continuations?: readonly ToolContinuation[];
 };
 
 export type McpToolOutputContentPart =
@@ -372,9 +384,34 @@ function buildToolOutput(result: {
     ? result.content
     : result.content.filter((part) => !isExactStructuredContentMirror(part, result.structuredContent));
   const modelAttachments: ModelInputAttachment[] = [];
+  let modelAttachmentBytes = 0;
+  const reserveAttachment = (byteLength: number, mimeType: string) => {
+    assertMcpModelAttachmentSize(byteLength, mimeType);
+    const nextCount = modelAttachments.length + 1;
+    if (nextCount > MAX_MCP_MODEL_ATTACHMENTS) {
+      throw mcpModelAttachmentBudgetError(
+        "mcp_model_attachment_count_exceeded",
+        `MCP tool result has more than ${MAX_MCP_MODEL_ATTACHMENTS} model attachments.`,
+        { attachmentCount: nextCount, maxAttachments: MAX_MCP_MODEL_ATTACHMENTS },
+      );
+    }
+    const nextBytes = modelAttachmentBytes + byteLength;
+    if (nextBytes > MAX_MCP_MODEL_ATTACHMENT_TOTAL_BYTES) {
+      throw mcpModelAttachmentBudgetError(
+        "mcp_model_attachment_total_bytes_exceeded",
+        `MCP tool result model attachments exceed the ${MAX_MCP_MODEL_ATTACHMENT_TOTAL_BYTES} byte aggregate limit.`,
+        {
+          attachmentCount: nextCount,
+          totalBytes: nextBytes,
+          maxTotalBytes: MAX_MCP_MODEL_ATTACHMENT_TOTAL_BYTES,
+        },
+      );
+    }
+    modelAttachmentBytes = nextBytes;
+  };
   const attachImage = (data: string, mimeType: string) => {
     const byteLength = approximateBase64Bytes(data);
-    assertMcpModelAttachmentSize(byteLength, mimeType);
+    reserveAttachment(byteLength, mimeType);
     const modelAttachmentIndex = modelAttachments.length;
     modelAttachments.push({
       kind: "image",
@@ -390,7 +427,7 @@ function buildToolOutput(result: {
     inputRef: string
   ) => {
     const byteLength = approximateBase64Bytes(data);
-    assertMcpModelAttachmentSize(byteLength, mimeType);
+    reserveAttachment(byteLength, mimeType);
     const modelAttachmentIndex = modelAttachments.length;
     modelAttachments.push({
       kind: "file",
@@ -408,7 +445,7 @@ function buildToolOutput(result: {
     inputRef: string,
   ) => {
     const byteLength = approximateBase64Bytes(data);
-    assertMcpModelAttachmentSize(byteLength, mimeType);
+    reserveAttachment(byteLength, mimeType);
     const modelAttachmentIndex = modelAttachments.length;
     modelAttachments.push({
       kind: "audio",
@@ -519,55 +556,14 @@ function buildToolOutput(result: {
     ...(result.structuredContent === undefined
       ? {}
       : { structuredContent: result.structuredContent as ToolFactValue }),
-    ...mcpContinuationFacts(result.structuredContent),
   };
   return withToolModelAttachments(output, modelAttachments);
-}
-
-function mcpContinuationFacts(
-  structuredContent: unknown,
-): Pick<McpToolOutput, "continuation" | "continuations"> {
-  const record = plainRecord(structuredContent);
-  const continuation = mcpContinuationFromUnknown(record.continuation);
-  const continuations = Array.isArray(record.continuations)
-    ? record.continuations
-      .map(mcpContinuationFromUnknown)
-      .filter((item): item is ToolContinuation => item !== undefined)
-    : [];
-  return {
-    ...(continuation === undefined ? {} : { continuation }),
-    ...(continuations.length === 0 ? {} : { continuations }),
-  };
-}
-
-function mcpContinuationFromUnknown(value: unknown): ToolContinuation | undefined {
-  const record = plainRecord(value);
-  const ref = nonEmptyString(record.ref);
-  const nextInput = record.nextInput === undefined
-    ? undefined
-    : normalizeToolFactValue(record.nextInput);
-  const note = nonEmptyString(record.note);
-  // MCP does not define a continuation field. Only promote an explicit next
-  // tool input, which is executable by the calling model; a ref alone may be
-  // ordinary server business data and cannot prove that omitted bytes are readable.
-  if (nextInput === undefined) {
-    return undefined;
-  }
-  return {
-    ...(ref === undefined ? {} : { ref }),
-    ...(nextInput === undefined ? {} : { nextInput }),
-    ...(note === undefined ? {} : { note }),
-  };
 }
 
 function plainRecord(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
     : {};
-}
-
-function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function isExactStructuredContentMirror(part: McpContentPart, structuredContent: unknown): boolean {
@@ -612,6 +608,167 @@ function assertMcpModelAttachmentSize(byteLength: number, mimeType: string): voi
       },
     },
   );
+}
+
+function mcpModelAttachmentBudgetError(
+  code: "mcp_model_attachment_count_exceeded" | "mcp_model_attachment_total_bytes_exceeded",
+  message: string,
+  facts: Readonly<Record<string, number>>,
+): Error {
+  return Object.assign(new Error(message), {
+    errorDomain: "runtime_error",
+    code,
+    facts,
+  });
+}
+
+function mcpPostExecutionDeliveryFailure(input: {
+  readonly error: unknown;
+  readonly result: {
+    readonly content: readonly McpContentPart[];
+    readonly structuredContent?: unknown;
+    readonly isError?: boolean;
+  };
+  readonly input: unknown;
+  readonly context: ToolExecutionContext;
+  readonly serverId: string;
+  readonly toolName: string;
+  readonly startedAt: number;
+}): ToolExecutorResult {
+  const errorRecord = plainRecord(input.error);
+  const code = typeof errorRecord.code === "string" && errorRecord.code.length > 0
+    ? errorRecord.code
+    : "mcp_result_delivery_failed";
+  const message = input.error instanceof Error
+    ? input.error.message
+    : "MCP tool result could not be converted into model-visible facts.";
+  const sourceExecutionStatus = input.result.isError === true ? "failed" : "completed";
+  const causeFacts = normalizedRecordFact(errorRecord.facts);
+  const output = mcpDeliveryFailureOutput({
+    result: input.result,
+    code,
+    message,
+    sourceExecutionStatus,
+  });
+  return {
+    kind: "tool_call_result",
+    result: {
+      callId: input.context.toolCallId ?? `${input.serverId}__${input.toolName}`,
+      toolName: `${input.serverId}__${input.toolName}`,
+      input: normalizeFactWithoutThrowing(input.input),
+      output,
+      status: "failed",
+      error: `MCP tool ${input.serverId}__${input.toolName} returned, but its result could not be delivered: ${message}`,
+      errorDomain: "runtime_error",
+      errorFacts: {
+        ...(causeFacts ?? {}),
+        code,
+        phase: "mcp_result_delivery",
+        serverId: input.serverId,
+        mcpToolName: input.toolName,
+        mcpIsError: input.result.isError === true,
+        sourceExecutionStatus,
+        doNotBlindlyRetry: true,
+      },
+      durationMs: Date.now() - input.startedAt,
+    },
+  };
+}
+
+function mcpDeliveryFailureOutput(input: {
+  readonly result: {
+    readonly content: readonly McpContentPart[];
+    readonly structuredContent?: unknown;
+    readonly isError?: boolean;
+  };
+  readonly code: string;
+  readonly message: string;
+  readonly sourceExecutionStatus: "completed" | "failed";
+}): ToolFactValue {
+  const structuredContent = normalizeFactWithoutThrowing(input.result.structuredContent);
+  return {
+    content: input.result.content.map(mcpDeliveryFailureContentPart),
+    ...(structuredContent === undefined ? {} : { structuredContent }),
+    resultDelivery: {
+      status: "failed",
+      code: input.code,
+      message: input.message,
+      mcpIsError: input.result.isError === true,
+      sourceExecutionStatus: input.sourceExecutionStatus,
+      doNotBlindlyRetry: true,
+    },
+  };
+}
+
+function mcpDeliveryFailureContentPart(part: McpContentPart, index: number): ToolFactValue {
+  switch (part.type) {
+    case "text":
+      return { type: "text", text: part.text };
+    case "image":
+      return {
+        type: "image",
+        mimeType: part.mimeType,
+        byteLength: approximateBase64Bytes(part.data),
+        modelInput: "not_delivered",
+      };
+    case "audio":
+      return {
+        type: "audio",
+        mimeType: part.mimeType,
+        filename: `mcp-audio-${index + 1}${extensionForMimeType(part.mimeType)}`,
+        byteLength: approximateBase64Bytes(part.data),
+        modelInput: "not_delivered",
+      };
+    case "resource_link":
+      return {
+        type: "resource_link",
+        uri: part.uri,
+        name: part.name,
+        ...(part.title === undefined ? {} : { title: part.title }),
+        ...(part.description === undefined ? {} : { description: part.description }),
+        ...(part.mimeType === undefined ? {} : { mimeType: part.mimeType }),
+        ...(part.size === undefined ? {} : { size: part.size }),
+      };
+    case "resource":
+      return "text" in part.resource
+        ? {
+            type: "resource",
+            resource: {
+              uri: part.resource.uri,
+              ...(part.resource.mimeType === undefined ? {} : { mimeType: part.resource.mimeType }),
+              text: part.resource.text,
+            },
+          }
+        : {
+            type: "resource",
+            resource: {
+              uri: part.resource.uri,
+              ...(part.resource.mimeType === undefined ? {} : { mimeType: part.resource.mimeType }),
+              byteLength: approximateBase64Bytes(part.resource.blob),
+              modelInput: "not_delivered",
+            },
+          };
+    default:
+      return {
+        type: String((part as { readonly type?: unknown }).type ?? "unknown"),
+        modelInput: "not_delivered",
+      };
+  }
+}
+
+function normalizedRecordFact(value: unknown): Readonly<Record<string, ToolFactValue | undefined>> | undefined {
+  const normalized = normalizeFactWithoutThrowing(value);
+  return typeof normalized === "object" && normalized !== null && !Array.isArray(normalized)
+    ? normalized as Readonly<Record<string, ToolFactValue | undefined>>
+    : undefined;
+}
+
+function normalizeFactWithoutThrowing(value: unknown): ToolFactValue | undefined {
+  try {
+    return normalizeToolFactValue(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function filenameForResource(uri: string, mimeType: string, contentIndex: number): string {

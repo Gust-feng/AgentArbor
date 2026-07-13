@@ -425,7 +425,8 @@ test("createMcpToolExecutor creates correct namespaced ToolExecutor", async () =
   assert.match(outputNotes, /one canonical fact body/i);
   assert.match(outputNotes, /not truncated/i);
   assert.match(outputNotes, /typed model attachments/i);
-  assert.match(outputNotes, /unsupported protocols or formats/i);
+  assert.match(outputNotes, /tool-origin media keeps its tool-result role/i);
+  assert.match(outputNotes, /rejects tool-origin binary attachments/i);
   assert.match(outputNotes, /failed ToolCallResult/i);
   assert.equal(executor.definition.modelContract?.whenNotToUse?.join("\n").includes("built-in"), false);
 
@@ -849,32 +850,102 @@ test("MCP audio and file media survive ToolCenter normalization out of band", as
 test("MCP model attachments fail with explicit facts above the 20 MiB request limit", async () => {
   const maxBytes = 20 * 1024 * 1024;
   const oversizedAudio = Buffer.alloc(maxBytes + 1).toString("base64");
+  let calls = 0;
   const client = {
     async callTool() {
+      calls += 1;
       return {
-        content: [{ type: "audio" as const, data: oversizedAudio, mimeType: "audio/wav" }],
+        content: [
+          { type: "text" as const, text: "Remote operation completed before media delivery." },
+          { type: "audio" as const, data: oversizedAudio, mimeType: "audio/wav" },
+        ],
       };
     },
   } as unknown as McpClientWrapper;
   const executor = createFakeMcpExecutor(client, "oversized_audio");
-
-  await assert.rejects(
-    executor.execute(
-      {},
-      { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
-    ),
-    (error: unknown) => {
-      const record = error as {
-        readonly code?: unknown;
-        readonly facts?: Readonly<Record<string, unknown>>;
-      };
-      assert.equal(record.code, "mcp_model_attachment_too_large");
-      assert.equal(record.facts?.mimeType, "audio/wav");
-      assert.equal(record.facts?.byteLength, maxBytes + 1);
-      assert.equal(record.facts?.maxBytes, maxBytes);
-      return true;
-    },
+  const center = new ToolCenter();
+  center.register(executor);
+  const result = await center.execute(
+    { callId: "mcp-oversized-audio", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
   );
+  const output = result.output as {
+    readonly content?: readonly unknown[];
+    readonly resultDelivery?: Readonly<Record<string, unknown>>;
+  };
+
+  assert.equal(calls, 1);
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorFacts?.code, "mcp_model_attachment_too_large");
+  assert.equal(result.errorFacts?.mimeType, "audio/wav");
+  assert.equal(result.errorFacts?.byteLength, maxBytes + 1);
+  assert.equal(result.errorFacts?.maxBytes, maxBytes);
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "completed");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
+  assert.equal(output.resultDelivery?.sourceExecutionStatus, "completed");
+  assert.equal(JSON.stringify(output.content).includes("Remote operation completed before media delivery."), true);
+  assert.equal(JSON.stringify(output).includes(oversizedAudio), false);
+});
+
+test("MCP model attachments fail when one result exceeds the attachment count budget", async () => {
+  const client = {
+    async callTool() {
+      return {
+        content: Array.from({ length: 17 }, () => ({
+          type: "image" as const,
+          data: "AA==",
+          mimeType: "image/png",
+        })),
+      };
+    },
+  } as unknown as McpClientWrapper;
+  const executor = createFakeMcpExecutor(client, "too_many_images");
+  const center = new ToolCenter();
+  center.register(executor);
+  const result = await center.execute(
+    { callId: "mcp-too-many-images", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorFacts?.code, "mcp_model_attachment_count_exceeded");
+  assert.equal(result.errorFacts?.attachmentCount, 17);
+  assert.equal(result.errorFacts?.maxAttachments, 16);
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "completed");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
+});
+
+test("MCP model attachments fail when one result exceeds the aggregate byte budget", async () => {
+  const attachmentBytes = 16 * 1024 * 1024 + 1;
+  const attachmentData = Buffer.alloc(attachmentBytes).toString("base64");
+  const client = {
+    async callTool() {
+      return {
+        content: [
+          { type: "image" as const, data: attachmentData, mimeType: "image/png" },
+          { type: "image" as const, data: attachmentData, mimeType: "image/png" },
+        ],
+      };
+    },
+  } as unknown as McpClientWrapper;
+  const executor = createFakeMcpExecutor(client, "aggregate_images");
+  const center = new ToolCenter();
+  center.register(executor);
+  const result = await center.execute(
+    { callId: "mcp-aggregate-images", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorFacts?.code, "mcp_model_attachment_total_bytes_exceeded");
+  assert.equal(result.errorFacts?.attachmentCount, 2);
+  assert.equal(result.errorFacts?.totalBytes, attachmentBytes * 2);
+  assert.equal(result.errorFacts?.maxTotalBytes, 32 * 1024 * 1024);
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "completed");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
 });
 
 test("createMcpToolExecutor preserves current MCP resource types without binary JSON fallbacks", async () => {
@@ -953,22 +1024,32 @@ test("createMcpToolExecutor preserves current MCP resource types without binary 
   await client.disconnect();
 });
 
-test("MCP tool adapter rejects unknown content instead of disguising it as text", async () => {
+test("MCP tool adapter reports unknown post-execution content without inviting a blind retry", async () => {
+  let calls = 0;
   const client = {
     async callTool() {
+      calls += 1;
       return {
         content: [{ type: "legacy_blob", data: "opaque" }],
       };
     },
   } as unknown as McpClientWrapper;
 
-  await assert.rejects(
-    () => createFakeMcpExecutor(client, "unknown_content").execute(
-      {},
-      { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" }
-    ),
-    /Unsupported MCP content part: legacy_blob/
+  const executor = createFakeMcpExecutor(client, "unknown_content");
+  const center = new ToolCenter();
+  center.register(executor);
+  const result = await center.execute(
+    { callId: "mcp-unknown-content", toolName: executor.definition.name, input: {} },
+    { callerAgentId: "test-agent", traceId: "trace-1", goalId: "goal-1" },
+    { callerAgentId: "test-agent", allowedTools: [executor.definition.name] },
   );
+
+  assert.equal(calls, 1);
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorFacts?.code, "mcp_result_delivery_failed");
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "completed");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
+  assert.match(result.error ?? "", /Unsupported MCP content part: legacy_blob/);
 });
 
 test("ToolCenter rejects non-JSON-safe MCP structured content at the executor fact boundary", async () => {
@@ -996,6 +1077,8 @@ test("ToolCenter rejects non-JSON-safe MCP structured content at the executor fa
   assert.match(result.error ?? "", /Tool fact is not JSON-safe at \$\.structuredContent\.self: circular references are not supported/);
   assert.equal(result.errorDomain, "runtime_error");
   assert.equal((result.errorFacts as Readonly<Record<string, unknown>> | undefined)?.code, "invalid_tool_output_fact");
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "completed");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
 });
 
 test("MCP tool adapter fails honestly when large text has no continuation reader", async () => {
@@ -1016,21 +1099,24 @@ test("MCP tool adapter fails honestly when large text has no continuation reader
   );
   const output = result.output as McpToolOutput & {
     readonly retentionFailed?: boolean;
-    readonly truncated?: boolean;
+    readonly contentIncomplete?: boolean;
     readonly contentPreview?: string;
+    readonly deliveryCode?: string;
   };
   const modelMessage = toolResultMessage(result);
 
   assert.equal(result.status, "failed");
   assert.equal(result.errorFacts?.code, "tool_output_reader_unavailable");
+  assert.equal(result.errorFacts?.outputDeliveryCode, "tool_output_reader_unavailable");
   assert.equal(output.retentionFailed, true);
-  assert.equal(output.truncated, true);
+  assert.equal(output.contentIncomplete, true);
+  assert.equal(output.deliveryCode, "tool_output_reader_unavailable");
   assert.equal(typeof output.contentPreview, "string");
   assert.equal(modelMessage.content.includes(text), false);
   assert.equal(modelMessage.content.includes("tool_output_reader_unavailable"), true);
 });
 
-test("MCP structuredContent continuations keep oversized canonical output recoverable", async () => {
+test("MCP continuation-shaped structuredContent stays opaque while oversized current output remains recoverable", async () => {
   const currentPageSentinel = "CURRENT_PAGE_SENTINEL";
   const currentPageText = `${"x".repeat(240_000)}${currentPageSentinel}`;
   const singleContinuation = {
@@ -1045,12 +1131,12 @@ test("MCP structuredContent continuations keep oversized canonical output recove
     {
       name: "structured_single_continuation",
       structuredContent: { continuation: singleContinuation },
-      expected: [singleContinuation],
+      expected: { continuation: singleContinuation },
     },
     {
       name: "structured_multiple_continuations",
       structuredContent: { continuations: multipleContinuations },
-      expected: multipleContinuations,
+      expected: { continuations: multipleContinuations },
     },
   ] as const;
 
@@ -1078,8 +1164,10 @@ test("MCP structuredContent continuations keep oversized canonical output recove
       },
     );
     const canonicalOutput = result.output as {
-      readonly continuation?: typeof singleContinuation;
-      readonly continuations?: typeof multipleContinuations;
+      readonly continuation?: {
+        readonly ref?: string;
+        readonly nextInput?: unknown;
+      };
     };
     const payload = JSON.parse(toolResultMessage(result).content) as {
       readonly status?: string;
@@ -1091,23 +1179,12 @@ test("MCP structuredContent continuations keep oversized canonical output recove
         };
       };
     };
-    const continuations = payload.body?.value?.continuation === undefined
-      ? payload.body?.value?.continuations ?? []
-      : [payload.body.value.continuation];
-
     assert.equal(result.status, "completed");
     assert.equal(payload.status, "completed");
     assert.equal(payload.body?.value?.truncated, true);
-    assert.equal(typeof (canonicalOutput as { readonly continuation?: { readonly ref?: unknown } }).continuation?.ref, "string");
-    assert.equal(continuations.length > 0, true);
+    assert.match(canonicalOutput.continuation?.ref ?? "", /^tool-output:\/\//u);
 
-    const firstInput = (canonicalOutput as {
-      readonly continuation?: { readonly nextInput?: unknown };
-      readonly continuations?: readonly { readonly nextInput?: unknown }[];
-    }).continuation?.nextInput ??
-      (canonicalOutput as {
-        readonly continuations?: readonly { readonly nextInput?: unknown }[];
-      }).continuations?.[0]?.nextInput;
+    const firstInput = canonicalOutput.continuation?.nextInput;
     let input = firstInput as { readonly ref: string; readonly startChar: number; readonly maxChars: number };
     let restored = "";
     while (true) {
@@ -1133,17 +1210,15 @@ test("MCP structuredContent continuations keep oversized canonical output recove
     }
     const restoredOutput = JSON.parse(restored) as {
       readonly content: readonly { readonly type: string; readonly text?: string }[];
-      readonly continuation?: typeof singleContinuation;
-      readonly continuations?: typeof multipleContinuations;
+      readonly structuredContent?: unknown;
+      readonly continuation?: unknown;
+      readonly continuations?: unknown;
     };
     assert.equal(restoredOutput.content[0]?.text, currentPageText);
     assert.equal(restoredOutput.content[0]?.text?.endsWith(currentPageSentinel), true);
-    assert.deepEqual(
-      restoredOutput.continuation === undefined
-        ? restoredOutput.continuations ?? []
-        : [restoredOutput.continuation],
-      fixture.expected,
-    );
+    assert.equal(restoredOutput.continuation, undefined);
+    assert.equal(restoredOutput.continuations, undefined);
+    assert.deepEqual(restoredOutput.structuredContent, fixture.expected);
   }
 });
 

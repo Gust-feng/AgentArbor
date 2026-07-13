@@ -45,7 +45,16 @@ async function assertLatestContextContract(store: DeepChildLoopContextStore): Pr
     childRunId,
     createdAt: "2026-07-12T02:00:00.000Z",
     updatedAt: "2026-07-12T02:00:00.000Z",
-    messages: [{ role: "assistant", content: "second segment replaces the latest snapshot" }],
+    messages: [{
+      role: "assistant",
+      content: "second segment replaces the latest snapshot",
+      attachments: [{
+        kind: "image",
+        filename: "ephemeral.png",
+        source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+      }],
+      protocolExtensions: { providerResponseId: "response-ephemeral" },
+    }],
   });
   const savedSecond = await store.upsert(second);
   const records = await store.listForChild(runId, childRunId);

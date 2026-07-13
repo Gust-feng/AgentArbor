@@ -55,8 +55,11 @@ function toOpenAIMessages(
 ): readonly Record<string, unknown>[] {
   return messages.map((message) => {
     if (message.role === "tool" && (message.attachments?.length ?? 0) > 0) {
+      const hasAudio = message.attachments?.some((attachment) => attachment.kind === "audio") === true;
       throw new OpenAIModelInputError(
-        "OpenAI-compatible Chat Completions cannot attach binary media to a tool result without changing its message role; use the Responses protocol for tool-origin image, audio, or file attachments.",
+        hasAudio
+          ? "OpenAI-compatible Chat Completions cannot attach tool-origin audio without changing its message role. The Responses adapter supports tool-origin image and file attachments, but not audio; AgentArbor currently has no OpenAI role-preserving transport for tool-origin audio."
+          : "OpenAI-compatible Chat Completions cannot attach tool-origin image or file content without changing its message role; use the Responses protocol for these tool-origin attachments.",
       );
     }
     return toOpenAIMessage(message, dialect);

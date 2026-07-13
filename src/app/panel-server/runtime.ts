@@ -328,10 +328,6 @@ function assemblePanelRuntime(input: {
         job: job as PanelRunJob,
         response: createPanelRunJobResponse(runtime as PanelRuntime, job as PanelRunJob),
       });
-      const traceId = (job as PanelRunJob).traceId;
-      if (traceId !== undefined) {
-        await runtime.toolOutputStore.releaseOwner(traceId);
-      }
       if (!runtime.isQuiescing) {
         input.hooks.scheduleNextQueuedConversationRun(runtime as PanelRuntime, job as PanelRunJob);
       }

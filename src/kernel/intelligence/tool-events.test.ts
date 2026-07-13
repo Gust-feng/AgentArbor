@@ -50,6 +50,20 @@ test("tool events trust ToolCenter facts, preserve evidence, and snapshot mutabl
   assert.doesNotThrow(() => JSON.stringify([requested, completed]));
 });
 
+test("tool events preserve prototype-shaped JSON keys as own facts", () => {
+  const output = JSON.parse('{"__proto__":{"polluted":true},"constructor":"fact"}') as ToolCallResult["output"];
+  const completed = createToolCompletedMessage({
+    result: toolResult({ output }),
+    context: toolContext(),
+  });
+  const record = outputRecord(completed.payload.output);
+
+  assert.equal(Object.prototype.hasOwnProperty.call(record, "__proto__"), true);
+  assert.deepEqual(record.__proto__, { polluted: true });
+  assert.equal(record.constructor, "fact");
+  assert.equal(({} as { polluted?: unknown }).polluted, undefined);
+});
+
 test("tool events keep one bounded fact snapshot and preserve executable continuation", () => {
   const requested = createToolRequestedMessage({
     request: {

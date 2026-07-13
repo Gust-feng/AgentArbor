@@ -318,7 +318,12 @@ function boundedToolEventFact(
       budget.truncated = true;
       break;
     }
-    output[key] = bounded;
+    Object.defineProperty(output, key, {
+      value: bounded,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
     budget.remaining = Math.max(0, budget.remaining - 1);
   }
   if (ordinaryEntries.length > TOOL_EVENT_OBJECT_MAX_FIELDS || Object.keys(output).length < entries.length) {

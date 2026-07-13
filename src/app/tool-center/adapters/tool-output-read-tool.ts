@@ -2,16 +2,19 @@ import type { ToolContinuation, ToolExecutor } from "../../../domain/tools/index
 import {
   TOOL_OUTPUT_REF_PREFIX,
   ToolOutputStoreError,
+  type ToolOutputSlice,
   type ToolOutputStore,
 } from "../tool-output-store.js";
+import {
+  DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS,
+  MAX_TOOL_OUTPUT_READ_CHARS,
+} from "../tool-output-limits.js";
 import { asRecord, throwIfAborted } from "./local-workspace-common.js";
+import { utf16SafePrefixLength } from "../text-window.js";
 
 export const MIN_TOOL_OUTPUT_READ_CHARS = 2;
-export const DEFAULT_TOOL_OUTPUT_READ_CHARS = 30_000;
-// A tool result is JSON encoded before it reaches the provider. Keeping the
-// raw window at 30k also keeps the worst-case six-character JSON escapes below
-// the shared 220k transport guard, so this reader never needs to offload itself.
-export const MAX_TOOL_OUTPUT_READ_CHARS = 30_000;
+export const DEFAULT_TOOL_OUTPUT_READ_CHARS = MAX_TOOL_OUTPUT_READ_CHARS;
+export { MAX_TOOL_OUTPUT_READ_CHARS };
 
 export type ReadToolOutputResult = {
   readonly ref: string;
@@ -24,6 +27,7 @@ export type ReadToolOutputResult = {
   readonly totalChars: number;
   readonly hasMoreAfter: boolean;
   readonly truncated: boolean;
+  readonly continuationAvailability: "live_only";
   readonly continuation?: ToolContinuation;
 };
 
@@ -57,6 +61,7 @@ export function createReadToolOutputTool(store: ToolOutputStore): ToolExecutor {
           "content is the exact retained text or canonical JSON window; window boundaries never split a UTF-16 surrogate pair.",
           "sourceToolName and sourceCallId identify the original execution; this read does not execute it again.",
           "truncated is true only when hasMoreAfter is true and continuation.nextInput points to the first unread character.",
+          "continuationAvailability is live_only because retained bytes are process-local and are lost after restart.",
           "The final window releases the process-local ref; retain the returned content instead of rereading from the beginning.",
         ],
         examples: [{
@@ -115,36 +120,99 @@ export function createReadToolOutputTool(store: ToolOutputStore): ToolExecutor {
           { ref },
         );
       }
-      const nextStartChar = slice.startChar + slice.textChars;
-      const continuation: ToolContinuation | undefined = slice.hasMoreAfter
-        ? {
-            ref: slice.ref,
-            nextInput: {
-              ref: slice.ref,
-              startChar: nextStartChar,
-              maxChars,
-            },
-            note: "Call read_tool_output with nextInput to read the next retained segment; the original tool will not run again.",
-          }
-        : undefined;
-      if (!slice.hasMoreAfter) {
+      const result = fitReadResultToInlineBudget(slice, maxChars);
+      if (!result.hasMoreAfter) {
         await store.release(slice.ref);
       }
-      return {
-        ref: slice.ref,
-        mediaType: slice.mediaType,
-        sourceToolName: slice.sourceToolName,
-        sourceCallId: slice.sourceCallId,
-        content: slice.content,
-        startChar: slice.startChar,
-        textChars: slice.textChars,
-        totalChars: slice.totalChars,
-        hasMoreAfter: slice.hasMoreAfter,
-        truncated: slice.hasMoreAfter,
-        continuation,
-      };
+      return result;
     },
   };
+}
+
+function fitReadResultToInlineBudget(
+  slice: ToolOutputSlice,
+  requestedMaxChars: number,
+): ReadToolOutputResult {
+  const full = readToolOutputResult(slice, slice.content, requestedMaxChars);
+  if (serializedReadResultChars(full) <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS) {
+    return full;
+  }
+
+  let low = 0;
+  let high = slice.content.length;
+  let best: ReadToolOutputResult | undefined;
+  while (low <= high) {
+    const candidateMaxChars = Math.floor((low + high) / 2);
+    const prefixLength = utf16SafePrefixLength(slice.content, candidateMaxChars);
+    const candidate = readToolOutputResult(
+      slice,
+      slice.content.slice(0, prefixLength),
+      requestedMaxChars,
+    );
+    if (serializedReadResultChars(candidate) <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS) {
+      if (candidate.textChars > 0 && (best === undefined || candidate.textChars > best.textChars)) {
+        best = candidate;
+      }
+      low = candidateMaxChars + 1;
+    } else {
+      high = candidateMaxChars - 1;
+    }
+  }
+
+  if (best === undefined) {
+    const metadataChars = serializedReadResultChars(readToolOutputResult(slice, "", requestedMaxChars));
+    throw new ToolOutputStoreError(
+      "tool_output_read_budget_exceeded",
+      "Retained tool output metadata leaves no transport-safe room for the next content segment.",
+      {
+        ref: slice.ref,
+        startChar: slice.startChar,
+        totalChars: slice.totalChars,
+        metadataChars,
+        maxInlineOutputChars: DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS,
+      },
+    );
+  }
+  return best;
+}
+
+function readToolOutputResult(
+  slice: ToolOutputSlice,
+  content: string,
+  requestedMaxChars: number,
+): ReadToolOutputResult {
+  const textChars = content.length;
+  const nextStartChar = slice.startChar + textChars;
+  const hasMoreAfter = nextStartChar < slice.totalChars;
+  const continuation: ToolContinuation | undefined = hasMoreAfter
+    ? {
+        ref: slice.ref,
+        nextInput: {
+          ref: slice.ref,
+          startChar: nextStartChar,
+          maxChars: requestedMaxChars,
+        },
+        note: "Call read_tool_output with nextInput to read the next retained segment; the original tool will not run again.",
+      }
+    : undefined;
+  return {
+    ref: slice.ref,
+    mediaType: slice.mediaType,
+    sourceToolName: slice.sourceToolName,
+    sourceCallId: slice.sourceCallId,
+    content,
+    startChar: slice.startChar,
+    textChars,
+    totalChars: slice.totalChars,
+    hasMoreAfter,
+    truncated: hasMoreAfter,
+    continuationAvailability: "live_only",
+    continuation,
+  };
+}
+
+function serializedReadResultChars(result: ReadToolOutputResult): number {
+  return JSON.stringify(result).length;
 }
 
 function requiredToolOutputRef(value: unknown): string {

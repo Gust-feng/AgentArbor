@@ -134,7 +134,7 @@ test("panel runtime records process residue summaries when ordinary runs reach t
   assert.equal(summaries[0]?.runId, run.runId);
 });
 
-test("panel runtime releases Ordinary-owned retained tool outputs at run terminal", async () => {
+test("panel runtime keeps Ordinary-owned retained tool outputs after terminal for conversation continuation", async () => {
   const traceId = "trace-tool-output-owner";
   let retainedRef: string | undefined;
   const runtime = createPanelRuntime({}, {
@@ -165,15 +165,15 @@ test("panel runtime releases Ordinary-owned retained tool outputs at run termina
   await runtime.runExecutor.start({
     runKind: "desktop",
     runMode: "agent",
-    goal: "release retained output at terminal",
+    goal: "retain tool output for a later conversation turn",
     aiMode: "fake",
   });
   await Promise.allSettled([...runtime.activeRunJobs]);
 
   assert.equal(typeof retainedRef, "string");
   assert.equal(
-    await runtime.toolOutputStore.read(retainedRef!, { startChar: 0, maxChars: 30_000 }),
-    undefined,
+    (await runtime.toolOutputStore.read(retainedRef!, { startChar: 0, maxChars: 30_000 }))?.content,
+    "ordinary-owned-output",
   );
 });
 

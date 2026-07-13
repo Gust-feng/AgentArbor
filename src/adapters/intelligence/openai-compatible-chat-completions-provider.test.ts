@@ -161,6 +161,56 @@ test("OpenAI-compatible Chat Completions rejects URL-backed user file attachment
   assert.match(response.failure?.message ?? "", /does not support URL-backed file attachments/);
 });
 
+test("OpenAI-compatible Chat Completions maps user wav and mp3 attachments to input_audio", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-audio-test",
+        model: "gpt-compatible-test",
+        choices: [{
+          message: { role: "assistant", content: "Audio received." },
+          finish_reason: "stop",
+        }],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test/",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Compare these clips.",
+      attachments: [{
+        kind: "audio",
+        filename: "first.wav",
+        source: { kind: "data", mimeType: "audio/wav", data: "UklGRg==" },
+      }, {
+        kind: "audio",
+        filename: "second.mp3",
+        source: { kind: "data", mimeType: "audio/mpeg", data: "SUQz" },
+      }],
+    }],
+  }));
+
+  assert.deepEqual(calls[0]?.body.messages, [{
+    role: "user",
+    content: [
+      { type: "text", text: "Compare these clips." },
+      { type: "input_audio", input_audio: { data: "UklGRg==", format: "wav" } },
+      { type: "input_audio", input_audio: { data: "SUQz", format: "mp3" } },
+    ],
+  }]);
+});
+
 test("OpenAI-compatible Chat Completions adapter maps MiniMax image auto detail to default", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
@@ -210,7 +260,7 @@ test("OpenAI-compatible Chat Completions adapter maps MiniMax image auto detail 
   }]);
 });
 
-test("OpenAI-compatible Chat Completions rejects tool-origin binary attachments before transport", async () => {
+test("OpenAI-compatible Chat Completions rejects mixed tool-origin media when audio has no role-preserving transport", async () => {
   let fetchCalls = 0;
   const provider = new OpenAICompatibleChatCompletionsProvider({
     baseUrl: "https://llm.example.test/",
@@ -238,6 +288,11 @@ test("OpenAI-compatible Chat Completions rejects tool-origin binary attachments 
         toolName: "mcp__read",
         content: JSON.stringify({ content: [{ type: "resource", uri: "memory://report.pdf" }] }),
         attachments: [{
+          kind: "image",
+          inputRef: "mcp-content:image:0",
+          filename: "preview.png",
+          source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+        }, {
           kind: "file",
           inputRef: "memory://report.pdf",
           filename: "report.pdf",
@@ -261,7 +316,49 @@ test("OpenAI-compatible Chat Completions rejects tool-origin binary attachments 
   assert.equal(fetchCalls, 0);
   assert.equal(response.status, "failed");
   assert.equal(response.failure?.kind, "request_validation");
-  assert.match(response.failure?.message ?? "", /use the Responses protocol/);
+  assert.match(response.failure?.message ?? "", /tool-origin audio/);
+  assert.match(response.failure?.message ?? "", /Responses adapter supports tool-origin image and file attachments, but not audio/);
+});
+
+test("OpenAI-compatible Chat Completions does not recommend Responses for tool-origin audio", async () => {
+  let fetchCalls = 0;
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test/",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ callId: "call-audio", toolName: "mcp__listen", input: {} }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-audio",
+        toolName: "mcp__listen",
+        content: JSON.stringify({ content: [{ type: "audio", mimeType: "audio/wav" }] }),
+        attachments: [{
+          kind: "audio",
+          inputRef: "mcp-content:audio:0",
+          filename: "clip.wav",
+          source: { kind: "data", mimeType: "audio/wav", data: "UklGRg==" },
+        }],
+      },
+    ],
+  }));
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "request_validation");
+  assert.match(response.failure?.message ?? "", /no OpenAI role-preserving transport for tool-origin audio/);
+  assert.doesNotMatch(response.failure?.message ?? "", /use the Responses protocol/);
 });
 
 test("OpenAI-compatible Chat Completions rejects URL-backed tool attachments without role promotion", async () => {

@@ -276,6 +276,38 @@ test("ToolCenter preserves approval_required when partial output retention fails
   assert.equal((result.output as { readonly retentionFailed?: unknown }).retentionFailed, true);
 });
 
+test("ToolCenter marks completed side-effect delivery failed without inviting a retry", async () => {
+  const store = new InMemoryToolOutputStore({ maxItemChars: 8 });
+  const center = new ToolCenter({ outputStore: store, maxInlineOutputChars: 4 });
+  center.register(createReadToolOutputTool(store));
+  let applied = 0;
+  center.register(testTool("submit_fixture", async () => {
+    applied += 1;
+    return { receipt: "effect-already-applied" };
+  }, "external-submit"));
+
+  const result = await center.execute(
+    { callId: "call-submit", toolName: "submit_fixture", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("submit_fixture", "read_tool_output"),
+  );
+  const delivery = result.output as Readonly<Record<string, unknown>>;
+
+  assert.equal(applied, 1);
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorDomain, "runtime_error");
+  assert.equal(result.errorFacts?.code, "tool_output_item_too_large");
+  assert.equal(result.errorFacts?.outputDeliveryCode, "tool_output_item_too_large");
+  assert.equal(result.errorFacts?.originalStatus, "completed");
+  assert.equal(delivery.retentionFailed, true);
+  assert.equal(delivery.contentIncomplete, true);
+  assert.equal(delivery.deliveryStatus, "failed");
+  assert.equal(delivery.sourceExecutionStatus, "completed");
+  assert.equal(delivery.doNotBlindlyRetry, true);
+  assert.equal(delivery.truncated, undefined);
+  assert.equal(delivery.continuation, undefined);
+});
+
 test("ToolCenter rebuilds explicit failed results with JSON-safe error facts", async () => {
   const circular: Record<string, unknown> = {};
   circular.self = circular;
@@ -523,6 +555,7 @@ test("ToolCenter retains oversized thrown stderr and HTTP-like bodies behind rea
     const delivery = result.output as {
       readonly contentRef?: unknown;
       readonly truncated?: unknown;
+      readonly continuationAvailability?: unknown;
       readonly continuation?: { readonly nextInput?: ToolCallRequest["input"] };
     };
 
@@ -532,6 +565,7 @@ test("ToolCenter retains oversized thrown stderr and HTTP-like bodies behind rea
     assert.notEqual(result.errorFacts?.[fixture.evidenceName], fixture.evidence);
     assert.equal(typeof delivery.contentRef, "string");
     assert.equal(delivery.truncated, true);
+    assert.equal(delivery.continuationAvailability, "live_only");
     assert.notEqual(delivery.continuation?.nextInput, undefined);
 
     const read = await center.execute(
@@ -991,6 +1025,9 @@ test("ToolCenter fails non-JSON-safe executor results at the fact boundary", asy
     assert.equal(result.errorFacts?.code, "invalid_tool_output_fact");
     assert.equal(result.errorFacts?.phase, "output");
     assert.equal(result.errorFacts?.path, expectedPath);
+    assert.equal(result.errorFacts?.sourceExecutionStatus, "completed");
+    assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
+    assert.equal(result.errorFacts?.outputDeliveryPhase, "executor_result_normalization");
     assert.match(result.error ?? "", /not JSON-safe/);
   }
 });

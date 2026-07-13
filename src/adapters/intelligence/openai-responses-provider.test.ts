@@ -167,6 +167,68 @@ test("OpenAI Responses adapter maps user image and file attachments to input con
   }]);
 });
 
+test("OpenAI Responses rejects per-file and request-wide file limits before transport", async () => {
+  let fetchCalls = 0;
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+  const fiftyMb = 50_000_000;
+  const thirtyMb = 30_000_000;
+
+  const oversized = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Inspect this file.",
+      attachments: [{
+        kind: "file",
+        source: { kind: "file_id", fileId: "file-oversized" },
+        filename: "oversized.pdf",
+        byteLength: fiftyMb,
+      }],
+    }],
+  }));
+  const aggregate = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [
+      {
+        role: "user",
+        content: "Compare both files.",
+        attachments: [{
+          kind: "file",
+          source: { kind: "file_id", fileId: "file-user" },
+          filename: "user.pdf",
+          byteLength: thirtyMb,
+        }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-file",
+        toolName: "mcp__read_file",
+        content: "Tool file output.",
+        attachments: [{
+          kind: "file",
+          source: { kind: "file_id", fileId: "file-tool" },
+          filename: "tool.pdf",
+          byteLength: thirtyMb,
+        }],
+      },
+    ],
+  }));
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(oversized.status, "failed");
+  assert.equal(oversized.failure?.kind, "request_validation");
+  assert.match(oversized.failure?.message ?? "", /each file input to be smaller/);
+  assert.equal(aggregate.status, "failed");
+  assert.equal(aggregate.failure?.kind, "request_validation");
+  assert.match(aggregate.failure?.message ?? "", /per-request limit/);
+});
+
 test("OpenAI Responses adapter maps system message to instructions", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
@@ -667,6 +729,45 @@ test("OpenAI Responses rejects audio attachments before transport", async () => 
   assert.equal(response.status, "failed");
   assert.equal(response.failure?.kind, "request_validation");
   assert.match(response.failure?.message ?? "", /does not currently accept audio input attachments/);
+  assert.match(response.failure?.message ?? "", /user-origin audio can use an audio-capable Chat Completions model/);
+});
+
+test("OpenAI Responses rejects tool-origin audio without redirecting it to Chat", async () => {
+  let fetchCalls = 0;
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("fetch should not run");
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "assistant",
+      content: "",
+      toolCalls: [{ callId: "call-audio", toolName: "mcp__listen", input: {} }],
+    }, {
+      role: "tool",
+      toolCallId: "call-audio",
+      toolName: "mcp__listen",
+      content: JSON.stringify({ mimeType: "audio/wav" }),
+      attachments: [{
+        kind: "audio",
+        inputRef: "mcp-content:audio:0",
+        filename: "clip.wav",
+        source: { kind: "data", mimeType: "audio/wav", data: "UklGRg==" },
+      }],
+    }],
+  }));
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "request_validation");
+  assert.match(response.failure?.message ?? "", /does not currently accept tool-origin audio attachments/);
+  assert.match(response.failure?.message ?? "", /cannot preserve their tool-result role/);
 });
 
 test("OpenAI Responses adapter handles assistant message with both text and tool calls", async () => {

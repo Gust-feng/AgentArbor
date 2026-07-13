@@ -11,6 +11,7 @@ import {
   InMemoryToolOutputStore,
   ToolOutputStoreError,
 } from "./tool-output-store.js";
+import { DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS } from "./tool-output-limits.js";
 import { createAgentToolRegistry } from "./builtin-tool-runtime.js";
 
 const TOOL_CONTEXT: ToolExecutionContext = {
@@ -39,6 +40,7 @@ test("InMemoryToolOutputStore and read_tool_output reconstruct exact retained te
 
   while (true) {
     const output = await executeReadTool(tool, input);
+    assert.equal(output.continuationAvailability, "live_only");
     assert.equal(output.mediaType, "text/plain");
     assert.equal(output.sourceToolName, "fixture_large_tool");
     assert.equal(output.sourceCallId, "call-large-text");
@@ -168,6 +170,19 @@ test("InMemoryToolOutputStore reports item, entry, and total-character capacity 
   assert.equal((await totalLimited.read(retainedTotal.ref, { startChar: 0, maxChars: 4 }))?.content, "1234");
 });
 
+test("InMemoryToolOutputStore refuses provenance that would create an unreadable continuation", async () => {
+  const store = deterministicStore();
+  await assertStoreRejects(
+    store.retain({
+      mediaType: "text/plain",
+      content: "retained content",
+      sourceToolName: "fixture_tool",
+      sourceCallId: "\u0000".repeat(20_000),
+    }),
+    "tool_output_source_metadata_too_large",
+  );
+});
+
 test("InMemoryToolOutputStore releases individual refs and run owners to reclaim live capacity", async () => {
   const store = new InMemoryToolOutputStore({
     maxEntries: 2,
@@ -210,10 +225,10 @@ test("read_tool_output rejects invalid windows and never emits a zero-progress c
   const retained = await store.retain(retainInput("abcdefghij", "call-window"));
   const tool = createReadToolOutputTool(store);
 
-  await assert.rejects(() => tool.execute({ ref: retained.ref, maxChars: 1 }, TOOL_CONTEXT), /between 2 and 30000/);
+  await assert.rejects(() => tool.execute({ ref: retained.ref, maxChars: 1 }, TOOL_CONTEXT), /between 2 and 29000/);
   await assert.rejects(
     () => tool.execute({ ref: retained.ref, maxChars: MAX_TOOL_OUTPUT_READ_CHARS + 1 }, TOOL_CONTEXT),
-    /between 2 and 30000/,
+    /between 2 and 29000/,
   );
   await assert.rejects(() => tool.execute({ ref: retained.ref, startChar: -1 }, TOOL_CONTEXT), /non-negative integer/);
   await assert.rejects(() => tool.execute({ ref: retained.ref, startChar: 1.5 }, TOOL_CONTEXT), /safe integer/);
@@ -226,6 +241,58 @@ test("read_tool_output rejects invalid windows and never emits a zero-progress c
   const nextInput = asReadInput(output.continuation?.nextInput);
   assert.equal(output.textChars, 2);
   assert.equal(nextInput.startChar, 2);
+});
+
+test("read_tool_output stays within the inline budget under worst-case JSON escaping", async () => {
+  const store = deterministicStore();
+  const retained = await store.retain(retainInput(
+    "\u0000".repeat(MAX_TOOL_OUTPUT_READ_CHARS + 1),
+    "call-escaped-window",
+  ));
+  const output = await executeReadTool(createReadToolOutputTool(store), {
+    ref: retained.ref,
+    startChar: 0,
+    maxChars: MAX_TOOL_OUTPUT_READ_CHARS,
+  });
+
+  assert.equal(output.textChars, MAX_TOOL_OUTPUT_READ_CHARS);
+  assert.equal(JSON.stringify(output).length <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS, true);
+  assert.equal(output.hasMoreAfter, true);
+});
+
+test("read_tool_output shrinks escaped windows for long provenance without skipping content", async () => {
+  const store = deterministicStore();
+  const content = "\u0000".repeat(MAX_TOOL_OUTPUT_READ_CHARS + 17);
+  const retained = await store.retain({
+    mediaType: "text/plain",
+    content,
+    sourceToolName: "fixture_tool",
+    sourceCallId: "call-" + "x".repeat(60_000),
+  });
+  const tool = createReadToolOutputTool(store);
+  const segments: string[] = [];
+  let input: ReadToolInput = {
+    ref: retained.ref,
+    startChar: 0,
+    maxChars: MAX_TOOL_OUTPUT_READ_CHARS,
+  };
+
+  while (true) {
+    const output = await executeReadTool(tool, input);
+    assert.equal(JSON.stringify(output).length <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS, true);
+    assert.equal(output.startChar, segments.reduce((total, segment) => total + segment.length, 0));
+    assert.equal(output.textChars > 0, true);
+    segments.push(output.content);
+    if (!output.hasMoreAfter) {
+      break;
+    }
+    const nextInput = asReadInput(output.continuation?.nextInput);
+    assert.equal(nextInput.startChar, output.startChar + output.textChars);
+    input = nextInput;
+  }
+
+  assert.equal(segments[0]!.length < MAX_TOOL_OUTPUT_READ_CHARS, true);
+  assert.equal(segments.join(""), content);
 });
 
 test("independent ToolCenters share the configured store and rebuild large results without rerunning producers", async () => {
@@ -340,6 +407,7 @@ type ReadToolOutput = {
   readonly totalChars: number;
   readonly hasMoreAfter: boolean;
   readonly truncated: boolean;
+  readonly continuationAvailability: "live_only";
   readonly continuation?: {
     readonly ref?: string;
     readonly nextInput?: unknown;

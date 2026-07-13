@@ -30,7 +30,10 @@ import {
   type ToolOutputMediaType,
   type ToolOutputStore,
 } from "./tool-output-store.js";
-import { DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS } from "./tool-output-limits.js";
+import {
+  DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS,
+  MAX_TOOL_OUTPUT_READ_CHARS,
+} from "./tool-output-limits.js";
 import { utf16SafePrefixLength } from "./text-window.js";
 
 export type ToolCenterOptions = {
@@ -40,7 +43,7 @@ export type ToolCenterOptions = {
 };
 
 const RETAINED_TOOL_OUTPUT_PREVIEW_CHARS = 4_000;
-const RETAINED_TOOL_OUTPUT_READ_CHARS = 30_000;
+const RETAINED_TOOL_OUTPUT_READ_CHARS = MAX_TOOL_OUTPUT_READ_CHARS;
 const MAX_INLINE_APPROVAL_PARTIAL_OUTPUT_CHARS = 24_000;
 const TOOL_OUTPUT_READER_NAME = "read_tool_output";
 
@@ -156,16 +159,31 @@ export class ToolCenter {
       return approvalRequiredToolResult(factRequest, startedAt, securityDecision);
     }
 
+    let output: unknown;
     try {
-      const output = await executor.execute(factRequest.input, {
+      output = await executor.execute(factRequest.input, {
         ...context,
         toolCallId: factRequest.callId,
         approvedConfirmationIds: permission.approvedConfirmationIds,
         confirmationPolicy: permission.confirmationPolicy,
       });
+    } catch (error) {
       if (isAbortSignalAborted(context.abortSignal)) {
         return cancelledToolResult(factRequest, startedAt);
       }
+      const sanitized = sanitizeError(error, factRequest.toolName);
+      return this.prepareThrownErrorForDelivery(
+        failedToolResult(factRequest, startedAt, sanitized),
+        permission,
+        sanitized,
+        context.traceId,
+      );
+    }
+    if (isAbortSignalAborted(context.abortSignal)) {
+      return cancelledToolResult(factRequest, startedAt);
+    }
+
+    try {
       if (isToolExecutorResult(output)) {
         return this.prepareResultForDelivery(
           normalizeExecutorResult(output.result, factRequest, startedAt),
@@ -186,10 +204,20 @@ export class ToolCenter {
         return cancelledToolResult(factRequest, startedAt);
       }
       const sanitized = sanitizeError(error, factRequest.toolName);
-      return this.prepareThrownErrorForDelivery(
-        failedToolResult(factRequest, startedAt, sanitized),
+      const sourceExecutionStatus = isToolExecutorResult(output)
+        ? toolCallStatus(output.result.status) ?? "unknown"
+        : "completed";
+      const failed = failedToolResult(factRequest, startedAt, sanitized);
+      return this.prepareResultForDelivery(
+        {
+          ...failed,
+          errorFacts: mergeToolErrorFacts(sanitized.facts, {
+            sourceExecutionStatus,
+            doNotBlindlyRetry: true,
+            outputDeliveryPhase: "executor_result_normalization",
+          }),
+        },
         permission,
-        sanitized,
         context.traceId,
       );
     }
@@ -251,6 +279,7 @@ export class ToolCenter {
         hasMoreAfter: true,
         truncated: true,
         expiresAt: retained.expiresAt,
+        continuationAvailability: "live_only",
         continuation: {
           ref: retained.ref,
           nextInput: {
@@ -383,6 +412,7 @@ type RetainedContentDelivery = {
   readonly hasMoreAfter: true;
   readonly truncated: true;
   readonly expiresAt: string;
+  readonly continuationAvailability: "live_only";
   readonly continuation: {
     readonly ref: string;
     readonly nextInput: {
@@ -451,6 +481,7 @@ function retainedContentDelivery(
     hasMoreAfter: true,
     truncated: true,
     expiresAt: retained.expiresAt,
+    continuationAvailability: "live_only",
     continuation: {
       ref: retained.ref,
       nextInput: {
@@ -566,9 +597,13 @@ function outputRetentionFailure(
     mediaType: candidate.mediaType,
     contentChars: candidate.content.length,
     contentPreview: preview,
-    hasMoreAfter: true,
-    truncated: true,
     retentionFailed: true,
+    contentIncomplete: true,
+    deliveryStatus: "failed",
+    deliveryCode: failure.code,
+    deliveryMessage: failure.message,
+    sourceExecutionStatus: result.status,
+    doNotBlindlyRetry: result.status === "completed",
   });
   if (result.status !== "completed") {
     return {
@@ -595,6 +630,7 @@ function outputRetentionFailure(
       code: failure.code,
       phase: "output_retention",
       originalStatus: result.status,
+      outputDeliveryCode: failure.code,
       ...(failure.facts ?? {}),
     },
     confirmationRequest: undefined,
@@ -1025,7 +1061,7 @@ function defineOwnFact(
 
 function mergeToolErrorFacts(
   original: ToolErrorFacts | undefined,
-  additions: Readonly<Record<string, string | number>>,
+  additions: Readonly<Record<string, ToolErrorFacts[string]>>,
 ): ToolErrorFacts {
   const merged: Record<string, ToolErrorFacts[string]> = {};
   for (const [key, value] of Object.entries(original ?? {})) {

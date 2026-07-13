@@ -12,6 +12,9 @@ import { removeUndefinedValues } from "./provider-value-utils.js";
 import { openAIResponsesContinuationItems } from "./openai-responses-continuation.js";
 import { OpenAIModelInputError } from "./openai-model-input-error.js";
 
+const MAX_OPENAI_RESPONSES_FILE_BYTES = 50_000_000;
+const MAX_OPENAI_RESPONSES_TOTAL_FILE_BYTES = 50_000_000;
+
 export function buildResponsesRequestBody(
   request: ModelRequest,
   model: string,
@@ -21,6 +24,7 @@ export function buildResponsesRequestBody(
     readonly enableWebSearch?: boolean;
   } = {}
 ): Record<string, unknown> {
+  validateResponsesFileAttachmentBudget(request.sanitizedMessages);
   const { instructions, input } = buildInput(request.sanitizedMessages);
   const tools = [
     ...(options.enableWebSearch === true ? [{ type: "web_search", search_context_size: "medium" }] : []),
@@ -118,7 +122,7 @@ function responsesFunctionCallOutput(message: ModelMessage): string | readonly R
     output.push({ type: "input_text", text: message.content });
   }
   for (const attachment of message.attachments) {
-    const part = toResponsesInputContentPart(attachment);
+    const part = toResponsesInputContentPart(attachment, "tool");
     if (part !== undefined) {
       output.push(part);
     }
@@ -132,7 +136,7 @@ function responsesInputContent(message: ModelMessage): readonly Record<string, u
     return content;
   }
   for (const attachment of message.attachments) {
-    const part = toResponsesInputContentPart(attachment);
+    const part = toResponsesInputContentPart(attachment, "user");
     if (part !== undefined) {
       content.push(part);
     }
@@ -140,7 +144,10 @@ function responsesInputContent(message: ModelMessage): readonly Record<string, u
   return content;
 }
 
-function toResponsesInputContentPart(attachment: ModelInputAttachment): Record<string, unknown> | undefined {
+function toResponsesInputContentPart(
+  attachment: ModelInputAttachment,
+  origin: "user" | "tool",
+): Record<string, unknown> | undefined {
   if (attachment.kind === "image") {
     return removeUndefinedValues({
       type: "input_image",
@@ -155,7 +162,9 @@ function toResponsesInputContentPart(attachment: ModelInputAttachment): Record<s
   }
   if (attachment.kind === "audio") {
     throw new OpenAIModelInputError(
-      "OpenAI Responses does not currently accept audio input attachments; use an audio-capable Chat Completions model.",
+      origin === "user"
+        ? "OpenAI Responses does not currently accept audio input attachments; user-origin audio can use an audio-capable Chat Completions model."
+        : "OpenAI Responses does not currently accept tool-origin audio attachments, and the current OpenAI Chat Completions adapter cannot preserve their tool-result role either.",
     );
   }
   return removeUndefinedValues({
@@ -192,4 +201,54 @@ function toResponsesToolChoice(choice: ModelToolChoice): unknown {
 
 function dataUrl(mimeType: string, data: string): string {
   return `data:${mimeType};base64,${data}`;
+}
+
+function validateResponsesFileAttachmentBudget(messages: readonly ModelMessage[]): void {
+  let totalBytes = 0;
+  let countedFiles = 0;
+  for (const message of messages) {
+    for (const attachment of message.attachments ?? []) {
+      if (attachment.kind !== "file") {
+        continue;
+      }
+      const byteLength = responsesFileByteLength(attachment);
+      if (byteLength === undefined) {
+        continue;
+      }
+      countedFiles += 1;
+      if (byteLength >= MAX_OPENAI_RESPONSES_FILE_BYTES) {
+        throw new OpenAIModelInputError(
+          `OpenAI Responses requires each file input to be smaller than ${MAX_OPENAI_RESPONSES_FILE_BYTES} bytes; received ${byteLength} bytes.`,
+        );
+      }
+      totalBytes += byteLength;
+      if (totalBytes > MAX_OPENAI_RESPONSES_TOTAL_FILE_BYTES) {
+        throw new OpenAIModelInputError(
+          `OpenAI Responses file inputs total ${totalBytes} bytes across ${countedFiles} files; the per-request limit is ${MAX_OPENAI_RESPONSES_TOTAL_FILE_BYTES} bytes.`,
+        );
+      }
+    }
+  }
+}
+
+function responsesFileByteLength(
+  attachment: Extract<ModelInputAttachment, { readonly kind: "file" }>,
+): number | undefined {
+  if (attachment.source.kind === "data") {
+    const clean = attachment.source.data.replace(/\s+/gu, "");
+    if (clean.length === 0) {
+      return 0;
+    }
+    const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+    return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
+  }
+  if (attachment.byteLength === undefined) {
+    // Remote file IDs and URLs may not carry local size metadata. OpenAI
+    // remains the final validator when the request size cannot be known here.
+    return undefined;
+  }
+  if (!Number.isSafeInteger(attachment.byteLength) || attachment.byteLength < 0) {
+    throw new OpenAIModelInputError("OpenAI Responses file attachment byteLength must be a non-negative safe integer.");
+  }
+  return attachment.byteLength;
 }

@@ -207,10 +207,11 @@ function isNodeError(error: unknown, code: string): boolean {
 
 function cloneMessages(messages: readonly ModelMessage[]): readonly ModelMessage[] {
   return messages.map((message) => ({
-    ...message,
-    attachments: message.attachments?.map((attachment) => globalThis.structuredClone(attachment)),
-    protocolExtensions:
-      message.protocolExtensions === undefined ? undefined : globalThis.structuredClone(message.protocolExtensions),
+    role: message.role,
+    content: message.content,
+    ...(message.ref === undefined ? {} : { ref: message.ref }),
+    ...(message.toolCallId === undefined ? {} : { toolCallId: message.toolCallId }),
+    ...(message.toolName === undefined ? {} : { toolName: message.toolName }),
     toolCalls: message.toolCalls?.map((toolCall) => ({
       callId: toolCall.callId,
       toolName: toolCall.toolName,

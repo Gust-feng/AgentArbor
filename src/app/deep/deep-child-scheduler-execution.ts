@@ -20,6 +20,7 @@ import {
 import {
   cloneDeepChildParentReview,
 } from "./deep-child-parent-instruction-history.js";
+import { DeepChildExecutionAdmissionError } from "./deep-child-run-contracts.js";
 import type {
   ContinueDeepChildFactory,
   DeepChildExecutedQueuedInstruction,
@@ -84,15 +85,26 @@ export async function executeDeepChildScheduledRun(input: {
     instructionId: string,
     executedAt: string,
   ) => void;
+  readonly markParentInstructionAdmissionRejected: (
+    childRunId: string,
+    instructionId: string,
+    cancelledAt: string,
+  ) => void;
+  readonly markParentInstructionCancelled: (
+    childRunId: string,
+    instructionId: string,
+    cancelledAt: string,
+  ) => void;
   readonly recordInstruction: (instruction: DeepChildInstructionRecord) => void;
 }): Promise<DeepChildTerminalMaterial> {
   let summary: DeepChildSummary;
   let completedRun: ChildAgentRun;
   let terminalTask: DeepChildTask;
   let pendingContinuation: ExploreDeepChildResult["pendingContinuation"];
-  let executedQueuedInstructions: readonly DeepChildExecutedQueuedInstruction[] = [];
+  const executedQueuedInstructions: DeepChildExecutedQueuedInstruction[] = [];
+  let latestKnownResult: ExploreDeepChildResult | undefined;
   try {
-    const queuedResult = await executeQueuedFollowUps({
+    const result = await executeQueuedFollowUps({
       childRunId: input.childRun.childRunId,
       initial: await input.exploreFactory(input.childRun, input.childSpec),
       fallbackChildSpec: input.childSpec,
@@ -100,10 +112,15 @@ export async function executeDeepChildScheduledRun(input: {
       applyParentInstructionHistory: input.applyParentInstructionHistory,
       takeNextInstruction: input.takeNextInstruction,
       markParentInstructionExecuted: input.markParentInstructionExecuted,
+      markParentInstructionAdmissionRejected: input.markParentInstructionAdmissionRejected,
+      markParentInstructionCancelled: input.markParentInstructionCancelled,
       recordInstruction: input.recordInstruction,
+      executedQueuedInstructions,
+      rememberKnownResult: (result) => {
+        latestKnownResult = result;
+        input.childRunById.set(input.childRun.childRunId, result.completedRun);
+      },
     });
-    const result = queuedResult.result;
-    executedQueuedInstructions = queuedResult.executedQueuedInstructions;
     pendingContinuation = result.pendingContinuation;
     input.childRunById.set(input.childRun.childRunId, result.completedRun);
     terminalTask = mapDeepChildExecutionResult({
@@ -125,8 +142,11 @@ export async function executeDeepChildScheduledRun(input: {
       reason,
       failedAt: nowIso(),
     });
-    summary = failed.summary;
+    summary = latestKnownResult === undefined
+      ? failed.summary
+      : preserveKnownChildMaterialAfterFollowUpFailure(failed.summary, latestKnownResult.summary);
     completedRun = input.applyParentInstructionHistory(failed.completedRun);
+    pendingContinuation = latestKnownResult?.pendingContinuation;
     terminalTask = input.board.markFailed(input.taskId, reason, summary);
     input.childRunById.set(input.childRun.childRunId, completedRun);
   }
@@ -151,35 +171,57 @@ async function executeQueuedFollowUps(input: {
     instructionId: string,
     executedAt: string,
   ) => void;
+  readonly markParentInstructionAdmissionRejected: (
+    childRunId: string,
+    instructionId: string,
+    cancelledAt: string,
+  ) => void;
+  readonly markParentInstructionCancelled: (
+    childRunId: string,
+    instructionId: string,
+    cancelledAt: string,
+  ) => void;
   readonly recordInstruction: (instruction: DeepChildInstructionRecord) => void;
-}): Promise<{
-  readonly result: ExploreDeepChildResult;
-  readonly executedQueuedInstructions: readonly DeepChildExecutedQueuedInstruction[];
-}> {
+  /** Shared accumulator so earlier executed facts survive a later FIFO failure. */
+  readonly executedQueuedInstructions: DeepChildExecutedQueuedInstruction[];
+  readonly rememberKnownResult: (result: ExploreDeepChildResult) => void;
+}): Promise<ExploreDeepChildResult> {
   let current: ExploreDeepChildResult = {
     ...input.initial,
     completedRun: input.applyParentInstructionHistory(input.initial.completedRun),
   };
-  const executedQueuedInstructions: DeepChildExecutedQueuedInstruction[] = [];
+  input.rememberKnownResult(current);
+  if (current.pendingContinuation !== undefined) {
+    cancelRemainingQueuedInstructions(input, input.childRunId);
+    const completedRunAfterCancellation = input.applyParentInstructionHistory(current.completedRun);
+    current = {
+      ...current,
+      completedRun: completedRunAfterCancellation,
+      pendingContinuation: {
+        ...current.pendingContinuation,
+        childRun: completedRunAfterCancellation,
+      },
+    };
+    input.rememberKnownResult(current);
+    return current;
+  }
   for (;;) {
     const queued = input.takeNextInstruction(input.childRunId);
     if (queued === undefined || input.continueFactory === undefined) {
-      return { result: current, executedQueuedInstructions };
+      return current;
     }
-    const executedAt = nowIso();
-    input.markParentInstructionExecuted(queued.childRunId, queued.instructionId, executedAt);
-    const executedInstructionRecord: DeepChildInstructionRecord = {
+    let instructionRecord: DeepChildInstructionRecord = {
       instructionId: queued.instructionId,
       messageRef: queued.messageRef,
       childRunId: queued.childRunId,
       source: queued.source,
-      status: "executed",
+      status: "queued",
       instruction: queued.instruction,
       review: cloneDeepChildParentReview(queued.review),
       requestedAt: queued.queuedAt,
       queuedAt: queued.queuedAt,
-      executedAt,
     };
+    let executedAt: string | undefined;
     try {
       current = await input.continueFactory(
         input.applyParentInstructionHistory(current.completedRun),
@@ -191,16 +233,63 @@ async function executeQueuedFollowUps(input: {
           messageRef: queued.messageRef,
           source: queued.source,
           review: cloneDeepChildParentReview(queued.review),
+          requestedAt: queued.queuedAt,
         },
       );
+      executedAt = nowIso();
+      input.markParentInstructionExecuted(queued.childRunId, queued.instructionId, executedAt);
+      instructionRecord = {
+        instructionId: queued.instructionId,
+        messageRef: queued.messageRef,
+        childRunId: queued.childRunId,
+        source: queued.source,
+        status: "executed",
+        instruction: queued.instruction,
+        review: cloneDeepChildParentReview(queued.review),
+        requestedAt: queued.queuedAt,
+        queuedAt: queued.queuedAt,
+        executedAt,
+      };
+    } catch (error) {
+      if (error instanceof DeepChildExecutionAdmissionError) {
+        const cancelledAt = nowIso();
+        input.markParentInstructionAdmissionRejected(
+          queued.childRunId,
+          queued.instructionId,
+          cancelledAt,
+        );
+        instructionRecord = {
+          instructionId: queued.instructionId,
+          messageRef: queued.messageRef,
+          childRunId: queued.childRunId,
+          source: queued.source,
+          status: "cancelled",
+          instruction: queued.instruction,
+          review: cloneDeepChildParentReview(queued.review),
+          requestedAt: queued.queuedAt,
+          queuedAt: queued.queuedAt,
+          cancelledAt,
+        };
+      }
+      throw error;
     } finally {
-      input.recordInstruction(executedInstructionRecord);
+      input.recordInstruction(instructionRecord);
     }
+    const completedRun = input.applyParentInstructionHistory(current.completedRun);
     current = {
       ...current,
-      completedRun: input.applyParentInstructionHistory(current.completedRun),
+      completedRun,
+      pendingContinuation: current.pendingContinuation === undefined
+        ? undefined
+        : {
+            ...current.pendingContinuation,
+            childRun: completedRun,
+          },
     };
-    executedQueuedInstructions.push({
+    if (executedAt === undefined) {
+      throw new Error("Deep child queued instruction completed without an execution timestamp");
+    }
+    input.executedQueuedInstructions.push({
       instructionId: queued.instructionId,
       messageRef: queued.messageRef,
       childRunId: queued.childRunId,
@@ -210,7 +299,73 @@ async function executeQueuedFollowUps(input: {
       queuedAt: queued.queuedAt,
       executedAt,
     });
+    if (current.pendingContinuation !== undefined) {
+      cancelRemainingQueuedInstructions(input, queued.childRunId);
+      const completedRunAfterCancellation = input.applyParentInstructionHistory(current.completedRun);
+      current = {
+        ...current,
+        completedRun: completedRunAfterCancellation,
+        pendingContinuation: {
+          ...current.pendingContinuation,
+          childRun: completedRunAfterCancellation,
+        },
+      };
+    }
+    input.rememberKnownResult(current);
+    if (current.pendingContinuation !== undefined) {
+      return current;
+    }
   }
+}
+
+function cancelRemainingQueuedInstructions(
+  input: {
+    readonly takeNextInstruction: (childRunId: string) => DeepChildScheduledInstruction | undefined;
+    readonly markParentInstructionCancelled: (
+      childRunId: string,
+      instructionId: string,
+      cancelledAt: string,
+    ) => void;
+    readonly recordInstruction: (instruction: DeepChildInstructionRecord) => void;
+  },
+  childRunId: string,
+): void {
+  const cancelledAt = nowIso();
+  for (;;) {
+    const queued = input.takeNextInstruction(childRunId);
+    if (queued === undefined) {
+      return;
+    }
+    input.markParentInstructionCancelled(queued.childRunId, queued.instructionId, cancelledAt);
+    input.recordInstruction({
+      instructionId: queued.instructionId,
+      messageRef: queued.messageRef,
+      childRunId: queued.childRunId,
+      source: queued.source,
+      status: "cancelled",
+      instruction: queued.instruction,
+      review: cloneDeepChildParentReview(queued.review),
+      requestedAt: queued.queuedAt,
+      queuedAt: queued.queuedAt,
+      cancelledAt,
+    });
+  }
+}
+
+function preserveKnownChildMaterialAfterFollowUpFailure(
+  failed: DeepChildSummary,
+  previous: DeepChildSummary,
+): DeepChildSummary {
+  if (previous.findings.length === 0 && previous.evidenceRefs.length === 0) {
+    return failed;
+  }
+  return {
+    ...failed,
+    summary: `${failed.summary} Previously completed child material remains available: ${previous.summary}`,
+    findings: [...previous.findings],
+    evidenceRefs: [...previous.evidenceRefs],
+    uncertainty: `${failed.uncertainty} Previously completed material was retained for parent review.`,
+  };
 }
 
 function errorMessage(error: unknown): string {

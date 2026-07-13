@@ -86,7 +86,10 @@ import {
   buildAndPublishRunTree,
   buildExplorationReport,
 } from "./deep-run-tree.js";
-import { continueDeepChildAgent } from "./deep-child-agent-runner.js";
+import {
+  continueDeepChildAgent,
+  DeepChildExecutionAdmissionError,
+} from "./deep-child-agent-runner.js";
 import { DEEP_DECISION_CONTRACT_ID } from "./deep-model-io.js";
 import { DeepChildScheduler } from "./deep-child-scheduler.js";
 import type {
@@ -97,6 +100,7 @@ import type {
 import type { DeepChildMessageStore } from "./deep-child-messages.js";
 import {
   loadDeepChildParentMessageContext,
+  persistDeepChildInstructionRecord,
   persistDeepChildInstructionRecords,
   persistExecutedQueuedChildMessages,
 } from "./deep-child-parent-messages.js";
@@ -177,11 +181,39 @@ export type DeepRuntimeConfig = {
   readonly childInstructionQueues?: DeepChildInstructionQueueRegistry;
   readonly childMessageStore?: DeepChildMessageStore;
   readonly childLoopContextStore?: DeepChildLoopContextStore;
+  readonly onChildMessageSidecarFailure?: (
+    failure: DeepChildMessageSidecarFailure,
+  ) => void | Promise<void>;
 };
+
+export type DeepChildMessageSidecarStage =
+  | "persist_instruction_records"
+  | "persist_executed_queued_messages";
+
+export type DeepChildMessageSidecarFailure = {
+  readonly runId: string;
+  readonly stage: DeepChildMessageSidecarStage;
+  readonly error: unknown;
+};
+
+/** The executor completed and produced a full final record, but its final commit failed. */
+export class DeepRunFinalPersistenceError extends Error {
+  readonly record: DeepRunRecord;
+
+  constructor(record: DeepRunRecord, cause: unknown) {
+    super(`Deep run final record persistence failed: ${deepRuntimeErrorMessage(cause)}`, { cause });
+    this.name = "DeepRunFinalPersistenceError";
+    this.record = record;
+  }
+}
 
 export type DeepChildInstructionQueueRegistry = {
   readonly register: (runId: string, handle: DeepChildInstructionQueueHandle) => void;
-  readonly unregister: (runId: string, handle: DeepChildInstructionQueueHandle) => void;
+  /** Stop new lookups before returning, then resolve after already-admitted commands finish. */
+  readonly unregister: (
+    runId: string,
+    handle: DeepChildInstructionQueueHandle,
+  ) => void | Promise<void>;
 };
 
 /**
@@ -345,6 +377,21 @@ export async function executeDeepRun(
         childSpec,
         previousSummary,
         parentInstruction,
+        beforeExecution: () => persistDeepChildInstructionRecord(
+          config.childMessageStore,
+          run.runId,
+          {
+            instructionId: parentOperation.instructionId,
+            messageRef: parentOperation.messageRef,
+            childRunId: childRun.childRunId,
+            source: parentOperation.source,
+            status: "queued",
+            instruction: parentInstruction,
+            review: parentOperation.review,
+            requestedAt: parentOperation.requestedAt,
+            queuedAt: parentOperation.requestedAt,
+          },
+        ),
         currentParentInstructionRef: parentOperation.messageRef,
         currentParentReview: parentOperation.review,
         parentMessageHistory: await loadDeepChildParentMessageContext(
@@ -352,7 +399,11 @@ export async function executeDeepRun(
           run.runId,
           childRun.childRunId,
           recordedChildInstructions,
-        ),
+        ).catch((error: unknown) => {
+          // Context preparation is part of execution admission: the child
+          // model/tool loop has not started and the instruction is cancellable.
+          throw new DeepChildExecutionAdmissionError(error);
+        }),
         runId: run.runId,
         goal: deepRuntimeGoal(input.conversation),
         permissionBoundaryRefs: input.permissionBoundaryRefs,
@@ -440,6 +491,13 @@ export async function executeDeepRun(
   });
   const instructionQueueHandle = scheduler.getInstructionQueueHandle();
   config.childInstructionQueues?.register(run.runId, instructionQueueHandle);
+  let closeInstructionQueuePromise: Promise<void> | undefined;
+  const closeInstructionQueue = (): Promise<void> => {
+    closeInstructionQueuePromise ??= Promise.resolve().then(() =>
+      config.childInstructionQueues?.unregister(run.runId, instructionQueueHandle)
+    );
+    return closeInstructionQueuePromise;
+  };
 
   const executorConfig: DeepRunExecutorConfig = {
     turnRuntime: config.turnRuntime,
@@ -448,6 +506,7 @@ export async function executeDeepRun(
     managerMaxModelRounds: config.managerMaxModelRounds,
     managerMaxToolRounds: config.managerMaxToolRounds,
     scheduler,
+    sealChildControl: closeInstructionQueue,
     // T2-1：onProgress 仅承载 decision/synthesis 相位（child 事件由 scheduler 回调实时发布）。
     // manager.decided 实时发布 deep.manager.decided（保证事件序列顺序 manager.decided→child→synthesis）。
     onProgress: async (event) => {
@@ -476,18 +535,32 @@ export async function executeDeepRun(
     // 委托 executor 驱动 manager 决策循环（含 control point，T2-7）。
     executorResult = await startDeepRun(executorInput, executorConfig);
   } finally {
-    config.childInstructionQueues?.unregister(run.runId, instructionQueueHandle);
+    // Stop new live child commands and drain commands already admitted through
+    // the queue before building the terminal record. Otherwise a continuation
+    // that started just before unregister could persist a stale live record
+    // after the terminal snapshot.
+    await closeInstructionQueue();
   }
-  await persistDeepChildInstructionRecords(
-    config.childMessageStore,
-    run.runId,
-    recordedChildInstructions,
-  );
-  await persistExecutedQueuedChildMessages(
-    config.childMessageStore,
-    run.runId,
-    executorResult.executedQueuedChildInstructions,
-  );
+  await persistChildMessageSidecar({
+    runId: run.runId,
+    stage: "persist_instruction_records",
+    persist: () => persistDeepChildInstructionRecords(
+      config.childMessageStore,
+      run.runId,
+      recordedChildInstructions,
+    ),
+    onFailure: config.onChildMessageSidecarFailure,
+  });
+  await persistChildMessageSidecar({
+    runId: run.runId,
+    stage: "persist_executed_queued_messages",
+    persist: () => persistExecutedQueuedChildMessages(
+      config.childMessageStore,
+      run.runId,
+      executorResult.executedQueuedChildInstructions,
+    ),
+    onFailure: config.onChildMessageSidecarFailure,
+  });
 
   // T2-1：从结果增量构建 AgentRunTree；child/manager 事件已由 scheduler 回调和
   // onProgress 实时发布，树构建只收口可复盘证据。
@@ -529,7 +602,11 @@ export async function executeDeepRun(
     brief: executorResult.brief,
     updatedAt,
   };
-  await config.store.upsert(record);
+  try {
+    await config.store.upsert(record);
+  } catch (error) {
+    throw new DeepRunFinalPersistenceError(record, error);
+  }
 
   return {
     run: finalRun,
@@ -543,6 +620,31 @@ export async function executeDeepRun(
   };
 }
 
+async function persistChildMessageSidecar(input: {
+  readonly runId: string;
+  readonly stage: DeepChildMessageSidecarStage;
+  readonly persist: () => Promise<void>;
+  readonly onFailure?: DeepRuntimeConfig["onChildMessageSidecarFailure"];
+}): Promise<void> {
+  try {
+    await input.persist();
+  } catch (error) {
+    try {
+      await input.onFailure?.({
+        runId: input.runId,
+        stage: input.stage,
+        error,
+      });
+    } catch {
+      // Sidecar diagnostics cannot replace the executor result or final run record.
+    }
+  }
+}
+
 function deepRuntimeGoal(conversation: DeepConversation): string {
   return conversation.currentObjective ?? conversation.goal;
+}
+
+function deepRuntimeErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

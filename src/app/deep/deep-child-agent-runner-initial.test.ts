@@ -13,6 +13,7 @@ import {
   normalizeDeepChildRoundLimit,
   runDeepChildAgent,
 } from "./deep-child-agent-runner.js";
+import { InMemoryDeepChildLoopContextStore } from "./deep-child-loop-contexts.js";
 import { createDeepTurnRuntime } from "./deep-turn.js";
 import {
   capabilitySnapshotWithTools,
@@ -91,6 +92,48 @@ test("runDeepChildAgent runs the standard model-tool-model loop and preserves th
     channel.requests[0]?.sanitizedMessages.some((message) => message.content.includes(childSpec.objective)),
     true,
   );
+});
+
+test("runDeepChildAgent returns a failed result with tool facts when post-execution context persistence fails", async () => {
+  const childSpec = sampleChildSpec({
+    allowedTools: ["search"],
+    objective: "执行一次检索，并在上下文写入失败时保留真实执行事实。",
+  });
+  const childRun = makeChildRun(childSpec);
+  const channel = new SequenceChannel([
+    toolCallResponse("call-search-persistence", "search", { query: "context persistence evidence" }),
+    completedJsonResponse({
+      summary: "检索已经执行，但 continuation context 无法落盘。",
+      findings: ["工具只执行了一次"],
+      evidenceRefs: ["tool:search:persistence"],
+      uncertainty: "上下文存储不可用。",
+      confidence: 0.6,
+    }),
+  ]);
+  const broker = new RecordingToolBroker(["search"]);
+  const contextStore = new InMemoryDeepChildLoopContextStore();
+  contextStore.upsert = async () => {
+    throw new Error("fixture initial child context write failed");
+  };
+
+  const result = await runDeepChildAgent({
+    runId: "deep-run-initial-context-failure",
+    childRun,
+    childSpec,
+    goal: "验证 child 初次运行的 post-execution 失败不会触发盲重试",
+    permissionBoundaryRefs: [],
+    turnRuntime: createDeepTurnRuntime({ intelligenceChannel: channel, toolCenter: broker }),
+    traceId: "trace-test",
+    goalId: "goal-test",
+    childLoopContextStore: contextStore,
+  });
+
+  assert.equal(result.completedRun.status, "failed");
+  assert.match(result.completedRun.failureReason ?? "", /fixture initial child context write failed/);
+  assert.equal(result.completedRun.execution?.toolCalls[0]?.toolName, "search");
+  assert.equal(result.completedRun.execution?.toolCalls[0]?.status, "completed");
+  assert.deepEqual(broker.executedToolNames(), ["search"]);
+  assert.equal(channel.requests.length, 2);
 });
 
 test("runDeepChildAgent leaves child round budgets unset when parent omits limits", async () => {

@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   createCoordinatedDeepRunRecordStore,
   createDeepRunRecordWriteCoordinator,
+  deepRunRecordWriteReceiptFromError,
+  DeepRunRecordWriteError,
   DeepRunRecordWriteDrainError,
 } from "./deep-run-record-write-coordinator.js";
 import type { DeepRunRecord, DeepRunRecordStore } from "./deep-run-record-store.js";
@@ -131,26 +133,31 @@ test("DeepRunRecordWriteCoordinator runs different run queues concurrently", asy
   await coordinator.drain();
 });
 
-test("DeepRunRecordWriteCoordinator continues after failure and reports ignored rejections through drain", async () => {
+test("DeepRunRecordWriteCoordinator retains an unrecovered failure until a later save succeeds", async () => {
   const persistedGoals: string[] = [];
   let attempt = 0;
-  const store = createStore({
+  const base = createStore();
+  const store: DeepRunRecordStore = {
+    ...base,
     async upsert(record) {
       attempt += 1;
       if (attempt === 1) {
         throw new Error("disk unavailable");
       }
       persistedGoals.push(record.run.goal);
-      return structuredClone(record);
+      return base.upsert(record);
     },
-  });
-  const coordinator = createDeepRunRecordWriteCoordinator(store);
-
-  void coordinator.save(createRun("run-1", "failed-live-snapshot"));
-  const recoveredSave = coordinator.save(createRun("run-1", "final-snapshot"));
+  };
+  const coordinated = createCoordinatedDeepRunRecordStore(store);
+  const coordinator = coordinated.writes;
 
   await assert.rejects(
-    coordinator.drainRun("run-1"),
+    coordinator.save(createRun("run-1", "failed-live-snapshot")),
+    DeepRunRecordWriteError,
+  );
+
+  await assert.rejects(
+    coordinator.flushRun("run-1"),
     (error: unknown) => {
       assert.ok(error instanceof DeepRunRecordWriteDrainError);
       assert.equal(error.failures.length, 1);
@@ -161,11 +168,117 @@ test("DeepRunRecordWriteCoordinator continues after failure and reports ignored 
       return true;
     },
   );
+
+  const recoveredSave = coordinator.save(createRun("run-1", "final-snapshot"));
   await recoveredSave;
   assert.deepEqual(persistedGoals, ["final-snapshot"]);
+  assert.equal((await coordinated.store.get("run-1"))?.run.goal, "final-snapshot");
+  await coordinator.drainRun("run-1");
+});
 
-  // Drain acknowledges buffered failures; later lifecycle drains only observe
-  // writes enqueued since the previous drain.
+test("DeepRunRecordWriteCoordinator clears an earlier failure after a successful delete", async () => {
+  const store = createStore({
+    async upsert() {
+      throw new Error("disk unavailable");
+    },
+  });
+  const coordinator = createDeepRunRecordWriteCoordinator(store);
+
+  await assert.rejects(
+    coordinator.save(createRun("run-delete-recovery", "failed-live-snapshot")),
+    DeepRunRecordWriteError,
+  );
+  await coordinator.delete("run-delete-recovery");
+
+  await coordinator.flushRun("run-delete-recovery");
+  await coordinator.drainRun("run-delete-recovery");
+});
+
+test("DeepRunRecordWriteCoordinator recovers failures only for the run with a later success", async () => {
+  const store = createStore({
+    async upsert(record) {
+      if (record.run.goal === "fail") {
+        throw new Error(`${record.run.runId} write failed`);
+      }
+      return structuredClone(record);
+    },
+  });
+  const coordinator = createDeepRunRecordWriteCoordinator(store);
+
+  await Promise.all([
+    assert.rejects(coordinator.save(createRun("run-a", "fail")), DeepRunRecordWriteError),
+    assert.rejects(coordinator.save(createRun("run-b", "fail")), DeepRunRecordWriteError),
+  ]);
+  await coordinator.save(createRun("run-a", "recovered"));
+
+  await coordinator.flushRun("run-a");
+  await assert.rejects(
+    coordinator.flushRun("run-b"),
+    (error: unknown) => error instanceof DeepRunRecordWriteDrainError
+      && error.failures.length === 1
+      && error.failures[0]?.runId === "run-b",
+  );
+  await assert.rejects(
+    coordinator.drain(),
+    (error: unknown) => error instanceof DeepRunRecordWriteDrainError
+      && error.failures.length === 1
+      && error.failures[0]?.runId === "run-b",
+  );
+  await coordinator.drain();
+});
+
+test("DeepRunRecordWriteCoordinator acknowledges an awaited operation receipt without consuming a shared-error background failure", async () => {
+  const sharedFailure = new Error("shared storage failure");
+  let attempt = 0;
+  const store = createStore({
+    async upsert(record) {
+      attempt += 1;
+      if (attempt <= 2) {
+        throw sharedFailure;
+      }
+      return structuredClone(record);
+    },
+  });
+  const coordinator = createDeepRunRecordWriteCoordinator(store);
+
+  void coordinator.save(createRun("run-1", "background-first"));
+  let awaitedError: unknown;
+  await assert.rejects(
+    coordinator.save(createRun("run-1", "awaited-second")),
+    (error: unknown) => {
+      assert.ok(error instanceof DeepRunRecordWriteError);
+      assert.equal(error.cause, sharedFailure);
+      assert.equal(error.receipt.runId, "run-1");
+      assert.equal(error.receipt.operation, "save");
+      assert.equal(error.receipt.sequence, 2);
+      awaitedError = error;
+      return true;
+    },
+  );
+  const awaitedReceipt = deepRunRecordWriteReceiptFromError(awaitedError);
+  assert.ok(awaitedReceipt);
+  assert.equal(await coordinator.acknowledgeFailure({
+    ...awaitedReceipt,
+    operationId: "not-the-issued-operation-id",
+  }), false);
+  assert.equal(await coordinator.acknowledgeFailure({
+    ...awaitedReceipt,
+    sequence: 999,
+  }), false);
+  assert.equal(await coordinator.acknowledgeFailure(awaitedReceipt), true);
+
+  await assert.rejects(
+    coordinator.drainRun("run-1"),
+    (error: unknown) => {
+      assert.ok(error instanceof DeepRunRecordWriteDrainError);
+      assert.equal(error.failures.length, 1);
+      assert.equal(error.failures[0]?.sequence, 1);
+      assert.equal(error.failures[0]?.error, sharedFailure);
+      return true;
+    },
+  );
+
+  await coordinator.save(createRun("run-1", "recovered"));
   await coordinator.drainRun("run-1");
 });
 

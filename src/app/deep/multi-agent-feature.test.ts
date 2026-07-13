@@ -25,7 +25,22 @@ import {
   type DeepChildPendingContinuation,
   type DeepChildPendingContinuationRetentionOptions,
 } from "./deep-child-continuations.js";
-import type { DeepRunRecordStore } from "./deep-run-record-store.js";
+import {
+  InMemoryDeepRunRecordStore,
+  type DeepRunRecordStore,
+} from "./deep-run-record-store.js";
+import type {
+  DeepChildInstructionContinueResult,
+  DeepChildInstructionQueueHandle,
+} from "./deep-child-scheduler-contracts.js";
+import type { DeepChildLoopContextStore } from "./deep-child-loop-contexts.js";
+import {
+  type DeepRunRecordWriteCoordinator,
+} from "./deep-run-record-write-coordinator.js";
+import {
+  createDeepChildMessageRecord,
+  type DeepChildMessageStore,
+} from "./deep-child-messages.js";
 import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import { createMultiAgentFeature } from "./multi-agent-feature.js";
 
@@ -85,6 +100,37 @@ test("MultiAgentFeature gives each operation a fresh bus and awaits lease releas
   assert.equal(buses.length, 2);
   assert.notEqual(buses[0], buses[1], "operations must not share an unbounded feature-lifetime bus");
 
+  await feature.dispose();
+});
+
+test("MultiAgentFeature preserves an intake result when lease release fails", async () => {
+  const releaseFailures: unknown[] = [];
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: capabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => ({
+      intelligenceChannel: directAnswerChannel(),
+      toolCenter: emptyToolBroker(),
+      capabilitySnapshot,
+      release: async () => {
+        throw new Error("fixture intake release failed");
+      },
+    }),
+    reportBackgroundFailure: ({ error }) => {
+      releaseFailures.push(error);
+    },
+  });
+
+  const result = await feature.intake({
+    aiMode: "fake",
+    message: "请直接回答，清理失败不能覆盖回答。",
+  });
+  assert.equal(result.status, "answered");
+  assert.equal(releaseFailures.length, 1);
+  assert.match(String(releaseFailures[0]), /fixture intake release failed/);
   await feature.dispose();
 });
 
@@ -279,8 +325,99 @@ test("MultiAgentFeature owns background release failures through an explicit rep
   await feature.dispose();
 });
 
+test("MultiAgentFeature reports cleanup failure without replacing the active run failure", async () => {
+  const failures: unknown[] = [];
+  const feature = createMultiAgentFeature({
+    reportBackgroundFailure: ({ error }) => {
+      failures.push(error);
+    },
+  });
+  const primaryFailure = new Error("fixture active run failed");
+  const cleanupFailure = new Error("fixture active run cleanup failed");
+  const internal = feature as typeof feature & {
+    readonly trackActiveRun: (input: {
+      readonly runId: string;
+      readonly conversationId: string;
+      readonly promise: Promise<void>;
+      readonly releaseResources?: () => void | Promise<void>;
+    }) => void;
+  };
+  internal.trackActiveRun({
+    runId: "deep-run-primary-and-cleanup-failure",
+    conversationId: "deep-conversation-primary-and-cleanup-failure",
+    promise: Promise.resolve().then(() => {
+      throw primaryFailure;
+    }),
+    releaseResources: async () => {
+      throw cleanupFailure;
+    },
+  });
+
+  await feature.waitForIdle();
+  assert.equal(failures.includes(primaryFailure), true);
+  assert.equal(failures.includes(cleanupFailure), true);
+  assert.equal(failures.length, 2);
+  await feature.dispose();
+});
+
+test("MultiAgentFeature retries the complete final record without discarding child facts", async () => {
+  const durable = new InMemoryDeepRunRecordStore();
+  const failures: unknown[] = [];
+  let failFinalRecord = true;
+  const runRecordStore: DeepRunRecordStore = {
+    upsert: async (record) => {
+      if (
+        failFinalRecord
+        && record.run.status !== "running"
+        && record.agentRunTree.childRuns.length > 0
+      ) {
+        failFinalRecord = false;
+        throw new Error("fixture final run record write failed");
+      }
+      return durable.upsert(record);
+    },
+    get: (runId) => durable.get(runId),
+    list: (limit) => durable.list(limit),
+    listByConversation: (conversationId, limit) => durable.listByConversation(conversationId, limit),
+    listByRootRun: (rootRunId, limit) => durable.listByRootRun(rootRunId, limit),
+    delete: (runId) => durable.delete(runId),
+  };
+  const feature = createMultiAgentFeature({
+    runRecordStore,
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => ({
+      intelligenceChannel: pendingApprovalRunChannel(),
+      toolCenter: new ApprovalFixtureToolBroker("approval"),
+      capabilitySnapshot,
+      release: async () => undefined,
+    }),
+    reportBackgroundFailure: ({ error }) => {
+      failures.push(error);
+    },
+  });
+
+  const pending = await createPendingApprovalChild(feature);
+  const record = await feature.getRun(pending.runId);
+  assert.equal(record?.run.status, "completed");
+  assert.equal(record?.agentRunTree.status, "completed");
+  assert.ok(record?.report, "the retry must commit the complete report, not the earlier live snapshot");
+  assert.equal(record?.report?.conclusion?.conclusion, "子 Agent 正在等待写入确认。");
+  assert.equal(record?.agentRunTree.parentSyntheses.length, 1);
+  assert.equal(record?.agentRunTree.childRuns[0]?.childRunId, pending.childRunId);
+  assert.equal(record?.agentRunTree.childRuns[0]?.status, "blocked");
+  assert.equal(record?.liveProjection?.children[0]?.childRunId, pending.childRunId);
+  assert.equal(failures.length, 1);
+  assert.match(String(failures[0]), /fixture final run record write failed/);
+  await feature.dispose();
+});
+
 test("MultiAgentFeature restores run-start TaskSoil for child follow-up and resynthesis", async () => {
   const acquiredTaskSoils: TaskSoil[] = [];
+  const releaseFailures: unknown[] = [];
   let acquisitionCount = 0;
   const feature = createMultiAgentFeature({
     resolveRunStartFacts: async () => ({
@@ -290,19 +427,27 @@ test("MultiAgentFeature restores run-start TaskSoil for child follow-up and resy
     }),
     acquireRunResources: async ({ capabilitySnapshot, taskSoil }) => {
       acquisitionCount += 1;
+      const leaseId = acquisitionCount;
       acquiredTaskSoils.push(taskSoil);
       return {
-        intelligenceChannel: acquisitionCount === 1
+        intelligenceChannel: leaseId === 1
           ? pendingApprovalRunChannel()
-          : acquisitionCount === 3
+          : leaseId === 3
             ? resumedChildChannel()
             : directRunChannel(),
-        toolCenter: acquisitionCount === 1
+        toolCenter: leaseId === 1
           ? new ApprovalFixtureToolBroker("approval")
           : emptyToolBroker(),
         capabilitySnapshot,
-        release: async () => undefined,
+        release: async () => {
+          if (leaseId === 4) {
+            throw new Error("fixture resynthesis release failed");
+          }
+        },
       };
+    },
+    reportBackgroundFailure: ({ error }) => {
+      releaseFailures.push(error);
     },
   });
   const attachmentRef = "local-file:C:/fixture/requirements.md";
@@ -358,7 +503,10 @@ test("MultiAgentFeature restores run-start TaskSoil for child follow-up and resy
     message: "请结合最初附件继续完成核查。",
   });
   assert.equal(continued.status, "continued");
-  await feature.resynthesize({ runId: started.runId });
+  const resynthesized = await feature.resynthesize({ runId: started.runId });
+  assert.equal(resynthesized.liveProjection?.synthesis?.status, "completed");
+  assert.equal(releaseFailures.length, 1);
+  assert.match(String(releaseFailures[0]), /fixture resynthesis release failed/);
 
   assert.equal(acquiredTaskSoils.length, 4);
   assert.equal(acquiredTaskSoils[1]?.contextRefs.some((ref) => ref.ref === laterAttachmentRef), true);
@@ -369,6 +517,552 @@ test("MultiAgentFeature restores run-start TaskSoil for child follow-up and resy
     assert.equal(taskSoil.contextRefs.some((ref) => ref.ref === laterAttachmentRef), false);
   }
   await feature.dispose();
+});
+
+test("MultiAgentFeature projects a known post-terminal child result when message and release cleanup fail", async () => {
+  let acquisitionCount = 0;
+  const backgroundFailures: unknown[] = [];
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      const leaseId = acquisitionCount;
+      return {
+        intelligenceChannel: leaseId === 1 ? pendingApprovalRunChannel() : resumedChildChannel(),
+        toolCenter: leaseId === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed"),
+        capabilitySnapshot,
+        release: async () => {
+          if (leaseId > 1) {
+            throw new Error("fixture post-terminal release failed");
+          }
+        },
+      };
+    },
+    reportBackgroundFailure: ({ error }) => {
+      backgroundFailures.push(error);
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  const internal = feature as typeof feature & {
+    readonly childMessageStore: DeepChildMessageStore;
+  };
+  const messageStore = internal.childMessageStore as DeepChildMessageStore & {
+    upsert: DeepChildMessageStore["upsert"];
+  };
+  const originalUpsert = messageStore.upsert;
+  messageStore.upsert = async (record) => {
+    if (record.status === "executed") {
+      throw new Error("fixture post-terminal child message write failed");
+    }
+    return originalUpsert.call(messageStore, record);
+  };
+  try {
+    const continued = await feature.sendChildInstruction({
+      runId: pending.runId,
+      childRunId: pending.childRunId,
+      message: "继续完成同一个子任务。",
+    });
+    assert.equal(continued.status, "continued");
+    assert.equal(continued.record.agentRunTree.childRuns[0]?.status, "completed");
+    assert.equal(backgroundFailures.length, 2);
+    assert.equal(
+      backgroundFailures.some((error) => String(error).includes("fixture post-terminal child message write failed")),
+      true,
+    );
+    assert.equal(
+      backgroundFailures.some((error) => String(error).includes("fixture post-terminal release failed")),
+      true,
+    );
+  } finally {
+    messageStore.upsert = originalUpsert;
+    await feature.dispose();
+  }
+});
+
+test("MultiAgentFeature retries a known direct child projection without reacquiring runtime", async () => {
+  let acquisitionCount = 0;
+  let toolExecutions = 0;
+  let failNextChildProjection = false;
+  const durableRunRecords = new InMemoryDeepRunRecordStore();
+  const runRecordStore: DeepRunRecordStore = {
+    upsert: async (record) => {
+      if (
+        failNextChildProjection
+        && record.agentRunTree.childRuns.some((childRun) => childRun.status === "completed")
+      ) {
+        failNextChildProjection = false;
+        throw new Error("fixture direct child projection failed");
+      }
+      return durableRunRecords.upsert(record);
+    },
+    get: (runId) => durableRunRecords.get(runId),
+    list: (limit) => durableRunRecords.list(limit),
+    listByConversation: (conversationId, limit) =>
+      durableRunRecords.listByConversation(conversationId, limit),
+    listByRootRun: (rootRunId, limit) => durableRunRecords.listByRootRun(rootRunId, limit),
+    delete: (runId) => durableRunRecords.delete(runId),
+  };
+  const feature = createMultiAgentFeature({
+    runRecordStore,
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : directChildInstructionChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed", () => {
+              toolExecutions += 1;
+            }),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  failNextChildProjection = true;
+  await assert.rejects(
+    feature.sendChildInstruction({
+      runId: pending.runId,
+      childRunId: pending.childRunId,
+      message: "执行一次直接 child 跟进。",
+    }),
+    (error: unknown) => error instanceof Error
+      && error.message.includes("fixture direct child projection failed"),
+  );
+  assert.equal(toolExecutions, 1);
+  assert.equal(acquisitionCount, 2);
+
+  const retried = await feature.sendChildInstruction({
+    runId: pending.runId,
+    childRunId: pending.childRunId,
+    message: "执行一次直接 child 跟进。",
+  });
+  assert.equal(retried.status, "continued");
+  assert.equal(retried.record.agentRunTree.childRuns[0]?.status, "completed");
+  assert.equal(toolExecutions, 1, "projection retry must not replay the tool");
+  assert.equal(acquisitionCount, 2, "projection retry must not acquire another runtime");
+  await feature.dispose();
+});
+
+test("MultiAgentFeature retries a known live child projection without continuing the child twice", async () => {
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => ({
+      intelligenceChannel: pendingApprovalRunChannel(),
+      toolCenter: new ApprovalFixtureToolBroker("approval"),
+      capabilitySnapshot,
+      release: async () => undefined,
+    }),
+  });
+  const pending = await createPendingApprovalChild(feature);
+  const initial = await feature.getRun(pending.runId);
+  const child = initial?.agentRunTree.childRuns.find((candidate) => candidate.childRunId === pending.childRunId);
+  const summary = initial?.report?.childSummaries.find((candidate) => candidate.childRunId === pending.childRunId);
+  assert.ok(child);
+  assert.ok(summary);
+  const completedAt = "2026-07-13T12:00:00.000Z";
+  const messageRef = "child_message:live-projection-retry";
+  const completedSummary = {
+    ...summary,
+    status: "completed" as const,
+    summary: "运行中的 child 已知结果。",
+    uncertainty: "无。",
+    confidence: 0.91,
+  };
+  const completedRun = {
+    ...child,
+    status: "completed" as const,
+    pendingApproval: undefined,
+    failureReason: undefined,
+    completedAt,
+    parentInstructions: [
+      ...(child.parentInstructions ?? []),
+      {
+        instructionId: "live-projection-retry",
+        messageRef,
+        source: "control_api" as const,
+        status: "executed" as const,
+        instructionSummary: "补齐运行中 child 材料。",
+        requestedAt: completedAt,
+        executedAt: completedAt,
+      },
+    ],
+    execution: {
+      modelRounds: 1,
+      toolRounds: 1,
+      toolCalls: [{ callId: "live-tool-call", toolName: "write_file", status: "completed" as const }],
+    },
+    executionHistory: [
+      ...(child.executionHistory ?? []),
+      {
+        modelRounds: 1,
+        toolRounds: 1,
+        toolCalls: [{ callId: "live-tool-call", toolName: "write_file", status: "completed" as const }],
+        outcome: "completed" as const,
+        recordedAt: completedAt,
+      },
+    ],
+  };
+  const continuedResult: DeepChildInstructionContinueResult = {
+    status: "continued",
+    childRunId: pending.childRunId,
+    childStatus: "completed",
+    material: {
+      task: {
+        taskId: "task-live-projection-retry",
+        childRunId: pending.childRunId,
+        spec: completedSummary.spec,
+        status: "completed",
+        startedAt: child.startedAt,
+        updatedAt: completedAt,
+        completedAt,
+        summary: completedSummary,
+      },
+      summary: completedSummary,
+      completedRun,
+    },
+  };
+  const internal = feature as typeof feature & {
+    readonly runRecordStore: DeepRunRecordStore;
+    readonly childContinuations: DeepChildPendingContinuationStore;
+    readonly childInstructionQueues: {
+      readonly register: (runId: string, handle: DeepChildInstructionQueueHandle) => void;
+      readonly unregister: (runId: string, handle: DeepChildInstructionQueueHandle) => Promise<void>;
+    };
+  };
+  const store = internal.runRecordStore as DeepRunRecordStore & {
+    get: DeepRunRecordStore["get"];
+  };
+  const originalGet = store.get;
+  const projectionReadStarted = deferred<void>();
+  const projectionReadGate = deferred<void>();
+  let failNextRead = false;
+  store.get = async (runId) => {
+    if (failNextRead) {
+      failNextRead = false;
+      projectionReadStarted.resolve();
+      await projectionReadGate.promise;
+      throw new Error("fixture live child projection read failed");
+    }
+    return originalGet(runId);
+  };
+  let continuationExecutions = 0;
+  const queueHandle: DeepChildInstructionQueueHandle = {
+    queueChildInstruction: ({ childRunId }) => ({
+      status: "not_accepting",
+      childRunId,
+      childStatus: "blocked",
+      reason: "terminal child uses immediate continuation",
+    }),
+    continueChildInstruction: async () => {
+      continuationExecutions += 1;
+      internal.childContinuations.deleteForChildRun(pending.runId, pending.childRunId);
+      failNextRead = true;
+      return continuedResult;
+    },
+    snapshot: () => ({
+      runId: pending.runId,
+      phase: "waiting",
+      tasks: [continuedResult.material.task],
+      updatedAt: completedAt,
+    }),
+  };
+  internal.childInstructionQueues.register(pending.runId, queueHandle);
+
+  try {
+    const firstAttempt = feature.sendChildInstruction({
+      runId: pending.runId,
+      childRunId: pending.childRunId,
+      message: "补齐运行中 child 材料。",
+    });
+    await projectionReadStarted.promise;
+    let unregisterSettled = false;
+    const unregister = internal.childInstructionQueues.unregister(pending.runId, queueHandle).finally(() => {
+      unregisterSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(
+      unregisterSettled,
+      false,
+      "terminal seal must wait through result registration and authoritative projection",
+    );
+    projectionReadGate.resolve();
+    await assert.rejects(
+      firstAttempt,
+      /fixture live child projection read failed/,
+    );
+    await unregister;
+    assert.equal(continuationExecutions, 1);
+
+    const retried = await feature.sendChildInstruction({
+      runId: pending.runId,
+      childRunId: pending.childRunId,
+      message: "补齐运行中 child 材料。",
+    });
+    assert.equal(retried.status, "continued");
+    assert.equal(retried.record.agentRunTree.childRuns[0]?.status, "completed");
+    assert.equal(continuationExecutions, 1, "known live child material must only be projected on retry");
+  } finally {
+    store.get = originalGet;
+    await feature.dispose();
+  }
+});
+
+test("MultiAgentFeature blocks an orphaned durable child instruction before runtime acquisition", async () => {
+  let acquisitionCount = 0;
+  let startFactsResolutionCount = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => {
+      startFactsResolutionCount += 1;
+      return {
+        capabilitySnapshot: approvalCapabilitySnapshot(),
+        informationAccess: informationAccess(),
+        confirmationPolicy: "prompt",
+      };
+    },
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : directChildInstructionChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed"),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  const internal = feature as typeof feature & {
+    readonly childMessageStore: DeepChildMessageStore;
+    readonly runRecordStore: DeepRunRecordStore;
+  };
+  const orphanedInstructionId = "orphaned-instruction";
+  const orphanedMessageRef = `child_message:${orphanedInstructionId}`;
+  const queuedAt = "2026-07-13T00:00:00.000Z";
+  const record = await internal.runRecordStore.get(pending.runId);
+  assert.ok(record);
+  await internal.runRecordStore.upsert({
+    ...record,
+    agentRunTree: {
+      ...record.agentRunTree,
+      childRuns: record.agentRunTree.childRuns.map((childRun) =>
+        childRun.childRunId === pending.childRunId
+          ? {
+              ...childRun,
+              parentInstructions: [
+                ...(childRun.parentInstructions ?? []),
+                {
+                  instructionId: orphanedInstructionId,
+                  messageRef: orphanedMessageRef,
+                  source: "control_api" as const,
+                  status: "queued" as const,
+                  instructionSummary: "这条指令的执行结果尚未投影。",
+                  requestedAt: queuedAt,
+                  queuedAt,
+                },
+              ],
+            }
+          : childRun
+      ),
+    },
+  });
+  await internal.childMessageStore.upsert(createDeepChildMessageRecord({
+    runId: pending.runId,
+    childRunId: pending.childRunId,
+    instructionId: orphanedInstructionId,
+    messageRef: orphanedMessageRef,
+    source: "control_api",
+    status: "queued",
+    content: "这条指令的执行结果在进程重启前未完成投影。",
+    requestedAt: queuedAt,
+    queuedAt,
+  }));
+
+  const acquisitionBaseline = acquisitionCount;
+  const startFactsBaseline = startFactsResolutionCount;
+
+  await assert.rejects(
+    feature.sendChildInstruction({
+      runId: pending.runId,
+      childRunId: pending.childRunId,
+      message: "不得盲目重放上一条指令。",
+    }),
+    childInstructionOutcomeUnknownError,
+  );
+  await assert.rejects(
+    feature.resynthesize({ runId: pending.runId }),
+    childInstructionOutcomeUnknownError,
+  );
+  await assert.rejects(
+    feature.intake({
+      conversationId: pending.conversationId,
+      activeRunId: pending.runId,
+      aiMode: "fake",
+      message: "基于上一轮材料继续判断。",
+    }),
+    childInstructionOutcomeUnknownError,
+  );
+  await assert.rejects(
+    feature.startRun({
+      conversationId: pending.conversationId,
+      parentRunId: pending.runId,
+      aiMode: "fake",
+    }),
+    childInstructionOutcomeUnknownError,
+  );
+  await assert.rejects(
+    feature.followUp({
+      runId: pending.runId,
+      aiMode: "fake",
+      message: "继续上一轮深入协作。",
+    }),
+    childInstructionOutcomeUnknownError,
+  );
+  assert.equal(
+    acquisitionCount,
+    acquisitionBaseline,
+    "orphan reconciliation must fail before acquiring another runtime",
+  );
+  assert.equal(
+    startFactsResolutionCount,
+    startFactsBaseline,
+    "run-dependent commands must fail before resolving new start facts",
+  );
+  await feature.dispose();
+});
+
+test("MultiAgentFeature refreshes a stale running snapshot after the live queue disappears", async () => {
+  let acquisitionCount = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : directChildInstructionChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed"),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  const internal = feature as typeof feature & {
+    readonly runRecordStore: DeepRunRecordStore;
+  };
+  const originalGet = internal.runRecordStore.get;
+  let reads = 0;
+  internal.runRecordStore.get = async (runId) => {
+    reads += 1;
+    const record = await originalGet(runId);
+    if (reads !== 2 || record === undefined) {
+      return record;
+    }
+    return {
+      ...record,
+      run: {
+        ...record.run,
+        status: "running",
+        completedAt: undefined,
+      },
+    };
+  };
+
+  try {
+    const continued = await feature.sendChildInstruction({
+      runId: pending.runId,
+      childRunId: pending.childRunId,
+      message: "基于终态权威记录继续，不要使用刚好过期的 running 快照。",
+    });
+
+    assert.equal(continued.status, "continued");
+    assert.equal(reads >= 3, true, "lease miss must trigger an authoritative run refresh");
+    assert.equal(acquisitionCount, 2);
+  } finally {
+    internal.runRecordStore.get = originalGet;
+    await feature.dispose();
+  }
+});
+
+test("MultiAgentFeature does not replace a durable child approval after its live continuation is lost", async () => {
+  const durable = new InMemoryDeepRunRecordStore();
+  const firstFeature = createMultiAgentFeature({
+    runRecordStore: durable,
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => ({
+      intelligenceChannel: pendingApprovalRunChannel(),
+      toolCenter: new ApprovalFixtureToolBroker("approval"),
+      capabilitySnapshot,
+      release: async () => undefined,
+    }),
+  });
+  const pending = await createPendingApprovalChild(firstFeature);
+  await firstFeature.dispose();
+
+  let restartedAcquisitions = 0;
+  const restartedFeature = createMultiAgentFeature({
+    runRecordStore: durable,
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      restartedAcquisitions += 1;
+      return {
+        intelligenceChannel: directChildInstructionChannel(),
+        toolCenter: new ApprovalFixtureToolBroker("completed"),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  try {
+    await assert.rejects(
+      restartedFeature.sendChildInstruction({
+        runId: pending.runId,
+        childRunId: pending.childRunId,
+        message: "不能绕过已经丢失的确认上下文。",
+      }),
+      (error: unknown) => error instanceof Error
+        && "code" in error
+        && error.code === "confirmation_continuation_lost",
+    );
+    assert.equal(restartedAcquisitions, 0);
+  } finally {
+    await restartedFeature.dispose();
+  }
 });
 
 test("MultiAgentFeature keeps a child confirmation continuation when resource acquisition fails", async () => {
@@ -421,6 +1115,399 @@ test("MultiAgentFeature keeps a child confirmation continuation when resource ac
   const child = resumed.agentRunTree.childRuns.find((candidate) => candidate.childRunId === pending.childRunId);
   assert.equal(child?.status, "completed");
   assert.equal(resumedToolExecutions, 1);
+  await feature.dispose();
+});
+
+test("MultiAgentFeature keeps the prior approval when child continuation context preparation fails", async () => {
+  let acquisitionCount = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : acquisitionCount === 2
+            ? directChildInstructionChannel()
+            : resumedChildChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed"),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  const internal = feature as typeof feature & {
+    readonly childLoopContextStore: DeepChildLoopContextStore;
+    readonly childMessageStore: DeepChildMessageStore;
+  };
+  const originalGetByRef = internal.childLoopContextStore.getByRef;
+  (internal.childLoopContextStore as { getByRef: DeepChildLoopContextStore["getByRef"] }).getByRef = async () => {
+    throw new Error("fixture child continuation context read failed");
+  };
+  try {
+    await assert.rejects(
+      feature.sendChildInstruction({
+        runId: pending.runId,
+        childRunId: pending.childRunId,
+        message: "上下文准备成功后才允许替换原确认。",
+      }),
+      /fixture child continuation context read failed/,
+    );
+    assert.equal(
+      (await internal.childMessageStore.listForChild(pending.runId, pending.childRunId)).length,
+      0,
+      "failed context preparation must not leave a write-ahead marker",
+    );
+  } finally {
+    (internal.childLoopContextStore as { getByRef: DeepChildLoopContextStore["getByRef"] }).getByRef = originalGetByRef;
+  }
+
+  const resumed = await feature.resumeChild({
+    ...pending,
+    decision: { decision: "approve_once" },
+  });
+  assert.equal(
+    resumed.agentRunTree.childRuns.find((child) => child.childRunId === pending.childRunId)?.status,
+    "completed",
+  );
+  assert.equal(acquisitionCount, 3);
+  await feature.dispose();
+});
+
+test("MultiAgentFeature keeps an unknown confirmation outcome ahead of a new child instruction", async () => {
+  let acquisitionCount = 0;
+  let unexpectedToolExecutions = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : resumedChildChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed", () => {
+              unexpectedToolExecutions += 1;
+            }),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  const internal = feature as typeof feature & {
+    readonly childContinuations: DeepChildPendingContinuationStore;
+  };
+  const reservation = internal.childContinuations.reserve(
+    pending.runId,
+    pending.childRunId,
+    pending.confirmationId,
+  );
+  internal.childContinuations.markOutcomeUnknown(reservation);
+
+  await assert.rejects(
+    feature.resumeChild({
+      ...pending,
+      decision: { decision: "approve_once" },
+    }),
+    confirmationOutcomeUnknownError,
+  );
+  await assert.rejects(
+    feature.sendChildInstruction({
+      runId: pending.runId,
+      childRunId: pending.childRunId,
+      message: "未知结果不能通过新父指令绕过。",
+    }),
+    confirmationOutcomeUnknownError,
+  );
+  assert.equal(acquisitionCount, 1, "an unknown outcome must be rejected before runtime acquisition");
+  assert.equal(unexpectedToolExecutions, 0);
+  await feature.dispose();
+});
+
+test("MultiAgentFeature retries confirmation persistence without replaying the tool", async () => {
+  let acquisitionCount = 0;
+  let toolExecutions = 0;
+  const durableRunRecords = new InMemoryDeepRunRecordStore();
+  let failNextPersistence = false;
+  const runRecordStore: DeepRunRecordStore = {
+    upsert: async (record) => {
+      if (
+        failNextPersistence
+        && record.agentRunTree.childRuns.some((childRun) => childRun.status === "completed")
+      ) {
+        failNextPersistence = false;
+        throw new Error("fixture confirmation persistence failed");
+      }
+      return durableRunRecords.upsert(record);
+    },
+    get: (runId) => durableRunRecords.get(runId),
+    list: (limit) => durableRunRecords.list(limit),
+    listByConversation: (conversationId, limit) =>
+      durableRunRecords.listByConversation(conversationId, limit),
+    listByRootRun: (rootRunId, limit) => durableRunRecords.listByRootRun(rootRunId, limit),
+    delete: (runId) => durableRunRecords.delete(runId),
+  };
+  const feature = createMultiAgentFeature({
+    runRecordStore,
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : resumedChildChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed", () => {
+              toolExecutions += 1;
+            }),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  failNextPersistence = true;
+  const internal = feature as typeof feature & {
+    readonly runRecordWrites: DeepRunRecordWriteCoordinator;
+  };
+  const writes = internal.runRecordWrites as DeepRunRecordWriteCoordinator & {
+    acknowledgeFailure: DeepRunRecordWriteCoordinator["acknowledgeFailure"];
+  };
+  const originalAcknowledgeFailure = writes.acknowledgeFailure;
+  let acknowledgedFailures = 0;
+  writes.acknowledgeFailure = async (receipt) => {
+    const acknowledged = await originalAcknowledgeFailure(receipt);
+    if (acknowledged) {
+      acknowledgedFailures += 1;
+    }
+    return acknowledged;
+  };
+  try {
+    await assert.rejects(
+      feature.resumeChild({
+        ...pending,
+        decision: { decision: "approve_once" },
+      }),
+      /fixture confirmation persistence failed/,
+    );
+    assert.equal(toolExecutions, 1);
+    await assert.rejects(
+      feature.sendChildInstruction({
+        runId: pending.runId,
+        childRunId: pending.childRunId,
+        message: "确认结果尚未落盘时不得绕过原确认改发新指令。",
+      }),
+      confirmationInProgressError,
+    );
+    assert.equal(toolExecutions, 1, "a parent instruction must not replay a retained confirmation result");
+    assert.equal(acquisitionCount, 2, "the protected child instruction must not acquire another runtime");
+    const resumed = await feature.resumeChild({
+      ...pending,
+      decision: { decision: "approve_once" },
+    });
+    assert.equal(resumed.agentRunTree.childRuns[0]?.status, "completed");
+    assert.equal(toolExecutions, 1, "retry must only persist the known result");
+    assert.equal(acquisitionCount, 2, "retry must not acquire a second runtime");
+    assert.equal(acknowledgedFailures, 1);
+  } finally {
+    writes.acknowledgeFailure = originalAcknowledgeFailure;
+    await feature.dispose();
+  }
+});
+
+test("MultiAgentFeature keeps a known child result when resource release fails", async () => {
+  let acquisitionCount = 0;
+  const releaseFailures: unknown[] = [];
+  let toolExecutions = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      const leaseId = acquisitionCount;
+      return {
+        intelligenceChannel: leaseId === 1 ? pendingApprovalRunChannel() : resumedChildChannel(),
+        toolCenter: leaseId === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed", () => {
+              toolExecutions += 1;
+            }),
+        capabilitySnapshot,
+        release: async () => {
+          if (leaseId > 1) {
+            throw new Error("fixture confirmation release failed");
+          }
+        },
+      };
+    },
+    reportBackgroundFailure: ({ error }) => {
+      releaseFailures.push(error);
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  const resumed = await feature.resumeChild({
+    ...pending,
+    decision: { decision: "approve_once" },
+  });
+  assert.equal(resumed.agentRunTree.childRuns[0]?.status, "completed");
+  assert.equal(toolExecutions, 1);
+  assert.equal(releaseFailures.length, 1);
+  await assert.rejects(
+    feature.resumeChild({
+      ...pending,
+      decision: { decision: "approve_once" },
+    }),
+    continuationLostError,
+  );
+  await feature.dispose();
+});
+
+test("MultiAgentFeature retries child context persistence without replaying a known confirmation tool result", async () => {
+  let acquisitionCount = 0;
+  let toolExecutions = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : resumedChildChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed", () => {
+              toolExecutions += 1;
+            }),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+  const internal = feature as typeof feature & {
+    readonly childLoopContextStore: DeepChildLoopContextStore;
+  };
+  const contextStore = internal.childLoopContextStore as DeepChildLoopContextStore & {
+    upsert: DeepChildLoopContextStore["upsert"];
+  };
+  const originalUpsert = contextStore.upsert;
+  let failingWrites = 2;
+  contextStore.upsert = async (...args: Parameters<DeepChildLoopContextStore["upsert"]>) => {
+    if (failingWrites > 0) {
+      failingWrites -= 1;
+      throw new Error("fixture continuation context persistence failed");
+    }
+    return originalUpsert.call(contextStore, ...args);
+  };
+  try {
+    await assert.rejects(
+      feature.resumeChild({
+        ...pending,
+        decision: { decision: "approve_once" },
+      }),
+      (error: unknown) => error instanceof Error
+        && error.message.includes("fixture continuation context persistence failed")
+        && (!("code" in error) || error.code !== "confirmation_outcome_unknown"),
+    );
+    assert.equal(toolExecutions, 1);
+    await assert.rejects(
+      feature.resumeChild({
+        ...pending,
+        decision: { decision: "approve_once" },
+      }),
+      (error: unknown) => error instanceof Error
+        && error.message.includes("fixture continuation context persistence failed")
+        && (!("code" in error) || error.code !== "confirmation_outcome_unknown"),
+    );
+    assert.equal(toolExecutions, 1, "a failed persistence retry must not replay the tool");
+    const resumed = await feature.resumeChild({
+      ...pending,
+      decision: { decision: "approve_once" },
+    });
+    assert.equal(resumed.agentRunTree.childRuns[0]?.status, "completed");
+    assert.equal(toolExecutions, 1);
+    assert.equal(acquisitionCount, 2, "persistence retries must not acquire another child runtime");
+  } finally {
+    contextStore.upsert = originalUpsert;
+    await feature.dispose();
+  }
+});
+
+test("MultiAgentFeature projects an unpersistable known child turn as failed without replaying its tool", async () => {
+  let acquisitionCount = 0;
+  let toolExecutions = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunWithUnpersistableContextChannel()
+          : resumedChildChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed", () => {
+              toolExecutions += 1;
+            }),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const pending = await createPendingApprovalChild(feature);
+
+  await assert.rejects(
+    feature.resumeChild({
+      ...pending,
+      decision: { decision: "approve_once" },
+    }),
+    (error: unknown) => error instanceof Error
+      && error.message.includes("model_protocol_continuation_not_persistable")
+      && (!("code" in error) || error.code !== "confirmation_outcome_unknown"),
+  );
+  assert.equal(toolExecutions, 1);
+
+  const projected = await feature.resumeChild({
+    ...pending,
+    decision: { decision: "approve_once" },
+  });
+  const child = projected.agentRunTree.childRuns.find(
+    (candidate) => candidate.childRunId === pending.childRunId,
+  );
+  assert.equal(child?.status, "failed");
+  assert.equal(child?.failureDetail?.failureKind, "model_protocol_continuation_not_persistable");
+  assert.equal(child?.execution?.toolCalls[0]?.status, "completed");
+  assert.equal(toolExecutions, 1);
+  assert.equal(acquisitionCount, 2, "the failed projection must not acquire another child runtime");
   await feature.dispose();
 });
 
@@ -532,7 +1619,7 @@ test("MultiAgentFeature clears terminal runtime handles and removes non-pending 
   const internal = feature as typeof feature & {
     readonly childContinuations: DeepChildPendingContinuationStore;
     readonly childInstructionQueues: {
-      readonly get: (runId: string) => unknown;
+      readonly has: (runId: string) => boolean;
     };
     readonly controlHandleForRun: (runId: string) => unknown;
   };
@@ -541,14 +1628,14 @@ test("MultiAgentFeature clears terminal runtime handles and removes non-pending 
     pendingContinuation("stale-child", "stale-confirmation"),
   );
 
-  await waitUntil(() => internal.childInstructionQueues.get(started.runId) !== undefined);
+  await waitUntil(() => internal.childInstructionQueues.has(started.runId));
   assert.notEqual(internal.controlHandleForRun(started.runId), undefined);
 
   gate.resolve();
   await feature.waitForIdle();
 
   assert.equal(internal.controlHandleForRun(started.runId), undefined);
-  assert.equal(internal.childInstructionQueues.get(started.runId), undefined);
+  assert.equal(internal.childInstructionQueues.has(started.runId), false);
   assert.equal(
     internal.childContinuations.get(started.runId, "stale-child", "stale-confirmation"),
     undefined,
@@ -657,6 +1744,138 @@ test("MultiAgentFeature serializes conversation deletion behind a post-terminal 
   await deletion;
   assert.equal(await feature.getRun(pending.runId), undefined, "late child save must not recreate a deleted run");
   await feature.dispose();
+});
+
+test("MultiAgentFeature keeps the run owner when conversation sidecar cleanup fails", async () => {
+  const feature = pendingApprovalFeature({});
+  const pending = await createPendingApprovalChild(feature);
+  const internal = feature as typeof feature & {
+    readonly childMessageStore: DeepChildMessageStore;
+  };
+  const messageStore = internal.childMessageStore as DeepChildMessageStore & {
+    deleteForRun: DeepChildMessageStore["deleteForRun"];
+  };
+  const originalDeleteForRun = messageStore.deleteForRun;
+  let failCleanup = true;
+  messageStore.deleteForRun = async (runId) => {
+    if (failCleanup) {
+      failCleanup = false;
+      throw new Error("fixture sidecar cleanup failed");
+    }
+    await originalDeleteForRun.call(messageStore, runId);
+  };
+  try {
+    await assert.rejects(
+      feature.deleteConversation(pending.conversationId),
+      /fixture sidecar cleanup failed/,
+    );
+    assert.ok(await feature.getRun(pending.runId), "run owner must remain available for cleanup retry");
+    assert.ok(await feature.getConversation(pending.conversationId));
+
+    await feature.deleteConversation(pending.conversationId);
+    assert.equal(await feature.getRun(pending.runId), undefined);
+    assert.equal(await feature.getConversation(pending.conversationId), undefined);
+  } finally {
+    messageStore.deleteForRun = originalDeleteForRun;
+    await feature.dispose();
+  }
+});
+
+test("MultiAgentFeature waits for terminal persistence after the live child queue unregisters", async () => {
+  const queueUnregistered = deferred<void>();
+  const terminalSaveStarted = deferred<void>();
+  const terminalSaveGate = deferred<void>();
+  let acquisitionCount = 0;
+  const feature = createMultiAgentFeature({
+    resolveRunStartFacts: async () => ({
+      capabilitySnapshot: approvalCapabilitySnapshot(),
+      informationAccess: informationAccess(),
+      confirmationPolicy: "prompt",
+    }),
+    acquireRunResources: async ({ capabilitySnapshot }) => {
+      acquisitionCount += 1;
+      return {
+        intelligenceChannel: acquisitionCount === 1
+          ? pendingApprovalRunChannel()
+          : resumedChildChannel(),
+        toolCenter: acquisitionCount === 1
+          ? new ApprovalFixtureToolBroker("approval")
+          : new ApprovalFixtureToolBroker("completed"),
+        capabilitySnapshot,
+        release: async () => undefined,
+      };
+    },
+  });
+  const internal = feature as typeof feature & {
+    readonly runRecordStore: DeepRunRecordStore;
+    readonly childInstructionQueues: {
+      readonly unregister: (
+        runId: string,
+        handle: DeepChildInstructionQueueHandle,
+      ) => Promise<void>;
+    };
+  };
+  // Use the concrete store methods as a test seam; the production owner remains
+  // the feature's coordinated store and no route-level state is introduced.
+  const store = internal.runRecordStore as DeepRunRecordStore & {
+    upsert: DeepRunRecordStore["upsert"];
+  };
+  const originalUpsert = store.upsert;
+  let holdTerminalSave = true;
+  store.upsert = async (record) => {
+    if (holdTerminalSave && record.run.status !== "running" && record.report !== undefined) {
+      holdTerminalSave = false;
+      terminalSaveStarted.resolve();
+      await terminalSaveGate.promise;
+    }
+    return originalUpsert(record);
+  };
+  const queueRegistry = internal.childInstructionQueues as unknown as {
+    unregister: (runId: string, handle: DeepChildInstructionQueueHandle) => Promise<void>;
+  };
+  const originalUnregister = queueRegistry.unregister;
+  queueRegistry.unregister = async (runId, handle) => {
+    await originalUnregister(runId, handle);
+    queueUnregistered.resolve();
+  };
+
+  try {
+    const conversation = await feature.createConversation({
+      aiMode: "fake",
+      goal: "验证终态写入与 child 续跑的顺序。",
+    });
+    const started = await feature.startRun({
+      conversationId: conversation.conversationId,
+      aiMode: "fake",
+    });
+    await queueUnregistered.promise;
+    await terminalSaveStarted.promise;
+    const live = await feature.getRun(started.runId);
+    const child = live?.agentRunTree.childRuns[0];
+    assert.ok(child);
+
+    let settled = false;
+    const instruction = feature.sendChildInstruction({
+      runId: started.runId,
+      childRunId: child.childRunId,
+      message: "请在确认后继续完成写入。",
+    }).finally(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, "post-terminal instruction must wait for final persistence");
+    assert.equal(acquisitionCount, 1, "must not acquire a second runtime from the stale record");
+
+    terminalSaveGate.resolve();
+    const continued = await instruction;
+    assert.equal(continued.status, "continued");
+    await feature.waitForIdle();
+    const final = await feature.getRun(started.runId);
+    assert.equal(final?.run.status, "completed");
+  } finally {
+    store.upsert = originalUpsert;
+    await feature.dispose();
+  }
 });
 
 test("MultiAgentFeature keeps Deep-owned tool output through terminal approval and reclaims it on conversation deletion", async () => {
@@ -957,6 +2176,24 @@ function continuationLostError(error: unknown): boolean {
     error.code === "confirmation_continuation_lost";
 }
 
+function confirmationInProgressError(error: unknown): boolean {
+  return error instanceof Error &&
+    "code" in error &&
+    error.code === "confirmation_in_progress";
+}
+
+function confirmationOutcomeUnknownError(error: unknown): boolean {
+  return error instanceof Error &&
+    "code" in error &&
+    error.code === "confirmation_outcome_unknown";
+}
+
+function childInstructionOutcomeUnknownError(error: unknown): boolean {
+  return error instanceof Error &&
+    "code" in error &&
+    error.code === "child_instruction_outcome_unknown";
+}
+
 function pendingApprovalRunChannel(): IntelligenceChannel {
   let decisionCount = 0;
   return {
@@ -1035,6 +2272,61 @@ function resumedChildChannel(): IntelligenceChannel {
     validateResponse(_request, response) {
       return response.validation;
     },
+  };
+}
+
+function directChildInstructionChannel(): IntelligenceChannel {
+  let requestCount = 0;
+  return {
+    async request(request): Promise<ModelResponse> {
+      assert.equal(request.purpose, "deep_child_material");
+      requestCount += 1;
+      if (requestCount === 1) {
+        return fixtureModelResponse(request, undefined, [{
+          callId: "call-write-direct-child",
+          toolName: "write_file",
+          input: { path: "notes.md", content: "direct child instruction" },
+        }]);
+      }
+      return fixtureModelResponse(request, {
+        summary: "直接 child 跟进已执行。",
+        findings: ["写入工具只执行一次"],
+        evidenceRefs: ["tool:call-write-direct-child"],
+        uncertainty: "无。",
+        confidence: 0.88,
+      });
+    },
+    validateResponse(_request, response) {
+      return response.validation;
+    },
+  };
+}
+
+function pendingApprovalRunWithUnpersistableContextChannel(): IntelligenceChannel {
+  const channel = pendingApprovalRunChannel();
+  return {
+    async request(request, options): Promise<ModelResponse> {
+      const response = await channel.request(request, options);
+      if (
+        request.purpose !== "deep_child_material"
+        || response.toolCalls === undefined
+        || response.toolCalls.length === 0
+      ) {
+        return response;
+      }
+      return {
+        ...response,
+        assistantMessage: {
+          role: "assistant",
+          content: "Pending tool call with an invalid durable protocol continuation.",
+          toolCalls: response.toolCalls,
+          protocolExtensions: {
+            openai_responses_output_items: [{ encrypted_content: "missing-type" }],
+          },
+        },
+      };
+    },
+    validateResponse: (request, response) => channel.validateResponse(request, response),
   };
 }
 

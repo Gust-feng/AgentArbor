@@ -72,7 +72,7 @@ export async function persistExecutedQueuedChildMessages(
   ));
 }
 
-function persistDeepChildInstructionRecord(
+export function persistDeepChildInstructionRecord(
   store: DeepChildMessageStore | undefined,
   runId: string,
   instruction: DeepChildInstructionRecord,

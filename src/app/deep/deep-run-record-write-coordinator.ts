@@ -1,13 +1,35 @@
+import { randomUUID } from "node:crypto";
 import type { DeepRunRecord, DeepRunRecordStore } from "./deep-run-record-store.js";
 
 export type DeepRunRecordWriteOperation = "save" | "delete";
 
-export type DeepRunRecordWriteFailure = {
+export type DeepRunRecordWriteReceipt = {
+  readonly operationId: string;
   readonly runId: string;
   readonly operation: DeepRunRecordWriteOperation;
   readonly sequence: number;
+};
+
+export type DeepRunRecordWriteFailure = DeepRunRecordWriteReceipt & {
   readonly error: unknown;
 };
+
+/** One failed write as observed by its direct caller, with an exact operation identity. */
+export class DeepRunRecordWriteError extends Error {
+  constructor(
+    readonly receipt: DeepRunRecordWriteReceipt,
+    cause: unknown,
+  ) {
+    super(errorMessage(cause), { cause });
+    this.name = "DeepRunRecordWriteError";
+  }
+}
+
+export function deepRunRecordWriteReceiptFromError(
+  error: unknown,
+): DeepRunRecordWriteReceipt | undefined {
+  return error instanceof DeepRunRecordWriteError ? error.receipt : undefined;
+}
 
 export class DeepRunRecordWriteDrainError extends Error {
   readonly failures: readonly DeepRunRecordWriteFailure[];
@@ -27,6 +49,8 @@ export interface DeepRunRecordWriteCoordinator {
   flushRun(runId: string): Promise<void>;
   /** Wait for writes queued for all runs without acknowledging failures. */
   flush(): Promise<void>;
+  /** Acknowledge one exact operation failure already returned to an awaited caller. */
+  acknowledgeFailure(receipt: DeepRunRecordWriteReceipt): Promise<boolean>;
   drainRun(runId: string): Promise<void>;
   drain(): Promise<void>;
 }
@@ -54,7 +78,8 @@ type DrainCapture = {
  * Serializes durable mutations for each Deep run without coupling unrelated runs.
  * Save and delete share one FIFO: save->delete removes a record, while
  * delete->save intentionally recreates it. A failed operation never poisons the
- * queue; the returned promise and the next drain both retain the failure.
+ * queue. Its failure remains observable until it is acknowledged, drained, or
+ * superseded by a later successful mutation for the same run.
  */
 export function createDeepRunRecordWriteCoordinator(
   store: DeepRunRecordStore,
@@ -94,22 +119,31 @@ export function createDeepRunRecordWriteCoordinator(
   ): Promise<TResult> {
     const state = stateFor(runId);
     const sequence = state.nextSequence + 1;
+    const receipt: DeepRunRecordWriteReceipt = {
+      operationId: randomUUID(),
+      runId,
+      operation,
+      sequence,
+    };
     state.nextSequence = sequence;
     state.pendingCount += 1;
 
-    const result = state.tail.then(execute);
+    const result = state.tail.then(execute).catch((error: unknown) => {
+      throw new DeepRunRecordWriteError(receipt, error);
+    });
     state.tail = result.then(
       () => {
         state.pendingCount -= 1;
+        // Every mutation writes the run's complete current state (or deletes it),
+        // so this success durably supersedes only earlier failures in this FIFO.
+        state.failures = state.failures.filter((failure) => failure.sequence >= sequence);
         removeIdleState(state);
       },
       (error: unknown) => {
         state.pendingCount -= 1;
         state.failures.push({
-          runId,
-          operation,
-          sequence,
-          error,
+          ...receipt,
+          error: error instanceof DeepRunRecordWriteError ? error.cause : error,
         });
       },
     );
@@ -183,6 +217,25 @@ export function createDeepRunRecordWriteCoordinator(
       await Promise.all(captures.map(flushCapture));
     },
 
+    async acknowledgeFailure(receipt: DeepRunRecordWriteReceipt): Promise<boolean> {
+      const state = states.get(receipt.runId);
+      if (state === undefined) {
+        return false;
+      }
+      await state.tail;
+      const failureIndex = state.failures.findIndex((failure) => (
+        failure.operationId === receipt.operationId
+        && failure.sequence === receipt.sequence
+        && failure.operation === receipt.operation
+      ));
+      if (failureIndex < 0) {
+        return false;
+      }
+      state.failures.splice(failureIndex, 1);
+      removeIdleState(state);
+      return true;
+    },
+
     async drainRun(runId: string): Promise<void> {
       const state = states.get(runId);
       if (state === undefined) {
@@ -197,6 +250,13 @@ export function createDeepRunRecordWriteCoordinator(
       throwIfFailed(failures);
     },
   };
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return typeof error === "string" ? error : String(error);
 }
 
 /**

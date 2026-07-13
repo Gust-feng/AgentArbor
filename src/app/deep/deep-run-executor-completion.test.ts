@@ -63,6 +63,154 @@ test("stepLimit 触发时如已有 child 材料必须尝试父层综合，不能
   assert.ok(result.synthesisRecord !== undefined);
 });
 
+test("direct_answer terminal decision cancels never-started children and drains running material", async () => {
+  const responses: FakeModelProviderResponse[] = [
+    {
+      output: {
+        action: "spawn_children",
+        childSpecs: [
+          {
+            specId: "child-spec-running",
+            displayName: "已启动角度",
+            role: "running_angle",
+            objective: "先收集一份可用材料",
+            allowedTools: [],
+            inputRefs: ["goal:goal-test-deep"],
+          },
+          {
+            specId: "child-spec-pending",
+            displayName: "未启动角度",
+            role: "pending_angle",
+            objective: "等待并发槽后再探索",
+            allowedTools: [],
+            inputRefs: ["goal:goal-test-deep"],
+          },
+        ],
+        decisionSummary: "先安排两个探索角度。",
+        rationale: "验证终态收口不会留下 pending child。",
+        uncertainty: "第二个角度尚未启动。",
+        confidence: 0.7,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        summary: "已启动角度返回了足够材料。",
+        findings: ["现有材料已足够直接回答"],
+        evidenceRefs: ["child:running:evidence"],
+        uncertainty: "未启动角度不再需要。",
+        confidence: 0.72,
+      },
+    },
+    {
+      output: {
+        action: "direct_answer",
+        childSpecs: [],
+        decisionSummary: "现有材料足够，直接收口。",
+        rationale: "无需启动剩余探索。",
+        uncertainty: "未启动角度已取消。",
+        confidence: 0.8,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        conclusion: "基于已返回材料直接给出结论。",
+        oneLineRationale: "一个已完成角度已经满足回答需要。",
+        keyEvidenceRefs: ["child:running:evidence"],
+        mainUncertainty: "剩余角度未执行。",
+        confidence: 0.75,
+      },
+    },
+  ];
+  const config: DeepRunExecutorConfig = {
+    ...makeTurnRuntime(responses),
+    maxConcurrency: 1,
+  };
+
+  const result = await startDeepRun(
+    makeStartInput("验证直接回答终态取消未启动 child", true),
+    config,
+  );
+
+  assert.equal(result.stopReason, "direct_answer");
+  assert.equal(result.run.status, "completed");
+  assert.equal(result.childSummaries.length, 1);
+  const snapshot = result.taskBoard?.snapshot();
+  assert.ok(snapshot);
+  assert.equal(snapshot.tasks.filter((task) => task.status === "completed").length, 1);
+  assert.equal(snapshot.tasks.filter((task) => task.status === "cancelled").length, 1);
+  assert.equal(
+    snapshot.tasks.some((task) => task.status === "pending" || task.status === "running"),
+    false,
+  );
+});
+
+test("manager failure cancels pending children and leaves the task board in failed phase", async () => {
+  const responses: FakeModelProviderResponse[] = [
+    {
+      output: {
+        action: "spawn_children",
+        childSpecs: [
+          {
+            specId: "child-spec-before-manager-failure",
+            displayName: "已启动角度",
+            role: "started_before_failure",
+            objective: "在 manager 失败前返回材料",
+            allowedTools: [],
+            inputRefs: ["goal:goal-test-deep"],
+          },
+          {
+            specId: "child-spec-pending-at-manager-failure",
+            displayName: "待取消角度",
+            role: "pending_at_failure",
+            objective: "保持 pending 直到 manager 失败",
+            allowedTools: [],
+            inputRefs: ["goal:goal-test-deep"],
+          },
+        ],
+        decisionSummary: "先安排两个探索角度。",
+        rationale: "验证异常终态清理。",
+        uncertainty: "后续 manager 请求将失败。",
+        confidence: 0.65,
+        reasoningRefs: [],
+      },
+    },
+    {
+      output: {
+        summary: "已启动 child 在 manager 失败前返回材料。",
+        findings: ["已启动材料应保留"],
+        evidenceRefs: ["child:before-manager-failure"],
+        uncertainty: "manager 无法继续决策。",
+        confidence: 0.6,
+      },
+    },
+    { fail: true, failureMessage: "fixture manager decision failed" },
+    { fail: true, failureMessage: "fixture manager decision retry failed" },
+  ];
+  const config: DeepRunExecutorConfig = {
+    ...makeTurnRuntime(responses),
+    maxConcurrency: 1,
+  };
+
+  const result = await startDeepRun(
+    makeStartInput("验证 manager 异常终态取消 pending child", true),
+    config,
+  );
+
+  assert.equal(result.stopReason, "failed");
+  assert.equal(result.run.status, "failed");
+  assert.match(result.failure ?? "", /Deep model turn failed: deep_decision/);
+  const snapshot = result.taskBoard?.snapshot();
+  assert.ok(snapshot);
+  assert.equal(snapshot.phase, "failed");
+  assert.equal(snapshot.tasks.filter((task) => task.status === "cancelled").length, 1);
+  assert.equal(
+    snapshot.tasks.some((task) => task.status === "pending" || task.status === "running"),
+    false,
+  );
+});
+
 test("模型主动 stop 会取消 pending、保留 running 材料并尝试部分综合", async () => {
   const responses: FakeModelProviderResponse[] = [
     {

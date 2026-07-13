@@ -772,6 +772,24 @@ function mapMultiAgentFeatureError(error: unknown): never {
         "confirmation_continuation_lost",
         "该子 Agent 的确认上下文已不可恢复，请让父 Agent 补充指令后继续该子任务。",
       );
+    case "confirmation_in_progress":
+      throw new PanelHttpError(
+        409,
+        "confirmation_in_progress",
+        "该子 Agent 的确认正在处理中，请等待当前操作完成。",
+      );
+    case "confirmation_outcome_unknown":
+      throw new PanelHttpError(
+        409,
+        "confirmation_outcome_unknown",
+        "该确认的执行结果无法确定，系统不会自动重复可能已经产生副作用的操作。",
+      );
+    case "child_instruction_outcome_unknown":
+      throw new PanelHttpError(
+        409,
+        "child_instruction_outcome_unknown",
+        "上一条子任务指令缺少可确认的持久化结果，系统不会自动重复可能已经执行的操作。",
+      );
     case "capability_snapshot_missing":
       throw new PanelHttpError(
         409,

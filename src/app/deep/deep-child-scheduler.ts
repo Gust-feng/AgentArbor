@@ -42,6 +42,7 @@ import type {
   DeepChildTask,
   DeepTaskBoardSnapshot,
 } from "./contracts.js";
+import { DeepChildExecutionAdmissionError } from "./deep-child-run-contracts.js";
 import {
   buildFailedChildExploration,
   DEEP_MAX_CHILDREN,
@@ -252,22 +253,22 @@ export class DeepChildScheduler {
       messageRef,
       childRunId: input.childRun.childRunId,
       source: input.source ?? "manager",
-      status: "executed",
+      status: "queued",
       instructionSummary: summarizeDeepChildParentInstruction(input.parentInstruction),
       review: cloneDeepChildParentReview(input.review),
       requestedAt,
-      executedAt: requestedAt,
+      queuedAt: requestedAt,
     });
-    const executedInstructionRecord: DeepChildInstructionRecord = {
+    let instructionRecord: DeepChildInstructionRecord = {
       instructionId,
       messageRef,
       childRunId: input.childRun.childRunId,
       source: input.source ?? "manager",
-      status: "executed",
+      status: "queued",
       instruction: input.parentInstruction,
       review: cloneDeepChildParentReview(input.review),
       requestedAt,
-      executedAt: requestedAt,
+      queuedAt: requestedAt,
     };
     const runningTask = this.board.markRunning(task.taskId);
     this.invokeStarted(runningTask, childRunForContinuation);
@@ -275,6 +276,7 @@ export class DeepChildScheduler {
     let completedRun: ChildAgentRun;
     let terminalTask: DeepChildTask;
     let pendingContinuation: ExploreDeepChildResult["pendingContinuation"];
+    let executedInstruction: DeepChildExecutedQueuedInstruction | undefined;
     try {
       const result = await this.continueFactory(
         childRunForContinuation,
@@ -286,21 +288,81 @@ export class DeepChildScheduler {
           messageRef,
           source: input.source ?? "manager",
           review: cloneDeepChildParentReview(input.review),
+          requestedAt,
         },
       );
-      pendingContinuation = result.pendingContinuation;
+      const executedAt = nowIso();
+      const executedRun = this.parentInstructionHistory.markExecuted(
+        input.childRun.childRunId,
+        result.completedRun,
+        instructionId,
+        executedAt,
+      ) ?? result.completedRun;
+      completedRun = this.applyParentInstructionHistory(executedRun);
+      pendingContinuation = result.pendingContinuation === undefined
+        ? undefined
+        : {
+            ...result.pendingContinuation,
+            childRun: completedRun,
+          };
+      instructionRecord = {
+        instructionId,
+        messageRef,
+        childRunId: input.childRun.childRunId,
+        source: input.source ?? "manager",
+        status: "executed",
+        instruction: input.parentInstruction,
+        review: cloneDeepChildParentReview(input.review),
+        requestedAt,
+        queuedAt: requestedAt,
+        executedAt,
+      };
+      executedInstruction = {
+        instructionId,
+        messageRef,
+        childRunId: input.childRun.childRunId,
+        instruction: input.parentInstruction,
+        source: input.source ?? "manager",
+        review: cloneDeepChildParentReview(input.review),
+        queuedAt: requestedAt,
+        executedAt,
+      };
       terminalTask = mapDeepChildExecutionResult({
         board: this.board,
         taskId: task.taskId,
-        result,
+        result: {
+          ...result,
+          completedRun,
+          pendingContinuation,
+        },
       });
       summary = result.summary;
-      completedRun = this.applyParentInstructionHistory(result.completedRun);
       this.childRunById.set(input.childRun.childRunId, completedRun);
     } catch (error) {
+      let failedChildRun = childRunForContinuation;
+      if (error instanceof DeepChildExecutionAdmissionError) {
+        const cancelledAt = nowIso();
+        failedChildRun = this.parentInstructionHistory.markAdmissionRejected(
+          input.childRun.childRunId,
+          childRunForContinuation,
+          instructionId,
+          cancelledAt,
+        ) ?? childRunForContinuation;
+        instructionRecord = {
+          instructionId,
+          messageRef,
+          childRunId: input.childRun.childRunId,
+          source: input.source ?? "manager",
+          status: "cancelled",
+          instruction: input.parentInstruction,
+          review: cloneDeepChildParentReview(input.review),
+          requestedAt,
+          cancelledAt,
+        };
+      }
       const reason = errorMessage(error);
       const failed = buildFailedChildExploration({
-        childRun: childRunForContinuation,
+        childRun: failedChildRun,
         childSpec: input.childSpec,
         reason,
         failedAt: nowIso(),
@@ -308,14 +370,16 @@ export class DeepChildScheduler {
       summary = failed.summary;
       completedRun = this.applyParentInstructionHistory(failed.completedRun);
       terminalTask = this.board.markFailed(task.taskId, reason, summary);
+      this.childRunById.set(input.childRun.childRunId, completedRun);
     } finally {
-      this.invokeInstructionRecorded(executedInstructionRecord);
+      this.invokeInstructionRecorded(instructionRecord);
     }
     const material: DeepChildTerminalMaterial = {
       task: terminalTask,
       summary,
       completedRun,
       pendingContinuation,
+      executedQueuedInstructions: executedInstruction === undefined ? undefined : [executedInstruction],
     };
     this.invokeTerminal(material);
     return material;
@@ -685,6 +749,10 @@ export class DeepChildScheduler {
       takeNextInstruction: (childRunId) => this.shiftQueuedInstruction(childRunId),
       markParentInstructionExecuted: (childRunId, instructionId, executedAt) =>
         this.markParentInstructionExecuted(childRunId, instructionId, executedAt),
+      markParentInstructionAdmissionRejected: (childRunId, instructionId, cancelledAt) =>
+        this.markParentInstructionAdmissionRejected(childRunId, instructionId, cancelledAt),
+      markParentInstructionCancelled: (childRunId, instructionId, cancelledAt) =>
+        this.markParentInstructionCancelled(childRunId, instructionId, cancelledAt),
       recordInstruction: (instruction) => this.invokeInstructionRecorded(instruction),
     });
     this.invokeTerminal(material);
@@ -795,6 +863,22 @@ export class DeepChildScheduler {
 
   private markParentInstructionCancelled(childRunId: string, instructionId: string, cancelledAt: string): void {
     const updated = this.parentInstructionHistory.markCancelled(
+      childRunId,
+      this.childRunById.get(childRunId),
+      instructionId,
+      cancelledAt,
+    );
+    if (updated !== undefined) {
+      this.childRunById.set(childRunId, updated);
+    }
+  }
+
+  private markParentInstructionAdmissionRejected(
+    childRunId: string,
+    instructionId: string,
+    cancelledAt: string,
+  ): void {
+    const updated = this.parentInstructionHistory.markAdmissionRejected(
       childRunId,
       this.childRunById.get(childRunId),
       instructionId,

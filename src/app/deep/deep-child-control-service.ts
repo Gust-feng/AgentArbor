@@ -146,7 +146,7 @@ export async function recordDeepChildMessage(
 export async function applyDeepChildOperationResult(
   state: DeepChildControlUpdateState,
   record: DeepRunRecord,
-  result: DeepChildAgentRunResult,
+  result: Pick<DeepChildAgentRunResult, "summary" | "completedRun" | "pendingContinuation">,
   copy: {
     readonly eventTitle: string;
     readonly eventSummary: string;
@@ -334,7 +334,7 @@ function updateLiveProjectionForResynthesis(
 
 function updateLiveProjectionForChild(
   projection: DeepLiveProjection,
-  result: DeepChildAgentRunResult,
+  result: Pick<DeepChildAgentRunResult, "summary" | "completedRun">,
   updatedAt: string,
   options?: { readonly markSynthesisPending?: boolean },
 ): DeepLiveProjection {
@@ -384,7 +384,7 @@ function updateLiveProjectionForChild(
 }
 
 function liveChildWorkflowItemsForControlResult(
-  result: DeepChildAgentRunResult,
+  result: Pick<DeepChildAgentRunResult, "summary" | "completedRun">,
   updatedAt: string,
 ): readonly DeepLiveChildWorkflowItem[] {
   const childRun = result.completedRun;

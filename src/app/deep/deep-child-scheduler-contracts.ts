@@ -31,6 +31,7 @@ export type ContinueDeepChildFactory = (
     readonly messageRef: string;
     readonly source: DeepChildQueuedInstructionSource;
     readonly review?: ChildAgentRunParentReview;
+    readonly requestedAt: string;
   },
 ) => Promise<ExploreDeepChildResult>;
 

@@ -29,9 +29,11 @@ import {
 import {
   createDeepChildLoopContextRef,
   createDeepChildLoopContextRecord,
+  type DeepChildLoopContextRecord,
   type DeepChildLoopContextStore,
 } from "./deep-child-loop-contexts.js";
 import {
+  DeepChildExecutionAdmissionError,
   type DeepChildAgentContinuationInput,
   type DeepChildAgentResumeInput,
   type DeepChildAgentRunInput,
@@ -45,6 +47,7 @@ const CHILD_AGENT_TURN_SEMANTICS = {
 } as const;
 
 export {
+  DeepChildExecutionAdmissionError,
   DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID,
   DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
   DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,
@@ -85,6 +88,23 @@ import {
   parseDeepChildMaterial,
 } from "./deep-model-io.js";
 
+/**
+ * The model/tool turn has a known result, but its mechanical continuation
+ * snapshot did not commit. A valid pending snapshot remains retryable; an
+ * invalid snapshot is represented by a failed child result. In both cases the
+ * caller must not replay the turn or classify the side effect as unknown.
+ */
+export class DeepChildPostExecutionPersistenceError extends Error {
+  constructor(
+    readonly result: DeepChildAgentRunResult,
+    cause: unknown,
+  ) {
+    super(`Deep child post-execution persistence failed: ${errorMessage(cause)}`);
+    this.name = "DeepChildPostExecutionPersistenceError";
+    (this as Error & { cause?: unknown }).cause = cause;
+  }
+}
+
 export async function runDeepChildAgent(input: DeepChildAgentRunInput): Promise<DeepChildAgentRunResult> {
   const childSpec = resolveRuntimeChildSpec(input);
   const startedRun = startChildAgentRun(input.childRun, input.childRun.startedAt);
@@ -92,6 +112,7 @@ export async function runDeepChildAgent(input: DeepChildAgentRunInput): Promise<
     ...input,
     childSpec,
     activeRun: startedRun,
+    persistenceFailureMode: "return_failed_result",
     messages: deepChildMaterialMessages({
       goal: input.goal,
       childSpec,
@@ -106,11 +127,18 @@ export async function continueDeepChildAgent(
 ): Promise<DeepChildAgentRunResult> {
   const childSpec = resolveRuntimeChildSpec(input);
   const resumedRun = resumeChildAgentRun(input.childRun, nowIso());
-  const baseMessages = await continuationBaseMessages(input, childSpec);
+  let baseMessages: readonly ModelMessage[];
+  try {
+    baseMessages = await continuationBaseMessages(input, childSpec);
+    await input.beforeExecution?.();
+  } catch (error) {
+    throw new DeepChildExecutionAdmissionError(error);
+  }
   return executeDeepChildAgentLoop({
     ...input,
     childSpec,
     activeRun: resumedRun,
+    persistenceFailureMode: "return_failed_result",
     messages: [
       ...baseMessages,
       continuationInstructionMessage({
@@ -149,6 +177,7 @@ async function executeDeepChildAgentLoop(input: DeepChildAgentRunInput & {
   readonly childSpec: DeepChildSpec;
   readonly activeRun: ChildAgentRun;
   readonly messages: readonly ModelMessage[];
+  readonly persistenceFailureMode: "return_failed_result";
 }): Promise<DeepChildAgentRunResult> {
   const childSpec = input.childSpec;
   const allowedTools = inheritToolOutputReader({
@@ -189,24 +218,29 @@ async function executeDeepChildAgentLoop(input: DeepChildAgentRunInput & {
     requestedAt: nowIso(),
     abortSignal: input.abortSignal,
   }, CHILD_AGENT_TURN_SEMANTICS);
-  const continuationContextRef = await persistContinuationContext(input, turn);
-  return finalizeDeepChildTurn({
+  return finalizeDeepChildTurnWithContextPersistence({
     childRun: input.activeRun,
     childSpec,
     turn,
-    continuationContextRef,
     unexpectedTurn: "throw",
+    runId: input.runId,
+    contextChildRunId: input.childRun.childRunId,
+    childLoopContextStore: input.childLoopContextStore,
+    persistenceFailureMode: input.persistenceFailureMode,
   });
 }
 
-async function persistContinuationContext(
+function prepareContinuationContextPersistence(
   input: {
     readonly runId?: string;
-    readonly childRun: ChildAgentRun;
+    readonly childRunId: string;
     readonly childLoopContextStore?: DeepChildLoopContextStore;
   },
   turn: AgentTurnRuntimeResult,
-): Promise<string | undefined> {
+): {
+  readonly store: DeepChildLoopContextStore;
+  readonly record: DeepChildLoopContextRecord;
+} | undefined {
   if (input.runId === undefined || input.childLoopContextStore === undefined) {
     return undefined;
   }
@@ -216,10 +250,10 @@ async function persistContinuationContext(
   }
   const record = createDeepChildLoopContextRecord({
     runId: input.runId,
-    childRunId: input.childRun.childRunId,
+    childRunId: input.childRunId,
     messages,
   });
-  return (await input.childLoopContextStore.upsert(record)).contextRef;
+  return { store: input.childLoopContextStore, record };
 }
 
 export async function resumeDeepChildAgent(input: DeepChildAgentResumeInput): Promise<DeepChildAgentRunResult> {
@@ -241,17 +275,110 @@ export async function resumeDeepChildAgent(input: DeepChildAgentResumeInput): Pr
         },
         abortSignal: input.abortSignal,
       }, CHILD_AGENT_TURN_SEMANTICS);
-  const continuationContextRef = await persistContinuationContext({
-    runId: input.runId,
-    childRun: input.childRun,
-    childLoopContextStore: input.childLoopContextStore,
-  }, turn);
-  return finalizeDeepChildTurn({
+  return finalizeDeepChildTurnWithContextPersistence({
     childRun: resumedRun,
     childSpec,
     turn,
-    continuationContextRef,
     unexpectedTurn: "interrupt",
+    runId: input.runId,
+    contextChildRunId: input.childRun.childRunId,
+    childLoopContextStore: input.childLoopContextStore,
+    persistenceFailureMode: "retain_for_confirmation_retry",
+  });
+}
+
+async function finalizeDeepChildTurnWithContextPersistence(input: {
+  readonly childRun: ChildAgentRun;
+  readonly childSpec: DeepChildSpec;
+  readonly turn: AgentTurnRuntimeResult;
+  readonly unexpectedTurn: "throw" | "interrupt";
+  readonly runId?: string;
+  readonly contextChildRunId: string;
+  readonly childLoopContextStore?: DeepChildLoopContextStore;
+  readonly persistenceFailureMode: "return_failed_result" | "retain_for_confirmation_retry";
+}): Promise<DeepChildAgentRunResult> {
+  let pending: ReturnType<typeof prepareContinuationContextPersistence>;
+  try {
+    pending = prepareContinuationContextPersistence({
+      runId: input.runId,
+      childRunId: input.contextChildRunId,
+      childLoopContextStore: input.childLoopContextStore,
+    }, input.turn);
+  } catch (error) {
+    const failed = buildUnpersistableDeepChildContextResult(input, error);
+    if (input.persistenceFailureMode === "return_failed_result") {
+      return failed;
+    }
+    throw new DeepChildPostExecutionPersistenceError(failed, error);
+  }
+  if (pending === undefined) {
+    return finalizeDeepChildTurn(input);
+  }
+  let stored: DeepChildLoopContextRecord;
+  try {
+    stored = await pending.store.upsert(pending.record);
+  } catch (error) {
+    if (input.persistenceFailureMode === "return_failed_result") {
+      return buildUnpersistableDeepChildContextResult(input, error);
+    }
+    const result = finalizeDeepChildTurn({
+      ...input,
+      continuationContextRef: pending.record.contextRef,
+    });
+    throw new DeepChildPostExecutionPersistenceError({
+      ...result,
+      pendingPersistence: {
+        kind: "child_loop_context",
+        record: pending.record,
+      },
+    }, error);
+  }
+  return finalizeDeepChildTurn({
+    ...input,
+    continuationContextRef: stored.contextRef,
+  });
+}
+
+/** Completes only the write left by a known child turn; no model/tool code runs. */
+export async function retryDeepChildAgentPostExecutionPersistence(
+  result: DeepChildAgentRunResult,
+  childLoopContextStore: DeepChildLoopContextStore,
+): Promise<DeepChildAgentRunResult> {
+  const pending = result.pendingPersistence;
+  if (pending === undefined) {
+    return result;
+  }
+  const stored = await childLoopContextStore.upsert(pending.record);
+  if (stored.contextRef !== pending.record.contextRef) {
+    throw new Error(
+      `Deep child loop context persistence returned an unexpected ref: ${stored.contextRef}`,
+    );
+  }
+  const { pendingPersistence: _pendingPersistence, ...persistedResult } = result;
+  return persistedResult;
+}
+
+function buildUnpersistableDeepChildContextResult(
+  input: {
+    readonly childRun: ChildAgentRun;
+    readonly childSpec: DeepChildSpec;
+    readonly turn: AgentTurnRuntimeResult;
+  },
+  error: unknown,
+): DeepChildAgentRunResult {
+  const message = errorMessage(error);
+  return buildFailedDeepChildAgentRun({
+    childRun: input.childRun,
+    childSpec: input.childSpec,
+    reason: `child continuation context is not persistable: ${message}`,
+    failedAt: nowIso(),
+    execution: executionStatsFromTurn(input.turn),
+    failureDetail: {
+      layer: "agent_runtime",
+      failureKind: errorCode(error) ?? "child_loop_context_not_persistable",
+      retryable: false,
+      message,
+    },
   });
 }
 
@@ -494,6 +621,14 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return typeof error === "string" ? error : String(error);
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
+  }
+  const code = error.code;
+  return typeof code === "string" && code.length > 0 ? code : undefined;
 }
 
 const OBSERVATION_REF_KINDS: ReadonlySet<string> = new Set<string>([

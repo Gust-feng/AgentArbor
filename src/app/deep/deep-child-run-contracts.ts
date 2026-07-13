@@ -16,11 +16,23 @@ import type {
 } from "../../domain/underground/agent-fabric.js";
 import type { AgentTurnPendingApproval, AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
-import type { DeepChildLoopContextStore } from "./deep-child-loop-contexts.js";
+import type {
+  DeepChildLoopContextRecord,
+  DeepChildLoopContextStore,
+} from "./deep-child-loop-contexts.js";
 
 export const DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID = "deep.child.agent.standard.v1";
 export const DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS = 200;
 export const DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS = 200;
+
+/** Continuation preparation or write-ahead admission failed before the model loop started. */
+export class DeepChildExecutionAdmissionError extends Error {
+  constructor(cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : String(cause);
+    super(`Deep child execution did not start: ${detail}`, { cause });
+    this.name = "DeepChildExecutionAdmissionError";
+  }
+}
 
 export type DeepChildAgentPrompt = {
   readonly templateId: typeof DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID;
@@ -61,6 +73,12 @@ export type DeepChildAgentRunInput = {
 
 export type DeepChildAgentContinuationInput = DeepChildAgentRunInput & {
   readonly parentInstruction: string;
+  /**
+   * Critical write-ahead admission invoked after continuation context is ready
+   * and immediately before the model/tool loop starts. A rejected admission
+   * proves that no new model or tool work was started by this continuation.
+   */
+  readonly beforeExecution?: () => void | Promise<void>;
   /** Current parent operation ref; used to keep the prompt history from repeating this instruction. */
   readonly currentParentInstructionRef?: string;
   /** Safe parent review for the current follow-up operation. */
@@ -88,6 +106,15 @@ export type DeepChildAgentRunResult = {
   readonly execution: DeepChildAgentExecutionStats;
   /** Runtime-only continuation for approval_required child runs. Never persist this object. */
   readonly pendingContinuation?: DeepChildAgentRuntimeContinuation;
+  /**
+   * Runtime-only write work left after the model/tool turn already completed.
+   * Callers must retry this write before projecting the known result, and must
+   * never replay the turn merely because this mechanical persistence failed.
+   */
+  readonly pendingPersistence?: {
+    readonly kind: "child_loop_context";
+    readonly record: DeepChildLoopContextRecord;
+  };
 };
 
 export type DeepChildAgentRuntimeContinuation = {

@@ -30,6 +30,7 @@ import {
 } from "./deep-run-record-store.js";
 import {
   createCoordinatedDeepRunRecordStore,
+  deepRunRecordWriteReceiptFromError,
   type DeepRunRecordWriteCoordinator,
 } from "./deep-run-record-write-coordinator.js";
 import {
@@ -43,7 +44,9 @@ import {
   type DeepChildLoopContextStore,
 } from "./deep-child-loop-contexts.js";
 import {
+  DeepChildConfirmationDecisionError,
   DeepChildPendingContinuationStore,
+  type DeepChildContinuationReservation,
   type DeepChildPendingContinuationRetentionOptions,
 } from "./deep-child-continuations.js";
 import type {
@@ -56,7 +59,11 @@ import type {
   DeepRunRecord,
   StartDeepRuntimeInput,
 } from "./deep-runtime.js";
-import { buildDeepManagerSpec, executeDeepRun } from "./deep-runtime.js";
+import {
+  buildDeepManagerSpec,
+  DeepRunFinalPersistenceError,
+  executeDeepRun,
+} from "./deep-runtime.js";
 import type {
   DeepConversation,
   DeepFollowUpContext,
@@ -93,7 +100,9 @@ import {
 import type { CapabilityAgentProfile } from "../capability/capability-policy.js";
 import {
   continueDeepChildAgent,
+  DeepChildPostExecutionPersistenceError,
   resumeDeepChildAgent,
+  retryDeepChildAgentPostExecutionPersistence,
   type DeepChildConfirmationDecision,
   type DeepChildAgentRunResult,
 } from "./deep-child-agent-runner.js";
@@ -196,6 +205,9 @@ export class MultiAgentFeatureError extends Error {
       | "follow_up_requires_terminal_run"
       | "child_not_found"
       | "confirmation_continuation_lost"
+      | "confirmation_in_progress"
+      | "confirmation_outcome_unknown"
+      | "child_instruction_outcome_unknown"
       | "resynthesis_no_child_material"
       | "resynthesis_no_child_runs",
     message: string,
@@ -207,10 +219,16 @@ export class MultiAgentFeatureError extends Error {
 
 export type MultiAgentChildInstructionQueueRegistry = {
   readonly register: (runId: string, handle: DeepChildInstructionQueueHandle) => void;
-  readonly unregister: (runId: string, handle: DeepChildInstructionQueueHandle) => void;
-  readonly get: (runId: string) => DeepChildInstructionQueueHandle | undefined;
+  readonly unregister: (runId: string, handle: DeepChildInstructionQueueHandle) => Promise<void>;
+  readonly acquire: (runId: string) => MultiAgentChildInstructionQueueLease | undefined;
+  readonly has: (runId: string) => boolean;
   readonly deleteForRun: (runId: string) => void;
   readonly clear: () => void;
+};
+
+export type MultiAgentChildInstructionQueueLease = {
+  readonly handle: DeepChildInstructionQueueHandle;
+  readonly release: () => void;
 };
 
 export type MultiAgentFeature = {
@@ -304,7 +322,9 @@ type MultiAgentFeatureRuntime = MultiAgentFeature & {
   readonly childMessageStore: DeepChildMessageStore;
   readonly childLoopContextStore: DeepChildLoopContextStore;
   readonly childContinuations: DeepChildPendingContinuationStore;
+  readonly pendingChildInstructionResults: Map<string, PendingDeepChildInstructionResult>;
   readonly childInstructionQueues: MultiAgentChildInstructionQueueRegistry;
+  readonly reportBackgroundFailure: MultiAgentBackgroundFailureReporter;
   readonly registerControlHandle: (runId: string, handle: DeepRunControlHandle) => void;
   readonly controlHandleForRun: (runId: string) => DeepRunControlHandle | undefined;
   readonly deleteControlHandle: (runId: string) => void;
@@ -316,8 +336,23 @@ type MultiAgentFeatureRuntime = MultiAgentFeature & {
   }) => void;
   readonly hasActiveRunForConversation: (conversationId: string) => boolean;
   readonly activeConversationIdForRun: (runId: string) => string | undefined;
+  readonly waitForActiveRunFinalization: (runId: string) => Promise<void>;
   readonly forgetRun: (runId: string) => void;
   readonly releaseToolOutputOwner: (ownerId: string) => void | Promise<void>;
+};
+
+type DeepChildProjectionResult = Pick<
+  DeepChildAgentRunResult,
+  "summary" | "completedRun" | "pendingContinuation"
+>;
+
+type PendingDeepChildInstructionResult = {
+  readonly message: string;
+  readonly result: DeepChildProjectionResult;
+  readonly copy: {
+    readonly eventTitle: string;
+    readonly eventSummary: string;
+  };
 };
 
 /**
@@ -352,6 +387,8 @@ function createDeepConversationCommandGate(): DeepConversationCommandGate {
 
 export function createMultiAgentFeature(options: {
   readonly runtimeHome?: string;
+  /** Storage adapter seam used by the composition owner and deterministic persistence tests. */
+  readonly runRecordStore?: DeepRunRecordStore;
   readonly acquireRunResources?: MultiAgentRunResourceAcquirer;
   readonly resolveRunStartFacts?: MultiAgentRunStartFactsResolver;
   readonly reportBackgroundFailure?: MultiAgentBackgroundFailureReporter;
@@ -363,6 +400,7 @@ export function createMultiAgentFeature(options: {
   const activeRunConversationIds = new Map<string, string>();
   const activeRuns = new Map<string, Promise<void>>();
   const childContinuations = new DeepChildPendingContinuationStore(options.childContinuationRetention);
+  const pendingChildInstructionResults = new Map<string, PendingDeepChildInstructionResult>();
   const childInstructionQueues = createChildInstructionQueueRegistry();
   const constraints = createMinimalSoilConstraints();
   const soilStore = createMinimalReadonlySoilStore(constraints);
@@ -370,7 +408,7 @@ export function createMultiAgentFeature(options: {
   const activeOperations = new Set<Promise<unknown>>();
   const conversationCommandGate = createDeepConversationCommandGate();
   const coordinatedRunRecords = createCoordinatedDeepRunRecordStore(
-    createRunRecordStore(options.runtimeHome),
+    options.runRecordStore ?? createRunRecordStore(options.runtimeHome),
   );
   let isQuiescing = false;
   let disposePromise: Promise<void> | undefined;
@@ -383,9 +421,18 @@ export function createMultiAgentFeature(options: {
       ));
     }
     let operation: Promise<T>;
-    operation = Promise.resolve().then(command).finally(() => {
-      activeOperations.delete(operation);
-    });
+    operation = Promise.resolve()
+      .then(command)
+      .catch(async (error: unknown) => {
+        // Awaited feature commands already return this exact failure to their
+        // caller. Do not leave the coordinator as a permanent read barrier;
+        // operations with a known child result retain that result separately.
+        await acknowledgeAwaitedRunRecordWriteFailure(feature, error);
+        throw error;
+      })
+      .finally(() => {
+        activeOperations.delete(operation);
+      });
     activeOperations.add(operation);
     return operation;
   };
@@ -423,7 +470,9 @@ export function createMultiAgentFeature(options: {
     childMessageStore: createChildMessageStore(options.runtimeHome),
     childLoopContextStore: createChildLoopContextStore(options.runtimeHome),
     childContinuations,
+    pendingChildInstructionResults,
     childInstructionQueues,
+    reportBackgroundFailure,
     releaseToolOutputOwner: options.releaseToolOutputOwner ?? (() => undefined),
     getConversation: (conversationId) => feature.conversationStore.get(conversationId),
     listConversations: (limit) => feature.conversationStore.list(limit),
@@ -520,15 +569,28 @@ export function createMultiAgentFeature(options: {
     },
     trackActiveRun(input): void {
       activeRunConversationIds.set(input.runId, input.conversationId);
-      const trackedPromise = input.promise.finally(async () => {
+      const settledRun = input.promise.then(
+        () => ({ status: "fulfilled" as const }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
+      const trackedPromise = settledRun.then(async (outcome) => {
         try {
           await input.releaseResources?.();
-        } finally {
-          if (activeRuns.get(input.runId) === trackedPromise) {
-            activeRuns.delete(input.runId);
-            activeRunConversationIds.delete(input.runId);
-            controlHandles.delete(input.runId);
-          }
+        } catch (error) {
+          reportMultiAgentBackgroundFailure(reportBackgroundFailure, {
+            runId: input.runId,
+            conversationId: input.conversationId,
+            error,
+          });
+        }
+        if (outcome.status === "rejected") {
+          throw outcome.error;
+        }
+      }).finally(() => {
+        if (activeRuns.get(input.runId) === trackedPromise) {
+          activeRuns.delete(input.runId);
+          activeRunConversationIds.delete(input.runId);
+          controlHandles.delete(input.runId);
         }
       });
       activeRuns.set(input.runId, trackedPromise);
@@ -549,10 +611,20 @@ export function createMultiAgentFeature(options: {
     activeConversationIdForRun(runId): string | undefined {
       return activeRunConversationIds.get(runId);
     },
+    async waitForActiveRunFinalization(runId): Promise<void> {
+      const active = activeRuns.get(runId);
+      if (active !== undefined) {
+        // Resource-release failures are reported by trackActiveRun. The
+        // command barrier only needs the authoritative run finalization to
+        // settle before it re-reads durable state.
+        await active.catch(() => undefined);
+      }
+    },
     forgetRun(runId): void {
       activeRunConversationIds.delete(runId);
       controlHandles.delete(runId);
       childContinuations.deleteForRun(runId);
+      deletePendingChildInstructionResultsForRun(pendingChildInstructionResults, runId);
       childInstructionQueues.deleteForRun(runId);
     },
     async waitForIdle(): Promise<void> {
@@ -582,6 +654,7 @@ export function createMultiAgentFeature(options: {
         } finally {
           controlHandles.clear();
           childContinuations.clear();
+          pendingChildInstructionResults.clear();
           childInstructionQueues.clear();
           activeRunConversationIds.clear();
           activeRuns.clear();
@@ -618,23 +691,68 @@ function createChildLoopContextStore(runtimeHome: string | undefined): DeepChild
 }
 
 function createChildInstructionQueueRegistry(): MultiAgentChildInstructionQueueRegistry {
-  const handles = new Map<string, DeepChildInstructionQueueHandle>();
+  type RegisteredQueue = {
+    readonly source: DeepChildInstructionQueueHandle;
+    readonly activeLeases: Set<Promise<void>>;
+    accepting: boolean;
+  };
+  const handles = new Map<string, RegisteredQueue>();
   return {
     register(runId, handle): void {
-      handles.set(runId, handle);
+      handles.set(runId, {
+        source: handle,
+        activeLeases: new Set<Promise<void>>(),
+        accepting: true,
+      });
     },
-    unregister(runId, handle): void {
-      if (handles.get(runId) === handle) {
-        handles.delete(runId);
+    async unregister(runId, handle): Promise<void> {
+      const registered = handles.get(runId);
+      if (registered?.source !== handle) {
+        return;
+      }
+      registered.accepting = false;
+      handles.delete(runId);
+      while (registered.activeLeases.size > 0) {
+        await Promise.allSettled([...registered.activeLeases]);
       }
     },
-    get(runId): DeepChildInstructionQueueHandle | undefined {
-      return handles.get(runId);
+    acquire(runId): MultiAgentChildInstructionQueueLease | undefined {
+      const registered = handles.get(runId);
+      if (registered === undefined || !registered.accepting) {
+        return undefined;
+      }
+      let settle!: () => void;
+      const completion = new Promise<void>((resolve) => {
+        settle = resolve;
+      });
+      registered.activeLeases.add(completion);
+      let released = false;
+      return {
+        handle: registered.source,
+        release(): void {
+          if (released) {
+            return;
+          }
+          released = true;
+          registered.activeLeases.delete(completion);
+          settle();
+        },
+      };
+    },
+    has(runId): boolean {
+      return handles.get(runId)?.accepting === true;
     },
     deleteForRun(runId): void {
+      const registered = handles.get(runId);
+      if (registered !== undefined) {
+        registered.accepting = false;
+      }
       handles.delete(runId);
     },
     clear(): void {
+      for (const registered of handles.values()) {
+        registered.accepting = false;
+      }
       handles.clear();
     },
   };
@@ -670,14 +788,20 @@ async function intakeMultiAgentConversation(
   resolveRunStartFacts: MultiAgentRunStartFactsResolver,
   input: Parameters<MultiAgentFeature["intake"]>[0],
 ): Promise<MultiAgentIntakeResult> {
-  const terminalRun = input.activeRunId === undefined
+  let terminalRun = input.activeRunId === undefined
     ? undefined
     : await requireMultiAgentRunRecord(feature, input.activeRunId);
+  if (terminalRun !== undefined) {
+    terminalRun = await reconcilePendingChildInstructionResultsForRun(feature, terminalRun);
+  }
   if (terminalRun !== undefined && !isTerminalMultiAgentRun(terminalRun)) {
     throw new MultiAgentFeatureError(
       "intake_active_run_not_terminal",
       "The active Multi-Agent run is still running.",
     );
+  }
+  if (terminalRun !== undefined) {
+    await assertNoUnreconciledChildInstructionsForRun(feature, terminalRun);
   }
 
   const requestedConversationId = input.conversationId ?? terminalRun?.run.conversationId;
@@ -736,9 +860,12 @@ async function startMultiAgentConversationRun(
       "Multi-Agent conversation already has an active run.",
     );
   }
-  const parentRun = input.parentRunId === undefined
+  let parentRun = input.parentRunId === undefined
     ? undefined
     : await requireMultiAgentRunRecord(feature, input.parentRunId);
+  if (parentRun !== undefined) {
+    parentRun = await reconcilePendingChildInstructionResultsForRun(feature, parentRun);
+  }
   if (parentRun !== undefined && parentRun.run.conversationId !== conversation.conversationId) {
     throw new MultiAgentFeatureError(
       "parent_run_conversation_mismatch",
@@ -750,6 +877,9 @@ async function startMultiAgentConversationRun(
       "follow_up_requires_terminal_run",
       "The parent Multi-Agent run is still running.",
     );
+  }
+  if (parentRun !== undefined) {
+    await assertNoUnreconciledChildInstructionsForRun(feature, parentRun);
   }
 
   const workspaceDirectory = input.workspaceDirectory ?? (
@@ -804,13 +934,15 @@ async function followUpMultiAgentRun(
   resolveRunStartFacts: MultiAgentRunStartFactsResolver,
   input: Parameters<MultiAgentFeature["followUp"]>[0],
 ): Promise<MultiAgentStartedRun & { readonly parentRunId: string }> {
-  const previous = await requireMultiAgentRunRecord(feature, input.runId);
+  let previous = await requireMultiAgentRunRecord(feature, input.runId);
+  previous = await reconcilePendingChildInstructionResultsForRun(feature, previous);
   if (!isTerminalMultiAgentRun(previous)) {
     throw new MultiAgentFeatureError(
       "follow_up_requires_terminal_run",
       "The current Multi-Agent run is still running.",
     );
   }
+  await assertNoUnreconciledChildInstructionsForRun(feature, previous);
   const conversation = await requireMultiAgentConversation(feature, previous.run.conversationId);
   if (feature.hasActiveRunForConversation(conversation.conversationId)) {
     throw new MultiAgentFeatureError(
@@ -897,6 +1029,7 @@ async function startMultiAgentRun(
   });
   const runtimeConfig = await createMultiAgentRuntimeConfig(feature, acquireRunResources, {
     aiMode: input.aiMode,
+    conversationId: input.conversation.conversationId,
     controlHandle,
     taskSoil,
     capabilitySnapshot: facts.capabilitySnapshot,
@@ -931,29 +1064,16 @@ async function startMultiAgentRun(
   };
   const runPromise = executeDeepRun(startInput, runtimeConfig.config).then(
     (result) => {
-      feature.childContinuations.retainPendingForRun(
-        runId,
-        result.agentRunTree.childRuns.flatMap((childRun) => (
-          childRun.pendingApproval === undefined
-            ? []
-            : [{
-                childRunId: childRun.childRunId,
-                confirmationId: childRun.pendingApproval.confirmationId,
-              }]
-        )),
-      );
+      retainPendingChildContinuationsForRecord(feature, runId, result);
     },
-    (error: unknown) => {
-      feature.childContinuations.deleteForRun(runId);
-      return writeMultiAgentFailureRecord(
-        feature,
-        runId,
-        input.conversation,
-        error,
-        { parentRunId: input.parentRunId, rootRunId, turnOrdinal },
-        continuationFacts,
-      );
-    },
+    (error: unknown) => reconcileMultiAgentRunFailure(
+      feature,
+      runId,
+      input.conversation,
+      error,
+      { parentRunId: input.parentRunId, rootRunId, turnOrdinal },
+      continuationFacts,
+    ),
   );
   feature.trackActiveRun({
     runId,
@@ -962,6 +1082,75 @@ async function startMultiAgentRun(
     releaseResources: runtimeConfig.releaseResources,
   });
   return { runId, runKind, runMode, rootRunId, turnOrdinal };
+}
+
+async function reconcileMultiAgentRunFailure(
+  feature: MultiAgentFeatureRuntime,
+  runId: string,
+  conversation: DeepConversation,
+  error: unknown,
+  lineage: {
+    readonly parentRunId?: string;
+    readonly rootRunId: string;
+    readonly turnOrdinal: number;
+  },
+  continuationFacts: NonNullable<DeepRunRecord["run"]["continuationFacts"]>,
+): Promise<void> {
+  if (error instanceof DeepRunFinalPersistenceError) {
+    await acknowledgeAwaitedRunRecordWriteFailure(feature, error.cause);
+    let durable: DeepRunRecord;
+    try {
+      durable = await feature.runRecordStore.upsert(error.record);
+    } catch (persistenceError) {
+      throw new AggregateError(
+        [error, persistenceError],
+        `Multi-Agent run completed but its final record could not be persisted: ${runId}`,
+      );
+    }
+    retainPendingChildContinuationsForRecord(feature, runId, durable);
+    reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+      runId,
+      conversationId: conversation.conversationId,
+      error,
+    });
+    return;
+  }
+  await acknowledgeAwaitedRunRecordWriteFailure(feature, error);
+  let existing: DeepRunRecord | undefined;
+  try {
+    existing = await feature.runRecordStore.get(runId);
+  } catch (readError) {
+    throw new AggregateError(
+      [error, readError],
+      `Multi-Agent run failed and its latest durable record could not be read: ${runId}`,
+    );
+  }
+
+  let durable = existing;
+  if (durable === undefined || durable.run.status === "running") {
+    try {
+      durable = await writeMultiAgentFailureRecord(
+        feature,
+        runId,
+        conversation,
+        error,
+        lineage,
+        continuationFacts,
+        existing,
+      );
+    } catch (persistenceError) {
+      throw new AggregateError(
+        [error, persistenceError],
+        `Multi-Agent run failed and its failure projection could not be persisted: ${runId}`,
+      );
+    }
+  }
+  retainPendingChildContinuationsForRecord(feature, runId, durable);
+  reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+    runId,
+    conversationId: conversation.conversationId,
+    error,
+  });
 }
 
 async function writeMultiAgentFailureRecord(
@@ -975,11 +1164,32 @@ async function writeMultiAgentFailureRecord(
     readonly turnOrdinal: number;
   },
   continuationFacts: NonNullable<DeepRunRecord["run"]["continuationFacts"]>,
-): Promise<void> {
-  try {
-    const timestamp = nowIso();
-    await feature.runRecordStore.upsert({
-      run: {
+  existing?: DeepRunRecord,
+): Promise<DeepRunRecord> {
+  const timestamp = nowIso();
+  const baseTree = existing?.agentRunTree ?? createAgentRunTree({
+    treeId: createId("deep-tree"),
+    rootRunId: runId,
+    rootAgentId: "deep-manager",
+    rootSpec: buildDeepManagerSpec(timestamp),
+    createdAt: timestamp,
+  });
+  const failureEvent: DeepRunStreamEvent = {
+    id: createId("deep-event"),
+    runId,
+    sequence: (existing?.eventSequence.at(-1)?.sequence ?? 0) + 1,
+    type: "deep.failed",
+    title: "运行失败",
+    summary: error instanceof Error ? error.message : String(error),
+    status: "failed",
+    timestamp,
+    refs: [],
+    visibility: "public",
+  };
+  const record: DeepRunRecord = {
+    ...existing,
+    run: existing === undefined
+      ? {
         runId,
         conversationId: conversation.conversationId,
         parentRunId: lineage.parentRunId,
@@ -992,42 +1202,45 @@ async function writeMultiAgentFailureRecord(
         continuationFacts,
         startedAt: timestamp,
         updatedAt: timestamp,
-      },
-      agentRunTree: {
-        ...createAgentRunTree({
-          treeId: createId("deep-tree"),
-          rootRunId: runId,
-          rootAgentId: "deep-manager",
-          rootSpec: buildDeepManagerSpec(timestamp),
-          createdAt: timestamp,
-        }),
+      }
+      : {
+        ...existing.run,
         status: "failed",
-      },
-      report: undefined,
-      controlEvents: [],
-      eventSequence: [{
-        id: createId("deep-event"),
-        runId,
-        sequence: 1,
-        type: "deep.failed",
-        title: "运行失败",
-        summary: error instanceof Error ? error.message : String(error),
-        status: "failed",
-        timestamp,
-        refs: [],
-        visibility: "public",
-      }],
-      liveProjection: {
-        phase: "failed",
-        activeNodeId: "decision",
-        children: [],
         updatedAt: timestamp,
       },
+    agentRunTree: { ...baseTree, status: "failed", updatedAt: timestamp },
+    report: existing?.report,
+    controlEvents: existing?.controlEvents ?? [],
+    eventSequence: [...(existing?.eventSequence ?? []), failureEvent],
+    liveProjection: {
+      ...(existing?.liveProjection ?? {
+        activeNodeId: "decision",
+        children: [],
+      }),
+      phase: "failed",
       updatedAt: timestamp,
-    });
-  } catch {
-    // The original run failure remains authoritative when failure projection persistence also fails.
-  }
+    },
+    updatedAt: timestamp,
+  };
+  return feature.runRecordStore.upsert(record);
+}
+
+function retainPendingChildContinuationsForRecord(
+  feature: Pick<MultiAgentFeatureRuntime, "childContinuations">,
+  runId: string,
+  record: Pick<DeepRunRecord, "agentRunTree">,
+): void {
+  feature.childContinuations.retainPendingForRun(
+    runId,
+    record.agentRunTree.childRuns.flatMap((childRun) => (
+      childRun.pendingApproval === undefined
+        ? []
+        : [{
+            childRunId: childRun.childRunId,
+            confirmationId: childRun.pendingApproval.confirmationId,
+          }]
+    )),
+  );
 }
 
 async function executeMultiAgentIntake(
@@ -1099,7 +1312,11 @@ async function executeMultiAgentIntake(
       createdAt: nowIso(),
     });
   } finally {
-    await resources.release();
+    await releaseMultiAgentOperationResources(feature, {
+      runId: traceId,
+      conversationId: input.conversation.conversationId,
+      release: resources.release,
+    });
   }
 }
 
@@ -1108,6 +1325,7 @@ async function createMultiAgentRuntimeConfig(
   acquireRunResources: MultiAgentRunResourceAcquirer,
   input: {
     readonly aiMode: ModelRuntimeMode;
+    readonly conversationId: string;
     readonly controlHandle: DeepRunControlHandle;
     readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
     readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
@@ -1120,7 +1338,10 @@ async function createMultiAgentRuntimeConfig(
 }> {
   const bus = createMultiAgentOperationBus();
   const resources = await acquireRunResources({
-    ...input,
+    aiMode: input.aiMode,
+    capabilitySnapshot: input.capabilitySnapshot,
+    informationAccess: input.informationAccess,
+    taskSoil: input.taskSoil,
     channelContext: { bus },
   });
   const turnRuntime = createDeepTurnRuntime({
@@ -1142,6 +1363,16 @@ async function createMultiAgentRuntimeConfig(
       childInstructionQueues: feature.childInstructionQueues,
       childMessageStore: feature.childMessageStore,
       childLoopContextStore: feature.childLoopContextStore,
+      onChildMessageSidecarFailure: (failure) => {
+        reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+          runId: failure.runId,
+          conversationId: input.conversationId,
+          error: new Error(
+            `Deep child-message sidecar persistence failed at ${failure.stage}`,
+            { cause: failure.error },
+          ),
+        });
+      },
     },
     capabilitySnapshot: resources.capabilitySnapshot,
     releaseResources: async () => {
@@ -1218,56 +1449,161 @@ async function resumeMultiAgentChild(
     readonly decision: DeepChildConfirmationDecision;
   },
 ): Promise<DeepRunRecord> {
-  const pendingContinuation = feature.childContinuations.get(
-    input.runId,
-    input.childRunId,
-    input.confirmationId,
-  );
-  if (pendingContinuation === undefined) {
-    throw new MultiAgentFeatureError(
-      "confirmation_continuation_lost",
-      "The child Agent confirmation continuation is no longer available.",
+  // A confirmation may be clicked while the scheduler has already stopped
+  // accepting live instructions but the manager is still writing its terminal
+  // snapshot. Wait for that owner to finish, then resume from the authoritative
+  // record instead of racing the final write with an older projection.
+  await feature.waitForActiveRunFinalization(input.runId);
+  try {
+    feature.childContinuations.assertPending(
+      input.runId,
+      input.childRunId,
+      input.confirmationId,
     );
+  } catch (error) {
+    throw mapChildContinuationDecisionError(error);
   }
-  const record = await requireMultiAgentRunRecord(feature, input.runId);
-  const childRuntime = await createExistingMultiAgentTurnRuntime(
+  let record = await requireMultiAgentRunRecord(feature, input.runId);
+  record = (await reconcilePendingChildInstructionResult(
     feature,
-    acquireRunResources,
     record,
-  );
-  const continuation = feature.childContinuations.consume(
-    input.runId,
     input.childRunId,
-    input.confirmationId,
-  );
-  if (continuation === undefined) {
-    await childRuntime.releaseResources();
-    throw new MultiAgentFeatureError(
-      "confirmation_continuation_lost",
-      "The child Agent confirmation continuation is no longer available.",
+  )).record;
+  let reservation: DeepChildContinuationReservation;
+  try {
+    reservation = feature.childContinuations.reserve(
+      input.runId,
+      input.childRunId,
+      input.confirmationId,
     );
+  } catch (error) {
+    throw mapChildContinuationDecisionError(error);
   }
+
+  // A previous attempt may have executed the side effect and only failed while
+  // persisting the projection. Reconcile that result without acquiring tools
+  // or replaying the model turn.
+  if (reservation.pendingResult !== undefined) {
+    try {
+      const pendingResult = await retryDeepChildAgentPostExecutionPersistence(
+        reservation.pendingResult,
+        feature.childLoopContextStore,
+      );
+      if (pendingResult !== reservation.pendingResult) {
+        feature.childContinuations.retainResult(reservation, pendingResult);
+      }
+      const latest = await requireMultiAgentRunRecord(feature, input.runId);
+      if (deepChildOperationResultAlreadyApplied(latest, pendingResult)) {
+        feature.childContinuations.commit(reservation);
+        feature.childContinuations.remember(input.runId, pendingResult.pendingContinuation);
+        return latest;
+      }
+      const updated = await applyDeepChildOperationResult(
+        feature,
+        latest,
+        pendingResult,
+        childOperationResultCopy(pendingResult),
+      );
+      feature.childContinuations.commit(reservation);
+      feature.childContinuations.remember(input.runId, pendingResult.pendingContinuation);
+      return updated;
+    } catch (error) {
+      await acknowledgeAwaitedRunRecordWriteFailure(feature, error);
+      feature.childContinuations.release(reservation);
+      throw error;
+    }
+  }
+
+  let childRuntime: Awaited<ReturnType<typeof createExistingMultiAgentTurnRuntime>> | undefined;
+  try {
+    childRuntime = await createExistingMultiAgentTurnRuntime(
+      feature,
+      acquireRunResources,
+      record,
+    );
+  } catch (error) {
+    feature.childContinuations.release(reservation);
+    throw error;
+  }
+
   let result: DeepChildAgentRunResult;
+  let releaseError: unknown;
   try {
     result = await resumeDeepChildAgent({
       runId: input.runId,
-      childRun: continuation.childRun,
-      childSpec: continuation.childSpec,
-      pendingApproval: continuation.pendingApproval,
+      childRun: reservation.continuation.childRun,
+      childSpec: reservation.continuation.childSpec,
+      pendingApproval: reservation.continuation.pendingApproval,
       decision: input.decision,
       turnRuntime: childRuntime.turnRuntime,
       childLoopContextStore: feature.childLoopContextStore,
     });
-  } finally {
-    await childRuntime.releaseResources();
+    feature.childContinuations.retainResult(reservation, result);
+  } catch (error) {
+    if (error instanceof DeepChildPostExecutionPersistenceError) {
+      // The turn (including any approved tool side effect) is known. Preserve
+      // it and expose only the failed write for a persistence-only retry.
+      feature.childContinuations.retainResult(reservation, error.result);
+      try {
+        await childRuntime.releaseResources();
+      } catch (cleanupError) {
+        reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+          runId: input.runId,
+          conversationId: record.run.conversationId,
+          error: cleanupError,
+        });
+      }
+      feature.childContinuations.release(reservation);
+      throw error;
+    }
+    feature.childContinuations.markOutcomeUnknown(reservation);
+    try {
+      await childRuntime.releaseResources();
+    } catch (cleanupError) {
+      reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+        runId: input.runId,
+        conversationId: record.run.conversationId,
+        error: cleanupError,
+      });
+    }
+    throw unknownContinuationOutcome(error);
   }
-  feature.childContinuations.remember(input.runId, result.pendingContinuation);
-  return applyDeepChildOperationResult(feature, record, result, {
-    eventTitle: result.completedRun.status === "completed" ? "子 Agent 已继续" : "子 Agent 继续受阻",
-    eventSummary: result.completedRun.status === "completed"
-      ? result.summary.summary
-      : result.completedRun.failureReason ?? result.summary.uncertainty ?? "子 Agent 需要继续处理。",
-  });
+  try {
+    await childRuntime.releaseResources();
+  } catch (error) {
+    releaseError = error;
+  }
+
+  try {
+    const updated = await applyDeepChildOperationResult(feature, record, result, {
+      eventTitle: result.completedRun.status === "completed" ? "子 Agent 已继续" : "子 Agent 继续受阻",
+      eventSummary: result.completedRun.status === "completed"
+        ? result.summary.summary
+        : result.completedRun.failureReason ?? result.summary.uncertainty ?? "子 Agent 需要继续处理。",
+    });
+    feature.childContinuations.commit(reservation);
+    feature.childContinuations.remember(input.runId, result.pendingContinuation);
+    if (releaseError !== undefined) {
+      reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+        runId: input.runId,
+        conversationId: record.run.conversationId,
+        error: releaseError,
+      });
+    }
+    return updated;
+  } catch (error) {
+    // Keep the known result available for a later persistence-only retry.
+    await acknowledgeAwaitedRunRecordWriteFailure(feature, error);
+    feature.childContinuations.release(reservation);
+    if (releaseError !== undefined) {
+      reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+        runId: input.runId,
+        conversationId: record.run.conversationId,
+        error: releaseError,
+      });
+    }
+    throw error;
+  }
 }
 
 async function sendMultiAgentChildInstruction(
@@ -1279,56 +1615,124 @@ async function sendMultiAgentChildInstruction(
     readonly message: string;
   },
 ): ReturnType<MultiAgentFeature["sendChildInstruction"]> {
-  const record = await requireMultiAgentRunRecord(feature, input.runId);
-  const queueHandle = feature.childInstructionQueues.get(input.runId);
-  if (queueHandle !== undefined) {
-    const queued = queueHandle.queueChildInstruction({
-      childRunId: input.childRunId,
-      instruction: input.message,
-    });
-    if (queued.status === "queued") {
-      await recordDeepChildMessage(feature, {
-        runId: input.runId,
-        childRunId: input.childRunId,
-        instructionId: queued.instructionId,
-        messageRef: queued.messageRef,
-        source: "control_api",
-        status: "queued",
-        content: input.message,
-        requestedAt: queued.queuedAt,
-        queuedAt: queued.queuedAt,
-      });
-      return {
-        status: "queued",
-        record,
-        messageRef: queued.messageRef,
-        childStatus: queued.childStatus,
-        queuedCount: queued.queuedCount,
-        queuedAt: queued.queuedAt,
-      };
+  let record = await requireMultiAgentRunRecord(feature, input.runId);
+  const pendingReconciliation = await reconcilePendingChildInstructionResult(
+    feature,
+    record,
+    input.childRunId,
+  );
+  record = pendingReconciliation.record;
+  if (pendingReconciliation.pending?.message === input.message) {
+    return {
+      status: "continued",
+      record,
+      messageRef: pendingReconciliation.pending.result.completedRun.parentInstructions?.at(-1)?.messageRef,
+    };
+  }
+  try {
+    feature.childContinuations.assertChildInstructionAllowed(input.runId, input.childRunId);
+  } catch (error) {
+    throw mapChildContinuationDecisionError(error);
+  }
+  assertDurableChildApprovalCanBeReplaced(feature, record, input.childRunId);
+  let queueLease = feature.childInstructionQueues.acquire(input.runId);
+  if (queueLease === undefined) {
+    if (feature.isRunActive(input.runId)) {
+      await feature.waitForActiveRunFinalization(input.runId);
     }
-    if (isContinuableTerminalChildRejection(queued)) {
-      const continued = await queueHandle.continueChildInstruction({
+    // A lease miss can race the active-run cleanup. Always refresh the
+    // authoritative record before deciding that a running snapshot is lost.
+    record = await requireMultiAgentRunRecord(feature, input.runId);
+    queueLease = feature.childInstructionQueues.acquire(input.runId);
+  }
+  if (queueLease !== undefined) {
+    const queueHandle = queueLease.handle;
+    try {
+      const queued = queueHandle.queueChildInstruction({
         childRunId: input.childRunId,
         instruction: input.message,
       });
-      if (continued.status === "continued") {
-        const latest = await feature.runRecordStore.get(input.runId);
-        await recordDeepChildMessageForResult(
-          feature,
-          input.runId,
-          input.message,
-          continued.material.completedRun,
-        );
+      if (queued.status === "queued") {
+        try {
+          await recordDeepChildMessage(feature, {
+            runId: input.runId,
+            childRunId: input.childRunId,
+            instructionId: queued.instructionId,
+            messageRef: queued.messageRef,
+            source: "control_api",
+            status: "queued",
+            content: input.message,
+            requestedAt: queued.queuedAt,
+            queuedAt: queued.queuedAt,
+          });
+        } catch (error) {
+          reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+            runId: input.runId,
+            conversationId: record.run.conversationId,
+            error,
+          });
+        }
         return {
-          status: "continued",
-          record: latest ?? record,
-          messageRef: continued.material.completedRun.parentInstructions?.at(-1)?.messageRef,
+          status: "queued",
+          record,
+          messageRef: queued.messageRef,
+          childStatus: queued.childStatus,
+          queuedCount: queued.queuedCount,
+          queuedAt: queued.queuedAt,
         };
       }
-      return { status: "rejected", result: continued };
+      if (isContinuableTerminalChildRejection(queued)) {
+        const continued = await queueHandle.continueChildInstruction({
+          childRunId: input.childRunId,
+          instruction: input.message,
+        });
+        if (continued.status === "continued") {
+          const resultCopy = childOperationResultCopy(continued.material);
+          const pendingResultKey = pendingChildInstructionResultKey(input.runId, input.childRunId);
+          feature.pendingChildInstructionResults.set(pendingResultKey, {
+            message: input.message,
+            result: continued.material,
+            copy: resultCopy,
+          });
+          const latest = await requireMultiAgentRunRecord(feature, input.runId);
+          const reconciled = await reconcilePendingChildInstructionResult(
+            feature,
+            latest,
+            input.childRunId,
+          );
+          try {
+            await recordDeepChildMessageForResult(
+              feature,
+              input.runId,
+              input.message,
+              continued.material.completedRun,
+            );
+          } catch (error) {
+            reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+              runId: input.runId,
+              conversationId: record.run.conversationId,
+              error,
+            });
+          }
+          return {
+            status: "continued",
+            record: reconciled.record,
+            messageRef: continued.material.completedRun.parentInstructions?.at(-1)?.messageRef,
+          };
+        }
+        return { status: "rejected", result: continued };
+      }
+      return { status: "rejected", result: queued };
+    } finally {
+      queueLease.release();
     }
-    return { status: "rejected", result: queued };
+  }
+  await assertNoUnreconciledChildInstruction(feature, record, input.childRunId);
+  if (record.run.status === "running") {
+    throw new MultiAgentFeatureError(
+      "child_instruction_outcome_unknown",
+      "The live Multi-Agent run is no longer recoverable in this process; child work will not be replayed.",
+    );
   }
   const childState = resolveDeepChildOperationTarget(feature, record, input.childRunId);
   if (childState === undefined) {
@@ -1339,12 +1743,24 @@ async function sendMultiAgentChildInstruction(
     acquireRunResources,
     record,
   );
-  feature.childContinuations.deleteForChildRun(input.runId, input.childRunId);
   let result: DeepChildAgentRunResult;
+  const requestedAt = nowIso();
+  const instructionId = createId("deep-child-instruction");
+  const messageRef = deepChildParentInstructionMessageRef(instructionId);
+  const continuationFacts = requireMultiAgentContinuationFacts(record);
+  const parentMessageHistory = await loadDeepChildParentMessageContext(
+    feature,
+    input.runId,
+    input.childRunId,
+  ).catch(async (error: unknown) => {
+    await releaseMultiAgentOperationResources(feature, {
+      runId: input.runId,
+      conversationId: record.run.conversationId,
+      release: childRuntime.releaseResources,
+    });
+    throw error;
+  });
   try {
-    const requestedAt = nowIso();
-    const instructionId = createId("deep-child-instruction");
-    const messageRef = deepChildParentInstructionMessageRef(instructionId);
     result = await continueDeepChildAgent({
       runId: input.runId,
       childRun: recordChildAgentRunParentInstruction(childState.childRun, {
@@ -1359,21 +1775,69 @@ async function sendMultiAgentChildInstruction(
       childSpec: childState.childSpec,
       previousSummary: childState.previousSummary,
       parentInstruction: input.message,
+      beforeExecution: async () => {
+        await recordDeepChildMessage(feature, {
+          runId: input.runId,
+          childRunId: input.childRunId,
+          instructionId,
+          messageRef,
+          source: "control_api",
+          status: "queued",
+          content: input.message,
+          requestedAt,
+          queuedAt: requestedAt,
+        });
+        try {
+          // An available approval is replaced only after every fallible context
+          // read and the write-ahead marker have completed successfully.
+          feature.childContinuations.deleteForChildRun(input.runId, input.childRunId);
+        } catch (error) {
+          throw mapChildContinuationDecisionError(error);
+        }
+      },
       currentParentInstructionRef: messageRef,
-      parentMessageHistory: await loadDeepChildParentMessageContext(
-        feature,
-        input.runId,
-        input.childRunId,
-      ),
+      parentMessageHistory,
       goal: record.run.goal,
-      permissionBoundaryRefs: requireMultiAgentContinuationFacts(record).permissionBoundaryRefs,
+      permissionBoundaryRefs: continuationFacts.permissionBoundaryRefs,
       turnRuntime: childRuntime.turnRuntime,
       traceId: multiAgentToolOutputOwnerId(input.runId),
       goalId: record.run.conversationId,
-      confirmationPolicy: requireMultiAgentContinuationFacts(record).confirmationPolicy,
+      confirmationPolicy: continuationFacts.confirmationPolicy,
       capabilitySnapshot: childRuntime.capabilitySnapshot,
       childLoopContextStore: feature.childLoopContextStore,
     });
+  } catch (error) {
+    try {
+      await childRuntime.releaseResources();
+    } catch (cleanupError) {
+      reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+        runId: input.runId,
+        conversationId: record.run.conversationId,
+        error: cleanupError,
+      });
+    }
+    throw error;
+  }
+  try {
+    await childRuntime.releaseResources();
+  } catch (error) {
+    reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+      runId: input.runId,
+      conversationId: record.run.conversationId,
+      error,
+    });
+  }
+  const resultCopy = {
+    eventTitle: "父 Agent 已补充子任务",
+    eventSummary: result.summary.summary,
+  } as const;
+  const pendingResultKey = pendingChildInstructionResultKey(input.runId, input.childRunId);
+  feature.pendingChildInstructionResults.set(pendingResultKey, {
+    message: input.message,
+    result,
+    copy: resultCopy,
+  });
+  try {
     await recordDeepChildMessage(feature, {
       runId: input.runId,
       childRunId: input.childRunId,
@@ -1385,19 +1849,26 @@ async function sendMultiAgentChildInstruction(
       requestedAt,
       executedAt: requestedAt,
     });
-  } finally {
-    await childRuntime.releaseResources();
+  } catch (error) {
+    reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+      runId: input.runId,
+      conversationId: record.run.conversationId,
+      error,
+    });
   }
   feature.childContinuations.remember(input.runId, result.pendingContinuation);
-  const updated = await applyDeepChildOperationResult(feature, record, result, {
-    eventTitle: "父 Agent 已补充子任务",
-    eventSummary: result.summary.summary,
-  });
-  return {
-    status: "continued",
-    record: updated,
-    messageRef: result.completedRun.parentInstructions?.at(-1)?.messageRef,
-  };
+  try {
+    const updated = await applyDeepChildOperationResult(feature, record, result, resultCopy);
+    feature.pendingChildInstructionResults.delete(pendingResultKey);
+    return {
+      status: "continued",
+      record: updated,
+      messageRef: result.completedRun.parentInstructions?.at(-1)?.messageRef,
+    };
+  } catch (error) {
+    await acknowledgeAwaitedRunRecordWriteFailure(feature, error);
+    throw error;
+  }
 }
 
 async function resynthesizeMultiAgentRun(
@@ -1407,7 +1878,10 @@ async function resynthesizeMultiAgentRun(
     readonly runId: string;
   },
 ): Promise<DeepRunRecord> {
-  const record = await requireMultiAgentRunRecord(feature, input.runId);
+  await feature.waitForActiveRunFinalization(input.runId);
+  let record = await requireMultiAgentRunRecord(feature, input.runId);
+  record = await reconcilePendingChildInstructionResultsForRun(feature, record);
+  await assertNoUnreconciledChildInstructionsForRun(feature, record);
   const childSummaries = record.report?.childSummaries;
   if (childSummaries === undefined || childSummaries.length === 0) {
     throw new MultiAgentFeatureError("resynthesis_no_child_material", "No child material is available.");
@@ -1439,7 +1913,11 @@ async function resynthesizeMultiAgentRun(
     });
     return applyDeepResynthesisResult(feature, record, synthesis);
   } finally {
-    await childRuntime.releaseResources();
+    await releaseMultiAgentOperationResources(feature, {
+      runId: input.runId,
+      conversationId: record.run.conversationId,
+      release: childRuntime.releaseResources,
+    });
   }
 }
 
@@ -1479,10 +1957,14 @@ async function deleteMultiAgentConversation(
     );
   }
   for (const record of records) {
-    await feature.runRecordStore.delete(record.run.runId);
+    // Keep the run record until every owned sidecar has been reclaimed. If a
+    // cleanup step fails, the conversation and run remain discoverable so a
+    // later delete can retry the exact remaining work instead of losing the
+    // owner before its resources are released.
     await feature.childMessageStore.deleteForRun(record.run.runId);
     await feature.childLoopContextStore.deleteForRun(record.run.runId);
     await feature.releaseToolOutputOwner(multiAgentToolOutputOwnerId(record.run.runId));
+    await feature.runRecordStore.delete(record.run.runId);
     feature.forgetRun(record.run.runId);
   }
   await feature.conversationStore.delete(conversationId);
@@ -1737,6 +2219,238 @@ function multiAgentConversationGoal(conversation: DeepConversation): string {
 
 function isTerminalMultiAgentRun(record: DeepRunRecord): boolean {
   return record.run.status !== "running";
+}
+
+function childOperationResultCopy(result: DeepChildProjectionResult): {
+  readonly eventTitle: string;
+  readonly eventSummary: string;
+} {
+  return {
+    eventTitle: result.completedRun.status === "completed" ? "子 Agent 已继续" : "子 Agent 继续受阻",
+    eventSummary: result.completedRun.status === "completed"
+      ? result.summary.summary
+      : result.completedRun.failureReason ?? result.summary.uncertainty ?? "子 Agent 需要继续处理。",
+  };
+}
+
+function deepChildOperationResultAlreadyApplied(
+  record: DeepRunRecord,
+  result: DeepChildProjectionResult,
+): boolean {
+  const current = record.agentRunTree.childRuns.find(
+    (childRun) => childRun.childRunId === result.completedRun.childRunId,
+  );
+  if (current === undefined) {
+    return false;
+  }
+  const expectedHistory = result.completedRun.executionHistory ?? [];
+  const currentHistory = current.executionHistory ?? [];
+  if (expectedHistory.length === 0 || currentHistory.length < expectedHistory.length) {
+    return false;
+  }
+  return expectedHistory.every((segment, index) => (
+    JSON.stringify(currentHistory[index]) === JSON.stringify(segment)
+  ));
+}
+
+function assertDurableChildApprovalCanBeReplaced(
+  feature: Pick<MultiAgentFeatureRuntime, "childContinuations">,
+  record: DeepRunRecord,
+  childRunId: string,
+): void {
+  const pendingApproval = record.agentRunTree.childRuns.find(
+    (childRun) => childRun.childRunId === childRunId,
+  )?.pendingApproval;
+  if (pendingApproval === undefined) {
+    return;
+  }
+  const live = feature.childContinuations.get(
+    record.run.runId,
+    childRunId,
+    pendingApproval.confirmationId,
+  );
+  if (live !== undefined) {
+    return;
+  }
+  throw new MultiAgentFeatureError(
+    "confirmation_continuation_lost",
+    "The child approval is durable, but its live continuation is no longer available.",
+  );
+}
+
+async function reconcilePendingChildInstructionResult(
+  feature: MultiAgentFeatureRuntime,
+  record: DeepRunRecord,
+  childRunId: string,
+): Promise<{
+  readonly record: DeepRunRecord;
+  readonly pending?: PendingDeepChildInstructionResult;
+}> {
+  const key = pendingChildInstructionResultKey(record.run.runId, childRunId);
+  const pending = feature.pendingChildInstructionResults.get(key);
+  if (pending === undefined) {
+    return { record };
+  }
+  let updated = record;
+  if (!deepChildOperationResultAlreadyApplied(record, pending.result)) {
+    try {
+      updated = await applyDeepChildOperationResult(
+        feature,
+        record,
+        pending.result,
+        pending.copy,
+      );
+    } catch (error) {
+      await acknowledgeAwaitedRunRecordWriteFailure(feature, error);
+      throw error;
+    }
+  }
+  feature.pendingChildInstructionResults.delete(key);
+  return { record: updated, pending };
+}
+
+async function reconcilePendingChildInstructionResultsForRun(
+  feature: MultiAgentFeatureRuntime,
+  record: DeepRunRecord,
+): Promise<DeepRunRecord> {
+  const prefix = `${record.run.runId}:`;
+  let updated = record;
+  for (const [key, pending] of [...feature.pendingChildInstructionResults]) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    if (!deepChildOperationResultAlreadyApplied(updated, pending.result)) {
+      try {
+        updated = await applyDeepChildOperationResult(
+          feature,
+          updated,
+          pending.result,
+          pending.copy,
+        );
+      } catch (error) {
+        await acknowledgeAwaitedRunRecordWriteFailure(feature, error);
+        throw error;
+      }
+    }
+    feature.pendingChildInstructionResults.delete(key);
+  }
+  return updated;
+}
+
+async function assertNoUnreconciledChildInstruction(
+  feature: Pick<MultiAgentFeatureRuntime, "childMessageStore">,
+  record: DeepRunRecord,
+  childRunId: string,
+): Promise<void> {
+  const childRun = record.agentRunTree.childRuns.find((child) => child.childRunId === childRunId);
+  const durableInstructionRefs = new Set(
+    (childRun?.parentInstructions ?? [])
+      .filter((instruction) => instruction.status === "executed" || instruction.status === "cancelled")
+      .map((instruction) =>
+        instruction.messageRef ?? deepChildParentInstructionMessageRef(instruction.instructionId)
+      ),
+  );
+  const unreconciled = (await feature.childMessageStore.listForChild(record.run.runId, childRunId))
+    .find((message) => message.status !== "cancelled" && !durableInstructionRefs.has(message.messageRef));
+  if (unreconciled === undefined) {
+    return;
+  }
+  throw new MultiAgentFeatureError(
+    "child_instruction_outcome_unknown",
+    "A previous child instruction has no durable result projection; it will not be replayed automatically.",
+  );
+}
+
+async function assertNoUnreconciledChildInstructionsForRun(
+  feature: Pick<MultiAgentFeatureRuntime, "childMessageStore">,
+  record: DeepRunRecord,
+): Promise<void> {
+  const durableInstructionRefs = new Set(
+    record.agentRunTree.childRuns.flatMap((childRun) =>
+      (childRun.parentInstructions ?? [])
+        .filter((instruction) => instruction.status === "executed" || instruction.status === "cancelled")
+        .map((instruction) =>
+          instruction.messageRef ?? deepChildParentInstructionMessageRef(instruction.instructionId)
+        )
+    ),
+  );
+  const unreconciled = (await feature.childMessageStore.listForRun(record.run.runId))
+    .find((message) => message.status !== "cancelled" && !durableInstructionRefs.has(message.messageRef));
+  if (unreconciled === undefined) {
+    return;
+  }
+  throw new MultiAgentFeatureError(
+    "child_instruction_outcome_unknown",
+    "A child instruction has no durable result projection; operations that depend on this run will not use stale child material.",
+  );
+}
+
+function mapChildContinuationDecisionError(error: unknown): unknown {
+  if (!(error instanceof DeepChildConfirmationDecisionError)) {
+    return error;
+  }
+  switch (error.code) {
+    case "confirmation_continuation_lost":
+    case "confirmation_in_progress":
+    case "confirmation_outcome_unknown":
+      return new MultiAgentFeatureError(error.code, error.message);
+    default:
+      return error;
+  }
+}
+
+function unknownContinuationOutcome(error: unknown): MultiAgentFeatureError {
+  const wrapped = new MultiAgentFeatureError(
+    "confirmation_outcome_unknown",
+    "确认后的子 Agent 执行结果无法确定，系统不会自动重复可能已经产生副作用的操作。",
+  );
+  (wrapped as Error & { cause?: unknown }).cause = error;
+  return wrapped;
+}
+
+async function acknowledgeAwaitedRunRecordWriteFailure(
+  feature: Pick<MultiAgentFeatureRuntime, "runRecordWrites">,
+  error: unknown,
+): Promise<boolean> {
+  const receipt = deepRunRecordWriteReceiptFromError(error);
+  return receipt === undefined
+    ? false
+    : feature.runRecordWrites.acknowledgeFailure(receipt);
+}
+
+async function releaseMultiAgentOperationResources(
+  feature: Pick<MultiAgentFeatureRuntime, "reportBackgroundFailure">,
+  input: {
+    readonly runId: string;
+    readonly conversationId: string;
+    readonly release: () => void | Promise<void>;
+  },
+): Promise<void> {
+  try {
+    await input.release();
+  } catch (error) {
+    reportMultiAgentBackgroundFailure(feature.reportBackgroundFailure, {
+      runId: input.runId,
+      conversationId: input.conversationId,
+      error,
+    });
+  }
+}
+
+function pendingChildInstructionResultKey(runId: string, childRunId: string): string {
+  return `${runId}:${childRunId}`;
+}
+
+function deletePendingChildInstructionResultsForRun(
+  pending: Map<string, PendingDeepChildInstructionResult>,
+  runId: string,
+): void {
+  const prefix = `${runId}:`;
+  for (const key of pending.keys()) {
+    if (key.startsWith(prefix)) {
+      pending.delete(key);
+    }
+  }
 }
 
 function defaultBackgroundFailureReporter(input: {

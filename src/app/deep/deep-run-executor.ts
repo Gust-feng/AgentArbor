@@ -208,6 +208,11 @@ export type DeepRunExecutorConfig = {
    */
   readonly onProgress?: DeepRunProgressObserver;
   /**
+   * manager 已选择终态动作后，在分发该动作前停止新的 child control 准入，
+   * 并等待已接收操作完成。这是执行一致性屏障，不属于可吞错的进度投影。
+   */
+  readonly sealChildControl?: () => void | Promise<void>;
+  /**
    * T1-4：scheduler 注入位。T2-1 runtime 装配 board+exploreFactory+生命周期回调后注入，
    * 使 child 生命周期事件在真实状态变化时实时发布（FR-PROJ-02，闭环2）。省略时 executor
    * 内部创建默认 scheduler（无生命周期回调，投影权威化在闭环2 由 runtime 注入补齐）。
@@ -391,6 +396,11 @@ export async function startDeepRun(
     emitProgress: (event) => emitProgress(config, event),
   });
   const board = scheduler.getBoard();
+  let childControlSeal: Promise<void> | undefined;
+  const sealChildControl = (): Promise<void> => {
+    childControlSeal ??= Promise.resolve().then(() => config.sealChildControl?.());
+    return childControlSeal;
+  };
   board.setPhase("planning");
 
   const decisions: DeepDelegationDecision[] = [];
@@ -407,6 +417,7 @@ export async function startDeepRun(
   let stopReason: DeepRunStopReason | undefined;
   let finalStatus: DeepRunStatus = "completed";
   let failure: string | undefined;
+  let childWorkFinalized = false;
 
   try {
     for (let stepIndex = 0; stepIndex < stepLimit; stepIndex += 1) {
@@ -426,12 +437,14 @@ export async function startDeepRun(
       if (input.control) {
         const signal = input.control.consume();
         if (signal.kind === "interrupt") {
+          await sealChildControl();
           // FR-008 + T1-4：先 cancel pending（board 置 stopped，此后 startQueued no-op），
           // 再 drain 在途 running（本轮不真 abort 模型调用，running 自然完成后材料进保留），
           // 合并新终态材料后记录保留量。已产出的 child/材料保留，run 置 interrupted。
           scheduler.cancelPendingAndRunning(signal.reason);
           const drained = await scheduler.waitForAll();
           mergeDeepTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+          childWorkFinalized = true;
           controlEvents.push({
             kind: "interrupt",
             atStepIndex: stepIndex,
@@ -446,12 +459,14 @@ export async function startDeepRun(
           break;
         }
         if (signal.kind === "stop") {
+          await sealChildControl();
           // FR-008 + T1-4：停止运行。先 cancel pending + drain 在途材料（保留），再尝试产出
           // partial conclusion（经综合，受 assertNoDirectChildOutputHandoff 约束）；综合硬约束
           // 失败时不阻塞停止，材料仍保留在结果中。
           scheduler.cancelPendingAndRunning(signal.reason);
           const drained = await scheduler.waitForAll();
           mergeDeepTerminalMaterials(drained, childSummaries, completedChildRuns, executedQueuedChildInstructions);
+          childWorkFinalized = true;
           const partial = await attemptDeepPartialSynthesis({
             context: input,
             turnRuntime: config.turnRuntime,
@@ -525,6 +540,27 @@ export async function startDeepRun(
         decision,
         recordedAt: nowIso(),
       });
+      if (isTerminalDeepAction(decision.action)) {
+        // Seal new live child-control admission through a critical awaited
+        // port. Progress observers are best-effort and cannot own this barrier.
+        await sealChildControl();
+        if (decision.action !== "synthesize") {
+          // A terminal decision must not leave never-started child work behind.
+          // Running children finish naturally; pending children and queued
+          // follow-ups are cancelled because this run will not explore again.
+          scheduler.cancelPendingAndRunning(decision.uncertainty);
+        }
+        const terminalMaterials = decision.action === "synthesize"
+          ? await scheduler.waitForAllQueued()
+          : await scheduler.waitForAll();
+        mergeDeepTerminalMaterials(
+          terminalMaterials,
+          childSummaries,
+          completedChildRuns,
+          executedQueuedChildInstructions,
+        );
+        childWorkFinalized = true;
+      }
 
       // 分发 manager 动作分支——每条分支都基于模型决策执行，executor 不改写动作语义。
       if (decision.action === "direct_answer") {
@@ -538,7 +574,7 @@ export async function startDeepRun(
           context: input,
           turnRuntime: config.turnRuntime,
           decision,
-          evidenceRefs,
+          evidenceRefs: collectDeepChildEvidenceRefs(childSummaries),
           maxModelRounds: managerMaxModelRounds,
           maxToolRounds: managerMaxToolRounds,
           maxRetries: managerMaxRetries,
@@ -839,6 +875,17 @@ export async function startDeepRun(
     finalStatus = "failed";
   }
 
+  // Every exit path has one finalization owner. Seal control admission before
+  // the final drain so runtime persistence never has to reinterpret or merge
+  // child business facts after this executor returns.
+  await sealChildControl();
+  if (!childWorkFinalized) {
+    // Step-limit and exception exits have no terminal manager action to apply
+    // the policy above. Stop pending admission before draining running work.
+    scheduler.cancelPendingAndRunning(failure ?? stopReason ?? "run_finalization");
+    childWorkFinalized = true;
+  }
+
   // T1-4 兜底：循环结束后 drain 任何残留 in-flight child（防 step_limit / 异常时材料丢失），
   // 保证 executorResult.childRuns/childSummaries 涵盖所有已启动 child（一致性 + 可复盘）。
   // board 已 stopped（control 终止）时 running 仍自然完成进 buffer，waitForAll 照常 drain。
@@ -880,8 +927,14 @@ export async function startDeepRun(
     }
   }
 
-  // 终态相位对齐（循环正常收束但相位未被显式置位时按 finalStatus 收口）。
-  if (board.getPhase() !== "stopped" && board.getPhase() !== "needs_input") {
+  // 终态相位对齐。Finalization may temporarily mark the board stopped only
+  // to cancel pending work; preserve that phase solely for real stop/input exits.
+  const preservesStoppedPhase =
+    stopReason === "stopped"
+    || stopReason === "stopped_by_control"
+    || stopReason === "interrupted"
+    || stopReason === "ask_user";
+  if (!preservesStoppedPhase) {
     board.setPhase(deepTaskBoardPhaseForRunStatus(finalStatus));
   }
 
@@ -904,6 +957,10 @@ export async function startDeepRun(
     brief,
     executedQueuedChildInstructions,
   };
+}
+
+function isTerminalDeepAction(action: DeepDelegationDecision["action"]): boolean {
+  return action === "direct_answer" || action === "synthesize" || action === "ask_user" || action === "stop";
 }
 
 // ---------------------------------------------------------------------------

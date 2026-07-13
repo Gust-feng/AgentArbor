@@ -66,6 +66,36 @@ export class DeepChildParentInstructionHistory {
     return updated;
   }
 
+  /** Force a prepared instruction to cancelled when execution admission never completed. */
+  markAdmissionRejected(
+    childRunId: string,
+    childRun: ChildAgentRun | undefined,
+    instructionId: string,
+    cancelledAt: string,
+  ): ChildAgentRun | undefined {
+    const reject = (instruction: ChildAgentRunParentInstruction): ChildAgentRunParentInstruction =>
+      instruction.instructionId === instructionId
+        ? {
+            ...instruction,
+            status: "cancelled",
+            executedAt: undefined,
+            cancelledAt,
+          }
+        : cloneParentInstruction(instruction);
+    if (childRun === undefined) {
+      const history = this.byChildRunId.get(childRunId) ?? [];
+      this.byChildRunId.set(childRunId, history.map(reject));
+      return undefined;
+    }
+    const applied = this.apply(childRun);
+    const updated = replaceChildAgentRunParentInstructions(
+      applied,
+      (applied.parentInstructions ?? []).map(reject),
+    );
+    this.remember(updated);
+    return updated;
+  }
+
   apply(childRun: ChildAgentRun): ChildAgentRun {
     this.seed(childRun);
     return replaceChildAgentRunParentInstructions(childRun, this.byChildRunId.get(childRun.childRunId));

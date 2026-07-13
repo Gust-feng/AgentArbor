@@ -130,10 +130,11 @@ export async function buildAndPublishRunTree(
   let controlApiResumeDecisionsAppended = false;
 
   for (const step of result.steps) {
-    const decisionChildRunIds =
+    const decisionChildRunIds = (
       step.dispatchedAction === "continue_child"
         ? step.operatedChildRunIds ?? []
-        : step.spawnedChildRunIds ?? [];
+        : step.spawnedChildRunIds ?? []
+    ).filter((childRunId) => childRunById.has(childRunId));
     const domainDecision = mapDeepDecisionToDomain(
       step.decision,
       decisionChildRunIds,

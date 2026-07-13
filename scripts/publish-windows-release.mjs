@@ -1,15 +1,24 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import {
+  resolveReleaseTag,
+  validateWindowsReleaseArtifacts,
+} from "./windows-release-validation.mjs";
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 const version = String(packageJson.version);
-const tag = process.argv[2] ?? process.env.GITHUB_REF_NAME ?? `v${version}`;
+const tag = resolveReleaseTag({
+  version,
+  argumentTag: process.argv[2],
+  environmentTag: process.env.GITHUB_REF_NAME,
+});
 const releaseDirectory = join(process.cwd(), "release");
+const releaseArtifacts = validateWindowsReleaseArtifacts({ releaseDirectory, version });
 const assets = [
-  findReleaseAsset((name) => /^AgentArbor-Setup-.+\.exe$/.test(name)),
-  findReleaseAsset((name) => /^AgentArbor-Setup-.+\.exe\.blockmap$/.test(name)),
-  join(releaseDirectory, "latest.yml"),
+  releaseArtifacts.installerPath,
+  releaseArtifacts.blockmapPath,
+  releaseArtifacts.latestPath,
 ];
 const target = process.env.GITHUB_SHA ?? readGitHead();
 
@@ -28,14 +37,6 @@ if (runGh(["release", "view", tag], { allowFailure: true }) === 0) {
     "--target",
     target,
   ]);
-}
-
-function findReleaseAsset(predicate) {
-  const entry = readdirSync(releaseDirectory).find(predicate);
-  if (entry === undefined) {
-    throw new Error("Missing Windows desktop release assets.");
-  }
-  return join(releaseDirectory, entry);
 }
 
 function runGh(args, options = {}) {

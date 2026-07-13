@@ -395,6 +395,142 @@ test("FileSystemRuntimeDatabase rejects legacy manifests and broken snapshot poi
   }
 });
 
+test("FileSystemRuntimeDatabase rejects invalid snapshot enums, identities, and stale manifest summaries", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-db-validation-"));
+  try {
+    const paths = resolveAgentArborRuntimeDatabasePaths(path.join(root, "config"));
+    const database = new FileSystemRuntimeDatabase(paths);
+    const runId = "validation-run";
+    const workspace = {
+      workspaceId: `workspace:run:${runId}`,
+      kind: "local_directory" as const,
+      path: path.join(root, "workspace"),
+      label: "workspace",
+      selectedAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+    };
+    await database.saveRunSnapshot(emptyRunSnapshot(
+      runRecord(runId, paths, workspace.workspaceId, workspace.path),
+      workspace,
+    ));
+
+    const runDirectory = database.runHome(runId);
+    const manifestPath = path.join(runDirectory, "run.json");
+    const snapshotPath = path.join(runDirectory, "snapshots", "1.json");
+    const originalManifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    const originalDocument = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as {
+      content: Record<string, unknown>;
+    };
+
+    const invalidStatusDocument = structuredClone(originalDocument);
+    (invalidStatusDocument.content.run as Record<string, unknown>).status = "not-a-runtime-status";
+    await fs.writeFile(snapshotPath, `${JSON.stringify(invalidStatusDocument)}\n`, "utf8");
+    await assert.rejects(database.getRun(runId), runtimeSnapshotIncompatible);
+
+    await fs.writeFile(snapshotPath, `${JSON.stringify(originalDocument)}\n`, "utf8");
+    const invalidContinuationDocument = structuredClone(originalDocument);
+    (invalidContinuationDocument.content.run as Record<string, unknown>).continuationAvailability = "future";
+    await fs.writeFile(snapshotPath, `${JSON.stringify(invalidContinuationDocument)}\n`, "utf8");
+    await assert.rejects(database.getRun(runId), runtimeSnapshotIncompatible);
+
+    await fs.writeFile(snapshotPath, `${JSON.stringify(originalDocument)}\n`, "utf8");
+    const foreignRunDocument = structuredClone(originalDocument);
+    (foreignRunDocument.content.run as Record<string, unknown>).runId = "another-run";
+    await fs.writeFile(snapshotPath, `${JSON.stringify(foreignRunDocument)}\n`, "utf8");
+    await assert.rejects(database.getRun(runId), runtimeSnapshotIncompatible);
+
+    await fs.writeFile(snapshotPath, `${JSON.stringify(originalDocument)}\n`, "utf8");
+    const staleManifest = structuredClone(originalManifest);
+    (staleManifest.run as Record<string, unknown>).status = "running";
+    await fs.writeFile(manifestPath, `${JSON.stringify(staleManifest)}\n`, "utf8");
+    await assert.rejects(database.getRun(runId), runtimeSnapshotIncompatible);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test("FileSystemRuntimeDatabase validates snapshot content before committing it", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-db-write-validation-"));
+  try {
+    const paths = resolveAgentArborRuntimeDatabasePaths(path.join(root, "config"));
+    const database = new FileSystemRuntimeDatabase(paths);
+    const runId = "write-validation-run";
+    const workspace = {
+      workspaceId: `workspace:run:${runId}`,
+      kind: "local_directory" as const,
+      path: path.join(root, "workspace"),
+      label: "workspace",
+      selectedAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+    };
+    const snapshot = emptyRunSnapshot(
+      runRecord(runId, paths, workspace.workspaceId, workspace.path),
+      workspace,
+    );
+
+    await assert.rejects(
+      database.saveRunSnapshot({
+        ...snapshot,
+        run: { ...snapshot.run, continuationAvailability: "future" as never },
+      }),
+      runtimeSnapshotIncompatible,
+    );
+    await assert.rejects(
+      database.saveRunSnapshot({
+        ...snapshot,
+        workspace: { ...workspace, path: path.join(root, "another-workspace") },
+      }),
+      runtimeSnapshotIncompatible,
+    );
+    assert.equal(await database.getRun(runId), undefined);
+
+    await database.saveRunSnapshot({
+      ...snapshot,
+      run: { ...snapshot.run, continuationAvailability: "live" },
+    });
+    assert.equal((await database.getRun(runId))?.run.continuationAvailability, "live");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test("FileSystemRuntimeDatabase keeps storage I/O errors distinct from incompatible JSON", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-db-io-error-"));
+  try {
+    const paths = resolveAgentArborRuntimeDatabasePaths(path.join(root, "config"));
+    const database = new FileSystemRuntimeDatabase(paths);
+    const runId = "io-error-run";
+    const workspace = {
+      workspaceId: `workspace:run:${runId}`,
+      kind: "local_directory" as const,
+      path: path.join(root, "workspace"),
+      label: "workspace",
+      selectedAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+    };
+    await database.saveRunSnapshot(emptyRunSnapshot(
+      runRecord(runId, paths, workspace.workspaceId, workspace.path),
+      workspace,
+    ));
+
+    const manifestPath = path.join(database.runHome(runId), "run.json");
+    await fs.writeFile(manifestPath, "{broken-json\n", "utf8");
+    await assert.rejects(database.getRun(runId), runtimeSnapshotIncompatible);
+    await fs.rm(manifestPath, { force: true });
+    await fs.mkdir(manifestPath);
+    await assert.rejects(
+      database.getRun(runId),
+      (error: unknown) => {
+        assert.equal(error instanceof Error, true);
+        assert.notEqual((error as { readonly code?: string }).code, "runtime_snapshot_incompatible");
+        return ["EISDIR", "EACCES", "EPERM"].includes((error as { readonly code?: string }).code ?? "");
+      },
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
 function runRecord(
   runId: string,
   paths: ReturnType<typeof resolveAgentArborRuntimeDatabasePaths>,

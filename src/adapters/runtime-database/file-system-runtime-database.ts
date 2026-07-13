@@ -10,12 +10,17 @@ import type {
   RuntimeDatabase,
   RuntimeRunModelCallsRecord,
   RuntimeRunManifest,
-  RuntimeRunRecord,
   RuntimeRunSnapshot,
   RuntimeRunSnapshotContent,
   RuntimeRunSnapshotDocument,
   RuntimeRunSummaryRecord,
 } from "../../domain/runtime-database/index.js";
+import {
+  runtimeRunSummary,
+  validateRuntimeRunManifest,
+  validateRuntimeRunSnapshotContent,
+  validateRuntimeRunSnapshotDocument,
+} from "./runtime-run-snapshot-validation.js";
 
 export type FileSystemRuntimeDatabasePaths = {
   readonly appHome: string;
@@ -81,6 +86,10 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
   async saveRunSnapshot(content: RuntimeRunSnapshotContent): Promise<RuntimeRunSnapshotContent> {
     const snapshot = cloneJson(content);
     const runId = snapshot.run.runId;
+    const validation = validateRuntimeRunSnapshotContent(snapshot, runId);
+    if (!validation.ok) {
+      throw incompatibleSnapshot(runId, validation.reason);
+    }
     const previous = this.runSaveTails.get(runId) ?? Promise.resolve();
     const operation = previous.then(() => this.saveRunSnapshotNow(snapshot));
     const tail = operation.then(() => undefined, () => undefined);
@@ -165,15 +174,19 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     try {
       raw = await readJsonFile<unknown>(filePath);
     } catch (error) {
-      throw incompatibleSnapshot(runId, "manifest JSON is invalid", error);
+      if (error instanceof SyntaxError) {
+        throw incompatibleSnapshot(runId, "manifest JSON is invalid", error);
+      }
+      throw error;
     }
     if (raw === undefined) {
       return undefined;
     }
-    if (!isRuntimeRunManifest(raw) || raw.run.runId !== runId) {
-      throw incompatibleSnapshot(runId, "manifest shape or run identity is invalid");
+    const validation = validateRuntimeRunManifest(raw, runId);
+    if (!validation.ok) {
+      throw incompatibleSnapshot(runId, validation.reason);
     }
-    return raw;
+    return validation.value;
   }
 
   private async readSnapshotDocument(
@@ -187,12 +200,16 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     try {
       raw = await readJsonFile<unknown>(path.join(this.runDirectory(runId), manifest.snapshotRef));
     } catch (error) {
-      throw incompatibleSnapshot(runId, "snapshot JSON is invalid", error);
+      if (error instanceof SyntaxError) {
+        throw incompatibleSnapshot(runId, "snapshot JSON is invalid", error);
+      }
+      throw error;
     }
-    if (!isRuntimeRunSnapshotDocument(raw) || raw.revision !== manifest.revision || raw.content.run.runId !== runId) {
-      throw incompatibleSnapshot(runId, "snapshot shape, revision, or run identity is invalid");
+    const validation = validateRuntimeRunSnapshotDocument(raw, runId, manifest);
+    if (!validation.ok) {
+      throw incompatibleSnapshot(runId, validation.reason);
     }
-    return raw;
+    return validation.value;
   }
 
   private async cleanupOldSnapshots(runId: string, currentRevision: number): Promise<void> {
@@ -313,88 +330,6 @@ function compareConversations(left: RuntimeConversationRecord, right: RuntimeCon
 
 function isFileNotFound(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
-}
-
-function runtimeRunSummary(run: RuntimeRunRecord): RuntimeRunSummaryRecord {
-  return {
-    runId: run.runId,
-    profile: run.profile,
-    runKind: run.runKind,
-    runMode: run.runMode,
-    status: run.status,
-    goalSummary: run.goalSummary,
-    aiMode: run.aiMode,
-    workspaceId: run.workspaceId,
-    workspacePath: run.workspacePath,
-    conversationId: run.conversationId,
-    appHome: run.appHome,
-    runHome: run.runHome,
-    createdAt: run.createdAt,
-    updatedAt: run.updatedAt,
-    completedAt: run.completedAt,
-    resultTitle: run.resultTitle,
-    resultSummary: run.resultSummary,
-    stopReason: run.stopReason,
-    continuationAvailability: run.continuationAvailability,
-    error: run.error,
-  };
-}
-
-function isRuntimeRunManifest(value: unknown): value is RuntimeRunManifest {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const record = value as Partial<RuntimeRunManifest>;
-  const revision = record.revision;
-  return record.schemaVersion === RUNTIME_RUN_MANIFEST_SCHEMA_VERSION &&
-    typeof revision === "number" && Number.isInteger(revision) && revision > 0 &&
-    typeof record.snapshotRef === "string" &&
-    isRuntimeRunSummaryRecord(record.run);
-}
-
-function isRuntimeRunSnapshotDocument(value: unknown): value is RuntimeRunSnapshotDocument {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const record = value as Partial<RuntimeRunSnapshotDocument>;
-  const revision = record.revision;
-  const content = record.content as RuntimeRunSnapshotContent | undefined;
-  return record.schemaVersion === RUNTIME_RUN_SNAPSHOT_SCHEMA_VERSION &&
-    typeof revision === "number" && Number.isInteger(revision) && revision > 0 &&
-    isRuntimeRunSnapshotContent(content);
-}
-
-function isRuntimeRunSnapshotContent(value: unknown): value is RuntimeRunSnapshotContent {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const content = value as Partial<RuntimeRunSnapshotContent>;
-  return isRuntimeRunSummaryRecord(content.run) &&
-    Array.isArray(content.basicEvents) &&
-    Array.isArray(content.events) &&
-    Array.isArray(content.modelCalls) &&
-    Array.isArray(content.toolCalls) &&
-    Array.isArray(content.artifacts) &&
-    Array.isArray(content.confirmations) &&
-    Array.isArray(content.subAgentRuns);
-}
-
-function isRuntimeRunSummaryRecord(value: unknown): value is RuntimeRunSummaryRecord {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const run = value as Partial<RuntimeRunSummaryRecord>;
-  return typeof run.runId === "string" && run.runId.length > 0 &&
-    (run.profile === "lite" || run.profile === "full") &&
-    (run.runKind === "desktop" || run.runKind === "underground") &&
-    (run.runMode === "agent" || run.runMode === "deep") &&
-    typeof run.status === "string" &&
-    typeof run.goalSummary === "string" &&
-    typeof run.aiMode === "string" &&
-    typeof run.appHome === "string" &&
-    typeof run.runHome === "string" &&
-    typeof run.createdAt === "string" &&
-    typeof run.updatedAt === "string";
 }
 
 function incompatibleSnapshot(runId: string, reason: string, cause?: unknown): RuntimeSnapshotIncompatibleError {

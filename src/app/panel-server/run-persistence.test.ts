@@ -15,9 +15,11 @@ import type {
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import { PanelRunJobStore } from "./run-jobs.js";
+import { submitRestoredBasicConfirmationDecision } from "../basic-agent-runtime/persistence.js";
+import { createOrdinaryAgentRuntime } from "../desktop-agent/ordinary-agent-runtime.js";
 import type { PanelRunPersistenceRuntime } from "./run-persistence.js";
 import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
-import { waitForPanelPersistenceIdle } from "./persistence.js";
+import { enqueuePanelPersistence, waitForPanelPersistenceIdle } from "./persistence.js";
 
 test("persistPanelRun uses frozen capability workspace instead of current config workspace", async () => {
   const database = new MemoryRuntimeDatabase();
@@ -246,6 +248,104 @@ test("persistPanelRunInBackground records failures without poisoning the queue",
   assert.equal(diagnostic?.detail?.errorFacts?.runId, job.runId);
 });
 
+test("restored confirmation waits for an in-flight background snapshot of the same run", async () => {
+  const database = new GatedSnapshotDatabase();
+  const runJobs = new PanelRunJobStore();
+  const agentDefinitionRef = {
+    agentId: "desktop-agent-session",
+    agentDisplayName: "Desktop Agent",
+    promptRef: "prompt:desktop-root-agent:v1",
+    promptVersion: "v1",
+    outputContractId: "desktop.agent_response.v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+    definitionHash: "sha256:run-persistence-confirmation-race-test",
+  };
+  const runtime = persistenceRuntime(database, runJobs, {
+    getBasicRun: (runId) => ({
+      ...basicRunFixture(runId),
+      status: "approval_needed",
+      agentDefinitionRef,
+    }),
+    replayEvents: (runId) => ({
+      cursor: { runId, lastSequence: 1, eventCount: 1 },
+      events: [{
+        id: `${runId}:event:1`,
+        runId,
+        sequence: 1,
+        type: "user_approval.requested",
+        title: "等待确认",
+        summary: "是否继续？",
+        status: "approval_needed",
+        timestamp: "2026-05-31T00:00:01.000Z",
+        refs: [],
+        visibility: "compact",
+      }],
+    }),
+  });
+  const job = runJobs.create({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "Persist confirmation without a stale overwrite",
+    aiMode: "fake",
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    capabilitySnapshot: capabilitySnapshot(),
+    agentDefinitionRef,
+  });
+  const confirmationId = "confirmation-background-race";
+  const ordinaryRuntime = createOrdinaryAgentRuntime();
+  ordinaryRuntime.eventLog.append({
+    id: `${job.runId}:confirmation-requested`,
+    traceId: `${job.runId}:trace`,
+    from: { id: "desktop-agent-session", role: "agent" },
+    type: "user_approval.requested",
+    intent: "request_confirmation",
+    payload: {
+      confirmationId,
+      question: "是否继续？",
+      consequence: "将执行受控测试动作。",
+      riskLevel: "medium",
+    },
+    createdAt: "2026-05-31T00:00:01.000Z",
+  });
+  runJobs.attachRuntime({
+    runId: job.runId,
+    runtime: ordinaryRuntime,
+    traceId: `${job.runId}:trace`,
+    goalId: `${job.runId}:goal`,
+  });
+  runJobs.awaitApproval(job.runId, {
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    capabilitySnapshot: capabilitySnapshot(),
+  });
+  const approvalJob = runJobs.get(job.runId);
+  assert.ok(approvalJob);
+  await persistPanelRun(runtime, approvalJob);
+
+  const gate = database.gateNextSnapshotSave();
+  persistPanelRunInBackground(runtime, approvalJob);
+  await gate.started;
+  let restored: BasicAgentRun | undefined;
+  const decision = enqueuePanelPersistence(runtime.persistenceChains, job.runId, async () => {
+    restored = await submitRestoredBasicConfirmationDecision({
+      runtimeDatabase: database,
+      runId: job.runId,
+      confirmationId,
+      decision: { decision: "deny" },
+    });
+  });
+
+  gate.release();
+  await decision;
+  await waitForPanelPersistenceIdle(runtime.persistenceChains);
+  const committed = await database.getRun(job.runId);
+
+  assert.equal(restored?.status, "blocked");
+  assert.equal(committed?.run.status, "blocked");
+  assert.equal(committed?.confirmations.find((item) => item.confirmationId === confirmationId)?.status, "denied");
+});
+
 function persistenceRuntime(
   database: MemoryRuntimeDatabase,
   runJobs: PanelRunJobStore,
@@ -376,6 +476,47 @@ class FailOnceUpsertRunDatabase extends MemoryRuntimeDatabase {
     }
     return super.saveRunSnapshot(content);
   }
+}
+
+class GatedSnapshotDatabase extends MemoryRuntimeDatabase {
+  private nextSaveGate: {
+    readonly started: () => void;
+    readonly released: Promise<void>;
+  } | undefined;
+
+  gateNextSnapshotSave(): { readonly started: Promise<void>; readonly release: () => void } {
+    const started = deferred();
+    const released = deferred();
+    this.nextSaveGate = {
+      started: started.resolve,
+      released: released.promise,
+    };
+    return {
+      started: started.promise,
+      release: released.resolve,
+    };
+  }
+
+  override async saveRunSnapshot(content: RuntimeRunSnapshot): Promise<RuntimeRunSnapshot> {
+    const gate = this.nextSaveGate;
+    if (gate !== undefined) {
+      this.nextSaveGate = undefined;
+      gate.started();
+      await gate.released;
+    }
+    return super.saveRunSnapshot(content);
+  }
+}
+
+function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolvePromise: (() => void) | undefined;
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve: () => resolvePromise?.(),
+  };
 }
 
 async function flushUnhandledRejections(): Promise<void> {

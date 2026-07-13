@@ -20,6 +20,7 @@ import {
 } from "./http-utils.js";
 import { parseConfirmationDecision } from "./request-parsers.js";
 import { appRunEventsAfterSequence } from "../run-runtime-core/event-stream.js";
+import { enqueuePanelPersistence } from "./persistence.js";
 
 export type PanelBasicAgentRouteRuntime = {
   readonly runJobs: {
@@ -27,6 +28,12 @@ export type PanelBasicAgentRouteRuntime = {
   };
   readonly runExecutor: BasicAgentRunExecutor;
   readonly runtimeDatabase?: RuntimeDatabase;
+  /**
+   * Restored confirmation decisions must share the same per-run writer as
+   * background run snapshots. Otherwise a late snapshot can overwrite the
+   * decision made from the persisted record.
+   */
+  readonly persistenceChains: Map<string, Promise<void>>;
 };
 
 export async function handlePanelBasicAgentRoute(
@@ -310,11 +317,14 @@ async function handleConfirmationDecisionRequest(
       throw new PanelHttpError(409, error.code, error.message);
     }
     if (error instanceof Error && error.message.includes("not found")) {
-      const restored = await submitRestoredBasicConfirmationDecision({
-        runtimeDatabase: runtime.runtimeDatabase,
-        runId,
-        confirmationId,
-        decision,
+      let restored: BasicAgentRun | undefined;
+      await enqueuePanelPersistence(runtime.persistenceChains, runId, async () => {
+        restored = await submitRestoredBasicConfirmationDecision({
+          runtimeDatabase: runtime.runtimeDatabase,
+          runId,
+          confirmationId,
+          decision,
+        });
       });
       if (restored !== undefined) {
         return restored;

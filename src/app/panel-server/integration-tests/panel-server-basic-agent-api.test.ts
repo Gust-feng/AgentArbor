@@ -3,6 +3,11 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import {
+  FileSystemRuntimeDatabase,
+  resolveAgentArborRuntimeDatabasePaths,
+} from "../../../adapters/runtime-database/index.js";
+import type { RuntimeDatabase } from "../../../domain/runtime-database/index.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
 import {
   assertSafePanelJsonText,
@@ -645,6 +650,116 @@ test("basic agent approve after restart blocks because executable continuation i
       false,
     );
     assertSafePanelJsonText(`${approved.text}\n${restoredEvents.text}\n${restoredView.text}\n${runtimeRun.text}`);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(workspace);
+  }
+});
+
+test("restored confirmation decisions serialize the full read and snapshot commit", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-concurrent-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-concurrent-workspace-"));
+  let server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    providerFetch: async () => createOpenAiRunCommandToolCallResponse("echo concurrent-confirmation"),
+  });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "gpt-4o-mini",
+        apiKey: "sk-concurrent-confirmation-secret",
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "测试并发恢复确认", aiMode: "openai-compatible" },
+    });
+    const pending = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      4_000,
+      "/api/desktop/runs",
+    );
+    const firstConfirmationId = pending.body.canvas.agent.pendingConfirmation.confirmationId as string;
+    await server.close();
+
+    const delegate = new FileSystemRuntimeDatabase(resolveAgentArborRuntimeDatabasePaths(directory));
+    const persisted = await delegate.getRun(start.body.runId);
+    assert.notEqual(persisted, undefined);
+    const firstConfirmation = persisted!.confirmations.find((item) => item.confirmationId === firstConfirmationId);
+    assert.notEqual(firstConfirmation, undefined);
+    const secondConfirmationId = `${firstConfirmationId}:second`;
+    await delegate.saveRunSnapshot({
+      ...persisted!,
+      confirmations: [
+        ...persisted!.confirmations,
+        {
+          ...firstConfirmation!,
+          confirmationId: secondConfirmationId,
+          toolCallId: undefined,
+          eventRefs: [`confirmation:${secondConfirmationId}`],
+        },
+      ],
+    });
+
+    let coordinateReads = false;
+    let coordinatedReadCount = 0;
+    let releaseFirstRead: (() => void) | undefined;
+    const secondReadStarted = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve;
+    });
+    const runtimeDatabase: RuntimeDatabase = {
+      upsertConversation: (record) => delegate.upsertConversation(record),
+      getConversation: (conversationId) => delegate.getConversation(conversationId),
+      listConversations: (limit) => delegate.listConversations(limit),
+      deleteConversation: (conversationId) => delegate.deleteConversation(conversationId),
+      saveRunSnapshot: (content) => delegate.saveRunSnapshot(content),
+      async getRun(runId) {
+        if (!coordinateReads) return delegate.getRun(runId);
+        const readIndex = ++coordinatedReadCount;
+        const snapshot = await delegate.getRun(runId);
+        if (readIndex === 2) releaseFirstRead?.();
+        if (readIndex === 1) {
+          await Promise.race([
+            secondReadStarted,
+            new Promise<void>((resolve) => setTimeout(resolve, 100)),
+          ]);
+        }
+        return snapshot;
+      },
+      listRuns: (limit) => delegate.listRuns(limit),
+      listModelCallsForRuns: (runIds) => delegate.listModelCallsForRuns(runIds),
+    };
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory, runtimeDatabase });
+    coordinateReads = true;
+    const [firstDecision, secondDecision] = await Promise.all([
+      requestJson(
+        server.url,
+        `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/confirmations/${encodeURIComponent(firstConfirmationId)}/decision`,
+        { method: "POST", body: { decision: "guidance", guidance: "保留第一项决定" } },
+      ),
+      requestJson(
+        server.url,
+        `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/confirmations/${encodeURIComponent(secondConfirmationId)}/decision`,
+        { method: "POST", body: { decision: "deny" } },
+      ),
+    ]);
+    coordinateReads = false;
+    const committed = await delegate.getRun(start.body.runId);
+
+    assert.equal(firstDecision.status, 200, firstDecision.text);
+    assert.equal(secondDecision.status, 200, secondDecision.text);
+    assert.equal(committed?.confirmations.find((item) => item.confirmationId === firstConfirmationId)?.status, "guidance");
+    assert.equal(committed?.confirmations.find((item) => item.confirmationId === secondConfirmationId)?.status, "denied");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

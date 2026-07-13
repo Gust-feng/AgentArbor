@@ -9,4 +9,9 @@ if (!distDir.startsWith(`${repoRoot}${"\\"}`) && !distDir.startsWith(`${repoRoot
   throw new Error(`Refusing to remove a path outside the repository: ${distDir}`);
 }
 
-await rm(distDir, { force: true, recursive: true });
+await rm(distDir, {
+  force: true,
+  recursive: true,
+  maxRetries: 10,
+  retryDelay: 100,
+});

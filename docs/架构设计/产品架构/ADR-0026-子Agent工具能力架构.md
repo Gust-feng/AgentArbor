@@ -22,7 +22,7 @@
 6. **复用基础设施**：子 Agent 执行复用 `IntelligenceChannel` / `ToolExecutionBroker` / `ToolCenter` / 确认机制，不另起平行运行时。
 7. **当前工具权限策略**：子 Agent 以父 run 当前 `allowedTools` 为上限；若 `SUB_AGENT.md` 的 `allowed-tools` 或 `spawn_sub_agent.allowed_tools` 声明了更窄工具集，则实际工具集合为父 run 权限与声明集合的交集，并始终强制排除 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` / `read_sub_agent_output`，避免递归派生、跨子 Agent 读取和权限扩张。
 8. **确认冒泡**：子 Agent 内部工具触发确认时，不包装成失败摘要，而是作为父 run 的 pending confirmation 进入既有确认流程；用户可见、可批准、可拒绝或补充指引。
-9. **运行视图与本地 trace**：普通 Agent read model 以 `subAgentRuns` 作为子 Agent UI 的唯一数据源；运行时保存模型可见消息、模型输出、工具事实和失败信息到本地 `sub-agent-runs.jsonl`，用于只读复盘，不保存 provider 原始 HTTP 响应。
+9. **运行视图与本地 trace**：普通 Agent read model 以 `subAgentRuns` 作为子 Agent UI 的唯一数据源；运行时将模型可见消息、模型输出、工具事实和失败信息放入父 run 的 `runtime-run-snapshot/v1`，用于只读复盘，不保存 provider 原始 HTTP 响应。
 
 ## 动机
 
@@ -105,7 +105,7 @@ ADR-0024 确立了 Ordinary 与基础能力优先路线，ADR-0025 定义了 Mul
 - read model 新增 `subAgentRuns`，作为 UI 展示子 Agent 内联卡片、批次卡片和右侧详情抽屉的唯一数据源；前端不从散落的 `tool.*` / `model.*` 事件中猜测归属。
 - `SubAgentRunner` 为每个子运行生成 `SubAgentRunTrace`，显式记录父 run id、父工具调用 `toolCallId`、`subRunId`、`batchId` / `batchIndex`、任务、上下文、状态、耗时、模型轮次、内部工具事实和摘要。
 - trace 记录的是 Agent 可复盘的调试事实：模型 request messages、模型 response 文本 / 工具请求 / 失败类型 / usage，以及工具 name、input、status、duration、确认、error/errorFacts 与必要引用。展示字段只由 `subAgentRuns` read-model 派生，不保存已删除的 display/envelope。trace 不保存底层 provider 原始 HTTP JSON，也不额外复制命令 stdout/stderr 全量；长输出通过真实 `logRef / logPath` 或子 Agent 输出续读工具查看。
-- RuntimeDatabase 持久化 `sub-agent-runs.jsonl`，历史 run 恢复时继续展示子 Agent 详情；老 run 没有该文件时只显示原有普通工具节点。
+- RuntimeDatabase 将 `subAgentRuns` 与父 run 的其他事实通过 `saveRunSnapshot` 原子提交，历史 run 恢复时继续展示子 Agent 详情；当前 snapshot 没有子 Agent trace 时只显示原有普通工具节点。
 - 第一版运行视图只读，不提供重试、续跑、取消或子 Agent 生命周期控制。子 Agent 内部工具确认仍展示为父 run 既有确认卡，详情视图只标注其等待父 run 确认。
 
 ## 与 ADR-0025 的关系
@@ -129,7 +129,7 @@ ADR-0024 确立了 Ordinary 与基础能力优先路线，ADR-0025 定义了 Mul
 - `Confirmation Gate`：子 Agent 工具调用沿用普通 Agent 确认语义，不另建确认门。
 - `CapabilityCenter`：`subAgentCatalog` 作为 capability snapshot 的子投影，复用同一快照口径，不另建快照实现。
 - `RunEvent` 安全投影口径：子 Agent 执行事实按同一安全口径投影，不另建投影实现；不以“安全投影”“脱敏”为名削弱模型继续工作所需的材料。
-- `RuntimeDatabase` 本地 trace 投影：`sub-agent-runs.jsonl` 只保存模型可见 I/O 与工具事实投影，用于刷新、重启后的只读复盘，不替代 provider 诊断日志。
+- `RuntimeDatabase` 本地 trace 投影：父 run snapshot 中的 `subAgentRuns` 只保存模型可见 I/O 与工具事实投影，用于刷新、重启后的只读复盘，不替代 provider 诊断日志，也不单独写 sidecar。
 
 ## 范围与排除项
 
@@ -142,7 +142,7 @@ ADR-0024 确立了 Ordinary 与基础能力优先路线，ADR-0025 定义了 Mul
 - 子 Agent 执行复用 `IntelligenceChannel` / `ToolExecutionBroker` / `ToolCenter` / 确认机制。
 - 子 Agent 内部工具权限在父 run `allowedTools` 上限内按声明式交集收敛，同时强制排除递归派生和跨子 Agent 读取工具。
 - 子 Agent 内部工具确认冒泡为父 run pending confirmation。
-- 子 Agent 运行视图、`subAgentRuns` read model 与本地 `sub-agent-runs.jsonl` trace 持久化。
+- 子 Agent 运行视图、`subAgentRuns` read model 与父 run snapshot 内的 trace 持久化。
 
 本期明确**不包含**（Out of Scope）：
 
@@ -161,7 +161,7 @@ ADR-0024 确立了 Ordinary 与基础能力优先路线，ADR-0025 定义了 Mul
   - `CapabilityCenter` 扩展 `subAgentCatalog` 子投影，纳入 capability snapshot。
   - `ToolExecutionBroker` 接口新增**可选** `register` 方法，用于运行时注入子 Agent executor；不破坏既有 broker 契约。
   - 构建流程新增 `copy:sub-agents` 步骤（`scripts/copy-sub-agent-assets.mjs`），把 builtin Markdown 资源复制到 `dist`，保证 builtin 子 Agent 定义在产物中可用。
-  - RuntimeDatabase 新增 `sub-agent-runs.jsonl` 本地持久化文件；Panel read model 新增 `subAgentRuns`，前端据此渲染内联卡片和详情抽屉。
+  - RuntimeDatabase 的完整父 run snapshot 包含 `subAgentRuns`；Panel read model 据此渲染内联卡片和详情抽屉，不新增独立 trace sidecar。
 - 与 deep 架构互补：简单场景用子 Agent 工具，复杂场景仍可走 deep 编排；两者独立演进，不互为前提。
 - ADR-0025 不受影响：deep 一期最小闭环口径不变；子 Agent 工具不写入 deep 的 `DeepTaskBoard` / `AgentRunTree`，不污染 deep 运行时边界。
 - ADR-0024 不受影响：基础 Agent 路线继续作为默认主线；子 Agent 工具是基础 Agent 工具体系的扩展，不引入新的运行模式或默认入口切换。

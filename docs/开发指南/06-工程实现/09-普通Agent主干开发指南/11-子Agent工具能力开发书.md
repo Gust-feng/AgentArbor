@@ -33,7 +33,7 @@
 - `IntelligenceChannel`：子 Agent 的模型调用复用父 Agent 的 `IntelligenceChannel`，不另起模型接入层。
 - `ToolExecutionBroker`：子 Agent 内部若再调用工具，仍经过父层 `ToolExecutionBroker`（即 `ToolCenter`），命令类工具仍走命令确认。
 - 确认机制：子 Agent 调用工具的确认策略继承父 run 的 `toolConfirmationPolicy`；子 Agent 工具本身（`call_sub_agent` 等）默认 `requiresConfirmation: false`，不额外触发确认。若子 Agent 内部工具触发确认，该 pending confirmation 会冒泡为父 run 的 pending confirmation，用户可见、可批准/拒绝/补充指引。
-- RuntimeDatabase：子 Agent 的复盘 trace 写入父 run 目录下的 `sub-agent-runs.jsonl`，刷新或重启后继续作为 `workView.subAgentRuns` 展示。
+- RuntimeDatabase：子 Agent 的复盘 trace 作为父 run `runtime-run-snapshot/v1` 内容中的 `subAgentRuns` 一次提交，刷新或重启后继续作为 `workView.subAgentRuns` 展示。
 
 ## 子 Agent 定义格式
 
@@ -285,7 +285,7 @@ maxSteps: 50
 1. `SubAgentRunner` 为每次调用创建 `SubAgentRunTrace`，记录 `parentRunId`、父工具调用 `parentToolCallId`、`subRunId`、`batchId` / `batchIndex`、子 Agent 名称、任务、上下文、状态、时间、模型轮次、工具次数、摘要和错误。
 2. runner 包装 `IntelligenceChannel`，按轮只记录 requestId / responseId、message refs/count、可见工具数量、tool-call refs、状态、失败事实、finish reason 和 usage；不保存每轮累计 messages、附件或 response 正文。
 3. runner 观察内部工具事件和 turn tool call 结果，只记录 callId、tool name、status、duration、confirmation、error/errorDomain/errorFacts；工具 input、output summary、display 和 envelope 不进入 trace。
-4. runtime 内存 trace store 汇总本轮 `subAgentRuns`；run persistence 在保存父 run snapshot 时调用 `replaceSubAgentRuns` 写入 `sub-agent-runs.jsonl`。
+4. runtime 内存 trace store 汇总本轮 `subAgentRuns`；run persistence 将它与父 run 的其他事实通过唯一 `saveRunSnapshot` 端口一次提交，不单独写 sidecar。
 5. live read model 从 runtime trace store 读取 `subAgentRuns`；persisted read model 从 RuntimeDatabase snapshot 读取 `subAgentRuns`。
 6. transcript 中 `sub_agent.*` 事件形成 `kind: "sub_agent"` 的 activity node；UI 用 `subAgentRunId` / `subAgentBatchId` 关联到 `subAgentRuns`，渲染内联卡片和右侧详情抽屉。
 
@@ -303,7 +303,7 @@ UI 行为：
 - `call_sub_agents` 显示批次卡片，展示总数、成功、失败、等待确认、未启动统计，并允许在详情抽屉中切换同批次子运行。
 - 点击卡片打开右侧详情抽屉，包含概览、输入输出、工具、诊断四组只读信息。
 - 子 Agent 内部工具确认仍使用父 run 的确认卡；详情抽屉只标注等待父 run 确认，不新增子 Agent 级 approve / deny 控制。
-- 老 run 没有 `sub-agent-runs.jsonl` 时，UI 必须回退显示原有普通工具节点，不得因为缺失 `subAgentRuns` 崩溃。
+- 当前 snapshot 的 `subAgentRuns` 为空时，UI 必须回退显示原有普通工具节点，不得因为没有子 Agent trace 崩溃；旧 pre-v1 run 属于明确失效的开发期数据，不做 sidecar 兼容读取。
 
 ## 当前不做
 
@@ -366,7 +366,7 @@ node --test `
 - 子 Agent 工具不绕过父 run `allowedTools`、`ToolCenter` 和命令确认；内部确认会冒泡为父 run pending confirmation。
 - 子 Agent 输出默认 UI 只展示摘要，完整输出作为 tool result 回到模型上下文；超长输出必须带可执行 continuation，而不是不可恢复截断。
 - `subAgentRuns` 是 UI 的唯一详情数据源；live run 和 persisted run 都能恢复子 Agent 详情。
-- `sub-agent-runs.jsonl` 写入与读取保持向后兼容；老 run 缺失该文件时 read model 返回空数组。
+- `subAgentRuns` 必须随父 run snapshot 原子写入和读取；不得恢复独立 `sub-agent-runs.jsonl` 或双读逻辑。
 - 子 Agent 内联卡片、批次卡片和详情抽屉只读；不引入重试、续跑或子 Agent 生命周期控制。
 
 ## 开发 agent 开工顺序

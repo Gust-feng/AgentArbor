@@ -1,5 +1,5 @@
 import type { FileSystemRuntimeDatabasePaths } from "../../adapters/runtime-database/index.js";
-import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
+import type { RuntimeDatabase, RuntimeRunSnapshotContent } from "../../domain/runtime-database/index.js";
 import type { ToolErrorFacts } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import {
@@ -97,15 +97,12 @@ async function persistPanelRunNow(
   }
   const workspace = job.capabilitySnapshot?.workspace;
   const workspaceRecord = workspace === undefined ? undefined : createRuntimeWorkspaceRecord(workspace, job.updatedAt, job.runId);
-  if (workspaceRecord !== undefined) {
-    await runtime.runtimeDatabase.upsertWorkspace(workspaceRecord);
-  }
-  await runtime.runtimeDatabase.upsertRun(createRuntimeRunRecord({
+  const run = createRuntimeRunRecord({
     job,
     workspace: workspaceRecord,
     appHome: runtime.runtimePaths.appHome,
     runtimeHome: runtime.runtimePaths.runtimeHome,
-  }));
+  });
 
   const eventEntries = job.runtime?.eventLog.list() ?? [];
   const trace = createPanelRunTrace({
@@ -133,38 +130,34 @@ async function persistPanelRunNow(
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   });
-  if (basicRun !== undefined) {
-    await runtime.runtimeDatabase.upsertBasicRun(basicRun);
-  }
-  if (basicReplay !== undefined) {
-    await runtime.runtimeDatabase.replaceBasicRunEvents(
-      job.runId,
-      durableBasicRunEvents(basicReplay.events)
-    );
-  }
-  if (basicRun !== undefined && basicReplay !== undefined) {
-    await runtime.runtimeDatabase.upsertContextLedger(
-      createLiveBasicAgentWorkViewReadModel({
+  const basicEvents = basicReplay === undefined ? [] : durableBasicRunEvents(basicReplay.events);
+  const contextLedger = basicRun === undefined || basicReplay === undefined
+    ? undefined
+    : createLiveBasicAgentWorkViewReadModel({
         job,
         run: basicRun,
         events: basicReplay.events,
         streamEvents,
-      }).contextLedger
-    );
-  }
+      }).contextLedger;
   const eventEntriesBySequence = new Map(eventEntries.map((entry) => [entry.sequence, entry]));
-  await runtime.runtimeDatabase.replaceRunEvents(
-    job.runId,
-    trace.events.map((event) => toRuntimeEventRecord(job.runId, event, eventEntriesBySequence.get(event.sequence)))
-  );
-  await runtime.runtimeDatabase.replaceModelCalls(
-    job.runId,
-    transcript.modelCalls.map((call) => toRuntimeModelCallRecord(job.runId, call))
-  );
-  await runtime.runtimeDatabase.replaceToolCalls(job.runId, toRuntimeToolCallRecords(job.runId, streamEvents, eventEntries));
-  await runtime.runtimeDatabase.replaceArtifacts(job.runId, toRuntimeArtifactRecords(job));
-  await runtime.runtimeDatabase.replaceConfirmations(job.runId, toRuntimeConfirmationRecords(job, eventEntries));
-  await runtime.runtimeDatabase.replaceSubAgentRuns(job.runId, job.runtime?.subAgentRunTraceStore.list() ?? []);
+  const snapshot: RuntimeRunSnapshotContent = {
+    run,
+    workspace: workspaceRecord,
+    basicRun,
+    basicEvents,
+    events: trace.events.map((event) => toRuntimeEventRecord(
+      job.runId,
+      event,
+      eventEntriesBySequence.get(event.sequence),
+    )),
+    modelCalls: transcript.modelCalls.map((call) => toRuntimeModelCallRecord(job.runId, call)),
+    toolCalls: toRuntimeToolCallRecords(job.runId, streamEvents, eventEntries),
+    artifacts: toRuntimeArtifactRecords(job),
+    confirmations: toRuntimeConfirmationRecords(job, eventEntries),
+    subAgentRuns: job.runtime?.subAgentRunTraceStore.list() ?? [],
+    contextLedger,
+  };
+  await runtime.runtimeDatabase.saveRunSnapshot(snapshot);
 }
 
 async function persistPanelConversationNow(

@@ -135,22 +135,26 @@ test("panel usage statistics route returns local runtime totals and empty storag
         },
       ],
     });
-    await database.upsertRun({
-      runId: "run-usage-1",
-      profile: "lite",
-      runKind: "desktop",
-      runMode: "agent",
-      status: "completed",
-      goalSummary: "统计测试",
-      aiMode: "fake",
-      appHome: paths.appHome,
-      runHome: path.join(paths.runtimeHome, "runs", encodeURIComponent("run-usage-1")),
-      createdAt: "2026-06-28T01:00:01.000Z",
-      updatedAt: "2026-06-28T01:00:02.000Z",
-      completedAt: "2026-06-28T01:00:02.000Z",
-    });
-    await database.replaceModelCalls("run-usage-1", [
-      {
+    await database.saveRunSnapshot({
+      run: {
+        runId: "run-usage-1",
+        profile: "lite",
+        runKind: "desktop",
+        runMode: "agent",
+        status: "completed",
+        goalSummary: "统计测试",
+        aiMode: "fake",
+        appHome: paths.appHome,
+        runHome: path.join(paths.runtimeHome, "runs", encodeURIComponent("run-usage-1")),
+        createdAt: "2026-06-28T01:00:01.000Z",
+        updatedAt: "2026-06-28T01:00:02.000Z",
+        completedAt: "2026-06-28T01:00:02.000Z",
+      },
+      workspace: undefined,
+      basicRun: undefined,
+      basicEvents: [],
+      events: [],
+      modelCalls: [{
         requestId: "usage-model-request",
         runId: "run-usage-1",
         responseId: "usage-model-response",
@@ -162,8 +166,13 @@ test("panel usage statistics route returns local runtime totals and empty storag
           cachedInputTokens: 40,
         },
         eventRefs: [],
-      },
-    ]);
+      }],
+      toolCalls: [],
+      artifacts: [],
+      confirmations: [],
+      subAgentRuns: [],
+      contextLedger: undefined,
+    });
 
     const usage = await requestJson(server.url, "/api/runtime/usage-statistics");
     assert.equal(usage.status, 200);
@@ -177,6 +186,24 @@ test("panel usage statistics route returns local runtime totals and empty storag
     assert.equal(usage.body.statistics.totals.outputTokens, 25);
     assert.equal(usage.body.statistics.totals.cacheSavedTokens, 40);
     assert.equal(JSON.stringify(usage.body).includes("统计测试"), false);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel maps incompatible runtime snapshots to an explicit gone response", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-snapshot-incompatible-"));
+  const paths = resolveAgentArborRuntimeDatabasePaths(directory);
+  const runId = "legacy-runtime-run";
+  const runDirectory = path.join(paths.runtimeHome, "runs", encodeURIComponent(runId));
+  await fs.mkdir(runDirectory, { recursive: true });
+  await fs.writeFile(path.join(runDirectory, "run.json"), JSON.stringify({ runId }), "utf8");
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const response = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
+    assert.equal(response.status, 410);
+    assert.equal(response.body.error.code, "runtime_snapshot_incompatible");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

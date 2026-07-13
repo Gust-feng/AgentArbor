@@ -96,8 +96,8 @@ test("conversation message returns before provider completion so the UI can subs
 test("conversation message attaches the run before slow initial persistence starts", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-slow-persistence-"));
   let releasePersistence: (() => void) | undefined;
-  let upsertRunStarted = false;
-  let upsertRunCompleted = false;
+  let saveRunSnapshotStarted = false;
+  let saveRunSnapshotCompleted = false;
   let persistedConversationBeforeRun: Awaited<ReturnType<RuntimeDatabase["upsertConversation"]>> | undefined;
   let latestPersistedConversation: Awaited<ReturnType<RuntimeDatabase["upsertConversation"]>> | undefined;
   const persistenceGate = new Promise<void>((resolve) => {
@@ -108,12 +108,12 @@ test("conversation message attaches the run before slow initial persistence star
       latestPersistedConversation = record;
       return record;
     },
-    async upsertRun(record) {
-      upsertRunStarted = true;
+    async saveRunSnapshot(content) {
+      saveRunSnapshotStarted = true;
       persistedConversationBeforeRun = latestPersistedConversation;
       await persistenceGate;
-      upsertRunCompleted = true;
-      return record;
+      saveRunSnapshotCompleted = true;
+      return content;
     },
   });
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, runtimeDatabase });
@@ -124,13 +124,13 @@ test("conversation message attaches the run before slow initial persistence star
       body: { goal: "测试慢持久化不阻塞首字", aiMode: "fake" },
     });
     const elapsedMs = Date.now() - startedAt;
-    await waitForCondition(() => upsertRunStarted, 2_000);
+    await waitForCondition(() => saveRunSnapshotStarted, 2_000);
 
     assert.equal(start.status, 202);
     assert.equal(typeof start.body.run.runId, "string");
     assert.equal(elapsedMs < 2_000, true);
-    assert.equal(upsertRunStarted, true);
-    assert.equal(upsertRunCompleted, false);
+    assert.equal(saveRunSnapshotStarted, true);
+    assert.equal(saveRunSnapshotCompleted, false);
     assert.equal(persistedConversationBeforeRun?.activeRunId, start.body.run.runId);
     assert.equal(persistedConversationBeforeRun?.turns[1]?.runId, start.body.run.runId);
     assert.equal(persistedConversationBeforeRun?.turns[1]?.status, "running");
@@ -461,9 +461,13 @@ test("conversation workspace projection rejects an invalid Ordinary snapshot aft
 
     const runtimePaths = resolveAgentArborRuntimeDatabasePaths(directory);
     const runPath = path.join(runtimePaths.runtimeHome, "runs", encodeURIComponent(runId), "run.json");
-    const invalidRun = JSON.parse(await fs.readFile(runPath, "utf8")) as { capabilitySnapshot?: unknown };
-    delete invalidRun.capabilitySnapshot;
-    await fs.writeFile(runPath, `${JSON.stringify(invalidRun, null, 2)}\n`, "utf8");
+    const manifest = JSON.parse(await fs.readFile(runPath, "utf8")) as { snapshotRef: string };
+    const snapshotPath = path.join(path.dirname(runPath), manifest.snapshotRef);
+    const document = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as {
+      content: { run: { capabilitySnapshot?: unknown } };
+    };
+    delete document.content.run.capabilitySnapshot;
+    await fs.writeFile(snapshotPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
 
     const invalidWorkspaceProjection = await requestJson(server.url, "/api/conversations");
     assert.equal(invalidWorkspaceProjection.status, 410);
@@ -1019,13 +1023,17 @@ test("persisted Ordinary APIs reject pre-contract snapshots instead of using cur
 
     const runtimePaths = resolveAgentArborRuntimeDatabasePaths(directory);
     const runPath = path.join(runtimePaths.runtimeHome, "runs", encodeURIComponent(runId), "run.json");
-    const invalidRun = JSON.parse(await fs.readFile(runPath, "utf8")) as {
-      capabilitySnapshot?: unknown;
-      informationAccess?: unknown;
+    const manifest = JSON.parse(await fs.readFile(runPath, "utf8")) as { snapshotRef: string };
+    const snapshotPath = path.join(path.dirname(runPath), manifest.snapshotRef);
+    const document = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as {
+      content: { run: {
+        capabilitySnapshot?: unknown;
+        informationAccess?: unknown;
+      } };
     };
-    delete invalidRun.capabilitySnapshot;
-    delete invalidRun.informationAccess;
-    await fs.writeFile(runPath, `${JSON.stringify(invalidRun, null, 2)}\n`, "utf8");
+    delete document.content.run.capabilitySnapshot;
+    delete document.content.run.informationAccess;
+    await fs.writeFile(snapshotPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
 
     server = await startLocalPanelServer({ port: 0, configDirectory: directory });
     const desktopRun = await requestJson(server.url, `/api/desktop/runs/${encodeURIComponent(runId)}`);
@@ -1993,9 +2001,6 @@ function delayedRuntimeDatabase(
   overrides: Partial<RuntimeDatabase>
 ): RuntimeDatabase {
   const base: RuntimeDatabase = {
-    async upsertWorkspace(record) {
-      return record;
-    },
     async upsertConversation(record) {
       return record;
     },
@@ -2008,35 +2013,8 @@ function delayedRuntimeDatabase(
     async deleteConversation() {
       return undefined;
     },
-    async upsertRun(record) {
-      return record;
-    },
-    async upsertBasicRun(record) {
-      return record;
-    },
-    async replaceBasicRunEvents(_runId, events) {
-      return events;
-    },
-    async replaceRunEvents(_runId, events) {
-      return events;
-    },
-    async replaceModelCalls(_runId, calls) {
-      return calls;
-    },
-    async replaceToolCalls(_runId, calls) {
-      return calls;
-    },
-    async replaceArtifacts(_runId, artifacts) {
-      return artifacts;
-    },
-    async replaceConfirmations(_runId, confirmations) {
-      return confirmations;
-    },
-    async replaceSubAgentRuns(_runId, records) {
-      return records;
-    },
-    async upsertContextLedger(record) {
-      return record;
+    async saveRunSnapshot(content) {
+      return content;
     },
     async getRun() {
       return undefined;

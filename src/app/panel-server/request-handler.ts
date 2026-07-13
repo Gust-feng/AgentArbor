@@ -42,6 +42,7 @@ import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled
 import { handlePanelAppUpdateRoute } from "./app-update-routes.js";
 import { OrdinaryRuntimeSnapshotContractError } from "../basic-agent-runtime/persistence-snapshot-contract.js";
 import { BasicAgentRunAdmissionClosedError } from "../basic-agent-runtime/run-executor.js";
+import { RuntimeSnapshotIncompatibleError } from "../../domain/runtime-database/index.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 const PANEL_REQUEST_DRAIN_TIMEOUT_MS = 1_000;
@@ -92,6 +93,10 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
         return;
       }
       if (error instanceof OrdinaryRuntimeSnapshotContractError) {
+        writePanelError(response, new PanelHttpError(410, error.code, error.message));
+        return;
+      }
+      if (error instanceof RuntimeSnapshotIncompatibleError) {
         writePanelError(response, new PanelHttpError(410, error.code, error.message));
         return;
       }

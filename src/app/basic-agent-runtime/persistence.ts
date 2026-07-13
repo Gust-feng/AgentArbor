@@ -159,17 +159,17 @@ export async function submitRestoredBasicConfirmationDecision(input: {
             summary: nextRun.error?.message ?? ORDINARY_RUN_BLOCKED_FALLBACK,
           }),
         ];
-  const nextSnapshot: RuntimeRunSnapshot = {
+  const nextSnapshotBeforeBasicRun: RuntimeRunSnapshot = {
     ...snapshot,
     run: nextRun,
     basicEvents: blockedEvents,
     confirmations: nextConfirmations,
   };
-  const basicRun = basicRunFromRuntimeSnapshot(nextSnapshot);
-
-  await input.runtimeDatabase.upsertRun(nextRun);
-  await input.runtimeDatabase.replaceConfirmations(input.runId, nextConfirmations);
-  await input.runtimeDatabase.replaceBasicRunEvents(input.runId, durableBasicRunEvents(blockedEvents));
-  await input.runtimeDatabase.upsertBasicRun(basicRun);
+  const basicRun = basicRunFromRuntimeSnapshot(nextSnapshotBeforeBasicRun);
+  await input.runtimeDatabase.saveRunSnapshot({
+    ...nextSnapshotBeforeBasicRun,
+    basicRun,
+    basicEvents: durableBasicRunEvents(blockedEvents),
+  });
   return basicRun;
 }

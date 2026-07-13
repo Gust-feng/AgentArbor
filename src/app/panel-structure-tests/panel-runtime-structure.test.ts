@@ -503,8 +503,10 @@ test("shared run shell layers stay centralized instead of diverging per mode", a
   assert.equal(adapterSnapshotStore.includes('from "../../app/run-runtime-core/snapshot-store.js"'), true);
   assert.equal(adapterSnapshotStore.includes("export function createFileSystemRunSnapshotStore"), true);
   assert.equal(adapterSnapshotStore.includes("export function createInMemoryRunSnapshotStore"), false);
-  assert.equal(runtimeDatabase.includes("private readonly runRecordStore: RunSnapshotStore<RuntimeRunRecord>"), true);
-  assert.equal(runtimeDatabase.includes("createFileSystemRunSnapshotStore<RuntimeRunRecord>"), true);
+  assert.equal(runtimeDatabase.includes("async saveRunSnapshot(content: RuntimeRunSnapshotContent)"), true);
+  assert.equal(runtimeDatabase.includes("RUNTIME_RUN_SNAPSHOT_SCHEMA_VERSION"), true);
+  assert.equal(runtimeDatabase.includes("RUNTIME_RUN_MANIFEST_SCHEMA_VERSION"), true);
+  assert.equal(runtimeDatabase.includes("createFileSystemRunSnapshotStore<RuntimeRunRecord>"), false);
 
   assert.equal(runEnvelope.includes("export function projectRunEnvelopeViewBase"), true);
   assert.equal(runEnvelope.includes("export function projectConversationRunEnvelopeViewBase"), true);

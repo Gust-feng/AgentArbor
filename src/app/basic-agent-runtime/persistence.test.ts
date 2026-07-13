@@ -408,10 +408,6 @@ test("restored basic run rejects conflicting duplicated agent definition facts",
 class MemoryRuntimeDatabase implements RuntimeDatabase {
   constructor(public snapshot: RuntimeRunSnapshot) {}
 
-  async upsertWorkspace(record: RuntimeWorkspaceRecord): Promise<RuntimeWorkspaceRecord> {
-    return record;
-  }
-
   async upsertConversation(record: RuntimeConversationRecord): Promise<RuntimeConversationRecord> {
     return record;
   }
@@ -428,54 +424,9 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
     return undefined;
   }
 
-  async upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord> {
-    this.snapshot = { ...this.snapshot, run: record };
-    return record;
-  }
-
-  async upsertBasicRun(record: BasicAgentRun): Promise<BasicAgentRun> {
-    this.snapshot = { ...this.snapshot, basicRun: record };
-    return record;
-  }
-
-  async replaceBasicRunEvents(_runId: string, events: readonly BasicAgentRunEvent[]): Promise<readonly BasicAgentRunEvent[]> {
-    this.snapshot = { ...this.snapshot, basicEvents: events };
-    return events;
-  }
-
-  async replaceRunEvents(_runId: string, events: readonly RuntimeEventRecord[]): Promise<readonly RuntimeEventRecord[]> {
-    this.snapshot = { ...this.snapshot, events };
-    return events;
-  }
-
-  async replaceModelCalls(_runId: string, calls: readonly RuntimeModelCallRecord[]): Promise<readonly RuntimeModelCallRecord[]> {
-    this.snapshot = { ...this.snapshot, modelCalls: calls };
-    return calls;
-  }
-
-  async replaceToolCalls(_runId: string, calls: readonly RuntimeToolCallRecord[]): Promise<readonly RuntimeToolCallRecord[]> {
-    this.snapshot = { ...this.snapshot, toolCalls: calls };
-    return calls;
-  }
-
-  async replaceArtifacts(_runId: string, artifacts: readonly RuntimeArtifactRecord[]): Promise<readonly RuntimeArtifactRecord[]> {
-    this.snapshot = { ...this.snapshot, artifacts };
-    return artifacts;
-  }
-
-  async replaceConfirmations(_runId: string, confirmations: readonly RuntimeConfirmationRecord[]): Promise<readonly RuntimeConfirmationRecord[]> {
-    this.snapshot = { ...this.snapshot, confirmations };
-    return confirmations;
-  }
-
-  async replaceSubAgentRuns(_runId: string, records: readonly RuntimeSubAgentRunRecord[]): Promise<readonly RuntimeSubAgentRunRecord[]> {
-    this.snapshot = { ...this.snapshot, subAgentRuns: records };
-    return records;
-  }
-
-  async upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord> {
-    this.snapshot = { ...this.snapshot, contextLedger: record };
-    return record;
+  async saveRunSnapshot(content: RuntimeRunSnapshot): Promise<RuntimeRunSnapshot> {
+    this.snapshot = structuredClone(content);
+    return structuredClone(this.snapshot);
   }
 
   async getRun(runId: string): Promise<RuntimeRunSnapshot | undefined> {

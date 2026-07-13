@@ -241,28 +241,72 @@ export type RuntimeRunSnapshot = {
   readonly contextLedger?: RuntimeContextLedgerRecord;
 };
 
+export type RuntimeRunSnapshotContent = RuntimeRunSnapshot;
+
+export const RUNTIME_RUN_SNAPSHOT_SCHEMA_VERSION = "runtime-run-snapshot/v1" as const;
+export const RUNTIME_RUN_MANIFEST_SCHEMA_VERSION = "runtime-run-manifest/v1" as const;
+
+/** The manifest deliberately excludes frozen capability and projection payloads. */
+export type RuntimeRunSummaryRecord = Pick<RuntimeRunRecord,
+  | "runId"
+  | "profile"
+  | "runKind"
+  | "runMode"
+  | "status"
+  | "goalSummary"
+  | "aiMode"
+  | "workspaceId"
+  | "workspacePath"
+  | "conversationId"
+  | "appHome"
+  | "runHome"
+  | "createdAt"
+  | "updatedAt"
+  | "completedAt"
+  | "resultTitle"
+  | "resultSummary"
+  | "stopReason"
+  | "continuationAvailability"
+  | "error"
+>;
+
+export type RuntimeRunSnapshotDocument = {
+  readonly schemaVersion: typeof RUNTIME_RUN_SNAPSHOT_SCHEMA_VERSION;
+  readonly revision: number;
+  readonly content: RuntimeRunSnapshotContent;
+};
+
+export type RuntimeRunManifest = {
+  readonly schemaVersion: typeof RUNTIME_RUN_MANIFEST_SCHEMA_VERSION;
+  readonly revision: number;
+  readonly snapshotRef: string;
+  readonly run: RuntimeRunSummaryRecord;
+};
+
+export class RuntimeSnapshotIncompatibleError extends Error {
+  readonly code = "runtime_snapshot_incompatible" as const;
+
+  constructor(
+    readonly runId: string,
+    reason: string,
+  ) {
+    super(`Runtime snapshot ${runId} is incompatible with runtime-run-snapshot/v1: ${reason}`);
+    this.name = "RuntimeSnapshotIncompatibleError";
+  }
+}
+
 export type RuntimeRunModelCallsRecord = {
   readonly runId: string;
   readonly modelCalls: readonly RuntimeModelCallRecord[];
 };
 
 export interface RuntimeDatabase {
-  upsertWorkspace(record: RuntimeWorkspaceRecord): Promise<RuntimeWorkspaceRecord>;
   upsertConversation(record: RuntimeConversationRecord): Promise<RuntimeConversationRecord>;
   getConversation(conversationId: string): Promise<RuntimeConversationRecord | undefined>;
   listConversations(limit?: number): Promise<readonly RuntimeConversationRecord[]>;
   deleteConversation(conversationId: string): Promise<void>;
-  upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord>;
-  upsertBasicRun(record: BasicAgentRun): Promise<BasicAgentRun>;
-  replaceBasicRunEvents(runId: string, events: readonly RunEvent[]): Promise<readonly RunEvent[]>;
-  replaceRunEvents(runId: string, events: readonly RuntimeEventRecord[]): Promise<readonly RuntimeEventRecord[]>;
-  replaceModelCalls(runId: string, calls: readonly RuntimeModelCallRecord[]): Promise<readonly RuntimeModelCallRecord[]>;
-  replaceToolCalls(runId: string, calls: readonly RuntimeToolCallRecord[]): Promise<readonly RuntimeToolCallRecord[]>;
-  replaceArtifacts(runId: string, artifacts: readonly RuntimeArtifactRecord[]): Promise<readonly RuntimeArtifactRecord[]>;
-  replaceConfirmations(runId: string, confirmations: readonly RuntimeConfirmationRecord[]): Promise<readonly RuntimeConfirmationRecord[]>;
-  replaceSubAgentRuns(runId: string, records: readonly RuntimeSubAgentRunRecord[]): Promise<readonly RuntimeSubAgentRunRecord[]>;
-  upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord>;
+  saveRunSnapshot(content: RuntimeRunSnapshotContent): Promise<RuntimeRunSnapshotContent>;
   getRun(runId: string): Promise<RuntimeRunSnapshot | undefined>;
-  listRuns(limit?: number): Promise<readonly RuntimeRunRecord[]>;
+  listRuns(limit?: number): Promise<readonly RuntimeRunSummaryRecord[]>;
   listModelCallsForRuns?(runIds: readonly string[]): Promise<readonly RuntimeRunModelCallsRecord[]>;
 }

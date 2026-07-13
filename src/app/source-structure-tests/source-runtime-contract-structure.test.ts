@@ -161,6 +161,48 @@ test("Conversation persistence consumers use the single validated Ordinary snaps
   }
 });
 
+test("Ordinary runtime persistence has one atomic run snapshot write contract", async () => {
+  const root = path.join(process.cwd(), "src");
+  const files = await collectSourceFiles(root);
+  const writeCallers: string[] = [];
+  const legacyRunWriters = [
+    ".upsertRun(",
+    ".upsertBasicRun(",
+    ".replaceBasicRunEvents(",
+    ".replaceRunEvents(",
+    ".replaceModelCalls(",
+    ".replaceToolCalls(",
+    ".replaceArtifacts(",
+    ".replaceConfirmations(",
+    ".replaceSubAgentRuns(",
+    ".upsertContextLedger(",
+    ".upsertWorkspace(",
+  ];
+
+  for (const file of files) {
+    const relative = relativePath(file);
+    if (relative.endsWith(".test.ts")) {
+      continue;
+    }
+    const source = await readSource(file);
+    for (const writer of legacyRunWriters) {
+      assert.equal(source.includes(writer), false, `${relative} must not use legacy runtime sidecar writer ${writer}`);
+    }
+    if (
+      source.includes(".saveRunSnapshot(") &&
+      relative !== "src/adapters/runtime-database/file-system-runtime-database.ts" &&
+      relative !== "src/domain/runtime-database/contracts.ts"
+    ) {
+      writeCallers.push(relative);
+    }
+  }
+
+  assert.deepEqual(writeCallers.sort(), [
+    "src/app/basic-agent-runtime/persistence.ts",
+    "src/app/panel-server/run-persistence.ts",
+  ]);
+});
+
 test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const sources = await Promise.all([

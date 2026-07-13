@@ -3,17 +3,9 @@ import test from "node:test";
 import type {
   RuntimeContextLedgerRecord,
   RuntimeDatabase,
-  RuntimeRunSnapshot,
-  RuntimeSubAgentRunRecord,
-} from "../../domain/runtime-database/index.js";
-import type {
-  RuntimeArtifactRecord,
-  RuntimeConfirmationRecord,
-  RuntimeConversationRecord,
-  RuntimeEventRecord,
-  RuntimeModelCallRecord,
   RuntimeRunRecord,
-  RuntimeToolCallRecord,
+  RuntimeRunSnapshot,
+  RuntimeConversationRecord,
   RuntimeWorkspaceRecord,
 } from "../../domain/runtime-database/index.js";
 import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
@@ -242,7 +234,7 @@ test("persistPanelRunInBackground records failures without poisoning the queue",
   }
 
   const diagnostic = job.streamEvents.find((event) => event.eventId.includes(":persistence.failed:"));
-  assert.equal(database.upsertRunAttempts, 2);
+  assert.equal(database.saveRunSnapshotAttempts, 2);
   assert.equal(database.runRecords.length, 1);
   assert.equal(runtime.persistenceChains.size, 0);
   assert.equal(unhandledRejections.length, 0);
@@ -331,10 +323,7 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
   readonly runRecords: RuntimeRunRecord[] = [];
   readonly contextLedgers: RuntimeContextLedgerRecord[] = [];
 
-  async upsertWorkspace(record: RuntimeWorkspaceRecord): Promise<RuntimeWorkspaceRecord> {
-    this.workspaceRecords.push(record);
-    return record;
-  }
+  readonly snapshots = new Map<string, RuntimeRunSnapshot>();
 
   async upsertConversation(record: RuntimeConversationRecord): Promise<RuntimeConversationRecord> {
     return record;
@@ -352,50 +341,22 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
     return undefined;
   }
 
-  async upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord> {
-    this.runRecords.push(record);
-    return record;
+  async saveRunSnapshot(content: RuntimeRunSnapshot): Promise<RuntimeRunSnapshot> {
+    const stored = structuredClone(content);
+    this.snapshots.set(stored.run.runId, stored);
+    this.runRecords.push(stored.run);
+    if (stored.workspace !== undefined) {
+      this.workspaceRecords.push(stored.workspace);
+    }
+    if (stored.contextLedger !== undefined) {
+      this.contextLedgers.push(stored.contextLedger);
+    }
+    return structuredClone(stored);
   }
 
-  async upsertBasicRun(record: BasicAgentRun): Promise<BasicAgentRun> {
-    return record;
-  }
-
-  async replaceBasicRunEvents(_runId: string, events: readonly RunEvent[]): Promise<readonly RunEvent[]> {
-    return events;
-  }
-
-  async replaceRunEvents(_runId: string, events: readonly RuntimeEventRecord[]): Promise<readonly RuntimeEventRecord[]> {
-    return events;
-  }
-
-  async replaceModelCalls(_runId: string, calls: readonly RuntimeModelCallRecord[]): Promise<readonly RuntimeModelCallRecord[]> {
-    return calls;
-  }
-
-  async replaceToolCalls(_runId: string, calls: readonly RuntimeToolCallRecord[]): Promise<readonly RuntimeToolCallRecord[]> {
-    return calls;
-  }
-
-  async replaceArtifacts(_runId: string, artifacts: readonly RuntimeArtifactRecord[]): Promise<readonly RuntimeArtifactRecord[]> {
-    return artifacts;
-  }
-
-  async replaceConfirmations(_runId: string, confirmations: readonly RuntimeConfirmationRecord[]): Promise<readonly RuntimeConfirmationRecord[]> {
-    return confirmations;
-  }
-
-  async replaceSubAgentRuns(_runId: string, records: readonly RuntimeSubAgentRunRecord[]): Promise<readonly RuntimeSubAgentRunRecord[]> {
-    return records;
-  }
-
-  async upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord> {
-    this.contextLedgers.push(record);
-    return record;
-  }
-
-  async getRun(_runId: string): Promise<RuntimeRunSnapshot | undefined> {
-    return undefined;
+  async getRun(runId: string): Promise<RuntimeRunSnapshot | undefined> {
+    const snapshot = this.snapshots.get(runId);
+    return snapshot === undefined ? undefined : structuredClone(snapshot);
   }
 
   async listRuns(_limit?: number): Promise<readonly RuntimeRunRecord[]> {
@@ -404,16 +365,16 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
 }
 
 class FailOnceUpsertRunDatabase extends MemoryRuntimeDatabase {
-  upsertRunAttempts = 0;
+  saveRunSnapshotAttempts = 0;
 
-  override async upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord> {
-    this.upsertRunAttempts += 1;
-    if (this.upsertRunAttempts === 1) {
+  override async saveRunSnapshot(content: RuntimeRunSnapshot): Promise<RuntimeRunSnapshot> {
+    this.saveRunSnapshotAttempts += 1;
+    if (this.saveRunSnapshotAttempts === 1) {
       const error = new Error("simulated runtime database write failure") as Error & { code: string };
       error.code = "EIO";
       throw error;
     }
-    return super.upsertRun(record);
+    return super.saveRunSnapshot(content);
   }
 }
 

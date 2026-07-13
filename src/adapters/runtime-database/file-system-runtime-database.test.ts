@@ -14,14 +14,14 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     const paths = resolveAgentArborRuntimeDatabasePaths(path.join(root, "config"));
     const database = new FileSystemRuntimeDatabase(paths);
     const runHome = database.runHome("panel-run-0001");
-    await database.upsertWorkspace({
+    const workspace = {
       workspaceId: "workspace:current",
       kind: "local_directory",
       path: path.join(root, "workspace"),
       label: "workspace",
       selectedAt: "2026-05-10T00:00:00.000Z",
       updatedAt: "2026-05-10T00:00:00.000Z",
-    });
+    } as const;
     await database.upsertConversation({
       conversationId: "conversation-0001",
       title: "safe goal summary",
@@ -54,7 +54,7 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         },
       ],
     });
-    await database.upsertRun({
+    const run = {
       runId: "panel-run-0001",
       profile: "lite",
       runKind: "desktop",
@@ -73,8 +73,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
       completedAt: "2026-05-10T00:00:01.000Z",
       resultTitle: "已完成",
       resultSummary: "Safe assistant result.",
-    });
-    await database.replaceRunEvents("panel-run-0001", [
+    } as const;
+    const events = [
       {
         eventId: "panel-run-0001:event:1",
         runId: "panel-run-0001",
@@ -90,8 +90,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         createdAt: "2026-05-10T00:00:00.000Z",
         recordedAt: "2026-05-10T00:00:00.000Z",
       },
-    ]);
-    await database.replaceModelCalls("panel-run-0001", [
+    ] as const;
+    const modelCalls = [
       {
         requestId: "model-request-0001",
         runId: "panel-run-0001",
@@ -108,8 +108,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         },
         eventRefs: ["event:msg-0001"],
       },
-    ]);
-    await database.replaceToolCalls("panel-run-0001", [
+    ] as const;
+    const toolCalls = [
       {
         callId: "tool-call-0001",
         runId: "panel-run-0001",
@@ -118,8 +118,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         eventRefs: ["event:msg-0002"],
         createdAt: "2026-05-10T00:00:01.000Z",
       },
-    ]);
-    await database.replaceArtifacts("panel-run-0001", [
+    ] as const;
+    const artifacts = [
       {
         runId: "panel-run-0001",
         ref: {
@@ -131,8 +131,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         },
         summary: "Safe artifact summary.",
       },
-    ]);
-    await database.replaceConfirmations("panel-run-0001", [
+    ] as const;
+    const confirmations = [
       {
         confirmationId: "confirmation-0001",
         runId: "panel-run-0001",
@@ -144,8 +144,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         requestedAt: "2026-05-10T00:00:01.000Z",
         eventRefs: ["event:approval-0001"],
       },
-    ]);
-    await database.replaceSubAgentRuns("panel-run-0001", [
+    ] as const;
+    const subAgentRuns = [
       {
         parentRunId: "panel-run-0001",
         parentToolCallId: "tool-call-sub-agent",
@@ -163,7 +163,20 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         modelExchanges: [],
         toolTraces: [],
       },
-    ]);
+    ] as const;
+    await database.saveRunSnapshot({
+      run,
+      workspace,
+      basicRun: undefined,
+      basicEvents: [],
+      events,
+      modelCalls,
+      toolCalls,
+      artifacts,
+      confirmations,
+      subAgentRuns,
+      contextLedger: undefined,
+    });
 
     const snapshot = await database.getRun("panel-run-0001");
     const modelCallsByRun = await database.listModelCallsForRuns(["panel-run-0001"]);
@@ -241,10 +254,14 @@ test("FileSystemRuntimeDatabase keeps run-born workspace records immutable acros
       updatedAt: "2026-05-10T00:01:00.000Z",
     };
 
-    await database.upsertWorkspace(firstWorkspace);
-    await database.upsertRun(runRecord("run-first", paths, firstWorkspace.workspaceId, firstWorkspace.path));
-    await database.upsertWorkspace(secondWorkspace);
-    await database.upsertRun(runRecord("run-second", paths, secondWorkspace.workspaceId, secondWorkspace.path));
+    await database.saveRunSnapshot(emptyRunSnapshot(
+      runRecord("run-first", paths, firstWorkspace.workspaceId, firstWorkspace.path),
+      firstWorkspace,
+    ));
+    await database.saveRunSnapshot(emptyRunSnapshot(
+      runRecord("run-second", paths, secondWorkspace.workspaceId, secondWorkspace.path),
+      secondWorkspace,
+    ));
 
     const firstSnapshot = await database.getRun("run-first");
     const secondSnapshot = await database.getRun("run-second");
@@ -253,6 +270,126 @@ test("FileSystemRuntimeDatabase keeps run-born workspace records immutable acros
     assert.equal(firstSnapshot?.run.workspacePath, firstWorkspace.path);
     assert.equal(secondSnapshot?.workspace?.path, secondWorkspace.path);
     assert.equal(secondSnapshot?.run.workspacePath, secondWorkspace.path);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test("FileSystemRuntimeDatabase commits monotonic snapshot revisions through one manifest", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-db-revisions-"));
+  try {
+    const paths = resolveAgentArborRuntimeDatabasePaths(path.join(root, "config"));
+    const database = new FileSystemRuntimeDatabase(paths);
+    const runId = "run-revisions";
+    const workspace = {
+      workspaceId: `workspace:run:${runId}`,
+      kind: "local_directory" as const,
+      path: path.join(root, "workspace"),
+      label: "workspace",
+      selectedAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+    };
+    const first = emptyRunSnapshot(
+      runRecord(runId, paths, workspace.workspaceId, workspace.path),
+      workspace,
+    );
+    await database.saveRunSnapshot(first);
+    first.run.goalSummary = "mutated after save";
+    assert.equal((await database.getRun(runId))?.run.goalSummary, runId);
+
+    const second = {
+      ...first,
+      run: {
+        ...first.run,
+        goalSummary: runId,
+        updatedAt: "2026-05-10T00:00:02.000Z",
+        resultSummary: "second revision",
+      },
+    };
+    const third = {
+      ...second,
+      run: {
+        ...second.run,
+        updatedAt: "2026-05-10T00:00:03.000Z",
+        resultSummary: "third revision",
+      },
+    };
+    await Promise.all([
+      database.saveRunSnapshot(second),
+      database.saveRunSnapshot(third),
+    ]);
+
+    const runDirectory = database.runHome(runId);
+    const manifest = JSON.parse(await fs.readFile(path.join(runDirectory, "run.json"), "utf8")) as {
+      schemaVersion: string;
+      revision: number;
+      snapshotRef: string;
+      run: { resultSummary?: string; capabilitySnapshot?: unknown };
+    };
+    const snapshotFiles = (await fs.readdir(path.join(runDirectory, "snapshots")))
+      .filter((name) => name.endsWith(".json"))
+      .sort();
+    const document = JSON.parse(
+      await fs.readFile(path.join(runDirectory, manifest.snapshotRef), "utf8"),
+    ) as { schemaVersion: string; revision: number; content: { run: { resultSummary?: string } } };
+
+    assert.equal(manifest.schemaVersion, "runtime-run-manifest/v1");
+    assert.equal(manifest.revision, 3);
+    assert.equal(manifest.snapshotRef, "snapshots/3.json");
+    assert.equal(manifest.run.resultSummary, "third revision");
+    assert.equal(manifest.run.capabilitySnapshot, undefined);
+    assert.equal(document.schemaVersion, "runtime-run-snapshot/v1");
+    assert.equal(document.revision, 3);
+    assert.equal(document.content.run.resultSummary, "third revision");
+    assert.deepEqual(snapshotFiles, ["2.json", "3.json"]);
+    assert.equal((await database.getRun(runId))?.run.resultSummary, "third revision");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test("FileSystemRuntimeDatabase rejects legacy manifests and broken snapshot pointers", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-db-incompatible-"));
+  try {
+    const paths = resolveAgentArborRuntimeDatabasePaths(path.join(root, "config"));
+    const database = new FileSystemRuntimeDatabase(paths);
+    const legacyRunId = "legacy-run";
+    const legacyDirectory = database.runHome(legacyRunId);
+    await fs.mkdir(legacyDirectory, { recursive: true });
+    await fs.writeFile(
+      path.join(legacyDirectory, "run.json"),
+      `${JSON.stringify(runRecord(legacyRunId, paths, "workspace:legacy", root), null, 2)}\n`,
+      "utf8",
+    );
+    await assert.rejects(
+      database.getRun(legacyRunId),
+      runtimeSnapshotIncompatible,
+    );
+    await assert.rejects(
+      database.listRuns(),
+      runtimeSnapshotIncompatible,
+    );
+
+    await fs.rm(legacyDirectory, { recursive: true, force: true });
+    const brokenRunId = "broken-run";
+    const workspace = {
+      workspaceId: `workspace:run:${brokenRunId}`,
+      kind: "local_directory" as const,
+      path: path.join(root, "workspace"),
+      label: "workspace",
+      selectedAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+    };
+    await database.saveRunSnapshot(emptyRunSnapshot(
+      runRecord(brokenRunId, paths, workspace.workspaceId, workspace.path),
+      workspace,
+    ));
+    const brokenDirectory = database.runHome(brokenRunId);
+    await fs.rm(path.join(brokenDirectory, "snapshots", "1.json"), { force: true });
+    await assert.rejects(
+      database.getRun(brokenRunId),
+      runtimeSnapshotIncompatible,
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
@@ -280,4 +417,36 @@ function runRecord(
     updatedAt: "2026-05-10T00:00:01.000Z",
     completedAt: "2026-05-10T00:00:01.000Z",
   };
+}
+
+function emptyRunSnapshot(
+  run: ReturnType<typeof runRecord>,
+  workspace: {
+    readonly workspaceId: string;
+    readonly kind: "local_directory";
+    readonly path: string;
+    readonly label: string;
+    readonly selectedAt: string;
+    readonly updatedAt: string;
+  },
+) {
+  return {
+    run,
+    workspace,
+    basicRun: undefined,
+    basicEvents: [],
+    events: [],
+    modelCalls: [],
+    toolCalls: [],
+    artifacts: [],
+    confirmations: [],
+    subAgentRuns: [],
+    contextLedger: undefined,
+  };
+}
+
+function runtimeSnapshotIncompatible(error: unknown): boolean {
+  return error instanceof Error &&
+    "code" in error &&
+    error.code === "runtime_snapshot_incompatible";
 }

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, request as httpRequest, type Server } from "node:http";
-import test from "node:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test, { type TestContext } from "node:test";
 import type { BasicAgentRunExecutionInput, BasicAgentRunExecutionResult } from "../basic-agent-runtime/index.js";
 import type { PanelRunJob } from "./run-jobs.js";
 import {
@@ -10,9 +13,9 @@ import {
 } from "./request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "./runtime.js";
 
-test("panel server close aborts active runs and cleans owned background processes", async () => {
+test("panel server close aborts active runs and cleans owned background processes", async (t) => {
   const killedPids: number[] = [];
-  const runtime = createPanelRuntime({
+  const runtime = await createTestPanelRuntime(t, {
     processTerminator: {
       killTree(pid) {
         killedPids.push(pid);
@@ -103,9 +106,9 @@ test("panel server close aborts active runs and cleans owned background processe
   );
 });
 
-test("panel server close runs shutdown cleanup before server close callback resolves", async () => {
+test("panel server close runs shutdown cleanup before server close callback resolves", async (t) => {
   const killedPids: number[] = [];
-  const runtime = createPanelRuntime({
+  const runtime = await createTestPanelRuntime(t, {
     processTerminator: {
       killTree(pid) {
         killedPids.push(pid);
@@ -164,9 +167,9 @@ test("panel server close runs shutdown cleanup before server close callback reso
   assert.equal(closeAllConnectionsCalls, 1);
 });
 
-test("panel server close cancels a scheduled Ordinary run before its deferred execution starts", async () => {
+test("panel server close cancels a scheduled Ordinary run before its deferred execution starts", async (t) => {
   let executionCalls = 0;
-  const runtime = createPanelRuntime({}, {
+  const runtime = await createTestPanelRuntime(t, {}, {
     ...panelRuntimeHooks(),
     async executeRun(): Promise<BasicAgentRunExecutionResult> {
       executionCalls += 1;
@@ -196,13 +199,13 @@ test("panel server close cancels a scheduled Ordinary run before its deferred ex
   assert.equal(runtime.activeRunJobs.size, 0);
 });
 
-test("panel server close quiesces Ordinary queue scheduling before active runs finish", async () => {
+test("panel server close quiesces Ordinary queue scheduling before active runs finish", async (t) => {
   let executionStarted!: () => void;
   const started = new Promise<void>((resolve) => {
     executionStarted = resolve;
   });
   let queuedScheduleCalls = 0;
-  const runtime = createPanelRuntime({}, {
+  const runtime = await createTestPanelRuntime(t, {}, {
     ...panelRuntimeHooks(),
     async executeRun(_runtime, execution): Promise<BasicAgentRunExecutionResult> {
       executionStarted();
@@ -236,8 +239,8 @@ test("panel server close quiesces Ordinary queue scheduling before active runs f
   assert.equal(runtime.activeRunJobs.size, 0);
 });
 
-test("panel server close repeatedly aborts controllers that appear while waiting for idle", async () => {
-  const runtime = createPanelRuntime({}, panelRuntimeHooks());
+test("panel server close repeatedly aborts controllers that appear while waiting for idle", async (t) => {
+  const runtime = await createTestPanelRuntime(t, {}, panelRuntimeHooks());
   const server = createServer((_request, response) => {
     response.end("ok");
   });
@@ -275,9 +278,9 @@ test("panel server close repeatedly aborts controllers that appear while waiting
   assert.equal(runtime.activeRunJobs.size, 0);
 });
 
-test("panel server close releases a pending Ordinary approval continuation exactly once", async () => {
+test("panel server close releases a pending Ordinary approval continuation exactly once", async (t) => {
   let releaseCalls = 0;
-  const runtime = createPanelRuntime({}, {
+  const runtime = await createTestPanelRuntime(t, {}, {
     ...panelRuntimeHooks(),
     async executeRun(): Promise<BasicAgentRunExecutionResult> {
       return {
@@ -315,8 +318,8 @@ test("panel server close releases a pending Ordinary approval continuation exact
   assert.equal(releaseCalls, 1);
 });
 
-test("panel server close rejects a Deep request that passed the Panel gate before shutdown", async () => {
-  const runtime = createPanelRuntime({}, panelRuntimeHooks());
+test("panel server close rejects a Deep request that passed the Panel gate before shutdown", async (t) => {
+  const runtime = await createTestPanelRuntime(t, {}, panelRuntimeHooks());
   const conversationsBefore = await runtime.multiAgentFeature.listConversations(100);
   const server = createServer(createPanelRequestHandler(runtime));
   await listen(server);
@@ -370,8 +373,8 @@ test("panel server close rejects a Deep request that passed the Panel gate befor
   );
 });
 
-test("panel server close force-closes a request body that never finishes", async () => {
-  const runtime = createPanelRuntime({}, panelRuntimeHooks());
+test("panel server close force-closes a request body that never finishes", async (t) => {
+  const runtime = await createTestPanelRuntime(t, {}, panelRuntimeHooks());
   const server = createServer(createPanelRequestHandler(runtime));
   await listen(server);
   const address = server.address();
@@ -401,8 +404,8 @@ test("panel server close force-closes a request body that never finishes", async
   assert.equal(Date.now() - startedAt < 4_000, true);
 });
 
-test("panel server close has a hard deadline when runtime cleanup ignores cancellation", async () => {
-  const runtime = createPanelRuntime({}, panelRuntimeHooks());
+test("panel server close has a hard deadline when runtime cleanup ignores cancellation", async (t) => {
+  const runtime = await createTestPanelRuntime(t, {}, panelRuntimeHooks());
   Object.defineProperty(runtime.multiAgentFeature, "dispose", {
     configurable: true,
     value: () => new Promise<void>(() => undefined),
@@ -442,6 +445,34 @@ function panelRuntimeHooks() {
       return undefined;
     },
   };
+}
+
+async function createTestPanelRuntime(
+  t: TestContext,
+  options: Parameters<typeof createPanelRuntime>[0],
+  hooks: Parameters<typeof createPanelRuntime>[1],
+): Promise<PanelRuntime> {
+  const configDirectory = await mkdtemp(join(tmpdir(), "agentarbor-request-handler-"));
+  const runtime = createPanelRuntime({ ...options, configDirectory }, hooks);
+  const disposeMultiAgent = runtime.multiAgentFeature.dispose.bind(runtime.multiAgentFeature);
+  t.after(async () => {
+    runtime.runExecutor.quiesce();
+    for (const controller of runtime.abortControllers.values()) {
+      controller.abort();
+    }
+    await Promise.allSettled([...runtime.activeRunJobs]);
+    await disposeMultiAgent();
+    await runtime.runExecutor.dispose();
+    await runtime.toolOutputStore.clear();
+    await Promise.allSettled([...runtime.persistenceChains.values()]);
+    await rm(configDirectory, {
+      force: true,
+      recursive: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  });
+  return runtime;
 }
 
 function listen(server: Server): Promise<void> {

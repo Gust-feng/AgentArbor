@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
-import { mkdtempSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import type {
   BasicAgentRunExecutionInput,
   BasicAgentRunExecutionResult,
@@ -11,8 +10,8 @@ import type {
 import { createMinimalRuntime } from "../runtime.js";
 import { createPanelRuntime, resolveDefaultPanelSkillRoots, resolveDefaultPanelSubAgentRoots } from "./runtime.js";
 
-test("panel runtime appends explicit additional skill roots without replacing default roots", () => {
-  const runtime = createPanelRuntime({
+test("panel runtime appends explicit additional skill roots without replacing default roots", async (t) => {
+  const runtime = await createTestPanelRuntime(t, {
     additionalSkillRoots: [
       { rootPath: path.join("C:", "managed", "skills"), sourceKind: "admin", sourceRootId: "admin", precedence: 1_000 },
       { rootPath: path.join("Z:", "plugin", "skills"), sourceKind: "plugin", sourceRootId: "plugin:repo-tools", precedence: 500 },
@@ -79,12 +78,18 @@ test("default panel sub-agent roots use the workspace directory for project scop
   ]);
 });
 
-test("panel runtime discovers project sub-agents from the run workspace", async () => {
-  const defaultWorkspace = mkdtempSync(path.join(tmpdir(), "agentarbor-sub-agent-default-"));
-  const runWorkspace = mkdtempSync(path.join(tmpdir(), "agentarbor-sub-agent-run-"));
+test("panel runtime discovers project sub-agents from the run workspace", async (t) => {
+  const defaultWorkspace = await mkdtemp(path.join(tmpdir(), "agentarbor-sub-agent-default-"));
+  const runWorkspace = await mkdtemp(path.join(tmpdir(), "agentarbor-sub-agent-run-"));
+  t.after(async () => {
+    await Promise.all([
+      removeTestDirectory(defaultWorkspace),
+      removeTestDirectory(runWorkspace),
+    ]);
+  });
   await writeSubAgentPackage(defaultWorkspace, "default-helper", "Default helper.");
   await writeSubAgentPackage(runWorkspace, "run-helper", "Run helper.");
-  const runtime = createPanelRuntime({}, noopHooks());
+  const runtime = await createTestPanelRuntime(t, {}, noopHooks());
   await runtime.configCenter.updateWorkspaceConfig({ workspaceDirectory: defaultWorkspace });
 
   const defaultSubAgents = await runtime.capabilityCenter.listSubAgents();
@@ -96,8 +101,8 @@ test("panel runtime discovers project sub-agents from the run workspace", async 
   assert.equal(runSnapshot.subAgentCatalog.some((subAgent) => subAgent.name === "default-helper"), false);
 });
 
-test("panel runtime skillRoots remains a full override for tests and custom hosts", () => {
-  const runtime = createPanelRuntime({
+test("panel runtime skillRoots remains a full override for tests and custom hosts", async (t) => {
+  const runtime = await createTestPanelRuntime(t, {
     skillRoots: [{ rootPath: path.join("Z:", "custom", "skills"), sourceKind: "custom", sourceRootId: "custom", precedence: 1 }],
     additionalSkillRoots: [{ rootPath: path.join("Z:", "ignored", "skills"), sourceKind: "plugin", sourceRootId: "plugin:ignored", precedence: 500 }],
   }, noopHooks());
@@ -107,8 +112,8 @@ test("panel runtime skillRoots remains a full override for tests and custom host
   ]);
 });
 
-test("panel runtime records process residue summaries when ordinary runs reach terminal status", async () => {
-  const runtime = createPanelRuntime({}, {
+test("panel runtime records process residue summaries when ordinary runs reach terminal status", async (t) => {
+  const runtime = await createTestPanelRuntime(t, {}, {
     async executeRun(_runtime, _execution): Promise<BasicAgentRunExecutionResult> {
       return { completed: true };
     },
@@ -134,10 +139,10 @@ test("panel runtime records process residue summaries when ordinary runs reach t
   assert.equal(summaries[0]?.runId, run.runId);
 });
 
-test("panel runtime keeps Ordinary-owned retained tool outputs after terminal for conversation continuation", async () => {
+test("panel runtime keeps Ordinary-owned retained tool outputs after terminal for conversation continuation", async (t) => {
   const traceId = "trace-tool-output-owner";
   let retainedRef: string | undefined;
-  const runtime = createPanelRuntime({}, {
+  const runtime = await createTestPanelRuntime(t, {}, {
     async executeRun(panelRuntime, execution): Promise<BasicAgentRunExecutionResult> {
       execution.onRuntimeReady({
         runtime: createMinimalRuntime(),
@@ -177,8 +182,8 @@ test("panel runtime keeps Ordinary-owned retained tool outputs after terminal fo
   );
 });
 
-test("panel runtime projects published runtime facts once before read paths observe them", async () => {
-  const runtime = createPanelRuntime({}, {
+test("panel runtime projects published runtime facts once before read paths observe them", async (t) => {
+  const runtime = await createTestPanelRuntime(t, {}, {
     async executeRun(_runtime, execution: BasicAgentRunExecutionInput): Promise<BasicAgentRunExecutionResult> {
       const sourceRuntime = createMinimalRuntime();
       execution.onRuntimeReady({
@@ -237,6 +242,40 @@ function noopHooks() {
       return undefined;
     },
   };
+}
+
+async function createTestPanelRuntime(
+  t: TestContext,
+  options: Parameters<typeof createPanelRuntime>[0],
+  hooks: Parameters<typeof createPanelRuntime>[1],
+) {
+  const configDirectory = await mkdtemp(path.join(tmpdir(), "agentarbor-panel-runtime-"));
+  const runtime = createPanelRuntime({ ...options, configDirectory }, hooks);
+  t.after(async () => {
+    const multiAgentDisposal = runtime.multiAgentFeature.dispose();
+    runtime.runExecutor.quiesce();
+    while (runtime.activeRunJobs.size > 0) {
+      for (const controller of runtime.abortControllers.values()) {
+        controller.abort();
+      }
+      await Promise.allSettled([...runtime.activeRunJobs]);
+    }
+    await multiAgentDisposal;
+    await runtime.runExecutor.dispose();
+    await runtime.toolOutputStore.clear();
+    await Promise.allSettled([...runtime.persistenceChains.values()]);
+    await removeTestDirectory(configDirectory);
+  });
+  return runtime;
+}
+
+function removeTestDirectory(directory: string): Promise<void> {
+  return rm(directory, {
+    force: true,
+    recursive: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }
 
 async function writeSubAgentPackage(workspace: string, name: string, description: string): Promise<void> {

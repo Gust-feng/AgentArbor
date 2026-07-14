@@ -1,7 +1,8 @@
 import { getJson } from "./api";
 import type { Conversation } from "./contracts/conversation";
 import type { DeepStreamEvent } from "./contracts/deep";
-import type { BasicAgentRunView, DesktopWorkView, RunEvent } from "./contracts/run";
+import type { BasicAgentRunView, DesktopWorkView, OrdinaryRunCursor, RunEvent } from "./contracts/run";
+import { ordinaryRunResourceUrl } from "./ordinary-run-request";
 
 const BASIC_RUN_EVENT_TYPES = [
   "run.started",
@@ -54,12 +55,12 @@ const DEEP_RUN_EVENT_TYPES = [
 
 export async function safeBasicRunView(
   runId: string,
-  cursor = 0,
+  cursor?: OrdinaryRunCursor,
   init?: RequestInit
 ): Promise<BasicAgentRunView | undefined> {
   try {
     return (await getJson<{ readonly view: BasicAgentRunView }>(
-      `/api/basic-agent/runs/${encodeURIComponent(runId)}/view?cursor=${cursor}`,
+      ordinaryRunResourceUrl(runId, "view", cursor),
       init
     )).view;
   } catch {
@@ -88,14 +89,14 @@ export function ordinaryWorkViewFromRunView(
 
 export function openBasicRunStream(input: {
   readonly runId: string;
-  readonly cursor: number;
+  readonly cursor?: OrdinaryRunCursor;
   readonly onEvent: (event: RunEvent) => void;
   readonly onError: () => void;
 }): EventSource | undefined {
   if (typeof EventSource === "undefined") {
     return undefined;
   }
-  const stream = new EventSource(`/api/basic-agent/runs/${encodeURIComponent(input.runId)}/stream?cursor=${input.cursor}`);
+  const stream = new EventSource(ordinaryRunResourceUrl(input.runId, "stream", input.cursor));
   const handle = (message: MessageEvent<string>): void => {
     try {
       input.onEvent(JSON.parse(message.data) as RunEvent);

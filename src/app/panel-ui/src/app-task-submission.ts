@@ -167,7 +167,6 @@ export async function submitPanelTask(
     if (shouldSwitchLiveStream) {
       options.startLiveUpdates({
         runId: immediateLiveRunId,
-        cursor: 0,
         conversationId: response.conversation.conversationId,
         epoch,
       });
@@ -247,7 +246,7 @@ export async function submitPanelTask(
     if (shouldStartObservedLive) {
       options.startLiveUpdates({
         runId: observedRunId,
-        cursor: replay?.cursor.lastSequence ?? 0,
+        cursor: replay?.cursor.token,
         conversationId: effectiveConversation.conversationId,
         epoch,
       });

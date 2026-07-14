@@ -136,7 +136,7 @@ export async function loadConversationSession(
   if (run !== undefined && shouldKeepRefreshing(run.status)) {
     options.startLiveUpdates({
       runId: run.runId,
-      cursor: replay?.cursor.lastSequence ?? run.eventCursor.lastSequence,
+      cursor: replay?.cursor.token,
       conversationId: response.conversation.conversationId,
       epoch,
     });
@@ -223,7 +223,7 @@ export async function loadHistoricalTranscriptNodeEntries(
       if (signal?.aborted) return;
       const runId = runIds[nextIndex]!;
       nextIndex += 1;
-      const view = await safeBasicRunView(runId, 0, { signal });
+      const view = await safeBasicRunView(runId, undefined, { signal });
       const nodes = transcriptNodesFrom(ordinaryWorkViewFromRunView(view))
         .filter((node: TranscriptNode) => node.runId === runId);
       entries.push([runId, nodes] as const);

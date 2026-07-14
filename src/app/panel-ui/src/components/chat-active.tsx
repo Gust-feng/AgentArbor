@@ -342,7 +342,7 @@ async function loadVisibleHistoricalRunNodes(input: {
     if (abortController.signal.aborted) return;
     const batchRunIds = missingRunIds.slice(index, index + HISTORICAL_TRANSCRIPT_LOAD_CONCURRENCY);
     const batch = await Promise.all(batchRunIds.map(async (runId) => {
-      const view = await safeBasicRunView(runId, 0, { signal: abortController.signal });
+      const view = await safeBasicRunView(runId, undefined, { signal: abortController.signal });
       return {
         runId,
         nodes: transcriptNodesFrom(ordinaryWorkViewFromRunView(view))

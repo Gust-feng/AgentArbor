@@ -378,7 +378,15 @@ export type PendingConfirmation = NonNullable<
   NonNullable<NonNullable<DesktopRunDetail["canvas"]>["agent"]>["pendingConfirmation"]
 >;
 
-export type BasicAgentReplay = PanelBasicAgentReplay<RunEvent>;
+export type OrdinaryRunCursor = string;
+
+export type BasicAgentReplay = Omit<PanelBasicAgentReplay<RunEvent>, "cursor"> & {
+  readonly cursor: {
+    /** Opaque backend-issued token. Return it unchanged; do not derive it from event sequence. */
+    readonly token: OrdinaryRunCursor;
+    readonly lastSequence: number;
+  };
+};
 
 export type AgentDeliverable = {
   readonly deliverableId: string;
@@ -459,4 +467,6 @@ type BackendBasicAgentRunView = PanelBasicAgentRunView<
   RunCapabilityResolution
 >;
 
-export type BasicAgentRunView = BackendBasicAgentRunView;
+export type BasicAgentRunView = Omit<BackendBasicAgentRunView, "replay"> & {
+  readonly replay: BasicAgentReplay;
+};

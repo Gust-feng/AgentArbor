@@ -83,7 +83,7 @@ export async function decideRunConfirmation(input: {
     if (shouldResumeLiveUpdates) {
       input.startLiveUpdates({
         runId: currentRunId,
-        cursor: observed.replay?.cursor.lastSequence ?? observedRun.eventCursor.lastSequence,
+        cursor: observed.replay?.cursor.token,
         conversationId: observed.conversation?.conversationId ?? input.app.conversation?.conversationId,
         epoch: input.viewEpochRef.current,
       });

@@ -95,7 +95,7 @@ export async function loadConversationTranscriptNodesByRunId(
     const batch = allRunIds.slice(batchStart, batchStart + batchSize);
     const entries = await Promise.all(
       batch.map(async (runId) => {
-        const view = await safeBasicRunView(runId, 0, { signal: options.signal });
+        const view = await safeBasicRunView(runId, undefined, { signal: options.signal });
         return [
           runId,
           transcriptNodesFrom(ordinaryWorkViewFromRunView(view)).filter((node) => node.runId === runId),

@@ -1,10 +1,10 @@
 import type { Conversation } from "./contracts/conversation";
 import type {
+  BasicAgentReplay,
   BasicAgentRun,
   DesktopRunDetail,
   DesktopWorkView,
   RunCapabilityResolution,
-  RunEvent,
 } from "./contracts/run";
 import {
   ordinaryWorkViewFromRunView,
@@ -19,12 +19,7 @@ export type ObservedRunReadModel = {
   readonly workView?: DesktopWorkView;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly detail?: DesktopRunDetail;
-  readonly replay?: {
-    readonly events: readonly RunEvent[];
-    readonly cursor: {
-      readonly lastSequence: number;
-    };
-  };
+  readonly replay?: BasicAgentReplay;
 };
 
 export async function loadObservedRunReadModel(input: {
@@ -51,7 +46,7 @@ export async function loadObservedRunReadModel(input: {
     };
   }
 
-  const view = await safeBasicRunView(input.runId, 0);
+  const view = await safeBasicRunView(input.runId);
 
   return {
     conversation,

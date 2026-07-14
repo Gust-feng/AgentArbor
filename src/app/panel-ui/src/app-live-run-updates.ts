@@ -25,7 +25,7 @@ import {
 } from "./runtime";
 import { transcriptNodesFrom } from "./app-run-projection";
 import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
-import type { BasicAgentRun, RunEvent } from "./contracts/run";
+import type { BasicAgentRun, OrdinaryRunCursor, RunEvent } from "./contracts/run";
 
 const FALLBACK_POLL_INTERVAL_MS = 1_200;
 const STREAM_BOOTSTRAP_POLL_INTERVAL_MS = 500;
@@ -49,7 +49,7 @@ export type LiveRunUpdateControllerOptions = {
 
 export type LiveRunSubscription = {
   readonly runId: string;
-  readonly cursor: number;
+  readonly cursor?: OrdinaryRunCursor;
   readonly conversationId?: string;
   readonly epoch: number;
 };
@@ -90,12 +90,12 @@ export function createLiveRunUpdateController(
     const { runId } = subscription;
     stopPolling(options.pollTimer);
     stopStream(options.streamRef);
-    let lastSequence = subscription.cursor;
+    let lastCursor = subscription.cursor;
     const tick = async (): Promise<void> => {
       if (!subscriptionIsCurrent(subscription)) return;
       try {
-        const runView = await fetchBasicRunView(runId, lastSequence);
-        lastSequence = runView.replay.cursor.lastSequence;
+        const runView = await fetchBasicRunView(runId, lastCursor);
+        lastCursor = runView.replay.cursor.token;
         await applyRunViewProjection(subscription, runView);
       } catch (error) {
         if (!subscriptionIsCurrent(subscription)) return;
@@ -118,12 +118,11 @@ export function createLiveRunUpdateController(
     const { runId } = subscription;
     stopLiveUpdates(options.pollTimer, options.streamRef);
     options.activeRunIdRef.current = runId;
-    let lastSequence = subscription.cursor;
+    let lastCursor = subscription.cursor;
     let streamDeliveredEvent = false;
     let liveRunSettled = false;
     const refreshAfterEvent = async (event: RunEvent): Promise<void> => {
       if (!subscriptionIsCurrent(subscription)) return;
-      lastSequence = Math.max(lastSequence, event.sequence);
       if (isLiveAppendOnlyEvent(event)) {
         if (subscriptionIsCurrent(subscription)) {
           appendOnlyBatcher.enqueue({ subscription, event });
@@ -131,7 +130,8 @@ export function createLiveRunUpdateController(
         return;
       }
       appendOnlyBatcher.flush();
-      const runView = await fetchBasicRunView(runId, lastSequence);
+      const runView = await fetchBasicRunView(runId, lastCursor);
+      lastCursor = runView.replay.cursor.token;
       const run = runView.run;
       const workView = ordinaryWorkViewFromRunView(runView);
       const capabilityResolution = runView.capabilityResolution;
@@ -190,8 +190,8 @@ export function createLiveRunUpdateController(
         attempts += 1;
         inFlight = true;
         try {
-          const runView = await fetchBasicRunView(runId, lastSequence);
-          lastSequence = runView.replay.cursor.lastSequence;
+          const runView = await fetchBasicRunView(runId, lastCursor);
+          lastCursor = runView.replay.cursor.token;
           await applyRunViewProjection(subscription, runView);
           if (runView.replay.events.length > 0 && !streamDeliveredEvent) {
             attempts = 0;
@@ -212,7 +212,7 @@ export function createLiveRunUpdateController(
     const fallback = (): void => {
       if (liveRunSettled) return;
       appendOnlyBatcher.flush();
-      startPolling({ ...subscription, cursor: lastSequence });
+      startPolling({ ...subscription, cursor: lastCursor });
     };
     const stream = openBasicRunStream({
       runId,
@@ -339,7 +339,7 @@ function scheduleAppendOnlyFlush(flush: () => void): () => void {
 
 async function fetchBasicRunView(
   runId: string,
-  cursor: number
+  cursor: OrdinaryRunCursor | undefined
 ): Promise<{
   readonly run: BasicAgentRun;
   readonly capabilityResolution?: NonNullable<Awaited<ReturnType<typeof safeBasicRunView>>>["capabilityResolution"];

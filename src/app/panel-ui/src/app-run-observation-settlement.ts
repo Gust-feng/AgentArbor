@@ -5,11 +5,12 @@ import { createRunReadModelPatch } from "./app-run-projection.js";
 import { shouldKeepRefreshing } from "./app-runtime-controls.js";
 import type { AppState } from "./app-state";
 import type {
+  BasicAgentReplay,
   BasicAgentRun,
   DesktopRunDetail,
   DesktopWorkView,
+  OrdinaryRunCursor,
   RunCapabilityResolution,
-  RunEvent,
 } from "./contracts/run";
 import type { Conversation } from "./contracts/conversation";
 import { ordinaryWorkViewFromRunView, safeBasicRunView, safeConversation } from "./runtime.js";
@@ -17,12 +18,7 @@ import { ordinaryWorkViewFromRunView, safeBasicRunView, safeConversation } from 
 export type FollowUpActiveRunProjection = {
   readonly conversation?: Conversation;
   readonly run?: BasicAgentRun;
-  readonly replay?: {
-    readonly events: readonly RunEvent[];
-    readonly cursor: {
-      readonly lastSequence: number;
-    };
-  };
+  readonly replay?: BasicAgentReplay;
   readonly workView?: DesktopWorkView;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly detail?: DesktopRunDetail;
@@ -45,7 +41,7 @@ export async function loadSettledRunProjection(input: {
   readonly capabilityResolution?: RunCapabilityResolution;
 }): Promise<SettledRunProjection> {
   const [view, conversation] = await Promise.all([
-    safeBasicRunView(input.runId, 0),
+    safeBasicRunView(input.runId),
     input.run.conversationId === undefined ? undefined : safeConversation(input.run.conversationId),
   ]);
   return {
@@ -87,14 +83,14 @@ export function appStateWithSettledRunProjection(
 
 export function refreshingFollowUpRun(
   settled: SettledRunProjection
-): { readonly runId: string; readonly cursor: number } | undefined {
+): { readonly runId: string; readonly cursor?: OrdinaryRunCursor } | undefined {
   const followUp = settled.followUp;
   if (followUp.run === undefined || !shouldKeepRefreshing(followUp.run.status)) {
     return undefined;
   }
   return {
     runId: followUp.run.runId,
-    cursor: followUp.replay?.cursor.lastSequence ?? 0,
+    cursor: followUp.replay?.cursor.token,
   };
 }
 

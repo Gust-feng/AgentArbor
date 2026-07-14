@@ -16,9 +16,6 @@ import type {
   TrimRuntimeConversationResult,
 } from "./panel-conversation-contracts.js";
 
-export const CONVERSATION_USER_MESSAGE_MAX_CHARS = 64_000;
-export const CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS = 128_000;
-
 type ConversationProjectionTurn = {
   readonly role: PanelConversationTurnRole;
   readonly title: string;
@@ -115,10 +112,7 @@ export function toRuntimeConversationRecord(
       turnId: turn.turnId,
       role: turn.role,
       title: compact(turn.title, 120),
-      content: compactMessageContent(
-        turn.role === "assistant" ? sanitizeAssistantVisibleText(turn.content) : turn.content,
-        turn.role === "assistant" ? CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS : CONVERSATION_USER_MESSAGE_MAX_CHARS
-      ),
+      content: normalizeConversationTurnContent(turn.content),
       status: turn.status,
       runId: turn.runId,
       responseModel: normalizeTurnModel(turn.responseModel),
@@ -192,18 +186,8 @@ export function compact(value: string, maxLength: number): string {
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
-export function compactMessageContent(value: string, maxLength: number): string {
-  const normalized = String(value || "")
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+export function normalizeConversationTurnContent(value: string): string {
+  return sanitizeAssistantVisibleText(value);
 }
 
 export function normalizeTurnAttachments(
@@ -312,7 +296,11 @@ function closedTurnPrefix(
 }
 
 function isClosedAssistantTurn(turn: RuntimeConversationRecord["turns"][number]): boolean {
-  return turn.status === "completed" || turn.status === "failed" || turn.status === "blocked" || turn.status === "needs_input";
+  return turn.status === "completed" ||
+    turn.status === "failed" ||
+    turn.status === "cancelled" ||
+    turn.status === "blocked" ||
+    turn.status === "needs_input";
 }
 
 function lastAssistantTurn<T extends { readonly role: PanelConversationTurnRole }>(turns: readonly T[]): T | undefined {
@@ -363,6 +351,9 @@ function conversationStatus(
   }
   if (lastAssistant.status === "failed") {
     return "failed";
+  }
+  if (lastAssistant.status === "cancelled") {
+    return "cancelled";
   }
   if (lastAssistant.status === "blocked") {
     return "blocked";

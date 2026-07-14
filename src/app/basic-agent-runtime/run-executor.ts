@@ -1,7 +1,6 @@
 import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import { nowIso } from "../../kernel/id.js";
-import type { BasicAgentRunReplay } from "./event-hub.js";
-import { BasicAgentRunStore } from "./run-store.js";
+import { appRunEventsAfterSequence, type AppRunEventReplay } from "../run-runtime-core/event-stream.js";
 import { projectRunJobToBasicRun, projectRunStreamEventToRunEvent } from "./run-projection.js";
 import type {
   BasicAgentRunJob,
@@ -36,6 +35,8 @@ export type {
 
 export { BasicAgentConfirmationDecisionError } from "./run-executor-continuations.js";
 
+export type BasicAgentRunReplay = AppRunEventReplay<RunEvent>;
+
 export class BasicAgentRunAdmissionClosedError extends Error {
   readonly code = "basic_agent_runtime_quiescing";
 
@@ -47,7 +48,6 @@ export class BasicAgentRunAdmissionClosedError extends Error {
 
 export class BasicAgentRunExecutor {
   private readonly pendingContinuations = new BasicAgentPendingContinuationStore();
-  private readonly basicRuns = new BasicAgentRunStore();
   private readonly terminalCommitsByRunId = new Map<string, Promise<void>>();
   private readonly scheduledRunIds = new Set<string>();
   private readonly scheduledConfirmationResumeRunIds = new Set<string>();
@@ -83,7 +83,7 @@ export class BasicAgentRunExecutor {
       informationAccess: startFacts.informationAccess,
       capabilitySnapshot: startFacts.capabilitySnapshot,
     });
-    this.syncRunEvents(job);
+    this.projectRunEvents(job);
     if (input.deferInitialPersistence !== true) {
       if (this.config.persistRunInBackground !== undefined) {
         this.config.persistRunInBackground(job);
@@ -98,11 +98,26 @@ export class BasicAgentRunExecutor {
   }
 
   get(runId: string): BasicAgentRun | undefined {
-    return this.basicRuns.get(runId);
+    const job = this.config.runJobs.get(runId);
+    return job === undefined
+      ? undefined
+      : projectRunJobToBasicRun(job, this.runEventsForReplay(job));
   }
 
   replayEvents(runId: string, afterSequence = 0): BasicAgentRunReplay | undefined {
-    return this.basicRuns.get(runId) === undefined ? undefined : this.basicRuns.replayEvents(runId, afterSequence);
+    const job = this.config.runJobs.get(runId);
+    if (job === undefined) {
+      return undefined;
+    }
+    const events = this.runEventsForReplay(job).map(projectRunStreamEventToRunEvent);
+    return {
+      cursor: {
+        runId,
+        lastSequence: events.at(-1)?.sequence ?? 0,
+        eventCount: events.length,
+      },
+      events: appRunEventsAfterSequence(events, afterSequence),
+    };
   }
 
   async waitForTerminalCommit(runId: string): Promise<void> {
@@ -125,25 +140,12 @@ export class BasicAgentRunExecutor {
     }
   }
 
-  restore(input: {
-    readonly run: BasicAgentRun;
-    readonly events: readonly RunEvent[];
-  }): BasicAgentRun {
-    return this.basicRuns.restore(input);
+  projectRunEvents(job: BasicAgentRunJob): void {
+    this.config.projectRunEvents?.(job);
   }
 
-  syncRun(job: BasicAgentRunJob): BasicAgentRun {
-    return this.basicRuns.upsert(projectRunJobToBasicRun(job));
-  }
-
-  syncRunEvents(job: BasicAgentRunJob, events?: readonly BasicAgentRunStreamEvent[]): readonly RunEvent[] {
-    const sourceEvents = events ?? this.config.projectRunEvents?.(job) ?? job.streamEvents;
-    this.syncRun(job);
-    const projected = sourceEvents.map(projectRunStreamEventToRunEvent);
-    for (const event of projected) {
-      this.basicRuns.publishEvent(event);
-    }
-    return projected;
+  private runEventsForReplay(job: BasicAgentRunJob): readonly BasicAgentRunStreamEvent[] {
+    return this.config.runEventsForReplay?.(job) ?? job.streamEvents;
   }
 
   schedule(runId: string): void {
@@ -190,13 +192,14 @@ export class BasicAgentRunExecutor {
       informationAccess: job.informationAccess,
       capabilitySnapshot: job.capabilitySnapshot,
       capabilityResolution: job.capabilityResolution,
+      ordinary: job.completed?.ordinary,
       reason: {
         code: "run_cancelled",
         message: "运行已取消。",
       },
     });
     const cancelled = this.requireJob(runId);
-    this.syncRunEvents(cancelled);
+    this.projectRunEvents(cancelled);
     await pendingContinuationRelease;
     await this.finalizeTerminalJob(cancelled);
     return this.requireBasicRun(runId);
@@ -221,11 +224,11 @@ export class BasicAgentRunExecutor {
     });
     this.config.runJobs.markResuming(input.runId);
     try {
-      this.syncRunEvents(this.requireJob(input.runId));
+      this.projectRunEvents(this.requireJob(input.runId));
       await this.config.persistRun(this.requireJob(input.runId));
     } catch (error) {
       // Convergence guard: markResuming 已把 status 改成 running；
-      // 若 syncRunEvents / persistRun 抛错而 scheduleConfirmationResume 尚未注册，
+      // 若事件投影 / persistRun 抛错而 scheduleConfirmationResume 尚未注册，
       // run 会永远卡在 running。这里直接收口到终态，复用与异步恢复相同的失败路径。
       await this.finalizeConfirmationResumeFailure(input.runId, job, error);
       return this.requireBasicRun(input.runId);
@@ -266,7 +269,6 @@ export class BasicAgentRunExecutor {
     this.config.runJobs.markRunning(runId);
     const running = this.config.runJobs.get(runId);
     if (running !== undefined) {
-      this.syncRun(running);
       await this.config.persistRun(running);
     }
     try {
@@ -306,9 +308,10 @@ export class BasicAgentRunExecutor {
           agentRunTree: result.agentRunTree,
           canvas: result.canvas,
           capabilityResolution: facts.capabilityResolution,
+          ordinary: result.ordinary,
         });
         const waiting = this.requireJob(runId);
-        this.syncRunEvents(waiting);
+        this.projectRunEvents(waiting);
         await this.config.persistRun(waiting);
         return;
       }
@@ -326,9 +329,10 @@ export class BasicAgentRunExecutor {
         agentRunTree: result.agentRunTree,
         canvas: result.canvas,
         capabilityResolution: facts.capabilityResolution,
+        ordinary: result.ordinary,
       });
       const completed = this.requireJob(runId);
-      this.syncRunEvents(completed);
+      this.projectRunEvents(completed);
       await this.finalizeTerminalJob(completed);
     } catch (error) {
       if (abort.signal.aborted) {
@@ -339,7 +343,7 @@ export class BasicAgentRunExecutor {
       await this.config.failRun(latestJob, error);
       const failed = this.config.runJobs.get(runId);
       if (failed !== undefined) {
-        this.syncRunEvents(failed);
+        this.projectRunEvents(failed);
         await this.finalizeTerminalJob(failed);
       }
     }
@@ -441,7 +445,7 @@ export class BasicAgentRunExecutor {
             console.error(`[run-executor] async confirmation resume failed for ${input.runId}:`, error);
             // Convergence guard: resumeConfirmationContinuation self-finalizes inside its
             // own try/catch, but a throw in the pre-resume setup (consume / markResuming /
-            // recordRunResumed / syncRunEvents) or a re-throw from the inner catch would
+            // recordRunResumed / event projection) or a re-throw from the inner catch would
             // otherwise escape with only a log line, leaving the run stuck in a
             // non-terminal status (running / resuming / approval_needed). Fail any job
             // that is still non-terminal so every scheduled resume reaches a terminal state.
@@ -491,7 +495,7 @@ export class BasicAgentRunExecutor {
     await this.config.failRun(latestJob, error);
     const failed = this.config.runJobs.get(runId);
     if (failed !== undefined) {
-      this.syncRunEvents(failed);
+      this.projectRunEvents(failed);
       await this.finalizeTerminalJob(failed);
     }
   }
@@ -521,6 +525,7 @@ export class BasicAgentRunExecutor {
         informationAccess: input.job.informationAccess,
         capabilitySnapshot: input.job.capabilitySnapshot,
         capabilityResolution: input.job.capabilityResolution,
+        ordinary: input.job.completed?.ordinary,
         reason: {
           code: blockedByMissingApproval ? "confirmation_continuation_lost" : "confirmation_decision_continuation_lost",
           message: blockedByMissingApproval
@@ -532,7 +537,7 @@ export class BasicAgentRunExecutor {
       // block() 对终态 job 短路，blocked.status 可能仍是其他终态（如被 cancel 抢占成 cancelled）。
       // 只有真的变成 blocked 才 finalize，避免对已被其他路径收口的 job 二次 finalize。
       if (blocked.status === "blocked") {
-        this.syncRunEvents(blocked);
+        this.projectRunEvents(blocked);
         await this.finalizeTerminalJob(blocked);
       }
       return this.requireBasicRun(input.runId);
@@ -543,7 +548,7 @@ export class BasicAgentRunExecutor {
       confirmationId: input.confirmationId,
       resumedAt: nowIso(),
     });
-    this.syncRunEvents(this.requireJob(input.runId));
+    this.projectRunEvents(this.requireJob(input.runId));
     try {
       const result = input.decision === "approve_once"
         ? await continuation.resume({
@@ -585,9 +590,10 @@ export class BasicAgentRunExecutor {
           agentRunTree: result.agentRunTree,
           canvas: result.canvas,
           capabilityResolution: facts.capabilityResolution,
+          ordinary: result.ordinary,
         });
         const waiting = this.requireJob(input.runId);
-        this.syncRunEvents(waiting);
+        this.projectRunEvents(waiting);
         await this.config.persistRun(waiting);
         return this.requireBasicRun(input.runId);
       }
@@ -605,9 +611,10 @@ export class BasicAgentRunExecutor {
         agentRunTree: result.agentRunTree,
         canvas: result.canvas,
         capabilityResolution: facts.capabilityResolution,
+        ordinary: result.ordinary,
       });
       const completed = this.requireJob(input.runId);
-      this.syncRunEvents(completed);
+      this.projectRunEvents(completed);
       await this.finalizeTerminalJob(completed);
       return this.requireBasicRun(input.runId);
     } catch (error) {
@@ -619,7 +626,7 @@ export class BasicAgentRunExecutor {
       await this.config.failRun(latestJob, error);
       const failed = this.config.runJobs.get(input.runId);
       if (failed !== undefined) {
-        this.syncRunEvents(failed);
+        this.projectRunEvents(failed);
         await this.finalizeTerminalJob(failed);
       }
       return this.requireBasicRun(input.runId);
@@ -645,9 +652,10 @@ export class BasicAgentRunExecutor {
       agentRunTree: result.agentRunTree,
       canvas: result.canvas,
       capabilityResolution: facts.capabilityResolution,
+      ordinary: result.ordinary,
     });
     const blocked = this.requireJob(runId);
-    this.syncRunEvents(blocked);
+    this.projectRunEvents(blocked);
     await this.finalizeTerminalJob(blocked);
   }
 
@@ -668,9 +676,10 @@ export class BasicAgentRunExecutor {
       canvas: result.canvas,
       error: result.failed,
       summary: result.summary,
+      ordinary: result.ordinary,
     });
     const failed = this.requireJob(runId);
-    this.syncRunEvents(failed);
+    this.projectRunEvents(failed);
     await this.finalizeTerminalJob(failed);
   }
 

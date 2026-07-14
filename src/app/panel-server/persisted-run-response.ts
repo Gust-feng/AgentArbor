@@ -339,6 +339,9 @@ export function createPersistedStreamEvents(
   }
   for (const confirmation of snapshot.confirmations) {
     if (confirmation.decidedAt === undefined && confirmation.status === "pending") {
+      if (snapshot.run.runMode === "agent" && snapshot.run.status !== "approval_needed") {
+        continue;
+      }
       events.push({
         eventId: `${snapshot.run.runId}:restored:confirmation:${confirmation.confirmationId}:pending`,
         runId: snapshot.run.runId,

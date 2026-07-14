@@ -105,7 +105,7 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
     if (isTerminalBasicAgentJobStatus(job.status)) {
       return;
     }
-    const normalized = normalizeCompletedPayloadForJob(job, completed);
+    const normalized = normalizeCompletedPayloadForJob(job, completed, "approval_needed");
     job.status = "approval_needed";
     applyResolvedRunFacts(job, normalized);
     job.completed = normalized;
@@ -150,7 +150,7 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
     if (isTerminalBasicAgentJobStatus(job.status)) {
       return;
     }
-    const normalized = normalizeCompletedPayloadForJob(job, completed);
+    const normalized = normalizeCompletedPayloadForJob(job, completed, "completed");
     job.status = "completed";
     applyResolvedRunFacts(job, normalized);
     job.completed = normalized;
@@ -162,7 +162,7 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
     if (isTerminalBasicAgentJobStatus(job.status)) {
       return;
     }
-    const normalized = normalizeFailedPayloadForJob(job, failed);
+    const normalized = normalizeFailedPayloadForJob(job, failed, "failed");
     job.status = "failed";
     applyResolvedRunFacts(job, normalized);
     job.failed = normalized;
@@ -174,23 +174,11 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
     if (isTerminalBasicAgentJobStatus(job.status)) {
       return;
     }
-    const normalized = normalizeTerminalPayloadForJob(job, cancelled);
+    const normalized = normalizeTerminalPayloadForJob(job, cancelled, "cancelled");
     job.status = "cancelled";
     applyResolvedRunFacts(job, normalized);
     job.cancelled = normalized;
     job.updatedAt = nowIso();
-    this.appendStreamEvent(runId, {
-      eventId: `${runId}:run.cancelled`,
-      runId,
-      type: "run.cancelled",
-      createdAt: job.updatedAt,
-      agentLabel: basicAgentJobLabel(job),
-      summary: normalized.reason.message,
-      status: "cancelled",
-      sourceRefs: [],
-      modelCallRefs: [],
-      toolCallRefs: [],
-    });
   }
 
   block(runId: string, blocked: BasicAgentRunTerminalPayload): void {
@@ -198,23 +186,11 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
     if (isTerminalBasicAgentJobStatus(job.status)) {
       return;
     }
-    const normalized = normalizeTerminalPayloadForJob(job, blocked);
+    const normalized = normalizeTerminalPayloadForJob(job, blocked, "blocked");
     job.status = "blocked";
     applyResolvedRunFacts(job, normalized);
     job.blocked = normalized;
     job.updatedAt = nowIso();
-    this.appendStreamEvent(runId, {
-      eventId: `${runId}:run.blocked`,
-      runId,
-      type: "run.blocked",
-      createdAt: job.updatedAt,
-      agentLabel: basicAgentJobLabel(job),
-      summary: normalized.reason.message,
-      status: "blocked",
-      sourceRefs: [],
-      modelCallRefs: [],
-      toolCallRefs: [],
-    });
   }
 
   recordConfirmationDecision(decision: BasicAgentRunConfirmationDecisionRecord): void {
@@ -319,7 +295,8 @@ function applyResolvedRunFacts(
 
 function normalizeCompletedPayloadForJob(
   job: StoredBasicAgentRunJob,
-  payload: BasicAgentRunCompletedPayload
+  payload: BasicAgentRunCompletedPayload,
+  status: "approval_needed" | "completed"
 ): BasicAgentRunCompletedPayload {
   const facts = resolveCompatibleRunFacts(job, payload);
   return {
@@ -328,12 +305,14 @@ function normalizeCompletedPayloadForJob(
     informationAccess: facts.informationAccess,
     capabilitySnapshot: facts.capabilitySnapshot,
     capabilityResolution: facts.capabilityResolution,
+    ordinary: ordinaryFactsForStatus(payload.ordinary, status, job.runId),
   };
 }
 
 function normalizeFailedPayloadForJob(
   job: StoredBasicAgentRunJob,
-  payload: BasicAgentRunFailedPayload
+  payload: BasicAgentRunFailedPayload,
+  status: "failed"
 ): BasicAgentRunFailedPayload {
   const facts = resolveCompatibleRunFacts(job, payload);
   return {
@@ -342,12 +321,14 @@ function normalizeFailedPayloadForJob(
     informationAccess: facts.informationAccess,
     capabilitySnapshot: facts.capabilitySnapshot,
     capabilityResolution: facts.capabilityResolution,
+    ordinary: ordinaryFactsForStatus(payload.ordinary, status, job.runId),
   };
 }
 
 function normalizeTerminalPayloadForJob(
   job: StoredBasicAgentRunJob,
-  payload: BasicAgentRunTerminalPayload
+  payload: BasicAgentRunTerminalPayload,
+  status: "cancelled" | "blocked"
 ): BasicAgentRunTerminalPayload {
   const facts = resolveCompatibleRunFacts(job, payload);
   return {
@@ -356,7 +337,29 @@ function normalizeTerminalPayloadForJob(
     informationAccess: facts.informationAccess,
     capabilitySnapshot: facts.capabilitySnapshot,
     capabilityResolution: facts.capabilityResolution,
+    ordinary: ordinaryFactsForStatus(payload.ordinary, status, job.runId),
   };
+}
+
+function ordinaryFactsForStatus(
+  ordinary: BasicAgentRunCompletedPayload["ordinary"],
+  status: "approval_needed" | "completed" | "failed" | "cancelled" | "blocked",
+  runId: string,
+): BasicAgentRunCompletedPayload["ordinary"] {
+  if (ordinary === undefined) {
+    return ordinary;
+  }
+  const owned = ordinary.contextLedger === undefined || ordinary.contextLedger.runId === runId
+    ? ordinary
+    : {
+        ...ordinary,
+        contextLedger: { ...ordinary.contextLedger, runId },
+      };
+  if (status === "approval_needed" || owned.pendingConfirmation === undefined) {
+    return owned;
+  }
+  const { pendingConfirmation: _pendingConfirmation, ...terminalFacts } = owned;
+  return terminalFacts;
 }
 
 function appendStreamEventToJob(

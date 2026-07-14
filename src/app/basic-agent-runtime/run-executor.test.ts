@@ -61,6 +61,20 @@ function defaultPrepareRunStart(
   return async (input) => preparedStartFacts(input, overrides);
 }
 
+function pendingConfirmationFacts(confirmationId: string) {
+  return {
+    confirmationId,
+    title: "运行命令",
+    actionSummary: "运行命令：pnpm test",
+    consequence: "批准后只执行本次命令。",
+    affectedResources: ["shell:test"],
+    riskLevel: "medium" as const,
+    resumeAvailability: "live" as const,
+    requestedAt: "2026-06-02T00:00:01.000Z",
+    sourceRefs: [`confirmation:${confirmationId}`],
+  };
+}
+
 function executorConfig(input: {
   readonly runJobs: InMemoryBasicAgentRunJobStore;
   readonly activeRunJobs?: Set<Promise<void>>;
@@ -113,7 +127,8 @@ test("BasicAgentRunExecutor keeps continuation state split from execution orches
   assert.equal(continuationsSource.includes("export class BasicAgentPendingContinuationStore"), true);
   assert.equal(continuationsSource.includes("export class BasicAgentConfirmationDecisionError"), true);
   assert.equal(continuationsSource.includes("function continuationKey"), true);
-  assert.equal(continuationsSource.includes("function pendingConfirmationIdFromCanvas"), true);
+  assert.equal(continuationsSource.includes("pendingConfirmationIdFromCanvas"), false);
+  assert.equal(continuationsSource.includes("job.completed?.ordinary?.pendingConfirmation"), true);
   assert.equal(runJobStoreSource.includes("function basicAgentJobLabel"), true);
   assert.equal(runJobStoreSource.includes("job.agentDefinitionRef?.agentDisplayName"), true);
   assert.equal(runJobStoreSource.includes("agentLabel: basicAgentJobLabel(job)"), true);
@@ -295,19 +310,15 @@ test("BasicAgentPendingContinuationStore clears every continuation exactly once"
   assert.equal(store.consume("run-confirmation-b", "confirmation-b"), undefined);
 });
 
-test("BasicAgentPendingContinuationStore accepts canvas pending confirmation and rejects stale decisions", () => {
+test("BasicAgentPendingContinuationStore accepts owned pending confirmation facts and rejects stale decisions", () => {
   const store = new BasicAgentPendingContinuationStore();
   const job = jobFixture({
     status: "approval_needed",
     completed: {
       config: modelConfig(),
       informationAccess: informationAccess(),
-      canvas: {
-        agent: {
-          pendingConfirmation: {
-            confirmationId: "confirmation-canvas",
-          },
-        },
+      ordinary: {
+        pendingConfirmation: pendingConfirmationFacts("confirmation-owned"),
       },
     },
     confirmationDecisions: [{
@@ -318,9 +329,9 @@ test("BasicAgentPendingContinuationStore accepts canvas pending confirmation and
     }],
   });
 
-  assert.doesNotThrow(() => store.assertPendingConfirmation(job, "confirmation-canvas"));
+  assert.doesNotThrow(() => store.assertPendingConfirmation(job, "confirmation-owned"));
   assert.throws(
-    () => store.assertPendingConfirmation({ ...job, status: "completed" }, "confirmation-canvas"),
+    () => store.assertPendingConfirmation({ ...job, status: "completed" }, "confirmation-owned"),
     (error) => error instanceof BasicAgentConfirmationDecisionError && error.code === "invalid_confirmation_state"
   );
   assert.throws(
@@ -329,7 +340,7 @@ test("BasicAgentPendingContinuationStore accepts canvas pending confirmation and
   );
 });
 
-test("BasicAgentRunExecutor owns basic run projection and replay cursor", async () => {
+test("BasicAgentRunExecutor projects replay directly from the owned run job", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   const executor = new BasicAgentRunExecutor(executorConfig({ runJobs }));
 
@@ -355,9 +366,9 @@ test("BasicAgentRunExecutor owns basic run projection and replay cursor", async 
     modelCallRefs: [],
     toolCallRefs: ["tool-1"],
   }]);
-  assert.equal(executor.replayEvents(run.runId, 0)?.events.length, 0);
+  assert.equal(executor.replayEvents(run.runId, 0)?.events.length, 1);
 
-  executor.syncRunEvents(job);
+  executor.projectRunEvents(job);
   const replay = executor.replayEvents(run.runId, 0);
   assert.equal(replay?.cursor.eventCount, 1);
   assert.equal(replay?.events[0]?.type, "tool.completed");
@@ -1596,13 +1607,8 @@ test("BasicAgentRunExecutor keeps frozen run facts when approval continuation is
           return {};
         },
       },
-      canvas: {
-        kind: "desktop_agent_canvas",
-        agent: {
-          pendingConfirmation: {
-            confirmationId: "confirmation-lost",
-          },
-        },
+      ordinary: {
+        pendingConfirmation: pendingConfirmationFacts("confirmation-lost"),
       },
     }),
   }));
@@ -1686,61 +1692,6 @@ test("BasicAgentRunExecutor omits agent definition ref when prepared start facts
   assert.equal(runJobs.get(run.runId)?.agentDefinitionRef, undefined);
   assert.equal(run.agentDefinitionRef, undefined);
   assert.equal(runJobs.get(run.runId)?.capabilitySnapshot, undefined);
-});
-
-test("InMemoryBasicAgentRunJobStore labels self stream events from frozen agent definition ref", () => {
-  const runJobs = new InMemoryBasicAgentRunJobStore();
-  const agentDefinitionRef: RunAgentDefinitionRef = {
-    agentId: "custom-basic-agent",
-    agentDisplayName: "Custom Basic Agent",
-    promptRef: "prompt:custom-basic-agent:v1",
-    promptVersion: "v1",
-    outputContractId: "custom.basic_agent_response.v1",
-    toolVisibilityProfileId: "custom-basic-agent:ordinary-visible-tools:v1",
-    definitionHash: "sha256:custom-basic-agent-test",
-  };
-  const createRun = (goal: string, ref?: RunAgentDefinitionRef): BasicAgentRunJob => {
-    return runJobs.create({
-      runKind: "desktop",
-      runMode: "agent",
-      goal,
-      aiMode: "fake",
-      config: modelConfig(),
-      informationAccess: informationAccess(),
-      capabilitySnapshot: capabilitySnapshot(),
-      agentDefinitionRef: ref ?? defaultAgentDefinitionRef(),
-    });
-  };
-  const terminalPayload = (message: string) => ({
-    config: modelConfig(),
-    informationAccess: informationAccess(),
-    reason: {
-      code: "test_terminal",
-      message,
-    },
-  });
-
-  const cancelled = createRun("cancel with custom agent", agentDefinitionRef);
-  runJobs.cancel(cancelled.runId, terminalPayload("cancelled"));
-  assert.equal(runJobs.get(cancelled.runId)?.streamEvents.at(-1)?.agentLabel, "Custom Basic Agent");
-
-  const blocked = createRun("block with custom agent", agentDefinitionRef);
-  runJobs.block(blocked.runId, terminalPayload("blocked"));
-  assert.equal(runJobs.get(blocked.runId)?.streamEvents.at(-1)?.agentLabel, "Custom Basic Agent");
-
-  const resumed = createRun("resume with custom agent", agentDefinitionRef);
-  runJobs.recordRunResumed(resumed.runId, {
-    confirmationId: "confirmation-custom-agent",
-    resumedAt: "2026-06-02T00:00:00.000Z",
-  });
-  assert.equal(runJobs.get(resumed.runId)?.streamEvents.at(-1), undefined);
-
-  const fallback = createRun("cancel with blank agent label", {
-    ...defaultAgentDefinitionRef(),
-    agentDisplayName: " ",
-  });
-  runJobs.cancel(fallback.runId, terminalPayload("fallback"));
-  assert.equal(runJobs.get(fallback.runId)?.streamEvents.at(-1)?.agentLabel, "AgentArbor");
 });
 
 function jobFixture(overrides: Partial<BasicAgentRunJob> = {}): BasicAgentRunJob {

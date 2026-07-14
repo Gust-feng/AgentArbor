@@ -1,10 +1,8 @@
-import type { ModelRunReasoningEffort } from "../../domain/config/index.js";
 import { agentDefinitionRefMatchesDefinition } from "../agent-definition-ref.js";
 import { runDesktopAgentSession } from "../desktop-agent/desktop-agent-session.js";
 import { latestModelFailureTextForUser } from "../panel-read-model/run/panel-model-failure-copy.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import { createDesktopAgentCanvas } from "../panel-read-model/canvas/panel-desktop-agent-canvas.js";
-import { createPanelRunTranscript } from "../panel-run-read-model.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { friendlyUserFacingFailureText } from "../text-projection/visible-text-safety.js";
 import { PanelHttpError } from "./http-utils.js";
@@ -19,6 +17,8 @@ import type {
   PanelRunExecutionOptions,
   PanelRunExecutionResult,
 } from "./run-execution-contracts.js";
+import { confirmationActionSummaryText } from "../text-projection/confirmation-copy.js";
+import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.js";
 
 export type OrdinaryDesktopPanelRunExecutionInput = {
   readonly runtime: PanelRuntime;
@@ -103,7 +103,7 @@ export async function executeOrdinaryDesktopRunForPanel(
     informationAccess: resources.informationAccess,
     capabilitySnapshot: resources.capabilitySnapshot,
     agentDefinitionRef,
-  }, options.reasoningEffort, releaseResources);
+  }, releaseResources);
 }
 
 function skillTriggerOptions(
@@ -157,7 +157,6 @@ type OrdinaryDesktopPanelFacts = {
 async function desktopPanelResultFromAgent(
   agent: Awaited<ReturnType<typeof runDesktopAgentSession>>,
   facts: OrdinaryDesktopPanelFacts,
-  reasoningEffort: ModelRunReasoningEffort | undefined,
   releaseResources: () => Promise<void>
 ): Promise<PanelRunExecutionResult> {
   if (
@@ -167,24 +166,6 @@ async function desktopPanelResultFromAgent(
     agent.status === "failed"
   ) {
     const eventEntries = agent.runtime.eventLog.list();
-    const transcriptStatus =
-      agent.status === "paused"
-        ? "blocked"
-        : agent.status === "failed"
-          ? "failed"
-        : agent.status === "confirmation_needed"
-          ? "approval_needed"
-          : "completed";
-    const transcript = createPanelRunTranscript({
-      runId: agent.traceId,
-      status: transcriptStatus,
-      eventEntries,
-      agentDefinitionRef: facts.agentDefinitionRef,
-      desktopMode: "agent",
-      reasoningEffort,
-      createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
-      updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
-    });
     if (agent.pendingApproval === undefined) {
       await releaseResources();
     }
@@ -192,10 +173,10 @@ async function desktopPanelResultFromAgent(
       ...facts,
       completed: agent.status === "completed" ? true : undefined,
       eventEntries,
+      ordinary: ordinaryRunFactsFromAgent(agent),
       capabilityResolution: frozenCapabilityResolution(agent.capabilityResolution, facts.agentDefinitionRef),
       canvas: createDesktopAgentCanvas({
         result: agent,
-        transcript,
       }),
       failed:
         agent.status === "failed"
@@ -214,7 +195,7 @@ async function desktopPanelResultFromAgent(
               resume: async (resumeInput) => {
                 try {
                   const resumed = await agent.pendingApproval!.resume(resumeInput);
-                  return await desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources);
+                  return await desktopPanelResultFromAgent(resumed, facts, releaseResources);
                 } catch (error) {
                   await releaseResources();
                   throw error;
@@ -223,7 +204,7 @@ async function desktopPanelResultFromAgent(
               resumeWithDecision: async (resumeInput) => {
                 try {
                   const resumed = await agent.pendingApproval!.resumeWithDecision(resumeInput);
-                  return await desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources);
+                  return await desktopPanelResultFromAgent(resumed, facts, releaseResources);
                 } catch (error) {
                   await releaseResources();
                   throw error;
@@ -235,6 +216,40 @@ async function desktopPanelResultFromAgent(
 
   await releaseResources();
   throw new PanelHttpError(500, "desktop_agent_stopped", agent.failureMessage ?? "桌面 Agent 运行已停止。");
+}
+
+function ordinaryRunFactsFromAgent(
+  agent: Awaited<ReturnType<typeof runDesktopAgentSession>>
+): BasicAgentOrdinaryRunFacts {
+  const pending = agent.pendingConfirmation;
+  return {
+    answer: agent.answer === undefined
+      ? undefined
+      : {
+          content: agent.answer.answer,
+          modelCallRefs: agent.answer.modelCallRefs,
+          toolCallRefs: agent.answer.toolCallRefs,
+          evidenceRefs: agent.answer.evidenceRefs,
+        },
+    pendingConfirmation: pending === undefined
+      ? undefined
+      : {
+          confirmationId: pending.confirmationId,
+          title: pending.title,
+          actionSummary: confirmationActionSummaryText({
+            question: pending.question,
+            consequence: pending.consequence,
+          }),
+          consequence: pending.consequence,
+          affectedResources: pending.affectedResources,
+          riskLevel: pending.riskLevel,
+          resumeAvailability: pending.resumeAvailability,
+          requestedAt: pending.requestedAt,
+          expiresAt: pending.expiresAt,
+          sourceRefs: pending.sourceRefs,
+        },
+    contextLedger: agent.contextLedger,
+  };
 }
 
 function frozenCapabilityResolution(

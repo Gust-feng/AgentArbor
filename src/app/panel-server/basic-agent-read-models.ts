@@ -1,5 +1,7 @@
 import type {
   BasicAgentRun,
+  ConfirmationRequest,
+  DesktopWorkViewAnswer,
   DesktopWorkViewReadModel,
   RunEvent,
 } from "../../domain/basic-agent/index.js";
@@ -11,13 +13,48 @@ import type {
 import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import {
   basicRunFromRuntimeSnapshot,
-  basicRunReplayFromRuntimeSnapshot,
   createDesktopWorkViewReadModel,
+  projectRunStreamEventToRunEvent,
 } from "../basic-agent-runtime/index.js";
+import { requireRestorableOrdinaryRuntimeSnapshot } from "../basic-agent-runtime/persistence-snapshot-contract.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
 import { panelRunPayloadForStatus, type PanelRunJob } from "./run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stream-contracts.js";
 import { restoredRunResultProjection } from "../run-read-model/restored-run-projection.js";
+import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.js";
+import { observationRefs } from "../basic-agent-runtime/work-view-context.js";
+import { createPersistedStreamEvents, panelStatusFromRuntimeStatus } from "./persisted-run-response.js";
+
+export function createPersistedBasicAgentReplay(
+  snapshot: RuntimeRunSnapshot,
+  streamEvents?: readonly PanelRunStreamEvent[]
+): {
+  readonly events: readonly RunEvent[];
+  readonly cursor: { readonly runId: string; readonly lastSequence: number; readonly eventCount: number };
+} {
+  const persistedSnapshot = requireRestorableOrdinaryRuntimeSnapshot(snapshot);
+  const resolvedStreamEvents = streamEvents ?? createPersistedStreamEvents(
+    persistedSnapshot,
+    panelStatusFromRuntimeStatus(persistedSnapshot.run.status)
+  );
+  const events = resolvedStreamEvents.map(projectRunStreamEventToRunEvent);
+  return {
+    events,
+    cursor: {
+      runId: persistedSnapshot.run.runId,
+      lastSequence: events.at(-1)?.sequence ?? 0,
+      eventCount: events.length,
+    },
+  };
+}
+
+export function createPersistedBasicAgentRun(
+  snapshot: RuntimeRunSnapshot,
+  streamEvents?: readonly PanelRunStreamEvent[]
+): BasicAgentRun {
+  const replay = createPersistedBasicAgentReplay(snapshot, streamEvents);
+  return basicRunFromRuntimeSnapshot(snapshot, replay.events);
+}
 
 export function createLiveBasicAgentWorkViewReadModel(input: {
   readonly job: PanelRunJob;
@@ -34,6 +71,9 @@ export function createLiveBasicAgentWorkViewReadModel(input: {
     toolDisplays: toolDisplaysFromStreamEvents(input.streamEvents),
     toolResultCount: terminalToolCallCount(input.streamEvents),
     subAgentRuns: input.job.runtime?.subAgentRunTraceStore.list() ?? [],
+    pendingConfirmation: ordinaryPendingConfirmation(input.job, statusPayload?.ordinary),
+    answer: ordinaryAnswer(statusPayload?.ordinary),
+    restoredContextLedger: statusPayload?.ordinary?.contextLedger,
   }) satisfies DesktopWorkViewReadModel;
   return {
     ...base,
@@ -44,16 +84,46 @@ export function createLiveBasicAgentWorkViewReadModel(input: {
   } satisfies DesktopWorkViewReadModel;
 }
 
+function ordinaryAnswer(
+  facts: BasicAgentOrdinaryRunFacts | undefined
+): DesktopWorkViewAnswer | undefined {
+  return facts?.answer === undefined
+    ? undefined
+    : {
+        title: "已回答",
+        content: facts.answer.content,
+        evidenceRefs: observationRefs(facts.answer.evidenceRefs),
+        nextActions: [],
+      };
+}
+
+function ordinaryPendingConfirmation(
+  job: PanelRunJob,
+  facts: BasicAgentOrdinaryRunFacts | undefined
+): ConfirmationRequest | undefined {
+  const pending = facts?.pendingConfirmation;
+  if (job.status !== "approval_needed" || pending === undefined) {
+    return undefined;
+  }
+  return {
+    ...pending,
+    runId: job.runId,
+    conversationId: job.conversationId,
+  };
+}
+
 export function createPersistedBasicAgentWorkViewReadModel(
   snapshot: RuntimeRunSnapshot,
   streamEvents: readonly PanelRunStreamEvent[],
 ): DesktopWorkViewReadModel {
-  const run = basicRunFromRuntimeSnapshot(snapshot);
-  const replay = basicRunReplayFromRuntimeSnapshot(snapshot);
+  const replay = createPersistedBasicAgentReplay(snapshot, streamEvents);
+  const run = basicRunFromRuntimeSnapshot(snapshot, replay.events);
   return createDesktopWorkViewReadModel({
     run,
     events: replay.events,
-    pendingConfirmation: restoredPendingConfirmation(snapshot.confirmations),
+    pendingConfirmation: snapshot.run.status === "approval_needed"
+      ? restoredPendingConfirmation(snapshot.confirmations)
+      : undefined,
     toolDisplays: toolDisplaysFromStreamEvents(streamEvents),
     toolResultCount: terminalToolCallCount(streamEvents),
     transcriptNodes: createPanelTranscriptNodes(streamEvents),

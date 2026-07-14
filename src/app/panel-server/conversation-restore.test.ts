@@ -90,7 +90,6 @@ function invalidOrdinarySnapshot(
       createdAt: "2026-07-12T00:00:00.000Z",
       updatedAt: "2026-07-12T00:00:02.000Z",
     },
-    basicEvents: [],
     events: [],
     modelCalls: [],
     toolCalls: [],

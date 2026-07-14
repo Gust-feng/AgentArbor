@@ -44,6 +44,7 @@ import type {
   PanelRunExecutionOptions,
   PanelRunExecutionResult,
 } from "./run-execution-contracts.js";
+import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.js";
 
 export type PanelRunResponse = {
   readonly ok: true;
@@ -64,6 +65,7 @@ export type PanelRunResponse = {
   readonly steps: PanelRunTranscript["steps"];
   readonly streamCursor: PanelRunStreamCursor;
   readonly canvas?: PanelRunCanvasReadModel;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
   readonly error?: {
     readonly code: string;
     readonly message: string;
@@ -131,6 +133,7 @@ export async function failPanelRunJob(
       summary: {
         ai: createConfigurationFailedAiSummary(error.issue.summaryInput, error, message),
       },
+      ordinary: job.completed?.ordinary,
     });
     return;
   }
@@ -144,6 +147,7 @@ export async function failPanelRunJob(
         code: error.code,
         message: panelJobErrorMessage(error),
       },
+      ordinary: job.completed?.ordinary,
     });
     return;
   }
@@ -158,6 +162,7 @@ export async function failPanelRunJob(
       code: "panel_internal_error",
       message: modelFailureMessage ?? "本次运行失败。",
     },
+    ordinary: job.completed?.ordinary,
   });
 }
 
@@ -345,6 +350,7 @@ export async function createPanelRunResponse(input: {
       lastSequence: transcript.events.at(-1)?.sequence ?? 0,
     },
     canvas: input.run.canvas,
+    ordinary: input.run.ordinary,
     error,
   };
 }

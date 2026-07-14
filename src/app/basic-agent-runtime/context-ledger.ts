@@ -181,7 +181,10 @@ function prioritizedOptionalContextItems(
     .map((item, index) => ({ item, index }))
     .sort((left, right) => {
       const priority = contextItemRetentionPriority(left.item) - contextItemRetentionPriority(right.item);
-      return priority === 0 ? left.index - right.index : priority;
+      if (priority !== 0) {
+        return priority;
+      }
+      return left.index - right.index;
     })
     .map((entry) => entry.item);
 }

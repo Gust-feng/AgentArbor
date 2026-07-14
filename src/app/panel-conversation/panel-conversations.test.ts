@@ -66,6 +66,32 @@ test("panel conversations preserve assistant markdown line breaks", () => {
   assert.equal(persisted.turns[1]?.content.includes("\n- **证据**"), true);
 });
 
+test("panel conversations preserve complete turn content beyond legacy character limits", () => {
+  const store = new PanelConversationStore();
+  const started = store.startDesktopMessage({ goal: "生成完整长回答" });
+  const answer = `开头\n\n\`\`\`ts\nconst kept = true;\n\`\`\`\n${"x".repeat(140_000)}\nLONG_ANSWER_TAIL`;
+
+  store.attachRun({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-long-answer",
+  });
+  store.completeAssistantTurn({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-long-answer",
+    title: "已完成",
+    content: answer,
+    status: "completed",
+  });
+
+  const conversation = store.getReadModel(started.conversation.conversationId)!;
+  const persisted = toRuntimeConversationRecord(conversation);
+
+  assert.equal(conversation.turns[1]?.content, answer);
+  assert.equal(persisted.turns[1]?.content, answer);
+});
+
 test("panel conversations preserve safe user turn attachment projections", () => {
   const store = new PanelConversationStore();
   const started = store.startDesktopMessage({
@@ -97,6 +123,35 @@ test("panel conversations preserve safe user turn attachment projections", () =>
   assert.equal(conversation.turns[0]?.attachments?.[0]?.mediaPreview?.url, "/api/context/attachments/media/ctx-image");
   assert.equal(persisted.turns[0]?.attachments?.[0]?.readonlyPreviewMeta?.mimeType, "image/png");
   assert.equal(restored.turns[0]?.attachments?.[0]?.mediaPreview?.kind, "image");
+});
+
+test("panel conversations persist and restore cancelled assistant turns", () => {
+  const store = new PanelConversationStore();
+  const started = store.startDesktopMessage({ goal: "取消当前任务" });
+  store.attachRun({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-cancelled",
+  });
+  store.completeAssistantTurn({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-cancelled",
+    title: "已取消",
+    content: "已取消。",
+    status: "cancelled",
+  });
+
+  const live = store.getReadModel(started.conversation.conversationId)!;
+  const persisted = toRuntimeConversationRecord(live);
+  const restored = new PanelConversationStore().restore(persisted);
+
+  assert.equal(live.status, "cancelled");
+  assert.equal(live.turns[1]?.status, "cancelled");
+  assert.equal(persisted.status, "cancelled");
+  assert.equal(persisted.turns[1]?.status, "cancelled");
+  assert.equal(restored.status, "cancelled");
+  assert.equal(restored.turns[1]?.status, "cancelled");
 });
 
 test("panel conversation summaries do not invent completed results for empty assistant turns", () => {

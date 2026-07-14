@@ -368,27 +368,22 @@ function resultSummaryForJob(job: PanelRunJob): {
       summary: compactRuntimeText(statusPayload.reason.message, 900),
     };
   }
-  const canvas = statusPayload?.canvas;
-  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
-    const answer = preserveRuntimeAnswerText(canvas.agent.answer.answer, 128_000);
+  const ordinary = statusPayload?.ordinary;
+  if (ordinary?.answer !== undefined) {
+    const answer = preserveRuntimeAnswerText(ordinary.answer.content);
     return {
-      title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "待处理",
+      title: ordinary.pendingConfirmation === undefined ? "已完成" : "待处理",
       summary: compactRuntimeText(answer, 900),
       answer,
     };
   }
-  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation !== undefined) {
+  if (ordinary?.pendingConfirmation !== undefined) {
     return {
       title: "待处理",
-      summary: compactRuntimeText(
-        confirmationActionSummaryText({
-          question: canvas.agent.pendingConfirmation.question,
-          consequence: canvas.agent.pendingConfirmation.consequence,
-        }),
-        900
-      ),
+      summary: compactRuntimeText(ordinary.pendingConfirmation.actionSummary, 900),
     };
   }
+  const canvas = statusPayload?.canvas;
   if (canvas?.kind === "underground_deep_canvas") {
     return {
       title: canvas.underground.status === "approved_package_created" ? "方向已形成" : "深度模式已停止",
@@ -443,12 +438,8 @@ function runtimeContinuationAvailabilityForJob(job: PanelRunJob): RuntimeRunCont
   return "none";
 }
 
-function preserveRuntimeAnswerText(value: string, maxLength: number): string {
-  const normalized = redactSensitiveText(normalizeModelFacingText(value));
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+function preserveRuntimeAnswerText(value: string): string {
+  return normalizeModelFacingText(value);
 }
 
 function safeRuntimeError(

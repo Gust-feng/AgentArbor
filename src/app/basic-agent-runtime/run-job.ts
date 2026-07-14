@@ -6,7 +6,7 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
+import type { ConfirmationDecision, ContextLedger } from "../../domain/basic-agent/index.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
@@ -20,6 +20,28 @@ import type {
   BasicAgentRunProjectionInput,
   BasicAgentRunStreamEventProjectionInput,
 } from "./run-projection.js";
+
+export type BasicAgentOrdinaryRunFacts = {
+  readonly answer?: {
+    readonly content: string;
+    readonly modelCallRefs: readonly string[];
+    readonly toolCallRefs: readonly string[];
+    readonly evidenceRefs: readonly string[];
+  };
+  readonly pendingConfirmation?: {
+    readonly confirmationId: string;
+    readonly title: string;
+    readonly actionSummary: string;
+    readonly consequence?: string;
+    readonly affectedResources: readonly string[];
+    readonly riskLevel: "low" | "medium" | "high";
+    readonly resumeAvailability?: "live" | "lost_after_restart";
+    readonly requestedAt: string;
+    readonly expiresAt?: string;
+    readonly sourceRefs: readonly string[];
+  };
+  readonly contextLedger?: ContextLedger;
+};
 
 export type BasicAgentRunKind = AgentArborRunKind;
 
@@ -45,6 +67,7 @@ export type BasicAgentRunCompletedPayload = {
   readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: BasicAgentCanvasProjection;
   readonly capabilityResolution?: RunCapabilityResolution;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
 };
 
 export type BasicAgentRunFailedPayload = {
@@ -58,6 +81,7 @@ export type BasicAgentRunFailedPayload = {
     readonly message: string;
   };
   readonly summary?: RunConfigurationFailureSummary;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
 };
 
 export type BasicAgentRunTerminalPayload = {
@@ -73,11 +97,12 @@ export type BasicAgentRunTerminalPayload = {
   readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: BasicAgentCanvasProjection;
   readonly capabilityResolution?: RunCapabilityResolution;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
 };
 
 export type BasicAgentRunConfirmationDecisionRecord = ConfirmationDecision;
 
-export type BasicAgentRunJob = Omit<BasicAgentRunProjectionInput, "confirmationDecisions"> & {
+export type BasicAgentRunJob = BasicAgentRunProjectionInput & {
   readonly runKind: BasicAgentRunKind;
   readonly aiMode: ModelRuntimeMode;
   readonly assistantTurnId?: string;

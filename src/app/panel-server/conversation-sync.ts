@@ -17,13 +17,14 @@ import {
   emptyTextStreamAssembly,
   textStreamFragmentSourceFromEventId,
 } from "../readable-text-fragments.js";
-import { confirmationActionSummaryText } from "../text-projection/confirmation-copy.js";
+import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.js";
 
 export type PanelConversationSyncRunResponse = {
   readonly status: PanelRunStatus;
   readonly config: SanitizedModelProviderConfig;
   readonly transcript: Pick<PanelRunTranscript, "events" | "modelCalls">;
   readonly canvas?: PanelRunCanvasReadModel;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
   readonly error?: {
     readonly code: string;
     readonly message: string;
@@ -64,7 +65,7 @@ export function syncConversationTurnForJob(input: {
       runId: job.runId,
       title: "已取消",
       content: "已取消。",
-      status: "failed",
+      status: "cancelled",
       responseModel,
     });
     return;
@@ -170,24 +171,19 @@ function latestPanelTranscriptModelCall(
 function assistantTurnFromResponse(
   response: PanelConversationSyncRunResponse
 ): { readonly title: string; readonly content: string } | undefined {
-  const canvas = response.canvas;
-  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
+  if (response.ordinary?.answer !== undefined) {
     return {
-      title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "待处理",
-      content: sanitizeAssistantVisibleText(canvas.agent.answer.answer),
+      title: response.ordinary.pendingConfirmation === undefined ? "已完成" : "待处理",
+      content: sanitizeAssistantVisibleText(response.ordinary.answer.content),
     };
   }
-  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation !== undefined) {
+  if (response.ordinary?.pendingConfirmation !== undefined) {
     return {
       title: "待处理",
-      content: sanitizeAssistantVisibleText(
-        confirmationActionSummaryText({
-          question: canvas.agent.pendingConfirmation.question,
-          consequence: canvas.agent.pendingConfirmation.consequence,
-        })
-      ),
+      content: sanitizeAssistantVisibleText(response.ordinary.pendingConfirmation.actionSummary),
     };
   }
+  const canvas = response.canvas;
   if (canvas?.kind === "underground_deep_canvas") {
     const summary = canvas.underground.recommendedDirection.reason.trim().length > 0
       ? canvas.underground.recommendedDirection.reason
@@ -264,17 +260,6 @@ function isModelOutputBoundaryEvent(event: PanelRunTranscript["events"][number])
 }
 
 function assistantFailureTextFromResponse(response: PanelConversationSyncRunResponse): string {
-  const eventError = response.transcript.events
-    .map((event) => event.detail?.error)
-    .filter((error): error is string => typeof error === "string" && error.trim().length > 0)
-    .find((error) => /\bHTTP\s+\d{3}\b/i.test(error)) ??
-    [...response.transcript.events]
-      .reverse()
-      .map((event) => event.detail?.error)
-      .find((error): error is string => typeof error === "string" && error.trim().length > 0);
-  if (eventError !== undefined) {
-    return truncateFailureText(friendlyUserFacingFailureText(eventError), 1_000);
-  }
   return conciseRunFailureText(response.error);
 }
 

@@ -25,6 +25,8 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when awaiting approva
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.completed);
   assert.equal(runJobs.get(job.runId)?.status, "approval_needed");
+  assert.equal(runJobs.get(job.runId)?.completed?.ordinary?.pendingConfirmation?.confirmationId, "confirmation-pending");
+  assert.equal(runJobs.get(job.runId)?.completed?.ordinary?.contextLedger?.runId, job.runId);
 });
 
 test("InMemoryBasicAgentRunJobStore keeps frozen run facts when completed payload is forged", () => {
@@ -36,6 +38,7 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when completed payloa
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.completed);
   assert.equal(runJobs.get(job.runId)?.status, "completed");
+  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.completed?.ordinary, job.runId);
 });
 
 test("InMemoryBasicAgentRunJobStore keeps frozen run facts when failed payload is forged", () => {
@@ -47,6 +50,7 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when failed payload i
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.failed);
   assert.equal(runJobs.get(job.runId)?.status, "failed");
+  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.failed?.ordinary, job.runId);
 });
 
 test("InMemoryBasicAgentRunJobStore keeps frozen run facts when cancelled payload is forged", () => {
@@ -58,6 +62,8 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when cancelled payloa
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.cancelled);
   assert.equal(runJobs.get(job.runId)?.status, "cancelled");
+  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.cancelled?.ordinary, job.runId);
+  assert.equal(runJobs.get(job.runId)?.streamEvents.some((event) => event.type === "run.cancelled"), false);
 });
 
 test("InMemoryBasicAgentRunJobStore keeps frozen run facts when blocked payload is forged", () => {
@@ -69,6 +75,8 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when blocked payload 
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.blocked);
   assert.equal(runJobs.get(job.runId)?.status, "blocked");
+  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.blocked?.ordinary, job.runId);
+  assert.equal(runJobs.get(job.runId)?.streamEvents.some((event) => event.type === "run.blocked"), false);
 });
 
 test("InMemoryBasicAgentRunJobStore keeps completed terminal state stable", () => {
@@ -244,6 +252,7 @@ function forgedFacts(): {
 function completedPayload(facts: ReturnType<typeof forgedFacts>): BasicAgentRunCompletedPayload {
   return {
     ...facts,
+    ordinary: ordinaryFactsWithPendingConfirmation(),
     canvas: {
       kind: "desktop_agent_canvas",
       agent: {},
@@ -254,6 +263,7 @@ function completedPayload(facts: ReturnType<typeof forgedFacts>): BasicAgentRunC
 function failedPayload(facts: ReturnType<typeof forgedFacts>): BasicAgentRunFailedPayload {
   return {
     ...facts,
+    ordinary: ordinaryFactsWithPendingConfirmation(),
     error: {
       code: "model_failed",
       message: "forged failure",
@@ -264,11 +274,47 @@ function failedPayload(facts: ReturnType<typeof forgedFacts>): BasicAgentRunFail
 function terminalPayload(facts: ReturnType<typeof forgedFacts>): BasicAgentRunTerminalPayload {
   return {
     ...facts,
+    ordinary: ordinaryFactsWithPendingConfirmation(),
     reason: {
       code: "cancelled",
       message: "forged terminal state",
     },
   };
+}
+
+function ordinaryFactsWithPendingConfirmation(): NonNullable<BasicAgentRunCompletedPayload["ordinary"]> {
+  return {
+    answer: {
+      content: "已形成的回答仍应保留。",
+      modelCallRefs: ["model-call-answer"],
+      toolCallRefs: ["tool-call-answer"],
+      evidenceRefs: ["tool:tool-call-answer"],
+    },
+    pendingConfirmation: {
+      confirmationId: "confirmation-pending",
+      title: "待确认操作",
+      actionSummary: "删除临时文件。",
+      affectedResources: ["temporary.txt"],
+      riskLevel: "medium",
+      requestedAt: "2026-06-07T00:00:30.000Z",
+      sourceRefs: ["confirmation:confirmation-pending"],
+    },
+    contextLedger: {
+      runId: "desktop-trace-id",
+      summary: "context",
+      entries: [],
+      truncation: { truncated: false, omittedItemCount: 0, truncatedItemIds: [] },
+    },
+  };
+}
+
+function assertTerminalOrdinaryFacts(
+  ordinary: BasicAgentRunCompletedPayload["ordinary"],
+  runId: string,
+): void {
+  assert.equal(ordinary?.answer?.content, "已形成的回答仍应保留。");
+  assert.equal(ordinary?.pendingConfirmation, undefined);
+  assert.equal(ordinary?.contextLedger?.runId, runId);
 }
 
 function assertFrozenFacts(

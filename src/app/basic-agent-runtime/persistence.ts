@@ -6,15 +6,8 @@ import type {
 } from "../../domain/runtime-database/index.js";
 import { isGenericApprovalDecisionText } from "../text-projection/confirmation-copy.js";
 import {
-  nextBasicEventSequence,
-  restoredBlockedEvent,
-  restoredConfirmationDecisionEvent,
   upsertRestoredConfirmation,
 } from "./persistence-confirmations.js";
-import {
-  durableBasicRunEvents,
-  restoredBasicEventsFromRuntimeSnapshot,
-} from "./persistence-restored-events.js";
 import {
   agentTaskStatusFromSnapshot,
   basicRunNextStepFromStatus,
@@ -23,26 +16,14 @@ import {
 import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../run-read-model/restored-run-projection.js";
 import { requireRestorableOrdinaryRuntimeSnapshot } from "./persistence-snapshot-contract.js";
 
-export {
-  durableBasicRunEvents,
-  restoredBasicEventsFromRuntimeSnapshot,
-} from "./persistence-restored-events.js";
-
-export type BasicAgentPersistedReplay = {
-  readonly cursor: {
-    readonly runId: string;
-    readonly lastSequence: number;
-    readonly eventCount: number;
-  };
-  readonly events: readonly RunEvent[];
-};
-
-export function basicRunFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRun {
+export function basicRunFromRuntimeSnapshot(
+  snapshot: RuntimeRunSnapshot,
+  events: readonly RunEvent[] = []
+): BasicAgentRun {
   const persistedSnapshot = requireRestorableOrdinaryRuntimeSnapshot(snapshot);
   const status = agentTaskStatusFromSnapshot(persistedSnapshot);
-  const events = restoredBasicEventsFromRuntimeSnapshot(persistedSnapshot);
   const latestEvent = [...events].reverse().find((event) => event.summary !== undefined && !isLowValuePersistedCurrentStepEvent(event));
-  const persisted = persistedSnapshot.basicRun;
+  const persisted = persistedSnapshot.run;
   return {
     runId: persisted.runId,
     conversationId: persisted.conversationId,
@@ -50,7 +31,7 @@ export function basicRunFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): Basic
     goalSummary: persisted.goalSummary,
     status,
     runMode: persisted.runMode,
-    agentDefinitionRef: persistedSnapshot.run.agentDefinitionRef,
+    agentDefinitionRef: persisted.agentDefinitionRef,
     createdAt: persisted.createdAt,
     updatedAt: persisted.updatedAt,
     currentStep: latestEvent?.summary,
@@ -73,26 +54,18 @@ function isLowValuePersistedCurrentStepEvent(event: RunEvent): boolean {
   return false;
 }
 
-export function basicRunReplayFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentPersistedReplay {
-  const events = restoredBasicEventsFromRuntimeSnapshot(snapshot);
-  return {
-    cursor: {
-      runId: snapshot.run.runId,
-      lastSequence: events.at(-1)?.sequence ?? 0,
-      eventCount: events.length,
-    },
-    events,
-  };
-}
-
 export async function submitRestoredBasicConfirmationDecision(input: {
   readonly runtimeDatabase: RuntimeDatabase | undefined;
   readonly runId: string;
   readonly confirmationId: string;
   readonly decision: Pick<ConfirmationDecision, "decision" | "guidance">;
-}): Promise<BasicAgentRun | undefined> {
-  const snapshot = await input.runtimeDatabase?.getRun(input.runId);
-  if (input.runtimeDatabase === undefined || snapshot === undefined) {
+}): Promise<RuntimeRunSnapshot | undefined> {
+  const loadedSnapshot = await input.runtimeDatabase?.getRun(input.runId);
+  if (input.runtimeDatabase === undefined || loadedSnapshot === undefined) {
+    return undefined;
+  }
+  const snapshot = requireRestorableOrdinaryRuntimeSnapshot(loadedSnapshot);
+  if (snapshot.run.status !== "approval_needed") {
     return undefined;
   }
   const pending = snapshot.confirmations.find(
@@ -131,45 +104,17 @@ export async function submitRestoredBasicConfirmationDecision(input: {
     decision: input.decision,
     decidedAt,
   });
-  const restoredEvents = restoredBasicEventsFromRuntimeSnapshot({
-    ...snapshot,
-    confirmations: nextConfirmations,
-  });
-  const events = [
-    ...restoredEvents,
-    ...(input.decision.decision === "approve_once"
-      ? []
-      : [restoredConfirmationDecisionEvent({
-          runId: input.runId,
-          confirmationId: input.confirmationId,
-          decision: input.decision,
-          decidedAt,
-          sequence: nextBasicEventSequence(restoredEvents),
-        })]),
-  ];
-  const blockedEvents =
-    input.decision.decision === "guidance"
-      ? events
-      : [
-          ...events,
-          restoredBlockedEvent({
-            runId: input.runId,
-            decidedAt,
-            sequence: nextBasicEventSequence(events),
-            summary: nextRun.error?.message ?? ORDINARY_RUN_BLOCKED_FALLBACK,
-          }),
-        ];
-  const nextSnapshotBeforeBasicRun: RuntimeRunSnapshot = {
-    ...snapshot,
+  const nextSnapshot: RuntimeRunSnapshot = {
     run: nextRun,
-    basicEvents: blockedEvents,
+    workspace: snapshot.workspace,
+    events: snapshot.events,
+    modelCalls: snapshot.modelCalls,
+    toolCalls: snapshot.toolCalls,
+    artifacts: snapshot.artifacts,
     confirmations: nextConfirmations,
+    subAgentRuns: snapshot.subAgentRuns,
+    contextLedger: snapshot.contextLedger,
   };
-  const basicRun = basicRunFromRuntimeSnapshot(nextSnapshotBeforeBasicRun);
-  await input.runtimeDatabase.saveRunSnapshot({
-    ...nextSnapshotBeforeBasicRun,
-    basicRun,
-    basicEvents: durableBasicRunEvents(blockedEvents),
-  });
-  return basicRun;
+  await input.runtimeDatabase.saveRunSnapshot(nextSnapshot);
+  return nextSnapshot;
 }

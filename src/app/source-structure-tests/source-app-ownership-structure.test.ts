@@ -561,8 +561,6 @@ test("desktop agent support modules stay under desktop-agent ownership", async (
   assert.equal(loopPreparationFacade.trim(), 'export * from "./desktop-agent/desktop-agent-loop-preparation.js";');
   assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-session.test.ts")), false);
   assert.equal(fileExistsSync(path.join(desktopAgentRoot, "desktop-agent-session.test.ts")), true);
-  assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-session-projection.test.ts")), false);
-  assert.equal(fileExistsSync(path.join(desktopAgentRoot, "desktop-agent-session-projection.test.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-loop-preparation.test.ts")), false);
   assert.equal(fileExistsSync(path.join(desktopAgentRoot, "desktop-agent-loop-preparation.test.ts")), true);
 

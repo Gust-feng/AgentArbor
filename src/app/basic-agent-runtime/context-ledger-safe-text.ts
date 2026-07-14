@@ -14,9 +14,10 @@ import { normalizeModelFacingText } from "../text-projection/visible-text-safety
  * `sanitizeConversationHistoryText`) and may collapse whitespace, but model
  * context must stay high-fidelity.
  *
- * Truncation here is by volume (character budget per item), never a signal to
- * drop an entire history entry. Dropping history is governed by the ledger's
- * token budget and retention priority, not by character thresholds.
+ * Volume limits in this helper are reserved for bounded metadata and UI-safe
+ * diagnostic text. Conversation, selected Skill bodies, model compaction
+ * summaries, and the current user message use the unbounded helper below;
+ * their capacity is governed by the ledger's model token budget.
  */
 export function safeContextText(value: string, maxLength: number): { readonly text: string; readonly truncated: boolean } {
   const text = normalizeModelFacingText(value);
@@ -48,8 +49,8 @@ export function safeUnboundedContextText(value: string): { readonly text: string
  * code/stdout/JSON in earlier turns keep their structure; only line endings
  * and outer whitespace are normalized.
  */
-export function safeConversationContextText(value: string, maxLength: number): { readonly text: string; readonly truncated: boolean } {
-  return safeContextText(value, maxLength);
+export function safeConversationContextText(value: string): { readonly text: string; readonly truncated: false } {
+  return safeUnboundedContextText(value);
 }
 
 export function safePlainContextText(value: string, maxLength: number): string {

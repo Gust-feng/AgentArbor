@@ -1,9 +1,5 @@
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
 import type { RuntimeRunContinuationAvailability } from "../../domain/runtime-database/index.js";
-import {
-  basicRunFromRuntimeSnapshot,
-  basicRunReplayFromRuntimeSnapshot,
-} from "../basic-agent-runtime/index.js";
 import type {
   PanelBasicAgentRunDetailReadModel,
   PanelBasicAgentRunViewReadModel,
@@ -12,7 +8,12 @@ import { panelRunPayloadForStatus, type PanelRunJob } from "./run-jobs.js";
 import { summarizePanelRuntimeVisibility, type PanelRuntimeSummaryRegistry } from "../panel-read-model/run/panel-runtime-summary.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
 import { restoredRunResultProjection } from "../run-read-model/restored-run-projection.js";
-import { createLiveBasicAgentWorkViewReadModel, createPersistedBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
+import {
+  createLiveBasicAgentWorkViewReadModel,
+  createPersistedBasicAgentReplay,
+  createPersistedBasicAgentRun,
+  createPersistedBasicAgentWorkViewReadModel,
+} from "./basic-agent-read-models.js";
 import { createPersistedStreamEvents, panelStatusFromRuntimeStatus } from "./persisted-run-response.js";
 import type { PanelRuntime } from "./runtime.js";
 import { persistentPanelRunStreamEvents } from "./run-stream-sync.js";
@@ -100,10 +101,10 @@ async function createPersistedBasicAgentRunViewReadModel(
   snapshot: RuntimeRunSnapshot,
   afterSequence: number
 ): Promise<PanelBasicAgentRunViewReadModel> {
-  const run = basicRunFromRuntimeSnapshot(snapshot);
-  const fullReplay = basicRunReplayFromRuntimeSnapshot(snapshot);
   const status = panelStatusFromRuntimeStatus(snapshot.run.status);
   const streamEvents = createPersistedStreamEvents(snapshot, status);
+  const run = createPersistedBasicAgentRun(snapshot, streamEvents);
+  const fullReplay = createPersistedBasicAgentReplay(snapshot, streamEvents);
   const workView = createPersistedBasicAgentWorkViewReadModel(snapshot, streamEvents);
   const replayEvents = fullReplay.events.filter((event) => event.sequence > afterSequence);
   const detail = createPersistedBasicAgentRunDetailReadModel(snapshot, status, streamEvents);

@@ -1,4 +1,3 @@
-import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
 import { isToolCallEventMessageType } from "../../domain/common.js";
 import type {
   RuntimeDatabase,
@@ -13,10 +12,6 @@ export type RestorableOrdinaryRuntimeSnapshot = RuntimeRunSnapshot & {
     readonly informationAccess: NonNullable<RuntimeRunSnapshot["run"]["informationAccess"]>;
     readonly agentDefinitionRef: NonNullable<RuntimeRunSnapshot["run"]["agentDefinitionRef"]>;
   };
-  readonly basicRun: BasicAgentRun & {
-    readonly agentDefinitionRef: NonNullable<BasicAgentRun["agentDefinitionRef"]>;
-  };
-  readonly basicEvents: readonly RunEvent[];
 };
 
 export class OrdinaryRuntimeSnapshotContractError extends Error {
@@ -80,40 +75,6 @@ export function requireRestorableOrdinaryRuntimeSnapshot(
   if (snapshot.run.agentDefinitionRef == null) {
     missingFacts.push("run.agentDefinitionRef");
   }
-  if (snapshot.basicRun == null) {
-    missingFacts.push("basicRun");
-  } else {
-    if (snapshot.basicRun.runId !== snapshot.run.runId) {
-      missingFacts.push("basicRun.runId");
-    }
-    if (snapshot.basicRun.runMode !== snapshot.run.runMode) {
-      missingFacts.push("basicRun.runMode");
-    }
-    if (snapshot.basicRun.agentDefinitionRef == null) {
-      missingFacts.push("basicRun.agentDefinitionRef");
-    } else if (
-      snapshot.run.agentDefinitionRef != null &&
-      !sameAgentDefinitionRef(snapshot.basicRun.agentDefinitionRef, snapshot.run.agentDefinitionRef)
-    ) {
-      missingFacts.push("basicRun.agentDefinitionRefMismatch");
-    }
-  }
-
-  const persistedEvents = Array.isArray(snapshot.basicEvents)
-    ? snapshot.basicEvents.filter((event) => event.visibility !== "debug")
-    : [];
-  if (persistedEvents.length === 0) {
-    missingFacts.push("basicEvents");
-  } else {
-    if (persistedEvents.some((event) => event.runId !== snapshot.run.runId)) {
-      missingFacts.push("basicEvents.runId");
-    }
-    const terminalType = ordinaryTerminalEventType(snapshot.run.status);
-    if (terminalType !== undefined && !persistedEvents.some((event) => event.type === terminalType)) {
-      missingFacts.push(`basicEvents.${terminalType}`);
-    }
-  }
-
   for (const event of snapshot.events) {
     if (!isOrdinaryToolFactEventType(event.type)) {
       continue;
@@ -193,27 +154,4 @@ function safeJsonLength(value: unknown): number | undefined {
   } catch {
     return undefined;
   }
-}
-
-function sameAgentDefinitionRef(
-  left: NonNullable<BasicAgentRun["agentDefinitionRef"]>,
-  right: NonNullable<RuntimeRunSnapshot["run"]["agentDefinitionRef"]>,
-): boolean {
-  return left.agentId === right.agentId &&
-    left.agentDisplayName === right.agentDisplayName &&
-    left.promptRef === right.promptRef &&
-    left.promptVersion === right.promptVersion &&
-    left.outputContractId === right.outputContractId &&
-    left.toolVisibilityProfileId === right.toolVisibilityProfileId &&
-    left.definitionHash === right.definitionHash;
-}
-
-function ordinaryTerminalEventType(
-  status: RuntimeRunSnapshot["run"]["status"]
-): "final.result" | "run.failed" | "run.cancelled" | "run.blocked" | undefined {
-  if (status === "completed") return "final.result";
-  if (status === "failed") return "run.failed";
-  if (status === "cancelled") return "run.cancelled";
-  if (status === "blocked") return "run.blocked";
-  return undefined;
 }

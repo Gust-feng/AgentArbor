@@ -1,4 +1,4 @@
-import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
+import type { AgentTaskStatus, BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type {
   ToolErrorDomain,
@@ -33,15 +33,6 @@ export type BasicAgentRunProjectionInput = {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly streamEvents: readonly BasicAgentRunStreamEventProjectionInput[];
-  readonly confirmationDecisions: readonly Pick<ConfirmationDecision, "confirmationId" | "decision" | "guidance">[];
-  readonly completed?: {
-    readonly canvas?: {
-      readonly kind?: string;
-      readonly agent?: {
-        readonly pendingConfirmation?: unknown;
-      };
-    };
-  };
 };
 
 export type BasicAgentRunStreamEventProjectionInput = {
@@ -88,7 +79,10 @@ export type BasicAgentRunStreamEventProjectionInput = {
   readonly toolCallRefs: readonly string[];
 };
 
-export function projectRunJobToBasicRun(job: BasicAgentRunProjectionInput): BasicAgentRun {
+export function projectRunJobToBasicRun(
+  job: BasicAgentRunProjectionInput,
+  events: readonly BasicAgentRunStreamEventProjectionInput[] = job.streamEvents
+): BasicAgentRun {
   const status = basicStatusForRunJob(job);
   return {
     runId: job.runId,
@@ -104,8 +98,8 @@ export function projectRunJobToBasicRun(job: BasicAgentRunProjectionInput): Basi
     nextStep: basicRunNextStep(status),
     requiresUserAction: status === "approval_needed" || status === "needs_input" || status === "blocked",
     eventCursor: {
-      lastSequence: 0,
-      eventCount: 0,
+      lastSequence: events.at(-1)?.sequence ?? 0,
+      eventCount: events.length,
     },
   };
 }
@@ -164,62 +158,24 @@ function basicStatusForRunEvent(event: BasicAgentRunStreamEventProjectionInput):
 }
 
 function basicStatusForRunJob(job: BasicAgentRunProjectionInput): AgentTaskStatus {
-  if (job.status === "pending") return "queued";
-  if (job.status === "approval_needed") return "approval_needed";
-  if (job.status === "needs_input") return "needs_input";
-  if (job.status === "cancelled") return "cancelled";
-  if (job.status === "blocked") return "blocked";
-  if (job.status === "failed") return "failed";
-  if (
-    job.completed?.canvas?.kind === "desktop_agent_canvas" &&
-    job.completed.canvas.agent?.pendingConfirmation !== undefined &&
-    !hasDecisionForCurrentPendingConfirmation(job)
-  ) {
-    return "approval_needed";
+  switch (job.status) {
+    case "pending":
+      return "queued";
+    case "running":
+      return "running";
+    case "approval_needed":
+      return "approval_needed";
+    case "needs_input":
+      return "needs_input";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    case "blocked":
+      return "blocked";
   }
-  if (
-    job.streamEvents.some((event) => event.type === "confirmation.needed") &&
-    job.status !== "completed" &&
-    !hasLatestConfirmationDecision(job)
-  ) {
-    return "approval_needed";
-  }
-  if (job.status === "completed") return "completed";
-  return "running";
-}
-
-function hasDecisionForCurrentPendingConfirmation(job: BasicAgentRunProjectionInput): boolean {
-  const pending = pendingConfirmationIdFromCanvas(job.completed?.canvas);
-  return pending !== undefined && job.confirmationDecisions.some((decision) => decision.confirmationId === pending);
-}
-
-function hasLatestConfirmationDecision(job: BasicAgentRunProjectionInput): boolean {
-  const latestConfirmation = [...job.streamEvents]
-    .reverse()
-    .find((event) => event.type === "confirmation.needed");
-  if (latestConfirmation === undefined) {
-    return false;
-  }
-  const latestDecision = [...job.streamEvents]
-    .reverse()
-    .find((event) => event.type === "user_approval.received" || event.type === "user.guidance");
-  if (latestDecision !== undefined && latestDecision.sequence > latestConfirmation.sequence) {
-    return true;
-  }
-  const confirmationId = latestConfirmation.sourceRefs
-    .map((ref) => ref.startsWith("confirmation:") ? ref.slice("confirmation:".length) : undefined)
-    .find((ref): ref is string => ref !== undefined && ref.length > 0) ??
-    pendingConfirmationIdFromCanvas(job.completed?.canvas);
-  return confirmationId !== undefined && job.confirmationDecisions.some((decision) => decision.confirmationId === confirmationId);
-}
-
-function pendingConfirmationIdFromCanvas(canvas: NonNullable<BasicAgentRunProjectionInput["completed"]>["canvas"]): string | undefined {
-  const agent = asRecord(canvas?.agent);
-  const pending = asRecord(agent.pendingConfirmation);
-  const confirmationId = pending.confirmationId;
-  return typeof confirmationId === "string" && confirmationId.trim().length > 0
-    ? confirmationId.trim()
-    : undefined;
 }
 
 function basicRunTitle(job: BasicAgentRunProjectionInput, status: AgentTaskStatus): string {
@@ -335,10 +291,4 @@ function sourceRefToObservationRef(ref: string): ObservationRef {
     if (kind === "sub_agent_batch") return { kind: "sub_agent_batch", id };
   }
   return { kind: "event", id: ref };
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : {};
 }

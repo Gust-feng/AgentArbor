@@ -2,15 +2,10 @@ import type { FileSystemRuntimeDatabasePaths } from "../../adapters/runtime-data
 import type { RuntimeDatabase, RuntimeRunSnapshotContent } from "../../domain/runtime-database/index.js";
 import type { ToolErrorFacts } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
-import {
-  durableBasicRunEvents,
-  type BasicAgentRunExecutor,
-} from "../basic-agent-runtime/index.js";
 import type { PanelConversationReadModel } from "../panel-conversation/panel-conversations.js";
 import { toRuntimeConversationRecord } from "../panel-conversation/panel-conversations.js";
 import { panelRunPayloadForStatus, PanelRunJobStore, type PanelRunJob } from "./run-jobs.js";
 import { createPanelRunTrace, createPanelRunTranscript } from "../panel-run-read-model.js";
-import { createLiveBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
 import {
   enqueuePanelPersistence,
   enqueuePanelPersistenceBackground,
@@ -30,7 +25,6 @@ import { persistentPanelRunStreamEvents } from "./run-stream-sync.js";
 
 export type PanelRunPersistenceRuntime = {
   readonly runJobs: PanelRunJobStore;
-  readonly runExecutor: Pick<BasicAgentRunExecutor, "get" | "replayEvents" | "syncRunEvents">;
   readonly conversations: {
     getReadModel(conversationId: string): PanelConversationReadModel | undefined;
   };
@@ -114,8 +108,6 @@ async function persistPanelRunNow(
   const statusPayload = panelRunPayloadForStatus(job);
   const transcriptPayload = statusPayload === undefined || !("observation" in statusPayload) ? undefined : statusPayload;
   const streamEvents = persistentPanelRunStreamEvents(job.streamEvents);
-  const basicRun = runtime.runExecutor.get(job.runId);
-  const basicReplay = runtime.runExecutor.replayEvents(job.runId, 0);
   const transcript = createPanelRunTranscript({
     runId: job.runId,
     status: job.status,
@@ -130,21 +122,11 @@ async function persistPanelRunNow(
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   });
-  const basicEvents = basicReplay === undefined ? [] : durableBasicRunEvents(basicReplay.events);
-  const contextLedger = basicRun === undefined || basicReplay === undefined
-    ? undefined
-    : createLiveBasicAgentWorkViewReadModel({
-        job,
-        run: basicRun,
-        events: basicReplay.events,
-        streamEvents,
-      }).contextLedger;
+  const contextLedger = statusPayload?.ordinary?.contextLedger;
   const eventEntriesBySequence = new Map(eventEntries.map((entry) => [entry.sequence, entry]));
   const snapshot: RuntimeRunSnapshotContent = {
     run,
     workspace: workspaceRecord,
-    basicRun,
-    basicEvents,
     events: trace.events.map((event) => toRuntimeEventRecord(
       job.runId,
       event,
@@ -182,7 +164,7 @@ function recordBackgroundPersistenceFailure(
     error
   );
   const createdAt = nowIso();
-  const event = runtime.runJobs.appendStreamEvent(job.runId, {
+  runtime.runJobs.appendStreamEvent(job.runId, {
     eventId: `${job.runId}:persistence.failed:${createId("diagnostic")}`,
     runId: job.runId,
     type: "agent.note.completed",
@@ -202,7 +184,6 @@ function recordBackgroundPersistenceFailure(
     modelCallRefs: [],
     toolCallRefs: [],
   });
-  runtime.runExecutor.syncRunEvents(job, [event]);
 }
 
 function persistenceFailureFacts(

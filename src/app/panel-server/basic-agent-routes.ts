@@ -1,14 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BasicAgentRun } from "../../domain/basic-agent/index.js";
-import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
+import type { RuntimeDatabase, RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
 import {
-  basicRunFromRuntimeSnapshot,
-  basicRunReplayFromRuntimeSnapshot,
   BasicAgentConfirmationDecisionError,
   projectRunStreamEventToRunEvent,
   submitRestoredBasicConfirmationDecision,
   type BasicAgentRunExecutor,
 } from "../basic-agent-runtime/index.js";
+import {
+  createPersistedBasicAgentReplay,
+  createPersistedBasicAgentRun,
+} from "./basic-agent-read-models.js";
 import type { PanelRunJob } from "./run-jobs.js";
 import { createBasicAgentRunViewReadModel } from "./basic-agent-run-view.js";
 import {
@@ -157,7 +159,7 @@ async function handleGetBasicRunEventsRequest(
   if (snapshot === undefined) {
     throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行事件。");
   }
-  const restored = basicRunReplayFromRuntimeSnapshot(snapshot);
+  const restored = createPersistedBasicAgentReplay(snapshot);
   writeJson(response, 200, {
     ok: true,
     runId,
@@ -191,13 +193,13 @@ async function handleGetBasicRunStreamRequest(
   request: IncomingMessage,
   response: ServerResponse
 ): Promise<void> {
-  let restoredReplay: ReturnType<typeof basicRunReplayFromRuntimeSnapshot> | undefined;
+  let restoredReplay: ReturnType<typeof createPersistedBasicAgentReplay> | undefined;
   if (runtime.runJobs.get(runId) === undefined) {
     const snapshot = await runtime.runtimeDatabase?.getRun(runId);
     if (snapshot === undefined) {
       throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行事件。");
     }
-    restoredReplay = basicRunReplayFromRuntimeSnapshot(snapshot);
+    restoredReplay = createPersistedBasicAgentReplay(snapshot);
   }
 
   let lastSequence = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
@@ -280,7 +282,7 @@ async function handleGetBasicRunRequest(
   }
   writeJson(response, 200, {
     ok: true,
-    run: basicRunFromRuntimeSnapshot(snapshot),
+    run: createPersistedBasicAgentRun(snapshot),
   });
 }
 
@@ -317,7 +319,7 @@ async function handleConfirmationDecisionRequest(
       throw new PanelHttpError(409, error.code, error.message);
     }
     if (error instanceof Error && error.message.includes("not found")) {
-      let restored: BasicAgentRun | undefined;
+      let restored: RuntimeRunSnapshot | undefined;
       await enqueuePanelPersistence(runtime.persistenceChains, runId, async () => {
         restored = await submitRestoredBasicConfirmationDecision({
           runtimeDatabase: runtime.runtimeDatabase,
@@ -327,7 +329,7 @@ async function handleConfirmationDecisionRequest(
         });
       });
       if (restored !== undefined) {
-        return restored;
+        return createPersistedBasicAgentRun(restored);
       }
       throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
     }

@@ -240,7 +240,6 @@ function snapshotRecord(
 ): RuntimeRunSnapshot {
   return {
     run,
-    basicEvents: [],
     events: [],
     modelCalls,
     toolCalls: [],

@@ -1,5 +1,5 @@
 import type { ArborMessageType, ArtifactRef } from "../common.js";
-import type { BasicAgentRun, ContextLedger, RunEvent } from "../basic-agent/contracts.js";
+import type { ContextLedger } from "../basic-agent/contracts.js";
 import type {
   BasicAgentCapabilitySnapshot,
   RunAgentDefinitionRef,
@@ -57,7 +57,7 @@ export type RuntimeConversationTurnRecord = {
   readonly role: "user" | "assistant";
   readonly title: string;
   readonly content: string;
-  readonly status: "pending" | "running" | "completed" | "failed" | "blocked" | "needs_input";
+  readonly status: "pending" | "running" | "completed" | "failed" | "cancelled" | "blocked" | "needs_input";
   readonly runId?: string;
   readonly responseModel?: {
     readonly profileId: string;
@@ -230,8 +230,6 @@ export type RuntimeContextLedgerRecord = ContextLedger;
 export type RuntimeRunSnapshot = {
   readonly run: RuntimeRunRecord;
   readonly workspace?: RuntimeWorkspaceRecord;
-  readonly basicRun?: BasicAgentRun;
-  readonly basicEvents: readonly RunEvent[];
   readonly events: readonly RuntimeEventRecord[];
   readonly modelCalls: readonly RuntimeModelCallRecord[];
   readonly toolCalls: readonly RuntimeToolCallRecord[];

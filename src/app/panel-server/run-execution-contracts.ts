@@ -12,6 +12,7 @@ import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { BasicAgentPendingToolContinuation } from "../basic-agent-runtime/index.js";
+import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
@@ -35,6 +36,7 @@ export type PanelRunExecutionResult = {
   readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: PanelRunCanvasReadModel;
   readonly capabilityResolution?: RunCapabilityResolution;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
   readonly failed?: {
     readonly code: string;
     readonly message: string;

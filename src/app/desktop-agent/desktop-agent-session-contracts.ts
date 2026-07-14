@@ -6,6 +6,7 @@ import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { BasicAgentConversationSummary } from "../basic-agent-runtime/conversation-compaction-contracts.js";
 import type { BasicAgentContextPack } from "../basic-agent-runtime/context-pack.js";
+import type { ContextLedger } from "../../domain/basic-agent/index.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
@@ -23,44 +24,6 @@ import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 export type DesktopAgentSessionStatus = "completed" | "confirmation_needed" | "stopped" | "failed" | "paused";
 
 export type DesktopAgentStopReason = "out_of_fuel" | "context_overflow";
-
-export type DesktopAgentActivity = {
-  readonly activityId: string;
-  readonly type:
-    | "task_received"
-    | "model_requested"
-    | "model_completed"
-    | "model_failed"
-    | "tool_requested"
-    | "tool_completed"
-    | "tool_failed"
-    | "tool_cancelled"
-    | "confirmation_needed"
-    | "completed"
-    | "stopped"
-    | "failed";
-  readonly title: string;
-  readonly summary: string;
-  readonly status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  readonly createdAt: string;
-  readonly action?: string;
-  readonly path?: string;
-  readonly truncated?: boolean;
-  readonly error?: string;
-  readonly toolName?: string;
-  readonly sourceRefs: readonly string[];
-  readonly modelCallRefs: readonly string[];
-  readonly toolCallRefs: readonly string[];
-};
-
-export type DesktopAgentResultBlock = {
-  readonly blockId: string;
-  readonly kind: "answer" | "tool_summary" | "pending_confirmation" | "failure";
-  readonly title: string;
-  readonly summary: string;
-  readonly evidenceRefs: readonly string[];
-  readonly toolCallRefs: readonly string[];
-};
 
 export type DesktopAgentPendingConfirmation = {
   readonly confirmationId: string;
@@ -82,7 +45,6 @@ export type DesktopAgentAnswer = {
   readonly modelCallRefs: readonly string[];
   readonly toolCallRefs: readonly string[];
   readonly evidenceRefs: readonly string[];
-  readonly resultBlocks: readonly DesktopAgentResultBlock[];
 };
 
 export type DesktopAgentSessionResult = {
@@ -96,11 +58,10 @@ export type DesktopAgentSessionResult = {
   readonly answer?: DesktopAgentAnswer;
   readonly pendingConfirmation?: DesktopAgentPendingConfirmation;
   readonly contextPack?: Pick<BasicAgentContextPack, "usageSummary" | "items" | "budget" | "truncationReport" | "truncated">;
+  readonly contextLedger?: ContextLedger;
   readonly failureMessage?: string;
   readonly modelCallRefs: readonly string[];
   readonly toolCallRefs: readonly string[];
-  readonly activity: readonly DesktopAgentActivity[];
-  readonly eventTypes: readonly string[];
   readonly pendingApproval?: DesktopAgentPendingApprovalContinuation;
 };
 

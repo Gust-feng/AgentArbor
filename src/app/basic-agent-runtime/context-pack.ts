@@ -65,6 +65,7 @@ export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInpu
     usageSummary: ledger.readModel.summary,
     truncationReport: ledger.truncationReport,
     truncated: ledger.truncationReport.truncated,
+    readModel: ledger.readModel,
   };
 }
 

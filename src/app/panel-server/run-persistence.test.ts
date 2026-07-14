@@ -8,7 +8,6 @@ import type {
   RuntimeConversationRecord,
   RuntimeWorkspaceRecord,
 } from "../../domain/runtime-database/index.js";
-import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
 import type {
   BasicAgentCapabilitySnapshot,
   SanitizedInformationAccessConfig,
@@ -106,11 +105,7 @@ test("persistPanelRun writes the workspace frozen at run birth", async () => {
 test("persistPanelRun stores safe context ledger projection for triggered skills", async () => {
   const database = new MemoryRuntimeDatabase();
   const runJobs = new PanelRunJobStore();
-  const basicRun = basicRunFixture("run-placeholder");
-  const runtime = persistenceRuntime(database, runJobs, {
-    getBasicRun: (runId) => ({ ...basicRun, runId }),
-    replayEvents: (runId) => basicReplayFixture(runId),
-  });
+  const runtime = persistenceRuntime(database, runJobs);
   const job = runJobs.create({
     runKind: "desktop",
     runMode: "agent",
@@ -132,6 +127,22 @@ test("persistPanelRun stores safe context ledger projection for triggered skills
   runJobs.complete(job.runId, {
     config: modelConfig(),
     informationAccess: informationAccess(),
+    ordinary: {
+      answer: { content: "done", modelCallRefs: [], toolCallRefs: [], evidenceRefs: [] },
+      contextLedger: {
+        runId: "trace-skill-persist",
+        summary: "技能 1",
+        entries: [{
+          entryId: "context:skill:repo-review",
+          kind: "skill",
+          title: "技能",
+          summary: "Repo Review：触发词 review",
+          refs: [{ kind: "event", id: "context:skill:repo-review" }],
+          status: "used",
+        }],
+        truncation: { truncated: false, omittedItemCount: 0, truncatedItemIds: [] },
+      },
+    },
     canvas: {
       kind: "desktop_agent_canvas",
       taskSoil: {
@@ -188,6 +199,7 @@ test("persistPanelRun stores safe context ledger projection for triggered skills
   await persistPanelRun(runtime, job);
 
   assert.equal(database.contextLedgers.length, 1);
+  assert.equal(database.contextLedgers[0]?.runId, job.runId);
   assert.equal(database.contextLedgers[0]?.entries.some((entry) => entry.kind === "skill"), true);
   assert.equal(JSON.stringify(database.contextLedgers[0]).includes("Repo Review"), true);
   assert.equal(JSON.stringify(database.contextLedgers[0]).includes("FULL PRIVATE SKILL BODY"), false);
@@ -260,28 +272,7 @@ test("restored confirmation waits for an in-flight background snapshot of the sa
     toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
     definitionHash: "sha256:run-persistence-confirmation-race-test",
   };
-  const runtime = persistenceRuntime(database, runJobs, {
-    getBasicRun: (runId) => ({
-      ...basicRunFixture(runId),
-      status: "approval_needed",
-      agentDefinitionRef,
-    }),
-    replayEvents: (runId) => ({
-      cursor: { runId, lastSequence: 1, eventCount: 1 },
-      events: [{
-        id: `${runId}:event:1`,
-        runId,
-        sequence: 1,
-        type: "user_approval.requested",
-        title: "等待确认",
-        summary: "是否继续？",
-        status: "approval_needed",
-        timestamp: "2026-05-31T00:00:01.000Z",
-        refs: [],
-        visibility: "compact",
-      }],
-    }),
-  });
+  const runtime = persistenceRuntime(database, runJobs);
   const job = runJobs.create({
     runKind: "desktop",
     runMode: "agent",
@@ -326,7 +317,7 @@ test("restored confirmation waits for an in-flight background snapshot of the sa
   const gate = database.gateNextSnapshotSave();
   persistPanelRunInBackground(runtime, approvalJob);
   await gate.started;
-  let restored: BasicAgentRun | undefined;
+  let restored: RuntimeRunSnapshot | undefined;
   const decision = enqueuePanelPersistence(runtime.persistenceChains, job.runId, async () => {
     restored = await submitRestoredBasicConfirmationDecision({
       runtimeDatabase: database,
@@ -341,7 +332,7 @@ test("restored confirmation waits for an in-flight background snapshot of the sa
   await waitForPanelPersistenceIdle(runtime.persistenceChains);
   const committed = await database.getRun(job.runId);
 
-  assert.equal(restored?.status, "blocked");
+  assert.equal(restored?.run.status, "blocked");
   assert.equal(committed?.run.status, "blocked");
   assert.equal(committed?.confirmations.find((item) => item.confirmationId === confirmationId)?.status, "denied");
 });
@@ -349,21 +340,9 @@ test("restored confirmation waits for an in-flight background snapshot of the sa
 function persistenceRuntime(
   database: MemoryRuntimeDatabase,
   runJobs: PanelRunJobStore,
-  overrides: {
-    readonly getBasicRun?: (runId: string) => BasicAgentRun | undefined;
-    readonly replayEvents?: (runId: string) => {
-      readonly cursor: { readonly runId: string; readonly lastSequence: number; readonly eventCount: number };
-      readonly events: readonly RunEvent[];
-    } | undefined;
-  } = {}
 ): PanelRunPersistenceRuntime {
   return {
     runJobs,
-    runExecutor: {
-      get: (runId) => overrides.getBasicRun?.(runId),
-      replayEvents: (runId) => overrides.replayEvents?.(runId),
-      syncRunEvents: () => [],
-    },
     conversations: {
       getReadModel: () => undefined,
     },
@@ -373,48 +352,6 @@ function persistenceRuntime(
       appHome: "C:\\AgentArbor\\app",
       runtimeHome: "C:\\AgentArbor\\runtime",
     },
-  };
-}
-
-function basicRunFixture(runId: string): BasicAgentRun {
-  return {
-    runId,
-    title: "已完成",
-    goalSummary: "please review this change",
-    status: "completed",
-    runMode: "agent",
-    createdAt: "2026-05-31T00:00:00.000Z",
-    updatedAt: "2026-05-31T00:00:01.000Z",
-    requiresUserAction: false,
-    eventCursor: {
-      lastSequence: 1,
-      eventCount: 1,
-    },
-  };
-}
-
-function basicReplayFixture(runId: string): {
-  readonly cursor: { readonly runId: string; readonly lastSequence: number; readonly eventCount: number };
-  readonly events: readonly RunEvent[];
-} {
-  return {
-    cursor: {
-      runId,
-      lastSequence: 1,
-      eventCount: 1,
-    },
-    events: [{
-      id: `${runId}:event:1`,
-      runId,
-      sequence: 1,
-      type: "final.result",
-      title: "已回答",
-      summary: "已回答。",
-      status: "completed",
-      timestamp: "2026-05-31T00:00:01.000Z",
-      refs: [],
-      visibility: "compact",
-    }],
   };
 }
 

@@ -137,10 +137,6 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(projection.includes("export function safeDesktopAgentContextPack"), true);
   assert.equal(projection.includes("export function parseAnswer"), true);
   assert.equal(projection.includes("export function pendingConfirmationFrom"), true);
-  assert.equal(projection.includes("export function resultBlocksFrom"), true);
-  assert.equal(projection.includes("export function activityFromEventEntries"), true);
-  assert.equal(projection.includes("function activityFromEventEntry"), true);
-  assert.equal(projection.includes("function toolActivityTitle"), true);
   assert.equal(projection.includes("当前任务的系统指令。"), true);
   assert.equal(projection.includes("桌面基础 Agent 系统边界。"), false);
   assert.equal(runtime.includes('from "./desktop-agent-session-events.js"'), true);

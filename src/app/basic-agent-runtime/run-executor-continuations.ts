@@ -1,4 +1,4 @@
-import type { BasicAgentCanvasProjection, BasicAgentRunJob } from "./run-job.js";
+import type { BasicAgentRunJob } from "./run-job.js";
 import type { BasicAgentPendingToolContinuation } from "./contracts.js";
 
 export class BasicAgentConfirmationDecisionError extends Error {
@@ -68,7 +68,7 @@ export class BasicAgentPendingContinuationStore {
         "这项操作已经处理过。"
       );
     }
-    if (pendingConfirmationIdFromCanvas(job.completed?.canvas) === confirmationId) {
+    if (job.completed?.ordinary?.pendingConfirmation?.confirmationId === confirmationId) {
       return;
     }
     if (this.continuations.has(continuationKey(job.runId, confirmationId))) {
@@ -83,17 +83,4 @@ export class BasicAgentPendingContinuationStore {
 
 function continuationKey(runId: string, confirmationId: string): string {
   return `${runId}:${confirmationId}`;
-}
-
-function pendingConfirmationIdFromCanvas(canvas: BasicAgentCanvasProjection | undefined): string | undefined {
-  const agent = asRecord(canvas?.agent);
-  const pending = asRecord(agent.pendingConfirmation);
-  const confirmationId = pending.confirmationId;
-  return typeof confirmationId === "string" && confirmationId.trim().length > 0
-    ? confirmationId
-    : undefined;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }

@@ -151,8 +151,6 @@ test("panel usage statistics route returns local runtime totals and empty storag
         completedAt: "2026-06-28T01:00:02.000Z",
       },
       workspace: undefined,
-      basicRun: undefined,
-      basicEvents: [],
       events: [],
       modelCalls: [{
         requestId: "usage-model-request",

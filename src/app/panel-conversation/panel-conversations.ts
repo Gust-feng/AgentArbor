@@ -1,7 +1,6 @@
 import { createId, nowIso, reserveId } from "../../kernel/id.js";
 import type { RuntimeConversationRecord } from "../../domain/runtime-database/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import type {
   PanelConversation,
   PanelConversationCurrentRunReadModel,
@@ -15,10 +14,8 @@ import type {
   PanelConversationTurnStatus,
 } from "./panel-conversation-contracts.js";
 import {
-  CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS,
-  CONVERSATION_USER_MESSAGE_MAX_CHARS,
   compact,
-  compactMessageContent,
+  normalizeConversationTurnContent,
   normalizeTurnAttachments,
   normalizeTurnModel,
   toConversationReadModel,
@@ -141,10 +138,7 @@ export class PanelConversationStore {
         turnId: turn.turnId,
         role: turn.role,
         title: compact(turn.title, 120),
-        content: compactMessageContent(
-          turn.role === "assistant" ? sanitizeAssistantVisibleText(turn.content) : turn.content,
-          turn.role === "assistant" ? CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS : CONVERSATION_USER_MESSAGE_MAX_CHARS
-        ),
+        content: normalizeConversationTurnContent(turn.content),
         status: turn.status,
         createdAt: turn.createdAt,
         updatedAt: turn.updatedAt,
@@ -197,7 +191,7 @@ export class PanelConversationStore {
     const userTurn = createTurn({
       role: "user",
       title: "你的消息",
-      content: compactMessageContent(input.goal, CONVERSATION_USER_MESSAGE_MAX_CHARS),
+      content: normalizeConversationTurnContent(input.goal),
       status: queued ? "pending" : "completed",
       taskSoilInput: input.taskSoilInput,
       attachments: input.attachments,
@@ -298,7 +292,7 @@ export class PanelConversationStore {
     readonly runId: string;
     readonly title: string;
     readonly content: string;
-    readonly status: "completed" | "failed" | "blocked" | "needs_input";
+    readonly status: "completed" | "failed" | "cancelled" | "blocked" | "needs_input";
     readonly responseModel?: PanelConversationTurnModel;
   }): void {
     const conversation = this.requireConversation(input.conversationId);
@@ -306,7 +300,7 @@ export class PanelConversationStore {
     assistantTurn.runId = input.runId;
     assistantTurn.responseModel = normalizeTurnModel(input.responseModel) ?? assistantTurn.responseModel;
     assistantTurn.title = compact(input.title, 120);
-    assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS);
+    assistantTurn.content = normalizeConversationTurnContent(input.content);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
     conversation.pendingAction = clearPendingActionForTurn(conversation.pendingAction, assistantTurn.turnId);
@@ -337,7 +331,7 @@ export class PanelConversationStore {
     const conversation = this.requireConversation(input.conversationId);
     const assistantTurn = requireTurn(conversation, input.assistantTurnId);
     assistantTurn.title = compact(input.title, 120);
-    assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS);
+    assistantTurn.content = normalizeConversationTurnContent(input.content);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
     conversation.pendingAction = input.pendingActionKind === undefined || assistantTurn.runId === undefined
@@ -425,10 +419,7 @@ function createTurn(input: {
     turnId: createId("turn"),
     role: input.role,
     title: compact(input.title, 120),
-    content: compactMessageContent(
-      input.role === "assistant" ? sanitizeAssistantVisibleText(input.content) : input.content,
-      input.role === "assistant" ? CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS : CONVERSATION_USER_MESSAGE_MAX_CHARS
-    ),
+    content: normalizeConversationTurnContent(input.content),
     status: input.status,
     createdAt,
     updatedAt: createdAt,

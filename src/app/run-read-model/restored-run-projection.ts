@@ -1,6 +1,9 @@
 import type { RuntimeRunRecord } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../tool-projection/safe-projection.js";
-import { friendlyUserFacingFailureText } from "../text-projection/visible-text-safety.js";
+import {
+  friendlyUserFacingFailureText,
+  sanitizeAssistantVisibleText,
+} from "../text-projection/visible-text-safety.js";
 
 export type RestoredRunResultProjection = {
   readonly title: string;
@@ -18,7 +21,7 @@ export function restoredRunResultProjection(
 ): RestoredRunResultProjection | undefined {
   const title = optionalRestoredText(run.resultTitle, 160);
   const summary = optionalRestoredText(run.resultSummary, 1_000);
-  const content = optionalRestoredText(run.resultAnswer, 128_000);
+  const content = optionalRestoredAnswer(run.resultAnswer);
   if (title === undefined && summary === undefined && content === undefined) {
     return undefined;
   }
@@ -27,6 +30,14 @@ export function restoredRunResultProjection(
     summary: summary ?? optionalRestoredText(content, 1_000) ?? title ?? "",
     content,
   };
+}
+
+function optionalRestoredAnswer(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const text = sanitizeAssistantVisibleText(value);
+  return text.length === 0 ? undefined : text;
 }
 
 export function restoredRunTerminalSummary(input: {

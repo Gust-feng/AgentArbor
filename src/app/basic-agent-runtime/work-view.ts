@@ -16,9 +16,9 @@ import type { ObservationRef, ToolDisplayProjection } from "../../domain/observa
 import type { SubAgentRunView } from "../../domain/sub-agents/contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
+import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import {
   cleanConfirmationSummary,
-  confirmationActionSummaryText,
   isGenericApprovalDecisionText,
 } from "../text-projection/confirmation-copy.js";
 import {
@@ -30,41 +30,12 @@ import {
   contextLedgerFor,
   isToolDisplay,
   mergeToolDisplays,
-  observationRefs,
   type WorkViewCanvasContextLike,
 } from "./work-view-context.js";
 import { transcriptNodesFromRunEvents } from "./work-view-transcript.js";
 import type { BasicAgentContextSkillFacts } from "./contracts.js";
 
-const DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS = 128_000;
-
-type DesktopAgentWorkViewCanvasLike = WorkViewCanvasContextLike & {
-  readonly kind: "desktop_agent_canvas";
-  readonly agent?: WorkViewCanvasContextLike["agent"] & {
-    readonly answer?: {
-      readonly answer: string;
-      readonly evidenceRefs: readonly string[];
-      readonly [key: string]: unknown;
-    };
-    readonly finalAnswer?: string;
-    readonly pendingConfirmation?: {
-      readonly confirmationId: string;
-      readonly title: string;
-      readonly question: string;
-      readonly consequence: string;
-      readonly affectedResources?: readonly string[];
-      readonly riskLevel: string;
-      readonly resumeAvailability?: "live" | "lost_after_restart";
-      readonly requestedAt?: string;
-      readonly expiresAt?: string;
-      readonly sourceRefs: readonly string[];
-      readonly [key: string]: unknown;
-    };
-    readonly [key: string]: unknown;
-  };
-};
-
-export type DesktopWorkViewCanvasLike = WorkViewCanvasContextLike | DesktopAgentWorkViewCanvasLike;
+export type DesktopWorkViewCanvasLike = WorkViewCanvasContextLike;
 
 export type CreateDesktopWorkViewReadModelInput = {
   readonly run: BasicAgentRun;
@@ -75,6 +46,7 @@ export type CreateDesktopWorkViewReadModelInput = {
   readonly toolResultCount?: number;
   readonly transcriptNodes?: readonly TranscriptNode[];
   readonly pendingConfirmation?: ConfirmationRequest;
+  readonly answer?: DesktopWorkViewAnswer;
   readonly restoredResult?: {
     readonly title: string;
     readonly summary: string;
@@ -93,7 +65,7 @@ export function createDesktopWorkViewReadModel(
   const toolResultCount = input.toolResultCount ?? toolDisplays.length;
   const contextLedger = input.restoredContextLedger ?? contextLedgerFor(input, contextAttachments);
   const triggeredSkills = triggeredSkillsFor(input);
-  const pendingConfirmation = input.pendingConfirmation ?? pendingConfirmationFor(input.run, input.canvas);
+  const pendingConfirmation = input.pendingConfirmation;
   const answer = answerFor(input);
   const transcriptNodes = input.transcriptNodes ?? transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation);
   const deliverable: AgentDeliverable | undefined = undefined;
@@ -144,7 +116,7 @@ function triggeredSkillsFor(input: CreateDesktopWorkViewReadModelInput): Desktop
         };
       });
   }
-  const context = desktopAgentCanvasFor(input.canvas)?.agent?.context;
+  const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent?.context : undefined;
   const items = context?.items ?? [];
   return items
     .filter((item) => item.sourceKind === "skill")
@@ -438,68 +410,19 @@ function currentActionFor(
 }
 
 function answerFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewAnswer | undefined {
-  const canvas = input.canvas;
-  const desktopCanvas = desktopAgentCanvasFor(canvas);
-  if (desktopCanvas?.agent?.answer !== undefined) {
+  if (input.answer !== undefined) {
     return {
-      title: "已回答",
-      content: redactOrdinaryText(desktopCanvas.agent.answer.answer, DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS),
-      evidenceRefs: observationRefs(desktopCanvas.agent.answer.evidenceRefs),
-      nextActions: [],
-    };
-  }
-  if (typeof desktopCanvas?.agent?.finalAnswer === "string" && desktopCanvas.agent.finalAnswer.trim().length > 0) {
-    return {
-      title: "已回答",
-      content: redactOrdinaryText(desktopCanvas.agent.finalAnswer, DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS),
-      evidenceRefs: [],
-      nextActions: [],
+      ...input.answer,
+      content: sanitizeAssistantVisibleText(input.answer.content),
     };
   }
   if (input.run.status === "completed" && input.restoredResult?.content !== undefined) {
     return {
       title: input.restoredResult.title.length > 0 ? input.restoredResult.title : "已回答",
-      content: redactOrdinaryText(input.restoredResult.content, DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS),
+      content: sanitizeAssistantVisibleText(input.restoredResult.content),
       evidenceRefs: [],
       nextActions: [],
     };
   }
   return undefined;
-}
-
-function pendingConfirmationFor(
-  run: BasicAgentRun,
-  canvas: DesktopWorkViewCanvasLike | undefined
-): ConfirmationRequest | undefined {
-  const desktopCanvas = desktopAgentCanvasFor(canvas);
-  if (run.status !== "approval_needed") {
-    return undefined;
-  }
-  if (desktopCanvas?.agent?.pendingConfirmation === undefined) {
-    return undefined;
-  }
-  const pending = desktopCanvas.agent.pendingConfirmation;
-  return {
-    confirmationId: pending.confirmationId,
-    runId: run.runId,
-    conversationId: run.conversationId,
-    title: redactOrdinaryText(pending.title, 120),
-    actionSummary: redactOrdinaryText(
-      confirmationActionSummaryText({
-        question: pending.question,
-        consequence: pending.consequence,
-      }),
-      600
-    ),
-    riskLevel: pending.riskLevel === "low" || pending.riskLevel === "medium" || pending.riskLevel === "high" ? pending.riskLevel : "medium",
-    affectedResources: (pending.affectedResources ?? pending.sourceRefs).map((ref) => redactOrdinaryText(ref, 240)),
-    resumeAvailability: pending.resumeAvailability ?? "live",
-    requestedAt: pending.requestedAt ?? run.updatedAt,
-    expiresAt: pending.expiresAt,
-    sourceRefs: pending.sourceRefs,
-  };
-}
-
-function desktopAgentCanvasFor(canvas: DesktopWorkViewCanvasLike | undefined): DesktopAgentWorkViewCanvasLike | undefined {
-  return canvas?.kind === "desktop_agent_canvas" ? canvas as DesktopAgentWorkViewCanvasLike : undefined;
 }

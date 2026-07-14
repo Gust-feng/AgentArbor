@@ -25,6 +25,7 @@ import { runDesktopAgentSession } from "./desktop-agent-session.js";
 import { createOpenAiStreamTextResponse } from "../testing/openai-test-fixtures.js";
 import { createReadSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { ToolCenter } from "../tool-center/index.js";
+import { createDesktopAgentCanvas } from "../panel-read-model/canvas/panel-desktop-agent-canvas.js";
 
 test("Desktop Agent Session answers ordinary questions without entering deep mode", async () => {
   const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "fake" });
@@ -32,21 +33,12 @@ test("Desktop Agent Session answers ordinary questions without entering deep mod
   assert.equal(result.status, "completed");
   assert.equal(result.answer?.answer.includes("AgentArbor 桌面助手"), true);
   assert.equal(result.pendingConfirmation, undefined);
-  assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
+  assert.equal("activity" in result, false);
+  assert.equal("eventTypes" in result, false);
+  assert.equal(result.answer === undefined ? false : "resultBlocks" in result.answer, false);
+  assert.deepEqual(result.runtime.eventLog.types(), ["goal.received", "model.requested", "model.completed"]);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
-});
-
-test("Desktop Agent Session activity omits generic message and model progress", async () => {
-  const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "fake" });
-  const activityText = JSON.stringify(result.activity);
-
-  assert.equal(result.status, "completed");
-  assert.equal(result.activity.some((item) => item.type === "model_requested"), false);
-  assert.equal(result.activity.some((item) => item.type === "model_completed"), false);
-  assert.equal(result.activity.some((item) => item.type === "task_received"), false);
-  assert.equal(activityText.includes("正在处理"), false);
-  assert.equal(activityText.includes("继续处理"), false);
 });
 
 test("Desktop Agent Session defaults aiMode from the frozen capability snapshot", async () => {
@@ -60,7 +52,7 @@ test("Desktop Agent Session defaults aiMode from the frozen capability snapshot"
   });
 
   assert.equal(result.status, "completed");
-  assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
+  assert.deepEqual(result.runtime.eventLog.types(), ["goal.received", "model.requested", "model.completed"]);
   const requested = result.runtime.eventLog.list().find((entry) => entry.type === "model.requested");
   assert.equal((requested?.message.payload as { readonly providerKind?: string }).providerKind, "fake");
 });
@@ -116,7 +108,7 @@ test("Desktop Agent Session keeps complex requests in ordinary desktop assistant
   assert.equal(result.answer?.answer.includes("桌面任务处理"), true);
   assert.equal(result.answer?.answer.includes("深度模式"), false);
   assert.equal(result.pendingConfirmation, undefined);
-  assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
+  assert.deepEqual(result.runtime.eventLog.types(), ["goal.received", "model.requested", "model.completed"]);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
 });
@@ -132,7 +124,7 @@ test("Desktop Agent Session fails when the model stops without a visible answer"
   assert.equal(result.answer, undefined);
   assert.equal(result.failureMessage, "Desktop Agent model stopped without a visible answer.");
   assert.equal(channel.requests.length, 1);
-  assert.deepEqual(result.eventTypes, ["goal.received"]);
+  assert.deepEqual(result.runtime.eventLog.types(), ["goal.received"]);
 });
 
 test("Desktop Agent Session preserves model text that used to look like control markup", async () => {
@@ -146,6 +138,17 @@ test("Desktop Agent Session preserves model text that used to look like control 
   assert.equal(result.answer?.answer, "<tool_call>{\"name\":\"read_file\"}</tool_call>");
   assert.equal(channel.requests.length, 1);
   assert.equal(JSON.stringify(result).includes("<tool_call>"), true);
+});
+
+test("Desktop Agent canvas preserves complete model answers beyond legacy character limits", async () => {
+  const answer = `开头\n${"x".repeat(140_000)}\nCANVAS_ANSWER_TAIL`;
+  const result = await runDesktopAgentSession("返回完整长回答", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => new EmptyVisibleAnswerChannel(answer),
+  });
+  const canvas = createDesktopAgentCanvas({ result });
+
+  assert.equal(canvas.agent.answer?.answer, answer);
 });
 
 test("Desktop Agent Session can use authorized tools before answering", async () => {
@@ -165,15 +168,14 @@ test("Desktop Agent Session can use authorized tools before answering", async ()
   assert.equal(result.answer?.toolCallRefs.includes("call-desktop-agent-search"), true);
   assert.equal(result.answer?.evidenceRefs.some((ref) => ref.includes("research:codebase:desktop-agent")), true);
   assert.equal(result.toolCallRefs.includes("call-desktop-agent-search"), true);
-  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "tool_summary"), true);
   assert.equal(toolCenter.executionCount(), 1);
-  assert.equal(result.eventTypes.includes("tool.requested"), true);
-  assert.equal(result.eventTypes.includes("tool.completed"), true);
+  assert.equal(result.runtime.eventLog.types().includes("tool.requested"), true);
+  assert.equal(result.runtime.eventLog.types().includes("tool.completed"), true);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
 });
 
-test("Desktop Agent Session projects local tool summaries and refs", async () => {
+test("Desktop Agent Session preserves local tool refs in canonical event facts", async () => {
   const toolCenter = new LocalToolCenter();
   const channel = new LocalToolChannel();
   const result = await runDesktopAgentSession("读取 README 并总结", {
@@ -187,10 +189,7 @@ test("Desktop Agent Session projects local tool summaries and refs", async () =>
 
   assert.equal(result.status, "completed");
   assert.equal(result.answer?.evidenceRefs.includes("workspace:file:README.md"), true);
-  const toolBlock = result.answer?.resultBlocks.find((block) => block.kind === "tool_summary");
-  assert.notEqual(toolBlock, undefined);
-  assert.equal(toolBlock?.summary.includes("README.md"), true);
-  assert.equal(result.activity.some((item) => item.toolName === "read_file" && item.summary.includes("README.md")), true);
+  assert.equal(JSON.stringify(result.runtime.eventLog.list()).includes("README.md"), true);
   assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "read_file"), true);
 });
 
@@ -218,8 +217,8 @@ test("Desktop Agent Session reads selected skill resources only on tool demand",
     assert.equal(JSON.stringify(channel.requests[0]).includes("RESOURCE_SENTINEL"), false);
     assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "read_skill_resource"), true);
     assert.equal(JSON.stringify(channel.requests[1]).includes("RESOURCE_SENTINEL"), true);
-    assert.equal(result.eventTypes.includes("tool.requested"), true);
-    assert.equal(result.eventTypes.includes("tool.completed"), true);
+    assert.equal(result.runtime.eventLog.types().includes("tool.requested"), true);
+    assert.equal(result.runtime.eventLog.types().includes("tool.completed"), true);
     assert.equal(result.toolCallRefs.includes("call-skill-resource"), true);
     assert.equal(result.answer?.evidenceRefs.includes("skill:resource-skill:reference:references/guide.md"), true);
   } finally {
@@ -575,9 +574,8 @@ test("Desktop Agent Session projects tool failures without leaking raw output", 
   });
 
   assert.equal(result.status, "completed");
-  assert.equal(result.eventTypes.includes("tool.failed"), true);
-  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "failure"), true);
-  assert.equal(JSON.stringify({ answer: result.answer, activity: result.activity }).includes("raw provider payload"), false);
+  assert.equal(result.runtime.eventLog.types().includes("tool.failed"), true);
+  assert.equal(JSON.stringify(result.answer).includes("raw provider payload"), false);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
 });
 
@@ -598,8 +596,8 @@ test("Desktop Agent Session blocks hidden tool calls before broker execution and
   assert.deepEqual(result.capabilityResolution?.allowedTools, ["search"]);
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["search"]);
   assert.deepEqual(channel.requests[1]?.tools?.map((tool) => tool.name), ["search"]);
-  assert.equal(result.eventTypes.includes("tool.failed"), true);
-  assert.equal(result.eventTypes.includes("tool.completed"), false);
+  assert.equal(result.runtime.eventLog.types().includes("tool.failed"), true);
+  assert.equal(result.runtime.eventLog.types().includes("tool.completed"), false);
   assert.equal(toolCenter.executionCount(), 0);
   const toolFeedback = channel.requests[1]?.sanitizedMessages.find(
     (message) => message.role === "tool" && message.toolCallId === "call-hidden-read"
@@ -631,7 +629,7 @@ test("Desktop Agent Session keeps approval waits out of assistant answers", asyn
   const confirmationPayload = confirmationEvent?.message.payload as { readonly consequence?: string } | undefined;
   assert.equal(confirmationPayload?.consequence, "目标：pending.txt。批准后只执行本次删除文件。");
   assert.equal(JSON.stringify(result).includes("这个操作需要你确认后才能继续"), false);
-  assert.equal(result.eventTypes.includes("user_approval.requested"), true);
+  assert.equal(result.runtime.eventLog.types().includes("user_approval.requested"), true);
 });
 
 test("Desktop Agent Session publishes confirmation requests from the injected agent identity", async () => {
@@ -698,7 +696,7 @@ test("Desktop Agent Session keeps returning tool results until the model stops i
   assert.equal(result.status, "completed");
   assert.equal(result.answer?.answer.includes("我已经基于多轮工具结果完成回答"), true);
   assert.equal(result.failureMessage, undefined);
-  assert.equal(result.eventTypes.includes("tool.failed"), true);
+  assert.equal(result.runtime.eventLog.types().includes("tool.failed"), true);
   assert.equal(channel.requests.length, 5);
 });
 
@@ -764,7 +762,7 @@ test("Desktop Agent Session pauses context_overflow when context maintenance fai
   assert.equal(result.stopReason, "context_overflow");
   assert.equal(result.answer, undefined);
   assert.equal(result.failureMessage?.includes("上下文整理没有成功"), true);
-  assert.equal(result.eventTypes.includes("context.compaction.failed"), true);
+  assert.equal(result.runtime.eventLog.types().includes("context.compaction.failed"), true);
   assert.equal(channel.requests.some((request) => request.purpose === "desktop_context_compaction"), true);
 });
 
@@ -864,7 +862,7 @@ test("Desktop Agent Session compacts oversized conversation history before the m
   assert.equal(finalRequestText.includes("Earlier conversation summary (model-compacted; use only as background):"), true);
   assert.equal(finalRequestText.includes("Older decisions preserved for continuation."), true);
   assert.equal(finalRequestText.includes("OLD_HISTORY_SENTINEL_0_"), false);
-  assert.equal(result.eventTypes.includes("context.compaction.completed"), true);
+  assert.equal(result.runtime.eventLog.types().includes("context.compaction.completed"), true);
   assert.equal(compactionPayload?.scope, "conversation_history");
   assert.equal(typeof compactionPayload?.tokenCount, "number");
   assert.equal(typeof compactionPayload?.threshold, "number");
@@ -900,7 +898,7 @@ test("Desktop Agent Session keeps running when conversation history compaction f
   assert.equal(result.status, "completed");
   assert.equal(result.answer?.answer, "压缩失败后仍保守继续。");
   assert.deepEqual(requests.map((request) => request.purpose), ["desktop_context_compaction", "desktop_agent"]);
-  assert.equal(result.eventTypes.includes("context.compaction.failed"), true);
+  assert.equal(result.runtime.eventLog.types().includes("context.compaction.failed"), true);
   assert.equal(compactionPayload?.scope, "conversation_history");
   assert.equal(compactionPayload?.nonBlocking, true);
   assert.equal(String(compactionPayload?.summary).includes("已保守继续"), true);
@@ -1008,8 +1006,7 @@ test("Desktop Agent Session stops cleanly when AI is disabled", async () => {
   assert.equal(result.answer, undefined);
   assert.equal(result.modelCallRefs.length, 0);
   assert.equal(result.toolCallRefs.length, 0);
-  assert.deepEqual(result.eventTypes, ["goal.received"]);
-  assert.equal(result.activity.some((item) => item.type === "stopped"), true);
+  assert.deepEqual(result.runtime.eventLog.types(), ["goal.received"]);
 });
 
 test("Desktop Agent Session surfaces sanitized model request exceptions as failed runs", async () => {
@@ -1043,8 +1040,7 @@ test("Desktop Agent Session explains missing file context without synthetic conf
   assert.equal(result.answer?.answer.includes("文件或文件夹"), true);
   assert.equal(result.pendingConfirmation, undefined);
   assert.equal(result.toolCallRefs.length, 0);
-  assert.equal(result.eventTypes.includes("user_approval.requested"), false);
-  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "pending_confirmation"), false);
+  assert.equal(result.runtime.eventLog.types().includes("user_approval.requested"), false);
 });
 
 test("Desktop Agent Session keeps daily efficiency advice as direct answer", async () => {
@@ -1053,7 +1049,7 @@ test("Desktop Agent Session keeps daily efficiency advice as direct answer", asy
   assert.equal(result.status, "completed");
   assert.equal(result.answer?.answer.includes("效率建议"), true);
   assert.equal(result.pendingConfirmation, undefined);
-  assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
+  assert.deepEqual(result.runtime.eventLog.types(), ["goal.received", "model.requested", "model.completed"]);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
 });
@@ -1232,7 +1228,7 @@ test("Desktop Agent Session preserves provider control-like markup without synth
   assert.equal(result.answer?.answer.includes("准备调用工具"), false);
   assert.equal(result.answer?.answer.includes("我需要你先提供文件引用"), true);
   assert.equal(result.pendingConfirmation, undefined);
-  assert.equal(result.eventTypes.includes("user_approval.requested"), false);
+  assert.equal(result.runtime.eventLog.types().includes("user_approval.requested"), false);
 });
 
 function customOrdinaryAgent(): AgentDefinition {

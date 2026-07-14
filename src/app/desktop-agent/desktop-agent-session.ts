@@ -30,13 +30,11 @@ import {
   publishTriggeredSkills,
 } from "./desktop-agent-session-events.js";
 import {
-  activityFromEventEntries,
   evidenceRefsFromToolCalls,
   parseAnswer,
   pendingConfirmationFrom,
   refsFromResponse,
   refsFromToolCalls,
-  resultBlocksFrom,
   safeDesktopAgentContextPack,
 } from "./desktop-agent-session-projection.js";
 import {
@@ -48,12 +46,10 @@ import {
 import { asRecord, stringOrUndefined } from "../run-read-model/value-utils.js";
 
 export type {
-  DesktopAgentActivity,
   DesktopAgentAnswer,
   DesktopAgentConversationMessage,
   DesktopAgentPendingApprovalContinuation,
   DesktopAgentPendingConfirmation,
-  DesktopAgentResultBlock,
   DesktopAgentSessionResult,
   DesktopAgentSessionRuntimeContext,
   DesktopAgentSessionStatus,
@@ -103,8 +99,6 @@ export async function runDesktopAgentSession(
       failureMessage: "AI runtime is not configured; Desktop Agent stopped before working.",
       modelCallRefs: [],
       toolCallRefs: [],
-      activity: activityFromEventEntries(runtime.eventLog.list(), "stopped"),
-      eventTypes: runtime.eventLog.types(),
     };
   }
 
@@ -303,13 +297,12 @@ function desktopAgentResultFromTurn(input: {
       taskSoil: input.taskSoil,
       capabilityResolution: input.capabilityResolution,
       contextPack: safeDesktopAgentContextPack(input.contextPack),
+      contextLedger: input.contextPack.readModel,
       failureMessage: input.turn.stoppedReason === "context_overflow"
         ? "上下文整理没有成功，任务没有完成。你可以继续发送消息，我会接着处理。"
         : "任务没有完成。你可以补充要求或重新发起，我会接着处理。",
       modelCallRefs,
       toolCallRefs,
-      activity: activityFromEventEntries(input.runtime.eventLog.list(), "paused"),
-      eventTypes: input.runtime.eventLog.types(),
     };
   }
   if (waitingForApproval) {
@@ -340,10 +333,9 @@ function desktopAgentResultFromTurn(input: {
       capabilityResolution: input.capabilityResolution,
       pendingConfirmation,
       contextPack: safeDesktopAgentContextPack(input.contextPack),
+      contextLedger: input.contextPack.readModel,
       modelCallRefs,
       toolCallRefs,
-      activity: activityFromEventEntries(input.runtime.eventLog.list(), "confirmation_needed"),
-      eventTypes: input.runtime.eventLog.types(),
       pendingApproval: pendingApprovalContinuation(input, pendingConfirmation),
     };
   }
@@ -360,15 +352,14 @@ function desktopAgentResultFromTurn(input: {
       taskSoil: input.taskSoil,
       capabilityResolution: input.capabilityResolution,
       contextPack: safeDesktopAgentContextPack(input.contextPack),
+      contextLedger: input.contextPack.readModel,
       failureMessage: input.turn.finalOutput?.failure?.message ?? "任务没有完成。",
       modelCallRefs,
       toolCallRefs,
-      activity: activityFromEventEntries(input.runtime.eventLog.list(), "failed"),
-      eventTypes: input.runtime.eventLog.types(),
     };
   }
 
-  const answer = parseAnswer(input.turn.finalOutput, input.turn.toolCalls);
+  const answer = parseAnswer(input.turn.finalOutput);
   if (answer === undefined) {
     return {
       status: "failed",
@@ -378,11 +369,10 @@ function desktopAgentResultFromTurn(input: {
       taskSoil: input.taskSoil,
       capabilityResolution: input.capabilityResolution,
       contextPack: safeDesktopAgentContextPack(input.contextPack),
+      contextLedger: input.contextPack.readModel,
       failureMessage: "Desktop Agent model stopped without a visible answer.",
       modelCallRefs,
       toolCallRefs,
-      activity: activityFromEventEntries(input.runtime.eventLog.list(), "failed"),
-      eventTypes: input.runtime.eventLog.types(),
     };
   }
   const evidenceRefs = evidenceRefsFromToolCalls(input.turn.toolCalls);
@@ -404,12 +394,6 @@ function desktopAgentResultFromTurn(input: {
       pendingConfirmation,
     });
   }
-  const resultBlocks = resultBlocksFrom({
-    answer,
-    toolCalls: input.turn.toolCalls,
-    evidenceRefs,
-    pendingConfirmation,
-  });
   const status = pendingConfirmation === undefined ? "completed" : "confirmation_needed";
   return {
     status,
@@ -423,14 +407,12 @@ function desktopAgentResultFromTurn(input: {
       modelCallRefs,
       toolCallRefs,
       evidenceRefs,
-      resultBlocks,
     },
     pendingConfirmation,
     contextPack: safeDesktopAgentContextPack(input.contextPack),
+    contextLedger: input.contextPack.readModel,
     modelCallRefs,
     toolCallRefs,
-    activity: activityFromEventEntries(input.runtime.eventLog.list(), status),
-    eventTypes: input.runtime.eventLog.types(),
     pendingApproval: pendingApprovalContinuation(input, pendingConfirmation),
   };
 }

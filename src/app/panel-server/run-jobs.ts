@@ -15,6 +15,7 @@ import type { PanelRunConfigurationFailureSummary, PanelRunSummary } from "../pa
 import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "../panel-read-model/run/index.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
+import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 import { resolveRunModeForKind } from "../run-runtime-core/run-mode-policy.js";
 import type { AgentArborRunKind, AgentArborRunMode } from "../run-runtime-core/run-mode-policy.js";
@@ -36,6 +37,7 @@ export type PanelRunCompletedPayload = {
   readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: PanelRunCanvasReadModel;
   readonly capabilityResolution?: RunCapabilityResolution;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
 };
 
 export type PanelRunFailedPayload = {
@@ -49,6 +51,7 @@ export type PanelRunFailedPayload = {
     readonly message: string;
   };
   readonly summary?: PanelRunConfigurationFailureSummary;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
 };
 
 export type PanelRunTerminalPayload = {
@@ -64,6 +67,7 @@ export type PanelRunTerminalPayload = {
   readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: PanelRunCanvasReadModel;
   readonly capabilityResolution?: RunCapabilityResolution;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
 };
 
 export type PanelRunStatusPayload =

@@ -34,6 +34,7 @@ import {
   persistentPanelRunStreamEvents,
 } from "./run-stream-sync.js";
 import { projectPanelRunResponseBase, type PanelRunResponseBase } from "./run-response-base.js";
+import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.js";
 
 export type PanelRunJobResponseRuntime = {
   readonly conversations: Pick<PanelConversationStore, "getReadModel">;
@@ -50,6 +51,7 @@ export type PanelRunJobResponse = PanelRunResponseBase & {
   readonly summary?: PanelRunSummaryPayload;
   readonly observation?: PanelObservationReadModel;
   readonly canvas?: PanelRunCanvasReadModel;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
   readonly runtimeSummary?: PanelRuntimeSummaryReadModel;
 };
 
@@ -123,6 +125,7 @@ export function createPanelRunJobResponse(
     summary: responseSummary,
     observation,
     canvas: statusPayload?.canvas,
+    ordinary: statusPayload?.ordinary,
     runtimeSummary: summarizePanelRuntimeVisibility({
       runId: job.runId,
       processRegistry: runtime.processRegistry,

@@ -10,6 +10,7 @@ import type {
 import type { ModelMessage, ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type {
+  ContextLedger,
   ContextLedgerSkillFacts,
   ContextLedgerSkillLoadStatus,
   ContextLedgerSkillMarkUsedStatus,
@@ -23,6 +24,7 @@ import type { RunSummary } from "../run-read-model/run-summary.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type {
   BasicAgentCanvasProjection,
+  BasicAgentOrdinaryRunFacts,
   BasicAgentRunJob,
   BasicAgentRunJobStore,
   BasicAgentRunKind,
@@ -86,6 +88,7 @@ export type BasicAgentContextPack = {
   readonly usageSummary: string;
   readonly truncationReport: BasicAgentContextTruncationReport;
   readonly truncated: boolean;
+  readonly readModel: ContextLedger;
 };
 
 export type BasicAgentRuntimeReadyContext = {
@@ -114,6 +117,7 @@ export type BasicAgentRunExecutionResult = {
   readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: BasicAgentCanvasProjection;
   readonly capabilityResolution?: RunCapabilityResolution;
+  readonly ordinary?: BasicAgentOrdinaryRunFacts;
   readonly failed?: {
     readonly code: string;
     readonly message: string;
@@ -165,7 +169,9 @@ export type BasicAgentRunExecutorConfig = {
   readonly inspectRunResources?: (runId: string, context: BasicAgentRunResourceInspectionContext) => Promise<unknown> | unknown;
   readonly executionAdapter: BasicAgentExecutionAdapter;
   /** Projects newly available runtime facts after a write-side state change. */
-  readonly projectRunEvents?: (job: BasicAgentRunJob) => readonly BasicAgentRunStreamEvent[];
+  readonly projectRunEvents?: (job: BasicAgentRunJob) => void;
+  /** Selects the stable transport events exposed through replay and persistence. */
+  readonly runEventsForReplay?: (job: BasicAgentRunJob) => readonly BasicAgentRunStreamEvent[];
   readonly failRun: (job: BasicAgentRunJob, error: unknown) => Promise<void>;
   readonly onRuntimeReady: (runId: string, context: BasicAgentRuntimeReadyContext) => void;
   readonly onModelOutputDelta: (runId: string, delta: ModelOutputDelta) => void;

@@ -635,12 +635,18 @@ test("basic agent approve after restart blocks because executable continuation i
       server.url,
       `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/view?cursor=0`
     );
+    const restoredRun = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}`
+    );
     const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
 
     assert.equal(restoredWorkView.body.workView.pendingConfirmation.resumeAvailability, "lost_after_restart");
     assert.equal("workSession" in restoredWorkView.body, false);
     assert.equal(approved.status, 200);
     assert.equal(approved.body.run.status, "blocked");
+    assert.deepEqual(approved.body.run.eventCursor, restoredRun.body.run.eventCursor);
+    assert.equal(approved.body.run.currentStep, restoredRun.body.run.currentStep);
     assert.equal(runtimeRun.body.snapshot.run.status, "blocked");
     assert.equal(runtimeRun.body.snapshot.confirmations[0].status, "approved");
     assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "confirmation.needed"), false);
@@ -657,7 +663,7 @@ test("basic agent approve after restart blocks because executable continuation i
   }
 });
 
-test("restored confirmation decisions serialize the full read and snapshot commit", async () => {
+test("restored confirmation decisions serialize and reject a stale second decision", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-concurrent-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-concurrent-workspace-"));
   let server = await startLocalPanelServer({
@@ -757,9 +763,10 @@ test("restored confirmation decisions serialize the full read and snapshot commi
     const committed = await delegate.getRun(start.body.runId);
 
     assert.equal(firstDecision.status, 200, firstDecision.text);
-    assert.equal(secondDecision.status, 200, secondDecision.text);
+    assert.equal(secondDecision.status, 404, secondDecision.text);
+    assert.equal(committed?.run.status, "needs_input");
     assert.equal(committed?.confirmations.find((item) => item.confirmationId === firstConfirmationId)?.status, "guidance");
-    assert.equal(committed?.confirmations.find((item) => item.confirmationId === secondConfirmationId)?.status, "denied");
+    assert.equal(committed?.confirmations.find((item) => item.confirmationId === secondConfirmationId)?.status, "pending");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

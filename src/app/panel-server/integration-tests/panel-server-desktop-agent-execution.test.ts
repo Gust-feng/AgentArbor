@@ -509,6 +509,8 @@ test("ordinary desktop execution can run a frozen fake MCP tool through the defa
   assert.equal(result.completed, true);
   assert.deepEqual(result.capabilityResolution?.allowedTools, ["fake_docs__lookup"]);
   assert.equal(result.canvas?.kind === "desktop_agent_canvas" ? result.canvas.agent.answer?.answer : undefined, "我已根据 fake MCP 工具结果回答。");
+  assert.deepEqual(result.canvas?.kind === "desktop_agent_canvas" ? result.canvas.agent.answer?.resultBlocks : undefined, []);
+  assert.deepEqual(result.canvas?.kind === "desktop_agent_canvas" ? result.canvas.agent.activity : undefined, []);
   assert.deepEqual(channel.requests.map((request) => request.tools?.map((tool) => tool.name)), [
     ["fake_docs__lookup"],
     ["fake_docs__lookup"],

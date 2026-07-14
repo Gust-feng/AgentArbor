@@ -4,11 +4,43 @@ import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js"
 import { createDesktopWorkViewReadModel } from "./work-view.js";
 import { transcriptNodesFromRunEvents } from "./work-view-transcript.js";
 
+function workViewAnswer(content: string, refs: readonly string[] = []) {
+  return {
+    title: "已回答",
+    content,
+    evidenceRefs: refs.map((ref) => ({
+      kind: ref.startsWith("tool:") ? "tool_call" as const : "event" as const,
+      id: ref.includes(":") ? ref.slice(ref.indexOf(":") + 1) : ref,
+    })),
+    nextActions: [],
+  };
+}
+
+function confirmationRequest(
+  runId: string,
+  confirmationId: string,
+  actionSummary: string,
+  riskLevel: "low" | "medium" | "high"
+) {
+  return {
+    confirmationId,
+    runId,
+    title: "待处理",
+    actionSummary,
+    affectedResources: ["tool:call-1"],
+    riskLevel,
+    resumeAvailability: "live" as const,
+    requestedAt: "2026-06-02T00:00:01.000Z",
+    sourceRefs: ["tool:call-1"],
+  };
+}
+
 test("work view read model keeps ordinary completed answers separate from deliverables", () => {
   const run = basicRun("completed");
   const workView = createDesktopWorkViewReadModel({
     run,
     events: [event(run.runId, "final.result", "结果已生成", "completed")],
+    answer: workViewAnswer("这是总结结果。", ["tool:tool-call-1"]),
     canvas: {
       kind: "desktop_agent_canvas",
       taskSoil: {
@@ -53,11 +85,24 @@ test("work view read model keeps ordinary completed answers separate from delive
   assert.equal(JSON.stringify(workView).includes("模型输入"), false);
 });
 
+test("work view preserves complete ordinary answers beyond legacy character limits", () => {
+  const run = basicRun("completed");
+  const answer = `开头\n${"x".repeat(140_000)}\nWORK_VIEW_ANSWER_TAIL`;
+  const workView = createDesktopWorkViewReadModel({
+    run,
+    events: [],
+    answer: workViewAnswer(answer),
+  });
+
+  assert.equal(workView.answer?.content, answer);
+});
+
 test("desktop work view read model does not re-expose the legacy workSession alias", () => {
   const run = basicRun("completed");
   const workView = createDesktopWorkViewReadModel({
     run,
     events: [event(run.runId, "final.result", "结果已生成", "completed")],
+    answer: workViewAnswer("这是总结结果。"),
     canvas: {
       kind: "desktop_agent_canvas",
       taskSoil: {
@@ -96,6 +141,7 @@ test("work view read model does not truncate ordinary answers before the chat tu
   const workView = createDesktopWorkViewReadModel({
     run,
     events: [event(run.runId, "final.result", "结果已生成", "completed")],
+    answer: workViewAnswer(longAnswer),
     canvas: {
       kind: "desktop_agent_canvas",
       taskSoil: {
@@ -380,6 +426,7 @@ test("work view read model surfaces approval as the main stage", () => {
   const workView = createDesktopWorkViewReadModel({
     run,
     events: [event(run.runId, "confirmation.needed", "需要确认", "approval_needed")],
+    pendingConfirmation: confirmationRequest(run.runId, "confirmation-test", "准备删除文件。", "high"),
     canvas: {
       kind: "desktop_agent_canvas",
       taskSoil: {
@@ -529,6 +576,9 @@ test("work view read model keeps unfinished status matrix explicit without stale
     const workView = createDesktopWorkViewReadModel({
       run: item.run,
       events: [staleConfirmationEvent, terminalEvent],
+      pendingConfirmation: item.expectsPendingConfirmation
+        ? confirmationRequest(item.run.runId, "confirmation-command", "运行命令：pnpm test", "medium")
+        : undefined,
       canvas: {
         kind: "desktop_agent_canvas",
         taskSoil: {
@@ -584,6 +634,12 @@ test("work view read model preserves concrete confirmation action", () => {
         "approval_needed"
       ),
     ],
+    pendingConfirmation: confirmationRequest(
+      run.runId,
+      "confirmation-delete",
+      "删除文件：C:\\repo\\old.txt",
+      "high"
+    ),
     canvas: {
       kind: "desktop_agent_canvas",
       taskSoil: {
@@ -652,6 +708,7 @@ test("work view read model counts tool results without duplicating a tool eviden
   const workView = createDesktopWorkViewReadModel({
     run,
     events: [event(run.runId, "tool.completed", "搜索已完成", "completed")],
+    answer: workViewAnswer("已根据搜索证据回答。", ["tool:call-search"]),
     canvas: {
       kind: "desktop_agent_canvas",
       taskSoil: {

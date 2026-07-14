@@ -167,8 +167,6 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     await database.saveRunSnapshot({
       run,
       workspace,
-      basicRun: undefined,
-      basicEvents: [],
       events,
       modelCalls,
       toolCalls,
@@ -569,8 +567,6 @@ function emptyRunSnapshot(
   return {
     run,
     workspace,
-    basicRun: undefined,
-    basicEvents: [],
     events: [],
     modelCalls: [],
     toolCalls: [],

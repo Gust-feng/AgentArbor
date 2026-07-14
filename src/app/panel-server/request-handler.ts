@@ -311,6 +311,7 @@ export async function closePanelServer(
       multiAgentDisposal,
     ]);
     await runtime.runExecutor.dispose();
+    runtime.runStreamProjection.clear();
     await runtime.toolOutputStore.clear();
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
     await waitForPanelPersistenceIdle(runtime);

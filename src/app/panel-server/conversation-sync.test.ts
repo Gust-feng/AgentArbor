@@ -8,7 +8,7 @@ import {
   type PanelConversationSyncRunResponse,
 } from "./conversation-sync.js";
 
-test("syncConversationTurnForJob completes assistant turn from desktop answer canvas", () => {
+test("syncConversationTurnForJob completes assistant turn from owned Ordinary answer facts", () => {
   const { conversations, job } = startedConversationJob();
 
   syncConversationTurnForJob({
@@ -16,6 +16,7 @@ test("syncConversationTurnForJob completes assistant turn from desktop answer ca
     job,
     response: response({
       status: "completed",
+      ordinary: ordinaryAnswer("已整理完成。"),
       canvas: {
         kind: "desktop_agent_canvas",
         taskSoil: taskSoilCanvas(),
@@ -48,6 +49,23 @@ test("syncConversationTurnForJob completes assistant turn from desktop answer ca
   assert.equal(assistant?.responseModel?.model, "gpt-sync-latest");
 });
 
+test("syncConversationTurnForJob preserves cancelled run semantics", () => {
+  const { conversations, job } = startedConversationJob();
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({ status: "cancelled" }),
+  });
+
+  const conversation = conversations.getReadModel(job.conversationId ?? "");
+  const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "已取消");
+  assert.equal(assistant?.content, "已取消。");
+  assert.equal(assistant?.status, "cancelled");
+  assert.equal(conversation?.status, "cancelled");
+});
+
 test("syncConversationTurnForJob records fake runs as the actual fake response model", () => {
   const { conversations, job } = startedConversationJob();
 
@@ -56,6 +74,7 @@ test("syncConversationTurnForJob records fake runs as the actual fake response m
     job,
     response: response({
       status: "completed",
+      ordinary: ordinaryAnswer("fake 运行完成。"),
       modelCalls: [
         {
           requestId: "model-call-fake",
@@ -111,6 +130,7 @@ test("syncConversationTurnForJob keeps long desktop answers intact", () => {
     job,
     response: response({
       status: "completed",
+      ordinary: ordinaryAnswer(longAnswer),
       canvas: {
         kind: "desktop_agent_canvas",
         taskSoil: taskSoilCanvas(),
@@ -141,7 +161,7 @@ test("syncConversationTurnForJob keeps long desktop answers intact", () => {
   assert.equal(assistant?.content.endsWith("结尾"), true);
 });
 
-test("syncConversationTurnForJob does not complete without visible canvas output", () => {
+test("syncConversationTurnForJob does not complete without an owned Ordinary answer", () => {
   const { conversations, job } = startedConversationJob();
 
   syncConversationTurnForJob({
@@ -169,6 +189,7 @@ test("syncConversationTurnForJob keeps approval requests as running previews", (
     job,
     response: response({
       status: "approval_needed",
+      ordinary: ordinaryPending("confirmation-delete", "是否删除文件？", "medium"),
       canvas: {
         kind: "desktop_agent_canvas",
         taskSoil: taskSoilCanvas(),
@@ -212,6 +233,7 @@ test("syncConversationTurnForJob keeps concrete confirmation preview", () => {
     job,
     response: response({
       status: "approval_needed",
+      ordinary: ordinaryPending("confirmation-delete", "删除文件：C:\\repo\\old.txt", "high"),
       canvas: {
         kind: "desktop_agent_canvas",
         taskSoil: taskSoilCanvas(),
@@ -838,7 +860,7 @@ test("syncConversationTurnForJob preserves repeated replay output chunks", () =>
   assert.equal(assistant?.content, "haha");
 });
 
-test("syncConversationTurnForJob prefers HTTP event errors for failed turns", () => {
+test("syncConversationTurnForJob uses the terminal run error for failed turns", () => {
   const { conversations, job } = startedConversationJob();
   const secret = "sk-sync-secret";
 
@@ -866,8 +888,8 @@ test("syncConversationTurnForJob prefers HTTP event errors for failed turns", ()
   const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
   assert.equal(assistant?.title, "未完成");
   assert.equal(assistant?.status, "failed");
-  assert.equal(assistant?.content.includes("错误信息：HTTP 401"), true);
-  assert.equal(assistant?.content.includes("HTTP 401"), true);
+  assert.equal(assistant?.content.includes("错误信息：raw provider response"), true);
+  assert.equal(assistant?.content.includes("HTTP 401"), false);
   assert.equal(assistant?.content.includes(secret), true);
 });
 
@@ -1074,9 +1096,34 @@ function startedConversationJob(): {
   };
 }
 
+function ordinaryAnswer(content: string): NonNullable<PanelConversationSyncRunResponse["ordinary"]> {
+  return {
+    answer: { content, modelCallRefs: [], toolCallRefs: [], evidenceRefs: [] },
+  };
+}
+
+function ordinaryPending(
+  confirmationId: string,
+  actionSummary: string,
+  riskLevel: "low" | "medium" | "high"
+): NonNullable<PanelConversationSyncRunResponse["ordinary"]> {
+  return {
+    pendingConfirmation: {
+      confirmationId,
+      title: "需要你判断",
+      actionSummary,
+      affectedResources: [],
+      riskLevel,
+      requestedAt: "2026-01-01T00:00:00.000Z",
+      sourceRefs: [],
+    },
+  };
+}
+
 function response(input: {
   readonly status: PanelConversationSyncRunResponse["status"];
   readonly canvas?: PanelConversationSyncRunResponse["canvas"];
+  readonly ordinary?: PanelConversationSyncRunResponse["ordinary"];
   readonly error?: PanelConversationSyncRunResponse["error"];
   readonly transcriptEvents?: readonly PanelRunStreamEvent[];
   readonly modelCalls?: PanelConversationSyncRunResponse["transcript"]["modelCalls"];
@@ -1086,6 +1133,7 @@ function response(input: {
     config: config(),
     error: input.error,
     canvas: input.canvas,
+    ordinary: input.ordinary,
     transcript: {
       events: input.transcriptEvents ?? [],
       modelCalls: input.modelCalls ?? [

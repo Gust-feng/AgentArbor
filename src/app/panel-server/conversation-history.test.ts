@@ -470,7 +470,6 @@ function invalidOrdinarySnapshot(
       stopReason: status === "blocked" ? "out_of_fuel" : undefined,
       continuationAvailability: status === "blocked" ? "new_turn" : "none",
     },
-    basicEvents: [],
     events: [],
     modelCalls: [],
     toolCalls: [],

@@ -19,9 +19,6 @@ const RUN_STATUSES = new Set([
   "pending", "running", "approval_needed", "needs_input", "completed", "failed", "stopped", "cancelled", "blocked",
 ]);
 const CONTINUATION_AVAILABILITIES = new Set(["none", "live", "lost_after_restart", "new_turn"]);
-const AGENT_STATUSES = new Set([
-  "queued", "planning", "running", "needs_input", "approval_needed", "paused", "blocked", "completed", "failed", "cancelled",
-]);
 const ARBOR_TYPES = new Set<string>(ARBOR_MESSAGE_TYPES);
 
 export function validateRuntimeRunManifest(
@@ -69,8 +66,6 @@ export function validateRuntimeRunSnapshotContent(
     content.workspace.workspaceId !== content.run.workspaceId ||
     content.workspace.path !== content.run.workspacePath
   )) return invalid("workspace identity does not match the run");
-  if (content.basicRun !== undefined && content.basicRun.runId !== runId) return invalid("basicRun runId is invalid");
-  if (content.basicEvents.some((item) => item.runId !== runId)) return invalid("basicEvents contain another runId");
   if (content.events.some((item) => item.runId !== runId)) return invalid("events contain another runId");
   if (content.modelCalls.some((item) => item.runId !== runId)) return invalid("modelCalls contain another runId");
   if (content.toolCalls.some((item) => item.runId !== runId)) return invalid("toolCalls contain another runId");
@@ -114,9 +109,7 @@ function snapshotContent(value: unknown): value is RuntimeRunSnapshotContent {
   const content = object(value);
   if (content === undefined || !runRecord(content.run)) return false;
   if (content.workspace !== undefined && !workspace(content.workspace)) return false;
-  if (content.basicRun !== undefined && !basicRun(content.basicRun)) return false;
-  return eventArray(content.basicEvents, (item) => basicEvent(item)) &&
-    eventArray(content.events, (item) => runtimeEvent(item)) &&
+  return eventArray(content.events, (item) => runtimeEvent(item)) &&
     eventArray(content.modelCalls, (item) => modelCall(item)) &&
     eventArray(content.toolCalls, (item) => toolCall(item)) &&
     eventArray(content.artifacts, (item) => runIdRecord(item)) &&
@@ -149,23 +142,10 @@ function runSummary(value: unknown): value is RuntimeRunSummaryRecord {
     optionalError(run.error);
 }
 
-function basicRun(value: unknown): boolean {
-  const run = object(value);
-  return run !== undefined && nonEmpty(run.runId) && enumValue(run.status, AGENT_STATUSES) &&
-    enumValue(run.runMode, new Set(["agent", "deep"])) && typeof run.title === "string" &&
-    typeof run.goalSummary === "string" && optionalString(run.conversationId) && nonEmpty(run.createdAt) &&
-    nonEmpty(run.updatedAt) && eventCursor(run.eventCursor) && optionalObject(run.agentDefinitionRef);
-}
-
 function workspace(value: unknown): boolean {
   const item = object(value);
   return item !== undefined && nonEmpty(item.workspaceId) && item.kind === "local_directory" &&
     nonEmpty(item.path) && typeof item.label === "string" && nonEmpty(item.selectedAt) && nonEmpty(item.updatedAt);
-}
-
-function eventCursor(value: unknown): boolean {
-  const cursor = object(value);
-  return cursor !== undefined && integer(cursor.lastSequence) && integer(cursor.eventCount);
 }
 
 function subAgentRun(value: unknown): boolean {
@@ -179,13 +159,6 @@ function contextLedger(value: unknown): boolean {
   const ledger = object(value);
   return ledger !== undefined && nonEmpty(ledger.runId) && typeof ledger.summary === "string" &&
     Array.isArray(ledger.entries) && object(ledger.truncation) !== undefined;
-}
-
-function basicEvent(value: unknown): boolean {
-  const event = object(value);
-  return event !== undefined && nonEmpty(event.runId) && integer(event.sequence) && nonEmpty(event.type) &&
-    enumValue(event.status, AGENT_STATUSES) && nonEmpty(event.timestamp) &&
-    enumValue(event.visibility, new Set(["compact", "expanded", "debug"]));
 }
 
 function runtimeEvent(value: unknown): boolean {

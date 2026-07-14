@@ -28,10 +28,7 @@ export type BuildContextLedgerDraftInput = {
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
 };
 
-const MAX_HISTORY_CHARS = 1_200;
-const MAX_HISTORY_SUMMARY_CHARS = 2_400;
 const RECENT_HISTORY_PAIR_COUNT = 4;
-const MAX_SKILL_BODY_CHARS = 4_000;
 const MAX_SKILL_REASON_CHARS = 240;
 const MAX_SKILL_SELECTION_ID_CHARS = 160;
 const MAX_SKILL_SELECTION_REF_CHARS = 180;
@@ -146,7 +143,7 @@ function skillContextItems(skills: readonly DesktopAgentSkillContext[]): readonl
         },
       };
     }
-    const body = safeText(context.body, MAX_SKILL_BODY_CHARS);
+    const body = safeUnboundedText(context.body);
     const reason = safeText(context.triggerReason, MAX_SKILL_REASON_CHARS);
     const resources = skillResourceIndexPrompt(context);
     const modelContent = [
@@ -298,7 +295,7 @@ function historyContextItems(
 ): readonly BasicAgentContextItem[] {
   const safeHistory = history
     .map((message, index) => {
-      const safe = safeConversationText(message.content, MAX_HISTORY_CHARS);
+      const safe = safeConversationText(message.content);
       return {
         message,
         index,
@@ -343,12 +340,11 @@ function aiConversationSummaryItem(
     readonly safe: { readonly text: string; readonly truncated: boolean };
   }[]
 ): BasicAgentContextItem | undefined {
-  const safeSummary = safeText(
+  const safeSummary = safeUnboundedText(
     [
       "Earlier conversation summary (model-compacted; use only as background):",
       summary.summary,
-    ].join("\n"),
-    MAX_HISTORY_SUMMARY_CHARS
+    ].join("\n")
   );
   if (safeSummary.text.length === 0) {
     return undefined;

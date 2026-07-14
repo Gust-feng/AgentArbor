@@ -161,30 +161,12 @@ test("runtime record mapper persists full ordinary answers separately from UI su
       completed: {
         config: modelConfig(),
         informationAccess: informationAccess(),
-        canvas: {
-          kind: "desktop_agent_canvas",
-          taskSoil: {
-            taskSoilId: "task-soil-answer",
-            goalSummary: "需要完整回答",
-            contextRefs: [],
-            permissionBoundaryRefs: [],
-          },
-          agent: {
-            status: "completed",
-            answer: {
-              answer,
-              modelCallRefs: [],
-              toolCallRefs: [],
-              evidenceRefs: [],
-              resultBlocks: [],
-            },
+        ordinary: {
+          answer: {
+            content: answer,
             modelCallRefs: [],
             toolCallRefs: [],
-            activity: [],
-          },
-          explanation: {
-            resultWhyReasonable: "完整回答应作为运行事实持久化。",
-            observationPanelRole: "测试。",
+            evidenceRefs: [],
           },
         },
       },

@@ -28,11 +28,10 @@ test("basic run projection derives BasicAgentRun state and preserves ordinary go
         toolCallRefs: [],
       },
     ],
-    confirmationDecisions: [],
   });
 
-  assert.equal(run.status, "approval_needed");
-  assert.equal(run.title, "待处理");
+  assert.equal(run.status, "running");
+  assert.equal(run.title, "进行中");
   assert.equal(run.currentStep, "删除操作。");
   assert.equal(run.nextStep, undefined);
   assert.equal(run.goalSummary.includes("sk-test-secret"), true);
@@ -119,7 +118,6 @@ test("basic run projection keeps the run status matrix explicit", () => {
     readonly expectedStatus: ExpectedStatus;
     readonly expectedTitle: string;
     readonly requiresUserAction: boolean;
-    readonly stalePendingConfirmation?: boolean;
   }[] = [
     {
       name: "completed-no-tool-calls",
@@ -130,14 +128,13 @@ test("basic run projection keeps the run status matrix explicit", () => {
     },
     {
       name: "approval-required",
-      jobStatus: "running",
+      jobStatus: "approval_needed",
       eventType: "confirmation.needed",
       eventStatus: "approval_needed",
       eventSummary: "运行命令：pnpm test",
       expectedStatus: "approval_needed",
       expectedTitle: "待处理",
       requiresUserAction: true,
-      stalePendingConfirmation: true,
     },
     {
       name: "out-of-fuel",
@@ -148,7 +145,6 @@ test("basic run projection keeps the run status matrix explicit", () => {
       expectedStatus: "blocked",
       expectedTitle: "需要处理",
       requiresUserAction: true,
-      stalePendingConfirmation: true,
     },
     {
       name: "context-overflow",
@@ -159,7 +155,6 @@ test("basic run projection keeps the run status matrix explicit", () => {
       expectedStatus: "blocked",
       expectedTitle: "需要处理",
       requiresUserAction: true,
-      stalePendingConfirmation: true,
     },
     {
       name: "model-failed",
@@ -170,7 +165,6 @@ test("basic run projection keeps the run status matrix explicit", () => {
       expectedStatus: "failed",
       expectedTitle: "未完成",
       requiresUserAction: false,
-      stalePendingConfirmation: true,
     },
     {
       name: "cancelled",
@@ -181,7 +175,6 @@ test("basic run projection keeps the run status matrix explicit", () => {
       expectedStatus: "cancelled",
       expectedTitle: "已取消",
       requiresUserAction: false,
-      stalePendingConfirmation: true,
     },
   ];
 
@@ -207,19 +200,6 @@ test("basic run projection keeps the run status matrix explicit", () => {
             modelCallRefs: [],
             toolCallRefs: [],
           }],
-      confirmationDecisions: [],
-      completed: item.stalePendingConfirmation === true
-        ? {
-            canvas: {
-              kind: "desktop_agent_canvas",
-              agent: {
-                pendingConfirmation: {
-                  confirmationId: "confirmation-stale",
-                },
-              },
-            },
-          }
-        : undefined,
     });
 
     assert.equal(run.status, item.expectedStatus, item.name);
@@ -235,7 +215,7 @@ test("basic run projection keeps the run status matrix explicit", () => {
   }
 });
 
-test("basic run projection does not complete a run with a pending confirmation payload", () => {
+test("basic run projection keeps explicit completed status despite stale confirmation events", () => {
   const run = projectRunJobToBasicRun({
     runId: "run-completed-stale-pending-confirmation",
     goal: "等待用户确认",
@@ -243,23 +223,21 @@ test("basic run projection does not complete a run with a pending confirmation p
     runMode: "agent",
     createdAt: "2026-05-12T00:00:00.000Z",
     updatedAt: "2026-05-12T00:00:01.000Z",
-    streamEvents: [],
-    confirmationDecisions: [],
-    completed: {
-      canvas: {
-        kind: "desktop_agent_canvas",
-        agent: {
-          pendingConfirmation: {
-            confirmationId: "confirmation-still-pending",
-          },
-        },
-      },
-    },
+    streamEvents: [{
+      eventId: "event-stale-confirmation",
+      runId: "run-completed-stale-pending-confirmation",
+      sequence: 1,
+      type: "confirmation.needed",
+      createdAt: "2026-05-12T00:00:00.500Z",
+      status: "approval_needed",
+      sourceRefs: ["confirmation:confirmation-still-pending"],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    }],
   });
 
-  assert.equal(run.status, "approval_needed");
-  assert.equal(run.requiresUserAction, true);
-  assert.notEqual(run.status, "completed");
+  assert.equal(run.status, "completed");
+  assert.equal(run.requiresUserAction, false);
 });
 
 test("basic run projection skips generic approval resume events for current step", () => {
@@ -307,13 +285,12 @@ test("basic run projection skips generic approval resume events for current step
         toolCallRefs: [],
       },
     ],
-    confirmationDecisions: [],
   });
 
   assert.equal(run.currentStep, "pnpm test · 通过");
 });
 
-test("basic run projection clears stale approval state after a recorded current confirmation decision", () => {
+test("basic run projection keeps explicit running status despite stale confirmation events", () => {
   const run = projectRunJobToBasicRun({
     runId: "run-approved-stale-confirmation",
     goal: "运行需要确认的命令",
@@ -334,20 +311,6 @@ test("basic run projection clears stale approval state after a recorded current 
         toolCallRefs: ["tool-command"],
       },
     ],
-    confirmationDecisions: [{
-      confirmationId: "confirmation-command",
-      decision: "approve_once",
-    }],
-    completed: {
-      canvas: {
-        kind: "desktop_agent_canvas",
-        agent: {
-          pendingConfirmation: {
-            confirmationId: "confirmation-command",
-          },
-        },
-      },
-    },
   });
 
   assert.equal(run.status, "running");
@@ -376,7 +339,6 @@ test("basic run projection keeps denied decisions visible as current step", () =
         toolCallRefs: [],
       },
     ],
-    confirmationDecisions: [],
   });
 
   assert.equal(run.currentStep, "已不执行。");

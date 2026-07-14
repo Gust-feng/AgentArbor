@@ -96,8 +96,8 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
   assert.equal(pack.inputRefs.some((ref) => ref.kind === "trace" && ref.id === "trace-test"), true);
   assert.equal(pack.items.some((item) => item.sourceKind === "task_soil_ref" && item.visibility === "model"), true);
   assert.match(pack.usageSummary, /技能 1/);
-  assert.equal(pack.truncationReport.truncated, true);
-  assert.equal(pack.truncated, true);
+  assert.equal(pack.truncationReport.truncated, false);
+  assert.equal(pack.truncated, false);
   const text = JSON.stringify(pack);
   assert.equal(text.includes("previous assistant reply"), true);
   assert.equal(text.includes("README.md"), true);
@@ -180,6 +180,79 @@ test("Basic Agent context pack preserves conversation history indentation and bl
   // alignment exactly as written (no whitespace collapsing), so code/stdout/JSON
   // structure the model needs to continue the task is preserved.
   assert.equal(historyMessage?.content, codeHistory);
+});
+
+test("Basic Agent context pack lets the model token budget govern long history and skill bodies", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "continue with complete context",
+    goalId: "goal-long-context-fidelity",
+    traceId: "trace-long-context-fidelity",
+  });
+  const historySentinel = "SENTINEL_AFTER_OLD_HISTORY_CHARACTER_LIMIT";
+  const skillSentinel = "SENTINEL_AFTER_OLD_SKILL_CHARACTER_LIMIT";
+  const skill: DesktopAgentSkillContext = {
+    skill: {
+      id: "long-context-skill",
+      name: "Long Context Skill",
+      description: "A complete instruction body used to verify token-budget ownership.",
+      enabled: true,
+      sourcePath: "Z:/AgentArbor/.agents/skills/long-context/SKILL.md",
+      triggers: ["complete context"],
+    },
+    body: `${"skill instruction ".repeat(360)}\n${skillSentinel}`,
+    triggerReason: "explicit test selection",
+  };
+
+  const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
+    goal: "continue with complete context",
+    taskSoil,
+    conversationHistory: [{
+      role: "assistant",
+      content: `${"earlier answer ".repeat(180)}\n${historySentinel}`,
+      ref: "conversation:long-context:assistant",
+    }],
+    skillContexts: [skill],
+    maxInputTokens: 20_000,
+  });
+
+  const history = pack.messages.find((message) => message.ref === "conversation:long-context:assistant");
+  const injectedSkill = pack.messages.find((message) => message.ref === "context:skill:long-context-skill");
+  assert.equal(history?.content.includes(historySentinel), true);
+  assert.equal(injectedSkill?.content.includes(skillSentinel), true);
+  assert.equal(pack.items.find((item) => item.itemId === history?.ref)?.truncated, false);
+  assert.equal(pack.items.find((item) => item.itemId === injectedSkill?.ref)?.truncated, false);
+});
+
+test("Basic Agent context pack keeps the complete model-compacted history summary within the token budget", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "continue from the compacted history",
+    goalId: "goal-long-history-summary",
+    traceId: "trace-long-history-summary",
+  });
+  const summarySentinel = "SENTINEL_AFTER_OLD_HISTORY_SUMMARY_CHARACTER_LIMIT";
+
+  const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
+    goal: "continue from the compacted history",
+    taskSoil,
+    conversationHistory: Array.from({ length: 10 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      content: `history ${index}`,
+      ref: `conversation:long-summary:${index}`,
+    })),
+    conversationSummary: {
+      summaryId: "conversation-summary:long",
+      summary: `${"preserved decision ".repeat(180)}\n${summarySentinel}`,
+      coveredRefs: ["conversation:long-summary:0"],
+      modelRequestId: "model-request:long-summary",
+    },
+    maxInputTokens: 20_000,
+  });
+
+  const summary = pack.messages.find((message) => message.ref === "conversation-summary:long");
+  assert.equal(summary?.content.includes(summarySentinel), true);
+  assert.equal(pack.items.find((item) => item.itemId === summary?.ref)?.truncated, false);
 });
 
 test("Basic Agent context pack does not expose run facts or tool visibility metadata", () => {

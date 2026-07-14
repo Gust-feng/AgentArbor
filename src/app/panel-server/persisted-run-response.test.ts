@@ -179,11 +179,6 @@ test("persisted run response restores model failures as typed failed events", ()
           message: "工具已执行，但后续模型续跑失败。模型服务连接失败。",
         },
       },
-      basicRun: {
-        ...base.basicRun!,
-        status: "failed",
-      },
-      basicEvents: basicEventsForStatus("failed"),
       events: [
         runtimeEvent(1, "tool.completed", "python hello_agent.py · exit 0", [{ kind: "tool_call", id: "tool-1" }], {
           callId: "tool-1",
@@ -296,11 +291,6 @@ test("persisted blocked ordinary responses explain the new-turn recovery path", 
           message: "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。",
         },
       },
-      basicRun: {
-        ...runtimeSnapshot().basicRun!,
-        status: "blocked",
-      },
-      basicEvents: basicEventsForStatus("blocked"),
     },
     config: modelConfig(),
     informationAccess: informationAccess(),
@@ -314,7 +304,7 @@ test("persisted blocked ordinary responses explain the new-turn recovery path", 
 });
 
 test("persisted run response exposes full restored answer separately from summary", () => {
-  const fullAnswer = "完整回答。\n\n```ts\nconst kept = true;\n```";
+  const fullAnswer = `完整回答。\n\n\`\`\`ts\nconst kept = true;\n\`\`\`\n${"x".repeat(140_000)}\nRESTORED_ANSWER_TAIL`;
   const base = runtimeSnapshot();
   const response = createPersistedPanelRunResponse({
     snapshot: {
@@ -593,8 +583,6 @@ test("persisted Legacy Underground response keeps its owner-scoped Host fallback
         capabilitySnapshot: undefined,
         informationAccess: undefined,
       },
-      basicRun: undefined,
-      basicEvents: [],
     },
     config: modelConfig(),
     informationAccess: informationAccess(),
@@ -643,30 +631,6 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
       selectedAt: "2026-05-31T00:00:00.000Z",
       updatedAt: "2026-05-31T00:00:00.000Z",
     },
-    basicRun: {
-      runId: "run-1",
-      conversationId: "conversation-1",
-      title: "已完成",
-      goalSummary: "Safe task",
-      status: "completed",
-      runMode: "agent",
-      agentDefinitionRef: {
-        agentId: "custom-restored-agent",
-        agentDisplayName: "Custom Restored Agent",
-        promptRef: "prompt:custom-restored-agent:v1",
-        promptVersion: "1",
-        outputContractId: "desktop.agent_response.v1",
-        toolVisibilityProfileId: "custom-restored-agent:ordinary-visible-tools:v1",
-      },
-      createdAt: "2026-05-31T00:00:00.000Z",
-      updatedAt: "2026-05-31T00:00:10.000Z",
-      requiresUserAction: false,
-      eventCursor: {
-        lastSequence: 2,
-        eventCount: 2,
-      },
-    },
-    basicEvents: basicEventsForStatus("completed"),
     events: [
       runtimeEvent(1, "goal.received", "收到任务", []),
       runtimeEvent(2, "model.requested", "正在判断下一步", [{ kind: "model_call", id: "model-1" }]),
@@ -741,12 +705,6 @@ function runtimeSnapshotWithStatus(status: RuntimeRunSnapshot["run"]["status"]):
       resultTitle: undefined,
       resultSummary: undefined,
     },
-    basicRun: {
-      ...snapshot.basicRun!,
-      status: basicRunStatusForRuntimeStatus(status),
-      requiresUserAction: status === "approval_needed" || status === "needs_input" || status === "blocked",
-    },
-    basicEvents: basicEventsForStatus(status),
     confirmations: status === "approval_needed"
       ? [
           {
@@ -764,59 +722,6 @@ function runtimeSnapshotWithStatus(status: RuntimeRunSnapshot["run"]["status"]):
         ]
       : [],
   };
-}
-
-function basicEventsForStatus(
-  status: RuntimeRunSnapshot["run"]["status"]
-): RuntimeRunSnapshot["basicEvents"] {
-  const events: Array<RuntimeRunSnapshot["basicEvents"][number]> = [
-    {
-      id: "run-1:basic:started",
-      runId: "run-1",
-      sequence: 1,
-      type: "run.started",
-      title: "任务",
-      summary: "已开始。",
-      status: "running",
-      timestamp: "2026-05-31T00:00:00.000Z",
-      refs: [],
-      visibility: "compact",
-    },
-  ];
-  const terminal = status === "completed"
-    ? { type: "final.result", title: "结果", summary: "安全结果摘要", status: "completed" as const }
-    : status === "failed"
-      ? { type: "run.failed", title: "未完成", summary: "运行失败。", status: "failed" as const }
-      : status === "cancelled"
-        ? { type: "run.cancelled", title: "已取消", summary: "运行已取消。", status: "cancelled" as const }
-        : status === "blocked"
-          ? { type: "run.blocked", title: "需要处理", summary: "运行已阻塞。", status: "blocked" as const }
-          : undefined;
-  if (terminal !== undefined) {
-    events.push({
-      id: `run-1:basic:${terminal.type}`,
-      runId: "run-1",
-      sequence: 2,
-      ...terminal,
-      timestamp: "2026-05-31T00:00:10.000Z",
-      refs: [],
-      visibility: "compact",
-    });
-  }
-  return events;
-}
-
-function basicRunStatusForRuntimeStatus(
-  status: RuntimeRunSnapshot["run"]["status"]
-): NonNullable<RuntimeRunSnapshot["basicRun"]>["status"] {
-  if (status === "pending") return "queued";
-  if (status === "running") return "running";
-  if (status === "approval_needed") return "approval_needed";
-  if (status === "needs_input") return "needs_input";
-  if (status === "completed") return "completed";
-  if (status === "failed") return "failed";
-  if (status === "cancelled") return "cancelled";
-  return "blocked";
 }
 
 function frozenCapabilitySnapshot(): NonNullable<RuntimeRunSnapshot["run"]["capabilitySnapshot"]> {

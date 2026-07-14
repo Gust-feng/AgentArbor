@@ -12,6 +12,7 @@ export type PanelConversationTurnStatus =
   | "running"
   | "completed"
   | "failed"
+  | "cancelled"
   | "blocked"
   | "needs_input";
 export type PanelConversationStatus = Extract<

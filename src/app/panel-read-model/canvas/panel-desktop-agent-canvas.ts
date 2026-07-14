@@ -1,10 +1,10 @@
 import type { DesktopAgentSessionResult } from "../../desktop-agent/desktop-agent-session-contracts.js";
 import { latestModelFailureTextForUser } from "../run/panel-model-failure-copy.js";
 import { safeText, taskSoilCanvas, type PanelTaskSoilCanvasReadModel } from "./panel-canvas-common.js";
-import type { PanelRunTranscript } from "../run/panel-run-transcript-contracts.js";
-import { friendlyUserFacingFailureText } from "../../text-projection/visible-text-safety.js";
-
-const DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS = 128_000;
+import {
+  friendlyUserFacingFailureText,
+  sanitizeAssistantVisibleText,
+} from "../../text-projection/visible-text-safety.js";
 
 export type DesktopAgentCanvasReadModel = {
   readonly kind: "desktop_agent_canvas";
@@ -89,7 +89,6 @@ export type DesktopAgentCanvasReadModel = {
 
 export function createDesktopAgentCanvas(input: {
   readonly result: DesktopAgentSessionResult;
-  readonly transcript: PanelRunTranscript;
 }): DesktopAgentCanvasReadModel {
   return {
     kind: "desktop_agent_canvas",
@@ -100,7 +99,7 @@ export function createDesktopAgentCanvas(input: {
         input.result.answer === undefined
           ? undefined
           : {
-              answer: safeText(input.result.answer.answer, DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS),
+              answer: sanitizeAssistantVisibleText(input.result.answer.answer),
               modelCallRefs: [...input.result.answer.modelCallRefs],
               toolCallRefs: [...input.result.answer.toolCallRefs],
               evidenceRefs: input.result.answer.evidenceRefs.map((value) => safeText(value, 180)),
@@ -156,7 +155,7 @@ export function createDesktopAgentCanvas(input: {
             ? "等待你判断。"
             : "",
       observationPanelRole:
-        `开发者详情展示调用引用和运行事件；当前运行事件 ${input.transcript.events.length} 条。`,
+        "开发者详情展示调用引用和运行事件。",
     },
   };
 }

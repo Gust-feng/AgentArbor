@@ -60,7 +60,11 @@ import { syncConversationTurnForJob } from "./conversation-sync.js";
 import { appendLiveModelOutputDelta } from "./live-model-stream.js";
 import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
-import { projectPanelRunStreamEventsForJob } from "./run-stream-sync.js";
+import {
+  PanelRunStreamProjectionOwner,
+  persistentPanelRunStreamEvents,
+  projectPanelRunStreamEventsForJob,
+} from "./run-stream-sync.js";
 import { desktopCapabilitySnapshotForRunStart } from "./desktop-run-model-settings.js";
 import { PanelHttpError } from "./http-utils.js";
 import { createMultiAgentRunResourceAcquirer } from "./multi-agent-run-resources.js";
@@ -80,6 +84,7 @@ export type PanelRuntime = {
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
   readonly runJobs: PanelRunJobStore;
+  readonly runStreamProjection: PanelRunStreamProjectionOwner;
   readonly activeRunJobs: Set<Promise<void>>;
   readonly activeRequestJobs: Set<Promise<void>>;
   readonly abortControllers: Map<string, AbortController>;
@@ -196,6 +201,7 @@ function assemblePanelRuntime(input: {
   readonly hooks: PanelRuntimeHooks;
 }): PanelRuntime {
   const runJobs = new PanelRunJobStore();
+  const runStreamProjection = new PanelRunStreamProjectionOwner();
   const activeRunJobs = new Set<Promise<void>>();
   const activeRequestJobs = new Set<Promise<void>>();
   const abortControllers = new Map<string, AbortController>();
@@ -255,6 +261,7 @@ function assemblePanelRuntime(input: {
     contextAttachmentPicker: input.contextAttachmentPicker,
     contextAttachmentMedia,
     runJobs,
+    runStreamProjection,
     activeRunJobs,
     activeRequestJobs,
     abortControllers,
@@ -294,8 +301,10 @@ function assemblePanelRuntime(input: {
     },
     projectRunEvents: (job) => projectPanelRunStreamEventsForJob(
       { runJobs: runtime.runJobs },
-      job as PanelRunJob
+      job as PanelRunJob,
+      runtime.runStreamProjection
     ),
+    runEventsForReplay: (job) => persistentPanelRunStreamEvents((job as PanelRunJob).streamEvents),
     failRun: (job, error) => input.hooks.failRun(runtime as PanelRuntime, job as PanelRunJob, error),
     onRuntimeReady: (runId, context) => {
       runtime.runJobs.attachRuntime({
@@ -313,12 +322,12 @@ function assemblePanelRuntime(input: {
           }
           try {
             runtime.runJobs.recordActivity(runId);
-            runtime.runExecutor?.syncRunEvents(current);
+            runtime.runExecutor?.projectRunEvents(current);
           } catch (error) {
             console.error(`[panel-server] run event projection failed for ${runId}:`, error);
           }
         });
-        runtime.runExecutor?.syncRunEvents(job);
+        runtime.runExecutor?.projectRunEvents(job);
       }
     },
     onModelOutputDelta: (runId, delta: ModelOutputDelta) => appendLiveModelOutputDelta(runtime as PanelRuntime, runId, delta),

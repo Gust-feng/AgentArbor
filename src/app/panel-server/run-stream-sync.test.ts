@@ -9,6 +9,7 @@ import { createMinimalRuntime } from "../runtime.js";
 import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
 import { PanelRunJobStore } from "./run-jobs.js";
 import {
+  PanelRunStreamProjectionOwner,
   persistentPanelRunStreamEvents,
   projectPanelRunStreamEventsForJob,
 } from "./run-stream-sync.js";
@@ -45,7 +46,16 @@ test("persistent panel stream events omit volatile live model deltas only", () =
 
 test("panel run projection publishes only newly available events from write-side facts", () => {
   const runJobs = new PanelRunJobStore();
+  const projectionOwner = new PanelRunStreamProjectionOwner();
   const runtime = createMinimalRuntime();
+  const eventLogListCursors: number[] = [];
+  const listEvents = runtime.eventLog.list.bind(runtime.eventLog);
+  Object.defineProperty(runtime.eventLog, "list", {
+    value: (afterSequence = 0) => {
+      eventLogListCursors.push(afterSequence);
+      return listEvents(afterSequence);
+    },
+  });
   const job = runJobs.create({
     runKind: "underground",
     runMode: "deep",
@@ -61,18 +71,18 @@ test("panel run projection publishes only newly available events from write-side
     goalId: "goal-incremental-sync",
   });
 
-  const started = projectPanelRunStreamEventsForJob({ runJobs }, job);
-  const duplicateStarted = projectPanelRunStreamEventsForJob({ runJobs }, job);
+  const started = projectPanelRunStreamEventsForJob({ runJobs }, job, projectionOwner);
+  const duplicateStarted = projectPanelRunStreamEventsForJob({ runJobs }, job, projectionOwner);
   runtime.bus.publish(toolRequestedMessage(job.runId));
-  const tool = projectPanelRunStreamEventsForJob({ runJobs }, job);
-  const duplicateTool = projectPanelRunStreamEventsForJob({ runJobs }, job);
+  const tool = projectPanelRunStreamEventsForJob({ runJobs }, job, projectionOwner);
+  const duplicateTool = projectPanelRunStreamEventsForJob({ runJobs }, job, projectionOwner);
   runJobs.fail(job.runId, {
     config: job.config,
     informationAccess: job.informationAccess,
     error: { code: "projection_test_failed", message: "Projection test failed." },
   });
-  const failed = projectPanelRunStreamEventsForJob({ runJobs }, job);
-  const duplicateFailed = projectPanelRunStreamEventsForJob({ runJobs }, job);
+  const failed = projectPanelRunStreamEventsForJob({ runJobs }, job, projectionOwner);
+  const duplicateFailed = projectPanelRunStreamEventsForJob({ runJobs }, job, projectionOwner);
 
   assert.deepEqual(started.map((event) => event.type), ["run.started"]);
   assert.deepEqual(tool.map((event) => event.type), ["tool.requested"]);
@@ -82,6 +92,37 @@ test("panel run projection publishes only newly available events from write-side
   assert.deepEqual(duplicateFailed, []);
   assert.deepEqual(job.streamEvents.map((event) => event.sequence), [1, 2, 3]);
   assert.equal(new Set(job.streamEvents.map((event) => event.eventId)).size, 3);
+  assert.deepEqual(eventLogListCursors.slice(2, 5), [0, 1, 1]);
+});
+
+test("panel stream projector is the only owner of cancelled and blocked transport events", () => {
+  for (const terminalStatus of ["cancelled", "blocked"] as const) {
+    const runJobs = new PanelRunJobStore();
+    const projectionOwner = new PanelRunStreamProjectionOwner();
+    const job = runJobs.create({
+      runKind: "underground",
+      runMode: "deep",
+      goal: `project ${terminalStatus}`,
+      aiMode: "fake",
+      config: modelConfig(),
+      informationAccess: informationAccess(),
+    });
+    projectPanelRunStreamEventsForJob({ runJobs }, job, projectionOwner);
+
+    const payload = {
+      config: job.config,
+      informationAccess: job.informationAccess,
+      reason: { code: terminalStatus, message: `Run ${terminalStatus}.` },
+    };
+    terminalStatus === "cancelled"
+      ? runJobs.cancel(job.runId, payload)
+      : runJobs.block(job.runId, payload);
+
+    assert.equal(job.streamEvents.some((event) => event.type === `run.${terminalStatus}`), false);
+    const projected = projectPanelRunStreamEventsForJob({ runJobs }, job, projectionOwner);
+    assert.deepEqual(projected.map((event) => event.type), [`run.${terminalStatus}`]);
+    assert.equal(job.streamEvents.filter((event) => event.type === `run.${terminalStatus}`).length, 1);
+  }
 });
 
 function streamEvent(input: {

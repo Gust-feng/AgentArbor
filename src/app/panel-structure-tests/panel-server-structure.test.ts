@@ -130,11 +130,8 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationRoutes.includes("local-project:"), true);
   assert.equal(conversationRestore.includes("export async function restorePersistedPanelConversation"), true);
   assert.equal(conversationSync.includes("export function syncConversationTurnForJob"), true);
-  assert.notEqual(
-    conversationSync.indexOf('canvas?.kind === "desktop_agent_canvas"'),
-    -1,
-    "conversation sync should inspect desktop agent canvas"
-  );
+  assert.equal(conversationSync.includes("response.ordinary?.answer"), true);
+  assert.equal(conversationSync.includes('canvas?.kind === "desktop_agent_canvas"'), false);
   assert.equal(
     conversationSync.includes('canvas?.kind === "work_session_canvas"'),
     false,
@@ -182,11 +179,8 @@ test("panel server source keeps conversation restore and persistence split", asy
     assert.equal(source.includes("toOpenAIFetch"), false, `${sourceName} must not map provider transport`);
   }
   assert.equal(runtimeRecords.includes("export function createRuntimeRunRecord"), true);
-  assert.notEqual(
-    runtimeRecords.indexOf('canvas?.kind === "desktop_agent_canvas"'),
-    -1,
-    "runtime records should inspect desktop agent canvas"
-  );
+  assert.equal(runtimeRecords.includes("statusPayload?.ordinary"), true);
+  assert.equal(runtimeRecords.includes('canvas?.kind === "desktop_agent_canvas"'), false);
   assert.equal(
     runtimeRecords.includes('canvas?.kind === "work_session_canvas"'),
     false,
@@ -492,10 +486,8 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopAgentExecution.includes("facts: Pick<PanelRunExecutionResult"), false);
   assert.equal(desktopAgentExecution.includes("facts = {}"), false);
   assert.equal(desktopAgentExecution.includes('agent.status === "confirmation_needed"'), true);
-  assert.equal(desktopAgentExecution.includes('"approval_needed"'), true);
   assert.equal(desktopAgentExecution.includes('status: agent.status === "paused" ? "blocked" : "completed"'), false);
   assert.equal(desktopAgentExecution.includes("没有形成最终结果"), true);
-  assert.equal(desktopAgentExecution.includes("desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources)"), true);
   assert.equal(undergroundCompatExecution.includes("export async function runDeepDesktopForPanel"), true);
   assert.equal(undergroundCompatExecution.includes("export async function runUndergroundForPanel"), true);
   assert.equal(undergroundCompatExecution.includes("runUndergroundDirectionSessionWithIntelligence"), true);

@@ -1,7 +1,7 @@
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import type { DesktopAgentPendingConfirmation } from "./desktop-agent-session-contracts.js";
-import type { DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
+import type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
 
 export function publishGoalReceived(input: {

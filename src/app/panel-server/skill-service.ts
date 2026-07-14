@@ -6,7 +6,7 @@ import type {
 } from "../../domain/basic-agent/index.js";
 import type { CapabilitySkillCatalogItem } from "../../domain/config/index.js";
 import type { IntelligenceChannel, ModelCallRef } from "../../domain/intelligence/index.js";
-import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-prompts.js";
+import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-contracts.js";
 import { nowIso } from "../../kernel/id.js";
 import {
   discoverSkills,

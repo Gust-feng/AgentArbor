@@ -5,7 +5,6 @@ export type { Conversation, ConversationSummary, ConversationTurn } from "./cont
 export type {
   AgentDeliverable,
   BasicAgentRun,
-  ContextLedger,
   DesktopRunDetail,
   DesktopWorkView,
   DesktopWorkViewAnswer,

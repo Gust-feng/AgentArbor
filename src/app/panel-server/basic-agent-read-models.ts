@@ -73,7 +73,6 @@ export function createLiveBasicAgentWorkViewReadModel(input: {
     subAgentRuns: input.job.runtime?.subAgentRunTraceStore.list() ?? [],
     pendingConfirmation: ordinaryPendingConfirmation(input.job, statusPayload?.ordinary),
     answer: ordinaryAnswer(statusPayload?.ordinary),
-    restoredContextLedger: statusPayload?.ordinary?.contextLedger,
   }) satisfies DesktopWorkViewReadModel;
   return {
     ...base,
@@ -128,7 +127,6 @@ export function createPersistedBasicAgentWorkViewReadModel(
     toolResultCount: terminalToolCallCount(streamEvents),
     transcriptNodes: createPanelTranscriptNodes(streamEvents),
     restoredResult: restoredRunResultProjection(snapshot.run),
-    restoredContextLedger: snapshot.contextLedger,
     subAgentRuns: snapshot.subAgentRuns,
   }) satisfies DesktopWorkViewReadModel;
 }

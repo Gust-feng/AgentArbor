@@ -121,7 +121,6 @@ test("panel UI app shell delegates runtime data and control work", async () => {
   assert.equal(app.includes("contextUsage,"), true);
   assert.equal(panelContextWindowUsage.includes("export function contextWindowUsageFrom"), true);
   assert.equal(panelContextWindowUsage.includes("export function latestModelUsageFromTranscript"), true);
-  assert.equal(panelContextWindowUsage.includes("isTokenSourceUsableForContextUsage"), true);
   assert.equal(chatEmpty.includes("readonly contextUsage?: ContextWindowUsage"), true);
   assert.equal(chatEmpty.includes('className="composer-context-usage"'), true);
   assert.equal(chatComposerStyles.includes(".composer-context-usage-svg"), true);

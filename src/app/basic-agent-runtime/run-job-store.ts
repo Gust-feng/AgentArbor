@@ -305,7 +305,8 @@ function normalizeCompletedPayloadForJob(
     informationAccess: facts.informationAccess,
     capabilitySnapshot: facts.capabilitySnapshot,
     capabilityResolution: facts.capabilityResolution,
-    ordinary: ordinaryFactsForStatus(payload.ordinary, status, job.runId),
+    ordinary: ordinaryFactsForStatus(payload.ordinary, status),
+    ordinaryModelContext: ordinaryModelContextForRun(payload.ordinaryModelContext, job.runId),
   };
 }
 
@@ -321,7 +322,8 @@ function normalizeFailedPayloadForJob(
     informationAccess: facts.informationAccess,
     capabilitySnapshot: facts.capabilitySnapshot,
     capabilityResolution: facts.capabilityResolution,
-    ordinary: ordinaryFactsForStatus(payload.ordinary, status, job.runId),
+    ordinary: ordinaryFactsForStatus(payload.ordinary, status),
+    ordinaryModelContext: ordinaryModelContextForRun(payload.ordinaryModelContext, job.runId),
   };
 }
 
@@ -337,29 +339,33 @@ function normalizeTerminalPayloadForJob(
     informationAccess: facts.informationAccess,
     capabilitySnapshot: facts.capabilitySnapshot,
     capabilityResolution: facts.capabilityResolution,
-    ordinary: ordinaryFactsForStatus(payload.ordinary, status, job.runId),
+    ordinary: ordinaryFactsForStatus(payload.ordinary, status),
+    ordinaryModelContext: ordinaryModelContextForRun(payload.ordinaryModelContext, job.runId),
   };
 }
 
 function ordinaryFactsForStatus(
   ordinary: BasicAgentRunCompletedPayload["ordinary"],
   status: "approval_needed" | "completed" | "failed" | "cancelled" | "blocked",
-  runId: string,
 ): BasicAgentRunCompletedPayload["ordinary"] {
   if (ordinary === undefined) {
     return ordinary;
   }
-  const owned = ordinary.contextLedger === undefined || ordinary.contextLedger.runId === runId
-    ? ordinary
-    : {
-        ...ordinary,
-        contextLedger: { ...ordinary.contextLedger, runId },
-      };
-  if (status === "approval_needed" || owned.pendingConfirmation === undefined) {
-    return owned;
+  if (status === "approval_needed" || ordinary.pendingConfirmation === undefined) {
+    return ordinary;
   }
-  const { pendingConfirmation: _pendingConfirmation, ...terminalFacts } = owned;
+  const { pendingConfirmation: _pendingConfirmation, ...terminalFacts } = ordinary;
   return terminalFacts;
+}
+
+function ordinaryModelContextForRun(
+  context: BasicAgentRunCompletedPayload["ordinaryModelContext"],
+  runId: string,
+): BasicAgentRunCompletedPayload["ordinaryModelContext"] {
+  if (context !== undefined && context.runId !== runId) {
+    throw new Error(`Ordinary model context ${context.runId} cannot be attached to run ${runId}.`);
+  }
+  return context;
 }
 
 function appendStreamEventToJob(

@@ -70,11 +70,7 @@ test("Desktop Agent resolves authorized local image refs into ephemeral model at
       mimeType: "image/png",
       data: bytes.toString("base64"),
     });
-    assert.equal(user?.content.includes("already attached to this user message for direct visual inspection"), true);
-    assert.equal(user?.content.includes("Inspect them directly instead of claiming that local images are unavailable."), true);
-    assert.equal(user?.content.includes("attachment_id=ctx-screen"), true);
-    assert.equal(user?.content.includes(imagePath), false);
-    assert.equal(user?.content.includes(bytes.toString("base64")), false);
+    assert.equal(user?.content, "Describe the attached image.");
     assert.equal(JSON.stringify(taskSoil).includes(bytes.toString("base64")), false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

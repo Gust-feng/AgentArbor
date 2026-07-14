@@ -10,10 +10,6 @@ test("context window usage prefers provider input tokens", () => {
   const usage = contextWindowUsageFrom({
     contextWindowTokens: 1_000,
     modelUsage: { inputTokens: 350 },
-    ledgerBudget: {
-      usedInputTokens: 120,
-      tokenCountSource: "openai_tiktoken",
-    },
   });
 
   assert.equal(usage?.source, "provider_usage");
@@ -24,29 +20,9 @@ test("context window usage prefers provider input tokens", () => {
   assert.equal(usage?.label, "已用35%上下文容量");
 });
 
-test("context window usage falls back to tokenizer-backed ledger budget", () => {
+test("context window usage waits for provider usage when no measured usage is available", () => {
   const usage = contextWindowUsageFrom({
     contextWindowTokens: 8_000,
-    ledgerBudget: {
-      usedInputTokens: 6_200,
-      tokenCountSource: "openai_tiktoken",
-    },
-  });
-
-  assert.equal(usage?.source, "context_ledger");
-  assert.equal(usage?.usedTokens, 6_200);
-  assert.equal(Math.round(usage?.percent ?? 0), 78);
-  assert.equal(usage?.tone, "warning");
-  assert.equal(usage?.label, "已用78%上下文容量");
-});
-
-test("context window usage does not treat character counts as token usage", () => {
-  const usage = contextWindowUsageFrom({
-    contextWindowTokens: 128_000,
-    ledgerBudget: {
-      usedInputTokens: 16_000,
-      tokenCountSource: "character_count",
-    },
   });
 
   assert.equal(usage?.source, "unavailable");
@@ -54,7 +30,7 @@ test("context window usage does not treat character counts as token usage", () =
   assert.equal(usage?.percent, undefined);
   assert.equal(usage?.ringPercent, 0);
   assert.equal(usage?.tone, "muted");
-  assert.equal(usage?.label, "上下文容量 128K，等待模型用量");
+  assert.equal(usage?.label, "上下文容量 8K，等待模型用量");
 });
 
 test("context window usage clamps only the visual ring when usage exceeds the window", () => {

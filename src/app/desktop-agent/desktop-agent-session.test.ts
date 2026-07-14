@@ -468,7 +468,7 @@ test("Desktop Agent Session can run with an injected agent definition on the sam
     true
   );
   assert.equal(
-    capturedRequest?.sanitizedMessages.some((message) => message.content.includes("Triggered skill: Custom Skill")),
+    capturedRequest?.sanitizedMessages.some((message) => message.content.includes("Skill: Custom Skill")),
     true
   );
   assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["search"]);
@@ -828,7 +828,7 @@ test("Desktop Agent Session uses capability snapshot model capabilities for loop
   assert.equal(channel.requests.some((request) => request.purpose === "desktop_context_compaction"), true);
 });
 
-test("Desktop Agent Session compacts oversized conversation history before the main ordinary request", async () => {
+test("Desktop Agent Session compacts oversized history once at the loop boundary", async () => {
   const requests: ModelRequest[] = [];
   const channel: IntelligenceChannel = {
     async request(request) {
@@ -846,7 +846,7 @@ test("Desktop Agent Session compacts oversized conversation history before the m
   const result = await runDesktopAgentSession("继续处理 8k 小窗口历史", {
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
-    conversationHistory: oversizedConversationHistory(),
+    priorModelContext: oversizedConversationHistory(),
     capabilitySnapshot: desktopCapabilitySnapshot([], {
       activeModel: { defaultAiMode: "fake", model: "gpt-4o" },
       modelCapabilities: smallWindowModelCapabilities(),
@@ -859,16 +859,16 @@ test("Desktop Agent Session compacts oversized conversation history before the m
 
   assert.equal(result.status, "completed");
   assert.deepEqual(requests.map((request) => request.purpose), ["desktop_context_compaction", "desktop_agent"]);
-  assert.equal(finalRequestText.includes("Earlier conversation summary (model-compacted; use only as background):"), true);
+  assert.equal(finalRequestText.includes("# Compacted Context"), true);
   assert.equal(finalRequestText.includes("Older decisions preserved for continuation."), true);
   assert.equal(finalRequestText.includes("OLD_HISTORY_SENTINEL_0_"), false);
   assert.equal(result.runtime.eventLog.types().includes("context.compaction.completed"), true);
-  assert.equal(compactionPayload?.scope, "conversation_history");
+  assert.equal(compactionPayload?.scope, "loop_context");
   assert.equal(typeof compactionPayload?.tokenCount, "number");
   assert.equal(typeof compactionPayload?.threshold, "number");
 });
 
-test("Desktop Agent Session keeps running when conversation history compaction fails", async () => {
+test("Desktop Agent Session pauses truthfully when the single context compaction fails", async () => {
   const requests: ModelRequest[] = [];
   const channel: IntelligenceChannel = {
     async request(request) {
@@ -886,7 +886,7 @@ test("Desktop Agent Session keeps running when conversation history compaction f
   const result = await runDesktopAgentSession("继续处理 8k 小窗口历史", {
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
-    conversationHistory: oversizedConversationHistory(),
+    priorModelContext: oversizedConversationHistory(),
     capabilitySnapshot: desktopCapabilitySnapshot([], {
       activeModel: { defaultAiMode: "fake", model: "gpt-4o" },
       modelCapabilities: smallWindowModelCapabilities(),
@@ -895,13 +895,12 @@ test("Desktop Agent Session keeps running when conversation history compaction f
   const compactionEvent = result.runtime.eventLog.list().find((entry) => entry.type === "context.compaction.failed");
   const compactionPayload = compactionEvent?.message.payload as Record<string, unknown> | undefined;
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.answer?.answer, "压缩失败后仍保守继续。");
-  assert.deepEqual(requests.map((request) => request.purpose), ["desktop_context_compaction", "desktop_agent"]);
+  assert.equal(result.status, "paused");
+  assert.equal(result.stopReason, "context_overflow");
+  assert.deepEqual(requests.map((request) => request.purpose), ["desktop_context_compaction"]);
   assert.equal(result.runtime.eventLog.types().includes("context.compaction.failed"), true);
-  assert.equal(compactionPayload?.scope, "conversation_history");
-  assert.equal(compactionPayload?.nonBlocking, true);
-  assert.equal(String(compactionPayload?.summary).includes("已保守继续"), true);
+  assert.equal(compactionPayload?.scope, "loop_context");
+  assert.equal(compactionPayload?.nonBlocking, false);
 });
 
 test("Desktop Agent Session does not let direct model capabilities override a frozen snapshot", async () => {
@@ -1054,7 +1053,7 @@ test("Desktop Agent Session keeps daily efficiency advice as direct answer", asy
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
 });
 
-test("Desktop Agent Session injects safe conversation history as separate messages", async () => {
+test("Desktop Agent Session injects canonical prior model context as separate messages", async () => {
   let capturedRequest: ModelRequest | undefined;
   const channel: IntelligenceChannel = {
     async request(request) {
@@ -1069,7 +1068,7 @@ test("Desktop Agent Session injects safe conversation history as separate messag
   const result = await runDesktopAgentSession("那你能继续解释一下吗？", {
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
-    conversationHistory: [
+    priorModelContext: [
       {
         role: "user",
         content: "你好，你能做什么？",

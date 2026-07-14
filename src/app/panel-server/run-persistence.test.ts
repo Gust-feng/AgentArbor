@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
-  RuntimeContextLedgerRecord,
   RuntimeDatabase,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
@@ -102,14 +101,14 @@ test("persistPanelRun writes the workspace frozen at run birth", async () => {
   assert.equal(database.runRecords[0]?.workspacePath, "Z:\\FrozenWorkspace");
 });
 
-test("persistPanelRun stores safe context ledger projection for triggered skills", async () => {
+test("persistPanelRun stores the Ordinary canonical model context with run ownership", async () => {
   const database = new MemoryRuntimeDatabase();
   const runJobs = new PanelRunJobStore();
   const runtime = persistenceRuntime(database, runJobs);
   const job = runJobs.create({
     runKind: "desktop",
     runMode: "agent",
-    goal: "please review this change",
+    goal: "persist model context",
     aiMode: "fake",
     config: modelConfig(),
     informationAccess: informationAccess(),
@@ -121,7 +120,7 @@ test("persistPanelRun stores safe context ledger projection for triggered skills
       promptVersion: "v1",
       outputContractId: "desktop.agent_response.v1",
       toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
-      definitionHash: "sha256:run-persistence-skill-test",
+      definitionHash: "sha256:model-context-persistence-test",
     },
   });
   runJobs.complete(job.runId, {
@@ -129,80 +128,22 @@ test("persistPanelRun stores safe context ledger projection for triggered skills
     informationAccess: informationAccess(),
     ordinary: {
       answer: { content: "done", modelCallRefs: [], toolCallRefs: [], evidenceRefs: [] },
-      contextLedger: {
-        runId: "trace-skill-persist",
-        summary: "技能 1",
-        entries: [{
-          entryId: "context:skill:repo-review",
-          kind: "skill",
-          title: "技能",
-          summary: "Repo Review：触发词 review",
-          refs: [{ kind: "event", id: "context:skill:repo-review" }],
-          status: "used",
-        }],
-        truncation: { truncated: false, omittedItemCount: 0, truncatedItemIds: [] },
-      },
     },
-    canvas: {
-      kind: "desktop_agent_canvas",
-      taskSoil: {
-        taskSoilId: "soil-skill-persist",
-        goalSummary: "please review this change",
-        contextRefs: [],
-        permissionBoundaryRefs: [],
-      },
-      agent: {
-        status: "completed",
-        answer: {
-          answer: "done",
-          modelCallRefs: [],
-          toolCallRefs: [],
-          evidenceRefs: [],
-          resultBlocks: [],
-        },
-        modelCallRefs: [],
-        toolCallRefs: [],
-        activity: [],
-        context: {
-          usageSummary: "技能 1",
-          budget: {
-            maxMessages: 20,
-            maxChars: 8_000,
-            usedChars: 120,
-          },
-          truncated: false,
-          items: [{
-            itemId: "context:skill:repo-review",
-            sourceKind: "skill",
-            summary: [
-              "Triggered skill: Repo Review",
-              "Why: 触发词：review",
-              "FULL PRIVATE SKILL BODY SHOULD NOT PERSIST",
-            ].join("\n"),
-            visibility: "model",
-            truncated: false,
-          }],
-          truncationReport: {
-            truncated: false,
-            omittedItemCount: 0,
-            truncatedItemIds: [],
-          },
-        },
-      },
-      explanation: {
-        resultWhyReasonable: "safe",
-        observationPanelRole: "safe",
-      },
+    ordinaryModelContext: {
+      runId: job.runId,
+      messages: [
+        { role: "system", content: "root", ref: "context:system:desktop-agent" },
+        { role: "user", content: "persist model context" },
+        { role: "assistant", content: "done" },
+      ],
     },
   });
 
-  await persistPanelRun(runtime, job);
+  await persistPanelRun(runtime, runJobs.get(job.runId)!);
 
-  assert.equal(database.contextLedgers.length, 1);
-  assert.equal(database.contextLedgers[0]?.runId, job.runId);
-  assert.equal(database.contextLedgers[0]?.entries.some((entry) => entry.kind === "skill"), true);
-  assert.equal(JSON.stringify(database.contextLedgers[0]).includes("Repo Review"), true);
-  assert.equal(JSON.stringify(database.contextLedgers[0]).includes("FULL PRIVATE SKILL BODY"), false);
+  const stored = database.snapshots.get(job.runId)?.ordinaryModelContext;
+  assert.equal(stored?.runId, job.runId);
+  assert.deepEqual(stored?.messages.map((message) => message.role), ["system", "user", "assistant"]);
 });
 
 test("persistPanelRunInBackground records failures without poisoning the queue", async () => {
@@ -358,7 +299,6 @@ function persistenceRuntime(
 class MemoryRuntimeDatabase implements RuntimeDatabase {
   readonly workspaceRecords: RuntimeWorkspaceRecord[] = [];
   readonly runRecords: RuntimeRunRecord[] = [];
-  readonly contextLedgers: RuntimeContextLedgerRecord[] = [];
 
   readonly snapshots = new Map<string, RuntimeRunSnapshot>();
 
@@ -384,9 +324,6 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
     this.runRecords.push(stored.run);
     if (stored.workspace !== undefined) {
       this.workspaceRecords.push(stored.workspace);
-    }
-    if (stored.contextLedger !== undefined) {
-      this.contextLedgers.push(stored.contextLedger);
     }
     return structuredClone(stored);
   }

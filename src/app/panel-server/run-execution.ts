@@ -27,9 +27,8 @@ import {
 import { latestModelFailureTextForUser } from "../panel-read-model/run/panel-model-failure-copy.js";
 import { friendlyUserFacingFailureText } from "../text-projection/visible-text-safety.js";
 import {
-  buildConversationHistoryMessages,
-  buildConversationInterruptedRunContexts,
-  buildConversationPriorToolCallContexts,
+  buildConversationSkillRoutingHistory,
+  buildConversationPriorModelContext,
 } from "./conversation-history.js";
 import { PanelHttpError } from "./http-utils.js";
 import { throwIfAborted } from "./request-parsers.js";
@@ -86,10 +85,9 @@ export async function executeBasicPanelRun(
     conversationId: job.conversationId,
     assistantTurnId: job.assistantTurnId,
   };
-  const [conversationHistory, interruptedRunContexts, priorToolCallContexts] = await Promise.all([
-    buildConversationHistoryMessages(conversationContext),
-    buildConversationInterruptedRunContexts(conversationContext),
-    buildConversationPriorToolCallContexts(conversationContext),
+  const [skillRoutingHistory, priorModelContext] = await Promise.all([
+    buildConversationSkillRoutingHistory(conversationContext),
+    buildConversationPriorModelContext(conversationContext),
   ]);
   return executePanelRunFromFrozenJob(runtime, {
     runKind: job.runKind,
@@ -98,9 +96,9 @@ export async function executeBasicPanelRun(
     aiMode: job.aiMode,
     taskSoilInput: job.taskSoilInput,
     options: {
-      conversationHistory,
-      interruptedRunContexts,
-      priorToolCallContexts,
+      runId: job.runId,
+      skillRoutingHistory,
+      priorModelContext,
       agentDefinition: resolveExecutionAgentDefinition(runtime, job),
       agentDefinitionRef: job.agentDefinitionRef,
       config: job.config,

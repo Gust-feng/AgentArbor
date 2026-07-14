@@ -93,7 +93,6 @@ test("app top-level keeps moved implementation modules as compatibility facades"
     ["restored-run-projection.ts", 'export * from "./run-read-model/restored-run-projection.js";'],
     ["sub-agent-stream-projection.ts", 'export * from "./run-read-model/sub-agent-stream-projection.js";'],
     ["desktop-agent-contracts.ts", 'export * from "./desktop-agent/desktop-agent-contracts.js";'],
-    ["desktop-agent-prompts.ts", 'export * from "./desktop-agent/desktop-agent-prompts.js";'],
     ["desktop-agent-session.ts", 'export * from "./desktop-agent/desktop-agent-session.js";'],
     ["desktop-agent-session-contracts.ts", 'export * from "./desktop-agent/desktop-agent-session-contracts.js";'],
     ["desktop-agent-session-projection.ts", 'export * from "./desktop-agent/desktop-agent-session-projection.js";'],
@@ -510,79 +509,18 @@ test("desktop shell support modules stay under desktop ownership", async () => {
   }
 });
 
-test("desktop agent support modules stay under desktop-agent ownership", async () => {
+test("desktop agent model input stays under desktop-agent ownership", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const desktopAgentRoot = path.join(appRoot, "desktop-agent");
-  const desktopAgentFiles = [
-    "desktop-agent-contracts.ts",
-    "desktop-agent-prompts.ts",
-    "desktop-agent-session.ts",
-    "desktop-agent-session-contracts.ts",
-    "desktop-agent-session-projection.ts",
-    "desktop-agent-session-events.ts",
-    "desktop-agent-session-runtime.ts",
-    "desktop-agent-loop-preparation.ts",
-  ];
   const sessionOwnerSource = await readSource(path.join(appRoot, "desktop-agent", "desktop-agent-session.ts"));
-  const externalOwnerConsumers = await Promise.all([
-    readSource(path.join(appRoot, "basic-agent-runtime", "context-pack.ts")),
-    readSource(path.join(appRoot, "basic-agent-runtime", "context-pack.test.ts")),
-    readSource(path.join(appRoot, "basic-agent-runtime", "context-ledger.ts")),
-    readSource(path.join(appRoot, "basic-agent-runtime", "context-ledger-items.ts")),
-    readSource(path.join(appRoot, "panel-read-model", "canvas", "panel-desktop-agent-canvas.ts")),
-    readSource(path.join(appRoot, "panel-server", "conversation-history.ts")),
-    readSource(path.join(appRoot, "panel-server", "desktop-agent-execution.ts")),
-    readSource(path.join(appRoot, "panel-server", "run-execution-contracts.ts")),
-    readSource(path.join(appRoot, "panel-server", "skill-service.ts")),
-    readSource(path.join(appRoot, "capability", "run-tool-boundary.ts")),
-  ]);
-
-  for (const fileName of desktopAgentFiles) {
-    if (fileName !== "desktop-agent-session-runtime.ts") {
-      assert.equal(fileExistsSync(path.join(appRoot, fileName)), true, `${fileName} should keep a top-level compatibility facade`);
-    }
-    assert.equal(fileExistsSync(path.join(desktopAgentRoot, fileName)), true, `${fileName} should live in desktop-agent`);
-  }
-
-  const contractsFacade = await readSource(path.join(appRoot, "desktop-agent-contracts.ts"));
-  assert.equal(contractsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-contracts.js";');
-  const promptsFacade = await readSource(path.join(appRoot, "desktop-agent-prompts.ts"));
-  assert.equal(promptsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-prompts.js";');
-  const sessionFacade = await readSource(path.join(appRoot, "desktop-agent-session.ts"));
-  assert.equal(sessionFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session.js";');
-  const sessionContractsFacade = await readSource(path.join(appRoot, "desktop-agent-session-contracts.ts"));
-  assert.equal(sessionContractsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-contracts.js";');
-  const sessionProjectionFacade = await readSource(path.join(appRoot, "desktop-agent-session-projection.ts"));
-  assert.equal(sessionProjectionFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-projection.js";');
-  const sessionEventsFacade = await readSource(path.join(appRoot, "desktop-agent-session-events.ts"));
-  assert.equal(sessionEventsFacade.trim(), 'export * from "./desktop-agent/desktop-agent-session-events.js";');
-  assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-session-runtime.ts")), false);
-  const loopPreparationFacade = await readSource(path.join(appRoot, "desktop-agent-loop-preparation.ts"));
-  assert.equal(loopPreparationFacade.trim(), 'export * from "./desktop-agent/desktop-agent-loop-preparation.js";');
-  assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-session.test.ts")), false);
-  assert.equal(fileExistsSync(path.join(desktopAgentRoot, "desktop-agent-session.test.ts")), true);
-  assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-loop-preparation.test.ts")), false);
-  assert.equal(fileExistsSync(path.join(desktopAgentRoot, "desktop-agent-loop-preparation.test.ts")), true);
+  const loopPreparationSource = await readSource(path.join(desktopAgentRoot, "desktop-agent-loop-preparation.ts"));
+  const modelInputSource = await readSource(path.join(desktopAgentRoot, "desktop-agent-model-input.ts"));
 
   assert.equal(sessionOwnerSource.includes('from "./desktop-agent-session-contracts.js"'), true);
   assert.equal(sessionOwnerSource.includes('from "./desktop-agent-session-projection.js"'), true);
   assert.equal(sessionOwnerSource.includes('from "./desktop-agent-session-events.js"'), true);
-  assert.equal(sessionOwnerSource.includes('from "../desktop-agent-session.js"'), false);
-  assert.equal(sessionOwnerSource.includes('from "../desktop-agent-session-contracts.js"'), false);
-  assert.equal(sessionOwnerSource.includes('from "../desktop-agent-session-projection.js"'), false);
-  assert.equal(sessionOwnerSource.includes('from "../desktop-agent-session-events.js"'), false);
-
-  for (const source of externalOwnerConsumers) {
-    assert.equal(source.includes("desktop-agent/desktop-agent-"), true);
-    assert.equal(source.includes('from "./desktop-agent-contracts.js"'), false);
-    assert.equal(source.includes('from "./desktop-agent-prompts.js"'), false);
-    assert.equal(source.includes('from "../desktop-agent-contracts.js"'), false);
-    assert.equal(source.includes('from "../desktop-agent-prompts.js"'), false);
-    assert.equal(source.includes('from "./desktop-agent-session-contracts.js"'), false);
-    assert.equal(source.includes('from "./desktop-agent-session-projection.js"'), false);
-    assert.equal(source.includes('from "./desktop-agent-session-events.js"'), false);
-    assert.equal(source.includes('from "../desktop-agent-session-contracts.js"'), false);
-    assert.equal(source.includes('from "../desktop-agent-session-projection.js"'), false);
-    assert.equal(source.includes('from "../desktop-agent-session-events.js"'), false);
-  }
+  assert.equal(loopPreparationSource.includes('from "./desktop-agent-model-input.js"'), true);
+  assert.equal(modelInputSource.includes("Panel"), false);
+  assert.equal(modelInputSource.includes("RuntimeDatabase"), false);
+  assert.equal(fileExistsSync(path.join(appRoot, "desktop-agent-model-input.ts")), false);
 });

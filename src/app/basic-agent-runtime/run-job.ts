@@ -6,7 +6,8 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import type { ConfirmationDecision, ContextLedger } from "../../domain/basic-agent/index.js";
+import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
+import type { RuntimeOrdinaryModelContextRecord } from "../../domain/runtime-database/index.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
@@ -40,7 +41,6 @@ export type BasicAgentOrdinaryRunFacts = {
     readonly expiresAt?: string;
     readonly sourceRefs: readonly string[];
   };
-  readonly contextLedger?: ContextLedger;
 };
 
 export type BasicAgentRunKind = AgentArborRunKind;
@@ -68,6 +68,7 @@ export type BasicAgentRunCompletedPayload = {
   readonly canvas?: BasicAgentCanvasProjection;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly ordinary?: BasicAgentOrdinaryRunFacts;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
 };
 
 export type BasicAgentRunFailedPayload = {
@@ -82,6 +83,7 @@ export type BasicAgentRunFailedPayload = {
   };
   readonly summary?: RunConfigurationFailureSummary;
   readonly ordinary?: BasicAgentOrdinaryRunFacts;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
 };
 
 export type BasicAgentRunTerminalPayload = {
@@ -98,6 +100,7 @@ export type BasicAgentRunTerminalPayload = {
   readonly canvas?: BasicAgentCanvasProjection;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly ordinary?: BasicAgentOrdinaryRunFacts;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
 };
 
 export type BasicAgentRunConfirmationDecisionRecord = ConfirmationDecision;

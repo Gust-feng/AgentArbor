@@ -1,0 +1,214 @@
+import type { ModelMessage } from "../../domain/intelligence/index.js";
+import type { ObservationRef } from "../../domain/observation/index.js";
+import type { TaskSoil } from "../../domain/soil/index.js";
+import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
+import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
+
+export type DesktopAgentModelInput = {
+  readonly messages: readonly ModelMessage[];
+  readonly inputRefs: readonly ObservationRef[];
+};
+
+export type BuildDesktopAgentModelInputOptions = {
+  readonly agentDefinition: Pick<AgentDefinition, "agentId" | "prompt">;
+  readonly goal: string;
+  readonly taskSoil: TaskSoil;
+  readonly priorModelContext?: readonly ModelMessage[];
+  readonly skillContexts?: readonly DesktopAgentSkillContext[];
+};
+
+/**
+ * Builds the Ordinary Agent request in provider-neutral message order.
+ * Earlier model messages stay byte-for-byte equivalent apart from cloning;
+ * context-window compaction is owned by the model loop, not this assembler.
+ */
+export function buildDesktopAgentModelInput(
+  input: BuildDesktopAgentModelInputOptions,
+): DesktopAgentModelInput {
+  const priorMessages = (input.priorModelContext ?? []).map(cloneModelMessage);
+  const currentUserContent = currentUserMessageContent(input);
+  const messages: ModelMessage[] = [
+    {
+      role: "system",
+      content: input.agentDefinition.prompt.systemPrompt,
+      ref: `context:system:${input.agentDefinition.agentId}`,
+    },
+    ...priorMessages,
+    {
+      role: "user",
+      content: currentUserContent,
+      ref: `context:goal:${input.taskSoil.goalId ?? input.taskSoil.taskSoilId}`,
+    },
+  ];
+  return {
+    messages,
+    inputRefs: modelInputRefs(input, messages),
+  };
+}
+
+function currentUserMessageContent(input: BuildDesktopAgentModelInputOptions): string {
+  const skills = (input.skillContexts ?? [])
+    .filter((context) => (context.loadStatus ?? "loaded") === "loaded")
+    .map(skillBlock);
+  const attachments = input.taskSoil.contextRefs
+    .map((ref, index) => attachmentBlock(ref, input.taskSoil, index))
+    .filter(isString);
+  const goal = normalizeModelFacingText(input.goal);
+  if (skills.length === 0 && attachments.length === 0) {
+    return goal;
+  }
+  return [
+    skills.length === 0 ? undefined : `[Selected skill instructions]\n${skills.join("\n\n")}`,
+    attachments.length === 0 ? undefined : `[User-provided context]\n${attachments.join("\n")}`,
+    `[Current user request]\n${goal}`,
+  ].filter(isString).join("\n\n");
+}
+
+function skillBlock(context: DesktopAgentSkillContext): string {
+  const resources = skillResourceLines(context);
+  return [
+    `Skill: ${normalizeModelFacingText(context.skill.name)}`,
+    `Selected because: ${normalizeModelFacingText(context.triggerReason)}`,
+    normalizeModelFacingText(context.body),
+    resources.length === 0
+      ? undefined
+      : [
+          "Resources available through read_skill_resource (contents are not preloaded):",
+          ...resources,
+        ].join("\n"),
+  ].filter(isString).join("\n");
+}
+
+function skillResourceLines(context: DesktopAgentSkillContext): readonly string[] {
+  const resources = [
+    ...(context.skill.resourceIndex ?? [])
+      .filter((resource) => resource.exists)
+      .map((resource) => ({
+        type: resource.type,
+        path: safeRelativeResourcePath(resource.relativePath),
+        name: undefined,
+        byteLength: resource.byteLength,
+      })),
+    ...(context.skill.resources ?? [])
+      .filter((resource) => resource.loadError === undefined)
+      .map((resource) => ({
+        type: resource.kind,
+        path: safeRelativeResourcePath(resource.relativePath ?? resource.name),
+        name: normalizeModelFacingText(resource.name),
+        byteLength: resource.byteLength,
+      })),
+  ];
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const resource of resources) {
+    if (resource.path === undefined) {
+      continue;
+    }
+    const key = `${resource.type}:${resource.path}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    lines.push(
+      `- type=${resource.type} path=${resource.path}` +
+      (resource.name === undefined ? "" : ` name=${resource.name}`) +
+      (resource.byteLength === undefined ? "" : ` bytes=${resource.byteLength}`),
+    );
+  }
+  return lines;
+}
+
+function safeRelativeResourcePath(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (normalized.length === 0 || normalized.startsWith("/") || normalized.includes("../")) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function attachmentBlock(
+  ref: TaskSoil["contextRefs"][number],
+  taskSoil: TaskSoil,
+  index: number,
+): string | undefined {
+  if (!isModelVisibleContextRef(ref, taskSoil)) {
+    return undefined;
+  }
+  const safeRef = modelSafeContextRef(ref.ref);
+  return [
+    "User-provided context attachment is authorized for this run.",
+    `attachment_id=${normalizeModelFacingText(ref.attachmentId ?? safeRef ?? `attachment-${index}`)}`,
+    `kind=${ref.kind}`,
+    safeRef === undefined ? undefined : `ref=${normalizeModelFacingText(safeRef)}`,
+    ref.title === undefined ? undefined : `title=${normalizeModelFacingText(ref.title)}`,
+    ref.summary === undefined ? undefined : `summary=${normalizeModelFacingText(ref.summary)}`,
+    ref.metadata?.mimeType === undefined ? undefined : `mime=${ref.metadata.mimeType}`,
+    ref.metadata?.byteLength === undefined ? undefined : `bytes=${ref.metadata.byteLength}`,
+    ref.metadata?.truncated === true ? "preview_truncated=true" : undefined,
+    "Inspect it with available attachment tools, or directly if file/image input is attached to this request. Do not assume unread content.",
+  ].filter(isString).join(" ");
+}
+
+function isModelVisibleContextRef(
+  ref: TaskSoil["contextRefs"][number],
+  taskSoil: TaskSoil,
+): boolean {
+  if (ref.kind === "user_goal" || ref.kind === "runtime") {
+    return false;
+  }
+  if (ref.kind === "workspace" && (ref.ref === `workspace:${taskSoil.goalId}` || ref.ref.startsWith("workspace:goal-"))) {
+    return false;
+  }
+  return ref.kind === "workspace" || ref.kind === "file" || ref.kind === "project" || ref.kind === "web";
+}
+
+function modelSafeContextRef(ref: string): string | undefined {
+  const normalized = ref.toLowerCase();
+  return normalized.startsWith("local-file:") || normalized.startsWith("local-project:")
+    ? undefined
+    : ref;
+}
+
+function modelInputRefs(
+  input: BuildDesktopAgentModelInputOptions,
+  messages: readonly ModelMessage[],
+): readonly ObservationRef[] {
+  const refs: ObservationRef[] = [
+    { kind: "trace", id: input.taskSoil.traceId ?? input.taskSoil.taskSoilId },
+    { kind: "goal", id: input.taskSoil.goalId ?? input.taskSoil.taskSoilId },
+    { kind: "event", id: input.agentDefinition.prompt.promptRef },
+    ...messages
+      .map((message) => message.ref)
+      .filter((ref): ref is string => ref !== undefined)
+      .map((id): ObservationRef => ({ kind: "event", id })),
+  ];
+  return refs.filter((ref, index, values) =>
+    values.findIndex((candidate) => candidate.kind === ref.kind && candidate.id === ref.id) === index
+  );
+}
+
+function cloneModelMessage(message: ModelMessage): ModelMessage {
+  const attachments = message.attachments?.map((attachment) => globalThis.structuredClone(attachment));
+  const toolCalls = message.toolCalls?.map((call) => ({
+      callId: call.callId,
+      toolName: call.toolName,
+      input: globalThis.structuredClone(call.input),
+    }));
+  const protocolExtensions = message.protocolExtensions === undefined
+    ? undefined
+    : globalThis.structuredClone(message.protocolExtensions);
+  return {
+    ...message,
+    ...(attachments === undefined ? {} : { attachments }),
+    ...(toolCalls === undefined ? {} : { toolCalls }),
+    ...(protocolExtensions === undefined ? {} : { protocolExtensions }),
+  };
+}
+
+function isString(value: string | undefined): value is string {
+  return value !== undefined;
+}

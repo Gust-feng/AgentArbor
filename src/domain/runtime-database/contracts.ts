@@ -1,12 +1,11 @@
 import type { ArborMessageType, ArtifactRef } from "../common.js";
-import type { ContextLedger } from "../basic-agent/contracts.js";
 import type {
   BasicAgentCapabilitySnapshot,
   RunAgentDefinitionRef,
   RunCapabilityResolution,
   SanitizedInformationAccessConfig,
 } from "../config/contracts.js";
-import type { ModelUsage } from "../intelligence/contracts.js";
+import type { ModelMessage, ModelUsage } from "../intelligence/contracts.js";
 import type { SubAgentRunTrace } from "../sub-agents/contracts.js";
 import type { ToolErrorDomain, ToolErrorFacts } from "../tools/contracts.js";
 import type { ToolFactValue } from "../tools/fact-value.js";
@@ -225,7 +224,15 @@ export type RuntimeConfirmationRecord = {
 
 export type RuntimeSubAgentRunRecord = SubAgentRunTrace;
 
-export type RuntimeContextLedgerRecord = ContextLedger;
+/**
+ * Ordinary Agent's canonical model-visible window after a run. Attachments are
+ * request-scoped and must not be stored here; provider continuations are
+ * restricted by the intelligence persistence contract before this is written.
+ */
+export type RuntimeOrdinaryModelContextRecord = {
+  readonly runId: string;
+  readonly messages: readonly ModelMessage[];
+};
 
 export type RuntimeRunSnapshot = {
   readonly run: RuntimeRunRecord;
@@ -236,7 +243,7 @@ export type RuntimeRunSnapshot = {
   readonly artifacts: readonly RuntimeArtifactRecord[];
   readonly confirmations: readonly RuntimeConfirmationRecord[];
   readonly subAgentRuns: readonly RuntimeSubAgentRunRecord[];
-  readonly contextLedger?: RuntimeContextLedgerRecord;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
 };
 
 export type RuntimeRunSnapshotContent = RuntimeRunSnapshot;

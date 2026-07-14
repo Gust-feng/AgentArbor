@@ -147,37 +147,9 @@ function appendAttachmentsToCurrentUserMessage(
     if (index !== targetIndex) {
       return message;
     }
-    const attachmentLines = attachments
-      .map((attachment, attachmentIndex) => {
-        const safeRef = modelSafeInputRef(attachment.inputRef);
-        return [
-          "-",
-          `attachment_id=${attachment.attachmentId ?? safeRef ?? `model-input:${attachmentIndex + 1}`}`,
-          safeRef === undefined ? undefined : `ref=${safeRef}`,
-          `kind=${attachment.kind}`,
-          attachment.filename === undefined ? undefined : `filename=${attachment.filename}`,
-          attachment.byteLength === undefined ? undefined : `bytes=${attachment.byteLength}`,
-        ].filter((part): part is string => part !== undefined).join(" ");
-      })
-      .join("\n");
     return {
       ...message,
-      content: [
-        message.content,
-        "",
-        "The following image inputs are already attached to this user message for direct visual inspection:",
-        "Inspect them directly instead of claiming that local images are unavailable.",
-        attachmentLines,
-      ].join("\n"),
       attachments: [...(message.attachments ?? []), ...attachments],
     };
   });
-}
-
-function modelSafeInputRef(ref: string | undefined): string | undefined {
-  const normalized = ref?.toLowerCase();
-  if (normalized === undefined || normalized.startsWith("local-file:") || normalized.startsWith("local-project:")) {
-    return undefined;
-  }
-  return ref;
 }

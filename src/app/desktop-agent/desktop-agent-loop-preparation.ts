@@ -4,9 +4,8 @@ import type { TaskSoil } from "../../domain/soil/index.js";
 import type { AgentTurnPolicy, AgentTurnRuntime } from "../../kernel/intelligence/index.js";
 import { createSubAgentToolExecutors } from "../sub-agents/sub-agent-tools.js";
 import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
-import { createOpenAITokenCounter, type BasicAgentContextPack } from "../basic-agent-runtime/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
-import { desktopAgentContextPack } from "./desktop-agent-prompts.js";
+import { buildDesktopAgentModelInput, type DesktopAgentModelInput } from "./desktop-agent-model-input.js";
 import type { RunDesktopAgentSessionOptions } from "./desktop-agent-session-contracts.js";
 import {
   createDesktopAgentTurnPolicy,
@@ -31,7 +30,7 @@ export type DesktopAgentLoopPreparationInput = {
 };
 
 export type DesktopAgentLoopPreparation = {
-  readonly contextPack: BasicAgentContextPack;
+  readonly modelInput: DesktopAgentModelInput;
   readonly turnRuntime: AgentTurnRuntime;
   readonly turnPolicy: AgentTurnPolicy;
   readonly modelCapabilities?: ModelCapabilities;
@@ -90,18 +89,12 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     }
   }
 
-  const tokenCounter = createOpenAITokenCounter(resolveActiveModelName(input.options));
-  const contextPack = desktopAgentContextPack({
+  const modelInput = buildDesktopAgentModelInput({
     agentDefinition: input.agentDefinition,
     goal: input.goal,
     taskSoil: input.taskSoil,
-    conversationHistory: input.options.conversationHistory ?? [],
-    conversationSummary: input.options.conversationSummary,
-    interruptedRunContexts: input.options.interruptedRunContexts,
-    priorToolCallContexts: input.options.priorToolCallContexts,
+    priorModelContext: input.options.priorModelContext,
     skillContexts,
-    modelCapabilities,
-    tokenCounter,
   });
   const turnRuntime = createDesktopAgentTurnRuntime({
     runtime: input.runtime,
@@ -138,7 +131,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
   });
 
   return {
-    contextPack,
+    modelInput,
     turnRuntime,
     turnPolicy,
     modelCapabilities,

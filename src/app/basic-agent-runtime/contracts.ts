@@ -7,18 +7,11 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import type { ModelMessage, ModelOutputDelta } from "../../domain/intelligence/index.js";
-import type { ObservationRef } from "../../domain/observation/index.js";
-import type {
-  ContextLedger,
-  ContextLedgerSkillFacts,
-  ContextLedgerSkillLoadStatus,
-  ContextLedgerSkillMarkUsedStatus,
-} from "../../domain/basic-agent/index.js";
+import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
+import type { RuntimeOrdinaryModelContextRecord } from "../../domain/runtime-database/index.js";
 import type { ToolConfirmationPolicy, ToolErrorDomain } from "../../domain/tools/index.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
 import type { BasicAgentRuntimeContext } from "./runtime-context.js";
-import type { DesktopAgentConversationMessage } from "../desktop-agent/desktop-agent-contracts.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { RunSummary } from "../run-read-model/run-summary.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
@@ -32,66 +25,6 @@ import type {
   BasicAgentRunStreamEvent,
 } from "./run-job.js";
 
-export type BasicAgentContextSourceKind =
-  | "system"
-  | "skill"
-  | "conversation"
-  | "conversation_summary"
-  | "conversation_recent_turn"
-  | "run_interruption"
-  | "run_tool_fact"
-  | "user_message"
-  | "task_soil_ref";
-
-export type BasicAgentContextSkillFacts = Omit<
-  ContextLedgerSkillFacts,
-  "injectionStatus" | "loadStatus" | "markUsedStatus"
-> & {
-  readonly loadStatus: ContextLedgerSkillLoadStatus;
-  readonly markUsedStatus?: ContextLedgerSkillMarkUsedStatus;
-};
-
-export type BasicAgentContextItem = {
-  readonly itemId: string;
-  readonly sourceKind: BasicAgentContextSourceKind;
-  readonly role?: "user" | "assistant";
-  readonly summary: string;
-  readonly modelContent?: string;
-  readonly refs: readonly ObservationRef[];
-  readonly visibility: "model" | "diagnostic";
-  readonly truncated: boolean;
-  readonly skill?: BasicAgentContextSkillFacts;
-};
-
-export type BasicAgentContextBudget = {
-  readonly maxMessages: number;
-  readonly maxInputTokens: number;
-  readonly usedInputTokens: number;
-  readonly tokenCountSource: string;
-  readonly maxChars: number;
-  readonly usedChars: number;
-  readonly inputTokenBudget?: number;
-  readonly reservedOutputTokens?: number;
-  readonly budgetSource: "default" | "model_capabilities" | "override";
-};
-
-export type BasicAgentContextTruncationReport = {
-  readonly truncated: boolean;
-  readonly omittedItemCount: number;
-  readonly truncatedItemIds: readonly string[];
-};
-
-export type BasicAgentContextPack = {
-  readonly messages: readonly ModelMessage[];
-  readonly inputRefs: readonly ObservationRef[];
-  readonly items: readonly BasicAgentContextItem[];
-  readonly budget: BasicAgentContextBudget;
-  readonly usageSummary: string;
-  readonly truncationReport: BasicAgentContextTruncationReport;
-  readonly truncated: boolean;
-  readonly readModel: ContextLedger;
-};
-
 export type BasicAgentRuntimeReadyContext = {
   readonly runtime: BasicAgentRuntimeContext;
   readonly traceId: string;
@@ -102,7 +35,6 @@ export type BasicAgentErrorDomain = ToolErrorDomain;
 
 export type BasicAgentRunExecutionInput = {
   readonly job: BasicAgentRunJob;
-  readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly abortSignal: AbortSignal;
   readonly onRuntimeReady: (context: BasicAgentRuntimeReadyContext) => void;
   readonly onModelOutputDelta: (delta: ModelOutputDelta) => void;
@@ -119,6 +51,7 @@ export type BasicAgentRunExecutionResult = {
   readonly canvas?: BasicAgentCanvasProjection;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly ordinary?: BasicAgentOrdinaryRunFacts;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
   readonly failed?: {
     readonly code: string;
     readonly message: string;

@@ -1,19 +1,14 @@
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { IntelligenceChannel } from "../../domain/intelligence/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type { AgentTurnRuntime, AgentTurnRuntimeResult } from "../../kernel/intelligence/index.js";
 import type { BasicAgentRuntimeContext } from "../basic-agent-runtime/runtime-context.js";
 import { createOrdinaryAgentRuntime } from "./ordinary-agent-runtime.js";
-import {
-  compactBasicAgentConversationIfNeeded,
-  createOpenAITokenCounter,
-  type BasicAgentContextPack,
-  type BasicAgentConversationSummary,
-} from "../basic-agent-runtime/index.js";
+import { ordinaryModelContextFromTurn } from "../basic-agent-runtime/index.js";
+import type { DesktopAgentModelInput } from "./desktop-agent-model-input.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { attachDesktopFileInputsToModelMessages } from "../task-soil/desktop-agent-model-input-files.js";
-import { modelCapabilitiesForDesktopRun, prepareDesktopAgentLoop } from "./desktop-agent-loop-preparation.js";
+import { prepareDesktopAgentLoop } from "./desktop-agent-loop-preparation.js";
 import { createTaskSoilFromDesktopInput } from "../task-soil/task-soil-workspace.js";
 import type {
   DesktopAgentConversationMessage,
@@ -23,8 +18,6 @@ import type {
   RunDesktopAgentSessionOptions,
 } from "./desktop-agent-session-contracts.js";
 import {
-  publishContextCompactionCompleted,
-  publishContextCompactionFailed,
   publishConfirmationRequested,
   publishGoalReceived,
   publishTriggeredSkills,
@@ -35,12 +28,10 @@ import {
   pendingConfirmationFrom,
   refsFromResponse,
   refsFromToolCalls,
-  safeDesktopAgentContextPack,
 } from "./desktop-agent-session-projection.js";
 import {
   constraintRefsFromTaskSoil,
   createIntelligenceChannelFromOptions,
-  resolveActiveModelName,
   resolveDesktopAgentAiMode,
 } from "./desktop-agent-session-runtime.js";
 import { asRecord, stringOrUndefined } from "../run-read-model/value-utils.js";
@@ -103,16 +94,7 @@ export async function runDesktopAgentSession(
   }
 
   const channel = intelligenceChannel(runtime);
-  const conversationContext = await compactConversationHistoryForSession({
-    goal,
-    runtime,
-    traceId,
-    goalId,
-    agentDefinition,
-    aiMode,
-    options,
-    channel,
-  });
+  const skillRoutingHistory = options.skillRoutingHistory ?? [];
   const skillContexts = options.resolveSkillContexts === undefined
     ? options.skillContexts ?? []
     : await options.resolveSkillContexts({
@@ -120,7 +102,7 @@ export async function runDesktopAgentSession(
         traceId,
         goalId,
         goal,
-        conversationHistory: conversationContext.conversationHistory,
+        conversationHistory: skillRoutingHistory,
         intelligenceChannel: channel,
         abortSignal: options.abortSignal,
       });
@@ -133,8 +115,7 @@ export async function runDesktopAgentSession(
   });
   const loopOptions: RunDesktopAgentSessionOptions = {
     ...options,
-    conversationHistory: conversationContext.conversationHistory,
-    conversationSummary: conversationContext.conversationSummary,
+    priorModelContext: options.priorModelContext,
     skillContexts,
   };
   const loop = prepareDesktopAgentLoop({
@@ -149,7 +130,7 @@ export async function runDesktopAgentSession(
     options: loopOptions,
   });
   const modelMessages = await attachDesktopFileInputsToModelMessages({
-    messages: loop.contextPack.messages,
+    messages: loop.modelInput.messages,
     taskSoil,
     modelCapabilities: loop.modelCapabilities,
     workspaceRoot: options.workspaceRoot,
@@ -158,7 +139,7 @@ export async function runDesktopAgentSession(
     policy: loop.turnPolicy,
     requestId: createId("model-request"),
     callerRef: { kind: "goal", id: goalId, label: "desktop_agent" },
-    inputRefs: loop.contextPack.inputRefs,
+    inputRefs: loop.modelInput.inputRefs,
     sanitizedMessages: modelMessages,
     constraintRefs: constraintRefsFromTaskSoil(taskSoil),
     toolChoice: "auto",
@@ -167,12 +148,13 @@ export async function runDesktopAgentSession(
   }, FINAL_OUTPUT_ONLY_TURN);
 
   return desktopAgentResultFromTurn({
+    runId: options.runId ?? traceId,
     goal,
     runtime,
     traceId,
     goalId,
     taskSoil,
-    contextPack: loop.contextPack,
+    modelInput: loop.modelInput,
     agentId: agentDefinition.agentId,
     turnRuntime: loop.turnRuntime,
     turn,
@@ -180,105 +162,14 @@ export async function runDesktopAgentSession(
   });
 }
 
-async function compactConversationHistoryForSession(input: {
-  readonly goal: string;
-  readonly runtime: BasicAgentRuntimeContext;
-  readonly traceId: string;
-  readonly goalId: string;
-  readonly agentDefinition: NonNullable<RunDesktopAgentSessionOptions["agentDefinition"]>;
-  readonly aiMode: ReturnType<typeof resolveDesktopAgentAiMode>;
-  readonly options: RunDesktopAgentSessionOptions;
-  readonly channel: IntelligenceChannel;
-}): Promise<{
-  readonly conversationHistory: readonly DesktopAgentConversationMessage[];
-  readonly conversationSummary?: BasicAgentConversationSummary;
-}> {
-  const conversationHistory = input.options.conversationHistory ?? [];
-  if (conversationHistory.length === 0 || input.options.conversationSummary !== undefined) {
-    return {
-      conversationHistory,
-      conversationSummary: input.options.conversationSummary,
-    };
-  }
-
-  try {
-    const result = await compactBasicAgentConversationIfNeeded({
-      goal: input.goal,
-      traceId: input.traceId,
-      goalId: input.goalId,
-      agentIdentity: {
-        agentId: input.agentDefinition.agentId,
-        displayName: input.agentDefinition.displayName,
-      },
-      conversationHistory,
-      intelligenceChannel: input.channel,
-      modelCapabilities: modelCapabilitiesForDesktopRun(input.aiMode, input.options),
-      tokenCounter: createOpenAITokenCounter(resolveActiveModelName(input.options)),
-    });
-    if (result.failed !== undefined) {
-      publishContextCompactionFailed({
-        runtime: input.runtime,
-        agentId: input.agentDefinition.agentId,
-        traceId: input.traceId,
-        goalId: input.goalId,
-        tokenCount: result.tokenCount,
-        threshold: result.threshold,
-        message: result.failed.message,
-        nonBlocking: true,
-        scope: "conversation_history",
-        requestId: result.failed.requestId,
-        responseId: result.failed.responseId,
-      });
-      return { conversationHistory, conversationSummary: input.options.conversationSummary };
-    }
-    if (result.compacted && result.conversationSummary !== undefined) {
-      publishContextCompactionCompleted({
-        runtime: input.runtime,
-        agentId: input.agentDefinition.agentId,
-        traceId: input.traceId,
-        goalId: input.goalId,
-        summaryId: result.conversationSummary.summaryId,
-        tokenCount: result.tokenCount ?? 0,
-        threshold: result.threshold ?? 0,
-        coveredRefCount: result.conversationSummary.coveredRefs.length,
-        messageCountAfter: result.conversationHistory.length,
-        scope: "conversation_history",
-        requestId: result.conversationSummary.modelRequestId,
-        responseId: result.conversationSummary.modelResponseId,
-      });
-      return {
-        conversationHistory: result.conversationHistory,
-        conversationSummary: result.conversationSummary,
-      };
-    }
-    return {
-      conversationHistory: result.conversationHistory,
-      conversationSummary: input.options.conversationSummary,
-    };
-  } catch (error) {
-    if (input.options.abortSignal?.aborted) {
-      throw error;
-    }
-    publishContextCompactionFailed({
-      runtime: input.runtime,
-      agentId: input.agentDefinition.agentId,
-      traceId: input.traceId,
-      goalId: input.goalId,
-      message: error instanceof Error ? error.message : String(error),
-      nonBlocking: true,
-      scope: "conversation_history",
-    });
-    return { conversationHistory, conversationSummary: input.options.conversationSummary };
-  }
-}
-
 function desktopAgentResultFromTurn(input: {
+  readonly runId: string;
   readonly goal: string;
   readonly runtime: BasicAgentRuntimeContext;
   readonly traceId: string;
   readonly goalId: string;
   readonly taskSoil: TaskSoil;
-  readonly contextPack: BasicAgentContextPack;
+  readonly modelInput: DesktopAgentModelInput;
   readonly agentId: string;
   readonly turnRuntime: AgentTurnRuntime;
   readonly turn: AgentTurnRuntimeResult;
@@ -286,6 +177,12 @@ function desktopAgentResultFromTurn(input: {
 }): DesktopAgentSessionResult {
   const modelCallRefs = refsFromResponse(input.turn.finalOutput, input.turn.modelRequestId, input.turn.modelResponseId);
   const toolCallRefs = refsFromToolCalls(input.turn.toolCalls);
+  const modelContext = ordinaryModelContextFromTurn({
+    runId: input.runId,
+    contextMessages: input.turn.contextMessages,
+    finalOutput: input.turn.finalOutput,
+    completed: input.turn.status === "completed" && input.turn.finalOutput?.status === "completed",
+  });
   const waitingForApproval = input.turn.status === "approval_required" && input.turn.pendingApproval !== undefined;
   if (input.turn.status === "paused" && (input.turn.stoppedReason === "out_of_fuel" || input.turn.stoppedReason === "context_overflow")) {
     return {
@@ -296,8 +193,7 @@ function desktopAgentResultFromTurn(input: {
       goalId: input.goalId,
       taskSoil: input.taskSoil,
       capabilityResolution: input.capabilityResolution,
-      contextPack: safeDesktopAgentContextPack(input.contextPack),
-      contextLedger: input.contextPack.readModel,
+      modelContext,
       failureMessage: input.turn.stoppedReason === "context_overflow"
         ? "上下文整理没有成功，任务没有完成。你可以继续发送消息，我会接着处理。"
         : "任务没有完成。你可以补充要求或重新发起，我会接着处理。",
@@ -332,8 +228,7 @@ function desktopAgentResultFromTurn(input: {
       taskSoil: input.taskSoil,
       capabilityResolution: input.capabilityResolution,
       pendingConfirmation,
-      contextPack: safeDesktopAgentContextPack(input.contextPack),
-      contextLedger: input.contextPack.readModel,
+      modelContext,
       modelCallRefs,
       toolCallRefs,
       pendingApproval: pendingApprovalContinuation(input, pendingConfirmation),
@@ -351,8 +246,7 @@ function desktopAgentResultFromTurn(input: {
       goalId: input.goalId,
       taskSoil: input.taskSoil,
       capabilityResolution: input.capabilityResolution,
-      contextPack: safeDesktopAgentContextPack(input.contextPack),
-      contextLedger: input.contextPack.readModel,
+      modelContext,
       failureMessage: input.turn.finalOutput?.failure?.message ?? "任务没有完成。",
       modelCallRefs,
       toolCallRefs,
@@ -368,8 +262,7 @@ function desktopAgentResultFromTurn(input: {
       goalId: input.goalId,
       taskSoil: input.taskSoil,
       capabilityResolution: input.capabilityResolution,
-      contextPack: safeDesktopAgentContextPack(input.contextPack),
-      contextLedger: input.contextPack.readModel,
+      modelContext,
       failureMessage: "Desktop Agent model stopped without a visible answer.",
       modelCallRefs,
       toolCallRefs,
@@ -409,8 +302,7 @@ function desktopAgentResultFromTurn(input: {
       evidenceRefs,
     },
     pendingConfirmation,
-    contextPack: safeDesktopAgentContextPack(input.contextPack),
-    contextLedger: input.contextPack.readModel,
+    modelContext,
     modelCallRefs,
     toolCallRefs,
     pendingApproval: pendingApprovalContinuation(input, pendingConfirmation),
@@ -419,12 +311,13 @@ function desktopAgentResultFromTurn(input: {
 
 function pendingApprovalContinuation(
   input: {
+    readonly runId: string;
     readonly goal: string;
     readonly runtime: BasicAgentRuntimeContext;
     readonly traceId: string;
     readonly goalId: string;
     readonly taskSoil: TaskSoil;
-    readonly contextPack: BasicAgentContextPack;
+    readonly modelInput: DesktopAgentModelInput;
     readonly agentId: string;
     readonly turnRuntime: AgentTurnRuntime;
     readonly turn: AgentTurnRuntimeResult;

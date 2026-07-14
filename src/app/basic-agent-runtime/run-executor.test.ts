@@ -481,6 +481,63 @@ test("BasicAgentRunExecutor ignores duplicate scheduling and preserves cancellat
   assert.equal(executionCalls, 1);
 });
 
+test("BasicAgentRunExecutor preserves returned model context when an in-flight run is aborted", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const abortControllers = new Map<string, AbortController>();
+  let markExecutionStarted!: () => void;
+  let releaseExecution!: () => void;
+  const executionStarted = new Promise<void>((resolve) => {
+    markExecutionStarted = resolve;
+  });
+  const executionGate = new Promise<void>((resolve) => {
+    releaseExecution = resolve;
+  });
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    abortControllers,
+    execute: async ({ job }) => {
+      markExecutionStarted();
+      await executionGate;
+      return {
+        completed: true,
+        ordinary: {
+          answer: {
+            content: "partial but canonical",
+            modelCallRefs: [],
+            toolCallRefs: [],
+            evidenceRefs: [],
+          },
+        },
+        ordinaryModelContext: {
+          runId: job.runId,
+          messages: [
+            { role: "user", content: "keep this request" },
+            { role: "assistant", content: "keep this response" },
+          ],
+        },
+      };
+    },
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "abort after the adapter has a canonical result",
+    aiMode: "fake",
+  });
+  await executionStarted;
+  abortControllers.get(run.runId)?.abort();
+  releaseExecution();
+  await waitUntil(() => runJobs.get(run.runId)?.status === "cancelled");
+
+  const cancelled = runJobs.get(run.runId)?.cancelled;
+  assert.equal(cancelled?.ordinary?.answer?.content, "partial but canonical");
+  assert.deepEqual(cancelled?.ordinaryModelContext?.messages.map((message) => message.content), [
+    "keep this request",
+    "keep this response",
+  ]);
+});
+
 test("BasicAgentRunExecutor does not complete when execution result has no terminal state", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   const executor = new BasicAgentRunExecutor(executorConfig({

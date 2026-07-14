@@ -173,7 +173,6 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
       artifacts,
       confirmations,
       subAgentRuns,
-      contextLedger: undefined,
     });
 
     const snapshot = await database.getRun("panel-run-0001");
@@ -573,7 +572,6 @@ function emptyRunSnapshot(
     artifacts: [],
     confirmations: [],
     subAgentRuns: [],
-    contextLedger: undefined,
   };
 }
 

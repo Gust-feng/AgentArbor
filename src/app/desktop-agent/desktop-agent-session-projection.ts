@@ -1,34 +1,12 @@
 import type { ModelResponse } from "../../domain/intelligence/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
-import type { BasicAgentContextPack } from "../basic-agent-runtime/index.js";
 import { asRecord, stringOrUndefined } from "../run-read-model/value-utils.js";
 import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import type {
   DesktopAgentPendingConfirmation,
   DesktopAgentSessionResult,
 } from "./desktop-agent-session-contracts.js";
-
-export function safeDesktopAgentContextPack(
-  pack: BasicAgentContextPack
-): NonNullable<DesktopAgentSessionResult["contextPack"]> {
-  return {
-    usageSummary: pack.usageSummary,
-    items: pack.items.map((item) => ({
-      itemId: item.itemId,
-      sourceKind: item.sourceKind,
-      role: item.role,
-      summary: safeText(item.sourceKind === "system" ? "当前任务的系统指令。" : item.summary, 320),
-      refs: item.refs,
-      visibility: item.visibility,
-      truncated: item.truncated,
-      skill: item.skill,
-    })),
-    budget: pack.budget,
-    truncationReport: pack.truncationReport,
-    truncated: pack.truncated,
-  };
-}
 
 export function parseAnswer(response: ModelResponse): string | undefined {
   const text =

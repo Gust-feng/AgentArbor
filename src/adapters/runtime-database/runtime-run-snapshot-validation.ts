@@ -1,5 +1,9 @@
 import { ARBOR_MESSAGE_TYPES } from "../../domain/common.js";
 import {
+  persistedModelProtocolExtensions,
+  type ModelMessage,
+} from "../../domain/intelligence/index.js";
+import {
   RUNTIME_RUN_MANIFEST_SCHEMA_VERSION,
   RUNTIME_RUN_SNAPSHOT_SCHEMA_VERSION,
 } from "../../domain/runtime-database/index.js";
@@ -74,8 +78,8 @@ export function validateRuntimeRunSnapshotContent(
   if (content.subAgentRuns.some((item) => item.parentRunId !== undefined && item.parentRunId !== runId)) {
     return invalid("subAgentRuns contain another parentRunId");
   }
-  if (content.contextLedger !== undefined && content.contextLedger.runId !== runId) {
-    return invalid("contextLedger runId is invalid");
+  if (content.ordinaryModelContext !== undefined && content.ordinaryModelContext.runId !== runId) {
+    return invalid("ordinaryModelContext runId is invalid");
   }
   return valid(content);
 }
@@ -115,7 +119,7 @@ function snapshotContent(value: unknown): value is RuntimeRunSnapshotContent {
     eventArray(content.artifacts, (item) => runIdRecord(item)) &&
     eventArray(content.confirmations, (item) => confirmation(item)) &&
     eventArray(content.subAgentRuns, (item) => subAgentRun(item)) &&
-    (content.contextLedger === undefined || contextLedger(content.contextLedger));
+    (content.ordinaryModelContext === undefined || ordinaryModelContext(content.ordinaryModelContext));
 }
 
 function runRecord(value: unknown): value is RuntimeRunRecord {
@@ -155,10 +159,78 @@ function subAgentRun(value: unknown): boolean {
     Array.isArray(item.modelExchanges) && Array.isArray(item.toolTraces);
 }
 
-function contextLedger(value: unknown): boolean {
-  const ledger = object(value);
-  return ledger !== undefined && nonEmpty(ledger.runId) && typeof ledger.summary === "string" &&
-    Array.isArray(ledger.entries) && object(ledger.truncation) !== undefined;
+function ordinaryModelContext(value: unknown): boolean {
+  const context = object(value);
+  if (context === undefined || !nonEmpty(context.runId) || !Array.isArray(context.messages) ||
+      !context.messages.every(modelContextMessage)) {
+    return false;
+  }
+  const unresolvedToolCalls = new Map<string, string>();
+  const completedToolCalls = new Set<string>();
+  for (const value of context.messages) {
+    const message = value as ModelMessage;
+    if (message.role === "assistant") {
+      if (message.toolCallId !== undefined || message.toolName !== undefined) {
+        return false;
+      }
+      for (const call of message.toolCalls ?? []) {
+        if (unresolvedToolCalls.has(call.callId) || completedToolCalls.has(call.callId)) {
+          return false;
+        }
+        unresolvedToolCalls.set(call.callId, call.toolName);
+      }
+      continue;
+    }
+    if (message.role === "tool") {
+      if (message.toolCallId === undefined || message.toolCalls !== undefined || message.protocolExtensions !== undefined) {
+        return false;
+      }
+      const expectedToolName = unresolvedToolCalls.get(message.toolCallId);
+      if (expectedToolName === undefined || (message.toolName !== undefined && message.toolName !== expectedToolName)) {
+        return false;
+      }
+      unresolvedToolCalls.delete(message.toolCallId);
+      completedToolCalls.add(message.toolCallId);
+      continue;
+    }
+    if (message.toolCallId !== undefined || message.toolName !== undefined ||
+        message.toolCalls !== undefined || message.protocolExtensions !== undefined) {
+      return false;
+    }
+  }
+  return unresolvedToolCalls.size === 0;
+}
+
+function modelContextMessage(value: unknown): boolean {
+  const message = object(value);
+  if (message === undefined || !enumValue(message.role, new Set(["system", "user", "assistant", "tool"]))) {
+    return false;
+  }
+  if (typeof message.content !== "string" || message.attachments !== undefined) {
+    return false;
+  }
+  if (!optionalString(message.ref) || !optionalString(message.toolCallId) || !optionalString(message.toolName)) {
+    return false;
+  }
+  if (message.protocolExtensions !== undefined) {
+    const extensions = object(message.protocolExtensions);
+    if (extensions === undefined || Object.keys(extensions).length !== 1) {
+      return false;
+    }
+    try {
+      if (persistedModelProtocolExtensions(extensions as ModelMessage["protocolExtensions"]) === undefined) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return message.toolCalls === undefined || (
+    Array.isArray(message.toolCalls) && message.toolCalls.every((value) => {
+      const call = object(value);
+      return call !== undefined && nonEmpty(call.callId) && nonEmpty(call.toolName);
+    })
+  );
 }
 
 function runtimeEvent(value: unknown): boolean {

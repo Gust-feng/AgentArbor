@@ -27,7 +27,6 @@ test("basic agent work view keeps projection modules split", async () => {
   assert.equal(workView.includes("function transcriptNodesFromRunEvents"), false);
   assert.equal(workView.includes("function transcriptNodeFromRunEvent"), false);
   assert.equal(workView.includes("updatePendingReasoningNode"), false);
-  assert.equal(workView.includes("function contextLedgerFor"), false);
   assert.equal(workView.includes("function contextAttachmentsFor"), false);
   assert.equal(workView.includes("function envelopeSafeToolEvidence"), false);
   assert.equal(workView.includes("function taskSoilContextAttachments"), false);
@@ -42,7 +41,6 @@ test("basic agent work view keeps projection modules split", async () => {
   assert.equal(transcriptTools.includes("export function transcriptToolSummaryFromRunEvent"), true);
   assert.equal(transcriptTools.includes("function fileDisplaySummary"), false);
   assert.equal(contextProjection.includes("export function contextAttachmentsFor"), true);
-  assert.equal(contextProjection.includes("export function contextLedgerFor"), true);
   assert.equal(contextProjection.includes("export function normalizeToolEvidence"), false);
   assert.equal(contextProjection.includes("export function mergeToolDisplays"), true);
   assert.equal(contextProjection.includes("export type WorkViewContextProjectionInput"), true);
@@ -118,7 +116,6 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(session.includes("function activityFromEventEntries"), false);
   assert.equal(session.includes("function activityFromEventEntry"), false);
   assert.equal(session.includes("function toolActivityTitle"), false);
-  assert.equal(session.includes("function safeDesktopAgentContextPack"), false);
   assert.equal(session.includes("function createIntelligenceChannelFromOptions"), false);
   assert.equal(session.includes("function desktopAgentOutputContract"), false);
   assert.equal(session.includes("function publishGoalReceived"), false);
@@ -134,10 +131,8 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(contracts.includes("export type { DesktopAgentConversationMessage, DesktopAgentSkillContext }"), true);
   assert.equal(sharedContracts.includes("export type DesktopAgentConversationMessage"), true);
   assert.equal(sharedContracts.includes("export type DesktopAgentSkillContext"), true);
-  assert.equal(projection.includes("export function safeDesktopAgentContextPack"), true);
   assert.equal(projection.includes("export function parseAnswer"), true);
   assert.equal(projection.includes("export function pendingConfirmationFrom"), true);
-  assert.equal(projection.includes("当前任务的系统指令。"), true);
   assert.equal(projection.includes("桌面基础 Agent 系统边界。"), false);
   assert.equal(runtime.includes('from "./desktop-agent-session-events.js"'), true);
   assert.equal(runtime.includes('from "../agent-prompts/desktop-root-agent.js"'), true);

@@ -122,7 +122,6 @@ async function persistPanelRunNow(
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   });
-  const contextLedger = statusPayload?.ordinary?.contextLedger;
   const eventEntriesBySequence = new Map(eventEntries.map((entry) => [entry.sequence, entry]));
   const snapshot: RuntimeRunSnapshotContent = {
     run,
@@ -137,7 +136,7 @@ async function persistPanelRunNow(
     artifacts: toRuntimeArtifactRecords(job),
     confirmations: toRuntimeConfirmationRecords(job, eventEntries),
     subAgentRuns: job.runtime?.subAgentRunTraceStore.list() ?? [],
-    contextLedger,
+    ordinaryModelContext: statusPayload?.ordinaryModelContext,
   };
   await runtime.runtimeDatabase.saveRunSnapshot(snapshot);
 }

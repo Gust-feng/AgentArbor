@@ -186,12 +186,10 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
         ? options.selectedModelContextWindowTokens
         : runContextWindowTokens,
       modelUsage: latestModelUsage,
-      ledgerBudget: currentRun.workView?.contextLedger.budget,
     });
   }, [
     currentRun.capabilityResolution?.capabilityPlan?.modelCapabilities.contextWindowTokens,
     currentRun.run,
-    currentRun.workView?.contextLedger.budget,
     hasNormalConversationContext,
     latestModelUsage,
     options.selectedModelContextWindowTokens,

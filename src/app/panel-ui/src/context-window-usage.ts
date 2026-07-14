@@ -1,4 +1,4 @@
-export type ContextWindowUsageSource = "provider_usage" | "context_ledger" | "unavailable";
+export type ContextWindowUsageSource = "provider_usage" | "unavailable";
 
 export type ContextWindowUsageTone = "normal" | "warning" | "danger" | "muted";
 
@@ -16,13 +16,6 @@ export type ContextWindowUsageModelUsage = {
   readonly inputTokens?: number;
 };
 
-export type ContextWindowUsageLedgerBudget = {
-  readonly maxInputTokens?: number;
-  readonly usedInputTokens?: number;
-  readonly tokenCountSource?: string;
-  readonly inputTokenBudget?: number;
-};
-
 export type ContextWindowUsageTranscriptNode = {
   readonly modelUsage?: ContextWindowUsageModelUsage;
 };
@@ -36,11 +29,8 @@ export type ContextWindowUsageEvent = {
 export function contextWindowUsageFrom(input: {
   readonly contextWindowTokens?: number;
   readonly modelUsage?: ContextWindowUsageModelUsage;
-  readonly ledgerBudget?: ContextWindowUsageLedgerBudget;
 }): ContextWindowUsage | undefined {
-  const maxTokens = positiveNumber(input.contextWindowTokens) ??
-    positiveNumber(input.ledgerBudget?.inputTokenBudget) ??
-    positiveNumber(input.ledgerBudget?.maxInputTokens);
+  const maxTokens = positiveNumber(input.contextWindowTokens);
   if (maxTokens === undefined) {
     return undefined;
   }
@@ -50,19 +40,6 @@ export function contextWindowUsageFrom(input: {
     return availableContextWindowUsage({
       source: "provider_usage",
       usedTokens: providerInputTokens,
-      maxTokens,
-    });
-  }
-
-  const ledgerInputTokens = finiteTokenCount(input.ledgerBudget?.usedInputTokens);
-  if (
-    ledgerInputTokens !== undefined &&
-    input.ledgerBudget?.tokenCountSource !== undefined &&
-    isTokenSourceUsableForContextUsage(input.ledgerBudget.tokenCountSource)
-  ) {
-    return availableContextWindowUsage({
-      source: "context_ledger",
-      usedTokens: ledgerInputTokens,
       maxTokens,
     });
   }
@@ -127,12 +104,6 @@ function usageTone(percent: number): ContextWindowUsageTone {
 function formatUsagePercent(percent: number): string {
   if (percent > 0 && percent < 1) return "<1";
   return String(Math.round(percent));
-}
-
-function isTokenSourceUsableForContextUsage(source: string): boolean {
-  const normalized = source.trim().toLowerCase();
-  if (normalized.length === 0) return false;
-  return !normalized.includes("char") && !normalized.includes("character");
 }
 
 function positiveNumber(value: number | undefined): number | undefined {

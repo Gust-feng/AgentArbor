@@ -1053,7 +1053,7 @@ test("persisted Ordinary APIs reject pre-contract snapshots instead of using cur
   }
 });
 
-test("conversation message POST restores prior turn history and tool facts after restart", async () => {
+test("conversation message POST restores the canonical model and tool context after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-post-recover-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-post-recover-workspace-"));
   await fs.writeFile(path.join(workspace, "context.txt"), "PERSISTED_TOOL_FACT_SENTINEL", "utf8");
@@ -1109,13 +1109,14 @@ test("conversation message POST restores prior turn history and tool facts after
     assert.equal(second.status, 202);
     assert.equal(completed.body.status, "completed");
     assert.equal(conversation.body.conversation.turns.length, 4);
-    assert.deepEqual(secondMessages.map((message) => message.role), ["system", "user", "assistant", "system", "user"]);
+    assert.deepEqual(secondMessages.map((message) => message.role), [
+      "system", "user", "assistant", "tool", "assistant", "user",
+    ]);
     assert.equal(secondMessages[1]?.content?.includes("第一轮问题"), true);
-    assert.equal(secondMessages[2]?.content?.includes("第一轮安全回答"), true);
-    assert.equal(secondMessages[3]?.content?.includes("Tool execution fact from the immediately preceding ordinary agent run"), true);
-    assert.equal(secondMessages[3]?.content?.includes('"path": "context.txt"'), true);
+    assert.equal(secondMessages[3]?.content?.includes("context.txt"), true);
     assert.equal(secondMessages[3]?.content?.includes("PERSISTED_TOOL_FACT_SENTINEL"), true);
-    assert.equal(secondMessages[4]?.content, "第二轮问题");
+    assert.equal(secondMessages[4]?.content?.includes("第一轮安全回答"), true);
+    assert.equal(secondMessages[5]?.content, "第二轮问题");
     assert.equal(JSON.stringify(secondMessages).includes(secret), false);
   } finally {
     await server.close();
@@ -1843,7 +1844,9 @@ test("conversation history keeps safe failed turns and later completed turns aft
 
     assert.equal(conversation.body.conversation.turns.length, 6);
     assert.equal(conversation.body.conversation.turns[1].status, "failed");
-    assert.deepEqual(thirdMessages.map((message) => message.role), ["system", "user", "user", "assistant", "user"]);
+    assert.deepEqual(thirdMessages.map((message) => message.role), [
+      "system", "user", "user", "assistant", "user",
+    ]);
     assert.equal(thirdPrompt.includes("第一轮会失败"), true);
     assert.equal(thirdPrompt.includes("系统错误："), false);
     assert.equal(thirdPrompt.includes("上一轮未生成助手回复"), false);
@@ -1859,7 +1862,7 @@ test("conversation history keeps safe failed turns and later completed turns aft
   }
 });
 
-test("conversation follow-up labels missing-key failure history as a system error", async () => {
+test("conversation follow-up does not invent model history for a pre-model configuration failure", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-missing-key-history-"));
   const secret = "sk-missing-key-history-secret";
   const providerRequests: ResponsesRequestBody[] = [];
@@ -1896,7 +1899,7 @@ test("conversation follow-up labels missing-key failure history as a system erro
     const prompt = JSON.stringify(extractResponsesMessages(providerRequests.at(-1)));
 
     assert.equal(providerRequests.length, 1);
-    assert.equal(prompt.includes("第一轮缺少密钥"), true);
+    assert.equal(prompt.includes("第一轮缺少密钥"), false);
     assert.equal(prompt.includes("系统错误："), false);
     assert.equal(prompt.includes("上一轮未生成助手回复"), false);
     assert.equal(prompt.includes("不是助手输出"), false);

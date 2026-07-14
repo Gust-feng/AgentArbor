@@ -6,7 +6,8 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
+import type { ModelMessage, ModelOutputDelta } from "../../domain/intelligence/index.js";
+import type { RuntimeOrdinaryModelContextRecord } from "../../domain/runtime-database/index.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../run-read-model/agent-run-tree-attachment.js";
@@ -15,8 +16,6 @@ import type { BasicAgentPendingToolContinuation } from "../basic-agent-runtime/i
 import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.js";
 import type {
   DesktopAgentConversationMessage,
-  DesktopAgentInterruptedRunContext,
-  DesktopAgentPriorToolCallContext,
   DesktopAgentSessionRuntimeContext,
 } from "../desktop-agent/desktop-agent-session-contracts.js";
 import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
@@ -38,6 +37,7 @@ export type PanelRunExecutionResult = {
   readonly canvas?: PanelRunCanvasReadModel;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly ordinary?: BasicAgentOrdinaryRunFacts;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
   readonly failed?: {
     readonly code: string;
     readonly message: string;
@@ -56,9 +56,9 @@ export type PanelRunExecutionResult = {
 };
 
 export type PanelRunExecutionOptions = {
-  readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
-  readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
-  readonly priorToolCallContexts?: readonly DesktopAgentPriorToolCallContext[];
+  readonly runId?: string;
+  readonly skillRoutingHistory?: readonly DesktopAgentConversationMessage[];
+  readonly priorModelContext?: readonly ModelMessage[];
   readonly agentDefinition?: AgentDefinition;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly config?: SanitizedModelProviderConfig;

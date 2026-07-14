@@ -440,7 +440,6 @@ test("basic agent run view exposes live runtime guard facts as a read-only detai
 test("basic agent run view for persisted runs restores from the run snapshot without current config readers", async () => {
   const snapshot: RuntimeRunSnapshot = {
     ...runtimeSnapshot(),
-    contextLedger: skillContextLedger("run-restored"),
     events: [
       runtimeEvent(1, "sub_agent.completed", "Sub-agent completed execution.", [
         { kind: "sub_agent_run", id: "sub-run-restored" },
@@ -489,17 +488,6 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   assert.deepEqual(view?.capabilityResolution, snapshot.run.capabilityResolution);
   assert.equal(view?.capabilityResolution?.snapshotId, "snapshot-restored");
   assert.deepEqual(view?.capabilityResolution?.allowedTools, ["read"]);
-  assert.deepEqual(view?.workView.triggeredSkills, [
-    {
-      skillId: "repo-review",
-      name: "Repo Review",
-      triggerReason: "触发词：review",
-      summary: "Repo Review：触发词：review",
-      sourceRef: "skill:repo-review",
-      truncated: false,
-    },
-  ]);
-  assert.equal(view?.workView.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
   assert.equal(view?.workView.subAgentRuns?.[0]?.subRunId, "sub-run-restored");
   assert.equal(view?.workView.subAgentRuns?.[0]?.fullOutput, "历史子 Agent 完整输出");
   assert.equal(view?.workView.transcriptNodes?.some((node) => node.kind === "sub_agent" && node.subAgentRunId === "sub-run-restored"), true);
@@ -860,28 +848,6 @@ function runtimeEvent(
     intent: type.replaceAll(".", "_"),
     createdAt: `2026-06-06T00:00:${String(sequence).padStart(2, "0")}.000Z`,
     recordedAt: `2026-06-06T00:00:${String(sequence).padStart(2, "0")}.000Z`,
-  };
-}
-
-function skillContextLedger(runId: string): NonNullable<RuntimeRunSnapshot["contextLedger"]> {
-  return {
-    runId,
-    summary: "技能 1；当前任务 1",
-    entries: [
-      {
-        entryId: `${runId}:ledger:context:context:skill:repo-review`,
-        kind: "skill",
-        title: "技能",
-        summary: "Triggered skill: Repo Review\nWhy: 触发词：review",
-        refs: [{ kind: "event", id: "skill:repo-review" }],
-        status: "used",
-      },
-    ],
-    truncation: {
-      truncated: false,
-      omittedItemCount: 0,
-      truncatedItemIds: [],
-    },
   };
 }
 

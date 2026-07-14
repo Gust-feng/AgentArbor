@@ -1,4 +1,5 @@
 import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
+import type { RuntimeOrdinaryModelContextRecord } from "../../domain/runtime-database/index.js";
 import type {
   BasicAgentCapabilitySnapshot,
   ModelRunReasoningEffort,
@@ -38,6 +39,7 @@ export type PanelRunCompletedPayload = {
   readonly canvas?: PanelRunCanvasReadModel;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly ordinary?: BasicAgentOrdinaryRunFacts;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
 };
 
 export type PanelRunFailedPayload = {
@@ -52,6 +54,7 @@ export type PanelRunFailedPayload = {
   };
   readonly summary?: PanelRunConfigurationFailureSummary;
   readonly ordinary?: BasicAgentOrdinaryRunFacts;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
 };
 
 export type PanelRunTerminalPayload = {
@@ -68,6 +71,7 @@ export type PanelRunTerminalPayload = {
   readonly canvas?: PanelRunCanvasReadModel;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly ordinary?: BasicAgentOrdinaryRunFacts;
+  readonly ordinaryModelContext?: RuntimeOrdinaryModelContextRecord;
 };
 
 export type PanelRunStatusPayload =

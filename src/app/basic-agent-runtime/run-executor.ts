@@ -178,7 +178,10 @@ export class BasicAgentRunExecutor {
     this.trackActiveJob(activeRunJob);
   }
 
-  async cancel(runId: string): Promise<BasicAgentRun> {
+  async cancel(
+    runId: string,
+    executionResult?: BasicAgentRunExecutionResult,
+  ): Promise<BasicAgentRun> {
     const job = this.requireJob(runId);
     if (isTerminalBasicAgentRunJob(job)) {
       // 并发竞态防御：job 已被其他路径收口为终态，
@@ -187,12 +190,18 @@ export class BasicAgentRunExecutor {
     }
     const pendingContinuationRelease = this.pendingContinuations.deleteForRun(runId);
     this.config.abortControllers.get(runId)?.abort();
+    const facts = executionResult === undefined ? undefined : executionResultRunFacts(job, executionResult);
     this.config.runJobs.cancel(runId, {
-      config: job.config,
-      informationAccess: job.informationAccess,
-      capabilitySnapshot: job.capabilitySnapshot,
-      capabilityResolution: job.capabilityResolution,
-      ordinary: job.completed?.ordinary,
+      config: facts?.config ?? job.config,
+      informationAccess: facts?.informationAccess ?? job.informationAccess,
+      capabilitySnapshot: facts?.capabilitySnapshot ?? job.capabilitySnapshot,
+      summary: executionResult?.summary,
+      observation: executionResult?.observation,
+      agentRunTree: executionResult?.agentRunTree,
+      canvas: executionResult?.canvas,
+      capabilityResolution: facts?.capabilityResolution ?? job.capabilityResolution,
+      ordinary: executionResult?.ordinary ?? job.completed?.ordinary,
+      ordinaryModelContext: executionResult?.ordinaryModelContext ?? job.completed?.ordinaryModelContext,
       reason: {
         code: "run_cancelled",
         message: "运行已取消。",
@@ -280,7 +289,7 @@ export class BasicAgentRunExecutor {
       });
       this.pendingContinuations.remember(runId, result.pendingApproval);
       if (abort.signal.aborted) {
-        await this.cancel(runId);
+        await this.cancel(runId, result);
         return;
       }
       if (result.failed !== undefined) {
@@ -309,6 +318,7 @@ export class BasicAgentRunExecutor {
           canvas: result.canvas,
           capabilityResolution: facts.capabilityResolution,
           ordinary: result.ordinary,
+          ordinaryModelContext: result.ordinaryModelContext,
         });
         const waiting = this.requireJob(runId);
         this.projectRunEvents(waiting);
@@ -330,6 +340,7 @@ export class BasicAgentRunExecutor {
         canvas: result.canvas,
         capabilityResolution: facts.capabilityResolution,
         ordinary: result.ordinary,
+        ordinaryModelContext: result.ordinaryModelContext,
       });
       const completed = this.requireJob(runId);
       this.projectRunEvents(completed);
@@ -526,6 +537,7 @@ export class BasicAgentRunExecutor {
         capabilitySnapshot: input.job.capabilitySnapshot,
         capabilityResolution: input.job.capabilityResolution,
         ordinary: input.job.completed?.ordinary,
+        ordinaryModelContext: input.job.completed?.ordinaryModelContext,
         reason: {
           code: blockedByMissingApproval ? "confirmation_continuation_lost" : "confirmation_decision_continuation_lost",
           message: blockedByMissingApproval
@@ -562,7 +574,7 @@ export class BasicAgentRunExecutor {
           });
       this.pendingContinuations.remember(input.runId, result.pendingApproval);
       if (abort.signal.aborted) {
-        await this.cancel(input.runId);
+        await this.cancel(input.runId, result);
         return this.requireBasicRun(input.runId);
       }
       if (result.failed !== undefined) {
@@ -591,6 +603,7 @@ export class BasicAgentRunExecutor {
           canvas: result.canvas,
           capabilityResolution: facts.capabilityResolution,
           ordinary: result.ordinary,
+          ordinaryModelContext: result.ordinaryModelContext,
         });
         const waiting = this.requireJob(input.runId);
         this.projectRunEvents(waiting);
@@ -612,6 +625,7 @@ export class BasicAgentRunExecutor {
         canvas: result.canvas,
         capabilityResolution: facts.capabilityResolution,
         ordinary: result.ordinary,
+        ordinaryModelContext: result.ordinaryModelContext,
       });
       const completed = this.requireJob(input.runId);
       this.projectRunEvents(completed);
@@ -653,6 +667,7 @@ export class BasicAgentRunExecutor {
       canvas: result.canvas,
       capabilityResolution: facts.capabilityResolution,
       ordinary: result.ordinary,
+      ordinaryModelContext: result.ordinaryModelContext,
     });
     const blocked = this.requireJob(runId);
     this.projectRunEvents(blocked);
@@ -677,6 +692,7 @@ export class BasicAgentRunExecutor {
       error: result.failed,
       summary: result.summary,
       ordinary: result.ordinary,
+      ordinaryModelContext: result.ordinaryModelContext,
     });
     const failed = this.requireJob(runId);
     this.projectRunEvents(failed);

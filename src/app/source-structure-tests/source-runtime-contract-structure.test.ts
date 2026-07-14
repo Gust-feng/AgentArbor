@@ -175,7 +175,6 @@ test("Ordinary runtime persistence has one atomic run snapshot write contract", 
     ".replaceArtifacts(",
     ".replaceConfirmations(",
     ".replaceSubAgentRuns(",
-    ".upsertContextLedger(",
     ".upsertWorkspace(",
   ];
 
@@ -407,17 +406,14 @@ test("tool execution facts stay independent from display, compatibility, and rep
   }
 });
 
-test("Basic Agent context pack does not own model-visible tool exposure", async () => {
+test("Desktop Agent model input does not own model-visible tool exposure", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const basicRuntimeRoot = path.join(appRoot, "basic-agent-runtime");
-  const promptAndContextSources = await Promise.all([
-    readSource(path.join(appRoot, "desktop-agent", "desktop-agent-prompts.ts")),
-    readSource(path.join(basicRuntimeRoot, "context-pack.ts")),
-    readSource(path.join(basicRuntimeRoot, "context-ledger.ts")),
-    readSource(path.join(basicRuntimeRoot, "context-ledger-items.ts")),
+  const modelInputSources = await Promise.all([
+    readSource(path.join(appRoot, "desktop-agent", "desktop-agent-model-input.ts")),
+    readSource(path.join(appRoot, "desktop-agent", "desktop-agent-model-input.test.ts")),
   ]);
 
-  for (const source of promptAndContextSources) {
+  for (const source of modelInputSources) {
     assert.equal(source.includes("allowedTools"), false);
     assert.equal(source.includes("toolCatalog"), false);
     assert.equal(source.includes("capabilitySnapshot"), false);

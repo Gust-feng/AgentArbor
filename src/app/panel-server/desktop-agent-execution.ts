@@ -58,6 +58,7 @@ export async function executeOrdinaryDesktopRunForPanel(
   let agent: Awaited<ReturnType<typeof runDesktopAgentSession>>;
   try {
     agent = await runDesktopAgentSession(goal, {
+      runId: options.runId,
       aiMode,
       createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
       createToolCenter: (toolRuntime, context) => createSharedToolCenter(toolRuntime, {
@@ -75,9 +76,8 @@ export async function executeOrdinaryDesktopRunForPanel(
       }),
       taskSoilInput,
       agentDefinition,
-      conversationHistory: options.conversationHistory,
-      interruptedRunContexts: options.interruptedRunContexts,
-      priorToolCallContexts: options.priorToolCallContexts,
+      skillRoutingHistory: options.skillRoutingHistory,
+      priorModelContext: options.priorModelContext,
       resolveSkillContexts: (context) =>
         resolveTriggeredSkillContexts(
           runtime,
@@ -175,6 +175,7 @@ async function desktopPanelResultFromAgent(
       completed: agent.status === "completed" ? true : undefined,
       eventEntries,
       ordinary: ordinaryRunFactsFromAgent(agent),
+      ordinaryModelContext: agent.modelContext,
       capabilityResolution: frozenCapabilityResolution(agent.capabilityResolution, facts.agentDefinitionRef),
       canvas: createDesktopAgentCanvas({
         result: agent,
@@ -249,7 +250,6 @@ function ordinaryRunFactsFromAgent(
           expiresAt: pending.expiresAt,
           sourceRefs: pending.sourceRefs,
         },
-    contextLedger: agent.contextLedger,
   };
 }
 

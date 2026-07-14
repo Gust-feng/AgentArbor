@@ -44,8 +44,11 @@ test("Ordinary runtime does not restore unused internal compatibility facades", 
   const appRoot = path.join(process.cwd(), "src", "app");
   const ordinaryRoot = path.join(appRoot, "basic-agent-runtime");
   const ordinaryBarrel = await fs.readFile(path.join(ordinaryRoot, "index.ts"), "utf8");
-  const conversationCompaction = await fs.readFile(path.join(ordinaryRoot, "conversation-compaction.ts"), "utf8");
   const removedFiles = [
+    "conversation-compaction-common.ts",
+    "conversation-compaction-contracts.ts",
+    "conversation-compaction.ts",
+    "conversation-history-compaction.ts",
     "loop-context-compaction.ts",
     "tool-registry.ts",
     "work-session.ts",
@@ -61,7 +64,7 @@ test("Ordinary runtime does not restore unused internal compatibility facades", 
   );
   assert.equal(ordinaryBarrel.includes("DesktopWorkSession"), false);
   assert.equal(ordinaryBarrel.includes("createDesktopWorkSessionReadModel"), false);
-  assert.equal(conversationCompaction.includes("compactBasicAgentLoopContextIfNeeded"), false);
+  assert.equal(ordinaryBarrel.includes("conversation-compaction"), false);
   assert.equal(existsSync(path.join(appRoot, "desktop-chat-session.ts")), false);
   assert.equal(existsSync(path.join(appRoot, "desktop-agent", "desktop-chat-session.ts")), false);
 });

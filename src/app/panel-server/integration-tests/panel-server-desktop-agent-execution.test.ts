@@ -239,12 +239,6 @@ test("ordinary desktop execution does not run skill routing for unmatched input"
   assert.deepEqual(channel.requests.map((request) => request.purpose), ["desktop_agent"]);
   assert.equal(channel.requests.some((request) => request.purpose === "skill_routing"), false);
   assert.deepEqual(result.capabilityResolution?.enabledSkills.map((skill) => skill.id), ["defuddle"]);
-  assert.equal(
-    result.canvas?.kind === "desktop_agent_canvas"
-      ? result.canvas.agent.context?.items.some((item) => item.sourceKind === "skill")
-      : true,
-    false
-  );
 });
 
 test("ordinary desktop execution runs skill routing only when the frozen trigger mode opts in", async () => {

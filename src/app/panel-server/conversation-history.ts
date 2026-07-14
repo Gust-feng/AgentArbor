@@ -1,18 +1,11 @@
-import type {
-  RuntimeDatabase,
-  RuntimeRunContinuationAvailability,
-} from "../../domain/runtime-database/index.js";
+import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
+import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type {
   DesktopAgentConversationMessage,
-  DesktopAgentInterruptedRunContext,
-  DesktopAgentPriorToolCallContext,
 } from "../desktop-agent/desktop-agent-session-contracts.js";
 import { readRuntimeSnapshotWithOrdinaryContract } from "../basic-agent-runtime/persistence-snapshot-contract.js";
+import { modelContextMessagesForNextTurn } from "../basic-agent-runtime/model-context.js";
 import type { PanelConversation, PanelConversationReadModel, PanelConversationStore } from "../panel-conversation/panel-conversations.js";
-import {
-  reduceToolCallEventFacts,
-  type ToolCallEventEntry,
-} from "../run-read-model/tool-call-event-reducer.js";
 import type { PanelRunJob, PanelRunJobStore } from "./run-jobs.js";
 import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
 
@@ -22,7 +15,7 @@ export type PanelConversationHistorySource = {
   readonly runtimeDatabase?: Pick<RuntimeDatabase, "getRun">;
 };
 
-export async function buildConversationHistoryMessages(input: {
+export async function buildConversationSkillRoutingHistory(input: {
   readonly source: PanelConversationHistorySource;
   readonly conversationId: string | undefined;
   readonly assistantTurnId: string | undefined;
@@ -69,40 +62,11 @@ export async function buildConversationHistoryMessages(input: {
     .filter((message): message is DesktopAgentConversationMessage => message !== undefined);
 }
 
-export async function buildConversationInterruptedRunContexts(input: {
+export async function buildConversationPriorModelContext(input: {
   readonly source: PanelConversationHistorySource;
   readonly conversationId: string | undefined;
   readonly assistantTurnId: string | undefined;
-}): Promise<readonly DesktopAgentInterruptedRunContext[]> {
-  if (input.conversationId === undefined) {
-    return [];
-  }
-  const conversation = input.source.conversations.get(input.conversationId);
-  if (conversation === undefined) {
-    return [];
-  }
-  const assistantIndex =
-    input.assistantTurnId === undefined
-      ? conversation.turns.length
-      : conversation.turns.findIndex((turn) => turn.turnId === input.assistantTurnId);
-  if (input.assistantTurnId !== undefined && assistantIndex < 0) {
-    return [];
-  }
-  const previousAssistant = [...conversationHistoryTurnsBeforeCurrentUser(conversation, assistantIndex)]
-    .reverse()
-    .find((turn) => turn.role === "assistant");
-  if (previousAssistant === undefined) {
-    return [];
-  }
-  const context = await interruptedRunContextForAssistantTurn(input.source, conversation, previousAssistant);
-  return context === undefined ? [] : [context];
-}
-
-export async function buildConversationPriorToolCallContexts(input: {
-  readonly source: PanelConversationHistorySource;
-  readonly conversationId: string | undefined;
-  readonly assistantTurnId: string | undefined;
-}): Promise<readonly DesktopAgentPriorToolCallContext[]> {
+}): Promise<readonly ModelMessage[]> {
   if (input.conversationId === undefined) {
     return [];
   }
@@ -116,22 +80,29 @@ export async function buildConversationPriorToolCallContexts(input: {
   if (input.assistantTurnId !== undefined && assistantIndex < 0) {
     return [];
   }
-  const previousAssistant = [...conversationHistoryTurnsBeforeCurrentUser(conversation, assistantIndex)]
+  const previousAssistants = [...conversationHistoryTurnsBeforeCurrentUser(conversation, assistantIndex)]
     .reverse()
-    .find((turn) => turn.role === "assistant");
-  const previousRunId = previousAssistant?.runId;
-  if (previousRunId === undefined) {
-    return [];
+    .filter((turn) => turn.role === "assistant");
+  for (const turn of previousAssistants) {
+    const runId = turn.runId;
+    if (runId === undefined) {
+      continue;
+    }
+    const liveJob = input.source.runJobs.get(runId);
+    if (liveJob !== undefined) {
+      const messages = modelContextMessagesForNextTurn(liveOrdinaryModelContext(liveJob));
+      if (messages.length > 0) {
+        return messages;
+      }
+      continue;
+    }
+    const snapshot = await readRuntimeSnapshotWithOrdinaryContract(input.source.runtimeDatabase, runId);
+    const messages = modelContextMessagesForNextTurn(snapshot?.ordinaryModelContext);
+    if (messages.length > 0) {
+      return messages;
+    }
   }
-  const liveJob = input.source.runJobs.get(previousRunId);
-  const liveEntries = liveJob?.runtime?.eventLog.list();
-  if (liveEntries !== undefined) {
-    return priorToolCallContextsFromEvents(previousRunId, liveEntries);
-  }
-  const snapshot = await readRuntimeSnapshotWithOrdinaryContract(input.source.runtimeDatabase, previousRunId);
-  return snapshot === undefined
-    ? []
-    : priorToolCallContextsFromEvents(previousRunId, snapshot.events);
+  return [];
 }
 
 function conversationHistoryTurnsBeforeCurrentUser(
@@ -166,174 +137,11 @@ async function assistantTurnCanEnterModelHistory(
   return true;
 }
 
-async function interruptedRunContextForAssistantTurn(
-  source: PanelConversationHistorySource,
-  conversation: PanelConversation,
-  turn: PanelConversationReadModel["turns"][number]
-): Promise<DesktopAgentInterruptedRunContext | undefined> {
-  if (turn.role !== "assistant" || turn.runId === undefined || !assistantTurnStatusCanProvideInterruptedContext(turn.status)) {
-    return undefined;
-  }
-  const liveJob = source.runJobs.get(turn.runId);
-  const snapshot = liveJob === undefined
-    ? await readRuntimeSnapshotWithOrdinaryContract(source.runtimeDatabase, turn.runId)
-    : undefined;
-  const turnContent = interruptedRunPartialOutput(
-    conversationHistoryContentForModel(turn),
-    turn.status,
-  );
-  const stopReason = liveJob === undefined
-    ? snapshot?.run.stopReason ?? snapshot?.run.error?.code ?? interruptedFallbackStopReason(turn.status)
-    : liveRunStopReason(liveJob);
-  const continuationAvailability = liveJob === undefined
-    ? snapshot?.run.continuationAvailability ?? continuationAvailabilityForStopReason(stopReason, turn.status)
-    : liveRunContinuationAvailability(liveJob);
-  const message = liveJob === undefined
-    ? snapshot?.run.error?.message ?? interruptedRunMessage(turnContent, stopReason)
-    : liveRunMessage(liveJob) ?? interruptedRunMessage(turnContent, stopReason);
-  return {
-    runId: turn.runId,
-    turnStatus: turn.status,
-    stopReason,
-    continuationAvailability,
-    message,
-    partialOutput: turnContent,
-    refs: [
-      `conversation:${conversation.conversationId}:turn:${turn.turnId}`,
-      `run:${turn.runId}`,
-    ],
-  };
-}
-
-function interruptedRunPartialOutput(
-  content: string,
-  status: DesktopAgentInterruptedRunContext["turnStatus"],
-): string | undefined {
-  if (status === "failed" && content.startsWith("错误信息：")) {
-    return undefined;
-  }
-  const marker = status === "failed"
-    ? "\n\n错误信息："
-    : status === "blocked"
-      ? "\n\n停止原因："
-      : undefined;
-  const modelOutput = marker === undefined ? content : content.split(marker, 1)[0]?.trim() ?? "";
-  if (modelOutput.length === 0 || (status === "cancelled" && modelOutput === "已取消。")) {
-    return undefined;
-  }
-  return modelOutput;
-}
-
-function assistantTurnStatusCanProvideInterruptedContext(
-  status: PanelConversationReadModel["turns"][number]["status"]
-): status is DesktopAgentInterruptedRunContext["turnStatus"] {
-  return status === "blocked" || status === "needs_input" || status === "failed" || status === "cancelled";
-}
-
-function liveRunStopReason(job: PanelRunJob): string {
-  if (job.status === "blocked") {
-    return job.blocked?.reason.code ?? "blocked";
-  }
-  if (job.status === "failed") {
-    return job.failed?.error.code ?? "failed";
-  }
-  if (job.status === "cancelled") {
-    return job.cancelled?.reason.code ?? "cancelled";
-  }
-  if (job.status === "needs_input") {
-    return "needs_input";
-  }
-  if (job.status === "approval_needed") {
-    return "approval_required";
-  }
-  return job.status;
-}
-
-function liveRunMessage(job: PanelRunJob): string | undefined {
-  if (job.status === "blocked") {
-    return job.blocked?.reason.message;
-  }
-  if (job.status === "failed") {
-    return job.failed?.error.message;
-  }
-  if (job.status === "cancelled") {
-    return job.cancelled?.reason.message;
-  }
-  if (job.status === "needs_input") {
-    return "Previous run requested additional user input.";
-  }
-  if (job.status === "approval_needed") {
-    return "Previous run is waiting for a tool confirmation.";
-  }
-  return undefined;
-}
-
-function liveRunContinuationAvailability(job: PanelRunJob): RuntimeRunContinuationAvailability {
-  if (job.status === "approval_needed") {
-    return "live";
-  }
-  if (job.status === "needs_input") {
-    return "new_turn";
-  }
-  if (job.status === "running" || job.status === "pending") {
-    return "live";
-  }
-  return continuationAvailabilityForStopReason(liveRunStopReason(job), job.status);
-}
-
-function continuationAvailabilityForStopReason(
-  stopReason: string | undefined,
-  status: string
-): RuntimeRunContinuationAvailability {
-  if (status === "needs_input" || stopReason === "needs_input") {
-    return "new_turn";
-  }
-  if (stopReason === "out_of_fuel" || stopReason === "context_overflow") {
-    return "new_turn";
-  }
-  if (stopReason === "confirmation_continuation_lost") {
-    return "lost_after_restart";
-  }
-  return "none";
-}
-
-function interruptedFallbackStopReason(status: DesktopAgentInterruptedRunContext["turnStatus"]): string {
-  if (status === "needs_input") {
-    return "needs_input";
-  }
-  return status;
-}
-
-function priorToolCallContextsFromEvents(
-  runId: string,
-  events: readonly ToolCallEventEntry[],
-): readonly DesktopAgentPriorToolCallContext[] {
-  return reduceToolCallEventFacts(events)
-    .filter((fact): fact is typeof fact & { toolName: string } => fact.toolName !== undefined)
-    .slice(-24)
-    .map((fact): DesktopAgentPriorToolCallContext => ({
-      runId,
-      callId: fact.callId,
-      toolName: fact.toolName,
-      status: fact.status,
-      input: fact.input,
-      output: fact.output,
-      error: fact.error,
-      errorDomain: fact.errorDomain,
-      errorFacts: fact.errorFacts,
-      factTruncation: fact.factTruncation,
-      refs: fact.eventSequences.map((sequence) => `${runId}:event:${sequence}`),
-    }));
-}
-
-function interruptedRunMessage(turnContent: string | undefined, stopReason: string | undefined): string | undefined {
-  if (turnContent !== undefined) {
-    return turnContent;
-  }
-  if (stopReason === undefined) {
-    return undefined;
-  }
-  return `Previous run stopped with reason: ${stopReason}`;
+function liveOrdinaryModelContext(job: PanelRunJob) {
+  return job.completed?.ordinaryModelContext ??
+    job.failed?.ordinaryModelContext ??
+    job.blocked?.ordinaryModelContext ??
+    job.cancelled?.ordinaryModelContext;
 }
 
 function conversationHistoryContentForModel(

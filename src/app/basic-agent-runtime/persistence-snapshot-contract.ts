@@ -100,10 +100,6 @@ export function requireRestorableOrdinaryRuntimeSnapshot(
     }
   }
 
-  if (snapshot.contextLedger?.entries.some((entry) => (entry as { readonly kind?: unknown }).kind === "tool_evidence")) {
-    missingFacts.push("contextLedger.toolEvidence");
-  }
-
   if (missingFacts.length > 0) {
     throw new OrdinaryRuntimeSnapshotContractError(snapshot.run.runId, missingFacts);
   }

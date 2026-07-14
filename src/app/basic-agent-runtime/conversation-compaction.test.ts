@@ -6,57 +6,7 @@ import type {
   ModelResponse,
 } from "../../domain/intelligence/index.js";
 import { compactAgentLoopContextIfNeeded } from "../context-maintenance/index.js";
-import { compactBasicAgentConversationIfNeeded } from "./conversation-compaction.js";
 import type { BasicAgentTokenCounter } from "./token-counter.js";
-
-test("conversation history compaction summarizes older turns and keeps recent turns", async () => {
-  const channel = new TestIntelligenceChannel("Older decisions preserved.");
-  const result = await compactBasicAgentConversationIfNeeded({
-    goal: "continue without raw prompt: hidden",
-    traceId: "trace-compaction",
-    goalId: "goal-compaction",
-    agentIdentity: {
-      agentId: "custom-compact-agent",
-      displayName: "Custom Compact Agent",
-    },
-    conversationHistory: [
-      {
-        role: "user",
-        content: `old request ${"x".repeat(700)} api_key=sk-old-secret`,
-        ref: "conversation:old-user",
-      },
-      {
-        role: "assistant",
-        content: `old answer ${"y".repeat(700)}\nraw provider response: private`,
-        ref: "conversation:old-assistant",
-      },
-      { role: "user", content: "recent user", ref: "conversation:recent-user" },
-      { role: "assistant", content: "recent assistant", ref: "conversation:recent-assistant" },
-    ],
-    intelligenceChannel: channel,
-    tokenCounter: characterTokenCounter(),
-    thresholdRatio: 0.1,
-    recentPairs: 1,
-  });
-
-  assert.equal(result.compacted, true);
-  assert.deepEqual(result.conversationHistory.map((message) => message.ref), [
-    "conversation:recent-user",
-    "conversation:recent-assistant",
-  ]);
-  assert.equal(result.conversationSummary?.summary, "Older decisions preserved.");
-  assert.deepEqual(result.conversationSummary?.coveredRefs, [
-    "conversation:old-user",
-    "conversation:old-assistant",
-  ]);
-  assert.equal(channel.requests.length, 1);
-  const requestText = JSON.stringify(channel.requests[0]?.sanitizedMessages);
-  assert.equal(requestText.includes("sk-old-secret"), true);
-  assert.equal(requestText.includes("raw provider response: private"), true);
-  assert.equal(requestText.includes("Custom Compact Agent"), true);
-  assert.equal(requestText.includes("AgentArbor's ordinary desktop agent"), false);
-  assert.equal(channel.requests[0]?.purpose, "desktop_context_compaction");
-});
 
 test("neutral loop context compaction replaces compactible messages with a continuation prompt", async () => {
   const channel = new TestIntelligenceChannel("## Goal\nContinue safely.\n\n## Next Steps\nUse preserved context.");

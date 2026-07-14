@@ -26,7 +26,6 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when awaiting approva
   assertFrozenFacts(runJobs.get(job.runId)?.completed);
   assert.equal(runJobs.get(job.runId)?.status, "approval_needed");
   assert.equal(runJobs.get(job.runId)?.completed?.ordinary?.pendingConfirmation?.confirmationId, "confirmation-pending");
-  assert.equal(runJobs.get(job.runId)?.completed?.ordinary?.contextLedger?.runId, job.runId);
 });
 
 test("InMemoryBasicAgentRunJobStore keeps frozen run facts when completed payload is forged", () => {
@@ -38,7 +37,24 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when completed payloa
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.completed);
   assert.equal(runJobs.get(job.runId)?.status, "completed");
-  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.completed?.ordinary, job.runId);
+  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.completed?.ordinary);
+});
+
+test("InMemoryBasicAgentRunJobStore rejects model context owned by another run", () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const job = createDesktopAgentJob(runJobs);
+
+  assert.throws(
+    () => runJobs.complete(job.runId, {
+      ...completedPayload(forgedFacts()),
+      ordinaryModelContext: {
+        runId: "another-run",
+        messages: [{ role: "user", content: "wrong owner" }],
+      },
+    }),
+    /cannot be attached to run/,
+  );
+  assert.equal(runJobs.get(job.runId)?.status, "pending");
 });
 
 test("InMemoryBasicAgentRunJobStore keeps frozen run facts when failed payload is forged", () => {
@@ -50,7 +66,7 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when failed payload i
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.failed);
   assert.equal(runJobs.get(job.runId)?.status, "failed");
-  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.failed?.ordinary, job.runId);
+  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.failed?.ordinary);
 });
 
 test("InMemoryBasicAgentRunJobStore keeps frozen run facts when cancelled payload is forged", () => {
@@ -62,7 +78,7 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when cancelled payloa
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.cancelled);
   assert.equal(runJobs.get(job.runId)?.status, "cancelled");
-  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.cancelled?.ordinary, job.runId);
+  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.cancelled?.ordinary);
   assert.equal(runJobs.get(job.runId)?.streamEvents.some((event) => event.type === "run.cancelled"), false);
 });
 
@@ -75,7 +91,7 @@ test("InMemoryBasicAgentRunJobStore keeps frozen run facts when blocked payload 
   assertFrozenFacts(runJobs.get(job.runId));
   assertFrozenFacts(runJobs.get(job.runId)?.blocked);
   assert.equal(runJobs.get(job.runId)?.status, "blocked");
-  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.blocked?.ordinary, job.runId);
+  assertTerminalOrdinaryFacts(runJobs.get(job.runId)?.blocked?.ordinary);
   assert.equal(runJobs.get(job.runId)?.streamEvents.some((event) => event.type === "run.blocked"), false);
 });
 
@@ -299,22 +315,14 @@ function ordinaryFactsWithPendingConfirmation(): NonNullable<BasicAgentRunComple
       requestedAt: "2026-06-07T00:00:30.000Z",
       sourceRefs: ["confirmation:confirmation-pending"],
     },
-    contextLedger: {
-      runId: "desktop-trace-id",
-      summary: "context",
-      entries: [],
-      truncation: { truncated: false, omittedItemCount: 0, truncatedItemIds: [] },
-    },
   };
 }
 
 function assertTerminalOrdinaryFacts(
   ordinary: BasicAgentRunCompletedPayload["ordinary"],
-  runId: string,
 ): void {
   assert.equal(ordinary?.answer?.content, "已形成的回答仍应保留。");
   assert.equal(ordinary?.pendingConfirmation, undefined);
-  assert.equal(ordinary?.contextLedger?.runId, runId);
 }
 
 function assertFrozenFacts(

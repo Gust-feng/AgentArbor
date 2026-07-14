@@ -11,9 +11,8 @@ import { OrdinaryRuntimeSnapshotContractError } from "../basic-agent-runtime/per
 import { PanelConversationStore } from "../panel-conversation/panel-conversations.js";
 import { PanelRunJobStore } from "./run-jobs.js";
 import {
-  buildConversationHistoryMessages,
-  buildConversationInterruptedRunContexts,
-  buildConversationPriorToolCallContexts,
+  buildConversationSkillRoutingHistory,
+  buildConversationPriorModelContext,
 } from "./conversation-history.js";
 
 test("conversation history excludes the current user turn and running assistant turns", async () => {
@@ -33,7 +32,7 @@ test("conversation history excludes the current user turn and running assistant 
     goal: "第二轮当前消息",
   });
 
-  const history = await buildConversationHistoryMessages({
+  const history = await buildConversationSkillRoutingHistory({
     source: { conversations, runJobs },
     conversationId: first.conversation.conversationId,
     assistantTurnId: second.assistantTurn.turnId,
@@ -74,7 +73,7 @@ test("conversation history waits for live assistant jobs before using their outp
     goal: "第二轮当前消息",
   });
 
-  const history = await buildConversationHistoryMessages({
+  const history = await buildConversationSkillRoutingHistory({
     source: { conversations, runJobs },
     conversationId: first.conversation.conversationId,
     assistantTurnId: second.assistantTurn.turnId,
@@ -100,7 +99,7 @@ test("conversation history does not feed blocked assistant turns as completed an
     goal: "第二轮当前消息",
   });
 
-  const history = await buildConversationHistoryMessages({
+  const history = await buildConversationSkillRoutingHistory({
     source: { conversations, runJobs },
     conversationId: first.conversation.conversationId,
     assistantTurnId: second.assistantTurn.turnId,
@@ -127,7 +126,7 @@ test("conversation history does not feed needs-input assistant turns as complete
     goal: "第二轮当前消息",
   });
 
-  const history = await buildConversationHistoryMessages({
+  const history = await buildConversationSkillRoutingHistory({
     source: { conversations, runJobs },
     conversationId: first.conversation.conversationId,
     assistantTurnId: second.assistantTurn.turnId,
@@ -156,46 +155,12 @@ test("conversation history rejects invalid persisted Ordinary snapshots before r
   });
 
   await assert.rejects(
-    buildConversationHistoryMessages({
+    buildConversationSkillRoutingHistory({
       source: {
         conversations,
         runJobs,
         runtimeDatabase: {
           getRun: async () => invalidOrdinarySnapshot(runId, "completed"),
-        },
-      },
-      conversationId: first.conversation.conversationId,
-      assistantTurnId: second.assistantTurn.turnId,
-    }),
-    (error: unknown) => error instanceof OrdinaryRuntimeSnapshotContractError
-  );
-});
-
-test("conversation interruption context rejects invalid persisted Ordinary stop facts", async () => {
-  const conversations = new PanelConversationStore();
-  const runJobs = new PanelRunJobStore();
-  const runId = "invalid-interrupted-run";
-  const first = conversations.startDesktopMessage({ goal: "第一轮用户消息" });
-  conversations.completeAssistantTurn({
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: first.assistantTurn.turnId,
-    runId,
-    title: "需要处理",
-    content: "旧快照声称本轮可以继续。",
-    status: "blocked",
-  });
-  const second = conversations.startDesktopMessage({
-    conversationId: first.conversation.conversationId,
-    goal: "继续上一轮",
-  });
-
-  await assert.rejects(
-    buildConversationInterruptedRunContexts({
-      source: {
-        conversations,
-        runJobs,
-        runtimeDatabase: {
-          getRun: async () => invalidOrdinarySnapshot(runId, "blocked"),
         },
       },
       conversationId: first.conversation.conversationId,
@@ -222,7 +187,7 @@ test("conversation history sanitizes internal fragments and secrets", async () =
     goal: "第二轮当前消息",
   });
 
-  const history = await buildConversationHistoryMessages({
+  const history = await buildConversationSkillRoutingHistory({
     source: { conversations, runJobs },
     conversationId: first.conversation.conversationId,
     assistantTurnId: second.assistantTurn.turnId,
@@ -269,7 +234,7 @@ test("conversation history preserves model-facing code and output structure", as
     goal: "继续解释上一轮输出",
   });
 
-  const history = await buildConversationHistoryMessages({
+  const history = await buildConversationSkillRoutingHistory({
     source: { conversations, runJobs },
     conversationId: first.conversation.conversationId,
     assistantTurnId: second.assistantTurn.turnId,
@@ -281,261 +246,65 @@ test("conversation history preserves model-facing code and output structure", as
   assert.equal(assistantHistory.includes("stdout:\n  line one\n  line two"), true);
 });
 
-test("conversation history exposes blocked run facts as interruption context", async () => {
+test("conversation history restores the previous completed run's canonical model context", async () => {
   const conversations = new PanelConversationStore();
   const runJobs = new PanelRunJobStore();
-  const first = conversations.startDesktopMessage({ goal: "运行测试" });
-  const liveJob = runJobs.create({
-    runKind: "desktop",
-    runMode: "agent",
-    goal: "运行测试",
-    aiMode: "fake",
-    config: modelConfig(),
-    informationAccess: informationAccess(),
-    capabilitySnapshot: capabilitySnapshot(),
-    agentDefinitionRef: agentDefinitionRef(),
-  });
-  runJobs.block(liveJob.runId, {
-    config: modelConfig(),
-    informationAccess: informationAccess(),
-    capabilitySnapshot: capabilitySnapshot(),
-    reason: {
-      code: "out_of_fuel",
-      message: "达到轮次边界，需要用户决定是否继续。",
-    },
-  });
-  conversations.completeAssistantTurn({
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: first.assistantTurn.turnId,
-    runId: liveJob.runId,
-    title: "受阻",
-    content: "已经定位到失败测试，但还没有修改完成。",
-    status: "blocked",
-  });
-  const second = conversations.startDesktopMessage({
-    conversationId: first.conversation.conversationId,
-    goal: "继续修复",
-  });
-
-  const history = await buildConversationHistoryMessages({
-    source: { conversations, runJobs },
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: second.assistantTurn.turnId,
-  });
-  const interruptions = await buildConversationInterruptedRunContexts({
-    source: { conversations, runJobs },
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: second.assistantTurn.turnId,
-  });
-
-  assert.equal(history.some((message) => message.role === "assistant"), false);
-  assert.equal(interruptions.length, 1);
-  assert.equal(interruptions[0]?.runId, liveJob.runId);
-  assert.equal(interruptions[0]?.turnStatus, "blocked");
-  assert.equal(interruptions[0]?.stopReason, "out_of_fuel");
-  assert.equal(interruptions[0]?.continuationAvailability, "new_turn");
-  assert.equal(interruptions[0]?.partialOutput?.includes("已经定位到失败测试"), true);
-  assert.equal(interruptions[0]?.message?.includes("达到轮次边界"), true);
-});
-
-test("conversation history exposes failed run facts as interruption context", async () => {
-  const conversations = new PanelConversationStore();
-  const runJobs = new PanelRunJobStore();
-  const first = conversations.startDesktopMessage({ goal: "修改并验证项目" });
-  const failedJob = runJobs.create({
-    runKind: "desktop",
-    runMode: "agent",
-    goal: "修改并验证项目",
-    aiMode: "fake",
-    config: modelConfig(),
-    informationAccess: informationAccess(),
-    capabilitySnapshot: capabilitySnapshot(),
-    agentDefinitionRef: agentDefinitionRef(),
-  });
-  runJobs.fail(failedJob.runId, {
-    config: modelConfig(),
-    informationAccess: informationAccess(),
-    capabilitySnapshot: capabilitySnapshot(),
-    error: {
-      code: "provider_network",
-      message: "模型连接在测试完成前中断。",
-    },
-  });
-  conversations.completeAssistantTurn({
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: first.assistantTurn.turnId,
-    runId: failedJob.runId,
-    title: "运行失败",
-    content: "已经修改两个文件，测试尚未完成。",
-    status: "failed",
-  });
-  const second = conversations.startDesktopMessage({
-    conversationId: first.conversation.conversationId,
-    goal: "继续验证",
-  });
-
-  const interruptions = await buildConversationInterruptedRunContexts({
-    source: { conversations, runJobs },
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: second.assistantTurn.turnId,
-  });
-
-  assert.equal(interruptions.length, 1);
-  assert.equal(interruptions[0]?.turnStatus, "failed");
-  assert.equal(interruptions[0]?.stopReason, "provider_network");
-  assert.equal(interruptions[0]?.continuationAvailability, "none");
-  assert.equal(interruptions[0]?.partialOutput, "已经修改两个文件，测试尚未完成。");
-  assert.equal(interruptions[0]?.message, "模型连接在测试完成前中断。");
-});
-
-test("conversation interruption keeps only the immediately preceding failed run", async () => {
-  const conversations = new PanelConversationStore();
-  const runJobs = new PanelRunJobStore();
-  const first = conversations.startDesktopMessage({ goal: "第一轮失败" });
-  conversations.completeAssistantTurn({
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: first.assistantTurn.turnId,
-    runId: "failed-run-not-immediate",
-    title: "未完成",
-    content: "错误信息：第一轮失败。",
-    status: "failed",
-  });
-  const second = conversations.startDesktopMessage({
-    conversationId: first.conversation.conversationId,
-    goal: "第二轮成功",
-  });
-  conversations.completeAssistantTurn({
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: second.assistantTurn.turnId,
-    runId: "completed-run-immediate",
-    title: "已完成",
-    content: "第二轮已经完成。",
-    status: "completed",
-  });
-  const third = conversations.startDesktopMessage({
-    conversationId: first.conversation.conversationId,
-    goal: "第三轮继续",
-  });
-
-  const interruptions = await buildConversationInterruptedRunContexts({
-    source: { conversations, runJobs },
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: third.assistantTurn.turnId,
-  });
-
-  assert.deepEqual(interruptions, []);
-});
-
-test("conversation interruption excludes appended failure copy from partial model output", async () => {
-  const conversations = new PanelConversationStore();
-  const runJobs = new PanelRunJobStore();
-  const first = conversations.startDesktopMessage({ goal: "执行修改" });
-  conversations.completeAssistantTurn({
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: first.assistantTurn.turnId,
-    runId: "failed-run-with-copy",
-    title: "未完成",
-    content: "已经修改配置。\n\n错误信息：provider request failed.",
-    status: "failed",
-  });
-  const second = conversations.startDesktopMessage({
-    conversationId: first.conversation.conversationId,
-    goal: "继续",
-  });
-
-  const interruptions = await buildConversationInterruptedRunContexts({
-    source: { conversations, runJobs },
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: second.assistantTurn.turnId,
-  });
-
-  assert.equal(interruptions[0]?.partialOutput, "已经修改配置。");
-});
-
-test("conversation history exposes cancelled run progress as interruption context", async () => {
-  const conversations = new PanelConversationStore();
-  const runJobs = new PanelRunJobStore();
-  const first = conversations.startDesktopMessage({ goal: "检查多个文件" });
-  const cancelledJob = runJobs.create({
-    runKind: "desktop",
-    runMode: "agent",
-    goal: "检查多个文件",
-    aiMode: "fake",
-    config: modelConfig(),
-    informationAccess: informationAccess(),
-    capabilitySnapshot: capabilitySnapshot(),
-    agentDefinitionRef: agentDefinitionRef(),
-  });
-  runJobs.cancel(cancelledJob.runId, {
-    config: modelConfig(),
-    informationAccess: informationAccess(),
-    capabilitySnapshot: capabilitySnapshot(),
-    reason: {
-      code: "user_cancelled",
-      message: "用户中止了上一轮运行。",
-    },
-  });
-  conversations.completeAssistantTurn({
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: first.assistantTurn.turnId,
-    runId: cancelledJob.runId,
-    title: "已取消",
-    content: "已经检查到 src/config.ts，其他文件尚未检查。",
-    status: "cancelled",
-  });
-  const second = conversations.startDesktopMessage({
-    conversationId: first.conversation.conversationId,
-    goal: "继续检查剩余文件",
-  });
-
-  const interruptions = await buildConversationInterruptedRunContexts({
-    source: { conversations, runJobs },
-    conversationId: first.conversation.conversationId,
-    assistantTurnId: second.assistantTurn.turnId,
-  });
-
-  assert.equal(interruptions.length, 1);
-  assert.equal(interruptions[0]?.turnStatus, "cancelled");
-  assert.equal(interruptions[0]?.stopReason, "user_cancelled");
-  assert.equal(interruptions[0]?.partialOutput?.includes("src/config.ts"), true);
-});
-
-test("conversation history restores the latest run tool facts for the next turn", async () => {
-  const conversations = new PanelConversationStore();
-  const runJobs = new PanelRunJobStore();
-  const runId = "completed-tool-context-run";
-  const first = conversations.startDesktopMessage({ goal: "读取配置" });
+  const runId = "completed-model-context-run";
+  const first = conversations.startDesktopMessage({ goal: "读取并分析配置" });
   conversations.completeAssistantTurn({
     conversationId: first.conversation.conversationId,
     assistantTurnId: first.assistantTurn.turnId,
     runId,
     title: "助手",
-    content: "配置已经读取。",
+    content: "配置已经分析完成。",
     status: "completed",
   });
   const second = conversations.startDesktopMessage({
     conversationId: first.conversation.conversationId,
-    goal: "根据刚才的内容继续修改",
+    goal: "继续修改",
   });
-  const baseSnapshot = validOrdinarySnapshot(runId, "completed");
   const snapshot: RuntimeRunSnapshot = {
-    ...baseSnapshot,
-    events: [
-      runtimeToolEvent(runId, 1, "tool.requested", {
-        callId: "call-read-config",
-        toolName: "read_file",
-        input: { path: "config.json" },
-      }),
-      runtimeToolEvent(runId, 2, "tool.completed", {
-        callId: "call-read-config",
-        toolName: "read_file",
-        output: { path: "config.json", content: "{\"enabled\":true}" },
-        durationMs: 12,
-      }),
-    ],
+    ...validOrdinarySnapshot(runId, "completed"),
+    ordinaryModelContext: {
+      runId,
+      messages: [
+        { role: "system", content: "root prompt", ref: "context:system:desktop-agent" },
+        { role: "user", content: "读取并分析配置", ref: "context:goal:first" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ callId: "call-config", toolName: "read_file", input: { path: "config.json" } }],
+          protocolExtensions: {
+            openai_responses_output_items: [{
+              type: "function_call",
+              call_id: "call-config",
+              name: "read_file",
+              arguments: "{\"path\":\"config.json\"}",
+            }],
+          },
+        },
+        {
+          role: "tool",
+          content: "{\"enabled\":true}",
+          toolCallId: "call-config",
+          toolName: "read_file",
+        },
+        {
+          role: "assistant",
+          content: "配置已经分析完成。",
+          protocolExtensions: {
+            openai_responses_output_items: [{
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "配置已经分析完成。" }],
+            }],
+          },
+        },
+      ],
+    },
   };
 
-  const toolContexts = await buildConversationPriorToolCallContexts({
+  const context = await buildConversationPriorModelContext({
     source: {
       conversations,
       runJobs,
@@ -545,76 +314,75 @@ test("conversation history restores the latest run tool facts for the next turn"
     assistantTurnId: second.assistantTurn.turnId,
   });
 
-  assert.equal(toolContexts.length, 1);
-  assert.equal(toolContexts[0]?.runId, runId);
-  assert.equal(toolContexts[0]?.callId, "call-read-config");
-  assert.equal(toolContexts[0]?.toolName, "read_file");
-  assert.equal(toolContexts[0]?.status, "completed");
-  assert.deepEqual(toolContexts[0]?.input, { path: "config.json" });
-  assert.deepEqual(toolContexts[0]?.output, { path: "config.json", content: "{\"enabled\":true}" });
-  assert.deepEqual(toolContexts[0]?.refs, [
-    `${runId}:event:1`,
-    `${runId}:event:2`,
-  ]);
+  assert.deepEqual(context.map((message) => message.role), ["user", "assistant", "tool", "assistant"]);
+  assert.equal(context.some((message) => message.content === "root prompt"), false);
+  assert.equal(context[1]?.toolCalls?.[0]?.callId, "call-config");
+  assert.equal(
+    Array.isArray(context[3]?.protocolExtensions?.openai_responses_output_items),
+    true,
+  );
 });
 
-test("conversation history preserves prior tool failure and truncation facts", async () => {
+test("conversation context skips a later pre-model failure and restores the newest canonical context", async () => {
   const conversations = new PanelConversationStore();
   const runJobs = new PanelRunJobStore();
-  const runId = "failed-tool-context-run";
-  const first = conversations.startDesktopMessage({ goal: "运行测试" });
+  const canonicalRunId = "run-with-canonical-context";
+  const failedRunId = "run-failed-before-model-context";
+  const first = conversations.startDesktopMessage({ goal: "读取配置" });
   conversations.completeAssistantTurn({
     conversationId: first.conversation.conversationId,
     assistantTurnId: first.assistantTurn.turnId,
-    runId,
-    title: "运行失败",
-    content: "测试命令失败。",
+    runId: canonicalRunId,
+    title: "助手",
+    content: "配置读取完成。",
+    status: "completed",
+  });
+  const failed = conversations.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "执行一个在调用模型前失败的操作",
+  });
+  conversations.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: failed.assistantTurn.turnId,
+    runId: failedRunId,
+    title: "助手",
+    content: "运行前检查失败。",
     status: "failed",
   });
-  const second = conversations.startDesktopMessage({
+  const current = conversations.startDesktopMessage({
     conversationId: first.conversation.conversationId,
-    goal: "根据错误继续修复",
+    goal: "继续处理配置",
   });
-  const baseSnapshot = validOrdinarySnapshot(runId, "failed");
-  const snapshot: RuntimeRunSnapshot = {
-    ...baseSnapshot,
-    events: [
-      runtimeToolEvent(runId, 1, "tool.requested", {
-        callId: "call-test",
-        toolName: "shell_command",
-        input: { command: "pnpm test" },
-      }),
-      runtimeToolEvent(runId, 2, "tool.failed", {
-        callId: "call-test",
-        toolName: "shell_command",
-        output: { stdout: "partial output" },
-        error: "Process exited with code 1.",
-        errorDomain: "process_error",
-        errorFacts: { exitCode: 1 },
-        factTruncation: { output: true },
-        durationMs: 20,
-      }),
-    ],
+  const canonicalSnapshot: RuntimeRunSnapshot = {
+    ...validOrdinarySnapshot(canonicalRunId, "completed"),
+    ordinaryModelContext: {
+      runId: canonicalRunId,
+      messages: [
+        { role: "system", content: "root", ref: "context:system:desktop-agent" },
+        { role: "user", content: "读取配置" },
+        { role: "assistant", content: "配置读取完成。" },
+      ],
+    },
   };
 
-  const toolContexts = await buildConversationPriorToolCallContexts({
+  const context = await buildConversationPriorModelContext({
     source: {
       conversations,
       runJobs,
-      runtimeDatabase: { getRun: async () => snapshot },
+      runtimeDatabase: {
+        getRun: async (runId) => runId === canonicalRunId
+          ? canonicalSnapshot
+          : validOrdinarySnapshot(failedRunId, "failed"),
+      },
     },
     conversationId: first.conversation.conversationId,
-    assistantTurnId: second.assistantTurn.turnId,
+    assistantTurnId: current.assistantTurn.turnId,
   });
 
-  assert.equal(toolContexts[0]?.status, "failed");
-  assert.equal(toolContexts[0]?.error, "Process exited with code 1.");
-  assert.equal(toolContexts[0]?.errorDomain, "process_error");
-  assert.deepEqual(toolContexts[0]?.errorFacts, { exitCode: 1 });
-  assert.deepEqual(toolContexts[0]?.factTruncation, { input: undefined, output: true, errorFacts: undefined });
+  assert.deepEqual(context.map((message) => message.content), ["读取配置", "配置读取完成。"]);
 });
 
-test("conversation history leaves long completed answers untruncated for Context Ledger ownership", async () => {
+test("skill routing history leaves long completed answers untruncated", async () => {
   const conversations = new PanelConversationStore();
   const runJobs = new PanelRunJobStore();
   const first = conversations.startDesktopMessage({ goal: "生成长回答" });
@@ -633,7 +401,7 @@ test("conversation history leaves long completed answers untruncated for Context
     goal: "继续上一轮长回答",
   });
 
-  const history = await buildConversationHistoryMessages({
+  const history = await buildConversationSkillRoutingHistory({
     source: { conversations, runJobs },
     conversationId: first.conversation.conversationId,
     assistantTurnId: second.assistantTurn.turnId,
@@ -769,32 +537,5 @@ function validOrdinarySnapshot(
       informationAccess: informationAccess(),
       agentDefinitionRef: agentDefinitionRef(),
     },
-  };
-}
-
-function runtimeToolEvent(
-  runId: string,
-  sequence: number,
-  type: "tool.requested" | "tool.completed" | "tool.failed" | "tool.cancelled",
-  payload: NonNullable<RuntimeRunSnapshot["events"][number]["payload"]>,
-): RuntimeRunSnapshot["events"][number] {
-  return {
-    eventId: `${runId}:event:${sequence}`,
-    runId,
-    sequence,
-    type,
-    summary: type,
-    scope: "runtime",
-    severity: type === "tool.failed" ? "error" : "info",
-    progress: {
-      status: type === "tool.requested" ? "in_progress" : type === "tool.failed" ? "failed" : "completed",
-      label: type,
-    },
-    refs: [],
-    traceId: `trace-${runId}`,
-    intent: type,
-    payload,
-    createdAt: "2026-07-12T00:00:01.000Z",
-    recordedAt: "2026-07-12T00:00:01.000Z",
   };
 }

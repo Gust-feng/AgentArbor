@@ -255,12 +255,6 @@ export type AgentDeliverable = {
   readonly createdAt: string;
 };
 
-export type ContextLedgerSkillLoadStatus = "loaded" | "failed";
-
-export type ContextLedgerSkillInjectionStatus = "loaded" | "injected" | "omitted" | "failed";
-
-export type ContextLedgerSkillMarkUsedStatus = "succeeded" | "failed" | "skipped";
-
 export type SkillSelectionMethod =
   | "explicit"
   | "model"
@@ -289,84 +283,11 @@ export type SkillSelectionDecisionFacts = {
   readonly reasonSummary?: string;
 };
 
-export type ContextLedgerSkillFacts = {
-  readonly skillId: string;
-  readonly name: string;
-  readonly triggerReason: string;
-  readonly summary: string;
-  readonly sourceRef: string;
-  readonly selectedAt?: string;
-  readonly loadedAt?: string;
-  readonly bodyHash?: string;
-  readonly contentHash?: string;
-  readonly bodyCharCount?: number;
-  readonly loadStatus: ContextLedgerSkillLoadStatus;
-  readonly injectionStatus: ContextLedgerSkillInjectionStatus;
-  readonly markUsedStatus?: ContextLedgerSkillMarkUsedStatus;
-  readonly truncated: boolean;
-  readonly omitted: boolean;
-  readonly error?: string;
-  readonly warning?: string;
-  readonly selection?: SkillSelectionDecisionFacts;
-};
-
-export type ContextLedgerEntry = {
-  readonly entryId: string;
-  readonly kind: "goal" | "attachment" | "history" | "skill" | "budget" | "truncation";
-  readonly title: string;
-  readonly summary: string;
-  readonly refs: readonly ObservationRef[];
-  readonly status: "used" | "truncated" | "omitted" | "blocked" | "failed";
-  readonly skill?: ContextLedgerSkillFacts;
-};
-
-export type ContextLedger = {
-  readonly runId: string;
-  readonly summary: string;
-  readonly entries: readonly ContextLedgerEntry[];
-  readonly budget?: {
-    readonly maxMessages?: number;
-    readonly maxInputTokens?: number;
-    readonly usedInputTokens?: number;
-    readonly tokenCountSource?: string;
-    readonly maxChars?: number;
-    readonly usedChars?: number;
-    readonly inputTokenBudget?: number;
-    readonly reservedOutputTokens?: number;
-    readonly budgetSource?: string;
-  };
-  readonly truncation: {
-    readonly truncated: boolean;
-    readonly omittedItemCount: number;
-    readonly truncatedItemIds: readonly string[];
-  };
-};
-
 export type DesktopWorkViewAnswer = {
   readonly title: string;
   readonly content: string;
   readonly evidenceRefs: readonly ObservationRef[];
   readonly nextActions: readonly string[];
-};
-
-export type TriggeredSkillReadModel = {
-  readonly skillId: string;
-  readonly name: string;
-  readonly triggerReason: string;
-  readonly summary: string;
-  readonly sourceRef: string;
-  readonly truncated: boolean;
-  readonly loadedAt?: string;
-  readonly bodyHash?: string;
-  readonly contentHash?: string;
-  readonly bodyCharCount?: number;
-  readonly loadStatus?: ContextLedgerSkillLoadStatus;
-  readonly injectionStatus?: ContextLedgerSkillInjectionStatus;
-  readonly markUsedStatus?: ContextLedgerSkillMarkUsedStatus;
-  readonly omitted?: boolean;
-  readonly error?: string;
-  readonly warning?: string;
-  readonly selection?: SkillSelectionDecisionFacts;
 };
 
 export type DesktopWorkViewReadModel = {
@@ -375,8 +296,6 @@ export type DesktopWorkViewReadModel = {
   readonly headline: string;
   readonly currentAction: string;
   readonly contextAttachments: readonly ContextAttachment[];
-  readonly contextLedger: ContextLedger;
-  readonly triggeredSkills: readonly TriggeredSkillReadModel[];
   readonly pendingConfirmation?: ConfirmationRequest;
   readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;

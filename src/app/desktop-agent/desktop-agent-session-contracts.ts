@@ -1,16 +1,12 @@
 import type { BasicAgentCapabilitySnapshot, ModelCapabilities, RunCapabilityResolution } from "../../domain/config/index.js";
-import type { IntelligenceChannel, ModelOutputDelta } from "../../domain/intelligence/index.js";
+import type { IntelligenceChannel, ModelMessage, ModelOutputDelta } from "../../domain/intelligence/index.js";
+import type { RuntimeOrdinaryModelContextRecord } from "../../domain/runtime-database/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../../domain/tools/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
-import type { BasicAgentConversationSummary } from "../basic-agent-runtime/conversation-compaction-contracts.js";
-import type { BasicAgentContextPack } from "../basic-agent-runtime/context-pack.js";
-import type { ContextLedger } from "../../domain/basic-agent/index.js";
 import type {
   DesktopAgentConversationMessage,
-  DesktopAgentInterruptedRunContext,
-  DesktopAgentPriorToolCallContext,
   DesktopAgentSkillContext,
 } from "./desktop-agent-contracts.js";
 import type {
@@ -58,8 +54,7 @@ export type DesktopAgentSessionResult = {
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly answer?: DesktopAgentAnswer;
   readonly pendingConfirmation?: DesktopAgentPendingConfirmation;
-  readonly contextPack?: Pick<BasicAgentContextPack, "usageSummary" | "items" | "budget" | "truncationReport" | "truncated">;
-  readonly contextLedger?: ContextLedger;
+  readonly modelContext?: RuntimeOrdinaryModelContextRecord;
   readonly failureMessage?: string;
   readonly modelCallRefs: readonly string[];
   readonly toolCallRefs: readonly string[];
@@ -102,15 +97,14 @@ export type DesktopAgentToolCenterFactory =
   ((runtime: BasicAgentRuntimeContext) => ToolExecutionBroker);
 
 export type RunDesktopAgentSessionOptions = {
+  readonly runId?: string;
   readonly aiMode?: ModelRuntimeMode;
   readonly agentDefinition?: AgentDefinition;
   readonly aiEnvironment?: ModelRuntimeEnvironment;
   readonly providerFetch?: ModelRuntimeProviderFetch;
   readonly taskSoilInput?: DesktopTaskSoilInput;
-  readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
-  readonly conversationSummary?: BasicAgentConversationSummary;
-  readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
-  readonly priorToolCallContexts?: readonly DesktopAgentPriorToolCallContext[];
+  readonly skillRoutingHistory?: readonly DesktopAgentConversationMessage[];
+  readonly priorModelContext?: readonly ModelMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly resolveSkillContexts?: (context: DesktopAgentSkillResolverContext) => Promise<readonly DesktopAgentSkillContext[]>;
   readonly modelCapabilities?: ModelCapabilities;
@@ -129,5 +123,3 @@ export type RunDesktopAgentSessionOptions = {
 };
 
 export type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
-export type { DesktopAgentInterruptedRunContext } from "./desktop-agent-contracts.js";
-export type { DesktopAgentPriorToolCallContext } from "./desktop-agent-contracts.js";

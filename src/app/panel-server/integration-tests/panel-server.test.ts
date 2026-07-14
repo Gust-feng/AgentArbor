@@ -169,7 +169,6 @@ test("panel usage statistics route returns local runtime totals and empty storag
       artifacts: [],
       confirmations: [],
       subAgentRuns: [],
-      contextLedger: undefined,
     });
 
     const usage = await requestJson(server.url, "/api/runtime/usage-statistics");

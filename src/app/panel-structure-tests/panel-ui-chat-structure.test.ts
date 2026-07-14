@@ -448,14 +448,11 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(assistantMessageViewProjection.includes("assistantMessageOutput"), true);
   assert.equal(chatActive.includes("AnswerSupport"), false);
   assert.equal(chatActive.includes("answerResultForTurn"), false);
-  assert.equal(chatActive.includes("contextLedgerForTurn"), false);
-  assert.equal(chatActive.includes("contextLedger={contextLedger}"), false);
   assert.equal(chatActive.includes("answerResult={props.workSession?.answer}"), false);
   assert.equal(chatActive.includes("answerResult === undefined && <AssistantAnswerBlock"), false);
   assert.equal(chatActive.includes('aria-label="结果"'), false);
   assert.equal(chatActive.includes("复制结果"), false);
   assert.equal(chatActive.includes("evidenceItemsForRefs"), false);
-  assert.equal(chatActive.includes("findContextLedgerEntry"), false);
   assert.equal(chatActive.includes("function isUserFacingEvidenceRef"), false);
   assert.equal(chatActive.includes("fallbackEvidenceSummary"), false);
   assert.equal(chatActive.includes("模型摘要"), false);

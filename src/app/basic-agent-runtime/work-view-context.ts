@@ -1,14 +1,10 @@
 import type {
   BasicAgentRun,
   ContextAttachment,
-  ContextLedger,
-  ContextLedgerEntry,
-  ContextLedgerSkillFacts,
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef, ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
-import type { BasicAgentContextSkillFacts } from "./contracts.js";
 
 export type WorkViewTaskSoilCanvasLike = {
   readonly taskSoilId: string;
@@ -30,22 +26,6 @@ export type WorkViewTaskSoilCanvasLike = {
 export type WorkViewCanvasContextLike = {
   readonly kind: string;
   readonly taskSoil?: WorkViewTaskSoilCanvasLike;
-  readonly agent?: {
-    readonly context?: {
-      readonly items?: readonly {
-        readonly itemId: string;
-        readonly sourceKind: string;
-        readonly summary: string;
-        readonly truncated: boolean;
-        readonly skill?: ContextLedgerSkillFacts | BasicAgentContextSkillFacts;
-      }[];
-      readonly truncationReport?: ContextLedger["truncation"];
-      readonly budget?: ContextLedger["budget"];
-      readonly usageSummary?: string;
-      readonly [key: string]: unknown;
-    };
-    readonly [key: string]: unknown;
-  };
   readonly [key: string]: unknown;
 };
 
@@ -84,70 +64,6 @@ export function contextAttachmentsFor(input: WorkViewContextProjectionInput): re
   return mergeContextAttachments(fromCanvas, fromInput);
 }
 
-export function contextLedgerFor(
-  input: WorkViewContextProjectionInput,
-  attachments: readonly ContextAttachment[]
-): ContextLedger {
-  const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent?.context : undefined;
-  const contextItems = context?.items ?? [];
-  const entries: ContextLedgerEntry[] = [
-    {
-      entryId: `${input.run.runId}:ledger:goal`,
-      kind: "goal",
-      title: "当前任务",
-      summary: input.run.goalSummary,
-      refs: [{ kind: "goal", id: input.run.runId }],
-      status: "used",
-    },
-    ...attachments.map((attachment): ContextLedgerEntry => ({
-      entryId: `${input.run.runId}:ledger:attachment:${attachment.attachmentId}`,
-      kind: "attachment",
-      title: attachment.title,
-      summary: attachment.summary,
-      refs: [{ kind: attachment.kind === "file" ? "artifact" : "event", id: attachment.ref }],
-      status: attachment.status === "blocked" ? "blocked" : attachment.readonlyPreviewMeta.truncated === true ? "truncated" : "used",
-    })),
-    ...contextItems
-      .filter((item) =>
-        item.sourceKind === "conversation" ||
-        item.sourceKind === "conversation_summary" ||
-        item.sourceKind === "conversation_recent_turn" ||
-        item.sourceKind === "skill"
-      )
-      .slice(0, 8)
-      .map((item): ContextLedgerEntry => ({
-        entryId: `${input.run.runId}:ledger:context:${item.itemId}`,
-        kind: item.sourceKind === "skill" ? "skill" : "history",
-        title: item.sourceKind === "skill" ? "触发技能" : item.sourceKind === "conversation_summary" ? "历史摘要" : "历史对话",
-        summary: item.sourceKind === "skill" ? skillLedgerSummary(item.summary) : item.summary,
-        refs: [{ kind: "event", id: item.itemId }],
-        status: item.skill?.loadStatus === "failed" ? "failed" : item.truncated ? "truncated" : "used",
-        skill: item.skill === undefined
-          ? undefined
-          : {
-              ...item.skill,
-              injectionStatus: item.skill.loadStatus === "failed" ? "failed" : "injected",
-              omitted: false,
-              truncated: item.truncated || item.skill.truncated,
-            },
-      })),
-  ];
-  const truncation = context?.truncationReport ?? {
-    truncated: entries.some((entry) => entry.status === "truncated"),
-    omittedItemCount: 0,
-    truncatedItemIds: entries.filter((entry) => entry.status === "truncated").map((entry) => entry.entryId),
-  };
-  const budgetEntries = contextBudgetEntries(input.run.runId, context?.budget, truncation);
-  const allEntries = [...entries, ...budgetEntries];
-  return {
-    runId: input.run.runId,
-    summary: context?.usageSummary ?? contextLedgerSummary(allEntries),
-    entries: allEntries,
-    budget: context?.budget,
-    truncation,
-  };
-}
-
 export function mergeToolDisplays(
   primary: readonly ToolDisplayProjection[],
   fallback: readonly ToolDisplayProjection[]
@@ -181,84 +97,6 @@ export function observationRefs(refs: readonly string[]): readonly ObservationRe
     }
     return { kind: "event", id: redactOrdinaryText(ref, 180) };
   });
-}
-
-function contextBudgetEntries(
-  runId: string,
-  budget: ContextLedger["budget"] | undefined,
-  truncation: ContextLedger["truncation"]
-): readonly ContextLedgerEntry[] {
-  const entries: ContextLedgerEntry[] = [];
-  if (budget !== undefined) {
-    entries.push({
-      entryId: `${runId}:ledger:budget`,
-      kind: "budget",
-      title: "上下文范围",
-      summary: contextBudgetSummary(budget),
-      refs: [],
-      status: truncation.truncated ? "truncated" : "used",
-    });
-  }
-  if (truncation.omittedItemCount > 0) {
-    entries.push({
-      entryId: `${runId}:ledger:omitted`,
-      kind: "truncation",
-      title: "暂未使用的上下文",
-      summary: `${truncation.omittedItemCount} 项上下文暂未用于本轮处理。`,
-      refs: [],
-      status: "omitted",
-    });
-  }
-  if (truncation.truncatedItemIds.length > 0) {
-    entries.push({
-      entryId: `${runId}:ledger:truncated`,
-      kind: "truncation",
-      title: "已截断上下文",
-      summary: `部分上下文已压缩：${truncation.truncatedItemIds.length} 项。`,
-      refs: [],
-      status: "truncated",
-    });
-  }
-  return entries;
-}
-
-function contextLedgerSummary(entries: readonly ContextLedgerEntry[]): string {
-  const counts = new Map<ContextLedgerEntry["kind"], number>();
-  for (const entry of entries) {
-    if (entry.kind === "budget" || entry.kind === "truncation") {
-      continue;
-    }
-    counts.set(entry.kind, (counts.get(entry.kind) ?? 0) + 1);
-  }
-  const labels: Record<ContextLedgerEntry["kind"], string> = {
-    goal: "任务",
-    attachment: "上下文",
-    history: "历史",
-    skill: "技能",
-    budget: "范围",
-    truncation: "压缩",
-  };
-  const parts = [...counts.entries()].map(([kind, count]) => `${labels[kind]} ${count}`);
-  return parts.length === 0 ? "已按当前任务整理上下文。" : parts.join("；");
-}
-
-function skillLedgerSummary(summary: string): string {
-  const lines = summary.split(/\r?\n/g).map((line) => line.trim()).filter((line) => line.length > 0);
-  if (lines.some((line) => line.startsWith("技能：") || line.startsWith("触发原因：") || line.startsWith("加载状态："))) {
-    return redactOrdinaryText(lines.join("\n"), 420);
-  }
-  const name = lines.find((line) => line.startsWith("Triggered skill:")) ?? "Triggered skill: 技能";
-  const reason = lines.find((line) => line.startsWith("Why:")) ?? "Why: 技能名称或描述匹配当前任务。";
-  return redactOrdinaryText([name, reason].join("\n"), 420);
-}
-
-function contextBudgetSummary(budget: ContextLedger["budget"]): string {
-  const parts = [
-    budget?.usedChars !== undefined && budget.usedChars > 0 ? `已整理 ${budget.usedChars} 字符` : undefined,
-    budget?.maxChars !== undefined && budget.maxChars > 0 ? `上限 ${budget.maxChars} 字符` : undefined,
-    budget?.usedInputTokens !== undefined && budget.usedInputTokens > 0 ? `约 ${budget.usedInputTokens} tokens` : undefined,
-  ].filter(isString);
-  return parts.length === 0 ? "已按当前任务整理上下文。" : parts.join("；");
 }
 
 function mergeContextAttachments(
@@ -338,8 +176,4 @@ function observationKind(value: string): ObservationRef["kind"] {
   if (value === "model" || value === "model_call") return "model_call";
   if (value === "artifact") return "artifact";
   return "event";
-}
-
-function isString(value: unknown): value is string {
-  return typeof value === "string";
 }

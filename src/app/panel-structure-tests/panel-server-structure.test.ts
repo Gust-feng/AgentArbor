@@ -110,7 +110,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationSync.includes("legacyWorkSessionCanvasForConversationSync"), false);
   assert.equal(runtimeRecords.includes("canvas.workSession"), false);
   assert.equal(runtimeRecords.includes("legacyWorkSessionCanvasForRuntimeRecord"), false);
-  assert.equal(conversationHistory.includes("export async function buildConversationHistoryMessages"), true);
+  assert.equal(conversationHistory.includes("export async function buildConversationSkillRoutingHistory"), true);
   assert.equal(conversationRoutes.includes("export async function handlePanelConversationRoute"), true);
   assert.equal(conversationRoutes.includes("startGuidanceFollowUpRun"), false);
   assert.equal(conversationRoutes.includes("export function scheduleNextQueuedConversationRun"), true);

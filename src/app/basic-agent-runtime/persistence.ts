@@ -113,7 +113,7 @@ export async function submitRestoredBasicConfirmationDecision(input: {
     artifacts: snapshot.artifacts,
     confirmations: nextConfirmations,
     subAgentRuns: snapshot.subAgentRuns,
-    contextLedger: snapshot.contextLedger,
+    ordinaryModelContext: snapshot.ordinaryModelContext,
   };
   await input.runtimeDatabase.saveRunSnapshot(nextSnapshot);
   return nextSnapshot;

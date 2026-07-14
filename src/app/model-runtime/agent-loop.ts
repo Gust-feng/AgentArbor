@@ -58,6 +58,7 @@ export type AgentLoopContinuation = {
 type AgentLoopResultFacts = {
   readonly messages: readonly ModelMessage[];
   readonly toolResults: readonly ToolCallResult[];
+  /** Cumulative usage for this execute/continuation chain, not a per-resume delta. */
   readonly usage: ModelUsage;
   readonly confirmationRequests: readonly ConfirmationRequest[];
 };

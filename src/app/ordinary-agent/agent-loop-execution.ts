@@ -1,4 +1,4 @@
-import type { ModelMessage } from "../../domain/intelligence/index.js";
+import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
 import type {
   AgentLoop,
   AgentLoopAgentTool,
@@ -47,6 +47,7 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           tools: resources.tools,
           ...(resources.agentTools === undefined ? {} : { agentTools: resources.agentTools }),
           abortSignal: executionInput.abortSignal,
+          onTextDelta: executionInput.onTextDelta,
         });
         return await mapAgentLoopResult(result, lease, input.onReleaseError);
       } catch (error) {
@@ -75,10 +76,13 @@ async function mapAgentLoopResult(
   result: AgentLoopResult,
   lease: ResourceLease,
   onReleaseError?: (error: unknown) => void,
+  previousUsage: ModelUsage = {},
 ): Promise<OrdinaryExecutionOutcome> {
+  const usage = latestCumulativeUsage(previousUsage, result.usage);
   const facts = {
     canonicalMessages: result.messages,
     toolCalls: result.toolResults,
+    usage,
   } as const;
 
   if (result.status === "approval_required") {
@@ -86,7 +90,7 @@ async function mapAgentLoopResult(
       ...facts,
       status: "approval_required",
       confirmationRequests: result.confirmationRequests,
-      continuation: mapContinuation(result.continuation, lease, onReleaseError),
+      continuation: mapContinuation(result.continuation, lease, onReleaseError, usage),
     };
   }
 
@@ -108,6 +112,7 @@ function mapContinuation(
   continuation: Extract<AgentLoopResult, { readonly status: "approval_required" }>["continuation"],
   lease: ResourceLease,
   onReleaseError?: (error: unknown) => void,
+  previousUsage: ModelUsage = {},
 ): OrdinaryExecutionContinuation {
   let consumed = false;
   return {
@@ -116,7 +121,7 @@ function mapContinuation(
       if (consumed) throw new Error("Ordinary approval continuation has already been decided");
       consumed = true;
       try {
-        return await mapAgentLoopResult(await continuation.decide(input), lease, onReleaseError);
+        return await mapAgentLoopResult(await continuation.decide(input), lease, onReleaseError, previousUsage);
       } catch (error) {
         await releaseWithoutReplacingOutcome(lease, onReleaseError);
         throw error;
@@ -127,6 +132,11 @@ function mapContinuation(
       return releaseWithoutReplacingOutcome(lease, onReleaseError);
     },
   };
+}
+
+/** AgentLoop usage is cumulative; missing fields on a later failure must not erase prior observed totals. */
+function latestCumulativeUsage(previous: ModelUsage, current: ModelUsage): ModelUsage {
+  return { ...previous, ...current };
 }
 
 async function releaseWithoutReplacingOutcome(

@@ -31,6 +31,25 @@ const confirmationSchema = z.object({
   resumeAvailability: z.enum(["live", "lost_after_restart"]).optional(), requestedAt: z.string().min(1),
   expiresAt: z.string().optional(), sourceRefs: z.array(z.string()),
 }).strict();
+const confirmationDecisionSchema = z.object({
+  confirmationId: z.string().min(1), runId: z.string().min(1),
+  decision: z.enum(["approve_once", "deny", "guidance"]), decidedAt: z.string().min(1),
+  guidance: z.string().optional(),
+}).strict();
+const usageSchema = z.object({
+  inputTokens: z.number().finite().nonnegative().optional(),
+  outputTokens: z.number().finite().nonnegative().optional(),
+  totalTokens: z.number().finite().nonnegative().optional(),
+  cachedInputTokens: z.number().finite().nonnegative().optional(),
+  cacheWriteInputTokens: z.number().finite().nonnegative().optional(),
+  uncachedInputTokens: z.number().finite().nonnegative().optional(),
+  reasoningOutputTokens: z.number().finite().nonnegative().optional(),
+  estimatedCostUsd: z.number().finite().nonnegative().optional(),
+  latencyMs: z.number().finite().nonnegative().optional(),
+  firstTokenLatencyMs: z.number().finite().nonnegative().optional(),
+  outputDurationMs: z.number().finite().nonnegative().optional(),
+  outputTokensPerSecond: z.number().finite().nonnegative().optional(),
+}).strict();
 const toolCallSchema = z.object({
   callId: z.string().min(1), toolName: z.string().min(1), input: jsonValueSchema.optional(),
   output: jsonValueSchema.optional(), status: z.enum(["completed", "failed", "approval_required", "cancelled"]),
@@ -111,8 +130,8 @@ const eventBase = {
 const eventSchema = z.discriminatedUnion("type", [
   z.object({ ...eventBase, type: z.literal("run.created") }).strict(),
   z.object({ ...eventBase, type: z.literal("run.started") }).strict(),
-  z.object({ ...eventBase, type: z.literal("run.approval_requested"), confirmationIds: z.array(z.string().min(1)).min(1), toolCallIds: z.array(z.string().min(1)) }).strict(),
-  z.object({ ...eventBase, type: z.literal("run.approval_decided"), confirmationId: z.string().min(1), decision: z.enum(["approve_once", "deny", "guidance"]) }).strict(),
+  z.object({ ...eventBase, type: z.literal("run.approval_requested"), confirmationRequests: z.array(confirmationSchema).min(1), toolCallIds: z.array(z.string().min(1)) }).strict(),
+  z.object({ ...eventBase, type: z.literal("run.approval_decided"), decision: confirmationDecisionSchema }).strict(),
   z.object({ ...eventBase, type: z.literal("run.completed"), toolCallIds: z.array(z.string().min(1)) }).strict(),
   z.object({ ...eventBase, type: z.literal("run.failed"), code: z.string().min(1), toolCallIds: z.array(z.string().min(1)) }).strict(),
   z.object({ ...eventBase, type: z.literal("run.cancelled"), reason: z.string(), toolCallIds: z.array(z.string().min(1)) }).strict(),
@@ -150,6 +169,7 @@ const rawStateSchema = z.object({
   status: statusSchema,
   canonicalMessages: z.array(modelMessageSchema),
   toolCalls: z.array(toolCallSchema),
+  usage: usageSchema,
   timeline: z.array(eventSchema).min(1),
   timestamps: z.object({ createdAt: z.string().min(1), updatedAt: z.string().min(1), terminalAt: z.string().optional() }).strict(),
 }).strict().superRefine((state, context) => {

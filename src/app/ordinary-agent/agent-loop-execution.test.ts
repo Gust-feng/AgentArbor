@@ -33,6 +33,7 @@ test("completed execution maps canonical facts and releases its run resources on
     answer: "done",
     canonicalMessages: completedResult().messages,
     toolCalls: [],
+    usage: {},
   });
   assert.equal(received?.instructions, ordinaryRunBirth().instructions);
   assert.equal(received?.tools, fixture.resources.tools);
@@ -103,22 +104,24 @@ test("approval keeps the same lease through recursive decisions and releases onl
             availability: "live_only",
             async decide() {
               secondDecisions += 1;
-              return completedResult();
+              return completedResult({ inputTokens: 9, outputTokens: 2, totalTokens: 11 });
             },
-          });
+          }, { inputTokens: 6, totalTokens: 6 });
         },
-      });
+      }, { inputTokens: 3, totalTokens: 3 });
     },
     async release() { return undefined; },
   });
 
   const first = await fixture.execution.execute(executionInput());
   assert.equal(first.status, "approval_required");
+  assert.deepEqual(first.usage, { inputTokens: 3, totalTokens: 3 });
   assert.equal(fixture.releaseCount(), 0);
   if (first.status !== "approval_required") return;
 
   const second = await first.continuation.decide({ decision: decision(firstRequest), abortSignal: new AbortController().signal });
   assert.equal(second.status, "approval_required");
+  assert.deepEqual(second.usage, { inputTokens: 6, totalTokens: 6 });
   assert.equal(fixture.releaseCount(), 0);
   await assert.rejects(
     first.continuation.decide({ decision: decision(firstRequest), abortSignal: new AbortController().signal }),
@@ -129,6 +132,7 @@ test("approval keeps the same lease through recursive decisions and releases onl
 
   const terminal = await second.continuation.decide({ decision: decision(secondRequest), abortSignal: new AbortController().signal });
   assert.equal(terminal.status, "completed");
+  assert.deepEqual(terminal.usage, { inputTokens: 9, outputTokens: 2, totalTokens: 11 });
   assert.equal(firstDecisions, 1);
   assert.equal(secondDecisions, 1);
   assert.equal(fixture.releaseCount(), 1);
@@ -137,6 +141,39 @@ test("approval keeps the same lease through recursive decisions and releases onl
     /already been decided/,
   );
   assert.equal(fixture.releaseCount(), 1);
+});
+
+test("execution forwards live text deltas and preserves prior cumulative usage when a resumed failure omits it", async () => {
+  const request = confirmation("confirmation-usage");
+  const deltas: string[] = [];
+  const fixture = executionFixture({
+    async execute(input) {
+      input.onTextDelta?.("first");
+      return approvalResult(request, {
+        availability: "live_only",
+        async decide() {
+          input.onTextDelta?.(" resumed");
+          return {
+            status: "failed",
+            error: "provider disconnected",
+            messages: input.messages,
+            toolResults: [],
+            usage: {},
+            confirmationRequests: [],
+          };
+        },
+      }, { inputTokens: 5, cachedInputTokens: 2, totalTokens: 5 });
+    },
+    async release() { return undefined; },
+  });
+
+  const paused = await fixture.execution.execute({ ...executionInput(), onTextDelta: (delta) => deltas.push(delta) });
+  assert.equal(paused.status, "approval_required");
+  if (paused.status !== "approval_required") return;
+  const failed = await paused.continuation.decide({ decision: decision(request), abortSignal: new AbortController().signal });
+
+  assert.deepEqual(deltas, ["first", " resumed"]);
+  assert.deepEqual(failed.usage, { inputTokens: 5, cachedInputTokens: 2, totalTokens: 5 });
 });
 
 test("discarding an approval continuation releases its lease idempotently", async () => {
@@ -298,13 +335,13 @@ function executionInput(abortSignal = new AbortController().signal) {
   };
 }
 
-function completedResult(): Extract<AgentLoopResult, { readonly status: "completed" }> {
+function completedResult(usage: Extract<AgentLoopResult, { readonly status: "completed" }>["usage"] = {}): Extract<AgentLoopResult, { readonly status: "completed" }> {
   return {
     status: "completed",
     finalText: "done",
     messages: [{ role: "user", content: "hello" }, { role: "assistant", content: "done" }],
     toolResults: [],
-    usage: {},
+    usage,
     confirmationRequests: [],
   };
 }
@@ -312,12 +349,13 @@ function completedResult(): Extract<AgentLoopResult, { readonly status: "complet
 function approvalResult(
   request: ConfirmationRequest,
   continuation: Extract<AgentLoopResult, { readonly status: "approval_required" }>["continuation"],
+  usage: Extract<AgentLoopResult, { readonly status: "approval_required" }>["usage"] = {},
 ): Extract<AgentLoopResult, { readonly status: "approval_required" }> {
   return {
     status: "approval_required",
     messages: [{ role: "user", content: "hello" }],
     toolResults: [],
-    usage: {},
+    usage,
     confirmationRequests: [request],
     continuation,
   };

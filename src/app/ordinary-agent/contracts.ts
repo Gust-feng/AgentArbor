@@ -6,7 +6,7 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import type { ModelMessage } from "../../domain/intelligence/index.js";
+import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
 import type { ToolCallResult, ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
@@ -66,8 +66,8 @@ type OrdinaryRunEventBase = {
 
 export type OrdinaryRunEvent = OrdinaryRunEventBase & (
   | { readonly type: "run.created" | "run.started" }
-  | { readonly type: "run.approval_requested"; readonly confirmationIds: readonly string[]; readonly toolCallIds: readonly string[] }
-  | { readonly type: "run.approval_decided"; readonly confirmationId: string; readonly decision: ConfirmationDecision["decision"] }
+  | { readonly type: "run.approval_requested"; readonly confirmationRequests: readonly ConfirmationRequest[]; readonly toolCallIds: readonly string[] }
+  | { readonly type: "run.approval_decided"; readonly decision: ConfirmationDecision }
   | { readonly type: "run.completed"; readonly toolCallIds: readonly string[] }
   | { readonly type: "run.failed"; readonly code: string; readonly toolCallIds: readonly string[] }
   | { readonly type: "run.cancelled"; readonly reason: string; readonly toolCallIds: readonly string[] }
@@ -82,6 +82,8 @@ export type OrdinaryRunState = {
   readonly status: OrdinaryRunStatus;
   readonly canonicalMessages: readonly ModelMessage[];
   readonly toolCalls: readonly ToolCallResult[];
+  /** Cumulative provider usage for this run, including every live approval continuation segment. */
+  readonly usage: ModelUsage;
   readonly timeline: readonly OrdinaryRunEvent[];
   readonly timestamps: {
     readonly createdAt: string;
@@ -117,6 +119,8 @@ export interface OrdinaryRunRepository {
 export type OrdinaryExecutionFacts = {
   readonly canonicalMessages: readonly ModelMessage[];
   readonly toolCalls: readonly ToolCallResult[];
+  /** Cumulative usage for the whole live execution/continuation chain. */
+  readonly usage: ModelUsage;
 };
 
 export type OrdinaryExecutionOutcome =
@@ -149,6 +153,32 @@ export type OrdinaryExecutionInput = {
   readonly runInput: OrdinaryRunInput;
   readonly messages: readonly ModelMessage[];
   readonly abortSignal: AbortSignal;
+  readonly onTextDelta?: (delta: string) => void;
+};
+
+export type OrdinaryRunActivityCursor = {
+  /** Changes whenever live-only activity memory is recreated, including after restart. */
+  readonly streamId: string;
+  readonly sequence: number;
+};
+
+type OrdinaryRunActivityBase = {
+  readonly activityId: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly recordedAt: string;
+};
+
+export type OrdinaryRunActivity = OrdinaryRunActivityBase & (
+  | { readonly type: "run.transition"; readonly durability: "durable"; readonly event: OrdinaryRunEvent }
+  | { readonly type: "model.output.delta"; readonly durability: "live_only"; readonly delta: string }
+);
+
+export type OrdinaryRunActivityReplay = {
+  readonly cursor: OrdinaryRunActivityCursor;
+  /** True when the supplied cursor belonged to a previous in-memory stream generation. */
+  readonly reset: boolean;
+  readonly activities: readonly OrdinaryRunActivity[];
 };
 
 export interface OrdinaryExecutionPort {
@@ -174,7 +204,8 @@ export interface OrdinaryAgentFeature {
     listRuns(limit?: number): Promise<readonly OrdinaryRunSummary[]>;
   };
   readonly events: {
-    subscribe(runId: string, listener: (event: OrdinaryRunEvent) => void): () => void;
+    replay(runId: string, cursor?: OrdinaryRunActivityCursor): Promise<OrdinaryRunActivityReplay | undefined>;
+    subscribe(runId: string, listener: (activity: OrdinaryRunActivity) => void): () => void;
   };
   release(): Promise<void>;
 }

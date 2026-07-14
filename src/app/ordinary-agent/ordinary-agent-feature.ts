@@ -5,6 +5,8 @@ import type {
   OrdinaryExecutionContinuation,
   OrdinaryExecutionOutcome,
   OrdinaryExecutionPort,
+  OrdinaryRunActivity,
+  OrdinaryRunActivityCursor,
   OrdinaryRunEvent,
   OrdinaryRunRepository,
   OrdinaryRunSnapshotDocument,
@@ -26,7 +28,8 @@ export function createOrdinaryAgentFeature(input: {
   const controllers = new Map<string, AbortController>();
   const executions = new Map<string, Promise<void>>();
   const mutationQueues = new Map<string, Promise<void>>();
-  const listeners = new Map<string, Set<(event: OrdinaryRunEvent) => void>>();
+  const activityStreams = new Map<string, { streamId: string; nextSequence: number; activities: OrdinaryRunActivity[] }>();
+  const listeners = new Map<string, Set<(activity: OrdinaryRunActivity) => void>>();
   let released = false;
 
   const readyPromise = recoverPersistedRuns();
@@ -38,6 +41,7 @@ export function createOrdinaryAgentFeature(input: {
       const document = await input.repository.get(summary.runId);
       if (document === undefined) continue;
       documents.set(summary.runId, document);
+      streamFor(summary.runId, document.state.timeline);
       if (document.state.status.kind === "awaiting_approval") {
         await mutate(summary.runId, {
           type: "block",
@@ -60,7 +64,10 @@ export function createOrdinaryAgentFeature(input: {
     const cached = documents.get(runId);
     if (cached !== undefined) return cached;
     const document = await input.repository.get(runId);
-    if (document !== undefined) documents.set(runId, document);
+    if (document !== undefined) {
+      documents.set(runId, document);
+      streamFor(runId, document.state.timeline);
+    }
     return document;
   }
 
@@ -96,16 +103,74 @@ export function createOrdinaryAgentFeature(input: {
       });
       const saved = await input.repository.save(state, current.revision);
       documents.set(runId, saved);
-      emit(state.timeline.at(-1)!);
+      recordTransition(state.timeline.at(-1)!);
       return clone(state);
     });
   }
 
-  function emit(event: OrdinaryRunEvent): void {
-    for (const listener of listeners.get(event.runId) ?? []) {
-      try { listener(clone(event)); }
+  function emit(activity: OrdinaryRunActivity): void {
+    for (const listener of listeners.get(activity.runId) ?? []) {
+      try { listener(clone(activity)); }
       catch { /* A projection subscriber cannot roll back an already committed feature fact. */ }
     }
+  }
+
+  function streamFor(runId: string, durableEvents: readonly OrdinaryRunEvent[] = []): {
+    streamId: string;
+    nextSequence: number;
+    activities: OrdinaryRunActivity[];
+  } {
+    const existing = activityStreams.get(runId);
+    if (existing !== undefined) return existing;
+    const activities = durableEvents.map((event, index): OrdinaryRunActivity => ({
+      activityId: `transition:${event.eventId}`,
+      runId,
+      sequence: index + 1,
+      recordedAt: event.recordedAt,
+      type: "run.transition",
+      durability: "durable",
+      event: clone(event),
+    }));
+    const created = { streamId: idFactory("ordinary-activity-stream"), nextSequence: activities.length + 1, activities };
+    activityStreams.set(runId, created);
+    return created;
+  }
+
+  function recordTransition(event: OrdinaryRunEvent): void {
+    const stream = streamFor(event.runId);
+    const activity: OrdinaryRunActivity = {
+      activityId: `transition:${event.eventId}`,
+      runId: event.runId,
+      sequence: stream.nextSequence++,
+      recordedAt: event.recordedAt,
+      type: "run.transition",
+      durability: "durable",
+      event: clone(event),
+    };
+    stream.activities.push(activity);
+    emit(activity);
+    if (isTerminalEvent(event)) {
+      // Final state is durable. Drop potentially large live-only deltas after subscribers
+      // observe the terminal boundary; replay remains truthful from durable transitions.
+      stream.activities = stream.activities.filter((item) => item.durability === "durable");
+    }
+  }
+
+  function recordOutputDelta(runId: string, delta: string): void {
+    if (released || delta.length === 0) return;
+    if (documents.get(runId)?.state.status.kind !== "running") return;
+    const stream = streamFor(runId);
+    const activity: OrdinaryRunActivity = {
+      activityId: idFactory("ordinary-activity"),
+      runId,
+      sequence: stream.nextSequence++,
+      recordedAt: now(),
+      type: "model.output.delta",
+      durability: "live_only",
+      delta,
+    };
+    stream.activities.push(activity);
+    emit(activity);
   }
 
   async function applyOutcome(runId: string, outcome: OrdinaryExecutionOutcome): Promise<void> {
@@ -121,21 +186,22 @@ export function createOrdinaryAgentFeature(input: {
         },
         canonicalMessages: outcome.canonicalMessages,
         toolCalls: outcome.toolCalls,
+        usage: outcome.usage,
       });
       if (state.status.kind === "awaiting_approval") continuations.set(runId, outcome.continuation);
       return;
     }
     if (outcome.status === "completed") {
-      await mutate(runId, { type: "complete", answer: outcome.answer, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls });
+      await mutate(runId, { type: "complete", answer: outcome.answer, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage });
       await activateSuccessor(runId);
       return;
     }
     if (outcome.status === "cancelled") {
-      await mutate(runId, { type: "cancel", reason: outcome.reason, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls });
+      await mutate(runId, { type: "cancel", reason: outcome.reason, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage });
       await activateSuccessor(runId);
       return;
     }
-    await mutate(runId, { type: "fail", error: outcome.error, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls });
+    await mutate(runId, { type: "fail", error: outcome.error, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage });
     await activateSuccessor(runId);
   }
 
@@ -151,6 +217,7 @@ export function createOrdinaryAgentFeature(input: {
         runInput: document.state.input,
         messages: document.state.canonicalMessages,
         abortSignal: controller.signal,
+        onTextDelta: (delta) => recordOutputDelta(runId, delta),
       });
       await applyOutcome(runId, outcome);
     } catch (error) {
@@ -215,7 +282,7 @@ export function createOrdinaryAgentFeature(input: {
     });
     const created = await input.repository.save(initial, 0);
     documents.set(initial.runId, created);
-    emit(initial.timeline[0]);
+    recordTransition(initial.timeline[0]);
     if (predecessor !== undefined && !isTerminal(predecessor.state)) return clone(initial);
     const running = await mutate(initial.runId, { type: "start" });
     track(initial.runId, runExecution(initial.runId));
@@ -302,6 +369,21 @@ export function createOrdinaryAgentFeature(input: {
       async listRuns(limit) { await readyPromise; return input.repository.list(limit); },
     },
     events: {
+      async replay(runId, cursor) {
+        await readyPromise;
+        const document = await load(runId);
+        if (document === undefined) return undefined;
+        const stream = streamFor(runId, document.state.timeline);
+        const reset = cursor !== undefined && (
+          cursor.streamId !== stream.streamId || cursor.sequence < 0 || cursor.sequence >= stream.nextSequence
+        );
+        const afterSequence = cursor === undefined || reset ? 0 : cursor.sequence;
+        return {
+          cursor: activityCursor(stream),
+          reset,
+          activities: clone(stream.activities.filter((activity) => activity.sequence > afterSequence)),
+        };
+      },
       subscribe(runId, listener) {
         assertLive();
         const runListeners = listeners.get(runId) ?? new Set();
@@ -323,6 +405,7 @@ export function createOrdinaryAgentFeature(input: {
       // An abort-ignoring execution may have returned an approval while release awaited it.
       await releaseContinuations();
       listeners.clear();
+      activityStreams.clear();
       documents.clear();
     },
   };
@@ -332,11 +415,19 @@ export function createOrdinaryAgentFeature(input: {
     continuations.clear();
     await Promise.allSettled(pending.map((continuation) => continuation.release()));
   }
+
+  function activityCursor(stream: { readonly streamId: string; readonly nextSequence: number }): OrdinaryRunActivityCursor {
+    return { streamId: stream.streamId, sequence: stream.nextSequence - 1 };
+  }
 }
 
 function isTerminal(state: OrdinaryRunState): boolean {
   return state.status.kind === "completed" || state.status.kind === "failed" ||
     state.status.kind === "cancelled" || state.status.kind === "blocked";
+}
+function isTerminalEvent(event: OrdinaryRunEvent): boolean {
+  return event.type === "run.completed" || event.type === "run.failed" ||
+    event.type === "run.cancelled" || event.type === "run.blocked";
 }
 function cancellationReason(value: unknown): string { return typeof value === "string" ? value : "cancelled"; }
 function errorMessage(value: unknown): string { return value instanceof Error ? value.message : String(value); }

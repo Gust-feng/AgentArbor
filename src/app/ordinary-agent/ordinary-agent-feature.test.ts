@@ -43,6 +43,72 @@ test("feature cancellation aborts live execution and cannot be overwritten by a 
   assert.equal((await run.feature.queries.getRun("cancelled-run"))?.status.kind, "cancelled");
 });
 
+test("feature activity stream supports output delta subscribe and cursor replay while a run is live", async (t) => {
+  let emitDelta: ((delta: string) => void) | undefined;
+  let finish: ((outcome: OrdinaryExecutionOutcome) => void) | undefined;
+  let markEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const run = await fixture(t, {
+    execute(input) {
+      emitDelta = input.onTextDelta;
+      markEntered?.();
+      return new Promise<OrdinaryExecutionOutcome>((resolve) => { finish = resolve; });
+    },
+  });
+  const observed: string[] = [];
+  run.feature.events.subscribe("stream-run", (activity) => observed.push(activity.type));
+  await run.feature.commands.start(startInput("stream-run"));
+  await entered;
+
+  emitDelta?.("hel");
+  emitDelta?.("lo");
+  const first = await run.feature.events.replay("stream-run");
+  assert.deepEqual(first?.activities.filter((activity) => activity.type === "model.output.delta").map((activity) => activity.delta), ["hel", "lo"]);
+  assert.deepEqual(first?.activities.map((activity) => activity.sequence), [1, 2, 3, 4]);
+
+  emitDelta?.("!");
+  const incremental = await run.feature.events.replay("stream-run", first?.cursor);
+  assert.deepEqual(incremental?.activities.map((activity) => activity.type), ["model.output.delta"]);
+  assert.deepEqual(incremental?.activities.map((activity) => activity.sequence), [5]);
+
+  finish?.(completedOutcome());
+  await waitForStatus(run.feature, "stream-run", "completed");
+  assert.equal(observed.at(-1), "run.transition");
+});
+
+test("feature ignores output deltas that arrive after cancellation", async (t) => {
+  let emitDelta: ((delta: string) => void) | undefined;
+  let markEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const run = await fixture(t, {
+    execute(input) {
+      emitDelta = input.onTextDelta;
+      markEntered?.();
+      return new Promise<OrdinaryExecutionOutcome>((resolve) => {
+        input.abortSignal.addEventListener("abort", () => resolve({
+          status: "cancelled",
+          reason: String(input.abortSignal.reason),
+          canonicalMessages: input.messages,
+          toolCalls: [],
+          usage: {},
+        }), { once: true });
+      });
+    },
+  });
+  const observed: string[] = [];
+  run.feature.events.subscribe("late-delta-run", (activity) => {
+    if (activity.type === "model.output.delta") observed.push(activity.delta);
+  });
+  await run.feature.commands.start(startInput("late-delta-run"));
+  await entered;
+  emitDelta?.("before cancel");
+  await run.feature.commands.cancel("late-delta-run", "user_stopped");
+  emitDelta?.("after cancel");
+
+  assert.deepEqual(observed, ["before cancel"]);
+  assert.equal((await run.feature.events.replay("late-delta-run"))?.activities.some((activity) => activity.type === "model.output.delta"), false);
+});
+
 test("feature resumes the exact live approval continuation", async (t) => {
   const request = confirmation("approval-run");
   let decided = 0;
@@ -50,6 +116,7 @@ test("feature resumes the exact live approval continuation", async (t) => {
     status: "approval_required",
     canonicalMessages: [{ role: "user", content: "change file" }],
     toolCalls: [],
+    usage: { inputTokens: 3, totalTokens: 3 },
     confirmationRequests: [request],
     continuation: {
       availability: "live_only",
@@ -85,10 +152,15 @@ test("feature resumes the exact live approval continuation", async (t) => {
     sequence: 3,
     type: "run.approval_requested",
     recordedAt: requested?.recordedAt,
-    confirmationIds: [request.confirmationId],
+    confirmationRequests: [request],
     toolCallIds: [],
   });
-  assert.equal(decidedEvent?.type === "run.approval_decided" ? decidedEvent.confirmationId : undefined, request.confirmationId);
+  assert.deepEqual(decidedEvent?.type === "run.approval_decided" ? decidedEvent.decision : undefined, {
+    confirmationId: request.confirmationId,
+    runId: "approval-run",
+    decision: "approve_once",
+    decidedAt: "2026-01-01T00:00:10.000Z",
+  });
 });
 
 test("feature commits cancellation before approval cleanup and cleanup failure cannot rewrite it", async (t) => {
@@ -103,6 +175,7 @@ test("feature commits cancellation before approval cleanup and cleanup failure c
         status: "approval_required",
         canonicalMessages: [{ role: "user", content: "change file" }],
         toolCalls: [],
+        usage: {},
         confirmationRequests: [request],
         continuation: {
           availability: "live_only",
@@ -139,6 +212,7 @@ test("feature release disposes a pending live approval continuation once", async
         status: "approval_required",
         canonicalMessages: [{ role: "user", content: "change file" }],
         toolCalls: [],
+        usage: {},
         confirmationRequests: [request],
         continuation: {
           availability: "live_only",
@@ -167,6 +241,7 @@ test("feature restart turns a persisted approval pause into an honest blocked st
         status: "approval_required",
         canonicalMessages: [{ role: "user", content: "change file" }],
         toolCalls: [],
+        usage: { inputTokens: 4, totalTokens: 4 },
         confirmationRequests: [confirmation("restart-run")],
         continuation: {
           availability: "live_only",
@@ -200,6 +275,87 @@ test("feature restart turns a persisted approval pause into an honest blocked st
     continueBy: "new_turn",
   });
   assert.equal(state?.timeline.at(-1)?.type, "run.blocked");
+});
+
+test("activity restart resets an old cursor, drops live deltas, and replays complete approval facts", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-activity-restart-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const request = confirmation("activity-restart-run");
+  const decision = {
+    confirmationId: request.confirmationId,
+    runId: request.runId,
+    decision: "guidance" as const,
+    guidance: "Use the safer path",
+    decidedAt: "2026-01-01T00:00:10.000Z",
+  };
+  const first = createOrdinaryAgentFeature({
+    repository,
+    execution: {
+      async execute(input) {
+        input.onTextDelta?.("volatile delta");
+        return {
+          status: "approval_required",
+          canonicalMessages: [{ role: "user", content: "change file" }],
+          toolCalls: [],
+          usage: { inputTokens: 4, totalTokens: 4 },
+          confirmationRequests: [request],
+          continuation: {
+            availability: "live_only",
+            async decide() { return completedOutcome({ inputTokens: 8, outputTokens: 2, totalTokens: 10 }); },
+            async release() { return undefined; },
+          },
+        };
+      },
+    },
+    now: monotonicClock(),
+    idFactory: deterministicIds(),
+  });
+  await first.commands.start(startInput("activity-restart-run"));
+  await waitForStatus(first, "activity-restart-run", "awaiting_approval");
+  const liveReplay = await first.events.replay("activity-restart-run");
+  assert.equal(liveReplay?.activities.some((activity) => activity.type === "model.output.delta"), true);
+  await first.commands.decideApproval(decision);
+  await waitForStatus(first, "activity-restart-run", "completed");
+  await first.release();
+
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    execution: { async execute() { throw new Error("must not execute"); } },
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(() => restarted.release());
+  const replay = await restarted.events.replay("activity-restart-run", liveReplay?.cursor);
+  assert.equal(replay?.reset, true);
+  assert.equal(replay?.activities.some((activity) => activity.type === "model.output.delta"), false);
+  const events = replay?.activities.flatMap((activity) => activity.type === "run.transition" ? [activity.event] : []) ?? [];
+  const requested = events.find((event) => event.type === "run.approval_requested");
+  const decided = events.find((event) => event.type === "run.approval_decided");
+  assert.deepEqual(requested?.type === "run.approval_requested" ? requested.confirmationRequests : undefined, [request]);
+  assert.deepEqual(decided?.type === "run.approval_decided" ? decided.decision : undefined, decision);
+  assert.deepEqual((await restarted.queries.getRun("activity-restart-run"))?.usage, { inputTokens: 8, outputTokens: 2, totalTokens: 10 });
+});
+
+test("feature carries cumulative usage across multiple approval continuations", async (t) => {
+  const firstRequest = confirmationWithId("usage-run", "usage-confirmation-1");
+  const secondRequest = confirmationWithId("usage-run", "usage-confirmation-2");
+  const run = await fixture(t, {
+    async execute() {
+      return approvalOutcome(firstRequest, { inputTokens: 3, totalTokens: 3 }, async () =>
+        approvalOutcome(secondRequest, { inputTokens: 7, totalTokens: 7 }, async () =>
+          completedOutcome({ inputTokens: 11, outputTokens: 2, totalTokens: 13 })));
+    },
+  });
+  await run.feature.commands.start(startInput("usage-run"));
+  await waitForStatus(run.feature, "usage-run", "awaiting_approval");
+  assert.deepEqual((await run.feature.queries.getRun("usage-run"))?.usage, { inputTokens: 3, totalTokens: 3 });
+  await run.feature.commands.decideApproval(approvalDecision(firstRequest));
+  await waitForApprovalRequest(run.feature, "usage-run", secondRequest.confirmationId);
+  assert.deepEqual((await run.feature.queries.getRun("usage-run"))?.usage, { inputTokens: 7, totalTokens: 7 });
+  await run.feature.commands.decideApproval(approvalDecision(secondRequest));
+  const completed = await waitForStatus(run.feature, "usage-run", "completed");
+  assert.deepEqual(completed.usage, { inputTokens: 11, outputTokens: 2, totalTokens: 13 });
 });
 
 test("a queued run starts only after its predecessor reaches a terminal state", async (t) => {
@@ -304,16 +460,18 @@ function executionFor(status: "completed" | "failed"): OrdinaryExecutionPort {
         error: { code: "model_failed", message: "provider unavailable" },
         canonicalMessages: [{ role: "user", content: "hello" }],
         toolCalls: [],
+        usage: {},
       };
   return { async execute() { return value; } };
 }
 
-function completedOutcome(): OrdinaryExecutionOutcome {
+function completedOutcome(usage = { inputTokens: 8, outputTokens: 2, totalTokens: 10 }): OrdinaryExecutionOutcome {
   return {
     status: "completed",
     answer: "final answer",
     canonicalMessages: [{ role: "user", content: "hello" }, { role: "assistant", content: "final answer" }],
     toolCalls: [],
+    usage,
   };
 }
 
@@ -327,8 +485,12 @@ function startInput(runId: string) {
 }
 
 function confirmation(runId: string): ConfirmationRequest {
+  return confirmationWithId(runId, `${runId}-confirmation`);
+}
+
+function confirmationWithId(runId: string, confirmationId: string): ConfirmationRequest {
   return {
-    confirmationId: `${runId}-confirmation`,
+    confirmationId,
     runId,
     title: "Confirm command",
     actionSummary: "Run a command",
@@ -337,6 +499,34 @@ function confirmation(runId: string): ConfirmationRequest {
     resumeAvailability: "live",
     requestedAt: "2026-01-01T00:00:02.000Z",
     sourceRefs: [],
+  };
+}
+
+function approvalDecision(request: ConfirmationRequest) {
+  return {
+    confirmationId: request.confirmationId,
+    runId: request.runId,
+    decision: "approve_once" as const,
+    decidedAt: "2026-01-01T00:00:10.000Z",
+  };
+}
+
+function approvalOutcome(
+  request: ConfirmationRequest,
+  usage: NonNullable<OrdinaryExecutionOutcome["usage"]>,
+  decide: () => Promise<OrdinaryExecutionOutcome>,
+): OrdinaryExecutionOutcome {
+  return {
+    status: "approval_required",
+    canonicalMessages: [{ role: "user", content: "hello" }],
+    toolCalls: [],
+    usage,
+    confirmationRequests: [request],
+    continuation: {
+      availability: "live_only",
+      async decide() { return decide(); },
+      async release() { return undefined; },
+    },
   };
 }
 
@@ -355,6 +545,31 @@ async function waitForStatus(
     const unsubscribe = feature.events.subscribe(runId, () => {
       void feature.queries.getRun(runId).then((state) => {
         if (state?.status.kind !== status) return;
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve(state);
+      }, reject);
+    });
+  });
+}
+
+async function waitForApprovalRequest(
+  feature: Awaited<ReturnType<typeof createOrdinaryAgentFeature>>,
+  runId: string,
+  confirmationId: string,
+): Promise<OrdinaryRunState> {
+  const current = await feature.queries.getRun(runId);
+  if (current?.status.kind === "awaiting_approval" &&
+      current.status.confirmationRequests.some((request) => request.confirmationId === confirmationId)) return current;
+  return new Promise<OrdinaryRunState>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      reject(new Error(`Timed out waiting for ${confirmationId}`));
+    }, 2_000);
+    const unsubscribe = feature.events.subscribe(runId, () => {
+      void feature.queries.getRun(runId).then((state) => {
+        if (state?.status.kind !== "awaiting_approval" ||
+            !state.status.confirmationRequests.some((request) => request.confirmationId === confirmationId)) return;
         clearTimeout(timeout);
         unsubscribe();
         resolve(state);

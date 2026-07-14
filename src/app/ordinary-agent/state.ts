@@ -1,4 +1,4 @@
-import { persistedModelProtocolExtensions, type ModelMessage } from "../../domain/intelligence/index.js";
+import { persistedModelProtocolExtensions, type ModelMessage, type ModelUsage } from "../../domain/intelligence/index.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
 import type {
   OrdinaryRunBirth,
@@ -16,6 +16,7 @@ export type OrdinaryRunTransition =
       readonly status: Extract<OrdinaryRunStatus, { readonly kind: "awaiting_approval" }>;
       readonly canonicalMessages: readonly ModelMessage[];
       readonly toolCalls: readonly ToolCallResult[];
+      readonly usage: ModelUsage;
     }
   | { readonly type: "approval_decided"; readonly decision: import("../../domain/confirmation/index.js").ConfirmationDecision }
   | {
@@ -23,18 +24,21 @@ export type OrdinaryRunTransition =
       readonly answer: string;
       readonly canonicalMessages: readonly ModelMessage[];
       readonly toolCalls: readonly ToolCallResult[];
+      readonly usage: ModelUsage;
     }
   | {
       readonly type: "fail";
       readonly error: { readonly code: string; readonly message: string };
       readonly canonicalMessages?: readonly ModelMessage[];
       readonly toolCalls?: readonly ToolCallResult[];
+      readonly usage?: ModelUsage;
     }
   | {
       readonly type: "cancel";
       readonly reason: string;
       readonly canonicalMessages?: readonly ModelMessage[];
       readonly toolCalls?: readonly ToolCallResult[];
+      readonly usage?: ModelUsage;
     }
   | {
       readonly type: "block";
@@ -67,6 +71,7 @@ export function createInitialOrdinaryRunState(input: {
     status: { kind: "queued" },
     canonicalMessages,
     toolCalls: [],
+    usage: {},
     timeline: [{
       eventId: input.eventId,
       runId: input.runId,
@@ -97,6 +102,7 @@ export function transitionOrdinaryRun(input: {
     status: nextStatus,
     canonicalMessages: messagesAfter(input.state, input.transition),
     toolCalls: toolCallsAfter(input.state, input.transition),
+    usage: usageAfter(input.state, input.transition),
     timeline: [...input.state.timeline, event],
     timestamps: {
       ...input.state.timestamps,
@@ -162,14 +168,13 @@ function eventForTransition(
     case "request_approval": return {
       ...base,
       type: "run.approval_requested",
-      confirmationIds: transition.status.confirmationRequests.map((request) => request.confirmationId),
+      confirmationRequests: cloneJson(transition.status.confirmationRequests),
       toolCallIds: transition.toolCalls.map((call) => call.callId),
     };
     case "approval_decided": return {
       ...base,
       type: "run.approval_decided",
-      confirmationId: transition.decision.confirmationId,
-      decision: transition.decision.decision,
+      decision: cloneJson(transition.decision),
     };
     case "complete": return { ...base, type: "run.completed", toolCallIds: transition.toolCalls.map((call) => call.callId) };
     case "fail": return {
@@ -186,6 +191,12 @@ function eventForTransition(
     };
     case "block": return { ...base, type: "run.blocked", code: transition.reason.code };
   }
+}
+
+function usageAfter(state: OrdinaryRunState, transition: OrdinaryRunTransition): ModelUsage {
+  return "usage" in transition && transition.usage !== undefined
+    ? cloneJson(transition.usage)
+    : state.usage;
 }
 
 function assertStatus(status: OrdinaryRunStatus, allowed: readonly OrdinaryRunStatus["kind"][], action: string): void {

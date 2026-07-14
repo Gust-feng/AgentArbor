@@ -37,7 +37,7 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
   });
 
   assert.deepEqual(Object.keys(initial).sort(), [
-    "birth", "canonicalMessages", "input", "runId", "status", "timeline", "timestamps", "toolCalls", "turn",
+    "birth", "canonicalMessages", "input", "runId", "status", "timeline", "timestamps", "toolCalls", "turn", "usage",
   ]);
   assert.equal(JSON.stringify(initial).includes("BASE64_MUST_NOT_PERSIST"), false);
   assert.equal(initial.input.taskSoil?.contextRefs?.[0]?.attachmentId, "image-1");
@@ -57,6 +57,7 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
       answer: "done",
       canonicalMessages: [...running.canonicalMessages, { role: "assistant", content: "done" }],
       toolCalls: [],
+      usage: { inputTokens: 7, outputTokens: 2, totalTokens: 9 },
     },
     recordedAt: "2026-01-01T00:00:02.000Z",
     eventId: "event-3",
@@ -65,6 +66,7 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
   assert.deepEqual(completed.timeline.map((event) => event.sequence), [1, 2, 3]);
   assert.deepEqual(completed.timeline.map((event) => event.type), ["run.created", "run.started", "run.completed"]);
   assert.deepEqual(completed.status, { kind: "completed", answer: "done" });
+  assert.deepEqual(completed.usage, { inputTokens: 7, outputTokens: 2, totalTokens: 9 });
   assert.equal(completed.timestamps.terminalAt, "2026-01-01T00:00:02.000Z");
   assert.throws(() => transitionOrdinaryRun({
     state: completed,

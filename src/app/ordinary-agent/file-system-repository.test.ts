@@ -81,6 +81,17 @@ test("file repository rejects old or malformed snapshots instead of compatibilit
     error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
 });
 
+test("file repository validates cumulative usage before committing an Ordinary snapshot", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-usage-validation-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const invalid = { ...state("invalid-usage-run", "2026-01-01T00:00:00.000Z"), usage: { inputTokens: -1 } };
+
+  await assert.rejects(repository.save(invalid, 0), (error: unknown) =>
+    error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
+  assert.equal(await repository.get("invalid-usage-run"), undefined);
+});
+
 test("a broken disposable manifest cannot invalidate a committed snapshot", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-manifest-failure-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -20,6 +20,13 @@ export type {
   ModelRuntimeSummaryInput,
 } from "./factory.js";
 export type { ModelRuntimeMode } from "./contracts.js";
+export type {
+  AgentLoop,
+  AgentLoopContinuation,
+  AgentLoopInput,
+  AgentLoopResult,
+  AgentLoopToolBoundary,
+} from "./agent-loop.js";
 
 export type ModelRuntimeRequestPlan = {
   readonly requestId: string;

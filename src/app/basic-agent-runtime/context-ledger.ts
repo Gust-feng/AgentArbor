@@ -5,6 +5,7 @@ import { createId } from "../../kernel/id.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
+  DesktopAgentPriorToolCallContext,
   DesktopAgentSkillContext,
 } from "../desktop-agent/desktop-agent-contracts.js";
 import type { BasicAgentContextItem } from "./contracts.js";
@@ -48,6 +49,7 @@ export type CreateBasicAgentContextLedgerInput = {
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
+  readonly priorToolCallContexts?: readonly DesktopAgentPriorToolCallContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly tokenCounter?: BasicAgentTokenCounter;
@@ -193,16 +195,17 @@ function contextItemRetentionPriority(item: BasicAgentContextItem): number {
   if (item.sourceKind === "run_interruption") return 0;
   if (item.sourceKind === "conversation_recent_turn") return 1;
   if (item.sourceKind === "task_soil_ref") return 2;
-  if (item.sourceKind === "skill") return 3;
-  if (item.sourceKind === "conversation") return 3;
-  if (item.sourceKind === "conversation_summary") return 4;
-  return 5;
+  if (item.sourceKind === "run_tool_fact") return 3;
+  if (item.sourceKind === "skill") return 4;
+  if (item.sourceKind === "conversation") return 4;
+  if (item.sourceKind === "conversation_summary") return 5;
+  return 6;
 }
 
 function contextItemTokenCount(counter: BasicAgentTokenCounter, item: BasicAgentContextItem): number {
   const role =
     item.sourceKind === "system" || item.sourceKind === "skill" || item.sourceKind === "conversation_summary" ||
-      item.sourceKind === "run_interruption"
+      item.sourceKind === "run_interruption" || item.sourceKind === "run_tool_fact"
       ? "system"
       : item.sourceKind === "user_message"
         ? "user"

@@ -27,6 +27,7 @@ export type ToolCallEventFact = {
   readonly factTruncation?: {
     readonly input?: true;
     readonly output?: true;
+    readonly errorFacts?: true;
   };
   readonly eventSequences: readonly number[];
   readonly createdAt?: string;
@@ -174,7 +175,10 @@ function mergeFactTruncation(
   const record = asRecord(value);
   const input = previous?.input === true || record.input === true ? true : undefined;
   const output = previous?.output === true || record.output === true ? true : undefined;
-  return input === undefined && output === undefined ? undefined : { input, output };
+  const errorFacts = previous?.errorFacts === true || record.errorFacts === true ? true : undefined;
+  return input === undefined && output === undefined && errorFacts === undefined
+    ? undefined
+    : { input, output, errorFacts };
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

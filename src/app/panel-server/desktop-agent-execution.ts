@@ -77,6 +77,7 @@ export async function executeOrdinaryDesktopRunForPanel(
       agentDefinition,
       conversationHistory: options.conversationHistory,
       interruptedRunContexts: options.interruptedRunContexts,
+      priorToolCallContexts: options.priorToolCallContexts,
       resolveSkillContexts: (context) =>
         resolveTriggeredSkillContexts(
           runtime,

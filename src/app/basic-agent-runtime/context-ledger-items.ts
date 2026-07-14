@@ -5,6 +5,7 @@ import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
+  DesktopAgentPriorToolCallContext,
   DesktopAgentSkillContext,
 } from "../desktop-agent/desktop-agent-contracts.js";
 import type { BasicAgentContextItem, BasicAgentContextSkillFacts } from "./contracts.js";
@@ -25,6 +26,7 @@ export type BuildContextLedgerDraftInput = {
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
+  readonly priorToolCallContexts?: readonly DesktopAgentPriorToolCallContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
 };
 
@@ -51,10 +53,54 @@ export function buildContextLedgerDraftItems(input: BuildContextLedgerDraftInput
     systemContextItem(input.agentDefinition),
     ...skillContextItems(input.skillContexts ?? []),
     ...historyContextItems(input.conversationHistory, input.conversationSummary),
+    ...priorToolCallContextItems(input.priorToolCallContexts ?? []),
     ...interruptedRunContextItems(input.interruptedRunContexts ?? []),
     ...taskSoilRefItems(input.taskSoil),
     currentUserMessageItem(input.goal, input.taskSoil),
   ];
+}
+
+function priorToolCallContextItems(
+  contexts: readonly DesktopAgentPriorToolCallContext[]
+): readonly BasicAgentContextItem[] {
+  return contexts.slice(-24).map((context) => {
+    const content = safeUnboundedText(priorToolCallContextModelText(context));
+    return {
+      itemId: `context:run-tool:${context.runId}:${context.callId}`,
+      sourceKind: "run_tool_fact",
+      summary: content.text,
+      refs: priorToolCallRefs(context),
+      visibility: "model" as const,
+      truncated: context.factTruncation !== undefined,
+    };
+  });
+}
+
+function priorToolCallContextModelText(context: DesktopAgentPriorToolCallContext): string {
+  return [
+    "Tool execution fact from the immediately preceding ordinary agent run. Treat it as observed context; call tools again when freshness or omitted data matters.",
+    `run_id=${safePlain(context.runId, 180)}`,
+    `call_id=${safePlain(context.callId, 180)}`,
+    `tool=${safePlain(context.toolName, 180)}`,
+    `status=${context.status}`,
+    context.input === undefined ? undefined : `input:\n${JSON.stringify(context.input, null, 2)}`,
+    context.output === undefined ? undefined : `output:\n${JSON.stringify(context.output, null, 2)}`,
+    context.error === undefined ? undefined : `error:\n${context.error}`,
+    context.errorDomain === undefined ? undefined : `error_domain=${safePlain(context.errorDomain, 120)}`,
+    context.errorFacts === undefined ? undefined : `error_facts:\n${JSON.stringify(context.errorFacts, null, 2)}`,
+    context.factTruncation === undefined
+      ? undefined
+      : `fact_truncation=${JSON.stringify(context.factTruncation)}`,
+    context.refs.length === 0
+      ? undefined
+      : `refs=${context.refs.map((ref) => safePlain(ref, 220)).filter((ref) => ref.length > 0).join("; ")}`,
+  ].filter(isString).join("\n");
+}
+
+function priorToolCallRefs(context: DesktopAgentPriorToolCallContext): readonly ObservationRef[] {
+  return [...new Set([`run:${context.runId}`, ...context.refs])]
+    .slice(0, 10)
+    .map((id): ObservationRef => ({ kind: "event", id }));
 }
 
 function interruptedRunContextItems(

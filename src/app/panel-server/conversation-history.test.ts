@@ -13,6 +13,7 @@ import { PanelRunJobStore } from "./run-jobs.js";
 import {
   buildConversationHistoryMessages,
   buildConversationInterruptedRunContexts,
+  buildConversationPriorToolCallContexts,
 } from "./conversation-history.js";
 
 test("conversation history excludes the current user turn and running assistant turns", async () => {
@@ -337,6 +338,218 @@ test("conversation history exposes blocked run facts as interruption context", a
   assert.equal(interruptions[0]?.message?.includes("达到轮次边界"), true);
 });
 
+test("conversation history exposes failed run facts as interruption context", async () => {
+  const conversations = new PanelConversationStore();
+  const runJobs = new PanelRunJobStore();
+  const first = conversations.startDesktopMessage({ goal: "修改并验证项目" });
+  const failedJob = runJobs.create({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "修改并验证项目",
+    aiMode: "fake",
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    capabilitySnapshot: capabilitySnapshot(),
+    agentDefinitionRef: agentDefinitionRef(),
+  });
+  runJobs.fail(failedJob.runId, {
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    capabilitySnapshot: capabilitySnapshot(),
+    error: {
+      code: "provider_network",
+      message: "模型连接在测试完成前中断。",
+    },
+  });
+  conversations.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: first.assistantTurn.turnId,
+    runId: failedJob.runId,
+    title: "运行失败",
+    content: "已经修改两个文件，测试尚未完成。",
+    status: "failed",
+  });
+  const second = conversations.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "继续验证",
+  });
+
+  const interruptions = await buildConversationInterruptedRunContexts({
+    source: { conversations, runJobs },
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: second.assistantTurn.turnId,
+  });
+
+  assert.equal(interruptions.length, 1);
+  assert.equal(interruptions[0]?.turnStatus, "failed");
+  assert.equal(interruptions[0]?.stopReason, "provider_network");
+  assert.equal(interruptions[0]?.continuationAvailability, "none");
+  assert.equal(interruptions[0]?.partialOutput, "已经修改两个文件，测试尚未完成。");
+  assert.equal(interruptions[0]?.message, "模型连接在测试完成前中断。");
+});
+
+test("conversation history exposes cancelled run progress as interruption context", async () => {
+  const conversations = new PanelConversationStore();
+  const runJobs = new PanelRunJobStore();
+  const first = conversations.startDesktopMessage({ goal: "检查多个文件" });
+  const cancelledJob = runJobs.create({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "检查多个文件",
+    aiMode: "fake",
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    capabilitySnapshot: capabilitySnapshot(),
+    agentDefinitionRef: agentDefinitionRef(),
+  });
+  runJobs.cancel(cancelledJob.runId, {
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    capabilitySnapshot: capabilitySnapshot(),
+    reason: {
+      code: "user_cancelled",
+      message: "用户中止了上一轮运行。",
+    },
+  });
+  conversations.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: first.assistantTurn.turnId,
+    runId: cancelledJob.runId,
+    title: "已取消",
+    content: "已经检查到 src/config.ts，其他文件尚未检查。",
+    status: "cancelled",
+  });
+  const second = conversations.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "继续检查剩余文件",
+  });
+
+  const interruptions = await buildConversationInterruptedRunContexts({
+    source: { conversations, runJobs },
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: second.assistantTurn.turnId,
+  });
+
+  assert.equal(interruptions.length, 1);
+  assert.equal(interruptions[0]?.turnStatus, "cancelled");
+  assert.equal(interruptions[0]?.stopReason, "user_cancelled");
+  assert.equal(interruptions[0]?.partialOutput?.includes("src/config.ts"), true);
+});
+
+test("conversation history restores the latest run tool facts for the next turn", async () => {
+  const conversations = new PanelConversationStore();
+  const runJobs = new PanelRunJobStore();
+  const runId = "completed-tool-context-run";
+  const first = conversations.startDesktopMessage({ goal: "读取配置" });
+  conversations.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: first.assistantTurn.turnId,
+    runId,
+    title: "助手",
+    content: "配置已经读取。",
+    status: "completed",
+  });
+  const second = conversations.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "根据刚才的内容继续修改",
+  });
+  const baseSnapshot = validOrdinarySnapshot(runId, "completed");
+  const snapshot: RuntimeRunSnapshot = {
+    ...baseSnapshot,
+    events: [
+      runtimeToolEvent(runId, 1, "tool.requested", {
+        callId: "call-read-config",
+        toolName: "read_file",
+        input: { path: "config.json" },
+      }),
+      runtimeToolEvent(runId, 2, "tool.completed", {
+        callId: "call-read-config",
+        toolName: "read_file",
+        output: { path: "config.json", content: "{\"enabled\":true}" },
+        durationMs: 12,
+      }),
+    ],
+  };
+
+  const toolContexts = await buildConversationPriorToolCallContexts({
+    source: {
+      conversations,
+      runJobs,
+      runtimeDatabase: { getRun: async () => snapshot },
+    },
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: second.assistantTurn.turnId,
+  });
+
+  assert.equal(toolContexts.length, 1);
+  assert.equal(toolContexts[0]?.runId, runId);
+  assert.equal(toolContexts[0]?.callId, "call-read-config");
+  assert.equal(toolContexts[0]?.toolName, "read_file");
+  assert.equal(toolContexts[0]?.status, "completed");
+  assert.deepEqual(toolContexts[0]?.input, { path: "config.json" });
+  assert.deepEqual(toolContexts[0]?.output, { path: "config.json", content: "{\"enabled\":true}" });
+  assert.deepEqual(toolContexts[0]?.refs, [
+    `${runId}:event:1`,
+    `${runId}:event:2`,
+  ]);
+});
+
+test("conversation history preserves prior tool failure and truncation facts", async () => {
+  const conversations = new PanelConversationStore();
+  const runJobs = new PanelRunJobStore();
+  const runId = "failed-tool-context-run";
+  const first = conversations.startDesktopMessage({ goal: "运行测试" });
+  conversations.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: first.assistantTurn.turnId,
+    runId,
+    title: "运行失败",
+    content: "测试命令失败。",
+    status: "failed",
+  });
+  const second = conversations.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "根据错误继续修复",
+  });
+  const baseSnapshot = validOrdinarySnapshot(runId, "failed");
+  const snapshot: RuntimeRunSnapshot = {
+    ...baseSnapshot,
+    events: [
+      runtimeToolEvent(runId, 1, "tool.requested", {
+        callId: "call-test",
+        toolName: "shell_command",
+        input: { command: "pnpm test" },
+      }),
+      runtimeToolEvent(runId, 2, "tool.failed", {
+        callId: "call-test",
+        toolName: "shell_command",
+        output: { stdout: "partial output" },
+        error: "Process exited with code 1.",
+        errorDomain: "process_error",
+        errorFacts: { exitCode: 1 },
+        factTruncation: { output: true },
+        durationMs: 20,
+      }),
+    ],
+  };
+
+  const toolContexts = await buildConversationPriorToolCallContexts({
+    source: {
+      conversations,
+      runJobs,
+      runtimeDatabase: { getRun: async () => snapshot },
+    },
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: second.assistantTurn.turnId,
+  });
+
+  assert.equal(toolContexts[0]?.status, "failed");
+  assert.equal(toolContexts[0]?.error, "Process exited with code 1.");
+  assert.equal(toolContexts[0]?.errorDomain, "process_error");
+  assert.deepEqual(toolContexts[0]?.errorFacts, { exitCode: 1 });
+  assert.deepEqual(toolContexts[0]?.factTruncation, { input: undefined, output: true, errorFacts: undefined });
+});
+
 test("conversation history leaves long completed answers untruncated for Context Ledger ownership", async () => {
   const conversations = new PanelConversationStore();
   const runJobs = new PanelRunJobStore();
@@ -476,5 +689,48 @@ function invalidOrdinarySnapshot(
     artifacts: [],
     confirmations: [],
     subAgentRuns: [],
+  };
+}
+
+function validOrdinarySnapshot(
+  runId: string,
+  status: RuntimeRunSnapshot["run"]["status"],
+): RuntimeRunSnapshot {
+  const snapshot = invalidOrdinarySnapshot(runId, status);
+  return {
+    ...snapshot,
+    run: {
+      ...snapshot.run,
+      capabilitySnapshot: capabilitySnapshot(),
+      informationAccess: informationAccess(),
+      agentDefinitionRef: agentDefinitionRef(),
+    },
+  };
+}
+
+function runtimeToolEvent(
+  runId: string,
+  sequence: number,
+  type: "tool.requested" | "tool.completed" | "tool.failed" | "tool.cancelled",
+  payload: NonNullable<RuntimeRunSnapshot["events"][number]["payload"]>,
+): RuntimeRunSnapshot["events"][number] {
+  return {
+    eventId: `${runId}:event:${sequence}`,
+    runId,
+    sequence,
+    type,
+    summary: type,
+    scope: "runtime",
+    severity: type === "tool.failed" ? "error" : "info",
+    progress: {
+      status: type === "tool.requested" ? "in_progress" : type === "tool.failed" ? "failed" : "completed",
+      label: type,
+    },
+    refs: [],
+    traceId: `trace-${runId}`,
+    intent: type,
+    payload,
+    createdAt: "2026-07-12T00:00:01.000Z",
+    recordedAt: "2026-07-12T00:00:01.000Z",
   };
 }

@@ -39,6 +39,7 @@ export type BasicAgentContextSourceKind =
   | "conversation_summary"
   | "conversation_recent_turn"
   | "run_interruption"
+  | "run_tool_fact"
   | "user_message"
   | "task_soil_ref";
 

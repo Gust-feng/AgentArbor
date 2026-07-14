@@ -122,7 +122,8 @@ function contextLedgerEntryKind(kind: BasicAgentContextSourceKind): ContextLedge
     kind === "conversation" ||
     kind === "conversation_summary" ||
     kind === "conversation_recent_turn" ||
-    kind === "run_interruption"
+    kind === "run_interruption" ||
+    kind === "run_tool_fact"
   ) return "history";
   if (kind === "skill") return "skill";
   if (kind === "task_soil_ref") return "attachment";
@@ -137,6 +138,7 @@ function contextLedgerEntryTitle(item: BasicAgentContextItem): string {
     conversation_summary: "历史摘要",
     conversation_recent_turn: "最近对话",
     run_interruption: "运行中断",
+    run_tool_fact: "工具事实",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
   };
@@ -158,6 +160,7 @@ function contextUsageSummary(
     conversation_summary: "历史摘要",
     conversation_recent_turn: "最近对话",
     run_interruption: "运行中断",
+    run_tool_fact: "工具事实",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
   };

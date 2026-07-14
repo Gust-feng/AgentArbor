@@ -10,6 +10,7 @@ import type { ContextLedger } from "../../domain/basic-agent/index.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
+  DesktopAgentPriorToolCallContext,
   DesktopAgentSkillContext,
 } from "./desktop-agent-contracts.js";
 import type {
@@ -109,6 +110,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
+  readonly priorToolCallContexts?: readonly DesktopAgentPriorToolCallContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly resolveSkillContexts?: (context: DesktopAgentSkillResolverContext) => Promise<readonly DesktopAgentSkillContext[]>;
   readonly modelCapabilities?: ModelCapabilities;
@@ -128,3 +130,4 @@ export type RunDesktopAgentSessionOptions = {
 
 export type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 export type { DesktopAgentInterruptedRunContext } from "./desktop-agent-contracts.js";
+export type { DesktopAgentPriorToolCallContext } from "./desktop-agent-contracts.js";

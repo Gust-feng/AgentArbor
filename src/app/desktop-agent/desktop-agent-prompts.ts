@@ -11,6 +11,7 @@ import type { BasicAgentConversationSummary, BasicAgentTokenCounter } from "../b
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
+  DesktopAgentPriorToolCallContext,
   DesktopAgentSkillContext,
 } from "./desktop-agent-contracts.js";
 export type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
@@ -22,6 +23,7 @@ export type DesktopAgentContextPackInput = {
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
+  readonly priorToolCallContexts?: readonly DesktopAgentPriorToolCallContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly tokenCounter?: BasicAgentTokenCounter;

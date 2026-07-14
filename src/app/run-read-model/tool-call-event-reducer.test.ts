@@ -39,6 +39,7 @@ test("tool call event reducer distinguishes approval, cancellation, and missing 
       error: "missing",
       errorDomain: "tool_error",
       errorFacts: { code: "ENOENT" },
+      factTruncation: { errorFacts: true },
       durationMs: 1,
     }),
   ]);
@@ -48,6 +49,11 @@ test("tool call event reducer distinguishes approval, cancellation, and missing 
   assert.equal(facts[0]?.error, "User denied the command.");
   assert.equal(facts[1]?.status, "failed");
   assert.equal(facts[1]?.errorFacts?.code, "ENOENT");
+  assert.deepEqual(facts[1]?.factTruncation, {
+    input: undefined,
+    output: undefined,
+    errorFacts: true,
+  });
 });
 
 test("tool call event timeline exposes each sequence without leaking later terminal facts", () => {

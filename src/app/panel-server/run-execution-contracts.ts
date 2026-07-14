@@ -16,6 +16,7 @@ import type { BasicAgentOrdinaryRunFacts } from "../basic-agent-runtime/run-job.
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
+  DesktopAgentPriorToolCallContext,
   DesktopAgentSessionRuntimeContext,
 } from "../desktop-agent/desktop-agent-session-contracts.js";
 import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
@@ -57,6 +58,7 @@ export type PanelRunExecutionResult = {
 export type PanelRunExecutionOptions = {
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
+  readonly priorToolCallContexts?: readonly DesktopAgentPriorToolCallContext[];
   readonly agentDefinition?: AgentDefinition;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly config?: SanitizedModelProviderConfig;

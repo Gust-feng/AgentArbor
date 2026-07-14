@@ -5,6 +5,7 @@ import type { TaskSoil } from "../../domain/soil/index.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
+  DesktopAgentPriorToolCallContext,
   DesktopAgentSkillContext,
 } from "../desktop-agent/desktop-agent-contracts.js";
 import { createBasicAgentContextLedger } from "./context-ledger.js";
@@ -31,6 +32,7 @@ export type BuildBasicAgentContextPackInput = {
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly conversationSummary?: BasicAgentConversationSummary;
   readonly interruptedRunContexts?: readonly DesktopAgentInterruptedRunContext[];
+  readonly priorToolCallContexts?: readonly DesktopAgentPriorToolCallContext[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly tokenCounter?: BasicAgentTokenCounter;
@@ -48,6 +50,7 @@ export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInpu
     conversationHistory: input.conversationHistory,
     conversationSummary: input.conversationSummary,
     interruptedRunContexts: input.interruptedRunContexts,
+    priorToolCallContexts: input.priorToolCallContexts,
     skillContexts: input.skillContexts,
     modelCapabilities: input.modelCapabilities,
     tokenCounter: input.tokenCounter,
@@ -88,7 +91,11 @@ function contextMessageForItem(item: BasicAgentContextItem): ModelMessage | unde
       ref: item.itemId,
     };
   }
-  if (item.sourceKind === "conversation_summary" || item.sourceKind === "run_interruption") {
+  if (
+    item.sourceKind === "conversation_summary" ||
+    item.sourceKind === "run_interruption" ||
+    item.sourceKind === "run_tool_fact"
+  ) {
     return {
       role: "system",
       content,

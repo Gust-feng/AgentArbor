@@ -1053,14 +1053,19 @@ test("persisted Ordinary APIs reject pre-contract snapshots instead of using cur
   }
 });
 
-test("conversation message POST restores persisted conversation after restart and sends safe prior turn history", async () => {
+test("conversation message POST restores prior turn history and tool facts after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-post-recover-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-post-recover-workspace-"));
+  await fs.writeFile(path.join(workspace, "context.txt"), "PERSISTED_TOOL_FACT_SENTINEL", "utf8");
   const secret = "sk-conversation-post-recover-secret";
   const providerRequests: ResponsesRequestBody[] = [];
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     const body = parseResponsesRequestBody(init.body);
     providerRequests.push(body);
-    return providerRequests.length === 1
+    if (providerRequests.length === 1) {
+      return createOpenAiReadFileToolCallResponse("context.txt", "call-recover-context");
+    }
+    return providerRequests.length === 2
       ? createOpenAiTextResponse("conversation-post-recover-model", "第一轮安全回答。")
       : createOpenAiTextResponse("conversation-post-recover-model", "第二轮安全回答。");
   };
@@ -1073,6 +1078,10 @@ test("conversation message POST restores persisted conversation after restart an
         model: "conversation-post-recover-model",
         apiKey: secret,
       },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
     });
 
     const first = await requestJson(server.url, "/api/conversations", {
@@ -1094,20 +1103,24 @@ test("conversation message POST restores persisted conversation after restart an
     );
     const completed = await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
-    const secondMessages = extractResponsesMessages(providerRequests[1]);
+    const secondMessages = extractResponsesMessages(providerRequests[2]);
 
     assert.equal(first.status, 202);
     assert.equal(second.status, 202);
     assert.equal(completed.body.status, "completed");
     assert.equal(conversation.body.conversation.turns.length, 4);
-    assert.deepEqual(secondMessages.map((message) => message.role), ["system", "user", "assistant", "user"]);
+    assert.deepEqual(secondMessages.map((message) => message.role), ["system", "user", "assistant", "system", "user"]);
     assert.equal(secondMessages[1]?.content?.includes("第一轮问题"), true);
     assert.equal(secondMessages[2]?.content?.includes("第一轮安全回答"), true);
-    assert.equal(secondMessages[3]?.content, "第二轮问题");
+    assert.equal(secondMessages[3]?.content?.includes("Tool execution fact from the immediately preceding ordinary agent run"), true);
+    assert.equal(secondMessages[3]?.content?.includes('"path": "context.txt"'), true);
+    assert.equal(secondMessages[3]?.content?.includes("PERSISTED_TOOL_FACT_SENTINEL"), true);
+    assert.equal(secondMessages[4]?.content, "第二轮问题");
     assert.equal(JSON.stringify(secondMessages).includes(secret), false);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
+    await removeTemporaryTree(workspace);
   }
 });
 

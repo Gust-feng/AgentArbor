@@ -29,6 +29,7 @@ import { friendlyUserFacingFailureText } from "../text-projection/visible-text-s
 import {
   buildConversationHistoryMessages,
   buildConversationInterruptedRunContexts,
+  buildConversationPriorToolCallContexts,
 } from "./conversation-history.js";
 import { PanelHttpError } from "./http-utils.js";
 import { throwIfAborted } from "./request-parsers.js";
@@ -85,9 +86,10 @@ export async function executeBasicPanelRun(
     conversationId: job.conversationId,
     assistantTurnId: job.assistantTurnId,
   };
-  const [conversationHistory, interruptedRunContexts] = await Promise.all([
+  const [conversationHistory, interruptedRunContexts, priorToolCallContexts] = await Promise.all([
     buildConversationHistoryMessages(conversationContext),
     buildConversationInterruptedRunContexts(conversationContext),
+    buildConversationPriorToolCallContexts(conversationContext),
   ]);
   return executePanelRunFromFrozenJob(runtime, {
     runKind: job.runKind,
@@ -98,6 +100,7 @@ export async function executeBasicPanelRun(
     options: {
       conversationHistory,
       interruptedRunContexts,
+      priorToolCallContexts,
       agentDefinition: resolveExecutionAgentDefinition(runtime, job),
       agentDefinitionRef: job.agentDefinitionRef,
       config: job.config,

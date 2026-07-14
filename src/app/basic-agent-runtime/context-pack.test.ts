@@ -384,6 +384,40 @@ test("Basic Agent context pack injects interrupted run context as system continu
   assert.equal(pack.truncationReport.truncatedItemIds.includes(interruptionItem?.itemId ?? ""), true);
 });
 
+test("Basic Agent context pack injects prior tool execution facts without replacing their output", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "continue from the previous tool result",
+    goalId: "goal-prior-tool-context",
+    traceId: "trace-prior-tool-context",
+  });
+  const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
+    goal: "continue from the previous tool result",
+    taskSoil,
+    conversationHistory: [],
+    priorToolCallContexts: [{
+      runId: "run-prior-tool",
+      callId: "call-prior-read",
+      toolName: "read_file",
+      status: "completed",
+      input: { path: "src/config.ts" },
+      output: {
+        path: "src/config.ts",
+        content: "export const enabled = true;",
+      },
+      refs: ["run-prior-tool:event:1", "run-prior-tool:event:2"],
+    }],
+  });
+
+  const toolFact = pack.items.find((item) => item.sourceKind === "run_tool_fact");
+  assert.ok(toolFact);
+  assert.equal(toolFact.summary.includes('"path": "src/config.ts"'), true);
+  assert.equal(toolFact.summary.includes("export const enabled = true;"), true);
+  const toolFactMessage = pack.messages.find((message) => message.ref === toolFact.itemId);
+  assert.equal(toolFactMessage?.role, "system");
+  assert.equal(toolFactMessage?.content.includes("status=completed"), true);
+});
+
 test("Basic Agent context pack preserves history roles without pre-threshold deterministic compaction", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "continue",

@@ -1,10 +1,18 @@
-import type { RuntimeDatabase, RuntimeRunContinuationAvailability } from "../../domain/runtime-database/index.js";
+import type {
+  RuntimeDatabase,
+  RuntimeRunContinuationAvailability,
+} from "../../domain/runtime-database/index.js";
 import type {
   DesktopAgentConversationMessage,
   DesktopAgentInterruptedRunContext,
+  DesktopAgentPriorToolCallContext,
 } from "../desktop-agent/desktop-agent-session-contracts.js";
 import { readRuntimeSnapshotWithOrdinaryContract } from "../basic-agent-runtime/persistence-snapshot-contract.js";
 import type { PanelConversation, PanelConversationReadModel, PanelConversationStore } from "../panel-conversation/panel-conversations.js";
+import {
+  reduceToolCallEventFacts,
+  type ToolCallEventEntry,
+} from "../run-read-model/tool-call-event-reducer.js";
 import type { PanelRunJob, PanelRunJobStore } from "./run-jobs.js";
 import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
 
@@ -90,6 +98,42 @@ export async function buildConversationInterruptedRunContexts(input: {
   return contexts.slice(-6);
 }
 
+export async function buildConversationPriorToolCallContexts(input: {
+  readonly source: PanelConversationHistorySource;
+  readonly conversationId: string | undefined;
+  readonly assistantTurnId: string | undefined;
+}): Promise<readonly DesktopAgentPriorToolCallContext[]> {
+  if (input.conversationId === undefined) {
+    return [];
+  }
+  const conversation = input.source.conversations.get(input.conversationId);
+  if (conversation === undefined) {
+    return [];
+  }
+  const assistantIndex = input.assistantTurnId === undefined
+    ? conversation.turns.length
+    : conversation.turns.findIndex((turn) => turn.turnId === input.assistantTurnId);
+  if (input.assistantTurnId !== undefined && assistantIndex < 0) {
+    return [];
+  }
+  const previousAssistant = [...conversationHistoryTurnsBeforeCurrentUser(conversation, assistantIndex)]
+    .reverse()
+    .find((turn) => turn.role === "assistant");
+  const previousRunId = previousAssistant?.runId;
+  if (previousRunId === undefined) {
+    return [];
+  }
+  const liveJob = input.source.runJobs.get(previousRunId);
+  const liveEntries = liveJob?.runtime?.eventLog.list();
+  if (liveEntries !== undefined) {
+    return priorToolCallContextsFromEvents(previousRunId, liveEntries);
+  }
+  const snapshot = await readRuntimeSnapshotWithOrdinaryContract(input.source.runtimeDatabase, previousRunId);
+  return snapshot === undefined
+    ? []
+    : priorToolCallContextsFromEvents(previousRunId, snapshot.events);
+}
+
 function conversationHistoryTurnsBeforeCurrentUser(
   conversation: PanelConversation,
   assistantIndex: number
@@ -161,7 +205,7 @@ async function interruptedRunContextForAssistantTurn(
 function assistantTurnStatusCanProvideInterruptedContext(
   status: PanelConversationReadModel["turns"][number]["status"]
 ): status is DesktopAgentInterruptedRunContext["turnStatus"] {
-  return status === "blocked" || status === "needs_input";
+  return status === "blocked" || status === "needs_input" || status === "failed" || status === "cancelled";
 }
 
 function liveRunStopReason(job: PanelRunJob): string {
@@ -236,6 +280,28 @@ function interruptedFallbackStopReason(status: DesktopAgentInterruptedRunContext
     return "needs_input";
   }
   return status;
+}
+
+function priorToolCallContextsFromEvents(
+  runId: string,
+  events: readonly ToolCallEventEntry[],
+): readonly DesktopAgentPriorToolCallContext[] {
+  return reduceToolCallEventFacts(events)
+    .filter((fact): fact is typeof fact & { toolName: string } => fact.toolName !== undefined)
+    .slice(-24)
+    .map((fact): DesktopAgentPriorToolCallContext => ({
+      runId,
+      callId: fact.callId,
+      toolName: fact.toolName,
+      status: fact.status,
+      input: fact.input,
+      output: fact.output,
+      error: fact.error,
+      errorDomain: fact.errorDomain,
+      errorFacts: fact.errorFacts,
+      factTruncation: fact.factTruncation,
+      refs: fact.eventSequences.map((sequence) => `${runId}:event:${sequence}`),
+    }));
 }
 
 function interruptedRunMessage(turnContent: string, stopReason: string | undefined): string | undefined {

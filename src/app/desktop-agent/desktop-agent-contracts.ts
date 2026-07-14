@@ -1,4 +1,5 @@
 import type { SkillDefinition, SkillSelectionDecisionFacts } from "../../domain/basic-agent/index.js";
+import type { ToolFactValue } from "../../domain/tools/index.js";
 
 export type DesktopAgentConversationMessage = {
   readonly role: "user" | "assistant";
@@ -8,11 +9,29 @@ export type DesktopAgentConversationMessage = {
 
 export type DesktopAgentInterruptedRunContext = {
   readonly runId: string;
-  readonly turnStatus: "blocked" | "needs_input" | "failed";
+  readonly turnStatus: "blocked" | "needs_input" | "failed" | "cancelled";
   readonly stopReason?: string;
   readonly continuationAvailability?: "none" | "live" | "lost_after_restart" | "new_turn";
   readonly message?: string;
   readonly partialOutput?: string;
+  readonly refs: readonly string[];
+};
+
+export type DesktopAgentPriorToolCallContext = {
+  readonly runId: string;
+  readonly callId: string;
+  readonly toolName: string;
+  readonly status: "requested" | "approval_required" | "completed" | "failed" | "cancelled";
+  readonly input?: ToolFactValue;
+  readonly output?: ToolFactValue;
+  readonly error?: string;
+  readonly errorDomain?: string;
+  readonly errorFacts?: ToolFactValue;
+  readonly factTruncation?: {
+    readonly input?: true;
+    readonly output?: true;
+    readonly errorFacts?: true;
+  };
   readonly refs: readonly string[];
 };
 

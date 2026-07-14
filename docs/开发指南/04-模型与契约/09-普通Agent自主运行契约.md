@@ -21,9 +21,9 @@
 
 ## 运行入口
 
-普通 Desktop Agent 通过 `AgentTurnRuntime.executeAutonomous` / `resumeAutonomous` 进入自主工具循环。旧的 `execute` / `resume` 保持通用 provider-stop 工具循环语义，供其他结构化路径继续使用。
+普通 Desktop Agent 通过 `AgentTurnRuntime.execute` / `resume` 进入标准模型-工具-模型循环。调用 feature 显式传入自己的停止与结果映射语义；Runtime 不再提供 Ordinary 专用方法名，也不内置普通 Agent 的完成工具或业务状态。
 
-`executeAutonomous` 的模型可见工具只包含本轮授权后的外部能力工具：
+`execute` 的模型可见工具只包含本轮授权后的外部能力工具：
 
 ```text
 ToolCenter.list()
@@ -79,7 +79,7 @@ ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一�
 
 ## 停止语义
 
-`executeAutonomous` 的结果映射为：
+Ordinary 对 `execute` / `resume` 技术结果的映射为：
 
 - `completed/no_tool_calls`：首轮无工具调用，模型直接给出最终文本。
 - `completed/completed`：至少执行过一轮工具，随后模型无工具调用并给出最终文本。
@@ -111,24 +111,27 @@ ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一�
 - 当前用户消息必须保留在最后。
 - 最近对话轮次优先保留原始 `user` / `assistant` role。
 - 更早历史可以压缩为上下文摘要。
-- Token 统计必须来自模型能力目录或专用 tokenizer / provider 计量能力，不能用字符数粗略估算作为最终裁剪依据。
+- Token 统计必须来自模型能力目录或专用 tokenizer / provider 计量能力，且覆盖正文、工具调用参数、协议扩展和附件元数据；本地无法精确计量的二进制附件必须预留保守预算，provider 仍是最终计量边界，不能用字符数粗略估算作为最终裁剪依据。
 - 达到模型上下文阈值时优先进行 AI 压缩；只有压缩失败且外部硬边界无法恢复时，才能中断运行。
 - 超预算时优先压缩旧历史或旧摘要，不能丢系统边界、当前用户消息和必要工具结果。
 - 摘要必须保留继续开发所需的关键事实，不能因为摘要或投影丢失普通回答、工具结果和错误信息。
+- 同一次 assistant tool call 与其全部 tool result 是不可拆分的上下文组；压缩要么保留整组，要么把整组交给压缩，不能留下悬空调用或孤立结果。
+- 紧邻上一轮 Ordinary run 的工具事件通过统一 reducer 恢复最多 24 组有界事实，包括 input、output、error、截断标记和事件引用；它们作为连续性上下文进入下一轮。被标记为截断、live-only 引用已失效或事实需要刷新时，模型应再次调用原工具，而不是依赖工程层猜测遗漏内容。
 
 普通 Agent loop 内不做任务完成判断。上下文压缩服务于 loop 连续运行，而不是替模型总结任务或决定停止。
 
 ## 持久化与恢复
 
-会话持久化由 Panel / Conversation 层负责，`desktop-agent-session` 只消费传入的 `conversationHistory`，不直接读取 RuntimeDatabase。
+会话持久化由 Panel / Conversation 层负责，`desktop-agent-session` 只消费传入的 `conversationHistory`、`interruptedRunContexts` 和 `priorToolCallContexts`，不直接读取 RuntimeDatabase。
 
 普通会话必须是长期可恢复时间线：今天、明天或一年后继续同一 conversation，都应从数据库恢复运行历史、当前分支和可见状态。用户可以回退到上一轮、前四轮或前五轮对话；回退生成新的当前分支或显式截断当前分支，但不能破坏原始审计记录。
 
-恢复对话时必须裁剪悬空 turn：
+恢复对话时必须区分可复用事实与不可伪造的运行时状态：
 
-- 保留最后一个完整用户-助手回合之前的运行历史。
-- 丢弃悬空 tool call、未完成 assistant 消息和失败运行中的内部材料。
-- 如果没有完整 turn，则以空历史恢复。
+- 已完成的用户-助手回合按原 role 恢复。
+- 紧邻上一轮 run 已持久化的工具 lifecycle payload 可以作为有界事实恢复；失败或取消 run 的可见进度、停止原因和工具错误也可以作为中断上下文恢复。
+- 丢弃未持久化的 provider 私有状态、悬空协议 continuation 和无法证明结果的内部执行对象，不能为了“续跑”伪造 tool call/result 对。
+- 恢复的工具事实不是长期记忆，也不替代重新读取文件、网页或外部状态；新鲜度重要时由模型再次调用工具。
 
 恢复审批时仍必须匹配原 confirmation id；不允许因为重新进入 loop 而绕过确认。
 
@@ -151,6 +154,7 @@ ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一�
 - 模型可在可见工具集合内自由选择工具；Runtime 不用固定阶段或关键词路由替模型挑工具。
 - 工具调用必须经过 ToolCenter、权限裁剪、命令确认和审计。
 - 工具调用后，真实工具结果必须回到下一轮模型请求，不能被摘要或投影替代。
+- 新一轮会话以及进程重启后，紧邻上一轮已持久化的工具事实、失败和取消进度仍可进入模型上下文，且任何截断都必须显式标记。
 - 工具后下一轮无工具调用时 `completed`，答案来自模型最终文本。
 - 普通 Agent 不因工具次数或模型轮次达到工程上限而停止。
 - 上下文达到阈值时触发 AI 压缩并继续，而不是停止或丢失关键历史。

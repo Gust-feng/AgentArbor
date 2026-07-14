@@ -25,7 +25,7 @@ Panel UI
   -> runForPanel
   -> runOrdinaryDesktopForPanel
   -> runDesktopAgentSession
-  -> AgentTurnRuntime.executeAutonomous
+  -> AgentTurnRuntime.execute
   -> executeToolUseLoop
 ```
 

@@ -140,7 +140,8 @@ const eventSchema = z.discriminatedUnion("type", [
 const rawStateSchema = z.object({
   runId: z.string().min(1),
   turn: z.object({
-    conversationId: z.string().min(1), userTurnId: z.string().min(1), assistantTurnId: z.string().min(1), predecessorRunId: z.string().min(1).optional(),
+    conversationId: z.string().min(1), lineageId: z.string().min(1), ordinal: z.number().int().positive(),
+    userTurnId: z.string().min(1), assistantTurnId: z.string().min(1), predecessorRunId: z.string().min(1).optional(),
   }).strict(),
   input: z.object({
     userMessage: z.string(),
@@ -184,6 +185,9 @@ const rawStateSchema = z.object({
   }
   if (state.turn.predecessorRunId === state.runId) {
     context.addIssue({ code: "custom", message: "a run cannot be its own predecessor", path: ["turn", "predecessorRunId"] });
+  }
+  if ((state.turn.predecessorRunId === undefined) !== (state.turn.ordinal === 1)) {
+    context.addIssue({ code: "custom", message: "the first turn must have no predecessor and later turns must have one", path: ["turn"] });
   }
   const expectedLastEvent = {
     queued: "run.created",

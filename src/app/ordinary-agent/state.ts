@@ -10,7 +10,7 @@ import type {
 } from "./contracts.js";
 
 export type OrdinaryRunTransition =
-  | { readonly type: "start" }
+  | { readonly type: "start"; readonly priorCanonicalMessages?: readonly ModelMessage[] }
   | {
       readonly type: "request_approval";
       readonly status: Extract<OrdinaryRunStatus, { readonly kind: "awaiting_approval" }>;
@@ -146,6 +146,12 @@ function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransitio
 }
 
 function messagesAfter(state: OrdinaryRunState, transition: OrdinaryRunTransition): readonly ModelMessage[] {
+  if (transition.type === "start" && transition.priorCanonicalMessages !== undefined) {
+    return persistableMessages([
+      ...transition.priorCanonicalMessages,
+      { role: "user", content: state.input.userMessage },
+    ]);
+  }
   if ("canonicalMessages" in transition && transition.canonicalMessages !== undefined) {
     return persistableMessages(transition.canonicalMessages);
   }

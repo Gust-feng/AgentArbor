@@ -67,6 +67,8 @@ export function ordinaryRunBirth(): OrdinaryRunBirth {
 export function ordinaryRunTurn(runId: string): OrdinaryRunTurn {
   return {
     conversationId: "conversation-1",
+    lineageId: "lineage-1",
+    ordinal: 1,
     userTurnId: `${runId}-user-turn`,
     assistantTurnId: `${runId}-assistant-turn`,
   };

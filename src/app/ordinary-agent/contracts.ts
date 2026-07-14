@@ -12,6 +12,7 @@ import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 
 export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v1" as const;
+export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v1" as const;
 
 export type OrdinaryRunBirth = {
   readonly instructions: string;
@@ -32,10 +33,49 @@ export type OrdinaryRunInput = {
 
 export type OrdinaryRunTurn = {
   readonly conversationId: string;
+  readonly lineageId: string;
+  readonly ordinal: number;
   readonly userTurnId: string;
   readonly assistantTurnId: string;
   readonly predecessorRunId?: string;
 };
+
+export type OrdinaryConversationLineage = {
+  readonly lineageId: string;
+  readonly parentLineageId?: string;
+  readonly forkFromRunId?: string;
+  readonly createdAt: string;
+};
+
+export type OrdinaryConversationControlState = {
+  readonly conversationId: string;
+  readonly createdAt: string;
+  readonly titleOverride?: string;
+  readonly titleEditedAt?: string;
+  readonly pinnedAt?: string;
+  readonly deletedAt?: string;
+  readonly activeLineageId: string;
+  readonly lineages: readonly OrdinaryConversationLineage[];
+};
+
+export type OrdinaryConversationControlDocument = {
+  readonly schemaVersion: typeof ORDINARY_CONVERSATION_SCHEMA_VERSION;
+  readonly revision: number;
+  readonly savedAt: string;
+  readonly state: OrdinaryConversationControlState;
+};
+
+export type OrdinaryConversationControlSummary = {
+  readonly conversationId: string;
+  readonly updatedAt: string;
+  readonly deleted: boolean;
+};
+
+export interface OrdinaryConversationControlRepository {
+  save(state: OrdinaryConversationControlState, expectedRevision: number, savedAt: string): Promise<OrdinaryConversationControlDocument>;
+  get(conversationId: string): Promise<OrdinaryConversationControlDocument | undefined>;
+  list(limit?: number): Promise<readonly OrdinaryConversationControlSummary[]>;
+}
 
 export type OrdinaryRunStatus =
   | { readonly kind: "queued" }
@@ -193,15 +233,69 @@ export type StartOrdinaryRunInput = {
   readonly priorCanonicalMessages?: readonly ModelMessage[];
 };
 
+export type SubmitOrdinaryTurnInput = {
+  readonly conversationId?: string;
+  readonly input: OrdinaryRunInput;
+  readonly birth: OrdinaryRunBirth;
+};
+
+export type OrdinaryConversationTurnReadModel =
+  | {
+      readonly role: "user";
+      readonly turnId: string;
+      readonly runId: string;
+      readonly content: string;
+      readonly input: OrdinaryRunInput;
+      readonly status: "pending" | "completed";
+      readonly createdAt: string;
+      readonly updatedAt: string;
+    }
+  | {
+      readonly role: "assistant";
+      readonly turnId: string;
+      readonly runId: string;
+      readonly content: string;
+      readonly status: OrdinaryRunStatus["kind"];
+      readonly model: SanitizedModelProviderConfig;
+      readonly createdAt: string;
+      readonly updatedAt: string;
+    };
+
+export type OrdinaryConversationReadModel = {
+  readonly conversationId: string;
+  readonly title: string;
+  readonly titleEditedAt?: string;
+  readonly pinnedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly activeLineage: OrdinaryConversationLineage;
+  readonly activeRunId?: string;
+  readonly latestRunId?: string;
+  readonly queuedRunIds: readonly string[];
+  readonly turns: readonly OrdinaryConversationTurnReadModel[];
+};
+
+export type SubmitOrdinaryTurnResult = {
+  readonly conversation: OrdinaryConversationReadModel;
+  readonly run: OrdinaryRunState;
+};
+
 export interface OrdinaryAgentFeature {
   readonly commands: {
     start(input: StartOrdinaryRunInput): Promise<OrdinaryRunState>;
+    submitTurn(input: SubmitOrdinaryTurnInput): Promise<SubmitOrdinaryTurnResult>;
+    renameConversation(conversationId: string, title: string): Promise<OrdinaryConversationReadModel>;
+    setConversationPinned(conversationId: string, pinned: boolean): Promise<OrdinaryConversationReadModel>;
+    rollbackConversation(input: { readonly conversationId: string; readonly targetRunId?: string; readonly stepsBack?: number }): Promise<OrdinaryConversationReadModel>;
+    deleteConversation(conversationId: string): Promise<void>;
     cancel(runId: string, reason?: string): Promise<OrdinaryRunState>;
     decideApproval(decision: ConfirmationDecision): Promise<OrdinaryRunState>;
   };
   readonly queries: {
     getRun(runId: string): Promise<OrdinaryRunState | undefined>;
     listRuns(limit?: number): Promise<readonly OrdinaryRunSummary[]>;
+    getConversation(conversationId: string): Promise<OrdinaryConversationReadModel | undefined>;
+    listConversations(limit?: number): Promise<readonly OrdinaryConversationReadModel[]>;
   };
   readonly events: {
     replay(runId: string, cursor?: OrdinaryRunActivityCursor): Promise<OrdinaryRunActivityReplay | undefined>;

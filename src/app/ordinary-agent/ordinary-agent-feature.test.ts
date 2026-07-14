@@ -6,6 +6,7 @@ import test from "node:test";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import type { OrdinaryExecutionOutcome, OrdinaryExecutionPort, OrdinaryRunState } from "./contracts.js";
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
+import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
 import { ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 
@@ -235,6 +236,7 @@ test("feature restart turns a persisted approval pause into an honest blocked st
   const repository = createFileSystemOrdinaryRunRepository(root);
   const first = await createOrdinaryAgentFeature({
     repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
     execution: { async execute() {
       return {
         status: "approval_required",
@@ -258,11 +260,12 @@ test("feature restart turns a persisted approval pause into an honest blocked st
 
   const restarted = await createOrdinaryAgentFeature({
     repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
     execution: { async execute() { throw new Error("must not restart execution"); } },
     now: monotonicClock("2026-01-02T00:00:00.000Z"),
     idFactory: deterministicIds(100),
   });
-  t.after(async () => { await restarted.release(); await fs.rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
   const state = await restarted.queries.getRun("restart-run");
 
   assert.deepEqual(state?.status, {
@@ -289,6 +292,7 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
   };
   const first = createOrdinaryAgentFeature({
     repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
     execution: {
       async execute(input) {
         input.onTextDelta?.("volatile delta");
@@ -319,11 +323,12 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
 
   const restarted = createOrdinaryAgentFeature({
     repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
     execution: { async execute() { throw new Error("must not execute"); } },
     now: monotonicClock("2026-01-02T00:00:00.000Z"),
     idFactory: deterministicIds(100),
   });
-  t.after(async () => { await restarted.release(); await fs.rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
   const replay = await restarted.events.replay("activity-restart-run", liveReplay?.cursor);
   assert.equal(replay?.reset, true);
   assert.equal(replay?.activities.some((activity) => activity.type === "model.output.delta"), false);
@@ -373,7 +378,7 @@ test("a queued run starts only after its predecessor reaches a terminal state", 
   const secondInput = startInput("second-run");
   const queued = await run.feature.commands.start({
     ...secondInput,
-    turn: { ...secondInput.turn, predecessorRunId: "first-run" },
+    turn: { ...secondInput.turn, ordinal: 2, predecessorRunId: "first-run" },
   });
   assert.equal(queued.status.kind, "queued");
   assert.equal(executionCount, 1);
@@ -402,16 +407,21 @@ test("the synchronous factory gates concurrent first calls on one recovery pass"
       ...base,
       async list(limit) { listCalls += 1; await listGate; return base.list(limit); },
     },
+    conversationRepository: emptyConversationRepository(),
     execution: executionFor("completed"),
     now: monotonicClock(),
     idFactory: deterministicIds(),
   });
-  t.after(async () => { await feature.release(); await fs.rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
   const query = feature.queries.getRun("missing");
   const command = feature.commands.start(startInput("ready-run"));
-  assert.equal(listCalls, 1);
-  assert.equal(await Promise.race([query.then(() => "settled"), Promise.resolve("pending")]), "pending");
-  releaseList?.();
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(listCalls, 1);
+    assert.equal(await Promise.race([query.then(() => "settled"), Promise.resolve("pending")]), "pending");
+  } finally {
+    releaseList?.();
+  }
   assert.equal(await query, undefined);
   await command;
   await waitForStatus(feature, "ready-run", "completed");
@@ -428,6 +438,7 @@ test("eager recovery failures are observed and remain stable for later commands"
       async list() { throw recoveryError; },
       async delete() { return undefined; },
     },
+    conversationRepository: emptyConversationRepository(),
     execution: executionFor("completed"),
   });
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -440,11 +451,12 @@ async function fixture(t: test.TestContext, execution: OrdinaryExecutionPort) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-feature-"));
   const feature = await createOrdinaryAgentFeature({
     repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
     execution,
     now: monotonicClock(),
     idFactory: deterministicIds(),
   });
-  t.after(async () => { await feature.release(); await fs.rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
   return { feature, root };
 }
 
@@ -586,4 +598,25 @@ function deterministicIds(initialIndex = 0) {
 
 async function waitForSettledMicrotasks(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+async function removeTestDirectory(root: string): Promise<void> {
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    try { await fs.rm(root, { recursive: true, force: true }); return; }
+    catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error
+        ? (error as { readonly code?: unknown }).code
+        : undefined;
+      if (attempt === 6 || (code !== "ENOTEMPTY" && code !== "EPERM" && code !== "EBUSY")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+    }
+  }
+}
+
+function emptyConversationRepository() {
+  return {
+    async save() { throw new Error("must not save conversation"); },
+    async get() { return undefined; },
+    async list() { return []; },
+  };
 }

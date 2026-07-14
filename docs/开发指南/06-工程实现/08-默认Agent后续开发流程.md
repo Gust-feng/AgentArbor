@@ -77,7 +77,7 @@
 普通 Agent 新功能必须覆盖完整 slice：
 
 1. 输入/输出契约与 AgentDefinition/capability snapshot。
-2. Context Ledger/Pack 与模型可见上下文。
+2. canonical 模型消息、工具调用/结果配对与模型输入顺序。
 3. 工具执行、确认、取消和 continuation。
 4. Ordinary event 与业务 outcome。
 5. repository 与后端 read-model。

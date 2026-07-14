@@ -104,34 +104,37 @@ Ordinary 对 `execute` / `resume` 技术结果的映射为：
 
 ## 上下文装配
 
-上下文管理属于 Context Pack 装配面和模型请求前置维护，不能成为普通 loop 的停止条件。模型上下文窗口是物理边界：达到压缩阈值时，应使用模型进行安全压缩，保留目标、最近对话、工具证据和未完成事项，然后继续 loop。
+上下文管理只有两个明确边界：Ordinary 负责装配本轮模型输入，模型调用前的 loop maintenance 负责在物理窗口不足时压缩较早消息。未触发压缩时，canonical 消息不得被摘要、投影或字符预算改写；触发压缩时必须保留系统边界、当前请求、完整工具交互和未完成事项，失败则明确暂停，不能带着超限或残缺上下文继续调用模型。
 
 装配规则：
 
 - 当前用户消息必须保留在最后。
-- 最近对话轮次优先保留原始 `user` / `assistant` role。
-- 更早历史可以压缩为上下文摘要。
+- 紧邻上一轮运行持久化的标准 `modelContext` 是跨轮模型历史的唯一事实；它保留真实 `user / assistant / tool` role、工具调用参数、工具结果和最终 assistant 输出。
+- Panel 可见对话、工具 lifecycle event 和 read-model 只服务展示、审计或 Skill 路由，不能重新拼成另一份模型历史。
 - Token 统计必须来自模型能力目录或专用 tokenizer / provider 计量能力，且覆盖正文、工具调用参数、协议扩展和附件元数据；本地无法精确计量的二进制附件必须预留保守预算，provider 仍是最终计量边界，不能用字符数粗略估算作为最终裁剪依据。
 - 达到模型上下文阈值时优先进行 AI 压缩；只有压缩失败且外部硬边界无法恢复时，才能中断运行。
-- 超预算时优先压缩旧历史或旧摘要，不能丢系统边界、当前用户消息和必要工具结果。
+- 超预算时由 loop-level compaction 压缩旧上下文，不能丢系统边界、当前用户消息和必要工具结果；除此之外不得在模型调用前静默省略或替换 canonical 消息。
 - 摘要必须保留继续开发所需的关键事实，不能因为摘要或投影丢失普通回答、工具结果和错误信息。
 - 同一次 assistant tool call 与其全部 tool result 是不可拆分的上下文组；压缩要么保留整组，要么把整组交给压缩，不能留下悬空调用或孤立结果。
-- 紧邻上一轮 Ordinary run 的工具事件通过统一 reducer 恢复最多 24 组有界事实，包括 input、output、error 和截断标记；它们作为连续性上下文进入下一轮。run/call/event id 留在 Context Ledger 和审计引用中，不作为工作材料发送给模型。被标记为截断、live-only 引用已失效或事实需要刷新时，模型应再次调用原工具，而不是依赖工程层猜测遗漏内容。
+- OpenAI Responses 手动上下文必须保留并回传上一轮 output items；官方端点请求 `reasoning.encrypted_content`，使推理与 function call continuation 不被消息文本替代。Chat Completions 则保留累计 `messages` 顺序。
+- 官方 OpenAI 请求的稳定系统指令、工具定义和既有消息必须位于动态用户输入之前；`prompt_cache_key` 只能由稳定协议事实生成，不能随 conversation id、run id 或本轮动态正文变化。缓存命中、写入和未缓存 token 以 provider usage 为准。
 
 普通 Agent loop 内不做任务完成判断。上下文压缩服务于 loop 连续运行，而不是替模型总结任务或决定停止。
 
 ## 持久化与恢复
 
-会话持久化由 Panel / Conversation 层负责，`desktop-agent-session` 只消费传入的 `conversationHistory`、`interruptedRunContexts` 和 `priorToolCallContexts`，不直接读取 RuntimeDatabase。
+会话持久化由 Panel / Conversation 层负责，`desktop-agent-session` 只消费传入的 `priorModelContext` 和 `skillRoutingHistory`，不直接读取 RuntimeDatabase。`skillRoutingHistory` 只用于 Skill 选择，不进入正式模型历史。
+
+`ordinaryModelContext` 只属于 Ordinary 内部恢复与持久化边界，不进入公开 `ordinary` read-model、conversation API 或 SSE；展示层继续消费安全投影，不能因模型恢复需要而把系统提示、工具原文或 provider continuation 暴露成产品响应。
 
 普通会话必须是长期可恢复时间线：今天、明天或一年后继续同一 conversation，都应从数据库恢复运行历史、当前分支和可见状态。用户可以回退到上一轮、前四轮或前五轮对话；回退生成新的当前分支或显式截断当前分支，但不能破坏原始审计记录。
 
 恢复对话时必须区分可复用事实与不可伪造的运行时状态：
 
-- 已完成的用户-助手回合按原 role 恢复。
-- 紧邻上一轮 run 已持久化的工具 lifecycle payload 可以作为有界事实恢复；该 run 失败或取消时，真实部分输出、稳定停止原因和工具错误也可以作为中断上下文恢复。Panel 为展示追加的错误文案不是模型输出，不能混入 `partialOutput`；更早的失败不能跨越后续成功回合反复注入。
-- 丢弃未持久化的 provider 私有状态、悬空协议 continuation 和无法证明结果的内部执行对象，不能为了“续跑”伪造 tool call/result 对。
-- 恢复的工具事实不是长期记忆，也不替代重新读取文件、网页或外部状态；新鲜度重要时由模型再次调用工具。
+- 从上一轮 `ordinaryModelContext` 恢复原始角色、工具调用/结果和允许持久化的 provider continuation；新的根系统指令由当前冻结 AgentDefinition 重新放在最前面。
+- 失败、blocked 或取消 run 若已经形成 canonical `ordinaryModelContext`，下一轮直接沿用其中真实消息；若在模型调用前失败，则跳过该 run 并继续查找更早的 canonical context。不得另造“中断上下文”，Panel 错误文案也不能冒充模型输出。
+- 附件字节、未知 provider 私有字段、悬空 continuation 和无法证明结果的内部执行对象一律不持久化，不能为了“续跑”伪造 tool call/result 对。
+- 开发期旧 snapshot 没有 `ordinaryModelContext` 时直接返回空历史；不得从可见回答、event payload 或当前全局配置迁移、双读或猜测回填。
 
 恢复审批时仍必须匹配原 confirmation id；不允许因为重新进入 loop 而绕过确认。
 
@@ -154,7 +157,7 @@ Ordinary 对 `execute` / `resume` 技术结果的映射为：
 - 模型可在可见工具集合内自由选择工具；Runtime 不用固定阶段或关键词路由替模型挑工具。
 - 工具调用必须经过 ToolCenter、权限裁剪、命令确认和审计。
 - 工具调用后，真实工具结果必须回到下一轮模型请求，不能被摘要或投影替代。
-- 新一轮会话以及进程重启后，紧邻上一轮已持久化的工具事实、失败和取消进度仍可进入模型上下文，且任何截断都必须显式标记。
+- 新一轮会话以及进程重启后，最新可用的标准 `ordinaryModelContext` 按原顺序进入模型上下文；失败、blocked 和取消 run 不产生第二套上下文表示，旧格式数据不兼容恢复。
 - 工具后下一轮无工具调用时 `completed`，答案来自模型最终文本。
 - 普通 Agent 不因工具次数或模型轮次达到工程上限而停止。
 - 上下文达到阈值时触发 AI 压缩并继续，而不是停止或丢失关键历史。

@@ -47,6 +47,68 @@ export function buildDesktopAgentModelInput(
   };
 }
 
+export type AssembleDesktopAgentModelInputOptions = Omit<
+  BuildDesktopAgentModelInputOptions,
+  "priorModelContext"
+> & {
+  /** Canonical run messages already include the current user turn. */
+  readonly canonicalMessages: readonly ModelMessage[];
+  readonly instructions: string;
+};
+
+/**
+ * Enriches an Ordinary run's existing current user message without rebuilding
+ * its canonical prefix. This keeps exactly one stable leading system message
+ * and prevents duplicate current turns when a run is resumed across turns.
+ */
+export function assembleDesktopAgentModelInput(
+  input: AssembleDesktopAgentModelInputOptions,
+): DesktopAgentModelInput {
+  if (input.agentDefinition.prompt.systemPrompt !== input.instructions) {
+    throw new Error("Ordinary run instructions do not match its frozen AgentDefinition");
+  }
+  const currentIndex = input.canonicalMessages.length - 1;
+  const current = input.canonicalMessages[currentIndex];
+  if (current?.role !== "user" || current.content !== input.goal) {
+    throw new Error("Ordinary canonical messages must end with the current user request");
+  }
+  const existingSystemIndexes = input.canonicalMessages
+    .map((message, index) => message.role === "system" ? index : -1)
+    .filter((index) => index >= 0);
+  if (existingSystemIndexes.length > 1 || existingSystemIndexes[0] !== undefined && existingSystemIndexes[0] !== 0) {
+    throw new Error("Ordinary canonical messages must contain at most one leading system message");
+  }
+  if (input.canonicalMessages[0]?.role === "system" && input.canonicalMessages[0].content !== input.instructions) {
+    throw new Error("Ordinary canonical system message does not match the frozen instructions");
+  }
+
+  const fresh = buildDesktopAgentModelInput({
+    agentDefinition: input.agentDefinition,
+    goal: input.goal,
+    taskSoil: input.taskSoil,
+    skillContexts: input.skillContexts,
+  });
+  const enrichedCurrent = fresh.messages.at(-1);
+  const stableSystem = fresh.messages[0];
+  if (enrichedCurrent?.role !== "user" || stableSystem?.role !== "system") {
+    throw new Error("Desktop Agent model input assembler produced an invalid message sequence");
+  }
+
+  const canonical = input.canonicalMessages.map(cloneModelMessage);
+  canonical[currentIndex] = {
+    ...canonical[currentIndex]!,
+    content: enrichedCurrent.content,
+    ref: canonical[currentIndex]!.ref ?? enrichedCurrent.ref,
+  };
+  const messages = canonical[0]?.role === "system"
+    ? canonical
+    : [stableSystem, ...canonical];
+  return {
+    messages,
+    inputRefs: modelInputRefs(input, messages),
+  };
+}
+
 function currentUserMessageContent(input: BuildDesktopAgentModelInputOptions): string {
   const skills = (input.skillContexts ?? [])
     .filter((context) => (context.loadStatus ?? "loaded") === "loaded")

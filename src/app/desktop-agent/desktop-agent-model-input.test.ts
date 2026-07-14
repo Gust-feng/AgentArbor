@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import { createTaskSoil } from "../../domain/soil/index.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
-import { buildDesktopAgentModelInput } from "./desktop-agent-model-input.js";
+import { assembleDesktopAgentModelInput, buildDesktopAgentModelInput } from "./desktop-agent-model-input.js";
 
 test("Desktop Agent model input keeps the stable prompt first and preserves prior protocol history", () => {
   const prior: readonly ModelMessage[] = [
@@ -115,4 +115,63 @@ test("Desktop Agent model input does not silently trim canonical history or the 
 
   assert.equal(result.messages[1]?.content, historySentinel);
   assert.equal(result.messages.at(-1)?.content.endsWith(requestSentinel), true);
+});
+
+test("Ordinary canonical assembler adds one system message and enriches only the current user turn", () => {
+  const prior: readonly ModelMessage[] = [
+    { role: "user", content: "first request", ref: "context:goal:first" },
+    { role: "assistant", content: "", toolCalls: [{ callId: "call-1", toolName: "read_file", input: { path: "README.md" } }] },
+    { role: "tool", content: "README", toolCallId: "call-1", toolName: "read_file" },
+    { role: "assistant", content: "first answer" },
+  ];
+  const current: ModelMessage = { role: "user", content: "second request" };
+  const taskSoil = createTaskSoil({
+    rawGoal: current.content,
+    goalId: "second",
+    traceId: "trace-second",
+    contextRefs: [{ ref: "file:README.md", kind: "file", title: "README.md" }],
+  });
+
+  const result = assembleDesktopAgentModelInput({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    instructions: DESKTOP_ROOT_AGENT.prompt.systemPrompt,
+    goal: current.content,
+    taskSoil,
+    canonicalMessages: [...prior, current],
+  });
+
+  assert.equal(result.messages.filter((message) => message.role === "system").length, 1);
+  assert.equal(result.messages.filter((message) => message.role === "user" && message.content === "first request").length, 1);
+  assert.equal(result.messages.filter((message) => message.role === "assistant").length, 2);
+  assert.equal(result.messages.filter((message) => message.role === "tool").length, 1);
+  assert.deepEqual(result.messages.slice(1, 1 + prior.length), prior);
+  assert.equal(result.messages.at(-1)?.content.includes("second request"), true);
+  assert.equal(result.messages.filter((message) => message.content.includes("second request")).length, 1);
+});
+
+test("Ordinary canonical assembler preserves an existing two-turn prefix byte-for-byte", () => {
+  const firstPass = assembleDesktopAgentModelInput({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    instructions: DESKTOP_ROOT_AGENT.prompt.systemPrompt,
+    goal: "first request",
+    taskSoil: createTaskSoil({ rawGoal: "first request", goalId: "first", traceId: "trace-first" }),
+    canonicalMessages: [{ role: "user", content: "first request" }],
+  }).messages;
+  const previousCompleted: readonly ModelMessage[] = [
+    ...firstPass,
+    { role: "assistant", content: "first answer" },
+  ];
+  const second = assembleDesktopAgentModelInput({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    instructions: DESKTOP_ROOT_AGENT.prompt.systemPrompt,
+    goal: "second request",
+    taskSoil: createTaskSoil({ rawGoal: "second request", goalId: "second", traceId: "trace-second" }),
+    canonicalMessages: [...previousCompleted, { role: "user", content: "second request" }],
+  });
+
+  assert.deepEqual(second.messages.slice(0, previousCompleted.length), previousCompleted);
+  assert.equal(second.messages.filter((message) => message.role === "system").length, 1);
+  assert.equal(second.messages.filter((message) => message.role === "user").length, 2);
+  assert.equal(second.messages.filter((message) => message.role === "assistant").length, 1);
+  assert.equal(second.messages.at(-1)?.content, "second request");
 });

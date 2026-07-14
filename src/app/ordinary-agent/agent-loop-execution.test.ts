@@ -245,7 +245,8 @@ test("the acquirer may reattach ephemeral inputs and contribute native agent too
   const runInput = {
     userMessage: "inspect image",
     taskSoil: {
-      attachmentRefs: [{ ref: "attachment:image-1", kind: "file" as const, title: "image.png" }],
+      contextRefs: [{ attachmentId: "image-1", ref: "file:image.png", kind: "file" as const, title: "image.png" }],
+      permissionBoundaryRefs: ["read:file:image.png"],
     },
   };
   await fixture.execution.execute({ ...executionInput(), runInput, messages: persistedMessages });

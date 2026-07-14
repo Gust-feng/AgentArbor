@@ -9,6 +9,7 @@ import type {
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { ToolCallResult, ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
+import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 
 export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v1" as const;
 
@@ -25,14 +26,8 @@ export type OrdinaryRunBirth = {
 
 export type OrdinaryRunInput = {
   readonly userMessage: string;
-  /** Durable references only. Attachment bytes are resolved again for each model request. */
-  readonly taskSoil?: {
-    readonly attachmentRefs: readonly {
-      readonly ref: string;
-      readonly kind: "file" | "project" | "web" | "workspace";
-      readonly title: string;
-    }[];
-  };
+  /** JSON-safe Desktop input. Attachment bytes are resolved again for each model request. */
+  readonly taskSoil?: DesktopTaskSoilInput;
 };
 
 export type OrdinaryRunTurn = {

@@ -125,9 +125,26 @@ const rawStateSchema = z.object({
   }).strict(),
   input: z.object({
     userMessage: z.string(),
-    taskSoil: z.object({ attachmentRefs: z.array(z.object({
-      ref: z.string().min(1), kind: z.enum(["file", "project", "web", "workspace"]), title: z.string(),
-    }).strict()) }).strict().optional(),
+    taskSoil: z.object({
+      contextRefs: z.array(z.object({
+        attachmentId: z.string().optional(),
+        ref: z.string().min(1),
+        kind: z.enum(["file", "project", "web", "workspace"]),
+        title: z.string().optional(),
+        summary: z.string().optional(),
+        metadata: z.object({
+          byteLength: z.number().int().nonnegative().optional(),
+          mimeType: z.string().optional(),
+          available: z.boolean().optional(),
+          truncated: z.boolean().optional(),
+        }).strict().optional(),
+        readonlyPreview: z.object({
+          title: z.string().optional(),
+          text: z.string(),
+        }).strict().optional(),
+      }).strict()).optional(),
+      permissionBoundaryRefs: z.array(z.string()).optional(),
+    }).strict().optional(),
   }).strict(),
   birth: birthSchema,
   status: statusSchema,

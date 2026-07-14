@@ -9,7 +9,18 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
     turn: ordinaryRunTurn("run-1"),
     runInput: {
       userMessage: "inspect the image",
-      taskSoil: { attachmentRefs: [{ ref: "attachment:image-1", kind: "file", title: "image.png" }] },
+      taskSoil: {
+        contextRefs: [{
+          attachmentId: "image-1",
+          ref: "file:image.png",
+          kind: "file",
+          title: "image.png",
+          summary: "Selected image",
+          metadata: { mimeType: "image/png", byteLength: 42, available: true, truncated: false },
+          readonlyPreview: { title: "Preview", text: "image preview" },
+        }],
+        permissionBoundaryRefs: ["read:file:image.png"],
+      },
     },
     birth: ordinaryRunBirth(),
     priorCanonicalMessages: [{
@@ -29,7 +40,9 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
     "birth", "canonicalMessages", "input", "runId", "status", "timeline", "timestamps", "toolCalls", "turn",
   ]);
   assert.equal(JSON.stringify(initial).includes("BASE64_MUST_NOT_PERSIST"), false);
-  assert.equal(initial.input.taskSoil?.attachmentRefs[0]?.ref, "attachment:image-1");
+  assert.equal(initial.input.taskSoil?.contextRefs?.[0]?.attachmentId, "image-1");
+  assert.equal(initial.input.taskSoil?.contextRefs?.[0]?.readonlyPreview?.text, "image preview");
+  assert.deepEqual(initial.input.taskSoil?.permissionBoundaryRefs, ["read:file:image.png"]);
 
   const running = transitionOrdinaryRun({
     state: initial,

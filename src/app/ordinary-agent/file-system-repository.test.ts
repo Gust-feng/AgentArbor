@@ -44,7 +44,10 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
     turn: ordinaryRunTurn("attachment-run"),
     runInput: {
       userMessage: "inspect attachment",
-      taskSoil: { attachmentRefs: [{ ref: "attachment:image", kind: "file", title: "image.png" }] },
+      taskSoil: {
+        contextRefs: [{ attachmentId: "image", ref: "file:image.png", kind: "file", title: "image.png" }],
+        permissionBoundaryRefs: ["read:file:image.png"],
+      },
     },
     birth: ordinaryRunBirth(),
     priorCanonicalMessages: [{
@@ -62,7 +65,8 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
   await createFileSystemOrdinaryRunRepository(root).save(stateWithAttachment, 0);
   const rawSnapshot = await fs.readFile(path.join(root, "runs", "attachment-run", "snapshot.json"), "utf8");
   assert.equal(rawSnapshot.includes("BASE64_MUST_NOT_REACH_DISK"), false);
-  assert.equal(rawSnapshot.includes("attachment:image"), true);
+  assert.equal(rawSnapshot.includes('"attachmentId": "image"'), true);
+  assert.equal(rawSnapshot.includes("read:file:image.png"), true);
 });
 
 test("file repository rejects old or malformed snapshots instead of compatibility reading", async (t) => {

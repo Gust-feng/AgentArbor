@@ -11,6 +11,7 @@ import type {
   ToolExecutionPreflight,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
+import { withToolModelAttachments } from "../../domain/tools/index.js";
 import {
   createOpenAIAgentsLoop,
   openAIAgentsPromptCacheKey,
@@ -130,6 +131,206 @@ test("official Responses sends a stable cache identity and retains response outp
   });
 });
 
+test("compatible Chat maps user image, file, and audio attachments without changing canonical messages", async () => {
+  const fetch = scriptedFetch([
+    ({ body }) => {
+      const serialized = JSON.stringify(body.messages);
+      assert.match(serialized, /data:image\/png;base64,aW1hZ2U=/u);
+      assert.match(serialized, /data:application\/pdf;base64,cGRm/u);
+      assert.match(serialized, /"input_audio":\{"data":"YXVkaW8=","format":"wav"\}/u);
+      return chatText("attachments-seen");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const messages: readonly ModelMessage[] = [{ role: "system", content: SYSTEM }, {
+        role: "user",
+        content: "inspect attachments",
+        attachments: [{
+          kind: "image",
+          source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+        }, {
+          kind: "file",
+          source: { kind: "data", mimeType: "application/pdf", data: "cGRm" },
+          filename: "brief.pdf",
+        }, {
+          kind: "audio",
+          source: { kind: "data", mimeType: "audio/wav", data: "YXVkaW8=" },
+          filename: "note.wav",
+        }],
+      }];
+      const result = await loop.execute(loopInput(messages));
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.deepEqual(result.messages[1]?.attachments, messages[1]?.attachments);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses maps user and tool-origin attachments and preserves them in canonical tool history", async () => {
+  const definition = plainTool("read_media");
+  const attachmentOutput = withToolModelAttachments({ result: "media-ready" }, [{
+    kind: "image",
+    source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+    attachmentId: "tool-image",
+  }, {
+    kind: "file",
+    source: { kind: "file_id", fileId: "file-tool" },
+    filename: "tool.pdf",
+    attachmentId: "tool-file",
+  }]);
+  const gateway: ToolExecutionGateway = {
+    list: () => [definition],
+    has: (name) => name === definition.name,
+    preflight: (request) => ({ status: "ready", request }),
+    execute: async (request) => ({
+      ...request,
+      output: attachmentOutput,
+      status: "completed",
+      durationMs: 1,
+    }),
+  };
+  const fetch = scriptedFetch([
+    ({ body }) => {
+      assert.match(JSON.stringify(body.input), /data:image\/png;base64,dXNlcg==/u);
+      return responsesTool("call-media", "read_media", { value: "media" });
+    },
+    ({ body }) => {
+      const serialized = JSON.stringify(body.input);
+      assert.match(serialized, /data:image\/png;base64,aW1hZ2U=/u);
+      assert.match(serialized, /file-tool/u);
+      assert.match(serialized, /media-ready/u);
+      return responsesText("media-finished", "resp-media-final");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL });
+    try {
+      const result = await loop.execute(loopInput([{ role: "system", content: SYSTEM }, {
+        role: "user",
+        content: "inspect image",
+        attachments: [{
+          kind: "image",
+          source: { kind: "data", mimeType: "image/png", data: "dXNlcg==" },
+        }],
+      }], gateway));
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      const toolMessage = result.messages.find((message) => message.toolCallId === "call-media");
+      assert.deepEqual(toolMessage?.attachments?.map((attachment) => attachment.attachmentId), [
+        "tool-image",
+        "tool-file",
+      ]);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("unsupported attachment transports fail before sending a request instead of dropping media", async () => {
+  const cases: readonly {
+    readonly protocol: OpenAIAgentsLoopConfig["protocol"];
+    readonly message: ModelMessage;
+    readonly error: RegExp;
+  }[] = [{
+    protocol: "openai_compatible_chat_completions",
+    message: {
+      role: "tool",
+      content: "tool output",
+      toolCallId: "call-image",
+      toolName: "read_image",
+      attachments: [{
+        kind: "image",
+        source: { kind: "url", url: "https://example.test/image.png" },
+      }],
+    },
+    error: /cannot attach tool-origin image or file/u,
+  }, {
+    protocol: "openai_responses",
+    message: {
+      role: "user",
+      content: "listen",
+      attachments: [{
+        kind: "audio",
+        source: { kind: "data", mimeType: "audio/wav", data: "YXVkaW8=" },
+        filename: "note.wav",
+      }],
+    },
+    error: /does not currently accept audio input attachments/u,
+  }];
+  for (const entry of cases) {
+    const fetch = scriptedFetch([]);
+    await withGlobalFetch(fetch.fetch, async () => {
+      const loop = createLoop({
+        protocol: entry.protocol,
+        baseUrl: entry.protocol === "openai_responses" ? OFFICIAL_BASE_URL : CHAT_BASE_URL,
+      });
+      try {
+        const result = await loop.execute(loopInput([
+          { role: "system", content: SYSTEM },
+          ...(entry.message.role === "tool"
+            ? [{
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{ callId: "call-image", toolName: "read_image", input: {} }],
+              }]
+            : []),
+          entry.message,
+        ]));
+        assert.equal(result.status, "failed");
+        assert.match(result.status === "failed" ? result.error : "", entry.error);
+        assert.equal(fetch.requests.length, 0);
+      } finally {
+        await loop.release();
+      }
+    });
+  }
+});
+
+test("an injected provider fetch is used without reading or replacing global fetch", async () => {
+  const previous = globalThis.fetch;
+  let globalCalls = 0;
+  globalThis.fetch = async () => {
+    globalCalls += 1;
+    throw new Error("global fetch must not be used");
+  };
+  const requests: string[] = [];
+  const injected: NonNullable<OpenAIAgentsLoopConfig["fetch"]> = async (url) => {
+    requests.push(url);
+    const payload = {
+      id: "chat-injected",
+      object: "chat.completion",
+      created: 1,
+      model: MODEL,
+      choices: [{ index: 0, message: { role: "assistant", content: "injected" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    };
+    return { ok: true, status: 200, json: async () => payload };
+  };
+  try {
+    const loop = createLoop({
+      protocol: "openai_compatible_chat_completions",
+      baseUrl: CHAT_BASE_URL,
+      fetch: injected,
+    });
+    try {
+      const result = await loop.execute(loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "use injected transport" },
+      ]));
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.status === "completed" ? result.finalText : undefined, "injected");
+      assert.deepEqual(requests, [`${CHAT_BASE_URL}/chat/completions`]);
+      assert.equal(globalCalls, 0);
+    } finally {
+      await loop.release();
+    }
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
 test("streaming consumes the SDK stream, emits text deltas, and awaits completion", async () => {
   const fetch = scriptedFetch([() => chatTextStream(["stream-", "complete"])]);
   await withGlobalFetch(fetch.fetch, async () => {
@@ -188,6 +389,91 @@ test("tool approval pauses before execution and approve resumes the exact call o
       ]);
       assert.deepEqual(resumed.toolResults.map((result) => result.status), ["approval_required", "completed"]);
       assert.equal(resumed.messages.filter((message) => message.toolCallId === "call-approved").length, 1);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("multiple confirmations can be decided sequentially without executing or replaying unresolved calls", async () => {
+  const gateway = new TestGateway([gatedTool("write_first"), gatedTool("write_second")]);
+  const fetch = scriptedFetch([
+    () => chatTools([
+      { callId: "call-first", name: "write_first", input: { value: "first" } },
+      { callId: "call-second", name: "write_second", input: { value: "second" } },
+    ]),
+    ({ body }) => {
+      const serialized = JSON.stringify(body.messages);
+      assert.match(serialized, /call-first/u);
+      assert.match(serialized, /use read-only evidence/u);
+      return chatText("sequential-final");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const paused = await loop.execute(loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "perform two writes" },
+      ], gateway));
+      assert.equal(paused.status, "approval_required");
+      if (paused.status !== "approval_required") return;
+      assert.deepEqual(paused.confirmationRequests.map((request) => request.confirmationId), [
+        "confirmation-call-first",
+        "confirmation-call-second",
+      ]);
+      const stillPaused = await paused.continuation.decide({
+        decision: decision("confirmation-call-first", "approve_once"),
+        abortSignal: new AbortController().signal,
+      });
+      assert.equal(stillPaused.status, "approval_required");
+      assert.equal(gateway.executions.length, 0);
+      assert.equal(fetch.requests.length, 1);
+      if (stillPaused.status !== "approval_required") return;
+      assert.deepEqual(stillPaused.confirmationRequests.map((request) => request.confirmationId), [
+        "confirmation-call-second",
+      ]);
+      const completed = await stillPaused.continuation.decide({
+        decision: decision("confirmation-call-second", "guidance", "use read-only evidence"),
+        abortSignal: new AbortController().signal,
+      });
+      assert.equal(completed.status, "completed", completed.status === "failed" ? completed.error : undefined);
+      assert.deepEqual(gateway.executions.map(({ request }) => request.callId), ["call-first"]);
+      assert.equal(fetch.requests.length, 2);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("multiple confirmations accept one validated batch and execute every approved call once", async () => {
+  const gateway = new TestGateway([gatedTool("write_first"), gatedTool("write_second")]);
+  const fetch = scriptedFetch([
+    () => chatTools([
+      { callId: "call-batch-first", name: "write_first", input: { value: "first" } },
+      { callId: "call-batch-second", name: "write_second", input: { value: "second" } },
+    ]),
+    () => chatText("batch-final"),
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const paused = await loop.execute(loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "perform two approved writes" },
+      ], gateway));
+      assert.equal(paused.status, "approval_required");
+      if (paused.status !== "approval_required") return;
+      const completed = await paused.continuation.decide({
+        decisions: paused.confirmationRequests.map((request) => decision(request.confirmationId, "approve_once")),
+        abortSignal: new AbortController().signal,
+      });
+      assert.equal(completed.status, "completed", completed.status === "failed" ? completed.error : undefined);
+      assert.deepEqual(gateway.executions.map(({ request }) => request.callId).sort(), [
+        "call-batch-first",
+        "call-batch-second",
+      ]);
+      assert.equal(new Set(gateway.executions.map(({ request }) => request.callId)).size, 2);
     } finally {
       await loop.release();
     }
@@ -383,14 +669,22 @@ class TestGateway implements ToolExecutionGateway {
     readonly permission: ToolPermissionCheck;
   }> = [];
 
-  constructor(private readonly definition?: ToolDefinition) {}
+  private readonly definitions: readonly ToolDefinition[];
+
+  constructor(definitions?: ToolDefinition | readonly ToolDefinition[]) {
+    this.definitions = definitions === undefined
+      ? []
+      : Array.isArray(definitions)
+        ? definitions
+        : [definitions];
+  }
 
   list(): ToolDefinition[] {
-    return this.definition === undefined ? [] : [globalThis.structuredClone(this.definition)];
+    return this.definitions.map((definition) => globalThis.structuredClone(definition));
   }
 
   has(name: string): boolean {
-    return this.definition?.name === name;
+    return this.definitions.some((definition) => definition.name === name);
   }
 
   preflight(
@@ -398,7 +692,7 @@ class TestGateway implements ToolExecutionGateway {
     _context: ToolExecutionContext,
     _permission: ToolPermissionCheck,
   ): ToolExecutionPreflight {
-    if (this.definition?.metadata?.requiresConfirmation === true) {
+    if (this.definitions.find((definition) => definition.name === request.toolName)?.metadata?.requiresConfirmation === true) {
       return {
         status: "approval_required",
         result: {
@@ -438,7 +732,7 @@ class TestGateway implements ToolExecutionGateway {
   }
 }
 
-function createLoop(input: Pick<OpenAIAgentsLoopConfig, "protocol" | "baseUrl" | "requestSettings">) {
+function createLoop(input: Pick<OpenAIAgentsLoopConfig, "protocol" | "baseUrl" | "requestSettings" | "fetch">) {
   return createOpenAIAgentsLoop({ ...input, apiKey: "test-key", model: MODEL });
 }
 
@@ -470,9 +764,9 @@ function loopInput(
   };
 }
 
-function gatedTool(): ToolDefinition {
+function gatedTool(name = "write_fact"): ToolDefinition {
   return {
-    ...plainTool("write_fact"),
+    ...plainTool(name),
     metadata: {
       category: "filesystem",
       riskLevel: "medium",
@@ -562,8 +856,16 @@ function chatText(text: string, usage: JsonRecord = {
 }
 
 function chatTool(callId: string, name: string, input: JsonRecord): Response {
+  return chatTools([{ callId, name, input }]);
+}
+
+function chatTools(calls: readonly {
+  readonly callId: string;
+  readonly name: string;
+  readonly input: JsonRecord;
+}[]): Response {
   return jsonResponse({
-    id: `chat-${callId}`,
+    id: `chat-${calls.map(({ callId }) => callId).join("-")}`,
     object: "chat.completion",
     created: 1,
     model: MODEL,
@@ -572,11 +874,30 @@ function chatTool(callId: string, name: string, input: JsonRecord): Response {
       message: {
         role: "assistant",
         content: null,
-        tool_calls: [{ id: callId, type: "function", function: { name, arguments: JSON.stringify(input) } }],
+        tool_calls: calls.map(({ callId, name, input }) => ({
+          id: callId,
+          type: "function",
+          function: { name, arguments: JSON.stringify(input) },
+        })),
       },
       finish_reason: "tool_calls",
     }],
     usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+  });
+}
+
+function responsesTool(callId: string, name: string, input: JsonRecord): Response {
+  return jsonResponse({
+    id: `response-${callId}`,
+    usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+    output: [{
+      id: `item-${callId}`,
+      type: "function_call",
+      status: "completed",
+      call_id: callId,
+      name,
+      arguments: JSON.stringify(input),
+    }],
   });
 }
 

@@ -214,7 +214,7 @@ function dataUrl(mimeType: string, data: string): string {
   return `data:${mimeType};base64,${data}`;
 }
 
-function validateResponsesFileAttachmentBudget(messages: readonly ModelMessage[]): void {
+export function validateResponsesFileAttachmentBudget(messages: readonly ModelMessage[]): void {
   let totalBytes = 0;
   let countedFiles = 0;
   for (const message of messages) {

@@ -12,11 +12,11 @@ import {
   setTracingDisabled,
   tool,
 } from "@openai/agents";
+import OpenAI from "openai";
 import type { OpenAIModelRequestSettings } from "../../domain/config/index.js";
-import type { ConfirmationDecision, ConfirmationRequest } from "../../domain/confirmation/index.js";
+import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import {
   OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION,
-  persistedModelProtocolExtensions,
   type ModelMessage,
   type ModelUsage,
 } from "../../domain/intelligence/index.js";
@@ -33,7 +33,20 @@ import type {
   AgentLoopResult,
 } from "../../app/model-runtime/agent-loop.js";
 import { isOfficialOpenAIBaseUrl } from "./openai-compatible-base-url.js";
-import { openAIResponsesContinuationItems, openAIResponsesOutputItems } from "./openai-responses-continuation.js";
+import {
+  openAIAgentsRejectionMessage,
+  pendingOpenAIAgentsConfirmations,
+  rejectedOpenAIAgentsToolResult,
+  selectOpenAIAgentsConfirmationDecisions,
+  type OpenAIAgentsPendingConfirmation,
+} from "./openai-agents-confirmation.js";
+import {
+  canonicalToolResultMessage,
+  createOpenAIAgentsInputMapper,
+  type OpenAIAgentsInputMapper,
+} from "./openai-agents-input.js";
+import { toOpenAIFetch, type FetchLike } from "./openai-fetch-bridge.js";
+import { openAIResponsesOutputItems } from "./openai-responses-continuation.js";
 
 export type OpenAIAgentsLoopProtocol =
   | "openai_responses"
@@ -45,6 +58,7 @@ export type OpenAIAgentsLoopConfig = {
   readonly apiKey: string;
   readonly model: string;
   readonly requestSettings?: OpenAIModelRequestSettings;
+  readonly fetch?: FetchLike;
 };
 
 type SdkExecutionContext = {
@@ -70,7 +84,15 @@ type ExecutionState = {
   readonly baseMessages: readonly ModelMessage[];
   readonly toolResults: ToolCallResult[];
   readonly preflightByCallId: Map<string, PreflightFact>;
+  readonly modelInput: OpenAIAgentsInputMapper;
 };
+
+type SdkInterruption = ReturnType<RunState<
+  SdkExecutionContext,
+  Agent<SdkExecutionContext, AgentOutputType>
+>["getInterruptions"]>[number];
+
+type PendingInterruption = OpenAIAgentsPendingConfirmation<SdkInterruption>;
 
 // Runner-level tracing is not sufficient in SDK 0.13.3: an outer workflow trace is
 // still created. AgentArbor never exports SDK traces, so keep the process guard too.
@@ -91,9 +113,17 @@ class OpenAIAgentsLoop implements AgentLoop {
     validateConfig(config);
     validateRequestSettings(config.protocol, config.requestSettings);
     this.config = config;
+    const openAIClient = config.fetch === undefined
+      ? undefined
+      : new OpenAI({
+          apiKey: config.apiKey,
+          baseURL: config.baseUrl,
+          fetch: toOpenAIFetch(config.fetch),
+        });
     this.provider = new OpenAIProvider({
-      apiKey: config.apiKey,
-      baseURL: config.baseUrl,
+      ...(openAIClient === undefined
+        ? { apiKey: config.apiKey, baseURL: config.baseUrl }
+        : { openAIClient }),
       useResponses: config.protocol === "openai_responses",
       strictFeatureValidation: true,
       cacheResponsesWebSocketModels: false,
@@ -108,19 +138,20 @@ class OpenAIAgentsLoop implements AgentLoop {
   async execute(input: AgentLoopInput): Promise<AgentLoopResult> {
     this.assertLive();
     const baseMessages = cloneMessages(input.messages);
+    const modelInput = createOpenAIAgentsInputMapper({
+      protocol: this.config.protocol,
+      messages: baseMessages,
+    });
     const execution: ExecutionState = {
       abortSignal: input.abortSignal,
       input,
       baseMessages,
       toolResults: [],
       preflightByCallId: new Map(),
+      modelInput,
     };
     try {
-      const sdkInput = modelMessagesToSdkInput({
-        instructions: input.instructions,
-        messages: baseMessages,
-        protocol: this.config.protocol,
-      });
+      const sdkInput = modelInput.messages(input.instructions);
       const agent = this.createAgent(execution);
       const result = await this.run(agent, sdkInput, execution, input.abortSignal);
       return this.resultFromSdk(agent, result, execution);
@@ -194,52 +225,20 @@ class OpenAIAgentsLoop implements AgentLoop {
     execution: ExecutionState,
   ): AgentLoopResult {
     const interruptions = result.interruptions;
-    if (interruptions.length > 1) {
-      return failedResult(execution, usageFromSdk(result.runContext.usage), "Multiple simultaneous tool confirmations are not supported by this live continuation.");
-    }
-    if (interruptions.length === 1) {
-      const interruption = interruptions[0];
-      const callId = interruptionCallId(interruption.rawItem);
-      const pendingPreflight = callId === undefined ? undefined : execution.preflightByCallId.get(callId);
-      const confirmation = pendingPreflight?.result?.confirmationRequest;
-      if (callId === undefined || pendingPreflight === undefined || confirmation === undefined) {
+    if (interruptions.length > 0) {
+      const pending = pendingOpenAIAgentsConfirmations(interruptions, (callId) => {
+        const preflight = execution.preflightByCallId.get(callId);
+        return preflight === undefined
+          ? undefined
+          : {
+              request: preflight.request,
+              confirmation: preflight.result?.confirmationRequest,
+            };
+      });
+      if (pending === undefined) {
         return failedResult(execution, usageFromSdk(result.runContext.usage), "The SDK interruption did not match an exact ToolCenter confirmation fact.");
       }
-      let decided = false;
-      return {
-        status: "approval_required",
-        messages: cloneMessages(execution.baseMessages),
-        toolResults: cloneToolResults(execution.toolResults),
-        usage: usageFromSdk(result.runContext.usage),
-        confirmationRequests: [cloneConfirmation(confirmation)],
-        continuation: {
-          availability: "live_only",
-          decide: async ({ decision, abortSignal }) => {
-            this.assertLive();
-            if (decided) {
-              return failedResult(execution, usageFromSdk(result.runContext.usage), "This live confirmation continuation has already been decided.");
-            }
-            decided = true;
-            if (decision.confirmationId !== confirmation.confirmationId) {
-              return failedResult(execution, usageFromSdk(result.runContext.usage), "The confirmation decision does not match the pending tool call.");
-            }
-            if (decision.decision === "approve_once") {
-              result.state.approve(interruption);
-            } else {
-              result.state.reject(interruption, {
-                message: rejectionMessage(decision),
-              });
-              execution.toolResults.push(rejectedToolResult(pendingPreflight.request, decision));
-            }
-            try {
-              const resumed = await this.run(agent, result.state, execution, abortSignal);
-              return this.resultFromSdk(agent, resumed, execution);
-            } catch (error) {
-              return terminalErrorResult(error, execution);
-            }
-          },
-        },
-      };
+      return this.approvalRequiredResult(agent, result, execution, pending);
     }
     const finalText = typeof result.finalOutput === "string" ? result.finalOutput : "";
     return {
@@ -254,6 +253,57 @@ class OpenAIAgentsLoop implements AgentLoop {
       toolResults: cloneToolResults(execution.toolResults),
       usage: usageFromSdk(result.runContext.usage),
       confirmationRequests: [],
+    };
+  }
+
+  private approvalRequiredResult(
+    agent: Agent<SdkExecutionContext, AgentOutputType>,
+    result: RunResult<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>,
+    execution: ExecutionState,
+    pending: readonly PendingInterruption[],
+  ): AgentLoopResult {
+    const usage = usageFromSdk(result.runContext.usage);
+    let decided = false;
+    return {
+      status: "approval_required",
+      messages: cloneMessages(execution.baseMessages),
+      toolResults: cloneToolResults(execution.toolResults),
+      usage,
+      confirmationRequests: pending.map(({ confirmation }) => cloneConfirmation(confirmation)),
+      continuation: {
+        availability: "live_only",
+        decide: async (input) => {
+          this.assertLive();
+          if (decided) {
+            return failedResult(execution, usage, "This live confirmation continuation has already been decided.");
+          }
+          const decisions = "decision" in input ? [input.decision] : [...input.decisions];
+          const selected = selectOpenAIAgentsConfirmationDecisions(pending, decisions);
+          if (selected === undefined) {
+            return failedResult(execution, usage, "The confirmation decisions do not match the pending tool calls.");
+          }
+          decided = true;
+          for (const { pending: item, decision } of selected) {
+            if (decision.decision === "approve_once") {
+              result.state.approve(item.interruption);
+            } else {
+              result.state.reject(item.interruption, { message: openAIAgentsRejectionMessage(decision) });
+              execution.toolResults.push(rejectedOpenAIAgentsToolResult(item.request, decision));
+            }
+          }
+          const decidedIds = new Set(decisions.map((decision) => decision.confirmationId));
+          const remaining = pending.filter(({ confirmation }) => !decidedIds.has(confirmation.confirmationId));
+          if (remaining.length > 0) {
+            return this.approvalRequiredResult(agent, result, execution, remaining);
+          }
+          try {
+            const resumed = await this.run(agent, result.state, execution, input.abortSignal);
+            return this.resultFromSdk(agent, resumed, execution);
+          } catch (error) {
+            return terminalErrorResult(error, execution);
+          }
+        },
+      },
     };
   }
 
@@ -303,13 +353,14 @@ function createSdkTool(
       const callId = requiredCallId(details?.toolCall?.callId);
       const cached = execution.preflightByCallId.get(callId);
       if (cached?.result !== undefined && cached.result.status !== "approval_required") {
-        return serializeToolResult(cached.result);
+        return execution.modelInput.toolResult(cached.result);
       }
       const request = cached?.request ?? toolCallRequest(callId, definition.name, input);
+      const approvedConfirmationId = cached?.result?.confirmationRequest?.confirmationId;
       const approvedConfirmationIds = cached?.needsApproval === true
         ? uniqueStrings([
             ...(execution.input.tools.permission.approvedConfirmationIds ?? []),
-            `confirmation-${callId}`,
+            ...(approvedConfirmationId === undefined ? [] : [approvedConfirmationId]),
           ])
         : execution.input.tools.permission.approvedConfirmationIds;
       const result = await execution.input.tools.gateway.execute(
@@ -321,7 +372,7 @@ function createSdkTool(
         },
       );
       execution.toolResults.push(result);
-      return serializeToolResult(result);
+      return execution.modelInput.toolResult(result);
     },
   });
 }
@@ -378,73 +429,6 @@ function modelSettings(input: {
     store: settings?.store,
     providerData,
   };
-}
-
-function modelMessagesToSdkInput(input: {
-  readonly instructions: string;
-  readonly messages: readonly ModelMessage[];
-  readonly protocol: OpenAIAgentsLoopProtocol;
-}): AgentInputItem[] {
-  const items: AgentInputItem[] = [];
-  let nonSystemSeen = false;
-  let systemSeen = false;
-  for (const message of input.messages) {
-    if ((message.attachments?.length ?? 0) > 0) {
-      throw new Error("OpenAI Agents loop does not yet support ModelMessage attachments.");
-    }
-    if (message.role === "system") {
-      if (nonSystemSeen || systemSeen || message.content !== input.instructions) {
-        throw new Error("AgentLoop messages may only contain one leading system message equal to instructions.");
-      }
-      systemSeen = true;
-      continue;
-    }
-    nonSystemSeen = true;
-    if (message.role === "user") {
-      items.push({ role: "user", content: message.content });
-      continue;
-    }
-    if (message.role === "tool") {
-      if (message.toolCallId === undefined || message.toolName === undefined) {
-        throw new Error("Canonical tool messages require toolCallId and toolName.");
-      }
-      items.push({
-        type: "function_call_result",
-        callId: message.toolCallId,
-        name: message.toolName,
-        status: "completed",
-        output: message.content,
-      });
-      continue;
-    }
-    if (input.protocol === "openai_responses" && message.protocolExtensions !== undefined) {
-      persistedModelProtocolExtensions(message.protocolExtensions);
-      const continuationItems = openAIResponsesContinuationItems(message);
-      if (continuationItems !== undefined) {
-        items.push(...continuationItems as AgentInputItem[]);
-        continue;
-      }
-    } else if (input.protocol !== "openai_responses" && message.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION] !== undefined) {
-      throw new Error("Responses protocol output items cannot be replayed through Chat Completions.");
-    }
-    for (const call of message.toolCalls ?? []) {
-      items.push({
-        type: "function_call",
-        callId: call.callId,
-        name: call.toolName,
-        status: "completed",
-        arguments: JSON.stringify(call.input),
-      });
-    }
-    if (message.content.length > 0) {
-      items.push({
-        role: "assistant",
-        status: "completed",
-        content: [{ type: "output_text", text: message.content }],
-      });
-    }
-  }
-  return items;
 }
 
 function canonicalMessagesFromResponses(input: {
@@ -505,16 +489,7 @@ function latestResolvedToolResult(results: readonly ToolCallResult[], callId: st
 }
 
 function toolResultMessage(result: ToolCallResult): ModelMessage {
-  return {
-    role: "tool",
-    content: serializeToolResult(result),
-    toolCallId: result.callId,
-    toolName: result.toolName,
-  };
-}
-
-function serializeToolResult(result: ToolCallResult): string {
-  return JSON.stringify(result);
+  return canonicalToolResultMessage(result);
 }
 
 function usageFromSdk(usage: {
@@ -633,28 +608,6 @@ function requiredCallId(value: string | undefined): string {
     throw new Error("OpenAI Agents SDK did not provide a function tool call id.");
   }
   return value;
-}
-
-function interruptionCallId(value: unknown): string | undefined {
-  const record = asRecord(value);
-  return typeof record.callId === "string" ? record.callId : undefined;
-}
-
-function rejectionMessage(decision: ConfirmationDecision): string {
-  return decision.decision === "guidance"
-    ? decision.guidance?.trim() || "The user rejected this tool call and provided no guidance."
-    : "The user rejected this tool call.";
-}
-
-function rejectedToolResult(request: ToolCallRequest, decision: ConfirmationDecision): ToolCallResult {
-  return {
-    ...request,
-    output: decision.decision === "guidance" ? { guidance: decision.guidance ?? "" } : undefined,
-    status: "cancelled",
-    error: rejectionMessage(decision),
-    errorFacts: { decision: decision.decision },
-    durationMs: 0,
-  };
 }
 
 function terminalErrorResult(error: unknown, execution: ExecutionState): AgentLoopResult {

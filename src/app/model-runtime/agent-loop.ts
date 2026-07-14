@@ -23,8 +23,11 @@ export type AgentLoopInput = {
 
 export type AgentLoopContinuation = {
   readonly availability: "live_only";
-  decide(input: {
+  decide(input: ({
     readonly decision: ConfirmationDecision;
+  } | {
+    readonly decisions: readonly ConfirmationDecision[];
+  }) & {
     readonly abortSignal: AbortSignal;
   }): Promise<AgentLoopResult>;
 };

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resetIdsForTests } from "../../kernel/id.js";
+import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../../domain/soil/index.js";
 import { TaskSoilInputValidationError } from "../task-soil-workspace.js";
 import {
@@ -14,6 +16,8 @@ import {
   type DeepConversationStore,
 } from "./deep-conversation.js";
 import type { DeepConversation } from "./contracts.js";
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // T2-2 测试点（task.md）：
@@ -31,10 +35,6 @@ function makeService(store: DeepConversationStore) {
     aiMode: "fake",
   });
 }
-
-test.before(() => {
-  resetIdsForTests();
-});
 
 test("createDeepConversation 写入 deep 专属 store 并标记 isolation", async () => {
   const store = new InMemoryDeepConversationStore();
@@ -193,6 +193,35 @@ test("FileSystemDeepConversationStore 写入 runtimeHome/deep-conversations 独�
   }
 });
 
+test("FileSystemDeepConversationStore keeps conversations created by fresh processes distinct", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "deep-conv-restart-"));
+  try {
+    const runtimeHome = path.join(tmp, "runtime");
+    const firstId = await deepConversationIdInFreshProcess();
+    const firstStore = createFileSystemDeepConversationStore(runtimeHome);
+    await firstStore.upsert(deepConversationRecord(
+      firstId,
+      "first process",
+      "2026-07-14T00:00:01.000Z",
+    ));
+
+    const secondId = await deepConversationIdInFreshProcess();
+    const restartedStore = createFileSystemDeepConversationStore(runtimeHome);
+    await restartedStore.upsert(deepConversationRecord(
+      secondId,
+      "second process",
+      "2026-07-14T00:00:02.000Z",
+    ));
+
+    assert.notEqual(firstId, secondId);
+    assert.equal((await restartedStore.list()).length, 2);
+    assert.equal((await restartedStore.get(firstId))?.title, "first process");
+    assert.equal((await restartedStore.get(secondId))?.title, "second process");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("DeepConversationService 的 get/list/delete 委托 deep store（隔离读取路径）", async () => {
   const store = new InMemoryDeepConversationStore();
   const service = makeService(store);
@@ -203,13 +232,10 @@ test("DeepConversationService 的 get/list/delete 委托 deep store（隔离读�
   const got = await service.get(c1.conversationId);
   assert.equal(got?.goal, "goal one");
 
-  // list（按 updatedAt 倒序）
+  // list 在相同毫秒内以 opaque id 稳定兜底，不承诺随机 ID 表示创建先后。
   const list = await service.list();
   assert.equal(list.length, 2);
-  assert.deepEqual(
-    list.map((c) => c.conversationId),
-    [c2.conversationId, c1.conversationId],
-  );
+  assert.deepEqual(new Set(list.map((c) => c.conversationId)), new Set([c1.conversationId, c2.conversationId]));
 
   // list limit
   const limited = await service.list(1);
@@ -221,3 +247,36 @@ test("DeepConversationService 的 get/list/delete 委托 deep store（隔离读�
   assert.equal(afterDelete.length, 1);
   assert.equal(afterDelete[0].conversationId, c2.conversationId);
 });
+
+function deepConversationRecord(
+  conversationId: string,
+  title: string,
+  updatedAt: string,
+): DeepConversation {
+  return {
+    conversationId,
+    title,
+    goal: title,
+    isolation: {
+      kind: "deep_conversation",
+      runKind: "underground",
+      runMode: "deep",
+    },
+    permissionBoundaryRefs: [],
+    createdAt: updatedAt,
+    updatedAt,
+  };
+}
+
+async function deepConversationIdInFreshProcess(): Promise<string> {
+  const moduleUrl = pathToFileURL(path.join(process.cwd(), "dist", "kernel", "id.js")).href;
+  const source = [
+    `import { createId } from ${JSON.stringify(moduleUrl)};`,
+    "process.stdout.write(createId('deep-conversation'));",
+  ].join("\n");
+  const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "--eval", source], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  return stdout.trim();
+}

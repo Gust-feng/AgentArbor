@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import {
   createAgentRunTree,
   type AgentSpec,
@@ -17,6 +20,8 @@ import {
   type DeepRunRecord,
   type DeepRunRecordStore,
 } from "./deep-run-record-store.js";
+
+const execFileAsync = promisify(execFile);
 
 type StoreFixture = {
   readonly store: DeepRunRecordStore;
@@ -113,6 +118,34 @@ for (const implementation of implementations) {
   });
 }
 
+test("FileSystemDeepRunRecordStore keeps runs created by fresh processes distinct", async () => {
+  const runtimeHome = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-deep-run-restart-"));
+  try {
+    const firstRunId = await deepRunIdInFreshProcess();
+    const firstStore = createFileSystemDeepRunRecordStore(runtimeHome);
+    await firstStore.upsert(deepRunRecord({
+      runId: firstRunId,
+      conversationId: "deep-conversation-restart-test",
+      updatedAt: "2026-07-14T00:00:01.000Z",
+    }));
+
+    const secondRunId = await deepRunIdInFreshProcess();
+    const restartedStore = createFileSystemDeepRunRecordStore(runtimeHome);
+    await restartedStore.upsert(deepRunRecord({
+      runId: secondRunId,
+      conversationId: "deep-conversation-restart-test",
+      updatedAt: "2026-07-14T00:00:02.000Z",
+    }));
+
+    assert.notEqual(firstRunId, secondRunId);
+    assert.equal((await restartedStore.list()).length, 2);
+    assert.equal((await restartedStore.get(firstRunId))?.run.runId, firstRunId);
+    assert.equal((await restartedStore.get(secondRunId))?.run.runId, secondRunId);
+  } finally {
+    await fs.rm(runtimeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
 function deepRunRecord(input: {
   readonly runId: string;
   readonly conversationId: string;
@@ -183,4 +216,17 @@ function managerSpec(createdAt: string): AgentSpec {
 
 function timestamp(second: number): string {
   return `2026-06-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+}
+
+async function deepRunIdInFreshProcess(): Promise<string> {
+  const moduleUrl = pathToFileURL(path.join(process.cwd(), "dist", "kernel", "id.js")).href;
+  const source = [
+    `import { createId } from ${JSON.stringify(moduleUrl)};`,
+    "process.stdout.write(createId('deep-run'));",
+  ].join("\n");
+  const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "--eval", source], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  return stdout.trim();
 }

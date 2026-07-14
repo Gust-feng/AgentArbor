@@ -2,7 +2,7 @@ import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import type { ChildAgentRun } from "../../domain/underground/agent-fabric.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
-import { createId, nowIso } from "../../kernel/id.js";
+import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import type {
   DeepChildSpec,
   DeepChildSummary,
@@ -48,6 +48,7 @@ export function createDeepDefaultScheduler(input: {
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly maxConcurrency?: number;
   readonly maxChildren?: number;
+  readonly childIdFactory?: IdFactory;
   readonly emitProgress: (event: DeepSchedulerProgressEvent) => void | Promise<void>;
 }): DeepChildScheduler {
   const board = new DeepTaskBoard({ runId: input.runId });
@@ -84,6 +85,7 @@ export function createDeepDefaultScheduler(input: {
       }),
     maxConcurrency: input.maxConcurrency,
     maxChildren: input.maxChildren,
+    childIdFactory: input.childIdFactory,
     callbacks: {
       onChildStarted: (task, childRun, stepIndex) => {
         void input.emitProgress({

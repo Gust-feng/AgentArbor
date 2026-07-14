@@ -1,12 +1,66 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
 } from "./file-system-runtime-database.js";
+
+const execFileAsync = promisify(execFile);
+
+test("FileSystemRuntimeDatabase keeps Ordinary records created by fresh processes distinct", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-db-restart-"));
+  try {
+    const paths = resolveAgentArborRuntimeDatabasePaths(path.join(root, "config"));
+    const workspace = {
+      workspaceId: "workspace:restart-test",
+      kind: "local_directory" as const,
+      path: path.join(root, "workspace"),
+      label: "workspace",
+      selectedAt: "2026-07-14T00:00:00.000Z",
+      updatedAt: "2026-07-14T00:00:00.000Z",
+    };
+    const firstIds = await ordinaryIdsInFreshProcess();
+    const firstDatabase = new FileSystemRuntimeDatabase(paths);
+    await firstDatabase.upsertConversation(ordinaryConversationRecord(
+      firstIds.conversationId,
+      firstIds.runId,
+      "first process",
+      "2026-07-14T00:00:01.000Z",
+    ));
+    await firstDatabase.saveRunSnapshot(emptyRunSnapshot(
+      runRecord(firstIds.runId, paths, workspace.workspaceId, workspace.path),
+      workspace,
+    ));
+
+    const secondIds = await ordinaryIdsInFreshProcess();
+    const restartedDatabase = new FileSystemRuntimeDatabase(paths);
+    await restartedDatabase.upsertConversation(ordinaryConversationRecord(
+      secondIds.conversationId,
+      secondIds.runId,
+      "second process",
+      "2026-07-14T00:00:02.000Z",
+    ));
+    await restartedDatabase.saveRunSnapshot(emptyRunSnapshot(
+      runRecord(secondIds.runId, paths, workspace.workspaceId, workspace.path),
+      workspace,
+    ));
+
+    assert.notEqual(firstIds.conversationId, secondIds.conversationId);
+    assert.notEqual(firstIds.runId, secondIds.runId);
+    assert.equal((await restartedDatabase.listConversations()).length, 2);
+    assert.equal((await restartedDatabase.listRuns()).length, 2);
+    assert.equal((await restartedDatabase.getConversation(firstIds.conversationId))?.title, "first process");
+    assert.equal((await restartedDatabase.getRun(firstIds.runId))?.run.runId, firstIds.runId);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
 
 test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-db-"));
@@ -573,6 +627,42 @@ function emptyRunSnapshot(
     confirmations: [],
     subAgentRuns: [],
   };
+}
+
+function ordinaryConversationRecord(
+  conversationId: string,
+  runId: string,
+  title: string,
+  updatedAt: string,
+) {
+  return {
+    conversationId,
+    title,
+    preview: title,
+    status: "completed" as const,
+    latestRunId: runId,
+    queuedRunIds: [],
+    queuedRunCount: 0,
+    createdAt: updatedAt,
+    updatedAt,
+    turns: [],
+  };
+}
+
+async function ordinaryIdsInFreshProcess(): Promise<{
+  readonly conversationId: string;
+  readonly runId: string;
+}> {
+  const moduleUrl = pathToFileURL(path.join(process.cwd(), "dist", "kernel", "id.js")).href;
+  const source = [
+    `import { createId } from ${JSON.stringify(moduleUrl)};`,
+    "process.stdout.write(JSON.stringify({ conversationId: createId('conversation'), runId: createId('panel-run') }));",
+  ].join("\n");
+  const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "--eval", source], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  return JSON.parse(stdout) as { readonly conversationId: string; readonly runId: string };
 }
 
 function runtimeSnapshotIncompatible(error: unknown): boolean {

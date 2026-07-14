@@ -15,7 +15,6 @@ import {
   type ChildAgentRun,
 } from "../../domain/underground/agent-fabric.js";
 import type { AgentTurnPendingApproval } from "../../kernel/intelligence/agent-turn-runtime.js";
-import { resetIdsForTests } from "../../kernel/id.js";
 import type {
   DeepChildSpec,
   DeepChildSummary,
@@ -24,6 +23,7 @@ import type {
 } from "./contracts.js";
 import { DeepTaskBoard } from "./deep-task-board.js";
 import { DeepChildScheduler } from "./deep-child-scheduler.js";
+import { createDeterministicIdFactory } from "./deep-run-executor-test-support.js";
 import type {
   ContinueDeepChildFactory,
   ExploreDeepChildFactory,
@@ -330,13 +330,13 @@ export function setupHarness(opts: {
   readonly maxChildren?: number;
   readonly continueFactory?: ContinueDeepChildFactory;
 }): Harness {
-  resetIdsForTests();
   const specByChildRunId = new Map<string, DeepChildSpec>();
   const events: SchedulerEvent[] = [];
   const board = new DeepTaskBoard({ runId: "run-1" });
   const controller = createDeferredFactory(specByChildRunId);
   const scheduler = new DeepChildScheduler({
     board,
+    childIdFactory: createDeterministicIdFactory(),
     exploreFactory: controller.factory,
     continueFactory: opts.continueFactory,
     maxConcurrency: opts.maxConcurrency,

@@ -35,7 +35,7 @@ import type {
   ChildAgentRun,
   ChildAgentRunParentReview,
 } from "../../domain/underground/agent-fabric.js";
-import { createId, nowIso } from "../../kernel/id.js";
+import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import type {
   DeepChildSpec,
   DeepChildSummary,
@@ -111,6 +111,7 @@ export class DeepChildScheduler {
   private readonly continueFactory?: ContinueDeepChildFactory;
   private readonly maxConcurrency: number;
   private readonly maxChildren: number;
+  private readonly childIdFactory?: IdFactory;
   private readonly callbacks?: DeepChildSchedulerCallbacks;
   /** childRunId → ChildAgentRun（deriveDeepChildren 产出，供 startQueued 调 exploreFactory）。 */
   private readonly childRunById: Map<string, ChildAgentRun> = new Map();
@@ -136,6 +137,7 @@ export class DeepChildScheduler {
       Math.floor(config.maxConcurrency ?? DEEP_SCHEDULER_DEFAULT_CONCURRENCY),
     );
     this.maxChildren = Math.max(0, Math.floor(config.maxChildren ?? DEEP_MAX_CHILDREN));
+    this.childIdFactory = config.childIdFactory;
     this.callbacks = config.callbacks;
   }
 
@@ -161,6 +163,7 @@ export class DeepChildScheduler {
       traceId: input.traceId,
       maxChildren: this.maxChildren,
       createdAt: input.createdAt,
+      idFactory: this.childIdFactory,
     });
     const specBySpecId = new Map(
       input.specs.map((spec) => [spec.specId, spec] as const),

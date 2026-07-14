@@ -25,7 +25,7 @@ import {
   createGuardViolation,
   type GuardResult,
 } from "../../domain/underground/guard.js";
-import { createId, nowIso } from "../../kernel/id.js";
+import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import { DEEP_CHILD_MATERIAL_CONTRACT_ID } from "./deep-model-io.js";
 import {
@@ -145,6 +145,7 @@ export type DeriveDeepChildrenInput = {
   readonly traceId: string;
   readonly maxChildren?: number;
   readonly createdAt?: string;
+  readonly idFactory?: IdFactory;
 };
 
 export type DeriveDeepChildrenResult = {
@@ -183,7 +184,7 @@ export function deriveDeepChildren(input: DeriveDeepChildrenInput): DeriveDeepCh
       createdAt,
     });
     return createChildAgentRun({
-      childRunId: createId("deep-child-run"),
+      childRunId: (input.idFactory ?? createId)("deep-child-run"),
       parentAgentId: input.parentAgentId,
       spec,
       inputRefs: spec.inputRefs,

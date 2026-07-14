@@ -13,7 +13,6 @@ import type {
   ModelResponse,
 } from "../../domain/intelligence/index.js";
 import { createTaskSoil } from "../../domain/soil/task-soil.js";
-import { resetIdsForTests } from "../../kernel/id.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -49,6 +48,7 @@ import type {
 import type { DeepRunControlHandle, DeepRunControlSignal } from "./deep-run-executor.js";
 import { DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";
 import { DEEP_RUN_KIND, DEEP_RUN_MODE, type DeepConversation } from "./contracts.js";
+import { createDeterministicIdFactory } from "./deep-run-executor-test-support.js";
 
 // ---------------------------------------------------------------------------
 // T2-6/T2-7 测试点（task.md 验收）：
@@ -142,6 +142,7 @@ function makeConfig(options: {
     turnRuntime: createDeepTurnRuntime({ intelligenceChannel: channel, toolCenter: options.toolCenter }),
     bus: new InMemoryMessageBus(eventLog),
     store: options.store ?? new InMemoryDeepRunRecordStore(),
+    childIdFactory: createDeterministicIdFactory(),
     controlHandle: options.controlHandle,
     childContinuations: options.childContinuations,
     childInstructionQueues: options.childInstructionQueues,
@@ -499,7 +500,6 @@ test("executeDeepRun direct_answer：产出 AgentRunTree（root+parentSynthesis�
 });
 
 test("executeDeepRun follow-up context is projected into manager decision input", async () => {
-  resetIdsForTests();
   let decisionRequestContent = "";
   const provider = new PurposeFakeModelProvider({
     responsesByPurpose: {
@@ -671,7 +671,6 @@ test("executeDeepRun spawn_children→synthesize：完整 tree（root+children+s
 });
 
 test("executeDeepRun final persistence error retains the complete executor record", async () => {
-  resetIdsForTests();
   const finalWriteFailure = new Error("fixture final Deep run record write failed");
   class FailFinalRecordStore extends InMemoryDeepRunRecordStore {
     override async upsert(
@@ -781,7 +780,6 @@ test("executeDeepRun does not classify an initial live write as final persistenc
 });
 
 test("executeDeepRun persists live AgentRunTree child runs before final record", async () => {
-  resetIdsForTests();
   const store = new InMemoryDeepRunRecordStore();
   let inspectedDuringChildRun = false;
   const provider = new PurposeFakeModelProvider({
@@ -824,7 +822,6 @@ test("executeDeepRun persists live AgentRunTree child runs before final record",
 });
 
 test("executeDeepRun continue_child：父层继续同一个 child run，并在 tree 中记录 resume_child + 真实 childRunId", async () => {
-  resetIdsForTests();
   const responses: FakeModelProviderResponse[] = [
     {
       output: {
@@ -952,7 +949,6 @@ test("executeDeepRun continue_child：父层继续同一个 child run，并在 t
 });
 
 test("executeDeepRun interrupted child：真实 child loop 中断后父层继续同一个 child run", async () => {
-  resetIdsForTests();
   const childRunId = "deep-child-run-0001";
   const provider = new PurposeFakeModelProvider({
     responsesByPurpose: {
@@ -1067,7 +1063,6 @@ test("executeDeepRun interrupted child：真实 child loop 中断后父层继续
 });
 
 test("executeDeepRun consecutive continue_child：child 续跑读取已执行父子消息历史但不重复当前指令", async () => {
-  resetIdsForTests();
   const childRunId = "deep-child-run-0001";
   const firstInstruction = "第一次父层补充：补齐回滚证据。";
   const secondInstruction = "第二次父层补充：核对灰度发布证据。";
@@ -1207,7 +1202,6 @@ test("executeDeepRun consecutive continue_child：child 续跑读取已执行父
 });
 
 test("executeDeepRun running child control message：运行中追加消息续跑同一个 child，并补齐 resume_child 审计", async () => {
-  resetIdsForTests();
   const runId = "deep-run-queued-control-test";
   const childRunId = "deep-child-run-0001";
   const rawInstruction = "追加一句只有测试能识别的原文：继续核对失败路径。";
@@ -1386,7 +1380,6 @@ test("executeDeepRun running child control message：运行中追加消息续跑
 });
 
 test("executeDeepRun preserves terminal child facts when child-message sidecar writes and diagnostics fail", async () => {
-  resetIdsForTests();
   const runId = "deep-run-child-message-sidecar-failure-test";
   const childRunId = "deep-child-run-0001";
   const queueRegistry = createInstructionQueueRegistry();
@@ -1531,7 +1524,6 @@ test("executeDeepRun preserves terminal child facts when child-message sidecar w
 });
 
 test("executeDeepRun cancels a queued instruction when parent-message context preparation fails", async () => {
-  resetIdsForTests();
   const runId = "deep-run-parent-context-admission-failure-test";
   const queueRegistry = createInstructionQueueRegistry();
   const childMessageStore = new InMemoryDeepChildMessageStore();
@@ -1624,7 +1616,6 @@ test("executeDeepRun cancels a queued instruction when parent-message context pr
 });
 
 test("executeDeepRun finalizes seal-drained continuation inside executor before step-limit synthesis", async () => {
-  resetIdsForTests();
   const runId = "deep-run-late-continuation-test";
   const synthesisRequests: ModelRequest[] = [];
   let continuationResult: DeepChildInstructionContinueResult | undefined;
@@ -1761,7 +1752,6 @@ test("executeDeepRun finalizes seal-drained continuation inside executor before 
 });
 
 test("executeDeepRun seals live continuations before an explicit manager synthesis", async () => {
-  resetIdsForTests();
   const runId = "deep-run-synthesis-seal-test";
   const synthesisRequests: ModelRequest[] = [];
   let continuationResult: DeepChildInstructionContinueResult | undefined;
@@ -1872,7 +1862,6 @@ test("executeDeepRun seals live continuations before an explicit manager synthes
 });
 
 test("executeDeepRun seals terminal child control when the manager decision live write fails", async () => {
-  resetIdsForTests();
   const runId = "deep-run-terminal-seal-write-failure-test";
   class FailTerminalDecisionWriteOnceStore extends InMemoryDeepRunRecordStore {
     managerDecisionWriteFailed = false;
@@ -1985,7 +1974,6 @@ test("executeDeepRun seals terminal child control when the manager decision live
 });
 
 test("executeDeepRun keeps never-started cancelled tasks in live projection without fabricating child runs", async () => {
-  resetIdsForTests();
   const runId = "deep-run-cancelled-pending-projection-test";
   const provider = new PurposeFakeModelProvider({
     responsesByPurpose: {

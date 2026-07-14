@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { createId, resetIdsForTests } from "../../kernel/id.js";
 import { PanelConversationStore, toRuntimeConversationRecord } from "./panel-conversations.js";
 
 test("panel conversations keep store state separate from projection", async () => {
@@ -403,8 +402,7 @@ test("panel conversation summaries do not invent running next steps", () => {
   assert.equal(summary.nextStep.includes("继续观察进度"), false);
 });
 
-test("panel conversation restore reserves existing ids before follow-up creation", () => {
-  resetIdsForTests();
+test("panel conversation restore keeps opaque existing ids distinct from follow-up ids", () => {
   const store = new PanelConversationStore();
   store.restore({
     conversationId: "conversation-0001",
@@ -448,10 +446,13 @@ test("panel conversation restore reserves existing ids before follow-up creation
     goal: "第二轮",
   });
 
-  assert.equal(followUp.userTurn.turnId, "turn-0003");
-  assert.equal(followUp.assistantTurn.turnId, "turn-0004");
-  assert.equal(createId("panel-run"), "panel-run-0002");
-  resetIdsForTests();
+  assert.match(followUp.userTurn.turnId, /^turn-/);
+  assert.match(followUp.assistantTurn.turnId, /^turn-/);
+  assert.notEqual(followUp.userTurn.turnId, "turn-0001");
+  assert.notEqual(followUp.userTurn.turnId, "turn-0002");
+  assert.notEqual(followUp.assistantTurn.turnId, "turn-0001");
+  assert.notEqual(followUp.assistantTurn.turnId, "turn-0002");
+  assert.notEqual(followUp.userTurn.turnId, followUp.assistantTurn.turnId);
 });
 
 async function readAppSource(fileName: string): Promise<string> {

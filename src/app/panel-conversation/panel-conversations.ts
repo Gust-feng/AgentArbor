@@ -1,4 +1,4 @@
-import { createId, nowIso, reserveId } from "../../kernel/id.js";
+import { createId, nowIso } from "../../kernel/id.js";
 import type { RuntimeConversationRecord } from "../../domain/runtime-database/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type {
@@ -147,7 +147,6 @@ export class PanelConversationStore {
         attachments: normalizeTurnAttachments(turn.attachments),
       })),
     };
-    reserveConversationIds(conversation);
     this.conversations.set(conversation.conversationId, conversation);
     return toConversationReadModel(conversation);
   }
@@ -493,19 +492,6 @@ function restoredPendingAction(record: RuntimeConversationRecord): PanelConversa
         runId: record.activeRunId,
         assistantTurnId: assistantTurn.turnId,
       };
-}
-
-function reserveConversationIds(conversation: PanelConversation): void {
-  reserveId(conversation.conversationId);
-  reserveId(conversation.currentRunId);
-  reserveId(conversation.latestRunId);
-  for (const runId of conversation.queuedRunIds) {
-    reserveId(runId);
-  }
-  for (const turn of conversation.turns) {
-    reserveId(turn.turnId);
-    reserveId(turn.runId);
-  }
 }
 
 function compareConversations(left: PanelConversation, right: PanelConversation): number {

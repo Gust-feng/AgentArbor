@@ -4,7 +4,7 @@ import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { NativeIntelligenceChannel } from "../../kernel/intelligence/channel.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
-import { createId, nowIso } from "../../kernel/id.js";
+import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import {
   DEEP_RUN_KIND,
@@ -81,7 +81,19 @@ export function makeTurnRuntimeForProvider(
     provider,
     bus: new InMemoryMessageBus(new InMemoryEventLog()),
   });
-  return { turnRuntime: createDeepTurnRuntime({ intelligenceChannel: channel }) };
+  return {
+    turnRuntime: createDeepTurnRuntime({ intelligenceChannel: channel }),
+    childIdFactory: createDeterministicIdFactory(),
+  };
+}
+
+export function createDeterministicIdFactory(): IdFactory {
+  const counters = new Map<string, number>();
+  return (prefix) => {
+    const next = (counters.get(prefix) ?? 0) + 1;
+    counters.set(prefix, next);
+    return `${prefix}-${String(next).padStart(4, "0")}`;
+  };
 }
 
 class SequenceModelProvider implements ModelProvider {

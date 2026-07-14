@@ -239,9 +239,8 @@ export class DeepConversationError extends Error {
 
 /**
  * deep 会话最近优先排序比较：先按 updatedAt 倒序；updatedAt 相等时按
- * conversationId 倒序兜底（createId 单调递增，id 字典序更大者创建更晚），
- * 保证 list 顺序确定——即便多次创建落在同一时间戳（nowIso 毫秒精度），
- * 最近创建的会话也稳定排在前面。
+ * opaque conversationId 倒序兜底，只保证 list 顺序稳定，不把随机 ID
+ * 误当成创建时间或业务顺序。
  */
 function compareDeepConversationByRecency(
   left: DeepConversation,

@@ -35,7 +35,7 @@ import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import type { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
-import { createId, nowIso } from "../../kernel/id.js";
+import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import type {
   AgentRunTree,
@@ -168,6 +168,8 @@ export type DeepRuntimeConfig = {
   readonly maxChildren?: number;
   /** T2-1：per-run scheduler 并发上限（注入 scheduler 用，默认 executor 内部值）。 */
   readonly maxConcurrency?: number;
+  /** Optional neutral child identity capability; defaults to the runtime UUID factory. */
+  readonly childIdFactory?: IdFactory;
   readonly managerMaxModelRounds?: number;
   readonly managerMaxToolRounds?: number;
   /**
@@ -371,6 +373,7 @@ export async function executeDeepRun(
   const scheduler = new DeepChildScheduler({
     board,
     exploreFactory,
+    childIdFactory: config.childIdFactory,
     continueFactory: async (childRun, childSpec, parentInstruction, previousSummary, parentOperation) =>
       continueDeepChildAgent({
         childRun,

@@ -5,6 +5,7 @@
  * and callback boundaries without importing the scheduler implementation.
  */
 import type { ChildAgentRun, ChildAgentRunParentReview } from "../../domain/underground/agent-fabric.js";
+import type { IdFactory } from "../../kernel/id.js";
 import type {
   DeepChildSpec,
   DeepChildSummary,
@@ -166,5 +167,6 @@ export type DeepChildSchedulerConfig = {
   readonly continueFactory?: ContinueDeepChildFactory;
   readonly maxConcurrency?: number;
   readonly maxChildren?: number;
+  readonly childIdFactory?: IdFactory;
   readonly callbacks?: DeepChildSchedulerCallbacks;
 };

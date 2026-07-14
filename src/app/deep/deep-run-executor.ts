@@ -56,7 +56,7 @@ import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type { ChildAgentRun, ParentSynthesisResult } from "../../domain/underground/agent-fabric.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
-import { nowIso } from "../../kernel/id.js";
+import { nowIso, type IdFactory } from "../../kernel/id.js";
 import type {
   DeepConversation,
   DeepDelegationAction,
@@ -196,6 +196,8 @@ export type DeepRunExecutorConfig = {
   readonly turnRuntime: AgentTurnRuntime;
   readonly stepLimit?: number;
   readonly maxChildren?: number;
+  /** Optional neutral child identity capability; defaults to the runtime UUID factory. */
+  readonly childIdFactory?: IdFactory;
   readonly managerMaxModelRounds?: number;
   readonly managerMaxToolRounds?: number;
   /**
@@ -393,6 +395,7 @@ export async function startDeepRun(
     capabilitySnapshot: input.capabilitySnapshot,
     maxConcurrency: config.maxConcurrency,
     maxChildren: config.maxChildren,
+    childIdFactory: config.childIdFactory,
     emitProgress: (event) => emitProgress(config, event),
   });
   const board = scheduler.getBoard();

@@ -7,12 +7,10 @@ import type {
   ModelRequestOptions,
   ModelResponse,
 } from "../../domain/intelligence/index.js";
-import { resetIdsForTests } from "../../kernel/id.js";
 import { routeSkillsWithModel, type SkillRouterCatalogSkill } from "./skill-router.js";
 import type { SkillCandidateContext } from "./skill-loader.js";
 
 test("routeSkillsWithModel preserves valid explicit skills and asks the model without tools", async () => {
-  resetIdsForTests();
   const channel = new TestSkillRouterChannel({
     selectedSkillIds: ["writer"],
     reasons: [{ skillId: "writer", reason: "The goal asks for polished writing.", confidence: 0.82 }],

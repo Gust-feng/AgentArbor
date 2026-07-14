@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SequenceModelProviderResponse as FakeModelProviderResponse } from "./deep-run-executor-test-support.js";
-import { resetIdsForTests } from "../../kernel/id.js";
 import {
   makeStartInput,
   makeTurnRuntime,
   startDeepRun,
 } from "./deep-run-executor-test-support.js";
 test("continue_child 让父层审查后驱动同一个 child run 继续标准 loop，并替换旧材料", async () => {
-  resetIdsForTests();
   const responses: FakeModelProviderResponse[] = [
     {
       output: {

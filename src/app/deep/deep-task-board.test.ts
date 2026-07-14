@@ -6,7 +6,6 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resetIdsForTests } from "../../kernel/id.js";
 import {
   DEEP_TASK_BOARD_DEFAULT_PHASE,
   DeepTaskBoard,
@@ -38,7 +37,6 @@ function sampleSummary(childRunId: string, spec: DeepChildSpec): DeepChildSummar
 }
 
 test("DeepTaskBoard 默认相位为 planning", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const snap = board.snapshot();
   assert.equal(snap.runId, "run-1");
@@ -48,7 +46,6 @@ test("DeepTaskBoard 默认相位为 planning", () => {
 });
 
 test("enqueue 后 snapshot.tasks 含 pending 任务且快照不可变", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const created = board.enqueue([
     { childRunId: "child-run-0001", spec: sampleSpec("spec-a") },
@@ -56,7 +53,8 @@ test("enqueue 后 snapshot.tasks 含 pending 任务且快照不可变", () => {
   ]);
   assert.equal(created.length, 2);
   assert.equal(created[0].status, "pending");
-  assert.equal(created[0].taskId, "deep-task-0001");
+  assert.match(created[0].taskId, /^deep-task-/u);
+  assert.notEqual(created[0].taskId, created[1].taskId);
   assert.equal(created[0].childRunId, "child-run-0001");
   assert.equal(created[0].spec.specId, "spec-a");
 
@@ -77,7 +75,6 @@ test("enqueue 后 snapshot.tasks 含 pending 任务且快照不可变", () => {
 });
 
 test("enqueue/snapshot 保留父 Agent 显式派生的 child 可选预算字段", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const spec: DeepChildSpec = {
     ...sampleSpec("spec-budgeted"),
@@ -93,7 +90,6 @@ test("enqueue/snapshot 保留父 Agent 显式派生的 child 可选预算字段"
 });
 
 test("markRunning/markCompleted 合法迁移并回填 startedAt/completedAt/summary", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const [task] = board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
 
@@ -111,7 +107,6 @@ test("markRunning/markCompleted 合法迁移并回填 startedAt/completedAt/summ
 });
 
 test("markFailed 合法迁移并回填 failure（单 child 失败降级为 failed task）", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const [task] = board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
   board.markRunning(task.taskId);
@@ -123,7 +118,6 @@ test("markFailed 合法迁移并回填 failure（单 child 失败降级为 faile
 });
 
 test("markFailed 可保留安全 child summary 供父层审查", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const [task] = board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
   board.markRunning(task.taskId);
@@ -148,7 +142,6 @@ test("markFailed 可保留安全 child summary 供父层审查", () => {
 });
 
 test("markBlocked 合法迁移并回填 summary/failure（child Agent 标准暂停态）", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const [task] = board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
   board.markRunning(task.taskId);
@@ -171,7 +164,6 @@ test("markBlocked 合法迁移并回填 summary/failure（child Agent 标准暂�
 });
 
 test("markBlocked 可携带安全确认投影，snapshot 深拷贝且不保存 runtime continuation", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const [task] = board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
   board.markRunning(task.taskId);
@@ -207,7 +199,6 @@ test("markBlocked 可携带安全确认投影，snapshot 深拷贝且不保存 r
 });
 
 test("markCancelled 把 pending 置 cancelled（无 startedAt）", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const [task] = board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
 
@@ -218,7 +209,6 @@ test("markCancelled 把 pending 置 cancelled（无 startedAt）", () => {
 });
 
 test("completed/failed/blocked/interrupted 只允许父层显式继续到 running；cancelled 仍不可逆", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const [completedTask, failedTask, blockedTask, interruptedTask, cancelledTask] = board.enqueue([
     { childRunId: "child-run-0001", spec: sampleSpec("spec-a") },
@@ -273,7 +263,6 @@ test("completed/failed/blocked/interrupted 只允许父层显式继续到 runnin
 });
 
 test("非法迁移：pending 直接 markCompleted 抛错（必须先 running）", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   const [task] = board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
   assert.throws(
@@ -285,7 +274,6 @@ test("非法迁移：pending 直接 markCompleted 抛错（必须先 running）"
 });
 
 test("setPhase 在 step 边界更新相位，snapshot 反映当前相位", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   board.setPhase("exploring");
   assert.equal(board.getPhase(), "exploring");
@@ -295,7 +283,6 @@ test("setPhase 在 step 边界更新相位，snapshot 反映当前相位", () =>
 });
 
 test("markStopped 后 isStopped=true 且相位切到 stopped（startQueued no-op 的权威标志）", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   assert.equal(board.isStopped(), false);
   board.markStopped();
@@ -305,7 +292,6 @@ test("markStopped 后 isStopped=true 且相位切到 stopped（startQueued no-op
 });
 
 test("snapshot 不保存 raw prompt/response/工具原始输出（FR-TB-01 安全结构化边界）", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1" });
   board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
   const snap = board.snapshot();
@@ -326,7 +312,6 @@ test("snapshot 不保存 raw prompt/response/工具原始输出（FR-TB-01 安�
 });
 
 test("terminalSnapshot 等价于 snapshot（终态读取点，供 final AgentRunTree 对齐）", () => {
-  resetIdsForTests();
   const board = new DeepTaskBoard({ runId: "run-1", initialPhase: "exploring" });
   const [task] = board.enqueue([{ childRunId: "child-run-0001", spec: sampleSpec("spec-a") }]);
   board.markRunning(task.taskId);

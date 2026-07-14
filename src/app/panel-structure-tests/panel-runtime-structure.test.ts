@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { readAppSource } from "./panel-structure-test-utils.js";
@@ -360,7 +360,10 @@ test("ordinary shared model runtime paths use neutral model runtime naming", asy
     )
     .map(({ relativePath }) => relativePath)
     .sort();
-  assert.deepEqual(directFactoryImportUsers, ["model-runtime/index.ts"]);
+  assert.deepEqual(directFactoryImportUsers, [
+    "model-runtime/agent-loop-factory.ts",
+    "model-runtime/index.ts",
+  ]);
 });
 
 test("shared panel run orchestration uses neutral run mode naming", async () => {
@@ -402,14 +405,12 @@ test("shared run summary types use app-level contracts before panel aliases", as
     panelSummaryContract,
     panelSummaryFacade,
     undergroundSummaryContract,
-    undergroundSummaryFacade,
   ] = await Promise.all([
     readAppSource(path.join("run-read-model", "run-summary.ts")),
     readAppSource("run-summary.ts"),
     readAppSource(path.join("panel-read-model", "run", "panel-run-summary.ts")),
     readAppSource("panel-run-summary.ts"),
     readAppSource(path.join("underground", "compat", "underground-demo-summary.ts")),
-    readAppSource("underground-demo-summary.ts"),
   ]);
   const basicAgentRunSummarySources = await Promise.all([
     readAppSource(path.join("basic-agent-runtime", "contracts.ts")),
@@ -442,7 +443,11 @@ test("shared run summary types use app-level contracts before panel aliases", as
   assert.equal(undergroundSummaryContract.includes('from "../../run-read-model/run-summary.js"'), true);
   assert.equal(undergroundSummaryContract.includes("export type UndergroundDemoSummary = RunSummary"), true);
   assert.equal(undergroundSummaryContract.includes("export type UndergroundDemoAiInput = RunSummaryAiInput"), true);
-  assert.equal(undergroundSummaryFacade.trim(), 'export * from "./underground/compat/underground-demo-summary.js";');
+  assert.equal(
+    existsSync(path.join(process.cwd(), "src", "app", "underground-demo-summary.ts")),
+    false,
+    "the retired root Underground summary facade must not return",
+  );
   for (const source of basicAgentRunSummarySources) {
     assert.equal(source.includes("underground-demo-summary.js"), false);
     assert.equal(source.includes("UndergroundDemoSummary"), false);

@@ -73,11 +73,18 @@ test("ToolCenter owns executor fact normalization while adapters only normalize 
   const root = process.cwd();
   const sourceRoot = path.join(root, "src");
   const mcpAdapter = path.join(sourceRoot, "adapters", "mcp", "mcp-tool-adapter.ts");
+  const openAIAgentsToolsAdapter = path.join(
+    sourceRoot,
+    "adapters",
+    "intelligence",
+    "openai-agents-tools.ts",
+  );
   const allowedCallers = new Set([
     path.join(sourceRoot, "app", "tool-center", "tool-center.ts"),
     path.join(sourceRoot, "domain", "tools", "fact-value.ts"),
     path.join(sourceRoot, "domain", "tools", "error-facts.ts"),
     mcpAdapter,
+    openAIAgentsToolsAdapter,
   ]);
   const violations: string[] = [];
   const files = (await collectSourceFiles(sourceRoot)).filter((file) => !isTestAssetSource(file));
@@ -96,6 +103,17 @@ test("ToolCenter owns executor fact normalization while adapters only normalize 
     violations,
     [],
     "production consumers must trust ToolCallResult facts instead of normalizing them again",
+  );
+  const openAIAgentsTools = await fs.readFile(openAIAgentsToolsAdapter, "utf8");
+  assert.equal(
+    openAIAgentsTools.includes("const fact = normalizeToolFactValue(value);"),
+    true,
+    "the OpenAI SDK adapter must normalize unknown agent-tool params at its external boundary",
+  );
+  assert.equal(
+    openAIAgentsTools.includes("normalizeToolErrorFacts("),
+    false,
+    "the OpenAI SDK adapter must trust ToolCenter error facts",
   );
   assert.equal(
     existsSync(path.join(sourceRoot, "domain", "basic-agent", "confirmation-contracts.ts")),

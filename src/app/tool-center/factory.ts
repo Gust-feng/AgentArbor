@@ -6,7 +6,7 @@ import type {
   ToolStateSettings,
 } from "../../domain/config/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { ToolExecutionBroker } from "../../domain/tools/index.js";
+import type { ToolExecutionGateway } from "../../domain/tools/index.js";
 import {
   createAgentToolRegistry,
   type ToolRegistryFetchLike,
@@ -48,14 +48,14 @@ export type CreateAgentToolCenterOptions = {
 
 export function createDefaultToolCenter(
   input: CreateAgentToolCenterOptions = {}
-): ToolExecutionBroker {
+): ToolExecutionGateway {
   return createToolCenter(input);
 }
 
 export async function createConfiguredToolCenter(
   configCenter: ConfigCenter,
   input: CreateAgentToolCenterOptions = {}
-): Promise<ToolExecutionBroker> {
+): Promise<ToolExecutionGateway> {
   return createToolCenter({
     ...input,
     env: input.env ?? await configCenter.createModelRuntimeEnvironment(),
@@ -65,12 +65,12 @@ export async function createConfiguredToolCenter(
 export async function createConfiguredToolCenterFactory(
   configCenter: ConfigCenter,
   input: Omit<CreateAgentToolCenterOptions, "runtime"> = {}
-): Promise<(runtime: AgentToolRuntimeContext) => ToolExecutionBroker> {
+): Promise<(runtime: AgentToolRuntimeContext) => ToolExecutionGateway> {
   const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
   return (runtime) => createToolCenter({ ...input, runtime, env });
 }
 
-function createToolCenter(input: CreateAgentToolCenterOptions): ToolExecutionBroker {
+function createToolCenter(input: CreateAgentToolCenterOptions): ToolExecutionGateway {
   const registry = new ToolRegistry({
     toolCenter: { outputStore: input.toolOutputStore },
   });

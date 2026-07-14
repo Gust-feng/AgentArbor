@@ -6,6 +6,8 @@ import type {
   ToolErrorDomain,
   ToolErrorFacts,
   ToolExecutionContext,
+  ToolExecutionGateway,
+  ToolExecutionPreflight,
   ToolExecutor,
   ToolExecutorResult,
   ToolPermissionCheck,
@@ -47,7 +49,13 @@ const RETAINED_TOOL_OUTPUT_READ_CHARS = MAX_TOOL_OUTPUT_READ_CHARS;
 const MAX_INLINE_APPROVAL_PARTIAL_OUTPUT_CHARS = 24_000;
 const TOOL_OUTPUT_READER_NAME = "read_tool_output";
 
-export class ToolCenter {
+type ToolExecutionPreflightInternal =
+  | (Extract<ToolExecutionPreflight, { readonly status: "ready" }> & {
+      readonly executor: ToolExecutor;
+    })
+  | Exclude<ToolExecutionPreflight, { readonly status: "ready" }>;
+
+export class ToolCenter implements ToolExecutionGateway {
   private readonly tools = new Map<string, ToolExecutor>();
   private readonly platform: NodeJS.Platform;
   private readonly outputStore: ToolOutputStore | undefined;
@@ -82,82 +90,30 @@ export class ToolCenter {
     return this.tools.has(name);
   }
 
+  preflight(
+    request: ToolCallRequest,
+    context: ToolExecutionContext,
+    permission: ToolPermissionCheck,
+  ): ToolExecutionPreflight {
+    const outcome = this.preflightInternal(request, context, permission, Date.now());
+    if (outcome.status === "ready") {
+      return { status: "ready", request: outcome.request };
+    }
+    return outcome;
+  }
+
   async execute(
     request: ToolCallRequest,
     context: ToolExecutionContext,
     permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
     const startedAt = Date.now();
-    let factRequest: ToolCallRequest;
-    try {
-      factRequest = { ...request, input: normalizeToolFactValue(request.input) };
-    } catch (error) {
-      if (!(error instanceof InvalidToolFactError)) {
-        throw error;
-      }
-      return failedToolResult({ ...request, input: undefined }, startedAt, {
-        message: `Tool input is not JSON-safe at ${error.path}: ${error.reason}.`,
-        errorDomain: "runtime_error",
-        facts: { ...error.facts, code: "invalid_tool_input_fact", phase: "input" },
-      });
+    const preflight = this.preflightInternal(request, context, permission, startedAt);
+    if (preflight.status !== "ready") {
+      return preflight.result;
     }
-    if (isAbortSignalAborted(context.abortSignal)) {
-      return cancelledToolResult(factRequest, startedAt);
-    }
-    const executor = this.tools.get(factRequest.toolName);
-    if (executor === undefined) {
-      return failedToolResult(factRequest, startedAt, {
-        message: `${toolDisplayName(factRequest.toolName)}未注册。`,
-        errorDomain: "tool_error",
-      });
-    }
-
-    if (permission.callerAgentId !== context.callerAgentId) {
-      return failedToolResult(
-        factRequest,
-        startedAt,
-        {
-        message: `${toolDisplayName(factRequest.toolName)}调用者身份与本轮工具授权不一致。`,
-          errorDomain: "tool_error",
-        }
-      );
-    }
-
-    if (!permission.allowedTools.includes(factRequest.toolName)) {
-      return failedToolResult(
-        factRequest,
-        startedAt,
-        {
-          message: `${toolDisplayName(factRequest.toolName)}未授权给当前 Agent。`,
-          errorDomain: "tool_error",
-        }
-      );
-    }
-
-    const metadata = normalizeToolMetadata(executor.definition);
-    const securityDecision = evaluateToolCallSecurity({
-      request: factRequest,
-      definition: executor.definition,
-      metadata,
-      context: {
-        platform: this.platform,
-        approvedConfirmationIds: permission.approvedConfirmationIds,
-        confirmationPolicy: permission.confirmationPolicy,
-      },
-    });
-    if (securityDecision.decision === "blocked") {
-      return failedToolResult(factRequest, startedAt, {
-        message: securityDecision.reason,
-        errorDomain: "tool_error",
-        facts: {
-          code: securityDecision.code,
-          affectedResources: [...securityDecision.affectedResources],
-        },
-      });
-    }
-    if (securityDecision.decision === "approval_required") {
-      return approvalRequiredToolResult(factRequest, startedAt, securityDecision);
-    }
+    const factRequest = preflight.request;
+    const executor = preflight.executor;
 
     let output: unknown;
     try {
@@ -233,6 +189,88 @@ export class ToolCenter {
         context.traceId,
       );
     }
+  }
+
+  private preflightInternal(
+    request: ToolCallRequest,
+    context: ToolExecutionContext,
+    permission: ToolPermissionCheck,
+    startedAt: number,
+  ): ToolExecutionPreflightInternal {
+    let factRequest: ToolCallRequest;
+    try {
+      factRequest = { ...request, input: normalizeToolFactValue(request.input) };
+    } catch (error) {
+      if (!(error instanceof InvalidToolFactError)) {
+        throw error;
+      }
+      return blockedPreflight(failedToolResult({ ...request, input: undefined }, startedAt, {
+        message: `Tool input is not JSON-safe at ${error.path}: ${error.reason}.`,
+        errorDomain: "runtime_error",
+        facts: { ...error.facts, code: "invalid_tool_input_fact", phase: "input" },
+      }));
+    }
+    if (isAbortSignalAborted(context.abortSignal)) {
+      return blockedPreflight(cancelledToolResult(factRequest, startedAt));
+    }
+    const executor = this.tools.get(factRequest.toolName);
+    if (executor === undefined) {
+      return blockedPreflight(failedToolResult(factRequest, startedAt, {
+        message: `${toolDisplayName(factRequest.toolName)}未注册。`,
+        errorDomain: "tool_error",
+      }));
+    }
+
+    if (permission.callerAgentId !== context.callerAgentId) {
+      return blockedPreflight(failedToolResult(
+        factRequest,
+        startedAt,
+        {
+          message: `${toolDisplayName(factRequest.toolName)}调用者身份与本轮工具授权不一致。`,
+          errorDomain: "tool_error",
+        }
+      ));
+    }
+
+    if (!permission.allowedTools.includes(factRequest.toolName)) {
+      return blockedPreflight(failedToolResult(
+        factRequest,
+        startedAt,
+        {
+          message: `${toolDisplayName(factRequest.toolName)}未授权给当前 Agent。`,
+          errorDomain: "tool_error",
+        }
+      ));
+    }
+
+    const metadata = normalizeToolMetadata(executor.definition);
+    const securityDecision = evaluateToolCallSecurity({
+      request: factRequest,
+      definition: executor.definition,
+      metadata,
+      context: {
+        platform: this.platform,
+        approvedConfirmationIds: permission.approvedConfirmationIds,
+        confirmationPolicy: permission.confirmationPolicy,
+      },
+    });
+    if (securityDecision.decision === "blocked") {
+      return blockedPreflight(failedToolResult(factRequest, startedAt, {
+        message: securityDecision.reason,
+        errorDomain: "tool_error",
+        facts: {
+          code: securityDecision.code,
+          affectedResources: [...securityDecision.affectedResources],
+        },
+      }));
+    }
+    if (securityDecision.decision === "approval_required") {
+      return {
+        status: "approval_required",
+        result: approvalRequiredToolResult(factRequest, startedAt, securityDecision),
+      };
+    }
+    return { status: "ready", request: factRequest, executor };
   }
 
   private async prepareResultForDelivery(
@@ -873,7 +911,7 @@ function failedToolResult(
   request: ToolCallRequest,
   startedAt: number,
   error: SanitizedToolError
-): ToolCallResult {
+): ToolCallResult & { readonly status: "failed" } {
   const durationMs = Date.now() - startedAt;
   return {
     callId: request.callId,
@@ -888,11 +926,17 @@ function failedToolResult(
   };
 }
 
+function blockedPreflight(
+  result: ToolCallResult & { readonly status: "failed" | "cancelled" },
+): Extract<ToolExecutionPreflight, { readonly status: "blocked" }> {
+  return { status: "blocked", result };
+}
+
 function approvalRequiredToolResult(
   request: ToolCallRequest,
   startedAt: number,
   decision: Extract<ToolSecurityDecision, { readonly decision: "approval_required" }>
-): ToolCallResult {
+): ToolCallResult & { readonly status: "approval_required" } {
   const confirmationRequest: ConfirmationRequest = confirmationRequestFromSecurityDecision({ request, decision });
   return {
     callId: request.callId,
@@ -909,7 +953,7 @@ function cancelledToolResult(
   request: ToolCallRequest,
   startedAt: number,
   errorFacts?: ToolErrorFacts,
-): ToolCallResult {
+): ToolCallResult & { readonly status: "cancelled" } {
   return {
     callId: request.callId,
     toolName: request.toolName,

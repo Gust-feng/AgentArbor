@@ -27,6 +27,149 @@ test("ToolCenter registers, lists, executes, and unregisters tools", async () =>
   assert.equal(center.has("echo"), false);
 });
 
+test("ToolCenter preflight returns a detached ready request without execution or output retention", () => {
+  let executions = 0;
+  let retentions = 0;
+  const outputStore: ToolOutputStore = {
+    async retain() {
+      retentions += 1;
+      throw new Error("preflight must not retain output");
+    },
+    async read() { return undefined; },
+    async release() { return false; },
+    async releaseOwner() { return 0; },
+    async clear() {},
+  };
+  const center = new ToolCenter({ outputStore });
+  center.register(testTool("inspect", async () => {
+    executions += 1;
+    return "x".repeat(300_000);
+  }));
+  const input = { nested: { value: "original" }, optional: undefined };
+  const request: ToolCallRequest = {
+    callId: "call-ready",
+    toolName: "inspect",
+    input,
+  };
+
+  const preflight = center.preflight(
+    request,
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("inspect"),
+  );
+
+  assert.equal(preflight.status, "ready");
+  assert.equal(executions, 0);
+  assert.equal(retentions, 0);
+  assert.deepEqual(input, { nested: { value: "original" }, optional: undefined });
+  assert.notEqual(preflight.status === "ready" ? preflight.request.input : undefined, input);
+  assert.deepEqual(preflight.status === "ready" ? preflight.request.input : undefined, {
+    nested: { value: "original" },
+  });
+});
+
+test("ToolCenter preflight returns the exact confirmation fact without execution", () => {
+  let executions = 0;
+  const center = new ToolCenter({ platform: "win32" });
+  center.register(testTool("delete_file", async () => {
+    executions += 1;
+    return { deleted: true };
+  }, "read-write", { requiresConfirmation: true }));
+
+  const preflight = center.preflight(
+    { callId: "call-preflight-delete", toolName: "delete_file", input: { path: "notes.txt" } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("delete_file"),
+  );
+
+  assert.equal(preflight.status, "approval_required");
+  assert.equal(executions, 0);
+  const result = preflight.status === "approval_required" ? preflight.result : undefined;
+  assert.equal(result?.callId, "call-preflight-delete");
+  assert.equal(result?.confirmationRequest?.confirmationId, "confirmation-call-preflight-delete");
+  assert.deepEqual(result?.confirmationRequest?.affectedResources, ["notes.txt"]);
+  assert.deepEqual(result?.confirmationRequest?.sourceRefs, ["tool:call-preflight-delete"]);
+});
+
+test("ToolCenter preflight blocks policy, registration, permission, and invalid-fact failures without execution", () => {
+  let executions = 0;
+  const center = new ToolCenter();
+  center.register(testTool("browser_snapshot", async () => {
+    executions += 1;
+    return { ok: true };
+  }));
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+
+  const blockedUrl = center.preflight(
+    { callId: "call-ftp", toolName: "browser_snapshot", input: { url: "ftp://example.test/file" } },
+    context,
+    allowTools("browser_snapshot"),
+  );
+  const unknown = center.preflight(
+    { callId: "call-unknown", toolName: "unknown", input: {} },
+    context,
+    allowTools("unknown"),
+  );
+  const unauthorized = center.preflight(
+    { callId: "call-denied", toolName: "browser_snapshot", input: {} },
+    context,
+    allowTools("other"),
+  );
+  const wrongCaller = center.preflight(
+    { callId: "call-wrong-caller", toolName: "browser_snapshot", input: {} },
+    context,
+    { callerAgentId: "other-agent", allowedTools: ["browser_snapshot"] },
+  );
+  const invalid = center.preflight(
+    {
+      callId: "call-invalid",
+      toolName: "browser_snapshot",
+      input: circular as unknown as ToolCallRequest["input"],
+    },
+    context,
+    allowTools("browser_snapshot"),
+  );
+
+  assert.equal(executions, 0);
+  assert.equal(blockedUrl.status, "blocked");
+  assert.equal(blockedUrl.status === "blocked" ? blockedUrl.result.errorFacts?.code : undefined, "url_protocol_blocked");
+  assert.equal(unknown.status, "blocked");
+  assert.match(unknown.status === "blocked" ? unknown.result.error ?? "" : "", /未注册/);
+  assert.equal(unauthorized.status, "blocked");
+  assert.match(unauthorized.status === "blocked" ? unauthorized.result.error ?? "" : "", /未授权/);
+  assert.equal(wrongCaller.status, "blocked");
+  assert.match(wrongCaller.status === "blocked" ? wrongCaller.result.error ?? "" : "", /调用者身份/);
+  assert.equal(invalid.status, "blocked");
+  assert.equal(invalid.status === "blocked" ? invalid.result.errorFacts?.code : undefined, "invalid_tool_input_fact");
+});
+
+test("ToolCenter execute reuses preflight and invokes an approved executor exactly once", async () => {
+  let executions = 0;
+  const center = new ToolCenter({ platform: "win32" });
+  center.register(testTool("shell_command", async () => {
+    executions += 1;
+    return { exitCode: 0 };
+  }, "execute", { requiresConfirmation: true }));
+  const request: ToolCallRequest = {
+    callId: "call-approved-once",
+    toolName: "shell_command",
+    input: { commandLine: "pnpm test" },
+  };
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+
+  const preflight = center.preflight(request, context, allowTools("shell_command"));
+  const result = await center.execute(request, context, {
+    ...allowTools("shell_command"),
+    approvedConfirmationIds: ["confirmation-call-approved-once"],
+  });
+
+  assert.equal(preflight.status, "approval_required");
+  assert.equal(result.status, "completed");
+  assert.equal(executions, 1);
+});
+
 test("ToolCenter rejects tools without explicit metadata", () => {
   const center = new ToolCenter();
 

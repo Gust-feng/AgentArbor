@@ -2,7 +2,7 @@ import type {
   ToolCategory,
   ToolDefinition,
   ToolDefinitionMetadata,
-  ToolExecutionBroker,
+  ToolExecutionGateway,
   ToolExecutor,
   ToolFileDisplayOperation,
   ToolInputSchema,
@@ -92,11 +92,11 @@ export class ToolRegistry {
     });
   }
 
-  createToolCenter(scope: ToolRegistryScope): ToolExecutionBroker {
+  createToolCenter(scope: ToolRegistryScope): ToolExecutionGateway {
     return this.createToolCenterForScopes([scope]);
   }
 
-  createToolCenterForScopes(scopes: readonly ToolRegistryScope[]): ToolExecutionBroker {
+  createToolCenterForScopes(scopes: readonly ToolRegistryScope[]): ToolExecutionGateway {
     const center = new ToolCenter(this.options.toolCenter);
     for (const entry of this.entriesForAnyScope(scopes)) {
       const availability = entry.availability ?? { status: "available" as const };

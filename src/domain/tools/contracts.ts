@@ -284,3 +284,33 @@ export interface ToolExecutionBroker {
   ): Promise<ToolCallResult>;
   register?(executor: ToolExecutor): void;
 }
+
+/**
+ * A side-effect-free decision about whether one exact tool call may enter its executor.
+ * `ready.request` is the detached, JSON-safe fact that a later execution will use.
+ */
+export type ToolExecutionPreflight =
+  | {
+      readonly status: "ready";
+      readonly request: ToolCallRequest;
+    }
+  | {
+      readonly status: "approval_required";
+      readonly result: ToolCallResult & { readonly status: "approval_required" };
+    }
+  | {
+      readonly status: "blocked";
+      readonly result: ToolCallResult & { readonly status: "failed" | "cancelled" };
+    };
+
+/**
+ * Production tool gateways expose the same authorization boundary independently from
+ * execution so an outer runtime can pause before invoking a side-effecting executor.
+ */
+export interface ToolExecutionGateway extends ToolExecutionBroker {
+  preflight(
+    request: ToolCallRequest,
+    context: ToolExecutionContext,
+    permission: ToolPermissionCheck
+  ): ToolExecutionPreflight;
+}

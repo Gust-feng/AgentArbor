@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { CapabilityToolCatalogItem } from "../../domain/config/index.js";
-import type { ModelMessage } from "../../domain/intelligence/index.js";
+import type { IntelligenceChannel, ModelMessage, ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../../domain/soil/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
@@ -12,6 +12,8 @@ import { runAgentDefinitionRef } from "../agent-definition-ref.js";
 import type { AgentLoop, CreateModelRuntimeAgentLoopInput } from "../model-runtime/index.js";
 import type { OrdinaryExecutionInput, OrdinaryRunBirth } from "../ordinary-agent/contracts.js";
 import { ordinaryRunBirth } from "../ordinary-agent/test-support.js";
+import type { AgentLoopTokenCounter } from "../context-maintenance/index.js";
+import { createOpenAIAgentsInputMapper } from "../../adapters/intelligence/openai-agents-input.js";
 import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
 import type { AgentRunResources } from "./agent-run-resources.js";
 import type { AgentToolRegistryContribution } from "../tool-center/index.js";
@@ -190,6 +192,139 @@ test("Ordinary resources reject an incomplete or mismatched AgentDefinition ref 
   assert.equal(acquisitions, 0);
 });
 
+for (const protocol of ["openai_responses", "openai_compatible_chat_completions"] as const) {
+  test(`Ordinary resources compact oversized ${protocol} context before AgentLoop`, async () => {
+    const base = ordinaryRunBirth();
+    const config = {
+      ...base.config,
+      protocolKind: protocol,
+      defaultAiMode: protocol === "openai_responses" ? "openai-responses" as const : "openai-compatible" as const,
+      model: `model-${protocol}`,
+    };
+    const snapshot = {
+      ...base.capabilitySnapshot,
+      activeModel: config,
+      modelCapabilities: {
+        ...base.capabilitySnapshot.modelCapabilities,
+        contextWindowTokens: 1_000,
+      },
+      workspace: { ...base.capabilitySnapshot.workspace, workspaceDirectory: process.cwd() },
+    };
+    const channel = new CompactionChannel();
+    const controller = new AbortController();
+    let loopConfig: CreateModelRuntimeAgentLoopInput | undefined;
+    const acquirer = createOrdinaryAgentRunResourceAcquirer({
+      host: {} as never,
+      soilStore: createMinimalReadonlySoilStore([]),
+      resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
+      resolveSubAgentRoots: () => [],
+    }, {
+      async prepareRunResources() {
+        return resources(snapshot, process.cwd(), () => undefined, channel);
+      },
+      createAgentLoop(input) {
+        loopConfig = input;
+        return loop(() => undefined);
+      },
+      createTokenCounter: () => characterTokenCounter(),
+    });
+    const oldMessages = Array.from({ length: 12 }, (_, index): ModelMessage => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `old-${index}-${"x".repeat(220)}`,
+      ref: `old:${index}`,
+    }));
+    const acquired = await acquirer.acquire({
+      runId: `run-${protocol}`,
+      birth: {
+        ...base,
+        instructions: DESKTOP_ROOT_AGENT.prompt.systemPrompt,
+        aiMode: config.defaultAiMode,
+        config,
+        agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT),
+        capabilitySnapshot: snapshot,
+      },
+      runInput: { userMessage: "current request" },
+      messages: [
+        ...oldMessages,
+        {
+          role: "assistant",
+          content: "",
+          ref: "recent:tool-call",
+          toolCalls: [{ callId: "recent-call", toolName: "read_file", input: { path: "README.md" } }],
+        },
+        {
+          role: "tool",
+          content: "recent README result",
+          ref: "recent:tool-result",
+          toolCallId: "recent-call",
+          toolName: "read_file",
+        },
+        { role: "user", content: "current request", ref: "current:user" },
+      ],
+      abortSignal: controller.signal,
+    });
+
+    assert.equal(channel.requests.length, 1);
+    assert.equal(channel.abortSignals[0], controller.signal);
+    assert.equal(loopConfig?.modelProvider?.protocolKind, protocol);
+    assert.equal(acquired.resolvedMessages.some((message) => message.content.includes("# Compacted Context")), true);
+    assert.equal(acquired.resolvedMessages.filter((message) => message.role === "system").length, 1);
+    assert.equal(acquired.resolvedMessages.some((message) => message.ref === "old:0"), false);
+    assert.equal(acquired.resolvedMessages.some((message) => message.ref === "recent:tool-call"), true);
+    assert.equal(acquired.resolvedMessages.some((message) => message.ref === "recent:tool-result"), true);
+    assert.equal(acquired.resolvedMessages.some((message) => message.content.includes("current request")), true);
+    assert.equal(acquired.resolvedMessages.some((message) => message.content === DESKTOP_ROOT_AGENT.prompt.systemPrompt), true);
+    assert.doesNotThrow(() => createOpenAIAgentsInputMapper({
+      protocol,
+      messages: acquired.resolvedMessages,
+    }).messages(DESKTOP_ROOT_AGENT.prompt.systemPrompt));
+    await acquired.release();
+  });
+}
+
+test("Ordinary run release attempts process and retained-output cleanup even when one cleanup fails", async () => {
+  const base = ordinaryRunBirth();
+  const calls: string[] = [];
+  const cleanupFailure = new Error("process cleanup failed");
+  const host = {
+    processRegistry: {
+      register() { return undefined; },
+      async cleanupByRun(runId: string) {
+        calls.push(`process:${runId}`);
+        throw cleanupFailure;
+      },
+    },
+    processTerminator: { killTree: async () => ({ status: "killed" as const }) },
+    toolOutputStore: {
+      async releaseOwner(ownerId: string) { calls.push(`output:${ownerId}`); return 1; },
+    },
+  } as never;
+  const acquirer = createOrdinaryAgentRunResourceAcquirer({
+    host,
+    soilStore: createMinimalReadonlySoilStore([]),
+    resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
+    resolveSubAgentRoots: () => [],
+  }, {
+    async prepareRunResources() {
+      return resources(base.capabilitySnapshot, process.cwd(), () => calls.push("host"));
+    },
+    createAgentLoop() {
+      return loop(() => calls.push("loop"));
+    },
+  });
+  const acquired = await acquirer.acquire({
+    runId: "run-cleanup",
+    birth: { ...base, instructions: DESKTOP_ROOT_AGENT.prompt.systemPrompt, agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT) },
+    runInput: { userMessage: "cleanup" },
+    messages: [{ role: "user", content: "cleanup" }],
+    abortSignal: new AbortController().signal,
+  });
+
+  await assert.rejects(acquired.release(), (error: unknown) => error === cleanupFailure);
+  await assert.rejects(acquired.release(), (error: unknown) => error === cleanupFailure);
+  assert.deepEqual(calls, ["loop", "host", "process:run-cleanup", "output:run-cleanup"]);
+});
+
 function executionInput(
   snapshot: OrdinaryRunBirth["capabilitySnapshot"],
   messages: readonly ModelMessage[],
@@ -254,6 +389,7 @@ function resources(
   snapshot: OrdinaryRunBirth["capabilitySnapshot"],
   workspaceRoot: string,
   onRelease: () => void,
+  channel: IntelligenceChannel = new UnusedChannel(),
 ): AgentRunResources {
   const mcpContribution: AgentToolRegistryContribution = (register) => register({
     executor: executor("mcp_lookup"),
@@ -264,7 +400,7 @@ function resources(
     capabilitySnapshot: snapshot,
     informationAccess: ordinaryRunBirth().informationAccess,
     aiEnvironment: { AGENTARBOR_MODEL_API_KEY: "test-key" },
-    aiConfig: { enabled: true, mode: "fake", summaryInput: { enabled: true, mode: "fake" }, createIntelligenceChannel: () => { throw new Error("unused"); } },
+    aiConfig: { enabled: true, mode: "fake", summaryInput: { enabled: true, mode: "fake" }, createIntelligenceChannel: () => channel },
     workspaceRoot,
     toolStates: snapshot.toolCatalog.tools.map((item) => ({ name: item.name, enabled: true, updatedAt: snapshot.createdAt })),
     toolCatalogNames: snapshot.toolCatalog.tools.map((item) => item.name),
@@ -273,6 +409,45 @@ function resources(
     toolRegistryScopes: ["desktop-basic", "mcp"],
     toolContributions: [mcpContribution],
     async release() { onRelease(); },
+  };
+}
+
+class CompactionChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+  readonly abortSignals: (AbortSignal | undefined)[] = [];
+  async request(request: ModelRequest, options?: { readonly abortSignal?: AbortSignal }): Promise<ModelResponse> {
+    this.requests.push(request);
+    this.abortSignals.push(options?.abortSignal);
+    return {
+      responseId: `response-${request.requestId}`,
+      requestId: request.requestId,
+      providerId: "compactor",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_responses",
+      model: "compactor",
+      status: "completed",
+      outputKind: "explanation",
+      textOutput: "## Goal\nContinue the current request.\n\n## Next Steps\nUse the preserved recent messages.",
+      validation: { status: "passed", checkedAt: "2026-07-15T00:00:00.000Z", issues: [] },
+      completedAt: "2026-07-15T00:00:00.000Z",
+    };
+  }
+  validateResponse(_request: ModelRequest, response: ModelResponse) { return response.validation; }
+}
+
+class UnusedChannel implements IntelligenceChannel {
+  async request(): Promise<ModelResponse> { throw new Error("unexpected context compaction request"); }
+  validateResponse(_request: ModelRequest, response: ModelResponse) { return response.validation; }
+}
+
+function characterTokenCounter(): AgentLoopTokenCounter {
+  const count = (message: ModelMessage) => message.content.length + JSON.stringify(message.toolCalls ?? []).length;
+  return {
+    source: "openai_tiktoken",
+    model: "test-character-counter",
+    countText: (text) => text.length,
+    countMessage: count,
+    countMessages: (messages) => messages.reduce((total, message) => total + count(message), 0),
   };
 }
 

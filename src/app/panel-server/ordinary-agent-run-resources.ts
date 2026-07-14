@@ -1,10 +1,18 @@
 import type { ReadonlySoilStore } from "../../domain/soil/index.js";
+import type { IntelligenceChannel, ModelMessage } from "../../domain/intelligence/index.js";
+import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
+import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
   agentDefinitionRefMatchesDefinition,
   isCompleteRunAgentDefinitionRef,
 } from "../agent-definition-ref.js";
 import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
+import {
+  compactAgentLoopContextIfNeeded,
+  createOpenAITokenCounter,
+  type AgentLoopTokenCounter,
+} from "../context-maintenance/index.js";
 import {
   assembleDesktopAgentModelInput,
 } from "../desktop-agent/desktop-agent-model-input.js";
@@ -58,6 +66,8 @@ export type CreateOrdinaryAgentRunResourceAcquirerInput = {
 type OrdinaryAgentRunResourceAcquirerDependencies = {
   readonly prepareRunResources?: typeof prepareAgentRunResources;
   readonly createAgentLoop?: typeof createModelRuntimeAgentLoop;
+  readonly compactContext?: typeof compactAgentLoopContextIfNeeded;
+  readonly createTokenCounter?: (model?: string) => AgentLoopTokenCounter;
 };
 
 /**
@@ -133,11 +143,20 @@ export function createOrdinaryAgentRunResourceAcquirer(
           canonicalMessages: input.messages,
           skillContexts,
         });
-        const resolvedMessages = await attachDesktopFileInputsToModelMessages({
+        const messagesWithAttachments = await attachDesktopFileInputsToModelMessages({
           messages: modelInput.messages,
           taskSoil,
           modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
           workspaceRoot: resources.workspaceRoot,
+        });
+        const resolvedMessages = await compactOrdinaryMessages({
+          input,
+          definition,
+          resources,
+          messages: messagesWithAttachments,
+          tools: toolBoundary.toolDefinitions,
+          compactContext: dependencies.compactContext ?? compactAgentLoopContextIfNeeded,
+          tokenCounter: (dependencies.createTokenCounter ?? createOpenAITokenCounter)(input.birth.config.model),
         });
         loop = (dependencies.createAgentLoop ?? createModelRuntimeAgentLoop)({
           mode: input.birth.aiMode,
@@ -145,9 +164,21 @@ export function createOrdinaryAgentRunResourceAcquirer(
           modelProvider: input.birth.config,
           providerFetch: options.host.providerFetch,
         });
+        const ownedLoop = loop;
+        const processTerminator = options.host.processTerminator;
+        const toolOutputStore = options.host.toolOutputStore;
         const release = idempotentRelease([
-          () => loop!.release(),
+          () => ownedLoop.release(),
           resources.release,
+          ...(processTerminator === undefined
+            ? []
+            : [() => options.host.processRegistry.cleanupByRun(
+                input.runId,
+                processTerminator,
+              ).then(() => undefined)]),
+          ...(toolOutputStore === undefined
+            ? []
+            : [() => toolOutputStore.releaseOwner(input.runId).then(() => undefined)]),
         ]);
         return {
           loop,
@@ -161,6 +192,52 @@ export function createOrdinaryAgentRunResourceAcquirer(
         throw error;
       }
     },
+  };
+}
+
+async function compactOrdinaryMessages(input: {
+  readonly input: AcquireOrdinaryAgentLoopRunResourcesInput;
+  readonly definition: AgentDefinition;
+  readonly resources: AgentRunResources;
+  readonly messages: readonly ModelMessage[];
+  readonly tools: ReturnType<typeof resolveRunToolBoundary>["toolDefinitions"];
+  readonly compactContext: typeof compactAgentLoopContextIfNeeded;
+  readonly tokenCounter: AgentLoopTokenCounter;
+}): Promise<readonly ModelMessage[]> {
+  const channel = lazyIntelligenceChannel(() => input.resources.aiConfig.createIntelligenceChannel({
+    bus: new InMemoryMessageBus(new InMemoryEventLog()),
+  }));
+  const result = await input.compactContext({
+    goal: input.input.runInput.userMessage,
+    traceId: input.input.runId,
+    goalId: input.input.runId,
+    agentIdentity: {
+      agentId: input.definition.agentId,
+      displayName: input.definition.displayName,
+    },
+    messages: input.messages,
+    tools: input.tools,
+    intelligenceChannel: channel,
+    modelCapabilities: input.resources.capabilitySnapshot.modelCapabilities,
+    tokenCounter: input.tokenCounter,
+    compactedContextRole: "user",
+    abortSignal: input.input.abortSignal,
+  });
+  if (result.status === "failed") {
+    throw new Error(`Ordinary context compaction failed: ${result.message}`);
+  }
+  return result.status === "compacted" ? result.messages : input.messages;
+}
+
+function lazyIntelligenceChannel(create: () => IntelligenceChannel): IntelligenceChannel {
+  let channel: IntelligenceChannel | undefined;
+  const get = (): IntelligenceChannel => {
+    channel ??= create();
+    return channel;
+  };
+  return {
+    request: (request, options) => get().request(request, options),
+    validateResponse: (request, response) => get().validateResponse(request, response),
   };
 }
 

@@ -65,7 +65,7 @@ export async function compactAgentLoopContextIfNeeded(
     requestedAt: nowIso(),
     toolChoice: "none",
     tools: [],
-  });
+  }, { abortSignal: input.abortSignal });
 
   if (response.status !== "completed") {
     return {
@@ -108,7 +108,12 @@ export async function compactAgentLoopContextIfNeeded(
     tokenCount,
     threshold,
     conversationSummary: summary,
-    messages: assembleCompactedLoopMessages(input.messages, split.preservedIndexes, summary),
+    messages: assembleCompactedLoopMessages(
+      input.messages,
+      split.preservedIndexes,
+      summary,
+      input.compactedContextRole ?? "system",
+    ),
   };
 }
 
@@ -250,10 +255,11 @@ function preserveOnlyCompleteToolInteractionGroups(
 function assembleCompactedLoopMessages(
   messages: readonly ModelMessage[],
   preservedIndexes: ReadonlySet<number>,
-  summary: AgentLoopContextSummary
+  summary: AgentLoopContextSummary,
+  role: "system" | "user",
 ): readonly ModelMessage[] {
   const compactedMessage: ModelMessage = {
-    role: "system",
+    role,
     content: [
       "# Compacted Context",
       "",

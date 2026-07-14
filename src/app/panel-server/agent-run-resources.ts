@@ -28,6 +28,7 @@ import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ConfigCenter } from "../config-center/index.js";
 import type { LocalCommandProcessRegistry } from "../tool-center/adapters/local-workspace-command-tools.js";
 import type { ToolOutputStore } from "../tool-center/tool-output-store.js";
+import type { InMemoryProcessRegistry, ProcessTerminator } from "../runtime-guard/index.js";
 import type { PanelProviderFetch } from "./types.js";
 import {
   createMcpToolRegistryContribution,
@@ -37,7 +38,9 @@ import {
 export type AgentRunResourceHost = {
   readonly configCenter: ConfigCenter;
   readonly providerFetch?: PanelProviderFetch;
-  readonly processRegistry: LocalCommandProcessRegistry;
+  readonly processRegistry: LocalCommandProcessRegistry & Pick<InMemoryProcessRegistry, "cleanupByRun">;
+  /** Present when a run-scoped Host lease is allowed to terminate owned processes. */
+  readonly processTerminator?: ProcessTerminator;
   readonly toolOutputStore?: ToolOutputStore;
 };
 

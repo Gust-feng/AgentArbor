@@ -55,4 +55,7 @@ export type MaintainAgentLoopContextInput = {
   readonly tokenCounter?: AgentLoopTokenCounter;
   readonly thresholdRatio?: number;
   readonly preserveRecentMessages?: number;
+  /** Defaults to system for existing runtimes; SDK-backed Ordinary uses user to keep one leading system instruction. */
+  readonly compactedContextRole?: "system" | "user";
+  readonly abortSignal?: AbortSignal;
 };

@@ -555,16 +555,12 @@ test("legacy underground compat chain stays under underground/compat ownership",
   const productionFacades = new Map([
     ["direction-handoff-derivation.ts", 'export * from "./underground/compat/direction-handoff-derivation.js";'],
     ["underground-agent-cluster-runtime.ts", 'export * from "./underground/compat/underground-agent-cluster-runtime.js";'],
-    ["underground-demo-summary.ts", 'export * from "./underground/compat/underground-demo-summary.js";'],
-    ["underground-direction-recovery.ts", 'export * from "./underground/compat/underground-direction-recovery.js";'],
-    ["underground-direction-session.ts", 'export * from "./underground/compat/underground-direction-session.js";'],
     ["underground-intelligence.ts", 'export * from "./underground/compat/underground-intelligence.js";'],
     ["underground-message-dispatcher.ts", 'export * from "./underground/compat/underground-message-dispatcher.js";'],
     ["underground-runner.ts", 'export * from "./underground/compat/underground-runner.js";'],
   ]);
   const movedTests = [
     "underground-autonomy-loop.test.ts",
-    "underground-demo-cli.test.ts",
     "underground-demo-summary.test.ts",
     "underground-direction-session.test.ts",
     "underground-intelligence.test.ts",
@@ -578,8 +574,6 @@ test("legacy underground compat chain stays under underground/compat ownership",
     readSource(path.join(appRoot, "underground", "minimal", "minimal-direction.ts")),
     readSource(path.join(appRoot, "underground", "clarification", "clarification-flow.ts")),
     readSource(path.join(appRoot, "underground", "agents", "growth-governor.ts")),
-    readSource(path.join(appRoot, "panel-server", "underground-compat-execution.ts")),
-    readSource(path.join(appRoot, "panel-server", "run-execution-contracts.ts")),
     readSource(path.join(appRoot, "panel-read-model", "canvas", "panel-canvas-read-model.ts")),
   ]);
 
@@ -589,9 +583,16 @@ test("legacy underground compat chain stays under underground/compat ownership",
     assert.equal(fileExistsSync(path.join(compatRoot, fileName)), true, `${fileName} implementation should live in underground/compat`);
   }
 
-  const cliFacade = await readSource(path.join(appRoot, "underground-demo.ts"));
-  assert.equal(cliFacade.trim(), 'import "./underground/compat/underground-demo.js";');
-  assert.equal(fileExistsSync(path.join(compatRoot, "underground-demo.ts")), true);
+  for (const retiredFile of [
+    path.join(appRoot, "underground-demo.ts"),
+    path.join(appRoot, "underground-demo-summary.ts"),
+    path.join(appRoot, "underground-direction-recovery.ts"),
+    path.join(appRoot, "underground-direction-session.ts"),
+    path.join(compatRoot, "underground-demo.ts"),
+    path.join(compatRoot, "underground-demo-cli.test.ts"),
+  ]) {
+    assert.equal(fileExistsSync(retiredFile), false, `${retiredFile} should remain retired`);
+  }
 
   for (const fileName of movedTests) {
     assert.equal(fileExistsSync(path.join(appRoot, fileName)), false, `${fileName} should not live at src/app top level`);

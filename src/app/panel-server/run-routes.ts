@@ -1,7 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  ModelRuntimeConfigurationError,
-} from "../model-runtime/index.js";
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
 import type { PanelRunJob, PanelRunKind } from "./run-jobs.js";
 import { getPanelConversation } from "./conversation-routes.js";
@@ -9,7 +6,6 @@ import {
   PanelHttpError,
   readJsonBody,
   writeJson,
-  writePanelError,
 } from "./http-utils.js";
 import { serveRunEventSse } from "./run-event-sse.js";
 import { createPersistedPanelRunResponse } from "./persisted-run-response.js";
@@ -18,13 +14,6 @@ import type { PanelRunStreamEvent } from "../panel-read-model/run/panel-run-stre
 import { parseRunInput } from "./request-parsers.js";
 import { projectRunEnvelopeViewBase } from "../run-read-model/envelope.js";
 import { projectSharedRunSummaryBase } from "../run-read-model/summary.js";
-import {
-  createPanelRunResponse,
-  createConfigurationFailedAiSummary,
-  panelConfigurationErrorMessage,
-  runLegacyUndergroundForPanel,
-  type PanelRunResponse,
-} from "./run-execution.js";
 import { createPanelRunJobResponse, type PanelRunJobResponse } from "./run-job-response.js";
 import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
@@ -46,31 +35,10 @@ export async function handlePanelRunRoute(
   url: URL
 ): Promise<boolean> {
   // ── 废弃候选（T3-5 / ADR-0025 deep 一期）──────────────────────────────────
-  // 正式 deep HTTP 入口为 /api/deep/*（见 src/app/panel-server/deep-routes.ts）：
-  //   POST /api/deep/conversations + POST /api/deep/conversations/:id/runs +
-  //   GET /api/deep/conversations/:id/runs/:runId/view + SSE + control。
-  // 下列 /api/underground/* 兼容路由驱动旧 UndergroundAgentOrchestrator 固定拓扑
-  // （与 directionHandoffPackage / Plan 强耦合），非正式 DeepRuntime。
-  // 退役前置 = 调用方迁移到 /api/deep/* + 等价能力验证完成（闭环4）。当前保持运行不阻塞。
+  // Ordinary direct-run compatibility remains until the feature-owned entry replaces it.
   // ──────────────────────────────────────────────────────────────────────────
-  if (request.method === "POST" && url.pathname === "/api/underground/run") {
-    await handleRunRequest(runtime, request, response, "underground");
-    return true;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/underground/runs") {
-    await handleStartRunRequest(runtime, request, response, "underground");
-    return true;
-  }
-
   if (request.method === "POST" && url.pathname === "/api/desktop/runs") {
     await handleStartRunRequest(runtime, request, response, "desktop");
-    return true;
-  }
-
-  const runMatch = /^\/api\/underground\/runs\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "GET" && runMatch !== null) {
-    await handleGetRunRequest(runtime, decodeURIComponent(runMatch[1] ?? ""), "underground", response);
     return true;
   }
 
@@ -111,12 +79,6 @@ export async function handlePanelRunRoute(
     return true;
   }
 
-  const runStreamMatch = /^\/api\/underground\/runs\/([^/]+)\/stream$/.exec(url.pathname);
-  if (request.method === "GET" && runStreamMatch !== null) {
-    handleGetRunStreamRequest(runtime, decodeURIComponent(runStreamMatch[1] ?? ""), "underground", url, request, response);
-    return true;
-  }
-
   const desktopRunStreamMatch = /^\/api\/desktop\/runs\/([^/]+)\/stream$/.exec(url.pathname);
   if (request.method === "GET" && desktopRunStreamMatch !== null) {
     handleGetRunStreamRequest(runtime, decodeURIComponent(desktopRunStreamMatch[1] ?? ""), "desktop", url, request, response);
@@ -124,67 +86,6 @@ export async function handlePanelRunRoute(
   }
 
   return false;
-}
-
-async function handleRunRequest(
-  runtime: PanelRuntime,
-  request: IncomingMessage,
-  response: ServerResponse,
-  runKind: PanelRunKind
-): Promise<void> {
-  if (runKind === "desktop") {
-    throw new PanelHttpError(
-      400,
-      "desktop_sync_run_not_supported",
-      "Desktop 默认运行入口必须创建异步普通 agent run。"
-    );
-  }
-  const body = await readJsonBody(request);
-  const config = await runtime.configCenter.getModelProviderConfig();
-  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
-  const runInput = parseRunInput(body);
-  const runMode = resolveRunModeForRoute(runKind, runInput.requestedRunMode);
-  const aiMode = runInput.aiMode ?? config.defaultAiMode;
-
-  try {
-    // Legacy synchronous underground route. Desktop routes must use
-    // BasicAgentRunExecutor.start so run birth facts are frozen before execution.
-    const run = await runLegacyUndergroundForPanel(runtime, runKind, runInput.goal, aiMode, runInput.taskSoilInput, runMode, {
-      config,
-      informationAccess,
-      reasoningEffort: runInput.reasoningEffort,
-    });
-    writeJson(response, 200, await createPanelRunResponse({
-      runtime,
-      runKind,
-      runMode,
-      requestedMode: aiMode,
-      reasoningEffort: runInput.reasoningEffort,
-      run,
-    }) satisfies PanelRunResponse);
-  } catch (error) {
-    if (error instanceof ModelRuntimeConfigurationError) {
-      const message = panelConfigurationErrorMessage(error.issue.code);
-      const ai = createConfigurationFailedAiSummary(error.issue.summaryInput, error, message);
-      writeJson(response, 400, {
-        ok: false,
-        status: "failed",
-        config,
-        informationAccess,
-        error: {
-          code: error.issue.code,
-          message,
-        },
-        summary: { ai },
-      });
-      return;
-    }
-    if (error instanceof PanelHttpError) {
-      writePanelError(response, error, { config, informationAccess });
-      return;
-    }
-    throw error;
-  }
 }
 
 async function handleStartRunRequest(

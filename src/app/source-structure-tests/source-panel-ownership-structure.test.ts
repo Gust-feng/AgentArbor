@@ -96,7 +96,6 @@ test("panel server integration test assets stay under panel-server ownership", (
     "panel-server-skill-service.test.ts",
     "panel-server-test-utils.ts",
     "panel-server.test.ts",
-    "panel-server-underground-compat.test.ts",
   ];
 
   for (const fileName of movedIntegrationTestAssets) {

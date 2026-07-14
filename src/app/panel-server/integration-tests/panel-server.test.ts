@@ -14,6 +14,7 @@ import { resolveDefaultPanelSkillRoots } from "../runtime.js";
 import {
   removeTemporaryTree,
   requestJson,
+  waitForRun,
 } from "./panel-server-test-utils.js";
 import {
   createOpenAiSearchToolCallResponse,
@@ -249,16 +250,24 @@ test("panel tools route can disable web search without using the stored Tavily k
       body: { provider: "none" },
     });
 
-    const run = await requestJson(server.url, "/api/underground/run", {
+    const started = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
       body: { goal: "Build a small deterministic helper.", aiMode: "openai-compatible" },
     });
+    const run = await waitForRun(
+      server.url,
+      started.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
 
     assert.equal(disabled.status, 200);
     assert.equal(disabled.body.tools.webSearch.provider, "none");
     assert.equal(disabled.body.tools.webSearch.status, "disabled");
     assert.equal(disabled.body.tools.webSearch.secretConfigured, false);
     assert.equal(disabled.text.includes(tavilySecret), false);
+    assert.equal(started.status, 202);
     assert.equal(run.status, 200);
     assert.equal(modelFetchCalls >= 1, true);
     assert.equal(tavilyFetchCalls, 0);

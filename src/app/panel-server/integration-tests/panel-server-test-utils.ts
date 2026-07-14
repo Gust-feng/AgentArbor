@@ -201,7 +201,7 @@ export async function waitForRun(
   runId: string,
   predicate: (body: any) => boolean,
   timeoutMs = PANEL_ASYNC_TEST_TIMEOUT_MS,
-  runsPath = "/api/underground/runs"
+  runsPath = "/api/desktop/runs"
 ): Promise<RequestJsonResult> {
   const startedAt = Date.now();
   const effectiveTimeoutMs = asyncTestTimeout(timeoutMs);

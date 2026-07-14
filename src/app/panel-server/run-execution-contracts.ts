@@ -21,7 +21,6 @@ import type {
 import type { PanelRunCanvasReadModel } from "../panel-read-model/canvas/panel-canvas-read-model.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
 import type { PanelRunSummary } from "../panel-read-model/run/panel-run-summary.js";
-import type { UndergroundDirectionSessionRuntimeContext } from "../underground/compat/underground-direction-session.js";
 import type { AgentRunResources } from "./agent-run-resources.js";
 
 export type PanelRunExecutionResult = {
@@ -71,8 +70,6 @@ export type PanelRunExecutionOptions = {
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
-export type PanelRuntimeReadyContext =
-  | UndergroundDirectionSessionRuntimeContext
-  | DesktopAgentSessionRuntimeContext;
+export type PanelRuntimeReadyContext = DesktopAgentSessionRuntimeContext;
 
 export type { AgentRunResources } from "./agent-run-resources.js";

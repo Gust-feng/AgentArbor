@@ -11,7 +11,7 @@ import { AgentDefinitionRegistry } from "../agent-definition-registry.js";
 import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { createRunCapabilityPlan } from "../model-capability-registry.js";
-import { createPanelRunResponse, executeBasicPanelRun, runLegacyUndergroundForPanel } from "./run-execution.js";
+import { createPanelRunResponse, executeBasicPanelRun } from "./run-execution.js";
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 
@@ -88,75 +88,6 @@ test("panel run response rejects ordinary desktop results without run-created fa
       const panelError = error as PanelHttpError;
       assert.equal(panelError.statusCode, 500);
       assert.equal(panelError.code, "desktop_capability_snapshot_required");
-      return true;
-    }
-  );
-});
-
-test("legacy panel run helper rejects ordinary desktop sync execution below the route layer", async () => {
-  await assert.rejects(
-    () =>
-      runLegacyUndergroundForPanel(
-        runtimeWithCurrentConfig(modelConfig("current-profile", "current-model"), informationAccess(20)),
-        "desktop",
-        "不要从内部绕过 BasicAgentRunExecutor.start 执行普通 Desktop",
-        "fake",
-        undefined,
-        "agent",
-        {
-          config: modelConfig("frozen-profile", "frozen-model"),
-          informationAccess: informationAccess(5),
-          capabilitySnapshot: capabilitySnapshot(modelConfig("frozen-profile", "frozen-model")),
-          agentDefinitionRef: frozenAgentDefinitionRef(),
-        }
-      ),
-    (error) => {
-      assert.equal(error instanceof PanelHttpError, true);
-      const panelError = error as PanelHttpError;
-      assert.equal(panelError.statusCode, 400);
-      assert.equal(panelError.code, "desktop_sync_run_not_supported");
-      return true;
-    }
-  );
-});
-
-test("panel run execution rejects desktop deep mode below the route layer", async () => {
-  await assert.rejects(
-    () =>
-      runLegacyUndergroundForPanel(
-        runtimeWithCurrentConfig(modelConfig("current-profile", "current-model"), informationAccess(20)),
-        "desktop",
-        "不要从内部把 Desktop 默认入口跑成 deep",
-        "fake",
-        undefined,
-        "deep"
-      ),
-    (error) => {
-      assert.equal(error instanceof PanelHttpError, true);
-      const panelError = error as PanelHttpError;
-      assert.equal(panelError.statusCode, 400);
-      assert.equal(panelError.code, "desktop_run_mode_not_supported");
-      return true;
-    }
-  );
-});
-
-test("panel run execution rejects underground ordinary agent mode below the route layer", async () => {
-  await assert.rejects(
-    () =>
-      runLegacyUndergroundForPanel(
-        runtimeWithCurrentConfig(modelConfig("current-profile", "current-model"), informationAccess(20)),
-        "underground",
-        "不要从内部把 Underground 入口跑成普通 agent",
-        "fake",
-        undefined,
-        "agent"
-      ),
-    (error) => {
-      assert.equal(error instanceof PanelHttpError, true);
-      const panelError = error as PanelHttpError;
-      assert.equal(panelError.statusCode, 400);
-      assert.equal(panelError.code, "underground_run_mode_not_supported");
       return true;
     }
   );

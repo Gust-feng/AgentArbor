@@ -36,7 +36,6 @@ import { canvasTraceId } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
 import { executeOrdinaryDesktopRunForPanel } from "./desktop-agent-execution.js";
 import { prepareOrdinaryAgentRunResources } from "./desktop-run-resources.js";
-import { runUndergroundForPanel } from "./underground-compat-execution.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import { runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
 import { assertRunModeForKind, RunModePolicyError } from "../run-runtime-core/run-mode-policy.js";
@@ -167,34 +166,6 @@ export async function failPanelRunJob(
   });
 }
 
-/** Explicit Legacy Underground route adapter; Ordinary runs never enter this path. */
-export async function runLegacyUndergroundForPanel(
-  runtime: PanelRuntime,
-  runKind: PanelRunKind,
-  goal: string,
-  aiMode: ModelRuntimeMode,
-  taskSoilInput: DesktopTaskSoilInput | undefined,
-  runMode: PanelRunMode = "agent",
-  options: PanelRunExecutionOptions = {}
-): Promise<PanelRunExecutionResult> {
-  assertSupportedPanelRunMode(runKind, runMode);
-  if (runKind === "desktop") {
-    throw new PanelHttpError(
-      400,
-      "desktop_sync_run_not_supported",
-      "Desktop 默认运行入口必须通过 BasicAgentRunExecutor.start 创建并冻结运行事实。"
-    );
-  }
-  return executePanelRunFromFrozenJob(runtime, {
-    runKind,
-    runMode,
-    goal,
-    aiMode,
-    taskSoilInput,
-    options,
-  });
-}
-
 type PanelRunFrozenExecutionInput = {
   readonly runKind: PanelRunKind;
   readonly runMode: PanelRunMode;
@@ -210,9 +181,14 @@ async function executePanelRunFromFrozenJob(
 ): Promise<PanelRunExecutionResult> {
   throwIfAborted(input.options.abortSignal);
   assertSupportedPanelRunMode(input.runKind, input.runMode);
-  return input.runKind === "desktop"
-    ? runDesktopForPanel(runtime, input.goal, input.aiMode, input.taskSoilInput, input.options)
-    : runUndergroundForPanel(runtime, input.goal, input.aiMode, input.options);
+  if (input.runKind !== "desktop" || input.runMode !== "agent") {
+    throw new PanelHttpError(
+      400,
+      "ordinary_run_mode_not_supported",
+      "默认普通 Agent 执行只接受 desktop/agent 运行事实。"
+    );
+  }
+  return runDesktopForPanel(runtime, input.goal, input.aiMode, input.taskSoilInput, input.options);
 }
 
 async function runDesktopForPanel(

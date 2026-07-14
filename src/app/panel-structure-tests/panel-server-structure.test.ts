@@ -39,7 +39,6 @@ test("panel server source keeps conversation restore and persistence split", asy
     desktopRunResources,
     desktopRunModelSettings,
     desktopAgentExecution,
-    undergroundCompatExecution,
     runStreamEvents,
     runStreamCopy,
     runStreamContracts,
@@ -83,7 +82,6 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-server", "desktop-run-resources.ts")),
     readAppSource(path.join("panel-server", "desktop-run-model-settings.ts")),
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
-    readAppSource(path.join("panel-server", "underground-compat-execution.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-stream-events.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-stream-copy.ts")),
     readAppSource(path.join("panel-read-model", "run", "panel-run-stream-contracts.ts")),
@@ -258,7 +256,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationContracts.includes("PanelConversationCurrentRunReadModel = PanelBasicAgentRunViewReadModel"), true);
   assert.equal(conversationContracts.includes("readonly result: PanelRunResultReadModel"), false);
   assert.equal(runRoutes.includes("export async function handlePanelRunRoute"), true);
-  assert.equal(runRoutes.includes("async function handleRunRequest"), true);
+  assert.equal(runRoutes.includes("async function handleRunRequest"), false);
   assert.equal(runRoutes.includes("async function handleStartRunRequest"), true);
   assert.equal(runRoutes.includes("async function handleGetRunRequest"), true);
   assert.equal(runRoutes.includes("function handleGetRunStreamRequest"), true);
@@ -278,15 +276,6 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(startRunRequestSource.includes("defaultAiMode"), false);
   assert.equal(startRunRequestSource.includes("const config = await runtime.configCenter.getModelProviderConfig()"), false);
   assert.equal(startRunRequestSource.includes("parseRunInput(body,"), false);
-  const runRequestSource = sourceBetween(
-    runRoutes,
-    "async function handleRunRequest",
-    "async function handleStartRunRequest"
-  );
-  assert.equal(runRequestSource.includes('if (runKind === "desktop")'), true);
-  assert.equal(runRequestSource.includes("desktop_sync_run_not_supported"), true);
-  assert.equal(runRequestSource.includes("runtime.runExecutor.start({"), false);
-  assert.equal(runRequestSource.includes("runtime.runExecutor.schedule"), false);
   assert.equal(requestParsers.includes("export function parseRunInput(raw: unknown): PanelRunInput"), true);
   assert.equal(requestParsers.includes("export function parseRunInput(raw: unknown,"), false);
   assert.equal(requestParsers.includes("defaultAiModeForRunKind"), false);
@@ -373,20 +362,11 @@ test("panel server source keeps conversation restore and persistence split", asy
   );
   assert.equal(executeBasicPanelRunSource.includes("executePanelRunFromFrozenJob(runtime,"), true);
   assert.equal(executeBasicPanelRunSource.includes("runLegacyUndergroundForPanel("), false);
-  assert.equal(runExecution.includes("BasicAgentRunExecutor.start"), true);
   assert.equal(runExecution.includes("function executePanelRunFromFrozenJob"), true);
   assert.equal(runExecution.includes("@deprecated Compatibility helper for legacy synchronous run routes"), false);
-  assert.equal(runExecution.includes("Explicit Legacy Underground route adapter"), true);
-  const legacyRunForPanelSource = sourceBetween(
-    runExecution,
-    "export async function runLegacyUndergroundForPanel",
-    "type PanelRunFrozenExecutionInput"
-  );
-  assert.equal(legacyRunForPanelSource.includes('if (runKind === "desktop")'), true);
-  assert.equal(legacyRunForPanelSource.includes("desktop_sync_run_not_supported"), true);
-  assert.equal(legacyRunForPanelSource.includes("runDesktopForPanel("), false);
+  assert.equal(runExecution.includes("Legacy Underground route adapter"), false);
   assert.equal(runExecution.includes("export async function failPanelRunJob"), true);
-  assert.equal(runExecution.includes("export async function runLegacyUndergroundForPanel"), true);
+  assert.equal(runExecution.includes("export async function runLegacyUndergroundForPanel"), false);
   assert.equal(runExecution.includes("export async function createPanelRunResponse"), true);
   assert.equal(runExecution.includes("function assertOrdinaryDesktopRunResponseFacts"), true);
   assert.equal(runExecution.includes("desktop_capability_snapshot_required"), true);
@@ -397,7 +377,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecution.includes('from "./agent-run-resources.js"'), false);
   assert.equal(runExecution.includes('from "./desktop-run-resources.js"'), true);
   assert.equal(runExecution.includes('from "./desktop-agent-execution.js"'), true);
-  assert.equal(runExecution.includes('from "./underground-compat-execution.js"'), true);
+  assert.equal(runExecution.includes('from "./underground-compat-execution.js"'), false);
   assert.equal(runExecution.includes('from "./run-execution-contracts.js"'), true);
   assert.equal(runExecution.includes('from "../panel-read-model/run/panel-model-failure-copy.js"'), true);
   assert.equal(runExecution.includes("function resolveExecutionAgentDefinition"), true);
@@ -488,16 +468,6 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopAgentExecution.includes('agent.status === "confirmation_needed"'), true);
   assert.equal(desktopAgentExecution.includes('status: agent.status === "paused" ? "blocked" : "completed"'), false);
   assert.equal(desktopAgentExecution.includes("没有形成最终结果"), true);
-  assert.equal(undergroundCompatExecution.includes("export async function runDeepDesktopForPanel"), true);
-  assert.equal(undergroundCompatExecution.includes("export async function runUndergroundForPanel"), true);
-  assert.equal(undergroundCompatExecution.includes("runUndergroundDirectionSessionWithIntelligence"), true);
-  assert.equal(undergroundCompatExecution.includes("createUndergroundDeepCanvas"), true);
-  const deepDesktopExecutionSource = sourceBetween(
-    undergroundCompatExecution,
-    "export async function runDeepDesktopForPanel",
-    "export async function runUndergroundForPanel"
-  );
-  assert.equal(deepDesktopExecutionSource.includes("informationAccess: resources.informationAccess"), true);
   assert.equal(runStreamEvents.includes('from "./panel-run-stream-copy.js"'), true);
   assert.equal(runStreamEvents.includes('from "./panel-run-read-model.js"'), false);
   assert.equal(runStreamEvents.includes("function agentNoteForEvent"), false);
@@ -575,25 +545,9 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecution.includes("function latestModelFailureMessage"), false);
   assert.equal(modelFailureVisibleCopy.includes("export function latestModelFailureTextForUser"), true);
   assert.equal(modelFailureVisibleCopy.includes("friendlyUserFacingModelFailureText"), true);
-  for (const privateRunRouteDetail of [
-    "async function handleRunRequest",
-    "async function handleStartRunRequest",
-    "async function handleGetRunRequest",
-    "function handleGetRunStreamRequest",
-    "async function createPersistedRunResponse",
-    "function requirePanelRunJob",
-  ]) {
+  for (const privateRunRouteDetail of ["async function createPersistedRunResponse"]) {
     assert.equal(requestHandler.includes(privateRunRouteDetail), false);
     assert.equal(runRoutes.includes(privateRunRouteDetail), true);
-  }
-  for (const compatibilityDetail of [
-    "async function runDeepDesktopForPanel",
-    "async function runUndergroundForPanel",
-    "runUndergroundDirectionSessionWithIntelligence",
-    "createUndergroundDeepCanvas",
-  ]) {
-    assert.equal(runExecution.includes(compatibilityDetail), false);
-    assert.equal(undergroundCompatExecution.includes(compatibilityDetail), true);
   }
   for (const movedDesktopResourceDetail of [
     "function toolStatesFromCapabilitySnapshot",

@@ -15,7 +15,6 @@
     "test:release-gate": "node --test scripts/windows-release-validation.test.mjs",
     "test": "pnpm build && node scripts/run-node-tests.mjs && pnpm test:release-gate",
     "demo": "pnpm build && node dist/app/demo.js",
-    "demo:underground": "pnpm build && node dist/app/underground-demo.js",
     "smoke:real-ai": "pnpm build && node dist/app/real-ai-smoke.js",
     "panel": "pnpm build && node dist/app/panel.js",
     "panel:dev": "node scripts/panel-dev.mjs",

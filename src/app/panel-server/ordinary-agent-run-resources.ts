@@ -184,6 +184,9 @@ export function createOrdinaryAgentRunResourceAcquirer(
           loop,
           resolvedMessages,
           tools,
+          ...(toolBoundary.capabilityResolution === undefined
+            ? {}
+            : { capabilityResolution: toolBoundary.capabilityResolution }),
           ...(agentTools.length === 0 ? {} : { agentTools }),
           release,
         };

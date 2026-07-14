@@ -222,21 +222,22 @@ export function createOrdinaryAgentFeature(input: {
         canonicalMessages: outcome.canonicalMessages,
         toolCalls: outcome.toolCalls,
         usage: outcome.usage,
+        capabilityResolution: outcome.capabilityResolution,
       });
       if (state.status.kind === "awaiting_approval") continuations.set(runId, outcome.continuation);
       return;
     }
     if (outcome.status === "completed") {
-      await mutate(runId, { type: "complete", answer: outcome.answer, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage });
+      await mutate(runId, { type: "complete", answer: outcome.answer, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, capabilityResolution: outcome.capabilityResolution });
       await activateSuccessor(runId);
       return;
     }
     if (outcome.status === "cancelled") {
-      await mutate(runId, { type: "cancel", reason: outcome.reason, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage });
+      await mutate(runId, { type: "cancel", reason: outcome.reason, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, capabilityResolution: outcome.capabilityResolution });
       await activateSuccessor(runId);
       return;
     }
-    await mutate(runId, { type: "fail", error: outcome.error, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage });
+    await mutate(runId, { type: "fail", error: outcome.error, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, capabilityResolution: outcome.capabilityResolution });
     await activateSuccessor(runId);
   }
 

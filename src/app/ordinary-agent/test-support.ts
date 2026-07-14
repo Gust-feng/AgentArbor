@@ -1,3 +1,4 @@
+import type { RunCapabilityResolution } from "../../domain/config/index.js";
 import type { OrdinaryRunBirth, OrdinaryRunTurn } from "./contracts.js";
 
 export function ordinaryRunBirth(): OrdinaryRunBirth {
@@ -71,5 +72,35 @@ export function ordinaryRunTurn(runId: string): OrdinaryRunTurn {
     ordinal: 1,
     userTurnId: `${runId}-user-turn`,
     assistantTurnId: `${runId}-assistant-turn`,
+  };
+}
+
+export function ordinaryCapabilityResolution(): RunCapabilityResolution {
+  const birth = ordinaryRunBirth();
+  return {
+    resolutionId: "resolution-1",
+    snapshotId: birth.capabilitySnapshot.snapshotId,
+    runMode: "agent",
+    agentId: birth.agentDefinitionRef.agentId,
+    agentDisplayName: birth.agentDefinitionRef.agentDisplayName,
+    toolVisibilityProfileId: birth.agentDefinitionRef.toolVisibilityProfileId,
+    capabilityPlan: {
+      protocolToolCallCapabilities: {
+        protocolKind: birth.config.protocolKind,
+        canSendToolDefinitions: true,
+        canReceiveToolCalls: true,
+        canRoundTripToolResults: true,
+      },
+      modelCapabilities: birth.capabilitySnapshot.modelCapabilities,
+      canExposeModelTools: true,
+      allowedTools: [],
+      warnings: [],
+    },
+    allowedTools: [],
+    toolExposures: [],
+    enabledSkills: [],
+    mcpDrafts: [],
+    warnings: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
   };
 }

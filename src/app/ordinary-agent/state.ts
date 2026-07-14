@@ -1,4 +1,5 @@
 import { persistedModelProtocolExtensions, type ModelMessage, type ModelUsage } from "../../domain/intelligence/index.js";
+import type { RunCapabilityResolution } from "../../domain/config/index.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
 import type {
   OrdinaryRunBirth,
@@ -17,6 +18,7 @@ export type OrdinaryRunTransition =
       readonly canonicalMessages: readonly ModelMessage[];
       readonly toolCalls: readonly ToolCallResult[];
       readonly usage: ModelUsage;
+      readonly capabilityResolution?: RunCapabilityResolution;
     }
   | { readonly type: "approval_decided"; readonly decision: import("../../domain/confirmation/index.js").ConfirmationDecision }
   | {
@@ -25,6 +27,7 @@ export type OrdinaryRunTransition =
       readonly canonicalMessages: readonly ModelMessage[];
       readonly toolCalls: readonly ToolCallResult[];
       readonly usage: ModelUsage;
+      readonly capabilityResolution?: RunCapabilityResolution;
     }
   | {
       readonly type: "fail";
@@ -32,6 +35,7 @@ export type OrdinaryRunTransition =
       readonly canonicalMessages?: readonly ModelMessage[];
       readonly toolCalls?: readonly ToolCallResult[];
       readonly usage?: ModelUsage;
+      readonly capabilityResolution?: RunCapabilityResolution;
     }
   | {
       readonly type: "cancel";
@@ -39,6 +43,7 @@ export type OrdinaryRunTransition =
       readonly canonicalMessages?: readonly ModelMessage[];
       readonly toolCalls?: readonly ToolCallResult[];
       readonly usage?: ModelUsage;
+      readonly capabilityResolution?: RunCapabilityResolution;
     }
   | {
       readonly type: "block";
@@ -103,6 +108,7 @@ export function transitionOrdinaryRun(input: {
     canonicalMessages: messagesAfter(input.state, input.transition),
     toolCalls: toolCallsAfter(input.state, input.transition),
     usage: usageAfter(input.state, input.transition),
+    capabilityResolution: capabilityResolutionAfter(input.state, input.transition),
     timeline: [...input.state.timeline, event],
     timestamps: {
       ...input.state.timestamps,
@@ -203,6 +209,15 @@ function usageAfter(state: OrdinaryRunState, transition: OrdinaryRunTransition):
   return "usage" in transition && transition.usage !== undefined
     ? cloneJson(transition.usage)
     : state.usage;
+}
+
+function capabilityResolutionAfter(
+  state: OrdinaryRunState,
+  transition: OrdinaryRunTransition,
+): RunCapabilityResolution | undefined {
+  return "capabilityResolution" in transition && transition.capabilityResolution !== undefined
+    ? cloneJson(transition.capabilityResolution)
+    : state.capabilityResolution;
 }
 
 function assertStatus(status: OrdinaryRunStatus, allowed: readonly OrdinaryRunStatus["kind"][], action: string): void {

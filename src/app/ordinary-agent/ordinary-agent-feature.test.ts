@@ -13,7 +13,7 @@ import {
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
-import { ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
+import { ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 
 test("feature owns completed and failed Ordinary run outcomes", async (t) => {
   const completedFixture = await fixture(t, executionFor("completed"));
@@ -21,6 +21,7 @@ test("feature owns completed and failed Ordinary run outcomes", async (t) => {
   const completed = await waitForStatus(completedFixture.feature, "completed-run", "completed");
   assert.deepEqual(completed.status, { kind: "completed", answer: "final answer" });
   assert.equal(completed.canonicalMessages.at(-1)?.content, "final answer");
+  assert.deepEqual(completed.capabilityResolution, ordinaryCapabilityResolution());
 
   const failedFixture = await fixture(t, executionFor("failed"));
   await failedFixture.feature.commands.start(startInput("failed-run"));
@@ -622,6 +623,7 @@ function completedOutcome(usage = { inputTokens: 8, outputTokens: 2, totalTokens
     canonicalMessages: [{ role: "user", content: "hello" }, { role: "assistant", content: "final answer" }],
     toolCalls: [],
     usage,
+    capabilityResolution: ordinaryCapabilityResolution(),
   };
 }
 

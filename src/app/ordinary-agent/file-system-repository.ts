@@ -124,6 +124,58 @@ const statusSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cancelled"), reason: z.string() }).strict(),
   z.object({ kind: z.literal("blocked"), reason: z.object({ code: z.string().min(1), message: z.string() }).strict(), continueBy: z.enum(["new_turn", "retry"]) }).strict(),
 ]);
+const capabilityResolutionSchema = z.object({
+  resolutionId: z.string().min(1),
+  snapshotId: z.string().min(1),
+  runMode: z.literal("agent"),
+  agentId: z.string().min(1),
+  agentDisplayName: z.string(),
+  toolVisibilityProfileId: z.string().min(1),
+  capabilityPlan: z.object({
+    protocolToolCallCapabilities: z.object({
+      protocolKind: z.enum(["openai_responses", "openai_compatible_chat_completions", "anthropic_messages", "gemini_generate_content"]),
+      canSendToolDefinitions: z.boolean(),
+      canReceiveToolCalls: z.boolean(),
+      canRoundTripToolResults: z.boolean(),
+    }).strict(),
+    modelCapabilities: capabilitySnapshotSchema.shape.modelCapabilities,
+    canExposeModelTools: z.boolean(),
+    tools: z.object({ canExposeToModel: z.boolean(), allowedTools: z.array(z.string()) }).strict().optional(),
+    fileOperations: z.object({
+      canReadWorkspace: z.boolean(), canWriteWorkspace: z.boolean(), canDeleteWorkspace: z.boolean(), canExecuteCommands: z.boolean(),
+    }).strict().optional(),
+    uiDisplay: z.object({
+      canShowStreamingOutput: z.boolean(), canShowToolCards: z.boolean(), visibleToolNames: z.array(z.string()),
+    }).strict().optional(),
+    allowedTools: z.array(z.string()),
+    warnings: z.array(z.string()),
+  }).strict(),
+  allowedTools: z.array(z.string()),
+  toolExposures: z.array(z.object({
+    name: z.string().min(1), displayName: z.string(), enabled: z.boolean(), modelVisible: z.boolean(),
+    scopes: z.array(z.enum(["desktop-basic", "underground", "research", "workspace", "mcp"])),
+    availability: z.enum(["available", "unavailable"]), riskLevel: z.enum(["low", "medium", "high"]),
+    operationType: z.enum(["read-only", "read-write", "execute", "external-submit"]),
+    fileOperation: z.enum(["create", "write", "append", "edit", "delete"]).optional(),
+    requiresConfirmation: z.boolean(), confirmationPolicy: z.enum(["prompt", "full_access"]).optional(),
+    reasonCode: z.enum([
+      "model_tools_unsupported", "tool_disabled", "tool_unavailable", "not_in_run_scope", "permission_denied",
+      "profile_hidden", "available_full_access", "available_requires_confirmation", "available",
+      "no_executable_tool_runner", "executable_tool_missing", "tool_contract_mismatch",
+      "selected_skill_resources_available", "selected_skill_resources_unavailable", "no_enabled_sub_agents",
+    ]).optional(),
+    reason: z.string(),
+  }).strict()),
+  enabledSkills: z.array(z.object({
+    id: z.string().min(1), name: z.string(), description: z.string(), triggers: z.array(z.string()),
+  }).passthrough()),
+  mcpDrafts: z.array(z.object({
+    draftId: z.string().min(1), source: z.literal("mcp"), label: z.string(),
+    availability: z.enum(["configured", "disabled", "unavailable"]), enabled: z.boolean(), reason: z.string(),
+  }).strict()),
+  warnings: z.array(z.string()),
+  createdAt: z.string().min(1),
+}).strict();
 const eventBase = {
   eventId: z.string().min(1), runId: z.string().min(1), sequence: z.number().int().positive(), recordedAt: z.string().min(1),
 };
@@ -171,6 +223,7 @@ const rawStateSchema = z.object({
   canonicalMessages: z.array(modelMessageSchema),
   toolCalls: z.array(toolCallSchema),
   usage: usageSchema,
+  capabilityResolution: capabilityResolutionSchema.optional(),
   timeline: z.array(eventSchema).min(1),
   timestamps: z.object({ createdAt: z.string().min(1), updatedAt: z.string().min(1), terminalAt: z.string().optional() }).strict(),
 }).strict().superRefine((state, context) => {

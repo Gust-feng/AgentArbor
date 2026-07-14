@@ -15,7 +15,7 @@ import {
   type AcquireOrdinaryAgentLoopRunResourcesInput,
   type OrdinaryAgentLoopRunResources,
 } from "./agent-loop-execution.js";
-import { ordinaryRunBirth } from "./test-support.js";
+import { ordinaryCapabilityResolution, ordinaryRunBirth } from "./test-support.js";
 
 test("completed execution maps canonical facts and releases its run resources once", async () => {
   let received: AgentLoopInput | undefined;
@@ -111,17 +111,19 @@ test("approval keeps the same lease through recursive decisions and releases onl
       }, { inputTokens: 3, totalTokens: 3 });
     },
     async release() { return undefined; },
-  });
+  }, { capabilityResolution: ordinaryCapabilityResolution() });
 
   const first = await fixture.execution.execute(executionInput());
   assert.equal(first.status, "approval_required");
   assert.deepEqual(first.usage, { inputTokens: 3, totalTokens: 3 });
+  assert.deepEqual(first.capabilityResolution, ordinaryCapabilityResolution());
   assert.equal(fixture.releaseCount(), 0);
   if (first.status !== "approval_required") return;
 
   const second = await first.continuation.decide({ decision: decision(firstRequest), abortSignal: new AbortController().signal });
   assert.equal(second.status, "approval_required");
   assert.deepEqual(second.usage, { inputTokens: 6, totalTokens: 6 });
+  assert.deepEqual(second.capabilityResolution, ordinaryCapabilityResolution());
   assert.equal(fixture.releaseCount(), 0);
   await assert.rejects(
     first.continuation.decide({ decision: decision(firstRequest), abortSignal: new AbortController().signal }),
@@ -133,6 +135,7 @@ test("approval keeps the same lease through recursive decisions and releases onl
   const terminal = await second.continuation.decide({ decision: decision(secondRequest), abortSignal: new AbortController().signal });
   assert.equal(terminal.status, "completed");
   assert.deepEqual(terminal.usage, { inputTokens: 9, outputTokens: 2, totalTokens: 11 });
+  assert.deepEqual(terminal.capabilityResolution, ordinaryCapabilityResolution());
   assert.equal(firstDecisions, 1);
   assert.equal(secondDecisions, 1);
   assert.equal(fixture.releaseCount(), 1);
@@ -300,6 +303,7 @@ function executionFixture(
   options: {
     readonly resolvedMessages?: readonly ModelMessage[];
     readonly agentTools?: readonly AgentLoopAgentTool[];
+    readonly capabilityResolution?: OrdinaryAgentLoopRunResources["capabilityResolution"];
     readonly onAcquire?: (input: AcquireOrdinaryAgentLoopRunResourcesInput) => void;
   } = {},
 ) {
@@ -309,6 +313,7 @@ function executionFixture(
     resolvedMessages: options.resolvedMessages ?? executionInput().messages,
     tools: toolBoundary(),
     ...(options.agentTools === undefined ? {} : { agentTools: options.agentTools }),
+    ...(options.capabilityResolution === undefined ? {} : { capabilityResolution: options.capabilityResolution }),
     async release() { releases += 1; },
   };
   return {

@@ -3,6 +3,7 @@ import type {
   BasicAgentCapabilitySnapshot,
   ModelRunReasoningEffort,
   RunAgentDefinitionRef,
+  RunCapabilityResolution,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
@@ -147,6 +148,8 @@ export type OrdinaryRunState = {
   readonly toolCalls: readonly ToolCallResult[];
   /** Cumulative provider usage for this run, including every live approval continuation segment. */
   readonly usage: ModelUsage;
+  /** Effective capability boundary resolved from the frozen birth snapshot and executable Host tools. */
+  readonly capabilityResolution?: RunCapabilityResolution;
   readonly timeline: readonly OrdinaryRunEvent[];
   readonly timestamps: {
     readonly createdAt: string;
@@ -184,6 +187,7 @@ export type OrdinaryExecutionFacts = {
   readonly toolCalls: readonly ToolCallResult[];
   /** Cumulative usage for the whole live execution/continuation chain. */
   readonly usage: ModelUsage;
+  readonly capabilityResolution?: RunCapabilityResolution;
 };
 
 export type OrdinaryExecutionOutcome =

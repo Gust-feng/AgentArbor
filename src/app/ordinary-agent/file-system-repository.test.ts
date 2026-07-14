@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { createFileSystemOrdinaryRunRepository, OrdinaryRunSnapshotIncompatibleError } from "./file-system-repository.js";
 import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js";
-import { ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
+import { ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 
 test("file repository atomically replaces the canonical snapshot and advances revisions", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-repository-"));
@@ -90,6 +90,42 @@ test("file repository validates cumulative usage before committing an Ordinary s
   await assert.rejects(repository.save(invalid, 0), (error: unknown) =>
     error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
   assert.equal(await repository.get("invalid-usage-run"), undefined);
+});
+
+test("file repository persists the effective capability resolution and rejects malformed facts", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-capability-resolution-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("capability-run", "2026-01-01T00:00:00.000Z");
+  const created = await repository.save(initial, 0);
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const started = await repository.save(running, created.revision);
+  const resolution = ordinaryCapabilityResolution();
+  const completed = transitionOrdinaryRun({
+    state: running,
+    transition: {
+      type: "complete",
+      answer: "done",
+      canonicalMessages: [...running.canonicalMessages, { role: "assistant", content: "done" }],
+      toolCalls: [],
+      usage: { inputTokens: 4, outputTokens: 1, totalTokens: 5 },
+      capabilityResolution: resolution,
+    },
+    recordedAt: "2026-01-01T00:00:02.000Z",
+    eventId: "event-3",
+  });
+
+  await repository.save(completed, started.revision);
+  assert.deepEqual((await repository.get("capability-run"))?.state.capabilityResolution, resolution);
+
+  const malformed = { ...state("bad-capability-run", "2026-01-01T00:00:00.000Z"), capabilityResolution: { resolutionId: "partial" } };
+  await assert.rejects(repository.save(malformed as never, 0), (error: unknown) =>
+    error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
 });
 
 test("a broken disposable manifest cannot invalidate a committed snapshot", async (t) => {

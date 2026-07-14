@@ -106,6 +106,9 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   assert.equal(acquired.tools.permission.allowedTools.includes("read_skill_resource"), true);
   assert.equal(acquired.tools.context.confirmationPolicy, "prompt");
   assert.equal(acquired.tools.permission.confirmationPolicy, "prompt");
+  assert.equal(acquired.capabilityResolution?.snapshotId, snapshot.snapshotId);
+  assert.deepEqual(acquired.capabilityResolution?.allowedTools, acquired.tools.permission.allowedTools);
+  assert.equal(acquired.capabilityResolution?.runMode, "agent");
   assert.equal(LEGACY_SUB_AGENT_TOOLS.some((name) => acquired.tools.gateway.has(name)), false);
   assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["call_sub_agent", "spawn_sub_agent"]);
 

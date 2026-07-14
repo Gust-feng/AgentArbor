@@ -1,4 +1,5 @@
 import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
+import type { RunCapabilityResolution } from "../../domain/config/index.js";
 import type {
   AgentLoop,
   AgentLoopAgentTool,
@@ -20,6 +21,7 @@ export type OrdinaryAgentLoopRunResources = {
   readonly resolvedMessages: readonly ModelMessage[];
   readonly tools: AgentLoopToolBoundary;
   readonly agentTools?: readonly AgentLoopAgentTool[];
+  readonly capabilityResolution?: RunCapabilityResolution;
   /** Releases every run-scoped resource created by the acquirer, including the loop. */
   release(): Promise<void>;
 };
@@ -49,7 +51,7 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           abortSignal: executionInput.abortSignal,
           onTextDelta: executionInput.onTextDelta,
         });
-        return await mapAgentLoopResult(result, lease, input.onReleaseError);
+        return await mapAgentLoopResult(result, lease, input.onReleaseError, {}, resources.capabilityResolution);
       } catch (error) {
         await releaseWithoutReplacingOutcome(lease, input.onReleaseError);
         throw error;
@@ -77,12 +79,14 @@ async function mapAgentLoopResult(
   lease: ResourceLease,
   onReleaseError?: (error: unknown) => void,
   previousUsage: ModelUsage = {},
+  capabilityResolution?: RunCapabilityResolution,
 ): Promise<OrdinaryExecutionOutcome> {
   const usage = latestCumulativeUsage(previousUsage, result.usage);
   const facts = {
     canonicalMessages: result.messages,
     toolCalls: result.toolResults,
     usage,
+    ...(capabilityResolution === undefined ? {} : { capabilityResolution }),
   } as const;
 
   if (result.status === "approval_required") {
@@ -90,7 +94,7 @@ async function mapAgentLoopResult(
       ...facts,
       status: "approval_required",
       confirmationRequests: result.confirmationRequests,
-      continuation: mapContinuation(result.continuation, lease, onReleaseError, usage),
+      continuation: mapContinuation(result.continuation, lease, onReleaseError, usage, capabilityResolution),
     };
   }
 
@@ -113,6 +117,7 @@ function mapContinuation(
   lease: ResourceLease,
   onReleaseError?: (error: unknown) => void,
   previousUsage: ModelUsage = {},
+  capabilityResolution?: RunCapabilityResolution,
 ): OrdinaryExecutionContinuation {
   let consumed = false;
   return {
@@ -121,7 +126,13 @@ function mapContinuation(
       if (consumed) throw new Error("Ordinary approval continuation has already been decided");
       consumed = true;
       try {
-        return await mapAgentLoopResult(await continuation.decide(input), lease, onReleaseError, previousUsage);
+        return await mapAgentLoopResult(
+          await continuation.decide(input),
+          lease,
+          onReleaseError,
+          previousUsage,
+          capabilityResolution,
+        );
       } catch (error) {
         await releaseWithoutReplacingOutcome(lease, onReleaseError);
         throw error;

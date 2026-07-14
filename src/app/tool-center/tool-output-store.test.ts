@@ -295,7 +295,7 @@ test("read_tool_output shrinks escaped windows for long provenance without skipp
   assert.equal(segments.join(""), content);
 });
 
-test("independent ToolCenters share the configured store and rebuild large results without rerunning producers", async () => {
+test("independent ToolCenters share the configured store and rebuild large read-only results without rerunning producers", async () => {
   const store = deterministicStore();
   const producerRegistry = createAgentToolRegistry({
     toolOutputStore: store,

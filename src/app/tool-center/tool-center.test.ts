@@ -5,7 +5,7 @@ import { toolModelAttachmentsFromOutput, withToolModelAttachments } from "../../
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { createReadToolOutputTool } from "./adapters/tool-output-read-tool.js";
 import { ToolCenter } from "./tool-center.js";
-import { InMemoryToolOutputStore } from "./tool-output-store.js";
+import { InMemoryToolOutputStore, type ToolOutputStore } from "./tool-output-store.js";
 
 test("ToolCenter registers, lists, executes, and unregisters tools", async () => {
   const center = new ToolCenter();
@@ -383,6 +383,41 @@ test("ToolCenter preserves complete errors from explicit executor results", asyn
   assert.equal(result.status, "failed");
   assert.equal(result.error, error);
   assert.equal(result.errorFacts?.detail, detail);
+});
+
+test("ToolCenter retains oversized successful read-only output without rerunning the producer", async () => {
+  const backingStore = new InMemoryToolOutputStore();
+  let retainCalls = 0;
+  const outputStore: ToolOutputStore = {
+    retain: async (input) => {
+      retainCalls += 1;
+      return backingStore.retain(input);
+    },
+    read: (ref, window) => backingStore.read(ref, window),
+    release: (ref) => backingStore.release(ref),
+    releaseOwner: (ownerId) => backingStore.releaseOwner(ownerId),
+    clear: () => backingStore.clear(),
+  };
+  const center = new ToolCenter({ outputStore, maxInlineOutputChars: 128 });
+  center.register(createReadToolOutputTool(outputStore));
+  center.register(testTool(
+    "oversized_read",
+    async () => ({ content: "x".repeat(2_000) }),
+    "read-only",
+  ));
+
+  const result = await center.execute(
+    { callId: "call-oversized-read", toolName: "oversized_read", input: { path: "large.txt" } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("oversized_read", "read_tool_output"),
+  );
+  const output = result.output as Readonly<Record<string, unknown>>;
+
+  assert.equal(retainCalls, 1);
+  assert.equal(result.status, "completed");
+  assert.equal(typeof output.contentPreview, "string");
+  assert.equal(typeof output.contentRef, "string");
+  assert.equal(typeof output.continuation, "object");
 });
 
 test("ToolCenter retains oversized explicit failure evidence without losing original facts", async () => {

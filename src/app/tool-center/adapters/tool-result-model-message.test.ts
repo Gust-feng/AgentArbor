@@ -52,7 +52,7 @@ test("real read_file results from 110k through 128k reach the model once and in 
   }
 });
 
-test("escaped read_file content stays model-visible through explicit character continuations", async () => {
+test("escaped read_file content stays model-visible through repeated character-range reads", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-read-model-message-escaped-"));
   try {
     const center = new ToolCenter();
@@ -85,9 +85,10 @@ test("escaped read_file content stays model-visible through explicit character c
       assert.equal(message.content.length < 220_000, true);
       assert.equal(asRecord(payload.body?.value).content, returned);
       reconstructed += returned.slice(0, rawChars);
-      nextInput = output.continuation === undefined
-        ? undefined
-        : asRecord(asRecord(output.continuation).nextInput) as ToolCallResult["input"];
+      const nextStartChar = output.nextStartChar;
+      nextInput = typeof nextStartChar === "number"
+        ? { path: filename, startChar: nextStartChar }
+        : undefined;
     }
 
     assert.equal(reconstructed, content);

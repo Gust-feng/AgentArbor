@@ -265,14 +265,21 @@ test("grep_files exposes skipped facts only when the search engine can observe t
   }
 });
 
-test("ToolCenter exposes executable continuation inputs for truncated local list and grep results", async () => {
+test("ToolCenter exposes plain next ranges for bounded local read, list, and grep results", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-continuation-"));
   try {
     for (let index = 1; index <= 5; index += 1) {
       await writeFile(path.join(root, `note-${index}.txt`), `needle ${index}\n`, "utf8");
     }
     const center = new ToolCenter();
-    center.register(createLocalReadFileTool(root));
+    const readFileTool = createLocalReadFileTool(root);
+    const readFileGuidance = [
+      ...(readFileTool.definition.modelContract?.usageNotes ?? []),
+      ...(readFileTool.definition.modelContract?.outputNotes ?? []),
+    ].join("\n");
+    assert.match(readFileGuidance, /pass nextStartChar as the startChar input/);
+    assert.match(readFileGuidance, /nextStartLine as the startLine input/);
+    center.register(readFileTool);
     center.register(createLocalListDirTool(root));
     center.register(createLocalGrepFilesTool(root, { ripgrepSearch: false }));
 
@@ -282,12 +289,10 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
     const readOutput = asDirectToolFacts(read.output);
-    const readNextInput = asRecord(asRecord(readOutput.continuation).nextInput);
-
     assert.equal(read.status, "completed");
     assert.equal(readOutput.truncated, true);
-    assert.equal(readNextInput.path, "note-1.txt");
-    assert.equal(readNextInput.startLine, 2);
+    assert.equal(readOutput.nextStartLine, 2);
+    assert.equal(readOutput.continuation, undefined);
 
     await writeFile(path.join(root, "long.txt"), "abcdefghij", "utf8");
     const charRead = await center.execute(
@@ -296,14 +301,11 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
     const charReadOutput = asDirectToolFacts(charRead.output);
-    const charReadNextInput = asRecord(asRecord(charReadOutput.continuation).nextInput);
-
     assert.equal(charRead.status, "completed");
     assert.equal(charReadOutput.truncated, true);
-    assert.equal(charReadNextInput.path, "long.txt");
-    assert.equal(charReadNextInput.maxLength, 5);
-    assert.equal(charReadNextInput.startChar, 4);
-    assert.equal("startLine" in charReadNextInput, false);
+    assert.equal(charReadOutput.nextStartChar, 4);
+    assert.equal(charReadOutput.nextStartLine, undefined);
+    assert.equal(charReadOutput.continuation, undefined);
 
     const listed = await center.execute(
       { callId: "call-list-continuation", toolName: "list_dir", input: { path: ".", limit: 2 } },
@@ -311,14 +313,10 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
     const listOutput = asDirectToolFacts(listed.output);
-    const listContinuation = asRecord(listOutput.continuation);
-    const listNextInput = asRecord(listContinuation.nextInput);
-
     assert.equal(listed.status, "completed");
     assert.equal(listOutput.truncated, true);
-    assert.equal(listNextInput.path, ".");
-    assert.equal(listNextInput.limit, 2);
-    assert.equal(listNextInput.offset, 2);
+    assert.equal(listOutput.nextOffset, 2);
+    assert.equal(listOutput.continuation, undefined);
 
     const grep = await center.execute(
       { callId: "call-grep-continuation", toolName: "grep_files", input: { path: ".", query: "needle", limit: 2 } },
@@ -326,15 +324,91 @@ test("ToolCenter exposes executable continuation inputs for truncated local list
       { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
     );
     const grepOutput = asDirectToolFacts(grep.output);
-    const grepContinuation = asRecord(grepOutput.continuation);
-    const grepNextInput = asRecord(grepContinuation.nextInput);
-
     assert.equal(grep.status, "completed");
     assert.equal(grepOutput.truncated, true);
-    assert.equal(grepNextInput.query, "needle");
-    assert.equal(grepNextInput.path, ".");
-    assert.equal(grepNextInput.limit, 2);
-    assert.equal(grepNextInput.offset, 2);
+    assert.equal(grepOutput.nextOffset, 2);
+    assert.equal(grepOutput.continuation, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read, list, and JS grep report cancellation instead of completed output", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-cancellation-"));
+  try {
+    await writeFile(path.join(root, "note.txt"), "needle\n", "utf8");
+    const fixtures = [
+      {
+        tool: createLocalReadFileTool(root),
+        input: { path: "note.txt" },
+      },
+      {
+        tool: createLocalListDirTool(root),
+        input: { path: "." },
+      },
+      {
+        tool: createLocalGrepFilesTool(root, { ripgrepSearch: false }),
+        input: { path: ".", query: "needle" },
+      },
+    ] as const;
+
+    for (const [index, fixture] of fixtures.entries()) {
+      const center = new ToolCenter();
+      center.register(fixture.tool);
+      const controller = new AbortController();
+      const resultPromise = center.execute(
+        {
+          callId: `call-cancel-local-read-${index}`,
+          toolName: fixture.tool.definition.name,
+          input: fixture.input,
+        },
+        { ...context, abortSignal: controller.signal },
+        { callerAgentId: context.callerAgentId, allowedTools: [fixture.tool.definition.name] },
+      );
+
+      controller.abort();
+      const result = await resultPromise;
+      assert.equal(result.status, "cancelled", fixture.tool.definition.name);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("grep_files forwards AbortSignal to the search runner and preserves cancellation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-rg-cancellation-"));
+  try {
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const controller = new AbortController();
+    const grep = createLocalGrepFilesTool(root, {
+      ripgrepSearch: async (request) => {
+        assert.equal(request.abortSignal, controller.signal);
+        markStarted?.();
+        return await new Promise<never>((_resolve, reject) => {
+          const rejectAbort = () => reject(request.abortSignal?.reason);
+          if (request.abortSignal?.aborted === true) {
+            rejectAbort();
+            return;
+          }
+          request.abortSignal?.addEventListener("abort", rejectAbort, { once: true });
+        });
+      },
+    });
+    const center = new ToolCenter();
+    center.register(grep);
+    const resultPromise = center.execute(
+      { callId: "call-cancel-rg", toolName: "grep_files", input: { path: ".", query: "needle" } },
+      { ...context, abortSignal: controller.signal },
+      { callerAgentId: context.callerAgentId, allowedTools: ["grep_files"] },
+    );
+
+    await started;
+    controller.abort();
+    const result = await resultPromise;
+    assert.equal(result.status, "cancelled");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

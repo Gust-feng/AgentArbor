@@ -12,7 +12,9 @@ export type LocalWorkspaceToolOptions = {
 
 export function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {
-    throw new Error("Tool execution cancelled.");
+    const error = new Error("Tool execution cancelled.");
+    error.name = "AbortError";
+    throw error;
   }
 }
 

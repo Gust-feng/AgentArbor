@@ -136,6 +136,8 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
     assert.equal(rangedReadFacts.endLine, 2);
     assert.equal(rangedReadFacts.hasMoreBefore, true);
     assert.equal(rangedReadFacts.hasMoreAfter, true);
+    assert.equal(rangedReadFacts.nextStartLine, 3);
+    assert.equal(rangedReadFacts.continuation, undefined);
 
     const emptyRangeRead = await readFile.execute({ path: "src/note.txt", startLine: 20, endLine: 21 }, context);
     const emptyRangeFacts = asDirectToolFacts(emptyRangeRead);
@@ -155,7 +157,7 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
   }
 });
 
-test("local list_dir and grep_files return executable continuation offsets when truncated", async () => {
+test("local list_dir and grep_files return plain next offsets without continuation objects", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-continuation-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -169,27 +171,31 @@ test("local list_dir and grep_files return executable continuation offsets when 
     const firstListResult = firstList;
     assert.equal(firstList.truncated, true);
     assert.equal(firstListResult.hasMoreAfter, true);
-    assert.equal(asRecord(asRecord(firstList.continuation).nextInput).offset, 2);
+    assert.equal(firstList.nextOffset, 2);
+    assert.equal(firstList.continuation, undefined);
     assert.equal(firstListResult.entriesReturned, 2);
 
     const secondList = asDirectToolFacts(await listDir.execute({ path: "src", limit: 2, offset: 2 }, context));
     const secondListResult = secondList;
     assert.equal(secondListResult.offset, 2);
     assert.equal(secondListResult.entriesReturned, 2);
-    assert.equal(asRecord(asRecord(secondList.continuation).nextInput).offset, 4);
+    assert.equal(secondList.nextOffset, 4);
+    assert.equal(secondList.continuation, undefined);
 
     const firstGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 2 }, context));
     const firstGrepResult = firstGrep;
     assert.equal(firstGrep.truncated, true);
     assert.equal(firstGrepResult.hasMoreAfter, true);
-    assert.equal(asRecord(asRecord(firstGrep.continuation).nextInput).offset, 2);
+    assert.equal(firstGrep.nextOffset, 2);
+    assert.equal(firstGrep.continuation, undefined);
     assert.equal(firstGrepResult.matchesReturned, 2);
 
     const secondGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 2, offset: 2 }, context));
     const secondGrepResult = secondGrep;
     assert.equal(secondGrepResult.offset, 2);
     assert.equal(secondGrepResult.matchesReturned, 2);
-    assert.equal(asRecord(asRecord(secondGrep.continuation).nextInput).offset, 4);
+    assert.equal(secondGrep.nextOffset, 4);
+    assert.equal(secondGrep.continuation, undefined);
 
     const exactGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 5 }, context));
     const exactGrepResult = exactGrep;
@@ -233,7 +239,7 @@ test("local grep_files caps oversized offsets before collecting matches", async 
   }
 });
 
-test("local grep_files fails honestly when matches exceed the continuation offset ceiling", async () => {
+test("local grep_files fails honestly when matches exceed the supported offset ceiling", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-offset-boundary-"));
   try {
     const observedCollectLimits: number[] = [];
@@ -255,7 +261,7 @@ test("local grep_files fails honestly when matches exceed the continuation offse
 
     assert.equal(executed.kind, "tool_call_result");
     assert.equal(result.status, "failed");
-    assert.equal(asRecord(result.errorFacts).code, "grep_files_continuation_limit_reached");
+    assert.equal(asRecord(result.errorFacts).code, "grep_files_offset_limit_reached");
     assert.equal(asRecord(result.errorFacts).retryable, false);
     assert.equal(output.truncated, undefined);
     assert.equal(output.continuation, undefined);
@@ -272,7 +278,7 @@ test("local grep_files fails honestly when matches exceed the continuation offse
   }
 });
 
-test("local read_file returns executable character continuation for maxLength windows", async () => {
+test("local read_file returns a plain next character offset for maxLength windows", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-char-continuation-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -286,19 +292,21 @@ test("local read_file returns executable character continuation for maxLength wi
     assert.equal(firstResult.startChar, 0);
     assert.equal(firstResult.textChars, 4);
     assert.equal(firstResult.charCount, 10);
-    assert.equal(asRecord(asRecord(firstRead.continuation).nextInput).startChar, 4);
+    assert.equal(firstRead.nextStartChar, 4);
+    assert.equal(firstRead.continuation, undefined);
 
     const secondRead = asDirectToolFacts(await readFileTool.execute({ path: "src/long.txt", maxLength: 5, startChar: 4 }, context));
     const secondResult = secondRead;
     assert.equal(secondResult.content, "efgh…");
     assert.equal(secondResult.startChar, 4);
-    assert.equal(asRecord(asRecord(secondRead.continuation).nextInput).startChar, 8);
+    assert.equal(secondRead.nextStartChar, 8);
+    assert.equal(secondRead.continuation, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local read_file continuation keeps emoji surrogate pairs intact", async () => {
+test("local read_file next character offset keeps emoji surrogate pairs intact", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-read-unicode-window-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -309,7 +317,7 @@ test("local read_file continuation keeps emoji surrogate pairs intact", async ()
       { path: "src/unicode.txt", maxLength: 3 },
       context,
     ));
-    const secondInput = asRecord(asRecord(first.continuation).nextInput);
+    const secondInput = { path: "src/unicode.txt", maxLength: 3, startChar: first.nextStartChar };
     const second = asDirectToolFacts(await readFileTool.execute(secondInput, context));
 
     assert.equal(first.content, "A…");
@@ -325,7 +333,7 @@ test("local read_file continuation keeps emoji surrogate pairs intact", async ()
   }
 });
 
-test("local read_file rejects a character window too small to advance continuation", async () => {
+test("local read_file rejects a character window too small to advance", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-char-minimum-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -365,7 +373,7 @@ test("local read_file rejects invalid explicit maxLength values instead of using
   }
 });
 
-test("local read_file rejects line ranges with maxLength to avoid skipped continuation", async () => {
+test("local read_file rejects line ranges with maxLength to avoid skipped text", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-line-maxlength-"));
   try {
     await mkdir(path.join(root, "src"));

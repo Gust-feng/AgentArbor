@@ -161,13 +161,18 @@ async function createConnectedPair() {
   return { client, server };
 }
 
-function createFakeMcpExecutor(client: McpClientWrapper, name: string) {
+function createFakeMcpExecutor(
+  client: McpClientWrapper,
+  name: string,
+  annotations?: Parameters<typeof createMcpToolExecutor>[1]["annotations"],
+) {
   return createMcpToolExecutor(
     client,
     {
       name,
       description: `Test MCP tool ${name}`,
       inputSchema: { type: "object", properties: {} },
+      annotations,
     },
     "fake-server"
   );
@@ -1187,7 +1192,7 @@ test("MCP continuation-shaped structuredContent stays opaque while oversized cur
         };
       },
     } as unknown as McpClientWrapper;
-    const executor = createFakeMcpExecutor(client, fixture.name);
+    const executor = createFakeMcpExecutor(client, fixture.name, { readOnlyHint: true });
     const store = new InMemoryToolOutputStore();
     const center = new ToolCenter({ outputStore: store });
     center.register(executor);
@@ -1217,6 +1222,7 @@ test("MCP continuation-shaped structuredContent stays opaque while oversized cur
         };
       };
     };
+    assert.equal(executor.definition.metadata?.operationType, "read-only");
     assert.equal(result.status, "completed");
     assert.equal(payload.status, "completed");
     assert.equal(payload.body?.value?.truncated, true);

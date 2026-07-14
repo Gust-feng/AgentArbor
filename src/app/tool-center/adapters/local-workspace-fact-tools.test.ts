@@ -29,6 +29,7 @@ test("local list_dir reports recursive entry facts without truncating small resu
     assert.equal(output.depth, 3);
     assert.equal(output.entriesReturned, 4);
     assert.equal(output.totalEntries, 4);
+    assert.equal(output.scanComplete, true);
     assert.equal(byPath.get("readme.md")?.name, "readme.md");
     assert.equal(byPath.get("readme.md")?.kind, "file");
     assert.equal(byPath.get("readme.md")?.bytes, 4);
@@ -62,8 +63,10 @@ test("local list_dir caps large results at the tool maximum", async () => {
     assert.equal(output.depth, 1);
     assert.equal(output.maxEntries, 200);
     assert.equal(output.entriesReturned, 200);
-    assert.equal(output.totalEntries, 205);
+    assert.equal(output.totalEntries, undefined);
+    assert.equal(output.scanComplete, false);
     assert.equal(entries.length, 200);
+    assert.equal(JSON.stringify(output).length < 180_000, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

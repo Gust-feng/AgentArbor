@@ -131,6 +131,7 @@ test("runtime feature modules do not depend on panel-server composition", async 
   const appRoot = path.join(process.cwd(), "src", "app");
   const panelServerRoot = path.join(appRoot, "panel-server");
   const featureRoots = [
+    path.join(appRoot, "ordinary-agent"),
     path.join(appRoot, "basic-agent-runtime"),
     path.join(appRoot, "desktop-agent"),
     path.join(appRoot, "sub-agents"),

@@ -181,7 +181,7 @@ function splitLoopMessagesForCompaction(
   for (let index = Math.max(0, messages.length - recentCount); index < messages.length; index += 1) {
     preserved.add(index);
   }
-  preserveUnclosedToolPairs(messages, preserved);
+  preserveOnlyCompleteToolInteractionGroups(messages, preserved);
   const compactible = messages
     .map((message, index) => ({ message, index }))
     .filter((entry) => !preserved.has(entry.index));
@@ -206,28 +206,44 @@ function findCurrentUserMessageIndex(messages: readonly ModelMessage[]): number 
   return undefined;
 }
 
-function preserveUnclosedToolPairs(messages: readonly ModelMessage[], preserved: Set<number>): void {
+function preserveOnlyCompleteToolInteractionGroups(
+  messages: readonly ModelMessage[],
+  preserved: Set<number>
+): void {
   const toolResultIndexes = new Map<string, number[]>();
   messages.forEach((message, index) => {
     if (message.role === "tool" && message.toolCallId !== undefined) {
       toolResultIndexes.set(message.toolCallId, [...(toolResultIndexes.get(message.toolCallId) ?? []), index]);
     }
   });
+  const groupedToolResultIndexes = new Set<number>();
   messages.forEach((message, index) => {
     const calls = message.toolCalls ?? [];
     if (message.role !== "assistant" || calls.length === 0) {
       return;
     }
-    const hasUnclosed = calls.some((call) => (toolResultIndexes.get(call.callId) ?? []).length === 0);
-    if (!hasUnclosed) {
-      return;
-    }
-    preserved.add(index);
-    calls.forEach((call) => {
-      for (const resultIndex of toolResultIndexes.get(call.callId) ?? []) {
-        preserved.add(resultIndex);
+    const group = new Set([
+      index,
+      ...calls.flatMap((call) => toolResultIndexes.get(call.callId) ?? []),
+    ]);
+    group.forEach((groupIndex) => {
+      if (messages[groupIndex]?.role === "tool") {
+        groupedToolResultIndexes.add(groupIndex);
       }
     });
+    const preservedCount = [...group].filter((groupIndex) => preserved.has(groupIndex)).length;
+    if (preservedCount === 0 || preservedCount === group.size) {
+      return;
+    }
+    // A provider tool interaction is one protocol unit. If the recent window
+    // cuts through it, compact the whole unit instead of emitting orphaned
+    // function outputs or an assistant call with only some results.
+    group.forEach((groupIndex) => preserved.delete(groupIndex));
+  });
+  messages.forEach((message, index) => {
+    if (message.role === "tool" && preserved.has(index) && !groupedToolResultIndexes.has(index)) {
+      preserved.delete(index);
+    }
   });
 }
 
@@ -268,7 +284,9 @@ function assembleCompactedLoopMessages(
 function serializeLoopMessageForCompaction(message: ModelMessage, index: number): string {
   const ref = message.ref ?? `loop-context:${index}`;
   const toolCalls = message.toolCalls?.length
-    ? `\n  toolCalls: ${message.toolCalls.map((call) => `${call.toolName}#${call.callId}`).join(", ")}`
+    ? `\n  toolCalls: ${message.toolCalls.map((call) =>
+        `${call.toolName}#${call.callId} input=${serializeToolInput(call.input)}`
+      ).join(", ")}`
     : "";
   const toolResult = message.toolCallId === undefined
     ? ""
@@ -284,7 +302,7 @@ function loopContextTokenCount(
   messages: readonly ModelMessage[],
   tools: readonly ToolDefinition[]
 ): number {
-  return counter.countMessages(messages.map((message) => ({ role: message.role, content: message.content }))) +
+  return counter.countMessages(messages) +
     counter.countText(serializeToolsForTokenBudget(tools));
 }
 
@@ -349,4 +367,12 @@ function indentBlock(value: string): string {
     .split(/\r?\n/)
     .map((line) => `  ${line}`)
     .join("\n");
+}
+
+function serializeToolInput(value: unknown): string {
+  try {
+    return normalizeModelFacingText(JSON.stringify(value) ?? "null");
+  } catch {
+    return "[unserializable tool input]";
+  }
 }

@@ -6,8 +6,8 @@ export type AgentLoopTokenCounter = {
   readonly source: "openai_tiktoken";
   readonly model: string;
   countText(text: string): number;
-  countMessage(message: Pick<ModelMessage, "role" | "content">): number;
-  countMessages(messages: readonly Pick<ModelMessage, "role" | "content">[]): number;
+  countMessage(message: ModelMessage): number;
+  countMessages(messages: readonly ModelMessage[]): number;
 };
 
 export type AgentLoopContextSummary = {

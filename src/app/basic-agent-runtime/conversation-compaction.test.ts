@@ -110,6 +110,94 @@ test("neutral loop context compaction replaces compactible messages with a conti
   assert.equal(channel.requests[0]?.toolChoice, "none");
 });
 
+test("loop context compaction never preserves only part of a parallel tool interaction", async () => {
+  const channel = new TestIntelligenceChannel("## Goal\nContinue after the complete tool batch.");
+  const toolCalls = Array.from({ length: 12 }, (_, index) => ({
+    callId: `call-${index}`,
+    toolName: "read_file",
+    input: { path: `src/file-${index}.ts` },
+  }));
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "inspect the files",
+    traceId: "trace-tool-batch-compaction",
+    goalId: "goal-tool-batch-compaction",
+    messages: [
+      { role: "system", content: "system boundary", ref: "prompt:system" },
+      { role: "user", content: "Current user message: inspect the files", ref: "context:goal:tool-batch" },
+      { role: "assistant", content: "", toolCalls, ref: "model:parallel-tool-call" },
+      ...toolCalls.map((call, index) => ({
+        role: "tool" as const,
+        content: `result-${index}-${"x".repeat(200)}`,
+        toolCallId: call.callId,
+        toolName: call.toolName,
+        ref: `tool-result:${call.callId}`,
+      })),
+    ],
+    tools: [],
+    intelligenceChannel: channel,
+    tokenCounter: characterTokenCounter(),
+    thresholdRatio: 0.1,
+    preserveRecentMessages: 10,
+    modelCapabilities: modelCapabilities(1_000),
+  });
+
+  assert.equal(result.status, "compacted");
+  if (result.status !== "compacted") {
+    return;
+  }
+  assert.equal(result.messages.some((message) => message.role === "tool"), false);
+  assert.equal(result.messages.some((message) => (message.toolCalls?.length ?? 0) > 0), false);
+  const compactionInput = JSON.stringify(channel.requests[0]?.sanitizedMessages);
+  assert.equal(compactionInput.includes("read_file#call-0"), true);
+  assert.equal(compactionInput.includes("toolResultFor: read_file#call-11"), true);
+});
+
+test("loop context budget includes tool arguments and protocol continuation items", async () => {
+  const channel = new TestIntelligenceChannel("## Goal\nContinue with the compacted protocol context.");
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "continue",
+    traceId: "trace-protocol-budget",
+    goalId: "goal-protocol-budget",
+    messages: [
+      { role: "system", content: "system boundary", ref: "prompt:system" },
+      { role: "user", content: "older user message", ref: "conversation:old-user" },
+      {
+        role: "assistant",
+        content: "",
+        ref: "model:large-tool-call",
+        toolCalls: [{
+          callId: "call-large-input",
+          toolName: "write_file",
+          input: { content: "x".repeat(1_400) },
+        }],
+        protocolExtensions: {
+          openai_responses_output_items: [{
+            type: "reasoning",
+            encrypted_content: "y".repeat(1_400),
+          }],
+        },
+      },
+      {
+        role: "tool",
+        content: "written",
+        toolCallId: "call-large-input",
+        toolName: "write_file",
+        ref: "tool-result:call-large-input",
+      },
+      { role: "user", content: "Current user message: continue", ref: "context:goal:protocol-budget" },
+    ],
+    tools: [],
+    intelligenceChannel: channel,
+    tokenCounter: characterTokenCounter(),
+    thresholdRatio: 0.1,
+    preserveRecentMessages: 2,
+    modelCapabilities: modelCapabilities(1_000),
+  });
+
+  assert.equal(result.status, "compacted");
+  assert.equal(channel.requests.length, 1);
+});
+
 class TestIntelligenceChannel implements IntelligenceChannel {
   readonly requests: ModelRequest[] = [];
 
@@ -146,6 +234,11 @@ function completedResponse(requestId: string, textOutput: string): ModelResponse
 }
 
 function characterTokenCounter(): BasicAgentTokenCounter {
+  const countMessage = (message: ModelRequest["sanitizedMessages"][number]) =>
+    message.content.length + JSON.stringify({
+      toolCalls: message.toolCalls,
+      protocolExtensions: message.protocolExtensions,
+    }).length;
   return {
     source: "openai_tiktoken",
     model: "test-character-counter",
@@ -153,10 +246,25 @@ function characterTokenCounter(): BasicAgentTokenCounter {
       return text.length;
     },
     countMessage(message) {
-      return message.content.length;
+      return countMessage(message);
     },
     countMessages(messages) {
-      return messages.reduce((total, message) => total + message.content.length, 0);
+      return messages.reduce((total, message) => total + countMessage(message), 0);
     },
+  };
+}
+
+function modelCapabilities(contextWindowTokens: number) {
+  return {
+    contextWindowTokens,
+    maxOutputTokens: 1_000,
+    supportsToolCalling: true,
+    supportsParallelToolCalls: true,
+    supportsStructuredOutputs: false,
+    supportsStreaming: true,
+    supportsVisionInput: false,
+    supportsReasoningEffort: false,
+    preferredApiStyle: "openai_compatible" as const,
+    stability: "stable" as const,
   };
 }

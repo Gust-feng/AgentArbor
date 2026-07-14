@@ -1283,6 +1283,158 @@ test("OpenAI Responses adapter handles stream failure event", async () => {
   assert.equal(response.failure?.kind, "provider_response");
 });
 
+test("OpenAI Responses adapter preserves official stream error details", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: responseSseEvents([
+      { type: "response.created", response: { id: "resp-error", model: "gpt-4.1" } },
+      {
+        type: "error",
+        code: "server_error",
+        message: "The response stream stopped unexpectedly.",
+        param: null,
+      },
+    ]),
+    json: async () => {
+      throw new Error("Should not use json");
+    },
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+    stream: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.message.includes("The response stream stopped unexpectedly."), true);
+});
+
+test("OpenAI Responses adapter preserves cancellation during stream iteration", async () => {
+  const controller = new AbortController();
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: (async function* () {
+      controller.abort();
+      throw new Error("stream aborted");
+    })(),
+    json: async () => {
+      throw new Error("Should not use json");
+    },
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+    stream: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest(), { abortSignal: controller.signal });
+
+  assert.equal(response.status, "cancelled");
+  assert.equal(response.failure?.retryable, false);
+});
+
+test("OpenAI Responses adapter preserves non-stream refusal text", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      id: "resp-refusal",
+      model: "gpt-4.1",
+      status: "completed",
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "refusal", refusal: "I cannot complete that request." }],
+        },
+      ],
+    }),
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.retryable, false);
+  assert.equal(response.failure?.message.includes("I cannot complete that request."), true);
+});
+
+test("OpenAI Responses adapter preserves streamed refusal text", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: responseSseEvents([
+      { type: "response.created", response: { id: "resp-stream-refusal", model: "gpt-4.1" } },
+      { type: "response.refusal.delta", output_index: 0, content_index: 0, delta: "I cannot " },
+      { type: "response.refusal.delta", output_index: 0, content_index: 0, delta: "complete that request." },
+      { type: "response.refusal.done", output_index: 0, content_index: 0, refusal: "I cannot complete that request." },
+      { type: "response.completed", response: { id: "resp-stream-refusal", status: "completed" } },
+    ]),
+    json: async () => {
+      throw new Error("Should not use json");
+    },
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+    stream: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.retryable, false);
+  assert.equal(response.failure?.message.includes("I cannot complete that request."), true);
+});
+
+test("OpenAI Responses adapter fails a stream that ends without a terminal response event", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: responseSseEvents([
+      { type: "response.created", response: { id: "resp-no-terminal", model: "gpt-4.1" } },
+      { type: "response.output_text.delta", output_index: 0, delta: "partial" },
+    ]),
+    json: async () => {
+      throw new Error("Should not use json");
+    },
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+    stream: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message.includes("terminal response event"), true);
+});
+
 test("OpenAI Responses adapter uses custom providerId", async () => {
   const fetch: FetchLike = async () => ({
     ok: true,

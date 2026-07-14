@@ -20,6 +20,8 @@ import {
   openAIResponsesOutputItems,
   openAIResponsesProtocolExtensions,
 } from "./openai-responses-continuation.js";
+import { providerErrorMessage } from "./provider-error-message.js";
+import { createOpenAIModelRefusalResponse } from "./openai-model-refusal.js";
 
 export function normalizeOpenAIResponsesResponse(input: {
   request: ModelRequest;
@@ -32,10 +34,21 @@ export function normalizeOpenAIResponsesResponse(input: {
 }): ModelResponse {
   const raw = asRecord(input.raw);
   const output = Array.isArray(raw.output) ? raw.output : [];
-  const { textOutput, toolCalls, reasoningContent } = parseOutputItems(output);
+  const { textOutput, toolCalls, reasoningContent, refusalContent } = parseOutputItems(output);
   const continuationOutputItems = openAIResponsesOutputItems(output);
   const parsedOutput = parseStructuredOutput(textOutput);
   const responseId = typeof raw.id === "string" ? raw.id : createId("model-response");
+  if (refusalContent.trim().length > 0) {
+    return createOpenAIModelRefusalResponse({
+      request: input.request,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model: typeof raw.model === "string" ? raw.model : input.model,
+      refusal: refusalContent,
+      responseId,
+    });
+  }
   const finishReason = finishReasonFromStatus(raw.status, toolCalls);
   const incompleteResponse = failedResponseForIncompleteResponsesFinish({
     request: input.request,
@@ -91,6 +104,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
   model: string;
   startedAtMs: number;
   emitDelta?: (delta: ModelOutputDelta) => void;
+  abortSignal?: AbortSignal;
 }): Promise<ModelResponse> {
   let textContent = "";
   let responseId = createId("model-response");
@@ -98,6 +112,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
   let model = input.model;
   let deltaIndex = 0;
   let reasoningContent = "";
+  let refusalContent = "";
   let reasoningDeltaIndex = 0;
   const visibleOutputStream = createVisibleOutputStreamProjector(input.request.outputContract);
   const toolCallBuilders = new Map<number, { callId?: string; name?: string; arguments: string }>();
@@ -177,6 +192,18 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
         continue;
       }
 
+      if (eventType === "response.refusal.delta") {
+        refusalContent += typeof event.delta === "string" ? event.delta : "";
+        continue;
+      }
+
+      if (eventType === "response.refusal.done") {
+        if (typeof event.refusal === "string") {
+          refusalContent = event.refusal;
+        }
+        continue;
+      }
+
       if (eventType === "response.function_call_arguments.delta") {
         const outputIndex = typeof event.output_index === "number" ? event.output_index : 0;
         const builder = toolCallBuilders.get(outputIndex) ?? { arguments: "" };
@@ -215,9 +242,12 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
         }
         const output = Array.isArray(response.output) ? response.output : [];
         responseOutputItems = openAIResponsesOutputItems(output);
+        const parsed = parseOutputItems(output);
         if (reasoningContent.length === 0) {
-          const parsed = parseOutputItems(output);
           reasoningContent = parsed.reasoningContent;
+        }
+        if (refusalContent.length === 0) {
+          refusalContent = parsed.refusalContent;
         }
         continue;
       }
@@ -228,6 +258,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       }
 
       if (eventType === "response.failed") {
+        const response = asRecord(event.response);
         return createFailedModelResponse({
           requestId: input.request.requestId,
           providerId: input.providerId,
@@ -237,11 +268,30 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
           outputKind: input.request.outputContract.outputKind,
           failureKind: "provider_response",
           retryable: true,
-          message: "OpenAI Responses provider stream reported failure.",
+          message: providerErrorMessage(response, "OpenAI Responses provider stream reported failure."),
+          responseId: typeof response.id === "string" ? response.id : responseId,
+        });
+      }
+
+      if (eventType === "error") {
+        return createFailedModelResponse({
+          requestId: input.request.requestId,
+          providerId: input.providerId,
+          providerKind: input.providerKind,
+          protocolKind: input.protocolKind,
+          model,
+          outputKind: input.request.outputContract.outputKind,
+          failureKind: "provider_response",
+          retryable: true,
+          message: providerErrorMessage(event, "OpenAI Responses provider stream reported an error."),
+          responseId,
         });
       }
     }
-  } catch {
+  } catch (error) {
+    if (input.abortSignal?.aborted === true) {
+      throw error;
+    }
     return createFailedModelResponse({
       requestId: input.request.requestId,
       providerId: input.providerId,
@@ -251,7 +301,33 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       outputKind: input.request.outputContract.outputKind,
       failureKind: "provider_response",
       retryable: true,
-      message: "OpenAI Responses provider stream response could not be parsed.",
+      message: `OpenAI Responses provider stream response could not be parsed: ${providerErrorMessage(error, "Unknown stream error.")}`,
+    });
+  }
+
+  if (refusalContent.trim().length > 0) {
+    return createOpenAIModelRefusalResponse({
+      request: input.request,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model,
+      refusal: refusalContent,
+      responseId,
+    });
+  }
+  if (responseStatus === undefined) {
+    return createFailedModelResponse({
+      requestId: input.request.requestId,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model,
+      outputKind: input.request.outputContract.outputKind,
+      failureKind: "provider_response",
+      retryable: true,
+      message: "OpenAI Responses provider stream ended without a terminal response event.",
+      responseId,
     });
   }
 
@@ -355,9 +431,11 @@ function parseOutputItems(output: unknown[]): {
   textOutput: string;
   toolCalls: ToolCallRequest[];
   reasoningContent: string;
+  refusalContent: string;
 } {
   let textOutput = "";
   let reasoningContent = "";
+  let refusalContent = "";
   const toolCalls: ToolCallRequest[] = [];
 
   for (const item of output) {
@@ -371,6 +449,9 @@ function parseOutputItems(output: unknown[]): {
         const partRecord = asRecord(part);
         if (partRecord.type === "output_text" && typeof partRecord.text === "string") {
           textOutput += partRecord.text;
+        }
+        if (partRecord.type === "refusal" && typeof partRecord.refusal === "string") {
+          refusalContent += partRecord.refusal;
         }
       }
     }
@@ -387,7 +468,7 @@ function parseOutputItems(output: unknown[]): {
     }
   }
 
-  return { textOutput, toolCalls, reasoningContent };
+  return { textOutput, toolCalls, reasoningContent, refusalContent };
 }
 
 function collectReasoningText(record: Record<string, unknown>): string {

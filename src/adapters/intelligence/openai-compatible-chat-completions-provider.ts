@@ -131,6 +131,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
 
       if (stream) {
         const stream = await client.chat.completions.create(requestBody as never, { signal: options.abortSignal });
+        let publishedStreamDelta = false;
         const streamed = await normalizeOpenAICompatibleStreamResponse({
           request,
           stream: stream as unknown as AsyncIterable<unknown>,
@@ -140,9 +141,15 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           model: this.model,
           dialect: this.dialect,
           startedAtMs: startedAt,
-          emitDelta: this.onOutputDelta,
+          emitDelta: this.onOutputDelta === undefined
+            ? undefined
+            : (delta) => {
+                publishedStreamDelta = true;
+                this.onOutputDelta?.(delta);
+              },
+          abortSignal: options.abortSignal,
         });
-        if (shouldRetryWithoutStreaming(streamed, options.abortSignal)) {
+        if (shouldRetryWithoutStreaming(streamed, options.abortSignal, publishedStreamDelta)) {
           const fallbackBody = buildOpenAICompatibleChatRequestBody({
             request,
             model: this.model,
@@ -264,9 +271,11 @@ function trimTrailingSlashes(value: string): string {
 
 function shouldRetryWithoutStreaming(
   response: ModelResponse,
-  abortSignal: AbortSignal | undefined
+  abortSignal: AbortSignal | undefined,
+  publishedStreamDelta: boolean,
 ): boolean {
   return abortSignal?.aborted !== true &&
+    !publishedStreamDelta &&
     response.status === "failed" &&
     response.failure?.kind === "provider_response" &&
     /stream response could not be parsed/i.test(response.failure.message);

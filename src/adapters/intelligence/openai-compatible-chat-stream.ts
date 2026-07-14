@@ -26,6 +26,8 @@ import {
   parseToolArguments,
 } from "./provider-value-utils.js";
 import { modelUsageWithTiming, openAIChatUsageFromRecord } from "./model-usage-metrics.js";
+import { providerErrorMessage } from "./provider-error-message.js";
+import { createOpenAIModelRefusalResponse } from "./openai-model-refusal.js";
 
 export async function normalizeOpenAICompatibleStreamResponse(input: {
   request: ModelRequest;
@@ -37,6 +39,7 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
   dialect: OpenAICompatibleChatDialect;
   startedAtMs: number;
   emitDelta?: (delta: ModelOutputDelta) => void;
+  abortSignal?: AbortSignal;
 }): Promise<ModelResponse> {
   let content = "";
   let rawContent = "";
@@ -47,6 +50,8 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
   let reasoningDeltaIndex = 0;
   let cumulativeReasoning = "";
   let cumulativeRawContent = "";
+  let cumulativeRefusal = "";
+  let refusalContent = "";
   const thinkTagSplitter = new OpenAICompatibleThinkTagStreamSplitter();
   const visibleOutputStream = createVisibleOutputStreamProjector(input.request.outputContract);
   const toolCalls = new Map<number, { id?: string; name?: string; arguments: string }>();
@@ -124,6 +129,13 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
           });
         }
       }
+      const refusalUpdate = streamDeltaText({
+        next: typeof delta.refusal === "string" ? delta.refusal : "",
+        previous: cumulativeRefusal,
+        mode: input.dialect.streamDeltaMode,
+      });
+      cumulativeRefusal = refusalUpdate.nextPrevious;
+      refusalContent += refusalUpdate.delta;
       accumulateStreamingToolCalls(toolCalls, delta.tool_calls, delta.function_call);
       accumulateStreamingProtocolExtensions(protocolExtensions, delta);
       finishReason = finishReasonForOpenAI(firstChoice.finish_reason) ?? finishReason;
@@ -155,7 +167,10 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
         index: deltaIndex,
       });
     }
-  } catch {
+  } catch (error) {
+    if (input.abortSignal?.aborted === true) {
+      throw error;
+    }
     return createFailedModelResponse({
       requestId: input.request.requestId,
       providerId: input.providerId,
@@ -165,7 +180,18 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
       outputKind: input.request.outputContract.outputKind,
       failureKind: "provider_response",
       retryable: true,
-      message: "OpenAI-compatible provider stream response could not be parsed.",
+      message: `OpenAI-compatible provider stream response could not be parsed: ${providerErrorMessage(error, "Unknown stream error.")}`,
+    });
+  }
+
+  if (refusalContent.trim().length > 0) {
+    return createOpenAIModelRefusalResponse({
+      request: input.request,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model,
+      refusal: refusalContent,
     });
   }
 
@@ -184,6 +210,19 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
         },
       ];
     });
+  if (completedToolCalls.length === 0 && finishReason === undefined) {
+    return createFailedModelResponse({
+      requestId: input.request.requestId,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model,
+      outputKind: input.request.outputContract.outputKind,
+      failureKind: "provider_response",
+      retryable: true,
+      message: "OpenAI-compatible provider stream ended without a terminal finish reason.",
+    });
+  }
   const assistantMessage =
     completedToolCalls.length === 0
       ? undefined

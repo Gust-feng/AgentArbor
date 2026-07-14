@@ -127,6 +127,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
           model: this.model,
           startedAtMs: startedAt,
           emitDelta: this.onOutputDelta,
+          abortSignal: options.abortSignal,
         });
       }
 

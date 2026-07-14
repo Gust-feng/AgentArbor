@@ -20,6 +20,7 @@ import {
 } from "./provider-value-utils.js";
 import { filterOpenAIChatProtocolExtensions } from "./openai-compatible-chat-protocol-extensions.js";
 import { modelUsageWithTiming, openAIChatUsageFromRecord } from "./model-usage-metrics.js";
+import { createOpenAIModelRefusalResponse } from "./openai-model-refusal.js";
 
 export function normalizeOpenAICompatibleResponse(input: {
   request: ModelRequest;
@@ -37,6 +38,17 @@ export function normalizeOpenAICompatibleResponse(input: {
   const message = asRecord(firstChoice.message);
   const decoded = decodeOpenAICompatibleChatMessage({ message, dialect: input.dialect });
   const content = decoded.textContent;
+  const refusal = typeof message.refusal === "string" ? message.refusal : "";
+  if (refusal.trim().length > 0) {
+    return createOpenAIModelRefusalResponse({
+      request: input.request,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model: typeof raw.model === "string" ? raw.model : input.model,
+      refusal,
+    });
+  }
   const reasoningOutput = reasoningOutputForChatMessage(decoded);
   const parsedOutput = parseStructuredOutput(content);
   const toolCalls = parseToolCalls(message.tool_calls, message.function_call);

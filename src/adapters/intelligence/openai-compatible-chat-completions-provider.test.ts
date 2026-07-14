@@ -782,6 +782,180 @@ test("OpenAI-compatible Chat adapter retries without streaming when stream parsi
   assert.deepEqual(calls.map((call) => call.body.stream), [true, undefined]);
 });
 
+test("OpenAI-compatible Chat adapter does not retry after publishing a stream delta", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const deltas: string[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    const body = JSON.parse(init.body) as Record<string, unknown>;
+    calls.push({ body });
+    if (body.stream !== true) {
+      throw new Error("Non-stream fallback must not run after visible output.");
+    }
+    return {
+      ok: true,
+      status: 200,
+      body: (async function* () {
+        yield `data: ${JSON.stringify({
+          model: "visible-stream-model",
+          choices: [{ delta: { content: "partial" }, finish_reason: null }],
+        })}\n\n`;
+        throw new Error("stream parser stopped after visible output");
+      })(),
+      json: async () => {
+        throw new Error("Streaming response should not be read through json().");
+      },
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "visible-stream-model",
+    fetch,
+    stream: true,
+    forceStreaming: true,
+    onOutputDelta: (delta) => deltas.push(delta.delta),
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "failed");
+  assert.deepEqual(deltas, ["partial"]);
+  assert.deepEqual(calls.map((call) => call.body.stream), [true]);
+});
+
+test("OpenAI-compatible Chat adapter preserves cancellation during stream iteration", async () => {
+  const controller = new AbortController();
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: (async function* () {
+      controller.abort();
+      throw new Error("stream aborted");
+    })(),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "cancel-stream-model",
+    fetch,
+    stream: true,
+    forceStreaming: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest(), { abortSignal: controller.signal });
+
+  assert.equal(response.status, "cancelled");
+  assert.equal(response.failure?.retryable, false);
+});
+
+test("OpenAI-compatible Chat adapter preserves model refusal text", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      id: "chatcmpl-refusal",
+      model: "gpt-compatible-test",
+      choices: [
+        {
+          message: { role: "assistant", content: null, refusal: "I cannot complete that request." },
+          finish_reason: "stop",
+        },
+      ],
+    }),
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.retryable, false);
+  assert.equal(response.failure?.message.includes("I cannot complete that request."), true);
+});
+
+test("OpenAI-compatible Chat adapter preserves streamed model refusal text", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: sseChunks([
+      {
+        model: "gpt-compatible-test",
+        choices: [{ delta: { refusal: "I cannot " }, finish_reason: null }],
+      },
+      {
+        model: "gpt-compatible-test",
+        choices: [{ delta: { refusal: "complete that request." }, finish_reason: "stop" }],
+      },
+    ]),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+    stream: true,
+    forceStreaming: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.retryable, false);
+  assert.equal(response.failure?.message.includes("I cannot complete that request."), true);
+});
+
+test("OpenAI-compatible Chat adapter fails a stream that ends without a finish reason", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: sseChunks([
+      {
+        model: "gpt-compatible-test",
+        choices: [{ delta: { content: "partial" }, finish_reason: null }],
+      },
+    ]),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+    stream: true,
+    forceStreaming: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message.includes("finish reason"), true);
+});
+
 test("OpenAI-compatible Chat adapter fails incomplete final finish reasons", async () => {
   for (const finishReason of ["length", "content_filter"] as const) {
     const fetch: FetchLike = async () => ({

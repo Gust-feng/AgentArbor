@@ -24,6 +24,8 @@ export type {
   AgentLoop,
   AgentLoopContinuation,
   AgentLoopInput,
+  AgentLoopAgentTool,
+  AgentLoopAgentToolInvocation,
   AgentLoopResult,
   AgentLoopToolBoundary,
 } from "./agent-loop.js";

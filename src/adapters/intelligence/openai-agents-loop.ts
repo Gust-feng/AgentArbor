@@ -5,12 +5,10 @@ import {
   OpenAIProvider,
   Runner,
   type AgentInputItem,
-  type FunctionTool,
   type ModelSettings,
   type RunResult,
   type RunState,
   setTracingDisabled,
-  tool,
 } from "@openai/agents";
 import OpenAI from "openai";
 import type { OpenAIModelRequestSettings } from "../../domain/config/index.js";
@@ -29,6 +27,7 @@ import type {
 import { modelVisibleToolDescription } from "../../domain/tools/index.js";
 import type {
   AgentLoop,
+  AgentLoopAgentTool,
   AgentLoopInput,
   AgentLoopResult,
 } from "../../app/model-runtime/agent-loop.js";
@@ -43,10 +42,15 @@ import {
 import {
   canonicalToolResultMessage,
   createOpenAIAgentsInputMapper,
-  type OpenAIAgentsInputMapper,
 } from "./openai-agents-input.js";
 import { toOpenAIFetch, type FetchLike } from "./openai-fetch-bridge.js";
 import { openAIResponsesOutputItems } from "./openai-responses-continuation.js";
+import {
+  createOpenAIAgentsToolAssembly,
+  openAIAgentsAgentToolCacheIdentity,
+  type OpenAIAgentsExecutionState,
+  type OpenAIAgentsSdkExecutionContext,
+} from "./openai-agents-tools.js";
 
 export type OpenAIAgentsLoopProtocol =
   | "openai_responses"
@@ -61,30 +65,13 @@ export type OpenAIAgentsLoopConfig = {
   readonly fetch?: FetchLike;
 };
 
-type SdkExecutionContext = {
-  readonly execution: ExecutionState;
-};
-
+type ExecutionState = OpenAIAgentsExecutionState;
+type SdkExecutionContext = OpenAIAgentsSdkExecutionContext;
 type SdkNonStrictObjectSchema = {
   readonly type: "object";
   readonly properties: Record<string, unknown>;
   readonly required: string[];
   readonly additionalProperties: true;
-};
-
-type PreflightFact = {
-  readonly request: ToolCallRequest;
-  readonly result?: ToolCallResult;
-  readonly needsApproval: boolean;
-};
-
-type ExecutionState = {
-  abortSignal: AbortSignal;
-  readonly input: AgentLoopInput;
-  readonly baseMessages: readonly ModelMessage[];
-  readonly toolResults: ToolCallResult[];
-  readonly preflightByCallId: Map<string, PreflightFact>;
-  readonly modelInput: OpenAIAgentsInputMapper;
 };
 
 type SdkInterruption = ReturnType<RunState<
@@ -170,8 +157,11 @@ class OpenAIAgentsLoop implements AgentLoop {
   }
 
   private createAgent(execution: ExecutionState): Agent<SdkExecutionContext, AgentOutputType> {
-    const definitions = frozenToolDefinitions(execution.input);
-    const sdkTools = definitions.map((definition) => createSdkTool(definition, execution));
+    const assembly = createOpenAIAgentsToolAssembly({
+      execution,
+      model: this.config.model,
+      nestedModelSettings: nestedModelSettings(this.config),
+    });
     return new Agent<SdkExecutionContext, AgentOutputType>({
       name: "AgentArborOrdinaryMechanicalLoop",
       instructions: execution.input.instructions,
@@ -179,9 +169,10 @@ class OpenAIAgentsLoop implements AgentLoop {
       modelSettings: modelSettings({
         config: this.config,
         instructions: execution.input.instructions,
-        tools: definitions,
+        tools: assembly.definitions,
+        agentTools: execution.input.agentTools ?? [],
       }),
-      tools: sdkTools,
+      tools: [...assembly.tools],
     });
   }
 
@@ -314,88 +305,11 @@ class OpenAIAgentsLoop implements AgentLoop {
   }
 }
 
-function createSdkTool(
-  definition: ToolDefinition,
-  execution: ExecutionState,
-): FunctionTool<SdkExecutionContext, SdkNonStrictObjectSchema> {
-  const parameters = sdkToolInputSchema(definition);
-  return tool<SdkNonStrictObjectSchema, SdkExecutionContext>({
-    name: definition.name,
-    description: modelVisibleToolDescription(definition),
-    parameters,
-    strict: false,
-    needsApproval: async (_runContext, input, callId) => {
-      const exactCallId = requiredCallId(callId);
-      const existing = execution.preflightByCallId.get(exactCallId);
-      if (existing !== undefined) {
-        return existing.needsApproval;
-      }
-      const request = toolCallRequest(exactCallId, definition.name, input);
-      const preflight = execution.input.tools.gateway.preflight(
-        request,
-        toolContext(execution, exactCallId),
-        execution.input.tools.permission,
-      );
-      if (preflight.status === "ready") {
-        execution.preflightByCallId.set(exactCallId, { request: preflight.request, needsApproval: false });
-        return false;
-      }
-      const fact: PreflightFact = {
-        request,
-        result: preflight.result,
-        needsApproval: preflight.status === "approval_required",
-      };
-      execution.preflightByCallId.set(exactCallId, fact);
-      execution.toolResults.push(preflight.result);
-      return fact.needsApproval;
-    },
-    execute: async (input, _runContext, details) => {
-      const callId = requiredCallId(details?.toolCall?.callId);
-      const cached = execution.preflightByCallId.get(callId);
-      if (cached?.result !== undefined && cached.result.status !== "approval_required") {
-        return execution.modelInput.toolResult(cached.result);
-      }
-      const request = cached?.request ?? toolCallRequest(callId, definition.name, input);
-      const approvedConfirmationId = cached?.result?.confirmationRequest?.confirmationId;
-      const approvedConfirmationIds = cached?.needsApproval === true
-        ? uniqueStrings([
-            ...(execution.input.tools.permission.approvedConfirmationIds ?? []),
-            ...(approvedConfirmationId === undefined ? [] : [approvedConfirmationId]),
-          ])
-        : execution.input.tools.permission.approvedConfirmationIds;
-      const result = await execution.input.tools.gateway.execute(
-        request,
-        toolContext(execution, callId),
-        {
-          ...execution.input.tools.permission,
-          approvedConfirmationIds,
-        },
-      );
-      execution.toolResults.push(result);
-      return execution.modelInput.toolResult(result);
-    },
-  });
-}
-
-function toolContext(execution: ExecutionState, callId: string) {
-  return {
-    ...execution.input.tools.context,
-    toolCallId: callId,
-    abortSignal: execution.abortSignal,
-  };
-}
-
-function frozenToolDefinitions(input: AgentLoopInput): readonly ToolDefinition[] {
-  const allowed = new Set(input.tools.permission.allowedTools);
-  return input.tools.gateway.list()
-    .filter((definition) => allowed.has(definition.name))
-    .map((definition) => globalThis.structuredClone(definition));
-}
-
 function modelSettings(input: {
   readonly config: OpenAIAgentsLoopConfig;
   readonly instructions: string;
   readonly tools: readonly ToolDefinition[];
+  readonly agentTools: readonly AgentLoopAgentTool[];
 }): ModelSettings {
   const settings = input.config.requestSettings;
   const officialOpenAI = isOfficialOpenAIBaseUrl(input.config.baseUrl);
@@ -406,6 +320,7 @@ function modelSettings(input: {
           input.config.model,
           input.instructions,
           input.tools,
+          input.agentTools,
         ),
         ...(settings?.serviceTier === undefined ? {} : { service_tier: settings.serviceTier }),
         ...(input.config.protocol === "openai_responses"
@@ -425,10 +340,28 @@ function modelSettings(input: {
         },
     text: settings?.textVerbosity === undefined ? undefined : { verbosity: settings.textVerbosity },
     truncation: settings?.truncation,
-    parallelToolCalls: input.tools.length === 0 ? undefined : settings?.parallelToolCalls,
+    parallelToolCalls: input.tools.length === 0 && input.agentTools.length === 0
+      ? undefined
+      : settings?.parallelToolCalls,
     store: settings?.store,
     providerData,
   };
+}
+
+function nestedModelSettings(config: OpenAIAgentsLoopConfig): ModelSettings {
+  const root = modelSettings({ config, instructions: "", tools: [], agentTools: [] });
+  const { providerData: _providerData, parallelToolCalls: _parallelToolCalls, ...base } = root;
+  const providerData = isOfficialOpenAIBaseUrl(config.baseUrl)
+    ? {
+        ...(config.requestSettings?.serviceTier === undefined
+          ? {}
+          : { service_tier: config.requestSettings.serviceTier }),
+        ...(config.protocol === "openai_responses"
+          ? { include: ["reasoning.encrypted_content"] }
+          : {}),
+      }
+    : {};
+  return { ...base, providerData };
 }
 
 function canonicalMessagesFromResponses(input: {
@@ -537,6 +470,7 @@ export function openAIAgentsPromptCacheKey(
   model: string,
   instructions: string,
   tools: readonly ToolDefinition[],
+  agentTools: readonly AgentLoopAgentTool[] = [],
 ): string {
   const identity = JSON.stringify({
     protocol,
@@ -549,6 +483,9 @@ export function openAIAgentsPromptCacheKey(
         description: modelVisibleToolDescription(definition),
         inputSchema: sdkToolInputSchema(definition),
       })),
+    agentTools: [...agentTools]
+      .sort((left, right) => left.toolName.localeCompare(right.toolName))
+      .map(openAIAgentsAgentToolCacheIdentity),
   });
   return `agentarbor:${createHash("sha256").update(identity).digest("hex").slice(0, 32)}`;
 }
@@ -560,10 +497,6 @@ function sdkToolInputSchema(definition: ToolDefinition): SdkNonStrictObjectSchem
     required: definition.inputSchema.required === undefined ? [] : [...definition.inputSchema.required],
     additionalProperties: true,
   };
-}
-
-function uniqueStrings(values: readonly string[]): readonly string[] {
-  return [...new Set(values)];
 }
 
 function validateConfig(config: OpenAIAgentsLoopConfig): void {
@@ -587,27 +520,12 @@ function validateRequestSettings(protocol: OpenAIAgentsLoopProtocol, settings: O
   }
 }
 
-function toolCallRequest(callId: string, toolName: string, input: unknown): ToolCallRequest {
-  return {
-    callId,
-    toolName,
-    input: input as ToolFactValue,
-  };
-}
-
 function parseToolInput(value: string): ToolFactValue | undefined {
   try {
     return JSON.parse(value) as ToolFactValue;
   } catch {
     return undefined;
   }
-}
-
-function requiredCallId(value: string | undefined): string {
-  if (value === undefined || value.length === 0) {
-    throw new Error("OpenAI Agents SDK did not provide a function tool call id.");
-  }
-  return value;
 }
 
 function terminalErrorResult(error: unknown, execution: ExecutionState): AgentLoopResult {

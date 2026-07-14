@@ -4,6 +4,8 @@ import type {
   ToolCallResult,
   ToolExecutionContext,
   ToolExecutionGateway,
+  ToolFactValue,
+  ToolInputSchema,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
 
@@ -13,10 +15,31 @@ export type AgentLoopToolBoundary = {
   readonly permission: ToolPermissionCheck;
 };
 
+/** One feature-owned specialist exposed to the parent model as a tool. */
+export type AgentLoopAgentToolInvocation = {
+  readonly agentName: string;
+  readonly instructions: string;
+  readonly input: string;
+  readonly callerAgentId: string;
+  readonly allowedTools: readonly string[];
+};
+
+/**
+ * Provider-neutral agents-as-tools contribution. The model adapter owns the nested
+ * model loop; the contributing feature owns definition lookup and permission narrowing.
+ */
+export type AgentLoopAgentTool = {
+  readonly toolName: string;
+  readonly toolDescription: string;
+  readonly inputSchema: ToolInputSchema;
+  resolve(input: ToolFactValue): Promise<AgentLoopAgentToolInvocation>;
+};
+
 export type AgentLoopInput = {
   readonly instructions: string;
   readonly messages: readonly ModelMessage[];
   readonly tools: AgentLoopToolBoundary;
+  readonly agentTools?: readonly AgentLoopAgentTool[];
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
 };

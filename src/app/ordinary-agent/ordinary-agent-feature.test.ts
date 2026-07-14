@@ -232,7 +232,6 @@ test("feature release disposes a pending live approval continuation once", async
 
 test("feature restart turns a persisted approval pause into an honest blocked state", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-restart-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
   const repository = createFileSystemOrdinaryRunRepository(root);
   const first = await createOrdinaryAgentFeature({
     repository,
@@ -263,7 +262,7 @@ test("feature restart turns a persisted approval pause into an honest blocked st
     now: monotonicClock("2026-01-02T00:00:00.000Z"),
     idFactory: deterministicIds(100),
   });
-  t.after(() => restarted.release());
+  t.after(async () => { await restarted.release(); await fs.rm(root, { recursive: true, force: true }); });
   const state = await restarted.queries.getRun("restart-run");
 
   assert.deepEqual(state?.status, {
@@ -279,7 +278,6 @@ test("feature restart turns a persisted approval pause into an honest blocked st
 
 test("activity restart resets an old cursor, drops live deltas, and replays complete approval facts", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-activity-restart-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
   const repository = createFileSystemOrdinaryRunRepository(root);
   const request = confirmation("activity-restart-run");
   const decision = {
@@ -325,7 +323,7 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
     now: monotonicClock("2026-01-02T00:00:00.000Z"),
     idFactory: deterministicIds(100),
   });
-  t.after(() => restarted.release());
+  t.after(async () => { await restarted.release(); await fs.rm(root, { recursive: true, force: true }); });
   const replay = await restarted.events.replay("activity-restart-run", liveReplay?.cursor);
   assert.equal(replay?.reset, true);
   assert.equal(replay?.activities.some((activity) => activity.type === "model.output.delta"), false);
@@ -395,7 +393,6 @@ test("subscriber failures cannot turn a committed run transition into a command 
 
 test("the synchronous factory gates concurrent first calls on one recovery pass", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-ready-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
   const base = createFileSystemOrdinaryRunRepository(root);
   let releaseList: (() => void) | undefined;
   const listGate = new Promise<void>((resolve) => { releaseList = resolve; });
@@ -409,7 +406,7 @@ test("the synchronous factory gates concurrent first calls on one recovery pass"
     now: monotonicClock(),
     idFactory: deterministicIds(),
   });
-  t.after(() => feature.release());
+  t.after(async () => { await feature.release(); await fs.rm(root, { recursive: true, force: true }); });
   const query = feature.queries.getRun("missing");
   const command = feature.commands.start(startInput("ready-run"));
   assert.equal(listCalls, 1);
@@ -441,14 +438,13 @@ test("eager recovery failures are observed and remain stable for later commands"
 
 async function fixture(t: test.TestContext, execution: OrdinaryExecutionPort) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-feature-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
   const feature = await createOrdinaryAgentFeature({
     repository: createFileSystemOrdinaryRunRepository(root),
     execution,
     now: monotonicClock(),
     idFactory: deterministicIds(),
   });
-  t.after(() => feature.release());
+  t.after(async () => { await feature.release(); await fs.rm(root, { recursive: true, force: true }); });
   return { feature, root };
 }
 

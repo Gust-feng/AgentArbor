@@ -402,6 +402,7 @@ export function createOrdinaryAgentFeature(input: {
       for (const controller of controllers.values()) controller.abort("ordinary_feature_released");
       await releaseContinuations();
       await Promise.allSettled(executions.values());
+      await Promise.allSettled(mutationQueues.values());
       // An abort-ignoring execution may have returned an approval while release awaited it.
       await releaseContinuations();
       listeners.clear();

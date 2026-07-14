@@ -14,6 +14,29 @@ import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v1" as const;
 export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v1" as const;
 
+export type OrdinaryFeatureErrorCode =
+  | "ordinary_run_not_found"
+  | "ordinary_conversation_not_found"
+  | "ordinary_conversation_deleted"
+  | "ordinary_run_conflict"
+  | "ordinary_run_state_conflict"
+  | "ordinary_conversation_busy"
+  | "ordinary_rollback_target_not_found"
+  | "ordinary_confirmation_not_found"
+  | "ordinary_confirmation_in_progress";
+
+/** Expected command/query failures that protocol adapters may map without parsing messages. */
+export class OrdinaryFeatureError extends Error {
+  readonly name = "OrdinaryFeatureError";
+
+  constructor(
+    readonly code: OrdinaryFeatureErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export type OrdinaryRunBirth = {
   readonly instructions: string;
   readonly aiMode: ModelRuntimeMode;

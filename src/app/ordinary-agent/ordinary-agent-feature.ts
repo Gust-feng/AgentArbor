@@ -19,6 +19,7 @@ import type {
   SubmitOrdinaryTurnInput,
   SubmitOrdinaryTurnResult,
 } from "./contracts.js";
+import { OrdinaryFeatureError } from "./contracts.js";
 import {
   normalizeOrdinaryConversationTitle,
   projectOrdinaryConversation,
@@ -38,6 +39,7 @@ export function createOrdinaryAgentFeature(input: {
   const documents = new Map<string, OrdinaryRunSnapshotDocument>();
   const conversationDocuments = new Map<string, OrdinaryConversationControlDocument>();
   const continuations = new Map<string, OrdinaryExecutionContinuation>();
+  const approvalReservations = new Map<string, string>();
   const controllers = new Map<string, AbortController>();
   const executions = new Map<string, Promise<void>>();
   const mutationQueues = new Map<string, Promise<void>>();
@@ -116,21 +118,29 @@ export function createOrdinaryAgentFeature(input: {
     transition: OrdinaryRunTransition,
     options: { readonly keepTerminal?: boolean } = {},
   ): Promise<OrdinaryRunState> {
-    return enqueue(runId, async () => {
-      const current = await load(runId);
-      if (current === undefined) throw new Error(`Ordinary run ${runId} was not found`);
-      if (options.keepTerminal === true && isTerminal(current.state)) return clone(current.state);
-      const state = transitionOrdinaryRun({
-        state: current.state,
-        transition,
-        recordedAt: now(),
-        eventId: idFactory("ordinary-event"),
-      });
-      const saved = await input.repository.save(state, current.revision);
-      documents.set(runId, saved);
-      recordTransition(state.timeline.at(-1)!);
-      return clone(state);
+    return enqueue(runId, () => commitTransition(runId, transition, options));
+  }
+
+  async function commitTransition(
+    runId: string,
+    transition: OrdinaryRunTransition,
+    options: { readonly keepTerminal?: boolean } = {},
+  ): Promise<OrdinaryRunState> {
+    const current = await load(runId);
+    if (current === undefined) {
+      throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
+    }
+    if (options.keepTerminal === true && isTerminal(current.state)) return clone(current.state);
+    const state = transitionOrdinaryRun({
+      state: current.state,
+      transition,
+      recordedAt: now(),
+      eventId: idFactory("ordinary-event"),
     });
+    const saved = await input.repository.save(state, current.revision);
+    documents.set(runId, saved);
+    recordTransition(state.timeline.at(-1)!);
+    return clone(state);
   }
 
   function emit(activity: OrdinaryRunActivity): void {
@@ -279,36 +289,51 @@ export function createOrdinaryAgentFeature(input: {
       .filter((document) => document.state.status.kind === "queued" && document.state.turn.predecessorRunId === predecessorRunId)
       .sort((left, right) => left.state.timestamps.createdAt.localeCompare(right.state.timestamps.createdAt))[0];
     if (successor === undefined) return;
-    const running = await mutate(successor.state.runId, {
-      type: "start",
-      priorCanonicalMessages: predecessor.state.canonicalMessages,
+    const activated = await enqueue(successor.state.runId, async () => {
+      const current = await load(successor.state.runId);
+      if (current === undefined || current.state.status.kind !== "queued") return undefined;
+      return commitTransition(successor.state.runId, {
+        type: "start",
+        priorCanonicalMessages: predecessor.state.canonicalMessages,
+      });
     });
-    if (running.status.kind === "running") track(running.runId, runExecution(running.runId));
+    if (activated?.status.kind === "running") track(activated.runId, runExecution(activated.runId));
   }
 
-  async function start(startInput: StartOrdinaryRunInput): Promise<OrdinaryRunState> {
+  async function startWithinConversation(startInput: StartOrdinaryRunInput): Promise<OrdinaryRunState> {
     assertLive();
     await readyPromise;
     const conversationControl = await loadConversationControl(startInput.turn.conversationId);
     if (conversationControl?.state.deletedAt !== undefined) {
-      throw new Error(`Ordinary conversation ${startInput.turn.conversationId} was deleted`);
+      throw new OrdinaryFeatureError(
+        "ordinary_conversation_deleted",
+        `Ordinary conversation ${startInput.turn.conversationId} was deleted`,
+      );
     }
-    if (await load(startInput.runId) !== undefined) throw new Error(`Ordinary run ${startInput.runId} already exists`);
+    if (await load(startInput.runId) !== undefined) {
+      throw new OrdinaryFeatureError("ordinary_run_conflict", `Ordinary run ${startInput.runId} already exists`);
+    }
     const predecessor = startInput.turn.predecessorRunId === undefined
       ? undefined
       : await load(startInput.turn.predecessorRunId);
     if (startInput.turn.predecessorRunId !== undefined && predecessor === undefined) {
-      throw new Error(`Ordinary predecessor run ${startInput.turn.predecessorRunId} was not found`);
+      throw new OrdinaryFeatureError(
+        "ordinary_run_not_found",
+        `Ordinary predecessor run ${startInput.turn.predecessorRunId} was not found`,
+      );
     }
     if (predecessor !== undefined && predecessor.state.turn.conversationId !== startInput.turn.conversationId) {
-      throw new Error("Ordinary predecessor must belong to the same conversation");
+      throw new OrdinaryFeatureError("ordinary_run_conflict", "Ordinary predecessor must belong to the same conversation");
     }
     if (startInput.turn.ordinal !== (predecessor?.state.turn.ordinal ?? 0) + 1) {
-      throw new Error("Ordinary run ordinal must immediately follow its predecessor");
+      throw new OrdinaryFeatureError("ordinary_run_conflict", "Ordinary run ordinal must immediately follow its predecessor");
     }
     if (predecessor !== undefined && [...documents.values()].some((document) =>
       document.state.status.kind === "queued" && document.state.turn.predecessorRunId === predecessor.state.runId)) {
-      throw new Error(`Ordinary predecessor run ${predecessor.state.runId} already has a queued successor`);
+      throw new OrdinaryFeatureError(
+        "ordinary_run_conflict",
+        `Ordinary predecessor run ${predecessor.state.runId} already has a queued successor`,
+      );
     }
     const initial = createInitialOrdinaryRunState({
       runId: startInput.runId,
@@ -322,10 +347,28 @@ export function createOrdinaryAgentFeature(input: {
     const created = await input.repository.save(initial, 0);
     documents.set(initial.runId, created);
     recordTransition(initial.timeline[0]);
-    if (predecessor !== undefined && !isTerminal(predecessor.state)) return clone(initial);
-    const running = await mutate(initial.runId, { type: "start" });
-    track(initial.runId, runExecution(initial.runId));
-    return running;
+    if (predecessor === undefined) {
+      const running = await mutate(initial.runId, { type: "start" });
+      track(initial.runId, runExecution(initial.runId));
+      return running;
+    }
+
+    // The predecessor may have committed its terminal state while this run's
+    // birth snapshot was being written. Re-read after the successor exists so
+    // either this path or the predecessor's terminal callback must activate it.
+    const latestPredecessor = await load(predecessor.state.runId);
+    if (latestPredecessor !== undefined && isTerminal(latestPredecessor.state)) {
+      await activateSuccessor(latestPredecessor.state.runId);
+    }
+    const current = await load(initial.runId);
+    if (current === undefined) {
+      throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${initial.runId} was not found after creation`);
+    }
+    return clone(current.state);
+  }
+
+  async function start(startInput: StartOrdinaryRunInput): Promise<OrdinaryRunState> {
+    return enqueue(`conversation:${startInput.turn.conversationId}`, () => startWithinConversation(startInput));
   }
 
   async function submitTurn(submitInput: SubmitOrdinaryTurnInput): Promise<SubmitOrdinaryTurnResult> {
@@ -335,7 +378,12 @@ export function createOrdinaryAgentFeature(input: {
     return enqueue(`conversation:${conversationId}`, async () => {
       let control = await loadConversationControl(conversationId);
       if (control === undefined) {
-        if (submitInput.conversationId !== undefined) throw new Error(`Ordinary conversation ${conversationId} was not found`);
+        if (submitInput.conversationId !== undefined) {
+          throw new OrdinaryFeatureError(
+            "ordinary_conversation_not_found",
+            `Ordinary conversation ${conversationId} was not found`,
+          );
+        }
         const createdAt = now();
         const lineageId = idFactory("ordinary-lineage");
         const state: OrdinaryConversationControlState = {
@@ -352,7 +400,7 @@ export function createOrdinaryAgentFeature(input: {
       const predecessor = runs.at(-1);
       const activeLineage = requireActiveLineage(control);
       const runId = idFactory("ordinary-run");
-      const run = await start({
+      const run = await startWithinConversation({
         runId,
         turn: {
           conversationId,
@@ -380,7 +428,12 @@ export function createOrdinaryAgentFeature(input: {
     await readyPromise;
     return enqueue(`conversation:${conversationId}`, async () => {
       const current = await loadConversationControl(conversationId);
-      if (current === undefined) throw new Error(`Ordinary conversation ${conversationId} was not found`);
+      if (current === undefined) {
+        throw new OrdinaryFeatureError(
+          "ordinary_conversation_not_found",
+          `Ordinary conversation ${conversationId} was not found`,
+        );
+      }
       assertConversationWritable(current);
       const changedAt = now();
       const saved = await input.conversationRepository.save(update(clone(current.state), changedAt), current.revision, changedAt);
@@ -412,12 +465,19 @@ export function createOrdinaryAgentFeature(input: {
     const control = await mutateConversation(rollback.conversationId, (state, changedAt) => {
       const current = conversationDocuments.get(rollback.conversationId)!;
       const runs = visibleRuns(current);
-      if (runs.some((run) => !isTerminal(run))) throw new Error("Cannot roll back a busy Ordinary conversation");
+      if (runs.some((run) => !isTerminal(run))) {
+        throw new OrdinaryFeatureError("ordinary_conversation_busy", "Cannot roll back a busy Ordinary conversation");
+      }
       const completed = runs.filter((run) => run.status.kind === "completed");
       const target = rollback.targetRunId === undefined
         ? completed[Math.max(0, completed.length - Math.max(1, Math.floor(rollback.stepsBack ?? 1)) - 1)]
         : completed.find((run) => run.runId === rollback.targetRunId);
-      if (target === undefined) throw new Error("Ordinary rollback target was not found in completed visible runs");
+      if (target === undefined) {
+        throw new OrdinaryFeatureError(
+          "ordinary_rollback_target_not_found",
+          "Ordinary rollback target was not found in completed visible runs",
+        );
+      }
       const lineageId = idFactory("ordinary-lineage");
       return {
         ...state,
@@ -474,7 +534,9 @@ export function createOrdinaryAgentFeature(input: {
     assertLive();
     await readyPromise;
     const document = await load(runId);
-    if (document === undefined) throw new Error(`Ordinary run ${runId} was not found`);
+    if (document === undefined) {
+      throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
+    }
     if (isTerminal(document.state)) return clone(document.state);
     controllers.get(runId)?.abort(reason);
     const continuation = continuations.get(runId);
@@ -488,34 +550,61 @@ export function createOrdinaryAgentFeature(input: {
   async function decideApproval(decision: ConfirmationDecision): Promise<OrdinaryRunState> {
     assertLive();
     await readyPromise;
-    const document = await load(decision.runId);
-    if (document === undefined) throw new Error(`Ordinary run ${decision.runId} was not found`);
-    if (document.state.status.kind !== "awaiting_approval") {
-      throw new Error(`Ordinary run ${decision.runId} is not awaiting approval`);
-    }
-    if (!document.state.status.confirmationRequests.some((request) => request.confirmationId === decision.confirmationId)) {
-      throw new Error(`Confirmation ${decision.confirmationId} does not belong to Ordinary run ${decision.runId}`);
-    }
-    const continuation = continuations.get(decision.runId);
-    if (continuation === undefined) {
-      const blocked = await mutate(decision.runId, {
-        type: "block",
-        reason: {
-          code: "confirmation_continuation_lost",
-          message: "The live confirmation continuation is no longer available.",
-        },
-        continueBy: "new_turn",
-      });
-      await activateSuccessor(decision.runId);
-      return blocked;
-    }
-    continuations.delete(decision.runId);
-    const running = await mutate(decision.runId, { type: "approval_decided", decision });
     const controller = new AbortController();
-    controllers.set(decision.runId, controller);
+    let continuation: OrdinaryExecutionContinuation | undefined;
+    const reserved = await enqueue(decision.runId, async () => {
+      if (approvalReservations.has(decision.runId)) {
+        throw new OrdinaryFeatureError(
+          "ordinary_confirmation_in_progress",
+          `A confirmation decision is already in progress for Ordinary run ${decision.runId}`,
+        );
+      }
+      const document = await load(decision.runId);
+      if (document === undefined) {
+        throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${decision.runId} was not found`);
+      }
+      if (document.state.status.kind !== "awaiting_approval") {
+        throw new OrdinaryFeatureError(
+          "ordinary_run_state_conflict",
+          `Ordinary run ${decision.runId} is not awaiting approval`,
+        );
+      }
+      if (!document.state.status.confirmationRequests.some((request) => request.confirmationId === decision.confirmationId)) {
+        throw new OrdinaryFeatureError(
+          "ordinary_confirmation_not_found",
+          `Confirmation ${decision.confirmationId} does not belong to Ordinary run ${decision.runId}`,
+        );
+      }
+      continuation = continuations.get(decision.runId);
+      if (continuation === undefined) {
+        return commitTransition(decision.runId, {
+          type: "block",
+          reason: {
+            code: "confirmation_continuation_lost",
+            message: "The live confirmation continuation is no longer available.",
+          },
+          continueBy: "new_turn",
+        });
+      }
+      approvalReservations.set(decision.runId, decision.confirmationId);
+      continuations.delete(decision.runId);
+      controllers.set(decision.runId, controller);
+      try {
+        return await commitTransition(decision.runId, { type: "approval_decided", decision });
+      } catch (error) {
+        approvalReservations.delete(decision.runId);
+        controllers.delete(decision.runId);
+        continuations.set(decision.runId, continuation);
+        throw error;
+      }
+    });
+    if (continuation === undefined) {
+      await activateSuccessor(decision.runId);
+      return reserved;
+    }
     const operation = (async () => {
       try {
-        await applyOutcome(decision.runId, await continuation.decide({ decision, abortSignal: controller.signal }));
+        await applyOutcome(decision.runId, await continuation!.decide({ decision, abortSignal: controller.signal }));
       } catch (error) {
         const latest = await load(decision.runId);
         if (latest !== undefined && !isTerminal(latest.state)) {
@@ -528,11 +617,14 @@ export function createOrdinaryAgentFeature(input: {
           await activateSuccessor(decision.runId);
         }
       } finally {
-        controllers.delete(decision.runId);
+        if (controllers.get(decision.runId) === controller) controllers.delete(decision.runId);
+        if (approvalReservations.get(decision.runId) === decision.confirmationId) {
+          approvalReservations.delete(decision.runId);
+        }
       }
     })();
     track(decision.runId, operation);
-    return running;
+    return reserved;
   }
 
   function assertLive(): void {
@@ -604,6 +696,7 @@ export function createOrdinaryAgentFeature(input: {
       await releaseContinuations();
       listeners.clear();
       activityStreams.clear();
+      approvalReservations.clear();
       documents.clear();
       conversationDocuments.clear();
     },
@@ -630,7 +723,10 @@ function isTerminalEvent(event: OrdinaryRunEvent): boolean {
 }
 function assertConversationWritable(document: OrdinaryConversationControlDocument): void {
   if (document.state.deletedAt !== undefined) {
-    throw new Error(`Ordinary conversation ${document.state.conversationId} was deleted`);
+    throw new OrdinaryFeatureError(
+      "ordinary_conversation_deleted",
+      `Ordinary conversation ${document.state.conversationId} was deleted`,
+    );
   }
 }
 function requireActiveLineage(document: OrdinaryConversationControlDocument) {

@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
-import type { OrdinaryExecutionOutcome, OrdinaryExecutionPort, OrdinaryRunState } from "./contracts.js";
+import {
+  OrdinaryFeatureError,
+  type OrdinaryExecutionOutcome,
+  type OrdinaryExecutionPort,
+  type OrdinaryRunState,
+} from "./contracts.js";
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
@@ -162,6 +167,62 @@ test("feature resumes the exact live approval continuation", async (t) => {
     decision: "approve_once",
     decidedAt: "2026-01-01T00:00:10.000Z",
   });
+});
+
+test("concurrent confirmation decisions have one owner and never consume or block its continuation", async (t) => {
+  const request = confirmation("approval-overlap-run");
+  let decideCalls = 0;
+  let releaseCalls = 0;
+  let markDecisionEntered: (() => void) | undefined;
+  let finishDecision: (() => void) | undefined;
+  const decisionEntered = new Promise<void>((resolve) => { markDecisionEntered = resolve; });
+  const decisionGate = new Promise<void>((resolve) => { finishDecision = resolve; });
+  const run = await fixture(t, {
+    async execute() {
+      return {
+        status: "approval_required",
+        canonicalMessages: [{ role: "user", content: "change file" }],
+        toolCalls: [],
+        usage: {},
+        confirmationRequests: [request],
+        continuation: {
+          availability: "live_only",
+          async decide() {
+            decideCalls += 1;
+            markDecisionEntered?.();
+            await decisionGate;
+            return completedOutcome();
+          },
+          async release() { releaseCalls += 1; },
+        },
+      };
+    },
+  });
+  await run.feature.commands.start(startInput("approval-overlap-run"));
+  await waitForStatus(run.feature, "approval-overlap-run", "awaiting_approval");
+
+  try {
+    const first = await run.feature.commands.decideApproval(approvalDecision(request));
+    assert.equal(first.status.kind, "running");
+    await decisionEntered;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await assert.rejects(
+        run.feature.commands.decideApproval(approvalDecision(request)),
+        (error: unknown) => error instanceof OrdinaryFeatureError &&
+          error.code === "ordinary_confirmation_in_progress",
+      );
+    }
+    assert.equal((await run.feature.queries.getRun(request.runId))?.status.kind, "running");
+    assert.equal(decideCalls, 1);
+    assert.equal(releaseCalls, 0);
+  } finally {
+    finishDecision?.();
+  }
+
+  await waitForStatus(run.feature, request.runId, "completed");
+  assert.equal(decideCalls, 1);
+  assert.equal(releaseCalls, 0);
 });
 
 test("feature commits cancellation before approval cleanup and cleanup failure cannot rewrite it", async (t) => {
@@ -389,6 +450,87 @@ test("a queued run starts only after its predecessor reaches a terminal state", 
   assert.equal(executionCount, 2);
 });
 
+test("successor birth cannot miss a predecessor terminal commit across consecutive races", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-successor-race-"));
+  const baseRepository = createFileSystemOrdinaryRunRepository(root);
+  const birthGates = new Map<string, ReturnType<typeof createManualGate>>();
+  const executions = new Map<string, (outcome: OrdinaryExecutionOutcome) => void>();
+  const repository = {
+    ...baseRepository,
+    async save(state: OrdinaryRunState, expectedRevision: number) {
+      const gate = expectedRevision === 0 ? birthGates.get(state.runId) : undefined;
+      if (gate !== undefined) {
+        gate.enter();
+        await gate.released;
+      }
+      return baseRepository.save(state, expectedRevision);
+    },
+  };
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: {
+      execute(input) {
+        return new Promise<OrdinaryExecutionOutcome>((resolve) => {
+          let settled = false;
+          const settle = (outcome: OrdinaryExecutionOutcome): void => {
+            if (settled) return;
+            settled = true;
+            executions.delete(input.runId);
+            resolve(outcome);
+          };
+          executions.set(input.runId, settle);
+          input.abortSignal.addEventListener("abort", () => settle({
+            status: "cancelled",
+            reason: String(input.abortSignal.reason),
+            canonicalMessages: input.messages,
+            toolCalls: [],
+            usage: {},
+          }), { once: true });
+        });
+      },
+    },
+    now: monotonicClock(),
+    idFactory: deterministicIds(),
+  });
+  t.after(async () => {
+    for (const gate of birthGates.values()) gate.release();
+    for (const settle of executions.values()) settle(completedOutcome());
+    await feature.release();
+    await removeTestDirectory(root);
+  });
+
+  await feature.commands.start(startInput("race-run-1"));
+  await waitForExecution(executions, "race-run-1");
+  let predecessorRunId = "race-run-1";
+  for (let ordinal = 2; ordinal <= 4; ordinal += 1) {
+    const runId = `race-run-${ordinal}`;
+    const gate = createManualGate();
+    birthGates.set(runId, gate);
+    const next = startInput(runId);
+    const starting = feature.commands.start({
+      ...next,
+      turn: {
+        ...next.turn,
+        ordinal,
+        predecessorRunId,
+      },
+    });
+    await gate.entered;
+
+    executions.get(predecessorRunId)?.(completedOutcome());
+    await waitForStatus(feature, predecessorRunId, "completed");
+    gate.release();
+
+    const started = await starting;
+    assert.notEqual(started.status.kind, "queued");
+    await waitForExecution(executions, runId);
+    predecessorRunId = runId;
+  }
+  executions.get(predecessorRunId)?.(completedOutcome());
+  await waitForStatus(feature, predecessorRunId, "completed");
+});
+
 test("subscriber failures cannot turn a committed run transition into a command failure", async (t) => {
   const run = await fixture(t, executionFor("completed"));
   run.feature.events.subscribe("listener-run", () => { throw new Error("projection failed"); });
@@ -559,6 +701,33 @@ async function waitForStatus(
       }, reject);
     });
   });
+}
+
+function createManualGate(): {
+  readonly entered: Promise<void>;
+  readonly released: Promise<void>;
+  enter(): void;
+  release(): void;
+} {
+  let markEntered: (() => void) | undefined;
+  let markReleased: (() => void) | undefined;
+  return {
+    entered: new Promise<void>((resolve) => { markEntered = resolve; }),
+    released: new Promise<void>((resolve) => { markReleased = resolve; }),
+    enter() { markEntered?.(); },
+    release() { markReleased?.(); },
+  };
+}
+
+async function waitForExecution(
+  executions: ReadonlyMap<string, (outcome: OrdinaryExecutionOutcome) => void>,
+  runId: string,
+): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!executions.has(runId)) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${runId} execution to start`);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 async function waitForApprovalRequest(

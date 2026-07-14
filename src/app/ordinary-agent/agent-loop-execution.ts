@@ -1,5 +1,6 @@
 import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
 import type { RunCapabilityResolution } from "../../domain/config/index.js";
+import { executionErrorFacts } from "../execution-errors/index.js";
 import type {
   AgentLoop,
   AgentLoopAgentTool,
@@ -40,7 +41,31 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
 }): OrdinaryExecutionPort {
   return {
     async execute(executionInput) {
-      const resources = await input.resources.acquire(executionInput);
+      let resources: OrdinaryAgentLoopRunResources;
+      try {
+        resources = await input.resources.acquire(executionInput);
+      } catch (error) {
+        if (executionInput.abortSignal.aborted) {
+          return {
+            status: "cancelled",
+            reason: cancellationReason(executionInput.abortSignal.reason),
+            canonicalMessages: executionInput.messages,
+            toolCalls: [],
+            usage: {},
+          };
+        }
+        const facts = executionErrorFacts(error);
+        if (facts !== undefined) {
+          return {
+            status: "failed",
+            error: facts,
+            canonicalMessages: executionInput.messages,
+            toolCalls: [],
+            usage: {},
+          };
+        }
+        throw error;
+      }
       const lease = createResourceLease(resources);
       try {
         const result = await resources.loop.execute({
@@ -58,6 +83,10 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
       }
     },
   };
+}
+
+function cancellationReason(value: unknown): string {
+  return typeof value === "string" ? value : "cancelled";
 }
 
 type ResourceLease = {

@@ -17,6 +17,7 @@ import { createOpenAIAgentsInputMapper } from "../../adapters/intelligence/opena
 import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
 import type { AgentRunResources } from "./agent-run-resources.js";
 import type { AgentToolRegistryContribution } from "../tool-center/index.js";
+import { CodedExecutionError } from "../execution-errors/index.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
 
 const LEGACY_SUB_AGENT_TOOLS = ["call_sub_agent", "call_sub_agents", "spawn_sub_agent", "read_sub_agent_output"];
@@ -163,7 +164,10 @@ test("Ordinary resources pass through Chat Completions configuration and clean H
     runInput: { userMessage: "hello" },
     messages: [{ role: "user", content: "hello" }],
     abortSignal: new AbortController().signal,
-  }), (error: unknown) => error === failure);
+  }), (error: unknown) =>
+    error instanceof CodedExecutionError &&
+    error.code === "run_resource_acquisition_failed" &&
+    error.cause === failure);
 
   assert.equal(received?.mode, "openai-compatible");
   assert.equal(received?.modelProvider, chatConfig);
@@ -191,8 +195,64 @@ test("Ordinary resources reject an incomplete or mismatched AgentDefinition ref 
     runInput: { userMessage: "hello" },
     messages: [{ role: "user", content: "hello" }],
     abortSignal: new AbortController().signal,
-  }), /complete frozen AgentDefinition reference/u);
+  }), (error: unknown) =>
+    error instanceof CodedExecutionError && error.code === "agent_definition_mismatch");
   assert.equal(acquisitions, 0);
+});
+
+test("Ordinary resources classify tool-boundary and compaction failures without parsing messages", async () => {
+  const base = ordinaryRunBirth();
+  const birth: OrdinaryRunBirth = {
+    ...base,
+    instructions: DESKTOP_ROOT_AGENT.prompt.systemPrompt,
+    agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT),
+  };
+  const input = {
+    runId: "run-boundary-error",
+    birth,
+    runInput: { userMessage: "hello" },
+    messages: [{ role: "user", content: "hello" }] satisfies readonly ModelMessage[],
+    abortSignal: new AbortController().signal,
+  };
+
+  const boundaryCause = new Error("arbitrary tool policy defect");
+  let boundaryReleases = 0;
+  const boundaryAcquirer = createOrdinaryAgentRunResourceAcquirer({
+    host: {} as never,
+    soilStore: createMinimalReadonlySoilStore([]),
+    resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
+    resolveSubAgentRoots: () => [],
+  }, {
+    async prepareRunResources() {
+      return resources(base.capabilitySnapshot, process.cwd(), () => { boundaryReleases += 1; });
+    },
+    resolveToolBoundary() { throw boundaryCause; },
+  });
+  await assert.rejects(boundaryAcquirer.acquire(input), (error: unknown) =>
+    error instanceof CodedExecutionError &&
+    error.code === "tool_boundary_resolution_failed" &&
+    error.cause === boundaryCause);
+  assert.equal(boundaryReleases, 1);
+
+  let compactionReleases = 0;
+  const compactionAcquirer = createOrdinaryAgentRunResourceAcquirer({
+    host: {} as never,
+    soilStore: createMinimalReadonlySoilStore([]),
+    resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
+    resolveSubAgentRoots: () => [],
+  }, {
+    async prepareRunResources() {
+      return resources(base.capabilitySnapshot, process.cwd(), () => { compactionReleases += 1; });
+    },
+    async compactContext() {
+      return { status: "failed", tokenCount: 10, threshold: 5, message: "summarizer unavailable" };
+    },
+  });
+  await assert.rejects(compactionAcquirer.acquire(input), (error: unknown) =>
+    error instanceof CodedExecutionError &&
+    error.code === "context_compaction_failed" &&
+    error.message === "summarizer unavailable");
+  assert.equal(compactionReleases, 1);
 });
 
 for (const protocol of ["openai_responses", "openai_compatible_chat_completions"] as const) {

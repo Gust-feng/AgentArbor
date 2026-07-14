@@ -17,6 +17,7 @@ import {
   assembleDesktopAgentModelInput,
 } from "../desktop-agent/desktop-agent-model-input.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-contracts.js";
+import { CodedExecutionError, executionErrorFacts } from "../execution-errors/index.js";
 import {
   createModelRuntimeAgentLoop,
   type AgentLoop,
@@ -68,6 +69,7 @@ type OrdinaryAgentRunResourceAcquirerDependencies = {
   readonly createAgentLoop?: typeof createModelRuntimeAgentLoop;
   readonly compactContext?: typeof compactAgentLoopContextIfNeeded;
   readonly createTokenCounter?: (model?: string) => AgentLoopTokenCounter;
+  readonly resolveToolBoundary?: typeof resolveRunToolBoundary;
 };
 
 /**
@@ -80,10 +82,22 @@ export function createOrdinaryAgentRunResourceAcquirer(
 ): OrdinaryAgentLoopRunResourceAcquirer {
   return {
     async acquire(input) {
-      const definition = await resolveFrozenAgentDefinition(options, input);
+      const definition = await resolveFrozenAgentDefinition(options, input).catch((error: unknown) => {
+        throw expectedOrWrappedExecutionError(
+          error,
+          "run_resource_acquisition_failed",
+          "Ordinary run resources could not be acquired.",
+        );
+      });
       const resources = await (dependencies.prepareRunResources ?? prepareAgentRunResources)(options.host, input.birth.aiMode, {
         capabilitySnapshot: input.birth.capabilitySnapshot,
         informationAccess: input.birth.informationAccess,
+      }).catch((error: unknown) => {
+        throw expectedOrWrappedExecutionError(
+          error,
+          "run_resource_acquisition_failed",
+          "Ordinary run resources could not be acquired.",
+        );
       });
       let loop: AgentLoop | undefined;
       try {
@@ -117,14 +131,23 @@ export function createOrdinaryAgentRunResourceAcquirer(
             createSkillToolRegistryContribution(skillContexts),
           ],
         });
-        const toolBoundary = resolveRunToolBoundary({
-          agentDefinition: definition,
-          snapshot: resources.capabilitySnapshot,
-          goal: input.runInput.userMessage,
-          taskSoil,
-          toolCenter,
-          skillContexts,
-        });
+        let toolBoundary: ReturnType<typeof resolveRunToolBoundary>;
+        try {
+          toolBoundary = (dependencies.resolveToolBoundary ?? resolveRunToolBoundary)({
+            agentDefinition: definition,
+            snapshot: resources.capabilitySnapshot,
+            goal: input.runInput.userMessage,
+            taskSoil,
+            toolCenter,
+            skillContexts,
+          });
+        } catch (error) {
+          throw expectedOrWrappedExecutionError(
+            error,
+            "tool_boundary_resolution_failed",
+            "Ordinary tool boundary could not be resolved.",
+          );
+        }
         const tools = ordinaryToolBoundary(input, definition, toolCenter, toolBoundary.allowedTools);
         const registry = new SubAgentRegistry({
           roots: options.resolveSubAgentRoots(resources.workspaceRoot),
@@ -192,7 +215,11 @@ export function createOrdinaryAgentRunResourceAcquirer(
         };
       } catch (error) {
         await releaseAfterAcquireFailure(loop, resources.release);
-        throw error;
+        throw expectedOrWrappedExecutionError(
+          error,
+          "run_resource_acquisition_failed",
+          "Ordinary run resources could not be acquired.",
+        );
       }
     },
   };
@@ -225,9 +252,15 @@ async function compactOrdinaryMessages(input: {
     tokenCounter: input.tokenCounter,
     compactedContextRole: "user",
     abortSignal: input.input.abortSignal,
+  }).catch((error: unknown) => {
+    throw expectedOrWrappedExecutionError(
+      error,
+      "context_compaction_failed",
+      "Ordinary context could not be compacted.",
+    );
   });
   if (result.status === "failed") {
-    throw new Error(`Ordinary context compaction failed: ${result.message}`);
+    throw new CodedExecutionError("context_compaction_failed", result.message);
   }
   return result.status === "compacted" ? result.messages : input.messages;
 }
@@ -250,19 +283,41 @@ async function resolveFrozenAgentDefinition(
 ): Promise<AgentDefinition> {
   const ref = input.birth.agentDefinitionRef;
   if (!isCompleteRunAgentDefinitionRef(ref)) {
-    throw new Error("Ordinary run requires a complete frozen AgentDefinition reference");
+    throw new CodedExecutionError(
+      "agent_definition_mismatch",
+      "Ordinary run requires a complete frozen AgentDefinition reference",
+    );
   }
   const definition = await options.resolveAgentDefinition(ref);
   if (definition === undefined || !agentDefinitionRefMatchesDefinition(ref, definition)) {
-    throw new Error("Ordinary run AgentDefinition no longer matches its frozen reference");
+    throw new CodedExecutionError(
+      "agent_definition_mismatch",
+      "Ordinary run AgentDefinition no longer matches its frozen reference",
+    );
   }
   if (definition.toolVisibilityProfile.runMode !== "agent" || definition.turnPolicy.purpose !== "desktop_agent") {
-    throw new Error("Ordinary run requires an ordinary desktop AgentDefinition");
+    throw new CodedExecutionError(
+      "agent_definition_mismatch",
+      "Ordinary run requires an ordinary desktop AgentDefinition",
+    );
   }
   if (definition.prompt.systemPrompt !== input.birth.instructions) {
-    throw new Error("Ordinary run instructions no longer match its frozen AgentDefinition");
+    throw new CodedExecutionError(
+      "agent_definition_mismatch",
+      "Ordinary run instructions no longer match its frozen AgentDefinition",
+    );
   }
   return definition;
+}
+
+function expectedOrWrappedExecutionError(
+  error: unknown,
+  code: string,
+  message: string,
+): unknown {
+  return executionErrorFacts(error) === undefined
+    ? new CodedExecutionError(code, message, { cause: error })
+    : error;
 }
 
 function ordinaryToolBoundary(

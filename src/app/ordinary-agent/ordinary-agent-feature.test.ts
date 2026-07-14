@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
+import { CodedExecutionError } from "../execution-errors/index.js";
+import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
 import {
   OrdinaryFeatureError,
   type OrdinaryExecutionOutcome,
@@ -29,6 +31,44 @@ test("feature owns completed and failed Ordinary run outcomes", async (t) => {
   assert.deepEqual(failed.status, {
     kind: "failed",
     error: { code: "model_failed", message: "provider unavailable" },
+  });
+});
+
+test("feature persists explicit execution error codes and keeps unknown fallback", async (t) => {
+  const configured = await fixture(t, {
+    async execute() {
+      throw new ModelRuntimeConfigurationError({
+        code: "missing_model_name",
+        message: "A model name is required.",
+        summaryInput: { enabled: true, mode: "openai-responses" },
+      });
+    },
+  });
+  await configured.feature.commands.start(startInput("configured-error-run"));
+  const configuredFailure = await waitForStatus(configured.feature, "configured-error-run", "failed");
+  assert.deepEqual(configuredFailure.status, {
+    kind: "failed",
+    error: { code: "missing_model_name", message: "A model name is required." },
+  });
+
+  const boundary = await fixture(t, {
+    async execute() {
+      throw new CodedExecutionError("tool_boundary_resolution_failed", "Tool boundary failed.");
+    },
+  });
+  await boundary.feature.commands.start(startInput("boundary-error-run"));
+  const boundaryFailure = await waitForStatus(boundary.feature, "boundary-error-run", "failed");
+  assert.deepEqual(boundaryFailure.status, {
+    kind: "failed",
+    error: { code: "tool_boundary_resolution_failed", message: "Tool boundary failed." },
+  });
+
+  const unknown = await fixture(t, { async execute() { throw new Error("unexpected defect"); } });
+  await unknown.feature.commands.start(startInput("unknown-error-run"));
+  const unknownFailure = await waitForStatus(unknown.feature, "unknown-error-run", "failed");
+  assert.deepEqual(unknownFailure.status, {
+    kind: "failed",
+    error: { code: "ordinary_execution_failed", message: "unexpected defect" },
   });
 });
 

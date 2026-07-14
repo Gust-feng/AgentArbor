@@ -20,6 +20,7 @@ import type {
   SubmitOrdinaryTurnResult,
 } from "./contracts.js";
 import { OrdinaryFeatureError } from "./contracts.js";
+import { executionErrorFacts } from "../execution-errors/index.js";
 import {
   normalizeOrdinaryConversationTitle,
   projectOrdinaryConversation,
@@ -263,7 +264,7 @@ export function createOrdinaryAgentFeature(input: {
           type: controller.signal.aborted ? "cancel" : "fail",
           ...(controller.signal.aborted
             ? { reason: cancellationReason(controller.signal.reason) }
-            : { error: { code: "ordinary_execution_failed", message: errorMessage(error) } }),
+            : { error: ordinaryExecutionFailureFacts(error) }),
         } as OrdinaryRunTransition, { keepTerminal: controller.signal.aborted });
         await activateSuccessor(runId);
       }
@@ -613,7 +614,7 @@ export function createOrdinaryAgentFeature(input: {
             type: controller.signal.aborted ? "cancel" : "fail",
             ...(controller.signal.aborted
               ? { reason: cancellationReason(controller.signal.reason) }
-              : { error: { code: "ordinary_execution_failed", message: errorMessage(error) } }),
+              : { error: ordinaryExecutionFailureFacts(error) }),
           } as OrdinaryRunTransition, { keepTerminal: controller.signal.aborted });
           await activateSuccessor(decision.runId);
         }
@@ -736,5 +737,11 @@ function requireActiveLineage(document: OrdinaryConversationControlDocument) {
   return lineage;
 }
 function cancellationReason(value: unknown): string { return typeof value === "string" ? value : "cancelled"; }
+function ordinaryExecutionFailureFacts(value: unknown): { readonly code: string; readonly message: string } {
+  const explicit = executionErrorFacts(value);
+  if (explicit !== undefined) return explicit;
+  if (value instanceof OrdinaryFeatureError) return { code: value.code, message: value.message };
+  return { code: "ordinary_execution_failed", message: errorMessage(value) };
+}
 function errorMessage(value: unknown): string { return value instanceof Error ? value.message : String(value); }
 function clone<T>(value: T): T { return globalThis.structuredClone(value); }

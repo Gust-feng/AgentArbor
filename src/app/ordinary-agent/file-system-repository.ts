@@ -4,6 +4,7 @@ import { z } from "zod";
 import { persistedModelProtocolExtensions } from "../../domain/intelligence/index.js";
 import {
   ORDINARY_RUN_SCHEMA_VERSION,
+  OrdinaryFeatureError,
   type OrdinaryRunRepository,
   type OrdinaryRunSnapshotDocument,
   type OrdinaryRunState,
@@ -291,7 +292,10 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
         const current = await readSnapshot(rootDir, state.runId);
         const actualRevision = current?.revision ?? 0;
         if (actualRevision !== expectedRevision) {
-          throw new Error(`Ordinary run ${state.runId} revision conflict: expected ${expectedRevision}, received ${actualRevision}`);
+          const cause = new Error(
+            `Ordinary run ${state.runId} revision conflict: expected ${expectedRevision}, received ${actualRevision}`,
+          );
+          throw new OrdinaryFeatureError("ordinary_revision_conflict", cause.message, { cause });
         }
         const document: OrdinaryRunSnapshotDocument = {
           schemaVersion: ORDINARY_RUN_SCHEMA_VERSION,

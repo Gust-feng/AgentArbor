@@ -3,6 +3,8 @@ import test from "node:test";
 import type { ConfirmationDecision, ConfirmationRequest } from "../../domain/confirmation/index.js";
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { ToolExecutionGateway } from "../../domain/tools/index.js";
+import { CodedExecutionError } from "../execution-errors/index.js";
+import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
 import type {
   AgentLoop,
   AgentLoopAgentTool,
@@ -63,6 +65,41 @@ test("cleanup failure cannot replace a known completed outcome", async () => {
   assert.equal(outcome.status, "completed");
   assert.equal(releases, 1);
   assert.deepEqual(observed, [cleanupError]);
+});
+
+test("resource acquisition maps only explicitly coded execution failures", async () => {
+  const failures = [
+    {
+      error: new ModelRuntimeConfigurationError({
+        code: "missing_api_key",
+        message: "API key is required.",
+        summaryInput: { enabled: true, mode: "openai-responses" },
+      }),
+      facts: { code: "missing_api_key", message: "API key is required." },
+    },
+    {
+      error: new CodedExecutionError("context_compaction_failed", "Context could not be compacted."),
+      facts: { code: "context_compaction_failed", message: "Context could not be compacted." },
+    },
+  ] as const;
+
+  for (const failure of failures) {
+    const execution = createOrdinaryAgentLoopExecutionPort({
+      resources: { async acquire() { throw failure.error; } },
+    });
+    const input = executionInput();
+    const outcome = await execution.execute(input);
+
+    assert.equal(outcome.status, "failed");
+    assert.deepEqual(outcome.status === "failed" ? outcome.error : undefined, failure.facts);
+    assert.equal(outcome.canonicalMessages, input.messages);
+  }
+
+  const unknown = new Error("unexpected defect");
+  const execution = createOrdinaryAgentLoopExecutionPort({
+    resources: { async acquire() { throw unknown; } },
+  });
+  await assert.rejects(execution.execute(executionInput()), (error: unknown) => error === unknown);
 });
 
 test("failed loop result maps to Ordinary failure and releases resources", async () => {

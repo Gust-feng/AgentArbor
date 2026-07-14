@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { OrdinaryFeatureError } from "./contracts.js";
 import { createFileSystemOrdinaryRunRepository, OrdinaryRunSnapshotIncompatibleError } from "./file-system-repository.js";
 import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js";
 import { ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
@@ -33,7 +34,11 @@ test("file repository atomically replaces the canonical snapshot and advances re
   assert.equal(snapshot.revision, 2);
   assert.equal("state" in manifest, false, "the manifest must remain a list index rather than a recovery fact");
   assert.equal((await fs.readdir(path.join(root, "runs", "run-one", ".tmp"))).length, 0);
-  await assert.rejects(repository.save(running, 1), /revision conflict/u);
+  await assert.rejects(repository.save(running, 1), (error: unknown) =>
+    error instanceof OrdinaryFeatureError &&
+    error.code === "ordinary_revision_conflict" &&
+    error.cause instanceof Error &&
+    /revision conflict/u.test(error.cause.message));
 });
 
 test("file repository never writes ephemeral attachment bytes into an Ordinary snapshot", async (t) => {

@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { OrdinaryFeatureError } from "./contracts.js";
 import type { OrdinaryConversationControlState } from "./contracts.js";
 import {
   createFileSystemOrdinaryConversationControlRepository,
@@ -36,7 +37,11 @@ test("conversation control repository atomically advances CAS revisions and pres
     updatedAt: "2026-01-01T00:00:03.000Z",
     deleted: false,
   }]);
-  await assert.rejects(repository.save(secondState, 1, "2026-01-01T00:00:04.000Z"), /revision conflict/u);
+  await assert.rejects(repository.save(secondState, 1, "2026-01-01T00:00:04.000Z"), (error: unknown) =>
+    error instanceof OrdinaryFeatureError &&
+    error.code === "ordinary_revision_conflict" &&
+    error.cause instanceof Error &&
+    /revision conflict/u.test(error.cause.message));
 });
 
 test("conversation control repository rejects malformed lineage graphs and old snapshots", async (t) => {

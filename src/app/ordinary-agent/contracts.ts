@@ -20,6 +20,7 @@ export type OrdinaryFeatureErrorCode =
   | "ordinary_conversation_not_found"
   | "ordinary_conversation_deleted"
   | "ordinary_run_conflict"
+  | "ordinary_revision_conflict"
   | "ordinary_run_state_conflict"
   | "ordinary_conversation_busy"
   | "ordinary_rollback_target_not_found"
@@ -33,8 +34,9 @@ export class OrdinaryFeatureError extends Error {
   constructor(
     readonly code: OrdinaryFeatureErrorCode,
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
 

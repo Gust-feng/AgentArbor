@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   ORDINARY_CONVERSATION_SCHEMA_VERSION,
+  OrdinaryFeatureError,
   type OrdinaryConversationControlDocument,
   type OrdinaryConversationControlRepository,
   type OrdinaryConversationControlState,
@@ -79,7 +80,10 @@ export function createFileSystemOrdinaryConversationControlRepository(rootDir: s
         const current = await readDocument(rootDir, state.conversationId);
         const actualRevision = current?.revision ?? 0;
         if (actualRevision !== expectedRevision) {
-          throw new Error(`Ordinary conversation ${state.conversationId} revision conflict: expected ${expectedRevision}, received ${actualRevision}`);
+          const cause = new Error(
+            `Ordinary conversation ${state.conversationId} revision conflict: expected ${expectedRevision}, received ${actualRevision}`,
+          );
+          throw new OrdinaryFeatureError("ordinary_revision_conflict", cause.message, { cause });
         }
         const document: OrdinaryConversationControlDocument = {
           schemaVersion: ORDINARY_CONVERSATION_SCHEMA_VERSION,

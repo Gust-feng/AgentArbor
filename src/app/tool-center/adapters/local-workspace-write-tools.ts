@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { TextDecoder } from "node:util";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import {
   asRecord,
+  decodeUtf8Text,
   DEFAULT_LOCAL_WORKSPACE_ROOT,
   MAX_LOCAL_WORKSPACE_FILE_BYTES,
   positiveInteger,
@@ -603,11 +603,11 @@ async function readEditableUtf8TextFile(absolutePath: string, relativePath: stri
   if (content.includes(0)) {
     throw new Error(`edit_file target is binary or non-text: ${relativePath}; bytes=${content.length}`);
   }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(content);
-  } catch {
+  const decoded = decodeUtf8Text(content);
+  if (decoded === undefined) {
     throw new Error(`edit_file target is binary or non-text: ${relativePath}; bytes=${content.length}`);
   }
+  return decoded;
 }
 
 function textField(value: unknown): string | undefined {

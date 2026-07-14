@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
 import { createReadStream, promises as fs } from "node:fs";
-import { createInterface } from "node:readline";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 import type { ToolExecutor, ToolFactValue } from "../../../domain/tools/index.js";
 import {
   asRecord,
+  decodeUtf8Text,
   DEFAULT_LOCAL_WORKSPACE_ROOT,
   isLikelyBinaryPath,
   MAX_LOCAL_WORKSPACE_FILE_BYTES,
@@ -125,6 +126,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         outputNotes: [
           "content contains the returned text when the file is textual.",
           "binary is true when the file appears binary and no text content is returned.",
+          "reason is invalid_utf8 when the file cannot be decoded losslessly as UTF-8.",
           "hasMoreAfter reports whether more text exists; copy nextStartChar to startChar or nextStartLine to startLine in the next plain read_file call.",
           "truncated tells whether more content may be needed.",
         ],
@@ -196,11 +198,26 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         "read_file maxLength",
         MIN_CHARACTER_WINDOW_CHARS,
       ) ?? DEFAULT_MAX_CHARS;
-      const content = lineRange === undefined
-        ? charWindowContent(await fs.readFile(target.absolutePath, "utf8"), startChar ?? 0)
-        : stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES
-          ? await readLineRange(target.absolutePath, lineRange, context.abortSignal)
-          : sliceLines(await fs.readFile(target.absolutePath, "utf8"), lineRange);
+      let content: ReadContentWindow;
+      if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES) {
+        try {
+          content = await readLineRange(target.absolutePath, lineRange!, context.abortSignal);
+        } catch (error) {
+          if (error instanceof InvalidUtf8TextError) {
+            return invalidUtf8ReadResult(target.relativePath, stat.size);
+          }
+          throw error;
+        }
+      } else {
+        const bytes = await fs.readFile(target.absolutePath, { signal: context.abortSignal });
+        const raw = decodeUtf8Text(bytes);
+        if (raw === undefined) {
+          return invalidUtf8ReadResult(target.relativePath, stat.size);
+        }
+        content = lineRange === undefined
+          ? charWindowContent(raw, startChar ?? 0)
+          : sliceLines(raw, lineRange);
+      }
       throwIfAborted(context.abortSignal);
       const returned = truncateReadFileContent(content.content, maxLength);
       if (lineRange !== undefined && returned.truncated) {
@@ -677,15 +694,16 @@ async function grepPath(
     recordSkippedFile(facts, rootDirectory, absolutePath, "binary", stat.size);
     return;
   }
-  const raw = await fs.readFile(absolutePath, "utf8").catch((error: unknown) => {
+  const rawBytes = await fs.readFile(absolutePath).catch((error: unknown) => {
     recordSkippedFile(facts, rootDirectory, absolutePath, "unreadable", stat.size, error);
     return undefined;
   });
   throwIfAborted(abortSignal);
-  if (raw === undefined) {
+  if (rawBytes === undefined) {
     return;
   }
-  if (raw.includes("\u0000")) {
+  const raw = rawBytes.includes(0) ? undefined : decodeUtf8Text(rawBytes);
+  if (raw === undefined) {
     recordSkippedFile(facts, rootDirectory, absolutePath, "binary", stat.size);
     return;
   }
@@ -828,11 +846,13 @@ function sliceLines(
   raw: string,
   range: { readonly startLine: number; readonly endLine: number }
 ): ReadContentWindow {
-  const lines = raw.split(/\r?\n/);
+  const lines = textLinesPreservingEndings(raw);
   const selected = lines.slice(range.startLine - 1, range.endLine);
   const actualEndLine = selected.length === 0 ? range.startLine : range.startLine + selected.length - 1;
   return {
-    content: selected.join("\n"),
+    content: selected.map((line, index) =>
+      index === selected.length - 1 ? line.text : `${line.text}${line.ending}`
+    ).join(""),
     range: { startLine: range.startLine, endLine: actualEndLine },
     totalLines: lines.length,
     hasMoreBefore: range.startLine > 1,
@@ -870,7 +890,7 @@ function truncateReadFileContent(value: string, maxLength: number): {
 }
 
 function countLines(raw: string): number {
-  return raw.length === 0 ? 0 : raw.split(/\r?\n/).length;
+  return textLinesPreservingEndings(raw).length;
 }
 
 async function readLineRange(
@@ -878,36 +898,151 @@ async function readLineRange(
   range: { readonly startLine: number; readonly endLine: number },
   abortSignal: AbortSignal | undefined,
 ): Promise<ReadContentWindow> {
-  const stream = createReadStream(absolutePath, { encoding: "utf8" });
-  const reader = createInterface({ input: stream, crlfDelay: Infinity });
-  const lines: string[] = [];
+  const stream = createReadStream(absolutePath);
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  const lines: TextLine[] = [];
   let lineNumber = 0;
   let hasMoreAfter = false;
-  try {
-    for await (const line of reader) {
-      throwIfAborted(abortSignal);
-      lineNumber += 1;
-      if (lineNumber < range.startLine) {
-        continue;
-      }
-      if (lineNumber > range.endLine) {
-        hasMoreAfter = true;
-        break;
-      }
+  let pending = "";
+  let endedWithLineEnding = false;
+
+  const acceptLine = (line: TextLine): boolean => {
+    lineNumber += 1;
+    if (lineNumber >= range.startLine && lineNumber <= range.endLine) {
       lines.push(line);
     }
+    if (lineNumber >= range.endLine && line.ending.length > 0) {
+      hasMoreAfter = true;
+      return true;
+    }
+    return lineNumber > range.endLine;
+  };
+
+  try {
+    streamLoop: for await (const chunk of stream) {
+      throwIfAborted(abortSignal);
+      try {
+        pending += decoder.decode(chunk as Buffer, { stream: true });
+      } catch {
+        throw new InvalidUtf8TextError();
+      }
+      while (true) {
+        const boundary = nextLineEnding(pending, false);
+        if (boundary === undefined) {
+          break;
+        }
+        const line = {
+          text: pending.slice(0, boundary.index),
+          ending: pending.slice(boundary.index, boundary.index + boundary.length),
+        };
+        pending = pending.slice(boundary.index + boundary.length);
+        endedWithLineEnding = pending.length === 0;
+        if (acceptLine(line)) {
+          break streamLoop;
+        }
+      }
+    }
+    if (!hasMoreAfter) {
+      try {
+        pending += decoder.decode();
+      } catch {
+        throw new InvalidUtf8TextError();
+      }
+      while (true) {
+        const boundary = nextLineEnding(pending, true);
+        if (boundary === undefined) {
+          break;
+        }
+        const line = {
+          text: pending.slice(0, boundary.index),
+          ending: pending.slice(boundary.index, boundary.index + boundary.length),
+        };
+        pending = pending.slice(boundary.index + boundary.length);
+        endedWithLineEnding = pending.length === 0;
+        if (acceptLine(line)) {
+          break;
+        }
+      }
+      if (!hasMoreAfter && (pending.length > 0 || endedWithLineEnding)) {
+        acceptLine({ text: pending, ending: "" });
+      }
+    }
   } finally {
-    reader.close();
     stream.destroy();
   }
   const actualEndLine = lines.length === 0 ? range.startLine : range.startLine + lines.length - 1;
   return {
-    content: lines.join("\n"),
+    content: lines.map((line, index) =>
+      index === lines.length - 1 ? line.text : `${line.text}${line.ending}`
+    ).join(""),
     range: { startLine: range.startLine, endLine: actualEndLine },
     totalLines: hasMoreAfter ? undefined : lineNumber,
     hasMoreBefore: range.startLine > 1,
     hasMoreAfter,
   };
+}
+
+type TextLine = {
+  readonly text: string;
+  readonly ending: string;
+};
+
+class InvalidUtf8TextError extends Error {
+  constructor() {
+    super("File is not valid UTF-8 text.");
+    this.name = "InvalidUtf8TextError";
+  }
+}
+
+function invalidUtf8ReadResult(relativePath: string, bytes: number): ToolFactValue {
+  return {
+    refId: `workspace:file:${relativePath}`,
+    path: relativePath,
+    bytes,
+    binary: true,
+    reason: "invalid_utf8",
+  };
+}
+
+function textLinesPreservingEndings(raw: string): readonly TextLine[] {
+  if (raw.length === 0) {
+    return [];
+  }
+  const lines: TextLine[] = [];
+  let remaining = raw;
+  while (true) {
+    const boundary = nextLineEnding(remaining, true);
+    if (boundary === undefined) {
+      lines.push({ text: remaining, ending: "" });
+      break;
+    }
+    lines.push({
+      text: remaining.slice(0, boundary.index),
+      ending: remaining.slice(boundary.index, boundary.index + boundary.length),
+    });
+    remaining = remaining.slice(boundary.index + boundary.length);
+    if (remaining.length === 0) {
+      lines.push({ text: "", ending: "" });
+      break;
+    }
+  }
+  return lines;
+}
+
+function nextLineEnding(value: string, final: boolean): { readonly index: number; readonly length: number } | undefined {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "\n") {
+      return { index, length: 1 };
+    }
+    if (value[index] !== "\r") {
+      continue;
+    }
+    if (index + 1 < value.length) {
+      return { index, length: value[index + 1] === "\n" ? 2 : 1 };
+    }
+    return final ? { index, length: 1 } : undefined;
+  }
+  return undefined;
 }
 
 async function searchWithRipgrep(request: {

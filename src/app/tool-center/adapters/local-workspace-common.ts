@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 import { utf16SafePrefixLength } from "../text-window.js";
 
 export const DEFAULT_LOCAL_WORKSPACE_ROOT = process.cwd();
@@ -42,7 +43,7 @@ export function safeRefToken(value: string): string {
 }
 
 export function shouldSkipEntry(name: string): boolean {
-  return name === "node_modules" || name === "dist" || name === "coverage";
+  return name === ".git" || name === "node_modules" || name === "dist" || name === "coverage";
 }
 
 export function isLikelyBinaryPath(value: string): boolean {
@@ -95,6 +96,16 @@ export function requireText(value: unknown, fieldName: string, options: { readon
 
 export function sha256Hex(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+export function decodeUtf8Text(value: Uint8Array): string | undefined {
+  try {
+    // Keeping the BOM as U+FEFF ensures a read/edit/write cycle preserves the
+    // original bytes instead of silently changing the file encoding marker.
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizePath(value: string): string {

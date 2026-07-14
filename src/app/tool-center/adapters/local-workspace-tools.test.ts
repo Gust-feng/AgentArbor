@@ -434,6 +434,25 @@ test("local grep_files falls back to JS recursion when ripgrep is unavailable", 
   }
 });
 
+test("local grep_files JS fallback skips Git internals like the ripgrep path", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-grep-git-"));
+  try {
+    await mkdir(path.join(root, ".git"), { recursive: true });
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, ".git", "config"), "needle internal\n", "utf8");
+    await writeFile(path.join(root, "src", "note.txt"), "needle source\n", "utf8");
+    const grep = createLocalGrepFilesTool(root, { ripgrepSearch: false });
+
+    const result = asDirectToolFacts(await grep.execute({ query: "needle", path: "." }, context));
+
+    assert.deepEqual(result.matches, [
+      { path: "src/note.txt", line: 1, preview: "needle source" },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("local read_file rejects paths outside workspace", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
@@ -442,6 +461,71 @@ test("local read_file rejects paths outside workspace", async () => {
       () => readFile.execute({ path: "../outside.txt" }, context),
       /outside the workspace boundary/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read_file preserves line endings so returned ranges can be edited exactly", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-line-endings-"));
+  try {
+    const file = path.join(root, "windows.txt");
+    await writeFile(file, "alpha\r\nbeta\r\ngamma\r\n", "utf8");
+    const readFileTool = createLocalReadFileTool(root);
+    const editFileTool = createLocalEditFileTool(root);
+
+    const readResult = asDirectToolFacts(await readFileTool.execute({
+      path: "windows.txt",
+      startLine: 1,
+      endLine: 2,
+    }, context));
+
+    assert.equal(readResult.content, "alpha\r\nbeta");
+    await editFileTool.execute({
+      path: "windows.txt",
+      edits: [{ oldText: readResult.content, newText: "ALPHA\r\nBETA" }],
+    }, context);
+    assert.equal(await readFile(file, "utf8"), "ALPHA\r\nBETA\r\ngamma\r\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read_file preserves line endings while streaming a large line range", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-large-line-range-"));
+  try {
+    const file = path.join(root, "large.txt");
+    const lines = Array.from({ length: 32_000 }, (_, index) => `line-${String(index + 1).padStart(5, "0")}-padding`);
+    await writeFile(file, `${lines.join("\r\n")}\r\n`, "utf8");
+    assert.equal((await stat(file)).size > 512_000, true);
+    const readFileTool = createLocalReadFileTool(root);
+
+    const result = asDirectToolFacts(await readFileTool.execute({
+      path: "large.txt",
+      startLine: 2,
+      endLine: 3,
+    }, context));
+
+    assert.equal(result.content, `${lines[1]}\r\n${lines[2]}`);
+    assert.equal(result.hasMoreAfter, true);
+    assert.equal(result.nextStartLine, 4);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read_file reports invalid UTF-8 instead of returning replacement text", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-invalid-utf8-"));
+  try {
+    const file = path.join(root, "invalid.txt");
+    await writeFile(file, Buffer.from([0x61, 0xC3, 0x28, 0x62]));
+    const readFileTool = createLocalReadFileTool(root);
+
+    const result = asDirectToolFacts(await readFileTool.execute({ path: "invalid.txt" }, context));
+
+    assert.equal(result.binary, true);
+    assert.equal(result.reason, "invalid_utf8");
+    assert.equal(result.content, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -571,6 +655,29 @@ test("local edit_file rejects binary targets before dryRun or write", async () =
       /edit_file target is binary or non-text: image\.bin; bytes=10/
     );
     assert.deepEqual(await readFile(file), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local edit_file preserves an existing UTF-8 byte order mark", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-bom-edit-"));
+  try {
+    const file = path.join(root, "bom.txt");
+    await writeFile(file, Buffer.concat([
+      Buffer.from([0xEF, 0xBB, 0xBF]),
+      Buffer.from("alpha\nbeta\n", "utf8"),
+    ]));
+    const editFileTool = createLocalEditFileTool(root);
+
+    await editFileTool.execute({
+      path: "bom.txt",
+      edits: [{ oldText: "beta", newText: "BETA" }],
+    }, context);
+
+    const updated = await readFile(file);
+    assert.deepEqual([...updated.subarray(0, 3)], [0xEF, 0xBB, 0xBF]);
+    assert.equal(updated.subarray(3).toString("utf8"), "alpha\nBETA\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

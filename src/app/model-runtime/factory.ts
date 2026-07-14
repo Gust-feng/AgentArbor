@@ -71,7 +71,11 @@ export type ModelRuntimeConfig =
       createIntelligenceChannel(context: ModelRuntimeChannelContext): IntelligenceChannel;
     };
 
-export type ModelRuntimeConfigurationIssueCode = "ai_disabled" | "missing_api_key" | "missing_model_name";
+export type ModelRuntimeConfigurationIssueCode =
+  | "ai_disabled"
+  | "missing_api_key"
+  | "missing_model_name"
+  | "unsupported_provider_protocol";
 
 export class ModelRuntimeConfigurationError extends Error {
   constructor(
@@ -102,6 +106,71 @@ const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
 const OPENAI_RESPONSES_PROVIDER_ID = "openai-responses";
 const OPENAI_RESPONSES_PROTOCOL = "openai_responses";
+
+export type OpenAIModelRuntimeMode = "openai-compatible" | "openai-responses";
+
+export type ResolvedOpenAIModelRuntimeConfig = {
+  readonly mode: OpenAIModelRuntimeMode;
+  readonly protocol: typeof OPENAI_COMPATIBLE_PROTOCOL | typeof OPENAI_RESPONSES_PROTOCOL;
+  readonly providerId: typeof OPENAI_COMPATIBLE_PROVIDER_ID | typeof OPENAI_RESPONSES_PROVIDER_ID;
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly model: string;
+  readonly requestSettings?: SanitizedModelProviderConfig["openAI"];
+  readonly summaryInput: ModelRuntimeSummaryInput;
+};
+
+/** Shared OpenAI connection resolution for both IntelligenceChannel and AgentLoop factories. */
+export function resolveOpenAIModelRuntimeConfig(input: {
+  readonly mode: OpenAIModelRuntimeMode;
+  readonly env: ModelRuntimeEnvironment;
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "baseUrl" | "model" | "openAI">;
+}): ResolvedOpenAIModelRuntimeConfig {
+  const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
+  const model = firstNonBlank(input.modelProvider?.model, input.env.AGENTARBOR_MODEL_NAME);
+  const baseUrl =
+    firstNonBlank(input.modelProvider?.baseUrl, input.env.AGENTARBOR_MODEL_BASE_URL) ??
+    OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
+  const responses = input.mode === "openai-responses";
+  const providerId = responses ? OPENAI_RESPONSES_PROVIDER_ID : OPENAI_COMPATIBLE_PROVIDER_ID;
+  const protocol = responses ? OPENAI_RESPONSES_PROTOCOL : OPENAI_COMPATIBLE_PROTOCOL;
+  const summaryInput: ModelRuntimeSummaryInput = {
+    enabled: true,
+    mode: input.mode,
+    providerId,
+    providerKind: "openai_compatible",
+    protocolKind: protocol,
+    model,
+  };
+
+  if (apiKey === undefined) {
+    throw new ModelRuntimeConfigurationError({
+      code: "missing_api_key",
+      message:
+        `--ai ${input.mode} requires AGENTARBOR_MODEL_API_KEY or OPENAI_API_KEY; no network request was attempted.`,
+      summaryInput,
+    });
+  }
+
+  if (model === undefined) {
+    throw new ModelRuntimeConfigurationError({
+      code: "missing_model_name",
+      message: `--ai ${input.mode} requires AGENTARBOR_MODEL_NAME; no network request was attempted.`,
+      summaryInput,
+    });
+  }
+
+  return {
+    mode: input.mode,
+    protocol,
+    providerId,
+    baseUrl,
+    apiKey,
+    model,
+    requestSettings: input.modelProvider?.openAI,
+    summaryInput,
+  };
+}
 
 export function createModelRuntimeConfig(input: {
   readonly mode?: ModelRuntimeMode;
@@ -189,60 +258,34 @@ function createOpenAICompatibleConfig(input: {
   readonly onContextWindowExceeded?: (event: ModelRuntimeContextWindowExceededEvent) => void | Promise<void>;
   readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
-  const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
-  const model = firstNonBlank(input.modelProvider?.model, input.env.AGENTARBOR_MODEL_NAME);
-  const baseUrl =
-    firstNonBlank(input.modelProvider?.baseUrl, input.env.AGENTARBOR_MODEL_BASE_URL) ??
-    OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
-  const summaryInput: ModelRuntimeSummaryInput = {
-    enabled: true,
+  const resolved = resolveOpenAIModelRuntimeConfig({
     mode: "openai-compatible",
-    providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
-    providerKind: "openai_compatible",
-    protocolKind: OPENAI_COMPATIBLE_PROTOCOL,
-    model,
-  };
-
-  if (apiKey === undefined) {
-    throw new ModelRuntimeConfigurationError({
-      code: "missing_api_key",
-      message:
-        "--ai openai-compatible requires AGENTARBOR_MODEL_API_KEY or OPENAI_API_KEY; no network request was attempted.",
-      summaryInput,
-    });
-  }
-
-  if (model === undefined) {
-    throw new ModelRuntimeConfigurationError({
-      code: "missing_model_name",
-      message:
-        "--ai openai-compatible requires AGENTARBOR_MODEL_NAME; no network request was attempted.",
-      summaryInput,
-    });
-  }
+    env: input.env,
+    modelProvider: input.modelProvider,
+  });
 
   return {
     enabled: true,
     mode: "openai-compatible",
-    summaryInput,
+    summaryInput: resolved.summaryInput,
     createIntelligenceChannel: (runtime) =>
       new NativeIntelligenceChannel({
         provider: new OpenAICompatibleChatCompletionsProvider({
-          providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
-          baseUrl,
-          apiKey,
-          model,
+          providerId: resolved.providerId,
+          baseUrl: resolved.baseUrl,
+          apiKey: resolved.apiKey,
+          model: resolved.model,
           providerProfileId: providerProfileIdFromConfig(input.modelProvider?.profileId),
           fetch: input.fetch,
           stream: input.onModelOutputDelta !== undefined,
           forceStreaming: input.streamingMode === "force_live" && input.onModelOutputDelta !== undefined,
-          requestSettings: input.modelProvider?.openAI,
+          requestSettings: resolved.requestSettings,
           onContextWindowExceeded: (event) =>
             input.onContextWindowExceeded?.({
               profileId: input.modelProvider?.profileId,
               providerKind: "openai_compatible",
               protocolKind: OPENAI_COMPATIBLE_PROTOCOL,
-              model,
+              model: resolved.model,
               message: event.message,
             }),
           onOutputDelta: input.onModelOutputDelta,
@@ -260,60 +303,34 @@ function createOpenAIResponsesConfig(input: {
   readonly onContextWindowExceeded?: (event: ModelRuntimeContextWindowExceededEvent) => void | Promise<void>;
   readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
-  const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
-  const model = firstNonBlank(input.modelProvider?.model, input.env.AGENTARBOR_MODEL_NAME);
-  const baseUrl =
-    firstNonBlank(input.modelProvider?.baseUrl, input.env.AGENTARBOR_MODEL_BASE_URL) ??
-    OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
-  const summaryInput: ModelRuntimeSummaryInput = {
-    enabled: true,
+  const resolved = resolveOpenAIModelRuntimeConfig({
     mode: "openai-responses",
-    providerId: OPENAI_RESPONSES_PROVIDER_ID,
-    providerKind: "openai_compatible",
-    protocolKind: OPENAI_RESPONSES_PROTOCOL,
-    model,
-  };
-
-  if (apiKey === undefined) {
-    throw new ModelRuntimeConfigurationError({
-      code: "missing_api_key",
-      message:
-        "--ai openai-responses requires AGENTARBOR_MODEL_API_KEY or OPENAI_API_KEY; no network request was attempted.",
-      summaryInput,
-    });
-  }
-
-  if (model === undefined) {
-    throw new ModelRuntimeConfigurationError({
-      code: "missing_model_name",
-      message:
-        "--ai openai-responses requires AGENTARBOR_MODEL_NAME; no network request was attempted.",
-      summaryInput,
-    });
-  }
+    env: input.env,
+    modelProvider: input.modelProvider,
+  });
 
   return {
     enabled: true,
     mode: "openai-responses",
-    summaryInput,
+    summaryInput: resolved.summaryInput,
     createIntelligenceChannel: (runtime) =>
       new NativeIntelligenceChannel({
         provider: new OpenAIResponsesProvider({
-          providerId: OPENAI_RESPONSES_PROVIDER_ID,
-          baseUrl,
-          apiKey,
-          model,
+          providerId: resolved.providerId,
+          baseUrl: resolved.baseUrl,
+          apiKey: resolved.apiKey,
+          model: resolved.model,
           fetch: input.fetch,
           stream: input.onModelOutputDelta !== undefined,
           forceStreaming: input.streamingMode === "force_live" && input.onModelOutputDelta !== undefined,
-          requestSettings: input.modelProvider?.openAI,
+          requestSettings: resolved.requestSettings,
           enableWebSearch: enabledFlag(input.env.AGENTARBOR_MODEL_BUILTIN_WEB_SEARCH),
           onContextWindowExceeded: (event) =>
             input.onContextWindowExceeded?.({
               profileId: input.modelProvider?.profileId,
               providerKind: "openai_compatible",
               protocolKind: OPENAI_RESPONSES_PROTOCOL,
-              model,
+              model: resolved.model,
               message: event.message,
             }),
           onOutputDelta: input.onModelOutputDelta,

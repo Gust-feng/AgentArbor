@@ -256,6 +256,31 @@ test("model runtime owns no tool construction", async () => {
   assert.deepEqual(violations, [], "model-runtime must create providers/channels only; tool assembly belongs to tool-center");
 });
 
+test("model-runtime is the only production owner allowed to create the OpenAI Agents loop adapter", async () => {
+  const root = process.cwd();
+  const adapterDefinition = path.join(root, "src", "adapters", "intelligence", "openai-agents-loop.ts");
+  const modelRuntimeRoot = path.join(root, "src", "app", "model-runtime");
+  const files = (await collectSourceFiles(path.join(root, "src")))
+    .filter((file) => !isTestAssetSource(file));
+  const violations: string[] = [];
+
+  for (const file of files) {
+    if (file === adapterDefinition || isPathWithin(file, modelRuntimeRoot)) {
+      continue;
+    }
+    const source = await fs.readFile(file, "utf8");
+    if (/\bcreateOpenAIAgentsLoop\s*\(/u.test(source)) {
+      violations.push(relativePath(file));
+    }
+  }
+
+  assert.deepEqual(
+    violations,
+    [],
+    "features and hosts must request AgentLoop from model-runtime instead of constructing the provider adapter",
+  );
+});
+
 test("AgentTurnRuntime exposes only explicit feature-neutral execution semantics", async () => {
   const file = path.join(process.cwd(), "src", "kernel", "intelligence", "agent-turn-runtime.ts");
   const source = await fs.readFile(file, "utf8");

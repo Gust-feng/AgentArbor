@@ -180,6 +180,7 @@ export type ModelUsage = {
   readonly outputTokens?: number;
   readonly totalTokens?: number;
   readonly cachedInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
   readonly uncachedInputTokens?: number;
   readonly reasoningOutputTokens?: number;
   readonly estimatedCostUsd?: number;

@@ -64,7 +64,7 @@ export type ModelMessage = {
    * Opaque protocol continuation fields returned by an adapter and replayed only
    * to that adapter during a tool-use loop. These fields are never projected to
    * EventLog, panel read models, Plan material, or user-visible output. Durable
-   * feature state may retain only the bounded whitelist produced by the model
+   * feature state may retain only the explicit whitelist produced by the model
    * protocol persistence contract.
    */
   readonly protocolExtensions?: Readonly<Record<string, unknown>>;
@@ -166,6 +166,8 @@ export type ModelUsage = {
    * prompt_cache_hit_tokens. This is a subset of inputTokens when provided.
    */
   readonly cachedInputTokens?: number;
+  /** Provider-reported prompt tokens written to cache for this request. */
+  readonly cacheWriteInputTokens?: number;
   /**
    * Provider-reported input tokens not served from cache, such as DeepSeek
    * prompt_cache_miss_tokens.

@@ -99,7 +99,7 @@ async function assertLatestContextContract(store: DeepChildLoopContextStore): Pr
   );
 }
 
-test("Deep child loop context refuses invalid or oversized Responses protocol continuation", () => {
+test("Deep child loop context preserves large valid Responses continuation and refuses invalid items", () => {
   const oversized = {
     runId: "deep-run-oversized-context",
     childRunId: "deep-child-oversized-context",
@@ -126,9 +126,10 @@ test("Deep child loop context refuses invalid or oversized Responses protocol co
     }],
   };
 
-  assert.throws(
-    () => createDeepChildLoopContextRecord(oversized),
-    (error: unknown) => (error as { readonly code?: unknown }).code === "model_protocol_continuation_not_persistable",
+  const record = createDeepChildLoopContextRecord(oversized);
+  assert.equal(
+    JSON.stringify(record.messages[0]?.protocolExtensions).includes("x".repeat(1_100_000)),
+    true,
   );
   assert.throws(
     () => createDeepChildLoopContextRecord(invalid),

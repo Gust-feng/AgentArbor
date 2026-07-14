@@ -11,6 +11,7 @@ import { buildOpenAIResponsesControlFields } from "./openai-request-settings.js"
 import { removeUndefinedValues } from "./provider-value-utils.js";
 import { openAIResponsesContinuationItems } from "./openai-responses-continuation.js";
 import { OpenAIModelInputError } from "./openai-model-input-error.js";
+import { promptCacheKeyForModelRequest } from "./openai-prompt-cache.js";
 
 const MAX_OPENAI_RESPONSES_FILE_BYTES = 50_000_000;
 const MAX_OPENAI_RESPONSES_TOTAL_FILE_BYTES = 50_000_000;
@@ -22,6 +23,8 @@ export function buildResponsesRequestBody(
   requestSettings: OpenAIModelRequestSettings | undefined,
   options: {
     readonly enableWebSearch?: boolean;
+    readonly enablePromptCacheKey?: boolean;
+    readonly includeEncryptedReasoning?: boolean;
   } = {}
 ): Record<string, unknown> {
   validateResponsesFileAttachmentBudget(request.sanitizedMessages);
@@ -32,6 +35,12 @@ export function buildResponsesRequestBody(
   ];
   return removeUndefinedValues({
     model,
+    prompt_cache_key: options.enablePromptCacheKey === true
+      ? promptCacheKeyForModelRequest({ protocol: "responses", model, request })
+      : undefined,
+    include: options.includeEncryptedReasoning === true
+      ? ["reasoning.encrypted_content"]
+      : undefined,
     input,
     instructions,
     tools: tools.length === 0 ? undefined : tools,
@@ -53,12 +62,14 @@ function buildInput(messages: readonly ModelMessage[]): {
 } {
   let instructions: string | undefined;
   const input: unknown[] = [];
+  let collectingLeadingInstructions = true;
 
   for (const msg of messages) {
-    if (msg.role === "system") {
+    if (collectingLeadingInstructions && msg.role === "system") {
       instructions = instructions === undefined ? msg.content : `${instructions}\n\n${msg.content}`;
       continue;
     }
+    collectingLeadingInstructions = false;
 
     if (msg.role === "tool") {
       input.push({
@@ -70,26 +81,26 @@ function buildInput(messages: readonly ModelMessage[]): {
     }
 
     if (msg.role === "assistant") {
+      const continuationItems = openAIResponsesContinuationItems(msg);
+      if (continuationItems !== undefined) {
+        input.push(...continuationItems);
+        continue;
+      }
       if (msg.toolCalls !== undefined && msg.toolCalls.length > 0) {
-        const continuationItems = openAIResponsesContinuationItems(msg);
-        if (continuationItems !== undefined) {
-          input.push(...continuationItems);
-        } else {
-          for (const call of msg.toolCalls) {
-            input.push({
-              type: "function_call",
-              call_id: call.callId,
-              name: call.toolName,
-              arguments: JSON.stringify(call.input),
-            });
-          }
-          if (msg.content.length > 0) {
-            input.push({
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: msg.content }],
-            });
-          }
+        for (const call of msg.toolCalls) {
+          input.push({
+            type: "function_call",
+            call_id: call.callId,
+            name: call.toolName,
+            arguments: JSON.stringify(call.input),
+          });
+        }
+        if (msg.content.length > 0) {
+          input.push({
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: msg.content }],
+          });
         }
         continue;
       }

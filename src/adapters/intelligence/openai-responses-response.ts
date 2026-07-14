@@ -506,7 +506,7 @@ function assistantMessageFromOutput(input: {
   responseId: string;
   outputItems?: readonly unknown[];
 }): ModelMessage | undefined {
-  if (input.toolCalls.length === 0) {
+  if (input.toolCalls.length === 0 && input.textOutput.length === 0 && input.outputItems === undefined) {
     return undefined;
   }
   return {

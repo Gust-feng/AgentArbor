@@ -78,6 +78,44 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
   assert.equal(JSON.stringify(eventLog.list()).includes("token"), false);
 });
 
+test("official OpenAI Chat requests include a stable prompt cache key", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-cache-key",
+        model: "gpt-4.1",
+        choices: [{ message: { role: "assistant", content: "Done." }, finish_reason: "stop" }],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+  const request = createValidModelRequest({
+    sanitizedMessages: [
+      { role: "system", content: "Stable root.", ref: "context:system:desktop-agent" },
+      { role: "user", content: "First request." },
+    ],
+  });
+
+  await provider.complete(request);
+  await provider.complete({
+    ...request,
+    requestId: "model-request-cache-key-2",
+    sanitizedMessages: [...request.sanitizedMessages, { role: "assistant", content: "First answer." }, { role: "user", content: "Continue." }],
+  });
+
+  assert.equal(typeof calls[0]?.body.prompt_cache_key, "string");
+  assert.equal(calls[0]?.body.prompt_cache_key, calls[1]?.body.prompt_cache_key);
+});
+
 test("OpenAI-compatible Chat Completions adapter maps user image and file attachments to provider content parts", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {

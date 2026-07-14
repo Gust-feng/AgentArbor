@@ -806,6 +806,7 @@ function modelUsageOrUndefined(value: unknown): ModelUsage | undefined {
     outputTokens: nonNegativeNumber(record.outputTokens),
     totalTokens: nonNegativeNumber(record.totalTokens),
     cachedInputTokens: nonNegativeNumber(record.cachedInputTokens),
+    cacheWriteInputTokens: nonNegativeNumber(record.cacheWriteInputTokens),
     uncachedInputTokens: nonNegativeNumber(record.uncachedInputTokens),
     reasoningOutputTokens: nonNegativeNumber(record.reasoningOutputTokens),
     estimatedCostUsd: nonNegativeNumber(record.estimatedCostUsd),

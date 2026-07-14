@@ -2,15 +2,10 @@ import type { ModelMessage } from "./contracts.js";
 
 export const OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION = "openai_responses_output_items";
 
-const MAX_PERSISTED_OPENAI_RESPONSES_OUTPUT_ITEMS = 128;
-const MAX_PERSISTED_OPENAI_RESPONSES_OUTPUT_ITEMS_JSON_CHARS = 1_000_000;
-
 export type PersistedModelProtocolExtensionFailureReason =
   | "not_array"
   | "empty_items"
-  | "too_many_items"
   | "not_json_safe"
-  | "too_large"
   | "invalid_item";
 
 /**
@@ -39,9 +34,9 @@ export class ModelProtocolContinuationPersistenceError extends Error {
 }
 
 /**
- * Produces the bounded protocol continuation facts that a feature may persist
- * without interpreting provider-private data. Request-only extensions and
- * model attachments remain ephemeral.
+ * Produces the exact JSON-safe protocol continuation facts that a feature may
+ * persist without interpreting provider-private data. Request-only extensions
+ * and model attachments remain ephemeral.
  */
 export function persistedModelProtocolExtensions(
   extensions: ModelMessage["protocolExtensions"],
@@ -56,16 +51,10 @@ export function persistedModelProtocolExtensions(
   if (rawItems.length === 0) {
     throw new ModelProtocolContinuationPersistenceError("empty_items");
   }
-  if (rawItems.length > MAX_PERSISTED_OPENAI_RESPONSES_OUTPUT_ITEMS) {
-    throw new ModelProtocolContinuationPersistenceError("too_many_items");
-  }
   if (!isProtocolJsonValue(rawItems, new Set<object>(), 0)) {
     throw new ModelProtocolContinuationPersistenceError("not_json_safe");
   }
   const serialized = JSON.stringify(rawItems);
-  if (serialized.length > MAX_PERSISTED_OPENAI_RESPONSES_OUTPUT_ITEMS_JSON_CHARS) {
-    throw new ModelProtocolContinuationPersistenceError("too_large");
-  }
   const detached = JSON.parse(serialized) as unknown;
   if (!Array.isArray(detached) || !detached.every(isProtocolOutputItem)) {
     throw new ModelProtocolContinuationPersistenceError("invalid_item");

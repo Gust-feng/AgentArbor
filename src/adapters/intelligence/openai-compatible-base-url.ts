@@ -6,3 +6,7 @@ export function normalizeOpenAICompatibleSdkBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
+export function isOfficialOpenAIBaseUrl(baseUrl: string): boolean {
+  const trimmed = baseUrl.replace(/\/+$/, "").toLowerCase();
+  return trimmed === "https://api.openai.com" || trimmed === "https://api.openai.com/v1";
+}

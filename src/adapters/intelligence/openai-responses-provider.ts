@@ -10,7 +10,10 @@ import type {
 import { createId, nowIso } from "../../kernel/id.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
-import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
+import {
+  isOfficialOpenAIBaseUrl,
+  normalizeOpenAICompatibleSdkBaseUrl,
+} from "./openai-compatible-base-url.js";
 import {
   resolveGlobalFetch,
   toOpenAIFetch,
@@ -114,6 +117,8 @@ export class OpenAIResponsesProvider implements ModelProvider {
       });
       const requestBody = buildResponsesRequestBody(request, this.model, stream, this.requestSettings, {
         enableWebSearch: this.enableWebSearch,
+        enablePromptCacheKey: isOfficialOpenAIBaseUrl(this.baseUrl),
+        includeEncryptedReasoning: isOfficialOpenAIBaseUrl(this.baseUrl),
       });
 
       if (stream) {

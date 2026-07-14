@@ -6,7 +6,7 @@ import {
   persistedModelProtocolExtensions,
 } from "./persisted-protocol-extensions.js";
 
-test("persisted model protocol extensions keep only bounded Responses continuation items", () => {
+test("persisted model protocol extensions keep exact JSON-safe Responses continuation items", () => {
   const items = [{ type: "reasoning", encrypted_content: "opaque" }];
   assert.deepEqual(persistedModelProtocolExtensions({
     response_id: "request-only",
@@ -23,15 +23,11 @@ test("persisted model protocol extensions keep only bounded Responses continuati
       error.code === "model_protocol_continuation_not_persistable" &&
       error.facts.reason === "invalid_item",
   );
-  assert.throws(
-    () => persistedModelProtocolExtensions({
-      [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: [{
-        type: "reasoning",
-        encrypted_content: "x".repeat(1_100_000),
-      }],
-    }),
-    (error: unknown) => error instanceof ModelProtocolContinuationPersistenceError &&
-      error.facts.reason === "too_large",
-  );
+  const largeOpaqueItem = { type: "reasoning", encrypted_content: "x".repeat(1_100_000) };
+  assert.deepEqual(persistedModelProtocolExtensions({
+    [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: [largeOpaqueItem],
+  }), {
+    [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: [largeOpaqueItem],
+  });
   assert.equal(persistedModelProtocolExtensions({ unknown_provider_field: "ignored" }), undefined);
 });

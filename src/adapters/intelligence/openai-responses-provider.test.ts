@@ -81,6 +81,8 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
   assert.equal(calls[0]?.authorization, "Bearer sk-test-key");
   assert.deepEqual(calls[0]?.body, {
     model: "gpt-4.1",
+    prompt_cache_key: (calls[0]?.body as Record<string, unknown> | undefined)?.prompt_cache_key,
+    include: ["reasoning.encrypted_content"],
     input: [
       {
         type: "message",
@@ -267,12 +269,89 @@ test("OpenAI Responses adapter maps system message to instructions", async () =>
   );
 
   assert.equal(calls[0]?.body.instructions, "You are a helpful assistant.");
+  assert.equal(typeof calls[0]?.body.prompt_cache_key, "string");
   assert.deepEqual(calls[0]?.body.input, [
     {
       type: "message",
       role: "user",
       content: [{ type: "input_text", text: "Hello." }],
     },
+  ]);
+});
+
+test("OpenAI-compatible Responses endpoints do not receive official cache or reasoning continuation fields", async () => {
+  let body: Record<string, unknown> | undefined;
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://responses.example.test/v1",
+    apiKey: "test-key",
+    model: "compatible-model",
+    fetch: async (_url, init) => {
+      body = JSON.parse(init.body) as Record<string, unknown>;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "resp-compatible",
+          model: "compatible-model",
+          status: "completed",
+          output: [{
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: JSON.stringify({ summary: "Done." }) }],
+          }],
+        }),
+      };
+    },
+  });
+
+  await provider.complete(createValidModelRequest());
+
+  assert.equal(body?.prompt_cache_key, undefined);
+  assert.equal(body?.include, undefined);
+});
+
+test("OpenAI Responses adapter preserves non-leading system context in transcript order", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "resp-ordered-system",
+        model: "gpt-4.1",
+        status: "completed",
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Done." }],
+        }],
+      }),
+    };
+  };
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    sanitizedMessages: [
+      { role: "system", content: "Stable root." },
+      { role: "user", content: "Earlier request." },
+      { role: "assistant", content: "Earlier answer." },
+      { role: "system", content: "Current attachment fact." },
+      { role: "user", content: "Current request." },
+    ],
+  }));
+
+  assert.equal(calls[0]?.body.instructions, "Stable root.");
+  assert.deepEqual(calls[0]?.body.input, [
+    { type: "message", role: "user", content: [{ type: "input_text", text: "Earlier request." }] },
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: "Earlier answer." }] },
+    { type: "message", role: "system", content: [{ type: "input_text", text: "Current attachment fact." }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "Current request." }] },
   ]);
 });
 
@@ -1227,6 +1306,42 @@ test("OpenAI Responses adapter stores response id and output items in protocolEx
       arguments: "{}",
     },
   ]);
+});
+
+test("OpenAI Responses adapter retains final response and encrypted reasoning items for the next turn", async () => {
+  const output = [
+    { type: "reasoning", encrypted_content: "opaque-reasoning" },
+    {
+      type: "message",
+      role: "assistant",
+      phase: "final_answer",
+      content: [{ type: "output_text", text: "Final answer." }],
+    },
+  ];
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      id: "resp-final-context",
+      model: "gpt-4.1",
+      status: "completed",
+      output,
+    }),
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.assistantMessage?.content, "Final answer.");
+  assert.deepEqual(
+    response.assistantMessage?.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION],
+    output,
+  );
 });
 
 test("OpenAI Responses adapter handles response.incomplete status", async () => {

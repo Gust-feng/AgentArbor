@@ -415,6 +415,7 @@ type AssistantModelUsage = {
   readonly outputTokens?: number;
   readonly totalTokens?: number;
   readonly cachedInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
   readonly uncachedInputTokens?: number;
   readonly reasoningOutputTokens?: number;
   readonly latencyMs?: number;
@@ -606,25 +607,31 @@ function modelUsageItems(usage: AssistantModelUsage | undefined): readonly Assis
 function inputUsageItem(usage: AssistantModelUsage): AssistantModelUsageItem | undefined {
   const inputText = formatTokenCount(usage.inputTokens);
   const cachedText = formatTokenCount(usage.cachedInputTokens);
+  const cacheWriteText = formatTokenCount(usage.cacheWriteInputTokens);
   const uncachedText = formatTokenCount(usage.uncachedInputTokens);
   if (inputText !== undefined) {
+    const cacheParts = [
+      cachedText === undefined ? undefined : `${cachedText} cached`,
+      cacheWriteText === undefined ? undefined : `${cacheWriteText} cache write`,
+    ].filter((part): part is string => part !== undefined);
     return {
       key: "input",
       icon: ArrowUp,
-      text: cachedText === undefined ? `${inputText} tokens` : `${inputText} tokens (${cachedText} cached)`,
-      title: "本次模型请求的总输入上下文 token；括号内为 provider 报告的缓存命中部分。系统提示、工具 schema、历史对话和附件上下文都可能计入总输入，命中缓存时计入 cached。",
+      text: cacheParts.length === 0 ? `${inputText} tokens` : `${inputText} tokens (${cacheParts.join(" · ")})`,
+      title: "本次模型请求的总输入上下文 token；括号内为 provider 报告的缓存命中与缓存写入。系统提示、工具 schema、历史对话和附件上下文都可能计入总输入。",
     };
   }
-  if (cachedText !== undefined || uncachedText !== undefined) {
+  if (cachedText !== undefined || cacheWriteText !== undefined || uncachedText !== undefined) {
     const parts = [
       uncachedText === undefined ? undefined : `${uncachedText} new`,
       cachedText === undefined ? undefined : `${cachedText} cached`,
+      cacheWriteText === undefined ? undefined : `${cacheWriteText} cache write`,
     ].filter((part): part is string => part !== undefined);
     return {
       key: "input",
       icon: ArrowUp,
       text: parts.join(" + "),
-      title: "输入上下文 token，按 provider usage 拆分为 cache miss 与 cache hit；工具、系统提示和历史前缀命中缓存时计入 cached。",
+      title: "输入上下文 token，按 provider usage 拆分为 cache miss、cache hit 与 cache write。",
     };
   }
   return undefined;

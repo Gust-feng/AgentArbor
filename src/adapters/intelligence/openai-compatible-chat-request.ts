@@ -16,6 +16,7 @@ import { buildOpenAIChatCompletionsControlFields } from "./openai-request-settin
 import { removeUndefinedValues } from "./provider-value-utils.js";
 import { filterOpenAIChatProtocolExtensions } from "./openai-compatible-chat-protocol-extensions.js";
 import { OpenAIModelInputError } from "./openai-model-input-error.js";
+import { promptCacheKeyForModelRequest } from "./openai-prompt-cache.js";
 
 export function buildOpenAICompatibleChatRequestBody(input: {
   readonly request: ModelRequest;
@@ -23,6 +24,7 @@ export function buildOpenAICompatibleChatRequestBody(input: {
   readonly dialect: OpenAICompatibleChatDialect;
   readonly stream: boolean;
   readonly requestSettings?: OpenAIModelRequestSettings;
+  readonly enablePromptCacheKey?: boolean;
 }): Record<string, unknown> {
   const controlFields = applyOpenAICompatibleChatDialectControls({
     fields: buildOpenAIChatCompletionsControlFields({
@@ -37,6 +39,13 @@ export function buildOpenAICompatibleChatRequestBody(input: {
     dialect: input.dialect,
     fields: {
       model: input.model,
+      prompt_cache_key: input.enablePromptCacheKey === true && input.dialect.profileId === "openai"
+        ? promptCacheKeyForModelRequest({
+            protocol: "chat",
+            model: input.model,
+            request: input.request,
+          })
+        : undefined,
       messages: toOpenAIMessages(input.request.sanitizedMessages, input.dialect),
       tools: input.request.tools === undefined || input.request.tools.length === 0 ? undefined : input.request.tools.map(toOpenAITool),
       tool_choice: toOpenAIToolChoice(input.request.toolChoice),

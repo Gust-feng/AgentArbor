@@ -65,6 +65,7 @@ test("model usage metrics normalize OpenAI Chat and Responses usage fields", () 
     total_tokens: 30,
     input_tokens_details: {
       cached_tokens: 8,
+      cache_write_tokens: 4,
     },
     output_tokens_details: {
       reasoning_tokens: 3,
@@ -74,6 +75,27 @@ test("model usage metrics normalize OpenAI Chat and Responses usage fields", () 
     outputTokens: 10,
     totalTokens: 30,
     cachedInputTokens: 8,
+    cacheWriteInputTokens: 4,
+    uncachedInputTokens: 12,
     reasoningOutputTokens: 3,
+  });
+});
+
+test("model usage metrics read official OpenAI Chat cache details", () => {
+  assert.deepEqual(openAIChatUsageFromRecord({
+    prompt_tokens: 2_006,
+    completion_tokens: 300,
+    total_tokens: 2_306,
+    prompt_tokens_details: {
+      cached_tokens: 1_920,
+      cache_write_tokens: 64,
+    },
+  }), {
+    inputTokens: 2_006,
+    outputTokens: 300,
+    totalTokens: 2_306,
+    cachedInputTokens: 1_920,
+    cacheWriteInputTokens: 64,
+    uncachedInputTokens: 86,
   });
 });

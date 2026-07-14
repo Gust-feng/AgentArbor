@@ -10,7 +10,10 @@ import type {
 import { createId, nowIso } from "../../kernel/id.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
-import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
+import {
+  isOfficialOpenAIBaseUrl,
+  normalizeOpenAICompatibleSdkBaseUrl,
+} from "./openai-compatible-base-url.js";
 import {
   resolveGlobalFetch,
   toOpenAIFetch,
@@ -127,6 +130,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         dialect: this.dialect,
         stream,
         requestSettings: this.requestSettings,
+        enablePromptCacheKey: isOfficialOpenAIBaseUrl(this.baseUrl),
       });
 
       if (stream) {
@@ -156,6 +160,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
             dialect: this.dialect,
             stream: false,
             requestSettings: this.requestSettings,
+            enablePromptCacheKey: isOfficialOpenAIBaseUrl(this.baseUrl),
           });
           const fallback = await client.chat.completions.create(fallbackBody as never, { signal: options.abortSignal });
           return normalizeOpenAICompatibleResponse({

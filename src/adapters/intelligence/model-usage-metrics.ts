@@ -3,40 +3,50 @@ import { numberOrUndefined } from "./provider-value-utils.js";
 
 export function openAIChatUsageFromRecord(value: unknown): Pick<
   ModelUsage,
-  "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "uncachedInputTokens" | "reasoningOutputTokens"
+  "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "cacheWriteInputTokens" | "uncachedInputTokens" | "reasoningOutputTokens"
 > {
   const usage = asUsageRecord(value);
+  const promptDetails = asUsageRecord(usage.prompt_tokens_details);
   const completionDetails = asUsageRecord(usage.completion_tokens_details);
-  return {
-    inputTokens: numberOrUndefined(usage.prompt_tokens),
+  const inputTokens = numberOrUndefined(usage.prompt_tokens);
+  const cachedInputTokens = numberOrUndefined(promptDetails.cached_tokens)
+    ?? numberOrUndefined(usage.prompt_cache_hit_tokens);
+  return compactUsage({
+    inputTokens,
     outputTokens: numberOrUndefined(usage.completion_tokens),
     totalTokens: numberOrUndefined(usage.total_tokens),
-    cachedInputTokens: numberOrUndefined(usage.prompt_cache_hit_tokens),
-    uncachedInputTokens: numberOrUndefined(usage.prompt_cache_miss_tokens),
+    cachedInputTokens,
+    cacheWriteInputTokens: numberOrUndefined(promptDetails.cache_write_tokens),
+    uncachedInputTokens: numberOrUndefined(usage.prompt_cache_miss_tokens)
+      ?? uncachedTokensFromTotal(inputTokens, cachedInputTokens),
     reasoningOutputTokens: numberOrUndefined(completionDetails.reasoning_tokens),
-  };
+  });
 }
 
 export function openAIResponsesUsageFromRecord(value: unknown): Pick<
   ModelUsage,
-  "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "reasoningOutputTokens"
+  "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "cacheWriteInputTokens" | "uncachedInputTokens" | "reasoningOutputTokens"
 > {
   const usage = asUsageRecord(value);
   const inputDetails = asUsageRecord(usage.input_tokens_details);
   const outputDetails = asUsageRecord(usage.output_tokens_details);
-  return {
-    inputTokens: numberOrUndefined(usage.input_tokens),
+  const inputTokens = numberOrUndefined(usage.input_tokens);
+  const cachedInputTokens = numberOrUndefined(inputDetails.cached_tokens);
+  return compactUsage({
+    inputTokens,
     outputTokens: numberOrUndefined(usage.output_tokens),
     totalTokens: numberOrUndefined(usage.total_tokens),
-    cachedInputTokens: numberOrUndefined(inputDetails.cached_tokens),
+    cachedInputTokens,
+    cacheWriteInputTokens: numberOrUndefined(inputDetails.cache_write_tokens),
+    uncachedInputTokens: uncachedTokensFromTotal(inputTokens, cachedInputTokens),
     reasoningOutputTokens: numberOrUndefined(outputDetails.reasoning_tokens),
-  };
+  });
 }
 
 export function modelUsageWithTiming(input: {
   readonly usage?: Pick<
     ModelUsage,
-    "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "uncachedInputTokens" | "reasoningOutputTokens"
+    "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "cacheWriteInputTokens" | "uncachedInputTokens" | "reasoningOutputTokens"
   >;
   readonly latencyMs: number;
   readonly firstTokenLatencyMs?: number;
@@ -52,6 +62,7 @@ export function modelUsageWithTiming(input: {
     outputTokens: normalizeTokenCount(input.usage?.outputTokens),
     totalTokens: normalizeTokenCount(input.usage?.totalTokens),
     cachedInputTokens: normalizeTokenCount(input.usage?.cachedInputTokens),
+    cacheWriteInputTokens: normalizeTokenCount(input.usage?.cacheWriteInputTokens),
     uncachedInputTokens: normalizeTokenCount(input.usage?.uncachedInputTokens),
     reasoningOutputTokens: normalizeTokenCount(input.usage?.reasoningOutputTokens),
     latencyMs,
@@ -62,6 +73,13 @@ export function modelUsageWithTiming(input: {
       durationMs: outputDurationMs,
     }),
   });
+}
+
+function uncachedTokensFromTotal(total: number | undefined, cached: number | undefined): number | undefined {
+  if (total === undefined || cached === undefined) {
+    return undefined;
+  }
+  return Math.max(0, total - cached);
 }
 
 function outputTokensPerSecond(input: {

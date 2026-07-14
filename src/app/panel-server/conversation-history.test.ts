@@ -388,6 +388,70 @@ test("conversation history exposes failed run facts as interruption context", as
   assert.equal(interruptions[0]?.message, "模型连接在测试完成前中断。");
 });
 
+test("conversation interruption keeps only the immediately preceding failed run", async () => {
+  const conversations = new PanelConversationStore();
+  const runJobs = new PanelRunJobStore();
+  const first = conversations.startDesktopMessage({ goal: "第一轮失败" });
+  conversations.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: first.assistantTurn.turnId,
+    runId: "failed-run-not-immediate",
+    title: "未完成",
+    content: "错误信息：第一轮失败。",
+    status: "failed",
+  });
+  const second = conversations.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "第二轮成功",
+  });
+  conversations.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: second.assistantTurn.turnId,
+    runId: "completed-run-immediate",
+    title: "已完成",
+    content: "第二轮已经完成。",
+    status: "completed",
+  });
+  const third = conversations.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "第三轮继续",
+  });
+
+  const interruptions = await buildConversationInterruptedRunContexts({
+    source: { conversations, runJobs },
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: third.assistantTurn.turnId,
+  });
+
+  assert.deepEqual(interruptions, []);
+});
+
+test("conversation interruption excludes appended failure copy from partial model output", async () => {
+  const conversations = new PanelConversationStore();
+  const runJobs = new PanelRunJobStore();
+  const first = conversations.startDesktopMessage({ goal: "执行修改" });
+  conversations.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: first.assistantTurn.turnId,
+    runId: "failed-run-with-copy",
+    title: "未完成",
+    content: "已经修改配置。\n\n错误信息：provider request failed.",
+    status: "failed",
+  });
+  const second = conversations.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "继续",
+  });
+
+  const interruptions = await buildConversationInterruptedRunContexts({
+    source: { conversations, runJobs },
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: second.assistantTurn.turnId,
+  });
+
+  assert.equal(interruptions[0]?.partialOutput, "已经修改配置。");
+});
+
 test("conversation history exposes cancelled run progress as interruption context", async () => {
   const conversations = new PanelConversationStore();
   const runJobs = new PanelRunJobStore();

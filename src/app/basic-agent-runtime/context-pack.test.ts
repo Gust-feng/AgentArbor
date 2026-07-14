@@ -376,7 +376,7 @@ test("Basic Agent context pack injects interrupted run context as system continu
 
   assert.equal(interruptionMessage?.role, "system");
   assert.match(interruptionMessage?.content ?? "", /Previous ordinary agent run did not complete/);
-  assert.match(interruptionMessage?.content ?? "", /run_id=run-interrupted-context/);
+  assert.equal((interruptionMessage?.content ?? "").includes("run-interrupted-context"), false);
   assert.match(interruptionMessage?.content ?? "", /stop_reason=out_of_fuel/);
   assert.match(interruptionMessage?.content ?? "", /continuation_availability=new_turn/);
   assert.equal((interruptionMessage?.content ?? "").includes("SENTINEL_AFTER_INTERRUPTION_PREVIEW"), false);
@@ -416,6 +416,8 @@ test("Basic Agent context pack injects prior tool execution facts without replac
   const toolFactMessage = pack.messages.find((message) => message.ref === toolFact.itemId);
   assert.equal(toolFactMessage?.role, "system");
   assert.equal(toolFactMessage?.content.includes("status=completed"), true);
+  assert.equal(toolFactMessage?.content.includes("run-prior-tool"), false);
+  assert.equal(toolFactMessage?.content.includes("call-prior-read"), false);
 });
 
 test("Basic Agent context pack preserves history roles without pre-threshold deterministic compaction", () => {

@@ -79,8 +79,6 @@ function priorToolCallContextItems(
 function priorToolCallContextModelText(context: DesktopAgentPriorToolCallContext): string {
   return [
     "Tool execution fact from the immediately preceding ordinary agent run. Treat it as observed context; call tools again when freshness or omitted data matters.",
-    `run_id=${safePlain(context.runId, 180)}`,
-    `call_id=${safePlain(context.callId, 180)}`,
     `tool=${safePlain(context.toolName, 180)}`,
     `status=${context.status}`,
     context.input === undefined ? undefined : `input:\n${JSON.stringify(context.input, null, 2)}`,
@@ -91,9 +89,6 @@ function priorToolCallContextModelText(context: DesktopAgentPriorToolCallContext
     context.factTruncation === undefined
       ? undefined
       : `fact_truncation=${JSON.stringify(context.factTruncation)}`,
-    context.refs.length === 0
-      ? undefined
-      : `refs=${context.refs.map((ref) => safePlain(ref, 220)).filter((ref) => ref.length > 0).join("; ")}`,
   ].filter(isString).join("\n");
 }
 
@@ -128,21 +123,18 @@ function interruptedRunContextModelText(context: DesktopAgentInterruptedRunConte
   const partialOutput = context.partialOutput === undefined ? undefined : safeText(context.partialOutput, 900);
   const parts = [
     "Previous ordinary agent run did not complete. Treat this as runtime continuity context, not as a completed assistant answer.",
-    `run_id=${safePlain(context.runId, 180)}`,
     `assistant_turn_status=${context.turnStatus}`,
     context.stopReason === undefined ? undefined : `stop_reason=${safePlain(context.stopReason, 180)}`,
     context.continuationAvailability === undefined
       ? undefined
       : `continuation_availability=${context.continuationAvailability}`,
-    message === undefined || message.text.trim().length === 0
+    context.turnStatus === "failed" || context.turnStatus === "cancelled" ||
+      message === undefined || message.text.trim().length === 0
       ? undefined
       : `message:\n${message.text}`,
     partialOutput === undefined || partialOutput.text.trim().length === 0
       ? undefined
       : `partial_output:\n${partialOutput.text}`,
-    context.refs.length === 0
-      ? undefined
-      : `refs=${context.refs.slice(0, 8).map((ref) => safePlain(ref, 220)).filter((ref) => ref.length > 0).join("; ")}`,
   ].filter(isString);
   return {
     text: parts.join("\n"),

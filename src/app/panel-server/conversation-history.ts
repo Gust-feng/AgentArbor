@@ -88,14 +88,14 @@ export async function buildConversationInterruptedRunContexts(input: {
   if (input.assistantTurnId !== undefined && assistantIndex < 0) {
     return [];
   }
-  const contexts: DesktopAgentInterruptedRunContext[] = [];
-  for (const turn of conversationHistoryTurnsBeforeCurrentUser(conversation, assistantIndex)) {
-    const context = await interruptedRunContextForAssistantTurn(input.source, conversation, turn);
-    if (context !== undefined) {
-      contexts.push(context);
-    }
+  const previousAssistant = [...conversationHistoryTurnsBeforeCurrentUser(conversation, assistantIndex)]
+    .reverse()
+    .find((turn) => turn.role === "assistant");
+  if (previousAssistant === undefined) {
+    return [];
   }
-  return contexts.slice(-6);
+  const context = await interruptedRunContextForAssistantTurn(input.source, conversation, previousAssistant);
+  return context === undefined ? [] : [context];
 }
 
 export async function buildConversationPriorToolCallContexts(input: {
@@ -178,7 +178,10 @@ async function interruptedRunContextForAssistantTurn(
   const snapshot = liveJob === undefined
     ? await readRuntimeSnapshotWithOrdinaryContract(source.runtimeDatabase, turn.runId)
     : undefined;
-  const turnContent = conversationHistoryContentForModel(turn);
+  const turnContent = interruptedRunPartialOutput(
+    conversationHistoryContentForModel(turn),
+    turn.status,
+  );
   const stopReason = liveJob === undefined
     ? snapshot?.run.stopReason ?? snapshot?.run.error?.code ?? interruptedFallbackStopReason(turn.status)
     : liveRunStopReason(liveJob);
@@ -194,12 +197,31 @@ async function interruptedRunContextForAssistantTurn(
     stopReason,
     continuationAvailability,
     message,
-    partialOutput: turnContent.length === 0 ? undefined : turnContent,
+    partialOutput: turnContent,
     refs: [
       `conversation:${conversation.conversationId}:turn:${turn.turnId}`,
       `run:${turn.runId}`,
     ],
   };
+}
+
+function interruptedRunPartialOutput(
+  content: string,
+  status: DesktopAgentInterruptedRunContext["turnStatus"],
+): string | undefined {
+  if (status === "failed" && content.startsWith("错误信息：")) {
+    return undefined;
+  }
+  const marker = status === "failed"
+    ? "\n\n错误信息："
+    : status === "blocked"
+      ? "\n\n停止原因："
+      : undefined;
+  const modelOutput = marker === undefined ? content : content.split(marker, 1)[0]?.trim() ?? "";
+  if (modelOutput.length === 0 || (status === "cancelled" && modelOutput === "已取消。")) {
+    return undefined;
+  }
+  return modelOutput;
 }
 
 function assistantTurnStatusCanProvideInterruptedContext(
@@ -304,8 +326,8 @@ function priorToolCallContextsFromEvents(
     }));
 }
 
-function interruptedRunMessage(turnContent: string, stopReason: string | undefined): string | undefined {
-  if (turnContent.length > 0) {
+function interruptedRunMessage(turnContent: string | undefined, stopReason: string | undefined): string | undefined {
+  if (turnContent !== undefined) {
     return turnContent;
   }
   if (stopReason === undefined) {

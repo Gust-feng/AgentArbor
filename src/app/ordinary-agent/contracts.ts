@@ -143,15 +143,21 @@ export interface OrdinaryExecutionContinuation {
     readonly decision: ConfirmationDecision;
     readonly abortSignal: AbortSignal;
   }): Promise<OrdinaryExecutionOutcome>;
+  /** Releases the live-only model/tool continuation without deciding it. */
+  release(): Promise<void>;
 }
 
+export type OrdinaryExecutionInput = {
+  readonly runId: string;
+  readonly birth: OrdinaryRunBirth;
+  /** Durable user input, including attachment refs that must be resolved per request. */
+  readonly runInput: OrdinaryRunInput;
+  readonly messages: readonly ModelMessage[];
+  readonly abortSignal: AbortSignal;
+};
+
 export interface OrdinaryExecutionPort {
-  execute(input: {
-    readonly runId: string;
-    readonly birth: OrdinaryRunBirth;
-    readonly messages: readonly ModelMessage[];
-    readonly abortSignal: AbortSignal;
-  }): Promise<OrdinaryExecutionOutcome>;
+  execute(input: OrdinaryExecutionInput): Promise<OrdinaryExecutionOutcome>;
 }
 
 export type StartOrdinaryRunInput = {

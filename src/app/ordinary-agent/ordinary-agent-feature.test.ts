@@ -58,6 +58,7 @@ test("feature resumes the exact live approval continuation", async (t) => {
         assert.equal(decision.confirmationId, request.confirmationId);
         return completedOutcome();
       },
+      async release() { return undefined; },
     },
   };
   const run = await fixture(t, { async execute() { return approvalOutcome; } });
@@ -90,6 +91,71 @@ test("feature resumes the exact live approval continuation", async (t) => {
   assert.equal(decidedEvent?.type === "run.approval_decided" ? decidedEvent.confirmationId : undefined, request.confirmationId);
 });
 
+test("feature commits cancellation before approval cleanup and cleanup failure cannot rewrite it", async (t) => {
+  const request = confirmation("approval-cancel-run");
+  let markReleaseStarted: (() => void) | undefined;
+  let finishRelease: (() => void) | undefined;
+  const releaseStarted = new Promise<void>((resolve) => { markReleaseStarted = resolve; });
+  const releaseGate = new Promise<void>((resolve) => { finishRelease = resolve; });
+  const run = await fixture(t, {
+    async execute() {
+      return {
+        status: "approval_required",
+        canonicalMessages: [{ role: "user", content: "change file" }],
+        toolCalls: [],
+        confirmationRequests: [request],
+        continuation: {
+          availability: "live_only",
+          async decide() { return completedOutcome(); },
+          async release() {
+            markReleaseStarted?.();
+            await releaseGate;
+            throw new Error("cleanup failed");
+          },
+        },
+      };
+    },
+  });
+  await run.feature.commands.start(startInput("approval-cancel-run"));
+  await waitForStatus(run.feature, "approval-cancel-run", "awaiting_approval");
+
+  const cancelling = run.feature.commands.cancel("approval-cancel-run", "user_stopped");
+  await releaseStarted;
+  assert.deepEqual((await run.feature.queries.getRun("approval-cancel-run"))?.status, {
+    kind: "cancelled",
+    reason: "user_stopped",
+  });
+  finishRelease?.();
+  assert.equal((await cancelling).status.kind, "cancelled");
+  assert.equal((await run.feature.queries.getRun("approval-cancel-run"))?.status.kind, "cancelled");
+});
+
+test("feature release disposes a pending live approval continuation once", async (t) => {
+  const request = confirmation("approval-feature-release-run");
+  let releases = 0;
+  const run = await fixture(t, {
+    async execute() {
+      return {
+        status: "approval_required",
+        canonicalMessages: [{ role: "user", content: "change file" }],
+        toolCalls: [],
+        confirmationRequests: [request],
+        continuation: {
+          availability: "live_only",
+          async decide() { return completedOutcome(); },
+          async release() { releases += 1; },
+        },
+      };
+    },
+  });
+  await run.feature.commands.start(startInput("approval-feature-release-run"));
+  await waitForStatus(run.feature, "approval-feature-release-run", "awaiting_approval");
+
+  await run.feature.release();
+  await run.feature.release();
+  assert.equal(releases, 1);
+});
+
 test("feature restart turns a persisted approval pause into an honest blocked state", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-restart-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -102,7 +168,11 @@ test("feature restart turns a persisted approval pause into an honest blocked st
         canonicalMessages: [{ role: "user", content: "change file" }],
         toolCalls: [],
         confirmationRequests: [confirmation("restart-run")],
-        continuation: { availability: "live_only", async decide() { return completedOutcome(); } },
+        continuation: {
+          availability: "live_only",
+          async decide() { return completedOutcome(); },
+          async release() { return undefined; },
+        },
       };
     } },
     now: monotonicClock(),

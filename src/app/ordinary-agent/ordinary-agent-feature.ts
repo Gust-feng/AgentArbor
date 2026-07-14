@@ -148,6 +148,7 @@ export function createOrdinaryAgentFeature(input: {
       const outcome = await input.execution.execute({
         runId,
         birth: document.state.birth,
+        runInput: document.state.input,
         messages: document.state.canonicalMessages,
         abortSignal: controller.signal,
       });
@@ -228,9 +229,11 @@ export function createOrdinaryAgentFeature(input: {
     if (document === undefined) throw new Error(`Ordinary run ${runId} was not found`);
     if (isTerminal(document.state)) return clone(document.state);
     controllers.get(runId)?.abort(reason);
+    const continuation = continuations.get(runId);
     continuations.delete(runId);
     const cancelled = await mutate(runId, { type: "cancel", reason }, { keepTerminal: true });
     await activateSuccessor(runId);
+    if (continuation !== undefined) await continuation.release().catch(() => undefined);
     return cancelled;
   }
 
@@ -315,12 +318,20 @@ export function createOrdinaryAgentFeature(input: {
       released = true;
       await readyPromise.catch(() => undefined);
       for (const controller of controllers.values()) controller.abort("ordinary_feature_released");
-      continuations.clear();
+      await releaseContinuations();
       await Promise.allSettled(executions.values());
+      // An abort-ignoring execution may have returned an approval while release awaited it.
+      await releaseContinuations();
       listeners.clear();
       documents.clear();
     },
   };
+
+  async function releaseContinuations(): Promise<void> {
+    const pending = [...continuations.values()];
+    continuations.clear();
+    await Promise.allSettled(pending.map((continuation) => continuation.release()));
+  }
 }
 
 function isTerminal(state: OrdinaryRunState): boolean {

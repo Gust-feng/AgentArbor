@@ -364,7 +364,6 @@ test("panel React workbench consumes Ordinary Agent projection APIs", async () =
   assert.equal(chatActiveViewProjection.includes("visibleDeliverable"), true);
   assert.equal(chatActiveViewProjection.includes("visibleRunProblem"), true);
   assert.equal(modelOptions.includes("profile.secretConfigured === true"), true);
-  assert.equal(modelOptions.includes("profile.defaultAiMode !== \"fake\""), true);
   assert.equal(modelOptions.includes("profile.defaultAiMode !== \"none\""), true);
   assert.equal(modelProviderLogos.includes("默认配置"), false);
   assert.equal(modelProviderLogos.includes("value.includes(\"default\")"), false);

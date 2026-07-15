@@ -125,9 +125,13 @@ export function stateWithObservedRunProjection<
     readonly events?: readonly TEvent[];
     readonly workView?: TWorkView;
     readonly detail?: TDetail;
+    /** Replace the current run's volatile observation buffer after a backend stream generation reset. */
+    readonly reset?: boolean;
   }
 ): TState {
   const events = input.events ?? [];
+  const priorLive = input.reset === true ? undefined : previous.live;
+  const priorEvents = input.reset === true ? [] : previous.events;
   const readModel = createRunReadModelPatch(previous, {
     runId: input.runId,
     workView: input.workView,
@@ -137,11 +141,11 @@ export function stateWithObservedRunProjection<
     ...previous,
     run: input.run ?? previous.run,
     live: events.length === 0
-      ? previous.live
-      : appendLiveRunEvents(input.runId, previous.live, events),
+      ? priorLive
+      : appendLiveRunEvents(input.runId, priorLive, events),
     events: events.length === 0
-      ? previous.events
-      : mergeRunEvents(previous.events, events),
+      ? priorEvents
+      : mergeRunEvents(priorEvents, events),
     ...readModel,
   };
 }

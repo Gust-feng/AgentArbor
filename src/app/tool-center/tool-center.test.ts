@@ -91,6 +91,39 @@ test("ToolCenter preflight returns the exact confirmation fact without execution
   assert.deepEqual(result?.confirmationRequest?.sourceRefs, ["tool:call-preflight-delete"]);
 });
 
+test("ToolCenter uses scoped fact identity for confirmation while preserving provider call id", async () => {
+  let executedToolCallId: string | undefined;
+  const center = new ToolCenter();
+  center.register(testTool("scoped_write", async (_input, context) => {
+    executedToolCallId = context.toolCallId;
+    return { written: true };
+  }, "read-write", { requiresConfirmation: true }));
+  const request = {
+    callId: "shared-provider-call",
+    factId: "agent-tool:8:parent-a/tool:shared-provider-call",
+    toolName: "scoped_write",
+    input: { value: "one" },
+  };
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+  const permission = allowTools("scoped_write");
+
+  const pending = center.preflight(request, context, permission);
+  assert.equal(pending.status, "approval_required");
+  const confirmationId = `confirmation-${request.factId}`;
+  assert.equal(pending.status === "approval_required" ? pending.result.callId : undefined, request.callId);
+  assert.equal(pending.status === "approval_required" ? pending.result.factId : undefined, request.factId);
+  assert.equal(pending.status === "approval_required" ? pending.result.confirmationRequest?.confirmationId : undefined, confirmationId);
+
+  const completed = await center.execute(request, context, {
+    ...permission,
+    approvedConfirmationIds: [confirmationId],
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.callId, request.callId);
+  assert.equal(completed.factId, request.factId);
+  assert.equal(executedToolCallId, request.factId);
+});
+
 test("ToolCenter preflight blocks policy, registration, permission, and invalid-fact failures without execution", () => {
   let executions = 0;
   const center = new ToolCenter();

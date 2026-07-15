@@ -208,15 +208,17 @@ test("Responses maps user and tool-origin attachments and preserves them in cano
   await withGlobalFetch(fetch.fetch, async () => {
     const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL });
     try {
-      const result = await loop.execute(loopInput([{ role: "system", content: SYSTEM }, {
+      const observedToolResults: string[] = [];
+      const result = await loop.execute({ ...loopInput([{ role: "system", content: SYSTEM }, {
         role: "user",
         content: "inspect image",
         attachments: [{
           kind: "image",
           source: { kind: "data", mimeType: "image/png", data: "dXNlcg==" },
         }],
-      }], gateway));
+      }], gateway), onToolResult: async (toolResult) => { observedToolResults.push(toolResult.callId); } });
       assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.deepEqual(observedToolResults, ["call-media"]);
       const toolMessage = result.messages.find((message) => message.toolCallId === "call-media");
       assert.deepEqual(toolMessage?.attachments?.map((attachment) => attachment.attachmentId), [
         "tool-image",
@@ -521,11 +523,13 @@ test("an allowed tool executes once through the gateway and returns the complete
 for (const decisionKind of ["deny", "guidance"] as const) {
   test(`tool ${decisionKind} resumes through SDK rejection without executing the gateway`, async () => {
     const gateway = new TestGateway(gatedTool());
+    let providerToolOutput: string | undefined;
     const fetch = scriptedFetch([
       () => chatTool(`call-${decisionKind}`, "write_fact", { value: decisionKind }),
       ({ body }) => {
         const serialized = JSON.stringify(body.messages);
         assert.match(serialized, decisionKind === "guidance" ? /use read-only evidence/u : /rejected this tool/u);
+        providerToolOutput = chatToolOutput(body, `call-${decisionKind}`);
         return chatText(`${decisionKind}-final`);
       },
     ]);
@@ -549,12 +553,86 @@ for (const decisionKind of ["deny", "guidance"] as const) {
         assert.equal(resumed.status, "completed");
         assert.equal(gateway.executions.length, 0);
         assert.deepEqual(resumed.toolResults.map((result) => result.status), ["approval_required", "cancelled"]);
+        assert.equal(
+          providerToolOutput,
+          resumed.messages.find((message) => message.toolCallId === `call-${decisionKind}`)?.content,
+        );
       } finally {
         await loop.release();
       }
     });
   });
 }
+
+test("provider failure after a completed tool preserves the exact canonical tool exchange", async () => {
+  const gateway = new TestGateway(plainTool("read_fact"));
+  let providerToolOutput: string | undefined;
+  const fetch = scriptedFetch([
+    () => chatTool("call-before-provider-failure", "read_fact", { value: "one" }),
+    ({ body }) => {
+      providerToolOutput = chatToolOutput(body, "call-before-provider-failure");
+      throw new Error("provider failed after tool result");
+    },
+  ]);
+  const loop = createLoop({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: CHAT_BASE_URL,
+    fetch: fetch.fetch,
+    requestSettings: { stream: false },
+  });
+  try {
+    const result = await loop.execute(loopInput([
+      { role: "system", content: SYSTEM },
+      { role: "user", content: "read before failure" },
+    ], gateway));
+    assert.equal(result.status, "failed");
+    const canonical = result.messages.find((message) => message.toolCallId === "call-before-provider-failure");
+    assert.equal(canonical?.content, providerToolOutput);
+    assert.deepEqual(result.messages.map((message) => message.role), ["system", "user", "assistant", "tool"]);
+  } finally {
+    await loop.release();
+  }
+});
+
+test("abort after a completed tool preserves the exact canonical tool exchange", async () => {
+  const gateway = new TestGateway(plainTool("read_fact"));
+  const controller = new AbortController();
+  let markSecondStarted: (() => void) | undefined;
+  const secondStarted = new Promise<void>((resolve) => { markSecondStarted = resolve; });
+  let providerToolOutput: string | undefined;
+  const fetch = scriptedFetch([
+    () => chatTool("call-before-provider-abort", "read_fact", { value: "one" }),
+    async ({ body, signal }) => {
+      providerToolOutput = chatToolOutput(body, "call-before-provider-abort");
+      markSecondStarted?.();
+      return rejectWhenAborted(signal ?? undefined);
+    },
+  ]);
+  const loop = createLoop({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: CHAT_BASE_URL,
+    fetch: fetch.fetch,
+    requestSettings: { stream: false },
+  });
+  try {
+    const resultPromise = loop.execute({
+      ...loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "read before abort" },
+      ], gateway),
+      abortSignal: controller.signal,
+    });
+    await secondStarted;
+    controller.abort("cancel after tool result");
+    const result = await resultPromise;
+    assert.equal(result.status, "cancelled");
+    const canonical = result.messages.find((message) => message.toolCallId === "call-before-provider-abort");
+    assert.equal(canonical?.content, providerToolOutput);
+    assert.deepEqual(result.messages.map((message) => message.role), ["system", "user", "assistant", "tool"]);
+  } finally {
+    await loop.release();
+  }
+});
 
 test("model cancellation returns cancelled and aborts the provider request", async () => {
   let requestSignal: AbortSignal | null | undefined;
@@ -810,7 +888,7 @@ function decision(
 }
 
 function scriptedFetch(
-  steps: readonly ((request: CapturedFetch) => Response)[],
+  steps: readonly ((request: CapturedFetch) => Response | Promise<Response>)[],
 ): { readonly requests: CapturedFetch[]; readonly fetch: typeof globalThis.fetch } {
   const remaining = [...steps];
   const requests: CapturedFetch[] = [];
@@ -825,9 +903,16 @@ function scriptedFetch(
       if (step === undefined) {
         throw new Error(`Unexpected fetch: ${request.url}`);
       }
-      return step(captured);
+      return await step(captured);
     },
   };
+}
+
+function chatToolOutput(body: JsonRecord, callId: string): string | undefined {
+  if (!Array.isArray(body.messages)) return undefined;
+  const message = body.messages.map(parseRecord).find((item) =>
+    item.role === "tool" && item.tool_call_id === callId);
+  return typeof message?.content === "string" ? message.content : undefined;
 }
 
 async function withGlobalFetch<T>(fetchImpl: typeof globalThis.fetch, run: () => Promise<T>): Promise<T> {

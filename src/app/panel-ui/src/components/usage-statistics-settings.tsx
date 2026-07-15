@@ -192,7 +192,6 @@ function UsageHeatmapSummary(props: { readonly totals: UsageStatisticsTotals }):
   return (
     <div className="usage-heatmap-summary" aria-label="使用统计关键数据">
       <UsageHeatmapSummaryItem label="运行数" value={formatCompactNumber(props.totals.runCount)} />
-      <UsageHeatmapSummaryItem label="模型调用" value={formatCompactNumber(props.totals.modelCallCount)} />
       <UsageHeatmapSummaryItem label="总 Token" value={formatCompactNumber(props.totals.totalTokens)} />
     </div>
   );

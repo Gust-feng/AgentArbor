@@ -21,7 +21,7 @@
 
 ## 运行入口
 
-普通 Desktop Agent 通过 `AgentTurnRuntime.execute` / `resume` 进入标准模型-工具-模型循环。调用 feature 显式传入自己的停止与结果映射语义；Runtime 不再提供 Ordinary 专用方法名，也不内置普通 Agent 的完成工具或业务状态。
+普通 Desktop Agent 通过 `OrdinaryAgentFeature` 进入标准模型-工具-模型循环。feature 调用中性的 `AgentLoop` 端口；当前生产 adapter 使用 OpenAI Agents SDK，同时支持 OpenAI Responses 与 OpenAI-compatible Chat。SDK 只负责机械循环和 live confirmation continuation，不拥有 Ordinary 的业务状态、完成语义、仓储或 read-model。
 
 `execute` 的模型可见工具只包含本轮授权后的外部能力工具：
 
@@ -73,13 +73,13 @@ while not cancelled:
 - 普通开发工具结果回传。
 - tool event 审计。
 
-ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一防线。AgentTurnRuntime / tool-use-loop 必须在进入具体执行 broker 前先按本轮 `allowedTools` 拦截未授权工具；ToolCenter 和 adapter 可以重复校验与命令确认，但只能返回执行事实，不能生产模型或 UI 投影。模型可以决定“要不要调用某个已暴露工具”，但不能绕过 ToolCenter 获得未授权工具、未裁剪参数、未确认的命令执行或未记录审计事件。工具失败、拒绝、取消和确认等待都应以标准结果回传模型，让模型基于真实工具世界继续判断。除用户显式中止或外部系统硬失败外，这些结果不应终止普通 loop。
+ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一防线。OpenAI Agents SDK adapter 必须在进入具体执行 broker 前按本轮 `allowedTools` 裁剪工具；ToolCenter 和 adapter 可以重复校验与命令确认，但只能返回执行事实，不能生产模型或 UI 投影。每个工具结果必须先由 Ordinary feature 持久化为 canonical 事实，才允许返回模型；provider `callId` 与应用 `factId` 分离，不能因父/子 Agent 或并行 child 的 call id 重复而复用权限、确认或结果。工具失败、拒绝、取消和确认等待都应以标准结果回传模型，让模型基于真实工具世界继续判断。
 
 工具结果回到模型时，应优先提供足以继续开发判断的真实内容。前端展示同一工具调用事实的紧凑视图即可，不要求工具生成解释性文本，也不得用 UI 标题、摘要或固定建议替代模型消息、正文、stdout/stderr、文件片段或错误信息。
 
 ## 停止语义
 
-Ordinary 对 `execute` / `resume` 技术结果的映射为：
+Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果的映射为：
 
 - `completed/no_tool_calls`：首轮无工具调用，模型直接给出最终文本。
 - `completed/completed`：至少执行过一轮工具，随后模型无工具调用并给出最终文本。
@@ -123,18 +123,18 @@ Ordinary 对 `execute` / `resume` 技术结果的映射为：
 
 ## 持久化与恢复
 
-会话持久化由 Panel / Conversation 层负责，`desktop-agent-session` 只消费传入的 `priorModelContext` 和 `skillRoutingHistory`，不直接读取 RuntimeDatabase。`skillRoutingHistory` 只用于 Skill 选择，不进入正式模型历史。
+会话与运行持久化由 `OrdinaryAgentFeature` 自己负责。它只从上一条可见 lineage 的 `ordinary-run/v2` snapshot 读取 `canonicalMessages`，并把本轮用户消息、assistant 输出和工具事实按真实顺序追加；Panel、旧 RuntimeDatabase 和 UI read-model 都不是恢复来源。
 
-`ordinaryModelContext` 只属于 Ordinary 内部恢复与持久化边界，不进入公开 `ordinary` read-model、conversation API 或 SSE；展示层继续消费安全投影，不能因模型恢复需要而把系统提示、工具原文或 provider continuation 暴露成产品响应。
+`canonicalMessages` 只属于 Ordinary 内部恢复与持久化边界，不进入公开 conversation API 或 SSE；展示层消费单向 read-model，不能因模型恢复需要而把系统提示或 provider continuation 暴露成产品响应，也不能用展示摘要覆盖模型仍可使用的工具正文。
 
 普通会话必须是长期可恢复时间线：今天、明天或一年后继续同一 conversation，都应从数据库恢复运行历史、当前分支和可见状态。用户可以回退到上一轮、前四轮或前五轮对话；回退生成新的当前分支或显式截断当前分支，但不能破坏原始审计记录。
 
 恢复对话时必须区分可复用事实与不可伪造的运行时状态：
 
-- 从上一轮 `ordinaryModelContext` 恢复原始角色、工具调用/结果和允许持久化的 provider continuation；新的根系统指令由当前冻结 AgentDefinition 重新放在最前面。
-- 失败、blocked 或取消 run 若已经形成 canonical `ordinaryModelContext`，下一轮直接沿用其中真实消息；若在模型调用前失败，则跳过该 run 并继续查找更早的 canonical context。不得另造“中断上下文”，Panel 错误文案也不能冒充模型输出。
+- 从上一轮 `canonicalMessages` 恢复原始角色、工具调用/结果和允许持久化的 provider continuation；根系统指令由该 run 冻结的 AgentDefinition 重新放在最前面。
+- 失败、blocked 或取消 run 若已经形成 canonical 消息，下一轮沿用其中真实消息；若在模型调用前失败，则使用更早的 canonical context。不得另造“中断上下文”，Panel 错误文案也不能冒充模型输出。
 - 附件字节、未知 provider 私有字段、悬空 continuation 和无法证明结果的内部执行对象一律不持久化，不能为了“续跑”伪造 tool call/result 对。
-- 开发期旧 snapshot 没有 `ordinaryModelContext` 时直接返回空历史；不得从可见回答、event payload 或当前全局配置迁移、双读或猜测回填。
+- 开发期旧 snapshot 直接视为不兼容数据；不得从可见回答、event payload 或当前全局配置迁移、双读或猜测回填。
 
 恢复审批时仍必须匹配原 confirmation id；不允许因为重新进入 loop 而绕过确认。
 
@@ -157,7 +157,7 @@ Ordinary 对 `execute` / `resume` 技术结果的映射为：
 - 模型可在可见工具集合内自由选择工具；Runtime 不用固定阶段或关键词路由替模型挑工具。
 - 工具调用必须经过 ToolCenter、权限裁剪、命令确认和审计。
 - 工具调用后，真实工具结果必须回到下一轮模型请求，不能被摘要或投影替代。
-- 新一轮会话以及进程重启后，最新可用的标准 `ordinaryModelContext` 按原顺序进入模型上下文；失败、blocked 和取消 run 不产生第二套上下文表示，旧格式数据不兼容恢复。
+- 新一轮会话以及进程重启后，上一条可见 lineage 的 `canonicalMessages` 按原顺序进入模型上下文；失败、blocked 和取消 run 不产生第二套上下文表示，旧格式数据不兼容恢复。
 - 工具后下一轮无工具调用时 `completed`，答案来自模型最终文本。
 - 普通 Agent 不因工具次数或模型轮次达到工程上限而停止。
 - 上下文达到阈值时触发 AI 压缩并继续，而不是停止或丢失关键历史。

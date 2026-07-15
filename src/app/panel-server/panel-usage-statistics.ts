@@ -1,9 +1,12 @@
 import type { ModelUsage } from "../../domain/intelligence/index.js";
 import type {
+  OrdinaryAgentFeature,
+  OrdinaryConversationReadModel,
+  OrdinaryRunState,
+} from "../ordinary-agent/index.js";
+import type {
   RuntimeConversationRecord,
-  RuntimeDatabase,
   RuntimeModelCallRecord,
-  RuntimeRunModelCallsRecord,
   RuntimeRunRecord,
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
@@ -33,12 +36,10 @@ export type UsageStatisticsTotals = {
   readonly conversationCount: number;
   readonly messageCount: number;
   readonly runCount: number;
-  readonly modelCallCount: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
   readonly cacheSavedTokens: number;
-  readonly unknownUsageModelCallCount: number;
 };
 
 export type UsageStatisticsDailyActivity = {
@@ -53,41 +54,77 @@ export type UsageStatisticsDailyActivity = {
 };
 
 export async function createPanelUsageStatistics(input: {
-  readonly runtimeDatabase?: RuntimeDatabase;
+  readonly ordinaryAgentFeature: OrdinaryAgentFeature;
   readonly generatedAt?: string;
 }): Promise<UsageStatisticsResponse> {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
-  if (input.runtimeDatabase === undefined) {
-    return {
-      ok: true,
-      status: "completed",
-      statistics: createUsageStatistics({
-        generatedAt,
-        storageAvailable: false,
-        conversations: [],
-        runs: [],
-        snapshots: [],
-        modelCallsByRun: [],
-      }),
-    };
-  }
-
-  const [conversations, runs] = await Promise.all([
-    input.runtimeDatabase.listConversations(ALL_LOCAL_RECORD_LIMIT),
-    input.runtimeDatabase.listRuns(ALL_LOCAL_RECORD_LIMIT),
+  const [conversations, summaries] = await Promise.all([
+    input.ordinaryAgentFeature.queries.listConversations(ALL_LOCAL_RECORD_LIMIT),
+    input.ordinaryAgentFeature.queries.listRuns(ALL_LOCAL_RECORD_LIMIT),
   ]);
-  const modelCallsByRun = await listModelCallsForRuns(input.runtimeDatabase, runs);
+  const runs = (await Promise.all(summaries.map((summary) =>
+    input.ordinaryAgentFeature.queries.getRun(summary.runId))))
+    .filter((run): run is OrdinaryRunState => run !== undefined);
   return {
     ok: true,
     status: "completed",
-    statistics: createUsageStatistics({
-      generatedAt,
-      storageAvailable: true,
-      conversations,
-      runs,
-      modelCallsByRun,
-      snapshots: [],
-    }),
+    statistics: createOrdinaryUsageStatistics({ generatedAt, conversations, runs }),
+  };
+}
+
+function createOrdinaryUsageStatistics(input: {
+  readonly generatedAt: string;
+  readonly conversations: readonly OrdinaryConversationReadModel[];
+  readonly runs: readonly OrdinaryRunState[];
+}): UsageStatistics {
+  const daily = createDailyBuckets(input.generatedAt);
+  const activityDates: string[] = [];
+  const totals: MutableUsageStatisticsTotals = {
+    conversationCount: input.conversations.length,
+    messageCount: 0,
+    runCount: input.runs.length,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    cacheSavedTokens: 0,
+  };
+  for (const conversation of input.conversations) {
+    addActivityDate(activityDates, conversation.createdAt);
+    addActivityDate(activityDates, conversation.updatedAt);
+    addDailyCount(daily, conversation.createdAt, "conversationCount", 1);
+    totals.messageCount += conversation.turns.length;
+    for (const turn of conversation.turns) {
+      addActivityDate(activityDates, turn.createdAt);
+      addActivityDate(activityDates, turn.updatedAt);
+      addDailyCount(daily, turn.createdAt, "messageCount", 1);
+    }
+  }
+
+  for (const run of input.runs) {
+    addActivityDate(activityDates, run.timestamps.createdAt);
+    addActivityDate(activityDates, run.timestamps.updatedAt);
+    addDailyCount(daily, run.timestamps.createdAt, "runCount", 1);
+    const usage = normalizedUsage(run.usage);
+    if (usage === undefined) continue;
+    totals.inputTokens += usage.inputTokens;
+    totals.outputTokens += usage.outputTokens;
+    totals.totalTokens += usage.totalTokens;
+    totals.cacheSavedTokens += usage.cacheSavedTokens;
+    const usageAt = run.timestamps.terminalAt ?? run.timestamps.updatedAt;
+    addDailyCount(daily, usageAt, "inputTokens", usage.inputTokens);
+    addDailyCount(daily, usageAt, "outputTokens", usage.outputTokens);
+    addDailyCount(daily, usageAt, "cacheSavedTokens", usage.cacheSavedTokens);
+  }
+
+  return {
+    generatedAt: input.generatedAt,
+    storageAvailable: true,
+    scope: "all_local",
+    heatmapWindowDays: USAGE_HEATMAP_WINDOW_DAYS,
+    firstActivityDate: minDate(activityDates),
+    lastActivityDate: maxDate(activityDates),
+    totals,
+    dailyActivity: finalizeDailyActivity(daily),
   };
 }
 
@@ -105,12 +142,10 @@ export function createUsageStatistics(input: {
     conversationCount: input.conversations.length,
     messageCount: 0,
     runCount: input.runs.length,
-    modelCallCount: 0,
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
     cacheSavedTokens: 0,
-    unknownUsageModelCallCount: 0,
   };
 
   for (const conversation of input.conversations) {
@@ -165,22 +200,6 @@ type UsageStatisticsModelCallGroup = {
   readonly modelCalls: readonly RuntimeModelCallRecord[];
 };
 
-async function listModelCallsForRuns(
-  runtimeDatabase: RuntimeDatabase,
-  runs: readonly RuntimeRunRecord[]
-): Promise<readonly RuntimeRunModelCallsRecord[]> {
-  if (runtimeDatabase.listModelCallsForRuns !== undefined) {
-    return runtimeDatabase.listModelCallsForRuns(runs.map((run) => run.runId));
-  }
-  const snapshots = await Promise.all(runs.map((run) => runtimeDatabase.getRun(run.runId)));
-  return snapshots
-    .filter((snapshot): snapshot is RuntimeRunSnapshot => snapshot !== undefined)
-    .map((snapshot) => ({
-      runId: snapshot.run.runId,
-      modelCalls: snapshot.modelCalls,
-    }));
-}
-
 function modelCallGroups(input: {
   readonly snapshots?: readonly RuntimeRunSnapshot[];
   readonly modelCallsByRun?: readonly UsageStatisticsModelCallGroup[];
@@ -208,10 +227,8 @@ function addModelCallUsage(
   if (call.status !== "completed") {
     return;
   }
-  totals.modelCallCount += 1;
   const usage = normalizedUsage(call.usage);
   if (usage === undefined) {
-    totals.unknownUsageModelCallCount += 1;
     return;
   }
   totals.inputTokens += usage.inputTokens;

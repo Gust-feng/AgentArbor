@@ -49,7 +49,12 @@ test("FileSystemRunSnapshotStore persists under encoded run directory and lists 
     const content = await fs.readFile(encodedDirectory, "utf8");
     assert.equal(content.includes("newer"), true);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    });
   }
 });
 

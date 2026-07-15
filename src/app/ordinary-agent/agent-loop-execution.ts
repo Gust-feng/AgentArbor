@@ -75,6 +75,7 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           ...(resources.agentTools === undefined ? {} : { agentTools: resources.agentTools }),
           abortSignal: executionInput.abortSignal,
           onTextDelta: executionInput.onTextDelta,
+          onToolResult: executionInput.onToolResult,
         });
         return await mapAgentLoopResult(result, lease, input.onReleaseError, {}, resources.capabilityResolution);
       } catch (error) {

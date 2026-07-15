@@ -35,7 +35,7 @@
 
 ### 2. 唯一后端 Composition Root
 
-- `createPanelRuntime()` 装配 Ordinary Agent 的精确运行端口与 `MultiAgentFeature`；当前 Ordinary 仍是 `BasicAgentRunExecutor` 加 Panel runtime 资源，待真实业务 facade 成熟后再建立独立 feature。
+- `createPanelRuntime()` 装配 `OrdinaryAgentFeature` 与 `MultiAgentFeature`；Ordinary route 只调用 feature 的 command/query/event facade，不再持有 run job、conversation store 或恢复投影。
 - Multi-Agent factory 拥有 Deep store、control/continuation registry、instruction queue、active run tracking 和资源释放。
 - `/api/deep/*` route 只解析 HTTP、调用 feature facade、映射响应。
 - route 不得创建 `MinimalRuntime`、store、provider 或 ToolCenter 工厂，也不得以 `WeakMap` 保存 feature 状态。
@@ -47,7 +47,7 @@
 
 - `model-runtime` 只创建 provider/channel 与协议能力，不创建 ToolCenter、Desktop Skill 或 feature registry。
 - ToolCenter 工厂回归工具能力模块；Host 装配文件、命令、浏览器、HTTP、研究、MCP、Skills 和 Sub-Agent contribution。
-- `AgentTurnRuntime` 使用显式调用参数，不硬编码 Ordinary 专用方法或 `finish_task`。
+- Ordinary 使用中性的 `AgentLoop` 端口，生产实现由 OpenAI Agents SDK adapter 提供；Multi-Agent 仍可使用自己的运行端口，两者不共享业务状态或完成语义。
 - Deep 只共享 tokenizer、消息完整性和压缩执行等机械能力，不依赖 Ordinary compaction facade。
 - 拆除 `MinimalRuntime` service locator，改为精确依赖注入；不新建 `RuntimeServices` 属性包。
 

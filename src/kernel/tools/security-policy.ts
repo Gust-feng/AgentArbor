@@ -6,7 +6,7 @@ import type {
   ToolSecurityDecision,
   ToolSecurityEvaluationContext,
 } from "../../domain/tools/index.js";
-import { commandTextFromValue, toolPresentationForDefinition } from "../../domain/tools/index.js";
+import { commandTextFromValue, toolCallFactId, toolPresentationForDefinition } from "../../domain/tools/index.js";
 import { nowIso } from "../id.js";
 
 export function evaluateToolCallSecurity(input: {
@@ -20,7 +20,7 @@ export function evaluateToolCallSecurity(input: {
     return urlDecision;
   }
 
-  const confirmationId = confirmationIdForToolCall(input.request.callId);
+  const confirmationId = confirmationIdForToolCall(toolCallFactId(input.request));
   if (input.context.approvedConfirmationIds?.includes(confirmationId) === true) {
     return { decision: "allow", reason: "Matching confirmation id was approved for this tool call." };
   }
@@ -44,8 +44,8 @@ export function confirmationRequestFromSecurityDecision(input: {
   readonly decision: Extract<ToolSecurityDecision, { readonly decision: "approval_required" }>;
 }): ConfirmationRequest {
   return {
-    confirmationId: confirmationIdForToolCall(input.request.callId),
-    runId: input.request.callId,
+    confirmationId: confirmationIdForToolCall(toolCallFactId(input.request)),
+    runId: toolCallFactId(input.request),
     title: input.decision.title,
     actionSummary: input.decision.actionSummary,
     consequence: input.decision.consequence,
@@ -84,7 +84,7 @@ function approvalDecision(input: {
     consequence,
     affectedResources,
     riskLevel: input.metadata.riskLevel,
-    sourceRefs: [`tool:${input.request.callId}`],
+    sourceRefs: [`tool:${toolCallFactId(input.request)}`],
   };
 }
 
@@ -111,7 +111,7 @@ function evaluateUrlSupport(request: ToolCallRequest): ToolSecurityDecision | un
       code: "url_protocol_blocked",
       reason: "Only HTTP and HTTPS URLs are allowed.",
       affectedResources: [compactPolicyText(url, 220)],
-      sourceRefs: [`tool:${request.callId}`],
+      sourceRefs: [`tool:${toolCallFactId(request)}`],
     };
   }
   return undefined;

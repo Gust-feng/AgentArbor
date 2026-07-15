@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
+import type { ToolCallResult } from "../../domain/tools/index.js";
 import { CodedExecutionError } from "../execution-errors/index.js";
 import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
 import {
@@ -15,6 +16,7 @@ import {
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
+import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js";
 import { ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 
 test("feature owns completed and failed Ordinary run outcomes", async (t) => {
@@ -90,14 +92,53 @@ test("feature cancellation aborts live execution and cannot be overwritten by a 
   assert.equal((await run.feature.queries.getRun("cancelled-run"))?.status.kind, "cancelled");
 });
 
+test("feature preserves a tool result that completes after cancellation commits", async (t) => {
+  const toolResult = resolvedToolResult("call-after-cancel");
+  let finishTool: (() => void) | undefined;
+  let markExecutionStarted: (() => void) | undefined;
+  let markFactPersisted: (() => void) | undefined;
+  const toolGate = new Promise<void>((resolve) => { finishTool = resolve; });
+  const executionStarted = new Promise<void>((resolve) => { markExecutionStarted = resolve; });
+  const factPersisted = new Promise<void>((resolve) => { markFactPersisted = resolve; });
+  const run = await fixture(t, {
+    async execute(input) {
+      markExecutionStarted?.();
+      await toolGate;
+      await input.onToolResult?.(toolResult);
+      markFactPersisted?.();
+      return {
+        status: "cancelled",
+        reason: String(input.abortSignal.reason),
+        canonicalMessages: input.messages,
+        toolCalls: [toolResult],
+        usage: {},
+      };
+    },
+  });
+  await run.feature.commands.start(startInput("cancel-late-tool-run"));
+  await executionStarted;
+  const cancelled = await run.feature.commands.cancel("cancel-late-tool-run", "user_stopped");
+  assert.equal(cancelled.status.kind, "cancelled");
+
+  finishTool?.();
+  await factPersisted;
+  const final = await run.feature.queries.getRun("cancel-late-tool-run");
+  assert.deepEqual(final?.status, { kind: "cancelled", reason: "user_stopped" });
+  assert.deepEqual(final?.toolCalls, [toolResult]);
+  const activities = (await run.feature.events.replay("cancel-late-tool-run"))?.activities ?? [];
+  assert.equal(activities.filter((activity) => activity.type === "tool.result").length, 1);
+});
+
 test("feature activity stream supports output delta subscribe and cursor replay while a run is live", async (t) => {
   let emitDelta: ((delta: string) => void) | undefined;
+  let emitToolResult: ((result: ToolCallResult) => Promise<void>) | undefined;
   let finish: ((outcome: OrdinaryExecutionOutcome) => void) | undefined;
   let markEntered: (() => void) | undefined;
   const entered = new Promise<void>((resolve) => { markEntered = resolve; });
   const run = await fixture(t, {
     execute(input) {
       emitDelta = input.onTextDelta;
+      emitToolResult = input.onToolResult;
       markEntered?.();
       return new Promise<OrdinaryExecutionOutcome>((resolve) => { finish = resolve; });
     },
@@ -109,18 +150,137 @@ test("feature activity stream supports output delta subscribe and cursor replay 
 
   emitDelta?.("hel");
   emitDelta?.("lo");
+  const toolResult = {
+    callId: "call-read",
+    toolName: "read_file",
+    input: { path: "README.md" },
+    output: { content: "read result" },
+    status: "completed" as const,
+    durationMs: 2,
+  };
+  await emitToolResult?.(toolResult);
   const first = await run.feature.events.replay("stream-run");
   assert.deepEqual(first?.activities.filter((activity) => activity.type === "model.output.delta").map((activity) => activity.delta), ["hel", "lo"]);
-  assert.deepEqual(first?.activities.map((activity) => activity.sequence), [1, 2, 3, 4]);
+  assert.deepEqual(first?.activities.map((activity) => activity.sequence), [1, 2, 3, 4, 5]);
+  assert.equal(first?.activities.some((activity) => activity.type === "tool.result"), true);
 
   emitDelta?.("!");
   const incremental = await run.feature.events.replay("stream-run", first?.cursor);
   assert.deepEqual(incremental?.activities.map((activity) => activity.type), ["model.output.delta"]);
-  assert.deepEqual(incremental?.activities.map((activity) => activity.sequence), [5]);
+  assert.deepEqual(incremental?.activities.map((activity) => activity.sequence), [6]);
 
-  finish?.(completedOutcome());
+  finish?.({ ...completedOutcome(), toolCalls: [toolResult] });
   await waitForStatus(run.feature, "stream-run", "completed");
   assert.equal(observed.at(-1), "run.transition");
+  const completedReplay = await run.feature.events.replay("stream-run");
+  assert.equal(completedReplay?.activities.some((activity) =>
+    activity.type === "tool.result" && activity.durability === "durable"), true);
+
+  await run.feature.release();
+  const restarted = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(run.root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(run.root),
+    execution: executionFor("completed"),
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(() => restarted.release());
+  const restartedReplay = await restarted.events.replay("stream-run");
+  assert.equal(restartedReplay?.activities.some((activity) =>
+    activity.type === "tool.result" && activity.durability === "durable"), true);
+});
+
+test("feature persists an executed tool fact before a simulated crash and rebuilds it once after restart", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-crash-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const toolResult = resolvedToolResult("call-before-crash");
+  let markPersisted: (() => void) | undefined;
+  const persisted = new Promise<void>((resolve) => { markPersisted = resolve; });
+  const first = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: {
+      async execute(input) {
+        await input.onToolResult?.(toolResult);
+        await input.onToolResult?.(toolResult);
+        markPersisted?.();
+        return new Promise<OrdinaryExecutionOutcome>((resolve) => {
+          input.abortSignal.addEventListener("abort", () => resolve({
+            status: "cancelled",
+            reason: String(input.abortSignal.reason),
+            canonicalMessages: input.messages,
+            toolCalls: [toolResult],
+            usage: {},
+          }), { once: true });
+        });
+      },
+    },
+    now: monotonicClock(),
+    idFactory: deterministicIds(),
+  });
+  let restarted: ReturnType<typeof createOrdinaryAgentFeature> | undefined;
+  t.after(async () => {
+    await restarted?.release();
+    await first.release();
+    await removeTestDirectory(root);
+  });
+
+  await first.commands.start(startInput("tool-crash-run"));
+  await persisted;
+  const beforeRestart = await repository.get("tool-crash-run");
+  assert.equal(beforeRestart?.state.status.kind, "running");
+  assert.deepEqual(beforeRestart?.state.toolCalls, [toolResult]);
+  const toolRecordedAt = beforeRestart?.state.toolResultRecordedAt["call-before-crash:completed"];
+  assert.equal(typeof toolRecordedAt, "string");
+
+  restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: { async execute() { throw new Error("must not restart interrupted execution"); } },
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  const blocked = await restarted.queries.getRun("tool-crash-run");
+  assert.equal(blocked?.status.kind, "blocked");
+  assert.deepEqual(blocked?.toolCalls, [toolResult]);
+  const toolActivities = (await restarted.events.replay("tool-crash-run"))?.activities.filter(
+    (activity) => activity.type === "tool.result",
+  ) ?? [];
+  assert.equal(toolActivities.length, 1);
+  assert.equal(toolActivities[0]?.recordedAt, toolRecordedAt);
+  assert.deepEqual(toolActivities[0]?.type === "tool.result" ? toolActivities[0].result : undefined, toolResult);
+});
+
+test("feature keeps a durable tool fact when execution subsequently fails", async (t) => {
+  const toolResult = resolvedToolResult("call-before-failure");
+  const run = await fixture(t, {
+    async execute(input) {
+      await input.onToolResult?.(toolResult);
+      throw new Error("provider failed after tool execution");
+    },
+  });
+  await run.feature.commands.start(startInput("tool-then-failure-run"));
+  const failed = await waitForStatus(run.feature, "tool-then-failure-run", "failed");
+  assert.deepEqual(failed.toolCalls, [toolResult]);
+  const activities = (await run.feature.events.replay("tool-then-failure-run"))?.activities ?? [];
+  assert.equal(activities.filter((activity) => activity.type === "tool.result").length, 1);
+  assert.ok(activities.findIndex((activity) => activity.type === "tool.result") <
+    activities.findIndex((activity) => activity.type === "run.transition" && activity.event.type === "run.failed"));
+});
+
+test("feature projects terminal-only tool results before the terminal transition", async (t) => {
+  const toolResult = resolvedToolResult("call-terminal-only");
+  const run = await fixture(t, {
+    async execute() { return { ...completedOutcome(), toolCalls: [toolResult] }; },
+  });
+  await run.feature.commands.start(startInput("terminal-tool-run"));
+  await waitForStatus(run.feature, "terminal-tool-run", "completed");
+  const activities = (await run.feature.events.replay("terminal-tool-run"))?.activities ?? [];
+  const toolIndex = activities.findIndex((activity) => activity.type === "tool.result");
+  const terminalIndex = activities.findIndex((activity) =>
+    activity.type === "run.transition" && activity.event.type === "run.completed");
+  assert.ok(toolIndex >= 0 && toolIndex < terminalIndex);
+  assert.deepEqual((await run.feature.queries.getRun("terminal-tool-run"))?.toolCalls, [toolResult]);
 });
 
 test("feature ignores output deltas that arrive after cancellation", async (t) => {
@@ -379,6 +539,70 @@ test("feature restart turns a persisted approval pause into an honest blocked st
     continueBy: "new_turn",
   });
   assert.equal(state?.timeline.at(-1)?.type, "run.blocked");
+});
+
+test("feature restart blocks an interrupted running execution instead of replaying side effects", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-running-restart-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = createInitialOrdinaryRunState({
+    ...startInput("running-restart-run"),
+    runInput: startInput("running-restart-run").input,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-created",
+  });
+  await repository.save(initial, 0);
+  await repository.save(transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-started",
+  }), 1);
+  let executions = 0;
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: { async execute() { executions += 1; return completedOutcome(); } },
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  const state = await restarted.queries.getRun("running-restart-run");
+  assert.deepEqual(state?.status, {
+    kind: "blocked",
+    reason: {
+      code: "execution_continuation_lost",
+      message: "The live execution was interrupted when the process restarted.",
+    },
+    continueBy: "new_turn",
+  });
+  assert.equal(executions, 0);
+});
+
+test("feature restart safely activates a persisted root queued run", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-root-queued-restart-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const input = startInput("root-queued-restart-run");
+  await repository.save(createInitialOrdinaryRunState({
+    runId: input.runId,
+    turn: input.turn,
+    runInput: input.input,
+    birth: input.birth,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-created",
+  }), 0);
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: executionFor("completed"),
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  const completed = await waitForStatus(restarted, input.runId, "completed");
+  assert.deepEqual(completed.status, { kind: "completed", answer: "final answer" });
+  assert.deepEqual(completed.timeline.map((event) => event.type), ["run.created", "run.started", "run.completed"]);
 });
 
 test("activity restart resets an old cursor, drops live deltas, and replays complete approval facts", async (t) => {
@@ -664,6 +888,17 @@ function completedOutcome(usage = { inputTokens: 8, outputTokens: 2, totalTokens
     toolCalls: [],
     usage,
     capabilityResolution: ordinaryCapabilityResolution(),
+  };
+}
+
+function resolvedToolResult(callId: string): ToolCallResult {
+  return {
+    callId,
+    toolName: "read_file",
+    input: { path: "README.md" },
+    output: { content: "read result" },
+    status: "completed",
+    durationMs: 2,
   };
 }
 

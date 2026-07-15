@@ -42,6 +42,8 @@ export type AgentLoopInput = {
   readonly agentTools?: readonly AgentLoopAgentTool[];
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
+  /** Resolves only after the owning feature has durably accepted the executed tool fact. */
+  readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
 };
 
 export type AgentLoopContinuation = {

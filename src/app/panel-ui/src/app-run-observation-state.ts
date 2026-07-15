@@ -62,6 +62,7 @@ export function appStateWithObservedRunProjection(
     readonly workView?: DesktopWorkView;
     readonly capabilityResolution?: RunCapabilityResolution;
     readonly detail?: DesktopRunDetail;
+    readonly reset?: boolean;
   }
 ): AppState {
   return {

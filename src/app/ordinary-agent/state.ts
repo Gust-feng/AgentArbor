@@ -1,6 +1,6 @@
 import { persistedModelProtocolExtensions, type ModelMessage, type ModelUsage } from "../../domain/intelligence/index.js";
 import type { RunCapabilityResolution } from "../../domain/config/index.js";
-import type { ToolCallResult } from "../../domain/tools/index.js";
+import { toolCallFactId, type ToolCallResult } from "../../domain/tools/index.js";
 import type {
   OrdinaryRunBirth,
   OrdinaryRunEvent,
@@ -9,6 +9,7 @@ import type {
   OrdinaryRunStatus,
   OrdinaryRunTurn,
 } from "./contracts.js";
+import { OrdinaryFeatureError } from "./contracts.js";
 
 export type OrdinaryRunTransition =
   | { readonly type: "start"; readonly priorCanonicalMessages?: readonly ModelMessage[] }
@@ -76,6 +77,7 @@ export function createInitialOrdinaryRunState(input: {
     status: { kind: "queued" },
     canonicalMessages,
     toolCalls: [],
+    toolResultRecordedAt: {},
     usage: {},
     timeline: [{
       eventId: input.eventId,
@@ -107,6 +109,7 @@ export function transitionOrdinaryRun(input: {
     status: nextStatus,
     canonicalMessages: messagesAfter(input.state, input.transition),
     toolCalls: toolCallsAfter(input.state, input.transition),
+    toolResultRecordedAt: toolResultRecordedAtAfter(input.state, input.transition, input.recordedAt),
     usage: usageAfter(input.state, input.transition),
     capabilityResolution: capabilityResolutionAfter(input.state, input.transition),
     timeline: [...input.state.timeline, event],
@@ -142,7 +145,7 @@ function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransitio
       assertStatus(status, ["queued", "running", "awaiting_approval"], transition.type);
       return { kind: "cancelled", reason: transition.reason };
     case "block":
-      assertStatus(status, ["awaiting_approval"], transition.type);
+      assertStatus(status, ["running", "awaiting_approval"], transition.type);
       return {
         kind: "blocked",
         reason: cloneJson(transition.reason),
@@ -166,9 +169,90 @@ function messagesAfter(state: OrdinaryRunState, transition: OrdinaryRunTransitio
 
 function toolCallsAfter(state: OrdinaryRunState, transition: OrdinaryRunTransition): readonly ToolCallResult[] {
   if ("toolCalls" in transition && transition.toolCalls !== undefined) {
-    return cloneJson(transition.toolCalls);
+    return mergeOrdinaryToolResults(state.toolCalls, transition.toolCalls);
   }
   return state.toolCalls;
+}
+
+function toolResultRecordedAtAfter(
+  state: OrdinaryRunState,
+  transition: OrdinaryRunTransition,
+  recordedAt: string,
+): Readonly<Record<string, string>> {
+  if (!("toolCalls" in transition) || transition.toolCalls === undefined) {
+    return state.toolResultRecordedAt;
+  }
+  const next = { ...state.toolResultRecordedAt };
+  for (const result of transition.toolCalls) {
+    next[ordinaryToolResultKey(result)] ??= recordedAt;
+  }
+  return next;
+}
+
+/** Records one executed tool fact without manufacturing a business lifecycle event. */
+export function recordOrdinaryToolResult(input: {
+  readonly state: OrdinaryRunState;
+  readonly result: ToolCallResult;
+  readonly recordedAt: string;
+}): OrdinaryRunState {
+  const key = ordinaryToolResultKey(input.result);
+  return {
+    ...input.state,
+    toolCalls: mergeOrdinaryToolResults(input.state.toolCalls, [input.result]),
+    toolResultRecordedAt: {
+      ...input.state.toolResultRecordedAt,
+      [key]: input.state.toolResultRecordedAt[key] ?? input.recordedAt,
+    },
+    timestamps: {
+      ...input.state.timestamps,
+      updatedAt: input.recordedAt,
+    },
+  };
+}
+
+export function ordinaryToolResultKey(result: ToolCallResult): string {
+  return `${toolCallFactId(result)}:${result.status}`;
+}
+
+function mergeOrdinaryToolResults(
+  existing: readonly ToolCallResult[],
+  incoming: readonly ToolCallResult[],
+): readonly ToolCallResult[] {
+  const merged = existing.map(cloneJson);
+  const indexes = new Map(merged.map((result, index) => [toolCallFactId(result), index] as const));
+  const normalizedIncoming: ToolCallResult[] = [];
+  const incomingIndexes = new Map<string, number>();
+  for (const result of incoming) {
+    const stored = cloneJson(result);
+    const factId = toolCallFactId(stored);
+    const duplicateIndex = incomingIndexes.get(factId);
+    if (duplicateIndex === undefined) {
+      incomingIndexes.set(factId, normalizedIncoming.length);
+      normalizedIncoming.push(stored);
+    } else {
+      normalizedIncoming[duplicateIndex] = stored;
+    }
+  }
+  for (const stored of normalizedIncoming) {
+    const factId = toolCallFactId(stored);
+    const index = indexes.get(factId);
+    if (index === undefined) {
+      indexes.set(factId, merged.length);
+      merged.push(stored);
+      continue;
+    }
+    const current = merged[index]!;
+    if (JSON.stringify(current) === JSON.stringify(stored)) continue;
+    if (current.status === "approval_required" && stored.status !== "approval_required") {
+      merged[index] = stored;
+      continue;
+    }
+    throw new OrdinaryFeatureError(
+      "ordinary_tool_result_conflict",
+      `Ordinary tool call ${stored.callId} already has a different resolved result`,
+    );
+  }
+  return merged;
 }
 
 function eventForTransition(
@@ -181,25 +265,25 @@ function eventForTransition(
       ...base,
       type: "run.approval_requested",
       confirmationRequests: cloneJson(transition.status.confirmationRequests),
-      toolCallIds: transition.toolCalls.map((call) => call.callId),
+      toolCallIds: transition.toolCalls.map(toolCallFactId),
     };
     case "approval_decided": return {
       ...base,
       type: "run.approval_decided",
       decision: cloneJson(transition.decision),
     };
-    case "complete": return { ...base, type: "run.completed", toolCallIds: transition.toolCalls.map((call) => call.callId) };
+    case "complete": return { ...base, type: "run.completed", toolCallIds: transition.toolCalls.map(toolCallFactId) };
     case "fail": return {
       ...base,
       type: "run.failed",
       code: transition.error.code,
-      toolCallIds: (transition.toolCalls ?? []).map((call) => call.callId),
+      toolCallIds: (transition.toolCalls ?? []).map(toolCallFactId),
     };
     case "cancel": return {
       ...base,
       type: "run.cancelled",
       reason: transition.reason,
-      toolCallIds: (transition.toolCalls ?? []).map((call) => call.callId),
+      toolCallIds: (transition.toolCalls ?? []).map(toolCallFactId),
     };
     case "block": return { ...base, type: "run.blocked", code: transition.reason.code };
   }

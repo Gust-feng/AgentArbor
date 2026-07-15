@@ -10,7 +10,7 @@ import { ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from 
 
 test("file repository atomically replaces the canonical snapshot and advances revisions", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-repository-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
   const initial = state("run-one", "2026-01-01T00:00:00.000Z");
 
@@ -43,7 +43,7 @@ test("file repository atomically replaces the canonical snapshot and advances re
 
 test("file repository never writes ephemeral attachment bytes into an Ordinary snapshot", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-no-attachments-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const stateWithAttachment = createInitialOrdinaryRunState({
     runId: "attachment-run",
     turn: ordinaryRunTurn("attachment-run"),
@@ -76,7 +76,7 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
 
 test("file repository rejects old or malformed snapshots instead of compatibility reading", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-incompatible-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const runDirectory = path.join(root, "runs", "old-run");
   await fs.mkdir(runDirectory, { recursive: true });
   await fs.writeFile(path.join(runDirectory, "snapshot.json"), JSON.stringify({ schemaVersion: "legacy/v0", revision: 1 }));
@@ -88,7 +88,7 @@ test("file repository rejects old or malformed snapshots instead of compatibilit
 
 test("file repository validates cumulative usage before committing an Ordinary snapshot", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-usage-validation-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
   const invalid = { ...state("invalid-usage-run", "2026-01-01T00:00:00.000Z"), usage: { inputTokens: -1 } };
 
@@ -99,7 +99,7 @@ test("file repository validates cumulative usage before committing an Ordinary s
 
 test("file repository persists the effective capability resolution and rejects malformed facts", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-capability-resolution-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
   const initial = state("capability-run", "2026-01-01T00:00:00.000Z");
   const created = await repository.save(initial, 0);
@@ -133,9 +133,49 @@ test("file repository persists the effective capability resolution and rejects m
     error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
 });
 
+test("file repository round-trips nested tool facts that share one provider call id", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-scoped-tool-facts-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("scoped-tool-run", "2026-01-01T00:00:00.000Z");
+  const created = await repository.save(initial, 0);
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const started = await repository.save(running, created.revision);
+  const toolCalls = ["parent-a", "parent-b"].map((parent) => ({
+    callId: "shared-provider-call",
+    factId: `agent-tool:${parent.length}:${parent}/tool:shared-provider-call`,
+    toolName: "read_fact",
+    input: { parent },
+    output: { value: parent },
+    status: "completed" as const,
+    durationMs: 1,
+  }));
+  const completed = transitionOrdinaryRun({
+    state: running,
+    transition: {
+      type: "complete",
+      answer: "done",
+      canonicalMessages: [...running.canonicalMessages, { role: "assistant", content: "done" }],
+      toolCalls,
+      usage: {},
+    },
+    recordedAt: "2026-01-01T00:00:02.000Z",
+    eventId: "event-3",
+  });
+
+  const saved = await repository.save(completed, started.revision);
+  assert.deepEqual((await repository.get("scoped-tool-run"))?.state.toolCalls, toolCalls);
+  assert.equal(Object.keys(saved.state.toolResultRecordedAt).length, 2);
+});
+
 test("a broken disposable manifest cannot invalidate a committed snapshot", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-manifest-failure-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   await fs.mkdir(path.join(root, "manifest.json"), { recursive: true });
   const repository = createFileSystemOrdinaryRunRepository(root);
   const initial = state("manifest-run", "2026-01-01T00:00:00.000Z");
@@ -162,5 +202,14 @@ function state(runId: string, recordedAt: string) {
     birth: ordinaryRunBirth(),
     recordedAt,
     eventId: "event-1",
+  });
+}
+
+function removeTestDirectory(root: string): Promise<void> {
+  return fs.rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 50,
   });
 }

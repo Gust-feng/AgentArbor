@@ -9,7 +9,7 @@ import {
   readPanelUiStyle,
 } from "./panel-structure-test-utils.js";
 
-test("panel React workbench consumes Basic Agent projection APIs", async () => {
+test("panel React workbench consumes Ordinary Agent projection APIs", async () => {
   const [
     app,
     appAttachments,
@@ -29,6 +29,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     appRuntimeControls,
     appSettingsController,
     runtime,
+    ordinaryRunRequest,
     text,
     settingsDialog,
     modelSettings,
@@ -68,6 +69,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     readPanelUiSource("app-runtime-controls.ts"),
     readPanelUiSource("app-settings-controller.ts"),
     readPanelUiSource("runtime.ts"),
+    readPanelUiSource("ordinary-run-request.ts"),
     readPanelUiSource("text.ts"),
     readPanelUiSource(path.join("components", "settings-dialog.tsx")),
     readPanelUiSource(path.join("components", "model-settings.tsx")),
@@ -157,8 +159,13 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appLiveRunUpdates.includes("startBootstrapPolling"), true);
   assert.equal(appLiveRunUpdates.includes("streamDeliveredEvent"), true);
   assert.equal(appLiveRunUpdates.includes("FALLBACK_POLL_INTERVAL_MS"), true);
-  assert.equal(runtime.includes("/stream?cursor="), true);
-  assert.equal(runtime.includes("/view?cursor="), true);
+  assert.equal(runtime.includes('from "./ordinary-run-request"'), true);
+  assert.equal(runtime.includes("ordinaryRunResourceUrl(runId, \"view\", cursor)"), true);
+  assert.equal(runtime.includes("ordinaryRunResourceUrl(input.runId, \"stream\", input.cursor)"), true);
+  assert.equal(runtime.includes("/api/basic-agent/runs/"), false);
+  assert.equal(ordinaryRunRequest.includes("export function ordinaryRunResourceUrl"), true);
+  assert.equal(ordinaryRunRequest.includes("/api/basic-agent/runs/"), true);
+  assert.equal(ordinaryRunRequest.includes("encodeURIComponent(cursor)"), true);
   assert.equal(runtime.includes("openDeepRunStream"), true);
   assert.equal(runtime.includes("/api/deep/runs/"), true);
   assert.equal(runtime.includes("/events?cursor="), true);

@@ -8,7 +8,7 @@ import type {
 } from "../../domain/basic-agent/index.js";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import type { ModelUsage } from "../../domain/intelligence/index.js";
-import type { ToolCallResult } from "../../domain/tools/index.js";
+import { toolCallFactId, type ToolCallResult } from "../../domain/tools/index.js";
 import type {
   OrdinaryConversationReadModel,
   OrdinaryConversationTurnReadModel,
@@ -25,30 +25,25 @@ import type {
   PanelConversationTurnAttachment,
   PanelConversationTurnReadModel,
 } from "../panel-conversation/panel-conversation-contracts.js";
+import { toolStreamDetail, toolSummary } from "../panel-read-model/run/panel-stream-tool-projection.js";
+import { workspaceFolderSummaryFromPath } from "../task-soil/workspace-folder-summary.js";
 import type {
-  PanelBasicAgentRunDetailReadModel,
-  PanelBasicAgentRunViewReadModel,
-} from "../panel-read-model/basic-agent-run-view-contracts.js";
+  OrdinaryPanelBasicRun,
+  OrdinaryPanelCapabilityResolution,
+  OrdinaryPanelReplayCursor,
+  OrdinaryPanelRunDetail,
+  OrdinaryPanelRunView,
+  OrdinaryPanelWorkView,
+} from "../panel-read-model/ordinary-agent-run-contracts.js";
 
-export type OrdinaryPanelReplayCursor = {
-  /** Opaque generation-aware cursor. Clients must return it unchanged. */
-  readonly token: string;
-  readonly lastSequence: number;
-};
-
-export type OrdinaryPanelRunDetail = PanelBasicAgentRunDetailReadModel & {
-  /** Canonical execution facts, not display summaries. */
-  readonly toolResults: readonly ToolCallResult[];
-  readonly usage: ModelUsage;
-};
-
-export type OrdinaryPanelRunView = Omit<PanelBasicAgentRunViewReadModel, "detail" | "replay"> & {
-  readonly detail: OrdinaryPanelRunDetail;
-  readonly replay: {
-    readonly events: readonly RunEvent[];
-    readonly cursor: OrdinaryPanelReplayCursor;
-  };
-};
+export type {
+  OrdinaryPanelBasicRun,
+  OrdinaryPanelCapabilityResolution,
+  OrdinaryPanelReplayCursor,
+  OrdinaryPanelRunDetail,
+  OrdinaryPanelRunView,
+  OrdinaryPanelWorkView,
+} from "../panel-read-model/ordinary-agent-run-contracts.js";
 
 export type OrdinaryPanelActivityBatch = {
   readonly runId: string;
@@ -118,7 +113,7 @@ export function projectOrdinaryPanelRunView(input: {
     isTranscriptActivity(activity) ? [projectTranscriptNode(input.run, activity)] : []);
   const contextAttachments = projectContextAttachments(input.run);
   const stage = workStage(input.run, fullEvents);
-  const workView: DesktopWorkViewReadModel = {
+  const workView: OrdinaryPanelWorkView = {
     run,
     stage,
     headline: workHeadline(input.run),
@@ -140,9 +135,7 @@ export function projectOrdinaryPanelRunView(input: {
   return {
     run,
     agentDefinitionRef: input.run.birth.agentDefinitionRef,
-    capabilityResolution: input.run.capabilityResolution === undefined
-      ? undefined
-      : structuredClone(input.run.capabilityResolution),
+    capabilityResolution: projectCapabilityResolution(input.run.capabilityResolution),
     workView,
     detail: {
       runId: input.run.runId,
@@ -155,6 +148,7 @@ export function projectOrdinaryPanelRunView(input: {
       usage: structuredClone(input.run.usage),
     },
     replay: {
+      reset: replay.reset,
       events: replay.activities.map((activity) => projectActivity(input.run, activity)),
       cursor: panelCursor(replay.cursor),
     },
@@ -164,6 +158,7 @@ export function projectOrdinaryPanelRunView(input: {
 export function projectOrdinaryPanelConversation(input: {
   readonly conversation: OrdinaryConversationReadModel;
   readonly currentRun?: OrdinaryPanelRunView;
+  readonly workspaceRun?: OrdinaryRunState;
 }): PanelConversationReadModel {
   const turns = input.conversation.turns.map(projectConversationTurn);
   const activeAssistant = input.conversation.activeRunId === undefined
@@ -186,6 +181,9 @@ export function projectOrdinaryPanelConversation(input: {
     status,
     activeRunId: input.conversation.activeRunId,
     latestRunId: input.conversation.latestRunId,
+    workspaceFolder: workspaceFolderSummaryFromPath(
+      input.workspaceRun?.birth.capabilitySnapshot.workspace.workspaceDirectory,
+    ),
     requiresUserAction: pendingAction !== undefined,
     pendingAction,
     queuedRunIds: input.conversation.queuedRunIds,
@@ -197,16 +195,30 @@ export function projectOrdinaryPanelConversation(input: {
 
 export function projectOrdinaryPanelConversationSummary(
   conversation: OrdinaryConversationReadModel,
+  workspaceRun?: OrdinaryRunState,
 ): PanelConversationSummaryReadModel {
-  const { turns: _turns, currentRun: _currentRun, ...summary } = projectOrdinaryPanelConversation({ conversation });
+  const { turns: _turns, currentRun: _currentRun, ...summary } = projectOrdinaryPanelConversation({
+    conversation,
+    workspaceRun,
+  });
   return summary;
+}
+
+function projectCapabilityResolution(
+  resolution: OrdinaryRunState["capabilityResolution"],
+): OrdinaryPanelCapabilityResolution | undefined {
+  if (resolution === undefined) return undefined;
+  if (resolution.runMode !== "agent") {
+    throw new Error("Ordinary capability resolution must use agent mode");
+  }
+  return structuredClone(resolution) as OrdinaryPanelCapabilityResolution;
 }
 
 function projectBasicRun(
   state: OrdinaryRunState,
   cursor: OrdinaryRunActivityCursor,
   eventCount: number,
-): BasicAgentRun {
+): OrdinaryPanelBasicRun {
   return {
     runId: state.runId,
     conversationId: state.turn.conversationId,
@@ -225,6 +237,36 @@ function projectBasicRun(
 }
 
 function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): RunEvent {
+  if (activity.type === "tool.result") {
+    const type = activity.result.status === "completed"
+      ? "tool.completed"
+      : activity.result.status === "cancelled" ? "tool.cancelled" : "tool.failed";
+    const payload = {
+      callId: activity.result.callId,
+      toolName: activity.result.toolName,
+      input: activity.result.input,
+      output: activity.result.output,
+      error: activity.result.error,
+      errorDomain: activity.result.errorDomain,
+      errorFacts: activity.result.errorFacts,
+    };
+    return {
+      id: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      type,
+      title: "",
+      summary: toolSummary(type, payload),
+      status: activity.result.status === "completed"
+        ? "completed"
+        : activity.result.status === "cancelled" ? "cancelled" : "failed",
+      timestamp: activity.recordedAt,
+      toolName: activity.result.toolName,
+      refs: [{ kind: "tool_call", id: toolCallFactId(activity.result) }],
+      visibility: "compact",
+      detail: toolStreamDetail(type, payload),
+    };
+  }
   if (activity.type === "model.output.delta") {
     return {
       id: activity.activityId,
@@ -308,6 +350,37 @@ function projectTransition(
 
 function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActivity): TranscriptNode {
   const event = projectActivity(run, activity);
+  if (activity.type === "tool.result") {
+    return {
+      nodeId: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      eventType: event.type,
+      kind: "tool",
+      phase: activity.result.status === "completed"
+        ? "completed"
+        : activity.result.status === "cancelled" ? "cancelled" : "failed",
+      title: "",
+      summary: event.summary,
+      timestamp: activity.recordedAt,
+      toolName: activity.result.toolName,
+      display: toolStreamDetail(
+        event.type === "tool.completed"
+          ? "tool.completed"
+          : event.type === "tool.cancelled" ? "tool.cancelled" : "tool.failed",
+        {
+          callId: activity.result.callId,
+          toolName: activity.result.toolName,
+          input: activity.result.input,
+          output: activity.result.output,
+          error: activity.result.error,
+          errorDomain: activity.result.errorDomain,
+          errorFacts: activity.result.errorFacts,
+        },
+      ).display,
+      refs: event.refs,
+    };
+  }
   if (activity.type === "model.output.delta") {
     return {
       nodeId: activity.activityId,
@@ -347,7 +420,7 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
 }
 
 function isTranscriptActivity(activity: OrdinaryRunActivity): boolean {
-  return activity.type === "model.output.delta" ||
+  return activity.type === "model.output.delta" || activity.type === "tool.result" ||
     (activity.event.type !== "run.created" && activity.event.type !== "run.started");
 }
 

@@ -52,6 +52,7 @@ test("run and conversation projection are protocol-neutral for both supported Op
     const conversation = projectOrdinaryPanelConversation({
       conversation: conversationFrom(run),
       currentRun: view,
+      workspaceRun: run,
     });
 
     assert.equal(view.run.status, "running");
@@ -59,6 +60,7 @@ test("run and conversation projection are protocol-neutral for both supported Op
     assert.equal(view.agentDefinitionRef, run.birth.agentDefinitionRef);
     assert.deepEqual(view.capabilityResolution, run.capabilityResolution);
     assert.equal(conversation.currentRun?.run.runId, run.runId);
+    assert.deepEqual(conversation.workspaceFolder, { label: "workspace", path: "Z:/workspace" });
     assert.equal(conversation.turns[1]?.responseModel?.protocolKind, protocol);
     assert.equal(conversation.turns[1]?.responseModel?.model, run.birth.config.model);
   }
@@ -212,7 +214,24 @@ test("terminal projection preserves raw answer, full tool output, usage and atta
   };
   const view = projectOrdinaryPanelRunView({
     run,
-    fullReplay: replay(run, [createdEvent(run), startedEvent(run), completed]),
+    fullReplay: {
+      cursor: { streamId: `stream-${run.runId}`, sequence: 4 },
+      reset: false,
+      activities: [
+        transitionActivity(run, createdEvent(run), 1),
+        transitionActivity(run, startedEvent(run), 2),
+        {
+          activityId: "tool:call-read:completed",
+          runId: run.runId,
+          sequence: 3,
+          recordedAt: completed.recordedAt,
+          type: "tool.result",
+          durability: "durable",
+          result: run.toolCalls[0]!,
+        },
+        transitionActivity(run, completed, 4),
+      ],
+    },
   });
 
   assert.equal(view.workView.answer?.content, answer);
@@ -224,6 +243,10 @@ test("terminal projection preserves raw answer, full tool output, usage and atta
   assert.equal(view.workView.contextAttachments[0]?.readonlyPreview?.text, "附件原文 <raw>");
   assert.equal(view.workView.contextAttachments[0]?.summary, "附件摘要 <raw>");
   assert.equal(view.workView.workSummary.toolResultCount, 1);
+  assert.equal(view.workView.visibleEvents.some((event) => event.type === "tool.completed"), true);
+  const toolNode = view.workView.transcriptNodes.find((node) => node.eventType === "tool.completed");
+  assert.equal(toolNode?.toolName, "read_file");
+  assert.equal(toolNode?.display?.kind, "read_result");
 });
 
 test("conversation DTO is a one-way projection with full turns, attachments and current run", () => {
@@ -238,8 +261,8 @@ test("conversation DTO is a one-way projection with full turns, attachments and 
   });
   const ordinary = conversationFrom(run);
   const currentRun = projectOrdinaryPanelRunView({ run, fullReplay: replay(run, []) });
-  const projected = projectOrdinaryPanelConversation({ conversation: ordinary, currentRun });
-  const summary = projectOrdinaryPanelConversationSummary(ordinary);
+  const projected = projectOrdinaryPanelConversation({ conversation: ordinary, currentRun, workspaceRun: run });
+  const summary = projectOrdinaryPanelConversationSummary(ordinary, run);
 
   assert.equal(projected.status, "approval_needed");
   assert.equal(projected.requiresUserAction, true);
@@ -249,6 +272,8 @@ test("conversation DTO is a one-way projection with full turns, attachments and 
     assistantTurnId: run.turn.assistantTurnId,
   });
   assert.equal(projected.currentRun?.run.runId, run.runId);
+  assert.deepEqual(projected.workspaceFolder, { label: "workspace", path: "Z:/workspace" });
+  assert.deepEqual(summary.workspaceFolder, projected.workspaceFolder);
   assert.equal(projected.turns[0]?.attachments?.[0]?.summary, "附件摘要 <raw>");
   assert.equal(projected.turns[1]?.content, "");
   assert.equal("turns" in summary, false);
@@ -319,6 +344,10 @@ function runState(input: {
     status: input.status,
     canonicalMessages: [{ role: "user", content: "请读取附件并回答" }],
     toolCalls: input.toolCalls ?? [],
+    toolResultRecordedAt: Object.fromEntries((input.toolCalls ?? []).map((result) => [
+      `${result.callId}:${result.status}`,
+      "2026-01-01T00:00:02.000Z",
+    ])),
     usage: input.usage ?? {},
     capabilityResolution: {
       ...ordinaryCapabilityResolution(),

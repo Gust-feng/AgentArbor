@@ -77,7 +77,7 @@ test("runtime keeps external LLM SDKs behind provider adapters", () => {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
   };
-  const allowedAdapterOnlyPackages = ["openai"];
+  const allowedAdapterOnlyPackages = ["openai", "@openai/agents"];
   const prohibitedPackages = [
     "ai",
     "@ai-sdk/openai",
@@ -105,8 +105,8 @@ test("runtime keeps external LLM SDKs behind provider adapters", () => {
   //   - 测试文件（*.test.ts）使用 FakeModelProvider 等测试桩构造 IntelligenceChannel
   //     是标准测试实践；FakeModelProvider 是 adapters/intelligence 下的测试基础设施，
   //     不构成对真实 provider 实现的耦合，故对 adapters/intelligence import 豁免。
-  //   - external LLM SDK（openai 等）禁止在任何文件（含测试）直接 import（见下），
-  //     这是真正的安全底线，不受测试豁免影响。
+  //   - external LLM SDK 只能由 adapters/intelligence 持有；feature 和 Panel
+  //     通过中性模型/AgentLoop 契约使用它们。
   for (const file of sourceFiles(["src/domain", "src/kernel", "src/app"])) {
     const source = readFileSync(file, "utf8");
     const isTestFile = file.endsWith(".test.ts");
@@ -123,80 +123,12 @@ test("runtime keeps external LLM SDKs behind provider adapters", () => {
       `${file} must not import external LLM SDKs`
     );
   }
-});
-
-test("ordinary panel mainline stays clear of legacy work-session and underground compat names", () => {
-  const ordinaryMainlineFiles = [
-    join("src", "app", "panel-server", "conversation-routes.ts"),
-    join("src", "app", "panel-server", "conversation-current-run.ts"),
-    join("src", "app", "panel-server", "basic-agent-run-view.ts"),
-    join("src", "app", "panel-server", "desktop-agent-execution.ts"),
-  ];
-  const compatNamePattern = /workSession|WorkSession|work-session|work_session|underground/;
-
-  for (const file of ordinaryMainlineFiles) {
-    assert.equal(
-      compatNamePattern.test(readFileSync(file, "utf8")),
-      false,
-      `${file} must not depend on legacy work-session or underground compat naming`
-    );
-  }
-});
-
-test("removed ordinary compatibility entrypoints cannot return", () => {
-  const routeSource = readFileSync(join("src", "app", "panel-server", "basic-agent-routes.ts"), "utf8");
-  assert.doesNotMatch(routeSource, /\/work-session/);
-  assert.doesNotMatch(routeSource, /workSession:\s*view\.workView/);
-
-  const staleDesktopChatSources = sourceFiles([join("src")])
-    .filter((file) => !file.endsWith(".test.ts"))
-    .filter((file) => /desktop_chat|desktop\.chat|DesktopChat|desktop-chat/.test(readFileSync(file, "utf8")))
-    .map(normalizedPath);
-  assert.deepEqual(staleDesktopChatSources, []);
-
-  const staleIntentGateSources = sourceFiles([join("src")])
-    .filter((file) => !file.endsWith(".test.ts"))
-    .filter((file) => /desktop_intent_gate|desktop\.intent_gate\.v1/.test(readFileSync(file, "utf8")))
-    .map(normalizedPath);
-  assert.deepEqual(staleIntentGateSources, []);
-});
-
-test("active legacy work-session replay aliases stay in explicit compatibility files", () => {
-  const allowedCompatFiles = new Set([
-    "src/app/panel-server/basic-agent-read-models.ts",
-    "src/app/panel-server/conversation-sync.ts",
-    "src/app/panel-server/live-model-stream.ts",
-    "src/app/panel-server/runtime-records.ts",
-  ]);
-  const compatNamePattern = /workSession|WorkSession|work-session|work_session/;
-  const unexpectedFiles = sourceFiles([join("src", "app", "panel-server")])
-    .filter((file) => !file.endsWith(".test.ts"))
-    .filter((file) => compatNamePattern.test(readFileSync(file, "utf8")))
+  const sdkImportPattern = /from\s+["'](?:openai|@openai\/agents)["']/;
+  const sdkOwners = sourceFiles([join("src")])
+    .filter((file) => sdkImportPattern.test(readFileSync(file, "utf8")))
     .map(normalizedPath)
-    .filter((file) => !allowedCompatFiles.has(file));
-
-  assert.deepEqual(unexpectedFiles, []);
-});
-
-test("restored ordinary run views require frozen facts while legacy runs keep scoped fallback config", () => {
-  const runViewSource = readFileSync(join("src", "app", "panel-server", "basic-agent-run-view.ts"), "utf8");
-  const persistedResponseSource = readFileSync(join("src", "app", "panel-server", "persisted-run-response.ts"), "utf8");
-
-  assert.match(runViewSource, /capabilityResolution:\s*snapshot\.run\.capabilityResolution/);
-  assert.equal(/configCenter|getModelProviderConfig|getInformationAccessConfig/.test(runViewSource), false);
-  assert.match(
-    persistedResponseSource,
-    /const ordinarySnapshot\s*=\s*input\.snapshot\.run\.runMode\s*===\s*"agent"[\s\S]*?requireRestorableOrdinaryRuntimeSnapshot\(input\.snapshot\)/
-  );
-  assert.match(
-    persistedResponseSource,
-    /const config\s*=\s*ordinarySnapshot\s*===\s*undefined[\s\S]*?input\.snapshot\.run\.capabilitySnapshot\?\.activeModel\s*\?\?\s*input\.config[\s\S]*?:\s*ordinarySnapshot\.run\.capabilitySnapshot\.activeModel;/
-  );
-  assert.match(
-    persistedResponseSource,
-    /const informationAccess\s*=\s*ordinarySnapshot\s*===\s*undefined[\s\S]*?input\.snapshot\.run\.informationAccess\s*\?\?\s*input\.informationAccess[\s\S]*?:\s*ordinarySnapshot\.run\.informationAccess;/
-  );
-  assert.match(persistedResponseSource, /capabilityResolution:\s*input\.snapshot\.run\.capabilityResolution/);
+    .filter((file) => !file.startsWith("src/adapters/intelligence/"));
+  assert.deepEqual(sdkOwners, [], "OpenAI SDK imports must remain adapter-owned");
 });
 
 function sourceFiles(roots: readonly string[]): string[] {
@@ -224,5 +156,8 @@ function normalizedPath(file: string): string {
 }
 
 function isAllowedProviderAdapterCompositionRoot(file: string): boolean {
-  return file.endsWith(join("src", "app", "model-runtime", "factory.ts"));
+  return [
+    join("src", "app", "model-runtime", "factory.ts"),
+    join("src", "app", "model-runtime", "agent-loop-factory.ts"),
+  ].some((compositionRoot) => file.endsWith(compositionRoot));
 }

@@ -8,9 +8,9 @@
 
 UI 收口尚未完成。当前仍有设置中的 Agent 集群 beta 开关、侧栏 `Agent 集群` 按钮、持久化 Agent mode、独立 `/api/deep/*`、Deep DTO 以及与 Ordinary 物理分离的数据目录。以下章节按真实代码记录这些行为；它们是统一 Workbench 下的过渡实现，不能被解释为两个产品，也不能提前声称已经移除。
 
-后端阶段一至阶段三要求的唯一组合根、资源所有权和中性依赖方向已经完成：`createPanelRuntime()` 是唯一生产组合根并创建 `MultiAgentFeature`；Deep conversation/run/child store、control/continuation registry、instruction queue 与 active run tracking 均由 feature 内部持有并在 Panel runtime 关闭时释放；`/api/deep/*` 不再创建 runtime、store 或 ToolCenter。Multi-Agent 的 intake、run 启动和终态 follow-up 已分别通过 feature 的 `intake / startRun / followUp` 业务 command 完成，route 只保留 HTTP 输入解析、Host 配置适配以及错误/响应映射。Deep run 仓储提供按 conversation/root 的完整查询，业务清理与 turn ordinal 不再复用展示 limit；同一 run 的 save/delete 由 feature-owned FIFO 顺序落盘，不同 run 仍可并发，feature 释放前统一 drain。同一 conversation 的重命名、置顶、删除、启动、续跑、子 Agent 控制和重新综合命令也在 feature 内按 FIFO 串行，不同 conversation 仍可并行；这用于阻止删除后晚到写入重建孤儿 run，不是共享工作流引擎。每个 intake、run 和 existing-run 操作创建独立 MessageBus/EventLog，终态清理 control handle 并等待异步资源释放；post-terminal child continuation/resynthesis 只使用持久化 `aiMode / continuationFacts`，任一缺失都按失效开发期数据明确失败，不回退 Host 当前配置。Ordinary 的终态、异常和确认恢复路径同样只释放一次资源并等待异步释放完成。模型运行时、ToolCenter contribution、上下文机械算法与 `AgentTurnRuntime` 执行语义也已完成中性化。
+后端阶段一至阶段三要求的唯一组合根、资源所有权和中性依赖方向已经完成：`createPanelRuntime()` 是唯一生产组合根，同时创建 `OrdinaryAgentFeature` 与 `MultiAgentFeature`。Ordinary 的 conversation、run 状态、canonical 模型历史、工具事实、确认 continuation、仓储和事件重放由 feature 自己拥有；`ordinary-routes` 只做 HTTP/SSE 适配。Multi-Agent 的 conversation/run/child store、control/continuation registry、instruction queue 与 active run tracking 同样由 feature 内部持有；`/api/deep/*` 不创建 runtime、store 或 ToolCenter。两类 feature 的资源都在 Panel runtime 关闭时由各自 owner 释放。
 
-“阶段一至阶段三完成”不表示所有目标命名都已经落地。Ordinary Agent 当前仍由 `BasicAgentRunExecutor` 和 Panel runtime 持有的会话、运行与持久化资源装配，并不存在独立的 `OrdinaryAgentFeature`；后续只在真实业务端口形成后再建立该 feature，不创建空 facade。当前尚未完成的是阶段四 Workbench/UI 入口收口和阶段五 Legacy Underground 删除。
+Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -> OrdinaryAgentFeature -> OpenAI Agents SDK adapter -> ToolCenter`。OpenAI Responses 与 OpenAI-compatible Chat 共用同一 feature 契约；SDK 负责模型-工具循环和 live confirmation continuation，Ordinary feature 负责业务状态、持久化和 read-model 事实。旧 `BasicAgentRunExecutor`、Panel run job、旧 conversation/run route 与 `/api/desktop/runs` 不再进入生产。当前尚未完成的是旧源码整组退役、外部边界 schema 收口，以及 Workbench/UI surface 隔离。
 
 ## 当前默认运行方式
 
@@ -22,7 +22,7 @@ UI 收口尚未完成。当前仍有设置中的 Agent 集群 beta 开关、侧�
 - 默认交互形态：线性会话驱动；用户在同一个 conversation 中一轮接一轮补充上下文、要求和判断
 - 当前已暴露显式 Agent 集群 beta 功能：用户先在 `设置 -> 关于` 启用“Agent 集群（beta）”，Panel 侧栏“新任务”下方才显示 `Agent 集群` 按钮；正式后端入口为 `/api/deep/*`；内部仍沿用 `deep` / `DeepRuntime` 命名（当前为 manager 自由决策循环 + 一层 child 的最小协作闭环，见 ADR-0025）
 - 默认仍为普通 `agent`，启动后不因历史 Agent 集群运行抢占普通入口，也不自动把普通请求升级为 Agent 集群；`deep` 只能由用户显式触发，不存在自动升级
-- `/api/conversations` 与 `/api/desktop/runs` 当前都只接受普通 `agent` 运行
+- `/api/conversations` 是普通 `agent` 的唯一提交入口；旧 `/api/desktop/runs` 已删除
 - Panel 普通输入栏可选择“当前工作区”作为本轮普通 `agent` 运行的工作根目录；该选择只作为前端会话内的显式覆盖，不写入设置。未选择当前工作区时，新 run 使用设置页保存的工作区作为默认工作区
 - 正式 Agent 集群后端入口为 `/api/deep/*`；旧 `/api/underground/*` 仅作为兼容/废弃候选路径保留，不与 `/api/deep/*` 并列为正式入口
 
@@ -37,6 +37,8 @@ UI 收口尚未完成。当前仍有设置中的 Agent 集群 beta 开关、侧�
 3. 如果模型请求工具，则走后端工具执行与确认边界
 4. 把工具结果回传模型
 5. 直到模型不再调用工具，形成最终结果
+
+生产实现由 OpenAI Agents SDK adapter 执行上述机械循环。SDK 不是业务状态 owner：每个工具结果必须先由 `OrdinaryAgentFeature` 持久化为 canonical 工具事实，才能返回给模型；SDK 的 provider call id 与应用事实 id 分开保存，避免父/子 Agent 或并行 child 复用 call id 时串用权限、确认或结果。确认、取消、provider 失败和进程退出都保留已经发生的完整 assistant/tool 事实，不会从 Panel 展示文本反向恢复模型上下文。
 
 这意味着：
 
@@ -74,10 +76,10 @@ UI 收口尚未完成。当前仍有设置中的 Agent 集群 beta 开关、侧�
 - 当前后端 run view 的语义字段是 `workView`；`GET /api/basic-agent/runs/:runId/view` 和 `GET /api/conversations/:id` 的 `currentRun` 不再返回顶层 `workSession` alias
 - 当前后端 run view 对普通 `agent` 暴露的顶层 `agentDefinitionRef` 与内层 `run.agentDefinitionRef` 必须来自同一个 run 出生事实，不能让前端面对两套 Agent 定义身份
 - 前端在打开会话，以及提交消息、确认决策、取消运行、运行结算、历史 transcript 读取后的刷新路径中，都应优先消费这些后端 read-model，而不是自行拼装运行状态、工作视图、结果详情和事件
-- 当前 Panel 前端普通运行主线不再直接依赖 `/api/desktop/runs/:id` 来拼装运行视图；已删除无生产客户端的 `/api/basic-agent/runs/:runId/work-session` 及 `workSession` 响应别名
-- 历史运行和恢复运行只使用 canonical `run`、runtime `events`、`confirmations`、`ordinaryModelContext` 与 run 创建时冻结的 `capabilitySnapshot / informationAccess`；`BasicAgentRun`、WorkView、Canvas 和 conversation 可见正文都是单向展示投影，不能反向拼装模型历史
-- Ordinary 的 RuntimeDatabase run 持久化使用 `runtime-run-snapshot/v1`：一次保存先校验快照边界，再原子写入 `runtime/runs/<runId>/snapshots/<revision>.json` 完整内容，最后原子切换 `run.json` manifest；读取时再次校验 schema、关键状态、记录归属和 manifest 摘要。`run / workspace / events / modelCalls / toolCalls / artifacts / confirmations / subAgentRuns / ordinaryModelContext` 只通过 `saveRunSnapshot` 一次提交，读取不会混合不同 revision 的 sidecar；manifest 只保存窄运行摘要。同一 run 的后台保存与重启后确认恢复共用同一条读改写队列，避免晚到快照覆盖确认决定。每个 run 最多保留 current + previous 两个 revision，conversation 仍独立写入。旧 raw `run.json`、坏 manifest、缺失 snapshot 或 revision/runId 不一致统一返回 `runtime_snapshot_incompatible`（HTTP 410），真实磁盘权限或路径错误保持原始 I/O 失败，不伪装成数据不兼容；不做双读双写或猜测迁移
-- Ordinary live 状态只由 run job 的 `status` 决定；正式回答和当前确认作为 Ordinary 自有事实进入终态 payload，`ordinaryModelContext` 只用于下一轮模型续接，Canvas 只消费展示字段。正式回答在 run、conversation、WorkView、Canvas 和 RuntimeDatabase 恢复链中保留完整正文，只有额外的 title/summary/preview 展示字段可以有界压缩。`BasicAgentRunStore / BasicAgentRunEventHub` 已删除；`BasicAgentRun` 直接从 job 投影，Panel transport event 只在 `job.streamEvents` 保留一条 live 链
+- 当前 Panel 前端通过 `/api/conversations` 提交普通运行，通过 `/api/basic-agent/runs/:id/view` 与 `/stream` 读取同一 Ordinary read-model；`/api/desktop/runs`、无生产客户端的 work-session route 及 `workSession` 响应别名均已删除
+- 历史运行和恢复只读取 `OrdinaryRunState`：run 出生事实、status、`canonicalMessages`、工具事实、usage 与 timeline 在同一 snapshot 中提交；conversation control 只保存分支、标题、置顶和删除事实。WorkView、Panel conversation 和 SSE 都是单向展示投影，不能反向拼装模型历史
+- Ordinary 使用 `ordinary-run/v2` snapshot：每个 run 原子写入 `runtime/ordinary/runs/<runId>/snapshot.json`，列表 manifest 只是可重建索引；conversation control 使用独立的 `ordinary-conversation/v1` 文档。旧 RuntimeDatabase、raw `run.json`、sidecar event/tool-call 和旧 schema 均不读取、不迁移、不双写
+- Ordinary live 状态只由 `OrdinaryAgentFeature` 拥有的 run status 决定；正式回答、当前确认和 canonical 消息都在同一 feature 事实中。Panel 只消费 read-model，额外 title/summary/preview 可以有界压缩，但不能覆盖正式回答或模型可继续使用的工具事实
 - 普通 `agent` run 的 live model stream 只接受 `desktop_agent` 的用户可见模型增量；`desktop_chat` purpose、`desktop.chat.*` 输出契约和 read-model alias 已清除，不读取旧本地记录；`work_session_*` 增量只服务显式 Legacy Underground / deep 路径，不能混入默认普通流式输出
 
 前端不是 Agent 引擎，也不负责推导任务状态、补全工具语义或重建运行事实。
@@ -97,10 +99,10 @@ UI 收口尚未完成。当前仍有设置中的 Agent 集群 beta 开关、侧�
 - 序列化结果超过当前 180,000 字符内联边界时，ToolCenter 使用每个 PanelRuntime 唯一、Host-owned 的进程内 `ToolOutputStore` 保存当前完整文本或序列化 JSON。结果返回 4,000 字符预览、opaque `tool-output://` 引用和 `read_tool_output` 的下一段输入，并保留带外附件；显式 failed/cancelled 的超大 output、error 与 errorFacts 作为一份完整失败证据保存。父 run 必须冻结并授权 reader，Deep child / Sub-Agent 在真实 broker 也具备 reader 时把它作为 transport companion 自动继承，不扩张其他业务工具。读取不会重新执行原工具；`read_tool_output` 以 UTF-16 code-unit offset 每次最多请求 29,000 字符，并按实际序列化包络动态缩小当前页，避免长 provider call id 或高转义正文造成二次截断与偏移跳跃；窗口不得拆分 surrogate pair，最后一段读完即释放该 ref。默认 store TTL 最长 24 小时、最多 128 项、单项最多 4,000,000 字符、总计最多 32,000,000 字符；Ordinary 未消费引用保留到完整读取、TTL 或 Panel 关闭，容量不足时拒绝新的 retain 而不驱逐仍可读取的 live fact；Deep run 为 post-terminal child continuation 保留稳定 owner，在删除所属 Multi-Agent conversation 时回收；Panel 关闭全量清理。模型附件字节只服务当前 provider 请求，不进入 Deep child 持久化上下文；为保证 OpenAI Responses 的跨轮 reasoning/function-call 恢复，Deep 只对白名单 `openai_responses_output_items` 做 JSON-safe 验证并原样保留有效 output items。已知该 key 但内容无效或为空时，Deep child context persistence 以稳定错误 `model_protocol_continuation_not_persistable` 明确失败，不能静默丢弃后声称可恢复；其他未知 protocol extension key 仍忽略。`tool-output://` 引用元数据可以随工具事实持久化，但必须携带 `continuationAvailability: "live_only"`；引用对应的完整内容不进入 RuntimeDatabase，过期或进程重启后读取会明确返回 not found。超过单项/总量/条目容量时不创建引用并返回明确 delivery failure；原 failed/cancelled/approval 状态、错误域、错误码和确认请求必须保留，只有原 completed 结果因无法完整交付而转为 failed
 - MCP adapter 只保留服务端 `content[]` 与可选 JSON 对象 `structuredContent` 的单份语义事实，不生成 `summary / mcpResult / result` 多份包装；外部 `structuredContent` 不是 JSON 对象或不满足 JSON-safe 边界时明确失败。只对“text 可解析 JSON 且与 structuredContent 深度完全相等”的精确镜像做无损去重，其他内容完整保留；`isError=true` 成为正式工具失败。图片、音频和非图片 embedded resource blob 分别转成带外 `image / audio / file` 类型的 `ModelInputAttachment`，JSON 只保留 MIME、文件名/URI、byteLength 和附件索引；单个 MCP 结果当前最多 16 个模型附件、单附件最多 20 MiB、合计最多 32 MiB。附件预算或结果归一化在远端调用返回后失败时，必须作为 post-execution delivery failure 保留真实 `sourceExecutionStatus` 与 `doNotBlindlyRetry`，不能声称远端未执行或诱导盲目重试。OpenAI-compatible Chat Completions 只映射原始 user 消息中的 image、inline/file-id file 与内联 wav/mp3 `input_audio`；tool-origin 二进制附件必须明确 `request_validation`，不得改变来源角色；OpenAI Responses 支持 user/tool-origin image 与 file，内联 file 使用官方 `data:<mime>;base64,<data>`，但当前拒绝 user/tool-origin audio；对 inline file_data 和携带 byteLength 的 file_id/file_url，发送前执行单文件小于 50 MB、整份请求文件合计不超过 50 MB 的校验，未知远端文件大小仍由 provider 最终校验；其他无法由 provider 协议消费的媒体同样必须形成可观察失败，不能伪装成普通 file 或静默丢弃
 - Agent loop 对 read-only 并行结果中的动态 `approval_required` 仍会暂停；等待确认、deny/guidance、多阶段再次确认或取消时，确认前正文、附件、错误和可执行 continuation 都保留给模型。用户 guidance 不做固定 1,000 字截断；pending call/confirmation 身份不一致时 fail closed，不能执行工具
-- Ordinary 在每次运行结束时持久化该运行实际交给模型的标准 `modelContext`：原始 `user / assistant / tool` 顺序、工具调用参数、工具结果和最终 assistant 输出保持一致；OpenAI Responses 只额外保留可作为下一轮输入的 `openai_responses_output_items`。下一轮只读取这份标准上下文并追加当前 Skill、任务引用和用户消息，不再从 Panel 可见对话、工具事件或旧摘要猜测重建第二份模型历史。附件字节仍只服务当前请求，不进入持久化上下文。开发期旧 snapshot 若没有 `ordinaryModelContext`，直接视为失效数据并从空上下文开始，不迁移、不双读、不回填
-- Ordinary 模型上下文不按固定字符数或消息数静默裁剪；容量只由冻结的模型 token budget 与 loop-level context compaction 管理。只有模型调用前的 loop compaction 可以改写上下文，且不得拆开 assistant tool call 与对应 tool result；压缩失败会明确进入 `context_overflow`，不能带着超限或半截上下文继续。失败、blocked 或取消 run 只有在确实产出 canonical `ordinaryModelContext` 时才能续接；若该 run 在模型调用前失败，则跳过它并查找更早的 canonical context，Panel 错误文案和可见回答都不能冒充模型历史
+- Ordinary 在每次状态提交时保存模型实际消费的 `canonicalMessages`：原始 `user / assistant / tool` 顺序、工具调用参数、工具结果和最终 assistant 输出保持一致；OpenAI Responses 只额外保留可作为下一轮输入的白名单 output items。下一轮只读取上一条可见 lineage 的 canonical 消息并追加当前 Skill、任务引用和用户消息，不从 Panel 可见对话、活动事件或摘要重建第二份历史。附件字节只服务当前请求，不进入持久化上下文；旧 snapshot 直接拒绝
+- Ordinary 模型上下文不按固定字符数或消息数静默裁剪；容量只由冻结的模型 token budget 与 loop-level context compaction 管理。只有模型调用前的 compaction 可以改写上下文，且不得拆开 assistant tool call 与对应 tool result；压缩失败明确中断，不能带着超限或半截上下文继续。失败、blocked 或取消 run 已经形成的 canonical 消息仍可被下一轮看到，Panel 错误文案和可见回答不能冒充模型历史
 - 官方 OpenAI Chat Completions 与 Responses 请求保持稳定前缀：系统指令、工具定义与既有消息顺序不因展示投影或跨轮恢复而改写；仅官方 `api.openai.com` 请求携带由协议、模型、根指令、输出契约和工具定义生成的稳定 `prompt_cache_key`。Responses 同时请求 `reasoning.encrypted_content` 并把上一轮 output items 原样回传，兼容端点不发送这些官方专有字段。运行计量保留 provider 报告的 cached input、cache write 与 uncached input tokens，不能用估算值冒充缓存命中
-- `ordinaryModelContext` 是 Ordinary 内部恢复事实，不属于 `ordinary` read-model；普通运行 API、conversation 投影和 SSE 不返回系统提示、工具原文或 provider continuation。Panel 只展示已有安全投影，后端恢复时才读取完整标准上下文
+- `canonicalMessages` 是 Ordinary 内部恢复事实，不属于公开 read-model；普通运行 API、conversation 投影和 SSE 不返回系统提示或 provider continuation。Panel 只展示单向投影，但不得用摘要替换正式回答和工具结果
 - 工具生命周期固定为 `tool.requested / tool.completed / tool.failed / tool.cancelled`，确认等待使用 `user_approval.requested`；live、replay、conversation history 和持久化视图从同一 append-only 事件归约语义消费调用事实
 - Panel 关闭会在首个异步清理前同步停止 Ordinary 与 Multi-Agent 新工作准入并请求停止现有 run；等待在途 HTTP 请求最多 1 秒后使用 Node `closeAllConnections()` 终止卡住的连接，整个运行资源清理另有 30 秒 Host hard deadline。若 provider 或其他在途 operation 不响应取消，关闭返回明确 `panel_shutdown_timeout`，桌面宿主可继续退出而不会永久挂起；关闭期间新 Ordinary 请求返回 `panel_runtime_quiescing`，已越过 Panel gate 的 Deep command 返回 `deep_feature_quiescing`
 - 普通 `agent` 的本轮模型配置事实来自 run 创建时冻结的 `capabilitySnapshot.activeModel`；执行、持久化、恢复和用户可见 read-model 不能再用当前全局模型配置覆盖它

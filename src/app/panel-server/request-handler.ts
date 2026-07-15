@@ -15,34 +15,23 @@ import {
   writeJson,
   writePanelError,
 } from "./http-utils.js";
-import { handlePanelBasicAgentRoute } from "./basic-agent-routes.js";
 import { handlePanelConfigRoute } from "./config-routes.js";
 import { handlePanelContextRoute } from "./context-routes.js";
-import {
-  handlePanelConversationRoute,
-  scheduleNextQueuedConversationRun,
-} from "./conversation-routes.js";
 import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 import { asRecord } from "./request-parsers.js";
-import { waitForPanelPersistenceIdle as waitForPanelPersistenceChainsIdle } from "./persistence.js";
 import {
   cleanupPanelRuntimeOwnedBackgroundProcesses,
   createPanelRuntime,
   isPanelRuntime,
   type PanelRuntime,
-  type PanelRuntimeHooks,
 } from "./runtime.js";
-import {
-  executeBasicPanelRun,
-  failPanelRunJob,
-} from "./run-execution.js";
-import { handlePanelRunRoute } from "./run-routes.js";
 import { handlePanelDeepRoute } from "./deep-routes.js";
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
 import { handlePanelAppUpdateRoute } from "./app-update-routes.js";
-import { OrdinaryRuntimeSnapshotContractError } from "../basic-agent-runtime/persistence-snapshot-contract.js";
-import { BasicAgentRunAdmissionClosedError } from "../basic-agent-runtime/run-executor.js";
-import { RuntimeSnapshotIncompatibleError } from "../../domain/runtime-database/index.js";
+import { OrdinaryFeatureError } from "../ordinary-agent/contracts.js";
+import { OrdinaryPanelCursorError } from "./ordinary-agent-panel-projection.js";
+import { handlePanelOrdinaryRoute } from "./ordinary-routes.js";
+import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 const PANEL_REQUEST_DRAIN_TIMEOUT_MS = 1_000;
@@ -63,7 +52,7 @@ export class PanelShutdownTimeoutError extends Error {
 }
 
 export async function startLocalPanelServer(options: PanelServerOptions = {}): Promise<StartedPanelServer> {
-  const runtime = createPanelRuntime(options, createPanelRuntimeHooks());
+  const runtime = createPanelRuntime(options);
   const server = createServer(createPanelRequestHandler(runtime));
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 9090;
@@ -79,25 +68,26 @@ export async function startLocalPanelServer(options: PanelServerOptions = {}): P
 }
 
 export function createPanelRequestHandler(options: PanelServerOptions | PanelRuntime = {}): (request: IncomingMessage, response: ServerResponse) => void {
-  const runtime = isPanelRuntime(options) ? options : createPanelRuntime(options, createPanelRuntimeHooks());
+  const runtime = isPanelRuntime(options) ? options : createPanelRuntime(options);
 
   return (request, response) => {
     let requestJob: Promise<void>;
     requestJob = handlePanelRequest(runtime, request, response).catch((error) => {
+      if (response.headersSent || response.writableEnded) {
+        logUnhandledPanelRequestError(request, error);
+        if (!response.writableEnded) response.end();
+        return;
+      }
       if (error instanceof PanelHttpError) {
         writePanelError(response, error);
         return;
       }
-      if (error instanceof BasicAgentRunAdmissionClosedError) {
-        writePanelError(response, new PanelHttpError(503, error.code, error.message));
+      if (error instanceof OrdinaryPanelCursorError) {
+        writePanelError(response, new PanelHttpError(400, error.code, error.message));
         return;
       }
-      if (error instanceof OrdinaryRuntimeSnapshotContractError) {
-        writePanelError(response, new PanelHttpError(410, error.code, error.message));
-        return;
-      }
-      if (error instanceof RuntimeSnapshotIncompatibleError) {
-        writePanelError(response, new PanelHttpError(410, error.code, error.message));
+      if (error instanceof OrdinaryFeatureError) {
+        writePanelError(response, ordinaryFeatureHttpError(error));
         return;
       }
       logUnhandledPanelRequestError(request, error);
@@ -106,14 +96,6 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
       runtime.activeRequestJobs.delete(requestJob);
     });
     runtime.activeRequestJobs.add(requestJob);
-  };
-}
-
-function createPanelRuntimeHooks(): PanelRuntimeHooks {
-  return {
-    executeRun: executeBasicPanelRun,
-    failRun: failPanelRunJob,
-    scheduleNextQueuedConversationRun,
   };
 }
 
@@ -193,11 +175,12 @@ async function handlePanelRequest(
     return;
   }
 
-  if (await handlePanelRunRoute(runtime, request, response, url)) {
+  if (request.method === "GET" && url.pathname === "/api/runtime/usage-statistics") {
+    writeJson(response, 200, await createPanelUsageStatistics({ ordinaryAgentFeature: runtime.ordinaryAgentFeature }));
     return;
   }
 
-  if (await handlePanelConversationRoute(runtime, request, response, url)) {
+  if (await handlePanelOrdinaryRoute(runtime, request, response, url)) {
     return;
   }
 
@@ -220,10 +203,6 @@ async function handlePanelRequest(
   const skillStateMatch = /^\/api\/skills\/([^/]+)\/state$/.exec(url.pathname);
   if (request.method === "POST" && skillStateMatch !== null) {
     await handleUpdateSkillStateRequest(runtime, decodeURIComponent(skillStateMatch[1] ?? ""), request, response);
-    return;
-  }
-
-  if (await handlePanelBasicAgentRoute(runtime, request, response, url)) {
     return;
   }
 
@@ -290,7 +269,8 @@ export async function closePanelServer(
   // callbacks may still run while active jobs converge, but they must not
   // admit the next queued conversation run.
   runtime.isQuiescing = true;
-  runtime.runExecutor.quiesce();
+  const ordinaryDisposal = runtime.ordinaryAgentFeature.release();
+  void ordinaryDisposal.catch(() => undefined);
   // dispose() closes Multi-Agent command admission synchronously before its
   // asynchronous cleanup starts. This covers requests that already passed the
   // Panel gate but are still reading their body or resolving configuration.
@@ -302,19 +282,14 @@ export async function closePanelServer(
   });
 
   const runtimeCleanup = (async () => {
-    abortPanelRuntimeActiveRuns(runtime);
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
     await waitForPanelRequestIdle(server, runtime);
-    abortPanelRuntimeActiveRuns(runtime);
     await Promise.all([
-      waitForPanelRuntimeIdle(runtime),
+      ordinaryDisposal,
       multiAgentDisposal,
     ]);
-    await runtime.runExecutor.dispose();
-    runtime.runStreamProjection.clear();
     await runtime.toolOutputStore.clear();
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
-    await waitForPanelPersistenceIdle(runtime);
   })();
   // A forced timeout may return while a broken provider promise is still
   // pending. Own its eventual rejection so shutdown never creates an unhandled
@@ -341,6 +316,28 @@ export async function closePanelServer(
   }
   if (serverCloseError !== undefined) {
     throw serverCloseError;
+  }
+}
+
+function ordinaryFeatureHttpError(error: OrdinaryFeatureError): PanelHttpError {
+  switch (error.code) {
+    case "ordinary_feature_released":
+      return new PanelHttpError(503, "panel_runtime_quiescing", "面板正在关闭，不能接受新的请求。");
+    case "ordinary_run_not_found":
+      return new PanelHttpError(404, "run_not_found", error.message);
+    case "ordinary_conversation_not_found":
+      return new PanelHttpError(404, "conversation_not_found", error.message);
+    case "ordinary_confirmation_not_found":
+    case "ordinary_rollback_target_not_found":
+      return new PanelHttpError(404, error.code, error.message);
+    case "ordinary_conversation_deleted":
+    case "ordinary_run_conflict":
+    case "ordinary_revision_conflict":
+    case "ordinary_run_state_conflict":
+    case "ordinary_conversation_busy":
+    case "ordinary_confirmation_in_progress":
+    case "ordinary_tool_result_conflict":
+      return new PanelHttpError(409, error.code, error.message);
   }
 }
 
@@ -377,27 +374,6 @@ function settleWithin(jobs: readonly Promise<void>[], timeoutMs: number): Promis
       resolve(true);
     });
   });
-}
-
-async function waitForPanelRuntimeIdle(runtime: PanelRuntime): Promise<void> {
-  while (runtime.activeRunJobs.size > 0) {
-    // A job that was already converging when shutdown started can register a
-    // replacement controller before the active-job set reaches zero. Abort on
-    // every pass so late controllers do not escape the one-time initial scan.
-    abortPanelRuntimeActiveRuns(runtime);
-    await Promise.allSettled([...runtime.activeRunJobs]);
-  }
-  abortPanelRuntimeActiveRuns(runtime);
-}
-
-async function waitForPanelPersistenceIdle(runtime: PanelRuntime): Promise<void> {
-  await waitForPanelPersistenceChainsIdle(runtime.persistenceChains);
-}
-
-function abortPanelRuntimeActiveRuns(runtime: PanelRuntime): void {
-  for (const controller of runtime.abortControllers.values()) {
-    controller.abort();
-  }
 }
 
 function close(server: Server): Promise<void> {

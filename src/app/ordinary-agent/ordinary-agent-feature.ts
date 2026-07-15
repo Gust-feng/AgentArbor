@@ -1,4 +1,5 @@
 import type { ConfirmationDecision } from "../../domain/confirmation/index.js";
+import { toolCallFactId, type ToolCallResult } from "../../domain/tools/index.js";
 import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import type {
   OrdinaryAgentFeature,
@@ -11,6 +12,7 @@ import type {
   OrdinaryExecutionPort,
   OrdinaryRunActivity,
   OrdinaryRunActivityCursor,
+  OrdinaryRunActivityReplay,
   OrdinaryRunEvent,
   OrdinaryRunRepository,
   OrdinaryRunSnapshotDocument,
@@ -26,7 +28,13 @@ import {
   projectOrdinaryConversation,
   visibleOrdinaryConversationRuns,
 } from "./conversation-projection.js";
-import { createInitialOrdinaryRunState, transitionOrdinaryRun, type OrdinaryRunTransition } from "./state.js";
+import {
+  createInitialOrdinaryRunState,
+  ordinaryToolResultKey,
+  recordOrdinaryToolResult,
+  transitionOrdinaryRun,
+  type OrdinaryRunTransition,
+} from "./state.js";
 
 export function createOrdinaryAgentFeature(input: {
   readonly repository: OrdinaryRunRepository;
@@ -61,7 +69,12 @@ export function createOrdinaryAgentFeature(input: {
       const document = await input.repository.get(summary.runId);
       if (document === undefined) continue;
       documents.set(summary.runId, document);
-      streamFor(summary.runId, document.state.timeline);
+      streamFor(
+        summary.runId,
+        document.state.timeline,
+        document.state.toolCalls,
+        document.state.toolResultRecordedAt,
+      );
       if (document.state.status.kind === "awaiting_approval") {
         await mutate(summary.runId, {
           type: "block",
@@ -71,10 +84,23 @@ export function createOrdinaryAgentFeature(input: {
           },
           continueBy: "new_turn",
         });
+      } else if (document.state.status.kind === "running") {
+        await mutate(summary.runId, {
+          type: "block",
+          reason: {
+            code: "execution_continuation_lost",
+            message: "The live execution was interrupted when the process restarted.",
+          },
+          continueBy: "new_turn",
+        });
       }
     }
     for (const document of documents.values()) {
-      if (document.state.status.kind !== "queued" || document.state.turn.predecessorRunId === undefined) continue;
+      if (document.state.status.kind !== "queued") continue;
+      if (document.state.turn.predecessorRunId === undefined) {
+        await activateRootQueued(document.state.runId);
+        continue;
+      }
       const predecessor = documents.get(document.state.turn.predecessorRunId);
       if (predecessor !== undefined && isTerminal(predecessor.state)) await activateSuccessor(predecessor.state.runId);
     }
@@ -94,7 +120,7 @@ export function createOrdinaryAgentFeature(input: {
     const document = await input.repository.get(runId);
     if (document !== undefined) {
       documents.set(runId, document);
-      streamFor(runId, document.state.timeline);
+      streamFor(runId, document.state.timeline, document.state.toolCalls, document.state.toolResultRecordedAt);
     }
     return document;
   }
@@ -140,6 +166,7 @@ export function createOrdinaryAgentFeature(input: {
     });
     const saved = await input.repository.save(state, current.revision);
     documents.set(runId, saved);
+    syncDurableToolResults(state);
     recordTransition(state.timeline.at(-1)!);
     return clone(state);
   }
@@ -151,22 +178,19 @@ export function createOrdinaryAgentFeature(input: {
     }
   }
 
-  function streamFor(runId: string, durableEvents: readonly OrdinaryRunEvent[] = []): {
+  function streamFor(
+    runId: string,
+    durableEvents: readonly OrdinaryRunEvent[] = [],
+    durableToolResults: readonly ToolCallResult[] = [],
+    toolResultRecordedAt: Readonly<Record<string, string>> = {},
+  ): {
     streamId: string;
     nextSequence: number;
     activities: OrdinaryRunActivity[];
   } {
     const existing = activityStreams.get(runId);
     if (existing !== undefined) return existing;
-    const activities = durableEvents.map((event, index): OrdinaryRunActivity => ({
-      activityId: `transition:${event.eventId}`,
-      runId,
-      sequence: index + 1,
-      recordedAt: event.recordedAt,
-      type: "run.transition",
-      durability: "durable",
-      event: clone(event),
-    }));
+    const activities = durableActivities(runId, durableEvents, durableToolResults, toolResultRecordedAt);
     const created = { streamId: idFactory("ordinary-activity-stream"), nextSequence: activities.length + 1, activities };
     activityStreams.set(runId, created);
     return created;
@@ -174,6 +198,11 @@ export function createOrdinaryAgentFeature(input: {
 
   function recordTransition(event: OrdinaryRunEvent): void {
     const stream = streamFor(event.runId);
+    const durableCallIds = toolCallIds(event);
+    stream.activities = stream.activities.map((activity) =>
+      activity.type === "tool.result" && durableCallIds.includes(toolCallFactId(activity.result))
+        ? { ...activity, durability: "durable" }
+        : activity);
     const activity: OrdinaryRunActivity = {
       activityId: `transition:${event.eventId}`,
       runId: event.runId,
@@ -207,6 +236,65 @@ export function createOrdinaryAgentFeature(input: {
     };
     stream.activities.push(activity);
     emit(activity);
+  }
+
+  async function persistToolResult(runId: string, result: ToolCallResult): Promise<void> {
+    if (result.status === "approval_required") return;
+    await enqueue(runId, async () => {
+      const current = await load(runId);
+      if (current === undefined) return;
+      // Cancellation commits promptly, but an already executing tool may finish after
+      // abort. Its observed result still belongs to this active execution lease.
+      if (current.state.status.kind !== "running" && !controllers.has(runId)) return;
+      const key = ordinaryToolResultKey(result);
+      const factId = toolCallFactId(result);
+      const existing = current.state.toolCalls.find((item) => toolCallFactId(item) === factId);
+      if (existing !== undefined) {
+        if (ordinaryToolResultKey(existing) === key && JSON.stringify(existing) === JSON.stringify(result)) return;
+        if (existing.status !== "approval_required") {
+          throw new OrdinaryFeatureError(
+            "ordinary_tool_result_conflict",
+            `Ordinary run ${runId} already recorded a different result for tool fact ${factId}`,
+          );
+        }
+      }
+      const recordedAt = current.state.toolResultRecordedAt[key] ?? now();
+      const state = recordOrdinaryToolResult({ state: current.state, result, recordedAt });
+      const saved = await input.repository.save(state, current.revision);
+      documents.set(runId, saved);
+      recordDurableToolResult(runId, result, recordedAt);
+    });
+  }
+
+  function recordDurableToolResult(runId: string, result: ToolCallResult, recordedAt: string): void {
+    const stream = streamFor(runId);
+    const activityId = toolActivityId(result);
+    const existingIndex = stream.activities.findIndex((activity) => activity.activityId === activityId);
+    const existing = stream.activities[existingIndex];
+    if (existing?.type === "tool.result" && existing.durability === "durable") return;
+    if (existing?.type === "tool.result") {
+      stream.activities[existingIndex] = { ...existing, durability: "durable" };
+      return;
+    }
+    const activity: OrdinaryRunActivity = {
+      activityId,
+      runId,
+      sequence: stream.nextSequence++,
+      recordedAt,
+      type: "tool.result",
+      durability: "durable",
+      result: clone(result),
+    };
+    stream.activities.push(activity);
+    emit(activity);
+  }
+
+  function syncDurableToolResults(state: OrdinaryRunState): void {
+    for (const result of state.toolCalls) {
+      if (result.status === "approval_required") continue;
+      const recordedAt = state.toolResultRecordedAt[ordinaryToolResultKey(result)];
+      if (recordedAt !== undefined) recordDurableToolResult(state.runId, result, recordedAt);
+    }
   }
 
   async function applyOutcome(runId: string, outcome: OrdinaryExecutionOutcome): Promise<void> {
@@ -255,6 +343,7 @@ export function createOrdinaryAgentFeature(input: {
         messages: document.state.canonicalMessages,
         abortSignal: controller.signal,
         onTextDelta: (delta) => recordOutputDelta(runId, delta),
+        onToolResult: (result) => persistToolResult(runId, result),
       });
       await applyOutcome(runId, outcome);
     } catch (error) {
@@ -287,17 +376,71 @@ export function createOrdinaryAgentFeature(input: {
     if (predecessor === undefined) return;
     const control = await loadConversationControl(predecessor.state.turn.conversationId);
     if (control?.state.deletedAt !== undefined) return;
-    const successor = [...documents.values()]
-      .filter((document) => document.state.status.kind === "queued" && document.state.turn.predecessorRunId === predecessorRunId)
-      .sort((left, right) => left.state.timestamps.createdAt.localeCompare(right.state.timestamps.createdAt))[0];
-    if (successor === undefined) return;
-    const activated = await enqueue(successor.state.runId, async () => {
-      const current = await load(successor.state.runId);
+    const candidate = nextEligibleQueuedRun(schedulingRuns(predecessor.state.turn.conversationId, control));
+    if (candidate === undefined) return;
+    const activated = await enqueue(candidate.runId, async () => {
+      const current = await load(candidate.runId);
       if (current === undefined || current.state.status.kind !== "queued") return undefined;
-      return commitTransition(successor.state.runId, {
+      const latestControl = await loadConversationControl(current.state.turn.conversationId);
+      if (latestControl?.state.deletedAt !== undefined) return undefined;
+      const latestRuns = schedulingRuns(current.state.turn.conversationId, latestControl);
+      const latestCandidate = nextEligibleQueuedRun(latestRuns);
+      if (latestCandidate?.runId !== current.state.runId) return undefined;
+      return commitTransition(current.state.runId, {
         type: "start",
-        priorCanonicalMessages: predecessor.state.canonicalMessages,
+        priorCanonicalMessages: canonicalMessagesBefore(latestRuns, current.state.runId),
       });
+    });
+    if (activated?.status.kind === "running") track(activated.runId, runExecution(activated.runId));
+  }
+
+  function schedulingRuns(
+    conversationId: string,
+    control: OrdinaryConversationControlDocument | undefined,
+  ): readonly OrdinaryRunState[] {
+    if (control !== undefined) return visibleRuns(control);
+    return [...documents.values()]
+      .map((document) => document.state)
+      .filter((run) => run.turn.conversationId === conversationId)
+      .sort((left, right) => left.turn.ordinal - right.turn.ordinal);
+  }
+
+  function nextEligibleQueuedRun(runs: readonly OrdinaryRunState[]): OrdinaryRunState | undefined {
+    for (const run of runs) {
+      if (run.status.kind === "queued") return run;
+      if (!isTerminal(run)) return undefined;
+    }
+    return undefined;
+  }
+
+  function canonicalMessagesBefore(
+    runs: readonly OrdinaryRunState[],
+    runId: string,
+  ): OrdinaryRunState["canonicalMessages"] {
+    const runIndex = runs.findIndex((run) => run.runId === runId);
+    if (runIndex < 0) throw new Error(`Ordinary queued run ${runId} was not found in its visible lineage`);
+    let messages: OrdinaryRunState["canonicalMessages"] = [];
+    for (const run of runs.slice(0, runIndex)) {
+      if (run.timeline.some((event) => event.type === "run.started")) {
+        messages = run.canonicalMessages;
+      } else {
+        // A queued turn cancelled before execution has no model-authored history.
+        messages = [...messages, { role: "user", content: run.input.userMessage }];
+      }
+    }
+    return messages;
+  }
+
+  async function activateRootQueued(runId: string): Promise<void> {
+    if (released) return;
+    const activated = await enqueue(runId, async () => {
+      const current = await load(runId);
+      if (current === undefined || current.state.status.kind !== "queued" || current.state.turn.predecessorRunId !== undefined) {
+        return undefined;
+      }
+      const control = await loadConversationControl(current.state.turn.conversationId);
+      if (control?.state.deletedAt !== undefined) return undefined;
+      return commitTransition(runId, { type: "start" });
     });
     if (activated?.status.kind === "running") track(activated.runId, runExecution(activated.runId));
   }
@@ -523,6 +666,7 @@ export function createOrdinaryAgentFeature(input: {
   }
 
   function conversationView(control: OrdinaryConversationControlDocument): OrdinaryConversationReadModel | undefined {
+    if (control.state.deletedAt !== undefined) return undefined;
     return projectOrdinaryConversation({ control, runs: visibleRuns(control) });
   }
 
@@ -630,7 +774,9 @@ export function createOrdinaryAgentFeature(input: {
   }
 
   function assertLive(): void {
-    if (released) throw new Error("OrdinaryAgentFeature has been released");
+    if (released) {
+      throw new OrdinaryFeatureError("ordinary_feature_released", "Ordinary Agent is shutting down");
+    }
   }
 
   return {
@@ -664,7 +810,12 @@ export function createOrdinaryAgentFeature(input: {
         await readyPromise;
         const document = await load(runId);
         if (document === undefined) return undefined;
-        const stream = streamFor(runId, document.state.timeline);
+        const stream = streamFor(
+          runId,
+          document.state.timeline,
+          document.state.toolCalls,
+          document.state.toolResultRecordedAt,
+        );
         const reset = cursor !== undefined && (
           cursor.streamId !== stream.streamId || cursor.sequence < 0 || cursor.sequence >= stream.nextSequence
         );
@@ -713,6 +864,86 @@ export function createOrdinaryAgentFeature(input: {
   function activityCursor(stream: { readonly streamId: string; readonly nextSequence: number }): OrdinaryRunActivityCursor {
     return { streamId: stream.streamId, sequence: stream.nextSequence - 1 };
   }
+}
+
+function durableActivities(
+  runId: string,
+  events: readonly OrdinaryRunEvent[],
+  toolResults: readonly ToolCallResult[],
+  toolResultRecordedAt: Readonly<Record<string, string>>,
+): OrdinaryRunActivity[] {
+  const pending: Array<{
+    readonly recordedAt: string;
+    readonly priority: number;
+    readonly insertion: number;
+    readonly activity: OrdinaryRunActivity;
+  }> = [];
+  for (const [insertion, event] of events.entries()) {
+    pending.push({
+      recordedAt: event.recordedAt,
+      priority: 1,
+      insertion,
+      activity: {
+      activityId: `transition:${event.eventId}`,
+      runId,
+      sequence: 0,
+      recordedAt: event.recordedAt,
+      type: "run.transition",
+      durability: "durable",
+      event: clone(event),
+      },
+    });
+  }
+  for (const [insertion, result] of toolResults.entries()) {
+    if (result.status === "approval_required") continue;
+    const recordedAt = toolResultRecordedAt[ordinaryToolResultKey(result)];
+    if (recordedAt === undefined) continue;
+    pending.push({
+      recordedAt,
+      priority: 0,
+      insertion,
+      activity: {
+        activityId: toolActivityId(result),
+        runId,
+        sequence: 0,
+        recordedAt,
+        type: "tool.result",
+        durability: "durable",
+        result: clone(result),
+      },
+    });
+  }
+  return pending
+    .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt) ||
+      left.priority - right.priority || left.insertion - right.insertion)
+    .map((item, index) => ({ ...item.activity, sequence: index + 1 }));
+}
+
+export function durableOrdinaryRunReplayFromState(run: OrdinaryRunState): OrdinaryRunActivityReplay {
+  const activities = durableActivities(
+    run.runId,
+    run.timeline,
+    run.toolCalls,
+    run.toolResultRecordedAt,
+  );
+  const lastEventId = run.timeline.at(-1)?.eventId ?? "initial";
+  return {
+    cursor: {
+      // Command responses are durable snapshots, not subscriptions to the live stream generation.
+      streamId: `ordinary-command-response:${run.runId}:${lastEventId}`,
+      sequence: activities.length,
+    },
+    reset: false,
+    activities,
+  };
+}
+
+function toolCallIds(event: OrdinaryRunEvent): readonly string[] {
+  return "toolCallIds" in event ? event.toolCallIds : [];
+}
+
+function toolActivityId(result: ToolCallResult): string {
+  return `tool:${ordinaryToolResultKey(result)}`;
 }
 
 function isTerminal(state: OrdinaryRunState): boolean {

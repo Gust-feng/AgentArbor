@@ -8,10 +8,10 @@ import type {
   ToolFileDisplayOperation,
 } from "./tools";
 import type {
-  PanelBasicAgentReplay,
-  PanelBasicAgentRunDetail,
-  PanelBasicAgentRunView,
-} from "../../../panel-read-model/basic-agent-run-view-contracts";
+  OrdinaryPanelReplay,
+  OrdinaryPanelRunDetail,
+  OrdinaryPanelRunView,
+} from "../../../panel-read-model/ordinary-agent-run-contracts";
 
 export type RunAgentDefinitionRef = {
   readonly agentId: string;
@@ -340,53 +340,24 @@ export type TranscriptNode = {
   readonly refs: readonly ObservationRef[];
 };
 
-export type DesktopRunCanvas = {
-  readonly kind?: string;
-  readonly agent?: {
-    readonly answer?: { readonly answer: string };
-    readonly pendingConfirmation?: {
-      readonly confirmationId: string;
-      readonly title: string;
-      readonly question: string;
-      readonly consequence: string;
-      readonly affectedResources?: readonly string[];
-      readonly riskLevel: string;
-      readonly resumeAvailability?: "live" | "lost_after_restart";
-      readonly requestedAt?: string;
-      readonly expiresAt?: string;
-      readonly sourceRefs?: readonly string[];
-    };
-    readonly context?: {
-      readonly usageSummary?: string;
-      readonly items?: readonly {
-        readonly itemId: string;
-        readonly sourceKind: string;
-        readonly summary: string;
-        readonly truncated?: boolean;
-      }[];
-    };
-  };
+export type DesktopRunDetail = OrdinaryPanelRunDetail;
+
+export type PendingConfirmation = {
+  readonly confirmationId: string;
+  readonly title: string;
+  readonly question: string;
+  readonly consequence: string;
+  readonly affectedResources?: readonly string[];
+  readonly riskLevel: string;
+  readonly resumeAvailability?: "live" | "lost_after_restart";
+  readonly requestedAt?: string;
+  readonly expiresAt?: string;
+  readonly sourceRefs?: readonly string[];
 };
-
-export type DesktopRunDetail = PanelBasicAgentRunDetail<
-  PanelStreamEvent,
-  TranscriptNode,
-  DesktopRunCanvas
->;
-
-export type PendingConfirmation = NonNullable<
-  NonNullable<NonNullable<DesktopRunDetail["canvas"]>["agent"]>["pendingConfirmation"]
->;
 
 export type OrdinaryRunCursor = string;
 
-export type BasicAgentReplay = Omit<PanelBasicAgentReplay<RunEvent>, "cursor"> & {
-  readonly cursor: {
-    /** Opaque backend-issued token. Return it unchanged; do not derive it from event sequence. */
-    readonly token: OrdinaryRunCursor;
-    readonly lastSequence: number;
-  };
-};
+export type BasicAgentReplay = OrdinaryPanelReplay;
 
 export type AgentDeliverable = {
   readonly deliverableId: string;
@@ -457,16 +428,4 @@ export type DesktopWorkView = {
   };
 };
 
-type BackendBasicAgentRunView = PanelBasicAgentRunView<
-  BasicAgentRun,
-  DesktopWorkView,
-  RunEvent,
-  PanelStreamEvent,
-  TranscriptNode,
-  DesktopRunCanvas,
-  RunCapabilityResolution
->;
-
-export type BasicAgentRunView = Omit<BackendBasicAgentRunView, "replay"> & {
-  readonly replay: BasicAgentReplay;
-};
+export type BasicAgentRunView = OrdinaryPanelRunView;

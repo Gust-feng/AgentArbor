@@ -43,6 +43,80 @@ test("submitTurn serializes queued turns and rebases the successor on completed 
   ]);
 });
 
+test("cancelling a queued middle turn does not start its successor past an active ancestor", async (t) => {
+  let executions = 0;
+  const run = await fixture(t, {
+    execute(input) {
+      executions += 1;
+      return new Promise<OrdinaryExecutionOutcome>((resolve) => {
+        input.abortSignal.addEventListener("abort", () => resolve({
+          status: "cancelled",
+          reason: String(input.abortSignal.reason),
+          canonicalMessages: input.messages,
+          toolCalls: [],
+          usage: {},
+        }), { once: true });
+      });
+    },
+  });
+  const first = await run.feature.commands.submitTurn({ input: { userMessage: "first" }, birth: ordinaryRunBirth() });
+  const second = await run.feature.commands.submitTurn({
+    conversationId: first.conversation.conversationId,
+    input: { userMessage: "second" },
+    birth: ordinaryRunBirth(),
+  });
+  const third = await run.feature.commands.submitTurn({
+    conversationId: first.conversation.conversationId,
+    input: { userMessage: "third" },
+    birth: ordinaryRunBirth(),
+  });
+
+  await run.feature.commands.cancel(second.run.runId, "cancel_middle");
+
+  assert.equal(executions, 1);
+  assert.equal((await run.feature.queries.getRun(first.run.runId))?.status.kind, "running");
+  assert.equal((await run.feature.queries.getRun(second.run.runId))?.status.kind, "cancelled");
+  assert.equal((await run.feature.queries.getRun(third.run.runId))?.status.kind, "queued");
+});
+
+test("a successor behind a cancelled queued turn starts after its active ancestor with complete context", async (t) => {
+  let finishFirst: ((outcome: OrdinaryExecutionOutcome) => void) | undefined;
+  const observed: { readonly message: string; readonly messages: OrdinaryRunState["canonicalMessages"] }[] = [];
+  const run = await fixture(t, {
+    execute(input) {
+      observed.push({ message: input.runInput.userMessage, messages: input.messages });
+      if (input.runInput.userMessage === "first") {
+        return new Promise<OrdinaryExecutionOutcome>((resolve) => { finishFirst = resolve; });
+      }
+      return Promise.resolve(completed(input, `answer:${input.runInput.userMessage}`));
+    },
+  });
+  const first = await run.feature.commands.submitTurn({ input: { userMessage: "first" }, birth: ordinaryRunBirth() });
+  const second = await run.feature.commands.submitTurn({
+    conversationId: first.conversation.conversationId,
+    input: { userMessage: "second" },
+    birth: ordinaryRunBirth(),
+  });
+  const third = await run.feature.commands.submitTurn({
+    conversationId: first.conversation.conversationId,
+    input: { userMessage: "third" },
+    birth: ordinaryRunBirth(),
+  });
+  await run.feature.commands.cancel(second.run.runId, "cancel_middle");
+  assert.deepEqual(observed.map((entry) => entry.message), ["first"]);
+
+  finishFirst?.(completedFromMessages(observed[0]!.messages, "answer:first"));
+  await waitForStatus(run.feature, first.run.runId, "completed");
+  await waitForStatus(run.feature, third.run.runId, "completed");
+
+  assert.deepEqual(observed.map((entry) => entry.message), ["first", "third"]);
+  assert.equal(
+    observed[1]?.messages.some((message) => message.role === "assistant" && message.content === "answer:first"),
+    true,
+  );
+  assert.equal(observed[1]?.messages.at(-1)?.content, "third");
+});
+
 test("conversation control persists rename and pin without copying turn content or run results", async (t) => {
   const run = await fixture(t, immediateExecution());
   const submitted = await run.feature.commands.submitTurn({ input: { userMessage: "sensitive user text" }, birth: ordinaryRunBirth() });

@@ -160,13 +160,19 @@ export type ToolDefinition = {
 };
 
 export type ToolCallRequest = {
+  /** Provider/protocol call id. It must be returned unchanged to the originating model. */
   readonly callId: string;
+  /** Application fact identity when the provider call id is only unique inside a nested run. */
+  readonly factId?: string;
   readonly toolName: string;
   readonly input: ToolFactValue | undefined;
 };
 
 export type ToolCallResult = {
+  /** Provider/protocol call id. It must be returned unchanged to the originating model. */
   readonly callId: string;
+  /** Application fact identity when the provider call id is only unique inside a nested run. */
+  readonly factId?: string;
   readonly toolName: string;
   readonly input: ToolFactValue | undefined;
   readonly output: ToolFactValue | undefined;
@@ -177,6 +183,10 @@ export type ToolCallResult = {
   readonly durationMs: number;
   readonly confirmationRequest?: ConfirmationRequest;
 };
+
+export function toolCallFactId(value: Pick<ToolCallRequest, "callId" | "factId">): string {
+  return value.factId ?? value.callId;
+}
 
 export type ToolSecurityDecision =
   | {

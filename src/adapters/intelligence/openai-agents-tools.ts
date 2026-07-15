@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   Agent,
   type AgentOutputType,
@@ -58,7 +59,9 @@ export type OpenAIAgentsExecutionState = {
   readonly input: AgentLoopInput;
   readonly baseMessages: readonly ModelMessage[];
   readonly toolResults: ToolCallResult[];
-  readonly preflightByCallId: Map<string, OpenAIAgentsPreflightFact>;
+  toolResultAcceptanceFailure?: unknown;
+  readonly preflightByFactId: Map<string, OpenAIAgentsPreflightFact>;
+  readonly interruptionFactIds: WeakMap<object, string>;
   readonly modelInput: OpenAIAgentsInputMapper;
 };
 
@@ -107,6 +110,7 @@ function createSdkTool(input: {
   readonly isEnabled?: (
     runContext: RunContext<OpenAIAgentsSdkExecutionContext>,
   ) => Promise<boolean>;
+  readonly factScope?: () => string | undefined;
 }): FunctionTool<OpenAIAgentsSdkExecutionContext, SdkNonStrictObjectSchema> {
   const parameters = sdkToolInputSchema(input.definition);
   return tool<SdkNonStrictObjectSchema, OpenAIAgentsSdkExecutionContext>({
@@ -114,24 +118,28 @@ function createSdkTool(input: {
     description: modelVisibleToolDescription(input.definition),
     parameters,
     strict: false,
+    // ToolCenter already normalizes expected failures. A durable acceptance failure
+    // must escape the SDK instead of becoming a model-visible fallback string.
+    errorFunction: null,
     isEnabled: input.isEnabled === undefined
       ? true
       : ({ runContext }) => input.isEnabled!(requireSdkRunContext(runContext)),
     needsApproval: async (runContext, toolInput, callId) => {
-      const exactCallId = requiredCallId(callId);
-      const existing = input.execution.preflightByCallId.get(exactCallId);
+      const providerCallId = requiredCallId(callId);
+      const factId = scopedToolFactId(input.factScope?.(), providerCallId);
+      const existing = input.execution.preflightByFactId.get(factId);
       if (existing !== undefined) {
         return existing.needsApproval;
       }
       const boundary = freezeBoundary(await input.boundary(requireSdkRunContext(runContext)));
-      const request = toolCallRequest(exactCallId, input.definition.name, toolInput);
+      const request = toolCallRequest(providerCallId, factId, input.definition.name, toolInput);
       const preflight = boundary.gateway.preflight(
         request,
-        executionContext(input.execution, boundary, exactCallId),
+        executionContext(input.execution, boundary, factId),
         boundary.permission,
       );
       if (preflight.status === "ready") {
-        input.execution.preflightByCallId.set(exactCallId, {
+        input.execution.preflightByFactId.set(factId, {
           request: preflight.request,
           needsApproval: false,
           boundary,
@@ -144,18 +152,19 @@ function createSdkTool(input: {
         needsApproval: preflight.status === "approval_required",
         boundary,
       };
-      input.execution.preflightByCallId.set(exactCallId, fact);
-      input.execution.toolResults.push(preflight.result);
+      input.execution.preflightByFactId.set(factId, fact);
+      await recordOpenAIAgentsToolResult(input.execution, preflight.result);
       return fact.needsApproval;
     },
     execute: async (toolInput, runContext, details) => {
       const callId = requiredCallId(details?.toolCall?.callId);
-      const cached = input.execution.preflightByCallId.get(callId);
+      const factId = scopedToolFactId(input.factScope?.(), callId);
+      const cached = input.execution.preflightByFactId.get(factId);
       if (cached?.result !== undefined && cached.result.status !== "approval_required") {
         return input.execution.modelInput.toolResult(cached.result);
       }
       const boundary = cached?.boundary ?? freezeBoundary(await input.boundary(requireSdkRunContext(runContext)));
-      const request = cached?.request ?? toolCallRequest(callId, input.definition.name, toolInput);
+      const request = cached?.request ?? toolCallRequest(callId, factId, input.definition.name, toolInput);
       const approvedConfirmationId = cached?.result?.confirmationRequest?.confirmationId;
       const approvedConfirmationIds = cached?.needsApproval === true
         ? uniqueStrings([
@@ -165,10 +174,10 @@ function createSdkTool(input: {
         : boundary.permission.approvedConfirmationIds;
       const result = await boundary.gateway.execute(
         request,
-        executionContext(input.execution, boundary, callId),
+        executionContext(input.execution, boundary, factId),
         { ...boundary.permission, approvedConfirmationIds },
       );
-      input.execution.toolResults.push(result);
+      await recordOpenAIAgentsToolResult(input.execution, result);
       return input.execution.modelInput.toolResult(result);
     },
   });
@@ -181,6 +190,7 @@ function createSdkAgentTool(input: {
   readonly model: string;
   readonly modelSettings: ModelSettings;
 }): Tool<OpenAIAgentsSdkExecutionContext> {
+  const childFactScope = new AsyncLocalStorage<string>();
   const resolveContribution = invocationResolver(input.agentTool);
   const resolveInvocation = async (value: unknown): Promise<AgentLoopAgentToolInvocation> =>
     validateInvocationBoundary(
@@ -198,6 +208,7 @@ function createSdkAgentTool(input: {
       const invocation = await resolveInvocation(runContext.toolInput);
       return invocation.allowedTools.includes(definition.name);
     },
+    factScope: () => childFactScope.getStore(),
   }));
   const child = new Agent<OpenAIAgentsSdkExecutionContext, AgentOutputType>({
     name: `AgentArborSubAgent:${input.agentTool.toolName}`,
@@ -207,49 +218,185 @@ function createSdkAgentTool(input: {
     tools: childTools,
   });
   const started = new Map<string, { readonly input: ToolFactValue; readonly at: number }>();
-  const completed = new Set<string>();
+  const settled = new Set<string>();
+  const interrupted = new Set<string>();
   const runOptions = {
     maxTurns: null,
     get signal(): AbortSignal {
       return input.execution.abortSignal;
     },
   };
-  return child.asTool({
+  const agentTool = child.asTool({
     toolName: input.agentTool.toolName,
     toolDescription: input.agentTool.toolDescription,
     parameters: strictAgentToolInputSchema(input.agentTool),
     inputBuilder: async ({ params }) => (await resolveInvocation(params)).input,
     needsApproval: async (_runContext, params, callId) => {
-      const exactCallId = requiredCallId(callId);
-      if (!started.has(exactCallId)) {
-        started.set(exactCallId, { input: requiredToolFact(params), at: Date.now() });
+      const providerCallId = requiredCallId(callId);
+      const factId = scopedToolFactId(childFactScope.getStore(), providerCallId);
+      if (!started.has(factId)) {
+        started.set(factId, { input: requiredToolFact(params), at: Date.now() });
       }
       return false;
     },
-    customOutputExtractor: (result) => {
-      if (result.interruptions.length > 0) {
-        return "";
-      }
+    customOutputExtractor: async (result) => {
       const invocation = result.agentToolInvocation;
       const callId = requiredCallId(invocation.toolCallId);
+      const factId = childFactScope.getStore() ?? callId;
+      if (result.interruptions.length > 0) {
+        interrupted.add(factId);
+        for (const interruption of result.interruptions) {
+          const rawChildCallId = interruptionToolCallId(interruption.rawItem);
+          if (rawChildCallId !== undefined) {
+            input.execution.interruptionFactIds.set(
+              interruption,
+              scopedToolFactId(factId, rawChildCallId),
+            );
+          }
+        }
+        return "";
+      }
       const finalOutput = typeof result.finalOutput === "string" ? result.finalOutput : String(result.finalOutput ?? "");
-      if (!completed.has(callId)) {
-        const start = started.get(callId);
-        input.execution.toolResults.push({
+      if (!settled.has(factId)) {
+        const start = started.get(factId);
+        const toolResult: ToolCallResult = {
           callId,
+          ...optionalFactId(callId, factId),
           toolName: input.agentTool.toolName,
           input: start?.input ?? parseToolInput(invocation.toolArguments),
           output: finalOutput,
           status: "completed",
           durationMs: start === undefined ? 0 : Math.max(0, Date.now() - start.at),
-        });
-        completed.add(callId);
+        };
+        await recordOpenAIAgentsToolResult(input.execution, toolResult);
+        settled.add(factId);
+        return agentToolModelOutput(input.execution, toolResult);
       }
-      return finalOutput;
+      const recorded = input.execution.toolResults.find((item) =>
+        (item.factId ?? item.callId) === factId && item.status === "completed");
+      return recorded === undefined ? finalOutput : agentToolModelOutput(input.execution, recorded);
     },
     runOptions,
     resumeState: { contextStrategy: "merge" },
   });
+  const sdkInvoke = agentTool.invoke.bind(agentTool);
+  agentTool.invoke = async (runContext, rawInput, details) => {
+    const callId = requiredCallId(details?.toolCall?.callId);
+    const factId = scopedToolFactId(childFactScope.getStore(), callId);
+    interrupted.delete(factId);
+    return childFactScope.run(factId, async () => {
+      try {
+        const output = await sdkInvoke(runContext, rawInput, details);
+        if (input.execution.toolResultAcceptanceFailure !== undefined) {
+          throw input.execution.toolResultAcceptanceFailure;
+        }
+        if (!settled.has(factId) && !interrupted.has(factId)) {
+          const modelOutput = await recordAgentToolFailure({
+            execution: input.execution,
+            agentTool: input.agentTool,
+            callId,
+            factId,
+            input: started.get(factId)?.input ?? parseToolInput(details?.toolCall?.arguments),
+            startedAt: started.get(factId)?.at,
+            output,
+            aborted: details?.signal?.aborted === true || input.execution.abortSignal.aborted,
+          });
+          settled.add(factId);
+          return modelOutput;
+        }
+        return output;
+      } catch (error) {
+        if (input.execution.toolResultAcceptanceFailure !== undefined) {
+          if (!settled.has(factId)) {
+            await recordAgentToolFailure({
+              execution: input.execution,
+              agentTool: input.agentTool,
+              callId,
+              factId,
+              input: started.get(factId)?.input ?? parseToolInput(details?.toolCall?.arguments),
+              startedAt: started.get(factId)?.at,
+              error: input.execution.toolResultAcceptanceFailure,
+              aborted: details?.signal?.aborted === true || input.execution.abortSignal.aborted,
+            }).catch(() => undefined);
+            settled.add(factId);
+          }
+          throw input.execution.toolResultAcceptanceFailure;
+        }
+        if (!settled.has(factId)) {
+          await recordAgentToolFailure({
+            execution: input.execution,
+            agentTool: input.agentTool,
+            callId,
+            factId,
+            input: started.get(factId)?.input ?? parseToolInput(details?.toolCall?.arguments),
+            startedAt: started.get(factId)?.at,
+            error,
+            aborted: details?.signal?.aborted === true || input.execution.abortSignal.aborted,
+          });
+          settled.add(factId);
+        }
+        throw error;
+      }
+    });
+  };
+  return agentTool;
+}
+
+async function recordAgentToolFailure(input: {
+  readonly execution: OpenAIAgentsExecutionState;
+  readonly agentTool: AgentLoopAgentTool;
+  readonly callId: string;
+  readonly factId: string;
+  readonly input: ToolFactValue | undefined;
+  readonly startedAt: number | undefined;
+  readonly output?: unknown;
+  readonly error?: unknown;
+  readonly aborted: boolean;
+}): Promise<string> {
+  const output = normalizeToolFactValue(input.output);
+  const message = input.error === undefined
+    ? typeof input.output === "string" && input.output.length > 0
+      ? input.output
+      : "The sub-agent invocation failed."
+    : errorMessage(input.error);
+  const result: ToolCallResult = {
+    callId: input.callId,
+    ...optionalFactId(input.callId, input.factId),
+    toolName: input.agentTool.toolName,
+    input: input.input,
+    output,
+    status: input.aborted ? "cancelled" : "failed",
+    error: input.aborted ? cancellationMessage(input.execution.abortSignal.reason) : message,
+    errorDomain: input.aborted ? "runtime_error" : "model_error",
+    errorFacts: { code: input.aborted ? "sub_agent_cancelled" : "sub_agent_execution_failed" },
+    durationMs: input.startedAt === undefined ? 0 : Math.max(0, Date.now() - input.startedAt),
+  };
+  await recordOpenAIAgentsToolResult(input.execution, result);
+  return agentToolModelOutput(input.execution, result);
+}
+
+function agentToolModelOutput(
+  execution: OpenAIAgentsExecutionState,
+  result: ToolCallResult,
+): string {
+  const output = execution.modelInput.toolResult(result);
+  if (typeof output !== "string") {
+    throw new Error("OpenAI Agent Tool results cannot carry model attachments.");
+  }
+  return output;
+}
+
+export async function recordOpenAIAgentsToolResult(
+  execution: OpenAIAgentsExecutionState,
+  result: ToolCallResult,
+): Promise<void> {
+  execution.toolResults.push(result);
+  try {
+    await execution.input.onToolResult?.(structuredClone(result));
+  } catch (error) {
+    execution.toolResultAcceptanceFailure ??= error;
+    throw error;
+  }
 }
 
 function invocationResolver(agentTool: AgentLoopAgentTool): (
@@ -383,8 +530,29 @@ function assertUniqueToolNames(
   }
 }
 
-function toolCallRequest(callId: string, toolName: string, input: unknown): ToolCallRequest {
-  return { callId, toolName, input: input as ToolFactValue };
+function toolCallRequest(callId: string, factId: string, toolName: string, input: unknown): ToolCallRequest {
+  return {
+    callId,
+    ...optionalFactId(callId, factId),
+    toolName,
+    input: input as ToolFactValue,
+  };
+}
+
+function scopedToolFactId(scope: string | undefined, providerCallId: string): string {
+  return scope === undefined
+    ? providerCallId
+    : `agent-tool:${scope.length}:${scope}/tool:${providerCallId}`;
+}
+
+function optionalFactId(callId: string, factId: string): { readonly factId?: string } {
+  return callId === factId ? {} : { factId };
+}
+
+function interruptionToolCallId(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const callId = (value as Readonly<Record<string, unknown>>).callId;
+  return typeof callId === "string" && callId.length > 0 ? callId : undefined;
 }
 
 function parseToolInput(value: string | undefined): ToolFactValue | undefined {
@@ -411,6 +579,16 @@ function requiredToolFact(value: unknown): ToolFactValue {
     throw new Error("OpenAI Agents SDK produced an undefined agent-tool input.");
   }
   return fact;
+}
+
+function errorMessage(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
+}
+
+function cancellationMessage(value: unknown): string {
+  return typeof value === "string" && value.length > 0
+    ? value
+    : "The sub-agent invocation was cancelled.";
 }
 
 function requireSdkRunContext(

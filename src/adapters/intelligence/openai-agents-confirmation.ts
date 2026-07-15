@@ -1,5 +1,6 @@
 import type { ConfirmationDecision, ConfirmationRequest } from "../../domain/confirmation/index.js";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
+import { toolCallFactId } from "../../domain/tools/index.js";
 
 export type OpenAIAgentsPendingConfirmation<TInterruption> = {
   readonly interruption: TInterruption;
@@ -9,7 +10,7 @@ export type OpenAIAgentsPendingConfirmation<TInterruption> = {
 
 export function pendingOpenAIAgentsConfirmations<TInterruption extends { readonly rawItem: unknown }>(
   interruptions: readonly TInterruption[],
-  resolve: (callId: string) => {
+  resolve: (callId: string, interruption: TInterruption) => {
     readonly request: ToolCallRequest;
     readonly confirmation?: ConfirmationRequest;
   } | undefined,
@@ -19,16 +20,18 @@ export function pendingOpenAIAgentsConfirmations<TInterruption extends { readonl
   const confirmationIds = new Set<string>();
   for (const interruption of interruptions) {
     const callId = interruptionCallId(interruption.rawItem);
-    const fact = callId === undefined ? undefined : resolve(callId);
+    const fact = callId === undefined ? undefined : resolve(callId, interruption);
+    const factId = fact === undefined ? undefined : toolCallFactId(fact.request);
     if (
       callId === undefined ||
+      factId === undefined ||
       fact?.confirmation === undefined ||
-      callIds.has(callId) ||
+      callIds.has(factId) ||
       confirmationIds.has(fact.confirmation.confirmationId)
     ) {
       return undefined;
     }
-    callIds.add(callId);
+    callIds.add(factId);
     confirmationIds.add(fact.confirmation.confirmationId);
     pending.push({
       interruption,

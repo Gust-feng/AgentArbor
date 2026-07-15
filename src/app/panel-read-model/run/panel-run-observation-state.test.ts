@@ -169,6 +169,22 @@ test("observed run projection updates run, events, live buffer, and transcript c
   assert.deepEqual(next.transcriptNodesByRunId["run-1"], [transcriptNode]);
 });
 
+test("stream generation reset replaces stale events and volatile model deltas", () => {
+  const stale = stateWithObservedRunProjection(initialState(), {
+    runId: "run-1",
+    events: [event({ id: "old-delta", sequence: 9, delta: "stale text" })],
+  });
+  const reset = stateWithObservedRunProjection(stale, {
+    runId: "run-1",
+    reset: true,
+    events: [event({ id: "new-delta", sequence: 1, delta: "fresh text" })],
+  });
+
+  assert.deepEqual(reset.events.map((item) => item.id), ["new-delta"]);
+  assert.equal(reset.live?.turns[0]?.output.text, "fresh text");
+  assert.equal(JSON.stringify(reset).includes("stale text"), false);
+});
+
 test("run subscription guard rejects stale epochs", () => {
   assert.equal(canApplyRunSubscriptionToState({
     previous: { conversation: { conversationId: "conversation-1" } },

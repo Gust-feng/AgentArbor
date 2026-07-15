@@ -5,11 +5,11 @@
 当前默认普通 Agent 必须始终围绕一个主循环实现：
 
 ```text
-assemble safe context
+assemble canonical context
 call model
 if tool calls:
   gate and execute tools
-  project safe tool results back to model
+  persist factual tool results and return them to model
   continue
 else:
   finish with the model's final answer
@@ -19,7 +19,7 @@ else:
 
 - 默认普通 Agent 只有一个主执行引擎。
 - CLI、Panel、桌面壳、后续 SDK 或其他入口，只能复用这套主循环，不能各自长出一套 Agent 语义。
-- 默认异步入口应先通过 `runExecutor.start` 创建带有冻结事实的 run，再由 executor 调度执行；会话入口、桌面 run 入口和未来普通入口不能直接绕到 `runForPanel`、`runOrdinaryDesktopForPanel` 或 `runDesktopAgentSession`。
+- 默认入口只允许调用 `OrdinaryAgentFeature.commands.submitTurn`；feature 创建带冻结出生事实的 run，再通过注入的 `AgentLoop` 调度执行。Panel、桌面壳和未来入口不得直接调用 OpenAI Agents SDK adapter 或 ToolCenter。
 - “模型不再调用工具”才表示普通 Agent 正常完成。
 - `approval_required`、用户补充指导、工具失败后继续判断，仍属于普通循环的一部分。
 - `provider` 失败、网络失败、上下文维护失败、进程失败、恢复失败不是正常完成。
@@ -28,7 +28,7 @@ else:
 禁止事项：
 
 - 在普通路径中引入第二套完成机制。
-- 在默认异步入口绕过 run executor，直接调用面板执行 helper、desktop session helper 或历史同步执行路径。
+- 绕过 `OrdinaryAgentFeature` 直接调用 SDK adapter、工具执行器或历史 helper。
 - 要求模型调用内部完成工具才能结束。
 - 用固定阶段、关键词或模板流程推动普通 Agent 继续或停止。
 

@@ -1,16 +1,16 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
   type FileSystemRuntimeDatabasePaths,
 } from "../../adapters/runtime-database/index.js";
-import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
-import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
+import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
+import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
+import { createMinimalReadonlySoilStore } from "../../domain/soil/index.js";
 import { createRuntimeAgentDefinitionCatalog } from "../agent-definition-catalog.js";
 import type { AgentDefinitionRegistry } from "../agent-definition-registry.js";
 import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
-import { runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
+import { agentDefinitionRefMatchesDefinition, runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
 import { desktopAgentDefinitionFromConfig } from "../agent-prompts/desktop-agent-configured-definition.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
@@ -23,18 +23,21 @@ import {
   createUnsupportedAppUpdateService,
   type AppUpdateServiceLike,
 } from "../app-update-service.js";
-import {
-  BasicAgentRunExecutor,
-  type BasicAgentRunExecutionInput,
-  type BasicAgentRunExecutionResult,
-  type BasicAgentRunStartFacts,
-  type BasicAgentRunStartInput,
-} from "../basic-agent-runtime/index.js";
 import { CapabilityCenter } from "../capability/capability-center.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center.js";
 import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
-import { PanelConversationStore } from "../panel-conversation/panel-conversations.js";
-import { PanelRunJobStore, resolvePanelRunMode, type PanelRunJob } from "./run-jobs.js";
+import {
+  createFileSystemOrdinaryConversationControlRepository,
+} from "../ordinary-agent/conversation-control-repository.js";
+import { createFileSystemOrdinaryRunRepository } from "../ordinary-agent/file-system-repository.js";
+import {
+  createOrdinaryAgentLoopExecutionPort,
+} from "../ordinary-agent/agent-loop-execution.js";
+import {
+  createOrdinaryAgentFeature,
+  type OrdinaryAgentFeature,
+  type OrdinaryRunBirth,
+} from "../ordinary-agent/index.js";
 import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
@@ -56,18 +59,12 @@ import type {
   PanelProviderFetch,
   PanelServerOptions,
 } from "./types.js";
-import { syncConversationTurnForJob } from "./conversation-sync.js";
-import { appendLiveModelOutputDelta } from "./live-model-stream.js";
-import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
-import { createPanelRunJobResponse } from "./run-job-response.js";
-import {
-  PanelRunStreamProjectionOwner,
-  persistentPanelRunStreamEvents,
-  projectPanelRunStreamEventsForJob,
-} from "./run-stream-sync.js";
 import { desktopCapabilitySnapshotForRunStart } from "./desktop-run-model-settings.js";
 import { PanelHttpError } from "./http-utils.js";
 import { createMultiAgentRunResourceAcquirer } from "./multi-agent-run-resources.js";
+import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
+import { resolveTriggeredSkillContexts } from "./skill-service.js";
+import type { PanelRunInput } from "./request-parsers.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -83,15 +80,7 @@ export type PanelRuntime = {
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
-  readonly runJobs: PanelRunJobStore;
-  readonly runStreamProjection: PanelRunStreamProjectionOwner;
-  readonly activeRunJobs: Set<Promise<void>>;
   readonly activeRequestJobs: Set<Promise<void>>;
-  readonly abortControllers: Map<string, AbortController>;
-  readonly persistenceChains: Map<string, Promise<void>>;
-  readonly runExecutor: BasicAgentRunExecutor;
-  readonly conversations: PanelConversationStore;
-  readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
   readonly processRegistry: InMemoryProcessRegistry;
   readonly processTerminator: ProcessTerminator;
@@ -100,6 +89,8 @@ export type PanelRuntime = {
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
   readonly multiAgentFeature: MultiAgentFeature;
+  readonly ordinaryAgentFeature: OrdinaryAgentFeature;
+  readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: InMemoryToolOutputStore;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
@@ -112,19 +103,13 @@ type PanelSubAgentRootsInput = {
   readonly workspaceDirectory?: string;
 };
 
-export type PanelRuntimeHooks = {
-  readonly executeRun: (runtime: PanelRuntime, execution: BasicAgentRunExecutionInput) => Promise<BasicAgentRunExecutionResult>;
-  readonly failRun: (runtime: PanelRuntime, job: PanelRunJob, error: unknown) => Promise<void>;
-  readonly scheduleNextQueuedConversationRun: (runtime: PanelRuntime, completedJob: PanelRunJob) => void;
-};
-
-export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRuntimeHooks): PanelRuntime {
+export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
   const agentDefinitionCatalog = createRuntimeAgentDefinitionCatalog({
     desktopAgentDefinition: options.desktopAgentDefinition,
     additionalDefinitions: options.agentDefinitions,
   });
   if (options.configCenter !== undefined) {
-    const runtimePersistence = createPanelRuntimePersistence(options.configDirectory, options.runtimeDatabase);
+    const runtimePaths = resolvePanelRuntimePaths(options.configDirectory);
     return assemblePanelRuntime({
       configCenter: options.configCenter,
       desktopAgentDefinition: agentDefinitionCatalog.desktopAgentDefinition,
@@ -141,12 +126,12 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
       skillStateStore: resolveSkillStateStore(options.configDirectory),
       processTerminator: options.processTerminator,
       appUpdateService: resolveAppUpdateService(options),
-      hooks,
-      ...runtimePersistence,
+      ordinaryAgentExecution: options.ordinaryAgentExecution,
+      runtimePaths,
     });
   }
   const local = createLocalConfigCenter({ configDirectory: options.configDirectory });
-  const runtimePersistence = createPanelRuntimePersistence(local.configDirectory, options.runtimeDatabase);
+  const runtimePaths = resolvePanelRuntimePaths(local.configDirectory);
   return assemblePanelRuntime({
     configCenter: local.configCenter,
     desktopAgentDefinition: agentDefinitionCatalog.desktopAgentDefinition,
@@ -163,18 +148,15 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
     skillStateStore: resolveSkillStateStore(local.configDirectory),
     processTerminator: options.processTerminator,
     appUpdateService: resolveAppUpdateService(options),
-    hooks,
-    ...runtimePersistence,
+    ordinaryAgentExecution: options.ordinaryAgentExecution,
+    runtimePaths,
   });
 }
 
 export function isPanelRuntime(value: PanelServerOptions | PanelRuntime): value is PanelRuntime {
   return (
     value.configCenter instanceof ConfigCenter &&
-    "runJobs" in value &&
-    value.runJobs instanceof PanelRunJobStore &&
-    "activeRunJobs" in value &&
-    value.activeRunJobs instanceof Set &&
+    "ordinaryAgentFeature" in value &&
     "activeRequestJobs" in value &&
     value.activeRequestJobs instanceof Set
   );
@@ -189,7 +171,6 @@ function assemblePanelRuntime(input: {
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
-  readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
   readonly skillRoots: readonly SkillRootInput[];
   readonly resolveSkillRoots?: (input: PanelSkillRootsInput) => readonly SkillRootInput[];
@@ -198,17 +179,11 @@ function assemblePanelRuntime(input: {
   readonly skillStateStore?: SkillStateStore;
   readonly processTerminator?: ProcessTerminator;
   readonly appUpdateService: AppUpdateServiceLike;
-  readonly hooks: PanelRuntimeHooks;
+  readonly ordinaryAgentExecution?: import("../ordinary-agent/contracts.js").OrdinaryExecutionPort;
 }): PanelRuntime {
-  const runJobs = new PanelRunJobStore();
-  const runStreamProjection = new PanelRunStreamProjectionOwner();
-  const activeRunJobs = new Set<Promise<void>>();
   const activeRequestJobs = new Set<Promise<void>>();
-  const abortControllers = new Map<string, AbortController>();
-  const persistenceChains = new Map<string, Promise<void>>();
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
   const agentDefinitionOverrides = new Map<string, AgentDefinition>();
-  const conversations = new PanelConversationStore();
   const processRegistry = new InMemoryProcessRegistry();
   const toolOutputStore = new InMemoryToolOutputStore();
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
@@ -247,7 +222,48 @@ function assemblePanelRuntime(input: {
       };
     },
   });
-  const runtime: Omit<PanelRuntime, "runExecutor"> & { runExecutor?: BasicAgentRunExecutor } = {
+  const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
+  const ordinaryRunResources = createOrdinaryAgentRunResourceAcquirer({
+    host: {
+      configCenter: input.configCenter,
+      providerFetch: input.providerFetch,
+      processRegistry,
+      processTerminator,
+      toolOutputStore,
+    },
+    soilStore: createMinimalReadonlySoilStore([]),
+    resolveAgentDefinition: ({ ref, instructions }) =>
+      agentDefinitionOverrides.get(runAgentDefinitionRefCacheKey(ref)) ??
+      input.agentDefinitions.resolve(ref) ??
+      reconstructFrozenOrdinaryDefinition(input.desktopAgentDefinition, ref, instructions),
+    resolveSkillContexts: (context) => resolveTriggeredSkillContexts(
+      { skillRoots: input.skillRoots, skillStateStore: input.skillStateStore, capabilityCenter },
+      context.goal,
+      context.catalog,
+      context.triggerMode === "model"
+        ? {
+            routingMode: "model",
+            intelligenceChannel: context.createIntelligenceChannel({
+              bus: new InMemoryMessageBus(new InMemoryEventLog()),
+            }),
+            traceId: context.runId,
+            callerRef: `skill-router:${context.runId}`,
+            abortSignal: context.abortSignal,
+          }
+        : { routingMode: "keyword", abortSignal: context.abortSignal },
+    ),
+    resolveSubAgentRoots: (workspaceRoot) =>
+      input.resolveSubAgentRoots?.({ workspaceDirectory: workspaceRoot }) ?? input.subAgentRoots,
+  });
+  const ordinaryAgentFeature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(ordinaryRuntimeRoot),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(ordinaryRuntimeRoot),
+    execution: input.ordinaryAgentExecution ?? createOrdinaryAgentLoopExecutionPort({
+      resources: ordinaryRunResources,
+      onReleaseError: (error) => console.error("[panel-server] Ordinary run resource release failed", error),
+    }),
+  });
+  const runtime: PanelRuntime = {
     isQuiescing: false,
     configCenter: input.configCenter,
     capabilityCenter,
@@ -260,14 +276,7 @@ function assemblePanelRuntime(input: {
     workspaceDirectoryPicker: input.workspaceDirectoryPicker,
     contextAttachmentPicker: input.contextAttachmentPicker,
     contextAttachmentMedia,
-    runJobs,
-    runStreamProjection,
-    activeRunJobs,
     activeRequestJobs,
-    abortControllers,
-    persistenceChains,
-    conversations,
-    runtimeDatabase: input.runtimeDatabase,
     runtimePaths: input.runtimePaths,
     processRegistry,
     processTerminator,
@@ -277,88 +286,69 @@ function assemblePanelRuntime(input: {
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
     multiAgentFeature,
+    ordinaryAgentFeature,
+    prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
     toolOutputStore,
   };
-  runtime.runExecutor = new BasicAgentRunExecutor({
-    prepareRunStart: (startInput) => preparePanelBasicRunStart(runtime as PanelRuntime, startInput),
-    runJobs,
-    activeRunJobs,
-    abortControllers,
-    persistRun: (job) => {
-      syncNonTerminalPanelConversation(runtime as PanelRuntime, job as PanelRunJob);
-      return persistPanelRun(runtime as PanelRuntime, job as PanelRunJob);
-    },
-    persistRunInBackground: (job) => {
-      syncNonTerminalPanelConversation(runtime as PanelRuntime, job as PanelRunJob);
-      persistPanelRunInBackground(runtime as PanelRuntime, job as PanelRunJob);
-    },
-    cleanupRunResources: (runId) =>
-      runtime.processRegistry.cleanupByRun(runId, runtime.processTerminator),
-    inspectRunResources: (runId) =>
-      runtime.processRegistry.recordRunResidueSummary(runId),
-    executionAdapter: {
-      execute: (execution) => input.hooks.executeRun(runtime as PanelRuntime, execution),
-    },
-    projectRunEvents: (job) => projectPanelRunStreamEventsForJob(
-      { runJobs: runtime.runJobs },
-      job as PanelRunJob,
-      runtime.runStreamProjection
-    ),
-    runEventsForReplay: (job) => persistentPanelRunStreamEvents((job as PanelRunJob).streamEvents),
-    failRun: (job, error) => input.hooks.failRun(runtime as PanelRuntime, job as PanelRunJob, error),
-    onRuntimeReady: (runId, context) => {
-      runtime.runJobs.attachRuntime({
-        runId,
-        runtime: context.runtime,
-        traceId: context.traceId,
-        goalId: context.goalId,
-      });
-      const job = runtime.runJobs.get(runId);
-      if (job !== undefined) {
-        context.runtime.bus.subscribe("*", () => {
-          const current = runtime.runJobs.get(runId);
-          if (current === undefined) {
-            return;
-          }
-          try {
-            runtime.runJobs.recordActivity(runId);
-            runtime.runExecutor?.projectRunEvents(current);
-          } catch (error) {
-            console.error(`[panel-server] run event projection failed for ${runId}:`, error);
-          }
-        });
-        runtime.runExecutor?.projectRunEvents(job);
-      }
-    },
-    onModelOutputDelta: (runId, delta: ModelOutputDelta) => appendLiveModelOutputDelta(runtime as PanelRuntime, runId, delta),
-    onRunFinished: async (job) => {
-      syncConversationTurnForJob({
-        conversations: runtime.conversations,
-        job: job as PanelRunJob,
-        response: createPanelRunJobResponse(runtime as PanelRuntime, job as PanelRunJob),
-      });
-      if (!runtime.isQuiescing) {
-        input.hooks.scheduleNextQueuedConversationRun(runtime as PanelRuntime, job as PanelRunJob);
-      }
-    },
-  });
-  return runtime as PanelRuntime;
+  return runtime;
 }
 
-function syncNonTerminalPanelConversation(runtime: PanelRuntime, job: PanelRunJob): void {
-  if (
-    job.status === "completed" ||
-    job.status === "failed" ||
-    job.status === "cancelled" ||
-    job.status === "blocked"
-  ) {
-    return;
+function resolveOrdinaryRuntimeRoot(input: {
+  readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
+  readonly configDirectory?: string;
+}): string {
+  const runtimeHome = input.runtimePaths?.runtimeHome ??
+    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
+  if (runtimeHome === undefined) {
+    throw new Error("Ordinary Agent requires a runtime directory.");
   }
-  syncConversationTurnForJob({
-    conversations: runtime.conversations,
-    job,
-    response: createPanelRunJobResponse(runtime, job),
-  });
+  return path.join(runtimeHome, "ordinary");
+}
+
+export function reconstructFrozenOrdinaryDefinition(
+  base: AgentDefinition,
+  ref: OrdinaryRunBirth["agentDefinitionRef"],
+  instructions: string,
+): AgentDefinition | undefined {
+  const candidate: AgentDefinition = {
+    ...base,
+    prompt: {
+      ...base.prompt,
+      promptRef: ref.promptRef,
+      version: ref.promptVersion,
+      systemPrompt: instructions,
+    },
+  };
+  return agentDefinitionRefMatchesDefinition(ref, candidate) ? candidate : undefined;
+}
+
+async function prepareOrdinaryRunBirth(
+  runtime: PanelRuntime,
+  input: PanelRunInput,
+): Promise<OrdinaryRunBirth> {
+  const [informationAccess, toolConfirmation, baseCapabilitySnapshot, desktopAgentConfig] = await Promise.all([
+    runtime.configCenter.getInformationAccessConfig(),
+    runtime.configCenter.getToolConfirmationConfig(),
+    capabilitySnapshotForRun(runtime, input.modelOverride, input.workspaceDirectory),
+    runtime.configCenter.getDesktopAgentConfig(),
+  ]);
+  const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
+    baseCapabilitySnapshot,
+    input.reasoningEffort,
+  );
+  const definition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
+  const agentDefinitionRef = runAgentDefinitionRef(definition);
+  runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), definition);
+  return {
+    instructions: definition.prompt.systemPrompt,
+    aiMode: input.aiMode ?? capabilitySnapshot.activeModel.defaultAiMode,
+    config: capabilitySnapshot.activeModel,
+    reasoningEffort: input.reasoningEffort,
+    agentDefinitionRef,
+    capabilitySnapshot,
+    informationAccess,
+    toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
+  };
 }
 
 function resolveAppUpdateService(options: PanelServerOptions): AppUpdateServiceLike {
@@ -387,58 +377,10 @@ export async function cleanupPanelRuntimeOwnedBackgroundProcesses(
   }
 }
 
-async function preparePanelBasicRunStart(
-  runtime: PanelRuntime,
-  input: BasicAgentRunStartInput
-): Promise<BasicAgentRunStartFacts> {
-  const [informationAccess, toolConfirmation] = await Promise.all([
-    runtime.configCenter.getInformationAccessConfig(),
-    runtime.configCenter.getToolConfirmationConfig(),
-  ]);
-  if (input.runKind !== "desktop") {
-    const config = await modelProviderConfigForRun(runtime, input.modelOverride);
-    return {
-      aiMode: input.aiMode ?? config.defaultAiMode,
-      config,
-      informationAccess,
-      toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
-    };
-  }
-
-  const [baseCapabilitySnapshot, desktopAgentConfig] = await Promise.all([
-    capabilitySnapshotForRun(
-      runtime,
-      input.modelOverride,
-      input.workspaceDirectory
-    ),
-    runtime.configCenter.getDesktopAgentConfig(),
-  ]);
-  const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
-    baseCapabilitySnapshot,
-    input.reasoningEffort
-  );
-  const config = capabilitySnapshot.activeModel;
-  const agentDefinition = resolvePanelRunMode(input.runKind, input.runMode) === "agent"
-    ? desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig)
-    : undefined;
-  const agentDefinitionRef = agentDefinition === undefined ? undefined : runAgentDefinitionRef(agentDefinition);
-  if (agentDefinition !== undefined && agentDefinitionRef !== undefined) {
-    runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), agentDefinition);
-  }
-  return {
-    aiMode: input.aiMode ?? config.defaultAiMode,
-    config,
-    informationAccess,
-    capabilitySnapshot,
-    toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
-    agentDefinitionRef,
-  };
-}
-
 async function modelProviderConfigForRun(
   runtime: PanelRuntime,
-  override: BasicAgentRunStartInput["modelOverride"]
-): Promise<BasicAgentRunStartFacts["config"]> {
+  override: PanelRunInput["modelOverride"]
+): Promise<import("../../domain/config/index.js").SanitizedModelProviderConfig> {
   if (override === undefined) {
     return runtime.configCenter.getModelProviderConfig();
   }
@@ -455,9 +397,9 @@ async function modelProviderConfigForRun(
 
 async function capabilitySnapshotForRun(
   runtime: PanelRuntime,
-  override: BasicAgentRunStartInput["modelOverride"],
-  workspaceDirectory: BasicAgentRunStartInput["workspaceDirectory"]
-): Promise<NonNullable<BasicAgentRunStartFacts["capabilitySnapshot"]>> {
+  override: PanelRunInput["modelOverride"],
+  workspaceDirectory: PanelRunInput["workspaceDirectory"]
+): Promise<import("../../domain/config/index.js").BasicAgentCapabilitySnapshot> {
   const snapshot = workspaceDirectory === undefined
     ? await runtime.capabilityCenter.snapshot()
     : await runtime.capabilityCenter.snapshot({ workspaceDirectory });
@@ -574,16 +516,6 @@ function resolveSkillStateStore(configDirectory: string | undefined): SkillState
   return configDirectory === undefined ? undefined : new FileSystemSkillStateStore(resolveSkillStateStorePath(configDirectory));
 }
 
-function createPanelRuntimePersistence(
-  configDirectory: string | undefined,
-  runtimeDatabase: RuntimeDatabase | undefined
-): Pick<PanelRuntime, "runtimeDatabase" | "runtimePaths"> {
-  if (configDirectory === undefined) {
-    return runtimeDatabase === undefined ? {} : { runtimeDatabase };
-  }
-  const runtimePaths = resolveAgentArborRuntimeDatabasePaths(configDirectory);
-  return {
-    runtimeDatabase: runtimeDatabase ?? new FileSystemRuntimeDatabase(runtimePaths),
-    runtimePaths,
-  };
+function resolvePanelRuntimePaths(configDirectory: string | undefined): FileSystemRuntimeDatabasePaths | undefined {
+  return configDirectory === undefined ? undefined : resolveAgentArborRuntimeDatabasePaths(configDirectory);
 }

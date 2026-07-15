@@ -13,6 +13,7 @@ import type {
   ToolFactValue,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
+import { toolCallFactId } from "../../domain/tools/index.js";
 import {
   createOpenAIAgentsLoop,
   openAIAgentsPromptCacheKey,
@@ -35,6 +36,8 @@ type CapturedFetch = {
 test("Chat keeps child exchanges private while returning one complete agent-tool result to the parent history", async () => {
   const fullOutput = `complete-child-output:${"x".repeat(130_000)}`;
   const gateway = new RecordingGateway([plainTool("read_fact")]);
+  const observedToolResults: ToolCallResult[] = [];
+  let parentObservedToolOutput: string | undefined;
   const fetch = scriptedFetch([
     ({ body }) => {
       assert.deepEqual(toolNames(body), ["read_fact", "call_sub_agent"]);
@@ -56,6 +59,7 @@ test("Chat keeps child exchanges private while returning one complete agent-tool
       assert.equal(serialized.includes("child-read-call"), false);
       assert.equal(serialized.includes("gateway:read_fact"), false);
       assert.equal(occurrences(serialized, fullOutput), 1);
+      parentObservedToolOutput = chatToolOutput(body, "parent-delegate-call");
       return chatText("root-synthesis");
     },
   ]);
@@ -64,6 +68,7 @@ test("Chat keeps child exchanges private while returning one complete agent-tool
     const result = await loop.execute(loopInput({
       gateway,
       agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: ["read_fact"] })],
+      onToolResult: async (toolResult) => { observedToolResults.push(toolResult); },
     }));
     assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
     assert.equal(result.status === "completed" ? result.finalText : undefined, "root-synthesis");
@@ -75,7 +80,12 @@ test("Chat keeps child exchanges private while returning one complete agent-tool
     const canonicalToolMessages = result.messages.filter((message) => message.role === "tool");
     assert.deepEqual(canonicalToolMessages.map((message) => message.toolCallId), ["parent-delegate-call"]);
     assert.equal(canonicalToolMessages[0]?.content, JSON.stringify(parentResult));
+    assert.equal(parentObservedToolOutput, canonicalToolMessages[0]?.content);
     assert.equal(result.messages.some((message) => message.toolCallId === "child-read-call"), false);
+    assert.deepEqual(observedToolResults.map((item) => [item.callId, item.status]), [
+      ["child-read-call", "completed"],
+      ["parent-delegate-call", "completed"],
+    ]);
   } finally {
     await loop.release();
   }
@@ -124,6 +134,48 @@ test("Responses gives a no-tool child no tools or parallel flag and never reuses
   }
 });
 
+test("root and child provider call-id collisions keep separate facts and permission boundaries", async () => {
+  const gateway = new RecordingGateway([plainTool("read_fact")]);
+  const fetch = scriptedFetch([
+    () => chatTool("shared-provider-call", "read_fact", { value: "root" }),
+    () => chatTool("parent-collision", "call_sub_agent", { task: "read child fact" }),
+    () => chatTool("shared-provider-call", "read_fact", { value: "child" }),
+    () => chatText("child-collision-result"),
+    () => chatText("root-collision-result"),
+  ]);
+  const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL, fetch: fetch.fetch });
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: ["read_fact"] })],
+    }));
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(gateway.executions.length, 2);
+    assert.deepEqual(gateway.executions.map((item) => item.request.callId), [
+      "shared-provider-call",
+      "shared-provider-call",
+    ]);
+    assert.deepEqual(gateway.executions.map((item) => item.request.input), [
+      { value: "root" },
+      { value: "child" },
+    ]);
+    assert.equal(toolCallFactId(gateway.executions[0]!.request), "shared-provider-call");
+    assert.notEqual(
+      toolCallFactId(gateway.executions[1]!.request),
+      toolCallFactId(gateway.executions[0]!.request),
+    );
+    assert.notEqual(
+      gateway.executions[1]!.context.callerAgentId,
+      gateway.executions[0]!.context.callerAgentId,
+    );
+    const rootToolMessage = result.messages.find((message) =>
+      message.toolCallId === "shared-provider-call" && message.toolName === "read_fact");
+    assert.deepEqual((JSON.parse(rootToolMessage?.content ?? "{}") as ToolCallResult).input, { value: "root" });
+  } finally {
+    await loop.release();
+  }
+});
+
 test("a nested ToolCenter approval pauses the root and resumes the exact child call with the new signal", async () => {
   const gateway = new RecordingGateway([gatedTool("write_fact")]);
   const fetch = scriptedFetch([
@@ -149,13 +201,12 @@ test("a nested ToolCenter approval pauses the root and resumes the exact child c
     }));
     assert.equal(paused.status, "approval_required", paused.status === "failed" ? paused.error : undefined);
     assert.equal(gateway.executions.length, 0);
-    assert.deepEqual(paused.confirmationRequests.map((item) => item.confirmationId), [
-      "confirmation-child-write-call",
-    ]);
+    assert.equal(paused.confirmationRequests.length, 1);
+    const confirmation = paused.confirmationRequests[0]!;
 
     const resumedController = new AbortController();
     const resumed = await paused.continuation.decide({
-      decision: approve("confirmation-child-write-call", "child-write-call"),
+      decision: approve(confirmation.confirmationId, confirmation.runId),
       abortSignal: resumedController.signal,
     });
     assert.equal(resumed.status, "completed", resumed.status === "failed" ? resumed.error : undefined);
@@ -190,10 +241,12 @@ test("nested guidance rejects the child side effect and lets child and parent ag
       agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: ["write_fact"] })],
     }));
     assert.equal(paused.status, "approval_required");
+    if (paused.status !== "approval_required") return;
+    const confirmation = paused.confirmationRequests[0]!;
     const resumed = await paused.continuation.decide({
       decision: {
-        confirmationId: "confirmation-child-guidance-call",
-        runId: "child-guidance-call",
+        confirmationId: confirmation.confirmationId,
+        runId: confirmation.runId,
         decision: "guidance",
         guidance: "use a read-only approach",
         decidedAt: "2026-07-15T00:00:01.000Z",
@@ -252,7 +305,7 @@ test("parallel nested agents surface multiple child confirmations and execute ev
     }
     await initialBarrier;
     childInitialActive -= 1;
-    return chatTool(`child-write-${task}`, "write_fact", { value: task });
+    return chatTool("child-write-shared", "write_fact", { value: task });
   };
   const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL, fetch: fetchImpl });
   try {
@@ -271,10 +324,11 @@ test("parallel nested agents surface multiple child confirmations and execute ev
     });
     assert.equal(resumed.status, "completed", resumed.status === "failed" ? resumed.error : undefined);
     assert.equal(gateway.executions.length, 2);
-    assert.deepEqual(new Set(gateway.executions.map((item) => item.request.callId)), new Set([
-      "child-write-task-a",
-      "child-write-task-b",
-    ]));
+    assert.deepEqual(gateway.executions.map((item) => item.request.callId), [
+      "child-write-shared",
+      "child-write-shared",
+    ]);
+    assert.equal(new Set(gateway.executions.map((item) => toolCallFactId(item.request))).size, 2);
     assert.equal(resumed.toolResults.filter((item) => item.callId === "parent-a").length, 1);
     assert.equal(resumed.toolResults.filter((item) => item.callId === "parent-b").length, 1);
     assert.equal(requests.length, 6);
@@ -291,6 +345,7 @@ test("aborting the root while a child model request is active cancels the nested
     childStarted = resolve;
   });
   let requestCount = 0;
+  const observedToolResults: ToolCallResult[] = [];
   const fetchImpl: typeof globalThis.fetch = async (requestInput, init) => {
     const request = requestInput instanceof Request ? requestInput : new Request(requestInput, init);
     requestCount += 1;
@@ -306,12 +361,16 @@ test("aborting the root while a child model request is active cancels the nested
       gateway,
       agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: [] })],
       abortSignal: controller.signal,
+      onToolResult: async (toolResult) => { observedToolResults.push(toolResult); },
     }));
     await childStartedPromise;
     controller.abort("cancel nested model");
     const result = await resultPromise;
     assert.equal(result.status, "cancelled", result.status === "failed" ? result.error : undefined);
     assert.equal(requestCount, 2);
+    const cancelled = observedToolResults.find((item) => item.callId === "parent-cancel");
+    assert.equal(cancelled?.status, "cancelled");
+    assert.equal(result.toolResults.find((item) => item.callId === "parent-cancel")?.status, "cancelled");
   } finally {
     await loop.release();
   }
@@ -336,11 +395,14 @@ test("agent-tool names must not collide with a legacy ToolCenter executor", asyn
 
 test("an out-of-bound agent-tool permission becomes a complete outer-model tool error without starting a child model", async () => {
   const gateway = new RecordingGateway([plainTool("read_fact")]);
+  const observedToolResults: ToolCallResult[] = [];
+  let parentObservedToolOutput: string | undefined;
   const fetch = scriptedFetch([
     () => chatTool("parent-outside", "call_sub_agent", { task: "try expansion" }),
     ({ body }) => {
       assert.equal(systemText(body), ROOT_SYSTEM);
       assert.match(JSON.stringify(body.messages), /outside the parent boundary: write_fact/u);
+      parentObservedToolOutput = chatToolOutput(body, "parent-outside");
       return chatText("root-explained-permission-failure");
     },
   ]);
@@ -349,11 +411,45 @@ test("an out-of-bound agent-tool permission becomes a complete outer-model tool 
     const result = await loop.execute(loopInput({
       gateway,
       agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: ["write_fact"] })],
+      onToolResult: async (toolResult) => { observedToolResults.push(toolResult); },
     }));
     assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
     assert.equal(result.status === "completed" ? result.finalText : undefined, "root-explained-permission-failure");
     assert.equal(fetch.requests.filter((request) => systemText(request.body) === CHILD_SYSTEM).length, 0);
     assert.equal(gateway.executions.length, 0);
+    const failure = observedToolResults.find((item) => item.callId === "parent-outside");
+    assert.equal(failure?.status, "failed");
+    assert.match(failure?.error ?? "", /error occurred while running the tool/u);
+    const canonicalResult = result.messages.find((message) => message.toolCallId === "parent-outside");
+    assert.equal(canonicalResult?.role, "tool");
+    assert.equal((JSON.parse(canonicalResult?.content ?? "{}") as ToolCallResult).status, "failed");
+    assert.equal(parentObservedToolOutput, canonicalResult?.content);
+  } finally {
+    await loop.release();
+  }
+});
+
+test("a nested tool fact acceptance failure escapes Agent.asTool instead of continuing the parent model", async () => {
+  const gateway = new RecordingGateway([plainTool("read_fact")]);
+  const fetch = scriptedFetch([
+    () => chatTool("parent-durable", "call_sub_agent", { task: "read one durable fact" }),
+    () => chatTool("child-durable", "read_fact", { value: "fact" }),
+  ]);
+  const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL, fetch: fetch.fetch });
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: ["read_fact"] })],
+      onToolResult: async (toolResult) => {
+        if (toolResult.callId === "child-durable") throw new Error("durable tool fact was rejected");
+      },
+    }));
+    assert.equal(result.status, "failed");
+    assert.match(result.status === "failed" ? result.error : "", /durable tool fact was rejected/u);
+    assert.equal(fetch.requests.length, 2);
+    assert.equal(result.toolResults.find((item) => item.callId === "child-durable")?.status, "completed");
+    assert.equal(result.toolResults.find((item) => item.callId === "parent-durable")?.status, "failed");
+    assert.equal(result.messages.find((item) => item.toolCallId === "parent-durable")?.role, "tool");
   } finally {
     await loop.release();
   }
@@ -403,6 +499,13 @@ function requiredTask(value: ToolFactValue): string {
   return task;
 }
 
+function chatToolOutput(body: JsonRecord, callId: string): string | undefined {
+  if (!Array.isArray(body.messages)) return undefined;
+  const message = body.messages.map(parseRecord).find((item) =>
+    item.role === "tool" && item.tool_call_id === callId);
+  return typeof message?.content === "string" ? message.content : undefined;
+}
+
 class RecordingGateway implements ToolExecutionGateway {
   readonly executions: {
     readonly request: ToolCallRequest;
@@ -431,15 +534,15 @@ class RecordingGateway implements ToolExecutionGateway {
           status: "approval_required",
           durationMs: 0,
           confirmationRequest: {
-            confirmationId: `confirmation-${request.callId}`,
-            runId: request.callId,
+            confirmationId: `confirmation-${toolCallFactId(request)}`,
+            runId: toolCallFactId(request),
             title: "Confirm nested write",
             actionSummary: "Write one delegated fact.",
             affectedResources: ["nested-resource"],
             riskLevel: "medium",
             resumeAvailability: "live",
             requestedAt: "2026-07-15T00:00:00.000Z",
-            sourceRefs: [`tool:${request.callId}`],
+            sourceRefs: [`tool:${toolCallFactId(request)}`],
           },
         },
       };
@@ -466,6 +569,7 @@ function loopInput(input: {
   readonly gateway: ToolExecutionGateway;
   readonly agentTools: readonly AgentLoopAgentTool[];
   readonly abortSignal?: AbortSignal;
+  readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
 }) {
   const allowedTools = input.gateway.list().map((definition) => definition.name);
   return {
@@ -489,6 +593,7 @@ function loopInput(input: {
     },
     agentTools: input.agentTools,
     abortSignal: input.abortSignal ?? new AbortController().signal,
+    onToolResult: input.onToolResult,
   };
 }
 

@@ -20,6 +20,7 @@ import {
   normalizeToolErrorFacts,
   normalizeToolErrorFactValue,
   normalizeToolFactValue,
+  toolCallFactId,
   toolDisplayName,
 } from "../../domain/tools/index.js";
 import type { ConfirmationRequest } from "../../domain/confirmation/contracts.js";
@@ -119,7 +120,7 @@ export class ToolCenter implements ToolExecutionGateway {
     try {
       output = await executor.execute(factRequest.input, {
         ...context,
-        toolCallId: factRequest.callId,
+        toolCallId: toolCallFactId(factRequest),
         approvedConfirmationIds: permission.approvedConfirmationIds,
         confirmationPolicy: permission.confirmationPolicy,
       });
@@ -164,6 +165,7 @@ export class ToolCenter implements ToolExecutionGateway {
       }
       return this.prepareResultForDelivery({
         callId: factRequest.callId,
+        ...toolFactIdentity(factRequest),
         toolName: factRequest.toolName,
         input: factRequest.input,
         output: normalizeToolFactValue(output),
@@ -743,6 +745,7 @@ function normalizeExecutorResult(
     }
     return {
       callId: request.callId,
+      ...toolFactIdentity(request),
       toolName: request.toolName,
       input: request.input,
       output,
@@ -755,6 +758,7 @@ function normalizeExecutorResult(
   if (status === "completed") {
     return {
       callId: request.callId,
+      ...toolFactIdentity(request),
       toolName: request.toolName,
       input: request.input,
       output,
@@ -771,6 +775,7 @@ function normalizeExecutorResult(
       : undefined;
   return {
     callId: request.callId,
+    ...toolFactIdentity(request),
     toolName: request.toolName,
     input: request.input,
     output,
@@ -795,6 +800,7 @@ function invalidExecutorResult(input: {
 }): ToolCallResult {
   return {
     callId: input.request.callId,
+    ...toolFactIdentity(input.request),
     toolName: input.request.toolName,
     input: input.request.input,
     output: input.output,
@@ -915,6 +921,7 @@ function failedToolResult(
   const durationMs = Date.now() - startedAt;
   return {
     callId: request.callId,
+    ...toolFactIdentity(request),
     toolName: request.toolName,
     input: request.input,
     output: undefined,
@@ -940,6 +947,7 @@ function approvalRequiredToolResult(
   const confirmationRequest: ConfirmationRequest = confirmationRequestFromSecurityDecision({ request, decision });
   return {
     callId: request.callId,
+    ...toolFactIdentity(request),
     toolName: request.toolName,
     input: request.input,
     output: undefined,
@@ -956,6 +964,7 @@ function cancelledToolResult(
 ): ToolCallResult & { readonly status: "cancelled" } {
   return {
     callId: request.callId,
+    ...toolFactIdentity(request),
     toolName: request.toolName,
     input: request.input,
     output: undefined,
@@ -964,6 +973,10 @@ function cancelledToolResult(
     errorFacts,
     durationMs: Date.now() - startedAt,
   };
+}
+
+function toolFactIdentity(request: ToolCallRequest): { readonly factId?: string } {
+  return request.factId === undefined ? {} : { factId: request.factId };
 }
 
 function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {

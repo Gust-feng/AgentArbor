@@ -91,6 +91,7 @@ export function openBasicRunStream(input: {
   readonly runId: string;
   readonly cursor?: OrdinaryRunCursor;
   readonly onEvent: (event: RunEvent) => void;
+  readonly onReset: (cursor: OrdinaryRunCursor) => void;
   readonly onError: () => void;
 }): EventSource | undefined {
   if (typeof EventSource === "undefined") {
@@ -107,6 +108,15 @@ export function openBasicRunStream(input: {
   for (const type of BASIC_RUN_EVENT_TYPES) {
     stream.addEventListener(type, handle as EventListener);
   }
+  stream.addEventListener("run.stream.reset", ((message: MessageEvent<string>) => {
+    try {
+      const value = JSON.parse(message.data) as { readonly cursor?: unknown };
+      if (typeof value.cursor !== "string" || value.cursor.length === 0) throw new Error("Missing reset cursor");
+      input.onReset(value.cursor);
+    } catch {
+      input.onError();
+    }
+  }) as EventListener);
   stream.onerror = () => {
     stream.close();
     input.onError();

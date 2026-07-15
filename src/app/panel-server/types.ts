@@ -1,17 +1,16 @@
-import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { AppUpdateFetch, AppUpdateServiceLike } from "../app-update-service.js";
 import type { ConfigCenter } from "../config-center.js";
 import type { ProcessTerminator } from "../runtime-guard/index.js";
 import type { SkillRootInput } from "../skills/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
+import type { OrdinaryExecutionPort } from "../ordinary-agent/contracts.js";
 
 export type PanelServerOptions = {
   readonly host?: string;
   readonly port?: number;
   readonly configDirectory?: string;
   readonly configCenter?: ConfigCenter;
-  readonly runtimeDatabase?: RuntimeDatabase;
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
@@ -26,6 +25,8 @@ export type PanelServerOptions = {
   readonly appUpdateService?: AppUpdateServiceLike;
   readonly updateManifestUrl?: string;
   readonly updateManifestFetch?: AppUpdateFetch;
+  /** Explicit test seam; production uses the composed OpenAI Agent loop port. */
+  readonly ordinaryAgentExecution?: OrdinaryExecutionPort;
 };
 
 export type PanelContextAttachmentSelection = {

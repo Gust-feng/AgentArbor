@@ -22,6 +22,7 @@ type SdkToolOutputPart = Extract<SdkToolOutput, readonly unknown[]>[number];
 type SdkAttachmentPart = Extract<SdkUserContentPart, { readonly type: "input_image" | "input_file" }>;
 
 export interface OpenAIAgentsInputMapper {
+  readonly protocol: OpenAIAgentsInputProtocol;
   messages(instructions: string): AgentInputItem[];
   toolResult(result: ToolCallResult): SdkToolOutput;
 }
@@ -34,6 +35,7 @@ export function createOpenAIAgentsInputMapper(input: {
   const messages = input.messages.map((message) => globalThis.structuredClone(message));
   const responseToolAttachmentMessages: ModelMessage[] = [];
   return {
+    protocol: input.protocol,
     messages: (instructions) => modelMessagesToSdkInput({
       instructions,
       messages,

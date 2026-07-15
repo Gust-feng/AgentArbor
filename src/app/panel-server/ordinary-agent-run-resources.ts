@@ -42,7 +42,10 @@ import {
 import { createHostAgentToolContributions } from "./agent-tool-contributions.js";
 
 export type OrdinaryAgentDefinitionResolver = (
-  ref: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["agentDefinitionRef"],
+  input: {
+    readonly ref: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["agentDefinitionRef"];
+    readonly instructions: string;
+  },
 ) => AgentDefinition | undefined | Promise<AgentDefinition | undefined>;
 
 export type OrdinaryAgentSkillContextResolver = (input: {
@@ -288,7 +291,7 @@ async function resolveFrozenAgentDefinition(
       "Ordinary run requires a complete frozen AgentDefinition reference",
     );
   }
-  const definition = await options.resolveAgentDefinition(ref);
+  const definition = await options.resolveAgentDefinition({ ref, instructions: input.birth.instructions });
   if (definition === undefined || !agentDefinitionRefMatchesDefinition(ref, definition)) {
     throw new CodedExecutionError(
       "agent_definition_mismatch",

@@ -4,10 +4,10 @@ import {
   type AgentOutputType,
   OpenAIProvider,
   Runner,
-  type AgentInputItem,
+  RunContext,
+  RunResult,
+  RunState,
   type ModelSettings,
-  type RunResult,
-  type RunState,
   setTracingDisabled,
 } from "@openai/agents";
 import OpenAI from "openai";
@@ -33,7 +33,6 @@ import type {
 } from "../../app/model-runtime/agent-loop.js";
 import { isOfficialOpenAIBaseUrl } from "./openai-compatible-base-url.js";
 import {
-  openAIAgentsRejectionMessage,
   pendingOpenAIAgentsConfirmations,
   rejectedOpenAIAgentsToolResult,
   selectOpenAIAgentsConfirmationDecisions,
@@ -47,6 +46,7 @@ import { toOpenAIFetch, type FetchLike } from "./openai-fetch-bridge.js";
 import { openAIResponsesOutputItems } from "./openai-responses-continuation.js";
 import {
   createOpenAIAgentsToolAssembly,
+  recordOpenAIAgentsToolResult,
   openAIAgentsAgentToolCacheIdentity,
   type OpenAIAgentsExecutionState,
   type OpenAIAgentsSdkExecutionContext,
@@ -134,16 +134,23 @@ class OpenAIAgentsLoop implements AgentLoop {
       input,
       baseMessages,
       toolResults: [],
-      preflightByCallId: new Map(),
+      preflightByFactId: new Map(),
+      interruptionFactIds: new WeakMap(),
       modelInput,
     };
+    let sdkState: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>> | undefined;
     try {
-      const sdkInput = modelInput.messages(input.instructions);
       const agent = this.createAgent(execution);
-      const result = await this.run(agent, sdkInput, execution, input.abortSignal);
+      sdkState = new RunState(
+        new RunContext<SdkExecutionContext>({ execution }),
+        modelInput.messages(input.instructions),
+        agent,
+        null,
+      );
+      const result = await this.run(agent, sdkState, execution, input.abortSignal);
       return this.resultFromSdk(agent, result, execution);
     } catch (error) {
-      return terminalErrorResult(error, execution);
+      return terminalErrorResult(error, execution, sdkState);
     }
   }
 
@@ -178,7 +185,7 @@ class OpenAIAgentsLoop implements AgentLoop {
 
   private async run(
     agent: Agent<SdkExecutionContext, AgentOutputType>,
-    input: AgentInputItem[] | RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>,
+    input: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>,
     execution: ExecutionState,
     abortSignal: AbortSignal,
   ): Promise<RunResult<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>> {
@@ -186,13 +193,11 @@ class OpenAIAgentsLoop implements AgentLoop {
     const stream = execution.input.onTextDelta !== undefined && this.config.requestSettings?.stream !== false;
     if (!stream) {
       return this.runner.run(agent, input, {
-        context: { execution },
         maxTurns: null,
         signal: abortSignal,
       });
     }
     const result = await this.runner.run(agent, input, {
-      context: { execution },
       maxTurns: null,
       signal: abortSignal,
       stream: true,
@@ -217,8 +222,9 @@ class OpenAIAgentsLoop implements AgentLoop {
   ): AgentLoopResult {
     const interruptions = result.interruptions;
     if (interruptions.length > 0) {
-      const pending = pendingOpenAIAgentsConfirmations(interruptions, (callId) => {
-        const preflight = execution.preflightByCallId.get(callId);
+      const pending = pendingOpenAIAgentsConfirmations(interruptions, (callId, interruption) => {
+        const factId = execution.interruptionFactIds.get(interruption) ?? callId;
+        const preflight = execution.preflightByFactId.get(factId);
         return preflight === undefined
           ? undefined
           : {
@@ -278,8 +284,11 @@ class OpenAIAgentsLoop implements AgentLoop {
             if (decision.decision === "approve_once") {
               result.state.approve(item.interruption);
             } else {
-              result.state.reject(item.interruption, { message: openAIAgentsRejectionMessage(decision) });
-              execution.toolResults.push(rejectedOpenAIAgentsToolResult(item.request, decision));
+              const rejected = rejectedOpenAIAgentsToolResult(item.request, decision);
+              await recordOpenAIAgentsToolResult(execution, rejected);
+              result.state.reject(item.interruption, {
+                message: stringToolOutput(execution.modelInput.toolResult(rejected)),
+              });
             }
           }
           const decidedIds = new Set(decisions.map((decision) => decision.confirmationId));
@@ -291,7 +300,7 @@ class OpenAIAgentsLoop implements AgentLoop {
             const resumed = await this.run(agent, result.state, execution, input.abortSignal);
             return this.resultFromSdk(agent, resumed, execution);
           } catch (error) {
-            return terminalErrorResult(error, execution);
+            return terminalErrorResult(error, execution, result.state);
           }
         },
       },
@@ -418,7 +427,10 @@ function textFromSdkItem(value: unknown): readonly string[] {
 }
 
 function latestResolvedToolResult(results: readonly ToolCallResult[], callId: string): ToolCallResult | undefined {
-  return [...results].reverse().find((result) => result.callId === callId && result.status !== "approval_required");
+  return [...results].reverse().find((result) =>
+    result.callId === callId &&
+    (result.factId === undefined || result.factId === result.callId) &&
+    result.status !== "approval_required");
 }
 
 function toolResultMessage(result: ToolCallResult): ModelMessage {
@@ -528,10 +540,20 @@ function parseToolInput(value: string): ToolFactValue | undefined {
   }
 }
 
-function terminalErrorResult(error: unknown, execution: ExecutionState): AgentLoopResult {
+function terminalErrorResult(
+  error: unknown,
+  execution: ExecutionState,
+  sdkState?: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>,
+): AgentLoopResult {
   const message = errorMessage(error);
+  const rawResponses = sdkState === undefined ? [] : new RunResult(sdkState).rawResponses;
   const facts = {
-    messages: cloneMessages(execution.baseMessages),
+    messages: canonicalMessagesFromResponses({
+      baseMessages: execution.baseMessages,
+      rawResponses,
+      protocol: execution.modelInput.protocol,
+      toolResults: execution.toolResults,
+    }),
     toolResults: cloneToolResults(execution.toolResults),
     usage: {},
     confirmationRequests: [],
@@ -539,6 +561,13 @@ function terminalErrorResult(error: unknown, execution: ExecutionState): AgentLo
   return isAbortError(error) || execution.abortSignal.aborted
     ? { ...facts, status: "cancelled", error: message }
     : { ...facts, status: "failed", error: message };
+}
+
+function stringToolOutput(value: ReturnType<OpenAIAgentsExecutionState["modelInput"]["toolResult"]>): string {
+  if (typeof value !== "string") {
+    throw new Error("OpenAI rejection tool results cannot carry model attachments.");
+  }
+  return value;
 }
 
 function failedResult(execution: ExecutionState, usage: ModelUsage, error: string): AgentLoopResult {

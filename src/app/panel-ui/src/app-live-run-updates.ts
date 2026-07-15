@@ -121,6 +121,7 @@ export function createLiveRunUpdateController(
     let lastCursor = subscription.cursor;
     let streamDeliveredEvent = false;
     let liveRunSettled = false;
+    let streamWork = Promise.resolve();
     const refreshAfterEvent = async (event: RunEvent): Promise<void> => {
       if (!subscriptionIsCurrent(subscription)) return;
       if (isLiveAppendOnlyEvent(event)) {
@@ -214,13 +215,29 @@ export function createLiveRunUpdateController(
       appendOnlyBatcher.flush();
       startPolling({ ...subscription, cursor: lastCursor });
     };
+    const refreshAfterReset = async (resetCursor: OrdinaryRunCursor): Promise<void> => {
+      if (!subscriptionIsCurrent(subscription)) return;
+      lastCursor = resetCursor;
+      appendOnlyBatcher.clear();
+      const runView = await fetchBasicRunView(runId, undefined);
+      lastCursor = runView.replay.cursor.token;
+      await applyRunViewProjection(subscription, runView, true);
+    };
+    const enqueueStreamWork = (work: () => Promise<void>): void => {
+      streamWork = streamWork.then(work, work).catch(() => fallback());
+    };
     const stream = openBasicRunStream({
       runId,
       cursor: subscription.cursor,
       onEvent: (event) => {
         streamDeliveredEvent = true;
         stopBootstrapPolling();
-        void refreshAfterEvent(event);
+        enqueueStreamWork(() => refreshAfterEvent(event));
+      },
+      onReset: (cursor) => {
+        streamDeliveredEvent = true;
+        stopBootstrapPolling();
+        enqueueStreamWork(() => refreshAfterReset(cursor));
       },
       onError: fallback,
     });
@@ -234,9 +251,12 @@ export function createLiveRunUpdateController(
 
   async function applyRunViewProjection(
     subscription: LiveRunSubscription,
-    runView: Awaited<ReturnType<typeof fetchBasicRunView>>
+    runView: Awaited<ReturnType<typeof fetchBasicRunView>>,
+    forceReset = false,
   ): Promise<void> {
-    appendOnlyBatcher.flush();
+    const reset = forceReset || runView.replay.reset;
+    if (reset) appendOnlyBatcher.clear();
+    else appendOnlyBatcher.flush();
     const { runId } = subscription;
     if (subscriptionIsCurrent(subscription)) {
       options.setApp((previous) =>
@@ -248,6 +268,7 @@ export function createLiveRunUpdateController(
               workView: ordinaryWorkViewFromRunView(runView),
               capabilityResolution: runView.capabilityResolution,
               detail: runView.detail,
+              reset,
             })
           : previous
       );

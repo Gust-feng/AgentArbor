@@ -135,7 +135,7 @@ test("panel UI app shell delegates settings and sidebar ownership", async () => 
   assert.equal(appTaskSubmission.includes("/api/underground"), false);
   assert.equal(appConversationSession.includes("liveRunForObservedReplay"), true);
   assert.equal(appConversationSession.includes("observedRunId: latestRunId"), true);
-  assert.equal(appConversationSession.includes("replay?.cursor.lastSequence ?? run.eventCursor.lastSequence"), true);
+  assert.equal(appConversationSession.includes("cursor: replay?.cursor.token"), true);
   assert.equal(submitFlow.includes("export function liveRunForObservedReplay"), true);
   assert.equal(appRunController.includes("observedRunId: latestRunId"), false);
   assert.equal(appRunController.includes("replay?.cursor.lastSequence ?? run.eventCursor.lastSequence"), false);
@@ -153,7 +153,7 @@ test("panel UI app shell delegates settings and sidebar ownership", async () => 
   assert.equal(appTaskSubmission.includes("loadObservedRunReadModel"), true);
   assert.equal(appTaskSubmission.includes("safeBasicRunView"), false);
   assert.equal(appTaskSubmission.includes("ordinaryWorkViewFromRunView"), false);
-  assert.equal(appTaskSubmission.includes("replay?.cursor.lastSequence ?? 0"), true);
+  assert.equal(appTaskSubmission.includes("cursor: replay?.cursor.token"), true);
   assert.equal(appLiveRunUpdates.includes("export function createLiveRunUpdateController"), true);
   assert.equal(appLiveRunUpdates.includes("function startLiveUpdates"), true);
   assert.equal(appLiveRunUpdates.includes("function startPolling(subscription"), true);
@@ -162,9 +162,11 @@ test("panel UI app shell delegates settings and sidebar ownership", async () => 
   assert.equal(appLiveRunUpdates.includes("appStateWithAppendOnlyRunEvents"), true);
   assert.equal(appLiveRunUpdates.includes("appendOnlyBatcher.enqueue({ subscription, event })"), true);
   assert.equal(
-    appLiveRunUpdates.includes("appendOnlyBatcher.flush();\n      const runView = await fetchBasicRunView(runId, lastSequence);"),
+    appLiveRunUpdates.includes("appendOnlyBatcher.flush();\n      const runView = await fetchBasicRunView(runId, lastCursor);"),
     true
   );
+  assert.equal(appConversationSession.includes("replay?.cursor.lastSequence"), false);
+  assert.equal(appTaskSubmission.includes("replay?.cursor.lastSequence"), false);
   assert.equal(appLiveRunUpdates.includes("requestAnimationFrame"), true);
   assert.equal(appRunController.includes("function decideConfirmation"), true);
   assert.equal(appRunController.includes("loadConversationSession"), true);

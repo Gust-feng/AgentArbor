@@ -19,12 +19,10 @@ export type UsageStatisticsTotals = {
   readonly conversationCount: number;
   readonly messageCount: number;
   readonly runCount: number;
-  readonly modelCallCount: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
   readonly cacheSavedTokens: number;
-  readonly unknownUsageModelCallCount: number;
 };
 
 export type UsageStatisticsDailyActivity = {

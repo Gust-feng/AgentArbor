@@ -4,17 +4,13 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import {
-  FileSystemRuntimeDatabase,
-  resolveAgentArborRuntimeDatabasePaths,
-} from "../../../adapters/runtime-database/index.js";
+import { resolveAgentArborRuntimeDatabasePaths } from "../../../adapters/runtime-database/index.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
 import { ConfigCenter } from "../../config-center.js";
 import { resolveDefaultPanelSkillRoots } from "../runtime.js";
 import {
   removeTemporaryTree,
   requestJson,
-  waitForRun,
 } from "./panel-server-test-utils.js";
 import {
   createOpenAiSearchToolCallResponse,
@@ -91,7 +87,7 @@ test("panel config route returns product runtime metadata for settings about pag
   }
 });
 
-test("panel usage statistics route returns local runtime totals and empty storage-safe defaults", async () => {
+test("panel usage statistics route reads the empty Ordinary feature store", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-usage-statistics-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
@@ -102,95 +98,13 @@ test("panel usage statistics route returns local runtime totals and empty storag
     assert.equal(empty.body.statistics.totals.messageCount, 0);
     assert.equal(empty.body.statistics.totals.inputTokens, 0);
 
-    const paths = resolveAgentArborRuntimeDatabasePaths(directory);
-    const database = new FileSystemRuntimeDatabase(paths);
-    await database.upsertConversation({
-      conversationId: "conversation-usage-1",
-      title: "统计测试",
-      preview: "统计测试",
-      status: "completed",
-      latestRunId: "run-usage-1",
-      queuedRunIds: [],
-      queuedRunCount: 0,
-      createdAt: "2026-06-28T01:00:00.000Z",
-      updatedAt: "2026-06-28T01:00:02.000Z",
-      turns: [
-        {
-          turnId: "turn-usage-user",
-          role: "user",
-          title: "你的消息",
-          content: "统计测试",
-          status: "completed",
-          createdAt: "2026-06-28T01:00:00.000Z",
-          updatedAt: "2026-06-28T01:00:00.000Z",
-        },
-        {
-          turnId: "turn-usage-assistant",
-          role: "assistant",
-          title: "已完成",
-          content: "已统计。",
-          status: "completed",
-          runId: "run-usage-1",
-          createdAt: "2026-06-28T01:00:02.000Z",
-          updatedAt: "2026-06-28T01:00:02.000Z",
-        },
-      ],
-    });
-    await database.saveRunSnapshot({
-      run: {
-        runId: "run-usage-1",
-        profile: "lite",
-        runKind: "desktop",
-        runMode: "agent",
-        status: "completed",
-        goalSummary: "统计测试",
-        aiMode: "fake",
-        appHome: paths.appHome,
-        runHome: path.join(paths.runtimeHome, "runs", encodeURIComponent("run-usage-1")),
-        createdAt: "2026-06-28T01:00:01.000Z",
-        updatedAt: "2026-06-28T01:00:02.000Z",
-        completedAt: "2026-06-28T01:00:02.000Z",
-      },
-      workspace: undefined,
-      events: [],
-      modelCalls: [{
-        requestId: "usage-model-request",
-        runId: "run-usage-1",
-        responseId: "usage-model-response",
-        status: "completed",
-        usage: {
-          inputTokens: 100,
-          outputTokens: 25,
-          totalTokens: 125,
-          cachedInputTokens: 40,
-        },
-        eventRefs: [],
-      }],
-      toolCalls: [],
-      artifacts: [],
-      confirmations: [],
-      subAgentRuns: [],
-    });
-
-    const usage = await requestJson(server.url, "/api/runtime/usage-statistics");
-    assert.equal(usage.status, 200);
-    assert.equal(usage.body.ok, true);
-    assert.equal(usage.body.status, "completed");
-    assert.equal(usage.body.statistics.totals.conversationCount, 1);
-    assert.equal(usage.body.statistics.totals.messageCount, 2);
-    assert.equal(usage.body.statistics.totals.runCount, 1);
-    assert.equal(usage.body.statistics.totals.modelCallCount, 1);
-    assert.equal(usage.body.statistics.totals.inputTokens, 100);
-    assert.equal(usage.body.statistics.totals.outputTokens, 25);
-    assert.equal(usage.body.statistics.totals.cacheSavedTokens, 40);
-    assert.equal(JSON.stringify(usage.body).includes("统计测试"), false);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
   }
 });
 
-test("panel maps incompatible runtime snapshots to an explicit gone response", async () => {
+test("panel ignores obsolete legacy runtime snapshots instead of adding a compatibility reader", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-snapshot-incompatible-"));
   const paths = resolveAgentArborRuntimeDatabasePaths(directory);
   const runId = "legacy-runtime-run";
@@ -200,8 +114,8 @@ test("panel maps incompatible runtime snapshots to an explicit gone response", a
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const response = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
-    assert.equal(response.status, 410);
-    assert.equal(response.body.error.code, "runtime_snapshot_incompatible");
+    assert.equal(response.status, 404);
+    assert.equal(response.body.error.code, "not_found");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -250,17 +164,11 @@ test("panel tools route can disable web search without using the stored Tavily k
       body: { provider: "none" },
     });
 
-    const started = await requestJson(server.url, "/api/desktop/runs", {
+    const started = await requestJson(server.url, "/api/conversations", {
       method: "POST",
       body: { goal: "Build a small deterministic helper.", aiMode: "openai-compatible" },
     });
-    const run = await waitForRun(
-      server.url,
-      started.body.runId,
-      (body) => body.status === "completed",
-      4_000,
-      "/api/desktop/runs"
-    );
+    const run = await waitForOrdinaryView(server.url, started.body.run.runId, "completed");
 
     assert.equal(disabled.status, 200);
     assert.equal(disabled.body.tools.webSearch.provider, "none");
@@ -271,7 +179,7 @@ test("panel tools route can disable web search without using the stored Tavily k
     assert.equal(run.status, 200);
     assert.equal(modelFetchCalls >= 1, true);
     assert.equal(tavilyFetchCalls, 0);
-    assert.equal(run.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    assert.equal(run.body.view.detail.toolResults.some((result: { status: string }) => result.status === "completed"), true);
     assert.equal(JSON.stringify(run.body).includes(modelSecret), false);
     assert.equal(JSON.stringify(run.body).includes(tavilySecret), false);
   } finally {
@@ -477,6 +385,17 @@ function extractPanelAssetPaths(html: string): readonly string[] {
     paths.add(match[1] ?? "");
   }
   return [...paths].filter((value) => value.length > 0);
+}
+
+async function waitForOrdinaryView(baseUrl: string, runId: string, status: string) {
+  const deadline = Date.now() + 4_000;
+  let last: Awaited<ReturnType<typeof requestJson>> | undefined;
+  while (Date.now() < deadline) {
+    last = await requestJson(baseUrl, `/api/basic-agent/runs/${encodeURIComponent(runId)}/view`);
+    if (last.status === 200 && last.body.view.run.status === status) return last;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for Ordinary run ${runId} status ${status}; last=${last?.text}`);
 }
 
 type RequestTextResult = {

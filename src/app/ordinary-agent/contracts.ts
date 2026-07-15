@@ -12,10 +12,11 @@ import type { ToolCallResult, ToolConfirmationPolicy } from "../../domain/tools/
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 
-export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v1" as const;
+export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v2" as const;
 export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v1" as const;
 
 export type OrdinaryFeatureErrorCode =
+  | "ordinary_feature_released"
   | "ordinary_run_not_found"
   | "ordinary_conversation_not_found"
   | "ordinary_conversation_deleted"
@@ -25,7 +26,8 @@ export type OrdinaryFeatureErrorCode =
   | "ordinary_conversation_busy"
   | "ordinary_rollback_target_not_found"
   | "ordinary_confirmation_not_found"
-  | "ordinary_confirmation_in_progress";
+  | "ordinary_confirmation_in_progress"
+  | "ordinary_tool_result_conflict";
 
 /** Expected command/query failures that protocol adapters may map without parsing messages. */
 export class OrdinaryFeatureError extends Error {
@@ -148,6 +150,8 @@ export type OrdinaryRunState = {
   readonly status: OrdinaryRunStatus;
   readonly canonicalMessages: readonly ModelMessage[];
   readonly toolCalls: readonly ToolCallResult[];
+  /** Durable occurrence time keyed by the stable tool result identity. */
+  readonly toolResultRecordedAt: Readonly<Record<string, string>>;
   /** Cumulative provider usage for this run, including every live approval continuation segment. */
   readonly usage: ModelUsage;
   /** Effective capability boundary resolved from the frozen birth snapshot and executable Host tools. */
@@ -223,6 +227,8 @@ export type OrdinaryExecutionInput = {
   readonly messages: readonly ModelMessage[];
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
+  /** Must settle before the executed result is returned to the model. */
+  readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
 };
 
 export type OrdinaryRunActivityCursor = {
@@ -241,6 +247,7 @@ type OrdinaryRunActivityBase = {
 export type OrdinaryRunActivity = OrdinaryRunActivityBase & (
   | { readonly type: "run.transition"; readonly durability: "durable"; readonly event: OrdinaryRunEvent }
   | { readonly type: "model.output.delta"; readonly durability: "live_only"; readonly delta: string }
+  | { readonly type: "tool.result"; readonly durability: "live_only" | "durable"; readonly result: ToolCallResult }
 );
 
 export type OrdinaryRunActivityReplay = {

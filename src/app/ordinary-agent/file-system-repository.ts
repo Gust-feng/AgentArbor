@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { persistedModelProtocolExtensions } from "../../domain/intelligence/index.js";
+import { toolCallFactId } from "../../domain/tools/index.js";
 import {
   ORDINARY_RUN_SCHEMA_VERSION,
   OrdinaryFeatureError,
@@ -17,7 +18,7 @@ export class OrdinaryRunSnapshotIncompatibleError extends Error {
   readonly code = "ordinary_run_snapshot_incompatible" as const;
 
   constructor(readonly runId: string, reason: string) {
-    super(`Ordinary run snapshot ${runId} is incompatible with ordinary-run/v1: ${reason}`);
+    super(`Ordinary run snapshot ${runId} is incompatible with ${ORDINARY_RUN_SCHEMA_VERSION}: ${reason}`);
     this.name = "OrdinaryRunSnapshotIncompatibleError";
   }
 }
@@ -52,7 +53,7 @@ const usageSchema = z.object({
   outputTokensPerSecond: z.number().finite().nonnegative().optional(),
 }).strict();
 const toolCallSchema = z.object({
-  callId: z.string().min(1), toolName: z.string().min(1), input: jsonValueSchema.optional(),
+  callId: z.string().min(1), factId: z.string().min(1).optional(), toolName: z.string().min(1), input: jsonValueSchema.optional(),
   output: jsonValueSchema.optional(), status: z.enum(["completed", "failed", "approval_required", "cancelled"]),
   error: z.string().optional(), errorDomain: z.string().optional(), errorFacts: z.record(z.string(), jsonValueSchema).optional(),
   durationMs: z.number().finite().nonnegative(), confirmationRequest: confirmationSchema.optional(),
@@ -223,6 +224,7 @@ const rawStateSchema = z.object({
   status: statusSchema,
   canonicalMessages: z.array(modelMessageSchema),
   toolCalls: z.array(toolCallSchema),
+  toolResultRecordedAt: z.record(z.string(), z.string().min(1)),
   usage: usageSchema,
   capabilityResolution: capabilityResolutionSchema.optional(),
   timeline: z.array(eventSchema).min(1),
@@ -263,8 +265,13 @@ const rawStateSchema = z.object({
   }
   const toolCallIds = new Set<string>();
   for (const [index, call] of state.toolCalls.entries()) {
-    if (toolCallIds.has(call.callId)) context.addIssue({ code: "custom", message: "tool call identity is duplicated", path: ["toolCalls", index, "callId"] });
-    toolCallIds.add(call.callId);
+    const factId = toolCallFactId(call);
+    if (toolCallIds.has(factId)) context.addIssue({ code: "custom", message: "tool fact identity is duplicated", path: ["toolCalls", index, "factId"] });
+    toolCallIds.add(factId);
+    const resultKey = `${factId}:${call.status}`;
+    if (call.status !== "approval_required" && state.toolResultRecordedAt[resultKey] === undefined) {
+      context.addIssue({ code: "custom", message: "resolved tool result occurrence time is missing", path: ["toolResultRecordedAt", resultKey] });
+    }
   }
   validateCanonicalMessageChain(state.canonicalMessages, context);
 });

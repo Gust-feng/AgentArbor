@@ -564,10 +564,9 @@ test("deep routes create isolated conversation and map run to underground/deep k
     );
     assert.equal(ordinaryIds.includes(conversation.conversationId), false);
 
-    // 物理隔离：deep run id 不出现在普通 /api/runtime/runs（deep 写入独立 DeepRunRecordStore）
+    // 旧的全局 runtime run 聚合入口已经退役；Deep 仍只通过自己的 feature API 暴露。
     const runtimeRuns = await requestJson(server.url, "/api/runtime/runs");
-    const runtimeRunIds = (runtimeRuns.body.runs as readonly { runId: string }[]).map((r) => r.runId);
-    assert.equal(runtimeRunIds.includes(run.runId), false);
+    assert.equal(runtimeRuns.status, 404);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

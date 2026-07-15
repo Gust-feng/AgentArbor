@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js";
+import { createInitialOrdinaryRunState, recordOrdinaryToolResult, transitionOrdinaryRun } from "./state.js";
 import { ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 
 test("Ordinary run reducer keeps one status, strips ephemeral attachments, and appends monotonic events", () => {
@@ -37,7 +37,8 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
   });
 
   assert.deepEqual(Object.keys(initial).sort(), [
-    "birth", "canonicalMessages", "input", "runId", "status", "timeline", "timestamps", "toolCalls", "turn", "usage",
+    "birth", "canonicalMessages", "input", "runId", "status", "timeline", "timestamps", "toolCalls",
+    "toolResultRecordedAt", "turn", "usage",
   ]);
   assert.equal(JSON.stringify(initial).includes("BASE64_MUST_NOT_PERSIST"), false);
   assert.equal(initial.input.taskSoil?.contextRefs?.[0]?.attachmentId, "image-1");
@@ -74,4 +75,38 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
     recordedAt: "2026-01-01T00:00:03.000Z",
     eventId: "event-4",
   }), /completed status/u);
+});
+
+test("Ordinary tool facts are idempotent, ordered, and reject conflicting resolved results", () => {
+  const queued = createInitialOrdinaryRunState({
+    runId: "tool-facts-run",
+    turn: ordinaryRunTurn("tool-facts-run"),
+    runInput: { userMessage: "read" },
+    birth: ordinaryRunBirth(),
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-1",
+  });
+  const running = transitionOrdinaryRun({
+    state: queued,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const result = {
+    callId: "call-1",
+    toolName: "read_file",
+    input: { path: "README.md" },
+    status: "completed" as const,
+    output: { content: "first" },
+    durationMs: 1,
+  };
+  const recorded = recordOrdinaryToolResult({ state: running, result, recordedAt: "2026-01-01T00:00:02.000Z" });
+  const repeated = recordOrdinaryToolResult({ state: recorded, result, recordedAt: "2026-01-01T00:00:03.000Z" });
+  assert.deepEqual(repeated.toolCalls, [result]);
+  assert.equal(repeated.toolResultRecordedAt["call-1:completed"], "2026-01-01T00:00:02.000Z");
+  assert.throws(() => recordOrdinaryToolResult({
+    state: repeated,
+    result: { ...result, output: { content: "conflict" } },
+    recordedAt: "2026-01-01T00:00:04.000Z",
+  }), /different resolved result/u);
 });

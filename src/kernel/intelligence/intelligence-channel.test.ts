@@ -232,6 +232,7 @@ test("IntelligenceChannel does not start another retry when aborted during backo
     model: "test-model",
     async complete(request) {
       attempts += 1;
+      setTimeout(() => controller.abort(new Error("caller cancelled retry backoff")), 10);
       return createFailedModelResponse({
         requestId: request.requestId,
         providerId: this.providerId,
@@ -249,18 +250,19 @@ test("IntelligenceChannel does not start another retry when aborted during backo
     provider,
     bus: new InMemoryMessageBus(eventLog),
     retryPolicy: {
-      sleep: async () => {
-        controller.abort();
-      },
+      baseDelayMs: 10_000,
+      maxDelayMs: 10_000,
       jitterRatio: 0,
     },
   });
 
+  const startedAt = Date.now();
   const response = await channel.request(createValidModelRequest(), { abortSignal: controller.signal });
 
   assert.equal(response.status, "failed");
   assert.equal(response.failure?.kind, "provider_network");
   assert.equal(attempts, 1);
+  assert.equal(Date.now() - startedAt < 1_000, true);
   assert.deepEqual(eventLog.types(), ["model.requested", "model.failed"]);
 });
 

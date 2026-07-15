@@ -224,16 +224,17 @@ async function executeHttpRequest(
   }
 
   const startedAt = Date.now();
-  const controller = new AbortController();
-  const detachAbort = attachAbortForwarder(context.abortSignal, controller);
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const requestSignal = context.abortSignal === undefined
+    ? timeoutSignal
+    : AbortSignal.any([context.abortSignal, timeoutSignal]);
   const timeoutReason = timeoutError(timeoutMs);
-  const timeout = setTimeout(() => controller.abort(timeoutReason), timeoutMs);
   try {
     const response = await fetchImpl(url, {
       method,
       headers: Object.keys(headers).length === 0 ? undefined : headers,
       body,
-      signal: controller.signal,
+      signal: requestSignal,
     });
     const bodyResult = method === "HEAD"
       ? { body: "", startChar: 0, bodyChars: 0, hasMoreAfter: false, reachedStartCharCeiling: false, startCharCeiling: MAX_BODY_START_CHAR, truncated: false }
@@ -294,7 +295,7 @@ async function executeHttpRequest(
     }
     return output;
   } catch (error) {
-    if (controller.signal.aborted && controller.signal.reason === timeoutReason) {
+    if (timeoutSignal.aborted && requestSignal.reason === timeoutSignal.reason) {
       throw normalizeHttpRequestFailure({
         error: timeoutReason,
         url,
@@ -311,9 +312,6 @@ async function executeHttpRequest(
       method,
       durationMs: Date.now() - startedAt,
     });
-  } finally {
-    clearTimeout(timeout);
-    detachAbort();
   }
 }
 
@@ -566,19 +564,6 @@ function positiveInteger(value: unknown): number | undefined {
 function resolveGlobalFetch(): HttpRequestFetchLike | undefined {
   const fetchImpl = (globalThis as { fetch?: HttpRequestFetchLike }).fetch;
   return typeof fetchImpl === "function" ? fetchImpl : undefined;
-}
-
-function attachAbortForwarder(parent: AbortSignal | undefined, controller: AbortController): () => void {
-  if (parent === undefined) {
-    return () => undefined;
-  }
-  const abort = () => controller.abort(parent.reason);
-  if (parent.aborted) {
-    abort();
-    return () => undefined;
-  }
-  parent.addEventListener("abort", abort, { once: true });
-  return () => parent.removeEventListener("abort", abort);
 }
 
 export function createHttpTimeoutCause(label: string, timeoutMs: number): Error & {

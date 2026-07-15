@@ -214,10 +214,11 @@ export function createPageInformationSourceAdapter(options: {
         DEFAULT_PAGE_READ_TIMEOUT_MS,
         options.maxTimeoutMs ?? MAX_PAGE_READ_TIMEOUT_MS
       );
-      const controller = new AbortController();
-      const detachAbort = attachAbortForwarder(request.abortSignal, controller);
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const requestSignal = request.abortSignal === undefined
+        ? timeoutSignal
+        : AbortSignal.any([request.abortSignal, timeoutSignal]);
       const timeoutCause = createHttpTimeoutCause("page read", timeoutMs);
-      const timeout = setTimeout(() => controller.abort(timeoutCause), timeoutMs);
       try {
         const response = await fetchImpl(uri, {
           method: "GET",
@@ -225,7 +226,7 @@ export function createPageInformationSourceAdapter(options: {
             accept: "text/html,text/plain;q=0.9,*/*;q=0.5",
             "user-agent": "AgentArbor-ResearchRuntime/0.1",
           },
-          signal: controller.signal,
+          signal: requestSignal,
         });
         if (!response.ok) {
           const facts = createHttpStatusErrorFacts({
@@ -263,7 +264,7 @@ export function createPageInformationSourceAdapter(options: {
         };
       } catch (error) {
         const failure = normalizeHttpRequestFailure({
-          error: controller.signal.aborted && controller.signal.reason === timeoutCause ? timeoutCause : error,
+          error: timeoutSignal.aborted && requestSignal.reason === timeoutSignal.reason ? timeoutCause : error,
           url: uri,
           method: "GET",
           durationMs: Date.now() - startedAt,
@@ -273,9 +274,6 @@ export function createPageInformationSourceAdapter(options: {
           message: failure.message,
           errorFacts: researchErrorFactsFromHttpRequest(failure.facts),
         };
-      } finally {
-        clearTimeout(timeout);
-        detachAbort();
       }
     },
   };
@@ -815,19 +813,6 @@ function boundedPositiveInteger(value: unknown, fallback: number, max: number): 
     return Math.min(Math.max(1, Math.floor(fallback)), normalizedMax);
   }
   return Math.min(Math.floor(value), normalizedMax);
-}
-
-function attachAbortForwarder(parent: AbortSignal | undefined, controller: AbortController): () => void {
-  if (parent === undefined) {
-    return () => undefined;
-  }
-  const abort = () => controller.abort(parent.reason);
-  if (parent.aborted) {
-    abort();
-    return () => undefined;
-  }
-  parent.addEventListener("abort", abort, { once: true });
-  return () => parent.removeEventListener("abort", abort);
 }
 
 function arrayItems(value: unknown): readonly unknown[] {

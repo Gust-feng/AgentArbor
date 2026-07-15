@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import type {
   IntelligenceChannel,
   ModelProvider,
@@ -179,21 +180,20 @@ function normalizeJitterRatio(value: number | undefined, fallback: number): numb
 }
 
 async function defaultRetrySleep(delayMs: number, abortSignal?: AbortSignal): Promise<void> {
-  if (delayMs <= 0 || abortSignal?.aborted === true) {
+  if (delayMs <= 0 || isAborted(abortSignal)) {
     return;
   }
-  await new Promise<void>((resolve) => {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const finish = (): void => {
-      if (timeout !== undefined) {
-        clearTimeout(timeout);
-      }
-      abortSignal?.removeEventListener("abort", finish);
-      resolve();
-    };
-    timeout = setTimeout(finish, delayMs);
-    abortSignal?.addEventListener("abort", finish, { once: true });
-  });
+  try {
+    await sleep(delayMs, undefined, { signal: abortSignal });
+  } catch (error) {
+    if (!isAborted(abortSignal)) {
+      throw error;
+    }
+  }
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 function normalizeValidatedResponse(

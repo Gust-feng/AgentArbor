@@ -84,7 +84,7 @@ test("resolveTriggeredSkillContexts uses the run-created skill catalog instead o
     assert.equal(contexts[0]?.bodyHash, frozenFacts.bodyHash);
     assert.equal(contexts[0]?.warning, undefined);
     assert.equal(contexts[0]?.markUsedStatus, "succeeded");
-    assert.deepEqual(usedSkillIds, ["source:legacy:frozen-review"]);
+    assert.deepEqual(usedSkillIds, ["source:unscoped:frozen-review"]);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -157,7 +157,7 @@ test("resolveTriggeredSkillContexts records explicit selector trigger reasons", 
     assert.equal(contexts[0]?.triggerReason, "显式调用：$explicit-skill");
     assert.match(contexts[0]?.summary ?? "", /显式调用：\$explicit-skill/);
     assert.equal(contexts[0]?.warning, undefined);
-    assert.deepEqual(usedSkillIds, ["source:legacy:explicit-skill"]);
+    assert.deepEqual(usedSkillIds, ["source:unscoped:explicit-skill"]);
     assert.equal(channel.requests.length, 0);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -639,10 +639,10 @@ test("resolveTriggeredSkillContexts skips disabled frozen skills and caps keywor
 
     assert.deepEqual(contexts.map((context) => context.skill.id), ["review-1", "review-2", "review-4", "review-5"]);
     assert.deepEqual(usedSkillIds, [
-      "source:legacy:review-1",
-      "source:legacy:review-2",
-      "source:legacy:review-4",
-      "source:legacy:review-5",
+      "source:unscoped:review-1",
+      "source:unscoped:review-2",
+      "source:unscoped:review-4",
+      "source:unscoped:review-5",
     ]);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

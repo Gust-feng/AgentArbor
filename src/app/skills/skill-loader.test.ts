@@ -865,7 +865,7 @@ test("discoverSkills preserves source roots and selection prefers higher-precede
   }
 });
 
-test("discoverSkills applies source-qualified state without leaking legacy duplicate-id state", async () => {
+test("discoverSkills applies only source-qualified state", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-skills-source-state-"));
   const userRoot = path.join(root, "user-skills");
   const projectRoot = path.join(root, "project-skills");
@@ -890,7 +890,7 @@ test("discoverSkills applies source-qualified state without leaking legacy dupli
       ],
       stateStore: {
         async readStates() {
-          return new Map([["shared-review", { skillId: "shared-review", enabled: false }]]);
+          return new Map();
         },
         async setEnabled(skillId, enabled) {
           return { skillId, enabled };

@@ -3,7 +3,6 @@ import path from "node:path";
 import type { SkillDefinition } from "../../domain/basic-agent/index.js";
 import {
   skillStateKeyForFacts,
-  type SkillStateRecord,
   type SkillStateStore,
 } from "./skill-state-store.js";
 import {
@@ -175,11 +174,10 @@ export async function discoverSkills(options: SkillDiscoveryOptions): Promise<re
   const discovered = await Promise.all(roots.map((root) => discoverSkillsUnderRoot(root)));
   const states = await options.stateStore?.readStates();
   const skills = discovered.flat();
-  const ambiguousLegacyIds = legacyAmbiguousSkillIds(skills);
   return skills
     .map((skill) => applyPersistedSkillState(
       skill,
-      persistedStateForSkill(skill, states, ambiguousLegacyIds)
+      states?.get(skill.stateKey)
     ))
     .sort(compareDiscoveredSkills);
 }
@@ -767,33 +765,6 @@ function applyPersistedSkillState(
     enabled: skill.loadError === undefined ? state.enabled ?? skill.enabled : false,
     lastUsedAt: state.lastUsedAt ?? skill.lastUsedAt,
   };
-}
-
-function persistedStateForSkill(
-  skill: AgentSkillDefinition,
-  states: ReadonlyMap<string, SkillStateRecord> | undefined,
-  ambiguousLegacyIds: ReadonlySet<string>
-): SkillStateRecord | undefined {
-  if (states === undefined) {
-    return undefined;
-  }
-  const qualified = states.get(skill.stateKey);
-  if (qualified !== undefined) {
-    return qualified;
-  }
-  return ambiguousLegacyIds.has(skill.id) ? undefined : states.get(skill.id);
-}
-
-function legacyAmbiguousSkillIds(skills: readonly AgentSkillDefinition[]): ReadonlySet<string> {
-  const rootsById = new Map<string, Set<string>>();
-  for (const skill of skills) {
-    const roots = rootsById.get(skill.id) ?? new Set<string>();
-    roots.add(skill.sourceRootId);
-    rootsById.set(skill.id, roots);
-  }
-  return new Set([...rootsById.entries()]
-    .filter(([, roots]) => roots.size > 1)
-    .map(([skillId]) => skillId));
 }
 
 export function normalizeSkillRoots(roots: readonly SkillRootInput[]): readonly SkillRootDescriptor[] {

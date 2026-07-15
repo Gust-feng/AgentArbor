@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import type { SkillDefinition } from "../../domain/basic-agent/index.js";
 import { nowIso } from "../../kernel/id.js";
 
@@ -41,22 +42,17 @@ export class FileSystemSkillStateStore implements SkillStateStore {
       return new Map();
     }
     const parsed = parseSkillStateFile(raw);
-    const states = new Map((parsed.value.skills ?? []).map((record) => {
-      const sanitized = sanitizeRecord(record);
-      return [stateMapKeyForRecord(sanitized), sanitized] as const;
-    }));
-    if (parsed.recovered) {
-      await this.writeStates(states);
-    }
-    return states;
+    return parsed === undefined
+      ? new Map()
+      : new Map(parsed.skills.map((record) => [record.stateKey, record] as const));
   }
 
   private async writeStates(states: ReadonlyMap<string, SkillStateRecord>): Promise<void> {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     const skills = [...states.values()].sort((left, right) =>
-      stateMapKeyForRecord(left).localeCompare(stateMapKeyForRecord(right))
+      requiredStateKey(left).localeCompare(requiredStateKey(right))
     );
-    await fs.writeFile(this.filePath, `${JSON.stringify({ version: 1, skills }, null, 2)}\n`, "utf8");
+    await fs.writeFile(this.filePath, `${JSON.stringify({ version: 2, skills }, null, 2)}\n`, "utf8");
   }
 
   async setEnabled(stateKey: string, enabled: boolean, target?: SkillStateTarget): Promise<SkillStateRecord> {
@@ -98,28 +94,6 @@ export function resolveSkillStateStorePath(configDirectory: string): string {
   return path.join(configDirectory, "skills-state.json");
 }
 
-function sanitizeRecord(record: SkillStateRecord): SkillStateRecord {
-  const stateKey = typeof record.stateKey === "string" && record.stateKey.trim().length > 0
-    ? record.stateKey.trim()
-    : undefined;
-  const sourceKind = isSkillSourceKind(record.sourceKind) ? record.sourceKind : undefined;
-  const sourceRootId = typeof record.sourceRootId === "string" && record.sourceRootId.trim().length > 0
-    ? record.sourceRootId.trim()
-    : undefined;
-  const sourcePrecedence = typeof record.sourcePrecedence === "number" && Number.isFinite(record.sourcePrecedence)
-    ? Math.trunc(record.sourcePrecedence)
-    : undefined;
-  return {
-    skillId: record.skillId,
-    ...(stateKey === undefined ? {} : { stateKey }),
-    ...(sourceKind === undefined ? {} : { sourceKind }),
-    ...(sourceRootId === undefined ? {} : { sourceRootId }),
-    ...(sourcePrecedence === undefined ? {} : { sourcePrecedence }),
-    enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
-    lastUsedAt: typeof record.lastUsedAt === "string" ? record.lastUsedAt : undefined,
-  };
-}
-
 export function skillStateKeyForSkill(skill: Pick<SkillDefinition, "id" | "sourceRootId"> & {
   readonly stateKey?: string;
 }): string {
@@ -148,83 +122,47 @@ export function skillStateKeyForFacts(input: {
   readonly skillId: string;
   readonly sourceRootId?: string;
 }): string {
-  const root = safeStateKeySegment(input.sourceRootId ?? "legacy");
+  const root = safeStateKeySegment(input.sourceRootId ?? "unscoped");
   const skill = safeStateKeySegment(input.skillId);
   return `source:${root}:${skill}`;
 }
 
-function stateMapKeyForRecord(record: SkillStateRecord): string {
-  return record.stateKey ?? record.skillId;
-}
+type SourceQualifiedSkillStateRecord = SkillStateRecord & { readonly stateKey: string };
 
-function parseSkillStateFile(raw: string): {
-  readonly value: { readonly skills?: readonly SkillStateRecord[] };
-  readonly recovered: boolean;
-} {
+function parseSkillStateFile(raw: string): { readonly skills: readonly SourceQualifiedSkillStateRecord[] } | undefined {
+  let value: unknown;
   try {
-    return {
-      value: JSON.parse(raw) as { readonly skills?: readonly SkillStateRecord[] },
-      recovered: false,
-    };
-  } catch (error) {
-    const objectEnd = findFirstJsonObjectEnd(raw);
-    if (objectEnd === undefined) {
-      throw error;
-    }
-    const trailing = raw.slice(objectEnd);
-    if (trailing.trim().length === 0) {
-      throw error;
-    }
-    return {
-      value: JSON.parse(raw.slice(0, objectEnd)) as { readonly skills?: readonly SkillStateRecord[] },
-      recovered: true,
-    };
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
   }
-}
-
-function findFirstJsonObjectEnd(raw: string): number | undefined {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = 0; index < raw.length; index += 1) {
-    const character = raw[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (character === "\\") {
-      escaped = inString;
-      continue;
-    }
-    if (character === "\"") {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (character === "{") {
-      depth += 1;
-    } else if (character === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return index + 1;
-      }
-      if (depth < 0) {
-        return undefined;
-      }
-    }
-  }
-  return undefined;
+  const parsed = SKILL_STATE_FILE_SCHEMA.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function safeStateKeySegment(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9_.:-]+/g, "-").replace(/^-+|-+$/g, "") || "skill";
 }
 
-function isSkillSourceKind(value: unknown): value is SkillDefinition["sourceKind"] {
-  return value === "project" || value === "user" || value === "plugin" || value === "admin" || value === "custom";
+function requiredStateKey(record: SkillStateRecord): string {
+  if (record.stateKey === undefined || record.stateKey.length === 0) {
+    throw new Error("Skill state writes require a source-qualified stateKey.");
+  }
+  return record.stateKey;
 }
+
+const SKILL_STATE_FILE_SCHEMA = z.object({
+  version: z.literal(2),
+  skills: z.array(z.object({
+    skillId: z.string().min(1),
+    stateKey: z.string().min(1),
+    sourceKind: z.enum(["project", "user", "plugin", "admin", "custom"]).optional(),
+    sourceRootId: z.string().min(1).optional(),
+    sourcePrecedence: z.number().int().optional(),
+    enabled: z.boolean().optional(),
+    lastUsedAt: z.string().min(1).optional(),
+  }).strict()),
+}).strict();
 
 function isFileNotFound(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";

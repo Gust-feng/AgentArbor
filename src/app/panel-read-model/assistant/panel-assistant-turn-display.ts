@@ -89,7 +89,10 @@ export function projectStableAssistantTurnDisplay<
     failure,
   );
   const workflow = projectStableAssistantWorkflowDisplay({
-    previous: input.previousWorkflow,
+    // A terminal failure notice owns the user-visible error. Rebuild from the
+    // current nodes so a run.failed activity cached one frame earlier cannot
+    // survive beside that notice; real tool activity remains in the nodes.
+    previous: failure === undefined ? input.previousWorkflow : undefined,
     content: failure?.previous ?? assistant.content,
     deliverable: failure === undefined ? assistant.deliverable : undefined,
     transcriptNodes: workflowTranscriptNodes,

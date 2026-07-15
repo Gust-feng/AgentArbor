@@ -475,6 +475,69 @@ test("stable assistant turn displays omit duplicate system failure text from wor
   );
 });
 
+test("stable assistant turn displays remove a failure activity cached before the final failure notice", () => {
+  const runningTurns = [
+    turn("user-1", "user", "继续", "completed"),
+    { ...turn("assistant-1", "assistant", "", "running"), runId: "run-1" },
+  ];
+  const transcriptNodes = [
+    transcriptNode({
+      nodeId: "tool-1",
+      runId: "run-1",
+      sequence: 1,
+      kind: "tool",
+      eventType: "tool.failed",
+      phase: "failed",
+      summary: "读取 README.md 失败",
+    }),
+    transcriptNode({
+      nodeId: "run-failed-1",
+      runId: "run-1",
+      sequence: 2,
+      kind: "system",
+      eventType: "run.failed",
+      phase: "failed",
+      summary: "provider quota exceeded",
+    }),
+  ];
+  const first = projectStableAssistantTurnDisplays({
+    projectedTurns: [
+      projected(runningTurns[0]!),
+      projected(runningTurns[1]!, "run-1"),
+    ],
+    turns: runningTurns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(runningTurns),
+    previousEmptyShells: assistantShellSnapshot([]),
+    assistantTurnSlotKeys: precomputeAssistantTurnSlotKeys(runningTurns),
+    transcriptNodesByRunId: new Map([["run-1", transcriptNodes]]),
+  });
+  const failedTurns = [
+    runningTurns[0]!,
+    { ...turn("assistant-1", "assistant", "错误信息：provider quota exceeded", "failed"), runId: "run-1" },
+  ];
+  const second = projectStableAssistantTurnDisplays({
+    previousDisplays: first.displays,
+    previousWorkflows: first.workflows,
+    projectedTurns: [
+      projected(failedTurns[0]!),
+      projected(failedTurns[1]!, "run-1"),
+    ],
+    turns: failedTurns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(failedTurns),
+    previousEmptyShells: assistantShellSnapshot([]),
+    assistantTurnSlotKeys: precomputeAssistantTurnSlotKeys(failedTurns),
+    transcriptNodesByRunId: new Map([["run-1", transcriptNodes]]),
+  });
+
+  const display = second.displays.get("assistant-1");
+  const activityItems = display?.workflow?.segments.flatMap((segment) =>
+    segment.kind === "activity" ? segment.timeline.items : []
+  ) ?? [];
+
+  assert.equal(display?.failure?.error, "错误信息：provider quota exceeded");
+  assert.deepEqual(activityItems.map((item) => item.nodeId), ["tool-1"]);
+});
+
 function projected<TTurn extends ReturnType<typeof turn>>(
   turn: TTurn,
   displayRunId?: string,

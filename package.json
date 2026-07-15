@@ -12,8 +12,9 @@
     "copy:sub-agents": "node scripts/copy-sub-agent-assets.mjs",
     "typecheck:panel": "tsc -p tsconfig.panel.json --noEmit",
     "build:panel": "vite build --config vite.panel.config.ts",
+    "test:panel": "vitest run --config vitest.panel.config.ts",
     "test:release-gate": "node --test scripts/windows-release-validation.test.mjs",
-    "test": "pnpm build && node scripts/run-node-tests.mjs && pnpm test:release-gate",
+    "test": "pnpm build && node scripts/run-node-tests.mjs && pnpm test:panel && pnpm test:release-gate",
     "smoke:real-ai": "pnpm build && node dist/app/real-ai-smoke.js",
     "panel": "pnpm build && node dist/app/panel.js",
     "panel:dev": "node scripts/panel-dev.mjs",
@@ -28,15 +29,20 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.0",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "electron": "^36.9.5",
     "electron-builder": "^26.0.12",
+    "jsdom": "29.1.1",
     "tailwindcss": "4.3.0",
     "typescript": "^5.9.0",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "4.1.10"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

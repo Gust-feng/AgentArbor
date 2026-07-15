@@ -27,6 +27,7 @@ import {
   parseModelCapabilityUpdate,
   parseModelCatalogUpdate,
   parseModelProviderOrderUpdate,
+  parseMcpEnvironmentRequest,
   parseMcpServerSecretValue,
   parseMcpServerImport,
   parseMcpServerUpdate,
@@ -546,15 +547,7 @@ export async function handlePanelConfigRoute(
   }
 
   if (request.method === "POST" && url.pathname === "/api/config/mcp/environment-check") {
-    const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? body as {
-      readonly commandLine?: unknown;
-      readonly command?: unknown;
-    } : {};
-    const result = await checkPanelMcpEnvironment({
-      commandLine: typeof record.commandLine === "string" ? record.commandLine : undefined,
-      command: typeof record.command === "string" ? record.command : undefined,
-    });
+    const result = await checkPanelMcpEnvironment(parseMcpEnvironmentRequest(await readJsonBody(request)));
     writeJson(response, 200, {
       ok: result.ok,
       status: result.status,
@@ -569,15 +562,7 @@ export async function handlePanelConfigRoute(
   }
 
   if (request.method === "POST" && url.pathname === "/api/config/mcp/environment-install") {
-    const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? body as {
-      readonly commandLine?: unknown;
-      readonly command?: unknown;
-    } : {};
-    const result = await installPanelMcpEnvironment({
-      commandLine: typeof record.commandLine === "string" ? record.commandLine : undefined,
-      command: typeof record.command === "string" ? record.command : undefined,
-    });
+    const result = await installPanelMcpEnvironment(parseMcpEnvironmentRequest(await readJsonBody(request)));
     writeJson(response, 200, {
       ok: result.ok,
       status: result.status,

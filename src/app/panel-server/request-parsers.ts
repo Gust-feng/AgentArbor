@@ -123,6 +123,11 @@ type DeepRunControlRequestInput = {
 
 type ContextAttachmentPreviewRequestInput = CreateContextAttachmentPreviewInput;
 
+export type McpEnvironmentRequestInput = {
+  readonly commandLine?: string;
+  readonly command?: string;
+};
+
 const optionalTrimmedStringSchema = z.preprocess(
   (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined,
   z.string().optional(),
@@ -227,6 +232,10 @@ const confirmationDecisionRequestSchema = z.preprocess(normalizeRequestObject, z
 const skillStateRequestSchema = z.preprocess(normalizeRequestObject, z.object({
   enabled: z.unknown().optional(),
   stateKey: optionalTrimmedStringSchema,
+}));
+const mcpEnvironmentRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  commandLine: optionalTrimmedStringSchema,
+  command: optionalTrimmedStringSchema,
 }));
 
 // Keep request parsing stateless. Route modules decide what to do with validated inputs.
@@ -445,6 +454,10 @@ export function parseMcpServerSecretValue(raw: unknown): {
     throw new PanelHttpError(400, "missing_mcp_secret_value", "MCP secret value 不能为空。");
   }
   return { secretRef, value };
+}
+
+export function parseMcpEnvironmentRequest(raw: unknown): McpEnvironmentRequestInput {
+  return mcpEnvironmentRequestSchema.parse(raw);
 }
 
 export function parseMcpServerImport(raw: unknown): readonly UpsertMcpServerInput[] {

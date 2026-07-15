@@ -9,6 +9,7 @@ import {
   parseDeepChildMessageRequest,
   parseDeepIntakeRequest,
   parseDeepRunControlRequest,
+  parseMcpEnvironmentRequest,
   parseMcpServerImport,
   parseRunInput,
   parseToolConfirmationUpdate,
@@ -156,6 +157,22 @@ test("Deep and context request schemas preserve explicit 400 errors for invalid 
     () => parseContextAttachmentPreviewRequest({ kind: "archive", value: "x" }),
     "invalid_context_attachment_kind",
   );
+});
+
+test("MCP environment requests use the shared schema boundary", () => {
+  assert.deepEqual(parseMcpEnvironmentRequest({
+    commandLine: "  npx -y @example/mcp  ",
+    command: "  npx  ",
+    legacyArgs: ["ignored"],
+  }), {
+    commandLine: "npx -y @example/mcp",
+    command: "npx",
+  });
+  assert.deepEqual(parseMcpEnvironmentRequest({ commandLine: 42, command: false }), {
+    commandLine: undefined,
+    command: undefined,
+  });
+  assert.deepEqual(parseMcpEnvironmentRequest(["npx"]), {});
 });
 
 test("readJsonBody enforces the existing body limit before schema parsing", async () => {

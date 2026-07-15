@@ -3,7 +3,6 @@ import type { ModelCapabilities } from "./config";
 import type { ContextAttachment } from "./context";
 import type {
   ToolDisplayProjection,
-  ToolErrorDomain,
   ToolErrorFacts,
   ToolFileDisplayOperation,
 } from "./tools";
@@ -157,21 +156,6 @@ export type RunEvent = {
     readonly error?: string;
     readonly errorDomain?: string;
     readonly errorFacts?: ToolErrorFacts;
-    readonly subAgentRunId?: string;
-    readonly subAgentBatchId?: string;
-    readonly subAgentBatchIndex?: number;
-    readonly subAgentName?: string;
-    readonly subAgentStatus?: "completed" | "failed" | "approval_required" | "cancelled" | "running";
-    readonly subAgentTask?: string;
-    readonly subAgentModelRounds?: number;
-    readonly subAgentToolCalls?: number;
-    readonly subAgentDurationMs?: number;
-    readonly subAgentTotalCount?: number;
-    readonly subAgentSuccessCount?: number;
-    readonly subAgentFailedCount?: number;
-    readonly subAgentCancelledCount?: number;
-    readonly subAgentApprovalRequiredCount?: number;
-    readonly subAgentNotStartedCount?: number;
   };
 };
 
@@ -188,65 +172,6 @@ export type ModelUsage = {
   readonly firstTokenLatencyMs?: number;
   readonly outputDurationMs?: number;
   readonly outputTokensPerSecond?: number;
-};
-
-export type SubAgentRunStatus = "completed" | "failed" | "approval_required" | "cancelled";
-
-export type SubAgentModelExchange = {
-  readonly requestId: string;
-  readonly responseId?: string;
-  readonly status: "requested" | "completed" | "failed" | "cancelled";
-  readonly purpose?: string;
-  readonly requestedAt: string;
-  readonly completedAt?: string;
-  readonly messageRefs: readonly string[];
-  readonly messageCount: number;
-  readonly visibleToolCount: number;
-  readonly toolCallRefs: readonly {
-    readonly callId: string;
-    readonly toolName: string;
-  }[];
-  readonly failureKind?: string;
-  readonly failureMessage?: string;
-  readonly retryable?: boolean;
-  readonly finishReason?: string;
-  readonly usage?: ModelUsage;
-};
-
-export type SubAgentToolTrace = {
-  readonly callId: string;
-  readonly toolName: string;
-  readonly status: "requested" | "approval_required" | "completed" | "failed" | "cancelled";
-  readonly startedAt?: string;
-  readonly completedAt?: string;
-  readonly durationMs?: number;
-  readonly confirmationId?: string;
-  readonly error?: string;
-  readonly errorDomain?: ToolErrorDomain;
-  readonly errorFacts?: ToolErrorFacts;
-};
-
-export type SubAgentRunView = {
-  readonly parentRunId?: string;
-  readonly parentToolCallId?: string;
-  readonly subRunId: string;
-  readonly batchId?: string;
-  readonly batchIndex?: number;
-  readonly subAgentId: string;
-  readonly subAgentName: string;
-  readonly task: string;
-  readonly context?: string;
-  readonly status: SubAgentRunStatus;
-  readonly startedAt: string;
-  readonly completedAt?: string;
-  readonly durationMs: number;
-  readonly modelRounds: number;
-  readonly toolCalls: number;
-  readonly summary: string;
-  readonly fullOutput?: string;
-  readonly error?: string;
-  readonly modelExchanges: readonly SubAgentModelExchange[];
-  readonly toolTraces: readonly SubAgentToolTrace[];
 };
 
 export type PanelStreamEvent = {
@@ -280,7 +205,6 @@ export type TranscriptNodeKind =
   | "tool"
   | "confirmation"
   | "user_decision"
-  | "sub_agent"
   | "answer"
   | "body"
   | "system";
@@ -324,16 +248,6 @@ export type TranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
-  readonly subAgentRunId?: string;
-  readonly subAgentBatchId?: string;
-  readonly subAgentName?: string;
-  readonly subAgentTask?: string;
-  readonly subAgentTotalCount?: number;
-  readonly subAgentSuccessCount?: number;
-  readonly subAgentFailedCount?: number;
-  readonly subAgentCancelledCount?: number;
-  readonly subAgentApprovalRequiredCount?: number;
-  readonly subAgentNotStartedCount?: number;
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: TranscriptConfirmation;
   readonly modelUsage?: ModelUsage;
@@ -419,7 +333,6 @@ export type DesktopWorkView = {
   readonly deliverable?: AgentDeliverable;
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes?: readonly TranscriptNode[];
-  readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly workSummary: {
     readonly summary: string;
     readonly pendingActionCount: number;

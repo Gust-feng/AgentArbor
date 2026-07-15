@@ -29,13 +29,13 @@ import {
   type DesktopWindowMaximizeState,
 } from "./panel-desktop-window-controls.js";
 import { startLocalPanelServer } from "../panel-server.js";
-import type { AppUpdateServiceLike } from "../app-update-service.js";
-import { createUnsupportedAppUpdateService } from "../app-update-service.js";
+import type { AppUpdateServiceLike } from "../app-update/app-update-service.js";
+import { createUnsupportedAppUpdateService } from "../app-update/app-update-service.js";
 import {
   createElectronAppUpdateService,
   electronAutoUpdaterFromModule,
   type ElectronUpdaterLike,
-} from "../electron-app-update-service.js";
+} from "../app-update/electron-app-update-service.js";
 
 const activeWindows = new Set<BrowserWindow>();
 const activeDesktopSessions = new Set<PanelDesktopSession>();

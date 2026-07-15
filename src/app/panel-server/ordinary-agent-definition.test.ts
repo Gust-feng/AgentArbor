@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
+import { runAgentDefinitionRef } from "../agent-definitions/agent-definition-runtime.js";
 import { desktopAgentDefinitionFromConfig } from "../agent-prompts/desktop-agent-configured-definition.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { reconstructFrozenOrdinaryDefinition } from "./runtime.js";

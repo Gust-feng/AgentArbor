@@ -76,9 +76,9 @@ const modelMessageSchema = z.object({
   }
 });
 const configSchema = z.object({
-  profileId: z.string().min(1), providerKind: z.enum(["openai_compatible", "anthropic", "gemini", "ollama", "local"]),
-  protocolKind: z.enum(["openai_responses", "openai_compatible_chat_completions", "anthropic_messages", "gemini_generate_content"]),
-  baseUrl: z.string(), defaultAiMode: z.enum(["none", "fake", "openai-compatible", "openai-responses"]),
+  profileId: z.string().min(1), providerKind: z.literal("openai_compatible"),
+  protocolKind: z.enum(["openai_responses", "openai_compatible_chat_completions"]),
+  baseUrl: z.string(), defaultAiMode: z.enum(["openai-compatible", "openai-responses"]),
   secretRef: z.string(), secretConfigured: z.boolean(), updatedAt: z.string().min(1),
 }).passthrough();
 const capabilitySnapshotSchema = z.object({
@@ -135,7 +135,7 @@ const capabilityResolutionSchema = z.object({
   toolVisibilityProfileId: z.string().min(1),
   capabilityPlan: z.object({
     protocolToolCallCapabilities: z.object({
-      protocolKind: z.enum(["openai_responses", "openai_compatible_chat_completions", "anthropic_messages", "gemini_generate_content"]),
+      protocolKind: z.enum(["openai_responses", "openai_compatible_chat_completions"]),
       canSendToolDefinitions: z.boolean(),
       canReceiveToolCalls: z.boolean(),
       canRoundTripToolResults: z.boolean(),

@@ -4,6 +4,7 @@ import type {
   ModelCapabilityOverrideSettings,
 } from "../../domain/config/index.js";
 import {
+  ConfigSchemaValidationError,
   asRecord,
   normalizeRequiredConfigString,
   optionalString,
@@ -92,8 +93,6 @@ function parsePartialCapabilities(record: Record<string, unknown>): NonNullable<
 function normalizePreferredApiStyle(value: ModelCapabilities["preferredApiStyle"] | undefined): ModelCapabilities["preferredApiStyle"] | undefined {
   return value === "chat_completions" ||
     value === "responses" ||
-    value === "messages" ||
-    value === "gemini_generate_content" ||
     value === "openai_compatible"
     ? value
     : undefined;
@@ -119,21 +118,26 @@ function booleanFromUnknown(value: unknown): boolean | undefined {
 }
 
 function optionalModelProviderKind(value: unknown): AgentArborLocalSettings["modelProvider"]["providerKind"] | undefined {
-  return value === "openai_compatible" || value === "anthropic" || value === "gemini" || value === "ollama" || value === "local"
-    ? value
-    : undefined;
+  if (value === undefined) return undefined;
+  if (value === "openai_compatible") return value;
+  throw new ConfigSchemaValidationError(
+    "Invalid AgentArbor config file: capability override provider kind must be openai_compatible."
+  );
 }
 
 function parsePreferredApiStyle(
   value: unknown
 ): NonNullable<AgentArborLocalSettings["modelCapabilityOverrides"]>[number]["capabilities"]["preferredApiStyle"] {
-  return value === "chat_completions" ||
+  if (value === undefined) return undefined;
+  if (value === "chat_completions" ||
     value === "responses" ||
-    value === "messages" ||
-    value === "gemini_generate_content" ||
     value === "openai_compatible"
-    ? value
-    : undefined;
+  ) {
+    return value;
+  }
+  throw new ConfigSchemaValidationError(
+    "Invalid AgentArbor config file: preferred API style must use an OpenAI protocol."
+  );
 }
 
 function parseModelStability(

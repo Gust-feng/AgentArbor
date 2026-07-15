@@ -59,12 +59,11 @@ export async function collectOrdinaryAgentSourceFiles(): Promise<string[]> {
   const appRoot = path.join(process.cwd(), "src", "app");
   const panelServerRoot = path.join(appRoot, "panel-server");
   const files = [
-    ...(await collectSourceFiles(path.join(appRoot, "basic-agent-runtime"))),
-    ...(await collectDirectSourceFiles(path.join(appRoot, "desktop-agent"), (name) =>
-      name.startsWith("desktop-agent-session")
-    )),
-    ...(await collectDirectSourceFiles(panelServerRoot, (name) => name.startsWith("basic-agent"))),
-    ...(await collectDirectSourceFiles(panelServerRoot, (name) => name.startsWith("conversation"))),
+    ...(await collectSourceFiles(path.join(appRoot, "ordinary-agent"))),
+    ...(await collectSourceFiles(path.join(appRoot, "sub-agents"))),
+    ...(await collectSourceFiles(path.join(appRoot, "desktop-agent"))),
+    ...(await collectSourceFiles(path.join(appRoot, "agent-prompts"))),
+    ...(await collectDirectSourceFiles(panelServerRoot, (name) => name.startsWith("ordinary-"))),
   ];
 
   return [...new Set(files)].sort((left, right) => relativePath(left).localeCompare(relativePath(right)));

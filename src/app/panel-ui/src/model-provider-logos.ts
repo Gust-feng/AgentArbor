@@ -1,4 +1,3 @@
-import anthropicLogo from "./assets/providers/anthropic.svg?raw";
 import deepseekLogo from "./assets/providers/deepseek.svg?raw";
 import kimiLogo from "./assets/providers/kimi.svg?raw";
 import minimaxLogo from "./assets/providers/minimax.svg?raw";
@@ -8,7 +7,6 @@ import zaiLogo from "./assets/providers/zai.svg?raw";
 import { decorativeSvg } from "./icon-svg";
 
 const providerLogos = {
-  anthropic: decorativeSvg(anthropicLogo),
   deepseek: decorativeSvg(deepseekLogo),
   kimi: decorativeSvg(kimiLogo),
   minimax: decorativeSvg(minimaxLogo),
@@ -33,13 +31,12 @@ export type ModelProviderLogo = {
   readonly tone: string;
 };
 
-export type ModelProviderIdentity = "openai" | "claude" | "deepseek" | "kimi" | "glm" | "minimax" | "unknown";
+export type ModelProviderIdentity = "openai" | "deepseek" | "kimi" | "glm" | "minimax" | "unknown";
+export type ModelFamilyIdentity = ModelProviderIdentity | "claude";
 
 const builtinProviderPresetAliases = new Map<string, Exclude<ModelProviderIdentity, "unknown">>([
   ["default", "openai"],
   ["openai", "openai"],
-  ["claude", "claude"],
-  ["anthropic", "claude"],
   ["deepseek", "deepseek"],
   ["moonshot", "kimi"],
   ["kimi", "kimi"],
@@ -51,7 +48,6 @@ const builtinProviderPresetAliases = new Map<string, Exclude<ModelProviderIdenti
 
 const providerIdentityPatterns: readonly [Exclude<ModelProviderIdentity, "unknown">, RegExp][] = [
   ["openai", /api\.openai\.com|openai|chatgpt|gpt/iu],
-  ["claude", /anthropic|claude/iu],
   ["deepseek", /deepseek/iu],
   ["kimi", /moonshot|kimi|月之暗面/iu],
   ["glm", /bigmodel|zhipu|glm|智谱/iu],
@@ -60,7 +56,6 @@ const providerIdentityPatterns: readonly [Exclude<ModelProviderIdentity, "unknow
 
 export function modelProviderDisplayName(identity: Exclude<ModelProviderIdentity, "unknown">): string {
   if (identity === "openai") return "OpenAI";
-  if (identity === "claude") return "Anthropic";
   if (identity === "deepseek") return "DeepSeek";
   if (identity === "kimi") return "月之暗面";
   if (identity === "glm") return "智谱 AI";
@@ -84,10 +79,12 @@ export function resolveModelProviderIdentity(input: ModelProviderLogoInput): Mod
 export function resolveModelFamilyIdentity(input: {
   readonly model?: string;
   readonly displayName?: string;
-}): ModelProviderIdentity {
-  return resolveStrongProviderSignal(
-    normalizeProviderSignal([input.displayName, input.model].filter(Boolean).join(" "))
-  ) ?? "unknown";
+}): ModelFamilyIdentity {
+  const signal = normalizeProviderSignal([input.displayName, input.model].filter(Boolean).join(" "));
+  if (/anthropic|claude/iu.test(signal)) {
+    return "claude";
+  }
+  return resolveStrongProviderSignal(signal) ?? "unknown";
 }
 
 function normalizeProviderSignal(value: string | undefined): string {
@@ -106,11 +103,10 @@ function resolveStrongProviderSignal(value: string): Exclude<ModelProviderIdenti
 export function modelProviderSortRank(input: ModelProviderLogoInput): number {
   const identity = resolveModelProviderIdentity(input);
   if (identity === "openai") return 0;
-  if (identity === "claude") return 1;
-  if (identity === "deepseek") return 2;
-  if (identity === "kimi") return 3;
-  if (identity === "glm") return 4;
-  if (identity === "minimax") return 5;
+  if (identity === "deepseek") return 1;
+  if (identity === "kimi") return 2;
+  if (identity === "glm") return 3;
+  if (identity === "minimax") return 4;
   return 99;
 }
 
@@ -120,7 +116,6 @@ export function resolveModelProviderLogo(input: ModelProviderLogoInput): ModelPr
   }
   const identity = resolveModelProviderIdentity(input);
   if (identity === "openai") return { svg: providerLogos.openai, tone: "openai" };
-  if (identity === "claude") return { svg: providerLogos.anthropic, tone: "claude" };
   if (identity === "deepseek") return { svg: providerLogos.deepseek, tone: "deepseek" };
   if (identity === "kimi") return { svg: providerLogos.kimi, tone: "kimi" };
   if (identity === "glm") return { svg: providerLogos.zai, tone: "glm" };
@@ -149,9 +144,6 @@ export function builtinProviderPresetId(input: {
   if (normalizedBaseUrl === "https://api.openai.com" || normalizedBaseUrl === "https://api.openai.com/v1") {
     return "openai";
   }
-  if (normalizedBaseUrl === "https://api.anthropic.com") {
-    return "claude";
-  }
   if (normalizedBaseUrl === "https://api.deepseek.com") {
     return "deepseek";
   }
@@ -173,7 +165,6 @@ function builtinProviderIdentity(input: ModelProviderLogoInput): Exclude<ModelPr
     return undefined;
   }
   if (presetId === "openai") return "openai";
-  if (presetId === "claude") return "claude";
   if (presetId === "deepseek") return "deepseek";
   if (presetId === "moonshot") return "kimi";
   if (presetId === "glm") return "glm";
@@ -183,6 +174,5 @@ function builtinProviderIdentity(input: ModelProviderLogoInput): Exclude<ModelPr
 
 function presetIdFromIdentity(identity: Exclude<ModelProviderIdentity, "unknown">): string {
   if (identity === "kimi") return "moonshot";
-  if (identity === "claude") return "claude";
   return identity;
 }

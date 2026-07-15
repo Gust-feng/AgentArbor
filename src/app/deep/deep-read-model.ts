@@ -3,12 +3,12 @@ import type {
   ChildAgentRunModelMessageTrace,
   ChildAgentRunParentInstruction,
 } from "../../domain/underground/agent-fabric.js";
-import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import type { WorkspaceFolderSummary } from "../workspace-folder-summary.js";
-import { workspaceFolderSummaryFromPath } from "../workspace-folder-summary.js";
-import { safeAgentRunTreeRef } from "../underground/events.js";
-import { projectConversationRunEnvelopeViewBase } from "../run-read-model/envelope.js";
-import { projectSharedConversationRunSummaryBase } from "../run-read-model/summary.js";
+import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
+import {
+  workspaceFolderSummaryFromPath,
+  type WorkspaceFolderSummary,
+} from "../task-soil/workspace-folder-summary.js";
+import { deepConversationRunEnvelope, deepConversationRunSummary } from "./deep-run-view-base.js";
 import type {
   DeepConversation,
   DeepFollowUpContext,
@@ -20,6 +20,7 @@ import type {
   DeepRunStatus,
 } from "./contracts.js";
 import type { DeepRunRecord } from "./deep-runtime.js";
+import { deepAgentRunTreeRef } from "./deep-agent-run-tree-ref.js";
 
 export function summarizeTerminalDeepRunForIntake(record: DeepRunRecord): string {
   const conclusion = record.report?.conclusion.conclusion ??
@@ -166,8 +167,8 @@ export function projectDeepRunSummary(
   const workspaceFolder = workspaceFolderForDeepRecord(rootRecord ?? record) ??
     workspaceFolderForDeepRecord(record);
   return {
-    ...projectSharedConversationRunSummaryBase({
-      ...projectConversationRunEnvelopeViewBase({
+    ...deepConversationRunSummary({
+      ...deepConversationRunEnvelope({
         runId: record.run.runId,
         conversationId: record.run.conversationId,
         parentRunId: record.run.parentRunId,
@@ -201,7 +202,7 @@ export function projectDeepRunView(
     workspaceFolderForDeepConversation(conversation);
   return {
     run: {
-      ...projectConversationRunEnvelopeViewBase({
+      ...deepConversationRunEnvelope({
         runId: record.run.runId,
         conversationId: record.run.conversationId,
         parentRunId: record.run.parentRunId,
@@ -216,7 +217,7 @@ export function projectDeepRunView(
       updatedAt: record.run.updatedAt,
       workspaceFolder,
     },
-    agentRunTree: safeAgentRunTreeRef(record.agentRunTree),
+    agentRunTree: deepAgentRunTreeRef(record.agentRunTree),
     report: record.report,
     eventSequence: record.eventSequence,
     liveProjection: record.liveProjection ?? fallbackLiveProjectionForRecord(record),

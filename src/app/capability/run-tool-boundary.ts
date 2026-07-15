@@ -18,11 +18,15 @@ export type ResolveRunToolBoundaryInput = {
   readonly capabilityPlan?: RunCapabilityPlan;
   readonly platform?: NodeJS.Platform;
   readonly toolCenter?: ToolExecutionBroker;
+  readonly agentToolDefinitions?: readonly ToolDefinition[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
 };
 
 export type ResolvedRunToolBoundary = {
+  /** ToolCenter-backed tools allowed to execute in this run. */
   readonly allowedTools: readonly string[];
+  /** SDK AgentTools allowed by the same frozen capability resolution. */
+  readonly allowedAgentToolNames: readonly string[];
   readonly toolDefinitions: readonly ToolDefinition[];
   readonly capabilityResolution?: RunCapabilityResolution;
 };
@@ -31,6 +35,7 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
   if (input.snapshot === undefined) {
     return {
       allowedTools: [],
+      allowedAgentToolNames: [],
       toolDefinitions: [],
       capabilityResolution: undefined,
     };
@@ -52,7 +57,8 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
             capabilityPlan,
           }),
           input.toolCenter,
-          input.snapshot
+          input.snapshot,
+          input.agentToolDefinitions,
         ),
         input.snapshot
       ),
@@ -63,17 +69,30 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
     ),
     input.skillContexts ?? []
   );
-  return {
+  const agentToolDefinitions = new Map(
+    (input.agentToolDefinitions ?? []).map((definition) => [definition.name, definition]),
+  );
+  const allowedAgentToolNames = capabilityResolution.allowedTools.filter((name) =>
+    agentToolDefinitions.has(name)
+  );
+  const allowedTools = capabilityResolution.allowedTools.filter((name) =>
+    !agentToolDefinitions.has(name)
+  );
+  const frozenDefinitions = frozenToolDefinitionsForRun({
+    snapshot: input.snapshot,
     allowedTools: capabilityResolution.allowedTools,
-    toolDefinitions: frozenToolDefinitionsForRun({
-      snapshot: input.snapshot,
-      allowedTools: capabilityResolution.allowedTools,
-    }),
+  });
+  return {
+    allowedTools,
+    allowedAgentToolNames,
+    toolDefinitions: frozenDefinitions.map((definition) =>
+      agentToolDefinitions.get(definition.name) ?? definition
+    ),
     capabilityResolution,
   };
 }
 
-const PRESET_SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent", "call_sub_agents"]);
+const PRESET_SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent"]);
 
 export function hidePresetSubAgentToolsWithoutEnabledCatalog(
   resolution: RunCapabilityResolution,
@@ -107,9 +126,13 @@ export function hidePresetSubAgentToolsWithoutEnabledCatalog(
 export function restrictRunCapabilityResolutionToExecutableTools(
   resolution: RunCapabilityResolution,
   toolCenter: ToolExecutionBroker | undefined,
-  snapshot?: BasicAgentCapabilitySnapshot
+  snapshot?: BasicAgentCapabilitySnapshot,
+  agentToolDefinitions: readonly ToolDefinition[] = [],
 ): RunCapabilityResolution {
-  const executableDefinitions = new Map((toolCenter?.list() ?? []).map((tool) => [tool.name, tool]));
+  const executableDefinitions = new Map([
+    ...(toolCenter?.list() ?? []).map((tool) => [tool.name, tool] as const),
+    ...agentToolDefinitions.map((tool) => [tool.name, tool] as const),
+  ]);
   const executableTools = new Set(executableDefinitions.keys());
   const frozenToolsByName = new Map(snapshot?.toolCatalog.tools.map((tool) => [tool.name, tool]) ?? []);
   if (executableTools.size === 0) {

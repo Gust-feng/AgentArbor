@@ -4,9 +4,9 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveAgentArborRuntimeDatabasePaths } from "../../../adapters/runtime-database/index.js";
+import { resolveAgentArborRuntimePaths } from "../../../adapters/runtime-storage/index.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
-import { ConfigCenter } from "../../config-center.js";
+import { ConfigCenter } from "../../config-center/index.js";
 import { resolveDefaultPanelSkillRoots } from "../runtime.js";
 import {
   removeTemporaryTree,
@@ -106,7 +106,7 @@ test("panel usage statistics route reads the empty Ordinary feature store", asyn
 
 test("panel ignores obsolete legacy runtime snapshots instead of adding a compatibility reader", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-snapshot-incompatible-"));
-  const paths = resolveAgentArborRuntimeDatabasePaths(directory);
+  const paths = resolveAgentArborRuntimePaths(directory);
   const runId = "legacy-runtime-run";
   const runDirectory = path.join(paths.runtimeHome, "runs", encodeURIComponent(runId));
   await fs.mkdir(runDirectory, { recursive: true });

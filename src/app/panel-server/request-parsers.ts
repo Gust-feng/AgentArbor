@@ -22,12 +22,18 @@ import type {
 import { normalizeModelCatalogDisplayName } from "../../domain/config/index.js";
 import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
-import { TaskSoilInputValidationError, parseDesktopTaskSoilInput, type DesktopTaskSoilInput } from "../task-soil-workspace.js";
+import {
+  TaskSoilInputValidationError,
+  parseDesktopTaskSoilInput,
+  type DesktopTaskSoilInput,
+} from "../task-soil/task-soil-workspace.js";
+import type { CreateContextAttachmentPreviewInput } from "../task-soil/context-attachments.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { AgentArborRunMode as PanelRunMode } from "../run-runtime-core/run-mode-policy.js";
 import { DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS } from "../config-center/desktop-agent-settings.js";
 import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
+import { z } from "zod";
 import { PanelHttpError } from "./http-utils.js";
 
 export type PanelRunInput = {
@@ -71,9 +77,160 @@ export type ModelCapabilityUpdateInput = {
   readonly capabilities: Partial<ModelCapabilities>;
 };
 
+type ConversationRollbackInput = {
+  readonly targetTurnId?: string;
+  readonly targetRunId?: string;
+  readonly stepsBack?: number;
+};
+
+type DeepIntakeRequestInput = {
+  readonly message: string;
+  readonly aiMode?: ModelRuntimeMode;
+  readonly conversationId?: string;
+  readonly activeRunId?: string;
+  readonly workspaceDirectory?: string;
+  readonly taskSoilInput?: DesktopTaskSoilInput;
+};
+
+type DeepConversationCreateRequestInput = {
+  readonly goal: string;
+  readonly aiMode?: ModelRuntimeMode;
+  readonly title?: string;
+  readonly workspaceDirectory?: string;
+  readonly taskSoilInput: DesktopTaskSoilInput;
+};
+
+type DeepRunStartRequestInput = {
+  readonly aiMode?: ModelRuntimeMode;
+  readonly intakeTurnId?: string;
+  readonly confirmedObjective?: string;
+  readonly confirmedPlan?: string;
+  readonly parentRunId?: string;
+  readonly workspaceDirectory?: string;
+};
+
+type DeepRunFollowUpRequestInput = {
+  readonly message: string;
+  readonly aiMode?: ModelRuntimeMode;
+  readonly workspaceDirectory?: string;
+  readonly taskSoilInput?: DesktopTaskSoilInput;
+};
+
+type DeepRunControlRequestInput = {
+  readonly reason?: string;
+  readonly correctionContext?: readonly string[];
+};
+
+type ContextAttachmentPreviewRequestInput = CreateContextAttachmentPreviewInput;
+
+const optionalTrimmedStringSchema = z.preprocess(
+  (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined,
+  z.string().optional(),
+);
+const optionalBooleanSchema = z.preprocess(
+  (value) => typeof value === "boolean" ? value : undefined,
+  z.boolean().optional(),
+);
+const optionalFiniteNumberSchema = z.preprocess(
+  (value) => typeof value === "number" && Number.isFinite(value) ? value : undefined,
+  z.number().optional(),
+);
+const normalizeRequestObject = (value: unknown): unknown =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+const requestRecordSchema = z.preprocess(normalizeRequestObject, z.record(z.string(), z.unknown()));
+const modelProviderKindSchema = z.enum(["openai_compatible"]);
+const modelProtocolKindSchema = z.enum(["openai_responses", "openai_compatible_chat_completions"]);
+const preferredApiStyleSchema = z.enum(["chat_completions", "responses", "openai_compatible"]);
+const modelStabilitySchema = z.enum(["stable", "preview", "deprecated", "unknown"]);
+const mcpTransportSchema = z.enum(["stdio", "http"]);
+const mcpConfirmationModeSchema = z.enum(["always", "unsafe_only", "never"]);
+const mcpToolExposureModeSchema = z.enum(["none", "all", "selected"]);
+const webSearchProviderSchema = z.enum(["tavily", "exa", "zai", "metaso", "google", "bing", "model_builtin", "none"]);
+const runModeSchema = z.enum(["agent", "deep"]);
+const toolConfirmationPolicySchema = z.enum(["prompt", "full_access"]);
+const skillTriggerModeSchema = z.enum(["keyword", "model"]);
+const aiModeSchema = z.enum(["none", "fake", "openai-compatible", "openai-responses"]);
+
+const ordinaryRunRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  goal: optionalTrimmedStringSchema,
+  aiMode: z.unknown().optional(),
+  runMode: z.unknown().optional(),
+  reasoningEffort: z.unknown().optional(),
+  toolConfirmationPolicy: z.unknown().optional(),
+  modelOverride: z.unknown().optional(),
+  workspaceDirectory: optionalTrimmedStringSchema,
+  taskSoilInput: z.unknown().optional(),
+}));
+
+const conversationRollbackRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  targetTurnId: optionalTrimmedStringSchema,
+  targetRunId: optionalTrimmedStringSchema,
+  stepsBack: optionalFiniteNumberSchema,
+}));
+
+const deepIntakeRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  message: optionalTrimmedStringSchema,
+  aiMode: z.unknown().optional(),
+  conversationId: optionalTrimmedStringSchema,
+  activeRunId: optionalTrimmedStringSchema,
+  workspaceDirectory: optionalTrimmedStringSchema,
+  taskSoilInput: z.unknown().optional(),
+}));
+
+const deepConversationCreateRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  goal: optionalTrimmedStringSchema,
+  aiMode: z.unknown().optional(),
+  title: optionalTrimmedStringSchema,
+  workspaceDirectory: optionalTrimmedStringSchema,
+  taskSoilInput: z.unknown().optional(),
+}));
+
+const deepRunStartRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  aiMode: z.unknown().optional(),
+  intakeTurnId: optionalTrimmedStringSchema,
+  confirmedObjective: optionalTrimmedStringSchema,
+  confirmedPlan: optionalTrimmedStringSchema,
+  parentRunId: optionalTrimmedStringSchema,
+  workspaceDirectory: optionalTrimmedStringSchema,
+}));
+
+const deepRunFollowUpRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  message: optionalTrimmedStringSchema,
+  aiMode: z.unknown().optional(),
+  workspaceDirectory: optionalTrimmedStringSchema,
+  taskSoilInput: z.unknown().optional(),
+}));
+
+const deepRunControlRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  reason: optionalTrimmedStringSchema,
+  correctionContext: z.unknown().optional(),
+}));
+
+const contextAttachmentPreviewRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  kind: z.unknown().optional(),
+  value: optionalTrimmedStringSchema,
+  ref: optionalTrimmedStringSchema,
+  title: optionalTrimmedStringSchema,
+  summary: optionalTrimmedStringSchema,
+}));
+const conversationRenameRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  title: optionalTrimmedStringSchema,
+}));
+const conversationPinRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  pinned: z.unknown().optional(),
+}));
+const confirmationDecisionRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  decision: z.unknown().optional(),
+  guidance: optionalTrimmedStringSchema,
+}));
+const skillStateRequestSchema = z.preprocess(normalizeRequestObject, z.object({
+  enabled: z.unknown().optional(),
+  stateKey: optionalTrimmedStringSchema,
+}));
+
 // Keep request parsing stateless. Route modules decide what to do with validated inputs.
 export function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   const update: UpdateModelProviderConfigInput = {
     profileId: optionalString(record.profileId),
     label: optionalString(record.label),
@@ -99,7 +256,7 @@ export function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput 
 
 export function parseCreateModelProfile(raw: unknown): CreateModelProviderProfileInput {
   const parsed = parseConfigUpdate(raw);
-  const profileId = optionalString(asRecord(raw).profileId);
+  const profileId = optionalString(parseRequestRecord(raw).profileId);
   if (profileId === undefined) {
     throw new PanelHttpError(400, "missing_model_profile_id", "模型 profile id 不能为空。");
   }
@@ -110,7 +267,7 @@ export function parseCreateModelProfile(raw: unknown): CreateModelProviderProfil
 }
 
 export function parseModelProviderOrderUpdate(raw: unknown): ModelProviderOrderUpdateInput {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   if (!Array.isArray(record.order)) {
     throw new PanelHttpError(400, "invalid_model_provider_order", "模型服务顺序必须是数组。");
   }
@@ -121,14 +278,14 @@ export function parseModelProviderOrderUpdate(raw: unknown): ModelProviderOrderU
 }
 
 export function parseModelCatalogUpdate(raw: unknown): ModelCatalogUpdateInput {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   const modelsRaw = record.models;
   if (!Array.isArray(modelsRaw)) {
     throw new PanelHttpError(400, "invalid_model_catalog", "模型列表必须是数组。");
   }
   const models = modelsRaw
     .map((item): ModelProviderModelCatalogItem | undefined => {
-      const model = asRecord(item);
+      const model = parseRequestRecord(item);
       const id = optionalString(model.id);
       if (id === undefined) {
         return undefined;
@@ -151,8 +308,8 @@ export function parseModelCatalogUpdate(raw: unknown): ModelCatalogUpdateInput {
 }
 
 export function parseModelCapabilityUpdate(raw: unknown): ModelCapabilityUpdateInput {
-  const record = asRecord(raw);
-  const capabilities = asRecord(record.capabilities ?? raw);
+  const record = parseRequestRecord(raw);
+  const capabilities = parseRequestRecord(record.capabilities ?? raw);
   return {
     profileId: optionalString(record.profileId),
     model: optionalString(record.model),
@@ -185,47 +342,29 @@ function positiveIntegerOrUndefined(value: unknown, message: string): number | u
 }
 
 function parseOptionalPreferredApiStyle(value: unknown): ModelCapabilities["preferredApiStyle"] | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (
-    value === "chat_completions" ||
-    value === "responses" ||
-    value === "messages" ||
-    value === "gemini_generate_content" ||
-    value === "openai_compatible"
-  ) {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_model_capability", "模型 API 风格无效。");
+  return parseOptionalEnum(preferredApiStyleSchema, value, "invalid_model_capability", "模型 API 风格无效。");
 }
 
 function parseOptionalModelStability(value: unknown): ModelCapabilities["stability"] | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "stable" || value === "preview" || value === "deprecated" || value === "unknown") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_model_capability", "模型稳定性无效。");
+  return parseOptionalEnum(modelStabilitySchema, value, "invalid_model_capability", "模型稳定性无效。");
 }
 
 export function parseToolStateUpdate(toolName: string, raw: unknown): ToolStateSettings {
-  const record = asRecord(raw);
-  const enabled = booleanOrUndefined(record.enabled);
-  if (enabled === undefined) {
+  const request = z.preprocess(normalizeRequestObject, z.object({ enabled: z.unknown().optional() })).parse(raw);
+  const enabled = z.boolean().safeParse(request.enabled);
+  if (!enabled.success) {
     throw new PanelHttpError(400, "invalid_tool_state", "工具状态必须包含 enabled 布尔值。");
   }
   return {
     name: toolName,
-    enabled,
+    enabled: enabled.data,
     updatedAt: new Date().toISOString(),
   };
 }
 
 export function parseToolConfirmationUpdate(raw: unknown): UpdateToolConfirmationConfigInput {
-  const record = asRecord(raw);
-  const policy = parseToolConfirmationPolicy(record.policy);
+  const request = z.preprocess(normalizeRequestObject, z.object({ policy: z.unknown().optional() })).parse(raw);
+  const policy = parseToolConfirmationPolicy(request.policy);
   if (policy === undefined) {
     throw new PanelHttpError(400, "invalid_tool_confirmation_policy", "工具确认策略无效。");
   }
@@ -233,14 +372,17 @@ export function parseToolConfirmationUpdate(raw: unknown): UpdateToolConfirmatio
 }
 
 export function parseDesktopAgentConfigUpdate(raw: unknown): UpdateDesktopAgentConfigInput {
-  const record = asRecord(raw);
-  if (booleanOrUndefined(record.resetSystemPrompt) === true) {
+  const request = z.preprocess(normalizeRequestObject, z.object({
+    resetSystemPrompt: optionalBooleanSchema,
+    systemPrompt: z.unknown().optional(),
+  })).parse(raw);
+  if (request.resetSystemPrompt === true) {
     return { resetSystemPrompt: true };
   }
-  if (typeof record.systemPrompt !== "string") {
+  if (typeof request.systemPrompt !== "string") {
     throw new PanelHttpError(400, "missing_desktop_agent_system_prompt", "系统提示词不能为空。");
   }
-  const systemPrompt = record.systemPrompt.trim();
+  const systemPrompt = request.systemPrompt.trim();
   if (systemPrompt.length === 0) {
     throw new PanelHttpError(400, "missing_desktop_agent_system_prompt", "系统提示词不能为空。");
   }
@@ -251,8 +393,8 @@ export function parseDesktopAgentConfigUpdate(raw: unknown): UpdateDesktopAgentC
 }
 
 export function parseSkillTriggerUpdate(raw: unknown): UpdateSkillTriggerConfigInput {
-  const record = asRecord(raw);
-  const mode = parseSkillTriggerMode(record.mode);
+  const request = z.preprocess(normalizeRequestObject, z.object({ mode: z.unknown().optional() })).parse(raw);
+  const mode = parseSkillTriggerMode(request.mode);
   if (mode === undefined) {
     throw new PanelHttpError(400, "invalid_skill_trigger_mode", "Skills 触发方式无效。");
   }
@@ -260,7 +402,7 @@ export function parseSkillTriggerUpdate(raw: unknown): UpdateSkillTriggerConfigI
 }
 
 export function parseMcpServerUpdate(raw: unknown): UpsertMcpServerInput {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   const serverId = optionalString(record.serverId);
   if (serverId === undefined) {
     throw new PanelHttpError(400, "missing_mcp_server_id", "MCP server id 不能为空。");
@@ -292,7 +434,7 @@ export function parseMcpServerSecretValue(raw: unknown): {
   readonly secretRef: string;
   readonly value: string;
 } {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   const secretRef = optionalString(record.secretRef);
   const value = optionalString(record.value);
   if (secretRef === undefined) {
@@ -305,16 +447,17 @@ export function parseMcpServerSecretValue(raw: unknown): {
 }
 
 export function parseMcpServerImport(raw: unknown): readonly UpsertMcpServerInput[] {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   const source = typeof record.config === "string" ? parseJsonObject(record.config) : record.config ?? raw;
-  const sourceRecord = asRecord(source);
-  const serversRaw = sourceRecord.mcpServers ?? asRecord(sourceRecord.mcp).servers ?? sourceRecord.servers;
+  const sourceRecord = parseRequestRecord(source);
+  const serversRaw = sourceRecord.mcpServers;
   if (serversRaw === undefined) {
     throw new PanelHttpError(400, "missing_mcp_import_servers", "导入内容未找到 mcpServers。");
   }
-  const entries = Array.isArray(serversRaw)
-    ? serversRaw.map((server, index) => [optionalString(asRecord(server).name) ?? optionalString(asRecord(server).serverId) ?? `mcp-${index + 1}`, server] as const)
-    : Object.entries(asRecord(serversRaw));
+  if (Array.isArray(serversRaw)) {
+    throw new PanelHttpError(400, "invalid_mcp_import_servers", "mcpServers 必须是按 server id 索引的对象。");
+  }
+  const entries = Object.entries(parseRequestRecord(serversRaw));
   const imported = entries
     .map(([serverId, value]) => importedMcpServer(serverId, value))
     .filter((server): server is UpsertMcpServerInput => server !== undefined);
@@ -325,14 +468,14 @@ export function parseMcpServerImport(raw: unknown): readonly UpsertMcpServerInpu
 }
 
 export function parseWorkspaceUpdate(raw: unknown): UpdateWorkspaceConfigInput {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   return {
     workspaceDirectory: typeof record.workspaceDirectory === "string" ? record.workspaceDirectory : undefined,
   };
 }
 
 export function parseCommandShellUpdate(raw: unknown): UpdateCommandShellConfigInput {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   const kind = optionalString(record.kind);
   if (kind === undefined) {
     throw new PanelHttpError(400, "missing_command_shell_kind", "命令 shell 不能为空。");
@@ -354,7 +497,7 @@ export function parseCommandShellUpdate(raw: unknown): UpdateCommandShellConfigI
 }
 
 export function parseInformationAccessUpdate(raw: unknown): UpdateInformationAccessConfigInput {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   return {
     provider: parseOptionalWebSearchProvider(record.provider),
     apiKey: optionalString(record.apiKey),
@@ -367,7 +510,7 @@ export function parseInformationAccessUpdate(raw: unknown): UpdateInformationAcc
 }
 
 export function parseWebSearchUpdate(raw: unknown): UpdateWebSearchConfigInput {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   return {
     provider: parseOptionalWebSearchProvider(record.provider),
     apiKey: optionalString(record.apiKey),
@@ -380,34 +523,25 @@ export function parseWebSearchUpdate(raw: unknown): UpdateWebSearchConfigInput {
 }
 
 export function parseRunInput(raw: unknown): PanelRunInput {
-  const record = asRecord(raw);
-  const goal = optionalString(record.goal);
+  const request = ordinaryRunRequestSchema.parse(raw);
+  const goal = request.goal;
   if (goal === undefined) {
     throw new PanelHttpError(400, "missing_goal", "运行需要填写目标。");
   }
-  let taskSoilInput: DesktopTaskSoilInput;
-  try {
-    taskSoilInput = parseDesktopTaskSoilInput(raw);
-  } catch (error) {
-    if (error instanceof TaskSoilInputValidationError) {
-      throw new PanelHttpError(400, error.code, error.message);
-    }
-    throw error;
-  }
   return {
     goal,
-    aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。"),
-    requestedRunMode: parseOptionalRunMode(record.runMode),
-    reasoningEffort: parseRunReasoningEffort(record.reasoningEffort, record.openAI),
-    toolConfirmationPolicy: parseToolConfirmationPolicy(record.toolConfirmationPolicy),
-    modelOverride: parseModelOverride(record.modelOverride),
-    workspaceDirectory: optionalString(record.workspaceDirectory),
-    taskSoilInput,
+    aiMode: parseOptionalAiMode(request.aiMode, "AI 模式无效。"),
+    requestedRunMode: parseOptionalRunMode(request.runMode),
+    reasoningEffort: parseOptionalRunReasoningEffort(request.reasoningEffort),
+    toolConfirmationPolicy: parseToolConfirmationPolicy(request.toolConfirmationPolicy),
+    modelOverride: parseModelOverride(request.modelOverride),
+    workspaceDirectory: request.workspaceDirectory,
+    taskSoilInput: parseCanonicalTaskSoilInput(request.taskSoilInput),
   };
 }
 
 export function parseConversationRenameInput(raw: unknown): ConversationRenameInput {
-  const title = optionalString(asRecord(raw).title);
+  const title = conversationRenameRequestSchema.parse(raw).title;
   if (title === undefined) {
     throw new PanelHttpError(400, "missing_conversation_title", "会话标题不能为空。");
   }
@@ -415,27 +549,147 @@ export function parseConversationRenameInput(raw: unknown): ConversationRenameIn
 }
 
 export function parseConversationPinInput(raw: unknown): ConversationPinInput {
-  const pinned = asRecord(raw).pinned;
-  if (typeof pinned !== "boolean") {
+  const pinned = z.boolean().safeParse(conversationPinRequestSchema.parse(raw).pinned);
+  if (!pinned.success) {
     throw new PanelHttpError(400, "invalid_conversation_pin_state", "置顶状态必须是布尔值。");
   }
-  return { pinned };
+  return { pinned: pinned.data };
 }
 
 export function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecision, "decision" | "guidance"> {
-  const record = asRecord(raw);
-  const decision = optionalString(record.decision);
-  if (decision !== "approve_once" && decision !== "deny" && decision !== "guidance") {
+  const request = confirmationDecisionRequestSchema.parse(raw);
+  const decision = z.enum(["approve_once", "deny", "guidance"]).safeParse(request.decision);
+  if (!decision.success) {
     throw new PanelHttpError(400, "invalid_confirmation_decision", "确认操作无效。");
   }
-  const guidance = optionalString(record.guidance);
-  if (decision === "guidance" && guidance === undefined) {
+  const guidance = request.guidance;
+  if (decision.data === "guidance" && guidance === undefined) {
     throw new PanelHttpError(400, "missing_confirmation_guidance", "补充要求不能为空。");
   }
   return {
-    decision,
+    decision: decision.data,
     guidance: guidance === undefined ? undefined : compactDecisionGuidance(guidance),
   };
+}
+
+export function parseSkillStateRequest(raw: unknown): { readonly enabled: boolean; readonly stateKey?: string } {
+  const request = skillStateRequestSchema.parse(raw);
+  const enabled = z.boolean().safeParse(request.enabled);
+  if (!enabled.success) {
+    throw new PanelHttpError(400, "invalid_skill_state", "技能状态必须包含 enabled 布尔值。");
+  }
+  return { enabled: enabled.data, stateKey: request.stateKey };
+}
+
+export function parseConversationRollbackInput(raw: unknown): ConversationRollbackInput {
+  return conversationRollbackRequestSchema.parse(raw);
+}
+
+export function parseDeepIntakeRequest(raw: unknown): DeepIntakeRequestInput {
+  const request = deepIntakeRequestSchema.parse(raw);
+  if (request.message === undefined) {
+    throw new PanelHttpError(400, "empty_intake_message", "多 Agent 需要非空输入。");
+  }
+  return {
+    ...request,
+    message: request.message,
+    aiMode: parseOptionalAiMode(request.aiMode, "AI 模式无效。"),
+    taskSoilInput: parseOptionalCanonicalTaskSoilInput(request.taskSoilInput),
+  };
+}
+
+export function parseDeepConversationCreateRequest(raw: unknown): DeepConversationCreateRequestInput {
+  const request = deepConversationCreateRequestSchema.parse(raw);
+  if (request.goal === undefined) {
+    throw new PanelHttpError(400, "empty_goal", "多 Agent 需要非空目标。");
+  }
+  return {
+    ...request,
+    goal: request.goal,
+    aiMode: parseOptionalAiMode(request.aiMode, "AI 模式无效。"),
+    taskSoilInput: parseCanonicalTaskSoilInput(request.taskSoilInput),
+  };
+}
+
+export function parseDeepRunStartRequest(raw: unknown): DeepRunStartRequestInput {
+  const request = deepRunStartRequestSchema.parse(raw);
+  return {
+    ...request,
+    aiMode: parseOptionalAiMode(request.aiMode, "AI 模式无效。"),
+  };
+}
+
+export function parseDeepRunFollowUpRequest(raw: unknown): DeepRunFollowUpRequestInput {
+  const request = deepRunFollowUpRequestSchema.parse(raw);
+  if (request.message === undefined) {
+    throw new PanelHttpError(400, "empty_follow_up_message", "继续多 Agent 任务需要非空补充。");
+  }
+  return {
+    ...request,
+    message: request.message,
+    aiMode: parseOptionalAiMode(request.aiMode, "AI 模式无效。"),
+    taskSoilInput: parseOptionalCanonicalTaskSoilInput(request.taskSoilInput),
+  };
+}
+
+export function parseDeepRunControlRequest(
+  raw: unknown,
+  action: "interrupt" | "correct" | "stop",
+): DeepRunControlRequestInput {
+  const request = deepRunControlRequestSchema.parse(raw);
+  if (action !== "correct") {
+    return { reason: request.reason };
+  }
+  if (request.correctionContext === undefined || request.correctionContext === null) {
+    throw new PanelHttpError(400, "empty_correction_context", "补充上下文不能为空。");
+  }
+  const parsed = z.array(z.string()).safeParse(request.correctionContext);
+  if (!parsed.success) {
+    throw new PanelHttpError(400, "invalid_correction_context", "correct 需要补充上下文数组。");
+  }
+  const correctionContext = parsed.data.filter((item) => item.length > 0);
+  if (correctionContext.length === 0) {
+    throw new PanelHttpError(400, "empty_correction_context", "补充上下文不能为空。");
+  }
+  return { reason: request.reason, correctionContext };
+}
+
+export function parseDeepChildMessageRequest(raw: unknown): string {
+  const request = z.preprocess(normalizeRequestObject, z.object({ message: optionalTrimmedStringSchema })).parse(raw);
+  if (request.message === undefined) {
+    throw new PanelHttpError(400, "empty_child_instruction", "子 Agent 补充要求不能为空。");
+  }
+  return request.message;
+}
+
+export function parseContextAttachmentPreviewRequest(raw: unknown): ContextAttachmentPreviewRequestInput {
+  const request = contextAttachmentPreviewRequestSchema.parse(raw);
+  const kind = z.enum(["workspace", "file", "project", "web"]).safeParse(request.kind);
+  if (request.kind !== undefined && request.kind !== null && request.kind !== "" && !kind.success) {
+    throw new PanelHttpError(400, "invalid_context_attachment_kind", "上下文附件类型必须是 workspace、file、project 或 web。");
+  }
+  return {
+    kind: kind.success ? kind.data : undefined,
+    value: request.value,
+    ref: request.ref,
+    title: request.title,
+    summary: request.summary,
+  };
+}
+
+function parseCanonicalTaskSoilInput(raw: unknown): DesktopTaskSoilInput {
+  try {
+    return parseDesktopTaskSoilInput({ taskSoilInput: raw });
+  } catch (error) {
+    if (error instanceof TaskSoilInputValidationError) {
+      throw new PanelHttpError(400, error.code, error.message);
+    }
+    throw error;
+  }
+}
+
+function parseOptionalCanonicalTaskSoilInput(raw: unknown): DesktopTaskSoilInput | undefined {
+  return raw === undefined ? undefined : parseCanonicalTaskSoilInput(raw);
 }
 
 export function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -444,15 +698,12 @@ export function throwIfAborted(signal: AbortSignal | undefined): void {
   }
 }
 
-export function optionalString(value: unknown): string | undefined {
+function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-export function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
+function parseRequestRecord(value: unknown): Record<string, unknown> {
+  return requestRecordSchema.parse(value);
 }
 
 export function unique(values: readonly string[]): string[] {
@@ -460,121 +711,46 @@ export function unique(values: readonly string[]): string[] {
 }
 
 function parseOptionalModelProviderKind(value: unknown): ConfiguredModelProviderKind | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "openai_compatible" || value === "anthropic" || value === "gemini" || value === "ollama" || value === "local") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_model_provider_kind", "模型厂商类型无效。");
+  return parseOptionalEnum(modelProviderKindSchema, value, "invalid_model_provider_kind", "模型厂商类型无效。");
 }
 
 function parseOptionalModelProtocolKind(value: unknown): ConfiguredModelProtocolKind | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (
-    value === "openai_responses" ||
-    value === "openai_compatible_chat_completions" ||
-    value === "anthropic_messages" ||
-    value === "gemini_generate_content" ||
-    value === "ollama_generate"
-  ) {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_model_protocol_kind", "模型协议类型无效。");
+  return parseOptionalEnum(modelProtocolKindSchema, value, "invalid_model_protocol_kind", "模型协议类型无效。");
 }
 
 function parseOptionalMcpTransport(value: unknown): McpServerTransportKind | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "stdio" || value === "http") {
-    return value;
-  }
-  if (value === "streamableHttp") {
-    return "http";
-  }
-  if (value === "sse") {
-    return "http";
-  }
-  throw new PanelHttpError(400, "invalid_mcp_transport", "MCP transport 必须是 stdio 或 streamableHttp。");
+  return parseOptionalEnum(mcpTransportSchema, value, "invalid_mcp_transport", "MCP transport 必须是 stdio 或 streamableHttp。");
 }
 
 function parseOptionalMcpConfirmationMode(value: unknown): McpConfirmationMode | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "always" || value === "unsafe_only" || value === "never") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_mcp_confirmation_mode", "MCP 确认模式无效。");
+  return parseOptionalEnum(mcpConfirmationModeSchema, value, "invalid_mcp_confirmation_mode", "MCP 确认模式无效。");
 }
 
 function parseOptionalMcpToolExposureMode(value: unknown): UpsertMcpServerInput["toolExposureMode"] {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "none" || value === "all" || value === "selected") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_mcp_tool_exposure_mode", "MCP 工具暴露模式无效。");
+  return parseOptionalEnum(mcpToolExposureModeSchema, value, "invalid_mcp_tool_exposure_mode", "MCP 工具暴露模式无效。");
 }
 
 function parseOptionalWebSearchProvider(value: unknown): UpdateWebSearchConfigInput["provider"] {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (
-    value === "tavily" ||
-    value === "exa" ||
-    value === "zai" ||
-    value === "metaso" ||
-    value === "google" ||
-    value === "bing" ||
-    value === "model_builtin" ||
-    value === "none"
-  ) {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_web_search_provider", "搜索工具 provider 无效。");
+  return parseOptionalEnum(webSearchProviderSchema, value, "invalid_web_search_provider", "搜索工具 provider 无效。");
 }
 
 function parseOptionalRunMode(value: unknown): PanelRunMode | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "agent" || value === "deep") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_run_mode", "运行模式无效。");
+  return parseOptionalEnum(runModeSchema, value, "invalid_run_mode", "运行模式无效。");
 }
 
 function parseToolConfirmationPolicy(value: unknown): ToolConfirmationPolicy | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "prompt" || value === "full_access") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_tool_confirmation_policy", "工具确认策略无效。");
+  return parseOptionalEnum(toolConfirmationPolicySchema, value, "invalid_tool_confirmation_policy", "工具确认策略无效。");
 }
 
 function parseSkillTriggerMode(value: unknown): UpdateSkillTriggerConfigInput["mode"] | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "keyword" || value === "model") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_skill_trigger_mode", "Skills 触发方式无效。");
+  return parseOptionalEnum(skillTriggerModeSchema, value, "invalid_skill_trigger_mode", "Skills 触发方式无效。");
 }
 
 function parseModelOverride(value: unknown): PanelRunInput["modelOverride"] {
   if (value === undefined || value === null) {
     return undefined;
   }
-  const record = asRecord(value);
+  const record = parseRequestRecord(value);
   const profileId = optionalString(record.profileId);
   const model = optionalString(record.model);
   if (profileId === undefined || model === undefined) {
@@ -584,21 +760,19 @@ function parseModelOverride(value: unknown): PanelRunInput["modelOverride"] {
 }
 
 function parseOptionalAiMode(value: unknown, invalidMessage: string): ModelRuntimeMode | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  const parsed = parseAiMode(value);
-  if (parsed === undefined) {
-    throw new PanelHttpError(400, "invalid_ai_mode", invalidMessage);
-  }
-  return parsed;
+  return parseOptionalEnum(aiModeSchema, value, "invalid_ai_mode", invalidMessage);
 }
 
-function parseAiMode(value: unknown): ModelRuntimeMode | undefined {
-  if (value === "none" || value === "fake" || value === "openai-compatible" || value === "openai-responses") {
-    return value;
-  }
-  return undefined;
+function parseOptionalEnum<T>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  code: string,
+  message: string,
+): T | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new PanelHttpError(400, code, message);
+  return parsed.data;
 }
 
 function booleanOrUndefined(value: unknown): boolean | undefined {
@@ -616,16 +790,16 @@ function stringArrayOrUndefined(value: unknown): readonly string[] | undefined {
 }
 
 function importedMcpServer(serverId: string, raw: unknown): UpsertMcpServerInput | undefined {
-  const record = asRecord(raw);
+  const record = parseRequestRecord(raw);
   const id = optionalString(record.serverId) ?? optionalString(record.name) ?? serverId;
   const transport = parseImportedMcpTransport(record.transport ?? record.type, record.url);
   const command = optionalString(record.command);
   const args = stringArrayOrUndefined(record.args);
   const url = optionalString(record.url);
-  const envRefs = Object.entries(asRecord(record.env))
+  const envRefs = Object.entries(parseRequestRecord(record.env))
     .map(([key, value]) => secretRefFromEnvValue(id, key, value))
     .filter((value): value is string => value !== undefined);
-  const headerRefs = Object.entries(asRecord(record.headers ?? record.http_headers))
+  const headerRefs = Object.entries(parseRequestRecord(record.headers))
     .map(([key, value]) => secretRefFromHeaderValue(id, key, value))
     .filter((value): value is string => value !== undefined);
   return {
@@ -672,7 +846,7 @@ function parseJsonObject(value: string): unknown {
   }
 }
 
-export function numberOrUndefined(value: unknown): number | undefined {
+function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
@@ -680,7 +854,7 @@ function parseOpenAIModelRequestSettings(value: unknown): OpenAIModelRequestSett
   if (value === undefined || value === null) {
     return {};
   }
-  const record = asRecord(value);
+  const record = parseRequestRecord(value);
   return {
     temperature: optionalNumberInRange(record.temperature, 0, 2, "temperature 必须在 0 到 2 之间。"),
     topP: optionalNumberInRange(record.topP, 0, 1, "top_p 必须在 0 到 1 之间。"),
@@ -694,17 +868,6 @@ function parseOpenAIModelRequestSettings(value: unknown): OpenAIModelRequestSett
     parallelToolCalls: booleanOrUndefined(record.parallelToolCalls),
     store: booleanOrUndefined(record.store),
   };
-}
-
-function parseRunReasoningEffort(
-  value: unknown,
-  legacyOpenAIValue: unknown
-): ModelRunReasoningEffort | undefined {
-  const direct = parseOptionalRunReasoningEffort(value);
-  if (direct !== undefined) {
-    return direct;
-  }
-  return parseOptionalRunReasoningEffort(asRecord(legacyOpenAIValue).reasoningEffort);
 }
 
 function optionalNumberInRange(value: unknown, min: number, max: number, message: string): number | undefined {

@@ -1039,7 +1039,7 @@ test("file deletion activity remains visible even without a content preview", ()
   assert.equal(item?.expandedSections, undefined);
 });
 
-test("display activity items suppress sub-agent parent tool rows when a sub-agent card is present", () => {
+test("sub-agent AgentTool facts remain visible as standard tool activity", () => {
   const items = displayActivityItemsForNodes([
     node({
       kind: "tool",
@@ -1049,36 +1049,11 @@ test("display activity items suppress sub-agent parent tool rows when a sub-agen
       summary: "已调用子 Agent：research-expert",
       refs: [{ kind: "tool_call", id: "tool-sub-agent-1" }],
     }),
-    node({
-      kind: "sub_agent",
-      eventType: "sub_agent.completed",
-      phase: "completed",
-      summary: "research-expert 已完成 RAG 选型。",
-      refs: [{ kind: "tool_call", id: "tool-sub-agent-1" }],
-    }),
   ]);
 
   assert.equal(items.length, 1);
-  assert.equal(items[0]?.variant, "sub_agent");
-});
-
-test("sub-agent activity copy separates agent name, status, and task", () => {
-  const items = displayActivityItemsForNodes([
-    node({
-      kind: "sub_agent",
-      eventType: "sub_agent.started",
-      phase: "executing",
-      title: "子 Agent",
-      summary: "code-expert 开始运行：请检查这段代码的边界问题。",
-      subAgentName: "code-expert",
-      subAgentTask: "请检查这段代码的边界问题。",
-    }),
-  ]);
-
-  assert.equal(items.length, 1);
-  assert.equal(items[0]?.variant, "sub_agent");
-  assert.equal(items[0]?.copy.label, "code-expert");
-  assert.equal(items[0]?.copy.detail, "请检查这段代码的边界问题。");
+  assert.equal(items[0]?.tone, "tool");
+  assert.equal(items[0]?.variant, undefined);
 });
 
 function node(input: {
@@ -1089,8 +1064,6 @@ function node(input: {
   readonly summary?: string;
   readonly text?: string;
   readonly toolName?: string;
-  readonly subAgentName?: string;
-  readonly subAgentTask?: string;
   readonly display?: TranscriptNode["display"];
   readonly confirmation?: TranscriptNode["confirmation"];
   readonly refs?: TranscriptNode["refs"];
@@ -1109,8 +1082,6 @@ function node(input: {
     text: input.text,
     timestamp: "2026-06-04T00:00:00.000Z",
     toolName: input.toolName,
-    subAgentName: input.subAgentName,
-    subAgentTask: input.subAgentTask,
     display: input.display,
     confirmation: input.confirmation,
     refs: input.refs ?? [],

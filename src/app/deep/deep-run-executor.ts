@@ -291,7 +291,7 @@ export type StartDeepRunInput = {
 /**
  * 一次 deep run 的执行结果（T2-6 扩展：暴露 childRuns/synthesisRecord/controlEvents）。
  * executor 不持久化（持久化由 T2-6 DeepRuntime 负责），只返回完整可观察结果供调用方
- * 写入 RuntimeDatabase 并构建 AgentRunTree。
+ * 交给 Multi-Agent feature 持久化并构建 AgentRunTree。
  *
  * T1-4 新增：
  *   - `taskBoard`：本次 run 使用的 board（注入或内部创建），供 T2-1 buildAndPublishRunTree

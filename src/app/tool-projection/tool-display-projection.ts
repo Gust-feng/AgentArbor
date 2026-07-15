@@ -146,8 +146,7 @@ function isContentReadTool(toolName: string): boolean {
   return toolName === "read_file" ||
     toolName === "read_context_attachment_text" ||
     toolName === "read_context_attachment_pdf_text" ||
-    toolName === "read_skill_resource" ||
-    toolName === "read_sub_agent_output";
+    toolName === "read_skill_resource";
 }
 
 function batchReadDisplayItem(value: unknown): string | undefined {

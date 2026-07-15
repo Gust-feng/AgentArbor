@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { AgentRunTree } from "../../domain/underground/agent-fabric.js";
-import { createFileSystemRunSnapshotStore } from "../../adapters/runtime-database/run-snapshot-store.js";
+import { createFileSystemRunSnapshotStore } from "../../adapters/runtime-storage/run-snapshot-store.js";
 import {
   createInMemoryRunSnapshotStore,
   type RunEnvelope,

@@ -12,7 +12,7 @@ import type {
   InformationSearchResult,
   InformationSourceKind,
 } from "../../domain/research/index.js";
-import { ConfigCenter } from "../config-center.js";
+import { ConfigCenter } from "../config-center/index.js";
 import type { FetchLike } from "../tool-center/index.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { createDefaultResearchRuntime } from "./research-runtime.js";

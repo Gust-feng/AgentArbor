@@ -5,8 +5,8 @@ export type ConfigResponse = {
     readonly profileId?: string;
     readonly label?: string;
     readonly logoDataUrl?: string;
-    readonly providerKind?: string;
-    readonly protocolKind?: string;
+    readonly providerKind?: "openai_compatible";
+    readonly protocolKind?: "openai_responses" | "openai_compatible_chat_completions";
     readonly baseUrl?: string;
     readonly model?: string;
     readonly defaultAiMode?: "none" | "fake" | "openai-compatible" | "openai-responses";
@@ -40,8 +40,8 @@ export type ModelProviderProfile = NonNullable<ConfigResponse["config"]>;
 
 export type ModelCapabilityProfile = {
   readonly profileId: string;
-  readonly providerKind?: string;
-  readonly protocolKind?: string;
+  readonly providerKind?: "openai_compatible";
+  readonly protocolKind?: "openai_responses" | "openai_compatible_chat_completions";
   readonly model: string;
   readonly capabilities: ModelCapabilities;
 };
@@ -151,8 +151,8 @@ export type ModelProviderPreset = {
   readonly label: string;
   readonly vendor: string;
   readonly description: string;
-  readonly providerKind: string;
-  readonly protocolKind: string;
+  readonly providerKind: "openai_compatible";
+  readonly protocolKind: "openai_responses" | "openai_compatible_chat_completions";
   readonly baseUrl: string;
   readonly modelsPath: string;
   readonly defaultModel?: string;

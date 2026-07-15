@@ -2,14 +2,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ModelCapabilities, ModelProviderModelCatalog, SanitizedWebSearchConfig } from "../../domain/config/index.js";
 import { listBuiltinMcpServerPresets, listBuiltinModelProviderPresets, listBuiltinProviderProtocolProfiles } from "../../domain/config/index.js";
 import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
-import { resolveModelCapabilities } from "../model-capability-registry.js";
+import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import { fetchModelRuntimeModelCatalog } from "../model-runtime/index.js";
 import { CapabilityCenter } from "../capability/capability-center.js";
 import {
   ConfigCenter,
   ConfigCenterValidationError,
   WorkspaceDirectoryValidationError,
-} from "../config-center.js";
+} from "../config-center/index.js";
 import {
   applyAgentToolRegistryContributions,
   createAgentToolRegistry,
@@ -38,7 +38,7 @@ import {
 } from "./request-parsers.js";
 import { checkPanelMcpEnvironment, installPanelMcpEnvironment, listPanelMcpReferences, testPanelMcpServer } from "./mcp-management-service.js";
 import type { PanelModelCatalogFetch, PanelProviderFetch } from "./types.js";
-import { readAgentArborPackageVersion } from "../product-info.js";
+import { readAgentArborPackageVersion } from "../app-update/product-info.js";
 
 export type PanelConfigRouteRuntime = {
   readonly configCenter: ConfigCenter;
@@ -209,13 +209,6 @@ export async function handlePanelConfigRoute(
       const profile = (await runtime.configCenter.listModelProviderProfiles()).find((item) => item.profileId === profileId);
       if (profile === undefined) {
         throw new PanelHttpError(404, "model_profile_not_found", "未找到模型配置。");
-      }
-      const supportedCatalogProvider =
-        (profile.providerKind === "openai_compatible" &&
-          (profile.protocolKind === "openai_compatible_chat_completions" || profile.protocolKind === "openai_responses")) ||
-        (profile.providerKind === "anthropic" && profile.protocolKind === "anthropic_messages");
-      if (!supportedCatalogProvider) {
-        throw new PanelHttpError(400, "unsupported_model_provider", "当前厂商暂不支持直接获取模型列表。");
       }
       const apiKey = await runtime.configCenter.getModelProviderApiKey(profile.profileId);
       if (apiKey === undefined) {

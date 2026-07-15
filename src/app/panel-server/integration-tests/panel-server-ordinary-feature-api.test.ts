@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import type { ConfirmationRequest } from "../../../domain/confirmation/index.js";
 import type { ToolCallResult } from "../../../domain/tools/index.js";
-import { createLocalConfigCenter } from "../../config-center.js";
+import { createLocalConfigCenter } from "../../config-center/index.js";
 import type {
   OrdinaryExecutionOutcome,
   OrdinaryExecutionPort,
@@ -49,6 +49,44 @@ test("Ordinary Panel entry submits directly to the feature and exposes the canon
     assert.equal((await requestJson(server.url, `/api/basic-agent/runs/${submitted.body.run.runId}/view?cursor=0`)).status, 400);
     assert.equal((await requestJson(server.url, "/api/basic-agent/runs/missing/view")).status, 404);
     assert.equal((await requestJson(server.url, "/api/desktop/runs", { method: "POST", body: { goal: "legacy" } })).status, 404);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Ordinary HTTP boundary returns stable validation errors before feature execution", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-panel-validation-"));
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    ordinaryAgentExecution: completedExecution("must not run", {}),
+  });
+  try {
+    const missing = await requestJson(server.url, "/api/conversations", { method: "POST", body: {} });
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.error.code, "missing_goal");
+
+    const invalidEnum = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "run", aiMode: "unsupported" },
+    });
+    assert.equal(invalidEnum.status, 400);
+    assert.equal(invalidEnum.body.error.code, "invalid_ai_mode");
+
+    const invalidNested = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "run", taskSoilInput: { contextRefs: [{ ref: "file:a", kind: "secret" }] } },
+    });
+    assert.equal(invalidNested.status, 400);
+    assert.equal(invalidNested.body.error.code, "empty_context_ref");
+
+    const tooLarge = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "x".repeat(128_001) },
+    });
+    assert.equal(tooLarge.status, 413);
+    assert.equal(tooLarge.body.error.code, "request_body_too_large");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

@@ -25,16 +25,6 @@ export type AssistantDeliverableLike = {
   readonly nextActions?: readonly string[];
 };
 
-export type AssistantSubAgentRunLike = {
-  readonly subRunId: string;
-  readonly batchId?: string;
-  readonly subAgentName: string;
-  readonly status: string;
-  readonly summary: string;
-  readonly fullOutput?: string;
-  readonly error?: string;
-};
-
 export type AssistantWorkViewOutput<TDeliverable extends AssistantDeliverableLike> = {
   readonly run: {
     readonly runId: string;
@@ -43,7 +33,6 @@ export type AssistantWorkViewOutput<TDeliverable extends AssistantDeliverableLik
     readonly content?: string;
   };
   readonly deliverable?: TDeliverable;
-  readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
 };
 
 export type AssistantMessageOutput = {

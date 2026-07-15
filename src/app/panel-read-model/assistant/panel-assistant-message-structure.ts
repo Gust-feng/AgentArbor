@@ -4,7 +4,6 @@ import {
 } from "./panel-agent-work-timeline-view.js";
 import type { ActivityItem } from "../transcript/panel-transcript-activity-copy.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
-import type { AssistantSubAgentRunLike } from "./panel-assistant-message-output.js";
 import {
   isModelNarrativeActivityItem,
   mergeModelNarrativeActivityItem,
@@ -17,7 +16,6 @@ import {
   type ProjectableTranscriptNode,
   timelineVisibleNodes,
 } from "../transcript/panel-transcript-node-projection.js";
-import { normalizeComparableText } from "./panel-assistant-visible-text.js";
 import type { LiveAnswerTone } from "../transcript/panel-live-transcript.js";
 
 export type AssistantMessageSegmentLifecycle = "open" | "settled" | "attention";
@@ -66,7 +64,6 @@ export function projectAssistantMessageStructure<
 >(input: {
   readonly fallbackText?: string;
   readonly transcriptNodes?: readonly TNode[];
-  readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
   readonly pending?: TConfirmation;
   readonly live?: boolean;
   readonly keepStreamMounted?: boolean;
@@ -82,7 +79,6 @@ export function projectAssistantMessageStructure<
   const preferTranscriptBodies = input.preferTranscriptBodies === true || keepStreamMounted;
   const bodySegments = assistantBodySegments<TNode, TConfirmation>({
     transcriptNodes,
-    subAgentRuns: input.subAgentRuns,
     fallbackText: input.fallbackText,
     live,
     animateOnMount,
@@ -154,7 +150,6 @@ function assistantBodySegments<
   TConfirmation extends ConfirmationIdentity = ConfirmationIdentity,
 >(input: {
   readonly transcriptNodes: readonly TNode[];
-  readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
   readonly fallbackText?: string;
   readonly live: boolean;
   readonly animateOnMount: boolean;
@@ -179,27 +174,20 @@ function assistantBodySegments<
       modelUsage: node.modelUsage,
     };
   });
-  const prunedDrafts = suppressSubAgentEchoBodyDrafts(drafts, {
-    transcriptNodes: input.transcriptNodes,
-    subAgentRuns: input.subAgentRuns,
-  });
   const fallbackText = input.fallbackText?.trim();
   const fallbackModelUsage = latestAnswerModelUsage(input.transcriptNodes);
   if (input.preferTranscriptBodies && bodyNodes.length === 0) {
-    return finalizeBodySegments(prunedDrafts, input.animateOnMount);
+    return finalizeBodySegments(drafts, input.animateOnMount);
   }
   if (fallbackText === undefined || fallbackText.length === 0) {
-    return finalizeBodySegments(prunedDrafts, input.animateOnMount);
+    return finalizeBodySegments(drafts, input.animateOnMount);
   }
   return finalizeBodySegments(
-    suppressSubAgentEchoBodyDrafts(mergeFallbackIntoBodyDrafts(prunedDrafts, {
+    mergeFallbackIntoBodyDrafts(drafts, {
       text: fallbackText,
       live: input.live,
       tone: input.tone,
       modelUsage: fallbackModelUsage,
-    }), {
-      transcriptNodes: input.transcriptNodes,
-      subAgentRuns: input.subAgentRuns,
     }),
     input.animateOnMount,
   );
@@ -313,144 +301,6 @@ function finalizeBodySegments<
   }));
 }
 
-function suppressSubAgentEchoBodyDrafts<
-  TNode extends ProjectableTranscriptNode,
-  TConfirmation extends ConfirmationIdentity,
->(
-  drafts: readonly BodySegmentDraft<TNode, TConfirmation>[],
-  input: {
-    readonly transcriptNodes: readonly TNode[];
-    readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
-  },
-): readonly BodySegmentDraft<TNode, TConfirmation>[] {
-  const echoSources = subAgentEchoSources(input.transcriptNodes, input.subAgentRuns);
-  if (echoSources.length === 0) {
-    return drafts;
-  }
-  const ownerKeys = new Set(echoSources.map((source) => source.ownerKey));
-  if (ownerKeys.size !== 1) {
-    return drafts;
-  }
-  return drafts.filter((draft) => !looksLikeSubAgentEcho(draft.text, echoSources));
-}
-
-type SubAgentEchoSource = {
-  readonly ownerKey: string;
-  readonly text: string;
-};
-
-function subAgentEchoSources<TNode extends ProjectableTranscriptNode>(
-  transcriptNodes: readonly TNode[],
-  subAgentRuns: readonly AssistantSubAgentRunLike[] | undefined,
-): readonly SubAgentEchoSource[] {
-  const subAgentNodes = transcriptNodes.filter((node) => node.kind === "sub_agent");
-  if (subAgentNodes.length === 0) {
-    return [];
-  }
-  const ownerKeysInTurn = new Set<string>();
-  const sources: SubAgentEchoSource[] = [];
-  const seen = new Set<string>();
-  const pushSource = (ownerKey: string | undefined, text: string | undefined): void => {
-    const normalizedText = normalizeComparableText(text ?? "");
-    if (ownerKey === undefined || normalizedText.length === 0) {
-      return;
-    }
-    const dedupeKey = `${ownerKey}:${normalizedText}`;
-    if (seen.has(dedupeKey)) {
-      return;
-    }
-    seen.add(dedupeKey);
-    sources.push({ ownerKey, text: normalizedText });
-  };
-  for (const node of subAgentNodes) {
-    const ownerKey = subAgentOwnerKey({
-      subRunId: node.subAgentRunId,
-      batchId: node.subAgentBatchId,
-      fallbackId: node.nodeId,
-    });
-    if (ownerKey !== undefined) {
-      ownerKeysInTurn.add(ownerKey);
-    }
-    pushSource(ownerKey, node.text ?? node.summary);
-  }
-  for (const run of subAgentRuns ?? []) {
-    const ownerKey = subAgentOwnerKey({
-      subRunId: run.subRunId,
-      batchId: run.batchId,
-      fallbackId: run.subRunId,
-    });
-    if (ownerKey === undefined || !ownerKeysInTurn.has(ownerKey)) {
-      continue;
-    }
-    pushSource(ownerKey, run.summary);
-    pushSource(ownerKey, run.fullOutput);
-  }
-  return sources;
-}
-
-function subAgentOwnerKey(input: {
-  readonly subRunId?: string;
-  readonly batchId?: string;
-  readonly fallbackId: string;
-}): string | undefined {
-  if (input.batchId !== undefined) {
-    return `batch:${input.batchId}`;
-  }
-  if (input.subRunId !== undefined) {
-    return `run:${input.subRunId}`;
-  }
-  return `node:${input.fallbackId}`;
-}
-
-function looksLikeSubAgentEcho(
-  text: string,
-  echoSources: readonly SubAgentEchoSource[],
-): boolean {
-  const normalizedText = normalizeComparableText(text);
-  if (normalizedText.length === 0) {
-    return false;
-  }
-  for (const source of echoSources) {
-    if (normalizedText === source.text) {
-      return true;
-    }
-    if (
-      source.text.length >= 80 &&
-      normalizedText.includes(source.text) &&
-      source.text.length / normalizedText.length >= 0.45
-    ) {
-      return true;
-    }
-    if (
-      normalizedText.length >= 80 &&
-      source.text.includes(normalizedText) &&
-      normalizedText.length / source.text.length >= 0.55
-    ) {
-      return true;
-    }
-  }
-  const leadingSummary = normalizedText.replace(
-    /^(?:我(?:刚刚|已经)?(?:试着)?(?:派了|调用了|委派了)|已(?:调用|委派))(?:一个)?子\s*agent[^。:：]*[。:：]?\s*/iu,
-    "",
-  );
-  const introducedSummary = leadingSummary.replace(/^(?:子\s*agent\s*)?(?:输出|结果)[:：]\s*/iu, "");
-  if (introducedSummary !== normalizedText) {
-    for (const source of echoSources) {
-      if (introducedSummary === source.text) {
-        return true;
-      }
-      if (
-        source.text.length >= 80 &&
-        introducedSummary.includes(source.text) &&
-        source.text.length / introducedSummary.length >= 0.45
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 function assistantMessageSegments<
   TNode extends ProjectableTranscriptNode,
   TConfirmation extends ConfirmationIdentity = ConfirmationIdentity,
@@ -537,10 +387,8 @@ function assistantMessageSegments<
     result.push(body);
   }
   return withActivityCollapseHints(
-    mergeAdjacentSubAgentActivitySegments(
-      removeRepeatedModelActivityAcrossSegments(
-        mergeAdjacentBodySegments(result),
-      ),
+    removeRepeatedModelActivityAcrossSegments(
+      mergeAdjacentBodySegments(result),
     ),
   );
 }
@@ -614,88 +462,6 @@ function mergeAdjacentBodySegments<
     merged.push(segment);
   }
   return merged;
-}
-
-function mergeAdjacentSubAgentActivitySegments<
-  TNode extends ProjectableTranscriptNode,
-  TConfirmation extends ConfirmationIdentity,
->(
-  segments: readonly AssistantMessageSegment<TNode, TConfirmation>[],
-): readonly AssistantMessageSegment<TNode, TConfirmation>[] {
-  const merged: AssistantMessageSegment<TNode, TConfirmation>[] = [];
-  for (const segment of segments) {
-    const previous = merged.at(-1);
-    if (
-      previous?.kind === "activity" &&
-      segment.kind === "activity" &&
-      canMergeAdjacentSubAgentActivitySegments(previous.timeline.items, segment.timeline.items)
-    ) {
-      const timeline = mergeActivityTimelines(previous.timeline, segment.timeline);
-      merged[merged.length - 1] = {
-        ...segment,
-        segmentKey: previous.segmentKey,
-        lifecycle: activitySegmentLifecycle(timeline),
-        defaultCollapsed: previous.defaultCollapsed && segment.defaultCollapsed,
-        timeline,
-      };
-      continue;
-    }
-    merged.push(segment);
-  }
-  return merged;
-}
-
-function canMergeAdjacentSubAgentActivitySegments(
-  previousItems: readonly ActivityItem[],
-  nextItems: readonly ActivityItem[],
-): boolean {
-  if (previousItems.length === 0 || nextItems.length === 0) {
-    return false;
-  }
-  if (!previousItems.every((item) => item.variant === "sub_agent")) {
-    return false;
-  }
-  if (!nextItems.every((item) => item.variant === "sub_agent")) {
-    return false;
-  }
-  const previousKeys = new Set(previousItems.map(subAgentActivityIdentity).filter((value): value is string => value !== undefined));
-  const nextKeys = new Set(nextItems.map(subAgentActivityIdentity).filter((value): value is string => value !== undefined));
-  if (previousKeys.size === 0 || nextKeys.size === 0 || previousKeys.size !== nextKeys.size) {
-    return false;
-  }
-  return [...previousKeys].every((key) => nextKeys.has(key));
-}
-
-function subAgentActivityIdentity(item: ActivityItem): string | undefined {
-  if (item.subAgentBatchId !== undefined) {
-    return `batch:${item.subAgentBatchId}`;
-  }
-  if (item.subAgentRunId !== undefined) {
-    return `run:${item.subAgentRunId}`;
-  }
-  return undefined;
-}
-
-function mergeActivityTimelines<
-  TNode extends ProjectableTranscriptNode,
-  TConfirmation extends ConfirmationIdentity,
->(
-  previous: AgentWorkTimelineView<TNode, TConfirmation>,
-  next: AgentWorkTimelineView<TNode, TConfirmation>,
-): AgentWorkTimelineView<TNode, TConfirmation> {
-  const itemNodeIds = new Set(next.items.map((item) => item.nodeId));
-  return {
-    ...next,
-    items: next.items,
-    nodes: [...previous.nodes, ...next.nodes].filter((node, index, nodes) => (
-      nodes.findIndex((candidate) => candidate.nodeId === node.nodeId) === index &&
-      (
-        itemNodeIds.has(node.nodeId) ||
-        (node.kind === "confirmation" && next.confirmation.currentNodeId === node.nodeId)
-      )
-    )),
-    hasContent: next.items.length > 0 || next.confirmation.current !== undefined,
-  };
 }
 
 function removeRepeatedModelActivityAcrossSegments<

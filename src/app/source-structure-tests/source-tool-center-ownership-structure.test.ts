@@ -7,28 +7,23 @@ import {
   importSpecifiersFrom,
   isTestAssetSource,
   relativePath,
+  resolveRelativeImports,
 } from "./source-structure-test-utils.js";
 
 test("Tool Registry remains owned by ToolCenter without an Ordinary compatibility facade", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const ordinaryRoot = path.join(appRoot, "basic-agent-runtime");
-  const removedFacade = path.join(ordinaryRoot, "tool-registry.ts");
-  const ordinaryBarrel = await fs.readFile(path.join(ordinaryRoot, "index.ts"), "utf8");
+  const toolCenterRoot = path.join(appRoot, "tool-center");
+  const registryOwner = path.join(toolCenterRoot, "tool-registry.ts");
   const files = (await collectSourceFiles(appRoot)).filter((file) => !isTestAssetSource(file));
   const violations: string[] = [];
 
-  assert.equal(existsSync(removedFacade), false, "the removed Ordinary Tool Registry facade must not return");
-  assert.deepEqual(
-    importSpecifiersFrom(ordinaryBarrel).filter((specifier) => specifier.includes("tool-registry")),
-    [],
-    "the Ordinary barrel must not re-export Tool Registry contracts",
-  );
+  assert.equal(existsSync(registryOwner), true, "ToolCenter must own the Tool Registry implementation");
 
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
-    for (const specifier of importSpecifiersFrom(source)) {
-      if (specifier.replaceAll("\\", "/").includes("basic-agent-runtime/tool-registry")) {
-        violations.push(`${relativePath(file)} -> ${specifier}`);
+    for (const target of resolveRelativeImports(file, source)) {
+      if (path.basename(target) === "tool-registry.ts" && !isPathWithin(target, toolCenterRoot)) {
+        violations.push(`${relativePath(file)} -> ${relativePath(target)}`);
       }
     }
   }
@@ -40,33 +35,40 @@ test("Tool Registry remains owned by ToolCenter without an Ordinary compatibilit
   );
 });
 
-test("Ordinary runtime does not restore unused internal compatibility facades", async () => {
+test("production code does not restore or import retired app runtime facades", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const ordinaryRoot = path.join(appRoot, "basic-agent-runtime");
-  const ordinaryBarrel = await fs.readFile(path.join(ordinaryRoot, "index.ts"), "utf8");
-  const removedFiles = [
-    "conversation-compaction-common.ts",
-    "conversation-compaction-contracts.ts",
-    "conversation-compaction.ts",
-    "conversation-history-compaction.ts",
-    "loop-context-compaction.ts",
-    "tool-registry.ts",
-    "work-session.ts",
-    "work-session-context.ts",
-    "work-session-transcript.ts",
-    "work-session-transcript-tools.ts",
+  const retiredRoots = [
+    path.join(appRoot, "basic-agent-runtime"),
+    path.join(appRoot, "run-read-model"),
+    path.join(appRoot, "underground"),
   ];
+  const retiredFilePrefixes = ["desktop-agent-session", "desktop-chat-session", "minimal-runtime"];
+  const violations: string[] = [];
 
-  assert.deepEqual(
-    removedFiles.filter((file) => existsSync(path.join(ordinaryRoot, file))),
-    [],
-    "unused Ordinary compatibility modules must not return",
-  );
-  assert.equal(ordinaryBarrel.includes("DesktopWorkSession"), false);
-  assert.equal(ordinaryBarrel.includes("createDesktopWorkSessionReadModel"), false);
-  assert.equal(ordinaryBarrel.includes("conversation-compaction"), false);
-  assert.equal(existsSync(path.join(appRoot, "desktop-chat-session.ts")), false);
-  assert.equal(existsSync(path.join(appRoot, "desktop-agent", "desktop-chat-session.ts")), false);
+  for (const root of retiredRoots) {
+    assert.equal(existsSync(root), false, `${relativePath(root)} must remain retired`);
+  }
+
+  const files = (await collectSourceFiles(appRoot)).filter((file) => !isTestAssetSource(file));
+  for (const file of files) {
+    const sourceName = path.basename(file, path.extname(file));
+    if (retiredFilePrefixes.some((prefix) => sourceName.startsWith(prefix))) {
+      violations.push(`${relativePath(file)} restored a retired runtime facade`);
+    }
+    const source = await fs.readFile(file, "utf8");
+    for (const specifier of importSpecifiersFrom(source)) {
+      if (!specifier.startsWith(".")) continue;
+      const target = unresolvedSourceTarget(file, specifier);
+      if (
+        retiredRoots.some((root) => isPathWithin(target, root)) ||
+        retiredFilePrefixes.some((prefix) => path.basename(target).startsWith(prefix))
+      ) {
+        violations.push(`${relativePath(file)} -> ${specifier}`);
+      }
+    }
+  }
+
+  assert.deepEqual(violations, [], "production code must import current feature and capability owners directly");
 });
 
 test("ToolCenter owns executor fact normalization while adapters only normalize explicit failure facts", async () => {
@@ -115,9 +117,13 @@ test("ToolCenter owns executor fact normalization while adapters only normalize 
     false,
     "the OpenAI SDK adapter must trust ToolCenter error facts",
   );
-  assert.equal(
-    existsSync(path.join(sourceRoot, "domain", "basic-agent", "confirmation-contracts.ts")),
-    false,
-    "the deleted Ordinary confirmation compatibility contract must not return",
-  );
 });
+
+function unresolvedSourceTarget(file: string, specifier: string): string {
+  return path.resolve(path.dirname(file), specifier.replace(/\.js$/u, ""));
+}
+
+function isPathWithin(file: string, directory: string): boolean {
+  const relative = path.relative(directory, file);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}

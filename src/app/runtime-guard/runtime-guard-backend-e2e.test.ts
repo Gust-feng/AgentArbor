@@ -8,14 +8,9 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { normalizeToolFactValue } from "../../domain/tools/index.js";
-import {
-  type BasicAgentRunExecutionInput,
-  type BasicAgentRunExecutionResult,
-} from "../basic-agent-runtime/index.js";
 import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../testing/desktop-basic-tool-registry.js";
-import type { PanelRunJob } from "../panel-server/run-jobs.js";
 import { closePanelServer } from "../panel-server/request-handler.js";
-import { createPanelRuntime, type PanelRuntime } from "../panel-server/runtime.js";
+import { createPanelRuntime } from "../panel-server/runtime.js";
 import { createLocalShellCommandTool } from "../tool-center/adapters/local-workspace-command-tools.js";
 import { ensurePidExited } from "../tool-center/adapters/background-process-test-utils.js";
 import {
@@ -385,20 +380,6 @@ test("panel server close cleans owned background processes and leaves unowned ex
     await removeTempTree(root);
   }
 });
-
-function panelRuntimeHooks() {
-  return {
-    async executeRun(_runtime: PanelRuntime, _execution: BasicAgentRunExecutionInput): Promise<BasicAgentRunExecutionResult> {
-      throw new Error("runtime guard e2e test should not execute a panel run");
-    },
-    async failRun(): Promise<void> {
-      throw new Error("runtime guard e2e test should not fail a panel run");
-    },
-    scheduleNextQueuedConversationRun(_runtime: PanelRuntime, _completedJob: PanelRunJob): void {
-      return undefined;
-    },
-  };
-}
 
 function toolContext(runId: string, toolCallId: string): typeof context & {
   readonly runId: string;

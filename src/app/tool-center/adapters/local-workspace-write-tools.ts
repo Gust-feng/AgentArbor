@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createTwoFilesPatch } from "diff";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import {
   asRecord,
@@ -19,6 +20,24 @@ import {
   createLocalWorkspaceSandboxPolicy,
   sandboxRequest,
 } from "./local-workspace-sandbox.js";
+
+export const EDIT_FILE_DIFF_MAX_INPUT_CHARS = 256_000;
+
+const EDIT_FILE_DIFF_TIMEOUT_MS = 100;
+
+export type EditFileDiffFact =
+  | Readonly<{ status: "available"; unifiedDiff: string }>
+  | Readonly<{ status: "unchanged" }>
+  | Readonly<{
+      status: "unavailable";
+      reason: "input_limit_exceeded" | "timeout" | "generation_failed";
+      beforeChars: number;
+      afterChars: number;
+      maxInputChars: number;
+      timeoutMs: number;
+      errorName?: string;
+      errorMessage?: string;
+    }>;
 
 export function createLocalWriteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceToolOptions = {}): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
@@ -202,7 +221,7 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
           "result.replacements is the number of edits written to disk.",
           "result.wouldReplace is the number of resolved replacements.",
           "result.beforeHash and result.afterHash identify the before/after file bodies.",
-          "result.diffSummary summarizes changed lines.",
+          "result.diff is the canonical unified diff fact: available includes unifiedDiff, unchanged records no content change, and unavailable records the generation limit or failure.",
           "result.dryRun records whether the file was left unchanged.",
         ],
         runtimeHints: [
@@ -270,6 +289,8 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       for (const edit of [...located].sort((left, right) => right.start - left.start)) {
         updated = `${updated.slice(0, edit.start)}${edit.replacement}${updated.slice(edit.end)}`;
       }
+      const diff = editFileDiffFact(target.relativePath, original, updated);
+      throwIfAborted(context.abortSignal);
       if (!dryRun) {
         assertSandboxAllowed(sandboxPolicy, sandboxRequest("edit", rootDirectory, target.relativePath, {
           bytes: Buffer.byteLength(updated, "utf8"),
@@ -288,7 +309,7 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         replacements: dryRun ? 0 : located.length,
         beforeHash,
         afterHash,
-        diffSummary: diffSummaryForEdits(original, located),
+        diff,
       };
     },
   };
@@ -518,14 +539,38 @@ function assertNoOverlappingEdits(edits: readonly LocatedAnchorEdit[], relativeP
   }
 }
 
-function diffSummaryForEdits(source: string, edits: readonly LocatedAnchorEdit[]): readonly string[] {
-  return edits
-    .slice()
-    .sort((left, right) => left.start - right.start)
-    .map((edit) => {
-      const line = lineNumberAt(source, edit.start);
-      return `line ${line}: ${previewOneLine(edit.oldText)} -> ${previewOneLine(edit.replacement)}`;
-    });
+function editFileDiffFact(relativePath: string, before: string, after: string): EditFileDiffFact {
+  const unavailable = (
+    reason: Extract<EditFileDiffFact, { readonly status: "unavailable" }>["reason"],
+  ): Extract<EditFileDiffFact, { readonly status: "unavailable" }> => ({
+    status: "unavailable",
+    reason,
+    beforeChars: before.length,
+    afterChars: after.length,
+    maxInputChars: EDIT_FILE_DIFF_MAX_INPUT_CHARS,
+    timeoutMs: EDIT_FILE_DIFF_TIMEOUT_MS,
+  });
+  if (before === after) {
+    return { status: "unchanged" };
+  }
+  if (before.length + after.length > EDIT_FILE_DIFF_MAX_INPUT_CHARS) {
+    return unavailable("input_limit_exceeded");
+  }
+  try {
+    const unifiedDiff = createTwoFilesPatch(
+      relativePath, relativePath, before, after, undefined, undefined,
+      { context: 3, timeout: EDIT_FILE_DIFF_TIMEOUT_MS },
+    );
+    return unifiedDiff === undefined
+      ? unavailable("timeout")
+      : { status: "available", unifiedDiff };
+  } catch (error) {
+    return {
+      ...unavailable("generation_failed"),
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function findAllOccurrences(source: string, search: string): readonly number[] {

@@ -7,8 +7,10 @@ import { SubAgentRegistry } from "./sub-agent-registry.js";
 import {
   CALL_SUB_AGENT_TOOL_NAME,
   SPAWN_SUB_AGENT_TOOL_NAME,
+  createSubAgentAgentToolCatalogContribution,
   createSubAgentAgentTools,
 } from "./sub-agent-agent-tools.js";
+import { ToolRegistry } from "../tool-center/tool-registry.js";
 
 test("Sub-Agent contributions resolve a frozen definition and narrow inherited mechanical tools", async (t) => {
   const root = await subAgentRoot(t, [{
@@ -22,6 +24,8 @@ test("Sub-Agent contributions resolve a frozen definition and narrow inherited m
     registry,
     parentAllowedTools: ["read_file", "write_file", "spawn_sub_agent"],
     executableTools: ["read_file", "write_file", "spawn_sub_agent"],
+    exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME, SPAWN_SUB_AGENT_TOOL_NAME],
+    dynamicSpawnAvailable: true,
   });
 
   assert.deepEqual(tools.map((tool) => tool.toolName), [
@@ -51,6 +55,8 @@ test("spawn_sub_agent distinguishes inheritance, no tools, explicit narrowing, a
     registry: new SubAgentRegistry({ roots: [root] }),
     parentAllowedTools: ["read_file", "shell_command", "call_sub_agent"],
     executableTools: ["read_file", "shell_command", "call_sub_agent"],
+    exposedToolNames: [SPAWN_SUB_AGENT_TOOL_NAME],
+    dynamicSpawnAvailable: true,
   });
   assert.equal(spawn?.toolName, SPAWN_SUB_AGENT_TOOL_NAME);
 
@@ -83,6 +89,8 @@ test("call_sub_agent fails closed when the discovered definition body changes", 
     registry,
     parentAllowedTools: [],
     executableTools: [],
+    exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME],
+    dynamicSpawnAvailable: true,
   });
   await fs.appendFile(path.join(root, "hash-expert", "SUB_AGENT.md"), "\nChanged after discovery.\n", "utf8");
 
@@ -103,8 +111,66 @@ test("call_sub_agent is absent when the frozen catalog has no enabled specialist
     registry: new SubAgentRegistry({ roots: [root] }),
     parentAllowedTools: [],
     executableTools: [],
+    exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME, SPAWN_SUB_AGENT_TOOL_NAME],
+    dynamicSpawnAvailable: true,
   });
   assert.deepEqual(tools.map((tool) => tool.toolName), [SPAWN_SUB_AGENT_TOOL_NAME]);
+});
+
+test("Sub-Agent AgentTools only materialize names allowed by the frozen run boundary", async (t) => {
+  const root = await subAgentRoot(t, [{
+    name: "reviewer",
+    description: "Reviews one bounded change.",
+    body: "Review the requested change.",
+  }]);
+  const registry = new SubAgentRegistry({ roots: [root] });
+
+  const callOnly = await createSubAgentAgentTools({
+    registry,
+    parentAllowedTools: ["read_file"],
+    executableTools: ["read_file"],
+    exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME],
+    dynamicSpawnAvailable: true,
+  });
+  const none = await createSubAgentAgentTools({
+    registry,
+    parentAllowedTools: ["read_file"],
+    executableTools: ["read_file"],
+    exposedToolNames: [],
+    dynamicSpawnAvailable: true,
+  });
+  const unavailableSpawn = await createSubAgentAgentTools({
+    registry,
+    parentAllowedTools: ["read_file"],
+    executableTools: ["read_file"],
+    exposedToolNames: [SPAWN_SUB_AGENT_TOOL_NAME],
+    dynamicSpawnAvailable: false,
+  });
+
+  assert.deepEqual(callOnly.map((tool) => tool.toolName), [CALL_SUB_AGENT_TOOL_NAME]);
+  assert.deepEqual(none, []);
+  assert.deepEqual(unavailableSpawn, []);
+});
+
+test("Sub-Agent catalog contribution never installs a fake ToolCenter executor", async (t) => {
+  const root = await subAgentRoot(t, [{
+    name: "reviewer",
+    description: "Reviews one bounded change.",
+    body: "Review the requested change.",
+  }]);
+  const subAgents = await new SubAgentRegistry({ roots: [root] }).list();
+  const contribution = createSubAgentAgentToolCatalogContribution({
+    subAgents,
+    dynamicSpawnAvailable: true,
+  });
+  const registry = new ToolRegistry();
+
+  assert.deepEqual(contribution.definitions.map((definition) => definition.name), [
+    CALL_SUB_AGENT_TOOL_NAME,
+    SPAWN_SUB_AGENT_TOOL_NAME,
+  ]);
+  assert.equal(registry.createToolCenter("desktop-basic").has(CALL_SUB_AGENT_TOOL_NAME), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has(SPAWN_SUB_AGENT_TOOL_NAME), false);
 });
 
 type DefinitionFixture = {

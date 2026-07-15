@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { FileSystemNormalSettingsStore } from "../../../adapters/config/index.js";
-import type { AppUpdateFetch, AppUpdateInfo, AppUpdateServiceLike } from "../../app-update-service.js";
+import type {
+  AppUpdateFetch,
+  AppUpdateInfo,
+  AppUpdateServiceLike,
+} from "../../app-update/app-update-service.js";
 import { startLocalPanelServer, type PanelModelCatalogFetch } from "../../panel-server.js";
 import { removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
 
@@ -60,10 +64,17 @@ test("panel config API keeps model provider and search keys out of ordinary resp
       true
     );
     assert.equal(
-      config.body.modelProviderMarket.presets.some((preset: { presetId?: string; baseUrl?: string }) =>
-        preset.presetId === "claude" && preset.baseUrl === "https://api.anthropic.com"
+      config.body.modelProviderMarket.presets.every((preset: { providerKind?: string; protocolKind?: string }) =>
+        preset.providerKind === "openai_compatible" &&
+        (preset.protocolKind === "openai_responses" || preset.protocolKind === "openai_compatible_chat_completions")
       ),
       true
+    );
+    assert.deepEqual(
+      config.body.modelProviderMarket.presets
+        .map((preset: { presetId?: string }) => preset.presetId)
+        .filter((presetId: string | undefined) => presetId === "claude" || presetId === "gemini"),
+      []
     );
     assert.equal(
       config.body.modelProviderMarket.presets.some((preset: { presetId?: string }) => preset.presetId === "deepseek"),

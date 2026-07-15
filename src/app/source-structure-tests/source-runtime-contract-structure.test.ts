@@ -14,14 +14,14 @@ import {
 const APP_ROOT = path.join(process.cwd(), "src", "app");
 const ORDINARY_ROOT = path.join(APP_ROOT, "ordinary-agent");
 
-test("OrdinaryAgentFeature owns its state and does not depend on Panel or retired Ordinary implementations", async () => {
+test("OrdinaryAgentFeature owns its state and does not depend on product features or Panel adapters", async () => {
   const forbiddenRoots = [
-    path.join(APP_ROOT, "basic-agent-runtime"),
+    path.join(APP_ROOT, "desktop-agent"),
+    path.join(APP_ROOT, "sub-agents"),
+    path.join(APP_ROOT, "deep"),
     path.join(APP_ROOT, "panel-server"),
     path.join(APP_ROOT, "panel-ui"),
     path.join(APP_ROOT, "panel-read-model"),
-    path.join(APP_ROOT, "panel-conversation"),
-    path.join(APP_ROOT, "deep"),
   ];
   const violations: string[] = [];
 

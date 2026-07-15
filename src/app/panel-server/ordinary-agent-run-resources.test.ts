@@ -6,21 +6,23 @@ import test from "node:test";
 import type { CapabilityToolCatalogItem } from "../../domain/config/index.js";
 import type { IntelligenceChannel, ModelMessage, ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../../domain/soil/index.js";
-import type { ToolExecutor } from "../../domain/tools/index.js";
+import { toolPresentationForDefinition, type ToolDefinition, type ToolExecutor } from "../../domain/tools/index.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
-import { runAgentDefinitionRef } from "../agent-definition-ref.js";
+import { runAgentDefinitionRef } from "../agent-definitions/agent-definition-ref.js";
 import type { AgentLoop, CreateModelRuntimeAgentLoopInput } from "../model-runtime/index.js";
 import type { OrdinaryExecutionInput, OrdinaryRunBirth } from "../ordinary-agent/contracts.js";
 import { ordinaryRunBirth } from "../ordinary-agent/test-support.js";
 import type { AgentLoopTokenCounter } from "../context-maintenance/index.js";
 import { createOpenAIAgentsInputMapper } from "../../adapters/intelligence/openai-agents-input.js";
 import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
+import { createSubAgentAgentToolCatalogContribution } from "../sub-agents/sub-agent-agent-tools.js";
+import { toolDefinitionContractHash } from "../capability/tool-definition-contract.js";
 import type { AgentRunResources } from "./agent-run-resources.js";
 import type { AgentToolRegistryContribution } from "../tool-center/index.js";
 import { CodedExecutionError } from "../execution-errors/index.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
 
-const LEGACY_SUB_AGENT_TOOLS = ["call_sub_agent", "call_sub_agents", "spawn_sub_agent", "read_sub_agent_output"];
+const AGENT_TOOL_NAMES = ["call_sub_agent", "spawn_sub_agent"];
 
 test("Ordinary Host resources preserve canonical context and expose mechanical, MCP, Skill, and native Sub-Agent capabilities", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-run-resources-"));
@@ -42,10 +44,14 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     allowedTools: definition.allowedTools,
     contentHash: definition.contentHash,
     bodyHash: definition.bodyHash,
-  })));
+  })), createSubAgentAgentToolCatalogContribution({
+    subAgents: frozenSubAgents,
+    dynamicSpawnAvailable: true,
+  }).definitions);
   let hostReleases = 0;
   let loopReleases = 0;
   let loopConfig: CreateModelRuntimeAgentLoopInput | undefined;
+  const countedToolContracts: string[] = [];
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
     host: {} as never,
     soilStore: createMinimalReadonlySoilStore(createMinimalSoilConstraints()),
@@ -72,6 +78,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
       loopConfig = input;
       return loop(() => { loopReleases += 1; });
     },
+    createTokenCounter: () => observingTokenCounter(countedToolContracts),
   });
   const prior: readonly ModelMessage[] = [
     { role: "system", content: DESKTOP_ROOT_AGENT.prompt.systemPrompt, ref: "stable-system" },
@@ -108,15 +115,33 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   assert.equal(acquired.tools.context.confirmationPolicy, "prompt");
   assert.equal(acquired.tools.permission.confirmationPolicy, "prompt");
   assert.equal(acquired.capabilityResolution?.snapshotId, snapshot.snapshotId);
-  assert.deepEqual(acquired.capabilityResolution?.allowedTools, acquired.tools.permission.allowedTools);
+  assert.deepEqual(acquired.capabilityResolution?.allowedTools, [
+    ...acquired.tools.permission.allowedTools,
+    "call_sub_agent",
+    "spawn_sub_agent",
+  ]);
   assert.equal(acquired.capabilityResolution?.runMode, "agent");
-  assert.equal(LEGACY_SUB_AGENT_TOOLS.some((name) => acquired.tools.gateway.has(name)), false);
+  assert.equal(AGENT_TOOL_NAMES.some((name) => acquired.tools.gateway.has(name)), false);
   assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["call_sub_agent", "spawn_sub_agent"]);
+  const countedTools = countedToolContracts.join("\n");
+  assert.match(countedTools, /Available specialists: reviewer/u);
+  assert.match(countedTools, /sub_agent_name/u);
+  assert.match(countedTools, /allowed_tools/u);
+
+  const deniedSpawn = await acquirer.acquire(executionInput(
+    snapshot,
+    [...prior, { role: "user", content: "review the image" }],
+    {
+      permissionBoundaryRefs: ["deny:tool:spawn_sub_agent"],
+    },
+  ));
+  assert.deepEqual(deniedSpawn.agentTools?.map((tool) => tool.toolName), ["call_sub_agent"]);
 
   await acquired.release();
   await acquired.release();
-  assert.equal(loopReleases, 1);
-  assert.equal(hostReleases, 1);
+  await deniedSpawn.release();
+  assert.equal(loopReleases, 2);
+  assert.equal(hostReleases, 2);
 });
 
 test("Ordinary resources pass through Chat Completions configuration and clean Host resources when loop creation fails", async () => {
@@ -412,18 +437,45 @@ function executionInput(
 function capabilitySnapshot(
   workspaceRoot: string,
   subAgentCatalog: OrdinaryRunBirth["capabilitySnapshot"]["subAgentCatalog"],
+  agentToolDefinitions: readonly ToolDefinition[] = [],
 ): OrdinaryRunBirth["capabilitySnapshot"] {
   const base = ordinaryRunBirth().capabilitySnapshot;
   const tools = [
     tool("read_file", ["workspace", "desktop-basic"]),
     tool("read_skill_resource", ["desktop-basic"]),
     tool("mcp_lookup", ["mcp"]),
+    ...agentToolDefinitions.map(capabilityToolFromDefinition),
   ];
   return {
     ...base,
     toolCatalog: { scope: "desktop-basic", tools, allowedTools: tools.map((item) => item.name) },
     subAgentCatalog,
     workspace: { ...base.workspace, workspaceDirectory: workspaceRoot },
+  };
+}
+
+function capabilityToolFromDefinition(definition: ToolDefinition): CapabilityToolCatalogItem {
+  const metadata = definition.metadata;
+  assert.notEqual(metadata, undefined);
+  const presentation = toolPresentationForDefinition(definition);
+  return {
+    name: definition.name,
+    displayName: presentation.displayName,
+    displayDescription: presentation.displayDescription,
+    description: definition.description,
+    inputSchema: globalThis.structuredClone(definition.inputSchema),
+    category: metadata!.category,
+    categoryLabel: presentation.categoryLabel,
+    riskLevel: metadata!.riskLevel,
+    riskLabel: presentation.riskLabel,
+    operationType: metadata!.operationType,
+    operationLabel: presentation.operationLabel,
+    requiresConfirmation: metadata!.requiresConfirmation,
+    confirmationLabel: presentation.confirmationLabel,
+    definitionHash: toolDefinitionContractHash(definition),
+    scopes: ["desktop-basic"],
+    enabled: true,
+    availability: "available",
   };
 }
 
@@ -511,6 +563,17 @@ function characterTokenCounter(): AgentLoopTokenCounter {
     countText: (text) => text.length,
     countMessage: count,
     countMessages: (messages) => messages.reduce((total, message) => total + count(message), 0),
+  };
+}
+
+function observingTokenCounter(observedText: string[]): AgentLoopTokenCounter {
+  const base = characterTokenCounter();
+  return {
+    ...base,
+    countText(text) {
+      observedText.push(text);
+      return base.countText(text);
+    },
   };
 }
 

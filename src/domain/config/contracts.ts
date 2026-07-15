@@ -8,7 +8,8 @@ import type {
   ToolRiskLevel,
   ToolRuntimeHint,
 } from "../tools/contracts.js";
-import type { SubAgentSourceKind } from "../sub-agents/contracts.js";
+
+export type SubAgentSourceKind = "builtin" | "project" | "user" | "plugin" | "custom";
 
 export type ConfiguredModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
@@ -24,24 +25,14 @@ export type ConfiguredWebSearchProvider =
 
 export type ConfiguredWebSearchProviderKind = Exclude<ConfiguredWebSearchProvider, "none" | "model_builtin">;
 
-export type ConfiguredModelProviderKind =
-  | "openai_compatible"
-  | "anthropic"
-  | "gemini"
-  | "ollama"
-  | "local";
+export type ConfiguredModelProviderKind = "openai_compatible";
 
 export type ConfiguredModelProtocolKind =
   | "openai_responses"
-  | "openai_compatible_chat_completions"
-  | "anthropic_messages"
-  | "gemini_generate_content"
-  | "ollama_generate";
+  | "openai_compatible_chat_completions";
 
 export type ProviderProtocolProfileId =
   | "openai"
-  | "anthropic"
-  | "gemini"
   | "deepseek"
   | "moonshot"
   | "glm"
@@ -55,14 +46,11 @@ export type ModelReasoningControlKind =
   | "deepseek_reasoning_effort"
   | "thinking_enabled_disabled"
   | "thinking_disabled"
-  | "reasoning_split"
-  | "vendor_specific";
+  | "reasoning_split";
 
 export type ModelPreferredApiStyle =
   | "chat_completions"
   | "responses"
-  | "messages"
-  | "gemini_generate_content"
   | "openai_compatible";
 
 export type ModelStability = "stable" | "preview" | "deprecated" | "unknown";
@@ -157,10 +145,6 @@ export type ProviderProtocolProfile = {
   readonly supportedProtocolKinds: readonly ConfiguredModelProtocolKind[];
   readonly defaultBaseUrl: string;
   readonly modelsPath: string;
-  readonly supportsOpenAIResponses: boolean;
-  readonly supportsOpenAIChatCompletions: boolean;
-  readonly supportsAnthropicMessages: boolean;
-  readonly requiresClientSideHistory: boolean;
   readonly reasoningControl: ModelReasoningControlKind;
   readonly unsupportedParams: readonly string[];
   readonly ignoredParams: readonly string[];
@@ -320,7 +304,7 @@ export type ModelProviderProfileSettings = {
 };
 
 export type AgentArborLocalSettings = {
-  readonly version: 1 | 2 | 3;
+  readonly version: 3;
   readonly modelProvider: ModelProviderProfileSettings;
   readonly activeModelProfileId: string;
   readonly modelProfiles: readonly ModelProviderProfileSettings[];

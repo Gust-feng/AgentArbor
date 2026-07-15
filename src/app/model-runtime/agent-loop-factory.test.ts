@@ -105,28 +105,6 @@ test("AgentLoop factory requires an explicit fake loop instead of constructing p
   );
 });
 
-test("AgentLoop factory rejects unsupported provider protocols without falling back", () => {
-  assert.throws(
-    () => createModelRuntimeAgentLoop({
-      env: { AGENTARBOR_MODEL_API_KEY: "key" },
-      modelProvider: {
-        profileId: "anthropic-profile",
-        providerKind: "anthropic",
-        protocolKind: "anthropic_messages",
-        baseUrl: "https://api.anthropic.com",
-        model: "claude",
-      },
-    }),
-    (error) => {
-      assert.equal(error instanceof ModelRuntimeConfigurationError, true);
-      const issue = (error as ModelRuntimeConfigurationError).issue;
-      assert.equal(issue.code, "unsupported_provider_protocol");
-      assert.match(issue.message, /anthropic\/anthropic_messages/u);
-      return true;
-    },
-  );
-});
-
 test("AgentLoop factory rejects a mode that disagrees with the frozen profile protocol", () => {
   assert.throws(
     () => createModelRuntimeAgentLoop({

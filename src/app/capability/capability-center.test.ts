@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../../adapters/config/index.js";
 import { CapabilityCenter } from "./capability-center.js";
-import { ConfigCenter } from "../config-center.js";
+import { ConfigCenter } from "../config-center/index.js";
 import type { SkillRootInput } from "../skills/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
@@ -149,9 +149,9 @@ test("CapabilityCenter discovers project sub-agents and tools from the effective
     ]);
     assert.equal(runSnapshot.subAgentCatalog[0]?.sourceRootId, "project");
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agent"), true);
-    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agents"), true);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("spawn_sub_agent"), true);
-    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("read_sub_agent_output"), true);
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agents"), false);
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("read_sub_agent_output"), false);
   } finally {
     await removeTestDirectory(directory);
   }

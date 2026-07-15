@@ -364,6 +364,9 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(modelSettingsProjection.includes("export function filterModelCatalogItems"), true);
   assert.equal(modelSettingsProjection.includes("export function requestPathOptionsForProvider"), true);
   assert.equal(modelSettingsProjection.includes("/chat/completions"), true);
+  assert.equal(modelSettingsProjection.includes("anthropic_messages"), false);
+  assert.equal(modelSettingsProjection.includes("gemini_generate_content"), false);
+  assert.equal(modelSettingsProjection.includes("ollama_generate"), false);
   assert.equal(modelSettingsProjection.includes("modelProviderSortRank"), true);
   assert.equal(modelSettings.includes("可添加"), false);
   assert.equal(modelCatalogPanel.includes("可添加"), true);
@@ -380,7 +383,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("provider-reasoning-panel"), false);
   assert.equal(settingsDialog.includes("思考强度"), false);
   assert.equal(modelProviderLogos.includes('from "./assets/providers/openai.svg?raw"'), true);
-  assert.equal(modelProviderLogos.includes('from "./assets/providers/anthropic.svg?raw"'), true);
+  assert.equal(modelProviderLogos.includes('from "./assets/providers/anthropic.svg?raw"'), false);
   assert.equal(modelProviderLogos.includes('from "./assets/providers/deepseek.svg?raw"'), true);
   assert.equal(modelProviderLogos.includes('from "./assets/providers/kimi.svg?raw"'), true);
   assert.equal(modelProviderLogos.includes('from "./assets/providers/zai.svg?raw"'), true);

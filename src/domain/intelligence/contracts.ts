@@ -11,13 +11,11 @@ export type { ModelCallRef } from "./model-call-ref.js";
 export const MODEL_PROTOCOL_KINDS = [
   "openai_compatible_chat_completions",
   "openai_responses",
-  "anthropic_messages",
-  "gemini_generate_content",
 ] as const;
 
 export type ModelProtocolKind = (typeof MODEL_PROTOCOL_KINDS)[number];
 
-export type ModelProviderKind = "fake" | "openai_compatible" | "openai" | "anthropic" | "gemini" | "local";
+export type ModelProviderKind = "fake" | "openai_compatible";
 
 export type ModelPurpose =
   | "intent_profile"

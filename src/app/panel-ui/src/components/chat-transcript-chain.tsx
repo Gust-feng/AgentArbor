@@ -12,10 +12,7 @@ import {
 } from "lucide-react";
 import type { ConversationTurn, ConversationTurnAttachment } from "../contracts/conversation";
 import { compact } from "../text";
-import type {
-  SubAgentRunView,
-  TranscriptNode,
-} from "../contracts/run";
+import type { TranscriptNode } from "../contracts/run";
 import type { LiveAnswerTone } from "../../../panel-read-model/transcript/panel-live-transcript";
 import { stabilizeStreamingMarkdown } from "../streaming-text";
 import type { AssistantWorkflowDisplay } from "../../../panel-read-model/assistant/panel-assistant-workflow-display";
@@ -42,7 +39,6 @@ export function TranscriptChain(props: {
   readonly models: readonly ChatModelOption[];
   readonly selectedModelId: string;
   readonly showModelUsage: boolean;
-  readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
   readonly hiddenEarlierTurnCount?: number;
@@ -90,7 +86,6 @@ export function TranscriptChain(props: {
               model={model}
               workflow={item.workflow}
               showModelUsage={props.showModelUsage}
-              subAgentRuns={props.subAgentRuns}
             />
           )
           : (
@@ -101,7 +96,6 @@ export function TranscriptChain(props: {
               model={model}
               workflow={item.workflow}
               showModelUsage={props.showModelUsage}
-              subAgentRuns={props.subAgentRuns}
               onDecision={stableOnDecision}
               confirmationBusy={item.hasPendingConfirmation && props.confirmationBusy}
             />
@@ -218,7 +212,6 @@ type AssistantMessageProps = {
   readonly model?: AssistantModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly showModelUsage: boolean;
-  readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy?: boolean;
 };
@@ -245,7 +238,6 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
             <AssistantWorkflowSegment
               key={segment.kind === "awaiting" ? `awaiting-${index}` : segment.segmentKey}
               segment={segment}
-              subAgentRuns={props.subAgentRuns}
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy === true}
             />
@@ -270,7 +262,6 @@ type AssistantFailureMessageProps = {
   readonly model?: AssistantModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly showModelUsage: boolean;
-  readonly subAgentRuns?: readonly SubAgentRunView[];
 };
 
 const AssistantFailureMessage = React.memo(function AssistantFailureMessage(props: AssistantFailureMessageProps): React.ReactElement {
@@ -287,7 +278,6 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
             <AssistantWorkflowSegment
               key={segment.kind === "awaiting" ? `awaiting-${index}` : segment.segmentKey}
               segment={segment}
-              subAgentRuns={props.subAgentRuns}
               confirmationBusy={false}
             />
           ))
@@ -306,7 +296,6 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
               <AssistantWorkflowSegment
               key={segment.segmentKey}
               segment={segment}
-              subAgentRuns={props.subAgentRuns}
               confirmationBusy={false}
             />
             ))}
@@ -319,7 +308,6 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
 
 function AssistantWorkflowSegment(props: {
   readonly segment: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>["segments"][number];
-  readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }): React.ReactElement {
@@ -331,7 +319,6 @@ function AssistantWorkflowSegment(props: {
         collapsed={segment.collapsed}
         lifecycle={segment.lifecycle}
         collapseReason={segment.collapseReason}
-        subAgentRuns={props.subAgentRuns}
         onDecision={props.onDecision}
         confirmationBusy={props.confirmationBusy}
       />
@@ -481,7 +468,6 @@ function assistantMessagePropsEqual(left: AssistantMessageProps, right: Assistan
     left.live === right.live &&
     left.animateOnMount === right.animateOnMount &&
     assistantModelBadgesEqual(left.model, right.model) &&
-    left.subAgentRuns === right.subAgentRuns &&
     left.onDecision === right.onDecision &&
     left.confirmationBusy === right.confirmationBusy;
 }
@@ -491,7 +477,6 @@ function assistantFailureMessagePropsEqual(left: AssistantFailureMessageProps, r
     left.failure.error === right.failure.error &&
     left.showModelUsage === right.showModelUsage &&
     assistantModelBadgesEqual(left.model, right.model) &&
-    left.subAgentRuns === right.subAgentRuns &&
     left.workflow === right.workflow;
 }
 

@@ -2,7 +2,6 @@ import {
   FakeModelProvider,
   OpenAICompatibleChatCompletionsProvider,
   OpenAIResponsesProvider,
-  fetchAnthropicModelCatalog,
   fetchOpenAICompatibleModelCatalog,
   type ModelCatalogFetchLike,
 } from "../../adapters/intelligence/index.js";
@@ -244,9 +243,6 @@ export async function fetchModelRuntimeModelCatalog(input: {
   readonly fetch?: ModelRuntimeModelCatalogFetch;
   readonly abortSignal?: AbortSignal;
 }): Promise<ModelProviderModelCatalog> {
-  if (input.profile.providerKind === "anthropic" && input.profile.protocolKind === "anthropic_messages") {
-    return fetchAnthropicModelCatalog(input);
-  }
   return fetchOpenAICompatibleModelCatalog(input);
 }
 
@@ -360,8 +356,6 @@ function enabledFlag(value: string | undefined): boolean {
 function providerProfileIdFromConfig(value: string | undefined): ProviderProtocolProfileId | undefined {
   if (
     value === "openai" ||
-    value === "anthropic" ||
-    value === "gemini" ||
     value === "deepseek" ||
     value === "moonshot" ||
     value === "glm" ||

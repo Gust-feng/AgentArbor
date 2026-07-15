@@ -67,41 +67,6 @@ test("domain and kernel do not depend on app or adapters", async () => {
   assert.deepEqual(violations, [], "domain/kernel layers must not import app or adapters");
 });
 
-test("Basic Agent runtime does not depend on panel-private modules", async () => {
-  const files = await collectSourceFiles(path.join(process.cwd(), "src", "app", "basic-agent-runtime"));
-  const violations: string[] = [];
-
-  for (const file of files) {
-    const source = await fs.readFile(file, "utf8");
-    for (const target of resolveRelativeImports(file, source)) {
-      const targetPath = relativePath(target);
-      const name = path.basename(targetPath);
-      if (name.startsWith("panel-")) {
-        violations.push(`${relativePath(file)} -> ${targetPath}`);
-      }
-    }
-  }
-
-  assert.deepEqual(violations, [], "Basic Agent runtime should consume app-level contracts, not panel-private helpers");
-});
-
-test("Basic Agent runtime does not depend on underground domain contracts", async () => {
-  const files = await collectSourceFiles(path.join(process.cwd(), "src", "app", "basic-agent-runtime"));
-  const violations: string[] = [];
-
-  for (const file of files) {
-    const source = await fs.readFile(file, "utf8");
-    for (const target of resolveRelativeImports(file, source)) {
-      const targetPath = relativePath(target);
-      if (targetPath.startsWith("src/domain/underground/")) {
-        violations.push(`${relativePath(file)} -> ${targetPath}`);
-      }
-    }
-  }
-
-  assert.deepEqual(violations, [], "Basic Agent runtime should keep deep/underground structures behind app-level attachments");
-});
-
 test("ordinary Agent paths do not import top-level domain barrels", async () => {
   const files = await collectOrdinaryAgentSourceFiles();
   const forbiddenTargets = new Set([
@@ -132,10 +97,10 @@ test("runtime feature modules do not depend on panel-server composition", async 
   const panelServerRoot = path.join(appRoot, "panel-server");
   const featureRoots = [
     path.join(appRoot, "ordinary-agent"),
-    path.join(appRoot, "basic-agent-runtime"),
-    path.join(appRoot, "desktop-agent"),
     path.join(appRoot, "sub-agents"),
     path.join(appRoot, "deep"),
+    path.join(appRoot, "skills"),
+    path.join(appRoot, "research"),
   ];
   const files = (await Promise.all(featureRoots.map((root) => collectSourceFiles(root))))
     .flat()
@@ -154,8 +119,9 @@ test("Deep and Multi-Agent feature code do not depend on ordinary Desktop implem
   const appRoot = path.join(process.cwd(), "src", "app");
   const deepRoot = path.join(appRoot, "deep");
   const forbiddenRoots = [
-    path.join(appRoot, "basic-agent-runtime"),
+    path.join(appRoot, "ordinary-agent"),
     path.join(appRoot, "desktop-agent"),
+    path.join(appRoot, "sub-agents"),
   ];
   const files = (await collectSourceFiles(deepRoot)).filter((file) => !isTestAssetSource(file));
   const graph = await buildSourceGraph("src/app");
@@ -190,11 +156,7 @@ test("Multi-Agent feature uses precise infrastructure ports instead of MinimalRu
 });
 
 test("Ordinary Agent feature uses its exact runtime contract instead of MinimalRuntime", async () => {
-  const appRoot = path.join(process.cwd(), "src", "app");
-  const files = [
-    ...(await collectSourceFiles(path.join(appRoot, "basic-agent-runtime"))),
-    ...(await collectSourceFiles(path.join(appRoot, "desktop-agent"))),
-  ].filter((file) => !isTestAssetSource(file));
+  const files = (await collectOrdinaryAgentSourceFiles()).filter((file) => !isTestAssetSource(file));
   const violations: string[] = [];
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
@@ -218,6 +180,7 @@ test("neutral runtime contracts and primitives do not depend on product feature 
     ...(await collectSourceFiles(path.join(root, "src", "kernel", "intelligence"))),
   ].filter((file) => !isTestAssetSource(file));
   const forbiddenRoots = [
+    "ordinary-agent",
     "basic-agent-runtime",
     "desktop-agent",
     "deep",
@@ -295,6 +258,7 @@ test("tool infrastructure does not depend on product feature implementations", a
   const files = (await collectSourceFiles(path.join(appRoot, "tool-center")))
     .filter((file) => !isTestAssetSource(file));
   const forbiddenRoots = [
+    "ordinary-agent",
     "basic-agent-runtime",
     "desktop-agent",
     "deep",
@@ -445,7 +409,7 @@ test("shared Agent run resources do not own feature contributions", async () => 
   const file = path.join(process.cwd(), "src", "app", "panel-server", "agent-run-resources.ts");
   const source = await fs.readFile(file, "utf8");
   const imports = sourceImportBindings(source, file)
-    .filter((binding) => /\/(?:basic-agent-runtime|desktop-agent|deep|skills|sub-agents)(?:\/|$)/.test(
+    .filter((binding) => /\/(?:ordinary-agent|desktop-agent|deep|skills|sub-agents)(?:\/|$)/.test(
       binding.moduleSpecifier.replaceAll("\\", "/"),
     ))
     .map((binding) => `${binding.moduleSpecifier}:${binding.importedName}`)

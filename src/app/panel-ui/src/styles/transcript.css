@@ -777,66 +777,6 @@ button.agent-activity-step:focus-visible {
   background: color-mix(in oklch, var(--accent) 34%, var(--border));
 }
 
-.agent-activity-step.sub_agent {
-  --tool-accent: var(--accent);
-}
-
-.sub-agent-inline-card {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-  width: fit-content;
-  max-width: min(100%, 520px);
-  padding: 6px 10px;
-  border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
-  border-radius: 7px;
-  background: color-mix(in oklch, var(--surface) 97%, var(--accent));
-}
-
-.sub-agent-inline-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  color: var(--accent);
-  background: color-mix(in oklch, var(--accent) 10%, transparent);
-}
-
-.sub-agent-inline-main {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 8px;
-  align-items: baseline;
-  min-width: 0;
-}
-
-.sub-agent-inline-main strong,
-.sub-agent-inline-main small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sub-agent-inline-main strong {
-  max-width: 18ch;
-  color: color-mix(in oklch, var(--fg) 88%, var(--muted));
-  font-size: 13px;
-  font-weight: var(--weight-heading);
-  line-height: 1.35;
-}
-
-.sub-agent-inline-main small {
-  flex: 1 1 auto;
-  max-width: 38ch;
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
 @keyframes agent-marker-pulse {
   0%, 100% {
     box-shadow: 0 0 0 4px color-mix(in oklch, var(--tool-accent, var(--accent)) 12%, transparent);
@@ -909,11 +849,6 @@ button.agent-activity-step:focus-visible {
   .agent-activity-detail {
     white-space: normal;
     overflow-wrap: anywhere;
-  }
-
-  .sub-agent-inline-card {
-    width: 100%;
-    max-width: 100%;
   }
 
 }

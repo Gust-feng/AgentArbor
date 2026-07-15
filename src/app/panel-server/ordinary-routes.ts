@@ -13,12 +13,10 @@ import {
 } from "./ordinary-agent-panel-projection.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import {
-  asRecord,
-  numberOrUndefined,
-  optionalString,
   parseConfirmationDecision,
   parseConversationPinInput,
   parseConversationRenameInput,
+  parseConversationRollbackInput,
   parseRunInput,
 } from "./request-parsers.js";
 import type { PanelRuntime } from "./runtime.js";
@@ -70,12 +68,12 @@ export async function handlePanelOrdinaryRoute(
   const rollback = /^\/api\/conversations\/([^/]+)\/rollback$/u.exec(url.pathname);
   if (request.method === "POST" && rollback !== null) {
     const conversationId = decode(rollback[1]);
-    const body = asRecord(await readJsonBody(request));
+    const input = parseConversationRollbackInput(await readJsonBody(request));
     const existing = await runtime.ordinaryAgentFeature.queries.getConversation(conversationId);
     if (existing === undefined) throw new PanelHttpError(404, "conversation_not_found", "未找到对话。");
-    const targetTurnId = optionalString(body.targetTurnId);
+    const targetTurnId = input.targetTurnId;
     const targetRunId = targetTurnId === undefined
-      ? optionalString(body.targetRunId)
+      ? input.targetRunId
       : existing.turns.find((turn) => turn.turnId === targetTurnId)?.runId;
     if (targetTurnId !== undefined && targetRunId === undefined) {
       throw new PanelHttpError(404, "conversation_turn_not_found", "未找到要回退到的对话轮次。");
@@ -83,7 +81,7 @@ export async function handlePanelOrdinaryRoute(
     const conversation = await runtime.ordinaryAgentFeature.commands.rollbackConversation({
       conversationId,
       targetRunId,
-      stepsBack: numberOrUndefined(body.stepsBack),
+      stepsBack: input.stepsBack,
     });
     writeJson(response, 200, { ok: true, conversation: await projectConversation(runtime, conversation) });
     return true;

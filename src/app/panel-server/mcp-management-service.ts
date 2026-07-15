@@ -2,7 +2,7 @@ import type { McpReferenceInfo } from "../../adapters/mcp/index.js";
 import { ensureManagedMcpExecutable, installMcpExecutable, McpManager, resolveMcpExecutable } from "../../adapters/mcp/index.js";
 import type { McpCachedReferenceInfo, McpCachedToolInfo, McpServerSettings } from "../../domain/config/index.js";
 import type { CapabilityCenter } from "../capability/capability-center.js";
-import type { ConfigCenter } from "../config-center.js";
+import type { ConfigCenter } from "../config-center/index.js";
 import { PanelHttpError } from "./http-utils.js";
 
 const PANEL_MCP_CONNECT_TIMEOUT_MS = 8_000;

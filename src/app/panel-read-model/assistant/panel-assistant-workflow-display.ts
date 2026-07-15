@@ -13,7 +13,6 @@ import type { ConfirmationIdentity } from "../transcript/panel-transcript-confir
 import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 import type {
   AssistantDeliverableLike,
-  AssistantSubAgentRunLike,
 } from "./panel-assistant-message-output.js";
 import type { LiveAnswerTone } from "../transcript/panel-live-transcript.js";
 
@@ -58,7 +57,6 @@ export function projectStableAssistantWorkflowDisplay<
   readonly content: string;
   readonly deliverable?: AssistantDeliverableLike;
   readonly transcriptNodes?: readonly TNode[];
-  readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
   readonly pending?: TConfirmation;
   readonly live?: boolean;
   readonly keepStreamMounted?: boolean;
@@ -72,7 +70,6 @@ export function projectStableAssistantWorkflowDisplay<
     content: input.content,
     deliverable: input.deliverable,
     transcriptNodes: input.transcriptNodes,
-    subAgentRuns: input.subAgentRuns,
     pending: input.pending,
     live,
     keepStreamMounted,

@@ -129,6 +129,11 @@ const DEFAULT_BING_MAX_RESULTS = 5;
 
 export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
   const record = asRecord(raw);
+  if (record.version !== 3) {
+    throw new ConfigSchemaValidationError(
+      "Invalid AgentArbor config file: settings version must be 3."
+    );
+  }
   const modelProvider = asRecord(record.modelProvider);
   const updatedAt = requiredString(record.updatedAt, "settings.updatedAt");
   const legacyProfile = parseModelProfile(modelProvider, {
@@ -162,7 +167,7 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
   const google = asRecord(informationAccess.google);
   const bing = asRecord(informationAccess.bing);
   return normalizeLocalSettings({
-    version: record.version === 3 ? 3 : record.version === 2 ? 2 : 1,
+    version: 3,
     modelProvider: activeProfile,
     activeModelProfileId: activeProfile.profileId,
     modelProfiles,

@@ -4,12 +4,6 @@ import type {
   OrdinaryConversationReadModel,
   OrdinaryRunState,
 } from "../ordinary-agent/index.js";
-import type {
-  RuntimeConversationRecord,
-  RuntimeModelCallRecord,
-  RuntimeRunRecord,
-  RuntimeRunSnapshot,
-} from "../../domain/runtime-database/index.js";
 
 export const USAGE_HEATMAP_WINDOW_DAYS = 182;
 const ALL_LOCAL_RECORD_LIMIT = Number.MAX_SAFE_INTEGER;
@@ -128,118 +122,13 @@ function createOrdinaryUsageStatistics(input: {
   };
 }
 
-export function createUsageStatistics(input: {
-  readonly generatedAt: string;
-  readonly storageAvailable: boolean;
-  readonly conversations: readonly RuntimeConversationRecord[];
-  readonly runs: readonly RuntimeRunRecord[];
-  readonly snapshots?: readonly RuntimeRunSnapshot[];
-  readonly modelCallsByRun?: readonly UsageStatisticsModelCallGroup[];
-}): UsageStatistics {
-  const daily = createDailyBuckets(input.generatedAt);
-  const activityDates: string[] = [];
-  const totals: MutableUsageStatisticsTotals = {
-    conversationCount: input.conversations.length,
-    messageCount: 0,
-    runCount: input.runs.length,
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-    cacheSavedTokens: 0,
-  };
-
-  for (const conversation of input.conversations) {
-    addActivityDate(activityDates, conversation.createdAt);
-    addActivityDate(activityDates, conversation.updatedAt);
-    addDailyCount(daily, conversation.createdAt, "conversationCount", 1);
-    totals.messageCount += conversation.turns.length;
-    for (const turn of conversation.turns) {
-      addActivityDate(activityDates, turn.createdAt);
-      addActivityDate(activityDates, turn.updatedAt);
-      addDailyCount(daily, turn.createdAt, "messageCount", 1);
-    }
-  }
-
-  const runById = new Map(input.runs.map((run) => [run.runId, run]));
-  for (const run of input.runs) {
-    addActivityDate(activityDates, run.createdAt);
-    addActivityDate(activityDates, run.updatedAt);
-    addDailyCount(daily, run.createdAt, "runCount", 1);
-  }
-
-  for (const group of modelCallGroups(input)) {
-    const run = runById.get(group.runId) ?? group.run;
-    if (run === undefined) {
-      continue;
-    }
-    for (const call of group.modelCalls) {
-      addModelCallUsage(totals, daily, run, call);
-    }
-  }
-
-  const dailyActivity = finalizeDailyActivity(daily);
-  return {
-    generatedAt: input.generatedAt,
-    storageAvailable: input.storageAvailable,
-    scope: "all_local",
-    heatmapWindowDays: USAGE_HEATMAP_WINDOW_DAYS,
-    firstActivityDate: minDate(activityDates),
-    lastActivityDate: maxDate(activityDates),
-    totals,
-    dailyActivity,
-  };
-}
-
 type MutableUsageStatisticsTotals = {
   -readonly [K in keyof UsageStatisticsTotals]: UsageStatisticsTotals[K];
 };
 
-type UsageStatisticsModelCallGroup = {
-  readonly runId: string;
-  readonly run?: RuntimeRunRecord;
-  readonly modelCalls: readonly RuntimeModelCallRecord[];
-};
-
-function modelCallGroups(input: {
-  readonly snapshots?: readonly RuntimeRunSnapshot[];
-  readonly modelCallsByRun?: readonly UsageStatisticsModelCallGroup[];
-}): readonly UsageStatisticsModelCallGroup[] {
-  if (input.modelCallsByRun !== undefined) {
-    return input.modelCallsByRun;
-  }
-  return (input.snapshots ?? []).map((snapshot) => ({
-    runId: snapshot.run.runId,
-    run: snapshot.run,
-    modelCalls: snapshot.modelCalls,
-  }));
-}
-
 type MutableDailyActivity = Omit<UsageStatisticsDailyActivity, "level"> & {
   level?: UsageStatisticsDailyActivity["level"];
 };
-
-function addModelCallUsage(
-  totals: MutableUsageStatisticsTotals,
-  daily: Map<string, MutableDailyActivity>,
-  run: RuntimeRunRecord,
-  call: RuntimeModelCallRecord
-): void {
-  if (call.status !== "completed") {
-    return;
-  }
-  const usage = normalizedUsage(call.usage);
-  if (usage === undefined) {
-    return;
-  }
-  totals.inputTokens += usage.inputTokens;
-  totals.outputTokens += usage.outputTokens;
-  totals.totalTokens += usage.totalTokens;
-  totals.cacheSavedTokens += usage.cacheSavedTokens;
-  const date = run.completedAt ?? run.updatedAt;
-  addDailyCount(daily, date, "inputTokens", usage.inputTokens);
-  addDailyCount(daily, date, "outputTokens", usage.outputTokens);
-  addDailyCount(daily, date, "cacheSavedTokens", usage.cacheSavedTokens);
-}
 
 function normalizedUsage(usage: ModelUsage | undefined): {
   readonly inputTokens: number;

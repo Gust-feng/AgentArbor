@@ -223,7 +223,7 @@ export function ModelSettings(props: {
       apiKey: "",
       apiKeyCleared: false,
     };
-    const nextProfile = profileFromModelForm(nextForm, "openai_compatible", projectedConfig?.config?.defaultAiMode);
+    const nextProfile = profileFromModelForm(nextForm, projectedConfig?.config?.defaultAiMode);
     const nextKey = `profile:${profileId}`;
     const previousOrder = providerOrderRef.current;
     const nextOrder = addProviderKey(providerOrderRef.current, undefined, nextKey);
@@ -706,14 +706,13 @@ function reconcileModelProviderProjectionDraft(
 
 function profileFromModelForm(
   form: ModelForm,
-  providerKind: string,
   defaultAiMode: ModelProviderProfileItem["defaultAiMode"] | undefined
 ): ModelProviderProfileItem {
   return {
     profileId: form.profileId,
     label: form.label.trim() || form.profileId,
     logoDataUrl: logoDataUrlFromModelForm(form),
-    providerKind,
+    providerKind: "openai_compatible",
     protocolKind: form.protocolKind || "openai_compatible_chat_completions",
     baseUrl: form.baseUrl,
     model: form.model,

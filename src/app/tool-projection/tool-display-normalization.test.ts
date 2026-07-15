@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";
 
-test("normalizeToolDisplayForOperation derives edit_file display without output display", () => {
+test("normalizeToolDisplayForOperation consumes the canonical edit_file unified diff", () => {
   const display = normalizeToolDisplayForOperation({
     toolName: "edit_file",
     input: {
       path: "src/app/example.ts",
       edits: [
         {
-          oldText: "const value = 1;",
-          newText: "const value = 2;",
+          oldText: "INPUT MUST NOT BECOME A DIFF",
+          newText: "INPUT MUST NOT BECOME A PREVIEW",
           occurrence: 1,
           startLine: 4,
         },
@@ -21,6 +21,10 @@ test("normalizeToolDisplayForOperation derives edit_file display without output 
       replacements: 1,
       previousLength: 16,
       nextLength: 16,
+      diff: {
+        status: "available",
+        unifiedDiff: "Index: src/app/example.ts\n--- src/app/example.ts\n+++ src/app/example.ts\n@@ -1,1 +1,1 @@\n-const value = 1;\n+const value = 2;\n",
+      },
     },
   });
 
@@ -30,11 +34,12 @@ test("normalizeToolDisplayForOperation derives edit_file display without output 
   assert.equal(display.kind === "file_diff_preview" ? display.replacements : undefined, 1);
   assert.equal(display.kind === "file_diff_preview" ? display.previousLength : undefined, 16);
   assert.equal(display.kind === "file_diff_preview" ? display.nextLength : undefined, 16);
-  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("- const value = 1;") : false, true);
-  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("+ const value = 2;") : false, true);
+  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("-const value = 1;") : false, true);
+  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("+const value = 2;") : false, true);
+  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("INPUT MUST NOT") : true, false);
 });
 
-test("normalizeToolDisplayForOperation derives edit preview from top-level anchor replacement fields", () => {
+test("normalizeToolDisplayForOperation does not reconstruct an edit diff from input", () => {
   const display = normalizeToolDisplayForOperation({
     toolName: "edit_file",
     input: {
@@ -50,11 +55,10 @@ test("normalizeToolDisplayForOperation derives edit preview from top-level ancho
 
   assert.equal(display.kind, "file_diff_preview");
   assert.equal(display.kind === "file_diff_preview" ? display.path : undefined, "notes/demo.md");
-  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("- old line") : false, true);
-  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("+ new line") : false, true);
+  assert.equal(display.kind === "file_diff_preview" ? display.preview : "unexpected", undefined);
 });
 
-test("normalizeToolDisplayForOperation preserves direct patch preview for file edits", () => {
+test("normalizeToolDisplayForOperation uses the canonical diff fact for custom file edits", () => {
   const display = normalizeToolDisplayForOperation({
     toolName: "workspace_patch",
     input: {
@@ -63,7 +67,10 @@ test("normalizeToolDisplayForOperation preserves direct patch preview for file e
     output: {
       operation: "edit",
       path: "notes/demo.md",
-      patch: "@@ line 1\n- old\n+ new",
+      diff: {
+        status: "available",
+        unifiedDiff: "@@ line 1\n- old\n+ new",
+      },
       replacements: 1,
     },
   });

@@ -23,7 +23,7 @@ import {
 } from "../tool-center/index.js";
 import { PanelHttpError } from "./http-utils.js";
 import type { ToolRegistryScope } from "../tool-center/tool-registry.js";
-import { persistContextWindowFallback } from "../model-context-window-fallback.js";
+import { persistContextWindowFallback } from "../model-runtime/model-context-window-fallback.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ConfigCenter } from "../config-center/index.js";
 import type { LocalCommandProcessRegistry } from "../tool-center/adapters/local-workspace-command-tools.js";

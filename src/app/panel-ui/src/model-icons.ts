@@ -5,7 +5,11 @@ import kimiModelIcon from "./assets/model-icons/kimi_model_icon.svg?raw";
 import minimaxModelIcon from "./assets/model-icons/minimax_model_icon.svg?raw";
 import openaiModelIcon from "./assets/model-icons/chatgpt_gpt_model_icon.svg?raw";
 import { decorativeSvg } from "./icon-svg";
-import { resolveModelFamilyIdentity, type ModelProviderIdentity } from "./model-provider-logos";
+import {
+  resolveModelFamilyIdentity,
+  type ModelFamilyIdentity,
+  type ModelProviderIdentity,
+} from "./model-provider-logos";
 
 const openaiModelSvg = decorativeSvg(openaiModelIcon);
 const claudeModelSvg = decorativeSvg(claudeModelIcon);
@@ -14,7 +18,7 @@ const kimiModelSvg = decorativeSvg(kimiModelIcon);
 const glmModelSvg = decorativeSvg(glmModelIcon);
 const minimaxModelSvg = decorativeSvg(minimaxModelIcon);
 
-export function resolveModelIconSvg(identity: ModelProviderIdentity): string | undefined {
+export function resolveModelIconSvg(identity: ModelFamilyIdentity): string | undefined {
   if (identity === "openai") return openaiModelSvg;
   if (identity === "claude") return claudeModelSvg;
   if (identity === "deepseek") return deepseekModelSvg;
@@ -28,7 +32,7 @@ export function resolveModelIconIdentity(input: {
   readonly providerIdentity?: ModelProviderIdentity;
   readonly modelId?: string;
   readonly displayName?: string;
-}): ModelProviderIdentity {
+}): ModelFamilyIdentity {
   const modelIdentity = resolveModelFamilyIdentity({
     displayName: input.displayName,
     model: input.modelId,

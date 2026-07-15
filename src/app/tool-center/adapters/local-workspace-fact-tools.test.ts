@@ -3,12 +3,16 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { applyPatch } from "diff";
 import { MAX_LOCAL_WORKSPACE_FILE_BYTES } from "./local-workspace-common.js";
 import {
   createLocalGrepFilesTool,
   createLocalListDirTool,
 } from "./local-workspace-read-tools.js";
-import { createLocalEditFileTool } from "./local-workspace-write-tools.js";
+import {
+  createLocalEditFileTool,
+  EDIT_FILE_DIFF_MAX_INPUT_CHARS,
+} from "./local-workspace-write-tools.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
@@ -148,7 +152,55 @@ test("local edit_file dryRun reports replacement facts without writing", async (
     assert.equal(typeof result.beforeHash, "string");
     assert.equal(typeof result.afterHash, "string");
     assert.notEqual(result.beforeHash, result.afterHash);
-    assert.deepEqual(result.diffSummary, ["line 2: beta -> BETA"]);
+    const diff = asRecord(result.diff);
+    assert.equal(diff.status, "available");
+    assert.equal(typeof diff.unifiedDiff, "string");
+    assert.equal(applyPatch(original, String(diff.unifiedDiff)), original.replace("beta", "BETA"));
+    assert.equal(await readFile(file, "utf8"), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local edit_file records an unchanged canonical diff without fabricating a patch", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-edit-unchanged-"));
+  try {
+    const file = path.join(root, "notes.txt");
+    await writeFile(file, "same\n", "utf8");
+    const result = asDirectToolFacts(await createLocalEditFileTool(root).execute({
+      path: "notes.txt",
+      dryRun: true,
+      edits: [{ oldText: "same", newText: "same" }],
+    }, context));
+
+    assert.deepEqual(result.diff, { status: "unchanged" });
+    assert.equal(result.wouldReplace, 1);
+    assert.equal(result.replacements, 0);
+    assert.equal(await readFile(file, "utf8"), "same\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local edit_file reports the canonical diff input limit without blocking a dry run", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-edit-limit-"));
+  try {
+    const file = path.join(root, "large.txt");
+    const original = `a${"x".repeat(Math.floor(EDIT_FILE_DIFF_MAX_INPUT_CHARS / 2) + 1)}\n`;
+    await writeFile(file, original, "utf8");
+    const result = asDirectToolFacts(await createLocalEditFileTool(root).execute({
+      path: "large.txt",
+      dryRun: true,
+      edits: [{ oldText: "a", newText: "b" }],
+    }, context));
+    const diff = asRecord(result.diff);
+
+    assert.equal(diff.status, "unavailable");
+    assert.equal(diff.reason, "input_limit_exceeded");
+    assert.equal(diff.beforeChars, original.length);
+    assert.equal(diff.afterChars, original.length);
+    assert.equal(diff.maxInputChars, EDIT_FILE_DIFF_MAX_INPUT_CHARS);
+    assert.equal(diff.unifiedDiff, undefined);
     assert.equal(await readFile(file, "utf8"), original);
   } finally {
     await rm(root, { recursive: true, force: true });

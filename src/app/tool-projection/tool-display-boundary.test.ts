@@ -8,7 +8,7 @@ test("tool display owners consume only canonical top-level facts", async () => {
   const sources = await Promise.all([
     readFile(path.join(root, "tool-projection", "tool-display-normalization.ts"), "utf8"),
     readFile(path.join(root, "tool-projection", "tool-display-projection.ts"), "utf8"),
-    readFile(path.join(root, "desktop-agent", "desktop-agent-session-projection.ts"), "utf8"),
+    readFile(path.join(root, "panel-read-model", "run", "panel-stream-tool-projection.ts"), "utf8"),
   ]);
 
   for (const source of sources) {

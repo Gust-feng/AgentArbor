@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",
-  "description": "AgentArbor deterministic minimal runtime kernel.",
+  "description": "AgentArbor desktop general-agent workbench.",
   "scripts": {
     "clean:dist": "node scripts/clean-dist.mjs",
     "build": "pnpm clean:dist && pnpm build:node && pnpm copy:sub-agents && pnpm typecheck:panel && pnpm build:panel",
@@ -14,7 +14,6 @@
     "build:panel": "vite build --config vite.panel.config.ts",
     "test:release-gate": "node --test scripts/windows-release-validation.test.mjs",
     "test": "pnpm build && node scripts/run-node-tests.mjs && pnpm test:release-gate",
-    "demo": "pnpm build && node dist/app/demo.js",
     "smoke:real-ai": "pnpm build && node dist/app/real-ai-smoke.js",
     "panel": "pnpm build && node dist/app/panel.js",
     "panel:dev": "node scripts/panel-dev.mjs",
@@ -42,6 +41,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/agents": "0.13.3",
+    "diff": "9.0.0",
     "electron-updater": "^6.6.2",
     "js-tiktoken": "^1.0.21",
     "lucide-react": "0.487.0",

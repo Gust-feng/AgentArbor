@@ -7,7 +7,7 @@ import {
   createInMemoryRunSnapshotStore,
   type RunEnvelope,
 } from "./snapshot-store.js";
-import { createFileSystemRunSnapshotStore } from "../../adapters/runtime-database/run-snapshot-store.js";
+import { createFileSystemRunSnapshotStore } from "../../adapters/runtime-storage/run-snapshot-store.js";
 
 type TestSnapshot = {
   readonly run: {

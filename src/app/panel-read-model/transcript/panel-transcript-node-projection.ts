@@ -161,7 +161,7 @@ export type ProjectableTranscriptNode = {
   readonly runId: string;
   readonly sequence: number;
   readonly eventType: string;
-  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "sub_agent" | "answer" | "body" | "system";
+  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "body" | "system";
   readonly phase:
     | "noted"
     | "preparing"
@@ -179,16 +179,6 @@ export type ProjectableTranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
-  readonly subAgentRunId?: string;
-  readonly subAgentBatchId?: string;
-  readonly subAgentName?: string;
-  readonly subAgentTask?: string;
-  readonly subAgentTotalCount?: number;
-  readonly subAgentSuccessCount?: number;
-  readonly subAgentFailedCount?: number;
-  readonly subAgentCancelledCount?: number;
-  readonly subAgentApprovalRequiredCount?: number;
-  readonly subAgentNotStartedCount?: number;
   readonly display?: TranscriptToolDisplayLike;
   readonly confirmation?: {
     readonly confirmationId?: string;
@@ -387,7 +377,6 @@ function transcriptNodeOrderRank(node: ProjectableTranscriptNode): number {
   if (node.kind === "tool") return 3;
   if (node.kind === "confirmation") return 4;
   if (node.kind === "user_decision") return 5;
-  if (node.kind === "sub_agent") return 6;
   if (node.kind === "system") return 7;
   return 6;
 }
@@ -457,7 +446,7 @@ function isLowValueNode(node: ProjectableTranscriptNode): boolean {
   if (node.kind === "user_decision") {
     return isLowValueUserDecisionNode(node);
   }
-  if (node.kind === "tool" || node.kind === "confirmation" || node.kind === "sub_agent" || node.kind === "body") {
+  if (node.kind === "tool" || node.kind === "confirmation" || node.kind === "body") {
     return false;
   }
   return lowValueCopy(node.text ?? node.summary ?? node.title);

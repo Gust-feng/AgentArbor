@@ -524,32 +524,6 @@ export const EVENT_OBSERVATION_METADATA = {
     phase: "completed",
     stage: "error_raised",
   }),
-  "sub_agent.started": metadata({
-    summary: "Sub-agent started execution.",
-    scope: "runtime",
-    progressStatus: "in_progress",
-    phase: "agent",
-    stage: "tool_requested",
-  }),
-  "sub_agent.completed": metadata({
-    summary: "Sub-agent completed execution.",
-    scope: "runtime",
-    phase: "agent",
-    stage: "tool_completed",
-  }),
-  "sub_agent_batch.started": metadata({
-    summary: "Sub-agent batch execution started.",
-    scope: "runtime",
-    progressStatus: "in_progress",
-    phase: "agent",
-    stage: "tool_requested",
-  }),
-  "sub_agent_batch.completed": metadata({
-    summary: "Sub-agent batch execution completed.",
-    scope: "runtime",
-    phase: "agent",
-    stage: "tool_completed",
-  }),
 } satisfies Record<ArborMessageType, EventObservationMetadata>;
 
 export function getEventObservationMetadata(type: ArborMessageType): EventObservationMetadata {

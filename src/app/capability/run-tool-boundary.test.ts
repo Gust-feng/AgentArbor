@@ -293,7 +293,17 @@ test("run tool boundary can activate latent read_skill_resource after skill sele
   assert.equal(boundary.capabilityResolution?.warnings.includes("已隐藏 1 个不可用工具。"), false);
 });
 
-test("run tool boundary injects frozen sub-agent catalog into sub-agent tool definitions", () => {
+test("run tool boundary exposes implemented SDK AgentTools without requiring ToolCenter executors", () => {
+  const callAgentTool = {
+    ...toolDefinition("call_sub_agent"),
+    description: "Call a frozen project-helper specialist.",
+    inputSchema: {
+      type: "object" as const,
+      properties: { sub_agent_name: { type: "string", enum: ["project-helper"] } },
+      required: ["sub_agent_name"],
+      additionalProperties: false,
+    },
+  };
   const boundary = resolveRunToolBoundary({
     agentDefinition: DESKTOP_ROOT_AGENT,
     snapshot: capabilitySnapshot(
@@ -312,18 +322,14 @@ test("run tool boundary injects frozen sub-agent catalog into sub-agent tool def
     ),
     goal: "use frozen sub-agent catalog",
     taskSoil: createTaskSoil({ rawGoal: "use frozen sub-agent catalog" }),
-    toolCenter: executableToolBroker(["call_sub_agent"]),
+    agentToolDefinitions: [callAgentTool],
   });
 
-  const hint = boundary.toolDefinitions[0]?.modelContract?.runtimeHints?.find((item) =>
-    item.label === "available sub-agents"
-  )?.value ?? "";
-
+  assert.deepEqual(boundary.allowedTools, []);
+  assert.deepEqual(boundary.allowedAgentToolNames, ["call_sub_agent"]);
   assert.equal(boundary.toolDefinitions[0]?.name, "call_sub_agent");
-  assert.match(hint, /project-helper/);
-  assert.match(hint, /allowedTools=read_file/);
-  assert.match(hint, /maxSteps=12/);
-  assert.equal(hint.includes("code-expert"), false);
+  assert.equal(boundary.toolDefinitions[0]?.description, callAgentTool.description);
+  assert.deepEqual(boundary.toolDefinitions[0]?.inputSchema, callAgentTool.inputSchema);
 });
 
 test("run tool boundary hides preset sub-agent call tools when no enabled sub-agents exist", () => {
@@ -332,32 +338,81 @@ test("run tool boundary hides preset sub-agent call tools when no enabled sub-ag
     snapshot: capabilitySnapshot(
       [
         tool("call_sub_agent", "read-write"),
-        tool("call_sub_agents", "read-write"),
-        tool("read_sub_agent_output", "read-only"),
         tool("spawn_sub_agent", "read-write"),
       ],
-      ["call_sub_agent", "call_sub_agents", "read_sub_agent_output", "spawn_sub_agent"],
+      ["call_sub_agent", "spawn_sub_agent"],
       [subAgentCatalogItem("disabled-helper", { enabled: false })]
     ),
     goal: "use sub-agent tools",
     taskSoil: createTaskSoil({ rawGoal: "use sub-agent tools" }),
-    toolCenter: executableToolBroker(["call_sub_agent", "call_sub_agents", "read_sub_agent_output", "spawn_sub_agent"]),
+    agentToolDefinitions: [toolDefinition("call_sub_agent"), toolDefinition("spawn_sub_agent")],
   });
 
-  assert.deepEqual(boundary.allowedTools, ["read_sub_agent_output", "spawn_sub_agent"]);
-  assert.deepEqual(boundary.toolDefinitions.map((definition) => definition.name), ["read_sub_agent_output", "spawn_sub_agent"]);
+  assert.deepEqual(boundary.allowedTools, []);
+  assert.deepEqual(boundary.allowedAgentToolNames, ["spawn_sub_agent"]);
+  assert.deepEqual(boundary.toolDefinitions.map((definition) => definition.name), ["spawn_sub_agent"]);
   assert.equal(
     boundary.capabilityResolution?.toolExposures.find((item) => item.name === "call_sub_agent")?.reasonCode,
     "no_enabled_sub_agents"
   );
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "call_sub_agents")?.reason,
-    "本轮没有可调用的预置子 Agent。"
-  );
-  assert.equal(
     boundary.capabilityResolution?.toolExposures.find((item) => item.name === "spawn_sub_agent")?.modelVisible,
     true
   );
+});
+
+test("run tool boundary applies permissions, profile, model, snapshot, and implementation gates to SDK AgentTools", () => {
+  const agentTools = [toolDefinition("call_sub_agent"), toolDefinition("spawn_sub_agent")];
+  const snapshot = capabilitySnapshot(
+    [tool("call_sub_agent", "read-write"), tool("spawn_sub_agent", "read-write")],
+    ["call_sub_agent", "spawn_sub_agent"],
+    [subAgentCatalogItem("reviewer")],
+  );
+  const base = {
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot,
+    goal: "delegate",
+    taskSoil: createTaskSoil({ rawGoal: "delegate" }),
+    agentToolDefinitions: agentTools,
+  };
+
+  assert.deepEqual(resolveRunToolBoundary(base).allowedAgentToolNames, [
+    "call_sub_agent",
+    "spawn_sub_agent",
+  ]);
+  assert.deepEqual(resolveRunToolBoundary({
+    ...base,
+    taskSoil: createTaskSoil({
+      rawGoal: "delegate",
+      permissionBoundaryRefs: ["deny:tool:spawn_sub_agent"],
+    }),
+  }).allowedAgentToolNames, ["call_sub_agent"]);
+  assert.deepEqual(resolveRunToolBoundary({
+    ...base,
+    agentDefinition: {
+      ...DESKTOP_ROOT_AGENT,
+      toolVisibilityProfile: {
+        ...DESKTOP_ROOT_AGENT.toolVisibilityProfile,
+        hiddenToolNames: ["call_sub_agent", "spawn_sub_agent"],
+      },
+    },
+  }).allowedAgentToolNames, []);
+  assert.deepEqual(resolveRunToolBoundary({
+    ...base,
+    modelCapabilities: {
+      ...snapshot.modelCapabilities,
+      supportsToolCalling: false,
+      supportsParallelToolCalls: false,
+    },
+  }).allowedAgentToolNames, []);
+  assert.deepEqual(resolveRunToolBoundary({
+    ...base,
+    snapshot: capabilitySnapshot([], [], [subAgentCatalogItem("reviewer")]),
+  }).allowedAgentToolNames, []);
+  assert.deepEqual(resolveRunToolBoundary({
+    ...base,
+    agentToolDefinitions: [],
+  }).allowedAgentToolNames, []);
 });
 
 function capabilitySnapshot(

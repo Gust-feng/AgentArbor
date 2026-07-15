@@ -1,6 +1,6 @@
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
-import type { AppUpdateFetch, AppUpdateServiceLike } from "../app-update-service.js";
-import type { ConfigCenter } from "../config-center.js";
+import type { AppUpdateFetch, AppUpdateServiceLike } from "../app-update/app-update-service.js";
+import type { ConfigCenter } from "../config-center/index.js";
 import type { ProcessTerminator } from "../runtime-guard/index.js";
 import type { SkillRootInput } from "../skills/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";

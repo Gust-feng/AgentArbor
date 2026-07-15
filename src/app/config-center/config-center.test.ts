@@ -8,6 +8,36 @@ import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAg
 import { ConfigCenter, ConfigCenterValidationError } from "./index.js";
 import { toSanitizedCommandShellConfig } from "./command-shell-settings.js";
 import { DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT } from "./desktop-agent-settings.js";
+import { parseLocalSettingsFile } from "./settings-schema.js";
+
+test("config settings reject retired model providers and protocols instead of rewriting them", () => {
+  const baseProfile = {
+    profileId: "default",
+    label: "Retired provider",
+    baseUrl: "https://retired.example",
+    defaultAiMode: "openai-compatible",
+    secretRef: "secret://local-dev/model-provider/default/api-key",
+    enabled: true,
+    updatedAt: "2026-07-15T00:00:00.000Z",
+  };
+
+  assert.throws(
+    () => parseLocalSettingsFile({
+      version: 3,
+      modelProvider: { ...baseProfile, providerKind: "anthropic", protocolKind: "anthropic_messages" },
+      updatedAt: baseProfile.updatedAt,
+    }),
+    /provider kind must be openai_compatible/u
+  );
+  assert.throws(
+    () => parseLocalSettingsFile({
+      version: 3,
+      modelProvider: { ...baseProfile, providerKind: "openai_compatible", protocolKind: "gemini_generate_content" },
+      updatedAt: baseProfile.updatedAt,
+    }),
+    /model protocol must be openai_responses or openai_compatible_chat_completions/u
+  );
+});
 
 test("config settings schema keeps OpenAI request settings split", async () => {
   const [settingsSchema, openAIRequestSettings] = await Promise.all([
@@ -109,14 +139,12 @@ test("command shell settings keep runtime environment detection split", async ()
 });
 
 test("ConfigCenter keeps projections and workspace validation split from orchestration", async () => {
-  const [configCenterFacade, configCenter, projections, workspaceSettings] = await Promise.all([
-    fs.readFile(path.join(process.cwd(), "src", "app", "config-center.ts"), "utf8"),
+  const [configCenter, projections, workspaceSettings] = await Promise.all([
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "index.ts"), "utf8"),
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "projections.ts"), "utf8"),
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "workspace-settings.ts"), "utf8"),
   ]);
 
-  assert.equal(configCenterFacade.trim(), 'export * from "./config-center/index.js";');
   assert.equal(configCenter.includes('from "./projections.js"'), true);
   assert.equal(configCenter.includes('from "./workspace-settings.js"'), true);
   assert.equal(configCenter.includes("private async toSanitizedConfig"), false);
@@ -585,11 +613,11 @@ test("ConfigCenter clears model names explicitly and does not inherit them into 
       defaultAiMode: "openai-compatible",
     });
     const created = await configCenter.createModelProviderProfile({
-      profileId: "anthropic",
-      label: "Anthropic",
-      providerKind: "anthropic",
-      protocolKind: "anthropic_messages",
-      baseUrl: "https://api.anthropic.com",
+      profileId: "router",
+      label: "Router",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://router.example/v1",
       defaultAiMode: "openai-compatible",
     });
     const cleared = await configCenter.updateModelProviderConfig({
@@ -746,7 +774,7 @@ test("ConfigCenter can build a model runtime environment from frozen run informa
   }
 });
 
-test("ConfigCenter reads v1 settings and upgrades local settings to v3", async () => {
+test("ConfigCenter rejects retired settings versions instead of migrating them", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-v1-"));
   try {
     const settingsStore = new FileSystemNormalSettingsStore(directory);
@@ -775,49 +803,10 @@ test("ConfigCenter reads v1 settings and upgrades local settings to v3", async (
     );
 
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
-    const modelConfig = await configCenter.getModelProviderConfig();
-    const defaultInformation = await configCenter.getInformationAccessConfig();
-    const updatedInformation = await configCenter.updateInformationAccessConfig({
-      sourcePreference: ["codebase", "web"],
-      tavilyMaxResults: 2,
-    });
-    const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
-      version: number;
-      activeModelProfileId?: string;
-      modelProfiles?: readonly unknown[];
-      modelCatalogs?: readonly unknown[];
-      modelCapabilityOverrides?: readonly unknown[];
-      toolStates?: readonly unknown[];
-      mcpServers?: readonly unknown[];
-      informationAccess?: {
-        sourcePreference?: readonly string[];
-        tavily?: { maxResults?: number };
-      };
-    };
-
-    assert.equal(modelConfig.baseUrl, "https://legacy.example");
-    assert.equal(modelConfig.defaultAiMode, "openai-compatible");
-    assert.equal(defaultInformation.web.maxResults, 5);
-    assert.deepEqual(defaultInformation.sourcePreference, [
-      "web",
-      "codebase",
-      "soil",
-      "run_memory",
-      "docs",
-      "packages",
-      "github",
-    ]);
-    assert.equal(updatedInformation.web.maxResults, 2);
-    assert.deepEqual(updatedInformation.sourcePreference, ["codebase", "web"]);
-    assert.equal(settingsRaw.version, 3);
-    assert.equal(settingsRaw.activeModelProfileId, "default");
-    assert.equal(settingsRaw.modelProfiles?.length, 1);
-    assert.deepEqual(settingsRaw.modelCatalogs, []);
-    assert.deepEqual(settingsRaw.modelCapabilityOverrides, []);
-    assert.deepEqual(settingsRaw.toolStates, []);
-    assert.deepEqual(settingsRaw.mcpServers, []);
-    assert.deepEqual(settingsRaw.informationAccess?.sourcePreference, ["codebase", "web"]);
-    assert.equal(settingsRaw.informationAccess?.tavily?.maxResults, 2);
+    await assert.rejects(
+      configCenter.getModelProviderConfig(),
+      /settings version must be 3/u
+    );
   } finally {
     await removeTestDirectory(directory);
   }
@@ -886,18 +875,6 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
               updatedAt: now,
             },
             {
-              profileId: "claude",
-              label: "Claude",
-              providerKind: "openai_compatible",
-              protocolKind: "openai_compatible_chat_completions",
-              baseUrl: "https://api.anthropic.com",
-              model: "deepseek-v4-pro",
-              defaultAiMode: "openai-compatible",
-              secretRef: "secret://local-dev/model-provider/claude/api-key",
-              enabled: true,
-              updatedAt: now,
-            },
-            {
               profileId: "claude-proxy",
               label: "Claude Proxy",
               providerKind: "openai_compatible",
@@ -943,7 +920,6 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
     const active = await configCenter.getModelProviderConfig();
     const profiles = await configCenter.listModelProviderProfiles();
     const openai = profiles.find((profile) => profile.profileId === "default");
-    const anthropic = profiles.find((profile) => profile.profileId === "claude");
     const deepseek = profiles.find((profile) => profile.profileId === "deepseek");
     const glmAlias = profiles.find((profile) => profile.profileId === "ai");
     const proxy = profiles.find((profile) => profile.profileId === "claude-proxy");
@@ -955,11 +931,6 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
     assert.equal(openai?.protocolKind, "openai_responses");
     assert.equal(openai?.defaultAiMode, "openai-responses");
     assert.equal(openai?.model, undefined);
-    assert.equal(anthropic?.label, "Claude");
-    assert.equal(anthropic?.providerKind, "anthropic");
-    assert.equal(anthropic?.protocolKind, "anthropic_messages");
-    assert.equal(anthropic?.baseUrl, "https://api.anthropic.com");
-    assert.equal(anthropic?.model, undefined);
     assert.equal(deepseek?.model, "deepseek-v4-pro");
     assert.equal(deepseek?.protocolKind, "openai_compatible_chat_completions");
     assert.equal(glmAlias?.label, "智谱 AI");

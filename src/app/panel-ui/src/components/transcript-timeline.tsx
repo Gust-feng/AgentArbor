@@ -16,7 +16,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { SubAgentRunView, TranscriptNode } from "../contracts/run";
+import type { TranscriptNode } from "../contracts/run";
 import {
   ConfirmationNode,
   type ConfirmationProjection,
@@ -33,7 +33,6 @@ import type {
 } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import { resolveActivityToolKind } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import { collapsedTimelineSummary } from "../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
-import { SubAgentInlineCard } from "./sub-agent-run-viewer";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";
 export { pendingForTurn } from "../../../panel-read-model/transcript/panel-transcript-confirmation-projection";
@@ -48,7 +47,6 @@ const TOOL_KIND_ICON: Record<string, LucideIcon> = {
   confirmation: CircleCheck,
   decision: Scale,
   system: Cog,
-  sub_agent: Sparkles,
   other: Wand2,
 };
 
@@ -59,7 +57,6 @@ type AgentWorkTimelineProps = {
   readonly collapseReason?: string;
   readonly selectedItemKey?: string;
   readonly selectableItemKeys?: readonly string[];
-  readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly onSelectItem?: (item: ActivityItem) => void;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
@@ -90,40 +87,6 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
               key={item.key}
             />
           );
-        }
-        if (item.variant === "sub_agent") {
-          const run = item.subAgentRunId === undefined
-            ? undefined
-            : props.subAgentRuns?.find((candidate) => candidate.subRunId === item.subAgentRunId);
-          const batchRuns = item.subAgentBatchId === undefined
-            ? undefined
-            : props.subAgentRuns?.filter((candidate) => candidate.batchId === item.subAgentBatchId);
-          return timelineStep({
-            item,
-            current,
-            selectable: false,
-            selected: false,
-            toolKind,
-            content: (
-              <>
-                <span className="agent-activity-marker" aria-hidden="true" />
-                <SubAgentInlineCard
-                  run={run}
-                  batchRuns={batchRuns}
-                  batchStats={{
-                    total: item.subAgentTotalCount,
-                    completed: item.subAgentSuccessCount,
-                    failed: item.subAgentFailedCount,
-                    cancelled: item.subAgentCancelledCount,
-                    approvalRequired: item.subAgentApprovalRequiredCount,
-                    notStarted: item.subAgentNotStartedCount,
-                  }}
-                  fallbackTitle={item.subAgentName ?? item.copy.label ?? "子 Agent"}
-                  fallbackSummary={item.subAgentTask ?? item.copy.detail}
-                />
-              </>
-            ),
-          });
         }
         const content = (
           <>
@@ -641,7 +604,6 @@ function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentW
     left.lifecycle === right.lifecycle &&
     left.collapseReason === right.collapseReason &&
     left.selectedItemKey === right.selectedItemKey &&
-    left.subAgentRuns === right.subAgentRuns &&
     stringListsEqual(left.selectableItemKeys, right.selectableItemKeys) &&
     left.onSelectItem === right.onSelectItem &&
     left.onDecision === right.onDecision &&
@@ -678,16 +640,6 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
     left.tone === right.tone &&
     left.phase === right.phase &&
     left.toolKind === right.toolKind &&
-    left.subAgentRunId === right.subAgentRunId &&
-    left.subAgentBatchId === right.subAgentBatchId &&
-    left.subAgentName === right.subAgentName &&
-    left.subAgentTask === right.subAgentTask &&
-    left.subAgentTotalCount === right.subAgentTotalCount &&
-    left.subAgentSuccessCount === right.subAgentSuccessCount &&
-    left.subAgentFailedCount === right.subAgentFailedCount &&
-    left.subAgentCancelledCount === right.subAgentCancelledCount &&
-    left.subAgentApprovalRequiredCount === right.subAgentApprovalRequiredCount &&
-    left.subAgentNotStartedCount === right.subAgentNotStartedCount &&
     lineDeltasEqual(left.lineDelta, right.lineDelta) &&
     left.copy.label === right.copy.label &&
     left.copy.detail === right.copy.detail &&

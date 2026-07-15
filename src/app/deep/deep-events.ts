@@ -15,9 +15,7 @@
  * buildAndPublishRunTree 倒序重建。publisher 本身只提供发布能力，"实时 vs 事后重建"
  * 由调用方装配决定。
  *
- * 复用边界：复用 {@link safeAgentRunTreeRef}（underground/events）的 tree 投影语义。
- * 旧 `underground/events.ts` 的 `agent.*` publisher 仍服务旧 underground cluster 兼容链，
- * 不在此模块修改；deep-runtime 改用本模块发布 `deep.*`。
+ * Agent run tree 的窄引用由 Deep 自己拥有，不依赖旧 Underground publisher。
  *
  * 命名红线：消费 contracts.ts 的 SynthesizedConclusion；不引入 Plan/artifact/Fruits。
  */
@@ -31,7 +29,7 @@ import type {
   DelegationDecision,
   ParentSynthesisResult,
 } from "../../domain/underground/agent-fabric.js";
-import { safeAgentRunTreeRef } from "../underground/events.js";
+import { deepAgentRunTreeRef } from "./deep-agent-run-tree-ref.js";
 import type { DeepRunControlEvent } from "./deep-run-executor.js";
 import type { SynthesizedConclusion } from "./contracts.js";
 import { DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";
@@ -267,7 +265,7 @@ export function createDeepEventPublisher(options: {
           confidence: input.decision.confidence,
           uncertainty: input.decision.uncertainty,
           childSpecIds: input.childSpecs.map((spec) => spec.specId),
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -288,7 +286,7 @@ export function createDeepEventPublisher(options: {
           childRunId: input.childRun.childRunId,
           displayName: input.childRun.spec.displayName,
           role: input.childRun.spec.role,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -307,7 +305,7 @@ export function createDeepEventPublisher(options: {
         },
         {
           childRunId: input.childRun.childRunId,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -332,7 +330,7 @@ export function createDeepEventPublisher(options: {
           instructionId: input.instructionId,
           messageRef: input.messageRef,
           queuedCount: input.queuedCount,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -352,7 +350,7 @@ export function createDeepEventPublisher(options: {
         {
           childRunId: input.childRun.childRunId,
           displayName: input.childRun.spec.displayName,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -373,7 +371,7 @@ export function createDeepEventPublisher(options: {
           childRunId: input.childRun.childRunId,
           displayName: input.childRun.spec.displayName,
           reason: input.reason ?? input.childRun.failureReason,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -394,7 +392,7 @@ export function createDeepEventPublisher(options: {
           childRunId: input.childRun.childRunId,
           displayName: input.childRun.spec.displayName,
           reason: input.reason ?? input.childRun.failureReason,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -416,7 +414,7 @@ export function createDeepEventPublisher(options: {
           childRunId: input.childRun.childRunId,
           displayName: input.childRun.spec.displayName,
           failure: input.failure,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -436,7 +434,7 @@ export function createDeepEventPublisher(options: {
         {
           synthesisId: input.parentSynthesis.synthesisId,
           childRunCount: input.childRuns.length,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -466,7 +464,7 @@ export function createDeepEventPublisher(options: {
         {
           runId: options.runId,
           error: input.summary,
-          agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+          agentRunTree: deepAgentRunTreeRef(input.agentRunTree),
         },
       );
     },
@@ -485,7 +483,7 @@ export function createDeepEventPublisher(options: {
                 treeRef(agentRunTree),
               ],
             },
-            { ...ce, runId: options.runId, agentRunTree: safeAgentRunTreeRef(agentRunTree) },
+            { ...ce, runId: options.runId, agentRunTree: deepAgentRunTreeRef(agentRunTree) },
           );
         } else if (ce.kind === "correct") {
           record(
@@ -499,7 +497,7 @@ export function createDeepEventPublisher(options: {
                 treeRef(agentRunTree),
               ],
             },
-            { ...ce, runId: options.runId, agentRunTree: safeAgentRunTreeRef(agentRunTree) },
+            { ...ce, runId: options.runId, agentRunTree: deepAgentRunTreeRef(agentRunTree) },
           );
         } else {
           record(
@@ -513,7 +511,7 @@ export function createDeepEventPublisher(options: {
                 treeRef(agentRunTree),
               ],
             },
-            { ...ce, runId: options.runId, agentRunTree: safeAgentRunTreeRef(agentRunTree) },
+            { ...ce, runId: options.runId, agentRunTree: deepAgentRunTreeRef(agentRunTree) },
           );
         }
     },

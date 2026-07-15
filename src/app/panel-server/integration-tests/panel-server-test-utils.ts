@@ -196,26 +196,6 @@ export async function removeTemporaryTree(directory: string): Promise<void> {
   });
 }
 
-export async function waitForRun(
-  baseUrl: string,
-  runId: string,
-  predicate: (body: any) => boolean,
-  timeoutMs = PANEL_ASYNC_TEST_TIMEOUT_MS,
-  runsPath = "/api/desktop/runs"
-): Promise<RequestJsonResult> {
-  const startedAt = Date.now();
-  const effectiveTimeoutMs = asyncTestTimeout(timeoutMs);
-  let last: RequestJsonResult | undefined;
-  while (Date.now() - startedAt < effectiveTimeoutMs) {
-    last = await requestJson(baseUrl, `${runsPath}/${encodeURIComponent(runId)}`);
-    if (predicate(last.body)) {
-      return last;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for panel run ${runId}; last=${last?.text}`);
-}
-
 export async function waitForBasicEvents(
   baseUrl: string,
   runId: string,

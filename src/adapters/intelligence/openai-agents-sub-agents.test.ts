@@ -376,7 +376,7 @@ test("aborting the root while a child model request is active cancels the nested
   }
 });
 
-test("agent-tool names must not collide with a legacy ToolCenter executor", async () => {
+test("agent-tool names must not collide with a ToolCenter executor", async () => {
   const gateway = new RecordingGateway([plainTool("call_sub_agent")]);
   const fetch = scriptedFetch([]);
   const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL, fetch: fetch.fetch });

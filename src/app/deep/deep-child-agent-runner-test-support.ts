@@ -205,10 +205,10 @@ export function capabilitySnapshotWithTools(toolNames: readonly string[]): Basic
     createdAt: "2026-05-01T00:00:00.000Z",
     activeModel: {
       profileId: "fake",
-      providerKind: "local",
+      providerKind: "openai_compatible",
       protocolKind: "openai_compatible_chat_completions",
       baseUrl: "http://localhost",
-      defaultAiMode: "fake",
+      defaultAiMode: "openai-compatible",
       secretRef: "secret:test",
       secretConfigured: true,
       updatedAt: "2026-05-01T00:00:00.000Z",

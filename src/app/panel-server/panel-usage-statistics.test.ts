@@ -1,80 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
-  RuntimeConversationRecord,
-  RuntimeModelCallRecord,
-  RuntimeRunRecord,
-  RuntimeRunSnapshot,
-} from "../../domain/runtime-database/index.js";
-import type { OrdinaryAgentFeature, OrdinaryRunState } from "../ordinary-agent/index.js";
+  OrdinaryAgentFeature,
+  OrdinaryConversationReadModel,
+  OrdinaryRunState,
+} from "../ordinary-agent/index.js";
 import {
   USAGE_HEATMAP_WINDOW_DAYS,
   createPanelUsageStatistics,
-  createUsageStatistics,
 } from "./panel-usage-statistics.js";
 
-test("usage statistics aggregates conversations, runs, token usage, and recent heatmap levels", () => {
-  const generatedAt = "2026-06-28T12:00:00.000Z";
-  const conversations: RuntimeConversationRecord[] = [
-    conversationRecord({
-      conversationId: "conversation-1",
-      createdAt: "2026-06-26T01:00:00.000Z",
-      turns: [
-        turnRecord("turn-1", "user", "2026-06-26T01:00:00.000Z"),
-        turnRecord("turn-2", "assistant", "2026-06-26T01:00:01.000Z", "run-agent"),
-        turnRecord("turn-3", "user", "2026-06-27T01:00:00.000Z"),
-      ],
+test("panel usage statistics aggregates canonical Ordinary conversations and run usage", async () => {
+  const conversations = [
+    conversation("conversation-1", "2026-06-26T01:00:00.000Z", [
+      turn("turn-1", "2026-06-26T01:00:00.000Z"),
+      turn("turn-2", "2026-06-26T01:00:01.000Z"),
+      turn("turn-3", "2026-06-27T01:00:00.000Z"),
+    ]),
+    conversation("conversation-2", "2026-06-28T01:00:00.000Z", [
+      turn("turn-4", "2026-06-28T01:00:00.000Z"),
+      turn("turn-5", "2026-06-28T01:00:01.000Z"),
+    ]),
+  ];
+  const runs = [
+    ordinaryRun("run-1", "2026-06-26T01:00:01.000Z", {
+      inputTokens: 120,
+      outputTokens: 30,
+      totalTokens: 150,
+      cachedInputTokens: 40,
     }),
-    conversationRecord({
-      conversationId: "conversation-2",
-      createdAt: "2026-06-28T01:00:00.000Z",
-      turns: [
-        turnRecord("turn-4", "user", "2026-06-28T01:00:00.000Z"),
-        turnRecord("turn-5", "assistant", "2026-06-28T01:00:01.000Z", "run-deep"),
-      ],
+    ordinaryRun("run-2", "2026-06-28T01:00:01.000Z", {
+      inputTokens: 80,
+      outputTokens: 20,
+      reasoningOutputTokens: 10,
+      cachedInputTokens: 5,
     }),
   ];
-  const runs: RuntimeRunRecord[] = [
-    runRecord({
-      runId: "run-agent",
-      runMode: "agent",
-      createdAt: "2026-06-26T01:00:01.000Z",
-      updatedAt: "2026-06-26T01:00:02.000Z",
-    }),
-    runRecord({
-      runId: "run-deep",
-      runMode: "deep",
-      createdAt: "2026-06-28T01:00:01.000Z",
-      updatedAt: "2026-06-28T01:00:02.000Z",
-    }),
-  ];
-  const statistics = createUsageStatistics({
-    generatedAt,
-    storageAvailable: true,
-    conversations,
-    runs,
-    snapshots: [
-      snapshotRecord(runs[0]!, [
-        modelCallRecord("request-1", {
-          inputTokens: 120,
-          outputTokens: 30,
-          totalTokens: 150,
-          cachedInputTokens: 40,
-        }),
-        modelCallRecord("request-2"),
-        modelCallRecord("request-3", { inputTokens: 8, outputTokens: 2 }, "failed"),
-      ]),
-      snapshotRecord(runs[1]!, [
-        modelCallRecord("request-4", {
-          inputTokens: 80,
-          outputTokens: 20,
-          reasoningOutputTokens: 10,
-          cachedInputTokens: 5,
-        }),
-      ]),
-    ],
-  });
 
+  const response = await createPanelUsageStatistics({
+    ordinaryAgentFeature: ordinaryFeature(conversations, runs),
+    generatedAt: "2026-06-28T12:00:00.000Z",
+  });
+  const statistics = response.statistics;
   const day26 = statistics.dailyActivity.find((item) => item.date === "2026-06-26");
   const day28 = statistics.dailyActivity.find((item) => item.date === "2026-06-28");
 
@@ -103,19 +70,13 @@ test("usage statistics aggregates conversations, runs, token usage, and recent h
   assert.equal(day28?.level, 5);
 });
 
-test("usage statistics returns an empty local view without storage", () => {
-  const statistics = createUsageStatistics({
+test("panel usage statistics returns an empty current view when Ordinary has no records", async () => {
+  const response = await createPanelUsageStatistics({
+    ordinaryAgentFeature: ordinaryFeature([], []),
     generatedAt: "2026-06-28T12:00:00.000Z",
-    storageAvailable: false,
-    conversations: [],
-    runs: [],
-    snapshots: [],
   });
 
-  assert.equal(statistics.storageAvailable, false);
-  assert.equal(statistics.firstActivityDate, undefined);
-  assert.equal(statistics.lastActivityDate, undefined);
-  assert.deepEqual(statistics.totals, {
+  assert.deepEqual(response.statistics.totals, {
     conversationCount: 0,
     messageCount: 0,
     runCount: 0,
@@ -124,124 +85,61 @@ test("usage statistics returns an empty local view without storage", () => {
     totalTokens: 0,
     cacheSavedTokens: 0,
   });
-  assert.equal(statistics.dailyActivity.every((item) => item.level === 0), true);
+  assert.equal(response.statistics.firstActivityDate, undefined);
+  assert.equal(response.statistics.lastActivityDate, undefined);
+  assert.equal(response.statistics.dailyActivity.every((item) => item.level === 0), true);
 });
 
-test("panel usage statistics reads cumulative usage from the Ordinary feature facts", async () => {
-  const run = {
-    runId: "run-ordinary",
-    canonicalMessages: [{ role: "assistant", content: "done" }],
-    usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7, cachedInputTokens: 3 },
-    timestamps: {
-      createdAt: "2026-06-28T01:00:01.000Z",
-      updatedAt: "2026-06-28T01:00:02.000Z",
-      terminalAt: "2026-06-28T01:00:02.000Z",
-    },
-  } as unknown as OrdinaryRunState;
-  const ordinaryAgentFeature = {
+function ordinaryFeature(
+  conversations: readonly OrdinaryConversationReadModel[],
+  runs: readonly OrdinaryRunState[],
+): OrdinaryAgentFeature {
+  const byId = new Map(runs.map((run) => [run.runId, run]));
+  return {
     queries: {
-      listConversations: async () => [],
-      listRuns: async () => [{ runId: run.runId }],
-      getRun: async (runId: string) => runId === run.runId ? run : undefined,
+      listConversations: async () => conversations,
+      listRuns: async () => runs.map((run) => ({ runId: run.runId })),
+      getRun: async (runId: string) => byId.get(runId),
     },
   } as unknown as OrdinaryAgentFeature;
-
-  const response = await createPanelUsageStatistics({
-    ordinaryAgentFeature,
-    generatedAt: "2026-06-28T12:00:00.000Z",
-  });
-
-  assert.equal(response.statistics.totals.runCount, 1);
-  assert.equal(response.statistics.totals.inputTokens, 5);
-  assert.equal(response.statistics.totals.outputTokens, 2);
-  assert.equal(response.statistics.totals.totalTokens, 7);
-  assert.equal(response.statistics.totals.cacheSavedTokens, 3);
-});
-
-function conversationRecord(input: {
-  readonly conversationId: string;
-  readonly createdAt: string;
-  readonly turns: RuntimeConversationRecord["turns"];
-}): RuntimeConversationRecord {
-  return {
-    conversationId: input.conversationId,
-    title: input.conversationId,
-    preview: "preview",
-    status: "completed",
-    latestRunId: input.turns.find((turn) => turn.role === "assistant")?.runId,
-    queuedRunIds: [],
-    queuedRunCount: 0,
-    createdAt: input.createdAt,
-    updatedAt: input.turns.at(-1)?.updatedAt ?? input.createdAt,
-    turns: input.turns,
-  };
 }
 
-function turnRecord(
-  turnId: string,
-  role: RuntimeConversationRecord["turns"][number]["role"],
+function conversation(
+  conversationId: string,
   createdAt: string,
-  runId?: string
-): RuntimeConversationRecord["turns"][number] {
+  turns: readonly OrdinaryConversationReadModel["turns"][number][],
+): OrdinaryConversationReadModel {
+  return {
+    conversationId,
+    createdAt,
+    updatedAt: turns.at(-1)?.updatedAt ?? createdAt,
+    turns,
+  } as OrdinaryConversationReadModel;
+}
+
+function turn(
+  turnId: string,
+  createdAt: string,
+): OrdinaryConversationReadModel["turns"][number] {
   return {
     turnId,
-    role,
-    title: turnId,
-    content: turnId,
-    status: "completed",
-    runId,
     createdAt,
     updatedAt: createdAt,
-  };
+  } as OrdinaryConversationReadModel["turns"][number];
 }
 
-function runRecord(input: {
-  readonly runId: string;
-  readonly runMode: RuntimeRunRecord["runMode"];
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}): RuntimeRunRecord {
+function ordinaryRun(
+  runId: string,
+  createdAt: string,
+  usage: OrdinaryRunState["usage"],
+): OrdinaryRunState {
   return {
-    runId: input.runId,
-    profile: "lite",
-    runKind: input.runMode === "agent" ? "desktop" : "underground",
-    runMode: input.runMode,
-    status: "completed",
-    goalSummary: input.runId,
-    aiMode: "fake",
-    appHome: "/tmp/app",
-    runHome: `/tmp/app/runtime/runs/${input.runId}`,
-    createdAt: input.createdAt,
-    updatedAt: input.updatedAt,
-    completedAt: input.updatedAt,
-  };
-}
-
-function snapshotRecord(
-  run: RuntimeRunRecord,
-  modelCalls: readonly RuntimeModelCallRecord[]
-): RuntimeRunSnapshot {
-  return {
-    run,
-    events: [],
-    modelCalls,
-    toolCalls: [],
-    artifacts: [],
-    confirmations: [],
-    subAgentRuns: [],
-  };
-}
-
-function modelCallRecord(
-  requestId: string,
-  usage?: RuntimeModelCallRecord["usage"],
-  status: RuntimeModelCallRecord["status"] = "completed"
-): RuntimeModelCallRecord {
-  return {
-    requestId,
-    runId: "run",
-    status,
+    runId,
     usage,
-    eventRefs: [],
-  };
+    timestamps: {
+      createdAt,
+      updatedAt: createdAt,
+      terminalAt: createdAt,
+    },
+  } as OrdinaryRunState;
 }

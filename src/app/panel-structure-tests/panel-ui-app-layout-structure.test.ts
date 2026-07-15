@@ -220,7 +220,6 @@ test("panel UI app shell keeps layout and style ownership split", async () => {
   assert.equal(workspaceStyles.includes(".settings-capabilities"), false);
   assert.equal(workspaceStyles.includes(".service-config-grid"), true);
 });
-
 test("panel UI native title tooltips stay limited to context usage ring", async () => {
   const sourceRoot = path.join(process.cwd(), "src", "app", "panel-ui", "src");
   const files = await listPanelUiSourceFiles(sourceRoot);
@@ -251,15 +250,4 @@ test("panel UI native title tooltips stay limited to context usage ring", async 
     ),
     [],
   );
-});
-
-test("panel UI subscribes to ordinary sub-agent stream events", async () => {
-  const runtime = await readPanelUiSource("runtime.ts");
-
-  assertIncludesAll(runtime, [
-    '"sub_agent.started"',
-    '"sub_agent.completed"',
-    '"sub_agent_batch.started"',
-    '"sub_agent_batch.completed"',
-  ]);
 });

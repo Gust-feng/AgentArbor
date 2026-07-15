@@ -17,10 +17,11 @@ import type {
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import type { SkillDefinition } from "../../domain/basic-agent/index.js";
+import { toolPresentationForDefinition, type ToolDefinition } from "../../domain/tools/index.js";
 import type { SubAgentDefinition, SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import { LazyMcpToolExecutorProvider } from "../../adapters/mcp/index.js";
-import type { ConfigCenter } from "../config-center.js";
+import type { ConfigCenter } from "../config-center/index.js";
 import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import {
   createAgentToolRegistry,
@@ -33,8 +34,7 @@ import type { ToolOutputStore } from "../tool-center/tool-output-store.js";
 import { discoverSkills, normalizeSkillRoots, parseSkillMarkdown, type SkillRootInput } from "../skills/skill-loader.js";
 import type { SkillStateStore } from "../skills/skill-state-store.js";
 import { discoverSubAgents, normalizeSubAgentRoots, type SubAgentDiscoveryOptions } from "../sub-agents/sub-agent-loader.js";
-import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
-import { registerSubAgentToolCatalog } from "../sub-agents/sub-agent-tools.js";
+import { createSubAgentAgentToolCatalogContribution } from "../sub-agents/sub-agent-agent-tools.js";
 import { registerSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
 import { createMcpToolRegistryContribution } from "../mcp/mcp-tool-contribution.js";
@@ -177,9 +177,6 @@ export class CapabilityCenter {
         });
     const modelCapabilities = resolveModelCapabilities({ profile: activeModel, overrides });
     const subAgentRoots = this.subAgentRootsFor({ workspaceDirectory: workspace.workspaceDirectory });
-    const subAgentRegistry = subAgentRoots.length > 0
-      ? new SubAgentRegistry({ roots: subAgentRoots })
-      : undefined;
     const toolRegistryOptions = {
       env,
       fetch: this.options.fetch,
@@ -208,19 +205,25 @@ export class CapabilityCenter {
       ]);
     }
     registerSkillResourceTool(registry, [], { includeWhenEmpty: true });
-    if (subAgentRegistry !== undefined) {
-      registerSubAgentToolCatalog(registry);
-    }
     const desktopToolCatalog = registry.catalog("desktop-basic");
     const mcpToolCatalog = registry.catalog("mcp");
     const exposedMcpToolCatalog = filteredMcpToolCatalog(mcpToolCatalog, mcpServers);
+    const subAgentToolCatalog = createSubAgentAgentToolCatalogContribution({
+      subAgents,
+      dynamicSpawnAvailable: subAgentRoots.length > 0,
+    });
+    const subAgentTools = subAgentToolCatalog.definitions.map((definition) =>
+      catalogOnlyToolItem(definition, subAgentToolCatalog.scopes)
+    );
     const allTools = [
       ...desktopToolCatalog.tools,
       ...exposedMcpToolCatalog.tools,
+      ...subAgentTools,
     ].map(capabilityToolCatalogItem);
     const allAllowedTools = capabilityAllowedToolNames({
       desktopAllowedTools: desktopToolCatalog.allowedTools,
       mcpAllowedTools: exposedMcpToolCatalog.allowedTools,
+      catalogOnlyAllowedTools: subAgentTools.map((tool) => tool.name),
     });
     const warnings = capabilityWarnings({
       activeModel,
@@ -280,10 +283,12 @@ export class CapabilityCenter {
 function capabilityAllowedToolNames(input: {
   readonly desktopAllowedTools: readonly string[];
   readonly mcpAllowedTools: readonly string[];
+  readonly catalogOnlyAllowedTools: readonly string[];
 }): readonly string[] {
   return [
     ...input.desktopAllowedTools.filter((name) => name !== "read_skill_resource"),
     ...input.mcpAllowedTools,
+    ...input.catalogOnlyAllowedTools,
   ];
 }
 
@@ -590,6 +595,40 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     enabled: tool.enabledByDefault,
     availability: tool.availability,
     disabledReason: tool.disabledReason,
+  };
+}
+
+function catalogOnlyToolItem(
+  definition: ToolDefinition,
+  scopes: readonly CapabilityToolScope[],
+): ToolCatalogItem {
+  const metadata = definition.metadata;
+  if (metadata === undefined) {
+    throw new Error(`Catalog-only tool ${definition.name} requires execution metadata.`);
+  }
+  const presentation = toolPresentationForDefinition(definition);
+  return {
+    name: definition.name,
+    displayName: presentation.displayName,
+    displayDescription: presentation.displayDescription,
+    description: definition.description,
+    inputSchema: globalThis.structuredClone(definition.inputSchema),
+    modelContract: definition.modelContract === undefined
+      ? undefined
+      : globalThis.structuredClone(definition.modelContract),
+    category: metadata.category,
+    categoryLabel: presentation.categoryLabel,
+    riskLevel: metadata.riskLevel,
+    riskLabel: presentation.riskLabel,
+    operationType: metadata.operationType,
+    fileOperation: metadata.fileOperation,
+    operationLabel: presentation.operationLabel,
+    requiresConfirmation: metadata.requiresConfirmation,
+    confirmationLabel: presentation.confirmationLabel,
+    runtimeHints: metadata.runtimeHints,
+    scopes,
+    enabledByDefault: true,
+    availability: "available",
   };
 }
 

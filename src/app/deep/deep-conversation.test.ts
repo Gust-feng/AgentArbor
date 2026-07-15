@@ -7,7 +7,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../../domain/soil/index.js";
-import { TaskSoilInputValidationError } from "../task-soil-workspace.js";
+import { TaskSoilInputValidationError } from "../task-soil/task-soil-workspace.js";
 import {
   createDeepConversationService,
   createFileSystemDeepConversationStore,

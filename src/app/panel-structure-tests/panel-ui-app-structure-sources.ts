@@ -159,7 +159,7 @@ export async function readPanelUiAppStructureSources(): Promise<PanelUiAppStruct
     readPanelUiSource("app-update-actions.ts"),
     readPanelUiSource("app-config-projection.ts"),
     readPanelUiSource("app-conversation-refresh.ts"),
-    readAppSource(path.join("panel-conversation", "panel-conversation-refresh.ts")),
+    readPanelUiSource("conversation-refresh-policy.ts"),
     readPanelUiSource("app-task-submit-flow.ts"),
     readPanelUiSource("app-observed-run-read-model.ts"),
     readPanelUiSource("app-run-projection.ts"),

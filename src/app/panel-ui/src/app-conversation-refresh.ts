@@ -6,8 +6,8 @@ import type { ConversationSummary } from "./contracts/conversation";
 export {
   conversationSummariesNeedRefresh,
   conversationSummaryNeedsRefresh,
-} from "../../panel-conversation/panel-conversation-refresh";
-import { conversationSummariesNeedRefresh } from "../../panel-conversation/panel-conversation-refresh";
+} from "./conversation-refresh-policy";
+import { conversationSummariesNeedRefresh } from "./conversation-refresh-policy";
 
 export const CONVERSATION_SUMMARY_REFRESH_INTERVAL_MS = 2_500;
 

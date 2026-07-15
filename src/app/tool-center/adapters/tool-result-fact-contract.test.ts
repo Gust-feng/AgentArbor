@@ -221,6 +221,7 @@ test("edit_file dryRun and failures return edit facts without recovery suggestio
     assert.equal(dryRun.replacements, 0);
     assert.equal(typeof dryRun.beforeHash, "string");
     assert.equal(typeof dryRun.afterHash, "string");
+    assert.equal(asRecord(dryRun.diff).status, "available");
     assert.doesNotMatch(JSON.stringify(dryRun), suggestionPattern);
 
     await assert.rejects(

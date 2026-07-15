@@ -18,7 +18,7 @@ import {
 import { handlePanelConfigRoute } from "./config-routes.js";
 import { handlePanelContextRoute } from "./context-routes.js";
 import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
-import { asRecord } from "./request-parsers.js";
+import { parseSkillStateRequest } from "./request-parsers.js";
 import {
   cleanupPanelRuntimeOwnedBackgroundProcesses,
   createPanelRuntime,
@@ -222,17 +222,10 @@ async function handleUpdateSkillStateRequest(
   request: IncomingMessage,
   response: ServerResponse
 ): Promise<void> {
-  const body = await readJsonBody(request);
-  const record = asRecord(body);
-  if (typeof record.enabled !== "boolean") {
-    throw new PanelHttpError(400, "invalid_skill_state", "技能状态必须包含 enabled 布尔值。");
-  }
-  const stateKey = typeof record.stateKey === "string" && record.stateKey.trim().length > 0
-    ? record.stateKey.trim()
-    : undefined;
+  const input = parseSkillStateRequest(await readJsonBody(request));
   let updated: boolean;
   try {
-    updated = await setPanelSkillEnabled(runtime, skillId, record.enabled, stateKey);
+    updated = await setPanelSkillEnabled(runtime, skillId, input.enabled, input.stateKey);
   } catch (error) {
     throw new PanelHttpError(
       400,

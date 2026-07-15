@@ -1,271 +1,224 @@
-import type { ArborMessageType } from "../../domain/common.js";
-import type { ToolExecutionBroker } from "../../domain/tools/index.js";
-import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
-import { createMinimalRuntime, type MinimalRuntime } from "../runtime.js";
-import {
-  runCognitiveWorkSession,
-  type CognitiveWorkSessionResult,
-} from "../underground/cognitive-work-session/cognitive-work-session.js";
-import {
-  createUndergroundAiRuntimeConfig,
-  UndergroundAiConfigurationError,
-  type UndergroundAiEnvironment,
-  type UndergroundAiProviderFetch,
-} from "../underground-ai-runtime.js";
-import { createResearchEnabledToolCenter } from "../research/research-tool-contribution.js";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { z } from "zod";
+import type { ModelUsage } from "../../domain/intelligence/index.js";
+import type { ToolCallResult } from "../../domain/tools/index.js";
+import { createLocalConfigCenter } from "../config-center/index.js";
+import type { OrdinaryExecutionPort } from "../ordinary-agent/index.js";
+import { startLocalPanelServer } from "../panel-server.js";
+import type { PanelProviderFetch } from "../panel-server/types.js";
+
+type RealAiSmokeEnvironment = Readonly<Record<string, string | undefined>>;
+type SmokeProtocol = "openai_responses" | "openai_compatible_chat_completions";
 
 export type RealAiSmokeSummary =
   | {
       readonly status: "completed";
-      readonly runtime: "cognitive_work_session";
-      readonly mode: "openai-compatible";
-      readonly traceId: string;
-      readonly goalId: string;
-      readonly taskSoilId: string;
-      readonly workSessionStatus: CognitiveWorkSessionResult["status"];
-      readonly artifactId: string;
-      readonly reportTitle: string;
-      readonly childRunCount: number;
-      readonly parentSynthesisCount: number;
-      readonly stepActions: readonly string[];
-      readonly evidenceRefs: readonly string[];
-      readonly modelCallRefs: readonly string[];
-      readonly toolCallRefs: readonly string[];
-      readonly eventCounts: RealAiSmokeEventCounts;
+      readonly runtime: "ordinary_agent";
+      readonly protocol: SmokeProtocol;
+      readonly conversationId: string;
+      readonly runId: string;
+      readonly answer: string;
+      readonly toolCallCount: number;
+      readonly usage: ModelUsage;
     }
   | {
       readonly status: "failed";
-      readonly runtime: "cognitive_work_session";
-      readonly mode: "openai-compatible";
-      readonly boundary: "runtime";
-      readonly traceId?: string;
-      readonly goalId?: string;
+      readonly runtime: "ordinary_agent";
+      readonly protocol: SmokeProtocol;
+      readonly runId?: string;
       readonly message: string;
-      readonly latestModelFailure?: RealAiSmokeModelFailure;
-      readonly eventCounts: RealAiSmokeEventCounts;
     }
   | {
       readonly status: "skipped";
-      readonly runtime: "cognitive_work_session";
+      readonly runtime: "ordinary_agent";
       readonly boundary: "configuration";
-      readonly mode: "openai-compatible";
-      readonly code: UndergroundAiConfigurationError["issue"]["code"];
+      readonly code: "ai_disabled" | "missing_api_key" | "missing_model_name" | "invalid_protocol";
       readonly message: string;
-      readonly eventCounts: RealAiSmokeEventCounts;
     };
 
-export type RealAiSmokeEventCounts = {
-  readonly requested: number;
-  readonly completed: number;
-  readonly failed: number;
-  readonly toolRequested: number;
-  readonly toolCompleted: number;
-  readonly toolFailed: number;
-};
-
-export type RealAiSmokeModelFailure = {
-  readonly purpose: string;
-  readonly contractId: string;
-  readonly failureKind: string;
-  readonly validationStatus: string;
-  readonly requestId?: string;
-  readonly responseId?: string;
-};
-
 export type RunRealAiSmokeOptions = {
-  readonly env?: UndergroundAiEnvironment;
-  readonly providerFetch?: UndergroundAiProviderFetch;
-  readonly createToolCenter?: (runtime: MinimalRuntime) => ToolExecutionBroker;
-  readonly runtime?: MinimalRuntime;
+  readonly env?: RealAiSmokeEnvironment;
+  readonly providerFetch?: PanelProviderFetch;
+  readonly configDirectory?: string;
+  readonly timeoutMs?: number;
+  /** Deterministic test seam. Production always uses the composed OpenAI Agents SDK loop. */
+  readonly ordinaryAgentExecution?: OrdinaryExecutionPort;
 };
 
-const DEFAULT_GOAL =
-  "Analyze the current AgentArbor project and produce a concise optimization report with evidence refs, risks, and next actions.";
+const DEFAULT_GOAL = [
+  "Use the list_dir tool to inspect the current workspace root.",
+  "Then return a concise, evidence-based optimization report that cites the observed entries.",
+].join(" ");
+const submitSchema = z.object({
+  ok: z.literal(true),
+  conversation: z.object({ conversationId: z.string().min(1) }).passthrough(),
+  run: z.object({ runId: z.string().min(1) }).passthrough(),
+}).passthrough();
+const viewSchema = z.object({
+  ok: z.literal(true),
+  view: z.object({
+    run: z.object({
+      runId: z.string().min(1),
+      status: z.enum(["queued", "running", "approval_needed", "blocked", "completed", "failed", "cancelled"]),
+    }).passthrough(),
+    workView: z.object({
+      answer: z.object({ content: z.string() }).passthrough().optional(),
+    }).passthrough(),
+    detail: z.object({
+      error: z.object({ message: z.string() }).passthrough().optional(),
+      toolResults: z.array(z.custom<ToolCallResult>()),
+      usage: z.custom<ModelUsage>(),
+    }).passthrough(),
+  }).passthrough(),
+}).passthrough();
 
 export async function runRealAiSmoke(
   goal = DEFAULT_GOAL,
-  options: RunRealAiSmokeOptions = {}
+  options: RunRealAiSmokeOptions = {},
 ): Promise<RealAiSmokeSummary> {
-  const runtime = options.runtime ?? createMinimalRuntime();
+  const env = options.env ?? process.env;
+  const configuration = smokeConfiguration(env);
+  if (configuration.status === "skipped") return configuration;
+
+  const ownsDirectory = options.configDirectory === undefined;
+  const configDirectory = options.configDirectory ?? await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-real-ai-smoke-"));
+  const local = createLocalConfigCenter({ configDirectory });
+  let server: Awaited<ReturnType<typeof startLocalPanelServer>> | undefined;
   try {
-    const aiConfig = createUndergroundAiRuntimeConfig({
-      mode: "openai-compatible",
-      env: options.env,
-      fetch: options.providerFetch,
+    await local.configCenter.updateModelProviderConfig({
+      providerKind: "openai_compatible",
+      protocolKind: configuration.protocol,
+      baseUrl: configuration.baseUrl,
+      model: configuration.model,
+      apiKey: configuration.apiKey,
+      defaultAiMode: configuration.protocol === "openai_responses" ? "openai-responses" : "openai-compatible",
+      enabled: true,
     });
-
-    if (!aiConfig.enabled) {
-      return skippedSummary("ai_disabled", "AI disabled; real AI smoke was not started.");
-    }
-
-    const result = await runCognitiveWorkSession(goal, {
-      aiMode: "openai-compatible",
-      runtime,
-      aiEnvironment: options.env,
+    server = await startLocalPanelServer({
+      port: 0,
+      configDirectory,
+      configCenter: local.configCenter,
       providerFetch: options.providerFetch,
-      createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-      createToolCenter: options.createToolCenter ?? ((toolRuntime) => createResearchEnabledToolCenter({
-        runtime: toolRuntime,
-        env: options.env,
-        fetch: options.providerFetch,
-      })),
-      taskSoilInput: {
-        contextRefs: [
-          {
-            kind: "project",
-            ref: "workspace:current",
-            summary: "Current AgentArbor repository, available through safe codebase search/read tools.",
-          },
-        ],
-        permissionBoundaryRefs: ["permission:read-only-workspace"],
-      },
+      ordinaryAgentExecution: options.ordinaryAgentExecution,
     });
-
-    if (result.status !== "completed" || result.finalArtifact === undefined || result.report === undefined) {
-      return runtimeFailedSummary({
-        runtime,
-        traceId: result.traceId,
-        goalId: result.goalId,
-        message: `Cognitive Work Session ended with status ${result.status}; no completed artifact was produced.`,
-      });
+    const submitted = submitSchema.parse(await requestJson(new URL("api/conversations", server.url), {
+      method: "POST",
+      body: JSON.stringify({ goal }),
+    }));
+    const view = await waitForTerminalView(server.url, submitted.run.runId, options.timeoutMs ?? 120_000);
+    if (view.view.run.status !== "completed" || view.view.workView.answer === undefined) {
+      return {
+        status: "failed",
+        runtime: "ordinary_agent",
+        protocol: configuration.protocol,
+        runId: submitted.run.runId,
+        message: view.view.detail.error?.message ?? `Ordinary Agent ended with status ${view.view.run.status}.`,
+      };
     }
-
+    if (view.view.detail.toolResults.length === 0) {
+      return {
+        status: "failed",
+        runtime: "ordinary_agent",
+        protocol: configuration.protocol,
+        runId: submitted.run.runId,
+        message: "Ordinary Agent completed without a persisted tool fact.",
+      };
+    }
+    if (!hasReportedUsage(view.view.detail.usage)) {
+      return {
+        status: "failed",
+        runtime: "ordinary_agent",
+        protocol: configuration.protocol,
+        runId: submitted.run.runId,
+        message: "Ordinary Agent completed without valid provider usage.",
+      };
+    }
     return {
       status: "completed",
-      runtime: "cognitive_work_session",
-      mode: "openai-compatible",
-      traceId: result.traceId,
-      goalId: result.goalId,
-      taskSoilId: result.taskSoil.taskSoilId,
-      workSessionStatus: result.status,
-      artifactId: result.finalArtifact.ref.id,
-      reportTitle: result.report.title,
-      childRunCount: result.agentRunTree.childRuns.length,
-      parentSynthesisCount: result.agentRunTree.parentSyntheses.length,
-      stepActions: result.steps.map((step) => step.action),
-      evidenceRefs: result.evidenceRefs.slice(0, 24),
-      modelCallRefs: result.modelCallRefs.slice(0, 24),
-      toolCallRefs: result.toolCallRefs.slice(0, 24),
-      eventCounts: eventCounts(runtime.eventLog.types()),
+      runtime: "ordinary_agent",
+      protocol: configuration.protocol,
+      conversationId: submitted.conversation.conversationId,
+      runId: submitted.run.runId,
+      answer: view.view.workView.answer.content,
+      toolCallCount: view.view.detail.toolResults.length,
+      usage: view.view.detail.usage,
     };
   } catch (error) {
-    if (error instanceof UndergroundAiConfigurationError) {
-      return skippedSummary(error.issue.code, configurationSkipMessage(error.issue.code));
+    return {
+      status: "failed",
+      runtime: "ordinary_agent",
+      protocol: configuration.protocol,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await server?.close().catch(() => undefined);
+    if (ownsDirectory) {
+      await fs.rm(configDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }).catch(() => undefined);
     }
-    return runtimeFailedSummary({
-      runtime,
-      message: error instanceof Error ? error.message : "Cognitive Work Session real AI smoke failed.",
-    });
   }
 }
 
-function skippedSummary(
-  code: UndergroundAiConfigurationError["issue"]["code"],
-  message: string
-): RealAiSmokeSummary {
+function smokeConfiguration(env: RealAiSmokeEnvironment):
+  | { readonly status: "ready"; readonly protocol: SmokeProtocol; readonly baseUrl: string; readonly model: string; readonly apiKey: string }
+  | Extract<RealAiSmokeSummary, { readonly status: "skipped" }> {
+  if (env.AGENTARBOR_AI_MODE?.trim().toLowerCase() === "none") {
+    return skipped("ai_disabled", "AI is disabled; the Ordinary Agent smoke was not started.");
+  }
+  const apiKey = env.AGENTARBOR_MODEL_API_KEY?.trim() || env.OPENAI_API_KEY?.trim();
+  if (apiKey === undefined || apiKey.length === 0) {
+    return skipped("missing_api_key", "AGENTARBOR_MODEL_API_KEY or OPENAI_API_KEY is required.");
+  }
+  const model = env.AGENTARBOR_MODEL_NAME?.trim();
+  if (model === undefined || model.length === 0) {
+    return skipped("missing_model_name", "AGENTARBOR_MODEL_NAME is required.");
+  }
+  const rawProtocol = env.AGENTARBOR_MODEL_PROTOCOL?.trim() ||
+    (env.AGENTARBOR_AI_MODE?.trim() === "openai-responses" ? "openai_responses" : "openai_compatible_chat_completions");
+  if (rawProtocol !== "openai_responses" && rawProtocol !== "openai_compatible_chat_completions") {
+    return skipped("invalid_protocol", "AGENTARBOR_MODEL_PROTOCOL must be openai_responses or openai_compatible_chat_completions.");
+  }
   return {
-    status: "skipped",
-    runtime: "cognitive_work_session",
-    boundary: "configuration",
-    mode: "openai-compatible",
-    code,
-    message,
-    eventCounts: emptyEventCounts(),
+    status: "ready",
+    protocol: rawProtocol,
+    baseUrl: env.AGENTARBOR_MODEL_BASE_URL?.trim() || "https://api.openai.com/v1",
+    model,
+    apiKey,
   };
 }
 
-function runtimeFailedSummary(input: {
-  readonly runtime: MinimalRuntime;
-  readonly traceId?: string;
-  readonly goalId?: string;
-  readonly message: string;
-}): RealAiSmokeSummary {
-  const events = input.runtime.eventLog.list();
-  return {
-    status: "failed",
-    runtime: "cognitive_work_session",
-    mode: "openai-compatible",
-    boundary: "runtime",
-    traceId: input.traceId,
-    goalId: input.goalId,
-    message: safeText(input.message, 500),
-    latestModelFailure: latestModelFailure(events),
-    eventCounts: eventCounts(events.map((entry) => entry.type)),
-  };
+function skipped(
+  code: Extract<RealAiSmokeSummary, { readonly status: "skipped" }>["code"],
+  message: string,
+): Extract<RealAiSmokeSummary, { readonly status: "skipped" }> {
+  return { status: "skipped", runtime: "ordinary_agent", boundary: "configuration", code, message };
 }
 
-function configurationSkipMessage(code: UndergroundAiConfigurationError["issue"]["code"]): string {
-  if (code === "missing_api_key") {
-    return "AGENTARBOR_MODEL_API_KEY or OPENAI_API_KEY is required; no provider fetch was attempted.";
+async function waitForTerminalView(baseUrl: string, runId: string, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const view = viewSchema.parse(await requestJson(
+      new URL(`api/basic-agent/runs/${encodeURIComponent(runId)}/view`, baseUrl),
+    ));
+    if (["completed", "failed", "cancelled", "blocked", "approval_needed"].includes(view.view.run.status)) return view;
+    if (Date.now() >= deadline) throw new Error(`Ordinary Agent smoke timed out after ${timeoutMs} ms.`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (code === "missing_model_name") {
-    return "AGENTARBOR_MODEL_NAME is required; no provider fetch was attempted.";
-  }
-  return "AI disabled; real AI smoke was not started.";
 }
 
-function latestModelFailure(eventEntries: readonly EventLogEntry[]): RealAiSmokeModelFailure | undefined {
-  const latestFailure = [...eventEntries].reverse().find((entry) => entry.type === "model.failed");
-  if (latestFailure === undefined) {
-    return undefined;
-  }
-  const failurePayload = asRecord(latestFailure.message.payload);
-  const requestId = optionalString(failurePayload.requestId);
-  const requestedPayload = requestId === undefined ? {} : modelRequestedPayloadFor(eventEntries, requestId);
-  const outputContract = asRecord(requestedPayload.outputContract);
-  return {
-    purpose: optionalString(requestedPayload.purpose) ?? "unknown",
-    contractId: optionalString(outputContract.contractId) ?? "unknown",
-    failureKind: optionalString(failurePayload.failureKind) ?? "model_failed",
-    validationStatus: optionalString(failurePayload.validationStatus) ?? "unknown",
-    requestId,
-    responseId: optionalString(failurePayload.responseId),
-  };
+function hasReportedUsage(usage: ModelUsage): boolean {
+  return typeof usage.inputTokens === "number" && Number.isFinite(usage.inputTokens) && usage.inputTokens > 0 &&
+    typeof usage.outputTokens === "number" && Number.isFinite(usage.outputTokens) && usage.outputTokens > 0 &&
+    typeof usage.totalTokens === "number" && Number.isFinite(usage.totalTokens) && usage.totalTokens > 0;
 }
 
-function modelRequestedPayloadFor(eventEntries: readonly EventLogEntry[], requestId: string): Record<string, unknown> {
-  const requested = eventEntries.find((entry) => {
-    if (entry.type !== "model.requested") {
-      return false;
-    }
-    return optionalString(asRecord(entry.message.payload).requestId) === requestId;
+async function requestJson(url: URL, init?: RequestInit): Promise<unknown> {
+  const response = await fetch(url, {
+    ...init,
+    headers: { "content-type": "application/json", ...init?.headers },
   });
-  return requested === undefined ? {} : asRecord(requested.message.payload);
-}
-
-function eventCounts(types: readonly ArborMessageType[]): RealAiSmokeEventCounts {
-  return {
-    requested: types.filter((type) => type === "model.requested").length,
-    completed: types.filter((type) => type === "model.completed").length,
-    failed: types.filter((type) => type === "model.failed").length,
-    toolRequested: types.filter((type) => type === "tool.requested").length,
-    toolCompleted: types.filter((type) => type === "tool.completed").length,
-    toolFailed: types.filter((type) => type === "tool.failed").length,
-  };
-}
-
-function emptyEventCounts(): RealAiSmokeEventCounts {
-  return {
-    requested: 0,
-    completed: 0,
-    failed: 0,
-    toolRequested: 0,
-    toolCompleted: 0,
-    toolFailed: 0,
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function safeText(value: string, maxLength: number): string {
-  const normalized = value.trim();
-  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
+  const body = await response.json() as unknown;
+  if (!response.ok) throw new Error(`Smoke request failed with HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
 }

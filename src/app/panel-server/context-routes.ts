@@ -4,16 +4,15 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ContextAttachment } from "../../domain/basic-agent/index.js";
-import type { ConfigCenter } from "../config-center.js";
+import type { ConfigCenter } from "../config-center/index.js";
 import {
   ContextAttachmentPreviewError,
   createContextAttachmentPreview,
   createSelectedLocalContextAttachment,
   createUploadedContextAttachment,
-  type CreateContextAttachmentPreviewInput,
-} from "../context-attachments.js";
+} from "../task-soil/context-attachments.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
-import { asRecord, optionalString } from "./request-parsers.js";
+import { parseContextAttachmentPreviewRequest } from "./request-parsers.js";
 import type { PanelContextAttachmentMediaEntry, PanelContextAttachmentSelection } from "./types.js";
 
 export type PanelContextRouteRuntime = {
@@ -43,7 +42,7 @@ export async function handlePanelContextRoute(
     const body = await readJsonBody(request);
     const workspace = await runtime.configCenter.getWorkspaceConfig();
     const attachment = await createContextAttachmentPreview({
-      raw: parseContextAttachmentPreviewInput(body),
+      raw: parseContextAttachmentPreviewRequest(body),
       workspaceRoot: workspace.workspaceDirectory,
     }).catch((error: unknown) => {
       if (error instanceof ContextAttachmentPreviewError) {
@@ -419,19 +418,4 @@ function decodeMediaAttachmentId(value: string): string {
 
 function isImageMimeType(mimeType: string): boolean {
   return /^image\/(?:png|jpeg|gif|webp)$/iu.test(mimeType);
-}
-
-function parseContextAttachmentPreviewInput(raw: unknown): CreateContextAttachmentPreviewInput {
-  const record = asRecord(raw);
-  const kind = optionalString(record.kind);
-  if (kind !== undefined && kind !== "workspace" && kind !== "file" && kind !== "project" && kind !== "web") {
-    throw new PanelHttpError(400, "invalid_context_attachment_kind", "上下文附件类型必须是 workspace、file、project 或 web。");
-  }
-  return {
-    kind,
-    value: optionalString(record.value),
-    ref: optionalString(record.ref),
-    title: optionalString(record.title),
-    summary: optionalString(record.summary),
-  };
 }

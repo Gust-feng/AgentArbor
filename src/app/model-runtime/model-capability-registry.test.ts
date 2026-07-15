@@ -43,12 +43,6 @@ test("protocol capability registry describes tool-call round trips by adapter", 
     canReceiveToolCalls: true,
     canRoundTripToolResults: true,
   });
-  assert.deepEqual(resolveProtocolToolCallCapabilities("anthropic_messages"), {
-    protocolKind: "anthropic_messages",
-    canSendToolDefinitions: false,
-    canReceiveToolCalls: false,
-    canRoundTripToolResults: false,
-  });
 });
 
 test("unknown OpenAI-compatible chat and responses models inherit protocol tool support", () => {
@@ -77,44 +71,6 @@ test("unknown OpenAI-compatible chat and responses models inherit protocol tool 
   assert.equal(responses.supportsParallelToolCalls, false);
   assert.equal(responses.supportsVisionInput, true);
   assert.equal(responses.preferredApiStyle, "responses");
-});
-
-test("protocol capability boundary blocks model hints for unimplemented tool adapters", () => {
-  const anthropicGpt = resolveModelCapabilities({
-    profile: profile("gpt-5.5", {
-      profileId: "anthropic-custom",
-      label: "Anthropic Custom",
-      providerKind: "anthropic",
-      protocolKind: "anthropic_messages",
-      baseUrl: "https://anthropic.example",
-    }),
-  });
-  const geminiGpt = resolveModelCapabilities({
-    profile: profile("gpt-5.5", {
-      profileId: "gemini-custom",
-      label: "Gemini Custom",
-      providerKind: "gemini",
-      protocolKind: "gemini_generate_content",
-      baseUrl: "https://gemini.example",
-    }),
-    overrides: [
-      {
-        profileId: "gemini-custom",
-        providerKind: "gemini",
-        model: "gpt-5.5",
-        capabilities: {
-          supportsToolCalling: true,
-          supportsParallelToolCalls: true,
-        },
-        updatedAt: "2026-06-20T00:00:00.000Z",
-      },
-    ],
-  });
-
-  assert.equal(anthropicGpt.supportsToolCalling, false);
-  assert.equal(anthropicGpt.supportsParallelToolCalls, false);
-  assert.equal(geminiGpt.supportsToolCalling, false);
-  assert.equal(geminiGpt.supportsParallelToolCalls, false);
 });
 
 test("model capability override can still close protocol tool support", () => {
@@ -187,37 +143,6 @@ test("model capability registry enables tools for current DeepSeek V4 OpenAI-com
   assert.equal(capabilities.supportsStructuredOutputs, true);
   assert.equal(capabilities.supportsVisionInput, false);
   assert.equal(capabilities.preferredApiStyle, "openai_compatible");
-});
-
-test("model capability registry resolves native Anthropic and Gemini context and vision metadata", () => {
-  const claude = resolveModelCapabilities({
-    profile: profile("claude-fable-5", {
-      profileId: "claude",
-      label: "Anthropic",
-      providerKind: "anthropic",
-      protocolKind: "anthropic_messages",
-      baseUrl: "https://api.anthropic.com",
-    }),
-  });
-  const gemini = resolveModelCapabilities({
-    profile: profile("gemini-3.5-flash", {
-      profileId: "gemini",
-      label: "Google Gemini",
-      providerKind: "gemini",
-      protocolKind: "gemini_generate_content",
-      baseUrl: "https://generativelanguage.googleapis.com",
-    }),
-  });
-
-  assert.equal(claude.contextWindowTokens, 1_000_000);
-  assert.equal(claude.supportsVisionInput, true);
-  assert.equal(claude.supportsToolCalling, false);
-  assert.equal(claude.protocolProfileId, "anthropic");
-  assert.equal(gemini.contextWindowTokens, 1_048_576);
-  assert.equal(gemini.maxOutputTokens, 65_536);
-  assert.equal(gemini.supportsVisionInput, true);
-  assert.equal(gemini.supportsToolCalling, false);
-  assert.equal(gemini.protocolProfileId, "gemini");
 });
 
 test("model capability registry resolves legacy DeepSeek context windows explicitly", () => {
@@ -414,24 +339,7 @@ test("protocol baseline models keep tool calling while budgets stay conservative
   assert.equal(JSON.stringify(overridden).includes("secret"), false);
 });
 
-test("protocols without a runtime tool-call adapter do not expose tools by default", () => {
-  const anthropicProfile = profile("same-profile-model", {
-    profileId: "anthropic-custom",
-    label: "Anthropic Custom",
-    providerKind: "anthropic",
-    protocolKind: "anthropic_messages",
-    baseUrl: "https://anthropic.example",
-  });
-  const baseline = resolveModelCapabilities({ profile: anthropicProfile });
-
-  assert.deepEqual(baseline, {
-    ...PROTOCOL_BASELINE_MODEL_CAPABILITIES,
-    protocolProfileId: "anthropic",
-    preferredApiStyle: "messages",
-  });
-});
-
-test("model capability registry scopes overrides to the selected profile before legacy provider matches", () => {
+test("model capability registry scopes overrides to the selected profile before global fallback", () => {
   const firstProfile = profile("shared-route-model", {
     profileId: "custom-a",
     label: "Custom A",
@@ -508,41 +416,4 @@ test("model capability registry merges profile context fallback with provider-le
   assert.equal(resolved.maxOutputTokens, 12_000);
   assert.equal(resolved.supportsToolCalling, false);
   assert.equal(resolved.supportsVisionInput, false);
-});
-
-test("model capability registry does not let stale profile overrides cross provider kinds", () => {
-  const selectedProfile = profile("same-profile-model", {
-    profileId: "custom-a",
-    label: "Custom A",
-    providerKind: "anthropic",
-    protocolKind: "anthropic_messages",
-    baseUrl: "https://anthropic.example",
-  });
-  const overrides = [
-    {
-      profileId: "custom-a",
-      providerKind: "openai_compatible" as const,
-      model: "same-profile-model",
-      capabilities: {
-        supportsToolCalling: true,
-        contextWindowTokens: 64_000,
-      },
-      updatedAt: "2026-06-20T00:00:00.000Z",
-    },
-    {
-      profileId: "custom-a",
-      providerKind: "anthropic" as const,
-      model: "same-profile-model",
-      capabilities: {
-        supportsToolCalling: false,
-        contextWindowTokens: 32_000,
-      },
-      updatedAt: "2026-06-20T00:01:00.000Z",
-    },
-  ];
-
-  const resolved = resolveModelCapabilities({ profile: selectedProfile, overrides });
-
-  assert.equal(resolved.supportsToolCalling, false);
-  assert.equal(resolved.contextWindowTokens, 32_000);
 });

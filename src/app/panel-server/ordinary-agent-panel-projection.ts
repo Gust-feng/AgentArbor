@@ -18,18 +18,17 @@ import type {
   OrdinaryRunEvent,
   OrdinaryRunState,
 } from "../ordinary-agent/contracts.js";
-import type {
-  PanelConversationPendingAction,
-  PanelConversationReadModel,
-  PanelConversationSummaryReadModel,
-  PanelConversationTurnAttachment,
-  PanelConversationTurnReadModel,
-} from "../panel-conversation/panel-conversation-contracts.js";
 import { toolStreamDetail, toolSummary } from "../panel-read-model/run/panel-stream-tool-projection.js";
 import { workspaceFolderSummaryFromPath } from "../task-soil/workspace-folder-summary.js";
 import type {
   OrdinaryPanelBasicRun,
   OrdinaryPanelCapabilityResolution,
+  OrdinaryPanelConversation,
+  OrdinaryPanelConversationPendingAction,
+  OrdinaryPanelConversationStatus,
+  OrdinaryPanelConversationSummary,
+  OrdinaryPanelConversationTurn,
+  OrdinaryPanelConversationTurnAttachment,
   OrdinaryPanelReplayCursor,
   OrdinaryPanelRunDetail,
   OrdinaryPanelRunView,
@@ -124,7 +123,6 @@ export function projectOrdinaryPanelRunView(input: {
     deliverable: undefined,
     visibleEvents: fullEvents.filter(isWorkViewEvent),
     transcriptNodes,
-    subAgentRuns: [],
     workSummary: {
       summary: workSummary(input.run.toolCalls.length, contextAttachments.length, pendingConfirmation !== undefined),
       pendingActionCount: pendingConfirmation === undefined ? 0 : 1,
@@ -159,7 +157,7 @@ export function projectOrdinaryPanelConversation(input: {
   readonly conversation: OrdinaryConversationReadModel;
   readonly currentRun?: OrdinaryPanelRunView;
   readonly workspaceRun?: OrdinaryRunState;
-}): PanelConversationReadModel {
+}): OrdinaryPanelConversation {
   const turns = input.conversation.turns.map(projectConversationTurn);
   const activeAssistant = input.conversation.activeRunId === undefined
     ? undefined
@@ -196,7 +194,7 @@ export function projectOrdinaryPanelConversation(input: {
 export function projectOrdinaryPanelConversationSummary(
   conversation: OrdinaryConversationReadModel,
   workspaceRun?: OrdinaryRunState,
-): PanelConversationSummaryReadModel {
+): OrdinaryPanelConversationSummary {
   const { turns: _turns, currentRun: _currentRun, ...summary } = projectOrdinaryPanelConversation({
     conversation,
     workspaceRun,
@@ -479,7 +477,7 @@ function projectContextAttachments(run: OrdinaryRunState): readonly ContextAttac
   }));
 }
 
-function projectConversationTurn(turn: OrdinaryConversationTurnReadModel): PanelConversationTurnReadModel {
+function projectConversationTurn(turn: OrdinaryConversationTurnReadModel): OrdinaryPanelConversationTurn {
   if (turn.role === "user") {
     return {
       turnId: turn.turnId,
@@ -515,8 +513,8 @@ function projectConversationTurn(turn: OrdinaryConversationTurnReadModel): Panel
 
 function projectConversationAttachments(
   turn: Extract<OrdinaryConversationTurnReadModel, { readonly role: "user" }>,
-): readonly PanelConversationTurnAttachment[] | undefined {
-  const attachments = (turn.input.taskSoil?.contextRefs ?? []).map((ref): PanelConversationTurnAttachment => ({
+): readonly OrdinaryPanelConversationTurnAttachment[] | undefined {
+  const attachments = (turn.input.taskSoil?.contextRefs ?? []).map((ref): OrdinaryPanelConversationTurnAttachment => ({
     attachmentId: ref.attachmentId ?? ref.ref,
     kind: ref.kind,
     title: ref.title ?? attachmentTitle(ref.kind, ref.ref),
@@ -552,7 +550,7 @@ function panelStatus(run: OrdinaryRunState): AgentTaskStatus {
 
 function conversationTurnStatus(
   status: Extract<OrdinaryConversationTurnReadModel, { readonly role: "assistant" }>["status"],
-): PanelConversationTurnReadModel["status"] {
+): OrdinaryPanelConversationTurn["status"] {
   if (status === "queued") return "pending";
   if (status === "awaiting_approval") return "running";
   return status;
@@ -560,7 +558,7 @@ function conversationTurnStatus(
 
 function conversationStatus(
   turn: OrdinaryConversationTurnReadModel | undefined,
-): PanelConversationReadModel["status"] {
+): OrdinaryPanelConversationStatus {
   if (turn === undefined) return "idle";
   if (turn.role === "user") return turn.status === "pending" ? "pending" : "idle";
   if (turn.status === "queued") return "pending";
@@ -570,7 +568,7 @@ function conversationStatus(
 
 function pendingConversationAction(
   turn: OrdinaryConversationTurnReadModel | undefined,
-): PanelConversationPendingAction | undefined {
+): OrdinaryPanelConversationPendingAction | undefined {
   if (turn?.role !== "assistant" || turn.status !== "awaiting_approval") return undefined;
   return { kind: "approval", runId: turn.runId, assistantTurnId: turn.turnId };
 }
@@ -641,8 +639,8 @@ function continuationAvailability(run: OrdinaryRunState): OrdinaryPanelRunDetail
 }
 
 function conversationCurrentAction(
-  status: PanelConversationReadModel["status"],
-  pending: PanelConversationPendingAction | undefined,
+  status: OrdinaryPanelConversationStatus,
+  pending: OrdinaryPanelConversationPendingAction | undefined,
   currentRun: OrdinaryPanelRunView | undefined,
 ): string {
   if (pending !== undefined) return currentRun?.workView.pendingConfirmation?.actionSummary ?? "等待确认";
@@ -651,7 +649,7 @@ function conversationCurrentAction(
   return "";
 }
 
-function conversationNextStep(status: PanelConversationReadModel["status"]): string {
+function conversationNextStep(status: OrdinaryPanelConversationStatus): string {
   if (status === "approval_needed") return "等待你的决定";
   if (status === "running" || status === "pending") return "继续运行";
   return "";

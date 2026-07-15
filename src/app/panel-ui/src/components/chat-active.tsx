@@ -61,7 +61,6 @@ export function ChatActive(props: ChatInputProps & {
       totalTurns: fullTurnCount,
     })
   ));
-  const subAgentRuns = props.workView?.subAgentRuns ?? [];
   const effectiveVisibilityState = reconcileTranscriptVisibilityState({
     previous: visibilityState,
     conversationId: props.conversation?.conversationId,
@@ -254,7 +253,6 @@ export function ChatActive(props: ChatInputProps & {
                   workView={props.workView}
                   pending={view.pending}
                   showModelUsage={props.showModelUsage}
-                  subAgentRuns={subAgentRuns}
                   standaloneRun={view.workline.standaloneRun !== true
                     ? undefined
                     : {

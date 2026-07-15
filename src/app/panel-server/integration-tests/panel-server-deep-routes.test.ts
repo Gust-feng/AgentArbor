@@ -24,7 +24,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveAgentArborRuntimeDatabasePaths } from "../../../adapters/runtime-database/index.js";
+import { resolveAgentArborRuntimePaths } from "../../../adapters/runtime-storage/index.js";
 import { createAgentRunTree, type AgentSpec } from "../../../domain/underground/agent-fabric.js";
 import {
   DEEP_RUN_KIND,
@@ -196,7 +196,7 @@ async function waitForDeepRunView(
 async function persistOrphanedDeepRunFixture(
   configDirectory: string,
 ): Promise<{ readonly conversationId: string; readonly runId: string }> {
-  const runtimeHome = resolveAgentArborRuntimeDatabasePaths(configDirectory).runtimeHome;
+  const runtimeHome = resolveAgentArborRuntimePaths(configDirectory).runtimeHome;
   const conversationStore = createFileSystemDeepConversationStore(runtimeHome);
   const runStore = createFileSystemDeepRunRecordStore(runtimeHome);
   const createdAt = "2026-01-01T00:00:00.000Z";
@@ -725,6 +725,20 @@ test("deep routes reject empty goal and unknown conversation run start", async (
     assert.equal(emptyGoal.status, 400);
     assert.equal(emptyGoal.body.ok, false);
     assert.equal(emptyGoal.body.error.code, "empty_goal");
+
+    const invalidAiMode = await requestJson(server.url, "/api/deep/conversations", {
+      method: "POST",
+      body: { goal: "inspect", aiMode: "unsupported" },
+    });
+    assert.equal(invalidAiMode.status, 400);
+    assert.equal(invalidAiMode.body.error.code, "invalid_ai_mode");
+
+    const invalidTaskSoil = await requestJson(server.url, "/api/deep/conversations", {
+      method: "POST",
+      body: { goal: "inspect", aiMode: "fake", taskSoilInput: { contextRefs: { ref: "file:a" } } },
+    });
+    assert.equal(invalidTaskSoil.status, 400);
+    assert.equal(invalidTaskSoil.body.error.code, "invalid_context_refs");
 
     // 未知会话启动 run → 404
     const unknownRun = await requestJson(server.url, "/api/deep/conversations/nonexistent/runs", {

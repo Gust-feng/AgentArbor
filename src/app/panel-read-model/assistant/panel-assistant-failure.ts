@@ -10,7 +10,7 @@ export type FailureEchoTranscriptNode = {
   readonly runId: string;
   readonly sequence: number;
   readonly eventType: string;
-  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "sub_agent" | "answer" | "body" | "system";
+  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "body" | "system";
   readonly phase:
     | "noted"
     | "preparing"
@@ -27,16 +27,6 @@ export type FailureEchoTranscriptNode = {
   readonly summary?: string;
   readonly title: string;
   readonly timestamp: string;
-  readonly subAgentRunId?: string;
-  readonly subAgentBatchId?: string;
-  readonly subAgentName?: string;
-  readonly subAgentTask?: string;
-  readonly subAgentTotalCount?: number;
-  readonly subAgentSuccessCount?: number;
-  readonly subAgentFailedCount?: number;
-  readonly subAgentCancelledCount?: number;
-  readonly subAgentApprovalRequiredCount?: number;
-  readonly subAgentNotStartedCount?: number;
   readonly refs: readonly {
     readonly kind: string;
     readonly id: string;

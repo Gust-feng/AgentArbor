@@ -16,7 +16,7 @@ export type ModelForm = {
   readonly logoDataUrl: string;
   readonly logoCleared: boolean;
   readonly baseUrl: string;
-  readonly protocolKind: string;
+  readonly protocolKind: ModelProtocolKind;
   readonly model: string;
   readonly apiKey: string;
   readonly apiKeyCleared: boolean;
@@ -24,6 +24,7 @@ export type ModelForm = {
 
 export type ModelProviderProfileItem = NonNullable<ConfigResponse["profiles"]>[number];
 export type ModelProviderModelItem = ModelProviderModelCatalog["models"][number];
+export type ModelProtocolKind = "openai_responses" | "openai_compatible_chat_completions";
 
 export type ModelProviderListItem = {
   readonly key: string;
@@ -32,7 +33,7 @@ export type ModelProviderListItem = {
   readonly logoDataUrl?: string;
   readonly model: string;
   readonly baseUrl: string;
-  readonly protocolKind: string;
+  readonly protocolKind: ModelProtocolKind;
   readonly profileId?: string;
   readonly profile?: ModelProviderProfileItem;
   readonly presetId?: string;
@@ -174,21 +175,15 @@ export function modelFormFromProviderItem(item: ModelProviderListItem): ModelFor
   };
 }
 
-export function requestPathOptionsForProvider(item: ModelProviderListItem): readonly { readonly value: string; readonly label: string }[] {
-  const providerKind = item.profile?.providerKind ?? item.preset?.providerKind;
-  if (providerKind === "anthropic") {
-    return [{ value: "anthropic_messages", label: "/v1/messages" }];
-  }
-  if (providerKind === "gemini") {
-    return [{ value: "gemini_generate_content", label: "/generateContent" }];
-  }
-  if (providerKind === "ollama") {
-    return [{ value: "ollama_generate", label: "/api/generate" }];
-  }
+export function requestPathOptionsForProvider(): readonly { readonly value: string; readonly label: string }[] {
   return [
     { value: "openai_responses", label: "/responses" },
     { value: "openai_compatible_chat_completions", label: "/chat/completions" },
   ];
+}
+
+export function modelProtocolKind(value: string): ModelProtocolKind {
+  return value === "openai_responses" ? value : "openai_compatible_chat_completions";
 }
 
 export function visibleProfileBaseUrl(profile: ModelProviderProfileItem): string {
@@ -200,17 +195,11 @@ export function visibleProfileBaseUrl(profile: ModelProviderProfileItem): string
 }
 
 function isSettingsModelProviderPreset(preset: ModelProviderPreset): boolean {
-  if (preset.providerKind === "anthropic") {
-    return preset.protocolKind === "anthropic_messages";
-  }
   return preset.providerKind === "openai_compatible" &&
     (preset.protocolKind === "openai_responses" || preset.protocolKind === "openai_compatible_chat_completions");
 }
 
 function isSettingsModelProviderProfile(profile: ModelProviderProfileItem): boolean {
-  if (profile.providerKind === "anthropic") {
-    return profile.protocolKind === "anthropic_messages";
-  }
   return profile.providerKind === "openai_compatible" &&
     (profile.protocolKind === "openai_responses" || profile.protocolKind === "openai_compatible_chat_completions");
 }

@@ -26,33 +26,18 @@ export function normalizeAiMode(value: ConfiguredModelRuntimeMode | undefined): 
 }
 
 export function normalizeModelProviderKind(value: ConfiguredModelProviderKind | undefined): ConfiguredModelProviderKind | undefined {
-  return value === "openai_compatible" || value === "anthropic" || value === "gemini" || value === "ollama" || value === "local"
-    ? value
-    : undefined;
+  return value === "openai_compatible" ? value : undefined;
 }
 
 export function normalizeModelProtocolKind(
-  value: ConfiguredModelProtocolKind | undefined,
-  providerKind: ConfiguredModelProviderKind
+  value: ConfiguredModelProtocolKind | undefined
 ): ConfiguredModelProtocolKind | undefined {
   if (
     value === "openai_responses" ||
-    value === "openai_compatible_chat_completions" ||
-    value === "anthropic_messages" ||
-    value === "gemini_generate_content" ||
-    value === "ollama_generate"
+    value === "openai_compatible_chat_completions"
   ) {
     return value;
   }
-  return defaultProtocolForProviderKind(providerKind);
-}
-
-export function defaultProtocolForProviderKind(
-  providerKind: ConfiguredModelProviderKind
-): ConfiguredModelProtocolKind {
-  if (providerKind === "anthropic") return "anthropic_messages";
-  if (providerKind === "gemini") return "gemini_generate_content";
-  if (providerKind === "ollama") return "ollama_generate";
   return "openai_compatible_chat_completions";
 }
 

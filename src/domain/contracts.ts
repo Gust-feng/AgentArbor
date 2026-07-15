@@ -18,4 +18,3 @@ export * from "./intelligence/contracts.js";
 export * from "./observation/contracts.js";
 export * from "./tools/contracts.js";
 export * from "./research/contracts.js";
-export * from "./runtime-database/contracts.js";

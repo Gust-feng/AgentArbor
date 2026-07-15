@@ -37,9 +37,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 // 模型运行时统一入口：ModelRuntimeConfigurationError 经 model-runtime/index.ts
 // re-export，禁止 app 层直接 import intelligence-channel-factory（panel-runtime-structure 命名中性约束）。
 import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
-import {
-  parseDesktopTaskSoilInput,
-} from "../task-soil-workspace.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import {
   PanelHttpError,
@@ -48,7 +45,7 @@ import {
   writePanelError,
 } from "./http-utils.js";
 import { serveRunEventSse } from "./run-event-sse.js";
-import { projectConversationRunEnvelopeViewBase } from "../run-read-model/envelope.js";
+import { deepConversationRunEnvelope } from "../deep/deep-run-view-base.js";
 import type { PanelRuntime } from "./runtime.js";
 import {
   type DeepRunRecord,
@@ -76,6 +73,12 @@ import {
   parseConfirmationDecision,
   parseConversationPinInput,
   parseConversationRenameInput,
+  parseDeepChildMessageRequest,
+  parseDeepConversationCreateRequest,
+  parseDeepIntakeRequest,
+  parseDeepRunControlRequest,
+  parseDeepRunFollowUpRequest,
+  parseDeepRunStartRequest,
 } from "./request-parsers.js";
 import { parseDeepRunListLimit } from "./deep-route-helpers.js";
 import {
@@ -284,14 +287,8 @@ async function handleDeepIntake(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const body = await readJsonBody(request);
-  const record = asRecord(body);
-  const message = stringField(record.message);
-  if (message.length === 0) {
-    throw new PanelHttpError(400, "empty_intake_message", "多 Agent 需要非空输入。");
-  }
-
-  const aiMode = await resolveDeepAiMode(runtime, record.aiMode);
+  const input = parseDeepIntakeRequest(await readJsonBody(request));
+  const aiMode = await resolveDeepAiMode(runtime, input.aiMode);
   if (aiMode === "none") {
     throw new PanelHttpError(
       409,
@@ -300,16 +297,13 @@ async function handleDeepIntake(
     );
   }
 
-  const taskSoilInput = hasTaskSoilPayload(record)
-    ? parseDesktopTaskSoilInput(record)
-    : undefined;
   const result = await state.intake({
     aiMode,
-    conversationId: optionalStringField(record.conversationId),
-    activeRunId: optionalStringField(record.activeRunId),
-    message,
-    taskSoilInput,
-    workspaceDirectory: optionalStringField(record.workspaceDirectory),
+    conversationId: input.conversationId,
+    activeRunId: input.activeRunId,
+    message: input.message,
+    taskSoilInput: input.taskSoilInput,
+    workspaceDirectory: input.workspaceDirectory,
   }).catch((error: unknown) => mapMultiAgentCommandError(error, "intake"));
   writeJson(response, 200, {
     ok: true,
@@ -329,19 +323,14 @@ async function handleCreateDeepConversation(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const body = await readJsonBody(request);
-  const record = asRecord(body);
-  const goal = stringField(record.goal);
-  if (goal.length === 0) {
-    throw new PanelHttpError(400, "empty_goal", "多 Agent 需要非空目标。");
-  }
-  const aiMode = await resolveDeepAiMode(runtime, record.aiMode);
+  const input = parseDeepConversationCreateRequest(await readJsonBody(request));
+  const aiMode = await resolveDeepAiMode(runtime, input.aiMode);
   const conversation = await state.createConversation({
     aiMode,
-    title: optionalStringField(record.title),
-    goal,
-    birthWorkspaceDirectory: optionalStringField(record.workspaceDirectory),
-    taskSoilInput: parseDesktopTaskSoilInput(record),
+    title: input.title,
+    goal: input.goal,
+    birthWorkspaceDirectory: input.workspaceDirectory,
+    taskSoilInput: input.taskSoilInput,
   });
   writeJson(response, 201, {
     ok: true,
@@ -361,24 +350,23 @@ async function handleStartDeepRun(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const body = await readJsonBody(request);
-  const record = asRecord(body);
-  const aiMode = await resolveDeepAiMode(runtime, record.aiMode);
+  const input = parseDeepRunStartRequest(await readJsonBody(request));
+  const aiMode = await resolveDeepAiMode(runtime, input.aiMode);
   const started = await state.startRun({
     conversationId,
     aiMode,
-    intakeTurnId: optionalStringField(record.intakeTurnId),
-    confirmedObjective: optionalStringField(record.confirmedObjective),
-    confirmedPlan: optionalStringField(record.confirmedPlan),
-    parentRunId: optionalStringField(record.parentRunId),
-    workspaceDirectory: optionalStringField(record.workspaceDirectory),
+    intakeTurnId: input.intakeTurnId,
+    confirmedObjective: input.confirmedObjective,
+    confirmedPlan: input.confirmedPlan,
+    parentRunId: input.parentRunId,
+    workspaceDirectory: input.workspaceDirectory,
   }).catch((error: unknown) => mapMultiAgentCommandError(error, "run"));
 
   writeJson(response, 202, {
     ok: true,
     status: "running",
     conversation: projectDeepConversation(started.conversation),
-    run: projectConversationRunEnvelopeViewBase({
+    run: deepConversationRunEnvelope({
       runId: started.runId,
       conversationId: started.conversation.conversationId,
       status: "running",
@@ -397,19 +385,14 @@ async function handleDeepRunFollowUp(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const body = await readJsonBody(request);
-  const record = asRecord(body);
-  const message = stringField(record.message);
-  if (message.length === 0) {
-    throw new PanelHttpError(400, "empty_follow_up_message", "继续多 Agent 任务需要非空补充。");
-  }
-  const aiMode = await resolveDeepAiMode(runtime, record.aiMode);
+  const input = parseDeepRunFollowUpRequest(await readJsonBody(request));
+  const aiMode = await resolveDeepAiMode(runtime, input.aiMode);
   const started = await state.followUp({
     runId,
     aiMode,
-    message,
-    taskSoilInput: hasTaskSoilPayload(record) ? parseDesktopTaskSoilInput(record) : undefined,
-    workspaceDirectory: optionalStringField(record.workspaceDirectory),
+    message: input.message,
+    taskSoilInput: input.taskSoilInput,
+    workspaceDirectory: input.workspaceDirectory,
   }).catch((error: unknown) => mapMultiAgentCommandError(error, "run"));
 
   writeJson(response, 202, {
@@ -599,14 +582,12 @@ async function handleDeepRunControl(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const body = await readJsonBody(request);
-  const record = asRecord(body);
-  const reason = optionalStringField(record.reason);
+  const input = parseDeepRunControlRequest(await readJsonBody(request), action);
   const result = await state.requestRunControl({
     runId,
     action,
-    reason,
-    correctionContext: action === "correct" ? parseCorrectionContext(record) : undefined,
+    reason: input.reason,
+    correctionContext: input.correctionContext,
   }).catch(mapMultiAgentFeatureError);
   if (result.record !== undefined) {
     writeJson(response, 200, {
@@ -654,8 +635,7 @@ async function handleDeepChildParentMessage(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const body = await readJsonBody(request);
-  const message = parseParentChildMessage(body);
+  const message = parseDeepChildMessageRequest(await readJsonBody(request));
   const result = await state.sendChildInstruction({
     runId,
     childRunId,
@@ -813,15 +793,6 @@ function mapMultiAgentFeatureError(error: unknown): never {
   }
 }
 
-function parseParentChildMessage(raw: unknown): string {
-  const record = asRecord(raw);
-  const message = optionalStringField(record.message) ?? optionalStringField(record.instruction);
-  if (message === undefined) {
-    throw new PanelHttpError(400, "empty_child_instruction", "子 Agent 补充要求不能为空。");
-  }
-  return message;
-}
-
 function throwDeepChildInstructionQueueRejection(
   result: Exclude<DeepChildInstructionQueueResult, { readonly status: "queued" }>,
 ): never {
@@ -964,61 +935,13 @@ async function projectDeepRunViewForResponse(
 /** 解析 deep 运行的 aiMode：请求体优先，否则取 configCenter 的默认 AI 模式。 */
 async function resolveDeepAiMode(
   runtime: PanelRuntime,
-  rawAiMode: unknown,
+  requestedAiMode: ModelRuntimeMode | undefined,
 ): Promise<ModelRuntimeMode> {
-  const explicit = parseAiMode(rawAiMode);
-  if (explicit !== undefined) {
-    return explicit;
+  if (requestedAiMode !== undefined) {
+    return requestedAiMode;
   }
   const config = await runtime.configCenter.getModelProviderConfig();
   return config.defaultAiMode;
-}
-
-const VALID_AI_MODES: readonly ModelRuntimeMode[] = [
-  "none",
-  "fake",
-  "openai-compatible",
-  "openai-responses",
-];
-
-function parseAiMode(value: unknown): ModelRuntimeMode | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (typeof value === "string" && (VALID_AI_MODES as readonly string[]).includes(value)) {
-    return value as ModelRuntimeMode;
-  }
-  throw new PanelHttpError(400, "invalid_ai_mode", "AI 模式无效。");
-}
-
-function hasTaskSoilPayload(record: Record<string, unknown>): boolean {
-  return record.taskSoilInput !== undefined ||
-    record.taskSoil !== undefined ||
-    record.contextRefs !== undefined ||
-    record.permissionBoundaryRefs !== undefined;
-}
-
-/**
- * correct 端点的补充上下文：字符串数组（注入下一 manager 决策 step）。
- *
- * 语义划分：
- *   - 字段缺失 / null → empty_correction_context（用户未提供任何补充，提示需要填写）；
- *   - 字段存在但类型错误（非数组）→ invalid_correction_context（请求格式损坏）；
- *   - 数组但全部为空串 → empty_correction_context（同无有效补充）。
- */
-function parseCorrectionContext(record: Record<string, unknown>): readonly string[] {
-  const raw = record.correctionContext ?? record.context;
-  if (raw === undefined || raw === null) {
-    throw new PanelHttpError(400, "empty_correction_context", "补充上下文不能为空。");
-  }
-  if (!Array.isArray(raw)) {
-    throw new PanelHttpError(400, "invalid_correction_context", "correct 需要补充上下文数组。");
-  }
-  const items = raw.map((item) => (typeof item === "string" ? item : String(item))).filter((item) => item.length > 0);
-  if (items.length === 0) {
-    throw new PanelHttpError(400, "empty_correction_context", "补充上下文不能为空。");
-  }
-  return items;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -1028,17 +951,6 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function stringField(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function optionalStringField(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {

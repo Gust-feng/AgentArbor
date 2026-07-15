@@ -45,7 +45,7 @@ import {
   AGENT_FABRIC_MVP_MAX_DEPTH,
   assertNoDirectChildOutputHandoff,
 } from "../../domain/underground/agent-fabric.js";
-import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
+import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 
 // ---------------------------------------------------------------------------
 // 复用领域契约（不重定义）——通过 deep 模块统一入口暴露，方便 DeepRuntime 各

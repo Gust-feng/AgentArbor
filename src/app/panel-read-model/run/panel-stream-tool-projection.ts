@@ -2,17 +2,16 @@ import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
 import type { ToolErrorDomain, ToolErrorFacts, ToolFactValue } from "../../../domain/tools/index.js";
 import { isToolErrorDomain, toolDisplayName } from "../../../domain/tools/index.js";
-import { commandTextFromToolInput, commandTextFromToolResult } from "../../command-text.js";
-import { asRecord, stringArray, stringOrUndefined } from "../../run-read-model/value-utils.js";
-import { safeCommandToolPreview, safeReadFileToolPreview } from "../../safe-tool-preview.js";
+import { commandTextFromToolInput, commandTextFromToolResult } from "../../tool-projection/command-text.js";
+import { safeCommandToolPreview, safeReadFileToolPreview } from "../../tool-projection/safe-tool-preview.js";
 import {
   normalizeToolDisplayForOperation,
-} from "../../tool-display-normalization.js";
+} from "../../tool-projection/tool-display-normalization.js";
 import { projectToolDisplay } from "../../tool-projection/tool-display-projection.js";
 import { commandSummaryParts } from "../transcript/panel-transcript-tool-format.js";
 
 export type PanelRunStreamEventDetail = {
-  readonly kind: "thinking" | "tool" | "confirmation" | "work" | "sub_agent";
+  readonly kind: "thinking" | "tool" | "confirmation" | "work";
   readonly action?: string;
   readonly path?: string;
   readonly query?: string;
@@ -25,21 +24,6 @@ export type PanelRunStreamEventDetail = {
   readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
   readonly modelUsage?: ModelUsage;
-  readonly subAgentRunId?: string;
-  readonly subAgentBatchId?: string;
-  readonly subAgentBatchIndex?: number;
-  readonly subAgentName?: string;
-  readonly subAgentStatus?: "completed" | "failed" | "approval_required" | "cancelled" | "running";
-  readonly subAgentTask?: string;
-  readonly subAgentModelRounds?: number;
-  readonly subAgentToolCalls?: number;
-  readonly subAgentDurationMs?: number;
-  readonly subAgentTotalCount?: number;
-  readonly subAgentSuccessCount?: number;
-  readonly subAgentFailedCount?: number;
-  readonly subAgentCancelledCount?: number;
-  readonly subAgentApprovalRequiredCount?: number;
-  readonly subAgentNotStartedCount?: number;
 };
 
 export function toolSummary(
@@ -112,8 +96,7 @@ function isContentReadTool(toolName: string): boolean {
   return toolName === "read_file" ||
     toolName === "read_context_attachment_text" ||
     toolName === "read_context_attachment_pdf_text" ||
-    toolName === "read_skill_resource" ||
-    toolName === "read_sub_agent_output";
+    toolName === "read_skill_resource";
 }
 
 function commandDisplayForReadModel(
@@ -419,6 +402,20 @@ function compactFactsText(facts: ToolErrorFacts): string {
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function stringArray(value: unknown): readonly string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function booleanOrUndefined(value: unknown): boolean | undefined {

@@ -4,7 +4,6 @@ import type {
   AgentDeliverable,
   BasicAgentRun,
   DesktopWorkView,
-  SubAgentRunView,
   TranscriptNode,
 } from "../contracts/run";
 import type { LiveRunBuffer } from "../../../panel-read-model/run/panel-run-live-buffer";
@@ -33,7 +32,6 @@ export function ChatTranscriptDisplay(props: {
   readonly workView?: DesktopWorkView;
   readonly pending?: ConfirmationProjection;
   readonly showModelUsage: boolean;
-  readonly subAgentRuns?: readonly SubAgentRunView[];
   readonly standaloneRun?: {
     readonly currentRunId?: string;
     readonly runStatus?: string;
@@ -83,7 +81,6 @@ export function ChatTranscriptDisplay(props: {
       live: props.live,
       workView: props.workView,
       pending: props.pending,
-      subAgentRuns: props.subAgentRuns,
       standaloneRun: props.standaloneRun === undefined
         ? undefined
         : {
@@ -102,7 +99,6 @@ export function ChatTranscriptDisplay(props: {
     props.live,
     props.workView,
     props.pending,
-    props.subAgentRuns,
     props.standaloneRun,
   ]);
 
@@ -116,7 +112,6 @@ export function ChatTranscriptDisplay(props: {
       models={props.models}
       selectedModelId={props.selectedModelId}
       showModelUsage={props.showModelUsage}
-      subAgentRuns={props.subAgentRuns}
       onDecision={props.onDecision}
       confirmationBusy={props.confirmationBusy}
       hiddenEarlierTurnCount={props.hiddenEarlierTurnCount}

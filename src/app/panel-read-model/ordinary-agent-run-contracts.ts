@@ -2,6 +2,7 @@ import type { BasicAgentRun, DesktopWorkViewReadModel, RunEvent, TranscriptNode 
 import type { RunAgentDefinitionRef, RunCapabilityResolution } from "../../domain/config/index.js";
 import type { ModelUsage } from "../../domain/intelligence/index.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
+import type { WorkspaceFolderSummary } from "../task-soil/workspace-folder-summary.js";
 
 export type OrdinaryPanelBasicRun = Omit<BasicAgentRun, "runMode" | "requiresUserAction"> & {
   readonly runMode: "agent";
@@ -44,3 +45,95 @@ export type OrdinaryPanelRunView = {
   readonly detail: OrdinaryPanelRunDetail;
   readonly replay: OrdinaryPanelReplay;
 };
+
+export type OrdinaryPanelConversationTurnStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "blocked"
+  | "needs_input";
+
+export type OrdinaryPanelConversationStatus =
+  | "idle"
+  | "pending"
+  | "running"
+  | "approval_needed"
+  | "needs_input"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "blocked";
+
+export type OrdinaryPanelConversationTurnModel = {
+  readonly profileId: string;
+  readonly label?: string;
+  readonly providerKind?: string;
+  readonly protocolKind?: string;
+  readonly baseUrl?: string;
+  readonly model?: string;
+};
+
+export type OrdinaryPanelConversationTurnAttachment = {
+  readonly attachmentId: string;
+  readonly kind: "workspace" | "file" | "project" | "web";
+  readonly title: string;
+  readonly summary?: string;
+  readonly readonlyPreviewMeta?: {
+    readonly available?: boolean;
+    readonly title?: string;
+    readonly byteLength?: number;
+    readonly mimeType?: string;
+    readonly truncated?: boolean;
+  };
+  readonly mediaPreview?: {
+    readonly kind: "image";
+    readonly url: string;
+    readonly mimeType: string;
+    readonly byteLength?: number;
+  };
+};
+
+export type OrdinaryPanelConversationTurn = {
+  readonly turnId: string;
+  readonly role: "user" | "assistant";
+  readonly title: string;
+  readonly content: string;
+  readonly status: OrdinaryPanelConversationTurnStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly runId?: string;
+  readonly responseModel?: OrdinaryPanelConversationTurnModel;
+  readonly attachments?: readonly OrdinaryPanelConversationTurnAttachment[];
+};
+
+export type OrdinaryPanelConversationPendingAction = {
+  readonly kind: "approval" | "input";
+  readonly runId: string;
+  readonly assistantTurnId: string;
+};
+
+export type OrdinaryPanelConversation = {
+  readonly conversationId: string;
+  readonly title: string;
+  readonly titleEditedAt?: string;
+  readonly preview: string;
+  readonly currentAction: string;
+  readonly nextStep: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly pinnedAt?: string;
+  readonly status: OrdinaryPanelConversationStatus;
+  readonly activeRunId?: string;
+  readonly latestRunId?: string;
+  readonly workspaceFolder?: WorkspaceFolderSummary;
+  readonly requiresUserAction: boolean;
+  readonly pendingAction?: OrdinaryPanelConversationPendingAction;
+  readonly queuedRunIds: readonly string[];
+  readonly queuedRunCount: number;
+  readonly currentRun?: OrdinaryPanelRunView;
+  readonly turns: readonly OrdinaryPanelConversationTurn[];
+};
+
+export type OrdinaryPanelConversationSummary = Omit<OrdinaryPanelConversation, "turns">;

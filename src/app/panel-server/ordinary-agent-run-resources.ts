@@ -6,7 +6,7 @@ import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
   agentDefinitionRefMatchesDefinition,
   isCompleteRunAgentDefinitionRef,
-} from "../agent-definition-ref.js";
+} from "../agent-definitions/agent-definition-ref.js";
 import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
 import {
   compactAgentLoopContextIfNeeded,
@@ -28,7 +28,10 @@ import type {
   OrdinaryAgentLoopRunResourceAcquirer,
 } from "../ordinary-agent/agent-loop-execution.js";
 import { createSkillToolRegistryContribution } from "../skills/skill-resource-tool.js";
-import { createSubAgentAgentTools } from "../sub-agents/sub-agent-agent-tools.js";
+import {
+  createSubAgentAgentToolCatalogContribution,
+  createSubAgentAgentTools,
+} from "../sub-agents/sub-agent-agent-tools.js";
 import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
 import { attachDesktopFileInputsToModelMessages } from "../task-soil/desktop-agent-model-input-files.js";
@@ -134,6 +137,15 @@ export function createOrdinaryAgentRunResourceAcquirer(
             createSkillToolRegistryContribution(skillContexts),
           ],
         });
+        const registry = new SubAgentRegistry({
+          roots: options.resolveSubAgentRoots(resources.workspaceRoot),
+          catalog: resources.capabilitySnapshot.subAgentCatalog,
+        });
+        const frozenSubAgents = await registry.list();
+        const subAgentToolCatalog = createSubAgentAgentToolCatalogContribution({
+          subAgents: frozenSubAgents,
+          dynamicSpawnAvailable: true,
+        });
         let toolBoundary: ReturnType<typeof resolveRunToolBoundary>;
         try {
           toolBoundary = (dependencies.resolveToolBoundary ?? resolveRunToolBoundary)({
@@ -142,6 +154,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
             goal: input.runInput.userMessage,
             taskSoil,
             toolCenter,
+            agentToolDefinitions: subAgentToolCatalog.definitions,
             skillContexts,
           });
         } catch (error) {
@@ -152,14 +165,12 @@ export function createOrdinaryAgentRunResourceAcquirer(
           );
         }
         const tools = ordinaryToolBoundary(input, definition, toolCenter, toolBoundary.allowedTools);
-        const registry = new SubAgentRegistry({
-          roots: options.resolveSubAgentRoots(resources.workspaceRoot),
-          catalog: resources.capabilitySnapshot.subAgentCatalog,
-        });
         const agentTools = await createSubAgentAgentTools({
           registry,
           parentAllowedTools: toolBoundary.allowedTools,
           executableTools: toolCenter.list().map((tool) => tool.name),
+          exposedToolNames: toolBoundary.allowedAgentToolNames,
+          dynamicSpawnAvailable: true,
         });
         const modelInput = assembleDesktopAgentModelInput({
           agentDefinition: definition,

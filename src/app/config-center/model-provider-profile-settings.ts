@@ -1,6 +1,5 @@
 import type {
   AgentArborLocalSettings,
-  ConfiguredModelProviderKind,
   ConfiguredModelProtocolKind,
   ConfiguredModelRuntimeMode,
   ModelProviderModelCatalog,
@@ -11,13 +10,11 @@ import {
   normalizeOpenAIModelRequestSettings,
   parseOpenAIModelRequestSettings,
 } from "./openai-request-settings.js";
-import { optionalString, safeConfigId } from "./settings-utils.js";
+import { ConfigSchemaValidationError, optionalString, safeConfigId } from "./settings-utils.js";
 import {
   DEFAULT_MODEL_PROFILE_ID,
   DEFAULT_MODEL_PROVIDER_BASE_URL,
   MODEL_PROVIDER_SECRET_REF,
-  defaultProtocolForProviderKind,
-  normalizeAiMode,
   normalizeBaseUrl,
   normalizeModelProviderKind,
   normalizeModelProtocolKind,
@@ -28,10 +25,6 @@ import {
 const BUILTIN_PROFILE_PRESET_ALIASES = new Map<string, string>([
   ["default", "openai"],
   ["openai", "openai"],
-  ["claude", "claude"],
-  ["anthropic", "claude"],
-  ["gemini", "gemini"],
-  ["google", "gemini"],
   ["deepseek", "deepseek"],
   ["moonshot", "moonshot"],
   ["kimi", "moonshot"],
@@ -73,7 +66,6 @@ export function parseModelProfile(
   const providerKind = parseModelProviderKind(record.providerKind);
   const baseUrl = optionalString(record.baseUrl);
   const protocolKind = parseModelProtocolKind(record.protocolKind, {
-    providerKind,
     profileId,
     baseUrl,
   });
@@ -86,7 +78,7 @@ export function parseModelProfile(
     baseUrl,
     model: optionalString(record.model),
     openAI: parseOpenAIModelRequestSettings(record.openAI),
-    defaultAiMode: parseAiMode(record.defaultAiMode),
+    defaultAiMode: normalizeProfileAiModeForProtocol(protocolKind),
     secretRef: optionalString(record.secretRef) ?? fallbacks.fallbackSecretRef,
     enabled: typeof record.enabled === "boolean" ? record.enabled : true,
     updatedAt: optionalString(record.updatedAt) ?? fallbacks.fallbackUpdatedAt,
@@ -108,9 +100,8 @@ export function normalizeModelProfile(
   const providerKind = normalizeModelProviderKind(input.providerKind) ?? fallback.providerKind;
   const protocolKind = input.protocolKind === undefined
     ? fallback.protocolKind
-    : normalizeModelProtocolKind(input.protocolKind, providerKind) ?? fallback.protocolKind;
-  const normalizedProtocolKind = normalizeProfileProtocolForProvider(providerKind, protocolKind);
-  const defaultAiMode = normalizeAiMode(input.defaultAiMode) ?? fallback.defaultAiMode;
+    : normalizeModelProtocolKind(input.protocolKind) ?? fallback.protocolKind;
+  const normalizedProtocolKind = normalizeProfileProtocol(protocolKind);
   const openAI =
     input.openAI === undefined ? fallback.openAI : normalizeOpenAIModelRequestSettings(input.openAI);
   return {
@@ -124,7 +115,7 @@ export function normalizeModelProfile(
     baseUrl: normalizeBaseUrl(input.baseUrl) ?? fallback.baseUrl,
     model: normalizeOptionalString(input.model) ?? fallback.model,
     openAI,
-    defaultAiMode: normalizeProfileAiModeForProvider(providerKind, normalizedProtocolKind, defaultAiMode),
+    defaultAiMode: normalizeProfileAiModeForProtocol(normalizedProtocolKind),
     secretRef: normalizeOptionalString(input.secretRef) ?? secretRefForProfile(input.profileId ?? fallback.profileId),
     enabled: input.enabled ?? fallback.enabled,
     updatedAt: normalizeOptionalString(input.updatedAt) ?? fallback.updatedAt,
@@ -143,7 +134,7 @@ export function normalizeBuiltInModelProviderProfiles(
     }
     const providerKind = preset.providerKind;
     const protocolKind = normalizeBuiltInProfileProtocol(profile, preset);
-    const defaultAiMode = normalizeProfileAiModeForProvider(providerKind, protocolKind, profile.defaultAiMode);
+    const defaultAiMode = normalizeProfileAiModeForProtocol(protocolKind);
     const baseUrl = normalizeBuiltInProfileBaseUrl(profile, preset);
     const model = shouldClearBuiltInProfileModel(profile, preset.presetId, catalogs)
       ? undefined
@@ -174,55 +165,46 @@ function shouldClearBuiltInProfileLogo(
 }
 
 function parseModelProviderKind(value: unknown): AgentArborLocalSettings["modelProvider"]["providerKind"] {
-  if (value === "anthropic" || value === "gemini" || value === "ollama" || value === "local") {
-    return value;
+  if (value === undefined || value === "openai_compatible") {
+    return "openai_compatible";
   }
-  return "openai_compatible";
+  throw new ConfigSchemaValidationError(
+    "Invalid AgentArbor config file: model provider kind must be openai_compatible."
+  );
 }
 
 function parseModelProtocolKind(
   value: unknown,
   input: {
-    readonly providerKind: AgentArborLocalSettings["modelProvider"]["providerKind"];
     readonly profileId: string;
     readonly baseUrl?: string;
   }
 ): AgentArborLocalSettings["modelProvider"]["protocolKind"] {
   if (
     value === "openai_responses" ||
-    value === "openai_compatible_chat_completions" ||
-    value === "anthropic_messages" ||
-    value === "gemini_generate_content" ||
-    value === "ollama_generate"
+    value === "openai_compatible_chat_completions"
   ) {
     return value;
+  }
+  if (value !== undefined) {
+    throw new ConfigSchemaValidationError(
+      "Invalid AgentArbor config file: model protocol must be openai_responses or openai_compatible_chat_completions."
+    );
   }
   return defaultProtocolForProfile(input);
 }
 
-function normalizeProfileProtocolForProvider(
-  providerKind: ConfiguredModelProviderKind,
+function normalizeProfileProtocol(
   protocolKind: ConfiguredModelProtocolKind
 ): ConfiguredModelProtocolKind {
-  if (providerKind === "openai_compatible") {
-    return protocolKind === "openai_responses"
-      ? "openai_responses"
-      : "openai_compatible_chat_completions";
-  }
-  if (providerKind === "anthropic") return "anthropic_messages";
-  if (providerKind === "gemini") return "gemini_generate_content";
-  if (providerKind === "ollama") return "ollama_generate";
-  return protocolKind;
+  return protocolKind === "openai_responses"
+    ? "openai_responses"
+    : "openai_compatible_chat_completions";
 }
 
-function normalizeProfileAiModeForProvider(
-  providerKind: ConfiguredModelProviderKind,
-  protocolKind: ConfiguredModelProtocolKind,
-  aiMode: ConfiguredModelRuntimeMode
+function normalizeProfileAiModeForProtocol(
+  protocolKind: ConfiguredModelProtocolKind
 ): ConfiguredModelRuntimeMode {
-  if (providerKind !== "openai_compatible") {
-    return aiMode;
-  }
   return protocolKind === "openai_compatible_chat_completions" ? "openai-compatible" : "openai-responses";
 }
 
@@ -240,13 +222,9 @@ function builtInPresetForProfile(profile: ModelProviderProfileSettings): ReturnT
 }
 
 function defaultProtocolForProfile(input: {
-  readonly providerKind: ConfiguredModelProviderKind;
   readonly profileId: string;
   readonly baseUrl?: string;
 }): ConfiguredModelProtocolKind {
-  if (input.providerKind !== "openai_compatible") {
-    return defaultProtocolForProviderKind(input.providerKind);
-  }
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   if (input.profileId === DEFAULT_MODEL_PROFILE_ID || input.profileId === "openai") {
     return baseUrl === undefined || isOfficialOpenAIBaseUrl(baseUrl)
@@ -269,17 +247,17 @@ function normalizeBuiltInProfileProtocol(
   const currentCanonicalOwner =
     currentBaseUrl === undefined ? undefined : builtInPresetIdForCanonicalBaseUrl(currentBaseUrl);
   if (currentCanonicalOwner !== undefined && currentCanonicalOwner !== preset.presetId) {
-    return normalizeProfileProtocolForProvider(preset.providerKind, preset.protocolKind);
+    return normalizeProfileProtocol(preset.protocolKind);
   }
   if (preset.presetId !== "openai") {
-    return normalizeProfileProtocolForProvider(preset.providerKind, preset.protocolKind);
+    return normalizeProfileProtocol(preset.protocolKind);
   }
   if (currentBaseUrl !== undefined && !isOfficialOpenAIBaseUrl(currentBaseUrl)) {
     return profile.protocolKind === "openai_responses"
       ? "openai_compatible_chat_completions"
-      : normalizeProfileProtocolForProvider(preset.providerKind, profile.protocolKind);
+      : normalizeProfileProtocol(profile.protocolKind);
   }
-  return normalizeProfileProtocolForProvider(preset.providerKind, profile.protocolKind);
+  return normalizeProfileProtocol(profile.protocolKind);
 }
 
 function normalizeBuiltInProfileBaseUrl(
@@ -337,8 +315,6 @@ function isOfficialOpenAIBaseUrl(baseUrl: string): boolean {
 function builtInPresetIdForModelSignal(model: string): string | undefined {
   const normalized = model.trim().toLowerCase();
   if (normalized.includes("deepseek")) return "deepseek";
-  if (normalized.includes("claude") || normalized.includes("anthropic")) return "claude";
-  if (normalized.includes("gemini") || normalized.includes("google")) return "gemini";
   if (normalized.includes("kimi") || normalized.includes("moonshot")) return "moonshot";
   if (normalized.includes("glm") || normalized.includes("zhipu") || normalized.includes("bigmodel")) return "glm";
   if (normalized.includes("minimax")) return "minimax";
@@ -362,13 +338,6 @@ function sameModelProfile(left: ModelProviderProfileSettings, right: ModelProvid
 
 function secretRefForProfile(profileId: string): string {
   return "secret://local-dev/model-provider/" + normalizeProfileId(profileId) + "/api-key";
-}
-
-function parseAiMode(value: unknown): AgentArborLocalSettings["modelProvider"]["defaultAiMode"] {
-  if (value === "none" || value === "fake" || value === "openai-compatible" || value === "openai-responses") {
-    return value;
-  }
-  return "none";
 }
 
 export function normalizeLogoDataUrl(value: unknown): string | undefined {

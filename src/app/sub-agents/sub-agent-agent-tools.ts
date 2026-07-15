@@ -2,25 +2,68 @@ import type {
   AgentLoopAgentTool,
   AgentLoopAgentToolInvocation,
 } from "../model-runtime/agent-loop.js";
-import type { ToolFactValue } from "../../domain/tools/index.js";
+import type { CapabilityToolScope } from "../../domain/config/index.js";
+import type { ToolDefinition, ToolFactValue, ToolInputSchema } from "../../domain/tools/index.js";
 import { loadSubAgentBody, type SubAgentDefinition } from "./sub-agent-loader.js";
 import type { SubAgentRegistry } from "./sub-agent-registry.js";
 
 export const CALL_SUB_AGENT_TOOL_NAME = "call_sub_agent";
 export const SPAWN_SUB_AGENT_TOOL_NAME = "spawn_sub_agent";
 
-const LEGACY_SUB_AGENT_TOOL_NAMES = new Set([
+const AGENT_TOOL_NAMES = new Set([
   CALL_SUB_AGENT_TOOL_NAME,
-  "call_sub_agents",
   SPAWN_SUB_AGENT_TOOL_NAME,
-  "read_sub_agent_output",
 ]);
+
+const CALL_SUB_AGENT_DESCRIPTION = "Call one registered specialist for a bounded task.";
+const SPAWN_SUB_AGENT_DESCRIPTION = "Create one temporary specialist for this call. It is not saved and cannot delegate to another agent.";
+const callSubAgentInputSchema: ToolInputSchema = {
+  type: "object",
+  properties: {
+    sub_agent_name: { type: "string", description: "The registered specialist name." },
+    task: { type: "string", description: "The bounded task delegated to the specialist." },
+    context: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+      description: "Optional supporting context. Use null when none is needed.",
+    },
+  },
+  required: ["sub_agent_name", "task", "context"],
+  additionalProperties: false,
+};
+
+const SUB_AGENT_CATALOG_METADATA = {
+  category: "other",
+  riskLevel: "medium",
+  operationType: "read-write",
+  requiresConfirmation: false,
+} as const;
 
 export type CreateSubAgentAgentToolsInput = {
   readonly registry: SubAgentRegistry;
   readonly parentAllowedTools: readonly string[];
   readonly executableTools: readonly string[];
+  readonly exposedToolNames: readonly string[];
+  readonly dynamicSpawnAvailable: boolean;
 };
+
+export type SubAgentAgentToolCatalogContribution = {
+  readonly definitions: readonly ToolDefinition[];
+  readonly scopes: readonly CapabilityToolScope[];
+};
+
+export function createSubAgentAgentToolCatalogContribution(input: {
+  readonly subAgents: readonly SubAgentDefinition[];
+  readonly dynamicSpawnAvailable: boolean;
+}): SubAgentAgentToolCatalogContribution {
+  const enabled = input.subAgents.filter((definition) => definition.enabled);
+  return {
+    definitions: [
+      ...(enabled.length === 0 ? [] : [callSubAgentDefinition(enabled)]),
+      ...(input.dynamicSpawnAvailable ? [spawnSubAgentDefinition()] : []),
+    ],
+    scopes: ["desktop-basic"],
+  };
+}
 
 /**
  * Creates the two Sub-Agent contributions for one frozen Ordinary run. These are
@@ -32,11 +75,20 @@ export async function createSubAgentAgentTools(
 ): Promise<readonly AgentLoopAgentTool[]> {
   const enabled = (await input.registry.list()).filter((definition) => definition.enabled);
   const parentTools = effectiveParentTools(input.parentAllowedTools, input.executableTools);
+  const contribution = createSubAgentAgentToolCatalogContribution({
+    subAgents: enabled,
+    dynamicSpawnAvailable: input.dynamicSpawnAvailable,
+  });
+  const exposed = new Set(input.exposedToolNames);
   const tools: AgentLoopAgentTool[] = [];
-  if (enabled.length > 0) {
-    tools.push(callSubAgentTool(input.registry, enabled, parentTools));
+  const callDefinition = contribution.definitions.find((definition) => definition.name === CALL_SUB_AGENT_TOOL_NAME);
+  if (callDefinition !== undefined && exposed.has(CALL_SUB_AGENT_TOOL_NAME)) {
+    tools.push(callSubAgentTool(input.registry, enabled, parentTools, callDefinition));
   }
-  tools.push(spawnSubAgentTool(parentTools));
+  const spawnDefinition = contribution.definitions.find((definition) => definition.name === SPAWN_SUB_AGENT_TOOL_NAME);
+  if (spawnDefinition !== undefined && exposed.has(SPAWN_SUB_AGENT_TOOL_NAME)) {
+    tools.push(spawnSubAgentTool(parentTools, spawnDefinition));
+  }
   return tools;
 }
 
@@ -44,34 +96,12 @@ function callSubAgentTool(
   registry: SubAgentRegistry,
   enabled: readonly SubAgentDefinition[],
   parentTools: readonly string[],
+  definition: ToolDefinition,
 ): AgentLoopAgentTool {
-  const names = enabled.map((definition) => definition.name);
-  const catalogDescription = enabled
-    .map((definition) => `${definition.name}: ${definition.description}`)
-    .join("; ");
   return {
     toolName: CALL_SUB_AGENT_TOOL_NAME,
-    toolDescription: `Call one registered specialist for a bounded task. Available specialists: ${catalogDescription}`,
-    inputSchema: {
-      type: "object",
-      properties: {
-        sub_agent_name: {
-          type: "string",
-          enum: names,
-          description: "The registered specialist name.",
-        },
-        task: {
-          type: "string",
-          description: "The bounded task delegated to the specialist.",
-        },
-        context: {
-          anyOf: [{ type: "string" }, { type: "null" }],
-          description: "Optional supporting context. Use null when none is needed.",
-        },
-      },
-      required: ["sub_agent_name", "task", "context"],
-      additionalProperties: false,
-    },
+    toolDescription: definition.description,
+    inputSchema: definition.inputSchema,
     resolve: async (value) => {
       const record = objectInput(value, CALL_SUB_AGENT_TOOL_NAME);
       const name = requiredString(record.sub_agent_name, "sub_agent_name");
@@ -93,32 +123,14 @@ function callSubAgentTool(
   };
 }
 
-function spawnSubAgentTool(parentTools: readonly string[]): AgentLoopAgentTool {
-  const itemSchema: Record<string, unknown> = { type: "string" };
-  if (parentTools.length > 0) {
-    itemSchema.enum = [...parentTools];
-  }
+function spawnSubAgentTool(
+  parentTools: readonly string[],
+  definition: ToolDefinition,
+): AgentLoopAgentTool {
   return {
     toolName: SPAWN_SUB_AGENT_TOOL_NAME,
-    toolDescription: "Create one temporary specialist for this call. It is not saved and cannot delegate to another agent.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        role: { type: "string", description: "A concise specialist role name." },
-        instructions: { type: "string", description: "The specialist's working instructions." },
-        task: { type: "string", description: "The bounded task delegated to the specialist." },
-        context: {
-          anyOf: [{ type: "string" }, { type: "null" }],
-          description: "Optional supporting context. Use null when none is needed.",
-        },
-        allowed_tools: {
-          anyOf: [{ type: "array", items: itemSchema, uniqueItems: true }, { type: "null" }],
-          description: "Use null to inherit parent tools, or an array to narrow them. An empty array grants no tools.",
-        },
-      },
-      required: ["role", "instructions", "task", "context", "allowed_tools"],
-      additionalProperties: false,
-    },
+    toolDescription: definition.description,
+    inputSchema: definition.inputSchema,
     resolve: async (value) => {
       const record = objectInput(value, SPAWN_SUB_AGENT_TOOL_NAME);
       const role = requiredString(record.role, "role");
@@ -137,20 +149,69 @@ function spawnSubAgentTool(parentTools: readonly string[]): AgentLoopAgentTool {
   };
 }
 
+function callSubAgentDefinition(enabled: readonly SubAgentDefinition[]): ToolDefinition {
+  const names = enabled.map((definition) => definition.name);
+  const catalogDescription = enabled
+    .map((definition) => `${definition.name}: ${definition.description}`)
+    .join("; ");
+  return {
+    name: CALL_SUB_AGENT_TOOL_NAME,
+    description: `${CALL_SUB_AGENT_DESCRIPTION} Available specialists: ${catalogDescription}`,
+    inputSchema: {
+      ...callSubAgentInputSchema,
+      properties: {
+        ...callSubAgentInputSchema.properties,
+        sub_agent_name: {
+          type: "string",
+          enum: names,
+          description: "The registered specialist name.",
+        },
+      },
+    },
+    metadata: SUB_AGENT_CATALOG_METADATA,
+  };
+}
+
+function spawnSubAgentDefinition(): ToolDefinition {
+  return {
+    name: SPAWN_SUB_AGENT_TOOL_NAME,
+    description: SPAWN_SUB_AGENT_DESCRIPTION,
+    inputSchema: {
+      type: "object",
+      properties: {
+        role: { type: "string", description: "A concise specialist role name." },
+        instructions: { type: "string", description: "The specialist's working instructions." },
+        task: { type: "string", description: "The bounded task delegated to the specialist." },
+        context: {
+          anyOf: [{ type: "string" }, { type: "null" }],
+          description: "Optional supporting context. Use null when none is needed.",
+        },
+        allowed_tools: {
+          anyOf: [{ type: "array", items: { type: "string" }, uniqueItems: true }, { type: "null" }],
+          description: "Use null to inherit parent tools, or an array to narrow them. An empty array grants no tools.",
+        },
+      },
+      required: ["role", "instructions", "task", "context", "allowed_tools"],
+      additionalProperties: false,
+    },
+    metadata: SUB_AGENT_CATALOG_METADATA,
+  };
+}
+
 function effectiveParentTools(
   parentAllowedTools: readonly string[],
   executableTools: readonly string[],
 ): readonly string[] {
   const executable = new Set(uniqueToolNames(executableTools));
   return uniqueToolNames(parentAllowedTools)
-    .filter((name) => executable.has(name) && !LEGACY_SUB_AGENT_TOOL_NAMES.has(name));
+    .filter((name) => executable.has(name) && !AGENT_TOOL_NAMES.has(name));
 }
 
 function declaredToolNarrowing(
   parentTools: readonly string[],
   declaredTools: readonly string[],
 ): readonly string[] {
-  const declared = uniqueToolNames(declaredTools).filter((name) => !LEGACY_SUB_AGENT_TOOL_NAMES.has(name));
+  const declared = uniqueToolNames(declaredTools).filter((name) => !AGENT_TOOL_NAMES.has(name));
   if (declared.length === 0) {
     return parentTools;
   }

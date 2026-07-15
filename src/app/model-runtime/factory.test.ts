@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelRequest } from "../../domain/intelligence/index.js";
+import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
+import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import {
   createModelRuntimeConfig,
   ModelRuntimeConfigurationError,
 } from "./index.js";
-import { createMinimalRuntime } from "../runtime.js";
 
 test("model runtime factory exposes a disabled boundary without runtime factories", () => {
   const config = createModelRuntimeConfig({});
@@ -122,7 +123,7 @@ test("openai-compatible AI config prefers frozen model provider facts over env m
     throw new Error("Expected config to be enabled.");
   }
 
-  const response = await config.createIntelligenceChannel(createMinimalRuntime()).request(createValidModelRequest());
+  const response = await config.createIntelligenceChannel(modelChannelContext()).request(createValidModelRequest());
 
   assert.equal(response.status, "completed");
   assert.equal(config.summaryInput.model, "snapshot-model");
@@ -172,7 +173,7 @@ test("openai-responses AI config prefers frozen model provider facts over env mo
     throw new Error("Expected config to be enabled.");
   }
 
-  const response = await config.createIntelligenceChannel(createMinimalRuntime()).request(createValidModelRequest());
+  const response = await config.createIntelligenceChannel(modelChannelContext()).request(createValidModelRequest());
 
   assert.equal(response.status, "completed");
   assert.equal(config.summaryInput.model, "snapshot-responses-model");
@@ -214,7 +215,7 @@ test("openai-responses AI config passes model-native web search flag to provider
     throw new Error("Expected config to be enabled.");
   }
 
-  await config.createIntelligenceChannel(createMinimalRuntime()).request(createValidModelRequest());
+  await config.createIntelligenceChannel(modelChannelContext()).request(createValidModelRequest());
 
   assert.deepEqual(calls[0]?.body.tools, [
     {
@@ -245,4 +246,8 @@ function createValidModelRequest(overrides: Partial<ModelRequest> = {}): ModelRe
     requestedAt: "2026-06-06T00:00:00.000Z",
     ...overrides,
   };
+}
+
+function modelChannelContext() {
+  return { bus: new InMemoryMessageBus(new InMemoryEventLog()) };
 }

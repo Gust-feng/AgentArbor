@@ -4,7 +4,7 @@ import type { ToolFactValue } from "../../domain/tools/index.js";
  * 适配器层共享的值处理工具。
  *
  * 这里集中存放与具体协议/厂商无关的纯函数 helper，供 OpenAI Chat Completions、
- * OpenAI Responses、Anthropic Messages、模型 catalog 以及 fetch 桥接等适配器复用，
+ * OpenAI Responses、OpenAI-compatible Chat、模型 catalog 以及 fetch 桥接等适配器复用，
  * 避免同一份逻辑在多个文件里各自重定义。
  */
 

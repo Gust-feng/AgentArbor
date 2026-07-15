@@ -1,7 +1,7 @@
 import React from "react";
 import { Eye, EyeOff, Trash2 } from "lucide-react";
 import type { ModelForm, ModelProviderListItem } from "./model-settings-projection";
-import { requestPathOptionsForProvider } from "./model-settings-projection";
+import { modelProtocolKind, requestPathOptionsForProvider } from "./model-settings-projection";
 
 export function ModelProviderForm(props: {
   readonly item: ModelProviderListItem;
@@ -93,9 +93,9 @@ export function ModelProviderForm(props: {
             <select
               value={props.modelForm.protocolKind || props.item.protocolKind}
               aria-label="协议"
-              onChange={(event) => props.onUpdateModelForm({ protocolKind: event.target.value })}
+              onChange={(event) => props.onUpdateModelForm({ protocolKind: modelProtocolKind(event.target.value) })}
             >
-              {requestPathOptionsForProvider(props.item).map((option) => (
+              {requestPathOptionsForProvider().map((option) => (
                 <option value={option.value} key={option.value}>{option.label}</option>
               ))}
             </select>

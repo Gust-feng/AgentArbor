@@ -1,16 +1,16 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  resolveAgentArborRuntimeDatabasePaths,
-  type FileSystemRuntimeDatabasePaths,
-} from "../../adapters/runtime-database/index.js";
+  resolveAgentArborRuntimePaths,
+  type AgentArborRuntimePaths,
+} from "../../adapters/runtime-storage/index.js";
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import { createMinimalReadonlySoilStore } from "../../domain/soil/index.js";
-import { createRuntimeAgentDefinitionCatalog } from "../agent-definition-catalog.js";
-import type { AgentDefinitionRegistry } from "../agent-definition-registry.js";
-import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
-import { agentDefinitionRefMatchesDefinition, runAgentDefinitionRefCacheKey } from "../agent-definition-ref.js";
+import { createRuntimeAgentDefinitionCatalog } from "../agent-definitions/agent-definition-catalog.js";
+import { agentDefinitionRefMatchesDefinition, runAgentDefinitionRefCacheKey } from "../agent-definitions/agent-definition-ref.js";
+import type { AgentDefinitionRegistry } from "../agent-definitions/agent-definition-registry.js";
+import { runAgentDefinitionRef } from "../agent-definitions/agent-definition-runtime.js";
 import { desktopAgentDefinitionFromConfig } from "../agent-prompts/desktop-agent-configured-definition.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
@@ -22,9 +22,9 @@ import {
   createAppUpdateService,
   createUnsupportedAppUpdateService,
   type AppUpdateServiceLike,
-} from "../app-update-service.js";
+} from "../app-update/app-update-service.js";
 import { CapabilityCenter } from "../capability/capability-center.js";
-import { ConfigCenter, createLocalConfigCenter } from "../config-center.js";
+import { ConfigCenter, createLocalConfigCenter } from "../config-center/index.js";
 import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import {
   createFileSystemOrdinaryConversationControlRepository,
@@ -81,7 +81,7 @@ export type PanelRuntime = {
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
   readonly activeRequestJobs: Set<Promise<void>>;
-  readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
+  readonly runtimePaths?: AgentArborRuntimePaths;
   readonly processRegistry: InMemoryProcessRegistry;
   readonly processTerminator: ProcessTerminator;
   readonly skillRoots: readonly SkillRootInput[];
@@ -171,7 +171,7 @@ function assemblePanelRuntime(input: {
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
-  readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
+  readonly runtimePaths?: AgentArborRuntimePaths;
   readonly skillRoots: readonly SkillRootInput[];
   readonly resolveSkillRoots?: (input: PanelSkillRootsInput) => readonly SkillRootInput[];
   readonly subAgentRoots: readonly SubAgentRootInput[];
@@ -294,7 +294,7 @@ function assemblePanelRuntime(input: {
 }
 
 function resolveOrdinaryRuntimeRoot(input: {
-  readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
+  readonly runtimePaths?: AgentArborRuntimePaths;
   readonly configDirectory?: string;
 }): string {
   const runtimeHome = input.runtimePaths?.runtimeHome ??
@@ -516,6 +516,6 @@ function resolveSkillStateStore(configDirectory: string | undefined): SkillState
   return configDirectory === undefined ? undefined : new FileSystemSkillStateStore(resolveSkillStateStorePath(configDirectory));
 }
 
-function resolvePanelRuntimePaths(configDirectory: string | undefined): FileSystemRuntimeDatabasePaths | undefined {
-  return configDirectory === undefined ? undefined : resolveAgentArborRuntimeDatabasePaths(configDirectory);
+function resolvePanelRuntimePaths(configDirectory: string | undefined): AgentArborRuntimePaths | undefined {
+  return configDirectory === undefined ? undefined : resolveAgentArborRuntimePaths(configDirectory);
 }

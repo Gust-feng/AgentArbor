@@ -100,7 +100,7 @@ test("panel UI app shell delegates settings and sidebar ownership", async () => 
   assert.equal(appState.includes("readonly appUpdate?: AppUpdateInfo"), true);
   assert.equal(appConfigProjection.includes("export function mergeConfigResponse"), true);
   assert.equal(appConfigProjection.includes("export function runReasoningSettings"), true);
-  assert.equal(appConversationRefresh.includes('from "../../panel-conversation/panel-conversation-refresh"'), true);
+  assert.equal(appConversationRefresh.includes('from "./conversation-refresh-policy"'), true);
   assert.equal(conversationRefresh.includes("export function conversationSummaryNeedsRefresh"), true);
   assert.equal(conversationRefresh.includes("export function conversationSummariesNeedRefresh"), true);
   assert.equal(appConversationRefresh.includes("export function useConversationSummaryRefresh"), true);

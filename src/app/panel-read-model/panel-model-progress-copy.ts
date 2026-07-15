@@ -1,5 +1,3 @@
-import { stringOrUndefined } from "../run-read-model/value-utils.js";
-
 export function modelRequestedSummary(payload: Readonly<Record<string, unknown>>): string | undefined {
   const explicit = visibleModelProgressSummary(
     stringOrUndefined(payload.summary) ??
@@ -10,6 +8,10 @@ export function modelRequestedSummary(payload: Readonly<Record<string, unknown>>
     return explicit;
   }
   return purposeProgressLabel(stringOrUndefined(payload.purpose) ?? "unknown");
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 export function restoredModelRequestedSummary(summary: string): string | undefined {

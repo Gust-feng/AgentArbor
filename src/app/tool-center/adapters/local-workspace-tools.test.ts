@@ -548,6 +548,7 @@ test("local create_file and edit_file stay inside the local strategy sandbox", a
     assert.equal(createdFacts.refId, "workspace:file:notes/result.md");
     assert.equal(typeof editedFacts.beforeHash, "string");
     assert.equal(typeof editedFacts.afterHash, "string");
+    assert.equal(asRecord(editedFacts.diff).status, "available");
     assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "# Title\n\nupdated body\n");
 
     await assert.rejects(

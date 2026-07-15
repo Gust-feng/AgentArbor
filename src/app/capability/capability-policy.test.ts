@@ -122,24 +122,6 @@ test("run capability policy exposes tools only when the selected protocol can ro
       expectedCanExposeModelTools: true,
       expectedAllowedTools: ["search"],
     },
-    {
-      protocolKind: "anthropic_messages" as const,
-      providerKind: "anthropic" as const,
-      expectedCanExposeModelTools: false,
-      expectedAllowedTools: [],
-    },
-    {
-      protocolKind: "gemini_generate_content" as const,
-      providerKind: "gemini" as const,
-      expectedCanExposeModelTools: false,
-      expectedAllowedTools: [],
-    },
-    {
-      protocolKind: "ollama_generate" as const,
-      providerKind: "ollama" as const,
-      expectedCanExposeModelTools: false,
-      expectedAllowedTools: [],
-    },
   ];
 
   for (const item of cases) {

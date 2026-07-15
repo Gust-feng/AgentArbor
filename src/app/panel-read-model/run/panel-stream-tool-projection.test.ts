@@ -224,25 +224,30 @@ test("tool stream projection carries edit diff preview in the file display", () 
     toolName: "edit_file",
     input: {
       path: "src/app/example.ts",
-      edits: [{ oldText: "old text", newText: "new text" }],
+      edits: [{ oldText: "INPUT OLD MUST STAY HIDDEN", newText: "INPUT NEW MUST STAY HIDDEN" }],
     },
     output: {
       path: "src/app/example.ts",
       replacements: 1,
       previousLength: 15,
       nextLength: 15,
+      diff: {
+        status: "available",
+        unifiedDiff: "Index: src/app/example.ts\n--- src/app/example.ts\n+++ src/app/example.ts\n@@ -1,1 +1,1 @@\n-old text\n+new text\n",
+      },
     },
   });
 
   assert.equal(detail.preview?.includes("文件已更新"), false);
-  assert.equal(detail.preview?.includes("- old text"), true);
-  assert.equal(detail.preview?.includes("+ new text"), true);
+  assert.equal(detail.preview?.includes("-old text"), true);
+  assert.equal(detail.preview?.includes("+new text"), true);
   assert.equal(detail.display?.kind, "file_diff_preview");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.path : undefined, "src/app/example.ts");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.operation : undefined, "edit");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.replacements : undefined, 1);
-  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("- old text") : false, true);
-  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("+ new text") : false, true);
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("-old text") : false, true);
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("+new text") : false, true);
+  assert.equal(detail.preview?.includes("INPUT OLD MUST STAY HIDDEN"), false);
 });
 
 test("tool stream projection uses the file diff as the edit preview", () => {
@@ -255,16 +260,20 @@ test("tool stream projection uses the file diff as the edit preview", () => {
     output: {
       path: "src/app/example.ts",
       replacements: 1,
+      diff: {
+        status: "available",
+        unifiedDiff: "@@ -1,1 +1,1 @@\n-old text\n+new text\n",
+      },
     },
   });
 
-  assert.equal(detail.preview?.includes("- old text"), true);
-  assert.equal(detail.preview?.includes("+ new text"), true);
+  assert.equal(detail.preview?.includes("-old text"), true);
+  assert.equal(detail.preview?.includes("+new text"), true);
   assert.equal(detail.preview?.includes("变更预览"), false);
   assert.equal(detail.preview?.includes("替换：1 处"), false);
 });
 
-test("tool stream projection keeps edit preview focused on file-level summary", () => {
+test("tool stream projection does not fabricate a diff when canonical generation is unavailable", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "edit_file",
     input: {
@@ -276,14 +285,21 @@ test("tool stream projection keeps edit preview focused on file-level summary", 
       replacements: 1,
       previousLength: 15,
       nextLength: 18,
+      diff: {
+        status: "unavailable",
+        reason: "input_limit_exceeded",
+        beforeChars: 200000,
+        afterChars: 200003,
+        maxInputChars: 256000,
+        timeoutMs: 100,
+      },
     },
   });
 
-  assert.equal(detail.preview?.includes("@@ occurrence 2 · line 4"), true);
-  assert.equal(detail.preview?.includes("- same"), true);
-  assert.equal(detail.preview?.includes("+ updated"), true);
-  assert.equal(detail.preview?.includes("变更预览"), false);
-  assert.equal(detail.preview?.includes("替换：1 处"), false);
+  assert.equal(detail.preview, "src/app/example.ts");
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview : "unexpected", undefined);
+  assert.equal(detail.preview?.includes("same"), false);
+  assert.equal(detail.preview?.includes("updated"), false);
 });
 
 test("tool stream projection derives structured directory displays from attachment listings", () => {

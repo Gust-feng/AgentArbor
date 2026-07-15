@@ -12,11 +12,9 @@
  * 复用边界（FR-010，复用而非另起）：
  *   - Task Soil 装配复用 task-soil-workspace.ts（含 workspace 上下文授权校验）
  *   - 只通过显式 soilStore / constraints 端口装配 Task Soil
- *   - RuntimeDatabase 的存储根（runtimeHome）与文件持久化模式复用——deep 会话
- *     写入 `${runtimeHome}/deep-conversations/` 独立分区，物理隔离于普通会话的
- *     `${runtimeHome}/conversations/`。DeepConversationStore 是 deep 模块自己的
- *     存储抽象；DeepConversationService 不调用 RuntimeDatabase 的会话方法
- *     （upsertConversation/getConversation/listConversations），从而保证隔离。
+ *   - Host 只提供 `runtimeHome` 路径；deep 会话写入
+ *     `${runtimeHome}/deep-conversations/` 独立分区。DeepConversationStore 自己拥有
+ *     JSON 写入、读取与删除语义，不复用 Ordinary 仓储或全局数据库。
  */
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
@@ -28,7 +26,7 @@ import {
   createTaskSoilFromDesktopInput,
   parseDesktopTaskSoilInput,
   type DesktopTaskSoilInput,
-} from "../task-soil-workspace.js";
+} from "../task-soil/task-soil-workspace.js";
 import {
   DEEP_RUN_KIND,
   DEEP_RUN_MODE,
@@ -98,10 +96,8 @@ export class InMemoryDeepConversationStore implements DeepConversationStore {
 /**
  * 创建文件系统版 deep 会话存储。
  *
- * 写入 `${runtimeHome}/deep-conversations/<id>.json` 独立分区，复用
- * file-system-runtime-database 的持久化模式（JSON 文件、encodeURIComponent
- * 文件名、原子写入、ENOENT 容错），但不调用 RuntimeDatabase 的会话方法，
- * 确保与普通会话 `${runtimeHome}/conversations/` 物理隔离。
+ * 写入 `${runtimeHome}/deep-conversations/<id>.json` 独立分区。文件名编码、
+ * 原子写入和 ENOENT 处理都由本 store 直接拥有，不存在跨 feature 数据库。
  */
 export function createFileSystemDeepConversationStore(runtimeHome: string): DeepConversationStore {
   const root = path.join(runtimeHome, "deep-conversations");
@@ -162,8 +158,8 @@ export type DeepConversationService = {
  *
  * `constraints` 与 `soilStore` 只用于 Task Soil 装配；`aiMode` 决定权限边界
  * 默认值（复用 createTaskSoilFromDesktopInput 的 permission 推导）。
- * DeepConversationService 不持有也不调用 RuntimeDatabase 的会话方法——会话读写
- * 完全经 `store`（deep 专属分区），从而与普通会话 store 隔离。
+ * DeepConversationService 的会话读写完全经 `store`（deep 专属分区），从而与
+ * Ordinary conversation repository 隔离。
  */
 export function createDeepConversationService(options: {
   readonly store: DeepConversationStore;

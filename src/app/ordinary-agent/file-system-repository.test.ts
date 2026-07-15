@@ -86,6 +86,23 @@ test("file repository rejects old or malformed snapshots instead of compatibilit
     error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
 });
 
+test("file repository rejects snapshots from retired model providers", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-retired-provider-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  await repository.save(state("retired-provider-run", "2026-01-01T00:00:00.000Z"), 0);
+  const snapshotPath = path.join(root, "runs", "retired-provider-run", "snapshot.json");
+  const snapshot = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as {
+    state: { birth: { capabilitySnapshot: { activeModel: Record<string, unknown> } } };
+  };
+  snapshot.state.birth.capabilitySnapshot.activeModel.providerKind = "anthropic";
+  snapshot.state.birth.capabilitySnapshot.activeModel.protocolKind = "anthropic_messages";
+  await fs.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+
+  await assert.rejects(repository.get("retired-provider-run"), (error: unknown) =>
+    error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
+});
+
 test("file repository validates cumulative usage before committing an Ordinary snapshot", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-usage-validation-"));
   t.after(() => removeTestDirectory(root));

@@ -1,6 +1,5 @@
 import type {
   AssistantDeliverableLike,
-  AssistantSubAgentRunLike,
   AssistantWorkViewOutput,
 } from "../panel-read-model/assistant/panel-assistant-message-output.js";
 import type { LiveRunBuffer } from "../panel-read-model/run/panel-run-live-buffer.js";
@@ -69,7 +68,6 @@ export function projectConversationDisplayList<
   readonly live?: LiveRunBuffer;
   readonly workView?: AssistantWorkViewOutput<TDeliverable>;
   readonly pending?: TPending;
-  readonly subAgentRuns?: readonly AssistantSubAgentRunLike[];
   readonly standaloneRun?: {
     readonly currentRunId?: string;
     readonly runStatus?: string;
@@ -104,7 +102,6 @@ export function projectConversationDisplayList<
     : projectStandaloneAssistantWorkflowDisplay({
         previous: input.previous,
         conversationId: input.conversationId,
-        subAgentRuns: input.subAgentRuns ?? input.workView?.subAgentRuns,
         ...standaloneWorkflowProjectionInput(input.conversationId, standaloneRun),
       });
   const items = conversationDisplayItemsFromTurns(input.projectedTurns, turnDisplay.assistantDisplays);

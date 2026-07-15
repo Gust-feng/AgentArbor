@@ -142,17 +142,25 @@ export function createTextPdfBuffer(lines: readonly string[]): Buffer {
     textOperators,
     "ET",
   ].join("\n");
-  return Buffer.from([
-    "%PDF-1.4",
-    "1 0 obj",
-    "<< /Length " + Buffer.byteLength(stream, "latin1") + " >>",
-    "stream",
-    stream,
-    "endstream",
-    "endobj",
-    "%%EOF",
-    "",
-  ].join("\n"), "latin1");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`,
+  ];
+  let source = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let index = 0; index < objects.length; index += 1) {
+    offsets.push(Buffer.byteLength(source, "latin1"));
+    source += `${index + 1} 0 obj\n${objects[index]}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(source, "latin1");
+  source += `xref\n0 ${objects.length + 1}\n`;
+  source += "0000000000 65535 f \n";
+  source += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(source, "latin1");
 }
 
 function pdfLiteral(value: string): string {

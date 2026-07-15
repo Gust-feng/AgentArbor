@@ -25,7 +25,7 @@ import {
   searchPath,
   type SearchMatch,
 } from "./context-attachment-files.js";
-import { extractPdfText } from "./context-attachment-pdf.js";
+import { extractPdfText, pdfReadErrorReason } from "./context-attachment-pdf.js";
 import {
   charWindowContent,
   parseLineRange,
@@ -373,7 +373,8 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
           bytes: stat.size,
         });
       }
-      const buffer = await fs.readFile(target.targetAbsolutePath).catch(() => undefined);
+      const buffer = await fs.readFile(target.targetAbsolutePath, { signal: context.abortSignal }).catch(() => undefined);
+      throwIfAborted(context.abortSignal);
       if (buffer === undefined) {
         return unsupportedPdfResult({
           entry,
@@ -382,7 +383,14 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
           bytes: stat.size,
         });
       }
-      const extracted = extractPdfText(buffer);
+      const extracted = await extractPdfText(buffer, context.abortSignal).catch((error: unknown) => {
+        throwIfAborted(context.abortSignal);
+        return {
+          text: "",
+          reason: pdfReadErrorReason(error),
+          facts: { pageCount: 0, textItems: 0 },
+        };
+      });
       if (extracted.text.length === 0) {
         return unsupportedPdfResult({
           entry,
@@ -424,7 +432,7 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
         bytes: stat.size,
         format: "pdf",
         readable: true,
-        extraction: "best_effort_pdf_text",
+        extraction: "pdfjs_text",
         content: returned,
         startChar,
         textChars: returned.length,

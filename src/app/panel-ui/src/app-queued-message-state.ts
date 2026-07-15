@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import type { BasicAgentRun } from "./contracts/run";
+import type { TaskStatus } from "./contracts/common.js";
 
 export type QueuedChatMessage = {
   readonly id: string;
@@ -16,18 +16,55 @@ export type AppQueuedMessageState = {
 
 export type AppQueuedMessageStateOptions = {
   readonly busy: boolean;
-  readonly currentRun: BasicAgentRun | undefined;
-  readonly modelResponding: boolean;
+  readonly currentRun: QueuedMessageDispatchRun | undefined;
   readonly setGoal: Dispatch<SetStateAction<string>>;
   readonly startTask: (explicitGoal?: string) => Promise<void>;
 };
+
+export type QueuedMessageDispatchRun = {
+  readonly runId: string;
+  readonly status: TaskStatus;
+  readonly requiresUserAction: boolean;
+};
+
+export type QueuedMessageDispatchDecision =
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "dispatch";
+      readonly message: QueuedChatMessage;
+      readonly sourceRunId: string;
+    };
+
+export function queuedMessageDispatchDecision(input: {
+  readonly busy: boolean;
+  readonly currentRun: QueuedMessageDispatchRun | undefined;
+  readonly queuedMessages: readonly QueuedChatMessage[];
+  readonly dispatchedAfterRunId: string | undefined;
+}): QueuedMessageDispatchDecision {
+  const settledRun = input.currentRun;
+  if (
+    input.busy ||
+    settledRun === undefined ||
+    !queuedMessageMayFollow(settledRun) ||
+    input.dispatchedAfterRunId === settledRun.runId
+  ) {
+    return { kind: "none" };
+  }
+  const message = input.queuedMessages[0];
+  if (message === undefined) {
+    return { kind: "none" };
+  }
+  return {
+    kind: "dispatch",
+    message,
+    sourceRunId: settledRun.runId,
+  };
+}
 
 export function useAppQueuedMessages(
   options: AppQueuedMessageStateOptions,
 ): AppQueuedMessageState {
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedChatMessage[]>([]);
-  const previousRunActivityRef = useRef<{ readonly runId?: string; readonly responding: boolean }>({ responding: false });
-  const queueReadyAfterRunRef = useRef<string | undefined>(undefined);
   const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
 
   const enqueueMessage = useCallback((content: string) => {
@@ -50,36 +87,29 @@ export function useAppQueuedMessages(
   }, []);
 
   const clearQueuedMessages = useCallback(() => {
-    queueReadyAfterRunRef.current = undefined;
     dispatchedQueueAfterRunRef.current = undefined;
     setQueuedMessages([]);
   }, []);
 
   useEffect(() => {
-    const previousRunActivity = previousRunActivityRef.current;
-    const activeRun = options.currentRun;
-    previousRunActivityRef.current = {
-      runId: activeRun?.runId,
-      responding: options.modelResponding,
-    };
-    if (!previousRunActivity.responding || options.modelResponding) return;
-    if (activeRun === undefined || activeRun.runId !== previousRunActivity.runId) return;
-    queueReadyAfterRunRef.current = activeRun.status === "completed" ? activeRun.runId : undefined;
-  }, [options.currentRun, options.modelResponding]);
-
-  useEffect(() => {
-    const readyRunId = queueReadyAfterRunRef.current;
-    if (readyRunId === undefined || options.busy) return;
-    if (options.currentRun?.runId !== readyRunId) return;
-    if (dispatchedQueueAfterRunRef.current === readyRunId) return;
-    if (queuedMessages.length === 0) return;
-    const next = queuedMessages[0];
-    if (next === undefined) return;
-    dispatchedQueueAfterRunRef.current = readyRunId;
-    queueReadyAfterRunRef.current = undefined;
-    setQueuedMessages((previous) => previous.slice(1));
-    options.setGoal(next.content);
-    void options.startTask(next.content);
+    const decision = queuedMessageDispatchDecision({
+      busy: options.busy,
+      currentRun: options.currentRun,
+      queuedMessages,
+      dispatchedAfterRunId: dispatchedQueueAfterRunRef.current,
+    });
+    if (decision.kind !== "dispatch") return;
+    // A completed run may remain visible across several renders. Bind one
+    // dispatch to that run id so StrictMode and unrelated renders cannot send
+    // the same or subsequent queued message early.
+    dispatchedQueueAfterRunRef.current = decision.sourceRunId;
+    setQueuedMessages((previous) =>
+      previous[0]?.id === decision.message.id
+        ? previous.slice(1)
+        : previous.filter((message) => message.id !== decision.message.id)
+    );
+    options.setGoal(decision.message.content);
+    void options.startTask(decision.message.content);
   }, [options.busy, options.currentRun, options.setGoal, options.startTask, queuedMessages]);
 
   return {
@@ -89,4 +119,8 @@ export function useAppQueuedMessages(
     updateQueuedMessage,
     clearQueuedMessages,
   };
+}
+
+function queuedMessageMayFollow(run: QueuedMessageDispatchRun): boolean {
+  return run.status === "completed" && !run.requiresUserAction;
 }

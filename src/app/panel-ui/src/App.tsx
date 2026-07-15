@@ -193,7 +193,6 @@ export function App(): React.ReactElement {
   } = useAppQueuedMessages({
     busy: app.busy,
     currentRun: currentRun.run,
-    modelResponding,
     setGoal,
     startTask,
   });

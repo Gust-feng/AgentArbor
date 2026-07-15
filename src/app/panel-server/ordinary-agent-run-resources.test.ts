@@ -123,6 +123,8 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   assert.equal(acquired.capabilityResolution?.runMode, "agent");
   assert.equal(AGENT_TOOL_NAMES.some((name) => acquired.tools.gateway.has(name)), false);
   assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["call_sub_agent", "spawn_sub_agent"]);
+  assert.ok(acquired.maintainContext);
+  await acquired.maintainContext({ messages: acquired.resolvedMessages, abortSignal: execution.abortSignal });
   const countedTools = countedToolContracts.join("\n");
   assert.match(countedTools, /Available specialists: reviewer/u);
   assert.match(countedTools, /sub_agent_name/u);
@@ -273,11 +275,41 @@ test("Ordinary resources classify tool-boundary and compaction failures without 
       return { status: "failed", tokenCount: 10, threshold: 5, message: "summarizer unavailable" };
     },
   });
-  await assert.rejects(compactionAcquirer.acquire(input), (error: unknown) =>
-    error instanceof CodedExecutionError &&
-    error.code === "context_compaction_failed" &&
-    error.message === "summarizer unavailable");
+  const compactionResources = await compactionAcquirer.acquire(input);
+  assert.ok(compactionResources.maintainContext);
+  assert.deepEqual(await compactionResources.maintainContext({
+    messages: compactionResources.resolvedMessages,
+    abortSignal: input.abortSignal,
+  }), {
+    status: "failed",
+    code: "context_compaction_failed",
+    error: "summarizer unavailable",
+  });
+  await compactionResources.release();
   assert.equal(compactionReleases, 1);
+
+  const thrownCompactionAcquirer = createOrdinaryAgentRunResourceAcquirer({
+    host: {} as never,
+    soilStore: createMinimalReadonlySoilStore([]),
+    resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
+    resolveSubAgentRoots: () => [],
+  }, {
+    async prepareRunResources() {
+      return resources(base.capabilitySnapshot, process.cwd(), () => undefined);
+    },
+    async compactContext() { throw new Error("summarizer transport unavailable"); },
+  });
+  const thrownCompactionResources = await thrownCompactionAcquirer.acquire(input);
+  assert.ok(thrownCompactionResources.maintainContext);
+  assert.deepEqual(await thrownCompactionResources.maintainContext({
+    messages: thrownCompactionResources.resolvedMessages,
+    abortSignal: input.abortSignal,
+  }), {
+    status: "failed",
+    code: "context_compaction_failed",
+    error: "Ordinary context could not be compacted.",
+  });
+  await thrownCompactionResources.release();
 });
 
 for (const protocol of ["openai_responses", "openai_compatible_chat_completions"] as const) {
@@ -352,19 +384,26 @@ for (const protocol of ["openai_responses", "openai_compatible_chat_completions"
       abortSignal: controller.signal,
     });
 
+    assert.ok(acquired.maintainContext);
+    const maintained = await acquired.maintainContext({
+      messages: acquired.resolvedMessages,
+      abortSignal: controller.signal,
+    });
+    assert.equal(maintained.status, "compacted");
+    if (maintained.status !== "compacted") return;
     assert.equal(channel.requests.length, 1);
     assert.equal(channel.abortSignals[0], controller.signal);
     assert.equal(loopConfig?.modelProvider?.protocolKind, protocol);
-    assert.equal(acquired.resolvedMessages.some((message) => message.content.includes("# Compacted Context")), true);
-    assert.equal(acquired.resolvedMessages.filter((message) => message.role === "system").length, 1);
-    assert.equal(acquired.resolvedMessages.some((message) => message.ref === "old:0"), false);
-    assert.equal(acquired.resolvedMessages.some((message) => message.ref === "recent:tool-call"), true);
-    assert.equal(acquired.resolvedMessages.some((message) => message.ref === "recent:tool-result"), true);
-    assert.equal(acquired.resolvedMessages.some((message) => message.content.includes("current request")), true);
-    assert.equal(acquired.resolvedMessages.some((message) => message.content === DESKTOP_ROOT_AGENT.prompt.systemPrompt), true);
+    assert.equal(maintained.messages.some((message) => message.content.includes("# Compacted Context")), true);
+    assert.equal(maintained.messages.filter((message) => message.role === "system").length, 1);
+    assert.equal(maintained.messages.some((message) => message.ref === "old:0"), false);
+    assert.equal(maintained.messages.some((message) => message.ref === "recent:tool-call"), true);
+    assert.equal(maintained.messages.some((message) => message.ref === "recent:tool-result"), true);
+    assert.equal(maintained.messages.some((message) => message.content.includes("current request")), true);
+    assert.equal(maintained.messages.some((message) => message.content === DESKTOP_ROOT_AGENT.prompt.systemPrompt), true);
     assert.doesNotThrow(() => createOpenAIAgentsInputMapper({
       protocol,
-      messages: acquired.resolvedMessages,
+      messages: maintained.messages,
     }).messages(DESKTOP_ROOT_AGENT.prompt.systemPrompt));
     await acquired.release();
   });

@@ -3,6 +3,7 @@ import {
   type OpenAIAgentsLoopConfig,
 } from "../../adapters/intelligence/openai-agents-loop.js";
 import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
+import type { ProviderProtocolProfileId } from "../../domain/config/index.js";
 import type { AgentLoop } from "./agent-loop.js";
 import type { ModelRuntimeMode } from "./contracts.js";
 import {
@@ -23,6 +24,7 @@ export type CreateModelRuntimeAgentLoopInput = {
   readonly mode?: ModelRuntimeMode;
   readonly env?: ModelRuntimeEnvironment;
   readonly modelProvider?: AgentLoopModelProvider;
+  readonly providerProfileId?: ProviderProtocolProfileId;
   readonly providerFetch?: ModelRuntimeProviderFetch;
   /** Fake execution is test-only and must be supplied explicitly. */
   readonly fakeAgentLoop?: AgentLoop;
@@ -72,6 +74,8 @@ export function createModelRuntimeAgentLoop(
     apiKey: resolved.apiKey,
     model: resolved.model,
     requestSettings: resolved.requestSettings,
+    providerProfileId: input.providerProfileId ?? resolved.providerProfileId,
+    enableWebSearch: resolved.enableWebSearch,
     fetch: input.providerFetch,
   });
 }

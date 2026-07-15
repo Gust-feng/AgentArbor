@@ -141,7 +141,7 @@ export function applyOpenAICompatibleChatDialectControls(input: {
     case "deepseek_reasoning_effort":
       return applyDeepSeekReasoningControls(next, effort);
     case "thinking_enabled_disabled":
-      return applyThinkingEnabledControls(next, input.dialect);
+      return applyThinkingEnabledControls(next, input.dialect, effort);
     case "thinking_disabled":
       return {
         ...next,
@@ -306,9 +306,10 @@ function applyDeepSeekReasoningControls(
 
 function applyThinkingEnabledControls(
   fields: Record<string, unknown>,
-  dialect: OpenAICompatibleChatDialect
+  dialect: OpenAICompatibleChatDialect,
+  effort: OpenAIReasoningEffort | undefined,
 ): Record<string, unknown> {
-  const thinking = { type: "enabled" };
+  const thinking = { type: effort === "none" ? "disabled" : "enabled" };
   if (dialect.profileId === "moonshot") {
     return {
       ...fields,

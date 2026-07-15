@@ -4,6 +4,7 @@ import { executionErrorFacts } from "../execution-errors/index.js";
 import type {
   AgentLoop,
   AgentLoopAgentTool,
+  AgentLoopInput,
   AgentLoopResult,
   AgentLoopToolBoundary,
 } from "../model-runtime/index.js";
@@ -23,6 +24,7 @@ export type OrdinaryAgentLoopRunResources = {
   readonly tools: AgentLoopToolBoundary;
   readonly agentTools?: readonly AgentLoopAgentTool[];
   readonly capabilityResolution?: RunCapabilityResolution;
+  readonly maintainContext?: AgentLoopInput["maintainContext"];
   /** Releases every run-scoped resource created by the acquirer, including the loop. */
   release(): Promise<void>;
 };
@@ -76,6 +78,7 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           abortSignal: executionInput.abortSignal,
           onTextDelta: executionInput.onTextDelta,
           onToolResult: executionInput.onToolResult,
+          maintainContext: resources.maintainContext,
         });
         return await mapAgentLoopResult(result, lease, input.onReleaseError, {}, resources.capabilityResolution);
       } catch (error) {
@@ -138,7 +141,7 @@ async function mapAgentLoopResult(
   return {
     ...facts,
     status: "failed",
-    error: { code: "agent_loop_failed", message: result.error },
+    error: { code: result.errorCode ?? "agent_loop_failed", message: result.error },
   };
 }
 

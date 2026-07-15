@@ -2,27 +2,28 @@ import { createHash } from "node:crypto";
 import {
   Agent,
   type AgentOutputType,
+  type CallModelInputFilter,
   OpenAIProvider,
   Runner,
   RunContext,
   RunResult,
   RunState,
   type ModelSettings,
+  isOpenAIChatCompletionsRawModelStreamEvent,
+  isOpenAIResponsesRawModelStreamEvent,
   setTracingDisabled,
+  webSearchTool,
 } from "@openai/agents";
 import OpenAI from "openai";
-import type { OpenAIModelRequestSettings } from "../../domain/config/index.js";
+import type { OpenAIModelRequestSettings, ProviderProtocolProfileId } from "../../domain/config/index.js";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import {
-  OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION,
   type ModelMessage,
   type ModelUsage,
 } from "../../domain/intelligence/index.js";
 import type {
-  ToolCallRequest,
   ToolCallResult,
   ToolDefinition,
-  ToolFactValue,
 } from "../../domain/tools/index.js";
 import { modelVisibleToolDescription } from "../../domain/tools/index.js";
 import type {
@@ -33,6 +34,11 @@ import type {
 } from "../../app/model-runtime/agent-loop.js";
 import { isOfficialOpenAIBaseUrl } from "./openai-compatible-base-url.js";
 import {
+  applyOpenAICompatibleChatDialectControls,
+  applyOpenAICompatibleChatRequestPolicy,
+  resolveOpenAICompatibleChatDialect,
+} from "./openai-compatible-chat-protocol.js";
+import {
   pendingOpenAIAgentsConfirmations,
   rejectedOpenAIAgentsToolResult,
   selectOpenAIAgentsConfirmationDecisions,
@@ -40,10 +46,11 @@ import {
 } from "./openai-agents-confirmation.js";
 import {
   canonicalToolResultMessage,
+  canonicalMessagesFromOpenAIAgentsInput,
   createOpenAIAgentsInputMapper,
 } from "./openai-agents-input.js";
+import { withOpenAICompatibleChatProfile } from "./openai-agents-provider-profile.js";
 import { toOpenAIFetch, type FetchLike } from "./openai-fetch-bridge.js";
-import { openAIResponsesOutputItems } from "./openai-responses-continuation.js";
 import {
   createOpenAIAgentsToolAssembly,
   recordOpenAIAgentsToolResult,
@@ -62,6 +69,8 @@ export type OpenAIAgentsLoopConfig = {
   readonly apiKey: string;
   readonly model: string;
   readonly requestSettings?: OpenAIModelRequestSettings;
+  readonly providerProfileId?: ProviderProtocolProfileId;
+  readonly enableWebSearch?: boolean;
   readonly fetch?: FetchLike;
 };
 
@@ -116,7 +125,12 @@ class OpenAIAgentsLoop implements AgentLoop {
       cacheResponsesWebSocketModels: false,
     });
     this.runner = new Runner({
-      modelProvider: this.provider,
+      modelProvider: config.protocol === "openai_compatible_chat_completions"
+        ? withOpenAICompatibleChatProfile(
+            this.provider,
+            compatibleChatDialectSettings(config).providerData,
+          )
+        : this.provider,
       tracingDisabled: true,
       traceIncludeSensitiveData: false,
     });
@@ -137,6 +151,8 @@ class OpenAIAgentsLoop implements AgentLoop {
       preflightByFactId: new Map(),
       interruptionFactIds: new WeakMap(),
       modelInput,
+      modelRequestCount: 0,
+      latestRequestIncludedResponses: 0,
     };
     let sdkState: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>> | undefined;
     try {
@@ -179,7 +195,10 @@ class OpenAIAgentsLoop implements AgentLoop {
         tools: assembly.definitions,
         agentTools: execution.input.agentTools ?? [],
       }),
-      tools: [...assembly.tools],
+      tools: [
+        ...assembly.tools,
+        ...(this.config.enableWebSearch === true ? [webSearchTool({ searchContextSize: "medium" })] : []),
+      ],
     });
   }
 
@@ -190,20 +209,49 @@ class OpenAIAgentsLoop implements AgentLoop {
     abortSignal: AbortSignal,
   ): Promise<RunResult<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>> {
     execution.abortSignal = abortSignal;
-    const stream = execution.input.onTextDelta !== undefined && this.config.requestSettings?.stream !== false;
+    const stream = execution.input.onTextDelta !== undefined && supportsSdkStreaming(this.config);
+    const callModelInputFilter = execution.input.maintainContext === undefined
+      ? undefined
+      : createContextMaintenanceFilter(execution, this.config.protocol);
     if (!stream) {
       return this.runner.run(agent, input, {
         maxTurns: null,
         signal: abortSignal,
+        callModelInputFilter,
       });
     }
     const result = await this.runner.run(agent, input, {
       maxTurns: null,
       signal: abortSignal,
       stream: true,
+      callModelInputFilter,
     });
-    for await (const delta of result.toTextStream()) {
-      execution.input.onTextDelta?.(delta);
+    for await (const event of result) {
+      if (isOpenAIChatCompletionsRawModelStreamEvent(event)) {
+        const choice = event.data.event.choices[0];
+        const content = choice?.delta.content;
+        if (typeof content === "string" && content.length > 0) {
+          execution.input.onTextDelta?.(content);
+        }
+        if (typeof choice?.finish_reason === "string") {
+          execution.lastStreamFinishReason = choice.finish_reason;
+        }
+        continue;
+      }
+      if (isOpenAIResponsesRawModelStreamEvent(event)) {
+        const rawEvent = asRecord(event.data.event);
+        if (rawEvent.type === "response.output_text.delta" && typeof rawEvent.delta === "string") {
+          execution.input.onTextDelta?.(rawEvent.delta);
+        }
+        if (rawEvent.type === "response.completed" || rawEvent.type === "response.incomplete") {
+          const response = asRecord(rawEvent.response);
+          execution.lastStreamResponseStatus = typeof response.status === "string"
+            ? response.status
+            : rawEvent.type === "response.completed" ? "completed" : "incomplete";
+          const details = asRecord(response.incomplete_details);
+          execution.lastStreamIncompleteReason = typeof details.reason === "string" ? details.reason : undefined;
+        }
+      }
     }
     await result.completed;
     if (result.cancelled) {
@@ -237,16 +285,22 @@ class OpenAIAgentsLoop implements AgentLoop {
       }
       return this.approvalRequiredResult(agent, result, execution, pending);
     }
+    const incomplete = incompleteFinalResponse(this.config.protocol, result.rawResponses.at(-1), execution);
+    if (incomplete !== undefined) {
+      return {
+        status: "failed",
+        error: incomplete,
+        messages: canonicalMessagesForResult(execution, result.rawResponses, this.config.protocol, true),
+        toolResults: cloneToolResults(execution.toolResults),
+        usage: usageFromSdk(result.runContext.usage),
+        confirmationRequests: [],
+      };
+    }
     const finalText = typeof result.finalOutput === "string" ? result.finalOutput : "";
     return {
       status: "completed",
       finalText,
-      messages: canonicalMessagesFromResponses({
-        baseMessages: execution.baseMessages,
-        rawResponses: result.rawResponses,
-        protocol: this.config.protocol,
-        toolResults: execution.toolResults,
-      }),
+      messages: canonicalMessagesForResult(execution, result.rawResponses, this.config.protocol),
       toolResults: cloneToolResults(execution.toolResults),
       usage: usageFromSdk(result.runContext.usage),
       confirmationRequests: [],
@@ -263,7 +317,7 @@ class OpenAIAgentsLoop implements AgentLoop {
     let decided = false;
     return {
       status: "approval_required",
-      messages: cloneMessages(execution.baseMessages),
+      messages: canonicalMessagesForResult(execution, result.rawResponses, this.config.protocol),
       toolResults: cloneToolResults(execution.toolResults),
       usage,
       confirmationRequests: pending.map(({ confirmation }) => cloneConfirmation(confirmation)),
@@ -314,6 +368,120 @@ class OpenAIAgentsLoop implements AgentLoop {
   }
 }
 
+function createContextMaintenanceFilter(
+  execution: ExecutionState,
+  protocol: OpenAIAgentsLoopProtocol,
+): CallModelInputFilter {
+  return async ({ modelData }) => {
+    const instructions = modelData.instructions ?? execution.input.instructions;
+    const mappedMessages = canonicalMessagesFromOpenAIAgentsInput({
+      protocol,
+      instructions,
+      items: modelData.input,
+    });
+    const canonicalMessages = preserveCanonicalMetadata(
+      mappedMessages,
+      execution.latestRequestMessages ?? execution.baseMessages,
+    );
+    execution.latestRequestMessages = cloneMessages(canonicalMessages);
+    execution.latestRequestIncludedResponses = execution.modelRequestCount;
+    const maintained = await execution.input.maintainContext!({
+      messages: canonicalMessages,
+      abortSignal: execution.abortSignal,
+    });
+    if (maintained.status === "failed") {
+      throw new ContextMaintenanceError(maintained.code, maintained.error);
+    }
+    const requestMessages = maintained.status === "compacted"
+      ? maintained.messages
+      : canonicalMessages;
+    execution.latestRequestMessages = cloneMessages(requestMessages);
+    execution.modelRequestCount += 1;
+    if (maintained.status === "unchanged") {
+      return modelData;
+    }
+    return {
+      instructions,
+      input: createOpenAIAgentsInputMapper({ protocol, messages: requestMessages }).messages(instructions),
+    };
+  };
+}
+
+function preserveCanonicalMetadata(
+  messages: readonly ModelMessage[],
+  previous: readonly ModelMessage[],
+): readonly ModelMessage[] {
+  return messages.map((message, index) => {
+    const prior = previous[index];
+    if (prior === undefined || !sameCanonicalMessage(message, prior)) return message;
+    return {
+      ...message,
+      ref: prior.ref,
+      attachments: prior.attachments?.map((attachment) => globalThis.structuredClone(attachment)),
+    };
+  });
+}
+
+function sameCanonicalMessage(left: ModelMessage, right: ModelMessage): boolean {
+  return left.role === right.role &&
+    left.content === right.content &&
+    left.toolCallId === right.toolCallId &&
+    left.toolName === right.toolName &&
+    JSON.stringify(left.toolCalls ?? []) === JSON.stringify(right.toolCalls ?? []);
+}
+
+function canonicalMessagesForResult(
+  execution: ExecutionState,
+  rawResponses: readonly { readonly output: readonly unknown[] }[],
+  protocol: OpenAIAgentsLoopProtocol,
+  excludeFinalResponse = false,
+): readonly ModelMessage[] {
+  const baseMessages = execution.latestRequestMessages ?? execution.baseMessages;
+  const unseen = execution.latestRequestMessages === undefined
+    ? rawResponses
+    : rawResponses.slice(execution.latestRequestIncludedResponses);
+  return canonicalMessagesFromResponses({
+    baseMessages,
+    rawResponses: excludeFinalResponse ? unseen.slice(0, -1) : unseen,
+    protocol,
+    toolResults: execution.toolResults,
+  });
+}
+
+function incompleteFinalResponse(
+  protocol: OpenAIAgentsLoopProtocol,
+  response: { readonly providerData?: unknown } | undefined,
+  execution: ExecutionState,
+): string | undefined {
+  if (response === undefined) {
+    return "OpenAI Agents SDK completed without a final provider response.";
+  }
+  const providerData = asRecord(response.providerData);
+  if (protocol === "openai_responses") {
+    const responseStatus = typeof providerData.status === "string"
+      ? providerData.status
+      : execution.lastStreamResponseStatus;
+    if (responseStatus === "completed") {
+      return undefined;
+    }
+    const details = asRecord(providerData.incomplete_details);
+    const incompleteReason = typeof details.reason === "string"
+      ? details.reason
+      : execution.lastStreamIncompleteReason;
+    const reason = incompleteReason === undefined ? "" : ` (${incompleteReason})`;
+    const status = responseStatus ?? "unknown";
+    return `OpenAI Responses returned ${status}${reason}; the response is incomplete.`;
+  }
+  const choices = Array.isArray(providerData.choices) ? providerData.choices : [];
+  const firstChoice = asRecord(choices[0]);
+  const finishReason = typeof firstChoice.finish_reason === "string"
+    ? firstChoice.finish_reason
+    : execution.lastStreamFinishReason ?? "unknown";
+  return finishReason === "stop"
+    ? undefined
+    : `OpenAI-compatible Chat returned finish_reason ${finishReason}; the response is incomplete.`;
+}
+
 function modelSettings(input: {
   readonly config: OpenAIAgentsLoopConfig;
   readonly instructions: string;
@@ -322,6 +490,7 @@ function modelSettings(input: {
 }): ModelSettings {
   const settings = input.config.requestSettings;
   const officialOpenAI = isOfficialOpenAIBaseUrl(input.config.baseUrl);
+  const dialectSettings = compatibleChatDialectSettings(input.config);
   const providerData: Record<string, unknown> = officialOpenAI
     ? {
         prompt_cache_key: openAIAgentsPromptCacheKey(
@@ -330,18 +499,21 @@ function modelSettings(input: {
           input.instructions,
           input.tools,
           input.agentTools,
+          input.config.enableWebSearch === true,
         ),
         ...(settings?.serviceTier === undefined ? {} : { service_tier: settings.serviceTier }),
         ...(input.config.protocol === "openai_responses"
           ? { include: ["reasoning.encrypted_content"] }
           : {}),
+        ...dialectSettings.providerData,
       }
-    : {};
+    : dialectSettings.providerData;
   return {
-    temperature: settings?.temperature,
-    topP: settings?.topP,
+    temperature: dialectSettings.temperature,
+    topP: dialectSettings.topP,
     maxTokens: settings?.maxOutputTokens,
-    reasoning: settings?.reasoningEffort === undefined && settings?.reasoningSummary === undefined
+    reasoning: dialectSettings.privateReasoning ||
+      (settings?.reasoningEffort === undefined && settings?.reasoningSummary === undefined)
       ? undefined
       : {
           effort: settings?.reasoningEffort,
@@ -359,18 +531,71 @@ function modelSettings(input: {
 
 function nestedModelSettings(config: OpenAIAgentsLoopConfig): ModelSettings {
   const root = modelSettings({ config, instructions: "", tools: [], agentTools: [] });
-  const { providerData: _providerData, parallelToolCalls: _parallelToolCalls, ...base } = root;
-  const providerData = isOfficialOpenAIBaseUrl(config.baseUrl)
-    ? {
-        ...(config.requestSettings?.serviceTier === undefined
-          ? {}
-          : { service_tier: config.requestSettings.serviceTier }),
-        ...(config.protocol === "openai_responses"
-          ? { include: ["reasoning.encrypted_content"] }
-          : {}),
-      }
-    : {};
+  const { providerData: rootProviderData, parallelToolCalls: _parallelToolCalls, ...base } = root;
+  const { prompt_cache_key: _promptCacheKey, ...providerData } = asRecord(rootProviderData);
   return { ...base, providerData };
+}
+
+function compatibleChatDialectSettings(config: OpenAIAgentsLoopConfig): {
+  readonly temperature?: number;
+  readonly topP?: number;
+  readonly privateReasoning: boolean;
+  readonly providerData: Record<string, unknown>;
+} {
+  const settings = config.requestSettings;
+  if (config.protocol !== "openai_compatible_chat_completions") {
+    return {
+      temperature: settings?.temperature,
+      topP: settings?.topP,
+      privateReasoning: false,
+      providerData: {},
+    };
+  }
+  const dialect = resolveOpenAICompatibleChatDialect({
+    providerProfileId: config.providerProfileId,
+    baseUrl: config.baseUrl,
+    model: config.model,
+  });
+  const privateReasoning = dialect.profileId === "deepseek" || dialect.profileId === "moonshot" ||
+    dialect.profileId === "glm" || dialect.profileId === "minimax";
+  if (!privateReasoning) {
+    return {
+      temperature: settings?.temperature,
+      topP: settings?.topP,
+      privateReasoning,
+      providerData: {},
+    };
+  }
+  const fields = applyOpenAICompatibleChatRequestPolicy({
+    dialect,
+    fields: applyOpenAICompatibleChatDialectControls({
+      dialect,
+      settings,
+      fields: {
+        ...(settings?.temperature === undefined ? {} : { temperature: settings.temperature }),
+        ...(settings?.topP === undefined ? {} : { top_p: settings.topP }),
+        ...(settings?.reasoningEffort === undefined ? {} : { reasoning_effort: settings.reasoningEffort }),
+      },
+    }),
+  });
+  const { temperature, top_p: topP, ...providerData } = fields;
+  return {
+    temperature: typeof temperature === "number" ? temperature : undefined,
+    topP: typeof topP === "number" ? topP : undefined,
+    privateReasoning,
+    providerData,
+  };
+}
+
+function supportsSdkStreaming(config: OpenAIAgentsLoopConfig): boolean {
+  if (config.requestSettings?.stream === false) return false;
+  if (config.protocol !== "openai_compatible_chat_completions") return true;
+  const dialect = resolveOpenAICompatibleChatDialect({
+    providerProfileId: config.providerProfileId,
+    baseUrl: config.baseUrl,
+    model: config.model,
+  });
+  return dialect.supportsStreaming && dialect.streamDeltaMode === "incremental";
 }
 
 function canonicalMessagesFromResponses(input: {
@@ -381,22 +606,12 @@ function canonicalMessagesFromResponses(input: {
 }): readonly ModelMessage[] {
   const messages = cloneMessages(input.baseMessages);
   for (const response of input.rawResponses) {
-    const calls = response.output.flatMap(functionCallFromSdkItem);
-    const content = response.output.flatMap(textFromSdkItem).join("");
-    if (calls.length > 0 || content.length > 0) {
-      const outputItems = input.protocol === "openai_responses"
-        ? openAIResponsesOutputItems(response.output)
-        : undefined;
-      messages.push({
-        role: "assistant",
-        content,
-        toolCalls: calls.length === 0 ? undefined : calls,
-        protocolExtensions: outputItems === undefined
-          ? undefined
-          : { [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: outputItems },
-      });
-    }
-    for (const call of calls) {
+    const assistantMessages = canonicalMessagesFromOpenAIAgentsInput({
+      protocol: input.protocol,
+      items: response.output,
+    }).filter((message) => message.role === "assistant");
+    messages.push(...assistantMessages);
+    for (const call of assistantMessages.flatMap((message) => message.toolCalls ?? [])) {
       const result = latestResolvedToolResult(input.toolResults, call.callId);
       if (result !== undefined) {
         messages.push(toolResultMessage(result));
@@ -404,26 +619,6 @@ function canonicalMessagesFromResponses(input: {
     }
   }
   return messages;
-}
-
-function functionCallFromSdkItem(value: unknown): readonly ToolCallRequest[] {
-  const record = asRecord(value);
-  if (record.type !== "function_call" || typeof record.callId !== "string" || typeof record.name !== "string") {
-    return [];
-  }
-  const input = typeof record.arguments === "string" ? parseToolInput(record.arguments) : undefined;
-  return [{ callId: record.callId, toolName: record.name, input }];
-}
-
-function textFromSdkItem(value: unknown): readonly string[] {
-  const record = asRecord(value);
-  if (record.role !== "assistant" || !Array.isArray(record.content)) {
-    return [];
-  }
-  return record.content.flatMap((part) => {
-    const content = asRecord(part);
-    return content.type === "output_text" && typeof content.text === "string" ? [content.text] : [];
-  });
 }
 
 function latestResolvedToolResult(results: readonly ToolCallResult[], callId: string): ToolCallResult | undefined {
@@ -483,11 +678,13 @@ export function openAIAgentsPromptCacheKey(
   instructions: string,
   tools: readonly ToolDefinition[],
   agentTools: readonly AgentLoopAgentTool[] = [],
+  enableWebSearch = false,
 ): string {
   const identity = JSON.stringify({
     protocol,
     model,
     instructions,
+    enableWebSearch,
     tools: [...tools]
       .sort((left, right) => left.name.localeCompare(right.name))
       .map((definition) => ({
@@ -517,6 +714,10 @@ function validateConfig(config: OpenAIAgentsLoopConfig): void {
       throw new Error(`OpenAI Agents loop ${name} must not be blank.`);
     }
   }
+  if (config.enableWebSearch === true &&
+      (config.protocol !== "openai_responses" || !isOfficialOpenAIBaseUrl(config.baseUrl))) {
+    throw new Error("OpenAI model built-in Web Search requires the official OpenAI Responses endpoint.");
+  }
 }
 
 function validateRequestSettings(protocol: OpenAIAgentsLoopProtocol, settings: OpenAIModelRequestSettings | undefined): void {
@@ -532,35 +733,44 @@ function validateRequestSettings(protocol: OpenAIAgentsLoopProtocol, settings: O
   }
 }
 
-function parseToolInput(value: string): ToolFactValue | undefined {
-  try {
-    return JSON.parse(value) as ToolFactValue;
-  } catch {
-    return undefined;
-  }
-}
-
 function terminalErrorResult(
   error: unknown,
   execution: ExecutionState,
   sdkState?: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>,
 ): AgentLoopResult {
   const message = errorMessage(error);
+  const errorCode = contextMaintenanceErrorCode(error);
   const rawResponses = sdkState === undefined ? [] : new RunResult(sdkState).rawResponses;
   const facts = {
-    messages: canonicalMessagesFromResponses({
-      baseMessages: execution.baseMessages,
-      rawResponses,
-      protocol: execution.modelInput.protocol,
-      toolResults: execution.toolResults,
-    }),
+    messages: canonicalMessagesForResult(execution, rawResponses, execution.modelInput.protocol),
     toolResults: cloneToolResults(execution.toolResults),
     usage: {},
     confirmationRequests: [],
   };
   return isAbortError(error) || execution.abortSignal.aborted
     ? { ...facts, status: "cancelled", error: message }
-    : { ...facts, status: "failed", error: message };
+    : {
+        ...facts,
+        status: "failed",
+        error: message,
+        ...(errorCode === undefined
+          ? {}
+          : { errorCode }),
+      };
+}
+
+class ContextMaintenanceError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ContextMaintenanceError";
+  }
+}
+
+function contextMaintenanceErrorCode(error: unknown): string | undefined {
+  return error instanceof ContextMaintenanceError ? error.code : undefined;
 }
 
 function stringToolOutput(value: ReturnType<OpenAIAgentsExecutionState["modelInput"]["toolResult"]>): string {

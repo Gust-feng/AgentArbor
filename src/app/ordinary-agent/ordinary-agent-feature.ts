@@ -1,4 +1,5 @@
 import type { ConfirmationDecision } from "../../domain/confirmation/index.js";
+import type { ModelMessage } from "../../domain/intelligence/index.js";
 import { toolCallFactId, type ToolCallResult } from "../../domain/tools/index.js";
 import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import type {
@@ -76,6 +77,7 @@ export function createOrdinaryAgentFeature(input: {
         document.state.toolResultRecordedAt,
       );
       if (document.state.status.kind === "awaiting_approval") {
+        const closed = closeLostApprovalFacts(document.state);
         await mutate(summary.runId, {
           type: "block",
           reason: {
@@ -83,6 +85,8 @@ export function createOrdinaryAgentFeature(input: {
             message: "The live confirmation continuation was lost when the process restarted.",
           },
           continueBy: "new_turn",
+          canonicalMessages: closed.canonicalMessages,
+          toolCalls: closed.toolCalls,
         });
       } else if (document.state.status.kind === "running") {
         await mutate(summary.runId, {
@@ -723,6 +727,7 @@ export function createOrdinaryAgentFeature(input: {
       }
       continuation = continuations.get(decision.runId);
       if (continuation === undefined) {
+        const closed = closeLostApprovalFacts(document.state);
         return commitTransition(decision.runId, {
           type: "block",
           reason: {
@@ -730,6 +735,8 @@ export function createOrdinaryAgentFeature(input: {
             message: "The live confirmation continuation is no longer available.",
           },
           continueBy: "new_turn",
+          canonicalMessages: closed.canonicalMessages,
+          toolCalls: closed.toolCalls,
         });
       }
       approvalReservations.set(decision.runId, decision.confirmationId);
@@ -771,6 +778,40 @@ export function createOrdinaryAgentFeature(input: {
     })();
     track(decision.runId, operation);
     return reserved;
+  }
+
+  function closeLostApprovalFacts(state: OrdinaryRunState): {
+    readonly canonicalMessages: readonly ModelMessage[];
+    readonly toolCalls: readonly ToolCallResult[];
+  } {
+    const cancelled = state.toolCalls
+      .filter((result) => result.status === "approval_required")
+      .map((result): ToolCallResult => {
+        const { confirmationRequest: _confirmationRequest, ...base } = result;
+        return {
+          ...base,
+          status: "cancelled",
+          error: "The command was not executed because its live confirmation continuation was lost.",
+          errorDomain: "runtime_error",
+          errorFacts: { code: "confirmation_continuation_lost" },
+        };
+      });
+    const existingToolMessages = new Set(state.canonicalMessages.flatMap((message) =>
+      message.role === "tool" && message.toolCallId !== undefined ? [message.toolCallId] : []));
+    return {
+      canonicalMessages: [
+        ...state.canonicalMessages,
+        ...cancelled.flatMap((result): readonly ModelMessage[] => existingToolMessages.has(result.callId)
+          ? []
+          : [{
+              role: "tool",
+              content: JSON.stringify(result),
+              toolCallId: result.callId,
+              toolName: result.toolName,
+            }]),
+      ],
+      toolCalls: cancelled,
+    };
   }
 
   function assertLive(): void {

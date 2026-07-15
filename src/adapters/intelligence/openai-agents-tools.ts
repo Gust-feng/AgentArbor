@@ -63,6 +63,12 @@ export type OpenAIAgentsExecutionState = {
   readonly preflightByFactId: Map<string, OpenAIAgentsPreflightFact>;
   readonly interruptionFactIds: WeakMap<object, string>;
   readonly modelInput: OpenAIAgentsInputMapper;
+  lastStreamFinishReason?: string;
+  lastStreamResponseStatus?: string;
+  lastStreamIncompleteReason?: string;
+  modelRequestCount: number;
+  latestRequestIncludedResponses: number;
+  latestRequestMessages?: readonly ModelMessage[];
 };
 
 export type OpenAIAgentsSdkExecutionContext = {

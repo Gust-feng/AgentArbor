@@ -126,6 +126,31 @@ test("failed loop result maps to Ordinary failure and releases resources", async
   assert.equal(fixture.releaseCount(), 1);
 });
 
+test("classified loop failure keeps the context-compaction code in Ordinary state", async () => {
+  const fixture = executionFixture({
+    async execute() {
+      return {
+        status: "failed",
+        errorCode: "context_compaction_failed",
+        error: "Context compaction failed before the next provider request.",
+        messages: [{ role: "user", content: "hello" }],
+        toolResults: [],
+        usage: {},
+        confirmationRequests: [],
+      };
+    },
+    async release() { return undefined; },
+  });
+
+  const outcome = await fixture.execution.execute(executionInput());
+
+  assert.deepEqual(outcome.status === "failed" ? outcome.error : undefined, {
+    code: "context_compaction_failed",
+    message: "Context compaction failed before the next provider request.",
+  });
+  assert.equal(fixture.releaseCount(), 1);
+});
+
 test("approval keeps the same lease through recursive decisions and releases only at the terminal outcome", async () => {
   const firstRequest = confirmation("confirmation-1");
   const secondRequest = confirmation("confirmation-2");

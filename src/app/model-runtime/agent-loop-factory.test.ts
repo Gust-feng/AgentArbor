@@ -53,6 +53,8 @@ test("AgentLoop factory resolves an OpenAI Responses profile through the shared 
     apiKey: "env-key",
     model: "gpt-responses",
     requestSettings: { serviceTier: "flex", reasoningEffort: "medium" },
+    providerProfileId: undefined,
+    enableWebSearch: false,
     fetch: providerFetch,
   });
 });
@@ -83,8 +85,31 @@ test("AgentLoop factory resolves OpenAI-compatible Chat Completions from explici
     apiKey: "agentarbor-key",
     model: "chat-model",
     requestSettings: undefined,
+    providerProfileId: undefined,
+    enableWebSearch: false,
     fetch: undefined,
   });
+});
+
+test("AgentLoop factory forwards frozen provider dialect and model built-in Web Search", () => {
+  let captured: OpenAIAgentsLoopConfig | undefined;
+  createModelRuntimeAgentLoop({
+    mode: "openai-responses",
+    providerProfileId: "openai",
+    env: {
+      OPENAI_API_KEY: "key",
+      AGENTARBOR_MODEL_NAME: "gpt-test",
+      AGENTARBOR_MODEL_BUILTIN_WEB_SEARCH: "true",
+    },
+  }, {
+    createOpenAILoop: (config) => {
+      captured = config;
+      return unusedLoop;
+    },
+  });
+
+  assert.equal(captured?.providerProfileId, "openai");
+  assert.equal(captured?.enableWebSearch, true);
 });
 
 test("AgentLoop factory fails clearly when the model runtime is disabled", () => {

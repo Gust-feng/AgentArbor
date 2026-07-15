@@ -116,6 +116,8 @@ export type ResolvedOpenAIModelRuntimeConfig = {
   readonly apiKey: string;
   readonly model: string;
   readonly requestSettings?: SanitizedModelProviderConfig["openAI"];
+  readonly providerProfileId?: ProviderProtocolProfileId;
+  readonly enableWebSearch: boolean;
   readonly summaryInput: ModelRuntimeSummaryInput;
 };
 
@@ -123,7 +125,7 @@ export type ResolvedOpenAIModelRuntimeConfig = {
 export function resolveOpenAIModelRuntimeConfig(input: {
   readonly mode: OpenAIModelRuntimeMode;
   readonly env: ModelRuntimeEnvironment;
-  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "baseUrl" | "model" | "openAI">;
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "profileId" | "baseUrl" | "model" | "openAI">;
 }): ResolvedOpenAIModelRuntimeConfig {
   const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
   const model = firstNonBlank(input.modelProvider?.model, input.env.AGENTARBOR_MODEL_NAME);
@@ -167,6 +169,8 @@ export function resolveOpenAIModelRuntimeConfig(input: {
     apiKey,
     model,
     requestSettings: input.modelProvider?.openAI,
+    providerProfileId: providerProfileIdFromConfig(input.modelProvider?.profileId),
+    enableWebSearch: enabledFlag(input.env.AGENTARBOR_MODEL_BUILTIN_WEB_SEARCH),
     summaryInput,
   };
 }
@@ -320,7 +324,7 @@ function createOpenAIResponsesConfig(input: {
           stream: input.onModelOutputDelta !== undefined,
           forceStreaming: input.streamingMode === "force_live" && input.onModelOutputDelta !== undefined,
           requestSettings: resolved.requestSettings,
-          enableWebSearch: enabledFlag(input.env.AGENTARBOR_MODEL_BUILTIN_WEB_SEARCH),
+          enableWebSearch: resolved.enableWebSearch,
           onContextWindowExceeded: (event) =>
             input.onContextWindowExceeded?.({
               profileId: input.modelProvider?.profileId,

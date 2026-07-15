@@ -44,6 +44,15 @@ export type AgentLoopInput = {
   readonly onTextDelta?: (delta: string) => void;
   /** Resolves only after the owning feature has durably accepted the executed tool fact. */
   readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
+  /** Runs immediately before every provider request with the exact canonical request history. */
+  readonly maintainContext?: (input: {
+    readonly messages: readonly ModelMessage[];
+    readonly abortSignal: AbortSignal;
+  }) => Promise<
+    | { readonly status: "unchanged" }
+    | { readonly status: "compacted"; readonly messages: readonly ModelMessage[] }
+    | { readonly status: "failed"; readonly code: string; readonly error: string }
+  >;
 };
 
 export type AgentLoopContinuation = {
@@ -81,6 +90,8 @@ export type AgentLoopResult =
   | (AgentLoopResultFacts & {
       readonly status: "failed";
       readonly error: string;
+      /** Stable mechanical failure classification when the adapter can prove one. */
+      readonly errorCode?: string;
     });
 
 /** Mechanical model-tool-model execution. Business completion remains feature-owned. */

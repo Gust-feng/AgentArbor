@@ -1,6 +1,15 @@
 import type { ModelMessage } from "./contracts.js";
 
 export const OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION = "openai_responses_output_items";
+export const OPENAI_CHAT_CONTINUATION_EXTENSIONS = [
+  "reasoning",
+  "reasoning_content",
+  "reasoning_details",
+] as const;
+
+type PersistedModelProtocolExtension =
+  | typeof OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION
+  | typeof OPENAI_CHAT_CONTINUATION_EXTENSIONS[number];
 
 export type PersistedModelProtocolExtensionFailureReason =
   | "not_array"
@@ -11,23 +20,26 @@ export type PersistedModelProtocolExtensionFailureReason =
 /**
  * Raised when a known provider continuation is present but cannot be retained
  * without breaking the provider's replay contract. Unknown provider fields are
- * intentionally ignored; this error is only for the explicit Responses key.
+ * intentionally ignored; only the explicit Responses and Chat allowlists fail.
  */
 export class ModelProtocolContinuationPersistenceError extends Error {
   readonly code = "model_protocol_continuation_not_persistable" as const;
   readonly errorDomain = "runtime_error" as const;
   readonly facts: Readonly<{
     code: "model_protocol_continuation_not_persistable";
-    extension: typeof OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION;
+    extension: PersistedModelProtocolExtension;
     reason: PersistedModelProtocolExtensionFailureReason;
   }>;
 
-  constructor(reason: PersistedModelProtocolExtensionFailureReason) {
-    super(`[model_protocol_continuation_not_persistable] Model protocol continuation ${OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION} cannot be persisted (${reason}).`);
+  constructor(
+    reason: PersistedModelProtocolExtensionFailureReason,
+    extension: PersistedModelProtocolExtension = OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION,
+  ) {
+    super(`[model_protocol_continuation_not_persistable] Model protocol continuation ${extension} cannot be persisted (${reason}).`);
     this.name = "ModelProtocolContinuationPersistenceError";
     this.facts = {
       code: this.code,
-      extension: OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION,
+      extension,
       reason,
     };
   }
@@ -41,10 +53,25 @@ export class ModelProtocolContinuationPersistenceError extends Error {
 export function persistedModelProtocolExtensions(
   extensions: ModelMessage["protocolExtensions"],
 ): Readonly<Record<string, unknown>> | undefined {
-  if (extensions === undefined || !Object.prototype.hasOwnProperty.call(extensions, OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION)) {
-    return undefined;
+  if (extensions === undefined) return undefined;
+  const persisted: Record<string, unknown> = {};
+  if (Object.prototype.hasOwnProperty.call(extensions, OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION)) {
+    persisted[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION] = persistedResponsesItems(
+      extensions[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION],
+    );
   }
-  const rawItems = extensions[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION];
+  for (const key of OPENAI_CHAT_CONTINUATION_EXTENSIONS) {
+    if (!Object.prototype.hasOwnProperty.call(extensions, key)) continue;
+    const value = extensions[key];
+    if (!isSupportedChatContinuation(key, value) || !isProtocolJsonValue(value, new Set<object>(), 0)) {
+      throw new ModelProtocolContinuationPersistenceError("invalid_item", key);
+    }
+    persisted[key] = JSON.parse(JSON.stringify(value)) as unknown;
+  }
+  return Object.keys(persisted).length === 0 ? undefined : persisted;
+}
+
+function persistedResponsesItems(rawItems: unknown): readonly unknown[] {
   if (!Array.isArray(rawItems)) {
     throw new ModelProtocolContinuationPersistenceError("not_array");
   }
@@ -59,7 +86,18 @@ export function persistedModelProtocolExtensions(
   if (!Array.isArray(detached) || !detached.every(isProtocolOutputItem)) {
     throw new ModelProtocolContinuationPersistenceError("invalid_item");
   }
-  return { [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: detached };
+  return detached;
+}
+
+function isSupportedChatContinuation(
+  key: typeof OPENAI_CHAT_CONTINUATION_EXTENSIONS[number],
+  value: unknown,
+): boolean {
+  if (key === "reasoning" || key === "reasoning_content") {
+    return typeof value === "string" && value.length > 0;
+  }
+  return (Array.isArray(value) && value.length > 0) ||
+    (typeof value === "object" && value !== null && !Array.isArray(value));
 }
 
 function isProtocolJsonValue(value: unknown, ancestors: Set<object>, depth: number): boolean {

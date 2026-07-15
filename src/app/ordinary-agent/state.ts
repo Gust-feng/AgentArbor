@@ -50,6 +50,8 @@ export type OrdinaryRunTransition =
       readonly type: "block";
       readonly reason: { readonly code: string; readonly message: string };
       readonly continueBy: "new_turn" | "retry";
+      readonly canonicalMessages?: readonly ModelMessage[];
+      readonly toolCalls?: readonly ToolCallResult[];
     };
 
 export function createInitialOrdinaryRunState(input: {

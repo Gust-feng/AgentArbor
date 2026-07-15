@@ -131,6 +131,54 @@ test("official Responses sends a stable cache identity and retains response outp
   });
 });
 
+test("official Responses injects hosted Web Search and isolates its cache identity", async () => {
+  const fetch = scriptedFetch([
+    ({ body }) => {
+      const tools = Array.isArray(body.tools) ? body.tools.map(parseRecord) : [];
+      assert.equal(tools.some((tool) =>
+        tool.type === "web_search" && tool.search_context_size === "medium"), true);
+      return responsesText("search-finished", "resp-search");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      enableWebSearch: true,
+    });
+    try {
+      const result = await loop.execute(loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "search the web" },
+      ]));
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    } finally {
+      await loop.release();
+    }
+  });
+
+  const withoutSearch = openAIAgentsPromptCacheKey("openai_responses", MODEL, SYSTEM, []);
+  const withSearch = openAIAgentsPromptCacheKey("openai_responses", MODEL, SYSTEM, [], [], true);
+  assert.notEqual(withoutSearch, withSearch);
+});
+
+test("model built-in Web Search rejects unsupported protocol and endpoint combinations", () => {
+  assert.throws(() => createOpenAIAgentsLoop({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: OFFICIAL_BASE_URL,
+    apiKey: "test-key",
+    model: MODEL,
+    enableWebSearch: true,
+  }), /official OpenAI Responses endpoint/u);
+  assert.throws(() => createOpenAIAgentsLoop({
+    protocol: "openai_responses",
+    baseUrl: CHAT_BASE_URL,
+    apiKey: "test-key",
+    model: MODEL,
+    enableWebSearch: true,
+  }), /official OpenAI Responses endpoint/u);
+});
+
 test("compatible Chat maps user image, file, and audio attachments without changing canonical messages", async () => {
   const fetch = scriptedFetch([
     ({ body }) => {
@@ -356,6 +404,248 @@ test("streaming consumes the SDK stream, emits text deltas, and awaits completio
   });
 });
 
+test("compatible Chat rejects a length-truncated final response without persisting partial assistant text", async () => {
+  const fetch = scriptedFetch([() => chatTextWithFinishReason("partial answer", "length")]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const input = [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "write a long answer" },
+      ] as const;
+      const result = await loop.execute(loopInput(input));
+      assert.equal(result.status, "failed");
+      assert.match(result.status === "failed" ? result.error : "", /finish_reason.*length/iu);
+      assert.deepEqual(result.messages, input);
+      assert.equal(result.messages.some((message) => message.content.includes("partial answer")), false);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("streaming compatible Chat reports partial text but does not persist a length-truncated answer", async () => {
+  const fetch = scriptedFetch([() => chatTextStreamWithFinishReason(["partial", " stream"], "length")]);
+  const deltas: string[] = [];
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_compatible_chat_completions",
+      baseUrl: CHAT_BASE_URL,
+      requestSettings: { stream: true },
+    });
+    try {
+      const input = [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "stream a long answer" },
+      ] as const;
+      const result = await loop.execute({
+        ...loopInput(input),
+        onTextDelta: (delta) => deltas.push(delta),
+      });
+      assert.equal(result.status, "failed");
+      assert.match(result.status === "failed" ? result.error : "", /finish_reason.*length/iu);
+      assert.equal(deltas.join(""), "partial stream");
+      assert.deepEqual(result.messages, input);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses rejects incomplete max-output responses without persisting partial assistant text", async () => {
+  const fetch = scriptedFetch([() => responsesText("partial response", "response-incomplete", undefined, {
+    status: "incomplete",
+    incomplete_details: { reason: "max_output_tokens" },
+  })]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL });
+    try {
+      const input = [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "write a long response" },
+      ] as const;
+      const result = await loop.execute(loopInput(input));
+      assert.equal(result.status, "failed");
+      assert.match(result.status === "failed" ? result.error : "", /incomplete.*max_output_tokens/iu);
+      assert.deepEqual(result.messages, input);
+      assert.equal(result.messages.some((message) => message.content.includes("partial response")), false);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("compatible provider profiles apply their frozen request dialects and safe streaming fallbacks", async () => {
+  const cases: readonly {
+    readonly profile: NonNullable<OpenAIAgentsLoopConfig["providerProfileId"]>;
+    readonly model: string;
+    readonly settings: NonNullable<OpenAIAgentsLoopConfig["requestSettings"]>;
+    readonly withTextDelta?: boolean;
+    readonly assertBody: (body: JsonRecord) => void;
+  }[] = [{
+    profile: "deepseek",
+    model: "deepseek-v4-pro",
+    settings: { reasoningEffort: "high", temperature: 0.2, topP: 0.8 },
+    assertBody: (body) => {
+      assert.deepEqual(body.thinking, { type: "enabled" });
+      assert.equal(body.reasoning_effort, "high", JSON.stringify(body));
+      assert.equal(body.temperature, undefined);
+      assert.equal(body.top_p, undefined);
+    },
+  }, {
+    profile: "moonshot",
+    model: "kimi-k2.6",
+    settings: { reasoningEffort: "high", temperature: 0.2, topP: 0.8 },
+    assertBody: (body) => {
+      assert.deepEqual(body.thinking, { type: "enabled" });
+      assert.equal(body.temperature, undefined);
+      assert.equal(body.top_p, undefined);
+      assert.equal(body.reasoning_effort, undefined);
+    },
+  }, {
+    profile: "glm",
+    model: "glm-4.5",
+    settings: { reasoningEffort: "high", stream: true },
+    withTextDelta: true,
+    assertBody: (body) => {
+      assert.deepEqual(body.thinking, { type: "disabled" });
+      assert.equal(body.stream === undefined || body.stream === false, true);
+    },
+  }, {
+    profile: "glm",
+    model: "glm-5.1",
+    settings: { reasoningEffort: "high" },
+    assertBody: (body) => {
+      assert.deepEqual(body.thinking, { type: "enabled" });
+      assert.equal(body.reasoning_effort, undefined);
+    },
+  }, {
+    profile: "minimax",
+    model: "MiniMax-M2.7",
+    settings: { stream: true },
+    withTextDelta: true,
+    assertBody: (body) => {
+      assert.equal(body.reasoning_split, true);
+      assert.equal(body.stream === undefined || body.stream === false, true);
+    },
+  }];
+
+  for (const entry of cases) {
+    const fetch = scriptedFetch([() => chatText(`${entry.profile}-finished`)]);
+    await withGlobalFetch(fetch.fetch, async () => {
+      const loop = createLoop({
+        protocol: "openai_compatible_chat_completions",
+        baseUrl: CHAT_BASE_URL,
+        providerProfileId: entry.profile,
+        model: entry.model,
+        requestSettings: entry.settings,
+      });
+      try {
+        const result = await loop.execute({
+          ...loopInput([{ role: "system", content: SYSTEM }, { role: "user", content: "profile request" }]),
+          onTextDelta: entry.withTextDelta === true ? () => undefined : undefined,
+        });
+        assert.equal(
+          result.status,
+          "completed",
+          `${entry.profile}/${entry.model}: ${result.status === "failed" ? result.error : "unexpected status"}`,
+        );
+      } finally {
+        await loop.release();
+      }
+    });
+    assert.ok(fetch.requests[0]);
+    entry.assertBody(fetch.requests[0].body);
+  }
+});
+
+test("compatible provider continuation survives one tool round-trip and enters canonical history", async () => {
+  const gateway = new TestGateway(plainTool("inspect_provider_fact"));
+  const fetch = scriptedFetch([
+    () => chatToolWithContinuation(
+      "call-provider-continuation",
+      "inspect_provider_fact",
+      { value: "evidence" },
+      { reasoning_content: "provider-private continuation" },
+    ),
+    ({ body }) => {
+      const messages = Array.isArray(body.messages) ? body.messages.map(parseRecord) : [];
+      const assistant = messages.find((message) =>
+        message.role === "assistant" && Array.isArray(message.tool_calls));
+      assert.equal(assistant?.reasoning_content, "provider-private continuation");
+      return chatText("provider-round-trip-finished");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_compatible_chat_completions",
+      baseUrl: CHAT_BASE_URL,
+      providerProfileId: "deepseek",
+      model: "deepseek-v4-pro",
+    });
+    try {
+      const result = await loop.execute(loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "inspect then continue" },
+      ], gateway));
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      const assistant = result.messages.find((message) =>
+        message.toolCalls?.[0]?.callId === "call-provider-continuation");
+      assert.deepEqual(assistant?.protocolExtensions, {
+        reasoning_content: "provider-private continuation",
+      });
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("streaming compatible provider continuation survives a tool round-trip", async () => {
+  const gateway = new TestGateway(plainTool("inspect_streamed_fact"));
+  const fetch = scriptedFetch([
+    () => chatToolStreamWithContinuation(
+      "call-streamed-continuation",
+      "inspect_streamed_fact",
+      { value: "streamed" },
+      ["provider-", "stream-continuation"],
+    ),
+    ({ body }) => {
+      const messages = Array.isArray(body.messages) ? body.messages.map(parseRecord) : [];
+      const assistant = messages.find((message) =>
+        message.role === "assistant" && Array.isArray(message.tool_calls));
+      assert.equal(assistant?.reasoning_content, "provider-stream-continuation");
+      return chatTextStream(["streamed-finished"]);
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_compatible_chat_completions",
+      baseUrl: CHAT_BASE_URL,
+      providerProfileId: "deepseek",
+      model: "deepseek-v4-pro",
+      requestSettings: { stream: true },
+    });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "stream provider continuation" },
+        ], gateway),
+        onTextDelta: () => undefined,
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      const assistant = result.messages.find((message) =>
+        message.toolCalls?.[0]?.callId === "call-streamed-continuation");
+      assert.equal(
+        assistant?.protocolExtensions?.reasoning_content,
+        "provider-stream-continuation",
+      );
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
 test("tool approval pauses before execution and approve resumes the exact call once", async () => {
   const gateway = new TestGateway(gatedTool());
   const fetch = scriptedFetch([
@@ -375,7 +665,12 @@ test("tool approval pauses before execution and approve resumes the exact call o
       ], gateway, ["existing-confirmation"]));
       assert.equal(paused.status, "approval_required");
       assert.equal(gateway.executions.length, 0);
-      assert.deepEqual(paused.messages.map((message) => message.role), ["system", "user"]);
+      assert.deepEqual(paused.messages.map((message) => message.role), ["system", "user", "assistant"]);
+      assert.deepEqual(paused.messages.at(-1)?.toolCalls, [{
+        callId: "call-approved",
+        toolName: "write_fact",
+        input: { value: "approved" },
+      }]);
       if (paused.status !== "approval_required") return;
       const confirmation = paused.confirmationRequests[0];
       assert.equal(confirmation?.confirmationId, "confirmation-call-approved");
@@ -514,6 +809,137 @@ test("an allowed tool executes once through the gateway and returns the complete
         status: "completed",
         durationMs: 1,
       }]);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("context maintenance runs before every model request and persists the compacted request history", async () => {
+  const gateway = new TestGateway([plainTool("read_first"), plainTool("read_second")]);
+  const maintained: ModelMessage[][] = [];
+  const fetch = scriptedFetch([
+    () => chatTools([
+      { callId: "call-context-first", name: "read_first", input: { value: "first" } },
+      { callId: "call-context-second", name: "read_second", input: { value: "second" } },
+    ]),
+    ({ body }) => {
+      const serialized = JSON.stringify(body.messages);
+      assert.match(serialized, /# Compacted Context/u);
+      assert.equal(serialized.includes("call-context-first"), false);
+      assert.equal(serialized.includes("call-context-second"), false);
+      return chatText("context-final");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "inspect both sources" },
+        ], gateway),
+        maintainContext: async ({ messages }) => {
+          maintained.push(messages.map((message) => structuredClone(message)));
+          if (maintained.length === 1) return { status: "unchanged" };
+          assert.deepEqual(messages.at(-3)?.toolCalls?.map((call) => call.callId), [
+            "call-context-first",
+            "call-context-second",
+          ]);
+          assert.deepEqual(messages.slice(-2).map((message) => message.toolCallId), [
+            "call-context-first",
+            "call-context-second",
+          ]);
+          return {
+            status: "compacted",
+            messages: [
+              { role: "system", content: SYSTEM },
+              { role: "user", content: "# Compacted Context\nBoth sources were inspected." },
+            ],
+          };
+        },
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(maintained.length, 2);
+      assert.deepEqual(result.messages.map((message) => message.role), ["system", "user", "assistant"]);
+      assert.equal(result.messages.some((message) => message.toolCallId !== undefined), false);
+      assert.equal(result.messages.at(-1)?.content, "context-final");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("unchanged context maintenance preserves local message refs and attachment identity", async () => {
+  const fetch = scriptedFetch([() => chatText("metadata-preserved")]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const messages: readonly ModelMessage[] = [
+        { role: "system", content: SYSTEM, ref: "system:stable" },
+        {
+          role: "user",
+          content: "inspect attachment metadata",
+          ref: "user:current",
+          attachments: [{
+            kind: "image",
+            source: { kind: "url", url: "https://example.test/context.png" },
+            attachmentId: "attachment-stable",
+            detail: "high",
+          }],
+        },
+      ];
+      const result = await loop.execute({
+        ...loopInput(messages),
+        maintainContext: async ({ messages: requestMessages }) => {
+          assert.equal(requestMessages[0]?.ref, "system:stable");
+          assert.equal(requestMessages[1]?.ref, "user:current");
+          assert.equal(requestMessages[1]?.attachments?.[0]?.attachmentId, "attachment-stable");
+          return { status: "unchanged" };
+        },
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.messages[0]?.ref, "system:stable");
+      assert.equal(result.messages[1]?.ref, "user:current");
+      assert.equal(result.messages[1]?.attachments?.[0]?.attachmentId, "attachment-stable");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("context maintenance failure stops the next provider request and preserves completed tool facts", async () => {
+  const gateway = new TestGateway(plainTool("read_before_compaction"));
+  const fetch = scriptedFetch([
+    () => chatTool("call-before-compaction", "read_before_compaction", { value: "evidence" }),
+  ]);
+  let maintenanceCalls = 0;
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "inspect then continue" },
+        ], gateway),
+        maintainContext: async () => {
+          maintenanceCalls += 1;
+          return maintenanceCalls === 1
+            ? { status: "unchanged" }
+            : {
+                status: "failed",
+                code: "context_compaction_failed",
+                error: "Context compaction failed before the next request.",
+              };
+        },
+      });
+      assert.equal(result.status, "failed");
+      assert.match(result.status === "failed" ? result.error : "", /context compaction failed/iu);
+      assert.equal(result.status === "failed" ? result.errorCode : undefined, "context_compaction_failed");
+      assert.equal(fetch.requests.length, 1);
+      assert.equal(result.messages.filter((message) => message.toolCalls?.[0]?.callId === "call-before-compaction").length, 1);
+      assert.equal(result.messages.filter((message) => message.toolCallId === "call-before-compaction").length, 1);
+      assert.equal(result.toolResults.some((toolResult) => toolResult.status === "completed"), true);
     } finally {
       await loop.release();
     }
@@ -810,8 +1236,11 @@ class TestGateway implements ToolExecutionGateway {
   }
 }
 
-function createLoop(input: Pick<OpenAIAgentsLoopConfig, "protocol" | "baseUrl" | "requestSettings" | "fetch">) {
-  return createOpenAIAgentsLoop({ ...input, apiKey: "test-key", model: MODEL });
+function createLoop(
+  input: Pick<OpenAIAgentsLoopConfig, "protocol" | "baseUrl"> &
+    Partial<Pick<OpenAIAgentsLoopConfig, "requestSettings" | "providerProfileId" | "enableWebSearch" | "fetch" | "model">>,
+) {
+  return createOpenAIAgentsLoop({ ...input, apiKey: "test-key", model: input.model ?? MODEL });
 }
 
 function loopInput(
@@ -930,18 +1359,55 @@ function chatText(text: string, usage: JsonRecord = {
   completion_tokens: 2,
   total_tokens: 5,
 }): Response {
+  return chatTextWithFinishReason(text, "stop", usage);
+}
+
+function chatTextWithFinishReason(
+  text: string,
+  finishReason: string,
+  usage: JsonRecord = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+): Response {
   return jsonResponse({
     id: `chat-${text}`,
     object: "chat.completion",
     created: 1,
     model: MODEL,
-    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: finishReason }],
     usage,
   });
 }
 
 function chatTool(callId: string, name: string, input: JsonRecord): Response {
   return chatTools([{ callId, name, input }]);
+}
+
+function chatToolWithContinuation(
+  callId: string,
+  name: string,
+  input: JsonRecord,
+  continuation: JsonRecord,
+): Response {
+  return jsonResponse({
+    id: `chat-${callId}`,
+    object: "chat.completion",
+    created: 1,
+    model: MODEL,
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: "Inspecting the provider fact.",
+        ...continuation,
+        tool_calls: [{
+          id: callId,
+          type: "function",
+          function: { name, arguments: JSON.stringify(input) },
+        }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+  });
 }
 
 function chatTools(calls: readonly {
@@ -974,6 +1440,7 @@ function chatTools(calls: readonly {
 function responsesTool(callId: string, name: string, input: JsonRecord): Response {
   return jsonResponse({
     id: `response-${callId}`,
+    status: "completed",
     usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
     output: [{
       id: `item-${callId}`,
@@ -987,10 +1454,43 @@ function responsesTool(callId: string, name: string, input: JsonRecord): Respons
 }
 
 function chatTextStream(chunks: readonly string[]): Response {
+  return chatTextStreamWithFinishReason(chunks, "stop");
+}
+
+function chatTextStreamWithFinishReason(chunks: readonly string[], finishReason: string): Response {
   const events = [
     chatStreamChunk({ role: "assistant", content: chunks[0] ?? "" }, null),
     ...chunks.slice(1).map((content) => chatStreamChunk({ content }, null)),
-    chatStreamChunk({}, "stop"),
+    chatStreamChunk({}, finishReason),
+  ];
+  return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function chatToolStreamWithContinuation(
+  callId: string,
+  name: string,
+  input: JsonRecord,
+  reasoningChunks: readonly string[],
+): Response {
+  const events = [
+    ...reasoningChunks.map((reasoningContent, index) => chatStreamChunk({
+      ...(index === 0 ? { role: "assistant" } : {}),
+      reasoning_content: reasoningContent,
+      ...(index === reasoningChunks.length - 1
+        ? {
+            tool_calls: [{
+              index: 0,
+              id: callId,
+              type: "function",
+              function: { name, arguments: JSON.stringify(input) },
+            }],
+          }
+        : {}),
+    }, null)),
+    chatStreamChunk({}, "tool_calls"),
   ];
   return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, {
     status: 200,
@@ -1012,9 +1512,11 @@ function responsesText(text: string, id: string, usage: JsonRecord = {
   input_tokens: 3,
   output_tokens: 2,
   total_tokens: 5,
-}): Response {
+}, response: JsonRecord = {}): Response {
   return jsonResponse({
     id,
+    status: "completed",
+    ...response,
     usage,
     output: [{
       id: `${id}-message`,

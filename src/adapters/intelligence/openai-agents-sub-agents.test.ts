@@ -727,6 +727,7 @@ function chatText(text: string): Response {
 function responsesTool(callId: string, name: string, input: JsonRecord): Response {
   return jsonResponse({
     id: `response-${callId}`,
+    status: "completed",
     usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
     output: [{
       id: `item-${callId}`,
@@ -742,6 +743,7 @@ function responsesTool(callId: string, name: string, input: JsonRecord): Respons
 function responsesText(text: string, id: string): Response {
   return jsonResponse({
     id,
+    status: "completed",
     usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
     output: [{
       id: `${id}-message`,

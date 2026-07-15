@@ -496,16 +496,32 @@ test("feature release disposes a pending live approval continuation once", async
 test("feature restart turns a persisted approval pause into an honest blocked state", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-restart-"));
   const repository = createFileSystemOrdinaryRunRepository(root);
+  const request = confirmation("restart-run");
   const first = await createOrdinaryAgentFeature({
     repository,
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
     execution: { async execute() {
       return {
         status: "approval_required",
-        canonicalMessages: [{ role: "user", content: "change file" }],
-        toolCalls: [],
+        canonicalMessages: [
+          { role: "user", content: "change file" },
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ callId: "restart-call", toolName: "shell_command", input: { command: "write" } }],
+          },
+        ],
+        toolCalls: [{
+          callId: "restart-call",
+          toolName: "shell_command",
+          input: { command: "write" },
+          output: undefined,
+          status: "approval_required",
+          durationMs: 0,
+          confirmationRequest: request,
+        }],
         usage: { inputTokens: 4, totalTokens: 4 },
-        confirmationRequests: [confirmation("restart-run")],
+        confirmationRequests: [request],
         continuation: {
           availability: "live_only",
           async decide() { return completedOutcome(); },
@@ -539,6 +555,10 @@ test("feature restart turns a persisted approval pause into an honest blocked st
     continueBy: "new_turn",
   });
   assert.equal(state?.timeline.at(-1)?.type, "run.blocked");
+  assert.equal(state?.toolCalls[0]?.status, "cancelled");
+  assert.equal(state?.toolCalls[0]?.errorFacts?.code, "confirmation_continuation_lost");
+  assert.equal(state?.canonicalMessages.at(-1)?.role, "tool");
+  assert.equal(state?.canonicalMessages.at(-1)?.toolCallId, "restart-call");
 });
 
 test("feature restart blocks an interrupted running execution instead of replaying side effects", async (t) => {
@@ -965,9 +985,10 @@ async function waitForStatus(
   const current = await feature.queries.getRun(runId);
   if (current?.status.kind === status) return current;
   return new Promise<OrdinaryRunState>((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       unsubscribe();
-      reject(new Error(`Timed out waiting for ${runId} to reach ${status}`));
+      const latest = await feature.queries.getRun(runId).catch(() => undefined);
+      reject(new Error(`Timed out waiting for ${runId} to reach ${status}; current state is ${JSON.stringify(latest?.status ?? "missing")}`));
     }, 2_000);
     const unsubscribe = feature.events.subscribe(runId, () => {
       void feature.queries.getRun(runId).then((state) => {

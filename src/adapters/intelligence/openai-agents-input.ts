@@ -5,11 +5,13 @@ import {
   type ModelInputAttachment,
   type ModelMessage,
 } from "../../domain/intelligence/index.js";
-import type { ToolCallResult } from "../../domain/tools/index.js";
+import type { ToolCallRequest, ToolCallResult, ToolFactValue } from "../../domain/tools/index.js";
 import { toolModelAttachmentsFromOutput } from "../../domain/tools/index.js";
 import { OpenAIModelInputError } from "./openai-model-input-error.js";
 import { openAIResponsesContinuationItems } from "./openai-responses-continuation.js";
+import { openAIResponsesOutputItems } from "./openai-responses-continuation.js";
 import { validateResponsesFileAttachmentBudget } from "./openai-responses-request.js";
+import { filterOpenAIChatContinuationExtensions } from "./openai-compatible-chat-protocol-extensions.js";
 
 export type OpenAIAgentsInputProtocol =
   | "openai_responses"
@@ -72,6 +74,59 @@ export function canonicalToolResultMessage(result: ToolCallResult): ModelMessage
   };
 }
 
+/** Rebuilds the exact canonical request history presented to the SDK model boundary. */
+export function canonicalMessagesFromOpenAIAgentsInput(input: {
+  readonly protocol: OpenAIAgentsInputProtocol;
+  readonly instructions?: string;
+  readonly items: readonly unknown[];
+}): readonly ModelMessage[] {
+  const messages: ModelMessage[] = input.instructions === undefined
+    ? []
+    : [{ role: "system", content: input.instructions }];
+  let assistantItems: unknown[] = [];
+  const flushAssistant = (): void => {
+    if (assistantItems.length === 0) return;
+    const calls = assistantItems.flatMap(canonicalToolCallFromSdkItem);
+    const content = assistantItems.flatMap(assistantTextFromSdkItem).join("");
+    const protocolExtensions = input.protocol === "openai_responses"
+      ? responsesExtensions(assistantItems)
+      : chatExtensions(assistantItems);
+    if (calls.length > 0 || content.length > 0 || protocolExtensions !== undefined) {
+      messages.push({
+        role: "assistant",
+        content,
+        toolCalls: calls.length === 0 ? undefined : calls,
+        protocolExtensions,
+      });
+    }
+    assistantItems = [];
+  };
+
+  for (const rawItem of input.items) {
+    const item = asRecord(rawItem);
+    if (item.role === "system") {
+      flushAssistant();
+      if (messages.length === 0 && typeof item.content === "string") {
+        messages.push({ role: "system", content: item.content });
+      }
+      continue;
+    }
+    if (item.role === "user") {
+      flushAssistant();
+      messages.push(canonicalUserMessage(item));
+      continue;
+    }
+    if (item.type === "function_call_result") {
+      flushAssistant();
+      messages.push(canonicalToolMessage(item));
+      continue;
+    }
+    assistantItems.push(rawItem);
+  }
+  flushAssistant();
+  return messages;
+}
+
 function modelMessagesToSdkInput(input: {
   readonly instructions: string;
   readonly messages: readonly ModelMessage[];
@@ -125,13 +180,16 @@ function modelMessagesToSdkInput(input: {
     ) {
       throw new Error("Responses protocol output items cannot be replayed through Chat Completions.");
     }
-    for (const call of message.toolCalls ?? []) {
+    for (const [callIndex, call] of (message.toolCalls ?? []).entries()) {
       items.push({
         type: "function_call",
         callId: call.callId,
         name: call.toolName,
         status: "completed",
         arguments: JSON.stringify(call.input),
+        providerData: input.protocol === "openai_compatible_chat_completions" && callIndex === 0
+          ? chatProviderData(message.protocolExtensions)
+          : undefined,
       });
     }
     if (message.content.length > 0) {
@@ -139,10 +197,174 @@ function modelMessagesToSdkInput(input: {
         role: "assistant",
         status: "completed",
         content: [{ type: "output_text", text: message.content }],
+        providerData: input.protocol === "openai_compatible_chat_completions" && (message.toolCalls?.length ?? 0) === 0
+          ? chatProviderData(message.protocolExtensions)
+          : undefined,
       });
     }
   }
   return items;
+}
+
+function canonicalUserMessage(item: Record<string, unknown>): ModelMessage {
+  if (typeof item.content === "string") {
+    return { role: "user", content: item.content };
+  }
+  const parts = Array.isArray(item.content) ? item.content.map(asRecord) : [];
+  const content = parts.flatMap((part) => part.type === "input_text" && typeof part.text === "string"
+    ? [part.text]
+    : []).join("");
+  const attachments = parts.flatMap((part, index) => {
+    const attachment = canonicalAttachment(part, index);
+    return attachment === undefined ? [] : [attachment];
+  });
+  return {
+    role: "user",
+    content,
+    attachments: attachments.length === 0 ? undefined : attachments,
+  };
+}
+
+function canonicalToolMessage(item: Record<string, unknown>): ModelMessage {
+  const callId = typeof item.callId === "string" ? item.callId : "missing-tool-call-id";
+  const toolName = typeof item.name === "string" ? item.name : "unknown_tool";
+  if (typeof item.output === "string") {
+    return { role: "tool", content: item.output, toolCallId: callId, toolName };
+  }
+  const parts = Array.isArray(item.output) ? item.output.map(asRecord) : [];
+  const content = parts.flatMap((part) => part.type === "input_text" && typeof part.text === "string"
+    ? [part.text]
+    : []).join("");
+  const attachments = parts.flatMap((part, index) => {
+    const attachment = canonicalAttachment(part, index);
+    return attachment === undefined ? [] : [attachment];
+  });
+  return {
+    role: "tool",
+    content,
+    toolCallId: callId,
+    toolName,
+    attachments: attachments.length === 0 ? undefined : attachments,
+  };
+}
+
+function canonicalToolCallFromSdkItem(value: unknown): readonly ToolCallRequest[] {
+  const item = asRecord(value);
+  const callId = typeof item.callId === "string"
+    ? item.callId
+    : typeof item.call_id === "string" ? item.call_id : undefined;
+  if (item.type !== "function_call" || callId === undefined || typeof item.name !== "string") {
+    return [];
+  }
+  return [{
+    callId,
+    toolName: item.name,
+    input: typeof item.arguments === "string" ? parseJson(item.arguments) : undefined,
+  }];
+}
+
+function assistantTextFromSdkItem(value: unknown): readonly string[] {
+  const item = asRecord(value);
+  if (item.role !== "assistant" || !Array.isArray(item.content)) return [];
+  return item.content.flatMap((rawPart) => {
+    const part = asRecord(rawPart);
+    if (part.type === "output_text" && typeof part.text === "string") return [part.text];
+    if (part.type === "refusal" && typeof part.refusal === "string") return [part.refusal];
+    return [];
+  });
+}
+
+function responsesExtensions(items: readonly unknown[]): Readonly<Record<string, unknown>> | undefined {
+  const outputItems = openAIResponsesOutputItems(items);
+  return outputItems === undefined
+    ? undefined
+    : { [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: outputItems };
+}
+
+function chatExtensions(items: readonly unknown[]): Readonly<Record<string, unknown>> | undefined {
+  const merged: Record<string, unknown> = {};
+  for (const item of items) {
+    const record = asRecord(item);
+    Object.assign(merged, filterOpenAIChatContinuationExtensions(asRecord(record.providerData)));
+    if (Array.isArray(record.content)) {
+      for (const part of record.content) {
+        Object.assign(
+          merged,
+          filterOpenAIChatContinuationExtensions(asRecord(asRecord(part).providerData)),
+        );
+      }
+    }
+  }
+  return Object.keys(merged).length === 0 ? undefined : merged;
+}
+
+function chatProviderData(extensions: ModelMessage["protocolExtensions"]): Record<string, unknown> | undefined {
+  if (extensions === undefined) return undefined;
+  const filtered = filterOpenAIChatContinuationExtensions({ ...extensions });
+  return Object.keys(filtered).length === 0 ? undefined : filtered;
+}
+
+function canonicalAttachment(part: Record<string, unknown>, index: number): ModelInputAttachment | undefined {
+  if (part.type === "input_image") {
+    const source = attachmentSource(part.image);
+    if (source === undefined) return undefined;
+    return {
+      kind: "image",
+      source,
+      attachmentId: `sdk-image-${index}`,
+      detail: part.detail === "low" || part.detail === "high" || part.detail === "auto"
+        ? part.detail
+        : undefined,
+    };
+  }
+  if (part.type === "input_file") {
+    const source = attachmentSource(part.file);
+    if (source === undefined) return undefined;
+    return {
+      kind: "file",
+      source,
+      attachmentId: `sdk-file-${index}`,
+      filename: typeof part.filename === "string" ? part.filename : `attachment-${index}`,
+    };
+  }
+  if (part.type === "audio" && typeof part.audio === "string") {
+    const format = part.format === "mp3" ? "mp3" : "wav";
+    return {
+      kind: "audio",
+      source: { kind: "data", mimeType: format === "mp3" ? "audio/mpeg" : "audio/wav", data: part.audio },
+      attachmentId: `sdk-audio-${index}`,
+      filename: `audio-${index}.${format}`,
+    };
+  }
+  return undefined;
+}
+
+function attachmentSource(value: unknown): ModelInputAttachment["source"] | undefined {
+  if (typeof value === "string") {
+    const data = /^data:([^;,]+);base64,(.*)$/su.exec(value);
+    if (data !== null) {
+      return { kind: "data", mimeType: data[1]!, data: data[2]! };
+    }
+    return { kind: "url", url: value };
+  }
+  const record = asRecord(value);
+  if (typeof record.id === "string") return { kind: "file_id", fileId: record.id };
+  if (typeof record.url === "string") return { kind: "url", url: record.url };
+  return undefined;
+}
+
+function parseJson(value: string): ToolFactValue | undefined {
+  try {
+    return JSON.parse(value) as ToolFactValue;
+  } catch {
+    return undefined;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function sdkUserContent(

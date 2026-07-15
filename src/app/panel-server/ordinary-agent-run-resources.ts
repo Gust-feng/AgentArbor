@@ -21,6 +21,7 @@ import { CodedExecutionError, executionErrorFacts } from "../execution-errors/in
 import {
   createModelRuntimeAgentLoop,
   type AgentLoop,
+  type AgentLoopInput,
   type AgentLoopToolBoundary,
 } from "../model-runtime/index.js";
 import type {
@@ -186,11 +187,10 @@ export function createOrdinaryAgentRunResourceAcquirer(
           modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
           workspaceRoot: resources.workspaceRoot,
         });
-        const resolvedMessages = await compactOrdinaryMessages({
+        const maintainContext = createOrdinaryContextMaintainer({
           input,
           definition,
           resources,
-          messages: messagesWithAttachments,
           tools: toolBoundary.toolDefinitions,
           compactContext: dependencies.compactContext ?? compactAgentLoopContextIfNeeded,
           tokenCounter: (dependencies.createTokenCounter ?? createOpenAITokenCounter)(input.birth.config.model),
@@ -199,6 +199,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
           mode: input.birth.aiMode,
           env: resources.aiEnvironment,
           modelProvider: input.birth.config,
+          providerProfileId: input.birth.capabilitySnapshot.modelCapabilities.protocolProfileId,
           providerFetch: options.host.providerFetch,
         });
         const ownedLoop = loop;
@@ -219,8 +220,9 @@ export function createOrdinaryAgentRunResourceAcquirer(
         ]);
         return {
           loop,
-          resolvedMessages,
+          resolvedMessages: messagesWithAttachments,
           tools,
+          maintainContext,
           ...(toolBoundary.capabilityResolution === undefined
             ? {}
             : { capabilityResolution: toolBoundary.capabilityResolution }),
@@ -239,44 +241,57 @@ export function createOrdinaryAgentRunResourceAcquirer(
   };
 }
 
-async function compactOrdinaryMessages(input: {
+function createOrdinaryContextMaintainer(input: {
   readonly input: AcquireOrdinaryAgentLoopRunResourcesInput;
   readonly definition: AgentDefinition;
   readonly resources: AgentRunResources;
-  readonly messages: readonly ModelMessage[];
   readonly tools: ReturnType<typeof resolveRunToolBoundary>["toolDefinitions"];
   readonly compactContext: typeof compactAgentLoopContextIfNeeded;
   readonly tokenCounter: AgentLoopTokenCounter;
-}): Promise<readonly ModelMessage[]> {
+}): NonNullable<AgentLoopInput["maintainContext"]> {
   const channel = lazyIntelligenceChannel(() => input.resources.aiConfig.createIntelligenceChannel({
     bus: new InMemoryMessageBus(new InMemoryEventLog()),
   }));
-  const result = await input.compactContext({
-    goal: input.input.runInput.userMessage,
-    traceId: input.input.runId,
-    goalId: input.input.runId,
-    agentIdentity: {
-      agentId: input.definition.agentId,
-      displayName: input.definition.displayName,
-    },
-    messages: input.messages,
-    tools: input.tools,
-    intelligenceChannel: channel,
-    modelCapabilities: input.resources.capabilitySnapshot.modelCapabilities,
-    tokenCounter: input.tokenCounter,
-    compactedContextRole: "user",
-    abortSignal: input.input.abortSignal,
-  }).catch((error: unknown) => {
-    throw expectedOrWrappedExecutionError(
-      error,
-      "context_compaction_failed",
-      "Ordinary context could not be compacted.",
-    );
-  });
-  if (result.status === "failed") {
-    throw new CodedExecutionError("context_compaction_failed", result.message);
-  }
-  return result.status === "compacted" ? result.messages : input.messages;
+  return async ({ messages, abortSignal }) => {
+    const result = await input.compactContext({
+      goal: input.input.runInput.userMessage,
+      traceId: input.input.runId,
+      goalId: input.input.runId,
+      agentIdentity: {
+        agentId: input.definition.agentId,
+        displayName: input.definition.displayName,
+      },
+      messages,
+      tools: input.tools,
+      intelligenceChannel: channel,
+      modelCapabilities: input.resources.capabilitySnapshot.modelCapabilities,
+      tokenCounter: input.tokenCounter,
+      compactedContextRole: "user",
+      abortSignal,
+    }).catch((error: unknown) => {
+      const wrapped = expectedOrWrappedExecutionError(
+        error,
+        "context_compaction_failed",
+        "Ordinary context could not be compacted.",
+      );
+      const facts = executionErrorFacts(wrapped);
+      return {
+        status: "failed" as const,
+        code: facts?.code ?? "context_compaction_failed",
+        message: facts?.message ?? "Ordinary context could not be compacted.",
+      };
+    });
+    if (result.status === "failed") {
+      return {
+        status: "failed",
+        code: "context_compaction_failed",
+        error: result.message,
+      };
+    }
+    return result.status === "compacted"
+      ? { status: "compacted", messages: result.messages }
+      : { status: "unchanged" };
+  };
 }
 
 function lazyIntelligenceChannel(create: () => IntelligenceChannel): IntelligenceChannel {

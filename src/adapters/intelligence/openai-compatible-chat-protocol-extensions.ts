@@ -13,6 +13,11 @@ import { isPlainRecord } from "./provider-value-utils.js";
 
 const MAX_EXTENSION_CONTAINER_SIZE = 32;
 const MAX_EXTENSION_DEPTH = 4;
+const CONTINUATION_FIELDS = new Set([
+  "reasoning",
+  "reasoning_content",
+  "reasoning_details",
+]);
 
 export function isStandardOpenAIMessageField(key: string): boolean {
   return (
@@ -51,6 +56,20 @@ export function filterOpenAIChatProtocolExtensions(
     Object.entries(record).filter(
       ([key, value]) => !isStandardOpenAIMessageField(key) && isProtocolExtensionValue(value)
     )
+  );
+}
+
+/**
+ * Returns only the provider fields that are known to be required when replaying
+ * an assistant turn through the supported OpenAI-compatible reasoning profiles.
+ */
+export function filterOpenAIChatContinuationExtensions(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(record).filter(
+      ([key, value]) => CONTINUATION_FIELDS.has(key) && isProtocolExtensionValue(value),
+    ),
   );
 }
 

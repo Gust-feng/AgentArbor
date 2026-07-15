@@ -273,7 +273,7 @@ const rawStateSchema = z.object({
       context.addIssue({ code: "custom", message: "resolved tool result occurrence time is missing", path: ["toolResultRecordedAt", resultKey] });
     }
   }
-  validateCanonicalMessageChain(state.canonicalMessages, context);
+  validateCanonicalMessageChain(state, context);
 });
 const stateSchema: z.ZodType<OrdinaryRunState> = z.custom<OrdinaryRunState>((value) => rawStateSchema.safeParse(value).success);
 const documentSchema: z.ZodType<OrdinaryRunSnapshotDocument> = z.object({
@@ -377,9 +377,10 @@ function summaryFromDocument(document: OrdinaryRunSnapshotDocument): OrdinaryRun
 }
 
 function validateCanonicalMessageChain(
-  messages: readonly z.infer<typeof modelMessageSchema>[],
+  state: z.infer<typeof rawStateSchema>,
   context: z.RefinementCtx,
 ): void {
+  const messages = state.canonicalMessages;
   const pending = new Map<string, string>();
   const completed = new Set<string>();
   for (const [index, message] of messages.entries()) {
@@ -412,7 +413,14 @@ function validateCanonicalMessageChain(
       context.addIssue({ code: "custom", message: "system/user messages contain tool-only fields", path: ["canonicalMessages", index] });
     }
   }
-  if (pending.size > 0) context.addIssue({ code: "custom", message: "canonical messages contain unresolved model tool calls", path: ["canonicalMessages"] });
+  if (pending.size === 0) return;
+  const pendingApprovalCallIds = new Set(state.toolCalls.flatMap((result) =>
+    result.status === "approval_required" ? [result.callId] : []));
+  const awaitingMatchingApproval = state.status.kind === "awaiting_approval" &&
+    [...pending.keys()].every((callId) => pendingApprovalCallIds.has(callId));
+  if (!awaitingMatchingApproval) {
+    context.addIssue({ code: "custom", message: "canonical messages contain unresolved model tool calls", path: ["canonicalMessages"] });
+  }
 }
 
 async function readJson(filePath: string, runId: string): Promise<unknown | undefined> {

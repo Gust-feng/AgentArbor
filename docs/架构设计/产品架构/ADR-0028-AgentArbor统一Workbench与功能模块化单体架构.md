@@ -47,7 +47,7 @@ Workbench
 
 模块化先按功能闭环，再按技术层分层：
 
-- Ordinary Agent、Multi-Agent、Sub-Agent 分别拥有自己的 command、query、event、业务状态、仓储端口、read-model 和测试。
+- Ordinary Agent 与 Multi-Agent 分别拥有自己的 command、query、event、业务状态、仓储端口、read-model 和测试。Sub-Agent 只拥有定义发现、SDK AgentTool 贡献、输入解析、权限收窄和测试；其 capability 条目是 catalog-only definition，与冻结 run 的普通工具边界使用同一曝光决策，不在 ToolRegistry 注册假 executor。调用、确认、结果与持久化事实归父 Ordinary run。
 - Workbench Shell 拥有导航和展示组合，不拥有或持久化功能业务状态。
 - 模型接入、工具执行原语、确认、上下文机械算法、tokenizer、消息完整性、配置读取和系统适配属于中性能力。
 - `domain / app / kernel / adapters` 可以作为模块内部或跨模块的技术分层，但不能取代功能所有权。
@@ -72,7 +72,7 @@ Workbench
 
 后端只有一个 Composition Root。目标边界是由它创建 Host 级资源，装配 Ordinary Agent 与 Multi-Agent 各自的精确公开端口，并把这些端口交给 HTTP/SSE adapter。
 
-当前实现中，`createPanelRuntime()` 已直接创建 `MultiAgentFeature`；Ordinary Agent 则仍通过 `BasicAgentRunExecutor` 与 Panel runtime 持有的会话、运行和持久化资源完成装配，尚不存在独立的 `OrdinaryAgentFeature`。这是需要诚实记录的过渡实现，不影响唯一组合根与依赖方向成立；后续只有在 Ordinary 的 command/query/event 边界形成真实职责时才建立对应 feature factory，不为了匹配文档制造空 facade。
+当前实现中，`createPanelRuntime()` 同时创建 `OrdinaryAgentFeature` 与 `MultiAgentFeature`。Ordinary 的正式入口只通过 `ordinary-routes` 调用 feature command/query；Multi-Agent 的正式入口只通过 `/api/deep/*` 调用 feature command/query。旧 BasicAgent、Desktop session、Panel run job、应用层 Underground 与 `MinimalRuntime` 已删除。
 
 - 只有 Composition Root 可以同时导入并装配多个 feature 和具体 adapter。
 - route 只解析 HTTP、调用 feature command/query、映射协议响应；不得创建 feature store、provider、ToolCenter 或隐藏的 runtime。
@@ -139,7 +139,7 @@ adapter -> neutral contracts
 2. 建立唯一后端 Composition Root，把 Deep store、registry、active run 和释放职责移入 Multi-Agent feature，保持 `/api/deep/*`、DTO 和存储格式不变。
 3. 中性化模型、工具、确认和上下文机械能力，拆除 `MinimalRuntime` service locator 与跨 feature facade。
 4. 收口 Workbench 产品入口；统一历史展示但不统一业务状态或存储。
-5. 在正式 Deep smoke 覆盖后退役 `/api/underground/*` 及未被正式 Deep 使用的 legacy 实现。
+5. 退役 `/api/underground/*`、旧 root exports、demo 及未被正式 Deep 使用的 legacy 实现；保留并逐步归位 Deep 仍使用的有效 run-tree 领域契约。
 
 每一阶段都必须先补行为测试，再删除兼容结构。开发期本地数据允许 clean break，但不主动删除旧字节，也不建设双读双写。
 
@@ -168,7 +168,7 @@ adapter -> neutral contracts
 
 ## 后果
 
-收益是产品心智统一、业务事实归属清楚、共享能力可以被按需调用、功能能够独立演进和测试。代价是迁移期间仍会同时看到旧 API/目录命名和新 feature 边界，且需要先补依赖门与行为基线，短期代码量不一定下降。
+收益是产品心智统一、业务事实归属清楚、共享能力可以被按需调用、功能能够独立演进和测试。当前后端 feature 边界和 Legacy 主链删除已经完成，但 UI 仍保留 Agent 集群 beta 入口，Deep 仍使用 `/api/deep/*`、独立数据分区和少量 `domain/underground/agent-fabric` run-tree 契约；这些真实命名不能被误写成 UI 已合并或 Deep 已消失。
 
 本 ADR 优先减少未来变更的耦合面，不以“文件数更少”或“所有运行统一”为目标。模块化的判断标准是功能能否只通过公开端口被装配、替换、测试和释放。
 

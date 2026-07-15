@@ -17,7 +17,7 @@
 1. **manager 自由决策循环**：deep 一期采用 manager AI 优先自由决策循环，决策由模型语义推理产出，非确定性模板；吸收 `cognitive-work-session-*` 的 action loop 语义为**设计输入**，但**新建 DeepRuntime 边界，不转正任何旧文件**。
 2. **强制一层 child**：`depth = 1`，child 不可递归派生子 child。
 3. **非 Plan 交接**：一期产物统一为 `SynthesizedConclusion`（结论级）与 `DeepExplorationReport`（运行级），不走 Plan / directionHandoffPackage / artifact / Fruits。
-4. **②' 固定拓扑与 Plan/Handoff 耦合作为已评估未采纳方案**：不作为本期骨架；其沉淀在 `domain/underground/` 的领域抽象（AgentLoop / Guard / run tree / 事件契约 / Workspace / Mailbox）保留并复用。
+4. **②' 固定拓扑与 Plan/Handoff 耦合作为已评估未采纳方案**：不作为本期骨架；Deep 只保留实际使用的 run-tree 与 Guard 领域契约，不整包保留旧 Underground 应用实现。
 
 ## 动机
 
@@ -60,22 +60,19 @@ child output **不直通结论**：综合结论的 outputRefs 与 child outputRe
 ### 决策四：②' 固定拓扑未采纳但领域抽象保留复用
 
 - ②' `underground/orchestrator*` 的**固定拓扑 DAG**（IntentCore→GrowthGovernor→RootletExplorer→CandidateCollector→AutonomyReviewer→ConvergenceJudge→HandoffSteward 硬编码推进）与 **`directionHandoffPackage` 强耦合**，经评估**不作为本期骨架**：固定拓扑把 manager 决策替换为固定阶段，超出最小闭环范围；Plan/Handoff 在本期 Out of Scope。
-- 该评估**不否定** ②' 的全部价值。②' 沉淀在 `domain/underground/` 下的领域抽象有长期积累价值，**保留并复用**：
+- 该评估**不否定** ②' 的全部价值。当前 Deep 只正式复用两类仍有真实调用方的领域契约：
 
   | 保留复用的领域抽象 | 积累价值 |
   |--------------------|----------|
-  | `domain/underground/agent-loop.ts` | AgentLoop 抽象（agent 运行循环边界） |
-  | `domain/underground/guard.ts` | Guard 确定性守卫（权限/预算/硬约束/证据校验边界） |
-  | `domain/underground/contracts.ts` | AgentRunTree / ChildAgentRun / ParentSynthesisResult 等 run tree 契约 |
-  | `domain/underground/workspace.ts` / `mailbox.ts` | WorkspaceView / Mailbox（agent 工作区与消息边界） |
-  | `domain/underground/evidence-ledger.ts` 等 | 证据/候选/报告领域逻辑 |
+  | `domain/underground/agent-fabric.ts` | AgentRunTree / ChildAgentRun / ParentSynthesisResult 与一层 child 约束 |
+  | `domain/underground/guard.ts` | child depth、预算和 hard constraint 守卫 |
 
-- DeepRuntime 通过**契约 import 复用**上述领域抽象，不复制其实现，也不重定义。
+- DeepRuntime 通过**契约 import 复用**上述领域抽象，不复制其实现，也不重定义。其他 `domain/underground/*` 文件只保留各自仍成立的长期领域价值，不因此自动成为 Deep 正式依赖。
 
-## 新建 DeepRuntime 边界（不转正旧文件）
+## DeepRuntime 边界
 
-- DeepRuntime 是**新建的正式边界**，不是任何旧文件（`cognitive-work-session-*` / `underground/orchestrator*` / `underground/compat/underground-direction-session*`）改名为正式主线。旧文件本期定位为 DeepRuntime 的**设计参考来源**与**迁移前兼容路径**；其去留按渐进迁移与退役策略处理，不激进删除。
-- DeepRuntime 的"新"只体现在**编排策略边界**（DeepConversation 会话隔离 / DeepRunExecutor manager 决策循环 / Child Delegation / Parent Synthesis）；其依赖的全部运行能力**复用**现有共享设施，不另起平行运行时。
+- DeepRuntime 是正式 Multi-Agent 内部边界，拥有 DeepConversation、DeepRunExecutor manager 决策循环、Child Delegation 与 Parent Synthesis。旧 `cognitive-work-session-*`、`underground/orchestrator*`、compat 应用路径和 `/api/underground/*` 已清洁断代，不保留迁移入口。
+- DeepRuntime 只通过中性端口复用模型、工具、确认和上下文机械能力，不另起平行基础设施，也不读取 Ordinary feature。
 
 ## 复用边界（复用而非另起）
 
@@ -83,22 +80,22 @@ DeepRuntime 通过契约使用以下共享设施，不复制其实现：
 
 - `AgentTurnRuntime`：manager / child / synthesis 各自经它调用模型（模型→工具→模型循环）。
 - `ToolCenter` + `Confirmation Gate`：child 工具调用经同一套执行与确认门。
-- `RuntimeDatabase`：deep 会话 / run tree / synthesis / 打断点持久化进同一存储（独立 deep 分区）。
+- feature-owned Deep file stores：conversation、run record、child message 与恢复事实由 Multi-Agent 自己持有，不进入 Ordinary 仓储或统一 RuntimeDatabase。
 - tokenizer、消息完整性、loop-level context compaction 与 `capabilitySnapshot` 机械能力：通过中性端口复用；Multi-Agent 自己拥有 child 模型历史和业务状态，不读取 Ordinary 的持久化上下文。
-- `RunEvent` 安全投影与 `src/app/underground/events.ts` 事件投影口径：deep 投影沿用同一安全口径，不另建投影实现。
+- Deep events 与 read-model：由 Multi-Agent 从自己的运行事实单向派生；Panel 只消费 `/api/deep/*` query/view，不从 UI 反推业务状态。
 - 模型运行时 / IntelligenceChannel：deep 经此接入 provider，不直接绑定外部 LLM SDK（遵循 `AGENTS.md` 模型接入层独立模块演进边界）。
 
 ## 默认入口与隔离
 
 - 默认入口仍为普通 `agent`；deep 只能由用户显式触发，**不存在自动升级**。
 - 产品对外 API 统一使用 `/api/deep/*` 端点族（唯一正式 deep 入口），内部映射 `runKind: "underground"` / `runMode: "deep"`，复用 `run-mode-policy` 门控。
-- 旧 `/api/underground/*` 仅作为兼容/废弃候选路径保留，不与 `/api/deep/*` 并列为正式入口；DeepRuntime 替代完成后逐步退役。
+- 旧 `/api/underground/*` 已删除；`/api/deep/*` 是唯一正式 Multi-Agent 后端入口。Deep 仍使用的 `domain/underground/agent-fabric` run-tree 契约保持有效，不代表旧应用层 Underground 仍存在。
 - deep 会话与普通会话数据隔离：DeepConversation 独立 store，不读取、不污染普通会话历史、确认记录与 run 投影。
 
-## 安全摘要与能力优先
+## 展示与能力优先
 
-- UI / read-model（Panel）可做安全摘要投影：只展示结论、理由、证据引用、agent 摘要、状态；不暴露 raw prompt / response / output、密钥或 token。
-- **能力优先边界**：模型继续工作所需的工具结果、文件片段、错误信息、证据材料**不被摘要替代**。摘要只是对外展示字段，不覆盖、不截断 DeepRuntime 内部模型可继续使用的正式材料。不以"安全投影""脱敏""鲁棒性"为名削弱模型能力。
+- UI / read-model 可以额外展示结论、理由、证据引用、child 摘要和状态，但不能成为第二事实源。
+- 模型继续工作所需的工具结果、文件片段、错误、父子消息和证据材料**不被摘要替代**。展示摘要不能覆盖或截断 DeepRuntime 内部正式材料；密钥仍不得进入模型上下文、事件或 read-model。
 
 ## 当前已落地的一期最小协作闭环事实
 
@@ -148,7 +145,7 @@ DeepRuntime 通过契约使用以下共享设施，不复制其实现：
 - DeepRuntime 一期以 manager 自由决策循环 + 一层 child + 非 Plan 交接为权威实现口径，闭环 2 全部编码任务以本 ADR 为契约依据。
 - ADR-0021 的 AI 优先诊断价值（"确定性主线 + AI 旁路"方向错误判定、"AI 优先 + 父层收束 + 确定性守卫"目标架构）保留为历史价值；其固定拓扑 Orchestrator 未被采纳为本期骨架，故 ADR-0021 不转 Accepted，标记为 Superseded-by ADR-0025。
 - ADR-0024 不废弃：基础 Agent 路线继续作为默认主线；deep 作为显式入口并行存在，不自动升级、不混入默认路径。
-- 旧文件（③ / ②' 固定拓扑主体 / ② 编排主线）按渐进退役顺序处置：先替代 → 后迁移 smoke/tests → 验证通过 → 最后分批删除；`domain/underground/*` 与共享投影层不在删除范围。
+- 旧应用层 Underground、compat 路由与固定拓扑主线已经删除；Deep 只保留仍被正式实现调用的 `agent-fabric` / Guard 契约。其他长期领域文件不因目录名获得永久保留资格。
 - `CURRENT_RUNTIME_MODE.md` 已同步更新为“默认仍是普通 agent，显式多 Agent 入口已具备最小协作闭环”（见该文件“当前默认运行方式”“当前真实工作方式”“当前默认产品边界”）。
 
 ## 相关文档

@@ -2,7 +2,7 @@
 
 ## 目标
 
-后续开发沿统一 Workbench 主线推进：Ordinary Agent 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是 Ordinary 的工具能力。不同功能共享中性模型、工具、确认、上下文算法和系统 adapter，不共享业务状态、事件、仓储或 read-model。
+后续开发沿统一 Workbench 主线推进：Ordinary Agent 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是 Ordinary 的 SDK AgentTool。Ordinary 与 Multi-Agent 共享中性模型、工具、确认、上下文算法和系统 adapter，不共享业务状态、事件、仓储或 read-model；Sub-Agent 调用事实进入父 Ordinary run。
 
 每轮开发先回答：
 
@@ -46,7 +46,7 @@
 ### 3. 共享能力中性化
 
 - `model-runtime` 只创建 provider/channel 与协议能力，不创建 ToolCenter、Desktop Skill 或 feature registry。
-- ToolCenter 工厂回归工具能力模块；Host 装配文件、命令、浏览器、HTTP、研究、MCP、Skills 和 Sub-Agent contribution。
+- ToolCenter 工厂归工具能力模块；Host 向 ToolCenter 装配文件、命令、浏览器、HTTP、研究、MCP 与 Skills 资源工具，并向 Ordinary SDK loop 装配 Sub-Agent AgentTool。
 - Ordinary 使用中性的 `AgentLoop` 端口，生产实现由 OpenAI Agents SDK adapter 提供；Multi-Agent 仍可使用自己的运行端口，两者不共享业务状态或完成语义。
 - Deep 只共享 tokenizer、消息完整性和压缩执行等机械能力，不依赖 Ordinary compaction facade。
 - 拆除 `MinimalRuntime` service locator，改为精确依赖注入；不新建 `RuntimeServices` 属性包。
@@ -65,9 +65,10 @@
 
 ### 5. Legacy 退役
 
-- 正式 Deep smoke 覆盖后删除 `/api/underground/*`、`runUndergroundForPanel`、旧 root exports、`demo:underground`、compat tests 和未被 Deep 使用的旧实现。
-- Deep 仍需要的少量领域契约迁回 Multi-Agent owner，不整包保留 legacy 目录。
-- RuntimeDatabase 拆分、Ordinary 持久化归位、Sub-Agent trace 解耦和重复事件加工分别作为独立纵向任务推进。
+- 已删除 `/api/underground/*`、旧 root exports、demo、BasicAgent/Desktop/Panel 旧执行链、应用层 Underground 与未被正式路径使用的旧实现。
+- Ordinary 持久化已归 feature-owned repository，旧 RuntimeDatabase 与旧 snapshot 不兼容读取。
+- Sub-Agent 已切换到 SDK 原生 AgentTool，旧 runner、事件、trace、批量与专用续读能力已退役。
+- Deep 仍需要的 `domain/underground/agent-fabric` run-tree 契约保持有效；后续只做 Multi-Agent owner 内部归位。
 - 不提前抽象通用 blob/journal/repository；出现两个稳定消费者后再提取。
 
 验收：legacy 删除有行为测试替代，正式入口和本地有效数据不被误删。
@@ -102,10 +103,10 @@ Multi-Agent 新功能必须留在自身闭环：
 ## Sub-Agent 纵向开发顺序
 
 - 父 run 权限始终是上限。
-- 子 Agent 工具集合强制排除递归与跨子运行读取能力。
+- nested Agent 工具集合强制排除全部 Sub-Agent AgentTool。
 - 确认冒泡到父 Ordinary run，不能包装成普通失败。
-- 输出、工具事实和错误必须完整或可 continuation。
-- trace 是只读复盘投影，不成为 Ordinary 或 Deep 主状态。
+- 完整输出、工具事实和错误直接回到父模型，不建设专用续读状态。
+- 不新增 Sub-Agent runner、事件、trace、持久化或 read-model。
 
 ## 状态和事件规则
 

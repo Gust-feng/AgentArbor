@@ -2,13 +2,13 @@
 
 AgentArbor 是一个面向本地工作区的桌面通用 Agent 项目。它把任务输入、文件上下文、工具调用、命令确认和结果展示放在同一个桌面工作台里处理，让用户不必反复组织上下文，也不必把简单动作拆成零散流程。
 
-产品边界统一为一个 Workbench：普通桌面 `agent` 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是普通 Agent 的工具能力。它们共享中性基础能力，但分别拥有业务流程、状态、事件、仓储和 read-model。
+产品边界统一为一个 Workbench：普通桌面 `agent` 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是普通 Agent 的 SDK AgentTool。Ordinary 与 Multi-Agent 共享中性基础能力，但分别拥有业务流程、状态、事件、仓储和 read-model；Sub-Agent 的调用与结果进入父 Ordinary run。
 
 ## 当前状态
 
 - 默认入口：`Desktop Shell / Panel`
 - 默认模式：`agent`
-- 默认主线：`用户消息 -> Task Soil -> 普通 Agent 主循环 -> 工具调用/命令确认 -> 结果投影`
+- 默认主线：`用户消息 -> OrdinaryAgentFeature -> OpenAI Agents SDK -> ToolCenter/命令确认 -> ordinary-run/v2 -> 结果投影`
 - 目标产品边界：Multi-Agent 是 Workbench 内的显式“深入协作”功能
 - 当前过渡实现：设置启用后仍从侧栏 `Agent 集群` 进入，后端仍使用 `/api/deep/*` 和独立数据分区
 - 默认请求不会自动升级为 deep
@@ -20,6 +20,7 @@ AgentArbor 是一个面向本地工作区的桌面通用 Agent 项目。它把�
 - 命令确认
 - 运行事件记录
 - 工作区、文件和网页上下文处理
+- XLSX 与 PDF 文本附件读取
 - 结果展示与会话持久化
 
 ## 项目结构

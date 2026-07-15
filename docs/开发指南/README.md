@@ -1,6 +1,6 @@
 # 开发指南
 
-本目录是 AgentArbor 开发前的正式指南。产品只有一个 Workbench：Ordinary Agent 是默认工作方式，Multi-Agent 是用户显式选择的深入协作功能，Sub-Agent 是 Ordinary Agent 的工具能力。三者可以调用同一组中性模型、工具、确认、上下文算法和系统适配，但分别拥有业务流程、状态、事件、仓储和 read-model。
+本目录是 AgentArbor 开发前的正式指南。产品只有一个 Workbench：Ordinary Agent 是默认工作方式，Multi-Agent 是用户显式选择的深入协作功能，Sub-Agent 是 Ordinary Agent 的工具能力。Ordinary 与 Multi-Agent 可以调用同一组中性模型、工具、确认、上下文算法和系统适配，但分别拥有业务流程、状态、事件、仓储和 read-model；Sub-Agent 只拥有定义与 SDK AgentTool 贡献，执行事实进入父 Ordinary run。
 
 开发指南不是过程归档、版本路线图或会议纪要。它只写稳定结论、工程边界和可执行契约。
 
@@ -32,10 +32,10 @@ AgentArbor 是一个桌面通用 Agent Workbench。用户默认直接使用 Ordi
 - Global Soil 保存长期偏好、Capability Asset、Path Bias、历史约束、失败模式和治理后的长期事实。
 - 当前默认普通 Agent 负责直接回答、模型工具循环、命令确认、工具结果回传和结果展示；当前阶段能力优先，不以脱敏或安全投影限制普通回答。
 - 普通 Agent 不自动升级到 Underground，不派生 child/rootlet，不把普通文件编辑、helper、adapter 或一次工具循环包装成 Plan / Handoff / deep flow。
-- 子 Agent 是普通 Agent 的工具能力，不是独立编排流程；模型在普通会话中通过 call_sub_agent / call_sub_agents / spawn_sub_agent 自主调用，子 Agent 不能递归派生，输出是局部材料由父层模型决定如何使用（见 [ADR-0026](../架构设计/产品架构/ADR-0026-子Agent工具能力架构.md)）。
+- 子 Agent 是普通 Agent 的工具能力，不是独立编排流程；模型在普通会话中通过 OpenAI Agents SDK 原生的 `call_sub_agent` / `spawn_sub_agent` AgentTool 自主调用，子 Agent 不能递归派生，完整输出作为工具结果交回父层模型（见 [ADR-0026](../架构设计/产品架构/ADR-0026-子Agent工具能力架构.md)）。
 - Underground Cognitive Runtime 负责方向智能：目标成形、多路探索、动态派生 child agent、父层综合、裁决、追问或停止；当前通过 Agent 集群 beta 模块提供一层 child 最小闭环，仍不进入默认普通路径。
 - Aboveground Execution Runtime 负责执行智能：消费已成形 Plan，进行文件修改、文档生成、原型制作、工具调用和验证；当前作为长期架构边界保留。
-- Ordinary、Multi-Agent 与 Sub-Agent 只共享中性模型、工具、确认、上下文算法和系统适配；业务状态、事件、仓储和 read-model 不共享。
+- Ordinary 与 Multi-Agent 只共享中性模型、工具、确认、上下文算法和系统适配；业务状态、事件、仓储和 read-model 不共享。Sub-Agent 不建立平行业务状态，其调用与结果由父 Ordinary run 持有。
 - Workbench Shell 只组合导航、输入、历史和展示，不推导 feature 运行事实。
 - 项目使用唯一后端 Composition Root 装配 feature；不建设 universal Run runtime、全局业务状态或统一工作流引擎。
 - Plan 是地下到地上的产品级交接对象；`.agentarbor` 只是 Plan Package 的实现/存储形态或目录名，不再作为独立产品节点。
@@ -43,7 +43,7 @@ AgentArbor 是一个桌面通用 Agent Workbench。用户默认直接使用 Ordi
 - child/rootlet 输出默认是局部材料，必须经过父层 synthesis / convergence 才能进入 Plan。
 - 智能通道是所有模型能力的统一接入边界；agent 的 `reason()` 承担语义推理，`guard()` 只守 schema、预算、权限、hard constraint 和包结构。
 - `agent`、`atomic`、`Plan`、`Handoff` 等命名必须匹配真实职责；`atomic` 只用于真正有全成功/全失败、回滚或一致性边界的场景。
-- 无 `AgentTurnRuntime` 不允许产出 approved Plan；默认稳定测试应使用 fake/stub AI runtime 验证 AI 路径。
+- `AgentTurnRuntime` 仅服务 Deep child，不是 Ordinary 主链；默认稳定测试应使用 fake/stub model loop 验证 AI 路径。
 - reasoningTrace 只保存决策摘要、输入引用、模型/工具引用、不确定性和证据 refs，不保存 raw chain-of-thought。
 - Fruits 不是 Global Soil；Run Memory、Experience Candidate 和候选能力必须经过 Governance Pipeline 才能入土。
 - Path Bias 只能影响偏好和方案排序，不能覆盖 hard constraint。

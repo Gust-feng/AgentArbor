@@ -67,7 +67,7 @@ manifest.json
 - package 只能保存 Global Soil 引用，不能内联 Global Soil 资产正文或内容副本。
 - package 不能内联执行成果；执行成果属于 Fruits。
 
-默认运行路径使用内存 store。文件系统 store 只能在调用方显式传入根目录时使用；当前 demo 和默认测试不得创建 repo-root `.agentarbor/` 运行资产。
+默认运行路径使用内存 store。文件系统 store 只能在调用方显式传入根目录时使用；默认测试不得创建 repo-root `.agentarbor/` 运行资产。
 
 ## Aboveground Execution Plan
 

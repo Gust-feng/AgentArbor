@@ -13,7 +13,7 @@ Workbench
   └─ Multi-Agent（显式深入协作）
 ```
 
-- Ordinary、Multi-Agent、Sub-Agent 分别拥有业务流程、状态、事件、仓储和 read-model。
+- Ordinary 与 Multi-Agent 分别拥有业务流程、状态、事件、仓储和 read-model；Sub-Agent 只贡献定义与 SDK AgentTool，调用事实归父 Ordinary run。
 - Workbench 只组合入口、导航、历史和展示。
 - 模型、工具、确认、上下文机械算法和系统适配作为中性能力被 feature 调用。
 - 后端由唯一 Composition Root 装配，不建设 universal Run runtime 或全局业务状态。

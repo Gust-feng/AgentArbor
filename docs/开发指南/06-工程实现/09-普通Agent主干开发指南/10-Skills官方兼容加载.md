@@ -71,7 +71,7 @@ Skills 是能力包：它提供可复用说明、参考资料、脚本和资产�
 - 不让 `read_skill_resource` 读取未选中、未成功加载、omitted、未索引或 hash 不匹配的 skill resource。
 - 不让 `read_skill_resource` 读取 `evals/`；eval artifacts 只服务本地质量门和后续评估体系。
 - 不让 `allowed-tools` 扩张工具能力，也不让它作为全局白名单削弱普通 agent 的工具可见集合；当前只做冻结、展示、审计和不可用声明 warning。
-- 不把完整 skill body、raw prompt、raw tool output、stdout/stderr 或文件正文写入 RuntimeDatabase。
+- 不为 skill body、工具结果或文件正文建立第二套副本；模型实际消费的内容按原样进入 Ordinary `canonicalMessages`，provider 原始 HTTP 响应、secret 与附件字节不持久化。
 - 不把 Skills 作为 Plan、Handoff、Governance 或任务编排层。
 - 不让 `.agents/skills` 反向定义 AgentArbor 产品语义。
 - 不自动扫描 Claude `.claude/skills`、Codex plugin marketplace、enterprise managed skills 或 admin skills；admin/plugin root 只能由宿主显式传入。当前新增或计划中的 local installer 只是本地分发治理原语，不等于 marketplace；远程 registry、自动更新、回滚和 enterprise managed skill 分发仍是后续能力。

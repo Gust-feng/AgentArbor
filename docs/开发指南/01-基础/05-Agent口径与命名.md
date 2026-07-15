@@ -10,7 +10,7 @@ AgentArbor 的 `agent` 不是所有自动化逻辑的泛称。只有具备目标
 - Multi-Agent：用户显式选择的深入协作功能，当前内部沿用 `deep` / `DeepRuntime`，负责 intake、manager、多路 child 探索、父层综合、纠正和停止。
 - Sub-Agent：Ordinary Agent 按需调用的工具能力，不是独立模式或 Multi-Agent child。
 
-三者只共享模型、工具、确认、上下文机械算法和系统适配等中性能力。Ordinary、Multi-Agent 和 Sub-Agent 分别拥有业务流程、状态、事件、仓储与 read-model；Workbench Shell 只组合导航和展示。不得以共享为名建设统一 Run runtime、RuntimeDatabase 业务仓储、全局状态或跨 feature Panel read-model。
+Ordinary 与 Multi-Agent 只共享模型、工具、确认、上下文机械算法和系统适配等中性能力，并分别拥有业务流程、状态、事件、仓储与 read-model。Sub-Agent 只拥有定义与 SDK AgentTool 贡献，执行事实进入父 Ordinary run；Workbench Shell 只组合导航和展示。不得以共享为名建设统一 Run runtime、RuntimeDatabase 业务仓储、全局状态或跨 feature Panel read-model。
 
 默认普通 Agent 的产品交互是线性会话驱动，不是任务驱动。它可以处理用户以“任务”形式输入的请求，但运行时只把每一轮用户消息、历史对话、上下文引用、工具结果和确认决定串成同一条 conversation 时间线；它不维护独立任务生命周期、任务拆解状态机、Plan 交接对象或多 agent 协作状态。任务驱动、目标成形、多候选探索和 Plan 交接留给后续显式 deep / Agent 集群能力。
 
@@ -52,10 +52,10 @@ Multi-Agent 必须通过中性能力端口复用模型、工具、确认和系�
 
 - `runMode: "agent" | "deep"` 只表示编排策略选择，不表示两套工具、事件、确认、持久化或投影实现。
 - 默认入口始终创建 `agent` run；deep 只能由明确产品入口、显式用户选择或后续 deep 项目契约触发。
-- 历史 `work_session` 请求别名不能再被接口层映射为 deep；旧读模型或兼容路径只能服务历史数据和诊断，不能成为新入口。
+- 历史 `work_session` 请求别名不能再被接口层映射为 deep；开发期旧数据直接废弃，不建设兼容入口。
 - 普通路径不展示 fake Plan、fake report、fake artifact、未出生的 Routines、团队 agent 或 deep 占位入口。
 - 新增概念前必须说明它承担的独立职责、输入输出、失败方式、测试边界和可观察投影；否则使用朴素名称。
-- 子 Agent（sub-agent）是普通 Agent 的工具能力，不是独立编排流程；它通过 `call_sub_agent` / `call_sub_agents` / `spawn_sub_agent` 工具被模型自主调用，不维护独立任务生命周期、不派生 Plan、不走 `/api/deep/*` 入口；子 Agent 不能递归派生，只有顶层 Agent 拥有 `spawn_sub_agent`。子 Agent 与 deep child/rootlet 是不同概念：deep child 由 DeepRuntime 编排，走 manager 自由决策循环和 DeepTaskBoard；子 Agent 由普通 Agent 的 ToolCenter 执行，走标准工具调用路径（见 ADR-0026）。
+- 子 Agent（sub-agent）是普通 Agent 的工具能力，不是独立编排流程；它通过 SDK 原生 `call_sub_agent` / `spawn_sub_agent` AgentTool 被模型自主调用，不维护独立任务生命周期、不派生 Plan、不走 `/api/deep/*` 入口。子 Agent 的工具集强制排除 Sub-Agent 工具，因此不能递归派生。子 Agent 与 deep child/rootlet 是不同概念：deep child 由 DeepRuntime 编排，走 manager 自由决策循环和 DeepTaskBoard；子 Agent 由 Ordinary 的 OpenAI Agents SDK loop 调用，并通过父 run 的 ToolCenter 执行获准工具（见 ADR-0026）。
 - 工程边界可以保护权限、预算、审计、验证和命令确认，但不能替 agent 判断目标、工具选择、候选取舍或是否继续探索；普通模型正文、工具结果、错误信息、文件内容、stdout/stderr 和开发上下文不得被脱敏或安全投影吞掉。
 
 这条口径的目标是同时避免两种错误：一是为了当前简单实现删除未来 deep / agent 集群方向；二是在默认普通 Agent 中提前使用超出实际职责的重命名、伪协议和伪复杂流程。

@@ -47,6 +47,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/agents": "0.13.3",
+    "@tanstack/react-query": "5.101.2",
     "diff": "9.0.0",
     "electron-updater": "^6.6.2",
     "js-tiktoken": "^1.0.21",

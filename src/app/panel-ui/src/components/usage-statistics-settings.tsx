@@ -1,4 +1,5 @@
 import React from "react";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import {
   ChartColumn,
   Cpu,
@@ -14,83 +15,45 @@ import type {
   UsageStatisticsResponse,
   UsageStatisticsTotals,
 } from "../contracts/statistics";
+import { panelQueryClient } from "../panel-query-client";
 
-type UsageStatisticsState = {
-  readonly loading: boolean;
-  readonly error?: string;
-  readonly statistics?: UsageStatistics;
-};
-
-let usageStatisticsCache: UsageStatistics | undefined;
-let usageStatisticsPromise: Promise<UsageStatistics> | undefined;
+const usageStatisticsQuery = queryOptions({
+  queryKey: ["runtime", "usage-statistics"],
+  queryFn: async ({ signal }): Promise<UsageStatistics> => {
+    const response = await getJson<UsageStatisticsResponse>("/api/runtime/usage-statistics", { signal });
+    return response.statistics;
+  },
+  retry: false,
+  staleTime: 30_000,
+});
 
 export function preloadUsageStatistics(): void {
-  void loadUsageStatistics();
+  void panelQueryClient.prefetchQuery(usageStatisticsQuery);
 }
 
 export function UsageStatisticsSettings(): React.ReactElement {
-  const mountedRef = React.useRef(true);
-  const [state, setState] = React.useState<UsageStatisticsState>(() =>
-    usageStatisticsCache === undefined
-      ? { loading: true }
-      : { loading: false, statistics: usageStatisticsCache }
-  );
+  const query = useQuery(usageStatisticsQuery);
 
-  const loadStatistics = React.useCallback(async (options?: { readonly force?: boolean }): Promise<void> => {
-    const force = options?.force === true;
-    setState((previous) => ({
-      ...previous,
-      loading: force || previous.statistics === undefined,
-      error: undefined,
-    }));
-    try {
-      const statistics = await loadUsageStatistics({ force });
-      if (!mountedRef.current) {
-        return;
-      }
-      setState({ loading: false, statistics });
-    } catch (error) {
-      if (!mountedRef.current || isAbortError(error)) {
-        return;
-      }
-      setState((previous) => ({
-        loading: false,
-        statistics: previous.statistics,
-        error: error instanceof Error ? error.message : "使用统计读取失败。",
-      }));
-    }
-  }, []);
-
-  React.useEffect(() => {
-    mountedRef.current = true;
-    if (usageStatisticsCache === undefined) {
-      void loadStatistics();
-    }
-    return () => {
-      mountedRef.current = false;
-    };
-  }, [loadStatistics]);
-
-  if (state.loading && state.statistics === undefined) {
+  if (query.isPending) {
     return <UsageStatisticsLoading />;
   }
 
-  if (state.error !== undefined && state.statistics === undefined) {
+  if (query.isError && query.data === undefined) {
     return (
       <section className="settings-card usage-settings-error">
         <div className="settings-card-title-row">
           <h3>使用统计</h3>
-          <button type="button" className="usage-refresh-button" onClick={() => void loadStatistics()}>
+          <button type="button" className="usage-refresh-button" onClick={() => void query.refetch()}>
             <RefreshCw size={14} />
             <span>重试</span>
           </button>
         </div>
-        <p>{state.error}</p>
+        <p>{query.error instanceof Error ? query.error.message : "使用统计读取失败。"}</p>
       </section>
     );
   }
 
-  const statistics = state.statistics;
+  const statistics = query.data;
   if (statistics === undefined) {
     return <UsageStatisticsLoading />;
   }
@@ -104,8 +67,8 @@ export function UsageStatisticsSettings(): React.ReactElement {
         <button
           type="button"
           className="usage-refresh-button"
-          aria-label={state.loading ? "刷新中" : "刷新使用统计"}
-          onClick={() => void loadStatistics({ force: true })}
+          aria-label={query.isFetching ? "刷新中" : "刷新使用统计"}
+          onClick={() => void query.refetch()}
         >
           <RefreshCw size={15} />
         </button>
@@ -241,31 +204,4 @@ function formatCompactNumber(value: number): string {
 
 function trimCompact(value: number, fractionDigits: number): string {
   return value.toFixed(fractionDigits).replace(/\.0+$/u, "").replace(/(\.\d*?)0+$/u, "$1");
-}
-
-function loadUsageStatistics(options?: { readonly force?: boolean }): Promise<UsageStatistics> {
-  if (options?.force !== true) {
-    if (usageStatisticsCache !== undefined) {
-      return Promise.resolve(usageStatisticsCache);
-    }
-    if (usageStatisticsPromise !== undefined) {
-      return usageStatisticsPromise;
-    }
-  }
-  usageStatisticsPromise = getJson<UsageStatisticsResponse>("/api/runtime/usage-statistics")
-    .then((response) => {
-      usageStatisticsCache = response.statistics;
-      return response.statistics;
-    })
-    .finally(() => {
-      usageStatisticsPromise = undefined;
-    });
-  return usageStatisticsPromise;
-}
-
-function isAbortError(error: unknown): boolean {
-  return typeof error === "object" &&
-    error !== null &&
-    "name" in error &&
-    (error as { readonly name?: unknown }).name === "AbortError";
 }

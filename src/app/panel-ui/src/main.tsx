@@ -1,8 +1,10 @@
 import { createRoot } from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/error-boundary";
 import { applyTheme, getInitialTheme } from "./app-theme";
 import { applyMotionPreference, applyStartupAnimationPreference } from "./app-motion";
+import { panelQueryClient } from "./panel-query-client";
 import "./styles.css";
 
 applyMotionPreference();
@@ -28,6 +30,8 @@ if (startupMode === "main") {
 
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
-    <App />
+    <QueryClientProvider client={panelQueryClient}>
+      <App />
+    </QueryClientProvider>
   </ErrorBoundary>
 );

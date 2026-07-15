@@ -257,6 +257,38 @@ test("ResearchRuntime page read returns timeout facts", async () => {
   assert.equal(typeof step?.errorFacts?.durationMs, "number");
 });
 
+test("page source preserves caller cancellation separately from timeout", async () => {
+  const callerAbort = new AbortController();
+  const cancelled = new Error("caller cancelled page read");
+  const adapter = createPageInformationSourceAdapter({
+    defaultTimeoutMs: 5_000,
+    fetch: async (_url, init) => {
+      await new Promise<void>((_resolve, reject) => {
+        if (init.signal?.aborted === true) {
+          reject(init.signal.reason);
+          return;
+        }
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      });
+      throw new Error("unreachable");
+    },
+  });
+
+  const pending = adapter.read!({
+    ref: "https://example.test/cancelled",
+    maxLength: 200,
+    startChar: 0,
+    abortSignal: callerAbort.signal,
+  });
+  callerAbort.abort(cancelled);
+  const read = await pending;
+
+  assert.equal(read.status, "provider-failed");
+  assert.match(read.message ?? "", /caller cancelled page read/u);
+  assert.equal(read.errorFacts?.timedOut, undefined);
+  assert.equal(read.errorFacts?.timeoutMs, undefined);
+});
+
 test("ResearchRuntime page read returns HTTP status facts for non-OK responses", async () => {
   for (const scenario of [
     { status: 404, statusText: "Not Found", url: "https://example.test/missing" },

@@ -92,8 +92,8 @@ test("context attachment table tools inspect and read selected CSV without expos
     assert.equal(projected.includes(csvFile), false);
     assert.equal(projected.includes("local-file:"), false);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   }
 });
 

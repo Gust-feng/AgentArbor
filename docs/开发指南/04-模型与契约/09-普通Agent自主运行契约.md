@@ -12,7 +12,7 @@
 
 ## 根原则
 
-1. **完成权属于模型的行动选择。** 模型响应中没有工具调用，表示模型停止继续行动；Runtime 将该响应作为最终回答。
+1. **完成权属于模型的行动选择。** 模型响应中没有工具调用且 provider 返回明确完成终态，表示模型停止继续行动；Runtime 将该响应作为最终回答。截断、过滤或 incomplete 响应不是完成。
 2. **工具调用表示继续工作。** 模型响应中有工具调用时，Runtime 执行授权工具，把工具结果追加回模型上下文，然后继续调用模型。
 3. **工具选择权属于模型。** 在本轮可见工具集合内，模型自由决定调用什么工具、调用顺序和是否继续调用；Runtime 不能用关键词、模板阶段或固定流程替模型选择工具。
 4. **Runtime 不替模型判断答案质量。** Runtime 不能根据关键词、证据数量、文本长度或工程规则判断“还没答完”或“应该总结”；它只观察模型是否继续调用工具。
@@ -38,10 +38,14 @@ ToolCenter.list()
 ```text
 assemble context
 while not cancelled:
+  maintain the exact context for the request
   call model with conversation messages and external tools
 
   if provider failed:
     return failed/model_failed
+
+  if provider response is incomplete or truncated:
+    return failed without committing partial assistant text
 
   if response has no tool calls:
     return completed(final assistant output)
@@ -81,8 +85,8 @@ ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一�
 
 Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果的映射为：
 
-- `completed/no_tool_calls`：首轮无工具调用，模型直接给出最终文本。
-- `completed/completed`：至少执行过一轮工具，随后模型无工具调用并给出最终文本。
+- `completed/no_tool_calls`：首轮无工具调用，模型直接给出最终文本，且 provider 返回明确完成终态。
+- `completed/completed`：至少执行过一轮工具，随后模型无工具调用并给出最终文本，且 provider 返回明确完成终态。
 - `approval_required/approval_required`：工具需要用户确认，等待 matching confirmation id。
 - `interrupted/external_boundary`：用户中止、provider 失败、上下文硬溢出、进程失败或其他外部硬边界打断 loop。该状态不是完成，也不是普通产品能力边界。
 - `cancelled/cancelled`：用户或系统中止。
@@ -104,7 +108,7 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 
 ## 上下文装配
 
-上下文管理只有两个明确边界：Ordinary 负责装配本轮模型输入，模型调用前的 loop maintenance 负责在物理窗口不足时压缩较早消息。未触发压缩时，canonical 消息不得被摘要、投影或字符预算改写；触发压缩时必须保留系统边界、当前请求、完整工具交互和未完成事项，失败则明确暂停，不能带着超限或残缺上下文继续调用模型。
+上下文管理只有两个明确边界：Ordinary 负责装配本轮模型输入，模型调用前的 loop maintenance 负责在物理窗口不足时压缩较早消息。该检查必须发生在首次请求以及每次工具调用后的下一次请求前，并以即将发送的完整请求为准。未触发压缩时，canonical 消息不得被摘要、投影或字符预算改写；触发压缩时必须保留系统边界、当前请求、完整工具交互和未完成事项，失败则明确暂停，不能带着超限或残缺上下文继续调用模型。
 
 装配规则：
 
@@ -116,7 +120,7 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 - 超预算时由 loop-level compaction 压缩旧上下文，不能丢系统边界、当前用户消息和必要工具结果；除此之外不得在模型调用前静默省略或替换 canonical 消息。
 - 摘要必须保留继续开发所需的关键事实，不能因为摘要或投影丢失普通回答、工具结果和错误信息。
 - 同一次 assistant tool call 与其全部 tool result 是不可拆分的上下文组；压缩要么保留整组，要么把整组交给压缩，不能留下悬空调用或孤立结果。
-- OpenAI Responses 手动上下文必须保留并回传上一轮 output items；官方端点请求 `reasoning.encrypted_content`，使推理与 function call continuation 不被消息文本替代。Chat Completions 则保留累计 `messages` 顺序。
+- OpenAI Responses 手动上下文必须保留并回传上一轮 output items；官方端点请求 `reasoning.encrypted_content`，使推理与 function call continuation 不被消息文本替代。Chat Completions 保留累计 `messages` 顺序，并只持久化受支持 provider profile 的 reasoning 续接白名单。
 - 官方 OpenAI 请求的稳定系统指令、工具定义和既有消息必须位于动态用户输入之前；`prompt_cache_key` 只能由稳定协议事实生成，不能随 conversation id、run id 或本轮动态正文变化。缓存命中、写入和未缓存 token 以 provider usage 为准。
 
 普通 Agent loop 内不做任务完成判断。上下文压缩服务于 loop 连续运行，而不是替模型总结任务或决定停止。
@@ -136,7 +140,7 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 - 附件字节、未知 provider 私有字段、悬空 continuation 和无法证明结果的内部执行对象一律不持久化，不能为了“续跑”伪造 tool call/result 对。
 - 开发期旧 snapshot 直接视为不兼容数据；不得从可见回答、event payload 或当前全局配置迁移、双读或猜测回填。
 
-恢复审批时仍必须匹配原 confirmation id；不允许因为重新进入 loop 而绕过确认。
+恢复审批时仍必须匹配原 confirmation id；不允许因为重新进入 loop 而绕过确认。进程重启导致 live continuation 丢失时，Ordinary 必须为待审批调用记录“未执行并已取消”的真实 tool result，再进入 blocked，不能留下孤立 assistant tool call 或重放命令。
 
 ## 禁止事项
 

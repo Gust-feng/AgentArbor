@@ -69,6 +69,7 @@ export function createMinimalXlsxBuffer(): Buffer {
       "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>",
       "<Override PartName=\"/xl/worksheets/sheet2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>",
       "<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>",
+      "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>",
       "</Types>",
     ].join(""),
     "xl/workbook.xml": [
@@ -85,6 +86,7 @@ export function createMinimalXlsxBuffer(): Buffer {
       "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
       "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>",
       "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet2.xml\"/>",
+      "<Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>",
       "</Relationships>",
     ].join(""),
     "xl/sharedStrings.xml": [
@@ -92,23 +94,38 @@ export function createMinimalXlsxBuffer(): Buffer {
       "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
       "<si><t>region</t></si>",
       "<si><t>revenue</t></si>",
+      "<si><t>active</t></si>",
+      "<si><t>started</t></si>",
+      "<si><t>optional</t></si>",
       "<si><t>north</t></si>",
       "<si><t>notes</t></si>",
       "</sst>",
+    ].join(""),
+    "xl/styles.xml": [
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+      "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
+      "<numFmts count=\"1\"><numFmt numFmtId=\"164\" formatCode=\"yyyy-mm-dd\"/></numFmts>",
+      "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\"/></cellStyleXfs>",
+      "<cellXfs count=\"2\"><xf numFmtId=\"0\"/><xf numFmtId=\"164\" applyNumberFormat=\"1\"/></cellXfs>",
+      "</styleSheet>",
     ].join(""),
     "xl/worksheets/sheet1.xml": [
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
       "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
       "<sheetData>",
-      "<row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c></row>",
-      "<row r=\"2\"><c r=\"A2\" t=\"s\"><v>2</v></c><c r=\"B2\"><v>1200</v></c></row>",
+      "<row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c><c r=\"C1\" t=\"s\"><v>2</v></c><c r=\"D1\" t=\"s\"><v>3</v></c><c r=\"E1\" t=\"s\"><v>4</v></c></row>",
+      "<row r=\"2\"><c r=\"A2\" t=\"s\"><v>5</v></c><c r=\"B2\"><v>1200</v></c><c r=\"C2\" t=\"b\"><v>1</v></c><c r=\"D2\" s=\"1\"><v>45292</v></c></row>",
+      ...Array.from({ length: 203 }, (_value, index) => {
+        const rowNumber = index + 3;
+        return `<row r=\"${rowNumber}\"><c r=\"A${rowNumber}\" t=\"s\"><v>5</v></c><c r=\"B${rowNumber}\"><v>${rowNumber}</v></c></row>`;
+      }),
       "</sheetData>",
       "</worksheet>",
     ].join(""),
     "xl/worksheets/sheet2.xml": [
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
       "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
-      "<sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>3</v></c></row></sheetData>",
+      "<sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>6</v></c></row></sheetData>",
       "</worksheet>",
     ].join(""),
   });

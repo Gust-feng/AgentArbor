@@ -113,6 +113,7 @@ export function createInspectContextAttachmentTableTool(options: ContextAttachme
       const table = await loadTableTarget(entry, target, {
         sheetName: stringOrUndefined(record.sheetName),
         sheetIndex: positiveInteger(record.sheetIndex),
+        abortSignal: context.abortSignal,
       });
       if (!table.supported) {
         return unsupportedTableResult({
@@ -222,6 +223,7 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
       const table = await loadTableTarget(entry, target, {
         sheetName: stringOrUndefined(record.sheetName),
         sheetIndex: positiveInteger(record.sheetIndex),
+        abortSignal: context.abortSignal,
       });
       if (!table.supported) {
         return unsupportedTableResult({
@@ -301,6 +303,7 @@ async function loadTableTarget(
   options: {
     readonly sheetName?: string;
     readonly sheetIndex?: number;
+    readonly abortSignal?: AbortSignal;
   }
 ): Promise<
   | { readonly supported: true; readonly parsed: ParsedAttachmentTable; readonly bytes: number }
@@ -324,10 +327,11 @@ async function loadTableTarget(
     if (stat.size > MAX_SPREADSHEET_BYTES) {
       return { supported: false, reason: "spreadsheet_file_too_large", bytes: stat.size };
     }
-    const parsed = await readXlsxTable(target.targetAbsolutePath, options).catch((error: unknown) => ({
-      supported: false as const,
-      reason: xlsxReadErrorReason(error),
-    }));
+    const parsed = await readXlsxTable(target.targetAbsolutePath, options).catch((error: unknown) => {
+      throwIfAborted(options.abortSignal);
+      return { supported: false as const, reason: xlsxReadErrorReason(error) };
+    });
+    throwIfAborted(options.abortSignal);
     return parsed.supported
       ? { supported: true, parsed: parsed.table, bytes: stat.size }
       : { supported: false, reason: parsed.reason, bytes: stat.size };

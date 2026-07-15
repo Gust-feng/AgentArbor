@@ -283,20 +283,117 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
       TOOL_CONTEXT,
       permission
     );
-    const modelVisible = JSON.stringify([listed.output, inspected.output, read.output]);
+    const notes = await center.execute(
+      {
+        callId: "call:inspect-xlsx-notes",
+        toolName: "inspect_context_attachment_table",
+        input: { attachmentId: "ctx_workbook", sheetName: "notes", sampleRows: 1 },
+      },
+      TOOL_CONTEXT,
+      permission,
+    );
+    const bounded = await center.execute(
+      {
+        callId: "call:read-xlsx-bounded",
+        toolName: "read_context_attachment_table",
+        input: { attachmentId: "ctx_workbook", sheetName: "Sales", startRow: 2, rowCount: 999 },
+      },
+      TOOL_CONTEXT,
+      permission,
+    );
+    const modelVisible = JSON.stringify([listed.output, inspected.output, read.output, notes.output, bounded.output]);
 
     assert.equal(listed.status, "completed");
     assert.equal(inspected.status, "completed");
     assert.equal(read.status, "completed");
+    assert.equal(notes.status, "completed");
+    assert.equal(bounded.status, "completed");
     assert.equal(modelVisible.includes("\"format\":\"spreadsheet\""), true);
     assert.equal(modelVisible.includes("\"canReadTable\":true"), true);
     assert.equal(modelVisible.includes("\"format\":\"xlsx\""), true);
     assert.equal(modelVisible.includes("\"sheetName\":\"Sales\""), true);
     assert.equal(modelVisible.includes("\"sheets\":[\"Sales\",\"Notes\"]"), true);
+    assert.equal(asRecord(notes.output).sheetName, "Notes");
     assert.equal(modelVisible.includes("north"), true);
     assert.equal(modelVisible.includes("1200"), true);
+    assert.equal(modelVisible.includes("\"active\":\"TRUE\""), true);
+    assert.equal(modelVisible.includes("\"started\":\"2024-01-01T00:00:00.000Z\""), true);
+    assert.equal(modelVisible.includes("\"optional\":\"\""), true);
+    assert.equal(asRecord(bounded.output).rowsReturned, 200);
+    assert.equal(asRecord(bounded.output).truncated, true);
     assert.equal(modelVisible.includes(xlsxFile), false);
     assert.equal(modelVisible.includes("local-file:"), false);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(localRoot, { recursive: true, force: true });
+  }
+});
+
+test("context attachment XLSX reads fail explicitly for corruption, cancellation, and size limits", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
+  const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-xlsx-failures-"));
+  const validFile = path.join(localRoot, "valid.xlsx");
+  const corruptFile = path.join(localRoot, "corrupt.xlsx");
+  const largeFile = path.join(localRoot, "large.xlsx");
+  await fs.writeFile(validFile, createMinimalXlsxBuffer());
+  await fs.writeFile(corruptFile, "not an xlsx archive", "utf8");
+  await fs.writeFile(largeFile, Buffer.alloc(8 * 1024 * 1024 + 1));
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [validFile, corruptFile, largeFile].map((file, index) => ({
+        attachmentId: ["ctx_valid_xlsx", "ctx_corrupt_xlsx", "ctx_large_xlsx"][index],
+        ref: `local-file:${file}`,
+        kind: "file" as const,
+        title: path.basename(file),
+        metadata: {
+          byteLength: index === 2 ? 8 * 1024 * 1024 + 1 : undefined,
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          available: true,
+        },
+      })),
+      permissionBoundaryRefs: [validFile, corruptFile, largeFile].map((file) => `read:local-file:${file}`),
+    });
+    const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
+    const permission = {
+      callerAgentId: TOOL_CONTEXT.callerAgentId,
+      allowedTools: ["inspect_context_attachment_table"],
+    };
+
+    const corrupt = await center.execute(
+      {
+        callId: "call:inspect-corrupt-xlsx",
+        toolName: "inspect_context_attachment_table",
+        input: { attachmentId: "ctx_corrupt_xlsx" },
+      },
+      TOOL_CONTEXT,
+      permission,
+    );
+    const tooLarge = await center.execute(
+      {
+        callId: "call:inspect-large-xlsx",
+        toolName: "inspect_context_attachment_table",
+        input: { attachmentId: "ctx_large_xlsx" },
+      },
+      TOOL_CONTEXT,
+      permission,
+    );
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await center.execute(
+      {
+        callId: "call:inspect-cancelled-xlsx",
+        toolName: "inspect_context_attachment_table",
+        input: { attachmentId: "ctx_valid_xlsx" },
+      },
+      { ...TOOL_CONTEXT, abortSignal: controller.signal },
+      permission,
+    );
+
+    assert.equal(corrupt.status, "completed");
+    assert.equal(asRecord(corrupt.output).reason, "xlsx_parse_failed");
+    assert.equal(tooLarge.status, "completed");
+    assert.equal(asRecord(tooLarge.output).reason, "spreadsheet_file_too_large");
+    assert.equal(cancelled.status, "cancelled");
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
     await fs.rm(localRoot, { recursive: true, force: true });

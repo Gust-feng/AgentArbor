@@ -2,13 +2,13 @@ import type { ConfigResponse, ModelProviderModelCatalog, ToolConfirmationPolicy 
 
 export type ComposerReasoningEffort = "" | "low" | "medium" | "high";
 export type ComposerToolConfirmationPolicy = ToolConfirmationPolicy;
-export type VisibleAiMode = "none" | "fake" | "openai-compatible" | "openai-responses";
+export type VisibleAiMode = "none" | "openai-compatible" | "openai-responses";
 
 /**
  * Agent 模式选择：用户在 Desktop Shell 入口处显式选择的 agent 运行路径。
  *
  * 与 {@link VisibleAiMode} 严格区分：
- * - VisibleAiMode 是模型 provider 选择（none/fake/openai-compatible/openai-responses），
+ * - VisibleAiMode 是模型 provider 选择（none/openai-compatible/openai-responses），
  *   决定走哪个模型接入层；
  * - AgentMode 是 agent 运行编排路径（普通 Agent 主循环 / Deep 地下认知运行时），
  *   决定提交目标（/api/conversations vs /api/deep/*）和视图投影。
@@ -39,7 +39,6 @@ export function mergeConfigResponse(previous: ConfigResponse | undefined, incomi
 }
 export function normalizeVisibleAiMode(mode: VisibleAiMode | undefined): VisibleAiMode {
   return mode === "none" ||
-    mode === "fake" ||
     mode === "openai-compatible" ||
     mode === "openai-responses"
     ? mode

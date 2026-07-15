@@ -114,7 +114,6 @@ function modelProfileHasId(profile: ConfigModelProfile): profile is ConfigModelP
 
 function shouldShowProviderIcon(profile: ConfigModelProfile): boolean {
   return profile.secretConfigured === true &&
-    profile.defaultAiMode !== "fake" &&
     profile.defaultAiMode !== "none";
 }
 

@@ -9,7 +9,7 @@ export type ConfigResponse = {
     readonly protocolKind?: "openai_responses" | "openai_compatible_chat_completions";
     readonly baseUrl?: string;
     readonly model?: string;
-    readonly defaultAiMode?: "none" | "fake" | "openai-compatible" | "openai-responses";
+    readonly defaultAiMode?: "none" | "openai-compatible" | "openai-responses";
     readonly secretConfigured?: boolean;
   };
   readonly profile?: ModelProviderProfile;

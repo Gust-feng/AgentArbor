@@ -127,6 +127,7 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       processTerminator: options.processTerminator,
       appUpdateService: resolveAppUpdateService(options),
       ordinaryAgentExecution: options.ordinaryAgentExecution,
+      testOnlyAllowFakeModel: options.testOnlyAllowFakeModel,
       runtimePaths,
     });
   }
@@ -149,6 +150,7 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     processTerminator: options.processTerminator,
     appUpdateService: resolveAppUpdateService(options),
     ordinaryAgentExecution: options.ordinaryAgentExecution,
+    testOnlyAllowFakeModel: options.testOnlyAllowFakeModel,
     runtimePaths,
   });
 }
@@ -180,6 +182,7 @@ function assemblePanelRuntime(input: {
   readonly processTerminator?: ProcessTerminator;
   readonly appUpdateService: AppUpdateServiceLike;
   readonly ordinaryAgentExecution?: import("../ordinary-agent/contracts.js").OrdinaryExecutionPort;
+  readonly testOnlyAllowFakeModel?: boolean;
 }): PanelRuntime {
   const activeRequestJobs = new Set<Promise<void>>();
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
@@ -206,6 +209,7 @@ function assemblePanelRuntime(input: {
         providerFetch: input.providerFetch,
         processRegistry,
         toolOutputStore,
+        testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
       },
       agentDefinition: MULTI_AGENT_CAPABILITY_PROFILE,
     }),
@@ -230,6 +234,7 @@ function assemblePanelRuntime(input: {
       processRegistry,
       processTerminator,
       toolOutputStore,
+      testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
     },
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: ({ ref, instructions }) =>

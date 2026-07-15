@@ -42,6 +42,7 @@ export type AgentRunResourceHost = {
   /** Present when a run-scoped Host lease is allowed to terminate owned processes. */
   readonly processTerminator?: ProcessTerminator;
   readonly toolOutputStore?: ToolOutputStore;
+  readonly testOnlyAllowFakeModel?: boolean;
 };
 
 export type AgentRunResources = {
@@ -93,6 +94,13 @@ export async function prepareAgentRunResources(
 ): Promise<AgentRunResources> {
   if (aiMode === "none") {
     throw createModelRuntimeDisabledConfigurationError();
+  }
+  if (aiMode === "fake" && runtime.testOnlyAllowFakeModel !== true) {
+    throw new PanelHttpError(
+      400,
+      "unsupported_model_provider",
+      "Fake model execution is available only through an explicit test runtime.",
+    );
   }
   const capabilitySnapshot = input.capabilitySnapshot;
   if (

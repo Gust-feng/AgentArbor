@@ -150,6 +150,7 @@ const runModeSchema = z.enum(["agent", "deep"]);
 const toolConfirmationPolicySchema = z.enum(["prompt", "full_access"]);
 const skillTriggerModeSchema = z.enum(["keyword", "model"]);
 const aiModeSchema = z.enum(["none", "fake", "openai-compatible", "openai-responses"]);
+const configuredAiModeSchema = z.enum(["none", "openai-compatible", "openai-responses"]);
 
 const ordinaryRunRequestSchema = z.preprocess(normalizeRequestObject, z.object({
   goal: optionalTrimmedStringSchema,
@@ -241,7 +242,7 @@ export function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput 
     baseUrl: optionalString(record.baseUrl),
     model: optionalString(record.model),
     clearModel: booleanOrUndefined(record.clearModel),
-    defaultAiMode: parseOptionalAiMode(record.defaultAiMode, "默认 AI 模式无效。"),
+    defaultAiMode: parseOptionalConfiguredAiMode(record.defaultAiMode, "默认 AI 模式无效。"),
     enabled: booleanOrUndefined(record.enabled),
     apiKey: optionalString(record.apiKey),
     clearApiKey: booleanOrUndefined(record.clearApiKey),
@@ -761,6 +762,13 @@ function parseModelOverride(value: unknown): PanelRunInput["modelOverride"] {
 
 function parseOptionalAiMode(value: unknown, invalidMessage: string): ModelRuntimeMode | undefined {
   return parseOptionalEnum(aiModeSchema, value, "invalid_ai_mode", invalidMessage);
+}
+
+function parseOptionalConfiguredAiMode(
+  value: unknown,
+  invalidMessage: string,
+): import("../../domain/config/index.js").ConfiguredModelRuntimeMode | undefined {
+  return parseOptionalEnum(configuredAiModeSchema, value, "invalid_ai_mode", invalidMessage);
 }
 
 function parseOptionalEnum<T>(

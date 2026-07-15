@@ -26,7 +26,7 @@ test("panel config API keeps model provider and search keys out of ordinary resp
         logoDataUrl,
         baseUrl: "https://provider.example/",
         model: "panel-model",
-        defaultAiMode: "fake",
+        defaultAiMode: "openai-compatible",
         apiKey: secret,
       },
     });

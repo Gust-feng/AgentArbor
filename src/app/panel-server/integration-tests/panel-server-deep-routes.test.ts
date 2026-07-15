@@ -36,7 +36,15 @@ import {
 import type { DeepRunStreamEvent } from "../../deep/deep-events.js";
 import { createFileSystemDeepConversationStore } from "../../deep/deep-conversation.js";
 import { createFileSystemDeepRunRecordStore, type DeepRunRecord } from "../../deep/deep-runtime.js";
-import { startLocalPanelServer, type PanelProviderFetch } from "../../panel-server.js";
+import {
+  startLocalPanelServer as startBasePanelServer,
+  type PanelProviderFetch,
+  type PanelServerOptions,
+} from "../../panel-server.js";
+
+function startLocalPanelServer(options: PanelServerOptions) {
+  return startBasePanelServer({ ...options, testOnlyAllowFakeModel: true });
+}
 import { createFileSystemDeepChildMessageStore } from "../../deep/deep-child-messages.js";
 import {
   deepChildInstructionQueueRejectionError,

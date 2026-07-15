@@ -11,7 +11,7 @@ import type {
 
 export type SubAgentSourceKind = "builtin" | "project" | "user" | "plugin" | "custom";
 
-export type ConfiguredModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
+export type ConfiguredModelRuntimeMode = "none" | "openai-compatible" | "openai-responses";
 
 export type ConfiguredWebSearchProvider =
   | "tavily"

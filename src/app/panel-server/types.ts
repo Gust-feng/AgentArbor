@@ -27,6 +27,8 @@ export type PanelServerOptions = {
   readonly updateManifestFetch?: AppUpdateFetch;
   /** Explicit test seam; production uses the composed OpenAI Agent loop port. */
   readonly ordinaryAgentExecution?: OrdinaryExecutionPort;
+  /** Explicit test seam for deterministic Multi-Agent integration tests. */
+  readonly testOnlyAllowFakeModel?: boolean;
 };
 
 export type PanelContextAttachmentSelection = {

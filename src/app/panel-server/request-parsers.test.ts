@@ -70,6 +70,7 @@ test("parseConfigUpdate accepts only the supported OpenAI protocol boundary", ()
   });
   assertPanelError(() => parseConfigUpdate({ providerKind: "anthropic" }), "invalid_model_provider_kind");
   assertPanelError(() => parseConfigUpdate({ protocolKind: "anthropic_messages" }), "invalid_model_protocol_kind");
+  assertPanelError(() => parseConfigUpdate({ defaultAiMode: "fake" }), "invalid_ai_mode");
 });
 
 test("parseRunInput accepts the canonical Panel payload and rejects missing or invalid fields", () => {

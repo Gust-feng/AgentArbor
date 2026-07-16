@@ -51,6 +51,7 @@ export type StartupIntroState = {
 
 type StartupIntroOptions = {
   readonly startupAnimationEnabled?: boolean;
+  readonly startupAnimationAllowed?: boolean;
 };
 
 type StartupIntroWindowExpansion = {
@@ -192,7 +193,7 @@ export function useStartupIntro(
   options: StartupIntroOptions = {},
 ): StartupIntroState {
   const runtimeMode = readStartupRuntimeMode();
-  const startupAnimationEnabled = options.startupAnimationEnabled === true;
+  const startupAnimationEnabled = options.startupAnimationEnabled === true && options.startupAnimationAllowed !== false;
   const [phase, setPhase] = useState<StartupIntroPhase>(() => startupAnimationEnabled ? "loading" : "done");
   const [reveal, setReveal] = useState<StartupIntroReveal | undefined>(undefined);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(readPrefersReducedMotion);

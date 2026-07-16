@@ -22,6 +22,7 @@ import { createInitialAppState } from "./app-state";
 
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
+  const [startupAnimationAllowed] = useState(readStartupAnimationAllowed);
   const taskState = useAppWorkbenchTaskState(app);
   const {
     goal,
@@ -239,7 +240,7 @@ export function App(): React.ReactElement {
     currentRun,
   });
   const isBootstrapping = isBootstrappingApp(app);
-  const startupIntro = useStartupIntro(isBootstrapping, { startupAnimationEnabled });
+  const startupIntro = useStartupIntro(isBootstrapping, { startupAnimationEnabled, startupAnimationAllowed });
   const startupIntroRootStyle = startupIntroRootStyleFrom(startupIntro);
   const startupIntroActive = isStartupIntroActive(startupIntro);
   const sidebarProps = buildSidebarProps({
@@ -335,6 +336,10 @@ export function App(): React.ReactElement {
       startupIntroOverlayProps={startupIntroOverlayProps}
     />
   );
+}
+
+function readStartupAnimationAllowed(): boolean {
+  return document.documentElement.dataset.desktopStartupAnimation !== "consumed";
 }
 
 function errorText(error: unknown, fallback: string): string {

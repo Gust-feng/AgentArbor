@@ -39,8 +39,17 @@ test("disabled startup animation begins directly in the completed phase", () => 
   expect(screen.getByTestId("startup-state").textContent).toBe("done:none");
 });
 
-function StartupStateProbe(): React.ReactElement {
-  const state = useStartupIntro(false, { startupAnimationEnabled: false });
+test("startup animation already consumed by the desktop host begins directly in the completed phase", () => {
+  render(<StartupStateProbe startupAnimationEnabled startupAnimationAllowed={false} />);
+
+  expect(screen.getByTestId("startup-state").textContent).toBe("done:none");
+});
+
+function StartupStateProbe(props: {
+  readonly startupAnimationEnabled?: boolean;
+  readonly startupAnimationAllowed?: boolean;
+} = {}): React.ReactElement {
+  const state = useStartupIntro(false, props);
   return <output data-testid="startup-state">{`${state.phase}:${state.overlayPhase ?? "none"}`}</output>;
 }
 

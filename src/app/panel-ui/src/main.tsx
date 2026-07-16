@@ -26,6 +26,8 @@ if (window.agentarborDesktop !== undefined) {
 const startupMode = new URLSearchParams(window.location.search).get("agentarborStartup");
 if (startupMode === "main") {
   document.documentElement.dataset.desktopStartupMode = startupMode;
+  document.documentElement.dataset.desktopStartupAnimation =
+    window.agentarborDesktop?.consumeStartupAnimation() === true ? "allowed" : "consumed";
 }
 
 createRoot(document.getElementById("root")!).render(

@@ -90,6 +90,9 @@ contextBridge.exposeInMainWorld("agentarborDesktop", {
   beginStartupWindowExpansion: () => {
     return ipcRenderer.invoke("agentarbor:startup-window-begin-expand") as Promise<DesktopStartupWindowBeginResult>;
   },
+  consumeStartupAnimation: (): boolean => {
+    return ipcRenderer.sendSync("agentarbor:startup-animation-consume") === true;
+  },
   notifyStartupOverlayReady: () => {
     ipcRenderer.send("agentarbor:startup-overlay-ready");
   },

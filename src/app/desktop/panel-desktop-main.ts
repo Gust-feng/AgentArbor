@@ -46,6 +46,7 @@ const startupHandoffFallbackTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>(
 const startupNativeControlRestoreTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const STARTUP_WINDOW_EXPAND_CHANNEL = "agentarbor:startup-window-expand";
 const STARTUP_WINDOW_BEGIN_EXPAND_CHANNEL = "agentarbor:startup-window-begin-expand";
+const STARTUP_ANIMATION_CONSUME_CHANNEL = "agentarbor:startup-animation-consume";
 const STARTUP_OVERLAY_READY_CHANNEL = "agentarbor:startup-overlay-ready";
 const STARTUP_MAIN_READY_CHANNEL = "agentarbor:startup-main-ready";
 const STARTUP_MAIN_HANDOFF_VISIBLE_CHANNEL = "agentarbor:startup-main-handoff-visible";
@@ -160,6 +161,7 @@ type DesktopStartupWindowState = {
   handoffCompleted: boolean;
   expansionStarted: boolean;
   expansionFinished: boolean;
+  animationConsumed: boolean;
   expansionResult: DesktopStartupWindowExpansionResult | undefined;
   readyToShow: boolean;
   overlayReady: boolean;
@@ -353,6 +355,7 @@ function createElectronPanelWindow(
       handoffCompleted: false,
       expansionStarted: false,
       expansionFinished: false,
+      animationConsumed: false,
       expansionResult: undefined,
       readyToShow: false,
       overlayReady: false,
@@ -468,6 +471,20 @@ function installStartupWindowExpansionBridge(): void {
     const window = startupWindowFromPanelEvent(event);
     if (window === undefined) return createNoopStartupWindowBeginResult();
     return beginStartupWindowExpansion(window);
+  });
+  ipcMain.on(STARTUP_ANIMATION_CONSUME_CHANNEL, (event: IpcMainEvent) => {
+    const window = startupWindowFromPanelEvent(event);
+    if (window === undefined) {
+      event.returnValue = false;
+      return;
+    }
+    const state = startupWindowStates.get(window);
+    if (state === undefined || state.animationConsumed) {
+      event.returnValue = false;
+      return;
+    }
+    state.animationConsumed = true;
+    event.returnValue = true;
   });
   ipcMain.on(STARTUP_OVERLAY_READY_CHANNEL, (event: IpcMainEvent) => {
     const window = panelWindowFromEvent(event);

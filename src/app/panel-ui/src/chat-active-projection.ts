@@ -159,6 +159,7 @@ export function projectChatActive<TDeliverable, TPending>(
 }
 
 const terminalStatuses = new Set<WorklineTaskStatus>(["completed", "failed", "cancelled", "blocked"]);
+const terminalProblemStatuses = new Set<WorklineTaskStatus>(["failed", "cancelled", "blocked"]);
 const refreshingStatuses = new Set<WorklineTaskStatus>(["queued", "planning", "running", "pending"]);
 
 function canUseConversationTurnAsAnswer<TPending>(input: {
@@ -231,6 +232,8 @@ function shouldShowStatusNotice(
   if (problem === undefined) return false;
   if (appError !== undefined) return true;
   if (assistantTurn === undefined) return true;
-  if (run?.status === "failed" && assistantTurn.status !== "failed") return true;
-  return run?.status === "blocked" || run?.status === "paused";
+  if (run !== undefined && terminalProblemStatuses.has(run.status)) {
+    return assistantTurn.status !== run.status;
+  }
+  return run?.status === "paused";
 }

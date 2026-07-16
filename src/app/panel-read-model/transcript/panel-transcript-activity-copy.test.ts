@@ -324,6 +324,11 @@ test("directory listing activity uses total counts and structured sections", () 
   assert.equal(items[0]?.copy.detail, "当前目录 · 29 项 · 深度 1");
   assert.deepEqual(items[0]?.badges?.map((badge) => badge.label), ["29 项", "深度 1", "1 个异常目录"]);
   assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目", "异常目录"]);
+  assert.equal(items[0]?.expandedSections?.[0]?.format, "path_list");
+  assert.deepEqual(items[0]?.expandedSections?.[0]?.items, [
+    { title: "README.md", meta: [{ value: "file" }, { value: "120 B" }], monospace: true },
+    { title: "src", meta: [{ value: "directory" }], monospace: true },
+  ]);
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "摘要" || section.title === "详情"), false);
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "目录"), false);
 });
@@ -393,6 +398,11 @@ test("file search activity keeps query, matches, and skipped details structured"
   assert.equal(items[0]?.copy.detail, "needle · 当前目录 · 2 处匹配");
   assert.deepEqual(items[0]?.badges?.map((badge) => badge.label), ["2 处匹配", "12 个文件", "3 个跳过"]);
   assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["命中", "跳过"]);
+  assert.equal(items[0]?.expandedSections?.[0]?.format, "path_list");
+  assert.deepEqual(items[0]?.expandedSections?.[0]?.items, [
+    { title: "src/index.ts:4", detail: "needle found here", monospace: true },
+    { title: "README.md:8", detail: undefined, monospace: true },
+  ]);
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "查询"), false);
 });
 
@@ -511,6 +521,35 @@ test("tool activity copy keeps result-only search tools visible", () => {
     label: "搜索",
     detail: "AgentArbor README",
   });
+});
+
+test("search activity keeps sources structured for the evidence view", () => {
+  const item = displayActivityItemsForNodes(activityVisibleNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "web_search",
+      display: {
+        kind: "search_results",
+        query: "AgentArbor",
+        results: [{
+          title: "AgentArbor README",
+          url: "https://example.com/readme",
+          source: "example.com",
+          snippet: "Desktop general-agent workbench.",
+        }],
+      },
+    }),
+  ]))[0];
+
+  assert.equal(item?.expandedSections?.[0]?.format, "source_list");
+  assert.deepEqual(item?.expandedSections?.[0]?.items, [{
+    title: "AgentArbor README",
+    detail: "Desktop general-agent workbench.",
+    href: "https://example.com/readme",
+    meta: [{ value: "example.com" }],
+  }]);
 });
 
 test("tool activity copy keeps preview-only read results visible", () => {

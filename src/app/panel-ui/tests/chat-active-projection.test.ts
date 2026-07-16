@@ -220,6 +220,27 @@ test("active chat projection treats blocked runs as non-running and shows the pr
   });
 });
 
+test("active chat projection does not repeat a blocked problem owned by the assistant turn", () => {
+  const projection = projectChatActive({
+    conversation: {
+      turns: [
+        userTurn("user-1", "继续"),
+        { ...assistantTurn("assistant-1", "进程重启后执行已中断。", "blocked"), runId: "run-1" },
+      ],
+      activeRunId: "run-1",
+    },
+    run: run("run-1", "blocked", 8),
+    transcriptNodes: [],
+    problem: {
+      title: "需要处理",
+      message: "进程重启后执行已中断。",
+      tone: "warning",
+    },
+  });
+
+  assert.equal(projection.statusNotice, undefined);
+});
+
 test("active chat projection hides completed problem when assistant turn already failed visibly", () => {
   const projection = projectChatActive({
     conversation: {

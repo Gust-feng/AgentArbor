@@ -16,14 +16,14 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 36px;
+  gap: 40px;
 }
 
 .transcript-list {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 40px;
+  gap: 46px;
 }
 
 .transcript-load-earlier {
@@ -294,7 +294,7 @@
   display: grid;
   width: min(var(--panel-reading-width), 100%);
   min-width: 0;
-  gap: var(--space-5);
+  gap: var(--space-4);
   color: var(--fg);
   font-size: 15px;
   line-height: 1.78;
@@ -304,7 +304,7 @@
   flex: 1 1 auto;
   width: min(var(--panel-reading-width), 100%);
   max-width: 100%;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
 
 .assistant-workline-collapsed .assistant-message-body {
@@ -314,18 +314,13 @@
 .assistant-answer {
   min-width: 0;
   max-width: 100%;
-  border-left: var(--border-width-thin) solid var(--message-assistant-border);
-  padding: 1px 0 1px var(--space-4);
+  padding: 0;
 }
 
 .assistant-message[data-entering] .assistant-answer {
   transform-origin: top center;
   animation: border-grow-down 360ms var(--motion-ease-spring) both;
   animation-delay: calc(var(--motion-stagger-unit) * 2);
-}
-
-.assistant-workline .assistant-answer {
-  border-left: var(--border-width-thin) solid color-mix(in oklch, var(--message-assistant-border) 88%, var(--accent));
 }
 
 .assistant-answer-pending {
@@ -341,10 +336,13 @@
 }
 
 .assistant-response-meta {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 7px;
-  margin-top: -6px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: -2px;
 }
 
 .assistant-response-meta .turn-actions {
@@ -356,12 +354,12 @@
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
-  gap: 5px 12px;
+  gap: 5px 10px;
   margin-top: 0;
-  color: color-mix(in oklch, var(--fg) 34%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 38%, var(--muted));
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: var(--weight-heading);
+  font-size: 10.5px;
+  font-weight: var(--weight-body);
   letter-spacing: 0;
   line-height: 1.35;
 }
@@ -390,7 +388,7 @@
   padding-right: 0;
   color: var(--fg);
   font-size: 15px;
-  line-height: 1.82;
+  line-height: 1.76;
   white-space: normal;
   text-wrap: wrap;
   overflow-wrap: anywhere;

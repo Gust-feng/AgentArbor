@@ -302,6 +302,43 @@ test("conversation display list keeps failed assistant turns on the unified work
   assert.equal(display.state.assistantWorkflowsByTurnId.has("assistant-1"), true);
 });
 
+test("conversation display list gives blocked turns one terminal notice instead of a body and activity echo", () => {
+  const turns = [
+    turn("user-1", "user", "继续", "completed"),
+    { ...turn("assistant-1", "assistant", "执行在进程重启后被中断。", "blocked"), runId: "run-1" },
+  ];
+  const display = projectConversationDisplayList({
+    previous: createConversationWorkflowDisplayState(),
+    conversationId: "conversation-1",
+    projectedTurns: [projected(turns[0]!), projected(turns[1]!, "run-1")],
+    turns,
+    cachedNodesByRunId: {
+      "run-1": [
+        transcriptNode({
+          nodeId: "run-blocked-1",
+          runId: "run-1",
+          sequence: 1,
+          kind: "system",
+          eventType: "run.blocked",
+          phase: "blocked",
+          summary: "执行在进程重启后被中断。",
+        }),
+      ],
+    },
+    currentRunNodes: [],
+  });
+
+  const item = display.items[1];
+
+  assert.equal(item?.kind, "assistant");
+  assert.equal(item?.kind === "assistant" ? item.terminalStatus : undefined, "blocked");
+  assert.deepEqual(item?.kind === "assistant" ? item.failure : undefined, {
+    previous: "",
+    error: "执行在进程重启后被中断。",
+  });
+  assert.deepEqual(item?.kind === "assistant" ? item.workflow?.segments : undefined, []);
+});
+
 test("conversation display list projects standalone failed runs like failed assistant turns", () => {
   const turns = [
     turn("user-1", "user", "继续", "completed"),

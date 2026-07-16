@@ -29,6 +29,7 @@ import {
   type AssistantWorkflowDisplayState,
 } from "../panel-read-model/assistant/panel-assistant-workflow-display.js";
 import {
+  type AssistantTerminalStatus,
   assistantFailureParts,
   transcriptNodesWithoutFailureEcho,
   type AssistantFailureParts,
@@ -152,7 +153,7 @@ export function projectStandaloneAssistantWorkflowDisplay<
   readonly runId?: string;
   readonly content: string;
   readonly deliverable?: AssistantDeliverableLike;
-  readonly failed?: boolean;
+  readonly terminalStatus?: AssistantTerminalStatus;
   readonly transcriptNodes?: readonly TNode[];
   readonly pending?: TPending;
   readonly live?: boolean;
@@ -172,7 +173,7 @@ export function projectStandaloneAssistantWorkflowDisplay<
   const previousWorkflow = previousRunWorkflow ?? (previous?.standaloneAssistant?.key === input.key
     ? previous.standaloneAssistant.workflow
     : undefined);
-  const failure = input.failed === true ? assistantFailureParts(input.content) : undefined;
+  const failure = input.terminalStatus === undefined ? undefined : assistantFailureParts(input.content);
   const workflowTranscriptNodes = transcriptNodesWithoutFailureEcho(
     input.transcriptNodes,
     failure,

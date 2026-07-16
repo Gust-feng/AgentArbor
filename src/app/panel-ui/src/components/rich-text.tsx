@@ -1,6 +1,7 @@
 import React from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { CopyActionButton } from "./copy-action-button";
 
 export function RichText({ text }: { readonly text: string }): React.ReactElement {
   return (
@@ -38,6 +39,19 @@ function preLanguage(children: React.ReactNode): string | undefined {
     return undefined;
   }
   return codeLanguage(child.props.className);
+}
+
+function markdownNodeText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(markdownNodeText).join("");
+  }
+  if (React.isValidElement<{ readonly children?: React.ReactNode }>(node)) {
+    return markdownNodeText(node.props.children);
+  }
+  return "";
 }
 
 const markdownComponents = {
@@ -85,10 +99,17 @@ const markdownComponents = {
   },
   pre({ children }) {
     const language = preLanguage(children);
+    const code = markdownNodeText(children).replace(/\n$/u, "");
     return (
-      <pre className="rich-code-block" data-language={language}>
-        {children}
-      </pre>
+      <div className="rich-code-frame" data-language={language}>
+        <div className="rich-code-toolbar">
+          <span>{language ?? "code"}</span>
+          <CopyActionButton value={code} label="复制代码" className="rich-code-copy" />
+        </div>
+        <pre className="rich-code-block">
+          {children}
+        </pre>
+      </div>
     );
   },
   table({ children }) {

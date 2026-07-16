@@ -1114,12 +1114,9 @@ html[data-style="glass"] .user-message-wrap {
 }
 
 html[data-style="glass"] .assistant-answer {
-  border-left-color: color-mix(in oklch, var(--accent) 20%, transparent);
-  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
-  background:
-    linear-gradient(180deg, color-mix(in oklch, white 12%, transparent), transparent 42%),
-    linear-gradient(90deg, color-mix(in oklch, var(--accent) 4%, transparent), transparent 44%);
-  padding: 4px 0 4px var(--space-4);
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
 }
 
 html[data-style="glass"] .assistant-result-evidence {
@@ -1144,7 +1141,7 @@ html[data-style="glass"] .assistant-file-change-preview {
 }
 
 html[data-style="glass"] .assistant-answer .rich-blockquote,
-html[data-style="glass"] .rich-code-block,
+html[data-style="glass"] .rich-code-frame,
 html[data-style="glass"] .rich-table-wrap {
   box-shadow:
     var(--shadow-soft),
@@ -1518,13 +1515,6 @@ html[data-style="glass"] .transcript-load-earlier:hover {
     inset 0 1px 0 color-mix(in oklch, white 34%, transparent);
 }
 
-/* ---- Agent activity expanded detail ---- */
-html[data-style="glass"] .agent-activity-expanded-detail {
-  border-left-color: color-mix(in oklch, var(--accent) 28%, transparent);
-  background: transparent;
-  box-shadow: none;
-}
-
 /* ---- Sidebar skeleton rows ---- */
 html[data-style="glass"] .sidebar-empty-row {
   border-color: color-mix(in oklch, white 28%, transparent);
@@ -1554,10 +1544,14 @@ html[data-style="glass"] .rich-inline-code {
     0 1px 2px color-mix(in oklch, var(--shadow-ink) 2%, transparent);
 }
 
-html[data-style="glass"] .rich-code-block,
+html[data-style="glass"] .rich-code-frame,
 html[data-style="glass"] .rich-table-wrap {
   backdrop-filter: saturate(1.03);
   -webkit-backdrop-filter: saturate(1.03);
+}
+
+html[data-style="glass"] .rich-code-block {
+  background: transparent;
 }
 
 html[data-style="glass"] .rich-heading-1 {

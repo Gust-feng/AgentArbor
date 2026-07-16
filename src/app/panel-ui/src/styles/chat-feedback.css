@@ -38,8 +38,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 8px;
-  opacity: 0;
+  margin-top: 0;
+  opacity: 0.46;
   transition: opacity var(--motion-enter-duration) var(--motion-ease-spring);
 }
 
@@ -48,24 +48,42 @@
   opacity: 1;
 }
 
-.turn-actions button {
+.copy-action-button {
   display: inline-flex;
+  width: 28px;
+  height: 28px;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
   border-radius: var(--radius-md);
-  padding: 4px 8px;
+  background: transparent;
+  padding: 0;
   color: var(--placeholder);
-  font-size: 12px;
-  line-height: 1.35;
+  line-height: 1;
   transition:
+    background-color var(--motion-fast-duration) var(--motion-ease-standard),
     color var(--motion-fast-duration) var(--motion-ease-standard),
     transform var(--motion-fast-duration) var(--motion-ease-snap);
 }
 
-.turn-actions button:hover {
-  transform: translateY(-1px);
+.copy-action-button:hover {
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
 }
 
-.turn-actions button:active {
+.copy-action-button:active {
   transform: scale(0.93);
+}
+
+.copy-action-button[data-state="copied"] {
+  color: color-mix(in oklch, var(--status-success) 78%, var(--fg));
+}
+
+.copy-action-button[data-state="failed"] {
+  color: color-mix(in oklch, var(--status-danger) 78%, var(--fg));
+}
+
+@media (hover: none) {
+  .turn-actions {
+    opacity: 1;
+  }
 }

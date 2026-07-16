@@ -5,7 +5,6 @@ import {
   ChevronDown,
   ChevronUp,
   Clock3,
-  Copy,
   Gauge,
   Zap,
   type LucideIcon,
@@ -20,13 +19,18 @@ import type { ConversationDisplayItem } from "../../../panel-conversation/panel-
 import { LiveStreamBox } from "./live-stream-text";
 import { RichText } from "./rich-text";
 import type { ChatModelOption } from "./chat-empty";
-import type { AssistantFailureParts } from "../../../panel-read-model/assistant/panel-assistant-failure";
+import {
+  assistantTerminalNoticeTitle,
+  type AssistantFailureParts,
+  type AssistantTerminalStatus,
+} from "../../../panel-read-model/assistant/panel-assistant-failure";
 import {
   assistantModelForTurn,
   selectedComposerModel,
   type AssistantModelBadge,
 } from "./chat-session-projection";
 import { AssistantMessageLabel } from "./assistant-message-label";
+import { CopyActionButton } from "./copy-action-button";
 import {
   AgentWorkTimeline,
   type ConfirmationProjection,
@@ -83,6 +87,7 @@ export function TranscriptChain(props: {
             <AssistantFailureMessage
               key={item.key}
               failure={item.failure}
+              terminalStatus={item.terminalStatus}
               model={model}
               workflow={item.workflow}
               showModelUsage={props.showModelUsage}
@@ -259,6 +264,7 @@ const AssistantPendingBlock = React.memo(function AssistantPendingBlock(): React
 
 type AssistantFailureMessageProps = {
   readonly failure: AssistantFailureParts;
+  readonly terminalStatus?: AssistantTerminalStatus;
   readonly model?: AssistantModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly showModelUsage: boolean;
@@ -289,7 +295,10 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
           />
         )}
         {workflow !== undefined && <AssistantResponseMeta workflow={workflow} showModelUsage={props.showModelUsage} />}
-        <AssistantFailureNotice error={props.failure.error} />
+        <AssistantFailureNotice
+          title={assistantTerminalNoticeTitle(props.terminalStatus ?? "failed")}
+          error={props.failure.error}
+        />
         {activitySegments.length > 0 && (
           <div className="assistant-failure-activity">
             {activitySegments.map((segment) => (
@@ -363,10 +372,7 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
       />
       {props.showActions && (
         <div className="turn-actions">
-          <button type="button" onClick={() => copyToClipboard(props.copyText)}>
-            <Copy size={13} />
-            复制
-          </button>
+          <CopyActionButton value={props.copyText} label="复制回答" />
         </div>
       )}
     </div>
@@ -386,10 +392,7 @@ const AssistantResponseMeta = React.memo(function AssistantResponseMeta(props: {
     <div className="assistant-response-meta">
       {showActions && (
         <div className="turn-actions">
-          <button type="button" onClick={() => copyToClipboard(props.workflow.copyText)}>
-            <Copy size={13} />
-            复制
-          </button>
+          <CopyActionButton value={props.workflow.copyText} label="复制回答" />
         </div>
       )}
       <AssistantModelUsageLine usage={usage} />
@@ -438,11 +441,12 @@ const AssistantModelUsageLine = React.memo(function AssistantModelUsageLine(prop
 });
 
 function AssistantFailureNotice(props: {
+  readonly title: string;
   readonly error: string;
 }): React.ReactElement {
   return (
     <section className="assistant-error-message assistant-failure-notice" aria-label="错误信息">
-      <strong>错误信息</strong>
+      <strong>{props.title}</strong>
       <RichText text={props.error.replace(/^错误信息[:：]\s*/u, "")} />
     </section>
   );
@@ -487,12 +491,6 @@ function assistantModelBadgesEqual(left: AssistantModelBadge | undefined, right:
     left.providerLabel === right.providerLabel &&
     left.providerIdentity === right.providerIdentity &&
     left.iconSvg === right.iconSvg;
-}
-
-function copyToClipboard(value: string): void {
-  if (navigator.clipboard !== undefined) {
-    void navigator.clipboard.writeText(value);
-  }
 }
 
 function workflowHasCollapsedActivity(

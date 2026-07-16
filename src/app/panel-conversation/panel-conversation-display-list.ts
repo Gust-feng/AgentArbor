@@ -17,7 +17,11 @@ import type {
   AssistantWorkflowDisplayState,
 } from "../panel-read-model/assistant/panel-assistant-workflow-display.js";
 import type { LiveRunTranscriptProjection } from "../panel-read-model/transcript/panel-live-transcript.js";
-import type { AssistantFailureParts } from "../panel-read-model/assistant/panel-assistant-failure.js";
+import {
+  assistantTerminalStatus,
+  type AssistantFailureParts,
+  type AssistantTerminalStatus,
+} from "../panel-read-model/assistant/panel-assistant-failure.js";
 
 export type ConversationDisplayItem<
   TTurn extends WorklineConversationTurn,
@@ -39,6 +43,7 @@ export type ConversationDisplayItem<
       readonly animateOnMount: boolean;
       readonly hasPendingConfirmation: boolean;
       readonly failure?: AssistantFailureParts;
+      readonly terminalStatus?: AssistantTerminalStatus;
     }
   | {
       readonly kind: "assistant";
@@ -49,6 +54,7 @@ export type ConversationDisplayItem<
       readonly animateOnMount: boolean;
       readonly hasPendingConfirmation: boolean;
       readonly failure?: AssistantFailureParts;
+      readonly terminalStatus?: AssistantTerminalStatus;
     };
 
 export function projectConversationDisplayList<
@@ -97,12 +103,15 @@ export function projectConversationDisplayList<
     pending: input.pending,
   });
   const standaloneRun = input.standaloneRun;
-  const standalone = standaloneRun === undefined
+  const standaloneInput = standaloneRun === undefined
+    ? undefined
+    : standaloneWorkflowProjectionInput(input.conversationId, standaloneRun);
+  const standalone = standaloneInput === undefined
     ? undefined
     : projectStandaloneAssistantWorkflowDisplay({
         previous: input.previous,
         conversationId: input.conversationId,
-        ...standaloneWorkflowProjectionInput(input.conversationId, standaloneRun),
+        ...standaloneInput,
       });
   const items = conversationDisplayItemsFromTurns(input.projectedTurns, turnDisplay.assistantDisplays);
   if (standalone !== undefined && standaloneRun !== undefined) {
@@ -116,6 +125,7 @@ export function projectConversationDisplayList<
       animateOnMount: standalone.failure === undefined ? standaloneFacts.animateOnMount : false,
       hasPendingConfirmation: standalone.failure === undefined && standaloneRun.pending !== undefined,
       failure: standalone.failure,
+      terminalStatus: standaloneInput?.terminalStatus,
     });
   }
   return {
@@ -159,7 +169,7 @@ function standaloneWorkflowProjectionInput<
   readonly animateOnMount: boolean;
   readonly liveTone?: NonNullable<LiveRunTranscriptProjection["answer"]>["tone"];
   readonly collapseTimeline: boolean;
-  readonly failed: boolean;
+  readonly terminalStatus?: AssistantTerminalStatus;
 } {
   const facts = standaloneAssistantFacts(standaloneRun, conversationId);
   return {
@@ -167,7 +177,7 @@ function standaloneWorkflowProjectionInput<
     runId: standaloneRun.currentRunId,
     content: facts.content,
     deliverable: standaloneRun.deliverable,
-    failed: facts.failed,
+    terminalStatus: facts.terminalStatus,
     transcriptNodes: standaloneRun.runProjection.nodes,
     pending: standaloneRun.pending,
     live: facts.live,
@@ -213,7 +223,7 @@ function standaloneAssistantFacts<
 ): {
   readonly key: string;
   readonly content: string;
-  readonly failed: boolean;
+  readonly terminalStatus?: AssistantTerminalStatus;
   readonly live: boolean;
   readonly keepStreamMounted: boolean;
   readonly animateOnMount: boolean;
@@ -227,7 +237,9 @@ function standaloneAssistantFacts<
   return {
     key: `${conversationId ?? "standalone"}:${standaloneRun.currentRunId ?? "standalone-assistant"}`,
     content,
-    failed: standaloneRun.runStatus === "failed",
+    terminalStatus: standaloneRun.runStatus === undefined
+      ? undefined
+      : assistantTerminalStatus(standaloneRun.runStatus),
     live: refreshing && liveStreamingAnswer !== undefined,
     keepStreamMounted: refreshing,
     animateOnMount: false,
@@ -264,7 +276,8 @@ function conversationDisplayItemsFromTurns<
       continue;
     }
     const { assistant, workflow } = assistantDisplay;
-    items.push(turn.status === "failed"
+    const terminalStatus = assistantTerminalStatus(turn.status);
+    items.push(terminalStatus !== undefined
       ? {
           kind: "assistant",
           key: turn.turnId,
@@ -275,6 +288,7 @@ function conversationDisplayItemsFromTurns<
           animateOnMount: false,
           hasPendingConfirmation: false,
           failure: assistantDisplay.failure,
+          terminalStatus,
         }
       : {
           kind: "assistant",

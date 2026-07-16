@@ -27,12 +27,22 @@ export type ActivityExpandedMeta = {
   readonly value: string;
 };
 
+export type ActivityExpandedItem = {
+  readonly title: string;
+  readonly detail?: string;
+  readonly href?: string;
+  readonly meta?: readonly ActivityExpandedMeta[];
+  readonly monospace?: boolean;
+};
+
 export type ActivityExpandedSection = {
   readonly title: string;
   readonly content: string;
-  readonly format?: "plain" | "code" | "list" | "source" | "quote" | "diff";
+  readonly format?: "plain" | "code" | "console" | "list" | "source" | "source_list" | "path_list" | "quote" | "diff";
   readonly href?: string;
   readonly meta?: readonly ActivityExpandedMeta[];
+  readonly items?: readonly ActivityExpandedItem[];
+  readonly note?: string;
   readonly tone?: "neutral" | "accent" | "success" | "warning" | "danger";
 };
 
@@ -386,30 +396,47 @@ function activityExpandedSectionsForNode(
   const sections: ActivityExpandedSection[] = [];
   if (display?.kind === "command_summary") {
     if (display.outputSummary !== undefined) {
-      sections.push({ title: "输出摘要", content: display.outputSummary });
+      sections.push({ title: "输出摘要", content: display.outputSummary, format: "console" });
     }
     if (display.errorSummary !== undefined) {
-      sections.push({ title: "错误摘要", content: display.errorSummary, tone: "danger" });
+      sections.push({ title: "错误摘要", content: display.errorSummary, format: "console", tone: "danger" });
     }
     const context = commandContextLines(display, node.phase);
     if (context.length > 0) {
       sections.push({ title: "执行信息", content: context.join("\n"), format: "list" });
     }
   } else if (display?.kind === "search_results") {
-    const results = (display.results ?? [])
-      .slice(0, EXPANDED_SEARCH_RESULTS_LIMIT)
-      .map((result) => searchResultLine(result.title, result.source, result.url, result.summary ?? result.snippet));
+    const visibleResults = (display.results ?? []).slice(0, EXPANDED_SEARCH_RESULTS_LIMIT);
+    const results = visibleResults.map((result) => searchResultLine(
+      result.title,
+      result.source,
+      result.url,
+      result.summary ?? result.snippet,
+    ));
     if (results.length > 0) {
       const tail = searchResultsTailLine(display, results.length);
-      sections.push({ title: "命中结果", content: [...results, tail].filter((line): line is string => line !== undefined).join("\n"), format: "list" });
+      sections.push({
+        title: "命中结果",
+        content: [...results, tail].filter((line): line is string => line !== undefined).join("\n"),
+        format: "source_list",
+        items: visibleResults.map(searchResultItem),
+        note: tail,
+      });
     } else if (display.message !== undefined) {
       sections.push({ title: "结果", content: display.message });
     }
   } else if (display?.kind === "directory_listing") {
-    const entries = display.entries.slice(0, EXPANDED_DIRECTORY_ENTRIES_LIMIT).map(directoryEntryLine);
+    const visibleEntries = display.entries.slice(0, EXPANDED_DIRECTORY_ENTRIES_LIMIT);
+    const entries = visibleEntries.map(directoryEntryLine);
     if (entries.length > 0) {
       const tail = directoryListingTailLine(display, entries.length);
-      sections.push({ title: "条目", content: [...entries, tail].filter((line): line is string => line !== undefined).join("\n"), format: "list" });
+      sections.push({
+        title: "条目",
+        content: [...entries, tail].filter((line): line is string => line !== undefined).join("\n"),
+        format: "path_list",
+        items: visibleEntries.map(directoryEntryItem),
+        note: tail,
+      });
     }
     const unreadable = display.unreadableSamples
       ?.slice(0, 6)
@@ -419,10 +446,17 @@ function activityExpandedSectionsForNode(
       sections.push({ title: "异常目录", content: unreadable!.join("\n"), format: "list", tone: "warning" });
     }
   } else if (display?.kind === "file_search_results") {
-    const matches = display.matches.slice(0, EXPANDED_FILE_SEARCH_MATCHES_LIMIT).map(fileSearchMatchLine);
+    const visibleMatches = display.matches.slice(0, EXPANDED_FILE_SEARCH_MATCHES_LIMIT);
+    const matches = visibleMatches.map(fileSearchMatchLine);
     if (matches.length > 0) {
       const tail = fileSearchTailLine(display, matches.length);
-      sections.push({ title: "命中", content: [...matches, tail].filter((line): line is string => line !== undefined).join("\n"), format: "list" });
+      sections.push({
+        title: "命中",
+        content: [...matches, tail].filter((line): line is string => line !== undefined).join("\n"),
+        format: "path_list",
+        items: visibleMatches.map(fileSearchMatchItem),
+        note: tail,
+      });
     }
     const skipped = fileSearchSkippedSummary(display);
     if (skipped !== undefined) {
@@ -720,6 +754,32 @@ function directoryEntryLine(
   return suffix.length === 0 ? entry.path : `${entry.path} (${suffix.join(", ")})`;
 }
 
+function directoryEntryItem(
+  entry: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>["entries"][number],
+): ActivityExpandedItem {
+  const meta = [
+    entry.kind,
+    entry.bytes === undefined ? undefined : byteLabel(entry.bytes),
+  ].filter((value): value is string => value !== undefined && value.trim().length > 0);
+  return {
+    title: entry.path,
+    meta: meta.length === 0 ? undefined : meta.map((value) => ({ value })),
+    monospace: true,
+  };
+}
+
+function searchResultItem(
+  result: NonNullable<Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "search_results" }>["results"]>[number],
+): ActivityExpandedItem {
+  const source = result.source ?? compactHostLabel(result.url);
+  return {
+    title: result.title,
+    detail: cleanToolTargetText(result.summary ?? result.snippet),
+    href: result.url,
+    meta: source === undefined ? undefined : [{ value: source }],
+  };
+}
+
 function directoryListingCount(
   display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>,
 ): number {
@@ -772,6 +832,16 @@ function fileSearchMatchLine(
   return match.preview === undefined || match.preview.trim().length === 0
     ? location
     : `${location} - ${match.preview.trim()}`;
+}
+
+function fileSearchMatchItem(
+  match: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "file_search_results" }>["matches"][number],
+): ActivityExpandedItem {
+  return {
+    title: match.line === undefined ? match.path : `${match.path}:${match.line}`,
+    detail: cleanToolTargetText(match.preview),
+    monospace: true,
+  };
 }
 
 function fileSearchSkippedSummary(

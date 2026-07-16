@@ -23,6 +23,7 @@ import {
   type AssistantWorkflowDisplayState,
 } from "./panel-assistant-workflow-display.js";
 import {
+  assistantTerminalStatus,
   assistantFailureParts,
   transcriptNodesWithoutFailureEcho,
   type AssistantFailureParts,
@@ -81,9 +82,8 @@ export function projectStableAssistantTurnDisplay<
     run: input.run,
     turnStatus: input.projectedTurn.turn.status,
   });
-  const failure = input.projectedTurn.turn.status === "failed"
-    ? assistantFailureParts(assistant.content)
-    : undefined;
+  const terminalStatus = assistantTerminalStatus(input.projectedTurn.turn.status);
+  const failure = terminalStatus === undefined ? undefined : assistantFailureParts(assistant.content);
   const workflowTranscriptNodes = transcriptNodesWithoutFailureEcho(
     assistant.runProjection.nodes as readonly TNode[],
     failure,

@@ -26,13 +26,14 @@ import {
 } from "../../../panel-read-model/assistant/panel-agent-work-timeline-view";
 import type {
   ActivityBadge,
+  ActivityExpandedSection,
   ActivityToolKind,
   ActivityItem,
-  ActivityExpandedSection,
   ActivityLineDelta,
 } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import { resolveActivityToolKind } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import { collapsedTimelineSummary } from "../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
+import { ActivityEvidencePanel } from "./activity-evidence";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";
 export { pendingForTurn } from "../../../panel-read-model/transcript/panel-transcript-confirmation-projection";
@@ -268,6 +269,7 @@ function ActivityLine(props: {
   const Icon = TOOL_KIND_ICON[toolKind] ?? Sparkles;
   const visibleBadges = visibleBadgesForItem(item);
   const lineDelta = visibleLineDeltaForItem(item);
+  const expandable = props.expandable !== false && shouldRenderExpandedDetail(item);
   const line = (
     <>
       <span className="agent-activity-line-prefix">
@@ -282,6 +284,10 @@ function ActivityLine(props: {
         )}
       </span>
       <span className="agent-activity-body">
+        <span className="agent-activity-copy">
+          {item.copy.label !== undefined && <span className="agent-activity-verb">{item.copy.label}</span>}
+          <span className="agent-activity-detail">{item.copy.detail}</span>
+        </span>
         {visibleBadges.length > 0 && (
           <span className="agent-activity-meta">
             {visibleBadges.map((entry, index) => (
@@ -289,15 +295,15 @@ function ActivityLine(props: {
             ))}
           </span>
         )}
-        <span className="agent-activity-detail">{item.copy.detail}</span>
       </span>
+      {expandable && <ChevronRight className="agent-activity-chevron" size={14} aria-hidden="true" />}
     </>
   );
-  if (props.expandable !== false && shouldRenderExpandedDetail(item)) {
+  if (expandable) {
     return (
       <details className="agent-activity-disclosure" data-tone={item.tone}>
         <summary className="agent-activity-line">{line}</summary>
-        <ExpandedDetailPanel item={item} />
+        <ActivityEvidencePanel item={item} />
       </details>
     );
   }
@@ -399,160 +405,6 @@ function itemNeedsAttention(item: ActivityItem): boolean {
     return true;
   }
   return item.tone === "tool" && item.phase !== "completed";
-}
-
-function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.ReactElement {
-  const sections = item.expandedSections ?? expandedDetailSectionsForItem(item);
-  if (sections !== undefined && sections.length > 0) {
-    return (
-      <div className="agent-activity-expanded-detail">
-        {sections.map((section: ActivityExpandedSection, index: number) => (
-          <div
-            className="agent-activity-expanded-section"
-            data-tone={section.tone}
-            data-title-hidden={shouldHideExpandedSectionTitle(section, sections) ? "true" : undefined}
-            key={index}
-          >
-            {!shouldHideExpandedSectionTitle(section, sections) && (
-              <div className="agent-activity-expanded-section-title">{section.title}</div>
-            )}
-            <ExpandedSectionContent section={section} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return <></>;
-}
-
-function expandedDetailSectionsForItem(item: ActivityItem): readonly ActivityExpandedSection[] | undefined {
-  if (item.copy.expandedDetail === undefined) {
-    return undefined;
-  }
-  return [{
-    title: "详情",
-    content: item.copy.expandedDetail,
-    format: item.tone === "thinking" ? "quote" : "plain",
-  }];
-}
-
-function shouldHideExpandedSectionTitle(
-  section: ActivityExpandedSection,
-  sections: readonly ActivityExpandedSection[],
-): boolean {
-  if (sections.length !== 1) {
-    return false;
-  }
-  return section.format === "diff" ||
-    section.format === "code" ||
-    section.format === "quote" ||
-    section.format === "list";
-}
-
-function ExpandedSectionContent(props: {
-  readonly section: ActivityExpandedSection;
-}): React.ReactElement {
-  if (props.section.format === "source") {
-    const showHref = props.section.href !== undefined && props.section.href !== props.section.content;
-    return (
-      <div className="agent-activity-expanded-section-content agent-activity-source">
-        <div className="agent-activity-source-title">{props.section.content}</div>
-        {(props.section.meta?.length ?? 0) > 0 && (
-          <div className="agent-activity-source-meta">
-            {props.section.meta?.map((item, index) => (
-              <span
-                className="agent-activity-source-meta-item"
-                aria-label={item.label === undefined ? undefined : `${item.label}：${item.value}`}
-                key={`${index}-${item.value}`}
-              >
-                {item.value}
-              </span>
-            ))}
-          </div>
-        )}
-        {showHref && (
-          <a
-            className="agent-activity-source-url"
-            href={props.section.href}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            {props.section.href}
-          </a>
-        )}
-      </div>
-    );
-  }
-  if (props.section.format === "quote") {
-    return (
-      <blockquote className="agent-activity-expanded-section-content agent-activity-quote">
-        {props.section.content}
-      </blockquote>
-    );
-  }
-  if (props.section.format === "diff") {
-    return (
-      <pre className="agent-activity-expanded-section-content agent-activity-diff" aria-label={props.section.title}>
-        {props.section.content.split("\n").map((line, index) => {
-          const parts = diffLineParts(line);
-          return (
-            <span
-              className="agent-activity-diff-line"
-              data-kind={parts.kind}
-              key={`${index}-${line}`}
-            >
-              <span className="agent-activity-diff-marker" aria-hidden="true">{parts.marker}</span>
-              <code>{parts.text.length === 0 ? " " : parts.text}</code>
-            </span>
-          );
-        })}
-      </pre>
-    );
-  }
-  if (props.section.format === "code") {
-    return (
-      <pre className="agent-activity-expanded-section-content agent-activity-expanded-code">
-        <code>{props.section.content}</code>
-      </pre>
-    );
-  }
-  if (props.section.format === "list") {
-    return (
-      <ul className="agent-activity-expanded-section-content agent-activity-expanded-list">
-        {props.section.content
-          .split("\n")
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0)
-          .map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}
-      </ul>
-    );
-  }
-  return <div className="agent-activity-expanded-section-content">{props.section.content}</div>;
-}
-
-type DiffLineKind = "add" | "delete" | "hunk" | "file" | "context";
-
-function diffLineParts(line: string): {
-  readonly kind: DiffLineKind;
-  readonly marker: string;
-  readonly text: string;
-} {
-  if (line.startsWith("@@")) {
-    return { kind: "hunk", marker: "@", text: line };
-  }
-  if (line.startsWith("diff --git") || line.startsWith("index ") || line.startsWith("+++") || line.startsWith("---")) {
-    return { kind: "file", marker: "", text: line };
-  }
-  if (line.startsWith("+")) {
-    return { kind: "add", marker: "+", text: line.slice(1) };
-  }
-  if (line.startsWith("-")) {
-    return { kind: "delete", marker: "-", text: line.slice(1) };
-  }
-  if (line.startsWith(" ")) {
-    return { kind: "context", marker: "", text: line.slice(1) };
-  }
-  return { kind: "context", marker: "", text: line };
 }
 
 type VisibleBadgeEntry = {
@@ -690,7 +542,32 @@ function expandedSectionsEqual(
       left[i]?.format !== right[i]?.format ||
       left[i]?.href !== right[i]?.href ||
       !sectionMetaEqual(left[i]?.meta, right[i]?.meta) ||
+      !expandedItemsEqual(left[i]?.items, right[i]?.items) ||
+      left[i]?.note !== right[i]?.note ||
       left[i]?.tone !== right[i]?.tone
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function expandedItemsEqual(
+  left: ActivityExpandedSection["items"],
+  right: ActivityExpandedSection["items"],
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const leftItem = left[index];
+    const rightItem = right[index];
+    if (
+      leftItem?.title !== rightItem?.title ||
+      leftItem?.detail !== rightItem?.detail ||
+      leftItem?.href !== rightItem?.href ||
+      leftItem?.monospace !== rightItem?.monospace ||
+      !sectionMetaEqual(leftItem?.meta, rightItem?.meta)
     ) {
       return false;
     }

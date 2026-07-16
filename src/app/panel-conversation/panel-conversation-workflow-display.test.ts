@@ -335,7 +335,7 @@ test("standalone failed assistant workflow uses previous output for workflow cop
     conversationId: "conversation-1",
     key: "conversation-1:run-1",
     content: "已完成前半段。\n\n错误信息：provider failed",
-    failed: true,
+    terminalStatus: "failed",
     transcriptNodes: [
       transcriptNode({
         nodeId: "body-1",

@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assistantFailureParts, transcriptNodesWithoutFailureEcho } from "./panel-assistant-failure.js";
+import {
+  assistantFailureParts,
+  assistantTerminalNoticeTitle,
+  assistantTerminalStatus,
+  transcriptNodesWithoutFailureEcho,
+} from "./panel-assistant-failure.js";
+
+test("assistant terminal status maps blocked and cancelled turns to distinct notices", () => {
+  assert.equal(assistantTerminalStatus("blocked"), "blocked");
+  assert.equal(assistantTerminalStatus("cancelled"), "cancelled");
+  assert.equal(assistantTerminalStatus("completed"), undefined);
+  assert.equal(assistantTerminalNoticeTitle("blocked"), "需要处理");
+  assert.equal(assistantTerminalNoticeTitle("cancelled"), "已取消");
+});
 
 test("assistant failure projection preserves previous output before the error marker", () => {
   assert.deepEqual(

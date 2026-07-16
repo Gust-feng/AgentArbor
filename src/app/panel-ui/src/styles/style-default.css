@@ -624,11 +624,9 @@ html[data-style="default"] .assistant-message-label::after {
 }
 
 html[data-style="default"] .assistant-answer {
-  border-left-color: var(--message-assistant-border);
-  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
-  background: linear-gradient(90deg, color-mix(in oklch, var(--accent) 3%, transparent), transparent 34%);
-  padding-top: 5px;
-  padding-bottom: 5px;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
 }
 
 html[data-style="default"] .assistant-result-evidence {
@@ -698,16 +696,6 @@ html[data-style="default"] .agent-activity-step[data-current="true"] {
 html[data-style="default"] .agent-activity-marker {
   border-color: color-mix(in oklch, var(--border) 76%, transparent);
   background: var(--surface);
-}
-
-html[data-style="default"] .agent-activity-expanded-detail {
-  border-left-color: color-mix(in oklch, var(--tool-accent, var(--accent)) 24%, var(--border));
-  background: transparent;
-  box-shadow: none;
-}
-
-html[data-style="default"] .agent-activity-expanded-section + .agent-activity-expanded-section {
-  border-top-color: transparent;
 }
 
 html[data-style="default"] .settings-dialog {
@@ -986,13 +974,17 @@ html[data-style="default"] .rich-inline-code {
   box-shadow: 0 1px 0 color-mix(in oklch, var(--shadow-ink) 2%, transparent);
 }
 
-html[data-style="default"] .rich-code-block,
+html[data-style="default"] .rich-code-frame,
 html[data-style="default"] .rich-table-wrap {
   border-color: color-mix(in oklch, var(--content-border) 88%, transparent);
   background: var(--content-surface);
   box-shadow:
     0 1px 2px color-mix(in oklch, var(--shadow-ink) 3%, transparent),
     inset 0 1px 0 color-mix(in oklch, white 14%, transparent);
+}
+
+html[data-style="default"] .rich-code-block {
+  background: transparent;
 }
 
 html[data-style="default"] .rich-table th {

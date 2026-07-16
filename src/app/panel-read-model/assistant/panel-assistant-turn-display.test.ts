@@ -426,6 +426,42 @@ test("stable assistant turn displays treat plain failed content as failure-only 
   assert.deepEqual(display?.workflow?.segments, []);
 });
 
+test("stable assistant turn displays render blocked terminal copy once outside the activity timeline", () => {
+  const turns = [
+    turn("user-1", "user", "继续", "completed"),
+    { ...turn("assistant-1", "assistant", "执行在进程重启后被中断。", "blocked"), runId: "run-1" },
+  ];
+  const result = projectStableAssistantTurnDisplays({
+    projectedTurns: [
+      projected(turns[0]!),
+      projected(turns[1]!, "run-1"),
+    ],
+    turns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
+    previousEmptyShells: assistantShellSnapshot([]),
+    assistantTurnSlotKeys: precomputeAssistantTurnSlotKeys(turns),
+    transcriptNodesByRunId: new Map([["run-1", [
+      transcriptNode({
+        nodeId: "run-blocked-1",
+        runId: "run-1",
+        sequence: 1,
+        kind: "system",
+        eventType: "run.blocked",
+        phase: "blocked",
+        summary: "执行在进程重启后被中断。",
+      }),
+    ]]]),
+  });
+
+  const display = result.displays.get("assistant-1");
+
+  assert.deepEqual(display?.failure, {
+    previous: "",
+    error: "执行在进程重启后被中断。",
+  });
+  assert.deepEqual(display?.workflow?.segments, []);
+});
+
 test("stable assistant turn displays omit duplicate system failure text from workflow activity", () => {
   const turns = [
     turn("user-1", "user", "继续", "completed"),

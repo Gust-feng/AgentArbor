@@ -5,6 +5,27 @@ export type AssistantFailureParts = {
   readonly error: string;
 };
 
+export type AssistantTerminalStatus = "failed" | "blocked" | "cancelled";
+
+export function assistantTerminalStatus(status: string): AssistantTerminalStatus | undefined {
+  switch (status) {
+    case "failed":
+    case "blocked":
+    case "cancelled":
+      return status;
+    default:
+      return undefined;
+  }
+}
+
+export function assistantTerminalNoticeTitle(status: AssistantTerminalStatus): string {
+  switch (status) {
+    case "blocked": return "需要处理";
+    case "cancelled": return "已取消";
+    case "failed": return "未完成";
+  }
+}
+
 export type FailureEchoTranscriptNode = {
   readonly nodeId: string;
   readonly runId: string;

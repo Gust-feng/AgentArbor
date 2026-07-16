@@ -1344,6 +1344,80 @@ test("OpenAI Responses adapter retains final response and encrypted reasoning it
   );
 });
 
+test("OpenAI Responses stream restores compacted reasoning and terminal-only text", async () => {
+  const encryptedContinuation = "opaque-stream-reasoning";
+  const message = {
+    id: "msg-stream-compacted",
+    type: "message",
+    status: "completed",
+    role: "assistant",
+    content: [{ type: "output_text", text: "Terminal-only answer." }],
+  };
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: responseSseEvents([{
+      type: "response.created",
+      response: { id: "resp-stream-compacted", status: "in_progress", output: [] },
+    }, {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { id: "rs-stream-compacted", type: "reasoning", summary: [] },
+    }, {
+      type: "response.output_item.done",
+      output_index: 0,
+      item: {
+        id: "rs-stream-compacted",
+        type: "reasoning",
+        summary: [],
+        encrypted_content: encryptedContinuation,
+      },
+    }, {
+      type: "response.output_item.added",
+      output_index: 1,
+      item: { ...message, status: "in_progress", content: [] },
+    }, {
+      type: "response.output_item.done",
+      output_index: 1,
+      item: message,
+    }, {
+      type: "response.completed",
+      response: {
+        id: "resp-stream-compacted",
+        status: "completed",
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: message.content,
+        }],
+      },
+    }]),
+    json: async () => {
+      throw new Error("Should not use json");
+    },
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+    stream: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.textOutput, "Terminal-only answer.");
+  const continuation = response.assistantMessage
+    ?.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION];
+  assert.equal(Array.isArray(continuation), true);
+  assert.deepEqual(
+    (continuation as readonly Record<string, unknown>[]).map((item) => item.type),
+    ["reasoning", "message"],
+  );
+  assert.match(JSON.stringify(continuation), new RegExp(encryptedContinuation, "u"));
+});
+
 test("OpenAI Responses adapter handles response.incomplete status", async () => {
   const fetch: FetchLike = async (_url, _init) => ({
     ok: true,

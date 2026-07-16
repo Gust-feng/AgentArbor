@@ -75,6 +75,22 @@ test("thinking copy keeps the entire thought in the expanded detail", () => {
   assert.match(copy?.expandedDetail ?? "", /python3 was rejected/);
 });
 
+test("model request progress uses the same activity layer as tools", () => {
+  const items = activityItemsForNodes([
+    node({
+      kind: "system",
+      eventType: "model.requested",
+      phase: "executing",
+      summary: "分析工具结果",
+    }),
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.tone, "thinking");
+  assert.equal(items[0]?.toolKind, "thinking");
+  assert.equal(items[0]?.copy.detail, "分析工具结果");
+});
+
 test("confirmation copy presents concrete confirmation action", () => {
   const copy = activityLineForNode(node({
     kind: "confirmation",
@@ -186,10 +202,10 @@ test("tool activity copy removes redundant target prefixes", () => {
 
   assert.deepEqual(read, { label: "读取", detail: "ability_live_demo_2025-07-31.md" });
   assert.deepEqual(search, { label: "搜索", detail: "能力|capability|demo" });
-  assert.deepEqual(command, { label: "命令", detail: "dir *.md" });
+  assert.deepEqual(command, { label: "命令", detail: "正在执行命令" });
 });
 
-test("tool activity copy prefers concrete command text over generic status", () => {
+test("tool activity copy keeps a running command concise", () => {
   const copy = activityLineForNode(node({
     kind: "tool",
     eventType: "tool.requested",
@@ -204,7 +220,7 @@ test("tool activity copy prefers concrete command text over generic status", () 
 
   assert.deepEqual(copy, {
     label: "命令",
-    detail: "git diff --check",
+    detail: "正在执行命令",
   });
 });
 
@@ -248,9 +264,9 @@ test("generic directory activity collapses into one structured entries section",
   })]);
 
   assert.equal(items[0]?.copy.label, "查看");
-  assert.equal(items[0]?.copy.detail, "当前目录 · 29 项 · 深度 1");
+  assert.equal(items[0]?.copy.detail, "当前目录");
   assert.equal(items[0]?.copy.expandedDetail, undefined);
-  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目"]);
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目", "目录信息"]);
   assert.equal(items[0]?.expandedSections?.[0]?.content, "-57cdf8cd11eed6fe.jpg\n1758895603614.png");
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "摘要" || section.title === "详情"), false);
 });
@@ -321,9 +337,9 @@ test("directory listing activity uses total counts and structured sections", () 
   ]));
 
   assert.equal(items[0]?.copy.label, "查看");
-  assert.equal(items[0]?.copy.detail, "当前目录 · 29 项 · 深度 1");
+  assert.equal(items[0]?.copy.detail, "当前目录");
   assert.deepEqual(items[0]?.badges?.map((badge) => badge.label), ["29 项", "深度 1", "1 个异常目录"]);
-  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目", "异常目录"]);
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目", "异常目录", "目录信息"]);
   assert.equal(items[0]?.expandedSections?.[0]?.format, "path_list");
   assert.deepEqual(items[0]?.expandedSections?.[0]?.items, [
     { title: "README.md", meta: [{ value: "file" }, { value: "120 B" }], monospace: true },
@@ -333,7 +349,7 @@ test("directory listing activity uses total counts and structured sections", () 
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "目录"), false);
 });
 
-test("completed directory activity does not expand into request/result boilerplate when empty", () => {
+test("completed empty directory activity keeps range facts in disclosure", () => {
   const items = displayActivityItemsForNodes([
     node({
       kind: "tool",
@@ -366,9 +382,13 @@ test("completed directory activity does not expand into request/result boilerpla
   ]);
 
   assert.equal(items.length, 1);
-  assert.equal(items[0]?.copy.detail, "当前目录 · 0 项 · 深度 1");
+  assert.equal(items[0]?.copy.detail, "当前目录");
   assert.equal(items[0]?.copy.expandedDetail, undefined);
-  assert.equal(items[0]?.expandedSections, undefined);
+  assert.deepEqual(items[0]?.expandedSections, [{
+    title: "目录信息",
+    content: "位置：当前目录\n总计：0 项\n深度：1",
+    format: "list",
+  }]);
 });
 
 test("file search activity keeps query, matches, and skipped details structured", () => {
@@ -453,7 +473,7 @@ test("tool activity copy surfaces safe failed command details", () => {
 
   assert.deepEqual(copy, {
     label: "命令",
-    detail: "pnpm test · 测试失败：1 个断言未通过",
+    detail: "测试失败：1 个断言未通过",
   });
 });
 
@@ -519,7 +539,28 @@ test("tool activity copy keeps result-only search tools visible", () => {
 
   assert.deepEqual(copy, {
     label: "搜索",
-    detail: "AgentArbor README",
+    detail: "网页资料",
+  });
+});
+
+test("HTTP activity uses a concrete request verb", () => {
+  const copy = activityLineForNode(node({
+    kind: "tool",
+    eventType: "tool.completed",
+    phase: "completed",
+    toolName: "http_request",
+    display: {
+      kind: "http_response",
+      method: "GET",
+      url: "http://127.0.0.1:4173/",
+      statusCode: 200,
+      statusText: "OK",
+    },
+  }));
+
+  assert.deepEqual(copy, {
+    label: "请求",
+    detail: "GET http://127.0.0.1:4173/",
   });
 });
 
@@ -731,9 +772,10 @@ test("tool activity derives the default line from display instead of presentatio
   ])[0];
 
   assert.equal(item?.copy.label, "命令");
-  assert.equal(item?.copy.detail, "pnpm test");
+  assert.equal(item?.copy.detail, "命令已执行");
   assert.equal(item?.toolKind, "command");
   assert.equal(item?.statusBadge?.label, "已完成");
+  assert.equal(item?.expandedSections?.[0]?.content, "命令：pnpm test");
 });
 
 test("tool activity derives display kind from display instead of presentation", () => {
@@ -927,7 +969,8 @@ test("activity items expose command status badges and structured sections", () =
 
   assert.equal(item?.statusBadge?.label, "已完成");
   assert.equal(item?.badges, undefined);
-  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["输出摘要"]);
+  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["输出摘要", "执行信息"]);
+  assert.equal(item?.expandedSections?.[1]?.content, "命令：pnpm test");
 });
 
 test("display activity items preserve requested detail and terminal preview for file edits", () => {

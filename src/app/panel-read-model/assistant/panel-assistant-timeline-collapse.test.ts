@@ -172,6 +172,19 @@ test("collapsed timeline summary keeps long command detail out of the main workf
   assert.equal(summary.includes("Get-Content"), false);
 });
 
+test("collapsed timeline summary counts mixed commands and requests as completed steps", () => {
+  const summary = collapsedTimelineSummary({
+    items: [
+      { phase: "completed", copy: { label: "命令", detail: "命令已执行" } },
+      { phase: "completed", copy: { label: "请求", detail: "GET http://127.0.0.1:4173/" } },
+      { phase: "completed", copy: { label: "命令", detail: "命令已执行" } },
+    ],
+    hasCurrentConfirmation: false,
+  });
+
+  assert.equal(summary, "完成 3 步");
+});
+
 test("standalone timeline keeps blocked and pending approval runs expanded", () => {
   assert.equal(shouldCollapseStandaloneTimeline({
     runStatus: "running",

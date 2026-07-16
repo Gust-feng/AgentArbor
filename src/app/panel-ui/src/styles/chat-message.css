@@ -247,6 +247,8 @@
 
 .assistant-message {
   display: flex;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   align-items: flex-start;
   gap: var(--space-4);
@@ -293,6 +295,7 @@
 .assistant-message-body {
   display: grid;
   width: min(var(--panel-reading-width), 100%);
+  max-width: 100%;
   min-width: 0;
   gap: var(--space-4);
   color: var(--fg);
@@ -325,14 +328,19 @@
 
 .assistant-answer-pending {
   display: flex;
-  min-height: 34px;
+  min-height: 28px;
   align-items: center;
+  gap: 7px;
   padding-top: 0;
+  color: color-mix(in oklch, var(--fg) 48%, var(--muted));
+  font-size: 12.5px;
+  line-height: 1.4;
 }
 
-.assistant-answer-pending .typing-dots {
-  transform: scale(0.92);
-  transform-origin: left center;
+.assistant-pending-icon {
+  flex: 0 0 auto;
+  color: color-mix(in oklch, var(--accent) 62%, var(--fg));
+  animation: assistant-pending-spin 900ms linear infinite;
 }
 
 .assistant-response-meta {
@@ -683,5 +691,17 @@
   to {
     opacity: 1;
     transform: scaleY(1);
+  }
+}
+
+@keyframes assistant-pending-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-pending-icon {
+    animation: none;
   }
 }

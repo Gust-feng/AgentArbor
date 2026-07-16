@@ -4,6 +4,7 @@ import { OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION, type ModelMessage } from "../.
 import {
   canonicalMessagesFromOpenAIAgentsInput,
   createOpenAIAgentsInputMapper,
+  modelMessagesForOpenAIProtocol,
 } from "./openai-agents-input.js";
 
 const SYSTEM = "Preserve the exact model history.";
@@ -97,4 +98,49 @@ test("Responses SDK input round-trips persisted reasoning and function-call cont
     outputItems,
   );
   assert.equal(roundTripped[3]?.toolCallId, "call-responses-round-trip");
+});
+
+test("protocol context transition preserves completed tool facts and drops incompatible continuation", () => {
+  const messages: readonly ModelMessage[] = [
+    { role: "system", content: SYSTEM },
+    { role: "user", content: "inspect the repository" },
+    {
+      role: "assistant",
+      content: "",
+      toolCalls: [{ callId: "call-before-switch", toolName: "read_file", input: { path: "README.md" } }],
+      protocolExtensions: {
+        [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: [
+          { type: "reasoning", encrypted_content: "responses-private-state", summary: [] },
+          {
+            type: "function_call",
+            call_id: "call-before-switch",
+            name: "read_file",
+            arguments: JSON.stringify({ path: "README.md" }),
+          },
+        ],
+      },
+    },
+    {
+      role: "tool",
+      content: JSON.stringify({ status: "completed", output: "README content" }),
+      toolCallId: "call-before-switch",
+      toolName: "read_file",
+    },
+  ];
+
+  const projected = modelMessagesForOpenAIProtocol({
+    protocol: "openai_compatible_chat_completions",
+    messages,
+  });
+  const items = createOpenAIAgentsInputMapper({
+    protocol: "openai_compatible_chat_completions",
+    messages,
+  }).messages(SYSTEM);
+
+  assert.deepEqual(projected[2]?.toolCalls, messages[2]?.toolCalls);
+  assert.equal(projected[2]?.protocolExtensions, undefined);
+  assert.equal(projected[3]?.toolCallId, "call-before-switch");
+  assert.equal(items.some((item) => item.type === "function_call" && item.callId === "call-before-switch"), true);
+  assert.equal(items.some((item) => item.type === "function_call_result" && item.callId === "call-before-switch"), true);
+  assert.doesNotMatch(JSON.stringify(items), /responses-private-state/u);
 });

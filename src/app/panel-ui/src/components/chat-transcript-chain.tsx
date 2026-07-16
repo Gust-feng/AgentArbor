@@ -6,6 +6,7 @@ import {
   ChevronUp,
   Clock3,
   Gauge,
+  LoaderCircle,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -228,7 +229,7 @@ export function AssistantMessage(props: AssistantMessageProps): React.ReactEleme
 const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: AssistantMessageProps): React.ReactElement {
   const workflow = props.workflow;
   if (workflow === undefined) {
-    return <AssistantPendingBlock />;
+    return <AssistantPendingBlock reason="initial" />;
   }
   const entering = props.animateOnMount === true || props.live === true;
   return (
@@ -254,10 +255,19 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
   );
 }, assistantMessagePropsEqual);
 
-const AssistantPendingBlock = React.memo(function AssistantPendingBlock(): React.ReactElement {
+const AssistantPendingBlock = React.memo(function AssistantPendingBlock(props: {
+  readonly reason: "initial" | "continuation";
+}): React.ReactElement {
+  const label = props.reason === "continuation" ? "思考中" : "正在处理";
   return (
-    <div className="assistant-answer assistant-answer-pending" aria-label="正在输出">
-      <TypingDots />
+    <div
+      className="assistant-answer assistant-answer-pending"
+      data-reason={props.reason}
+      role="status"
+      aria-live="polite"
+    >
+      <LoaderCircle className="assistant-pending-icon" size={14} strokeWidth={1.9} aria-hidden="true" />
+      <span>{label}</span>
     </div>
   );
 });
@@ -334,7 +344,7 @@ function AssistantWorkflowSegment(props: {
     );
   }
   if (segment.kind === "awaiting") {
-    return <AssistantPendingBlock />;
+    return <AssistantPendingBlock reason={segment.reason} />;
   }
   return (
     <AssistantAnswerBlock
@@ -451,20 +461,6 @@ function AssistantFailureNotice(props: {
     </section>
   );
 }
-
-export function TypingDots(): React.ReactElement {
-  return <MemoTypingDots />;
-}
-
-const MemoTypingDots = React.memo(function TypingDotsContent(): React.ReactElement {
-  return (
-    <div className="typing-dots" aria-label="正在整理">
-      <span />
-      <span />
-      <span />
-    </div>
-  );
-});
 
 function assistantMessagePropsEqual(left: AssistantMessageProps, right: AssistantMessageProps): boolean {
   return left.workflow === right.workflow &&

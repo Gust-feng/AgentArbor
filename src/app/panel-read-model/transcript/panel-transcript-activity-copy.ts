@@ -96,6 +96,9 @@ export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLi
     return readableUserDecisionCopy(node);
   }
   if (node.kind === "system") {
+    if (isModelRequestNode(node)) {
+      return { detail: node.summary?.trim() || "思考中" };
+    }
     if (isContextCompactionNode(node)) {
       return contextCompactionActivityCopy(node);
     }
@@ -375,6 +378,10 @@ function isContextCompactionNode(node: ProjectableTranscriptNode): boolean {
     node.eventType === "context.compaction.failed";
 }
 
+function isModelRequestNode(node: ProjectableTranscriptNode): boolean {
+  return node.eventType === "model.requested";
+}
+
 function contextCompactionActivityCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
   if (node.eventType === "context.compaction.requested" || node.phase === "executing") {
     return { detail: "正在上下文压缩" };
@@ -444,6 +451,10 @@ function activityExpandedSectionsForNode(
       .filter((value) => value.length > 0);
     if ((unreadable?.length ?? 0) > 0) {
       sections.push({ title: "异常目录", content: unreadable!.join("\n"), format: "list", tone: "warning" });
+    }
+    const context = directoryListingContextLines(display);
+    if (context.length > 0) {
+      sections.push({ title: "目录信息", content: context.join("\n"), format: "list" });
     }
   } else if (display?.kind === "file_search_results") {
     const visibleMatches = display.matches.slice(0, EXPANDED_FILE_SEARCH_MATCHES_LIMIT);
@@ -801,11 +812,18 @@ function fileSearchMatchesReturned(
 function directoryListingHeadline(
   display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>,
 ): string {
+  return toolPathLabel(display.path) ?? "目录内容";
+}
+
+function directoryListingContextLines(
+  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>,
+): readonly string[] {
+  const path = toolPathLabel(display.path);
   return [
-    toolPathLabel(display.path),
-    `${directoryListingCount(display)} 项`,
-    display.depth === undefined ? undefined : `深度 ${display.depth}`,
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ");
+    path === undefined ? undefined : `位置：${path}`,
+    `总计：${directoryListingCount(display)} 项`,
+    display.depth === undefined ? undefined : `深度：${display.depth}`,
+  ].filter((value): value is string => value !== undefined);
 }
 
 function fileSearchHeadline(
@@ -903,14 +921,6 @@ function commandContextLines(
     (display.exitCode !== undefined && display.exitCode !== 0) ||
     display.timedOut === true ||
     display.cancelled === true;
-  const hasRuntimeContext = display.background === true ||
-    display.logPath !== undefined ||
-    display.stopCommand !== undefined ||
-    display.waitForPort !== undefined ||
-    display.portReady === false;
-  if (!hasIssue && !hasRuntimeContext) {
-    return [];
-  }
   const command = commandText(display);
   return [
     command === undefined ? undefined : `命令：${command}`,
@@ -1144,9 +1154,15 @@ function genericToolSections(
 ): readonly ActivityExpandedSection[] {
   const directory = genericDirectoryFacts(display);
   if (directory !== undefined) {
-    return directory.items.length === 0
-      ? []
-      : [{ title: "条目", content: directory.items.join("\n"), format: "list" }];
+    const sections: ActivityExpandedSection[] = [];
+    if (directory.items.length > 0) {
+      sections.push({ title: "条目", content: directory.items.join("\n"), format: "list" });
+    }
+    const context = genericDirectoryContextLines(directory);
+    if (context.length > 0) {
+      sections.push({ title: "目录信息", content: context.join("\n"), format: "list" });
+    }
+    return sections;
   }
 
   const article = genericArticleFacts(display);
@@ -1249,11 +1265,16 @@ function genericDirectoryHeadline(display: GenericToolSummaryDisplay): string | 
   if (facts === undefined) {
     return undefined;
   }
+  return toolPathLabel(facts.path) ?? "目录内容";
+}
+
+function genericDirectoryContextLines(facts: GenericDirectoryFacts): readonly string[] {
+  const path = toolPathLabel(facts.path);
   return [
-    toolPathLabel(facts.path),
-    facts.count === undefined ? undefined : `${facts.count} 项`,
-    facts.depth === undefined ? undefined : `深度 ${facts.depth}`,
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ") || undefined;
+    path === undefined ? undefined : `位置：${path}`,
+    facts.count === undefined ? undefined : `总计：${facts.count} 项`,
+    facts.depth === undefined ? undefined : `深度：${facts.depth}`,
+  ].filter((value): value is string => value !== undefined);
 }
 
 function genericDirectoryPath(summary: string): string | undefined {
@@ -1497,6 +1518,7 @@ function toolVerb(node: ProjectableTranscriptNode): string {
   if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search" || toolName.includes("grep")) return "搜索";
   if (display?.kind === "file_search_results") return "搜索";
   if (display?.kind === "directory_listing") return "查看";
+  if (display?.kind === "http_response" || toolName === "http_request") return "请求";
   if (fileMutationVerb !== undefined) return fileMutationVerb;
   if (display?.kind === "generic_tool_summary") {
     const role = genericToolRole(toolName, display);
@@ -1573,15 +1595,20 @@ function mentionsEditFile(value: string): boolean {
 function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy, "detail" | "expandedDetail"> | undefined {
   const display = node.display;
   if (display?.kind === "command_summary") {
-    const command = cleanToolTargetText(node.summary) ?? cleanToolTargetText(commandText(display));
-    const failure = node.phase === "failed" ? cleanToolTargetText(display.errorSummary) : undefined;
-    return readableToolTarget([command, failure].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ")) ??
-      fallbackToolTargetCopy(node);
+    return { detail: commandActivityHeadline(display, node.phase) };
   }
   if (display?.kind === "search_results") {
-    return readableToolTarget(cleanToolTargetText(
-      [display.query, display.message].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ") || node.summary
-    )) ?? fallbackToolTargetCopy(node);
+    const query = cleanToolTargetText(display.query);
+    if (query !== undefined) {
+      return readableToolTarget(query);
+    }
+    const message = cleanToolTargetText(display.message);
+    if ((node.phase === "failed" || node.phase === "blocked") && message !== undefined) {
+      return readableToolTarget(message);
+    }
+    return {
+      detail: searchResultsReturned(display) > 0 ? "网页资料" : "搜索结果",
+    };
   }
   if (display?.kind === "directory_listing") {
     return {
@@ -1610,6 +1637,19 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
     return readableToolTarget(cleanToolTargetText(display.path ?? node.summary)) ?? fallbackToolTargetCopy(node);
   }
   if (display?.kind === "generic_tool_summary") {
+    const role = genericToolRole(normalizedToolName(node.toolName), display);
+    if (role === "命令") {
+      return { detail: genericCommandActivityHeadline(node.phase) };
+    }
+    if (role === "搜索") {
+      if (node.phase === "preparing" || node.phase === "executing" || node.phase === "noted") {
+        const query = cleanToolTargetText(display.summary);
+        if (query !== undefined) {
+          return readableToolTarget(query);
+        }
+      }
+      return { detail: genericSearchActivityHeadline(node.phase) };
+    }
     const directoryHeadline = genericDirectoryHeadline(display);
     if (directoryHeadline !== undefined) {
       return {
@@ -1642,6 +1682,40 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
     return readableToolTarget(summary ?? genericActionTargetText(display.action)) ?? fallbackToolTargetCopy(node);
   }
   return readableToolTarget(cleanToolTargetText(node.summary)) ?? fallbackToolTargetCopy(node);
+}
+
+function commandActivityHeadline(
+  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "command_summary" }>,
+  phase: ProjectableTranscriptNode["phase"],
+): string {
+  const failed = phase === "failed" ||
+    phase === "blocked" ||
+    (display.exitCode !== undefined && display.exitCode !== 0) ||
+    display.timedOut === true;
+  if (failed) {
+    return cleanToolTargetText(display.errorSummary) ?? "命令未完成";
+  }
+  if (phase === "cancelled" || display.cancelled === true) {
+    return "命令已停止";
+  }
+  if (phase === "preparing" || phase === "executing" || phase === "noted") {
+    return "正在执行命令";
+  }
+  return "命令已执行";
+}
+
+function genericCommandActivityHeadline(phase: ProjectableTranscriptNode["phase"]): string {
+  if (phase === "failed" || phase === "blocked") return "命令未完成";
+  if (phase === "cancelled") return "命令已停止";
+  if (phase === "preparing" || phase === "executing" || phase === "noted") return "正在执行命令";
+  return "命令已执行";
+}
+
+function genericSearchActivityHeadline(phase: ProjectableTranscriptNode["phase"]): string {
+  if (phase === "failed" || phase === "blocked") return "搜索未完成";
+  if (phase === "cancelled") return "搜索已停止";
+  if (phase === "preparing" || phase === "executing" || phase === "noted") return "正在搜索";
+  return "搜索结果";
 }
 
 function toolStatusText(node: ProjectableTranscriptNode): string | undefined {
@@ -1786,6 +1860,7 @@ function stableActivityEventKey(node: ProjectableTranscriptNode): string {
 
 function activityToneForNode(node: ProjectableTranscriptNode): ActivityItem["tone"] {
   if (node.kind === "thinking") return "thinking";
+  if (isModelRequestNode(node)) return "thinking";
   if (isModelSideOutputNode(node)) return "narration";
   if (node.kind === "tool") return "tool";
   if (node.kind === "confirmation") return "confirmation";

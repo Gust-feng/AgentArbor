@@ -59,6 +59,11 @@ test("spawn_sub_agent distinguishes inheritance, no tools, explicit narrowing, a
     dynamicSpawnAvailable: true,
   });
   assert.equal(spawn?.toolName, SPAWN_SUB_AGENT_TOOL_NAME);
+  assert.doesNotMatch(
+    JSON.stringify(spawn?.inputSchema),
+    /uniqueItems/u,
+    "OpenAI Agent.asTool() always uses strict mode, whose schema subset does not support uniqueItems",
+  );
 
   const base = {
     role: "focused-reviewer",
@@ -72,6 +77,10 @@ test("spawn_sub_agent distinguishes inheritance, no tools, explicit narrowing, a
   ]);
   assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: [] })).allowedTools, []);
   assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: ["read_file"] })).allowedTools, ["read_file"]);
+  assert.deepEqual(
+    (await spawn!.resolve({ ...base, allowed_tools: ["read_file", "read_file"] })).allowedTools,
+    ["read_file"],
+  );
   await assert.rejects(
     spawn!.resolve({ ...base, allowed_tools: ["write_file"] }),
     /requested unavailable tools: write_file/u,

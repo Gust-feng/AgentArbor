@@ -334,8 +334,6 @@ html.theme-switching .assistant-answer,
 html.theme-switching .user-message-wrap,
 html.theme-switching .transcript-entry,
 html.theme-switching .agent-activity-step,
-html.theme-switching .agent-activity-marker,
-html.theme-switching .agent-activity-step::before,
 html.theme-switching .tool-result-card,
 html.theme-switching .workspace-card {
   transition:

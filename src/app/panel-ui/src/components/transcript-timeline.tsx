@@ -5,8 +5,7 @@ import {
   Cog,
   Compass,
   Eye,
-  FileText,
-  Globe2,
+  LoaderCircle,
   PencilLine,
   Scale,
   Search,
@@ -90,16 +89,12 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
           );
         }
         const content = (
-          <>
-            <span className="agent-activity-marker" aria-hidden="true" />
-            <ActivityLine item={item} />
-          </>
+          <ActivityLine item={item} expandable={!selectable} />
         );
         return timelineStep({ item, current, selectable, selected, toolKind, onSelectItem: props.onSelectItem, content });
       })}
       {confirmation.current !== undefined && (
         <div className="agent-activity-step confirmation waiting_approval" data-current="true" aria-current="step">
-          <span className="agent-activity-marker" aria-hidden="true" />
           <ConfirmationNode
             confirmation={confirmation.current}
             busy={props.confirmationBusy}
@@ -111,7 +106,6 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
   );
 
   if (props.collapsed === true && confirmation.current === undefined) {
-    const metrics = activityMetrics(items);
     const summary = collapsedTimelineSummary({
       items,
       hasCurrentConfirmation: false,
@@ -125,25 +119,8 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
       >
         <details className="agent-workline-disclosure">
           <summary className="agent-workline-summary" aria-label={`展开过程，${summary}`}>
-            <span className="agent-workline-summary-status" aria-hidden="true" />
+            <ChevronRight className="agent-workline-summary-chevron" size={14} aria-hidden="true" />
             <span className="agent-workline-summary-text">{summary}</span>
-            <span className="agent-workline-summary-metrics" aria-hidden="true">
-              {metrics.map((metric) => {
-                const Icon = metric.icon;
-                return (
-                  <span className={`agent-workline-summary-chip ${metric.kind}`} key={metric.kind}>
-                    <span className="agent-workline-summary-icon">
-                      <Icon size={13} strokeWidth={2.25} />
-                    </span>
-                    {metric.lineDelta !== undefined && (
-                      <LineDeltaIndicator delta={metric.lineDelta} running={metric.lineDeltaRunning === true} />
-                    )}
-                    <strong>{metric.count}</strong>
-                  </span>
-                );
-              })}
-            </span>
-            <ChevronRight className="agent-workline-summary-chevron" size={16} aria-hidden="true" />
           </summary>
           {activity}
         </details>
@@ -204,99 +181,47 @@ function timelineStep(input: {
   );
 }
 
-type ActivityMetricKind = "web" | "read" | "edit" | "command" | "other";
-
-type ActivityMetric = {
-  readonly kind: ActivityMetricKind;
-  readonly count: number;
-  readonly label: string;
-  readonly icon: LucideIcon;
-  readonly lineDelta?: ActivityLineDelta;
-  readonly lineDeltaRunning?: boolean;
-};
-
-function activityMetrics(items: readonly ActivityItem[]): readonly ActivityMetric[] {
-  const counts = new Map<ActivityMetricKind, number>();
-  let latestEditDeltaItem: ActivityItem | undefined;
-  for (const item of items) {
-    const kind = activityMetricKind(item);
-    if (kind === undefined) continue;
-    counts.set(kind, (counts.get(kind) ?? 0) + 1);
-    if (kind === "edit" && visibleLineDeltaForItem(item) !== undefined) {
-      latestEditDeltaItem = item;
-    }
-  }
-  if (counts.size === 0 && items.length > 0) {
-    counts.set("other", items.length);
-  }
-  const metrics: ActivityMetric[] = [];
-  for (const kind of ACTIVITY_METRIC_ORDER) {
-    const count = counts.get(kind);
-    if (count === undefined || count <= 0) continue;
-    const metric: ActivityMetric = { ...ACTIVITY_METRIC_DEFS[kind], kind, count };
-    if (kind === "edit" && latestEditDeltaItem !== undefined) {
-      const lineDelta = visibleLineDeltaForItem(latestEditDeltaItem);
-      if (lineDelta !== undefined) {
-        metrics.push({
-          ...metric,
-          lineDelta,
-          lineDeltaRunning: isLineDeltaRunning(latestEditDeltaItem),
-        });
-        continue;
-      }
-    }
-    metrics.push(metric);
-  }
-  return metrics;
-}
-
-function activityMetricKind(item: ActivityItem): ActivityMetricKind | undefined {
-  const label = item.copy.label;
-  if (label === "网页" || label === "搜索") return "web";
-  if (label === "读取" || label === "查看") return "read";
-  if (label === "编辑" || label === "写入" || label === "创建" || label === "删除" || label === "生成") return "edit";
-  if (label === "命令") return "command";
-  if (item.tone === "tool") return "other";
-  return undefined;
-}
-
 function ActivityLine(props: {
   readonly item: ActivityItem;
   readonly expandable?: boolean;
 }): React.ReactElement {
   const { item } = props;
   const toolKind = item.toolKind ?? resolveActivityToolKind(item);
-  const Icon = TOOL_KIND_ICON[toolKind] ?? Sparkles;
+  const running = isRunningActivityPhase(item.phase);
+  const Icon = running ? LoaderCircle : TOOL_KIND_ICON[toolKind] ?? Sparkles;
   const visibleBadges = visibleBadgesForItem(item);
   const lineDelta = visibleLineDeltaForItem(item);
   const expandable = props.expandable !== false && shouldRenderExpandedDetail(item);
+  const verb = visibleActivityVerb(item);
   const line = (
     <>
+      {expandable
+        ? <ChevronRight className="agent-activity-chevron" size={14} aria-hidden="true" />
+        : <span className="agent-activity-chevron-spacer" aria-hidden="true" />}
       <span className="agent-activity-line-prefix">
-        <span className="agent-activity-label" aria-hidden="true">
-          <Icon size={12} strokeWidth={2.25} />
+        <span className={`agent-activity-label${running ? " is-running" : ""}`} aria-hidden="true">
+          <Icon size={14} strokeWidth={1.8} />
         </span>
-        {lineDelta !== undefined && (
-          <LineDeltaIndicator
-            delta={lineDelta}
-            running={isLineDeltaRunning(item)}
-          />
-        )}
       </span>
       <span className="agent-activity-body">
         <span className="agent-activity-copy">
-          {item.copy.label !== undefined && <span className="agent-activity-verb">{item.copy.label}</span>}
+          {verb !== undefined && <span className="agent-activity-verb">{verb}</span>}
           <span className="agent-activity-detail">{item.copy.detail}</span>
         </span>
-        {visibleBadges.length > 0 && (
+        {(lineDelta !== undefined || visibleBadges.length > 0) && (
           <span className="agent-activity-meta">
+            {lineDelta !== undefined && (
+              <LineDeltaIndicator
+                delta={lineDelta}
+                running={isLineDeltaRunning(item)}
+              />
+            )}
             {visibleBadges.map((entry, index) => (
               <ActivityBadgeChip key={`${entry.badge.label}-${index}`} badge={entry.badge} variant={entry.variant} />
             ))}
           </span>
         )}
       </span>
-      {expandable && <ChevronRight className="agent-activity-chevron" size={14} aria-hidden="true" />}
     </>
   );
   if (expandable) {
@@ -312,6 +237,16 @@ function ActivityLine(props: {
       {line}
     </p>
   );
+}
+
+function visibleActivityVerb(item: ActivityItem): string | undefined {
+  const label = item.copy.label?.trim();
+  if (label === undefined || label.length === 0) return undefined;
+  return item.copy.detail.includes(label) ? undefined : label;
+}
+
+function isRunningActivityPhase(phase: ActivityItem["phase"]): boolean {
+  return phase === "noted" || phase === "preparing" || phase === "executing";
 }
 
 function visibleLineDeltaForItem(item: ActivityItem): ActivityLineDelta | undefined {
@@ -599,13 +534,3 @@ function stringListsEqual(left: readonly string[] | undefined, right: readonly s
   }
   return true;
 }
-
-const ACTIVITY_METRIC_ORDER: readonly ActivityMetricKind[] = ["web", "read", "edit", "command", "other"];
-
-const ACTIVITY_METRIC_DEFS: Record<ActivityMetricKind, Omit<ActivityMetric, "kind" | "count">> = {
-  web: { label: "网页", icon: Globe2 },
-  read: { label: "读取", icon: FileText },
-  edit: { label: "编辑", icon: PencilLine },
-  command: { label: "命令", icon: Terminal },
-  other: { label: "动作", icon: Sparkles },
-};

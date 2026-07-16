@@ -1329,31 +1329,6 @@ html[data-style="glass"] .status-notice.error {
     color-mix(in oklch, var(--status-danger) 7%, color-mix(in oklch, var(--surface) 44%, var(--glass-shell-tone)));
 }
 
-html[data-style="glass"] .agent-workline-summary-status {
-  box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--status-success) 10%, transparent),
-    0 0 0 1px color-mix(in oklch, var(--status-success) 18%, transparent) inset;
-}
-
-html[data-style="glass"] .agent-activity {
-  border-left-color: color-mix(in oklch, white 28%, var(--border));
-}
-
-html[data-style="glass"] .agent-activity-marker {
-  background: color-mix(in oklch, var(--surface) 52%, var(--glass-shell-tone-strong));
-  border-color: color-mix(in oklch, white 18%, var(--border));
-  box-shadow: 0 0 0 2px color-mix(in oklch, white 10%, transparent);
-}
-
-html[data-style="glass"] .agent-activity-step:hover {
-  background: transparent;
-}
-
-html[data-style="glass"] .agent-activity-step[data-current="true"] {
-  background: transparent;
-  box-shadow: none;
-}
-
 html[data-style="glass"] .app-error-boundary-retry {
   background:
     linear-gradient(180deg, color-mix(in oklch, white 16%, transparent), transparent 42%),

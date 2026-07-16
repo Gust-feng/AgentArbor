@@ -32,7 +32,6 @@ import type {
   AgentLoopInput,
   AgentLoopResult,
 } from "../../app/model-runtime/agent-loop.js";
-import { isOfficialOpenAIBaseUrl } from "./openai-compatible-base-url.js";
 import {
   applyOpenAICompatibleChatDialectControls,
   applyOpenAICompatibleChatRequestPolicy,
@@ -48,9 +47,11 @@ import {
   canonicalToolResultMessage,
   canonicalMessagesFromOpenAIAgentsInput,
   createOpenAIAgentsInputMapper,
+  modelMessagesForOpenAIProtocol,
 } from "./openai-agents-input.js";
 import { withOpenAICompatibleChatProfile } from "./openai-agents-provider-profile.js";
 import { toOpenAIFetch, type FetchLike } from "./openai-fetch-bridge.js";
+import { withOpenAIResponsesStreamReconciliation } from "./openai-responses-stream-reconciliation.js";
 import {
   createOpenAIAgentsToolAssembly,
   recordOpenAIAgentsToolResult,
@@ -94,6 +95,8 @@ type PendingInterruption = OpenAIAgentsPendingConfirmation<SdkInterruption>;
 // still created. AgentArbor never exports SDK traces, so keep the process guard too.
 setTracingDisabled(true);
 
+const globalOpenAIFetch: typeof fetch = (input, init) => globalThis.fetch(input, init);
+
 export function createOpenAIAgentsLoop(config: OpenAIAgentsLoopConfig): AgentLoop {
   return new OpenAIAgentsLoop(config);
 }
@@ -109,13 +112,20 @@ class OpenAIAgentsLoop implements AgentLoop {
     validateConfig(config);
     validateRequestSettings(config.protocol, config.requestSettings);
     this.config = config;
-    const openAIClient = config.fetch === undefined
-      ? undefined
-      : new OpenAI({
+    const configuredFetch = config.fetch === undefined ? undefined : toOpenAIFetch(config.fetch);
+    const openAIClient = config.protocol === "openai_responses"
+      ? new OpenAI({
           apiKey: config.apiKey,
           baseURL: config.baseUrl,
-          fetch: toOpenAIFetch(config.fetch),
-        });
+          fetch: withOpenAIResponsesStreamReconciliation(configuredFetch ?? globalOpenAIFetch),
+        })
+      : configuredFetch === undefined
+        ? undefined
+        : new OpenAI({
+            apiKey: config.apiKey,
+            baseURL: config.baseUrl,
+            fetch: configuredFetch,
+          });
     this.provider = new OpenAIProvider({
       ...(openAIClient === undefined
         ? { apiKey: config.apiKey, baseURL: config.baseUrl }
@@ -138,7 +148,10 @@ class OpenAIAgentsLoop implements AgentLoop {
 
   async execute(input: AgentLoopInput): Promise<AgentLoopResult> {
     this.assertLive();
-    const baseMessages = cloneMessages(input.messages);
+    const baseMessages = modelMessagesForOpenAIProtocol({
+      protocol: this.config.protocol,
+      messages: input.messages,
+    });
     const modelInput = createOpenAIAgentsInputMapper({
       protocol: this.config.protocol,
       messages: baseMessages,
@@ -489,25 +502,24 @@ function modelSettings(input: {
   readonly agentTools: readonly AgentLoopAgentTool[];
 }): ModelSettings {
   const settings = input.config.requestSettings;
-  const officialOpenAI = isOfficialOpenAIBaseUrl(input.config.baseUrl);
   const dialectSettings = compatibleChatDialectSettings(input.config);
-  const providerData: Record<string, unknown> = officialOpenAI
-    ? {
-        prompt_cache_key: openAIAgentsPromptCacheKey(
-          input.config.protocol,
-          input.config.model,
-          input.instructions,
-          input.tools,
-          input.agentTools,
-          input.config.enableWebSearch === true,
-        ),
-        ...(settings?.serviceTier === undefined ? {} : { service_tier: settings.serviceTier }),
-        ...(input.config.protocol === "openai_responses"
-          ? { include: ["reasoning.encrypted_content"] }
-          : {}),
-        ...dialectSettings.providerData,
-      }
-    : dialectSettings.providerData;
+  const providerData: Record<string, unknown> = {
+    // A stable cache identity is useful to every OpenAI-compatible gateway;
+    // endpoint ownership is unrelated to whether it can cache a stable prefix.
+    prompt_cache_key: openAIAgentsPromptCacheKey(
+      input.config.protocol,
+      input.config.model,
+      input.instructions,
+      input.tools,
+      input.agentTools,
+      input.config.enableWebSearch === true,
+    ),
+    ...(settings?.serviceTier === undefined ? {} : { service_tier: settings.serviceTier }),
+    ...(input.config.protocol === "openai_responses"
+      ? { include: ["reasoning.encrypted_content"] }
+      : {}),
+    ...dialectSettings.providerData,
+  };
   return {
     temperature: dialectSettings.temperature,
     topP: dialectSettings.topP,
@@ -714,9 +726,8 @@ function validateConfig(config: OpenAIAgentsLoopConfig): void {
       throw new Error(`OpenAI Agents loop ${name} must not be blank.`);
     }
   }
-  if (config.enableWebSearch === true &&
-      (config.protocol !== "openai_responses" || !isOfficialOpenAIBaseUrl(config.baseUrl))) {
-    throw new Error("OpenAI model built-in Web Search requires the official OpenAI Responses endpoint.");
+  if (config.enableWebSearch === true && config.protocol !== "openai_responses") {
+    throw new Error("OpenAI model built-in Web Search requires the Responses protocol.");
   }
 }
 

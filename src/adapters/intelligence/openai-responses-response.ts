@@ -20,6 +20,7 @@ import {
   openAIResponsesOutputItems,
   openAIResponsesProtocolExtensions,
 } from "./openai-responses-continuation.js";
+import { reconcileOpenAIResponsesTerminalOutput } from "./openai-responses-stream-reconciliation.js";
 import { providerErrorMessage } from "./provider-error-message.js";
 import { createOpenAIModelRefusalResponse } from "./openai-model-refusal.js";
 
@@ -215,7 +216,9 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       if (eventType === "response.output_item.done") {
         const item = asRecord(event.item);
         const outputIndex = typeof event.output_index === "number" ? event.output_index : completedOutputItems.size;
-        completedOutputItems.set(outputIndex, item);
+        if (typeof item.type === "string" && item.type.length > 0) {
+          completedOutputItems.set(outputIndex, item);
+        }
         if (item.type === "function_call") {
           const builder = toolCallBuilders.get(outputIndex) ?? { arguments: "" };
           toolCallBuilders.set(outputIndex, {
@@ -240,9 +243,19 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
         if (typeof response.model === "string") {
           model = response.model;
         }
-        const output = Array.isArray(response.output) ? response.output : [];
+        const output = reconcileOpenAIResponsesTerminalOutput({
+          terminalOutput: response.output,
+          observations: [...completedOutputItems.entries()].map(([outputIndex, completed]) => ({
+            outputIndex,
+            completed,
+          })),
+          terminalStatus: responseStatus === "incomplete" ? "incomplete" : "completed",
+        });
         responseOutputItems = openAIResponsesOutputItems(output);
-        const parsed = parseOutputItems(output);
+        const parsed = parseOutputItems([...output]);
+        if (textContent.length === 0) {
+          textContent = parsed.textOutput;
+        }
         if (reasoningContent.length === 0) {
           reasoningContent = parsed.reasoningContent;
         }

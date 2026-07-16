@@ -141,6 +141,53 @@ test("restart reset and live text delta remain explicit activity facts", () => {
   assert.deepEqual(batch.events.map((event) => event.sequence), [1, 2, 3]);
 });
 
+test("model request activity is visible as quiet workflow progress", () => {
+  const run = runState({ runId: "model-request-run", status: { kind: "running" } });
+  const fullReplay: OrdinaryRunActivityReplay = {
+    cursor: { streamId: "stream-model-request", sequence: 4 },
+    reset: false,
+    activities: [
+      transitionActivity(run, createdEvent(run), 1),
+      transitionActivity(run, startedEvent(run), 2),
+      {
+        activityId: "activity-tool",
+        runId: run.runId,
+        sequence: 3,
+        recordedAt: "2026-01-01T00:00:03.000Z",
+        type: "tool.result",
+        durability: "durable",
+        result: {
+          callId: "call-read",
+          toolName: "read_file",
+          input: { path: "package.json" },
+          output: { path: "package.json", content: "{}" },
+          status: "completed",
+          durationMs: 1,
+        },
+      },
+      {
+        activityId: "activity-model-request",
+        runId: run.runId,
+        sequence: 4,
+        recordedAt: "2026-01-01T00:00:04.000Z",
+        type: "model.request",
+        durability: "live_only",
+        reason: "after_tool",
+      },
+    ],
+  };
+
+  const view = projectOrdinaryPanelRunView({ run, fullReplay });
+  const node = view.workView.transcriptNodes.at(-1);
+
+  assert.equal(view.replay.events.at(-1)?.type, "model.requested");
+  assert.equal(view.replay.events.at(-1)?.summary, "分析工具结果");
+  assert.equal(node?.eventType, "model.requested");
+  assert.equal(node?.kind, "system");
+  assert.equal(node?.phase, "executing");
+  assert.equal(node?.summary, "分析工具结果");
+});
+
 test("approval projection keeps the complete confirmation and canonical tool result", () => {
   const request = confirmation("approval-run");
   const run = runState({

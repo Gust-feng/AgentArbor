@@ -392,6 +392,57 @@ test("assistant message structure suppresses speculative fallback body while a l
   assert.equal(structure.awaitingFirstVisibleOutput, true);
 });
 
+test("assistant message structure keeps post-tool continuation inside the workflow activity", () => {
+  const structure = projectAssistantMessageStructure({
+    keepStreamMounted: true,
+    transcriptNodes: [
+      node({
+        nodeId: "tool-completed",
+        sequence: 1,
+        kind: "tool",
+        eventType: "tool.completed",
+        phase: "completed",
+        summary: "当前目录",
+      }),
+      node({
+        nodeId: "model-request",
+        sequence: 2,
+        kind: "system",
+        eventType: "model.requested",
+        phase: "executing",
+        summary: "分析工具结果",
+      }),
+    ],
+  });
+
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity"]);
+  assert.deepEqual(
+    structure.segments[0]?.kind === "activity"
+      ? structure.segments[0].timeline.items.map((item) => item.copy.detail)
+      : [],
+    ["当前目录", "分析工具结果"],
+  );
+  assert.equal(structure.awaitingFirstVisibleOutput, false);
+});
+
+test("assistant message structure does not duplicate waiting state while a tool is executing", () => {
+  const structure = projectAssistantMessageStructure({
+    keepStreamMounted: true,
+    transcriptNodes: [
+      node({
+        nodeId: "tool-executing",
+        sequence: 1,
+        kind: "tool",
+        eventType: "tool.requested",
+        phase: "executing",
+        summary: "当前目录",
+      }),
+    ],
+  });
+
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity"]);
+});
+
 function node(input: {
   readonly nodeId: string;
   readonly sequence: number;

@@ -29,12 +29,34 @@ export interface OpenAIAgentsInputMapper {
   toolResult(result: ToolCallResult): SdkToolOutput;
 }
 
+/**
+ * Starts a target-protocol context segment from portable conversation facts.
+ * Native continuation fields remain exact only while their owning protocol is
+ * active; a protocol switch keeps messages and completed tool facts but drops
+ * continuation state that the target protocol cannot consume.
+ */
+export function modelMessagesForOpenAIProtocol(input: {
+  readonly protocol: OpenAIAgentsInputProtocol;
+  readonly messages: readonly ModelMessage[];
+}): readonly ModelMessage[] {
+  return input.messages.map((message) => {
+    const { protocolExtensions: _incompatibleExtensions, ...portable } = globalThis.structuredClone(message);
+    const protocolExtensions = protocolExtensionsForOpenAIProtocol(
+      input.protocol,
+      message.protocolExtensions,
+    );
+    return protocolExtensions === undefined
+      ? portable
+      : { ...portable, protocolExtensions };
+  });
+}
+
 /** Maps AgentArbor's canonical messages to SDK input without changing attachment origin roles. */
 export function createOpenAIAgentsInputMapper(input: {
   readonly protocol: OpenAIAgentsInputProtocol;
   readonly messages: readonly ModelMessage[];
 }): OpenAIAgentsInputMapper {
-  const messages = input.messages.map((message) => globalThis.structuredClone(message));
+  const messages = modelMessagesForOpenAIProtocol(input);
   const responseToolAttachmentMessages: ModelMessage[] = [];
   return {
     protocol: input.protocol,
@@ -174,11 +196,9 @@ function modelMessagesToSdkInput(input: {
         items.push(...continuationItems as AgentInputItem[]);
         continue;
       }
-    } else if (
-      input.protocol !== "openai_responses" &&
-      message.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION] !== undefined
-    ) {
-      throw new Error("Responses protocol output items cannot be replayed through Chat Completions.");
+    }
+    if (input.protocol === "openai_compatible_chat_completions" && message.content.length > 0) {
+      items.push(sdkAssistantTextItem(message));
     }
     for (const [callIndex, call] of (message.toolCalls ?? []).entries()) {
       items.push({
@@ -192,18 +212,39 @@ function modelMessagesToSdkInput(input: {
           : undefined,
       });
     }
-    if (message.content.length > 0) {
-      items.push({
-        role: "assistant",
-        status: "completed",
-        content: [{ type: "output_text", text: message.content }],
-        providerData: input.protocol === "openai_compatible_chat_completions" && (message.toolCalls?.length ?? 0) === 0
-          ? chatProviderData(message.protocolExtensions)
-          : undefined,
-      });
+    if (input.protocol === "openai_responses" && message.content.length > 0) {
+      items.push(sdkAssistantTextItem(message));
     }
   }
   return items;
+}
+
+function sdkAssistantTextItem(message: ModelMessage): AgentInputItem {
+  return {
+    role: "assistant",
+    status: "completed",
+    content: [{ type: "output_text", text: message.content }],
+    providerData: (message.toolCalls?.length ?? 0) === 0
+      ? chatProviderData(message.protocolExtensions)
+      : undefined,
+  };
+}
+
+function protocolExtensionsForOpenAIProtocol(
+  protocol: OpenAIAgentsInputProtocol,
+  extensions: ModelMessage["protocolExtensions"],
+): Readonly<Record<string, unknown>> | undefined {
+  if (extensions === undefined) return undefined;
+  if (protocol === "openai_responses") {
+    if (!Object.prototype.hasOwnProperty.call(extensions, OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION)) {
+      return undefined;
+    }
+    return persistedModelProtocolExtensions({
+      [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: extensions[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION],
+    });
+  }
+  const chatExtensions = filterOpenAIChatContinuationExtensions({ ...extensions });
+  return persistedModelProtocolExtensions(chatExtensions);
 }
 
 function canonicalUserMessage(item: Record<string, unknown>): ModelMessage {

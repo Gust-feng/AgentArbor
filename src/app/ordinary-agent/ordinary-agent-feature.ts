@@ -242,6 +242,25 @@ export function createOrdinaryAgentFeature(input: {
     emit(activity);
   }
 
+  function recordModelRequest(runId: string, reason: "initial" | "after_tool" | "after_approval"): void {
+    if (released) return;
+    if (documents.get(runId)?.state.status.kind !== "running") return;
+    const stream = streamFor(runId);
+    const latest = stream.activities.at(-1);
+    if (latest?.type === "model.request" && latest.reason === reason) return;
+    const activity: OrdinaryRunActivity = {
+      activityId: idFactory("ordinary-activity"),
+      runId,
+      sequence: stream.nextSequence++,
+      recordedAt: now(),
+      type: "model.request",
+      durability: "live_only",
+      reason,
+    };
+    stream.activities.push(activity);
+    emit(activity);
+  }
+
   async function persistToolResult(runId: string, result: ToolCallResult): Promise<void> {
     if (result.status === "approval_required") return;
     await enqueue(runId, async () => {
@@ -340,6 +359,7 @@ export function createOrdinaryAgentFeature(input: {
     const controller = new AbortController();
     controllers.set(runId, controller);
     try {
+      recordModelRequest(runId, "initial");
       const outcome = await input.execution.execute({
         runId,
         birth: document.state.birth,
@@ -347,7 +367,12 @@ export function createOrdinaryAgentFeature(input: {
         messages: document.state.canonicalMessages,
         abortSignal: controller.signal,
         onTextDelta: (delta) => recordOutputDelta(runId, delta),
-        onToolResult: (result) => persistToolResult(runId, result),
+        onToolResult: async (result) => {
+          await persistToolResult(runId, result);
+          if (result.status !== "approval_required") {
+            recordModelRequest(runId, "after_tool");
+          }
+        },
       });
       await applyOutcome(runId, outcome);
     } catch (error) {
@@ -757,6 +782,7 @@ export function createOrdinaryAgentFeature(input: {
     }
     const operation = (async () => {
       try {
+        recordModelRequest(decision.runId, "after_approval");
         await applyOutcome(decision.runId, await continuation!.decide({ decision, abortSignal: controller.signal }));
       } catch (error) {
         const latest = await load(decision.runId);

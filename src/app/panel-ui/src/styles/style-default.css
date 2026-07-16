@@ -672,32 +672,6 @@ html[data-style="default"] .agent-workline-disclosure > summary {
   color: color-mix(in oklch, var(--fg) 74%, var(--muted));
 }
 
-html[data-style="default"] .agent-workline-summary-status {
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--status-success) 10%, transparent);
-}
-
-html[data-style="default"] .agent-activity {
-  border-left-color: color-mix(in oklch, var(--border) 74%, transparent);
-}
-
-html[data-style="default"] .agent-activity-step {
-  border-radius: 0;
-}
-
-html[data-style="default"] .agent-activity-step:hover {
-  background: transparent;
-}
-
-html[data-style="default"] .agent-activity-step[data-current="true"] {
-  background: transparent;
-  box-shadow: none;
-}
-
-html[data-style="default"] .agent-activity-marker {
-  border-color: color-mix(in oklch, var(--border) 76%, transparent);
-  background: var(--surface);
-}
-
 html[data-style="default"] .settings-dialog {
   border-width: var(--border-width-thin);
   border-radius: var(--radius-xl);

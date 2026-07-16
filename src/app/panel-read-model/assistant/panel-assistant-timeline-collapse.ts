@@ -181,7 +181,7 @@ function timelineStatusLabel(input: {
   return undefined;
 }
 
-type TimelineActionKind = "command" | "edit" | "read" | "search" | "web" | "other";
+type TimelineActionKind = "command" | "edit" | "read" | "search" | "web" | "request" | "other";
 
 function dominantTimelineAction(items: readonly TimelineCollapseActivityLike[]): {
   readonly kind: TimelineActionKind;
@@ -212,6 +212,7 @@ function timelineActionKind(item: TimelineCollapseActivityLike): TimelineActionK
   if (label === "读取" || label === "查看") return "read";
   if (label === "搜索") return "search";
   if (label === "网页") return "web";
+  if (label === "请求") return "request";
   return undefined;
 }
 
@@ -225,5 +226,6 @@ function completedTimelineActionLabel(action: {
   if (action.kind === "read") return `已读取 ${count} 项`;
   if (action.kind === "search") return `已搜索 ${count} 次`;
   if (action.kind === "web") return `已查看 ${count} 个网页`;
+  if (action.kind === "request") return `已发送 ${count} 个请求`;
   return count === 1 ? "完成 1 步" : `完成 ${count} 步`;
 }

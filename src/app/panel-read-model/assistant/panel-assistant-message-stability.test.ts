@@ -46,6 +46,30 @@ test("assistant message stability preserves already shown thinking when a later 
   assert.deepEqual(stabilized.segments[0]?.kind === "activity" ? stabilized.segments[0].timeline.items.map((item) => item.nodeId) : [], ["thinking-1"]);
 });
 
+test("assistant message stability keeps post-tool model progress in the workflow", () => {
+  const tool = activity("activity:tool-1", ["tool-1"], false, "tool");
+  const progress = activityWithPhases("activity:tool-1", [
+    { nodeId: "tool-1", detail: "tool-1", tone: "tool", phase: "completed" },
+    { nodeId: "model-request", detail: "分析工具结果", tone: "thinking", phase: "executing" },
+  ], false);
+  const previous = view([tool]);
+  const waitingView = stabilizeAssistantMessageView(previous, view([progress]));
+
+  assert.deepEqual(waitingView.segments.map((segment) => segment.kind), ["activity"]);
+  assert.deepEqual(
+    waitingView.segments[0]?.kind === "activity"
+      ? waitingView.segments[0].timeline.items.map((item) => item.copy.detail)
+      : [],
+    ["tool-1", "分析工具结果"],
+  );
+
+  const continued = stabilizeAssistantMessageView(waitingView, view([
+    progress,
+    body("body:continued", "继续执行下一步。", true),
+  ]));
+  assert.deepEqual(continued.segments.map((segment) => segment.kind), ["activity", "body"]);
+});
+
 test("assistant message stability closes thinking as soon as the next projection renders body after it", () => {
   const previous = view([
     activityWithPhases("activity:thinking-live", [
@@ -555,7 +579,7 @@ function view(
       hasContent: segments.some((segment) => segment.kind === "activity"),
     },
     hasTimeline: segments.some((segment) => segment.kind === "activity"),
-    awaitingFirstVisibleOutput: segments.some((segment) => segment.kind === "awaiting"),
+    awaitingFirstVisibleOutput: segments.some((segment) => segment.kind === "awaiting" && segment.reason === "initial"),
     answer: undefined,
     segments,
     copyText: segments

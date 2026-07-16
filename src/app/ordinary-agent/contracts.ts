@@ -246,6 +246,7 @@ type OrdinaryRunActivityBase = {
 
 export type OrdinaryRunActivity = OrdinaryRunActivityBase & (
   | { readonly type: "run.transition"; readonly durability: "durable"; readonly event: OrdinaryRunEvent }
+  | { readonly type: "model.request"; readonly durability: "live_only"; readonly reason: "initial" | "after_tool" | "after_approval" }
   | { readonly type: "model.output.delta"; readonly durability: "live_only"; readonly delta: string }
   | { readonly type: "tool.result"; readonly durability: "live_only" | "durable"; readonly result: ToolCallResult }
 );

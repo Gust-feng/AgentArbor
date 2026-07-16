@@ -45,6 +45,7 @@ export type AssistantMessageSegment<
   | {
       readonly kind: "awaiting";
       readonly lifecycle: AssistantMessageSegmentLifecycle;
+      readonly reason: "initial" | "continuation";
     };
 
 export type AssistantMessageStructure<
@@ -120,7 +121,7 @@ export function assistantMessageAwaitingFirstVisibleOutput<
 >(
   segments: readonly AssistantMessageSegment<TNode, TConfirmation>[],
 ): boolean {
-  return segments.some((segment) => segment.kind === "awaiting");
+  return segments.some((segment) => segment.kind === "awaiting" && segment.reason === "initial");
 }
 
 export function assistantMessageCopyTextFromSegments<
@@ -311,7 +312,7 @@ function assistantMessageSegments<
   readonly awaiting: boolean;
 }): readonly AssistantMessageSegment<TNode, TConfirmation>[] {
   if (input.awaiting) {
-    return [{ kind: "awaiting", lifecycle: "open" }];
+    return [{ kind: "awaiting", lifecycle: "open", reason: "initial" }];
   }
   const activityNodes = assistantTimelineNodes(input.transcriptNodes);
   const activityNodesById = new Map(activityNodes.map((node) => [node.nodeId, node]));

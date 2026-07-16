@@ -59,11 +59,12 @@ export type ModelMessage = {
   readonly toolName?: string;
   readonly toolCalls?: readonly ToolCallRequest[];
   /**
-   * Opaque protocol continuation fields returned by an adapter and replayed only
-   * to that adapter during a tool-use loop. These fields are never projected to
-   * EventLog, panel read models, Plan material, or user-visible output. Durable
-   * feature state may retain only the explicit whitelist produced by the model
-   * protocol persistence contract.
+   * Opaque protocol continuation fields returned by an adapter and replayed
+   * only while that protocol remains active. A protocol switch starts a new
+   * context segment from portable message and tool facts instead of translating
+   * these fields. They are never projected to EventLog, panel read models, Plan
+   * material, or user-visible output. Durable feature state may retain only the
+   * explicit whitelist produced by the model protocol persistence contract.
    */
   readonly protocolExtensions?: Readonly<Record<string, unknown>>;
 };

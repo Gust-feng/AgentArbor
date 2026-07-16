@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentLoopAgentTool } from "../../app/model-runtime/agent-loop.js";
+import {
+  SPAWN_SUB_AGENT_TOOL_NAME,
+  createSubAgentAgentTools,
+} from "../../app/sub-agents/sub-agent-agent-tools.js";
+import { SubAgentRegistry } from "../../app/sub-agents/sub-agent-registry.js";
 import type { ConfirmationDecision } from "../../domain/confirmation/index.js";
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type {
@@ -129,6 +134,37 @@ test("Responses gives a no-tool child no tools or parallel flag and never reuses
     assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
     assert.equal(result.status === "completed" ? result.finalText : undefined, "root-responses-synthesis");
     assert.equal(result.toolResults.find((item) => item.callId === "spawn-call")?.output, "temporary-specialist-output");
+  } finally {
+    await loop.release();
+  }
+});
+
+test("Responses serializes the production spawn_sub_agent schema within the strict JSON subset", async () => {
+  const agentTools = await createSubAgentAgentTools({
+    registry: new SubAgentRegistry({ roots: [] }),
+    parentAllowedTools: [],
+    executableTools: [],
+    exposedToolNames: [SPAWN_SUB_AGENT_TOOL_NAME],
+    dynamicSpawnAvailable: true,
+  });
+  const gateway = new RecordingGateway([]);
+  const fetch = scriptedFetch([
+    ({ body }) => {
+      const tools = Array.isArray(body.tools) ? body.tools.map(parseRecord) : [];
+      const spawn = tools.find((item) => item.name === SPAWN_SUB_AGENT_TOOL_NAME);
+      assert.equal(spawn?.strict, true);
+      assert.doesNotMatch(JSON.stringify(spawn?.parameters), /uniqueItems/u);
+      return responsesText("schema-compatible", "schema-compatible-response");
+    },
+  ]);
+  const loop = createLoop({
+    protocol: "openai_responses",
+    baseUrl: OFFICIAL_BASE_URL,
+    fetch: fetch.fetch,
+  });
+  try {
+    const result = await loop.execute(loopInput({ gateway, agentTools }));
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
   } finally {
     await loop.release();
   }

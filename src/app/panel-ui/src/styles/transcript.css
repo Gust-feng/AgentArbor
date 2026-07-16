@@ -1,14 +1,18 @@
 .agent-workline {
   display: grid;
-  width: min(var(--panel-reading-width), 100%);
+  width: 100%;
+  max-width: 700px;
   min-width: 0;
+  justify-self: stretch;
   user-select: none;
 }
 
 .agent-workline-disclosure {
   display: grid;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .agent-workline-disclosure > summary {
@@ -16,15 +20,17 @@
   width: fit-content;
   max-width: 100%;
   min-width: 0;
+  min-height: 24px;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  padding: 2px 0;
-  color: var(--fg);
+  padding: 3px 0;
+  color: color-mix(in oklch, var(--fg) 56%, var(--muted));
   cursor: pointer;
-  line-height: 1;
+  font-size: 12.5px;
+  line-height: 1.4;
   list-style: none;
   transition:
     color var(--motion-fast-duration) var(--motion-ease-standard),
@@ -40,87 +46,17 @@
   opacity: 0.9;
 }
 
-.agent-workline-summary-status {
-  flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklch, var(--status-success) 72%, var(--accent));
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--status-success) 10%, transparent);
-}
-
 .agent-workline-summary-text {
-  display: none;
-}
-
-.agent-workline-summary-metrics {
-  display: inline-flex;
+  display: block;
   min-width: 0;
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.agent-workline-summary-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: color-mix(in oklch, var(--fg) 48%, var(--muted));
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.agent-workline-summary-chip strong {
-  font-size: 12px;
-  font-weight: var(--weight-bold);
-}
-
-.agent-workline-summary-chip .agent-activity-line-delta {
-  margin-left: 1px;
-  font-size: 11px;
-}
-
-.agent-workline-summary-chip.edit .agent-activity-line-delta + strong {
-  margin-left: 1px;
-}
-
-.agent-workline-summary-icon {
-  display: inline-flex;
-  width: 15px;
-  height: 15px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--fg);
-}
-
-.agent-workline-summary-chip.web .agent-workline-summary-icon {
-  color: color-mix(in oklch, var(--accent) 78%, var(--fg));
-}
-
-.agent-workline-summary-chip.read .agent-workline-summary-icon {
-  color: color-mix(in oklch, var(--status-success) 70%, var(--fg));
-}
-
-.agent-workline-summary-chip.edit .agent-workline-summary-icon {
-  color: color-mix(in oklch, var(--status-warning) 78%, var(--fg));
-}
-
-.agent-workline-summary-chip.command .agent-workline-summary-icon {
-  color: color-mix(in oklch, var(--secondary) 78%, var(--fg));
-}
-
-.agent-workline-summary-chip.other .agent-workline-summary-icon {
-  color: color-mix(in oklch, var(--fg) 58%, var(--muted));
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .agent-workline-summary-chevron {
   flex: 0 0 auto;
-  color: color-mix(in oklch, var(--fg) 38%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 42%, var(--muted));
+  opacity: 0.74;
   transition: transform var(--motion-enter-duration) var(--motion-ease-spring);
 }
 
@@ -139,30 +75,31 @@
 
 .agent-activity {
   display: grid;
+  width: 100%;
+  max-width: 700px;
   min-width: 0;
-  gap: 0;
-  border-left: 1px solid color-mix(in oklch, var(--border) 62%, transparent);
-  margin-left: 8px;
-  padding: 2px 0 var(--space-1) 18px;
+  gap: 1px;
+  padding: 1px 0 var(--space-1);
 }
 
 .agent-activity-step {
-  position: relative;
   display: grid;
+  width: 100%;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  padding: 5px 0 5px var(--space-2);
-  color: color-mix(in oklch, var(--fg) 62%, var(--muted));
+  border: 0;
   border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: color-mix(in oklch, var(--fg) 62%, var(--muted));
   transition:
-    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
     color var(--motion-interaction-duration) var(--motion-ease-standard),
     opacity var(--motion-interaction-duration) var(--motion-ease-standard);
 }
 
 .agent-activity-step:hover {
-  background: transparent;
+  color: color-mix(in oklch, var(--fg) 78%, var(--muted));
 }
 
 button.agent-activity-step {
@@ -181,116 +118,32 @@ button.agent-activity-step:focus-visible {
   outline-offset: 2px;
 }
 
-.agent-activity-marker {
-  position: absolute;
-  z-index: 1;
-  top: 15px;
-  left: -22px;
-  width: 6px;
-  height: 6px;
-  border: 2px solid color-mix(in oklch, var(--border) 72%, transparent);
-  border-radius: 999px;
-  background: var(--bg);
-  transition:
-    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
-    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
-    box-shadow var(--motion-interaction-duration) var(--motion-ease-standard),
-    transform var(--motion-interaction-duration) var(--motion-ease-standard);
+.agent-activity-step[data-current="true"] {
+  color: color-mix(in oklch, var(--fg) 86%, var(--muted));
 }
 
 .agent-activity-step[data-current="true"] .agent-activity-label {
-  color: color-mix(in oklch, var(--accent) 72%, var(--fg));
+  color: color-mix(in oklch, var(--accent) 68%, var(--fg));
 }
 
-/* ── Semantic marker dot colors + per-kind accent ── */
-
-.agent-activity-step[data-tool-kind="command"] {
-  --tool-accent: color-mix(in oklch, var(--secondary) 68%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="search"] {
-  --tool-accent: color-mix(in oklch, var(--accent) 68%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="read"] {
-  --tool-accent: color-mix(in oklch, var(--status-success) 62%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="edit"] {
-  --tool-accent: color-mix(in oklch, var(--status-warning) 68%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="web"] {
-  --tool-accent: color-mix(in oklch, var(--accent) 68%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="thinking"] {
-  --tool-accent: color-mix(in oklch, var(--muted) 56%, var(--fg));
-}
-.agent-activity-step.confirmation {
-  --tool-accent: var(--status-warning);
-}
-
-.agent-activity-step[data-tool-kind] .agent-activity-marker {
-  border-color: color-mix(in oklch, var(--tool-accent) 42%, var(--border));
-  background: var(--bg);
-}
-
-.agent-activity-step[data-tool-kind]:hover .agent-activity-marker {
-  background: color-mix(in oklch, var(--tool-accent) 26%, var(--bg));
-  transform: scale(1.15);
-}
-
-.agent-activity-step[data-tool-kind][data-current="true"] .agent-activity-marker {
-  background: var(--tool-accent);
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--tool-accent) 12%, transparent);
-}
-
-.assistant-message[data-entering] .agent-activity-step[data-current="true"] .agent-activity-marker {
-  border-color: var(--tool-accent, var(--accent));
-  background: var(--tool-accent, var(--accent));
-  animation: agent-marker-pulse 2s var(--motion-ease-standard) infinite;
-}
-
-/* ── Interaction layer: hover accent + current step highlight ── */
-
-.agent-activity-step::before {
-  content: "";
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 0;
-  width: 2px;
-  border-radius: 1px;
-  background: transparent;
-  transition: background var(--motion-interaction-duration) var(--motion-ease-standard);
-}
-
-.agent-activity-step:hover::before {
-  background: color-mix(in oklch, var(--tool-accent, var(--fg)) 32%, transparent);
-}
-
-.agent-activity-step[data-current="true"] {
-  color: color-mix(in oklch, var(--fg) 86%, var(--muted));
-  background: transparent;
-}
-
-.agent-activity-step[data-current="true"]::before {
-  background: color-mix(in oklch, var(--tool-accent, var(--accent)) 70%, transparent);
-}
-
-.agent-activity-step.confirmation .agent-activity-marker {
-  border-color: var(--status-warning);
-  background: var(--status-warning);
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--status-warning) 10%, transparent);
+.agent-activity-step.failed .agent-activity-detail,
+.agent-activity-step.blocked .agent-activity-detail,
+.agent-activity-step.cancelled .agent-activity-detail {
+  color: color-mix(in oklch, var(--status-danger) 76%, var(--fg));
 }
 
 .agent-activity-line {
   display: grid;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
-  grid-template-columns: 18px minmax(0, 1fr) 14px;
-  align-items: center;
-  column-gap: var(--space-2);
-  row-gap: 4px;
+  grid-template-columns: 14px 16px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 6px;
   margin: 0;
+  padding: 3px 0;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   transition:
     color var(--motion-interaction-duration) var(--motion-ease-standard),
     opacity var(--motion-interaction-duration) var(--motion-ease-standard);
@@ -312,11 +165,19 @@ button.agent-activity-step:focus-visible {
 }
 
 .agent-activity-chevron {
-  grid-column: 3;
+  grid-column: 1;
   flex: 0 0 auto;
-  color: color-mix(in oklch, var(--fg) 46%, var(--muted));
-  opacity: 0.42;
+  margin-top: 3px;
+  color: color-mix(in oklch, var(--fg) 40%, var(--muted));
+  opacity: 0.62;
   transition: opacity var(--motion-quick-duration) ease, transform var(--motion-enter-duration) var(--motion-ease-spring);
+}
+
+.agent-activity-chevron-spacer {
+  display: block;
+  width: 14px;
+  height: 14px;
+  grid-column: 1;
 }
 
 .agent-activity-disclosure[open] > summary .agent-activity-chevron {
@@ -330,15 +191,16 @@ button.agent-activity-step:focus-visible {
 
 .agent-evidence-panel {
   display: grid;
-  width: calc(100% - 24px);
-  max-width: var(--panel-reading-width);
+  width: calc(100% - 36px);
+  max-width: 664px;
   min-width: 0;
-  margin: 9px 0 4px 24px;
-  overflow: hidden;
-  border: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
-  border-radius: var(--radius-md);
-  background: color-mix(in oklch, var(--surface) 92%, var(--surface-subtle));
-  box-shadow: 0 1px 2px color-mix(in oklch, var(--shadow-ink) 4%, transparent);
+  gap: 8px;
+  margin: 4px 0 9px 36px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: color-mix(in oklch, var(--fg) 74%, var(--muted));
   font-size: 12px;
   line-height: 1.58;
@@ -351,19 +213,19 @@ button.agent-activity-step:focus-visible {
 }
 
 .agent-evidence-section + .agent-evidence-section {
-  border-top: 1px solid color-mix(in oklch, var(--border) 68%, transparent);
+  border-top: 0;
 }
 
 .agent-evidence-section-header {
   display: flex;
   min-width: 0;
-  min-height: 30px;
+  min-height: 24px;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  border-bottom: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
-  background: color-mix(in oklch, var(--surface-subtle) 52%, transparent);
-  padding: 6px 9px;
+  border-bottom: 0;
+  background: transparent;
+  padding: 2px 0 4px;
   color: color-mix(in oklch, var(--fg) 50%, var(--muted));
   font-size: 10.5px;
   font-weight: var(--weight-heading);
@@ -378,7 +240,7 @@ button.agent-activity-step:focus-visible {
 .agent-evidence-section[data-format="list"] .agent-evidence-section-header {
   border-bottom: 0;
   background: transparent;
-  padding: 9px 11px 3px;
+  padding: 2px 0 3px;
 }
 
 .agent-evidence-copy.copy-action-button {
@@ -393,6 +255,8 @@ button.agent-activity-step:focus-visible {
   max-height: min(42vh, 420px);
   margin: 0;
   overflow: auto;
+  border: 1px solid color-mix(in oklch, var(--border) 68%, transparent);
+  border-radius: 6px;
   background: color-mix(in oklch, var(--surface-subtle) 42%, var(--surface));
   color: color-mix(in oklch, var(--fg) 78%, var(--muted));
   font-family: var(--font-mono);
@@ -406,7 +270,7 @@ button.agent-activity-step:focus-visible {
 }
 
 .agent-evidence-code.is-console {
-  border-left: 2px solid color-mix(in oklch, var(--secondary) 52%, var(--border));
+  border-left: 2px solid color-mix(in oklch, var(--fg) 28%, var(--border));
 }
 
 .agent-evidence-section[data-tone="danger"] .agent-evidence-code.is-console {
@@ -465,7 +329,7 @@ button.agent-activity-step:focus-visible {
   display: grid;
   min-width: 0;
   margin: 0;
-  padding: 3px 0;
+  padding: 0;
   list-style: none;
 }
 
@@ -473,11 +337,11 @@ button.agent-activity-step:focus-visible {
   display: grid;
   min-width: 0;
   gap: 3px;
-  padding: 8px 11px;
+  padding: 6px 0;
 }
 
 .agent-evidence-item-list > li + li {
-  border-top: 1px solid color-mix(in oklch, var(--border) 48%, transparent);
+  border-top: 1px solid color-mix(in oklch, var(--border) 38%, transparent);
 }
 
 .agent-evidence-item-main {
@@ -545,7 +409,7 @@ button.agent-activity-step:focus-visible {
 .agent-evidence-plain,
 .agent-evidence-quote {
   margin: 0;
-  padding: 8px 11px 11px;
+  padding: 1px 0 3px;
 }
 
 .agent-evidence-source {
@@ -587,7 +451,8 @@ button.agent-activity-step:focus-visible {
 }
 
 .agent-evidence-quote {
-  border-left: 2px solid color-mix(in oklch, var(--tool-accent, var(--accent)) 28%, var(--border));
+  border-left: 1px solid color-mix(in oklch, var(--fg) 20%, var(--border));
+  padding-left: 10px;
   color: color-mix(in oklch, var(--fg) 66%, var(--muted));
   font-size: 12px;
   line-height: 1.68;
@@ -596,7 +461,7 @@ button.agent-activity-step:focus-visible {
 
 .agent-evidence-list {
   gap: 5px;
-  padding: 7px 11px 10px 27px;
+  padding: 2px 0 4px 18px;
   list-style: disc;
 }
 
@@ -606,8 +471,8 @@ button.agent-activity-step:focus-visible {
 
 .agent-evidence-note {
   margin: 0;
-  border-top: 1px solid color-mix(in oklch, var(--border) 44%, transparent);
-  padding: 7px 11px;
+  border-top: 0;
+  padding: 2px 0;
   color: color-mix(in oklch, var(--fg) 42%, var(--muted));
   font-size: 10.5px;
   line-height: 1.4;
@@ -633,19 +498,29 @@ button.agent-activity-step:focus-visible {
   align-items: center;
   justify-content: center;
   width: 16px;
+  height: 20px;
   flex-shrink: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: color-mix(in oklch, var(--fg) 42%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 44%, var(--muted));
   line-height: 1;
+}
+
+.agent-activity-label.is-running {
+  color: color-mix(in oklch, var(--accent) 66%, var(--fg));
+}
+
+.agent-activity-label.is-running svg {
+  animation: agent-activity-spin 900ms linear infinite;
 }
 
 .agent-activity-line-prefix {
   display: inline-flex;
+  grid-column: 2;
   align-items: center;
+  justify-content: center;
   min-width: 0;
-  gap: 5px;
   line-height: 1;
 }
 
@@ -657,7 +532,7 @@ button.agent-activity-step:focus-visible {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: var(--weight-heading);
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
   line-height: 1;
   white-space: nowrap;
 }
@@ -682,9 +557,10 @@ button.agent-activity-step:focus-visible {
 
 .agent-activity-body {
   display: flex;
+  grid-column: 3;
   min-width: 0;
   align-items: baseline;
-  gap: var(--space-2);
+  gap: 8px;
 }
 
 .agent-activity-meta {
@@ -692,7 +568,8 @@ button.agent-activity-step:focus-visible {
   min-width: 0;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: 5px;
+  align-items: center;
+  gap: 6px;
 }
 
 .agent-activity-chip {
@@ -700,9 +577,9 @@ button.agent-activity-step:focus-visible {
   align-items: center;
   max-width: 100%;
   border: 0;
-  border-radius: var(--radius-sm);
-  background: color-mix(in oklch, var(--surface-subtle) 66%, transparent);
-  padding: 2px 5px;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
   color: color-mix(in oklch, var(--fg) 56%, var(--muted));
   font-size: 10.5px;
   font-weight: var(--weight-heading);
@@ -720,67 +597,49 @@ button.agent-activity-step:focus-visible {
 
 .agent-activity-chip.status[data-tone="accent"],
 .agent-activity-chip.meta[data-tone="accent"] {
-  background: color-mix(in oklch, var(--accent) 7%, transparent);
+  background: transparent;
   color: color-mix(in oklch, var(--accent) 82%, var(--fg));
 }
 
 .agent-activity-chip.status[data-tone="success"],
 .agent-activity-chip.meta[data-tone="success"] {
-  background: color-mix(in oklch, var(--status-success) 7%, transparent);
+  background: transparent;
   color: color-mix(in oklch, var(--status-success) 82%, var(--fg));
 }
 
 .agent-activity-chip.status[data-tone="warning"],
 .agent-activity-chip.meta[data-tone="warning"] {
-  background: color-mix(in oklch, var(--status-warning) 8%, transparent);
+  background: transparent;
   color: color-mix(in oklch, var(--status-warning) 82%, var(--fg));
 }
 
 .agent-activity-chip.status[data-tone="danger"],
 .agent-activity-chip.meta[data-tone="danger"] {
-  background: color-mix(in oklch, var(--status-danger) 8%, transparent);
+  background: transparent;
   color: color-mix(in oklch, var(--status-danger) 82%, var(--fg));
-}
-
-/* ── Semantic icon colors by tool kind ── */
-
-.agent-activity-step[data-tool-kind="command"] .agent-activity-label {
-  color: color-mix(in oklch, var(--secondary) 68%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="search"] .agent-activity-label {
-  color: color-mix(in oklch, var(--accent) 68%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="read"] .agent-activity-label {
-  color: color-mix(in oklch, var(--status-success) 62%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="edit"] .agent-activity-label {
-  color: color-mix(in oklch, var(--status-warning) 68%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="web"] .agent-activity-label {
-  color: color-mix(in oklch, var(--accent) 68%, var(--fg));
-}
-.agent-activity-step[data-tool-kind="thinking"] .agent-activity-label {
-  color: color-mix(in oklch, var(--muted) 56%, var(--fg));
 }
 
 .agent-activity-detail {
   min-width: 0;
-  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
-  overflow-wrap: anywhere;
+  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+  overflow-wrap: break-word;
+  word-break: normal;
   white-space: normal;
 }
 
 .agent-activity-copy {
-  display: inline;
+  display: block;
   min-width: 0;
   flex: 1 1 auto;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .agent-activity-verb {
   margin-right: 0.45em;
-  color: color-mix(in oklch, var(--fg) 82%, var(--muted));
-  font-weight: var(--weight-heading);
+  color: color-mix(in oklch, var(--fg) 76%, var(--muted));
+  font-size: inherit;
+  font-weight: var(--weight-normal);
 }
 
 .agent-activity-step.thinking:not([data-current="true"]) .agent-activity-detail {
@@ -798,19 +657,16 @@ button.agent-activity-step:focus-visible {
 
 .agent-activity-step.tool:not([data-current="true"]) .agent-activity-detail,
 .agent-activity-step.decision:not([data-current="true"]) .agent-activity-detail {
-  color: color-mix(in oklch, var(--fg) 64%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 66%, var(--muted));
 }
 
 .agent-activity-step.confirmation {
   padding-top: 7px;
 }
 
-.agent-activity-step.confirmation .agent-activity-marker {
-  top: 19px;
-}
-
 .agent-activity-step.confirmation .confirmation-node-body {
-  width: min(var(--panel-reading-width), 100%);
+  width: 100%;
+  max-width: 664px;
   padding-top: 0;
 }
 
@@ -856,15 +712,6 @@ button.agent-activity-step:focus-visible {
   background: color-mix(in oklch, var(--accent) 34%, var(--border));
 }
 
-@keyframes agent-marker-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 4px color-mix(in oklch, var(--tool-accent, var(--accent)) 12%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 7px color-mix(in oklch, var(--tool-accent, var(--accent)) 5%, transparent);
-  }
-}
-
 @keyframes agent-line-delta-pulse {
   0%, 100% {
     opacity: 0.66;
@@ -876,7 +723,14 @@ button.agent-activity-step:focus-visible {
   }
 }
 
+@keyframes agent-activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .agent-activity-label.is-running svg,
   .agent-activity-line-delta[data-running="true"] .agent-activity-line-delta-add,
   .agent-activity-line-delta[data-running="true"] .agent-activity-line-delta-remove {
     animation: none;
@@ -887,14 +741,7 @@ button.agent-activity-step:focus-visible {
 
 @media (max-width: 720px) {
   .agent-workline-disclosure > summary {
-    width: 100%;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    row-gap: var(--space-2);
-  }
-
-  .agent-workline-summary-metrics {
-    flex: 1 1 100%;
+    width: fit-content;
   }
 
   .agent-workline-summary-chevron {
@@ -902,18 +749,12 @@ button.agent-activity-step:focus-visible {
   }
 
   .agent-activity {
-    margin-left: 6px;
-    padding-left: var(--space-4);
-  }
-
-  .agent-activity-marker {
-    left: calc(-1 * var(--space-4) - 4px);
+    width: 100%;
   }
 
   .agent-activity-line {
-    grid-template-columns: 18px minmax(0, 1fr) 14px;
+    grid-template-columns: 14px 16px minmax(0, 1fr);
     align-items: start;
-    row-gap: 4px;
   }
 
   .agent-activity-body {
@@ -931,7 +772,8 @@ button.agent-activity-step:focus-visible {
 
   .agent-activity-detail {
     white-space: normal;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
 
   .agent-evidence-panel {

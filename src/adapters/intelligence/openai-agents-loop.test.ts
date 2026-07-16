@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ConfirmationDecision } from "../../domain/confirmation/index.js";
-import type { ModelMessage } from "../../domain/intelligence/index.js";
+import {
+  OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION,
+  type ModelMessage,
+} from "../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -30,7 +33,7 @@ type CapturedFetch = {
   readonly signal?: AbortSignal | null;
 };
 
-test("compatible Chat completes from one local history without duplicating messages and maps cached usage", async () => {
+test("compatible Chat sends a stable cache identity with one local history and maps cached usage", async () => {
   const fetch = scriptedFetch([
     ({ url, body }) => {
       assert.equal(url, `${CHAT_BASE_URL}/chat/completions`);
@@ -38,7 +41,12 @@ test("compatible Chat completes from one local history without duplicating messa
       assert.equal(occurrences(serialized, "prior-user"), 1);
       assert.equal(occurrences(serialized, "prior-assistant"), 1);
       assert.equal(occurrences(serialized, "current-user"), 1);
-      assert.equal(body.prompt_cache_key, undefined);
+      assert.equal(body.prompt_cache_key, openAIAgentsPromptCacheKey(
+        "openai_compatible_chat_completions",
+        MODEL,
+        SYSTEM,
+        [],
+      ));
       assert.equal(body.include, undefined);
       assert.equal(body.service_tier, undefined);
       return chatText("chat-finished", {
@@ -85,7 +93,7 @@ test("compatible Chat completes from one local history without duplicating messa
   assert.equal(fetch.requests.length, 1);
 });
 
-test("official Responses sends a stable cache identity and retains response output items only in canonical history", async () => {
+test("Responses through a compatible gateway sends a stable cache identity and retains response output items only in canonical history", async () => {
   const fetch = scriptedFetch([
     ({ body }) => {
       assert.equal(typeof body.prompt_cache_key, "string");
@@ -104,7 +112,7 @@ test("official Responses sends a stable cache identity and retains response outp
   await withGlobalFetch(fetch.fetch, async () => {
     const loop = createLoop({
       protocol: "openai_responses",
-      baseUrl: OFFICIAL_BASE_URL,
+      baseUrl: CHAT_BASE_URL,
       requestSettings: { serviceTier: "flex" },
     });
     try {
@@ -131,7 +139,130 @@ test("official Responses sends a stable cache identity and retains response outp
   });
 });
 
-test("official Responses injects hosted Web Search and isolates its cache identity", async () => {
+test("Chat rehydrates portable conversation facts without replaying Responses continuation items", async () => {
+  const privateContinuation = "responses-encrypted-continuation";
+  const fetch = scriptedFetch([
+    ({ body }) => {
+      const serialized = JSON.stringify(body.messages);
+      assert.match(serialized, /portable prior answer/u);
+      assert.doesNotMatch(serialized, new RegExp(privateContinuation, "u"));
+      assert.doesNotMatch(serialized, new RegExp(OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION, "u"));
+      return chatText("chat-after-protocol-switch");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const result = await loop.execute(loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "prior Responses request" },
+        {
+          role: "assistant",
+          content: "portable prior answer",
+          protocolExtensions: {
+            [OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]: [{
+              id: "reasoning-before-chat-switch",
+              type: "reasoning",
+              encrypted_content: privateContinuation,
+              summary: [],
+            }],
+          },
+        },
+        { role: "user", content: "continue through Chat" },
+      ]));
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.messages.some((message) =>
+        message.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION] !== undefined), false);
+      assert.equal(result.messages.at(-1)?.content, "chat-after-protocol-switch");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses rehydrates portable conversation facts without replaying Chat continuation fields", async () => {
+  const privateContinuation = "chat-private-reasoning";
+  const fetch = scriptedFetch([
+    ({ body }) => {
+      const serialized = JSON.stringify(body.input);
+      assert.match(serialized, /portable Chat answer/u);
+      assert.doesNotMatch(serialized, new RegExp(privateContinuation, "u"));
+      assert.doesNotMatch(serialized, /reasoning_content/u);
+      return responsesText("responses-after-protocol-switch", "resp-after-chat-switch");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL });
+    try {
+      const result = await loop.execute(loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "prior Chat request" },
+        {
+          role: "assistant",
+          content: "portable Chat answer",
+          protocolExtensions: { reasoning_content: privateContinuation },
+        },
+        { role: "user", content: "continue through Responses" },
+      ]));
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.messages.some((message) =>
+        message.protocolExtensions?.reasoning_content !== undefined), false);
+      assert.equal(
+        Array.isArray(result.messages.at(-1)?.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION]),
+        true,
+      );
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Chat keeps tool results adjacent when canonical assistant history has text and tool calls", async () => {
+  const callIds = ["call-text-and-tool-history-a", "call-text-and-tool-history-b"] as const;
+  const fetch = scriptedFetch([
+    ({ body }) => {
+      const messages = Array.isArray(body.messages) ? body.messages.map(parseRecord) : [];
+      const toolCallIndex = messages.findIndex((message) =>
+        message.role === "assistant" && Array.isArray(message.tool_calls));
+      assert.ok(toolCallIndex >= 0, JSON.stringify(messages));
+      assert.equal(messages[toolCallIndex - 1]?.role, "assistant");
+      assert.equal(messages[toolCallIndex + 1]?.role, "tool");
+      assert.equal(messages[toolCallIndex + 1]?.tool_call_id, callIds[0]);
+      assert.equal(messages[toolCallIndex + 1]?.content, "");
+      assert.equal(messages[toolCallIndex + 2]?.role, "tool");
+      assert.equal(messages[toolCallIndex + 2]?.tool_call_id, callIds[1]);
+      return chatText("valid-tool-history");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    try {
+      const result = await loop.execute(loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "show a capability" },
+        {
+          role: "assistant",
+          content: "I will inspect two facts.",
+          toolCalls: callIds.map((callId, index) => ({
+            callId,
+            toolName: "inspect_fact",
+            input: { value: `history-${index}` },
+          })),
+          protocolExtensions: { reasoning_content: "private-reasoning" },
+        },
+        { role: "tool", content: "", toolCallId: callIds[0], toolName: "inspect_fact" },
+        { role: "tool", content: "second", toolCallId: callIds[1], toolName: "inspect_fact" },
+        { role: "user", content: "continue" },
+      ]));
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.status === "completed" ? result.finalText : undefined, "valid-tool-history");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses injects hosted Web Search through a compatible gateway and isolates its cache identity", async () => {
   const fetch = scriptedFetch([
     ({ body }) => {
       const tools = Array.isArray(body.tools) ? body.tools.map(parseRecord) : [];
@@ -143,7 +274,7 @@ test("official Responses injects hosted Web Search and isolates its cache identi
   await withGlobalFetch(fetch.fetch, async () => {
     const loop = createLoop({
       protocol: "openai_responses",
-      baseUrl: OFFICIAL_BASE_URL,
+      baseUrl: CHAT_BASE_URL,
       enableWebSearch: true,
     });
     try {
@@ -162,21 +293,22 @@ test("official Responses injects hosted Web Search and isolates its cache identi
   assert.notEqual(withoutSearch, withSearch);
 });
 
-test("model built-in Web Search rejects unsupported protocol and endpoint combinations", () => {
+test("model built-in Web Search rejects only an unsupported protocol", () => {
   assert.throws(() => createOpenAIAgentsLoop({
     protocol: "openai_compatible_chat_completions",
     baseUrl: OFFICIAL_BASE_URL,
     apiKey: "test-key",
     model: MODEL,
     enableWebSearch: true,
-  }), /official OpenAI Responses endpoint/u);
-  assert.throws(() => createOpenAIAgentsLoop({
+  }), /Responses protocol/u);
+  const loop = createOpenAIAgentsLoop({
     protocol: "openai_responses",
     baseUrl: CHAT_BASE_URL,
     apiKey: "test-key",
     model: MODEL,
     enableWebSearch: true,
-  }), /official OpenAI Responses endpoint/u);
+  });
+  return loop.release();
 });
 
 test("compatible Chat maps user image, file, and audio attachments without changing canonical messages", async () => {
@@ -446,6 +578,255 @@ test("streaming compatible Chat reports partial text but does not persist a leng
       assert.match(result.status === "failed" ? result.error : "", /finish_reason.*length/iu);
       assert.equal(deltas.join(""), "partial stream");
       assert.deepEqual(result.messages, input);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses streams text and reconciles a terminal item status from output_item.done", async () => {
+  const fetch = scriptedFetch([
+    ({ body }) => {
+      assert.equal(body.stream, true);
+      return responsesTextStream(["responses-", "stream-finished"], "resp-stream-reconciled");
+    },
+  ]);
+  const deltas: string[] = [];
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      requestSettings: { stream: true },
+    });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "responses should stream" },
+        ]),
+        onTextDelta: (delta) => deltas.push(delta),
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.status === "completed" ? result.finalText : undefined, "responses-stream-finished");
+      assert.equal(deltas.join(""), "responses-stream-finished");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses matches compacted terminal output by identity and preserves reasoning continuation", async () => {
+  const encryptedContinuation = "encrypted-reasoning-after-stream";
+  const deltas: string[] = [];
+  const fetch = scriptedFetch([
+    () => responsesCompactedReasoningTextStream(
+      ["流式", "能力展示"],
+      "resp-stream-compacted",
+      encryptedContinuation,
+      7,
+    ),
+    ({ body }) => {
+      const serializedInput = JSON.stringify(body.input);
+      assert.match(serializedInput, /resp-stream-compacted-reasoning/u);
+      assert.match(serializedInput, new RegExp(encryptedContinuation, "u"));
+      return responsesText("continued-with-reasoning", "resp-after-compacted-stream");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      requestSettings: { stream: true },
+    });
+    try {
+      const first = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "show capabilities through a compacted Responses stream" },
+        ]),
+        onTextDelta: (delta) => deltas.push(delta),
+      });
+      assert.equal(first.status, "completed", first.status === "failed" ? first.error : undefined);
+      assert.equal(first.status === "completed" ? first.finalText : undefined, "流式能力展示");
+      assert.equal(deltas.join(""), "流式能力展示");
+      const continuation = first.messages.at(-1)
+        ?.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION];
+      assert.equal(Array.isArray(continuation), true);
+      assert.match(JSON.stringify(continuation), new RegExp(encryptedContinuation, "u"));
+
+      const second = await loop.execute(loopInput([
+        ...first.messages,
+        { role: "user", content: "continue with the same reasoning context" },
+      ]));
+      assert.equal(second.status, "completed", second.status === "failed" ? second.error : undefined);
+      assert.equal(second.status === "completed" ? second.finalText : undefined, "continued-with-reasoning");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses derives a missing terminal message status from the completed response", async () => {
+  const deltas: string[] = [];
+  const fetch = scriptedFetch([() => responsesTextStream(
+    ["terminal-", "completed"],
+    "resp-stream-terminal-completed",
+    { includeOutputItemDone: false },
+  )]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      requestSettings: { stream: true },
+    });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "accept the terminal response lifecycle" },
+        ]),
+        onTextDelta: (delta) => deltas.push(delta),
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.status === "completed" ? result.finalText : undefined, "terminal-completed");
+      assert.equal(deltas.join(""), "terminal-completed");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses reports a streamed incomplete outcome without persisting partial output", async () => {
+  const input = [
+    { role: "system", content: SYSTEM },
+    { role: "user", content: "produce an intentionally limited response" },
+  ] as const;
+  const deltas: string[] = [];
+  const fetch = scriptedFetch([() => responsesTextStream(
+    ["partial-", "stream"],
+    "resp-stream-incomplete",
+    {
+      includeOutputItemDone: false,
+      terminalStatus: "incomplete",
+      incompleteReason: "max_output_tokens",
+    },
+  )]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      requestSettings: { stream: true },
+    });
+    try {
+      const result = await loop.execute({
+        ...loopInput(input),
+        onTextDelta: (delta) => deltas.push(delta),
+      });
+      assert.equal(result.status, "failed");
+      assert.match(result.status === "failed" ? result.error : "", /incomplete.*max_output_tokens/iu);
+      assert.doesNotMatch(result.status === "failed" ? result.error : "", /invalid option|invalid_value/iu);
+      assert.equal(deltas.join(""), "partial-stream");
+      assert.deepEqual(result.messages, input);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses rejects an explicit invalid terminal message status", async () => {
+  const fetch = scriptedFetch([() => responsesTextStream(
+    ["invalid-status"],
+    "resp-stream-invalid-status",
+    {
+      includeOutputItemDone: false,
+      terminalItemStatus: "finished",
+    },
+  )]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      requestSettings: { stream: true },
+    });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "surface a conflicting provider status" },
+        ]),
+        onTextDelta: () => undefined,
+      });
+      assert.equal(result.status, "failed");
+      assert.match(result.status === "failed" ? result.error : "", /invalid message status "finished"/iu);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses executes a compacted streamed function call and pairs its result", async () => {
+  const gateway = new TestGateway(plainTool("read_fact"));
+  const deltas: string[] = [];
+  const fetch = scriptedFetch([
+    () => responsesToolStream("call-streamed-read", "read_fact", { value: "streamed" }),
+    ({ body }) => {
+      const serializedInput = JSON.stringify(body.input);
+      assert.match(serializedInput, /call-streamed-read/u);
+      assert.match(serializedInput, /gateway-completed/u);
+      return responsesTextStream(["tool-", "stream-finished"], "resp-after-streamed-tool");
+    },
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      requestSettings: { stream: true },
+    });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "read a fact through a streamed tool call" },
+        ], gateway),
+        onTextDelta: (delta) => deltas.push(delta),
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.status === "completed" ? result.finalText : undefined, "tool-stream-finished");
+      assert.equal(deltas.join(""), "tool-stream-finished");
+      assert.deepEqual(gateway.executions.map(({ request }) => request.callId), ["call-streamed-read"]);
+      assert.equal(result.messages.some((message) => message.toolCallId === "call-streamed-read"), true);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("Responses preserves a streamed provider failure instead of reporting an output schema error", async () => {
+  const fetch = scriptedFetch([() => responsesFailedStream(
+    "resp-stream-failed",
+    "provider_overloaded",
+    "The provider could not complete the response.",
+  )]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      requestSettings: { stream: true },
+    });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "surface the provider failure" },
+        ]),
+        onTextDelta: () => undefined,
+      });
+      assert.equal(result.status, "failed");
+      assert.match(
+        result.status === "failed" ? result.error : "",
+        /Responses stream failed \(provider_overloaded\).*could not complete/iu,
+      );
+      assert.doesNotMatch(result.status === "failed" ? result.error : "", /invalid_value|invalid option/iu);
     } finally {
       await loop.release();
     }
@@ -1525,6 +1906,260 @@ function responsesText(text: string, id: string, usage: JsonRecord = {
       role: "assistant",
       content: [{ type: "output_text", text }],
     }],
+  });
+}
+
+function responsesTextStream(
+  chunks: readonly string[],
+  id: string,
+  options: {
+    readonly includeOutputItemDone?: boolean;
+    readonly terminalStatus?: "completed" | "incomplete";
+    readonly incompleteReason?: string;
+    readonly terminalItemStatus?: unknown;
+  } = {},
+): Response {
+  const text = chunks.join("");
+  const itemId = `${id}-message`;
+  const terminalStatus = options.terminalStatus ?? "completed";
+  const message = {
+    id: itemId,
+    type: "message",
+    status: "completed",
+    role: "assistant",
+    content: [{ type: "output_text", text, annotations: [] }],
+  };
+  const events: JsonRecord[] = [
+    {
+      type: "response.created",
+      response: {
+        id,
+        object: "response",
+        created_at: 1,
+        status: "in_progress",
+        model: MODEL,
+        output: [],
+        usage: null,
+      },
+    },
+    {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { ...message, status: "in_progress", content: [] },
+    },
+    ...chunks.map((delta) => ({
+      type: "response.output_text.delta",
+      item_id: itemId,
+      output_index: 0,
+      content_index: 0,
+      delta,
+    })),
+    ...(options.includeOutputItemDone === false
+      ? []
+      : [{ type: "response.output_item.done", output_index: 0, item: message }]),
+    {
+      type: terminalStatus === "completed" ? "response.completed" : "response.incomplete",
+      response: {
+        id,
+        object: "response",
+        created_at: 1,
+        status: terminalStatus,
+        model: MODEL,
+        ...(options.incompleteReason === undefined
+          ? {}
+          : { incomplete_details: { reason: options.incompleteReason } }),
+        usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+        output: [{
+          id: itemId,
+          type: "message",
+          role: "assistant",
+          content: message.content,
+          ...(options.terminalItemStatus === undefined ? {} : { status: options.terminalItemStatus }),
+        }],
+      },
+    },
+  ];
+  return responsesEventStream(events);
+}
+
+function responsesCompactedReasoningTextStream(
+  chunks: readonly string[],
+  id: string,
+  encryptedContinuation: string,
+  fragmentSize: number,
+): Response {
+  const text = chunks.join("");
+  const reasoning = {
+    id: `${id}-reasoning`,
+    type: "reasoning",
+    summary: [],
+    encrypted_content: encryptedContinuation,
+  };
+  const message = {
+    id: `${id}-message`,
+    type: "message",
+    status: "completed",
+    role: "assistant",
+    content: [{ type: "output_text", text, annotations: [] }],
+  };
+  return responsesEventStream([{
+    type: "response.created",
+    response: {
+      id,
+      object: "response",
+      created_at: 1,
+      status: "in_progress",
+      model: MODEL,
+      output: [],
+      usage: null,
+    },
+  }, {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { id: reasoning.id, type: reasoning.type, summary: [] },
+  }, {
+    type: "response.output_item.done",
+    output_index: 0,
+    item: reasoning,
+  }, {
+    type: "response.output_item.added",
+    output_index: 1,
+    item: { ...message, status: "in_progress", content: [] },
+  }, ...chunks.map((delta) => ({
+    type: "response.output_text.delta",
+    item_id: message.id,
+    output_index: 1,
+    content_index: 0,
+    delta,
+  })), {
+    type: "response.output_item.done",
+    output_index: 1,
+    item: message,
+  }, {
+    type: "response.completed",
+    response: {
+      id,
+      object: "response",
+      created_at: 1,
+      status: "completed",
+      model: MODEL,
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+      output: [{
+        type: "message",
+        role: "assistant",
+        content: message.content,
+      }],
+    },
+  }], fragmentSize);
+}
+
+function responsesToolStream(callId: string, name: string, input: JsonRecord): Response {
+  const id = `resp-${callId}`;
+  const item = {
+    id: `${id}-function-call`,
+    type: "function_call",
+    status: "completed",
+    call_id: callId,
+    name,
+    arguments: JSON.stringify(input),
+  };
+  return responsesEventStream([{
+    type: "response.created",
+    response: {
+      id,
+      object: "response",
+      created_at: 1,
+      status: "in_progress",
+      model: MODEL,
+      output: [],
+      usage: null,
+    },
+  }, {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { ...item, status: "in_progress", arguments: "" },
+  }, {
+    type: "response.function_call_arguments.delta",
+    item_id: item.id,
+    output_index: 0,
+    delta: item.arguments,
+  }, {
+    type: "response.function_call_arguments.done",
+    item_id: item.id,
+    output_index: 0,
+    arguments: item.arguments,
+  }, {
+    type: "response.output_item.done",
+    output_index: 0,
+    item,
+  }, {
+    type: "response.completed",
+    response: {
+      id,
+      object: "response",
+      created_at: 1,
+      status: "completed",
+      model: MODEL,
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+      output: [{
+        type: "function_call",
+        call_id: callId,
+        name,
+        arguments: item.arguments,
+      }],
+    },
+  }]);
+}
+
+function responsesFailedStream(id: string, code: string, message: string): Response {
+  const events: JsonRecord[] = [{
+    type: "response.created",
+    response: {
+      id,
+      object: "response",
+      created_at: 1,
+      status: "in_progress",
+      model: MODEL,
+      output: [],
+      usage: null,
+    },
+  }, {
+    type: "response.failed",
+    response: {
+      id,
+      object: "response",
+      created_at: 1,
+      status: "failed",
+      model: MODEL,
+      error: { code, message },
+      output: [],
+      usage: { input_tokens: 3, output_tokens: 0, total_tokens: 3 },
+    },
+  }];
+  return responsesEventStream(events);
+}
+
+function responsesEventStream(events: readonly JsonRecord[], fragmentSize?: number): Response {
+  const serialized = `${events.map((event) =>
+    `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
+  if (fragmentSize === undefined) {
+    return new Response(serialized, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }
+  const bytes = new TextEncoder().encode(serialized);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let offset = 0; offset < bytes.length; offset += fragmentSize) {
+        controller.enqueue(bytes.slice(offset, offset + fragmentSize));
+      }
+      controller.close();
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
   });
 }
 

@@ -68,14 +68,18 @@ function stabilizeAssistantMessageSegments<
   }
   if (nextMaterialized.length === 0) {
     const preserved = previous.filter((segment) => segment.kind !== "awaiting");
-    return normalizeModelNarrativeSegments(
+    const normalized = normalizeModelNarrativeSegments(
       preserved.length > 0 ? preserved : next,
       frozenModelNarrativeSegments,
     );
+    return withTrailingAwaitingFromNext(normalized, next);
   }
   const previousMaterialized = previous.filter((segment) => segment.kind !== "awaiting");
   if (previousMaterialized.length === 0) {
-    return normalizeModelNarrativeSegments(nextMaterialized, frozenModelNarrativeSegments);
+    return withTrailingAwaitingFromNext(
+      normalizeModelNarrativeSegments(nextMaterialized, frozenModelNarrativeSegments),
+      next,
+    );
   }
   const result: AssistantMessageSegment<TNode, TConfirmation>[] = [];
   const represented = new Set<string>();
@@ -146,10 +150,24 @@ function stabilizeAssistantMessageSegments<
     result.push(displaySegment);
     represented.add(segmentIdentity(displaySegment));
   });
-  return normalizeModelNarrativeSegments(
+  const normalized = normalizeModelNarrativeSegments(
     result.length > 0 ? result : nextMaterialized,
     frozenModelNarrativeSegments,
   );
+  return withTrailingAwaitingFromNext(normalized, next);
+}
+
+function withTrailingAwaitingFromNext<
+  TNode extends ProjectableTranscriptNode,
+  TConfirmation extends ConfirmationIdentity,
+>(
+  materialized: readonly AssistantMessageSegment<TNode, TConfirmation>[],
+  next: readonly AssistantMessageSegment<TNode, TConfirmation>[],
+): readonly AssistantMessageSegment<TNode, TConfirmation>[] {
+  const awaiting = next.at(-1);
+  if (awaiting?.kind !== "awaiting") return materialized;
+  if (awaiting.reason === "initial" && materialized.length > 0) return materialized;
+  return [...materialized.filter((segment) => segment.kind !== "awaiting"), awaiting];
 }
 
 function stablePrefixSegmentPresentation<

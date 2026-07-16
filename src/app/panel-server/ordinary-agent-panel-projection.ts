@@ -279,6 +279,20 @@ function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): 
       visibility: "compact",
     };
   }
+  if (activity.type === "model.request") {
+    return {
+      id: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      type: "model.requested",
+      title: "",
+      summary: modelRequestSummary(activity.reason),
+      status: "running",
+      timestamp: activity.recordedAt,
+      refs: [{ kind: "event", id: activity.activityId }],
+      visibility: "compact",
+    };
+  }
   return projectTransition(run, activity, activity.event);
 }
 
@@ -393,6 +407,20 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
       refs: event.refs,
     };
   }
+  if (activity.type === "model.request") {
+    return {
+      nodeId: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      eventType: "model.requested",
+      kind: "system",
+      phase: "executing",
+      title: "",
+      summary: modelRequestSummary(activity.reason),
+      timestamp: activity.recordedAt,
+      refs: event.refs,
+    };
+  }
   const confirmation = activity.event.type === "run.approval_requested"
     ? activity.event.confirmationRequests[0]
     : undefined;
@@ -418,7 +446,8 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
 }
 
 function isTranscriptActivity(activity: OrdinaryRunActivity): boolean {
-  return activity.type === "model.output.delta" || activity.type === "tool.result" ||
+  return activity.type === "model.request" ||
+    activity.type === "model.output.delta" || activity.type === "tool.result" ||
     (activity.event.type !== "run.created" && activity.event.type !== "run.started");
 }
 
@@ -662,6 +691,12 @@ function workSummary(toolCount: number, contextCount: number, pending: boolean):
     pending ? "待处理 1" : undefined,
   ].filter((part): part is string => part !== undefined);
   return parts.length === 0 ? "本轮没有额外上下文。" : parts.join("；");
+}
+
+function modelRequestSummary(reason: "initial" | "after_tool" | "after_approval"): string {
+  if (reason === "after_tool") return "分析工具结果";
+  if (reason === "after_approval") return "继续处理确认结果";
+  return "思考中";
 }
 
 function attachmentTitle(kind: "workspace" | "file" | "project" | "web", ref: string): string {

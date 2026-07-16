@@ -120,8 +120,10 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 - 超预算时由 loop-level compaction 压缩旧上下文，不能丢系统边界、当前用户消息和必要工具结果；除此之外不得在模型调用前静默省略或替换 canonical 消息。
 - 摘要必须保留继续开发所需的关键事实，不能因为摘要或投影丢失普通回答、工具结果和错误信息。
 - 同一次 assistant tool call 与其全部 tool result 是不可拆分的上下文组；压缩要么保留整组，要么把整组交给压缩，不能留下悬空调用或孤立结果。
-- OpenAI Responses 手动上下文必须保留并回传上一轮 output items；官方端点请求 `reasoning.encrypted_content`，使推理与 function call continuation 不被消息文本替代。Chat Completions 保留累计 `messages` 顺序，并只持久化受支持 provider profile 的 reasoning 续接白名单。
-- 官方 OpenAI 请求的稳定系统指令、工具定义和既有消息必须位于动态用户输入之前；`prompt_cache_key` 只能由稳定协议事实生成，不能随 conversation id、run id 或本轮动态正文变化。缓存命中、写入和未缓存 token 以 provider usage 为准。
+- 映射到 Chat Completions wire payload 时，带 `tool_calls` 的 assistant message 后必须连续跟随该批次全部对应 tool message；canonical assistant 同时含正文和工具调用时，正文不能被映射成夹在 tool call 与 tool result 之间的独立 assistant message。
+- 同一协议连续运行时，OpenAI Responses 手动上下文必须保留并回传上一轮 output items；Responses 请求 `reasoning.encrypted_content`，使推理与 function call continuation 不被消息文本替代。Chat Completions 保留累计 `messages` 顺序，并只持久化受支持 provider profile 的 reasoning 续接白名单。用户在同一 conversation 切换 Responses 与 Chat Completions 时，产品会话继续存在，但 adapter 必须从 canonical `user / assistant / tool` 事实建立新的协议上下文段；旧协议 reasoning、加密 output item 和私有续接字段不得发送给目标协议，也不得声称无损转换。
+- Responses streaming 必须保留 live text delta，并在 SDK 解析前按同一 SSE 响应的 `output_index`、item id、call id、类型和事件顺序归并 output item lifecycle 与 terminal response snapshot；terminal output 允许省略已由 item 事件完整给出的 reasoning 或压缩数组，因此不得把 terminal 数组下标当作流式 `output_index`。缺少重复 item status 时可以由已完成 item 事件或响应自身的 `completed / incomplete` 终态补齐，不得把某一个可选中间事件写成成功前提；恢复后的完整 item 必须继续交给 SDK 标准转换和 canonical continuation。不得通过关闭 streaming、过滤 output item 或伪造完成状态绕过 SDK/协议错误；身份冲突、显式非法状态和 provider failure 必须作为协议失败暴露。
+- 所有 OpenAI-compatible 请求的稳定系统指令、工具定义和既有消息必须位于动态用户输入之前；`prompt_cache_key` 只能由稳定协议事实生成，不能随 conversation id、run id、本轮动态正文或中转 Base URL 变化。缓存命中、写入和未缓存 token 以 provider usage 为准。
 
 普通 Agent loop 内不做任务完成判断。上下文压缩服务于 loop 连续运行，而不是替模型总结任务或决定停止。
 
@@ -136,6 +138,7 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 恢复对话时必须区分可复用事实与不可伪造的运行时状态：
 
 - 从上一轮 `canonicalMessages` 恢复原始角色、工具调用/结果和允许持久化的 provider continuation；根系统指令由该 run 冻结的 AgentDefinition 重新放在最前面。
+- 恢复时若本轮冻结协议与历史 continuation 所属协议不同，只迁移可移植消息以及已记录的工具调用/结果事实，并在本轮 canonical 基线中移除旧协议 continuation；历史 run snapshot 保持原样，不能回写篡改审计事实。
 - 失败、blocked 或取消 run 若已经形成 canonical 消息，下一轮沿用其中真实消息；若在模型调用前失败，则使用更早的 canonical context。不得另造“中断上下文”，Panel 错误文案也不能冒充模型输出。
 - 附件字节、未知 provider 私有字段、悬空 continuation 和无法证明结果的内部执行对象一律不持久化，不能为了“续跑”伪造 tool call/result 对。
 - 开发期旧 snapshot 直接视为不兼容数据；不得从可见回答、event payload 或当前全局配置迁移、双读或猜测回填。
@@ -161,7 +164,7 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 - 模型可在可见工具集合内自由选择工具；Runtime 不用固定阶段或关键词路由替模型挑工具。
 - 工具调用必须经过 ToolCenter、权限裁剪、命令确认和审计。
 - 工具调用后，真实工具结果必须回到下一轮模型请求，不能被摘要或投影替代。
-- 新一轮会话以及进程重启后，上一条可见 lineage 的 `canonicalMessages` 按原顺序进入模型上下文；失败、blocked 和取消 run 不产生第二套上下文表示，旧格式数据不兼容恢复。
+- 新一轮会话以及进程重启后，上一条可见 lineage 的 `canonicalMessages` 按原顺序进入模型上下文；协议不变时保留原生 continuation，协议变化时从可移植消息和已完成工具事实建立新的上下文段。失败、blocked 和取消 run 不产生第二套产品上下文表示，旧格式数据不兼容恢复。
 - 工具后下一轮无工具调用时 `completed`，答案来自模型最终文本。
 - 普通 Agent 不因工具次数或模型轮次达到工程上限而停止。
 - 上下文达到阈值时触发 AI 压缩并继续，而不是停止或丢失关键历史。

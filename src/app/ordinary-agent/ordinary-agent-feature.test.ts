@@ -161,13 +161,14 @@ test("feature activity stream supports output delta subscribe and cursor replay 
   await emitToolResult?.(toolResult);
   const first = await run.feature.events.replay("stream-run");
   assert.deepEqual(first?.activities.filter((activity) => activity.type === "model.output.delta").map((activity) => activity.delta), ["hel", "lo"]);
-  assert.deepEqual(first?.activities.map((activity) => activity.sequence), [1, 2, 3, 4, 5]);
+  assert.deepEqual(first?.activities.filter((activity) => activity.type === "model.request").map((activity) => activity.reason), ["initial", "after_tool"]);
+  assert.deepEqual(first?.activities.map((activity) => activity.sequence), [1, 2, 3, 4, 5, 6, 7]);
   assert.equal(first?.activities.some((activity) => activity.type === "tool.result"), true);
 
   emitDelta?.("!");
   const incremental = await run.feature.events.replay("stream-run", first?.cursor);
   assert.deepEqual(incremental?.activities.map((activity) => activity.type), ["model.output.delta"]);
-  assert.deepEqual(incremental?.activities.map((activity) => activity.sequence), [6]);
+  assert.deepEqual(incremental?.activities.map((activity) => activity.sequence), [8]);
 
   finish?.({ ...completedOutcome(), toolCalls: [toolResult] });
   await waitForStatus(run.feature, "stream-run", "completed");

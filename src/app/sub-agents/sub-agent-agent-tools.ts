@@ -187,7 +187,7 @@ function spawnSubAgentDefinition(): ToolDefinition {
           description: "Optional supporting context. Use null when none is needed.",
         },
         allowed_tools: {
-          anyOf: [{ type: "array", items: { type: "string" }, uniqueItems: true }, { type: "null" }],
+          anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }],
           description: "Use null to inherit parent tools, or an array to narrow them. An empty array grants no tools.",
         },
       },

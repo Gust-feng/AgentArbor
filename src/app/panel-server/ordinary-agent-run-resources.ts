@@ -72,7 +72,14 @@ export type CreateOrdinaryAgentRunResourceAcquirerInput = {
 };
 
 type OrdinaryAgentRunResourceAcquirerDependencies = {
-  readonly prepareRunResources?: typeof prepareAgentRunResources;
+  readonly prepareRunResources?: (
+    runtime: AgentRunResourceHost,
+    aiMode: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["aiMode"],
+    input: {
+      readonly capabilitySnapshot: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["capabilitySnapshot"];
+      readonly informationAccess: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["informationAccess"];
+    },
+  ) => Promise<AgentRunResources<AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["capabilitySnapshot"]>>;
   readonly createAgentLoop?: typeof createModelRuntimeAgentLoop;
   readonly compactContext?: typeof compactAgentLoopContextIfNeeded;
   readonly createTokenCounter?: (model?: string) => AgentLoopTokenCounter;
@@ -140,7 +147,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
         });
         const registry = new SubAgentRegistry({
           roots: options.resolveSubAgentRoots(resources.workspaceRoot),
-          catalog: resources.capabilitySnapshot.subAgentCatalog,
+          catalog: input.birth.capabilitySnapshot.subAgentCatalog,
         });
         const frozenSubAgents = await registry.list();
         const subAgentToolCatalog = createSubAgentAgentToolCatalogContribution({
@@ -151,7 +158,9 @@ export function createOrdinaryAgentRunResourceAcquirer(
         try {
           toolBoundary = (dependencies.resolveToolBoundary ?? resolveRunToolBoundary)({
             agentDefinition: definition,
-            snapshot: resources.capabilitySnapshot,
+            snapshot: input.birth.capabilitySnapshot,
+            skillCatalog: input.birth.capabilitySnapshot.skillCatalog,
+            subAgentCatalog: input.birth.capabilitySnapshot.subAgentCatalog,
             goal: input.runInput.userMessage,
             taskSoil,
             toolCenter,

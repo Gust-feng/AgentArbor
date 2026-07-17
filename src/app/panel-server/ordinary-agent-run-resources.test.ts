@@ -544,7 +544,7 @@ function resources(
   workspaceRoot: string,
   onRelease: () => void,
   channel: IntelligenceChannel = new UnusedChannel(),
-): AgentRunResources {
+): AgentRunResources<OrdinaryRunBirth["capabilitySnapshot"]> {
   const mcpContribution: AgentToolRegistryContribution = (register) => register({
     executor: executor("mcp_lookup"),
     scopes: ["mcp"],

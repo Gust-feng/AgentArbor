@@ -556,6 +556,56 @@ test("compatible Chat rejects a length-truncated final response without persisti
   });
 });
 
+test("SDK terminal gate rejects invalid tool turns before ToolCenter preflight", async () => {
+  const cases = [{
+    protocol: "openai_compatible_chat_completions" as const,
+    baseUrl: CHAT_BASE_URL,
+    response: () => chatToolWithFinishReason("invalid-chat-tool", "write_fact", { value: "changed" }, "length"),
+  }, {
+    protocol: "openai_responses" as const,
+    baseUrl: OFFICIAL_BASE_URL,
+    response: () => responsesToolWithStatus("invalid-responses-tool", "write_fact", { value: "changed" }, "incomplete"),
+  }];
+  for (const fixture of cases) {
+    const gateway = new TestGateway(plainTool("write_fact"));
+    const fetch = scriptedFetch([fixture.response]);
+    await withGlobalFetch(fetch.fetch, async () => {
+      const loop = createLoop({ protocol: fixture.protocol, baseUrl: fixture.baseUrl });
+      try {
+        const result = await loop.execute(loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "perform the write" },
+        ], gateway));
+        assert.equal(result.status, "failed");
+        assert.equal(gateway.preflights.length, 0);
+        assert.equal(gateway.executions.length, 0);
+      } finally {
+        await loop.release();
+      }
+    });
+  }
+});
+
+test("SDK terminal gate preserves a provider refusal as failed canonical history", async () => {
+  const fetch = scriptedFetch([() => chatRefusal("I cannot complete that request.")]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
+    const input = [
+      { role: "system", content: SYSTEM },
+      { role: "user", content: "perform the refused request" },
+    ] as const;
+    try {
+      const result = await loop.execute(loopInput(input));
+      assert.equal(result.status, "failed");
+      assert.match(result.status === "failed" ? result.error : "", /refused|cannot complete/iu);
+      assert.deepEqual(result.messages.slice(0, 2), input);
+      assert.equal(result.messages.at(-1)?.content, "I cannot complete that request.");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
 test("streaming compatible Chat reports partial text but does not persist a length-truncated answer", async () => {
   const fetch = scriptedFetch([() => chatTextStreamWithFinishReason(["partial", " stream"], "length")]);
   const deltas: string[] = [];
@@ -1274,6 +1324,7 @@ test("unchanged context maintenance preserves local message refs and attachment 
         ...loopInput(messages),
         maintainContext: async ({ messages: requestMessages }) => {
           assert.equal(requestMessages[0]?.ref, "system:stable");
+          assert.equal(Object.hasOwn(requestMessages[0]!, "attachments"), false);
           assert.equal(requestMessages[1]?.ref, "user:current");
           assert.equal(requestMessages[1]?.attachments?.[0]?.attachmentId, "attachment-stable");
           return { status: "unchanged" };
@@ -1548,6 +1599,7 @@ test("cache identity is independent of tool order and changes with protocol", ()
 });
 
 class TestGateway implements ToolExecutionGateway {
+  readonly preflights: ToolCallRequest[] = [];
   readonly executions: Array<{
     readonly request: ToolCallRequest;
     readonly context: ToolExecutionContext;
@@ -1577,6 +1629,7 @@ class TestGateway implements ToolExecutionGateway {
     _context: ToolExecutionContext,
     _permission: ToolPermissionCheck,
   ): ToolExecutionPreflight {
+    this.preflights.push(globalThis.structuredClone(request));
     if (this.definitions.find((definition) => definition.name === request.toolName)?.metadata?.requiresConfirmation === true) {
       return {
         status: "approval_required",
@@ -1758,8 +1811,43 @@ function chatTextWithFinishReason(
   });
 }
 
+function chatRefusal(refusal: string): Response {
+  return jsonResponse({
+    id: "chat-refusal",
+    object: "chat.completion",
+    created: 1,
+    model: MODEL,
+    choices: [{ index: 0, message: { role: "assistant", content: null, refusal }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+  });
+}
+
 function chatTool(callId: string, name: string, input: JsonRecord): Response {
   return chatTools([{ callId, name, input }]);
+}
+
+function chatToolWithFinishReason(
+  callId: string,
+  name: string,
+  input: JsonRecord,
+  finishReason: string,
+): Response {
+  return jsonResponse({
+    id: `chat-${callId}`,
+    object: "chat.completion",
+    created: 1,
+    model: MODEL,
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: callId, type: "function", function: { name, arguments: JSON.stringify(input) } }],
+      },
+      finish_reason: finishReason,
+    }],
+    usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+  });
 }
 
 function chatToolWithContinuation(
@@ -1822,6 +1910,28 @@ function responsesTool(callId: string, name: string, input: JsonRecord): Respons
   return jsonResponse({
     id: `response-${callId}`,
     status: "completed",
+    usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+    output: [{
+      id: `item-${callId}`,
+      type: "function_call",
+      status: "completed",
+      call_id: callId,
+      name,
+      arguments: JSON.stringify(input),
+    }],
+  });
+}
+
+function responsesToolWithStatus(
+  callId: string,
+  name: string,
+  input: JsonRecord,
+  status: "completed" | "incomplete",
+): Response {
+  return jsonResponse({
+    id: `response-${callId}`,
+    status,
+    ...(status === "incomplete" ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
     usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
     output: [{
       id: `item-${callId}`,

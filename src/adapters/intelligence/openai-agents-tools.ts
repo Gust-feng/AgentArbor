@@ -26,6 +26,7 @@ import type {
   AgentLoopToolBoundary,
 } from "../../app/model-runtime/agent-loop.js";
 import type { OpenAIAgentsInputMapper } from "./openai-agents-input.js";
+import { openAIAgentsTerminalGuardFailure } from "./openai-agents-terminal.js";
 
 type SdkNonStrictObjectSchema = {
   readonly type: "object";
@@ -327,6 +328,20 @@ function createSdkAgentTool(input: {
             settled.add(factId);
           }
           throw input.execution.toolResultAcceptanceFailure;
+        }
+        if (openAIAgentsTerminalGuardFailure(error) !== undefined && !settled.has(factId)) {
+          const modelOutput = await recordAgentToolFailure({
+            execution: input.execution,
+            agentTool: input.agentTool,
+            callId,
+            factId,
+            input: started.get(factId)?.input ?? parseToolInput(details?.toolCall?.arguments),
+            startedAt: started.get(factId)?.at,
+            error,
+            aborted: false,
+          });
+          settled.add(factId);
+          return modelOutput;
         }
         if (!settled.has(factId)) {
           await recordAgentToolFailure({

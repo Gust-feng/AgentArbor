@@ -3,6 +3,7 @@ import {
   Agent,
   type AgentOutputType,
   type CallModelInputFilter,
+  type ModelProvider,
   OpenAIProvider,
   Runner,
   RunContext,
@@ -52,6 +53,10 @@ import {
 import { withOpenAICompatibleChatProfile } from "./openai-agents-provider-profile.js";
 import { toOpenAIFetch, type FetchLike } from "./openai-fetch-bridge.js";
 import { withOpenAIResponsesStreamReconciliation } from "./openai-responses-stream-reconciliation.js";
+import {
+  preservedOpenAIAgentsTerminalResponse,
+  withOpenAIAgentsTerminalGuard,
+} from "./openai-agents-terminal.js";
 import {
   createOpenAIAgentsToolAssembly,
   recordOpenAIAgentsToolResult,
@@ -104,6 +109,7 @@ export function createOpenAIAgentsLoop(config: OpenAIAgentsLoopConfig): AgentLoo
 class OpenAIAgentsLoop implements AgentLoop {
   private readonly config: OpenAIAgentsLoopConfig;
   private readonly provider: OpenAIProvider;
+  private readonly modelProvider: ModelProvider;
   private readonly runner: Runner;
   private released = false;
   private releasePromise: Promise<void> | undefined;
@@ -134,13 +140,15 @@ class OpenAIAgentsLoop implements AgentLoop {
       strictFeatureValidation: true,
       cacheResponsesWebSocketModels: false,
     });
+    const profiledProvider = config.protocol === "openai_compatible_chat_completions"
+      ? withOpenAICompatibleChatProfile(
+          this.provider,
+          compatibleChatDialectSettings(config).providerData,
+        )
+      : this.provider;
+    this.modelProvider = withOpenAIAgentsTerminalGuard(profiledProvider, config.protocol);
     this.runner = new Runner({
-      modelProvider: config.protocol === "openai_compatible_chat_completions"
-        ? withOpenAICompatibleChatProfile(
-            this.provider,
-            compatibleChatDialectSettings(config).providerData,
-          )
-        : this.provider,
+      modelProvider: this.modelProvider,
       tracingDisabled: true,
       traceIncludeSensitiveData: false,
     });
@@ -298,17 +306,6 @@ class OpenAIAgentsLoop implements AgentLoop {
       }
       return this.approvalRequiredResult(agent, result, execution, pending);
     }
-    const incomplete = incompleteFinalResponse(this.config.protocol, result.rawResponses.at(-1), execution);
-    if (incomplete !== undefined) {
-      return {
-        status: "failed",
-        error: incomplete,
-        messages: canonicalMessagesForResult(execution, result.rawResponses, this.config.protocol, true),
-        toolResults: cloneToolResults(execution.toolResults),
-        usage: usageFromSdk(result.runContext.usage),
-        confirmationRequests: [],
-      };
-    }
     const finalText = typeof result.finalOutput === "string" ? result.finalOutput : "";
     return {
       status: "completed",
@@ -427,10 +424,14 @@ function preserveCanonicalMetadata(
   return messages.map((message, index) => {
     const prior = previous[index];
     if (prior === undefined || !sameCanonicalMessage(message, prior)) return message;
+    const ref = prior.ref ?? message.ref;
+    const attachments = prior.attachments ?? message.attachments;
     return {
       ...message,
-      ref: prior.ref,
-      attachments: prior.attachments?.map((attachment) => globalThis.structuredClone(attachment)),
+      ...(ref === undefined ? {} : { ref }),
+      ...(attachments === undefined
+        ? {}
+        : { attachments: attachments.map((attachment) => globalThis.structuredClone(attachment)) }),
     };
   });
 }
@@ -447,7 +448,6 @@ function canonicalMessagesForResult(
   execution: ExecutionState,
   rawResponses: readonly { readonly output: readonly unknown[] }[],
   protocol: OpenAIAgentsLoopProtocol,
-  excludeFinalResponse = false,
 ): readonly ModelMessage[] {
   const baseMessages = execution.latestRequestMessages ?? execution.baseMessages;
   const unseen = execution.latestRequestMessages === undefined
@@ -455,44 +455,10 @@ function canonicalMessagesForResult(
     : rawResponses.slice(execution.latestRequestIncludedResponses);
   return canonicalMessagesFromResponses({
     baseMessages,
-    rawResponses: excludeFinalResponse ? unseen.slice(0, -1) : unseen,
+    rawResponses: unseen,
     protocol,
     toolResults: execution.toolResults,
   });
-}
-
-function incompleteFinalResponse(
-  protocol: OpenAIAgentsLoopProtocol,
-  response: { readonly providerData?: unknown } | undefined,
-  execution: ExecutionState,
-): string | undefined {
-  if (response === undefined) {
-    return "OpenAI Agents SDK completed without a final provider response.";
-  }
-  const providerData = asRecord(response.providerData);
-  if (protocol === "openai_responses") {
-    const responseStatus = typeof providerData.status === "string"
-      ? providerData.status
-      : execution.lastStreamResponseStatus;
-    if (responseStatus === "completed") {
-      return undefined;
-    }
-    const details = asRecord(providerData.incomplete_details);
-    const incompleteReason = typeof details.reason === "string"
-      ? details.reason
-      : execution.lastStreamIncompleteReason;
-    const reason = incompleteReason === undefined ? "" : ` (${incompleteReason})`;
-    const status = responseStatus ?? "unknown";
-    return `OpenAI Responses returned ${status}${reason}; the response is incomplete.`;
-  }
-  const choices = Array.isArray(providerData.choices) ? providerData.choices : [];
-  const firstChoice = asRecord(choices[0]);
-  const finishReason = typeof firstChoice.finish_reason === "string"
-    ? firstChoice.finish_reason
-    : execution.lastStreamFinishReason ?? "unknown";
-  return finishReason === "stop"
-    ? undefined
-    : `OpenAI-compatible Chat returned finish_reason ${finishReason}; the response is incomplete.`;
 }
 
 function modelSettings(input: {
@@ -751,7 +717,11 @@ function terminalErrorResult(
 ): AgentLoopResult {
   const message = errorMessage(error);
   const errorCode = contextMaintenanceErrorCode(error);
-  const rawResponses = sdkState === undefined ? [] : new RunResult(sdkState).rawResponses;
+  const stateResponses = sdkState === undefined ? [] : new RunResult(sdkState).rawResponses;
+  const preservedTerminalResponse = preservedOpenAIAgentsTerminalResponse(error);
+  const rawResponses = preservedTerminalResponse === undefined
+    ? stateResponses
+    : [...stateResponses, preservedTerminalResponse];
   const facts = {
     messages: canonicalMessagesForResult(execution, rawResponses, execution.modelInput.protocol),
     toolResults: cloneToolResults(execution.toolResults),

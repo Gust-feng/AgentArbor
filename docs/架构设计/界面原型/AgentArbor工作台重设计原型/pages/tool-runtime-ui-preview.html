@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentArbor 工具运行态预览</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f7f7f6;
+      --surface: #ffffff;
+      --surface-subtle: #fafaf9;
+      --text: #20201e;
+      --text-secondary: #666661;
+      --text-tertiary: #92928b;
+      --line: #e8e8e4;
+      --line-strong: #dcdcd6;
+      --accent: #2563eb;
+      --accent-soft: #eff5ff;
+      --danger: #b42318;
+      --danger-soft: #fff2f0;
+      --success: #238052;
+      --code-bg: #f6f6f4;
+      --diff-add: #edf8f1;
+      --diff-delete: #fff1ef;
+      --selection: #e5efff;
+      --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --page: #171716;
+      --surface: #1d1d1c;
+      --surface-subtle: #20201f;
+      --text: #ebebe7;
+      --text-secondary: #aeaea7;
+      --text-tertiary: #7d7d77;
+      --line: #30302d;
+      --line-strong: #3b3b37;
+      --accent: #7eabff;
+      --accent-soft: #1e2a3e;
+      --danger: #ff9187;
+      --danger-soft: #362220;
+      --success: #71c99a;
+      --code-bg: #222220;
+      --diff-add: #1c2d23;
+      --diff-delete: #332220;
+      --selection: #253650;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      overflow-x: hidden;
+      background: var(--page);
+      color: var(--text);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body { padding: 24px; }
+    button { font: inherit; }
+    code, pre { font-family: var(--font-mono); }
+    ::selection { background: var(--selection); }
+
+    .preview {
+      width: min(100%, 980px);
+      max-width: 100%;
+      min-width: 0;
+      margin: 0 auto;
+    }
+
+    .preview-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 42px;
+      margin-bottom: 20px;
+      color: var(--text-tertiary);
+      font-size: 12px;
+    }
+
+    .preview-label { white-space: nowrap; }
+
+    .preview-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .preview-controls button {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .preview-controls button:hover { background: var(--surface); }
+
+    .preview-controls button[aria-pressed="true"] {
+      border-color: var(--line);
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .preview-controls .theme-button {
+      border-color: var(--line);
+      margin-left: 4px;
+    }
+
+    .workbench {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      min-height: 820px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+    }
+
+    .conversation {
+      width: min(100% - 48px, 740px);
+      max-width: 100%;
+      min-width: 0;
+      margin: 0 auto;
+      padding: 78px 0 110px;
+    }
+
+    .user-message {
+      width: fit-content;
+      max-width: min(100%, 580px);
+      margin: 0 0 42px auto;
+      padding: 10px 14px;
+      border-radius: 15px 15px 4px 15px;
+      background: var(--code-bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.65;
+      overflow-wrap: anywhere;
+    }
+
+    .assistant { min-width: 0; }
+
+    .live-status {
+      display: flex;
+      align-items: center;
+      min-height: 26px;
+      padding-left: 2px;
+    }
+
+    .live-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 18px;
+    }
+
+    .live-dots span {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--text-tertiary);
+      animation: dot-rise 1.1s ease-in-out infinite;
+    }
+
+    .live-dots span:nth-child(2) { animation-delay: 120ms; }
+    .live-dots span:nth-child(3) { animation-delay: 240ms; }
+
+    @keyframes dot-rise {
+      0%, 60%, 100% { opacity: 0.34; transform: translateY(0); }
+      30% { opacity: 0.9; transform: translateY(-3px); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .live-dots span { animation: none; }
+    }
+
+    .activity {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      margin-top: 12px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    summary {
+      list-style: none;
+      cursor: pointer;
+    }
+
+    summary::-webkit-details-marker { display: none; }
+
+    .activity > summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      user-select: none;
+    }
+
+    .chevron {
+      width: 6px;
+      height: 6px;
+      border-right: 1.5px solid currentColor;
+      border-bottom: 1.5px solid currentColor;
+      transform: rotate(-45deg);
+      transition: transform 140ms ease;
+      flex: 0 0 auto;
+    }
+
+    details[open] > summary .chevron { transform: rotate(45deg) translateY(-1px); }
+
+    .records {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      padding: 2px 0 10px;
+    }
+
+    .record {
+      position: relative;
+      width: calc(100% - 3px);
+      max-width: 100%;
+      min-width: 0;
+      margin-left: 3px;
+      padding-left: 17px;
+    }
+
+    .record::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 1px;
+      background: var(--line);
+    }
+
+    .record:last-child::before { bottom: 22px; }
+
+    .record > summary {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 9px 0;
+      color: var(--text-secondary);
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    .record-icon {
+      position: absolute;
+      left: -26px;
+      top: 10px;
+      display: inline-flex;
+      width: 18px;
+      height: 18px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      background: var(--surface);
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    .record > summary:hover .record-title,
+    .record[open] > summary .record-title { color: var(--text); }
+
+    .record-title {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      transition: color 120ms ease;
+    }
+
+    .line-delta {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 5px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .line-delta .add { color: var(--success); }
+    .line-delta .remove { color: var(--danger); }
+
+    .record-content {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      padding: 0 0 18px 28px;
+    }
+
+    .native-block {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--code-bg);
+    }
+
+    .code-lines, .terminal {
+      margin: 0;
+      padding: 12px 14px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.65;
+      white-space: pre;
+    }
+
+    .source-link {
+      display: grid;
+      min-width: 0;
+      gap: 4px;
+      padding: 2px 0 4px;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .source-link strong {
+      color: var(--text);
+      font-size: 12.5px;
+      font-weight: 540;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .source-link span {
+      color: var(--text-tertiary);
+      font-size: 10.5px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .source-link:hover strong,
+    .source-link:focus-visible strong { color: var(--accent); }
+
+    .code-lines .line-number {
+      display: inline-block;
+      width: 32px;
+      color: var(--text-tertiary);
+      user-select: none;
+    }
+
+    .matches {
+      margin: 0;
+      padding: 4px 0;
+      list-style: none;
+    }
+
+    .matches li {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      padding: 8px 12px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+
+    .matches li + li { border-top: 1px solid var(--line); }
+    .matches li > span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .matches .where { color: var(--text-tertiary); }
+
+    .file-change {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--code-bg);
+    }
+
+    .file-change + .file-change { margin-top: 7px; }
+
+    .file-change > summary {
+      min-height: 34px;
+      padding: 7px 10px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .file-change .native-block {
+      border: 0;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+    }
+
+    .diff { padding: 8px 0; }
+    .diff-line {
+      display: grid;
+      grid-template-columns: 26px minmax(max-content, 1fr);
+      min-height: 22px;
+      padding: 1px 12px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 20px;
+      white-space: pre;
+    }
+
+    .diff-line.add { background: var(--diff-add); }
+    .diff-line.delete { background: var(--diff-delete); }
+    .diff-line.hunk { color: var(--accent); }
+    .diff-mark { color: var(--text-tertiary); user-select: none; }
+
+    .terminal .prompt { color: var(--text); }
+    .terminal .ok { color: var(--success); }
+    .terminal .dim { color: var(--text-tertiary); }
+    .terminal .error { color: var(--danger); }
+
+    .final-answer {
+      margin-top: 28px;
+      max-width: 66ch;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .final-answer p { margin: 0 0 12px; }
+
+    .approval {
+      margin-top: 24px;
+      padding: 16px 0 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .approval h2 {
+      margin: 0 0 7px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .approval p {
+      margin: 0 0 12px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .approval code {
+      display: block;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--code-bg);
+      color: var(--text);
+      font-size: 11.5px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+
+    .approval-actions { display: flex; gap: 8px; }
+
+    .approval-actions button {
+      min-height: 34px;
+      padding: 0 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .approval-actions .primary {
+      border-color: var(--text);
+      background: var(--text);
+      color: var(--surface);
+    }
+
+    .state-note {
+      margin-top: 24px;
+      color: var(--text-tertiary);
+      font-size: 11px;
+    }
+
+    @media (max-width: 680px) {
+      body { padding: 10px; }
+      .preview-bar { align-items: flex-start; }
+      .preview-label { display: none; }
+      .preview-controls { justify-content: flex-start; }
+      .workbench { min-height: 720px; border-radius: 10px; }
+      .conversation { width: calc(100% - 32px); padding: 52px 0 80px; }
+      .matches li { grid-template-columns: 1fr; gap: 2px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="preview">
+    <header class="preview-bar">
+      <span class="preview-label">工具运行态 · 单列原型</span>
+      <nav class="preview-controls" aria-label="预览状态">
+        <button type="button" data-state="running" aria-pressed="true">运行中</button>
+        <button type="button" data-state="completed" aria-pressed="false">已完成</button>
+        <button type="button" data-state="approval" aria-pressed="false">等待确认</button>
+        <button type="button" class="theme-button" id="theme-button">深色</button>
+      </nav>
+    </header>
+
+    <section class="workbench" aria-label="工具运行态预览">
+      <div class="conversation">
+        <div class="user-message">重新整理工具运行态，让用户先知道 AI 在工作，需要时再查看具体操作。</div>
+        <div class="assistant" id="assistant"></div>
+      </div>
+    </section>
+  </main>
+
+  <template id="activity-template">
+    <details class="activity">
+      <summary>
+        <span class="chevron" aria-hidden="true"></span>
+        <span>过程</span>
+      </summary>
+
+      <div class="records">
+        <details class="record">
+          <summary>
+            <span class="record-icon" aria-hidden="true">&lt;&gt;</span>
+            <span class="record-title">transcript-timeline.tsx</span>
+          </summary>
+          <div class="record-content">
+            <div class="native-block">
+              <pre class="code-lines"><span class="line-number">168</span>export function ToolActivity({ activity }: Props) {
+<span class="line-number">169</span>  const [open, setOpen] = useState(false);
+<span class="line-number">170</span>
+<span class="line-number">171</span>  return (
+<span class="line-number">172</span>    &lt;section className="tool-activity"&gt;
+<span class="line-number">173</span>      &lt;ActivitySummary activity={activity} /&gt;</pre>
+            </div>
+          </div>
+        </details>
+
+        <details class="record">
+          <summary>
+            <span class="record-icon" aria-hidden="true">⌕</span>
+            <span class="record-title">panel projection</span>
+          </summary>
+          <div class="record-content">
+            <div class="native-block">
+              <ul class="matches">
+                <li><span>projectToolActivity(event)</span><span class="where">panel-stream-tool-projection.ts:84</span></li>
+                <li><span>toTranscriptToolNode(fact)</span><span class="where">panel-transcript-node-projection.ts:116</span></li>
+                <li><span>toolDisplayProjection(result)</span><span class="where">tool-display-projection.ts:52</span></li>
+              </ul>
+            </div>
+          </div>
+        </details>
+
+        <details class="record">
+          <summary>
+            <span class="record-icon" aria-hidden="true">✎</span>
+            <span class="record-title">2 个文件</span>
+            <span class="line-delta" aria-label="新增 2 行，删除 1 行">
+              <span class="add">+2</span>
+              <span class="remove">-1</span>
+            </span>
+          </summary>
+          <div class="record-content">
+            <details class="file-change" open>
+              <summary>src/app/panel-ui/src/components/transcript-timeline.tsx</summary>
+              <div class="native-block diff">
+                <div class="diff-line hunk"><span class="diff-mark">@@</span><span>@@ -171,12 +171,9 @@</span></div>
+                <div class="diff-line delete"><span class="diff-mark">−</span><span>&lt;ToolCard title={activity.label}&gt;</span></div>
+                <div class="diff-line add"><span class="diff-mark">+</span><span>&lt;details className="activity-record"&gt;</span></div>
+                <div class="diff-line"><span class="diff-mark"> </span><span>  &lt;ToolOutput content={activity.output} /&gt;</span></div>
+              </div>
+            </details>
+            <details class="file-change">
+              <summary>src/app/panel-ui/src/components/transcript-timeline.test.tsx</summary>
+              <div class="native-block diff">
+                <div class="diff-line hunk"><span class="diff-mark">@@</span><span>@@ -242,8 +242,8 @@</span></div>
+                <div class="diff-line add"><span class="diff-mark">+</span><span>expect(screen.queryByText("搜索")).toBeNull();</span></div>
+              </div>
+            </details>
+          </div>
+        </details>
+
+        <details class="record">
+          <summary>
+            <span class="record-icon" aria-hidden="true">&gt;_</span>
+            <span class="record-title">终端</span>
+          </summary>
+          <div class="record-content">
+            <div class="native-block">
+              <pre class="terminal"><span class="prompt">$ pnpm typecheck:panel</span>
+
+&gt; agentarbor@0.1.0 typecheck:panel Z:\AgentArbor
+&gt; tsc -p tsconfig.panel.json --noEmit
+
+<span class="ok">Done in 3.1s</span></pre>
+            </div>
+          </div>
+        </details>
+
+        <details class="record">
+          <summary>
+            <span class="record-icon" aria-hidden="true">↗</span>
+            <span class="record-title">AgentArbor 工具展示</span>
+          </summary>
+          <div class="record-content">
+            <a class="source-link" href="https://example.com/agentarbor/tool-display" target="_blank" rel="noreferrer noopener">
+              <strong>AgentArbor 工具运行态设计</strong>
+              <span>example.com ↗</span>
+            </a>
+          </div>
+        </details>
+      </div>
+    </details>
+  </template>
+
+  <script>
+    const assistant = document.getElementById("assistant");
+    const activityTemplate = document.getElementById("activity-template");
+    const stateButtons = [...document.querySelectorAll("[data-state]")];
+    const themeButton = document.getElementById("theme-button");
+
+    const previewParams = new URLSearchParams(window.location.search);
+    const requestedState = previewParams.get("state");
+    let state = ["running", "completed", "approval"].includes(requestedState)
+      ? requestedState
+      : "running";
+
+    function activityMarkup(open) {
+      const activity = activityTemplate.content.firstElementChild.cloneNode(true);
+      activity.open = open;
+      return activity.outerHTML;
+    }
+
+    function render() {
+      if (state === "running") {
+        assistant.innerHTML = `
+          <div class="live-status" role="status" aria-label="AI 正在工作">
+            <span class="live-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          </div>
+          ${activityMarkup(true)}
+        `;
+      }
+
+      if (state === "completed") {
+        assistant.innerHTML = `
+          ${activityMarkup(false)}
+          <div class="final-answer">
+            <p>已完成工具展示结构调整，过程中的必要证据可按需查看。</p>
+          </div>
+        `;
+      }
+
+      if (state === "approval") {
+        assistant.innerHTML = `
+          ${activityMarkup(true)}
+          <div class="approval">
+            <h2>运行项目构建</h2>
+            <p>这条命令会在当前工作区生成 Panel 构建产物。</p>
+            <code>pnpm build:panel</code>
+            <div class="approval-actions">
+              <button type="button" class="primary">允许</button>
+              <button type="button">取消</button>
+            </div>
+          </div>
+        `;
+      }
+
+      stateButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.state === state));
+      });
+    }
+
+    stateButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        state = button.dataset.state;
+        render();
+      });
+    });
+
+    themeButton.addEventListener("click", () => {
+      const html = document.documentElement;
+      const nextTheme = html.dataset.theme === "light" ? "dark" : "light";
+      html.dataset.theme = nextTheme;
+      themeButton.textContent = nextTheme === "light" ? "深色" : "浅色";
+    });
+
+    render();
+    if (previewParams.get("open") === "all") {
+      document.querySelectorAll("details").forEach((node) => {
+        node.open = true;
+      });
+    }
+  </script>
+</body>
+</html>

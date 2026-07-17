@@ -51,7 +51,7 @@ test("configured provider projection keeps user display identity editable", asyn
   assert.equal(modelOptions.includes("const label = profile.label ?? catalog?.label ?? profile.profileId;"), true);
 });
 
-test("configured provider projection binds builtin presets by stable provider facts instead of display-name keywords", async () => {
+test("configured provider projection binds builtin presets by profile identity instead of display-name or endpoint keywords", async () => {
   const [projection, logos, providerList, settings] = await Promise.all([
     readPanelUiSource(path.join("components", "model-settings-projection.ts")),
     readPanelUiSource("model-provider-logos.ts"),
@@ -59,7 +59,8 @@ test("configured provider projection binds builtin presets by stable provider fa
     readPanelUiSource(path.join("components", "model-settings.tsx")),
   ]);
 
-  assert.equal(projection.includes("presetId: builtinProviderPresetId({"), true);
+  assert.equal(projection.includes("presetId: builtinProviderPresetId({ profileId: profile.profileId })"), true);
+  assert.equal(projection.includes("baseUrl: profile.baseUrl,"), false);
   assert.equal(projection.includes("return item.presetId === preset.presetId;"), true);
   assert.equal(projection.includes("item.identity === presetIdentity"), false);
   assert.equal(projection.includes("protectedBuiltin: true"), true);

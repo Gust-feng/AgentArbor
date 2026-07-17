@@ -67,11 +67,9 @@ export function resolveModelProviderIdentity(input: ModelProviderLogoInput): Mod
   if (builtinIdentity !== undefined) {
     return builtinIdentity;
   }
-  const baseUrl = normalizeProviderSignal(input.baseUrl);
   const explicitProvider = normalizeProviderSignal([input.presetId, input.vendor].filter(Boolean).join(" "));
-
-  const strongSignal = resolveStrongProviderSignal(baseUrl) ?? resolveStrongProviderSignal(explicitProvider);
-  if (strongSignal !== undefined) return strongSignal;
+  const explicitIdentity = resolveStrongProviderSignal(explicitProvider);
+  if (explicitIdentity !== undefined) return explicitIdentity;
 
   return "unknown";
 }
@@ -160,7 +158,13 @@ export function builtinProviderPresetId(input: {
 }
 
 function builtinProviderIdentity(input: ModelProviderLogoInput): Exclude<ModelProviderIdentity, "unknown"> | undefined {
-  const presetId = builtinProviderPresetId(input);
+  // Base URLs are transport configuration, not provider identity. A custom
+  // profile can intentionally point at the same endpoint as a built-in
+  // provider and must not inherit that provider's visual identity.
+  const presetId = builtinProviderPresetId({
+    profileId: input.profileId,
+    presetId: input.presetId,
+  });
   if (presetId === undefined) {
     return undefined;
   }

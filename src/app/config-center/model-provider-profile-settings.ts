@@ -157,6 +157,7 @@ function shouldClearBuiltInProfileLogo(
   profile: ModelProviderProfileSettings,
   presetId: string
 ): boolean {
+  if (isGeneratedCustomProfileId(profile.profileId)) return false;
   const baseUrl = normalizeBaseUrl(profile.baseUrl);
   if (baseUrl === undefined) {
     return BUILTIN_PROFILE_PRESET_ALIASES.get(profile.profileId) === presetId;
@@ -209,6 +210,7 @@ function normalizeProfileAiModeForProtocol(
 }
 
 function builtInPresetForProfile(profile: ModelProviderProfileSettings): ReturnType<typeof listBuiltinModelProviderPresets>[number] | undefined {
+  if (isGeneratedCustomProfileId(profile.profileId)) return undefined;
   const presets = listBuiltinModelProviderPresets();
   const presetId = BUILTIN_PROFILE_PRESET_ALIASES.get(profile.profileId);
   if (presetId !== undefined) {
@@ -219,6 +221,10 @@ function builtInPresetForProfile(profile: ModelProviderProfileSettings): ReturnT
   return canonicalOwner === undefined
     ? undefined
     : presets.find((preset) => preset.presetId === canonicalOwner);
+}
+
+function isGeneratedCustomProfileId(profileId: string): boolean {
+  return profileId.startsWith("custom_");
 }
 
 function defaultProtocolForProfile(input: {

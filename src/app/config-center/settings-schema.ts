@@ -285,7 +285,9 @@ export function shouldRewriteLocalSettingsFile(
 export function normalizeLocalSettings(settings: AgentArborLocalSettings): AgentArborLocalSettings {
   const now = settings.updatedAt;
   const legacyProfile = normalizeModelProfile(settings.modelProvider, createDefaultModelProviderProfile(now));
-  const profileFallback = { ...legacyProfile, model: undefined, openAI: undefined };
+  // Profiles are independent records. The active legacy profile may supply
+  // compatibility defaults, but visual state must never flow into another profile.
+  const profileFallback = { ...legacyProfile, logoDataUrl: undefined, model: undefined, openAI: undefined };
   const parsedProfiles = dedupeProfiles((settings.modelProfiles.length === 0 ? [legacyProfile] : settings.modelProfiles)
     .map((profile) => normalizeModelProfile(profile, profileFallback)));
   const parsedCatalogs = normalizeModelCatalogs(settings.modelCatalogs ?? [], parsedProfiles, now);

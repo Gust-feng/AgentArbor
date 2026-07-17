@@ -888,7 +888,7 @@ function createModelProviderProfileFallback(
     protocolKind: "openai_compatible_chat_completions",
     baseUrl: DEFAULT_MODEL_PROVIDER_BASE_URL,
     defaultAiMode: current.defaultAiMode === "none" ? "none" : "openai-compatible",
-    secretRef: current.secretRef,
+    secretRef: `secret://local-dev/model-provider/${profileId}/api-key`,
     enabled: true,
     updatedAt: now,
   };
@@ -897,6 +897,7 @@ function createModelProviderProfileFallback(
 function builtinPresetForProtectedProfile(
   profile: Pick<ModelProviderProfileSettings, "profileId" | "baseUrl">
 ): ReturnType<typeof listBuiltinModelProviderPresets>[number] | undefined {
+  if (profile.profileId.startsWith("custom_")) return undefined;
   const presets = listBuiltinModelProviderPresets();
   const baseUrl = normalizeBaseUrl(profile.baseUrl);
   if (baseUrl === undefined) {

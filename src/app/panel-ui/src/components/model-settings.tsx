@@ -211,7 +211,7 @@ export function ModelSettings(props: {
 
   async function addCustomProvider(): Promise<void> {
     flushScheduledModelSave();
-    const profileId = `custom_${Date.now().toString(36)}`;
+    const profileId = nextCustomProfileId(providerItems, providerDraft.createdProfiles);
     const nextForm: ModelForm = {
       profileId,
       label: "自定义厂商",
@@ -618,6 +618,21 @@ export function ModelSettings(props: {
       </section>
     </div>
   );
+}
+
+function nextCustomProfileId(
+  items: readonly ModelProviderListItem[],
+  createdProfiles: readonly ModelProviderProfileItem[],
+): string {
+  const existingIds = new Set([
+    ...items.map((item) => item.profileId).filter((id): id is string => id !== undefined),
+    ...createdProfiles.map((profile) => profile.profileId).filter((id): id is string => id !== undefined),
+  ]);
+  let profileId = "";
+  do {
+    profileId = `custom_${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`}`;
+  } while (existingIds.has(profileId));
+  return profileId;
 }
 
 function applyModelProviderProjectionDraft(

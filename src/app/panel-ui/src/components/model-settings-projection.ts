@@ -63,10 +63,10 @@ export function modelProviderItems(
   const order = config?.modelProviderOrder ?? [];
   const profileBindings = profiles.map((profile: ModelProviderProfileItem) => ({
     profile,
-    presetId: builtinProviderPresetId({
-      profileId: profile.profileId,
-      baseUrl: profile.baseUrl,
-    }),
+    // Only the profile id is a stable relationship to a built-in slot. A custom
+    // provider may intentionally use the same endpoint as a preset, but must
+    // retain its own label and logo object.
+    presetId: builtinProviderPresetId({ profileId: profile.profileId }),
   }));
   const boundProfileIds = new Set<string>();
   const presetItems = presets.map((preset: ModelProviderPreset) => {

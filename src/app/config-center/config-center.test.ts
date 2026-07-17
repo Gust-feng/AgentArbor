@@ -496,6 +496,75 @@ test("ConfigCenter scopes model provider logos to the updated profile", async ()
   }
 });
 
+test("ConfigCenter does not restore an active profile logo into a cleared custom profile after restart", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-profile-logo-clear-"));
+  const historicalLogo = "data:image/png;base64,iVBORw0KGgo=";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.updateModelProviderConfig({
+      label: "历史厂商",
+      logoDataUrl: historicalLogo,
+      baseUrl: "https://history.example/v1",
+      defaultAiMode: "openai-compatible",
+    });
+    await configCenter.createModelProviderProfile({
+      profileId: "custom_fresh",
+      label: "自定义厂商",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.example.com/v1",
+      defaultAiMode: "openai-compatible",
+    });
+    const cleared = await configCenter.updateModelProviderConfig({
+      profileId: "custom_fresh",
+      clearLogoDataUrl: true,
+    });
+    const restored = await new ConfigCenter({ settingsStore, secretStore }).listModelProviderProfiles();
+
+    assert.equal(cleared.logoDataUrl, undefined);
+    assert.equal(restored.find((profile) => profile.profileId === "default")?.logoDataUrl, historicalLogo);
+    assert.equal(restored.find((profile) => profile.profileId === "custom_fresh")?.logoDataUrl, undefined);
+  } finally {
+    await removeTestDirectory(directory);
+  }
+});
+
+test("ConfigCenter keeps a custom profile logo independent when it uses a built-in endpoint", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-custom-endpoint-logo-"));
+  const firstLogo = "data:image/png;base64,QUFB";
+  const replacementLogo = "data:image/png;base64,QkJC";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.createModelProviderProfile({
+      profileId: "custom_openai_router",
+      label: "团队 OpenAI 路由",
+      logoDataUrl: firstLogo,
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.openai.com/v1",
+      defaultAiMode: "openai-compatible",
+    });
+    const updated = await configCenter.updateModelProviderConfig({
+      profileId: "custom_openai_router",
+      logoDataUrl: replacementLogo,
+    });
+    const restored = (await new ConfigCenter({ settingsStore, secretStore }).listModelProviderProfiles())
+      .find((profile) => profile.profileId === "custom_openai_router");
+
+    assert.equal(updated.label, "团队 OpenAI 路由");
+    assert.equal(updated.logoDataUrl, replacementLogo);
+    assert.equal(restored?.logoDataUrl, replacementLogo);
+  } finally {
+    await removeTestDirectory(directory);
+  }
+});
+
 test("ConfigCenter repairs logo pollution on built-in model provider profiles", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-builtin-logo-repair-"));
   const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";

@@ -556,29 +556,34 @@ test("compatible Chat rejects a length-truncated final response without persisti
   });
 });
 
-test("SDK terminal gate rejects invalid tool turns before ToolCenter preflight", async () => {
-  const cases = [{
-    protocol: "openai_compatible_chat_completions" as const,
-    baseUrl: CHAT_BASE_URL,
-    response: () => chatToolWithFinishReason("invalid-chat-tool", "write_fact", { value: "changed" }, "length"),
-  }, {
-    protocol: "openai_responses" as const,
-    baseUrl: OFFICIAL_BASE_URL,
-    response: () => responsesToolWithStatus("invalid-responses-tool", "write_fact", { value: "changed" }, "incomplete"),
-  }];
-  for (const fixture of cases) {
-    const gateway = new TestGateway(plainTool("write_fact"));
-    const fetch = scriptedFetch([fixture.response]);
+test("SDK loop rejects unknown Chat and incomplete Responses terminal states without persisting partial assistant text", async () => {
+  const cases = [
+    {
+      protocol: "openai_compatible_chat_completions" as const,
+      baseUrl: CHAT_BASE_URL,
+      response: chatTextWithFinishReason("unknown Chat partial", "unexpected_terminal"),
+      expected: /finish_reason.*unexpected_terminal/iu,
+    },
+    {
+      protocol: "openai_responses" as const,
+      baseUrl: OFFICIAL_BASE_URL,
+      response: responsesText("incomplete Responses partial", "resp-incomplete", undefined, { status: "incomplete" }),
+      expected: /Responses returned incomplete/iu,
+    },
+  ];
+  for (const entry of cases) {
+    const fetch = scriptedFetch([() => entry.response]);
     await withGlobalFetch(fetch.fetch, async () => {
-      const loop = createLoop({ protocol: fixture.protocol, baseUrl: fixture.baseUrl });
+      const loop = createLoop({ protocol: entry.protocol, baseUrl: entry.baseUrl });
+      const input = [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "return a complete answer" },
+      ] as const;
       try {
-        const result = await loop.execute(loopInput([
-          { role: "system", content: SYSTEM },
-          { role: "user", content: "perform the write" },
-        ], gateway));
+        const result = await loop.execute(loopInput(input));
         assert.equal(result.status, "failed");
-        assert.equal(gateway.preflights.length, 0);
-        assert.equal(gateway.executions.length, 0);
+        assert.match(result.status === "failed" ? result.error : "", entry.expected);
+        assert.deepEqual(result.messages, input);
       } finally {
         await loop.release();
       }
@@ -586,7 +591,295 @@ test("SDK terminal gate rejects invalid tool turns before ToolCenter preflight",
   }
 });
 
-test("SDK terminal gate preserves a provider refusal as failed canonical history", async () => {
+test("SDK terminal gate rejects an invalid intermediate tool turn before write execution", async () => {
+  const cases = [{
+    protocol: "openai_compatible_chat_completions" as const,
+    baseUrl: CHAT_BASE_URL,
+    response: () => chatToolWithFinishReason(
+      "chat-invalid-write",
+      "write_fact",
+      { value: "changed" },
+      "length",
+    ),
+    followUp: () => chatText("must-not-follow-up"),
+  }, {
+    protocol: "openai_responses" as const,
+    baseUrl: OFFICIAL_BASE_URL,
+    response: () => responsesToolWithStatus(
+      "responses-invalid-write",
+      "write_fact",
+      { value: "changed" },
+      "incomplete",
+    ),
+    followUp: () => responsesText("must-not-follow-up", "responses-must-not-follow-up"),
+  }];
+
+  for (const fixture of cases) {
+    const gateway = new TestGateway(writeTool("write_fact", false));
+    const fetch = scriptedFetch([() => fixture.response(), () => fixture.followUp()]);
+    let acceptedToolRounds = 0;
+    await withGlobalFetch(fetch.fetch, async () => {
+      const loop = createLoop({ protocol: fixture.protocol, baseUrl: fixture.baseUrl });
+      try {
+        const result = await loop.execute({
+          ...loopInput([
+            { role: "system", content: SYSTEM },
+            { role: "user", content: "perform the write" },
+          ], gateway),
+          onToolRound: async () => { acceptedToolRounds += 1; },
+        });
+
+        assert.equal(result.status, "failed");
+        assert.equal(acceptedToolRounds, 0);
+        assert.equal(gateway.preflights.length, 0);
+        assert.equal(gateway.executions.length, 0);
+        assert.equal(fetch.requests.length, 1);
+      } finally {
+        await loop.release();
+      }
+    });
+  }
+});
+
+test("SDK terminal gate rejects an invalid streamed tool turn before write execution", async () => {
+  const cases = [{
+    protocol: "openai_compatible_chat_completions" as const,
+    baseUrl: CHAT_BASE_URL,
+    response: () => chatToolStreamWithFinishReason(
+      "chat-stream-invalid-write",
+      "write_fact",
+      { value: "changed" },
+      "length",
+    ),
+    followUp: () => chatTextStream(["must-not-follow-up"]),
+  }, {
+    protocol: "openai_responses" as const,
+    baseUrl: OFFICIAL_BASE_URL,
+    response: () => responsesToolStream(
+      "responses-stream-invalid-write",
+      "write_fact",
+      { value: "changed" },
+      { terminalStatus: "incomplete", incompleteReason: "max_output_tokens" },
+    ),
+    followUp: () => responsesTextStream(["must-not-follow-up"], "responses-stream-must-not-follow-up"),
+  }];
+
+  for (const fixture of cases) {
+    const gateway = new TestGateway(writeTool("write_fact", false));
+    const fetch = scriptedFetch([() => fixture.response(), () => fixture.followUp()]);
+    let acceptedToolRounds = 0;
+    await withGlobalFetch(fetch.fetch, async () => {
+      const loop = createLoop({
+        protocol: fixture.protocol,
+        baseUrl: fixture.baseUrl,
+        requestSettings: { stream: true },
+      });
+      try {
+        const result = await loop.execute({
+          ...loopInput([
+            { role: "system", content: SYSTEM },
+            { role: "user", content: "stream the write request" },
+          ], gateway),
+          onTextDelta: () => undefined,
+          onToolRound: async () => { acceptedToolRounds += 1; },
+        });
+
+        assert.equal(result.status, "failed");
+        assert.equal(acceptedToolRounds, 0);
+        assert.equal(gateway.preflights.length, 0);
+        assert.equal(gateway.executions.length, 0);
+        assert.equal(fetch.requests.length, 1);
+      } finally {
+        await loop.release();
+      }
+    });
+  }
+});
+
+test("SDK terminal gate rejects incomplete approval turns before ToolCenter preflight", async () => {
+  const cases = [{
+    protocol: "openai_compatible_chat_completions" as const,
+    baseUrl: CHAT_BASE_URL,
+    response: () => chatToolWithFinishReason(
+      "chat-invalid-approval",
+      "write_fact",
+      { value: "changed" },
+      "length",
+    ),
+  }, {
+    protocol: "openai_responses" as const,
+    baseUrl: OFFICIAL_BASE_URL,
+    response: () => responsesToolWithStatus(
+      "responses-invalid-approval",
+      "write_fact",
+      { value: "changed" },
+      "incomplete",
+    ),
+  }];
+
+  for (const fixture of cases) {
+    const gateway = new TestGateway(writeTool("write_fact", true));
+    const fetch = scriptedFetch([() => fixture.response()]);
+    await withGlobalFetch(fetch.fetch, async () => {
+      const loop = createLoop({ protocol: fixture.protocol, baseUrl: fixture.baseUrl });
+      try {
+        const result = await loop.execute(loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "request the gated write" },
+        ], gateway));
+
+        assert.equal(result.status, "failed");
+        assert.equal(gateway.preflights.length, 0);
+        assert.equal(gateway.executions.length, 0);
+        assert.equal(fetch.requests.length, 1);
+      } finally {
+        await loop.release();
+      }
+    });
+  }
+});
+
+test("root tool-round hook receives one complete canonical parallel assistant turn before execution", async () => {
+  const gateway = new TestGateway([plainTool("read_left"), plainTool("read_right")]);
+  const accepted: ModelMessage[] = [];
+  const acceptedPrefixes: Array<readonly ModelMessage[]> = [];
+  const fetch = scriptedFetch([
+    () => responsesTools([{
+      callId: "parallel-left",
+      name: "read_left",
+      input: { value: "left" },
+    }, {
+      callId: "parallel-right",
+      name: "read_right",
+      input: { value: "right" },
+    }]),
+    () => responsesText("parallel-complete", "parallel-final"),
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "read both facts" },
+        ], gateway),
+        onToolRound: async ({ canonicalMessagesBeforeRound, assistantMessage }) => {
+          assert.equal(gateway.preflights.length, 0);
+          assert.equal(gateway.executions.length, 0);
+          acceptedPrefixes.push(canonicalMessagesBeforeRound);
+          accepted.push(assistantMessage);
+        },
+      });
+
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(accepted.length, 1);
+      assert.deepEqual(acceptedPrefixes, [[
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "read both facts" },
+      ]]);
+      assert.deepEqual(accepted[0]?.toolCalls, [{
+        callId: "parallel-left",
+        toolName: "read_left",
+        input: { value: "left" },
+      }, {
+        callId: "parallel-right",
+        toolName: "read_right",
+        input: { value: "right" },
+      }]);
+      const outputItems = accepted[0]?.protocolExtensions?.[OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION];
+      assert.equal(Array.isArray(outputItems), true);
+      assert.match(JSON.stringify(outputItems), /parallel-left/u);
+      assert.match(JSON.stringify(outputItems), /parallel-right/u);
+      assert.equal(gateway.executions.length, 2);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("root tool-round hook observes the exact accumulated prefix without a context maintainer", async () => {
+  const gateway = new TestGateway([plainTool("read_first"), plainTool("read_second")]);
+  const prefixes: Array<readonly ModelMessage[]> = [];
+  const fetch = scriptedFetch([
+    () => responsesTools([{ callId: "round-one", name: "read_first", input: { value: "first" } }]),
+    () => responsesTools([{ callId: "round-two", name: "read_second", input: { value: "second" } }]),
+    () => responsesText("rounds-complete", "done"),
+  ]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL });
+    try {
+      const result = await loop.execute({
+        ...loopInput([
+          { role: "system", content: SYSTEM },
+          { role: "user", content: "read in sequence" },
+        ], gateway),
+        onToolRound: async ({ canonicalMessagesBeforeRound }) => {
+          prefixes.push(canonicalMessagesBeforeRound);
+        },
+      });
+
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(prefixes.length, 2);
+      assert.deepEqual(prefixes[0]?.map((message) => message.role), ["system", "user"]);
+      assert.deepEqual(prefixes[1]?.map((message) => message.role), ["system", "user", "assistant", "tool"]);
+      assert.equal(prefixes[1]?.at(-2)?.toolCalls?.[0]?.callId, "round-one");
+      assert.equal(prefixes[1]?.at(-1)?.toolCallId, "round-one");
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("root tool-round acceptance failure blocks non-streamed and streamed tools before preflight", async () => {
+  const cases = [{
+    protocol: "openai_compatible_chat_completions" as const,
+    baseUrl: CHAT_BASE_URL,
+    stream: false,
+    response: () => chatTool("rejected-chat-round", "write_fact", { value: "changed" }),
+  }, {
+    protocol: "openai_responses" as const,
+    baseUrl: OFFICIAL_BASE_URL,
+    stream: true,
+    response: () => responsesToolStream("rejected-responses-round", "write_fact", { value: "changed" }),
+  }];
+
+  for (const fixture of cases) {
+    const gateway = new TestGateway(writeTool("write_fact", false));
+    const fetch = scriptedFetch([() => fixture.response()]);
+    let acceptanceAttempts = 0;
+    await withGlobalFetch(fetch.fetch, async () => {
+      const loop = createLoop({
+        protocol: fixture.protocol,
+        baseUrl: fixture.baseUrl,
+        requestSettings: fixture.stream ? { stream: true } : undefined,
+      });
+      try {
+        const result = await loop.execute({
+          ...loopInput([
+            { role: "system", content: SYSTEM },
+            { role: "user", content: "persist this tool round" },
+          ], gateway),
+          ...(fixture.stream ? { onTextDelta: () => undefined } : {}),
+          onToolRound: async () => {
+            acceptanceAttempts += 1;
+            throw new Error("durable tool round rejected");
+          },
+        });
+
+        assert.equal(result.status, "failed");
+        assert.match(result.status === "failed" ? result.error : "", /durable tool round rejected/u);
+        assert.equal(acceptanceAttempts, 1);
+        assert.equal(gateway.preflights.length, 0);
+        assert.equal(gateway.executions.length, 0);
+        assert.equal(fetch.requests.length, 1);
+      } finally {
+        await loop.release();
+      }
+    });
+  }
+});
+
+test("SDK loop treats a provider refusal as failed instead of a completed answer", async () => {
   const fetch = scriptedFetch([() => chatRefusal("I cannot complete that request.")]);
   await withGlobalFetch(fetch.fetch, async () => {
     const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
@@ -1214,7 +1507,21 @@ test("an allowed tool executes once through the gateway and returns the complete
     ...plainTool("read_fact"),
     modelContract: { outputNotes: ["MODEL_CONTRACT_OUTPUT_SENTINEL"] },
   };
-  const gateway = new TestGateway(definition);
+  const recordedGateway = new TestGateway(definition);
+  const gateway: ToolExecutionGateway = {
+    list: () => recordedGateway.list(),
+    has: (name) => recordedGateway.has(name),
+    preflight: (request, context, permission) => recordedGateway.preflight(request, context, permission),
+    execute: async (request, context, permission) => {
+      context.reportProgress?.({
+        kind: "command_output",
+        stdoutTail: "live evidence",
+        stdoutChars: 13,
+        stderrChars: 0,
+      });
+      return recordedGateway.execute(request, context, permission);
+    },
+  };
   const fetch = scriptedFetch([
     () => chatTool("call-read-once", "read_fact", { value: "one" }),
     () => chatText("tool-final"),
@@ -1222,17 +1529,24 @@ test("an allowed tool executes once through the gateway and returns the complete
   await withGlobalFetch(fetch.fetch, async () => {
     const loop = createLoop({ protocol: "openai_compatible_chat_completions", baseUrl: CHAT_BASE_URL });
     try {
-      const result = await loop.execute(loopInput([
+      const requested: string[] = [];
+      const progress: string[] = [];
+      const result = await loop.execute({ ...loopInput([
         { role: "system", content: SYSTEM },
         { role: "user", content: "read one fact" },
-      ], gateway));
+      ], gateway),
+        onToolRequested: (request) => requested.push(request.callId),
+        onToolProgress: (update) => progress.push(update.progress.kind),
+      });
       assert.match(JSON.stringify(fetch.requests[0]?.body.tools), /MODEL_CONTRACT_OUTPUT_SENTINEL/u);
       const modelToolResult = JSON.stringify(fetch.requests[1]?.body.messages);
       for (const fact of ["call-read-once", "read_fact", "gateway-completed", "completed"]) {
         assert.match(modelToolResult, new RegExp(fact, "u"));
       }
       assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
-      assert.equal(gateway.executions.length, 1);
+      assert.equal(recordedGateway.executions.length, 1);
+      assert.deepEqual(requested, ["call-read-once"]);
+      assert.deepEqual(progress, ["command_output"]);
       assert.deepEqual(result.toolResults, [{
         callId: "call-read-once",
         toolName: "read_fact",
@@ -1325,7 +1639,6 @@ test("unchanged context maintenance preserves local message refs and attachment 
         ...loopInput(messages),
         maintainContext: async ({ messages: requestMessages }) => {
           assert.equal(requestMessages[0]?.ref, "system:stable");
-          assert.equal(Object.hasOwn(requestMessages[0]!, "attachments"), false);
           assert.equal(requestMessages[1]?.ref, "user:current");
           assert.equal(requestMessages[1]?.attachments?.[0]?.attachmentId, "attachment-stable");
           return { status: "unchanged" };
@@ -1707,13 +2020,17 @@ function loopInput(
 }
 
 function gatedTool(name = "write_fact"): ToolDefinition {
+  return writeTool(name, true);
+}
+
+function writeTool(name: string, requiresConfirmation: boolean): ToolDefinition {
   return {
     ...plainTool(name),
     metadata: {
       category: "filesystem",
-      riskLevel: "medium",
+      riskLevel: requiresConfirmation ? "medium" : "low",
       operationType: "read-write",
-      requiresConfirmation: true,
+      requiresConfirmation,
     },
   };
 }
@@ -1817,7 +2134,11 @@ function chatRefusal(refusal: string): Response {
     object: "chat.completion",
     created: 1,
     model: MODEL,
-    choices: [{ index: 0, message: { role: "assistant", content: null, refusal }, finish_reason: "stop" }],
+    choices: [{
+      index: 0,
+      message: { role: "assistant", content: null, refusal },
+      finish_reason: "stop",
+    }],
     usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
   });
 }
@@ -1842,7 +2163,11 @@ function chatToolWithFinishReason(
       message: {
         role: "assistant",
         content: null,
-        tool_calls: [{ id: callId, type: "function", function: { name, arguments: JSON.stringify(input) } }],
+        tool_calls: [{
+          id: callId,
+          type: "function",
+          function: { name, arguments: JSON.stringify(input) },
+        }],
       },
       finish_reason: finishReason,
     }],
@@ -1907,18 +2232,26 @@ function chatTools(calls: readonly {
 }
 
 function responsesTool(callId: string, name: string, input: JsonRecord): Response {
+  return responsesToolWithStatus(callId, name, input, "completed");
+}
+
+function responsesTools(calls: readonly {
+  readonly callId: string;
+  readonly name: string;
+  readonly input: JsonRecord;
+}[]): Response {
   return jsonResponse({
-    id: `response-${callId}`,
+    id: `response-${calls.map(({ callId }) => callId).join("-")}`,
     status: "completed",
     usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
-    output: [{
+    output: calls.map(({ callId, name, input }) => ({
       id: `item-${callId}`,
       type: "function_call",
       status: "completed",
       call_id: callId,
       name,
       arguments: JSON.stringify(input),
-    }],
+    })),
   });
 }
 
@@ -1982,6 +2315,30 @@ function chatToolStreamWithContinuation(
         : {}),
     }, null)),
     chatStreamChunk({}, "tool_calls"),
+  ];
+  return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function chatToolStreamWithFinishReason(
+  callId: string,
+  name: string,
+  input: JsonRecord,
+  finishReason: string,
+): Response {
+  const events = [
+    chatStreamChunk({
+      role: "assistant",
+      tool_calls: [{
+        index: 0,
+        id: callId,
+        type: "function",
+        function: { name, arguments: JSON.stringify(input) },
+      }],
+    }, null),
+    chatStreamChunk({}, finishReason),
   ];
   return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, {
     status: 200,
@@ -2163,8 +2520,17 @@ function responsesCompactedReasoningTextStream(
   }], fragmentSize);
 }
 
-function responsesToolStream(callId: string, name: string, input: JsonRecord): Response {
+function responsesToolStream(
+  callId: string,
+  name: string,
+  input: JsonRecord,
+  options: {
+    readonly terminalStatus?: "completed" | "incomplete";
+    readonly incompleteReason?: string;
+  } = {},
+): Response {
   const id = `resp-${callId}`;
+  const terminalStatus = options.terminalStatus ?? "completed";
   const item = {
     id: `${id}-function-call`,
     type: "function_call",
@@ -2203,13 +2569,16 @@ function responsesToolStream(callId: string, name: string, input: JsonRecord): R
     output_index: 0,
     item,
   }, {
-    type: "response.completed",
+    type: terminalStatus === "completed" ? "response.completed" : "response.incomplete",
     response: {
       id,
       object: "response",
       created_at: 1,
-      status: "completed",
+      status: terminalStatus,
       model: MODEL,
+      ...(options.incompleteReason === undefined
+        ? {}
+        : { incomplete_details: { reason: options.incompleteReason } }),
       usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
       output: [{
         type: "function_call",

@@ -74,7 +74,7 @@ export function createAppDeepEntryController(
   function openNormalConversation(conversationId: string): void {
     changeAgentMode("normal");
     const summary = options.app.conversations.find((item) => item.conversationId === conversationId);
-    options.setSelectedWorkspaceDirectory(summary?.workspaceFolder?.path);
+    options.setSelectedWorkspaceDirectory(summary?.workspaceFolder?.selection === "explicit" ? summary.workspaceFolder.path : undefined);
     void options.loadConversation(conversationId);
   }
 
@@ -108,7 +108,9 @@ export function createAppDeepEntryController(
         ? undefined
         : deepConversationSummaryFromView(view.conversation, summary);
       const intakeStatus = conversationSummary?.intakeStatus;
-      options.setSelectedWorkspaceDirectory(view.run.workspaceFolder?.path);
+      options.setSelectedWorkspaceDirectory(
+        view.run.workspaceFolder?.selection === "explicit" ? view.run.workspaceFolder.path : undefined,
+      );
       options.setApp((previous) => ({
         ...previous,
         agentMode: "deep",

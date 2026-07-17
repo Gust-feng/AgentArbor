@@ -3,8 +3,8 @@ import test from "node:test";
 import { projectAgentWorkTimelineView } from "./panel-agent-work-timeline-view.js";
 import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 
-test("agent work timeline view projects items and current confirmation outside React", () => {
-  const pending = { confirmationId: "confirmation-1", runId: "run-1" };
+test("agent work timeline view projects current confirmation with provider-returned model activity", () => {
+  const pending = { confirmationId: "confirmation-1", ownerRunId: "run-1" };
   const view = projectAgentWorkTimelineView({
     nodes: [
       node({
@@ -30,6 +30,7 @@ test("agent work timeline view projects items and current confirmation outside R
   assert.equal(view.confirmation.current?.confirmationId, "confirmation-1");
   assert.equal(view.confirmation.currentNodeId, "confirmation-node");
   assert.deepEqual(view.items.map((item) => item.nodeId), ["thinking-1"]);
+  assert.equal(view.items[0]?.copy.expandedDetail, "先判断目标");
 });
 
 test("agent work timeline view hides low-value answer nodes", () => {
@@ -58,7 +59,7 @@ test("agent work timeline view does not show historical confirmations as pending
         eventType: "confirmation.needed",
         phase: "waiting_approval",
         summary: "运行命令：python 3",
-        confirmation: { confirmationId: "confirmation-call-command", runId: "run-1" },
+        confirmation: { confirmationId: "confirmation-call-command", ownerRunId: "run-1" },
         refs: [{ kind: "tool_call", id: "call-command" }],
       }),
       node({

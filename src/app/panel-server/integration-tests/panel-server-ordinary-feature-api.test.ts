@@ -4,14 +4,17 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createOpenAIAgentsLoop } from "../../../adapters/intelligence/openai-agents-loop.js";
 import type { ConfirmationRequest } from "../../../domain/confirmation/index.js";
-import type { ToolCallResult } from "../../../domain/tools/index.js";
+import type { ToolCallResult, ToolExecutor } from "../../../domain/tools/index.js";
 import { createLocalConfigCenter } from "../../config-center/index.js";
 import type {
   OrdinaryExecutionOutcome,
   OrdinaryExecutionPort,
 } from "../../ordinary-agent/index.js";
+import { createOrdinaryAgentLoopExecutionPort } from "../../ordinary-agent/index.js";
 import { startLocalPanelServer } from "../../panel-server.js";
+import { ToolCenter } from "../../tool-center/index.js";
 import { closePanelServer, createPanelRequestHandler } from "../request-handler.js";
 import { createPanelRuntime } from "../runtime.js";
 import {
@@ -256,20 +259,25 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
     async execute(input) {
       if (input.runInput.userMessage === "needs approval") {
         const request = confirmation(input.runId);
+        const approval = approvalToolResult(request);
         return {
           status: "approval_required",
           confirmationRequests: [request],
           canonicalMessages: [{ role: "user", content: input.runInput.userMessage }],
-          toolCalls: [approvalToolResult(request)],
+          toolCalls: [approval],
           usage: { inputTokens: 2, totalTokens: 2 },
           continuation: {
             availability: "live_only",
             async decide({ decision }) {
+              assert.equal(decision.confirmationId, request.confirmationId);
               assert.equal("ownerRunId" in decision, false);
               assert.equal("toolCallFactId" in decision, false);
               return {
-                ...completedOutcome("approved", { inputTokens: 4, outputTokens: 1, totalTokens: 5 }),
+                status: "completed",
+                answer: "approved",
+                canonicalMessages: [...input.messages, { role: "assistant", content: "approved" }],
                 toolCalls: [resolvedApprovalToolResult(request)],
+                usage: { inputTokens: 4, outputTokens: 1, totalTokens: 5 },
               };
             },
             async release() { return undefined; },
@@ -294,11 +302,7 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
       body: { goal: "needs approval" },
     });
     const approvalView = await waitForView(server.url, approvalStart.body.run.runId, "approval_needed");
-    const pending = approvalView.body.view.workView.pendingConfirmation;
-    const confirmationId = pending.confirmationId;
-    assert.equal(pending.ownerRunId, approvalStart.body.run.runId);
-    assert.equal(pending.toolCallFactId, `${approvalStart.body.run.runId}:tool-fact`);
-    assert.notEqual(pending.ownerRunId, pending.toolCallFactId);
+    const confirmationId = approvalView.body.view.workView.pendingConfirmation.confirmationId;
     const decided = await requestJson(
       server.url,
       `/api/basic-agent/runs/${approvalStart.body.run.runId}/confirmations/${confirmationId}/decision`,
@@ -325,6 +329,119 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
     assert.equal(cancelled.body.run.runId, cancelStart.body.run.runId);
     assert.equal(cancelled.body.run.status, "cancelled");
     assert.equal("state" in cancelled.body.run, false);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Ordinary HTTP approval resumes the exact ToolCenter fact through the OpenAI Agents continuation", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-sdk-approval-"));
+  const providerCallId = "provider-call-approval";
+  const toolName = "approval_probe";
+  let executions = 0;
+  let modelRequests = 0;
+  const toolCenter = new ToolCenter();
+  const executor: ToolExecutor = {
+    definition: {
+      name: toolName,
+      description: "Record one approval identity probe.",
+      inputSchema: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
+      metadata: {
+        category: "other",
+        riskLevel: "high",
+        operationType: "read-write",
+        requiresConfirmation: true,
+      },
+    },
+    async execute(input) {
+      executions += 1;
+      return { recorded: input };
+    },
+  };
+  toolCenter.register(executor);
+  const providerFetch: typeof globalThis.fetch = async (url, init) => {
+    const request = url instanceof Request ? url : new Request(url, init);
+    const body = await request.clone().json() as Readonly<Record<string, unknown>>;
+    modelRequests += 1;
+    if (modelRequests === 1) {
+      return sdkChatToolResponse(providerCallId, toolName, { value: "approved-fact" });
+    }
+    assert.match(JSON.stringify(body.messages), /approved-fact/u);
+    assert.match(JSON.stringify(body.messages), /recorded/u);
+    return sdkChatTextResponse("approval completed");
+  };
+  const execution = createOrdinaryAgentLoopExecutionPort({
+    resources: {
+      async acquire(input) {
+        const loop = createOpenAIAgentsLoop({
+          protocol: "openai_compatible_chat_completions",
+          baseUrl: "https://ordinary-approval.example/v1",
+          apiKey: "test-key",
+          model: "ordinary-approval-model",
+          requestSettings: { stream: false },
+          fetch: providerFetch,
+        });
+        return {
+          loop,
+          resolvedMessages: input.messages,
+          tools: {
+            gateway: toolCenter,
+            context: {
+              callerAgentId: "ordinary-agent",
+              traceId: `trace:${input.runId}`,
+              goalId: input.runId,
+            },
+            permission: {
+              callerAgentId: "ordinary-agent",
+              allowedTools: [toolName],
+              confirmationPolicy: "prompt",
+            },
+          },
+          release: () => loop.release(),
+        };
+      },
+    },
+  });
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    ordinaryAgentExecution: execution,
+  });
+  try {
+    const submitted = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "Run one approved probe.", toolConfirmationPolicy: "prompt" },
+    });
+    assert.equal(submitted.status, 202);
+    const ownerRunId = submitted.body.run.runId as string;
+    const awaiting = await waitForView(server.url, ownerRunId, "approval_needed");
+    const pending = awaiting.body.view.workView.pendingConfirmation;
+    assert.equal(pending.ownerRunId, ownerRunId);
+    assert.equal(pending.toolCallFactId, providerCallId);
+    assert.notEqual(pending.ownerRunId, pending.toolCallFactId);
+
+    const approved = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${ownerRunId}/confirmations/${pending.confirmationId}/decision`,
+      { method: "POST", body: { decision: "approve_once" } },
+    );
+    assert.equal(approved.status, 200);
+    const completed = await waitForView(server.url, ownerRunId, "completed");
+    assert.equal(completed.body.view.workView.answer.content, "approval completed");
+    assert.equal(executions, 1);
+    assert.equal(modelRequests, 2);
+    assert.equal(
+      completed.body.view.detail.toolResults.filter((result: { readonly callId: string; readonly status: string }) =>
+        result.callId === providerCallId && result.status === "completed"
+      ).length,
+      1,
+    );
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -477,6 +594,79 @@ test("Ordinary SSE preserves tool.completed before final.result in terminal repl
   }
 });
 
+test("Ordinary SSE delivers request, progress and completion continuously without reopening the conversation", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-sse-live-tool-"));
+  let executionInput: Parameters<OrdinaryExecutionPort["execute"]>[0] | undefined;
+  let finish: ((outcome: OrdinaryExecutionOutcome) => void) | undefined;
+  let markEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    ordinaryAgentExecution: {
+      execute(input) {
+        executionInput = input;
+        markEntered?.();
+        return new Promise<OrdinaryExecutionOutcome>((resolve) => { finish = resolve; });
+      },
+    },
+  });
+  try {
+    const submitted = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "observe one long command" },
+    });
+    await entered;
+    const streamPromise = requestSse(
+      server.url,
+      `/api/basic-agent/runs/${submitted.body.run.runId}/stream`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    executionInput?.onTextDelta?.("hel");
+    executionInput?.onTextDelta?.("lo");
+    const request = {
+      callId: "call-live-command",
+      toolName: "shell_command",
+      input: { commandLine: "pnpm test" },
+    } as const;
+    executionInput?.onToolRequested?.(request);
+    executionInput?.onToolProgress?.({
+      callId: request.callId,
+      toolName: request.toolName,
+      progress: {
+        kind: "command_output",
+        stdoutTail: "running\n",
+        stdoutChars: 8,
+        stderrChars: 0,
+      },
+    });
+    const result: ToolCallResult = {
+      ...request,
+      output: { stdout: "running\n", stderr: "", exitCode: 0 },
+      status: "completed",
+      durationMs: 25,
+    };
+    await executionInput?.onToolResult?.(result);
+    finish?.({ ...completedOutcome("done", {}), toolCalls: [result] });
+
+    const stream = await streamPromise;
+    const events = ordinarySseEvents(stream.events);
+    const eventTypes = events.map((event) => event.type);
+    assert.equal(stream.status, 200);
+    assert.equal(eventTypes.includes("tool.requested"), true);
+    assert.equal(eventTypes.includes("tool.progress"), true);
+    assert.equal(eventTypes.includes("tool.completed"), true);
+    assert.equal(eventTypes.at(-1), "final.result");
+    const deltas = events.filter((event) => event.type === "model.output.delta");
+    assert.equal(deltas.length, 1);
+    assert.equal((deltas[0] as { readonly delta?: string } | undefined)?.delta, "hello");
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Ordinary SSE reports an opaque-cursor reset and completes terminal replay after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-sse-reset-"));
   let server = await startLocalPanelServer({
@@ -566,16 +756,17 @@ test("Panel close releases a pending Ordinary approval continuation once", async
   const server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: {
-      async execute(input) {
-        const request = confirmation(input.runId);
-        return {
-          status: "approval_required",
-          confirmationRequests: [request],
-          canonicalMessages: input.messages,
-          toolCalls: [approvalToolResult(request)],
-          usage: {},
-          continuation: {
+      ordinaryAgentExecution: {
+        async execute(input) {
+          const request = confirmation(input.runId);
+          const approval = approvalToolResult(request);
+          return {
+            status: "approval_required",
+            confirmationRequests: [request],
+            canonicalMessages: input.messages,
+            toolCalls: [approval],
+            usage: {},
+            continuation: {
             availability: "live_only",
             async decide() { return completedOutcome("unused", {}); },
             async release() { releases += 1; },
@@ -683,9 +874,10 @@ function confirmation(runId: string): ConfirmationRequest {
 
 function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
   return {
-    callId: request.toolCallFactId,
+    callId: `${request.toolCallFactId}:provider-call`,
+    factId: request.toolCallFactId,
     toolName: "shell_command",
-    input: { command: "write" },
+    input: { commandLine: "echo approved" },
     output: undefined,
     status: "approval_required",
     durationMs: 0,
@@ -694,14 +886,62 @@ function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
 }
 
 function resolvedApprovalToolResult(request: ConfirmationRequest): ToolCallResult {
+  const { confirmationRequest: _confirmationRequest, ...result } = approvalToolResult(request);
   return {
-    callId: request.toolCallFactId,
-    toolName: "shell_command",
-    input: { command: "write" },
-    output: { approved: true },
+    ...result,
+    output: { stdout: "approved", stderr: "", exitCode: 0 },
     status: "completed",
     durationMs: 1,
   };
+}
+
+function sdkChatToolResponse(
+  callId: string,
+  name: string,
+  input: Readonly<Record<string, unknown>>,
+): Response {
+  return sdkChatResponse({
+    id: `chat-${callId}`,
+    object: "chat.completion",
+    created: 1,
+    model: "ordinary-approval-model",
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: callId,
+          type: "function",
+          function: { name, arguments: JSON.stringify(input) },
+        }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+  });
+}
+
+function sdkChatTextResponse(text: string): Response {
+  return sdkChatResponse({
+    id: "chat-approval-completed",
+    object: "chat.completion",
+    created: 1,
+    model: "ordinary-approval-model",
+    choices: [{
+      index: 0,
+      message: { role: "assistant", content: text },
+      finish_reason: "stop",
+    }],
+    usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
+  });
+}
+
+function sdkChatResponse(value: Readonly<Record<string, unknown>>): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 async function waitForView(baseUrl: string, runId: string, status: string) {

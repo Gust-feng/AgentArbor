@@ -79,6 +79,7 @@ export type RunEvent = {
     readonly command?: string;
     readonly exitCode?: number;
     readonly preview?: string;
+    readonly display?: ToolDisplayProjection;
     readonly truncated?: boolean;
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;

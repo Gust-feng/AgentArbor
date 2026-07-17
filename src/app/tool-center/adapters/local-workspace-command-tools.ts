@@ -4,7 +4,13 @@ import { closeSync, openSync, promises as fs, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SanitizedCommandShellConfig } from "../../../domain/config/index.js";
-import type { ToolContinuation, ToolDefinition, ToolExecutionContext, ToolExecutor } from "../../../domain/tools/index.js";
+import type {
+  ToolContinuation,
+  ToolDefinition,
+  ToolExecutionContext,
+  ToolExecutionProgress,
+  ToolExecutor,
+} from "../../../domain/tools/index.js";
 import {
   createPlatformPortOccupantProbe,
   probeLocalPort,
@@ -50,6 +56,8 @@ const COMMAND_LOG_REF_SCHEME = "command-log";
 const COMMAND_LOG_REF_PREFIX = `${COMMAND_LOG_REF_SCHEME}://`;
 const COMMAND_LOG_DIRECTORY_NAME = "agentarbor-command-logs";
 const COMMAND_LOG_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/u;
+const COMMAND_PROGRESS_TAIL_CHARS = 4_000;
+const COMMAND_PROGRESS_INTERVAL_MS = 120;
 
 type CommandExecutionResult = {
   readonly stdout: string;
@@ -125,6 +133,11 @@ type CommandProcessFacts = {
   readonly toolCallId?: string;
 };
 
+type CommandProgressReporter = {
+  readonly append: (stream: "stdout" | "stderr", chunk: Buffer | string) => void;
+  readonly flush: () => void;
+};
+
 type RegistryPortOwner = {
   readonly processId: string;
   readonly pid?: number;
@@ -161,6 +174,7 @@ export function createLocalShellCommandTool(
       const background = record.background === true;
       const cwd = await resolveCommandCwd(rootDirectory, record.cwd);
       const processFacts = commandProcessFacts(options.processRegistry, context);
+      const progress = createCommandProgressReporter(context);
       assertSandboxAllowed(sandboxPolicy, {
         operation: "execute",
         workspaceRoot: path.resolve(rootDirectory),
@@ -205,8 +219,8 @@ export function createLocalShellCommandTool(
           ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
           : await runBackgroundProgramCommand(commandShell, normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
         : normalized.directProgram === undefined || !executeDirectly
-          ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts)
-          : await runProgramCommand(normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts);
+          ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts, progress)
+          : await runProgramCommand(normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts, progress);
       const result = await enrichCommandResult({
         result: rawOutcome.result,
         waitForPort,
@@ -849,13 +863,14 @@ async function runShellCommand(
   relativeCwd: string,
   timeoutMs: number,
   abortSignal: AbortSignal | undefined,
-  processFacts: CommandProcessFacts | undefined
+  processFacts: CommandProcessFacts | undefined,
+  progress: CommandProgressReporter,
 ): Promise<CommandExecutionOutcome> {
   const args = shellArgs(shell, commandLine);
   return runSpawnedCommand(shell.executable, args, workingDirectory, relativeCwd, timeoutMs, abortSignal, {
     commandLine,
     windowsVerbatimArguments: shell.syntax === "cmd",
-  }, processFacts);
+  }, processFacts, progress);
 }
 
 async function runProgramCommand(
@@ -866,9 +881,10 @@ async function runProgramCommand(
   relativeCwd: string,
   timeoutMs: number,
   abortSignal: AbortSignal | undefined,
-  processFacts: CommandProcessFacts | undefined
+  processFacts: CommandProcessFacts | undefined,
+  progress: CommandProgressReporter,
 ): Promise<CommandExecutionOutcome> {
-  return runSpawnedCommand(command, [...args], workingDirectory, relativeCwd, timeoutMs, abortSignal, { commandLine }, processFacts);
+  return runSpawnedCommand(command, [...args], workingDirectory, relativeCwd, timeoutMs, abortSignal, { commandLine }, processFacts, progress);
 }
 
 async function runBackgroundShellCommand(
@@ -927,7 +943,8 @@ async function runSpawnedCommand(
   timeoutMs: number,
   abortSignal: AbortSignal | undefined,
   options: { readonly commandLine: string; readonly windowsVerbatimArguments?: boolean },
-  processFacts: CommandProcessFacts | undefined
+  processFacts: CommandProcessFacts | undefined,
+  progress: CommandProgressReporter,
 ): Promise<CommandExecutionOutcome> {
   const logTarget = await createCommandLogTarget(options.commandLine);
   return new Promise((resolve, reject) => {
@@ -946,14 +963,17 @@ async function runSpawnedCommand(
     const appendStdout = (chunk: Buffer) => {
       stdout.append(chunk);
       writeCommandLogChunk(logFd, "stdout", chunk);
+      progress.append("stdout", chunk);
     };
     const appendStderr = (chunk: Buffer) => {
       stderr.append(chunk);
       writeCommandLogChunk(logFd, "stderr", chunk);
+      progress.append("stderr", chunk);
     };
     const appendStderrText = (text: string) => {
       stderr.appendText(text);
       writeCommandLogText(logFd, "stderr", text);
+      progress.append("stderr", text);
     };
     const closeLog = () => {
       if (logFd === undefined) {
@@ -1008,6 +1028,7 @@ async function runSpawnedCommand(
         abortSignal?.removeEventListener("abort", abortHandler);
       }
       closeLog();
+      progress.flush();
       markCommandProcessExited(processFacts, processId, {
         exitCode: typeof value.exitCode === "number" ? value.exitCode : undefined,
         signal: value.signal,
@@ -1081,6 +1102,7 @@ async function runSpawnedCommand(
       }
       markCommandProcessExited(processFacts, processId, {});
       closeLog();
+      progress.flush();
       removeLog();
       reject(error);
     });
@@ -1105,6 +1127,77 @@ async function runSpawnedCommand(
       abortHandler();
     }
   });
+}
+
+function createCommandProgressReporter(context: ToolExecutionContext): CommandProgressReporter {
+  if (context.reportProgress === undefined) {
+    return { append: () => undefined, flush: () => undefined };
+  }
+  let stdoutTail = "";
+  let stderrTail = "";
+  let stdoutChars = 0;
+  let stderrChars = 0;
+  let dirty = false;
+  let lastReportedAt = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const snapshot = (): ToolExecutionProgress => ({
+    kind: "command_output",
+    ...(stdoutTail.length === 0 ? {} : { stdoutTail }),
+    ...(stderrTail.length === 0 ? {} : { stderrTail }),
+    stdoutChars,
+    stderrChars,
+  });
+  const report = (): void => {
+    if (!dirty) return;
+    dirty = false;
+    lastReportedAt = Date.now();
+    try {
+      context.reportProgress?.(snapshot());
+    } catch {
+      // Progress is best-effort observation and cannot alter command execution.
+    }
+  };
+  const schedule = (): void => {
+    const remaining = COMMAND_PROGRESS_INTERVAL_MS - (Date.now() - lastReportedAt);
+    if (remaining <= 0) {
+      report();
+      return;
+    }
+    if (timer !== undefined) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      report();
+    }, remaining);
+    timer.unref?.();
+  };
+  return {
+    append(stream, chunk) {
+      const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
+      if (text.length === 0) return;
+      if (stream === "stdout") {
+        stdoutChars += text.length;
+        stdoutTail = boundedTail(stdoutTail, text, COMMAND_PROGRESS_TAIL_CHARS);
+      } else {
+        stderrChars += text.length;
+        stderrTail = boundedTail(stderrTail, text, COMMAND_PROGRESS_TAIL_CHARS);
+      }
+      dirty = true;
+      schedule();
+    },
+    flush() {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      report();
+    },
+  };
+}
+
+function boundedTail(current: string, incoming: string, maxChars: number): string {
+  const combined = `${current}${incoming}`;
+  return combined.length <= maxChars ? combined : combined.slice(combined.length - maxChars);
 }
 
 async function resolveCommandCwd(

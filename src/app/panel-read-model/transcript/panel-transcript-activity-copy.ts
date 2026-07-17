@@ -38,7 +38,7 @@ export type ActivityExpandedItem = {
 export type ActivityExpandedSection = {
   readonly title: string;
   readonly content: string;
-  readonly format?: "plain" | "code" | "console" | "list" | "source" | "source_list" | "path_list" | "quote" | "diff";
+  readonly format?: "plain" | "code" | "console" | "list" | "diagnostics" | "source" | "source_list" | "path_list" | "quote" | "diff";
   readonly href?: string;
   readonly meta?: readonly ActivityExpandedMeta[];
   readonly items?: readonly ActivityExpandedItem[];
@@ -57,6 +57,13 @@ export type ActivityLineDelta = {
   readonly removed: number;
 };
 
+export type ActivityLead = {
+  readonly action: string;
+  readonly subject: string;
+  readonly context?: string;
+  readonly monospace?: boolean;
+};
+
 export type ActivityItem = {
   readonly nodeId: string;
   readonly key: string;
@@ -64,7 +71,9 @@ export type ActivityItem = {
   readonly copy: ActivityLineCopy;
   readonly tone: "thinking" | "narration" | "tool" | "confirmation" | "decision" | "system";
   readonly phase: ProjectableTranscriptNode["phase"];
-  readonly toolKind?: "command" | "search" | "read" | "edit" | "web" | "thinking" | "system" | "confirmation" | "decision" | "other";
+  readonly startedAt?: string;
+  readonly toolKind?: "command" | "search" | "read" | "directory" | "edit" | "web" | "agent" | "thinking" | "system" | "confirmation" | "decision" | "other";
+  readonly lead?: ActivityLead;
   readonly lineDelta?: ActivityLineDelta;
   readonly statusBadge?: ActivityBadge;
   readonly badges?: readonly ActivityBadge[];
@@ -108,7 +117,7 @@ export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLi
     if (node.phase === "failed" || node.phase === "blocked") {
       return {
         label: node.eventType === "model.failed" ? "模型" : "问题",
-        detail: readableNarrationText(node.text ?? node.summary ?? node.title) ?? "任务未完成。",
+        detail: readableNarrationText(node.text ?? node.summary ?? node.title) ?? "运行失败。",
       };
     }
     if (node.phase === "cancelled") return { label: "已停止", detail: "任务已取消。" };
@@ -129,15 +138,22 @@ export function resolveActivityToolKind(item: {
   if (item.tone === "system") return "system";
   if (item.displayKind === "command_summary") return "command";
   if (item.displayKind === "search_results" || item.displayKind === "file_search_results") return "search";
-  if (item.displayKind === "directory_listing" || item.displayKind === "read_result") return "read";
+  if (item.displayKind === "directory_listing") return "directory";
+  if (item.displayKind === "read_result") return "read";
   if (item.displayKind === "browser_snapshot" || item.displayKind === "http_response") return "web";
-  if (item.displayKind === "file_change_summary" || item.displayKind === "file_diff_preview") return "edit";
+  if (item.displayKind === "agent_task") return "agent";
+  if (
+    item.displayKind === "file_change_summary" ||
+    item.displayKind === "file_diff_preview" ||
+    item.displayKind === "file_change_group"
+  ) return "edit";
   const label = item.copy.label;
   if (label === "命令") return "command";
   if (label === "搜索") return "search";
   if (label === "读取" || label === "查看") return "read";
   if (label === "编辑" || label === "写入" || label === "创建" || label === "删除") return "edit";
   if (label === "网页") return "web";
+  if (label === "委派") return "agent";
   if (label === "生成") return "edit";
   return "other";
 }
@@ -155,7 +171,9 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
       copy,
       tone,
       phase: node.phase,
+      startedAt: node.timestamp || undefined,
       toolKind: resolveActivityToolKind({ tone, copy, displayKind: node.display?.kind }),
+      lead: activityLeadForNode(node, copy),
       lineDelta: activityLineDeltaForNode(node, copy),
       statusBadge: activityStatusBadge(node),
       badges: activityBadgesForNode(node),
@@ -253,11 +271,159 @@ function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLin
     copy,
     tone,
     phase: node.phase,
+    startedAt: node.timestamp || undefined,
     toolKind: resolveActivityToolKind({ tone, copy, displayKind: node.display?.kind }),
+    lead: activityLeadForNode(node, copy),
     lineDelta: activityLineDeltaForNode(node, copy),
     statusBadge: activityStatusBadge(node),
     badges: activityBadgesForNode(node),
     expandedSections: activityExpandedSectionsForNode(node, copy),
+  };
+}
+
+function activityLeadForNode(
+  node: ProjectableTranscriptNode,
+  copy: ActivityLineCopy,
+): ActivityLead | undefined {
+  if (node.kind !== "tool") {
+    return undefined;
+  }
+  const action = copy.label ?? toolVerb(node);
+  const display = node.display;
+  if (display?.kind === "command_summary") {
+    const issue = node.phase === "failed" || node.phase === "blocked" ||
+      (display.exitCode !== undefined && display.exitCode !== 0) || display.timedOut === true;
+    return makeActivityLead({
+      action: "运行",
+      subject: "终端",
+      context: issue
+        ? display.timedOut === true ? "执行超时" : "运行失败"
+        : undefined,
+    });
+  }
+  if (display?.kind === "search_results") {
+    return makeActivityLead({
+      action,
+      subject: cleanToolTargetText(display.query) ?? display.results?.[0]?.title ?? copy.detail,
+      context: node.phase === "failed" || node.phase === "blocked"
+        ? cleanToolTargetText(display.message)
+        : undefined,
+    });
+  }
+  if (display?.kind === "directory_listing") {
+    return makeActivityLead({
+      action,
+      subject: toolPathLabel(display.path) ?? copy.detail,
+      monospace: true,
+    });
+  }
+  if (display?.kind === "file_search_results") {
+    const matches = fileSearchMatchesReturned(display);
+    return makeActivityLead({
+      action,
+      subject: cleanToolTargetText(display.query) ?? "项目内容",
+      context: node.phase === "completed" && matches === 0
+        ? "未找到匹配"
+        : undefined,
+      monospace: true,
+    });
+  }
+  if (display?.kind === "read_result") {
+    const remote = display.url !== undefined || urlLikeValue(display.uri) !== undefined;
+    const subject = readResultTarget(display, node.summary) ?? copy.detail;
+    return makeActivityLead({
+      action,
+      subject,
+      context: display.error,
+      monospace: !remote,
+    });
+  }
+  if (display?.kind === "browser_snapshot") {
+    const subject = cleanToolTargetText(display.title ?? display.url) ?? copy.detail;
+    return makeActivityLead({
+      action,
+      subject,
+    });
+  }
+  if (display?.kind === "http_response") {
+    const request = [display.method, display.url]
+      .filter((value): value is string => value !== undefined && value.trim().length > 0)
+      .join(" ");
+    const status = display.statusCode === undefined || display.statusCode < 400
+      ? undefined
+      : [`HTTP ${display.statusCode}`, display.statusText].filter(isString).join(" ");
+    return makeActivityLead({
+      action,
+      subject: request || copy.detail,
+      context: status,
+      monospace: true,
+    });
+  }
+  if (display?.kind === "agent_task") {
+    const agentName = cleanToolTargetText(display.agentName);
+    const task = cleanToolTargetText(display.task);
+    return makeActivityLead({
+      action: "委派",
+      subject: agentName ?? task ?? "协作任务",
+      context: agentName === undefined ? undefined : task,
+    });
+  }
+  if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
+    return makeActivityLead({
+      action,
+      subject: cleanToolTargetText(display.path) ?? copy.detail,
+      monospace: display.path !== undefined,
+    });
+  }
+  if (display?.kind === "file_change_group") {
+    return makeActivityLead({
+      action,
+      subject: `${display.files.length} 个文件`,
+    });
+  }
+  if (display?.kind === "generic_tool_summary") {
+    const directory = genericDirectoryFacts(display);
+    if (directory !== undefined) {
+      return makeActivityLead({
+        action,
+        subject: toolPathLabel(directory.path) ?? copy.detail,
+        monospace: true,
+      });
+    }
+    const role = genericToolRole(normalizedToolName(node.toolName), display);
+    const firstItem = display.items
+      ?.map((item) => cleanToolTargetText(genericItemLabel(item)))
+      .find((item): item is string => item !== undefined);
+    const article = genericArticleFacts(display);
+    const genericSubject = role === "命令"
+      ? "终端"
+      : role === "搜索"
+        ? cleanToolTargetText(display.summary) ?? firstItem ?? copy.detail
+        : article.title ?? compactHostLabel(article.url) ?? copy.detail;
+    return makeActivityLead({
+      action,
+      subject: genericSubject,
+    });
+  }
+  return makeActivityLead({ action, subject: copy.detail });
+}
+
+function makeActivityLead(input: {
+  readonly action: string;
+  readonly subject: string;
+  readonly context?: string;
+  readonly monospace?: boolean;
+}): ActivityLead {
+  const action = compact(readableActivityText(input.action), 40);
+  const readableSubject = input.monospace === true ? input.subject.trim() : readableActivityText(input.subject);
+  const context = input.context === undefined
+    ? undefined
+    : readableActivityText(input.context);
+  return {
+    action: action.length === 0 ? "工具" : action,
+    subject: readableSubject.length === 0 ? "工具活动" : readableSubject,
+    ...(context === undefined || context.length === 0 ? {} : { context }),
+    ...(input.monospace === true ? { monospace: true } : {}),
   };
 }
 
@@ -277,94 +443,28 @@ function activityStatusBadge(node: ProjectableTranscriptNode): ActivityBadge | u
     return undefined;
   }
   if (node.kind !== "tool") {
-    if (node.phase === "failed" || node.phase === "blocked") return { label: "未完成", tone: "danger" };
+    if (node.phase === "failed" || node.phase === "blocked") return { label: "运行失败", tone: "danger" };
     if (node.phase === "cancelled") return { label: "已停止", tone: "warning" };
     return undefined;
-  }
-  if (node.phase === "preparing" || node.phase === "executing" || node.phase === "noted") {
-    return { label: "进行中", tone: "accent" };
-  }
-  if (node.phase === "completed") {
-    return { label: "已完成", tone: "success" };
-  }
-  if (node.phase === "failed" || node.phase === "blocked" || node.phase === "cancelled") {
-    return { label: "未完成", tone: "danger" };
   }
   return undefined;
 }
 
 function activityBadgesForNode(node: ProjectableTranscriptNode): readonly ActivityBadge[] | undefined {
   const display = node.display;
-  const badges: ActivityBadge[] = [];
   if (isContextCompactionNode(node)) {
     return undefined;
   }
-  if (display?.kind === "command_summary") {
-    if (display.exitCode !== undefined && display.exitCode !== 0) {
-      badges.push({
-        label: `exit ${display.exitCode}`,
-        tone: "danger",
-        monospace: true,
-      });
-    }
-    if (node.phase !== "completed" && display.durationMs !== undefined) {
-      badges.push({ label: durationLabel(display.durationMs), monospace: true });
-    }
-    if (display.background === true) badges.push({ label: "后台", tone: "accent" });
-    if (display.waitForPort !== undefined) {
-      badges.push({
-        label: display.portReady === true ? `端口 ${display.waitForPort}` : `等待端口 ${display.waitForPort}`,
-        tone: display.portReady === false ? "warning" : "accent",
-      });
-    }
-    if (display.stdoutTruncated === true || display.stderrTruncated === true) {
-      badges.push({ label: "输出截断", tone: "warning" });
-    }
-  } else if (display?.kind === "search_results") {
-    badges.push({ label: `${searchResultsReturned(display)} 条结果`, tone: "accent" });
-  } else if (display?.kind === "directory_listing") {
-    badges.push({ label: `${directoryListingCount(display)} 项`, tone: "accent" });
-    if (display.depth !== undefined) badges.push({ label: `深度 ${display.depth}` });
-    if ((display.unreadableDirectories ?? 0) > 0) {
-      badges.push({ label: `${display.unreadableDirectories} 个异常目录`, tone: "warning" });
-    }
-  } else if (display?.kind === "file_search_results") {
-    badges.push({ label: `${fileSearchMatchesReturned(display)} 处匹配`, tone: "accent" });
-    if (display.searchedFiles !== undefined) badges.push({ label: `${display.searchedFiles} 个文件` });
-    if ((display.skippedFiles ?? 0) > 0) badges.push({ label: `${display.skippedFiles} 个跳过`, tone: "warning" });
-  } else if (display?.kind === "read_result") {
-    const source = compactHttpHostLabel(display.url ?? display.uri);
-    if (source !== undefined) badges.push({ label: source });
-    if (display.truncated === true) badges.push({ label: "已截断", tone: "warning" });
-  } else if (display?.kind === "browser_snapshot") {
-    const source = compactHostLabel(display.url);
-    if (source !== undefined) badges.push({ label: source });
-    if (display.truncated === true) badges.push({ label: "已截断", tone: "warning" });
-  } else if (display?.kind === "http_response") {
-    if (display.statusCode !== undefined) {
-      badges.push({
-        label: `${display.statusCode}`,
-        tone: httpStatusTone(display.statusCode),
-        monospace: true,
-      });
-    }
-    if (display.durationMs !== undefined) {
-      badges.push({ label: durationLabel(display.durationMs), monospace: true });
-    }
-    if (display.truncated === true) badges.push({ label: "已截断", tone: "warning" });
-  } else if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
-    const operationBadge = fileOperationBadge(display);
-    if (operationBadge !== undefined) {
-      badges.push(operationBadge);
-    }
-    if (display.append === true && operationBadge?.label !== "追加") badges.push({ label: "追加", tone: "accent" });
-    if (display.truncated === true) badges.push({ label: "预览截断", tone: "warning" });
-  } else if (display?.kind === "generic_tool_summary") {
-    if ((display.items?.length ?? 0) > 1) {
-      badges.push({ label: `${display.items?.length ?? 0} 项` });
-    }
+  if (display?.kind === "directory_listing" && (display.unreadableDirectories ?? 0) > 0) {
+    return [{ label: "部分目录不可读", tone: "warning" }];
   }
-  return badges.length === 0 ? undefined : badges;
+  if (display?.kind === "file_search_results" && (display.skippedUnreadableFiles ?? 0) > 0) {
+    return [{ label: "部分文件不可读", tone: "warning" }];
+  }
+  if (display?.kind === "http_response" && (display.statusCode ?? 0) >= 400) {
+    return [{ label: "请求失败", tone: "danger" }];
+  }
+  return undefined;
 }
 
 function activityVariantForNode(node: ProjectableTranscriptNode): ActivityItem["variant"] {
@@ -402,47 +502,45 @@ function activityExpandedSectionsForNode(
   const display = node.display;
   const sections: ActivityExpandedSection[] = [];
   if (display?.kind === "command_summary") {
-    if (display.outputSummary !== undefined) {
-      sections.push({ title: "输出摘要", content: display.outputSummary, format: "console" });
+    const command = commandText(display);
+    if (command !== undefined) {
+      sections.push({
+        title: "命令",
+        content: `$ ${command}`,
+        format: "console",
+      });
     }
-    if (display.errorSummary !== undefined) {
-      sections.push({ title: "错误摘要", content: display.errorSummary, format: "console", tone: "danger" });
-    }
-    const context = commandContextLines(display, node.phase);
-    if (context.length > 0) {
-      sections.push({ title: "执行信息", content: context.join("\n"), format: "list" });
+    const output = commandOutputForActivity(display);
+    if (output !== undefined) {
+      sections.push({
+        title: "输出",
+        content: output,
+        format: "console",
+        tone: stdoutMissingWithError(display) ? "danger" : undefined,
+      });
     }
   } else if (display?.kind === "search_results") {
     const visibleResults = (display.results ?? []).slice(0, EXPANDED_SEARCH_RESULTS_LIMIT);
-    const results = visibleResults.map((result) => searchResultLine(
-      result.title,
-      result.source,
-      result.url,
-      result.summary ?? result.snippet,
-    ));
+    const results = visibleResults.map((result) => searchResultLine(result.title, result.source, result.url));
     if (results.length > 0) {
-      const tail = searchResultsTailLine(display, results.length);
       sections.push({
-        title: "命中结果",
-        content: [...results, tail].filter((line): line is string => line !== undefined).join("\n"),
+        title: "来源",
+        content: results.join("\n"),
         format: "source_list",
         items: visibleResults.map(searchResultItem),
-        note: tail,
       });
     } else if (display.message !== undefined) {
-      sections.push({ title: "结果", content: display.message });
+      sections.push({ title: "提示", content: display.message });
     }
   } else if (display?.kind === "directory_listing") {
     const visibleEntries = display.entries.slice(0, EXPANDED_DIRECTORY_ENTRIES_LIMIT);
     const entries = visibleEntries.map(directoryEntryLine);
     if (entries.length > 0) {
-      const tail = directoryListingTailLine(display, entries.length);
       sections.push({
         title: "条目",
-        content: [...entries, tail].filter((line): line is string => line !== undefined).join("\n"),
+        content: entries.join("\n"),
         format: "path_list",
         items: visibleEntries.map(directoryEntryItem),
-        note: tail,
       });
     }
     const unreadable = display.unreadableSamples
@@ -452,68 +550,70 @@ function activityExpandedSectionsForNode(
     if ((unreadable?.length ?? 0) > 0) {
       sections.push({ title: "异常目录", content: unreadable!.join("\n"), format: "list", tone: "warning" });
     }
-    const context = directoryListingContextLines(display);
-    if (context.length > 0) {
-      sections.push({ title: "目录信息", content: context.join("\n"), format: "list" });
-    }
   } else if (display?.kind === "file_search_results") {
     const visibleMatches = display.matches.slice(0, EXPANDED_FILE_SEARCH_MATCHES_LIMIT);
     const matches = visibleMatches.map(fileSearchMatchLine);
     if (matches.length > 0) {
-      const tail = fileSearchTailLine(display, matches.length);
       sections.push({
-        title: "命中",
-        content: [...matches, tail].filter((line): line is string => line !== undefined).join("\n"),
+        title: "匹配位置",
+        content: matches.join("\n"),
         format: "path_list",
         items: visibleMatches.map(fileSearchMatchItem),
-        note: tail,
       });
     }
-    const skipped = fileSearchSkippedSummary(display);
-    if (skipped !== undefined) {
-      sections.push({ title: "跳过", content: skipped, format: "list", tone: "warning" });
-    }
   } else if (display?.kind === "read_result") {
-    const source = sourceSection("资料", {
+    const source = sourceSection("来源", {
       title: display.title ?? display.url ?? display.uri,
       url: display.url ?? urlLikeValue(display.uri),
     });
-    if (source !== undefined) {
+    if (source?.format === "source") {
       sections.push(source);
     }
-    if (display.contentPreview !== undefined) {
+    if (display.contentPreview !== undefined && source?.format !== "source") {
       sections.push({
-        title: "摘录",
+        title: "内容",
         content: display.contentPreview,
-        format: source?.format === "source" ? "quote" : "code",
+        format: "code",
       });
     }
     if (display.error !== undefined) {
-      sections.push({ title: "错误摘要", content: display.error, tone: "danger" });
+      sections.push({ title: "错误", content: display.error, tone: "danger" });
     }
   } else if (display?.kind === "browser_snapshot") {
-    const source = sourceSection("网页", {
+    const source = sourceSection("来源", {
       title: display.title ?? display.url,
       url: display.url,
     });
     if (source !== undefined) {
       sections.push(source);
     }
-    if (display.summary !== undefined) {
-      if (display.text === undefined) {
-        sections.push({ title: "页面摘要", content: display.summary });
-      }
-    }
-    if (display.text !== undefined) {
-      sections.push({ title: "页面摘录", content: display.text, format: "quote" });
-    }
   } else if (display?.kind === "http_response") {
     if (display.bodyPreview !== undefined) {
       sections.push({ title: "内容预览", content: display.bodyPreview, format: "code" });
     }
-    const responseLine = httpResponseContextLine(display, node.phase);
-    if (responseLine !== undefined) {
-      sections.push({ title: "响应", content: responseLine });
+  } else if (display?.kind === "agent_task") {
+    if (display.result !== undefined) {
+      sections.push({ title: "结果", content: display.result });
+    }
+  } else if (display?.kind === "file_change_group") {
+    const previewSections = display.files.flatMap((file) => {
+      const preview = cleanFilePreviewContent(file.preview);
+      if (preview === undefined) return [];
+      return [{
+        title: file.path,
+        content: preview,
+        format: filePreviewLooksLikeDiff(preview) ? "diff" as const : "code" as const,
+      }];
+    });
+    if (previewSections.length > 0) {
+      sections.push(...previewSections);
+    } else {
+      sections.push({
+        title: "文件",
+        content: display.files.map((file) => file.path).join("\n"),
+        format: "path_list",
+        items: display.files.map((file) => ({ title: file.path, monospace: true })),
+      });
     }
   } else if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
     const preview = filePreviewContentForActivity(display, node, copy);
@@ -532,9 +632,6 @@ function activityExpandedSectionsForNode(
           tone: fileOperationTone(fileDisplayOperation(display)),
         });
       }
-      if (display.summary !== undefined && display.summary.trim() !== copy.detail.trim()) {
-        sections.push({ title: "摘要", content: display.summary });
-      }
     }
   } else if (display?.kind === "generic_tool_summary") {
     sections.push(...genericToolSections(display, copy));
@@ -542,6 +639,22 @@ function activityExpandedSectionsForNode(
   const fallback = copy.expandedDetail === undefined ? [] : [{ title: "详情", content: copy.expandedDetail }];
   const allSections = dedupeExpandedSections(appendSectionsWithoutDuplicateContent(sections, fallback));
   return allSections.length === 0 ? undefined : allSections;
+}
+
+function commandOutputForActivity(
+  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "command_summary" }>,
+): string | undefined {
+  const stdout = display.stdoutPreview;
+  const stderr = display.stderrPreview;
+  const parts = [stdout, stderr].filter((value): value is string => value !== undefined && value.length > 0);
+  return parts.length === 0 ? undefined : parts.join("\n");
+}
+
+function stdoutMissingWithError(
+  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "command_summary" }>,
+): boolean {
+  return display.stdoutPreview === undefined &&
+    display.stderrPreview !== undefined;
 }
 
 function toolCallIdForActivityNode(node: ProjectableTranscriptNode): string | undefined {
@@ -758,55 +871,47 @@ function shouldDropPartialSentence(value: string): boolean {
 function directoryEntryLine(
   entry: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>["entries"][number],
 ): string {
-  const suffix = [
-    entry.kind,
-    entry.bytes === undefined ? undefined : byteLabel(entry.bytes),
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0);
-  return suffix.length === 0 ? entry.path : `${entry.path} (${suffix.join(", ")})`;
+  return directoryEntryTitle(entry);
 }
 
 function directoryEntryItem(
   entry: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>["entries"][number],
 ): ActivityExpandedItem {
-  const meta = [
-    entry.kind,
-    entry.bytes === undefined ? undefined : byteLabel(entry.bytes),
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0);
   return {
-    title: entry.path,
-    meta: meta.length === 0 ? undefined : meta.map((value) => ({ value })),
+    title: directoryEntryTitle(entry),
     monospace: true,
   };
+}
+
+function directoryEntryTitle(
+  entry: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>["entries"][number],
+): string {
+  return entry.kind === "directory" && !entry.path.endsWith("/")
+    ? `${entry.path}/`
+    : entry.path;
 }
 
 function searchResultItem(
   result: NonNullable<Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "search_results" }>["results"]>[number],
 ): ActivityExpandedItem {
-  const source = result.source ?? compactHostLabel(result.url);
+  const source = compactHostLabel(result.url) ?? result.source;
   return {
     title: result.title,
-    detail: cleanToolTargetText(result.summary ?? result.snippet),
     href: result.url,
     meta: source === undefined ? undefined : [{ value: source }],
   };
 }
 
-function directoryListingCount(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>,
-): number {
-  return display.totalEntries ?? display.entriesReturned ?? display.entries.length;
-}
-
 function searchResultsReturned(
   display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "search_results" }>,
 ): number {
-  return display.resultsReturned ?? display.results?.length ?? 0;
+  return display.results.length;
 }
 
 function fileSearchMatchesReturned(
   display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "file_search_results" }>,
 ): number {
-  return display.matchesReturned ?? display.matches.length;
+  return display.matches.length;
 }
 
 function directoryListingHeadline(
@@ -815,25 +920,12 @@ function directoryListingHeadline(
   return toolPathLabel(display.path) ?? "目录内容";
 }
 
-function directoryListingContextLines(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>,
-): readonly string[] {
-  const path = toolPathLabel(display.path);
-  return [
-    path === undefined ? undefined : `位置：${path}`,
-    `总计：${directoryListingCount(display)} 项`,
-    display.depth === undefined ? undefined : `深度：${display.depth}`,
-  ].filter((value): value is string => value !== undefined);
-}
-
 function fileSearchHeadline(
   display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "file_search_results" }>,
 ): string {
-  return [
-    cleanToolTargetText(display.query),
-    toolPathLabel(display.path),
-    `${fileSearchMatchesReturned(display)} 处匹配`,
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ") || `${fileSearchMatchesReturned(display)} 处匹配`;
+  return cleanToolTargetText(display.query) ??
+    toolPathLabel(display.path) ??
+    "项目内容";
 }
 
 function toolPathLabel(value: string | undefined): string | undefined {
@@ -862,96 +954,6 @@ function fileSearchMatchItem(
   };
 }
 
-function fileSearchSkippedSummary(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "file_search_results" }>,
-): string | undefined {
-  const lines = [
-    display.skippedFiles === undefined ? undefined : `文件：${display.skippedFiles}`,
-    display.skippedBinaryFiles === undefined ? undefined : `二进制：${display.skippedBinaryFiles}`,
-    display.skippedTooLargeFiles === undefined ? undefined : `过大：${display.skippedTooLargeFiles}`,
-    display.skippedUnreadableFiles === undefined ? undefined : `不可读：${display.skippedUnreadableFiles}`,
-    display.skippedDirectories === undefined ? undefined : `目录：${display.skippedDirectories}`,
-    ...(display.skippedSamples ?? []).slice(0, 6).map((item) =>
-      [item.path, item.reason ?? item.errorCode].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ")
-    ),
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0);
-  return lines.length === 0 ? undefined : lines.join("\n");
-}
-
-function searchResultsTailLine(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "search_results" }>,
-  shown: number,
-): string | undefined {
-  const returned = searchResultsReturned(display);
-  if (display.truncated !== true && returned <= shown) {
-    return undefined;
-  }
-  return `仅显示前 ${shown} 条结果；可缩小查询范围。`;
-}
-
-function directoryListingTailLine(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "directory_listing" }>,
-  shown: number,
-): string | undefined {
-  const total = directoryListingCount(display);
-  if (display.truncated !== true && total <= shown) {
-    return undefined;
-  }
-  return `仅显示前 ${shown} 项；可缩小目录范围或提高 limit。`;
-}
-
-function fileSearchTailLine(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "file_search_results" }>,
-  shown: number,
-): string | undefined {
-  const returned = fileSearchMatchesReturned(display);
-  if (display.truncated !== true && returned <= shown) {
-    return undefined;
-  }
-  return `仅显示前 ${shown} 处匹配；可缩小范围或提高 limit。`;
-}
-
-function commandContextLines(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "command_summary" }>,
-  phase: ProjectableTranscriptNode["phase"],
-): readonly string[] {
-  const hasIssue = phase === "failed" ||
-    phase === "blocked" ||
-    phase === "cancelled" ||
-    (display.exitCode !== undefined && display.exitCode !== 0) ||
-    display.timedOut === true ||
-    display.cancelled === true;
-  const command = commandText(display);
-  return [
-    command === undefined ? undefined : `命令：${command}`,
-    hasIssue && display.cwd !== undefined ? `目录：${display.cwd}` : undefined,
-    hasIssue && display.shell !== undefined ? `Shell：${display.shell}` : undefined,
-    display.background === true ? `后台：${display.pid === undefined ? "是" : `PID ${display.pid}`}` : undefined,
-    display.logPath === undefined ? undefined : `日志：${display.logPath}`,
-    display.stopCommand === undefined ? undefined : `停止：${display.stopCommand}`,
-    display.waitForPort === undefined ? undefined : `等待端口：${display.waitForPort}`,
-    display.portReady === false ? "端口：未就绪" : undefined,
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0);
-}
-
-function httpResponseContextLine(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "http_response" }>,
-  phase: ProjectableTranscriptNode["phase"],
-): string | undefined {
-  const statusFailed = display.statusCode !== undefined && display.statusCode >= 400;
-  const phaseFailed = phase === "failed" || phase === "blocked" || phase === "cancelled";
-  if (!statusFailed && !phaseFailed) {
-    return undefined;
-  }
-  const status = display.statusCode === undefined
-    ? undefined
-    : `${display.statusCode}${display.statusText === undefined ? "" : ` ${display.statusText}`}`;
-  const line = [display.method, display.url, status]
-    .filter((value): value is string => value !== undefined && value.trim().length > 0)
-    .join(" · ");
-  return line.length === 0 ? undefined : line;
-}
-
 type FileDisplay = Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "file_change_summary" | "file_diff_preview" }>;
 
 type FileDisplayOperation = NonNullable<FileDisplay["operation"]>;
@@ -963,29 +965,7 @@ function fileDisplayOperation(display: FileDisplay): FileDisplayOperation | unde
   if (display.kind === "file_diff_preview") {
     return "edit";
   }
-  if (display.append === true) {
-    return "append";
-  }
   return undefined;
-}
-
-function fileOperationBadge(display: FileDisplay): ActivityBadge | undefined {
-  const operation = fileDisplayOperation(display);
-  if (operation !== "append") {
-    return undefined;
-  }
-  return {
-    label: fileOperationShortLabel(operation),
-    tone: fileOperationTone(operation),
-  };
-}
-
-function fileOperationShortLabel(operation: FileDisplayOperation): string {
-  if (operation === "create") return "新增";
-  if (operation === "append") return "追加";
-  if (operation === "delete") return "删除";
-  if (operation === "edit") return "编辑";
-  return "写入";
 }
 
 function fileOperationTone(operation: FileDisplayOperation | undefined): ActivityBadge["tone"] | undefined {
@@ -998,14 +978,7 @@ function fileOperationTone(operation: FileDisplayOperation | undefined): Activit
 
 function fileChangeSummary(display: FileDisplay): string | undefined {
   const operation = fileDisplayOperation(display);
-  const lines = [
-    operation === undefined ? undefined : `${fileOperationSentence(operation)}。`,
-    display.bytes === undefined ? undefined : `大小：${byteLabel(display.bytes)}`,
-    display.replacements === undefined ? undefined : `修改：${display.replacements} 处`,
-    display.previousLength === undefined ? undefined : `原长度：${display.previousLength}`,
-    display.nextLength === undefined ? undefined : `新长度：${display.nextLength}`,
-  ].filter((value): value is string => value !== undefined && value.trim().length > 0);
-  return lines.length === 0 ? undefined : lines.join("\n");
+  return operation === undefined ? undefined : `${fileOperationSentence(operation)}。`;
 }
 
 function fileOperationSentence(operation: FileDisplayOperation): string {
@@ -1053,21 +1026,48 @@ function activityLineDeltaForNode(
   copy: ActivityLineCopy,
 ): ActivityLineDelta | undefined {
   const display = node.display;
-  if (display?.kind !== "file_change_summary" && display?.kind !== "file_diff_preview") {
-    return undefined;
+  const previews = display?.kind === "file_change_group"
+    ? display.files.map((file) => file.preview)
+    : display?.kind === "file_change_summary" || display?.kind === "file_diff_preview"
+      ? [filePreviewContentForActivity(display, node, copy)]
+      : [];
+  return mergeLineDeltas(previews.map((preview) => lineDeltaFromDiffPreview(preview)));
+}
+
+function mergeLineDeltas(deltas: readonly (ActivityLineDelta | undefined)[]): ActivityLineDelta | undefined {
+  let added = 0;
+  let removed = 0;
+  for (const delta of deltas) {
+    if (delta !== undefined) {
+      added += delta.added;
+      removed += delta.removed;
+    }
   }
-  const preview = filePreviewContentForActivity(display, node, copy);
+  return added === 0 && removed === 0 ? undefined : { added, removed };
+}
+
+function lineDeltaFromDiffPreview(preview: string | undefined): ActivityLineDelta | undefined {
   if (preview === undefined) {
     return undefined;
   }
-  return lineDeltaFromDiffPreview(preview);
-}
-
-function lineDeltaFromDiffPreview(preview: string): ActivityLineDelta | undefined {
+  const lines = preview.replace(/\r\n?/g, "\n").split("\n");
+  const hasHunks = lines.some((line) => line.startsWith("@@"));
+  let insideHunk = !hasHunks;
   let added = 0;
   let removed = 0;
-  for (const line of preview.split(/\r?\n/)) {
-    if (line.startsWith("+++") || line.startsWith("---")) {
+  for (const line of lines) {
+    if (line.startsWith("diff --git ") || line.startsWith("Index: ")) {
+      insideHunk = false;
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      insideHunk = true;
+      continue;
+    }
+    if (!insideHunk) {
+      continue;
+    }
+    if (!hasHunks && (line.startsWith("+++ ") || line.startsWith("--- "))) {
       continue;
     }
     if (line.startsWith("+")) {
@@ -1076,10 +1076,7 @@ function lineDeltaFromDiffPreview(preview: string): ActivityLineDelta | undefine
       removed += 1;
     }
   }
-  if (added === 0 && removed === 0) {
-    return undefined;
-  }
-  return { added, removed };
+  return added === 0 && removed === 0 ? undefined : { added, removed };
 }
 
 function filePreviewLooksLikeDiff(value: string): boolean {
@@ -1106,8 +1103,17 @@ function genericToolRole(
   const action = display.action?.toLowerCase() ?? "";
   if (
     action.includes("搜索") ||
+    action.includes("检索") ||
+    action.includes("查询") ||
+    action.includes("查找") ||
     action.includes("search") ||
-    toolName.includes("search")
+    action.includes("lookup") ||
+    action.includes("find") ||
+    action.includes("query") ||
+    toolName.includes("search") ||
+    toolName.includes("lookup") ||
+    toolName.includes("find") ||
+    toolName.includes("query")
   ) {
     return "搜索";
   }
@@ -1156,11 +1162,12 @@ function genericToolSections(
   if (directory !== undefined) {
     const sections: ActivityExpandedSection[] = [];
     if (directory.items.length > 0) {
-      sections.push({ title: "条目", content: directory.items.join("\n"), format: "list" });
-    }
-    const context = genericDirectoryContextLines(directory);
-    if (context.length > 0) {
-      sections.push({ title: "目录信息", content: context.join("\n"), format: "list" });
+      sections.push({
+        title: "条目",
+        content: directory.items.join("\n"),
+        format: "path_list",
+        items: directory.items.map((title) => ({ title, monospace: true })),
+      });
     }
     return sections;
   }
@@ -1171,24 +1178,19 @@ function genericToolSections(
     const source = sourceSection("来源", {
       title: article.title ?? article.url,
       url: article.url,
-      published: article.published,
-      author: article.author,
     });
     if (source !== undefined) {
       sections.push(source);
     }
   }
-  if (article.excerpt !== undefined) {
-    sections.push({ title: "摘录", content: article.excerpt, format: "quote" });
-  }
-
   const summary = cleanGenericSummaryText(display.summary);
   if (
     summary !== undefined &&
+    article.excerpt === undefined &&
     !genericTextMatchesArticle(summary, article) &&
     !genericTextAlreadyRepresented(summary, sections, copy)
   ) {
-    sections.push({ title: "摘要", content: summary });
+    sections.push({ title: "内容", content: summary });
   }
 
   const items = uniqueStrings(
@@ -1210,12 +1212,13 @@ function genericArticleFacts(display: GenericToolSummaryDisplay): GenericArticle
   const url = fieldValue(text, "URL");
   const published = fieldValue(text, "Published");
   const author = fieldValue(text, "Author");
+  const hasArticleIdentity = title !== undefined || url !== undefined || published !== undefined || author !== undefined;
   return {
     title,
     url,
     published,
     author,
-    excerpt: articleExcerpt(text, title),
+    excerpt: hasArticleIdentity ? articleExcerpt(text, title) : undefined,
   };
 }
 
@@ -1268,15 +1271,6 @@ function genericDirectoryHeadline(display: GenericToolSummaryDisplay): string | 
   return toolPathLabel(facts.path) ?? "目录内容";
 }
 
-function genericDirectoryContextLines(facts: GenericDirectoryFacts): readonly string[] {
-  const path = toolPathLabel(facts.path);
-  return [
-    path === undefined ? undefined : `位置：${path}`,
-    facts.count === undefined ? undefined : `总计：${facts.count} 项`,
-    facts.depth === undefined ? undefined : `深度：${facts.depth}`,
-  ].filter((value): value is string => value !== undefined);
-}
-
 function genericDirectoryPath(summary: string): string | undefined {
   const first = summary.split(/[·\n]/u)[0]?.trim();
   if (first === undefined || first.length === 0 || /\d+\s*(?:entries|项)/iu.test(first)) {
@@ -1324,7 +1318,7 @@ function genericDirectoryItemLabel(value: string): string | undefined {
 function fieldValue(text: string, field: string): string | undefined {
   const pattern = new RegExp(`(?:^|\\n)\\s*${field}\\s*:\\s*(.+?)(?=\\n\\s*(?:Title|URL|Published|Author|Highlights?)\\s*:|$)`, "isu");
   const value = pattern.exec(text)?.[1]?.trim();
-  return value === undefined || value.length === 0 ? undefined : compact(value.replace(/\s+/g, " "), 300);
+  return value === undefined || value.length === 0 ? undefined : value.replace(/\s+/g, " ");
 }
 
 function articleExcerpt(text: string, title: string | undefined): string | undefined {
@@ -1394,8 +1388,6 @@ function sourceSection(
   input: {
     readonly title?: string;
     readonly url?: string;
-    readonly published?: string;
-    readonly author?: string;
   },
 ): ActivityExpandedSection | undefined {
   const content = cleanToolTargetText(input.title) ?? cleanToolTargetText(input.url);
@@ -1403,42 +1395,12 @@ function sourceSection(
     return undefined;
   }
   const href = httpHref(input.url);
-  const meta = sourceMeta(input);
   return {
     title,
     content,
-    format: href === undefined && meta.length === 0 ? "plain" : "source",
+    format: href === undefined ? "plain" : "source",
     href,
-    meta: meta.length === 0 ? undefined : meta,
   };
-}
-
-function sourceMeta(input: {
-  readonly url?: string;
-  readonly published?: string;
-  readonly author?: string;
-}): readonly ActivityExpandedMeta[] {
-  const meta: ActivityExpandedMeta[] = [];
-  const host = compactHostLabel(input.url);
-  if (host !== undefined) {
-    meta.push({ label: "站点", value: host });
-  }
-  if (input.published !== undefined) {
-    meta.push({ label: "时间", value: sourceDateLabel(input.published) });
-  }
-  if (input.author !== undefined) {
-    meta.push({ label: "作者", value: compact(input.author, 80) });
-  }
-  return meta.filter((item) => item.value.trim().length > 0);
-}
-
-function sourceDateLabel(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return compact(value, 80);
-  }
-  const iso = date.toISOString();
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 }
 
 function urlLikeValue(value: string | undefined): string | undefined {
@@ -1514,6 +1476,7 @@ function toolVerb(node: ProjectableTranscriptNode): string {
   const toolName = normalizedToolName(node.toolName);
   const action = display?.kind === "generic_tool_summary" ? display.action?.toLowerCase() ?? "" : "";
   const fileMutationVerb = fileMutationVerbForTool(toolName, display);
+  if (display?.kind === "agent_task" || toolName === "call_sub_agent" || toolName === "spawn_sub_agent") return "委派";
   if (display?.kind === "command_summary" || toolName === "shell_command" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) return "命令";
   if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search" || toolName.includes("grep")) return "搜索";
   if (display?.kind === "file_search_results") return "搜索";
@@ -1544,6 +1507,20 @@ function fileMutationVerbForTool(
   toolName: string,
   display: ProjectableTranscriptNode["display"],
 ): "写入" | "创建" | "删除" | "编辑" | undefined {
+  if (display?.kind === "file_change_group") {
+    const operations = uniqueStrings(
+      display.files
+        .map((file) => file.operation)
+        .filter((operation): operation is NonNullable<typeof operation> => operation !== undefined),
+    );
+    if (operations.length === 1) {
+      const operation = operations[0];
+      if (operation === "create") return "创建";
+      if (operation === "delete") return "删除";
+      if (operation === "append" || operation === "write") return "写入";
+    }
+    return "编辑";
+  }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
     const operation = fileDisplayOperation(display);
     if (operation === "create") return "创建";
@@ -1595,7 +1572,7 @@ function mentionsEditFile(value: string): boolean {
 function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy, "detail" | "expandedDetail"> | undefined {
   const display = node.display;
   if (display?.kind === "command_summary") {
-    return { detail: commandActivityHeadline(display, node.phase) };
+    return { detail: "终端" };
   }
   if (display?.kind === "search_results") {
     const query = cleanToolTargetText(display.query);
@@ -1606,18 +1583,24 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
     if ((node.phase === "failed" || node.phase === "blocked") && message !== undefined) {
       return readableToolTarget(message);
     }
+    const firstResult = display.results
+      ?.map((result) => cleanToolTargetText(result.title) ?? cleanToolTargetText(result.source) ?? cleanToolTargetText(result.url))
+      .find((result): result is string => result !== undefined);
+    if (firstResult !== undefined) {
+      return readableToolTarget(firstResult);
+    }
     return {
-      detail: searchResultsReturned(display) > 0 ? "网页资料" : "搜索结果",
+      detail: searchResultsReturned(display) > 0 ? "网页资料" : "未找到相关内容",
     };
   }
   if (display?.kind === "directory_listing") {
     return {
-      detail: compact(readableActivityText(directoryListingHeadline(display)), 120),
+      detail: readableActivityText(directoryListingHeadline(display)),
     };
   }
   if (display?.kind === "file_search_results") {
     return {
-      detail: compact(readableActivityText(fileSearchHeadline(display)), 120),
+      detail: readableActivityText(fileSearchHeadline(display)),
     };
   }
   if (display?.kind === "read_result") {
@@ -1633,34 +1616,41 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
     ].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" ");
     return readableToolTarget(cleanToolTargetText(target || node.summary)) ?? fallbackToolTargetCopy(node);
   }
+  if (display?.kind === "agent_task") {
+    return {
+      detail: cleanToolTargetText(display.agentName) ?? cleanToolTargetText(display.task) ?? "协作任务",
+    };
+  }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
     return readableToolTarget(cleanToolTargetText(display.path ?? node.summary)) ?? fallbackToolTargetCopy(node);
+  }
+  if (display?.kind === "file_change_group") {
+    return { detail: `${display.files.length} 个文件` };
   }
   if (display?.kind === "generic_tool_summary") {
     const role = genericToolRole(normalizedToolName(node.toolName), display);
     if (role === "命令") {
-      return { detail: genericCommandActivityHeadline(node.phase) };
+      return { detail: "终端" };
     }
     if (role === "搜索") {
-      if (node.phase === "preparing" || node.phase === "executing" || node.phase === "noted") {
-        const query = cleanToolTargetText(display.summary);
-        if (query !== undefined) {
-          return readableToolTarget(query);
-        }
+      const target = cleanToolTargetText(display.summary) ??
+        display.items
+          ?.map((item) => cleanToolTargetText(genericItemLabel(item)))
+          .find((item): item is string => item !== undefined);
+      if (target !== undefined) {
+        return readableToolTarget(target);
       }
       return { detail: genericSearchActivityHeadline(node.phase) };
     }
     const directoryHeadline = genericDirectoryHeadline(display);
     if (directoryHeadline !== undefined) {
       return {
-        detail: compact(readableActivityText(directoryHeadline), 120),
+        detail: readableActivityText(directoryHeadline),
       };
     }
     const article = genericArticleFacts(display);
     if (article.title !== undefined || article.url !== undefined) {
-      return readableToolTarget(
-        [article.title, compactHostLabel(article.url)].filter((value): value is string => value !== undefined && value.length > 0).join(" · ")
-      );
+      return readableToolTarget(article.title ?? compactHostLabel(article.url));
     }
     const items = display.items
       ?.map((item) => cleanToolTargetText(genericItemLabel(item)) ?? "")
@@ -1668,7 +1658,7 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
     const summary = cleanToolTargetText(display.summary ?? node.summary);
     if (summary !== undefined && items.length > 1) {
       return {
-        detail: compact(readableActivityText(summary), 120),
+        detail: readableActivityText(summary),
         expandedDetail: items.join("\n"),
       };
     }
@@ -1684,42 +1674,15 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
   return readableToolTarget(cleanToolTargetText(node.summary)) ?? fallbackToolTargetCopy(node);
 }
 
-function commandActivityHeadline(
-  display: Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "command_summary" }>,
-  phase: ProjectableTranscriptNode["phase"],
-): string {
-  const failed = phase === "failed" ||
-    phase === "blocked" ||
-    (display.exitCode !== undefined && display.exitCode !== 0) ||
-    display.timedOut === true;
-  if (failed) {
-    return cleanToolTargetText(display.errorSummary) ?? "命令未完成";
-  }
-  if (phase === "cancelled" || display.cancelled === true) {
-    return "命令已停止";
-  }
-  if (phase === "preparing" || phase === "executing" || phase === "noted") {
-    return "正在执行命令";
-  }
-  return "命令已执行";
-}
-
-function genericCommandActivityHeadline(phase: ProjectableTranscriptNode["phase"]): string {
-  if (phase === "failed" || phase === "blocked") return "命令未完成";
-  if (phase === "cancelled") return "命令已停止";
-  if (phase === "preparing" || phase === "executing" || phase === "noted") return "正在执行命令";
-  return "命令已执行";
-}
-
 function genericSearchActivityHeadline(phase: ProjectableTranscriptNode["phase"]): string {
-  if (phase === "failed" || phase === "blocked") return "搜索未完成";
+  if (phase === "failed" || phase === "blocked") return "搜索失败";
   if (phase === "cancelled") return "搜索已停止";
   if (phase === "preparing" || phase === "executing" || phase === "noted") return "正在搜索";
-  return "搜索结果";
+  return "未找到相关内容";
 }
 
 function toolStatusText(node: ProjectableTranscriptNode): string | undefined {
-  if (node.phase === "failed") return "动作未完成。";
+  if (node.phase === "failed") return "动作失败";
   return undefined;
 }
 
@@ -1730,13 +1693,13 @@ function fallbackToolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityL
 function fallbackToolTargetText(node: ProjectableTranscriptNode): string | undefined {
   const display = node.display;
   if (display?.kind === "command_summary") {
-    return cleanToolTargetText(display.errorSummary) ??
-      cleanToolTargetText(display.outputSummary) ??
+    return cleanToolTargetText(display.stderrPreview) ??
+      cleanToolTargetText(display.stdoutPreview) ??
       fallbackToolActionText(node);
   }
   if (display?.kind === "search_results") {
     const firstResult = display.results
-      ?.map((result) => cleanToolTargetText(result.title) ?? cleanToolTargetText(result.source) ?? cleanToolTargetText(result.url) ?? cleanToolTargetText(result.summary ?? result.snippet))
+      ?.map((result) => cleanToolTargetText(result.title) ?? cleanToolTargetText(result.source) ?? cleanToolTargetText(result.url))
       .find((value): value is string => value !== undefined && value.length > 0);
     return firstResult ??
       (searchResultsReturned(display) > 0 ? `${searchResultsReturned(display)} 条结果` : undefined) ??
@@ -1745,20 +1708,22 @@ function fallbackToolTargetText(node: ProjectableTranscriptNode): string | undef
   if (display?.kind === "read_result") {
     return cleanToolTargetText(display.error) ??
       previewLineTarget(display.contentPreview) ??
-      cleanToolTargetText(display.source ?? display.ref ?? display.status) ??
+      cleanToolTargetText(display.title ?? display.url ?? display.uri) ??
       fallbackToolActionText(node);
   }
   if (display?.kind === "browser_snapshot") {
-    return previewLineTarget(display.text ?? display.summary) ?? fallbackToolActionText(node);
+    return cleanToolTargetText(display.title ?? display.url) ?? fallbackToolActionText(node);
   }
   if (display?.kind === "http_response") {
     const status = display.statusCode === undefined ? undefined : `HTTP ${display.statusCode}`;
     return previewLineTarget(display.bodyPreview) ?? cleanToolTargetText(status) ?? fallbackToolActionText(node);
   }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
-    return cleanToolTargetText(display.summary) ??
-      fileChangeFallbackTarget(display) ??
+    return fileChangeFallbackTarget(display) ??
       fallbackToolActionText(node);
+  }
+  if (display?.kind === "file_change_group") {
+    return `${display.files.length} 个文件`;
   }
   if (display?.kind === "generic_tool_summary") {
     return genericActionTargetText(display.action) ?? fallbackToolActionText(node);
@@ -1779,7 +1744,7 @@ function previewLineTarget(value: string | undefined): string | undefined {
     ?.split(/\r?\n/)
     .map((line) => cleanToolTargetText(line))
     .find((line): line is string => line !== undefined && line.length > 0);
-  return firstLine === undefined ? undefined : compact(firstLine, 120);
+  return firstLine;
 }
 
 function fileChangeFallbackTarget(display: FileDisplay): string | undefined {
@@ -1824,6 +1789,7 @@ function fallbackToolNameText(node: ProjectableTranscriptNode): string | undefin
   if (verb === "写入") return "写入文件";
   if (verb === "编辑") return "编辑文件";
   if (verb === "生成") return "生成内容";
+  if (verb === "委派") return "协作任务";
   return cleanToolTargetText(toolName.replace(/[_-]+/g, " "));
 }
 
@@ -1907,8 +1873,7 @@ function readableExpandedModelText(value: string): string {
 function readableToolTarget(value: string | undefined): Pick<ActivityLineCopy, "detail" | "expandedDetail"> | undefined {
   const text = readableActivityText(value ?? "");
   if (text.length === 0) return undefined;
-  const detail = compact(text, 120);
-  return detail === text ? { detail } : { detail, expandedDetail: text };
+  return { detail: text };
 }
 
 function readResultTarget(
@@ -1951,16 +1916,11 @@ function searchResultLine(
   title: string | undefined,
   source: string | undefined,
   url: string | undefined,
-  summary: string | undefined,
 ): string {
   const headline = [title, source ?? compactHostLabel(url)]
     .filter((value): value is string => value !== undefined && value.trim().length > 0)
     .join(" · ");
-  const detail = cleanToolTargetText(summary);
-  if (headline.length === 0) {
-    return detail ?? "";
-  }
-  return detail === undefined ? headline : `${headline}\n${detail}`;
+  return headline;
 }
 
 function compactHostLabel(value: string | undefined): string | undefined {
@@ -1968,7 +1928,7 @@ function compactHostLabel(value: string | undefined): string | undefined {
     return undefined;
   }
   try {
-    return new URL(value).host || value;
+    return new URL(value).host.replace(/^www\./u, "") || value;
   } catch {
     return value;
   }
@@ -1977,38 +1937,6 @@ function compactHostLabel(value: string | undefined): string | undefined {
 function compactHttpHostLabel(value: string | undefined): string | undefined {
   const href = httpHref(value);
   return href === undefined ? undefined : compactHostLabel(href);
-}
-
-function httpStatusTone(code: number): ActivityBadge["tone"] {
-  if (code >= 500) return "danger";
-  if (code >= 400) return "warning";
-  if (code >= 200 && code < 300) return "success";
-  return "neutral";
-}
-
-function durationLabel(value: number): string {
-  if (!Number.isFinite(value)) {
-    return "0ms";
-  }
-  if (value < 1_000) {
-    return `${Math.max(0, Math.round(value))}ms`;
-  }
-  const seconds = value / 1_000;
-  const rounded = seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toString();
-  return `${rounded.replace(/\.0$/, "")}s`;
-}
-
-function byteLabel(value: number): string {
-  if (!Number.isFinite(value) || value < 0) {
-    return "0 B";
-  }
-  if (value < 1_024) {
-    return `${Math.round(value)} B`;
-  }
-  if (value < 1_024 * 1_024) {
-    return `${(value / 1_024).toFixed(value < 10 * 1_024 ? 1 : 0).replace(/\.0$/, "")} KB`;
-  }
-  return `${(value / (1_024 * 1_024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
 function narrationCandidate(value: string): string | undefined {

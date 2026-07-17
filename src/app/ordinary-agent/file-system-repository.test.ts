@@ -86,58 +86,86 @@ test("file repository rejects old or malformed snapshots instead of compatibilit
     error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
 });
 
-test("file repository rejects an approval request bound to a different tool fact", async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-approval-fact-"));
+test("file repository rejects the retired ordinary-run/v2 confirmation identity schema", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-v2-incompatible-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
-  const initial = state("approval-fact-run", "2026-01-01T00:00:00.000Z");
+  const saved = await repository.save(state("v2-run", "2026-01-01T00:00:00.000Z"), 0);
+  await fs.writeFile(
+    path.join(root, "runs", "v2-run", "snapshot.json"),
+    JSON.stringify({ ...saved, schemaVersion: "ordinary-run/v2" }),
+    "utf8",
+  );
+
+  await assert.rejects(
+    repository.get("v2-run"),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
+      error.message.includes("ordinary-run/v3"),
+  );
+});
+
+test("file repository rejects the retired in-place retry continuation", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-retry-incompatible-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("retry-run", "2026-01-01T00:00:00.000Z");
+  const created = await repository.save(initial, 0);
   const running = transitionOrdinaryRun({
     state: initial,
     transition: { type: "start" },
     recordedAt: "2026-01-01T00:00:01.000Z",
     eventId: "event-2",
   });
-  const request = {
-    confirmationId: "confirmation-1",
-    toolCallFactId: "tool-fact-1",
-    title: "Confirm",
-    actionSummary: "Run command",
-    affectedResources: ["workspace"],
-    riskLevel: "medium" as const,
-    requestedAt: "2026-01-01T00:00:02.000Z",
-    sourceRefs: ["tool:tool-fact-1"],
-  };
-  const paused = transitionOrdinaryRun({
+  const started = await repository.save(running, created.revision);
+  const blocked = transitionOrdinaryRun({
     state: running,
     transition: {
-      type: "request_approval",
-      status: { kind: "awaiting_approval", confirmationRequests: [request], continuationAvailability: "live_only" },
-      canonicalMessages: running.canonicalMessages,
-      toolCalls: [{
-        callId: "provider-call",
-        factId: request.toolCallFactId,
-        toolName: "shell_command",
-        input: { command: "write" },
-        output: undefined,
-        status: "approval_required",
-        durationMs: 0,
-        confirmationRequest: request,
-      }],
-      usage: {},
+      type: "block",
+      reason: { code: "provider_disconnected", message: "provider disconnected" },
+      continueBy: "new_turn",
     },
     recordedAt: "2026-01-01T00:00:02.000Z",
     eventId: "event-3",
   });
-  const malformed = {
-    ...paused,
-    toolCalls: [{
-      ...paused.toolCalls[0]!,
-      confirmationRequest: { ...request, toolCallFactId: "forged-tool-fact" },
-    }],
+  await repository.save(blocked, started.revision);
+  const snapshotPath = path.join(root, "runs", "retry-run", "snapshot.json");
+  const snapshot = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as {
+    state: { status: unknown };
   };
+  snapshot.state.status = {
+    kind: "blocked",
+    reason: { code: "provider_disconnected", message: "provider disconnected" },
+    continueBy: "retry",
+  };
+  await fs.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
 
-  await assert.rejects(repository.save(malformed as never, 0), (error: unknown) =>
-    error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
+  await assert.rejects(
+    repository.get("retry-run"),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError,
+  );
+});
+
+test("file repository list isolates an incompatible snapshot from healthy run summaries", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-isolated-invalid-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  await repository.save(state("healthy-run", "2026-01-01T00:00:00.000Z"), 0);
+  await repository.save(state("broken-run", "2026-01-01T00:00:01.000Z"), 0);
+
+  await fs.writeFile(
+    path.join(root, "runs", "broken-run", "snapshot.json"),
+    JSON.stringify({ schemaVersion: "legacy/v0", revision: 1 }),
+    "utf8",
+  );
+
+  assert.deepEqual(
+    (await repository.list()).map((summary) => summary.runId),
+    ["healthy-run"],
+  );
+  await assert.rejects(
+    repository.get("broken-run"),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError,
+  );
 });
 
 test("file repository rejects snapshots from retired model providers", async (t) => {

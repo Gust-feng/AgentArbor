@@ -10,13 +10,7 @@ import {
   ConfigCenterValidationError,
   WorkspaceDirectoryValidationError,
 } from "../config-center/index.js";
-import {
-  applyAgentToolRegistryContributions,
-  createAgentToolRegistry,
-  ToolRegistry,
-  type ToolCatalogSnapshot,
-} from "../tool-center/index.js";
-import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
+import type { ToolCatalogSnapshot } from "../tool-center/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import {
   parseConfigUpdate,
@@ -341,7 +335,7 @@ export async function handlePanelConfigRoute(
   if (request.method === "GET" && url.pathname === "/api/config/tools") {
     const tools: PanelToolsConfig = {
       webSearch: await runtime.configCenter.getWebSearchConfig(),
-      catalog: await createPanelToolCatalog(runtime),
+      catalog: await readPanelToolCatalog(runtime),
     };
     writeJson(response, 200, {
       ok: true,
@@ -428,7 +422,7 @@ export async function handlePanelConfigRoute(
     writeJson(response, 200, {
       ok: true,
       status: "completed",
-      tools: { webSearch, catalog: await createPanelToolCatalog(runtime) },
+      tools: { webSearch, catalog: await readPanelToolCatalog(runtime) },
       capabilities: await runtime.capabilityCenter.snapshot(),
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
     });
@@ -443,7 +437,7 @@ export async function handlePanelConfigRoute(
     invalidateCapabilityCache(runtime);
     const tools: PanelToolsConfig = {
       webSearch: await runtime.configCenter.getWebSearchConfig(),
-      catalog: await createPanelToolCatalog(runtime),
+      catalog: await readPanelToolCatalog(runtime),
     };
     writeJson(response, 200, {
       ok: true,
@@ -923,29 +917,8 @@ function modelCapabilityWarnings(activeModel: SanitizedModelProviderConfig): rea
   return warnings;
 }
 
-async function createPanelToolCatalog(runtime: PanelConfigRouteRuntime): Promise<ToolCatalogSnapshot> {
-  const env = await runtime.configCenter.createModelRuntimeEnvironment();
-  const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig().catch(() => undefined))?.workspaceDirectory;
-  const toolStates = await runtime.configCenter.listToolStates();
-  const commandShell = await runtime.configCenter.getCommandShellConfig();
-  const toolRegistryOptions = {
-    env,
-    fetch: runtime.providerFetch,
-    workspaceRoot,
-    toolStates,
-    commandShell,
-    baseToolScopes: ["desktop-basic"],
-  };
-  const registry = new ToolRegistry();
-  applyAgentToolRegistryContributions(registry, { toolStates }, [
-    createResearchToolRegistryContribution({
-      env,
-      fetch: runtime.providerFetch,
-      workspaceRoot,
-    }),
-  ]);
-  createAgentToolRegistry(toolRegistryOptions, registry);
-  return registry.catalog("desktop-basic");
+async function readPanelToolCatalog(runtime: PanelConfigRouteRuntime): Promise<ToolCatalogSnapshot> {
+  return runtime.capabilityCenter.toolCatalog();
 }
 
 function configCenterHttpError(error: unknown): PanelHttpError {

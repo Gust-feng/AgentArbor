@@ -328,9 +328,9 @@ test("multi Agent workspace uses a linear answer transcript with click-to-open d
   includes(transcriptTimeline, "selectedItemKey");
   includes(transcriptTimeline, "onSelectItem");
   includes(transcriptTimeline, "data-selected");
-  includes(transcriptTimeline, "aria-pressed={input.selected}");
-  includes(transcriptTimeline, "agent-activity-body");
-  includes(transcriptTimeline, 'aria-label="工作进度"');
+  includes(transcriptTimeline, "aria-pressed={props.selected}");
+  includes(transcriptTimeline, "agent-record-body");
+  includes(transcriptTimeline, '"aria-label": "运行过程"');
 
   includes(deepStyles, ".with-work-detail");
   includes(deepStyles, ".deep-plan-confirmation");

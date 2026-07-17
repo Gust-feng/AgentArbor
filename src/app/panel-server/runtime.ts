@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  FileSystemToolOutputStore,
   resolveAgentArborRuntimePaths,
   type AgentArborRuntimePaths,
 } from "../../adapters/runtime-storage/index.js";
@@ -18,6 +19,7 @@ import {
   MULTI_AGENT_CAPABILITY_PROFILE,
   type MultiAgentFeature,
 } from "../deep/multi-agent-feature.js";
+import { projectMultiAgentCapabilitySnapshot } from "../deep/multi-agent-capability-snapshot.js";
 import {
   createAppUpdateService,
   createUnsupportedAppUpdateService,
@@ -51,7 +53,7 @@ import {
   type SkillStateStore,
 } from "../skills/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
-import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
+import type { ToolOutputStore } from "../tool-center/tool-output-store.js";
 import type {
   PanelContextAttachmentMediaEntry,
   PanelContextAttachmentSelection,
@@ -91,7 +93,7 @@ export type PanelRuntime = {
   readonly multiAgentFeature: MultiAgentFeature;
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
-  readonly toolOutputStore: InMemoryToolOutputStore;
+  readonly toolOutputStore: ToolOutputStore;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
 
@@ -188,7 +190,7 @@ function assemblePanelRuntime(input: {
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
   const agentDefinitionOverrides = new Map<string, AgentDefinition>();
   const processRegistry = new InMemoryProcessRegistry();
-  const toolOutputStore = new InMemoryToolOutputStore();
+  const toolOutputStore = new FileSystemToolOutputStore(resolveToolEvidenceRoot(input));
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
@@ -220,7 +222,7 @@ function assemblePanelRuntime(input: {
         input.configCenter.getToolConfirmationConfig(),
       ]);
       return {
-        capabilitySnapshot,
+        capabilitySnapshot: projectMultiAgentCapabilitySnapshot(capabilitySnapshot),
         informationAccess,
         confirmationPolicy: toolConfirmation.policy,
       };
@@ -263,6 +265,7 @@ function assemblePanelRuntime(input: {
   const ordinaryAgentFeature = createOrdinaryAgentFeature({
     repository: createFileSystemOrdinaryRunRepository(ordinaryRuntimeRoot),
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(ordinaryRuntimeRoot),
+    releaseToolEvidenceOwner: (ownerId) => toolOutputStore.releaseOwner(ownerId).then(() => undefined),
     execution: input.ordinaryAgentExecution ?? createOrdinaryAgentLoopExecutionPort({
       resources: ordinaryRunResources,
       onReleaseError: (error) => console.error("[panel-server] Ordinary run resource release failed", error),
@@ -310,6 +313,18 @@ function resolveOrdinaryRuntimeRoot(input: {
   return path.join(runtimeHome, "ordinary");
 }
 
+function resolveToolEvidenceRoot(input: {
+  readonly runtimePaths?: AgentArborRuntimePaths;
+  readonly configDirectory?: string;
+}): string {
+  const runtimeHome = input.runtimePaths?.runtimeHome ??
+    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
+  if (runtimeHome === undefined) {
+    throw new Error("Tool evidence requires a runtime directory.");
+  }
+  return path.join(runtimeHome, "tool-evidence");
+}
+
 export function reconstructFrozenOrdinaryDefinition(
   base: AgentDefinition,
   ref: OrdinaryRunBirth["agentDefinitionRef"],
@@ -351,6 +366,7 @@ async function prepareOrdinaryRunBirth(
     reasoningEffort: input.reasoningEffort,
     agentDefinitionRef,
     capabilitySnapshot,
+    workspaceSelection: input.workspaceDirectory === undefined ? "default" : "explicit",
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
   };

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  activeTimelineStatus,
   collapsedTimelineSummary,
   isSettledTimelineStatus,
   shouldAutoCollapseTimelineSegment,
@@ -146,14 +147,13 @@ test("segment lifecycle keeps open and attention timelines expanded", () => {
   }), { collapsed: false, reason: "needs_attention" });
 });
 
-test("collapsed timeline summary keeps action and status anchors", () => {
+test("collapsed timeline summary uses a quiet work-record label", () => {
   const summary = collapsedTimelineSummary({
     items: [{ phase: "completed", copy: { label: "编辑", detail: "src/app/panel-read-model/assistant/panel-assistant-timeline-collapse.ts" } }],
     hasCurrentConfirmation: false,
   });
 
-  assert.equal(summary, "已编辑 1 个文件");
-  assert.notEqual(summary, "1 步");
+  assert.equal(summary, "过程 · 1");
 });
 
 test("collapsed timeline summary keeps long command detail out of the main workflow line", () => {
@@ -168,11 +168,11 @@ test("collapsed timeline summary keeps long command detail out of the main workf
     hasCurrentConfirmation: false,
   });
 
-  assert.equal(summary, "已运行 1 条命令");
+  assert.equal(summary, "过程 · 1");
   assert.equal(summary.includes("Get-Content"), false);
 });
 
-test("collapsed timeline summary counts mixed commands and requests as completed steps", () => {
+test("collapsed timeline summary counts mixed technical records without naming them", () => {
   const summary = collapsedTimelineSummary({
     items: [
       { phase: "completed", copy: { label: "命令", detail: "命令已执行" } },
@@ -182,7 +182,79 @@ test("collapsed timeline summary counts mixed commands and requests as completed
     hasCurrentConfirmation: false,
   });
 
-  assert.equal(summary, "完成 3 步");
+  assert.equal(summary, "过程 · 3");
+});
+
+test("active timeline status keeps command execution concrete without exposing command text", () => {
+  const status = activeTimelineStatus({
+    items: [{
+      phase: "executing",
+      tone: "tool",
+      toolKind: "command",
+      copy: { label: "命令", detail: "pnpm test -- --runInBand" },
+    }],
+  });
+
+  assert.deepEqual(status, { label: "正在运行命令" });
+  assert.equal(status.label.includes("pnpm"), false);
+});
+
+test("active timeline status does not promote model narration into product status", () => {
+  const status = activeTimelineStatus({
+    items: [
+      {
+        phase: "completed",
+        tone: "tool",
+        toolKind: "read",
+        copy: { label: "读取", detail: "README.md" },
+      },
+      {
+        phase: "executing",
+        tone: "narration",
+        copy: { detail: "我在核对界面层级与真实工具事实。" },
+      },
+    ],
+  });
+
+  assert.deepEqual(status, { label: "正在处理" });
+});
+
+test("active timeline status names a verifiable tool target when available", () => {
+  const status = activeTimelineStatus({
+    items: [{
+      phase: "executing",
+      tone: "tool",
+      toolKind: "read",
+      lead: { subject: "README.md" },
+      copy: { label: "读取", detail: "README.md" },
+    }],
+  });
+
+  assert.deepEqual(status, { label: "正在读取 README.md" });
+});
+
+test("active timeline status distinguishes file reading from directory browsing", () => {
+  const file = activeTimelineStatus({
+    items: [{
+      phase: "executing",
+      tone: "tool",
+      toolKind: "read",
+      lead: { subject: "src/app.ts" },
+      copy: { label: "读取", detail: "src/app.ts" },
+    }],
+  });
+  const directory = activeTimelineStatus({
+    items: [{
+      phase: "executing",
+      tone: "tool",
+      toolKind: "directory",
+      lead: { subject: "src/components" },
+      copy: { label: "查看", detail: "src/components" },
+    }],
+  });
+
+  assert.deepEqual(file, { label: "正在读取 src/app.ts" });
+  assert.deepEqual(directory, { label: "正在查看 src/components" });
 });
 
 test("standalone timeline keeps blocked and pending approval runs expanded", () => {

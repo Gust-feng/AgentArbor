@@ -35,7 +35,7 @@ test("assistant activity segment identity keeps one key as a tool request comple
   assert.equal(activitySegmentKey(completed), activitySegmentKey(requested));
 });
 
-test("assistant activity segment identity ignores late earlier thinking before existing tool work", () => {
+test("assistant activity segment identity keeps tool identity when earlier thinking joins tool work", () => {
   const withoutThinking = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -73,13 +73,13 @@ test("assistant activity segment identity ignores late earlier thinking before e
   });
 
   assert.deepEqual(
-    activitySegments(withLateEarlierThinking)[0]?.timeline.items.map((item) => item.nodeId),
+    activitySegments(withLateEarlierThinking).flatMap((segment) => segment.timeline.items.map((item) => item.nodeId)),
     ["thinking-1", "tool-completed-1"],
   );
   assert.equal(activitySegmentKey(withLateEarlierThinking), activitySegmentKey(withoutThinking));
 });
 
-test("assistant activity segment identity uses remaining operational work after duplicate model narrative is removed", () => {
+test("assistant activity segment identity keeps model narrative and operational work independently addressable", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -123,11 +123,14 @@ test("assistant activity segment identity uses remaining operational work after 
   const segments = activitySegments(structure);
 
   assert.equal(segments.length, 2);
-  assert.deepEqual(segments[1]?.timeline.items.map((item) => item.nodeId), ["tool-completed-1"]);
+  assert.deepEqual(
+    segments.flatMap((segment) => segment.timeline.items.map((item) => item.nodeId)),
+    ["thinking-live", "tool-completed-1"],
+  );
   assert.equal(segments[1]?.segmentKey, "activity:tool-call:run-1:tool-call-1");
 });
 
-test("assistant activity segment identity gives pure model narrative a stable narrative key", () => {
+test("assistant activity segment identity stays stable when raw model narrative settles", () => {
   const firstProjection = projectAssistantMessageStructure({
     transcriptNodes: [
       node({

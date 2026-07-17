@@ -581,12 +581,54 @@ test("tool events do not move the original live output sequence forward", () => 
   assert.equal(buffer.turns[0]?.updatedAtSequence, 3);
 });
 
+test("tool progress replaces the live request and terminal events remove the volatile row", () => {
+  const requested = event({
+    id: "tool-live:call-1",
+    sequence: 2,
+    type: "tool.requested",
+    toolName: "shell_command",
+    refs: [{ kind: "tool_call", id: "call-1" }],
+    detail: { display: { kind: "command_summary", commandLine: "pnpm test" } },
+  });
+  const progress = event({
+    id: "tool-live:call-1",
+    sequence: 3,
+    type: "tool.progress",
+    toolName: "shell_command",
+    refs: [{ kind: "tool_call", id: "call-1" }],
+    detail: {
+      display: {
+        kind: "command_summary",
+        commandLine: "pnpm test",
+        stdoutPreview: "running\n",
+      },
+    },
+  });
+  const running = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [requested, progress]);
+
+  assert.equal(running.tools.length, 1);
+  assert.equal(running.tools[0]?.sequence, 3);
+  assert.equal(running.tools[0]?.display?.kind, "command_summary");
+
+  const settled = appendLiveRunEvent("run-1", running, event({
+    id: "tool:call-1:completed",
+    sequence: 4,
+    type: "tool.completed",
+    refs: [{ kind: "tool_call", id: "call-1" }],
+  }));
+  assert.deepEqual(settled.tools, []);
+});
+
 function event(input: {
   readonly id: string;
   readonly sequence: number;
   readonly type: string;
   readonly delta?: string;
   readonly summary?: string;
+  readonly timestamp?: string;
+  readonly toolName?: string;
+  readonly refs?: TestRunEvent["refs"];
+  readonly detail?: TestRunEvent["detail"];
 }): TestRunEvent {
   return {
     id: input.id,
@@ -595,6 +637,9 @@ function event(input: {
     type: input.type,
     summary: input.summary,
     delta: input.delta,
-    refs: [{ kind: "model_call", id: "model-1" }],
+    timestamp: input.timestamp,
+    toolName: input.toolName,
+    detail: input.detail,
+    refs: input.refs ?? [{ kind: "model_call", id: "model-1" }],
   };
 }

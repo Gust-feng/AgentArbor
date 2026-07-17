@@ -49,7 +49,7 @@ export type AssistantRunDetailLike = {
 };
 
 export type AssistantRunProblem = {
-  readonly title: string;
+  readonly title?: string;
   readonly message: string;
   readonly tone: "warning" | "error";
 };
@@ -72,7 +72,6 @@ export function visibleRunProblem(
   }
   if (run?.status === "failed") {
     return {
-      title: "未完成",
       message: visibleProblemText(detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "没有返回可用结果。",
       tone: "error",
     };

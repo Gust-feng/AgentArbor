@@ -96,6 +96,101 @@ test("Chat keeps child exchanges private while returning one complete agent-tool
   }
 });
 
+test("Sub-Agent records an incomplete Responses terminal state as a failed tool fact before the parent continues", async () => {
+  const observedToolResults: ToolCallResult[] = [];
+  const gateway = new RecordingGateway([]);
+  const fetch = scriptedFetch([
+    () => responsesTool("parent-invalid-child", "call_sub_agent", { task: "return a verified result" }),
+    () => responsesTextWithStatus("child partial", "child-incomplete", "incomplete"),
+    () => responsesText("parent handled the child failure", "root-after-child"),
+  ]);
+  const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL, fetch: fetch.fetch });
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: [] })],
+      onToolResult: async (toolResult) => { observedToolResults.push(toolResult); },
+    }));
+
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(result.status === "completed" ? result.finalText : undefined, "parent handled the child failure");
+    assert.equal(result.toolResults.find((item) => item.callId === "parent-invalid-child")?.status, "failed");
+    assert.equal(observedToolResults.find((item) => item.callId === "parent-invalid-child")?.status, "failed");
+  } finally {
+    await loop.release();
+  }
+});
+
+test("Sub-Agent terminal gate rejects an incomplete child tool turn before nested execution", async () => {
+  const observedToolResults: ToolCallResult[] = [];
+  const gateway = new RecordingGateway([plainTool("write_fact")]);
+  const fetch = scriptedFetch([
+    () => responsesTool("parent-invalid-child-tool", "call_sub_agent", { task: "perform a delegated write" }),
+    () => responsesToolWithStatus(
+      "child-incomplete-write",
+      "write_fact",
+      { value: "changed" },
+      "incomplete",
+    ),
+    () => responsesText("parent handled the rejected child tool", "root-after-rejected-child-tool"),
+  ]);
+  const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL, fetch: fetch.fetch });
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: ["write_fact"] })],
+      onToolResult: async (toolResult) => { observedToolResults.push(toolResult); },
+    }));
+
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(
+      result.status === "completed" ? result.finalText : undefined,
+      "parent handled the rejected child tool",
+    );
+    assert.equal(gateway.executions.length, 0);
+    assert.equal(fetch.requests.length, 3);
+    assert.equal(
+      result.toolResults.find((item) => item.callId === "parent-invalid-child-tool")?.status,
+      "failed",
+    );
+    assert.equal(
+      observedToolResults.some((item) => item.callId === "child-incomplete-write"),
+      false,
+    );
+  } finally {
+    await loop.release();
+  }
+});
+
+test("root tool-round hook observes the AgentTool call but not nested child model turns", async () => {
+  const accepted: ModelMessage[] = [];
+  const gateway = new RecordingGateway([plainTool("read_fact")]);
+  const fetch = scriptedFetch([
+    () => responsesTool("parent-observed-delegation", "call_sub_agent", { task: "read the delegated fact" }),
+    () => responsesTool("child-unobserved-read", "read_fact", { value: "nested" }),
+    () => responsesText("child-read-complete", "child-unobserved-final"),
+    () => responsesText("root-observer-complete", "root-observer-final"),
+  ]);
+  const loop = createLoop({ protocol: "openai_responses", baseUrl: OFFICIAL_BASE_URL, fetch: fetch.fetch });
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: ["read_fact"] })],
+      onToolRound: async ({ assistantMessage }) => { accepted.push(assistantMessage); },
+    }));
+
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(result.status === "completed" ? result.finalText : undefined, "root-observer-complete");
+    assert.equal(gateway.executions.length, 1);
+    assert.deepEqual(
+      accepted.flatMap((message) => message.toolCalls ?? []).map((call) => call.callId),
+      ["parent-observed-delegation"],
+    );
+  } finally {
+    await loop.release();
+  }
+});
+
 test("Responses gives a no-tool child no tools or parallel flag and never reuses the root prompt cache key", async () => {
   let rootCacheKey: unknown;
   const gateway = new RecordingGateway([plainTool("read_fact")]);
@@ -605,6 +700,10 @@ function loopInput(input: {
   readonly agentTools: readonly AgentLoopAgentTool[];
   readonly abortSignal?: AbortSignal;
   readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
+  readonly onToolRound?: (input: {
+    readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
+    readonly assistantMessage: ModelMessage;
+  }) => Promise<void>;
 }) {
   const allowedTools = input.gateway.list().map((definition) => definition.name);
   return {
@@ -629,6 +728,7 @@ function loopInput(input: {
     agentTools: input.agentTools,
     abortSignal: input.abortSignal ?? new AbortController().signal,
     onToolResult: input.onToolResult,
+    onToolRound: input.onToolRound,
   };
 }
 
@@ -748,20 +848,34 @@ function chatTools(calls: readonly { readonly callId: string; readonly name: str
 }
 
 function chatText(text: string): Response {
+  return chatTextWithFinishReason(text, "stop");
+}
+
+function chatTextWithFinishReason(text: string, finishReason: string): Response {
   return jsonResponse({
     id: `chat-${text.slice(0, 20)}`,
     object: "chat.completion",
     created: 1,
     model: MODEL,
-    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: finishReason }],
     usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
   });
 }
 
 function responsesTool(callId: string, name: string, input: JsonRecord): Response {
+  return responsesToolWithStatus(callId, name, input, "completed");
+}
+
+function responsesToolWithStatus(
+  callId: string,
+  name: string,
+  input: JsonRecord,
+  status: "completed" | "incomplete",
+): Response {
   return jsonResponse({
     id: `response-${callId}`,
-    status: "completed",
+    status,
+    ...(status === "incomplete" ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
     usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
     output: [{
       id: `item-${callId}`,
@@ -775,9 +889,17 @@ function responsesTool(callId: string, name: string, input: JsonRecord): Respons
 }
 
 function responsesText(text: string, id: string): Response {
+  return responsesTextWithStatus(text, id, "completed");
+}
+
+function responsesTextWithStatus(
+  text: string,
+  id: string,
+  status: "completed" | "incomplete",
+): Response {
   return jsonResponse({
     id,
-    status: "completed",
+    status,
     usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
     output: [{
       id: `${id}-message`,

@@ -12,6 +12,7 @@ const BASIC_RUN_EVENT_TYPES = [
   "run.failed",
   "final.result",
   "tool.requested",
+  "tool.progress",
   "tool.completed",
   "tool.failed",
   "tool.cancelled",
@@ -88,6 +89,7 @@ export function openBasicRunStream(input: {
   readonly cursor?: OrdinaryRunCursor;
   readonly onEvent: (event: RunEvent) => void;
   readonly onReset: (cursor: OrdinaryRunCursor) => void;
+  readonly onHeartbeat?: () => void;
   readonly onError: () => void;
 }): EventSource | undefined {
   if (typeof EventSource === "undefined") {
@@ -112,6 +114,9 @@ export function openBasicRunStream(input: {
     } catch {
       input.onError();
     }
+  }) as EventListener);
+  stream.addEventListener("run.stream.heartbeat", (() => {
+    input.onHeartbeat?.();
   }) as EventListener);
   stream.onerror = () => {
     stream.close();

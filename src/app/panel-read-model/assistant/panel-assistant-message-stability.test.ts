@@ -468,7 +468,7 @@ test("assistant message stability recomputes lifecycle after trimming represente
 });
 
 test("assistant message stability preserves a single confirmation activity when a pending placeholder becomes a confirmation node", () => {
-  const pending = { confirmationId: "confirmation-1", runId: "run-1" };
+  const pending = { confirmationId: "confirmation-1", ownerRunId: "run-1" };
   const previous = view([
     body("body:1", "我需要确认权限。", false),
     confirmationActivity("activity:pending:confirmation-1", pending),
@@ -650,7 +650,7 @@ function activityWithPhases(
 
 function confirmationActivity(
   segmentKey: string,
-  pending: { readonly confirmationId: string; readonly runId: string },
+  pending: { readonly confirmationId: string; readonly ownerRunId: string },
   currentNodeId?: string,
 ): Extract<AssistantMessageView<ProjectableTranscriptNode>["segments"][number], { readonly kind: "activity" }> {
   return {

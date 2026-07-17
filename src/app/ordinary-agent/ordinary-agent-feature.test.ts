@@ -4,9 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
-import type { ToolCallResult } from "../../domain/tools/index.js";
+import type { ModelMessage } from "../../domain/intelligence/index.js";
+import type { ToolCallProgress, ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
 import { CodedExecutionError } from "../execution-errors/index.js";
-import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
+import { canonicalToolResultMessage, ModelRuntimeConfigurationError } from "../model-runtime/index.js";
 import {
   OrdinaryFeatureError,
   type OrdinaryExecutionOutcome,
@@ -16,7 +17,12 @@ import {
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
-import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js";
+import {
+  acceptOrdinaryToolRound,
+  createInitialOrdinaryRunState,
+  recordOrdinaryToolResult,
+  transitionOrdinaryRun,
+} from "./state.js";
 import { ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 
 test("feature owns completed and failed Ordinary run outcomes", async (t) => {
@@ -129,6 +135,128 @@ test("feature preserves a tool result that completes after cancellation commits"
   assert.equal(activities.filter((activity) => activity.type === "tool.result").length, 1);
 });
 
+test("feature checkpoints a root tool round and commits parallel results in model call order", async (t) => {
+  const assistantMessage: ModelMessage = {
+    role: "assistant",
+    content: "I will inspect both files.",
+    toolCalls: [
+      { callId: "call-first", toolName: "read_file", input: { path: "first.md" } },
+      { callId: "call-second", toolName: "read_file", input: { path: "second.md" } },
+    ],
+  };
+  const first = resolvedToolResult("call-first", "first.md");
+  const second = resolvedToolResult("call-second", "second.md");
+  const roundAccepted = createManualGate();
+  const secondPersisted = createManualGate();
+  const firstPersisted = createManualGate();
+  const run = await fixture(t, {
+    async execute(input) {
+      await input.onToolRound?.({
+        canonicalMessagesBeforeRound: input.messages,
+        assistantMessage,
+      });
+      roundAccepted.enter();
+      await roundAccepted.released;
+      await input.onToolResult?.(second);
+      secondPersisted.enter();
+      await secondPersisted.released;
+      await input.onToolResult?.(first);
+      firstPersisted.enter();
+      await firstPersisted.released;
+      return {
+        status: "completed",
+        answer: "done",
+        canonicalMessages: [
+          ...input.messages,
+          assistantMessage,
+          canonicalToolResultMessage(first),
+          canonicalToolResultMessage(second),
+          { role: "assistant", content: "done" },
+        ],
+        toolCalls: [second, first],
+        usage: {},
+      };
+    },
+  });
+
+  await run.feature.commands.start(startInput("checkpoint-run"));
+  await roundAccepted.entered;
+  const accepted = await run.feature.queries.getRun("checkpoint-run");
+  assert.deepEqual(accepted?.pendingToolRound?.assistantMessage, assistantMessage);
+  assert.equal(accepted?.canonicalMessages.at(-1)?.role, "user");
+
+  roundAccepted.release();
+  await secondPersisted.entered;
+  const partial = await run.feature.queries.getRun("checkpoint-run");
+  assert.equal(partial?.pendingToolRound?.assistantMessage.toolCalls?.length, 2);
+  assert.deepEqual(partial?.toolCalls.map((result) => result.callId), ["call-second"]);
+  assert.equal(partial?.canonicalMessages.at(-1)?.role, "user");
+
+  secondPersisted.release();
+  await firstPersisted.entered;
+  const committed = await run.feature.queries.getRun("checkpoint-run");
+  assert.equal(committed?.pendingToolRound, undefined);
+  assert.deepEqual(committed?.canonicalMessages.slice(-3).map((message) =>
+    message.role === "tool" ? message.toolCallId : message.role), ["assistant", "call-first", "call-second"]);
+
+  firstPersisted.release();
+  await waitForStatus(run.feature, "checkpoint-run", "completed");
+});
+
+test("cancelling a tool round does not activate its successor before the old execution settles", async (t) => {
+  const toolGate = createManualGate();
+  const toolRoundAccepted = createManualGate();
+  const result = resolvedToolResult("cancelled-round-call");
+  let executionCount = 0;
+  const run = await fixture(t, {
+    async execute(input) {
+      executionCount += 1;
+      if (executionCount > 1) return completedOutcome();
+      await input.onToolRound?.({
+        canonicalMessagesBeforeRound: input.messages,
+        assistantMessage: {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            callId: result.callId,
+            toolName: result.toolName,
+            input: result.input,
+          }],
+        },
+      });
+      toolRoundAccepted.enter();
+      await toolGate.released;
+      await input.onToolResult?.(result);
+      return {
+        status: "cancelled",
+        reason: String(input.abortSignal.reason),
+        canonicalMessages: input.messages,
+        toolCalls: [result],
+        usage: {},
+      };
+    },
+  });
+
+  await run.feature.commands.start(startInput("cancel-predecessor"));
+  await toolRoundAccepted.entered;
+  const next = startInput("cancel-successor");
+  await run.feature.commands.start({
+    ...next,
+    turn: { ...next.turn, ordinal: 2, predecessorRunId: "cancel-predecessor" },
+  });
+  await run.feature.commands.cancel("cancel-predecessor", "user_stopped");
+  await waitForSettledMicrotasks();
+  assert.equal(executionCount, 1);
+  assert.equal((await run.feature.queries.getRun("cancel-successor"))?.status.kind, "queued");
+
+  toolGate.release();
+  await waitForStatus(run.feature, "cancel-successor", "completed");
+  const predecessor = await run.feature.queries.getRun("cancel-predecessor");
+  assert.equal(predecessor?.pendingToolRound, undefined);
+  assert.equal(predecessor?.canonicalMessages.at(-1)?.toolCallId, result.callId);
+  assert.equal(executionCount, 2);
+});
+
 test("feature activity stream supports output delta subscribe and cursor replay while a run is live", async (t) => {
   let emitDelta: ((delta: string) => void) | undefined;
   let emitToolResult: ((result: ToolCallResult) => Promise<void>) | undefined;
@@ -191,6 +319,121 @@ test("feature activity stream supports output delta subscribe and cursor replay 
     activity.type === "tool.result" && activity.durability === "durable"), true);
 });
 
+test("feature exposes one live tool row from request through progress and keeps only the durable result after settlement", async (t) => {
+  let emitRequested: ((request: ToolCallRequest) => void) | undefined;
+  let emitProgress: ((progress: ToolCallProgress) => void) | undefined;
+  let emitResult: ((result: ToolCallResult) => Promise<void>) | undefined;
+  let finish: ((outcome: OrdinaryExecutionOutcome) => void) | undefined;
+  let markEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const run = await fixture(t, {
+    execute(input) {
+      emitRequested = input.onToolRequested;
+      emitProgress = input.onToolProgress;
+      emitResult = input.onToolResult;
+      markEntered?.();
+      return new Promise<OrdinaryExecutionOutcome>((resolve) => { finish = resolve; });
+    },
+  });
+  await run.feature.commands.start(startInput("live-tool-run"));
+  await entered;
+
+  const request: ToolCallRequest = {
+    callId: "call-command",
+    toolName: "shell_command",
+    input: { commandLine: "pnpm test" },
+  };
+  emitRequested?.(request);
+  emitProgress?.({
+    callId: request.callId,
+    toolName: request.toolName,
+    progress: {
+      kind: "command_output",
+      stdoutTail: "running tests\n",
+      stdoutChars: 14,
+      stderrChars: 0,
+    },
+  });
+
+  const liveReplay = await run.feature.events.replay("live-tool-run");
+  const liveTools = liveReplay?.activities.filter((activity) =>
+    activity.type === "tool.requested" || activity.type === "tool.progress") ?? [];
+  assert.equal(liveTools.length, 1);
+  assert.equal(liveTools[0]?.type, "tool.progress");
+  assert.equal(liveTools[0]?.activityId, "tool-live:call-command");
+  if (liveTools[0]?.type === "tool.progress" && liveTools[0].progress.kind === "command_output") {
+    assert.equal(liveTools[0].progress.stdoutTail, "running tests\n");
+  }
+
+  const result: ToolCallResult = {
+    ...request,
+    output: { stdout: "running tests\n", stderr: "", exitCode: 0 },
+    status: "completed",
+    durationMs: 25,
+  };
+  await emitResult?.(result);
+  finish?.({ ...completedOutcome(), toolCalls: [result] });
+  await waitForStatus(run.feature, "live-tool-run", "completed");
+
+  const settledReplay = await run.feature.events.replay("live-tool-run");
+  assert.equal(settledReplay?.activities.some((activity) =>
+    activity.type === "tool.requested" || activity.type === "tool.progress"), false);
+  assert.equal(settledReplay?.activities.some((activity) =>
+    activity.type === "tool.result" && activity.durability === "durable"), true);
+});
+
+test("feature replay stays sequence ordered when parallel tool progress replaces an earlier row", async (t) => {
+  let emitRequested: ((request: ToolCallRequest) => void) | undefined;
+  let emitProgress: ((progress: ToolCallProgress) => void) | undefined;
+  let finish: ((outcome: OrdinaryExecutionOutcome) => void) | undefined;
+  let markEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const run = await fixture(t, {
+    execute(input) {
+      emitRequested = input.onToolRequested;
+      emitProgress = input.onToolProgress;
+      markEntered?.();
+      return new Promise<OrdinaryExecutionOutcome>((resolve) => { finish = resolve; });
+    },
+  });
+  await run.feature.commands.start(startInput("parallel-live-tools-run"));
+  await entered;
+
+  const first: ToolCallRequest = {
+    callId: "call-first",
+    toolName: "shell_command",
+    input: { commandLine: "pnpm test" },
+  };
+  const second: ToolCallRequest = {
+    callId: "call-second",
+    toolName: "read_file",
+    input: { path: "README.md" },
+  };
+  emitRequested?.(first);
+  emitRequested?.(second);
+  emitProgress?.({
+    callId: first.callId,
+    toolName: first.toolName,
+    progress: {
+      kind: "command_output",
+      stdoutTail: "running\n",
+      stdoutChars: 8,
+      stderrChars: 0,
+    },
+  });
+
+  const replay = await run.feature.events.replay("parallel-live-tools-run");
+  const liveTools = replay?.activities.filter((activity) =>
+    activity.type === "tool.requested" || activity.type === "tool.progress") ?? [];
+
+  finish?.(completedOutcome());
+  await waitForStatus(run.feature, "parallel-live-tools-run", "completed");
+
+  const sequences = liveTools.map((activity) => activity.sequence);
+  assert.deepEqual(sequences, [...sequences].sort((left, right) => left - right));
+  assert.deepEqual(liveTools.map((activity) => activity.request.callId), [second.callId, first.callId]);
+});
+
 test("feature persists an executed tool fact before a simulated crash and rebuilds it once after restart", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-crash-"));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -250,6 +493,117 @@ test("feature persists an executed tool fact before a simulated crash and rebuil
   assert.equal(toolActivities.length, 1);
   assert.equal(toolActivities[0]?.recordedAt, toolRecordedAt);
   assert.deepEqual(toolActivities[0]?.type === "tool.result" ? toolActivities[0].result : undefined, toolResult);
+});
+
+test("restart closes an interrupted parallel tool round without replaying unknown side effects", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-pending-round-restart-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const start = startInput("pending-round-restart");
+  let state = createInitialOrdinaryRunState({
+    ...start,
+    runInput: start.input,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-created",
+  });
+  let document = await repository.save(state, 0);
+  state = transitionOrdinaryRun({
+    state,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-started",
+  });
+  document = await repository.save(state, document.revision);
+  const assistantMessage: ModelMessage = {
+    role: "assistant",
+    content: "Inspect both files.",
+    toolCalls: [
+      { callId: "known-call", toolName: "read_file", input: { path: "known.md" } },
+      { callId: "unknown-call", toolName: "write_file", input: { path: "unknown.md", content: "changed" } },
+    ],
+  };
+  state = acceptOrdinaryToolRound({
+    state,
+    canonicalMessagesBeforeRound: state.canonicalMessages,
+    assistantMessage,
+    acceptedAt: "2026-01-01T00:00:02.000Z",
+  });
+  document = await repository.save(state, document.revision);
+  state = recordOrdinaryToolResult({
+    state,
+    result: resolvedToolResult("known-call", "known.md"),
+    recordedAt: "2026-01-01T00:00:03.000Z",
+  });
+  await repository.save(state, document.revision);
+
+  let executions = 0;
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: { async execute() { executions += 1; return completedOutcome(); } },
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  const recovered = await restarted.queries.getRun("pending-round-restart");
+  assert.equal(recovered?.status.kind, "blocked");
+  assert.equal(recovered?.pendingToolRound, undefined);
+  assert.equal(executions, 0);
+  assert.deepEqual(recovered?.canonicalMessages.slice(-3).map((message) =>
+    message.role === "tool" ? message.toolCallId : message.role), ["assistant", "known-call", "unknown-call"]);
+  const unknown = recovered?.toolCalls.find((result) => result.callId === "unknown-call");
+  assert.equal(unknown?.status, "failed");
+  assert.equal(unknown?.errorFacts?.code, "tool_execution_outcome_unknown");
+  assert.equal(unknown?.errorFacts?.doNotBlindlyRetry, true);
+});
+
+test("a known tool result is retried as a snapshot write without replaying the tool", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-known-result-retry-"));
+  const baseRepository = createFileSystemOrdinaryRunRepository(root);
+  const result = resolvedToolResult("known-write-call");
+  let rejectedResultWrite = false;
+  let sideEffects = 0;
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...baseRepository,
+      async save(state, expectedRevision) {
+        if (!rejectedResultWrite && state.toolCalls.some((item) => item.callId === result.callId)) {
+          rejectedResultWrite = true;
+          throw new Error("simulated result snapshot failure");
+        }
+        return baseRepository.save(state, expectedRevision);
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: {
+      async execute(input) {
+        await input.onToolRound?.({
+          canonicalMessagesBeforeRound: input.messages,
+          assistantMessage: {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ callId: result.callId, toolName: result.toolName, input: result.input }],
+          },
+        });
+        sideEffects += 1;
+        await input.onToolResult?.(result);
+        throw new Error("must stop after the durable acceptance failure");
+      },
+    },
+    now: monotonicClock(),
+    idFactory: deterministicIds(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("known-result-retry"));
+  await waitForStatus(feature, "known-result-retry", "failed");
+  const failed = await waitForPendingToolRoundToClear(feature, "known-result-retry");
+  assert.equal(rejectedResultWrite, true);
+  assert.equal(sideEffects, 1);
+  assert.equal(failed.pendingToolRound, undefined);
+  assert.deepEqual(failed.toolCalls, [result]);
+  assert.equal(failed.toolCalls.some((item) => item.errorFacts?.code === "tool_execution_outcome_unknown"), false);
+  assert.equal(failed.canonicalMessages.at(-1)?.toolCallId, result.callId);
 });
 
 test("feature keeps a durable tool fact when execution subsequently fails", async (t) => {
@@ -339,12 +693,6 @@ test("feature resumes the exact live approval continuation", async (t) => {
   const run = await fixture(t, { async execute() { return approvalOutcome; } });
   await run.feature.commands.start(startInput("approval-run"));
   await waitForStatus(run.feature, "approval-run", "awaiting_approval");
-  await assert.rejects(run.feature.commands.decideApproval({
-    confirmationId: request.confirmationId,
-    ownerRunId: "missing-run",
-    decision: "approve_once",
-    decidedAt: "2026-01-01T00:00:09.000Z",
-  }), (error: unknown) => error instanceof OrdinaryFeatureError && error.code === "ordinary_run_not_found");
   await run.feature.commands.decideApproval({
     confirmationId: request.confirmationId,
     ownerRunId: "approval-run",
@@ -448,7 +796,7 @@ test("feature commits cancellation before approval cleanup and cleanup failure c
         confirmationRequests: [request],
         continuation: {
           availability: "live_only",
-          async decide() { return completedOutcome(); },
+          async decide() { return { ...completedOutcome(), toolCalls: [resolvedApprovalToolResult(request)] }; },
           async release() {
             markReleaseStarted?.();
             await releaseGate;
@@ -509,7 +857,7 @@ test("cancellation cannot race approval continuation registration or strand a qu
           confirmationRequests: [request],
           continuation: {
             availability: "live_only",
-            async decide() { return completedOutcome(); },
+            async decide() { return { ...completedOutcome(), toolCalls: [resolvedApprovalToolResult(request)] }; },
             async release() { releaseCalls += 1; },
           },
         };
@@ -572,7 +920,7 @@ test("feature releases an incoming approval continuation when its snapshot canno
           confirmationRequests: [request],
           continuation: {
             availability: "live_only",
-            async decide() { return completedOutcome(); },
+            async decide() { return { ...completedOutcome(), toolCalls: [resolvedApprovalToolResult(request)] }; },
             async release() { releaseCalls += 1; },
           },
         };
@@ -601,7 +949,7 @@ test("feature release disposes a pending live approval continuation once", async
         confirmationRequests: [request],
         continuation: {
           availability: "live_only",
-          async decide() { return completedOutcome(); },
+          async decide() { return { ...completedOutcome(), toolCalls: [resolvedApprovalToolResult(request)] }; },
           async release() { releases += 1; },
         },
       };
@@ -622,31 +970,27 @@ test("feature restart turns a persisted approval pause into an honest blocked st
   const first = await createOrdinaryAgentFeature({
     repository,
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
-    execution: { async execute() {
+    execution: { async execute(input) {
+      const assistantMessage: ModelMessage = {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ callId: "restart-call", toolName: "shell_command", input: { command: "write" } }],
+      };
+      const approval = approvalToolResult(request);
+      await input.onToolRound?.({
+        canonicalMessagesBeforeRound: input.messages,
+        assistantMessage,
+      });
+      await input.onToolResult?.(approval);
       return {
         status: "approval_required",
-        canonicalMessages: [
-          { role: "user", content: "change file" },
-          {
-            role: "assistant",
-            content: "",
-            toolCalls: [{ callId: "restart-call", toolName: "shell_command", input: { command: "write" } }],
-          },
-        ],
-        toolCalls: [{
-          callId: "restart-call",
-          toolName: "shell_command",
-          input: { command: "write" },
-          output: undefined,
-          status: "approval_required",
-          durationMs: 0,
-          confirmationRequest: request,
-        }],
+        canonicalMessages: [...input.messages, assistantMessage],
+        toolCalls: [approval],
         usage: { inputTokens: 4, totalTokens: 4 },
         confirmationRequests: [request],
         continuation: {
           availability: "live_only",
-          async decide() { return completedOutcome(); },
+          async decide() { return { ...completedOutcome(), toolCalls: [resolvedApprovalToolResult(request)] }; },
           async release() { return undefined; },
         },
       };
@@ -681,6 +1025,171 @@ test("feature restart turns a persisted approval pause into an honest blocked st
   assert.equal(state?.toolCalls[0]?.errorFacts?.code, "confirmation_continuation_lost");
   assert.equal(state?.canonicalMessages.at(-1)?.role, "tool");
   assert.equal(state?.canonicalMessages.at(-1)?.toolCallId, "restart-call");
+});
+
+test("restart closes nested Sub-Agent approval without inventing an orphan child tool message", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-nested-approval-restart-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const start = startInput("nested-approval-restart");
+  let state = createInitialOrdinaryRunState({
+    ...start,
+    runInput: start.input,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-created",
+  });
+  let document = await repository.save(state, 0);
+  state = transitionOrdinaryRun({
+    state,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-started",
+  });
+  document = await repository.save(state, document.revision);
+  const outerCallId = "outer-sub-agent-call";
+  state = acceptOrdinaryToolRound({
+    state,
+    canonicalMessagesBeforeRound: state.canonicalMessages,
+    assistantMessage: {
+      role: "assistant",
+      content: "",
+      toolCalls: [{ callId: outerCallId, toolName: "call_sub_agent", input: { agentId: "reviewer" } }],
+    },
+    acceptedAt: "2026-01-01T00:00:02.000Z",
+  });
+  const nestedFactId = `${outerCallId}/tool:child-command`;
+  const request: ConfirmationRequest = {
+    ...confirmationWithId("nested-approval-restart", "nested-confirmation"),
+    toolCallFactId: nestedFactId,
+  };
+  const nestedApproval: ToolCallResult = {
+    callId: "child-command",
+    factId: nestedFactId,
+    toolName: "shell_command",
+    input: { command: "write" },
+    output: undefined,
+    status: "approval_required",
+    durationMs: 0,
+    confirmationRequest: request,
+  };
+  state = recordOrdinaryToolResult({
+    state,
+    result: nestedApproval,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+  });
+  state = transitionOrdinaryRun({
+    state,
+    transition: {
+      type: "request_approval",
+      status: {
+        kind: "awaiting_approval",
+        confirmationRequests: [request],
+        continuationAvailability: "live_only",
+      },
+      canonicalMessages: [...state.canonicalMessages, state.pendingToolRound!.assistantMessage],
+      toolCalls: [nestedApproval],
+      usage: {},
+    },
+    recordedAt: "2026-01-01T00:00:04.000Z",
+    eventId: "event-approval",
+  });
+  await repository.save(state, document.revision);
+
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: { async execute() { throw new Error("must not replay nested approval"); } },
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  const recovered = await restarted.queries.getRun("nested-approval-restart");
+  assert.equal(recovered?.status.kind, "blocked");
+  assert.equal(recovered?.pendingToolRound, undefined);
+  assert.equal(recovered?.toolCalls.find((result) => result.factId === nestedFactId)?.status, "cancelled");
+  assert.equal(recovered?.toolCalls.find((result) => result.callId === outerCallId)?.errorFacts?.code, "tool_execution_outcome_unknown");
+  assert.equal(recovered?.canonicalMessages.some((message) => message.toolCallId === "child-command"), false);
+  assert.equal(recovered?.canonicalMessages.at(-1)?.toolCallId, outerCallId);
+});
+
+test("restart marks an approved root tool with a missing result as outcome unknown", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-approved-tool-restart-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const start = startInput("approved-tool-restart");
+  let state = createInitialOrdinaryRunState({
+    ...start,
+    runInput: start.input,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-created",
+  });
+  let document = await repository.save(state, 0);
+  state = transitionOrdinaryRun({
+    state,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-started",
+  });
+  document = await repository.save(state, document.revision);
+  const callId = "approved-write-call";
+  const request: ConfirmationRequest = {
+    ...confirmationWithId("approved-tool-restart", "approved-confirmation"),
+    toolCallFactId: callId,
+  };
+  const approval = approvalToolResult(request);
+  state = acceptOrdinaryToolRound({
+    state,
+    canonicalMessagesBeforeRound: state.canonicalMessages,
+    assistantMessage: {
+      role: "assistant",
+      content: "",
+      toolCalls: [{ callId, toolName: approval.toolName, input: approval.input }],
+    },
+    acceptedAt: "2026-01-01T00:00:02.000Z",
+  });
+  state = recordOrdinaryToolResult({ state, result: approval, recordedAt: "2026-01-01T00:00:03.000Z" });
+  state = transitionOrdinaryRun({
+    state,
+    transition: {
+      type: "request_approval",
+      status: { kind: "awaiting_approval", confirmationRequests: [request], continuationAvailability: "live_only" },
+      canonicalMessages: [...state.canonicalMessages, state.pendingToolRound!.assistantMessage],
+      toolCalls: [approval],
+      usage: {},
+    },
+    recordedAt: "2026-01-01T00:00:04.000Z",
+    eventId: "event-approval-requested",
+  });
+  state = transitionOrdinaryRun({
+    state,
+    transition: {
+      type: "approval_decided",
+      decision: {
+        confirmationId: request.confirmationId,
+        decision: "approve_once",
+        decidedAt: "2026-01-01T00:00:05.000Z",
+      },
+    },
+    recordedAt: "2026-01-01T00:00:05.000Z",
+    eventId: "event-approval-decided",
+  });
+  await repository.save(state, document.revision);
+
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: { async execute() { throw new Error("must not replay approved tool"); } },
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  const recovered = await restarted.queries.getRun("approved-tool-restart");
+  const result = recovered?.toolCalls.find((item) => item.callId === callId);
+  assert.equal(recovered?.status.kind, "blocked");
+  assert.equal(result?.status, "failed");
+  assert.equal(result?.errorFacts?.code, "tool_execution_outcome_unknown");
+  assert.equal(result?.errorFacts?.doNotBlindlyRetry, true);
+  assert.equal(recovered?.canonicalMessages.at(-1)?.toolCallId, callId);
 });
 
 test("feature restart blocks an interrupted running execution instead of replaying side effects", async (t) => {
@@ -753,6 +1262,7 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
   const request = confirmation("activity-restart-run");
   const decision = {
     confirmationId: request.confirmationId,
+    ownerRunId: "activity-restart-run",
     decision: "guidance" as const,
     guidance: "Use the safer path",
     decidedAt: "2026-01-01T00:00:10.000Z",
@@ -789,7 +1299,7 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
   await waitForStatus(first, "activity-restart-run", "awaiting_approval");
   const liveReplay = await first.events.replay("activity-restart-run");
   assert.equal(liveReplay?.activities.some((activity) => activity.type === "model.output.delta"), true);
-  await first.commands.decideApproval({ ownerRunId: "activity-restart-run", ...decision });
+  await first.commands.decideApproval(decision);
   await waitForStatus(first, "activity-restart-run", "completed");
   await first.release();
 
@@ -808,13 +1318,20 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
   const requested = events.find((event) => event.type === "run.approval_requested");
   const decided = events.find((event) => event.type === "run.approval_decided");
   assert.deepEqual(requested?.type === "run.approval_requested" ? requested.confirmationRequests : undefined, [request]);
-  assert.deepEqual(decided?.type === "run.approval_decided" ? decided.decision : undefined, decision);
+  const { ownerRunId: _ownerRunId, ...neutralDecision } = decision;
+  assert.deepEqual(decided?.type === "run.approval_decided" ? decided.decision : undefined, neutralDecision);
   assert.deepEqual((await restarted.queries.getRun("activity-restart-run"))?.usage, { inputTokens: 8, outputTokens: 2, totalTokens: 10 });
 });
 
 test("feature carries cumulative usage across multiple approval continuations", async (t) => {
-  const firstRequest = confirmationWithId("usage-run", "usage-confirmation-1");
-  const secondRequest = confirmationWithId("usage-run", "usage-confirmation-2");
+  const firstRequest = {
+    ...confirmationWithId("usage-run", "usage-confirmation-1"),
+    toolCallFactId: "usage-run:tool-fact-1",
+  };
+  const secondRequest = {
+    ...confirmationWithId("usage-run", "usage-confirmation-2"),
+    toolCallFactId: "usage-run:tool-fact-2",
+  };
   const run = await fixture(t, {
     async execute() {
       return approvalOutcome(firstRequest, { inputTokens: 3, totalTokens: 3 }, async () =>
@@ -1037,14 +1554,37 @@ function completedOutcome(usage = { inputTokens: 8, outputTokens: 2, totalTokens
   };
 }
 
-function resolvedToolResult(callId: string): ToolCallResult {
+function resolvedToolResult(callId: string, path = "README.md"): ToolCallResult {
   return {
     callId,
     toolName: "read_file",
-    input: { path: "README.md" },
+    input: { path },
     output: { content: "read result" },
     status: "completed",
     durationMs: 2,
+  };
+}
+
+function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
+  return {
+    callId: request.toolCallFactId,
+    toolName: "shell_command",
+    input: { command: "write" },
+    output: undefined,
+    status: "approval_required",
+    durationMs: 0,
+    confirmationRequest: request,
+  };
+}
+
+function resolvedApprovalToolResult(request: ConfirmationRequest): ToolCallResult {
+  return {
+    callId: request.toolCallFactId,
+    toolName: "shell_command",
+    input: { command: "write" },
+    output: { approved: true },
+    status: "completed",
+    durationMs: 1,
   };
 }
 
@@ -1064,7 +1604,7 @@ function confirmation(runId: string): ConfirmationRequest {
 function confirmationWithId(runId: string, confirmationId: string): ConfirmationRequest {
   return {
     confirmationId,
-    toolCallFactId: `${runId}:${confirmationId}:tool-fact`,
+    toolCallFactId: `${runId}:tool-fact`,
     title: "Confirm command",
     actionSummary: "Run a command",
     affectedResources: ["workspace"],
@@ -1106,29 +1646,6 @@ function approvalOutcome(
       },
       async release() { return undefined; },
     },
-  };
-}
-
-function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
-  return {
-    callId: request.toolCallFactId,
-    toolName: "shell_command",
-    input: { command: "write" },
-    output: undefined,
-    status: "approval_required",
-    durationMs: 0,
-    confirmationRequest: request,
-  };
-}
-
-function resolvedApprovalToolResult(request: ConfirmationRequest): ToolCallResult {
-  return {
-    callId: request.toolCallFactId,
-    toolName: "shell_command",
-    input: { command: "write" },
-    output: { approved: true },
-    status: "completed",
-    durationMs: 1,
   };
 }
 
@@ -1206,6 +1723,19 @@ async function waitForApprovalRequest(
       }, reject);
     });
   });
+}
+
+async function waitForPendingToolRoundToClear(
+  feature: Awaited<ReturnType<typeof createOrdinaryAgentFeature>>,
+  runId: string,
+): Promise<OrdinaryRunState> {
+  const deadline = Date.now() + 2_000;
+  while (true) {
+    const state = await feature.queries.getRun(runId);
+    if (state !== undefined && state.pendingToolRound === undefined) return state;
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${runId} pending tool round to clear`);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 function monotonicClock(start = "2026-01-01T00:00:00.000Z"): () => string {

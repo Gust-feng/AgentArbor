@@ -6,7 +6,7 @@ import {
   withLiveTranscriptNodes,
   type LiveTranscriptNode,
 } from "./panel-live-transcript.js";
-import type { LiveRunBuffer } from "../run/panel-run-live-buffer.js";
+import { appendLiveRunEvents, emptyLiveRun, type LiveRunBuffer } from "../run/panel-run-live-buffer.js";
 import { textStreamAssemblyFromText } from "./readable-text-fragments.js";
 
 test("withLiveTranscriptNodes replaces existing reasoning node instead of appending duplicate", () => {
@@ -28,6 +28,34 @@ test("withLiveTranscriptNodes replaces existing reasoning node instead of append
   assert.equal(merged[0]?.nodeId, "reasoning-existing");
   assert.equal(merged[0]?.text, "先分析目标，再检查约束");
   assert.equal(merged[0]?.eventType, "model.reasoning.completed");
+});
+
+test("withLiveTranscriptNodes exposes the latest live tool progress without waiting for a full view refresh", () => {
+  const live = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [{
+    id: "tool-live:call-1",
+    runId: "run-1",
+    sequence: 3,
+    type: "tool.progress",
+    summary: "正在运行命令。",
+    timestamp: "2026-01-01T00:00:01.000Z",
+    toolName: "shell_command",
+    refs: [{ kind: "tool_call", id: "call-1" }],
+    detail: {
+      display: {
+        kind: "command_summary",
+        commandLine: "pnpm test",
+        stdoutPreview: "running\n",
+      },
+    },
+  }]);
+
+  const projected = withLiveTranscriptNodes([], live);
+
+  assert.equal(projected.length, 1);
+  assert.equal(projected[0]?.eventType, "tool.requested");
+  assert.equal(projected[0]?.phase, "executing");
+  assert.equal(projected[0]?.toolName, "shell_command");
+  assert.equal(projected[0]?.display?.kind, "command_summary");
 });
 
 test("withLiveTranscriptNodes can match live reasoning by comparable text during streaming", () => {
@@ -365,6 +393,7 @@ function live(input: {
   return {
     runId: "run-1",
     appliedEventKeys: [],
+    tools: [],
     turns: [
       {
         requestId: "model-1",

@@ -41,7 +41,7 @@ test("assistant workflow display keeps collapsed activity stable once the segmen
   assert.equal(second.workflow.segments[0]?.kind === "activity" ? second.workflow.segments[0].collapseReason : undefined, "turn_settled");
 });
 
-test("assistant workflow display does not reopen a collapsed segment for ordinary later progress", () => {
+test("assistant workflow display reopens a collapsed segment when tool activity resumes", () => {
   const first = projectStableAssistantWorkflowDisplay({
     content: "",
     transcriptNodes: [
@@ -75,8 +75,9 @@ test("assistant workflow display does not reopen a collapsed segment for ordinar
   assert.equal(first.workflow.segments[0]?.kind, "activity");
   assert.equal(first.workflow.segments[0]?.kind === "activity" ? first.workflow.segments[0].collapsed : undefined, true);
   assert.equal(second.workflow.segments[0]?.kind, "activity");
-  assert.equal(second.workflow.segments[0]?.kind === "activity" ? second.workflow.segments[0].collapsed : undefined, true);
-  assert.equal(second.workflow.segments[0]?.kind === "activity" ? second.workflow.segments[0].collapseReason : undefined, "turn_settled");
+  assert.equal(second.workflow.segments[0]?.kind === "activity" ? second.workflow.segments[0].collapsed : undefined, false);
+  assert.equal(second.workflow.segments[0]?.kind === "activity" ? second.workflow.segments[0].collapseReason : undefined, "active_or_pending");
+  assert.equal(second.workflow.segments[0]?.kind === "activity" ? second.workflow.segments[0].lifecycle : undefined, "open");
 });
 
 test("assistant workflow display hides copy actions while the stream stays mounted", () => {
@@ -143,7 +144,7 @@ test("assistant workflow display keeps closed stage content stable when earlier 
   );
 });
 
-test("assistant workflow display auto collapses completed process segments around body content", () => {
+test("assistant workflow display auto collapses completed reasoning and tool process around body content", () => {
   const display = projectStableAssistantWorkflowDisplay({
     content: "",
     transcriptNodes: [
@@ -247,7 +248,7 @@ test("assistant workflow display keeps attention process segments expanded aroun
   assert.equal(activity?.kind === "activity" ? activity.lifecycle : undefined, "attention");
 });
 
-test("assistant workflow display closes prefix thinking after body without rewriting it from later replay", () => {
+test("assistant workflow display keeps prefix reasoning and later tool activity", () => {
   const first = projectStableAssistantWorkflowDisplay({
     content: "我先检查工作区。",
     transcriptNodes: [
@@ -305,15 +306,12 @@ test("assistant workflow display closes prefix thinking after body without rewri
   const activitySegments = second.workflow.segments.filter((segment) => segment.kind === "activity");
 
   assert.equal(activitySegments.length, 2);
-  assert.equal(activitySegments[0]?.collapsed, true);
-  assert.equal(activitySegments[0]?.lifecycle, "settled");
-  assert.deepEqual(activitySegments[0]?.timeline.items.map((item) => item.copy.detail), [
-    "思考中",
-  ]);
-  assert.deepEqual(activitySegments[0]?.timeline.items.map((item) => item.copy.expandedDetail), [
-    "I should inspect the workspace.",
-  ]);
-  assert.deepEqual(activitySegments[1]?.timeline.items.map((item) => item.copy.detail), ["README.md"]);
+  assert.deepEqual(
+    activitySegments.flatMap((segment) => segment.timeline.items.map((item) => item.nodeId)),
+    ["thinking-live", "tool-1"],
+  );
+  assert.deepEqual(activitySegments.map((segment) => segment.collapsed), [true, true]);
+  assert.deepEqual(activitySegments.map((segment) => segment.lifecycle), ["settled", "settled"]);
 });
 
 test("assistant workflow display reopens a previously collapsed segment when it needs attention", () => {
@@ -389,12 +387,8 @@ test("assistant workflow display exposes segment lifecycle for observation", () 
 
   const segments = display.workflow.segments;
 
-  assert.equal(segments[0]?.kind, "activity");
-  assert.equal(segments[0]?.kind === "activity" ? segments[0].lifecycle : undefined, "open");
-  assert.equal(segments[1]?.kind, "body");
-  assert.equal(segments[1]?.kind === "body" ? segments[1].lifecycle : undefined, "settled");
-  assert.equal(segments[2]?.kind, "activity");
-  assert.equal(segments[2]?.kind === "activity" ? segments[2].lifecycle : undefined, "settled");
+  assert.deepEqual(segments.map((segment) => segment.kind), ["activity", "body", "activity"]);
+  assert.deepEqual(segments.map((segment) => segment.lifecycle), ["open", "settled", "settled"]);
 });
 
 function node(input: {

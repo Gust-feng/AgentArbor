@@ -8,11 +8,16 @@ import type {
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
-import type { ToolCallResult, ToolConfirmationPolicy } from "../../domain/tools/index.js";
+import type {
+  ToolCallProgress,
+  ToolCallRequest,
+  ToolCallResult,
+  ToolConfirmationPolicy,
+} from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 
-export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v2" as const;
+export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v3" as const;
 export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v1" as const;
 
 export type OrdinaryFeatureErrorCode =
@@ -49,6 +54,8 @@ export type OrdinaryRunBirth = {
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly agentDefinitionRef: RunAgentDefinitionRef;
   readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+  /** Frozen provenance prevents the configured fallback becoming a user selection after restore. */
+  readonly workspaceSelection?: "default" | "explicit";
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly toolConfirmationPolicy: ToolConfirmationPolicy;
 };
@@ -122,8 +129,14 @@ export type OrdinaryRunStatus =
   | {
       readonly kind: "blocked";
       readonly reason: { readonly code: string; readonly message: string };
-      readonly continueBy: "new_turn" | "retry";
+      readonly continueBy: "new_turn";
     };
+
+export type OrdinaryPendingToolRound = {
+  /** Exact validated root assistant turn accepted before any tool preflight or execution. */
+  readonly assistantMessage: ModelMessage;
+  readonly acceptedAt: string;
+};
 
 type OrdinaryRunEventBase = {
   readonly eventId: string;
@@ -149,6 +162,8 @@ export type OrdinaryRunState = {
   readonly birth: OrdinaryRunBirth;
   readonly status: OrdinaryRunStatus;
   readonly canonicalMessages: readonly ModelMessage[];
+  /** Durable write-ahead fact until every root call has a resolved tool result. */
+  readonly pendingToolRound?: OrdinaryPendingToolRound;
   readonly toolCalls: readonly ToolCallResult[];
   /** Durable occurrence time keyed by the stable tool result identity. */
   readonly toolResultRecordedAt: Readonly<Record<string, string>>;
@@ -227,6 +242,13 @@ export type OrdinaryExecutionInput = {
   readonly messages: readonly ModelMessage[];
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
+  readonly onToolRequested?: (request: ToolCallRequest) => void;
+  readonly onToolProgress?: (progress: ToolCallProgress) => void;
+  /** Must settle before any tool in this validated root turn enters preflight. */
+  readonly onToolRound?: (input: {
+    readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
+    readonly assistantMessage: ModelMessage;
+  }) => Promise<void>;
   /** Must settle before the executed result is returned to the model. */
   readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
 };
@@ -248,6 +270,13 @@ export type OrdinaryRunActivity = OrdinaryRunActivityBase & (
   | { readonly type: "run.transition"; readonly durability: "durable"; readonly event: OrdinaryRunEvent }
   | { readonly type: "model.request"; readonly durability: "live_only"; readonly reason: "initial" | "after_tool" | "after_approval" }
   | { readonly type: "model.output.delta"; readonly durability: "live_only"; readonly delta: string }
+  | { readonly type: "tool.requested"; readonly durability: "live_only"; readonly request: ToolCallRequest }
+  | {
+      readonly type: "tool.progress";
+      readonly durability: "live_only";
+      readonly request: ToolCallRequest;
+      readonly progress: ToolCallProgress["progress"];
+    }
   | { readonly type: "tool.result"; readonly durability: "live_only" | "durable"; readonly result: ToolCallResult }
 );
 

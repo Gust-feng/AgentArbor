@@ -6,7 +6,6 @@ import {
   ChevronUp,
   Clock3,
   Gauge,
-  LoaderCircle,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -232,6 +231,10 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
     return <AssistantPendingBlock reason="initial" />;
   }
   const entering = props.animateOnMount === true || props.live === true;
+  const hasAwaitingSegment = workflow.segments.some((segment) => segment.kind === "awaiting");
+  const liveActivitySegmentIndex = hasAwaitingSegment
+    ? -1
+    : workflow.segments.findIndex((segment) => segment.kind === "activity" && segment.lifecycle === "open");
   return (
     <article
       className="assistant-message assistant-workline"
@@ -246,6 +249,7 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
               segment={segment}
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy === true}
+              showLiveStatus={index === liveActivitySegmentIndex}
             />
           );
         })}
@@ -258,16 +262,19 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
 const AssistantPendingBlock = React.memo(function AssistantPendingBlock(props: {
   readonly reason: "initial" | "continuation";
 }): React.ReactElement {
-  const label = props.reason === "continuation" ? "思考中" : "正在处理";
   return (
     <div
       className="assistant-answer assistant-answer-pending"
       data-reason={props.reason}
       role="status"
       aria-live="polite"
+      aria-label="正在处理"
     >
-      <LoaderCircle className="assistant-pending-icon" size={14} strokeWidth={1.9} aria-hidden="true" />
-      <span>{label}</span>
+      <span className="typing-dots assistant-pending-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
     </div>
   );
 });
@@ -329,17 +336,20 @@ function AssistantWorkflowSegment(props: {
   readonly segment: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>["segments"][number];
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
+  readonly showLiveStatus?: boolean;
 }): React.ReactElement {
   const segment = props.segment;
   if (segment.kind === "activity") {
     return (
       <AgentWorkTimeline
         view={segment.timeline}
+        presentation="agent_work"
         collapsed={segment.collapsed}
         lifecycle={segment.lifecycle}
         collapseReason={segment.collapseReason}
         onDecision={props.onDecision}
         confirmationBusy={props.confirmationBusy}
+        showLiveStatus={props.showLiveStatus}
       />
     );
   }
@@ -451,12 +461,12 @@ const AssistantModelUsageLine = React.memo(function AssistantModelUsageLine(prop
 });
 
 function AssistantFailureNotice(props: {
-  readonly title: string;
+  readonly title?: string;
   readonly error: string;
 }): React.ReactElement {
   return (
     <section className="assistant-error-message assistant-failure-notice" aria-label="错误信息">
-      <strong>{props.title}</strong>
+      {props.title !== undefined && <strong>{props.title}</strong>}
       <RichText text={props.error.replace(/^错误信息[:：]\s*/u, "")} />
     </section>
   );

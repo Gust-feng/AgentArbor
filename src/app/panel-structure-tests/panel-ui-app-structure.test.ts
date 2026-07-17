@@ -335,9 +335,12 @@ test("panel UI app shell delegates runtime data and control work", async () => {
   assert.equal(app.includes("app.deep?.run.workspaceFolder?.path"), false);
   assert.equal(appWorkbenchRuntime.includes("options.app.conversation.workspaceFolder?.path"), false);
   assert.equal(appWorkbenchRuntime.includes("options.app.deep.run.workspaceFolder?.path"), false);
-  assert.equal(appWorkbenchTaskState.includes("app.conversation.workspaceFolder?.path"), true);
-  assert.equal(appWorkbenchTaskState.includes("app.deep.run.workspaceFolder?.path"), true);
+  assert.equal(appWorkbenchTaskState.includes("const workspace = app.conversation.workspaceFolder"), true);
+  assert.equal(appWorkbenchTaskState.includes("const workspace = app.deep.run.workspaceFolder"), true);
+  assert.equal(appWorkbenchTaskState.includes('workspace?.selection === "explicit" ? workspace.path : undefined'), true);
   assert.equal(app.includes("summary?.workspaceFolder?.path") || app.includes("view.run.workspaceFolder?.path"), false);
-  assert.equal(appDeepEntry.includes("summary?.workspaceFolder?.path"), true);
-  assert.equal(appDeepEntry.includes("view.run.workspaceFolder?.path"), true);
+  assert.equal(appDeepEntry.includes("summary?.workspaceFolder?.selection"), true);
+  assert.equal(appDeepEntry.includes("summary.workspaceFolder.path"), true);
+  assert.equal(appDeepEntry.includes("view.run.workspaceFolder?.selection"), true);
+  assert.equal(appDeepEntry.includes("view.run.workspaceFolder.path"), true);
 });

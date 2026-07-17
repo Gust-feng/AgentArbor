@@ -1,18 +1,16 @@
 import React from "react";
 import {
+  Bot,
   ChevronRight,
-  CircleCheck,
-  Cog,
-  Compass,
-  Eye,
-  LoaderCircle,
-  PencilLine,
-  Scale,
+  CircleAlert,
+  FileText,
+  Files,
+  FolderOpen,
+  Globe2,
+  ListTree,
+  Pencil,
   Search,
-  Sparkles,
   Terminal,
-  Wand2,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import type { TranscriptNode } from "../contracts/run";
@@ -20,41 +18,27 @@ import {
   ConfirmationNode,
   type ConfirmationProjection,
 } from "./transcript-confirmation";
-import {
-  type AgentWorkTimelineView,
-} from "../../../panel-read-model/assistant/panel-agent-work-timeline-view";
 import type {
   ActivityBadge,
-  ActivityExpandedSection,
+  ActivityLead,
   ActivityToolKind,
   ActivityItem,
-  ActivityLineDelta,
 } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import { resolveActivityToolKind } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
-import { collapsedTimelineSummary } from "../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
+import { activeTimelineStatus } from "../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
+import type { AgentWorkTimelineView } from "../../../panel-read-model/assistant/panel-agent-work-timeline-view";
 import { ActivityEvidencePanel } from "./activity-evidence";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";
 export { pendingForTurn } from "../../../panel-read-model/transcript/panel-transcript-confirmation-projection";
 
-const TOOL_KIND_ICON: Record<string, LucideIcon> = {
-  command: Terminal,
-  search: Search,
-  read: Eye,
-  edit: PencilLine,
-  web: Compass,
-  thinking: Zap,
-  confirmation: CircleCheck,
-  decision: Scale,
-  system: Cog,
-  other: Wand2,
-};
-
 type AgentWorkTimelineProps = {
   readonly view: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;
+  readonly presentation?: "agent_work" | "records";
   readonly collapsed?: boolean;
   readonly lifecycle?: "open" | "settled" | "attention";
   readonly collapseReason?: string;
+  readonly showLiveStatus?: boolean;
   readonly selectedItemKey?: string;
   readonly selectableItemKeys?: readonly string[];
   readonly onSelectItem?: (item: ActivityItem) => void;
@@ -68,220 +52,348 @@ export function AgentWorkTimeline(props: AgentWorkTimelineProps): React.ReactEle
 
 const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props: AgentWorkTimelineProps): React.ReactElement | null {
   const { confirmation, items } = props.view;
-
   if (!props.view.hasContent) return null;
 
-  const activity = (
+  const visibleItems = props.presentation === "agent_work"
+    ? items.filter(isOrdinaryWorkRecord)
+    : items;
+  const itemActivity = visibleItems.length === 0 ? null : (
     <div className="agent-activity">
-      {items.map((item, index) => {
-        const current = props.lifecycle !== "settled" && confirmation.current === undefined && index === items.length - 1;
+      {visibleItems.map((item, index) => {
+        const current = props.lifecycle !== "settled" &&
+          confirmation.current === undefined &&
+          index === visibleItems.length - 1 &&
+          isActiveActivityItem(item);
         const toolKind = item.toolKind ?? resolveActivityToolKind(item);
         const selectable = props.onSelectItem !== undefined &&
           (props.selectableItemKeys === undefined || props.selectableItemKeys.includes(item.key));
         const selected = selectable && props.selectedItemKey === item.key;
         if (item.variant === "context_compaction") {
-          return (
-            <ContextCompactionStatusLine
-              current={current}
-              item={item}
-              key={item.key}
-            />
-          );
+          return <ContextCompactionStatusLine current={current} item={item} key={item.key} />;
         }
-        const content = (
-          <ActivityLine item={item} expandable={!selectable} />
-        );
-        return timelineStep({ item, current, selectable, selected, toolKind, onSelectItem: props.onSelectItem, content });
-      })}
-      {confirmation.current !== undefined && (
-        <div className="agent-activity-step confirmation waiting_approval" data-current="true" aria-current="step">
-          <ConfirmationNode
-            confirmation={confirmation.current}
-            busy={props.confirmationBusy}
-            onDecision={props.onDecision}
+        return (
+          <ActivityRecord
+            current={current}
+            item={item}
+            key={item.key}
+            selectable={selectable}
+            selected={selected}
+            toolKind={toolKind}
+            onSelectItem={props.onSelectItem}
           />
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 
-  if (props.collapsed === true && confirmation.current === undefined) {
-    const summary = collapsedTimelineSummary({
-      items,
-      hasCurrentConfirmation: false,
-    });
+  const confirmationActivity = confirmation.current === undefined ? null : (
+    <div className="agent-confirmation-activity">
+      <ConfirmationNode
+        confirmation={confirmation.current}
+        busy={props.confirmationBusy}
+        onDecision={props.onDecision}
+      />
+    </div>
+  );
+
+  const worklineProps = {
+    className: "agent-workline",
+    "aria-label": "运行过程",
+    "data-surface": props.presentation === "agent_work" ? "tools" : "records",
+    "data-lifecycle": props.lifecycle,
+    "data-collapse-reason": props.collapseReason,
+  } as const;
+  const autoOpenWorkRecords = props.lifecycle === "open" ||
+    props.lifecycle === "attention" ||
+    props.collapsed === false ||
+    confirmation.current !== undefined;
+
+  if (props.presentation === "agent_work" && confirmation.current === undefined) {
+    const status = activeTimelineStatus({ items });
     return (
-      <section
-        className="agent-workline"
-        aria-label="工作进度"
-        data-lifecycle={props.lifecycle}
-        data-collapse-reason={props.collapseReason}
-      >
-        <details className="agent-workline-disclosure">
-          <summary className="agent-workline-summary" aria-label={`展开过程，${summary}`}>
-            <ChevronRight className="agent-workline-summary-chevron" size={14} aria-hidden="true" />
-            <span className="agent-workline-summary-text">{summary}</span>
-          </summary>
-          {activity}
-        </details>
+      <section {...worklineProps}>
+        {props.showLiveStatus !== false && props.lifecycle === "open" && (
+          <div className="agent-live-work-status" role="status" aria-live="polite" aria-label={status.label}>
+            <span className="typing-dots agent-live-work-dots" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          </div>
+        )}
+        {visibleItems.length > 0 && (
+          <WorkRecordDisclosure autoOpen={autoOpenWorkRecords}>{itemActivity}</WorkRecordDisclosure>
+        )}
+      </section>
+    );
+  }
+
+  if (props.presentation === "agent_work" && confirmation.current !== undefined) {
+    return (
+      <section {...worklineProps}>
+        {visibleItems.length > 0 && (
+          <WorkRecordDisclosure autoOpen={autoOpenWorkRecords}>{itemActivity}</WorkRecordDisclosure>
+        )}
+        {confirmationActivity}
+      </section>
+    );
+  }
+
+  if (props.collapsed === true && confirmation.current === undefined) {
+    return (
+      <section {...worklineProps}>
+        {visibleItems.length > 0 && (
+          <WorkRecordDisclosure autoOpen={false}>{itemActivity}</WorkRecordDisclosure>
+        )}
       </section>
     );
   }
 
   return (
-    <section
-      className="agent-workline"
-      aria-label="工作进度"
-      data-lifecycle={props.lifecycle}
-      data-collapse-reason={props.collapseReason}
-    >
-      {activity}
+    <section {...worklineProps}>
+      {itemActivity}
+      {confirmationActivity}
     </section>
   );
 }, agentWorkTimelinePropsEqual);
 
-function timelineStep(input: {
+function WorkRecordDisclosure(props: {
+  readonly autoOpen: boolean;
+  readonly children: React.ReactNode;
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(props.autoOpen);
+  const previousAutoOpen = React.useRef(props.autoOpen);
+  React.useEffect(() => {
+    if (previousAutoOpen.current === props.autoOpen) {
+      return;
+    }
+    previousAutoOpen.current = props.autoOpen;
+    setOpen(props.autoOpen);
+  }, [props.autoOpen]);
+
+  return (
+    <details
+      className="agent-workline-disclosure"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="agent-workline-summary" aria-label={open ? "收起过程" : "展开过程"}>
+        <ChevronRight className="agent-workline-summary-chevron" size={14} aria-hidden="true" />
+        <span className="agent-workline-summary-text">过程</span>
+      </summary>
+      {props.children}
+    </details>
+  );
+}
+
+function isOrdinaryWorkRecord(item: ActivityItem): boolean {
+  return item.tone === "tool" ||
+    item.phase === "failed" ||
+    item.phase === "blocked" ||
+    item.phase === "cancelled" ||
+    item.tone === "confirmation" ||
+    item.tone === "decision";
+}
+
+function ActivityRecord(props: {
   readonly item: ActivityItem;
   readonly current: boolean;
   readonly selectable: boolean;
   readonly selected: boolean;
   readonly toolKind: ActivityToolKind;
   readonly onSelectItem?: (item: ActivityItem) => void;
-  readonly content: React.ReactNode;
 }): React.ReactElement {
-  if (input.selectable) {
+  const expandable = shouldRenderExpandedDetail(props.item);
+  const recordClass = classNames("agent-record", props.item.tone, props.item.phase);
+  const summary = (
+    <ActivityRecordSummary
+      item={props.item}
+      current={props.current}
+      expandable={expandable}
+      toolKind={props.toolKind}
+      asSummary={false}
+    />
+  );
+
+  if (props.selectable) {
     return (
       <button
         type="button"
-        className={`agent-activity-step ${input.item.tone} ${input.item.phase}`}
-        data-current={input.current ? "true" : undefined}
-        data-selected={input.selected ? "true" : undefined}
+        className={classNames(recordClass, "agent-record-selectable")}
+        data-current={props.current ? "true" : undefined}
+        data-selected={props.selected ? "true" : undefined}
         data-selectable="true"
-        data-tool-kind={input.toolKind}
-        aria-current={input.current ? "step" : undefined}
-        aria-pressed={input.selected}
-        onClick={() => input.onSelectItem?.(input.item)}
-        key={input.item.key}
+        data-tool-kind={props.toolKind}
+        data-running={isActiveActivityItem(props.item) ? "true" : undefined}
+        aria-current={props.current ? "step" : undefined}
+        aria-pressed={props.selected}
+        onClick={() => props.onSelectItem?.(props.item)}
       >
-        {input.content}
+        {summary}
       </button>
     );
   }
-  return (
-    <div
-      className={`agent-activity-step ${input.item.tone} ${input.item.phase}`}
-      data-current={input.current ? "true" : undefined}
-      data-selected={input.selected ? "true" : undefined}
-      data-tool-kind={input.toolKind}
-      aria-current={input.current ? "step" : undefined}
-      key={input.item.key}
-    >
-      {input.content}
-    </div>
-  );
-}
 
-function ActivityLine(props: {
-  readonly item: ActivityItem;
-  readonly expandable?: boolean;
-}): React.ReactElement {
-  const { item } = props;
-  const toolKind = item.toolKind ?? resolveActivityToolKind(item);
-  const running = isRunningActivityPhase(item.phase);
-  const Icon = running ? LoaderCircle : TOOL_KIND_ICON[toolKind] ?? Sparkles;
-  const visibleBadges = visibleBadgesForItem(item);
-  const lineDelta = visibleLineDeltaForItem(item);
-  const expandable = props.expandable !== false && shouldRenderExpandedDetail(item);
-  const verb = visibleActivityVerb(item);
-  const line = (
-    <>
-      {expandable
-        ? <ChevronRight className="agent-activity-chevron" size={14} aria-hidden="true" />
-        : <span className="agent-activity-chevron-spacer" aria-hidden="true" />}
-      <span className="agent-activity-line-prefix">
-        <span className={`agent-activity-label${running ? " is-running" : ""}`} aria-hidden="true">
-          <Icon size={14} strokeWidth={1.8} />
-        </span>
-      </span>
-      <span className="agent-activity-body">
-        <span className="agent-activity-copy">
-          {verb !== undefined && <span className="agent-activity-verb">{verb}</span>}
-          <span className="agent-activity-detail">{item.copy.detail}</span>
-        </span>
-        {(lineDelta !== undefined || visibleBadges.length > 0) && (
-          <span className="agent-activity-meta">
-            {lineDelta !== undefined && (
-              <LineDeltaIndicator
-                delta={lineDelta}
-                running={isLineDeltaRunning(item)}
-              />
-            )}
-            {visibleBadges.map((entry, index) => (
-              <ActivityBadgeChip key={`${entry.badge.label}-${index}`} badge={entry.badge} variant={entry.variant} />
-            ))}
-          </span>
-        )}
-      </span>
-    </>
-  );
-  if (expandable) {
+  if (!expandable) {
     return (
-      <details className="agent-activity-disclosure" data-tone={item.tone}>
-        <summary className="agent-activity-line">{line}</summary>
-        <ActivityEvidencePanel item={item} />
-      </details>
+      <div
+        className={recordClass}
+        data-current={props.current ? "true" : undefined}
+        data-tool-kind={props.toolKind}
+        data-running={isActiveActivityItem(props.item) ? "true" : undefined}
+        aria-current={props.current ? "step" : undefined}
+      >
+        {summary}
+      </div>
     );
   }
+
   return (
-    <p className="agent-activity-line">
-      {line}
-    </p>
+    <details
+      className={recordClass}
+      data-current={props.current ? "true" : undefined}
+      data-tool-kind={props.toolKind}
+      data-running={isActiveActivityItem(props.item) ? "true" : undefined}
+    >
+      <ActivityRecordSummary
+        item={props.item}
+        current={props.current}
+        expandable={expandable}
+        toolKind={props.toolKind}
+        asSummary
+      />
+      <div className="agent-record-body">
+        <ActivityEvidencePanel item={props.item} />
+      </div>
+    </details>
   );
 }
 
-function visibleActivityVerb(item: ActivityItem): string | undefined {
-  const label = item.copy.label?.trim();
-  if (label === undefined || label.length === 0) return undefined;
-  return item.copy.detail.includes(label) ? undefined : label;
-}
-
-function isRunningActivityPhase(phase: ActivityItem["phase"]): boolean {
-  return phase === "noted" || phase === "preparing" || phase === "executing";
-}
-
-function visibleLineDeltaForItem(item: ActivityItem): ActivityLineDelta | undefined {
-  if ((item.toolKind ?? resolveActivityToolKind(item)) !== "edit") {
-    return undefined;
-  }
-  const delta = item.lineDelta;
-  if (delta === undefined || (delta.added <= 0 && delta.removed <= 0)) {
-    return undefined;
-  }
-  return delta;
-}
-
-function isLineDeltaRunning(item: ActivityItem): boolean {
-  return item.phase === "executing" || item.phase === "preparing" || item.phase === "noted";
-}
-
-function LineDeltaIndicator(props: {
-  readonly delta: ActivityLineDelta;
-  readonly running: boolean;
+function ActivityRecordSummary(props: {
+  readonly item: ActivityItem;
+  readonly current: boolean;
+  readonly expandable: boolean;
+  readonly toolKind: ActivityToolKind;
+  readonly asSummary?: boolean;
 }): React.ReactElement {
+  const lead = visibleLeadForItem(props.item);
+  if (lead === undefined) {
+    const Tag = props.asSummary === true ? "summary" : "div";
+    return (
+      <Tag className="agent-record-summary">
+        <ActivityRecordIcon toolKind={props.toolKind} />
+        <span className="agent-record-content">
+          <span className="agent-record-title">{props.item.copy.detail}</span>
+        </span>
+        <RecordTrailing
+          expandable={props.expandable}
+          attention={itemNeedsAttention(props.item)}
+          lineDelta={props.item.lineDelta}
+          elapsedSince={props.toolKind === "command" && isActiveActivityItem(props.item) ? props.item.startedAt : undefined}
+        />
+      </Tag>
+    );
+  }
+  const context = lead.context ?? firstAttentionBadge(props.item);
+  const Tag = props.asSummary === true ? "summary" : "div";
   return (
-    <span
-      className="agent-activity-line-delta"
-      data-running={props.running ? "true" : undefined}
-      aria-label={`新增 ${props.delta.added} 行，删除 ${props.delta.removed} 行`}
-    >
-      {props.delta.added > 0 && (
-        <span className="agent-activity-line-delta-add">+{props.delta.added}</span>
-      )}
-      {props.delta.removed > 0 && (
-        <span className="agent-activity-line-delta-remove">-{props.delta.removed}</span>
-      )}
+    <Tag className="agent-record-summary">
+      <ActivityRecordIcon toolKind={props.toolKind} />
+      <span className="agent-record-content">
+        <span className="agent-record-title" aria-label={`${lead.action} ${lead.subject}`}>
+          <span className="agent-record-subject" data-monospace={lead.monospace === true ? "true" : undefined}>
+            {lead.subject}
+          </span>
+        </span>
+        {context !== undefined && <span className="agent-record-context">{context}</span>}
+      </span>
+      <RecordTrailing
+        expandable={props.expandable}
+        attention={itemNeedsAttention(props.item)}
+        lineDelta={props.item.lineDelta}
+        elapsedSince={props.toolKind === "command" && isActiveActivityItem(props.item) ? props.item.startedAt : undefined}
+      />
+    </Tag>
+  );
+}
+
+function visibleLeadForItem(item: ActivityItem): ActivityLead | undefined {
+  if (item.tone !== "tool") return undefined;
+  if (item.toolKind === "command") {
+    return {
+      action: "运行",
+      subject: "终端",
+      context: item.lead?.context,
+    };
+  }
+  return item.lead ?? { action: item.copy.label ?? "操作", subject: item.copy.detail };
+}
+
+function ActivityRecordIcon(props: { readonly toolKind: ActivityToolKind }): React.ReactElement {
+  const Icon = toolIconForKind(props.toolKind);
+  return (
+    <span className="agent-record-icon" aria-hidden="true">
+      <Icon size={14} strokeWidth={1.8} />
     </span>
   );
+}
+
+function toolIconForKind(kind: ActivityToolKind): LucideIcon {
+  if (kind === "command") return Terminal;
+  if (kind === "search") return Search;
+  if (kind === "read") return FileText;
+  if (kind === "directory") return FolderOpen;
+  if (kind === "edit") return Pencil;
+  if (kind === "web") return Globe2;
+  if (kind === "agent") return Bot;
+  if (kind === "other") return Files;
+  return ListTree;
+}
+
+function RecordTrailing(props: {
+  readonly expandable: boolean;
+  readonly attention: boolean;
+  readonly lineDelta?: ActivityItem["lineDelta"];
+  readonly elapsedSince?: string;
+}): React.ReactElement {
+  return (
+    <span className="agent-record-trailing">
+      {props.attention && <CircleAlert className="agent-record-alert" size={13} aria-label="需要注意" />}
+      {props.elapsedSince !== undefined && <ElapsedTime startedAt={props.elapsedSince} />}
+      {props.lineDelta !== undefined && (
+        <span
+          className="agent-record-line-delta"
+          aria-label={`新增 ${props.lineDelta.added} 行，删除 ${props.lineDelta.removed} 行`}
+        >
+          {props.lineDelta.added > 0 && (
+            <span className="agent-record-line-delta-add">+{props.lineDelta.added}</span>
+          )}
+          {props.lineDelta.removed > 0 && (
+            <span className="agent-record-line-delta-remove">-{props.lineDelta.removed}</span>
+          )}
+        </span>
+      )}
+      {props.expandable
+        ? <ChevronRight className="agent-record-chevron" size={14} aria-hidden="true" />
+        : <span className="agent-record-chevron-spacer" aria-hidden="true" />}
+    </span>
+  );
+}
+
+function ElapsedTime(props: { readonly startedAt: string }): React.ReactElement | null {
+  const startedAt = Date.parse(props.startedAt);
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [props.startedAt]);
+  if (!Number.isFinite(startedAt)) return null;
+  const elapsedSeconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
+  if (elapsedSeconds < 2) return null;
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  const text = minutes === 0 ? `${seconds}s` : `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return <span className="agent-record-elapsed" aria-label={`已运行 ${elapsedSeconds} 秒`}>{text}</span>;
 }
 
 function ContextCompactionStatusLine(props: {
@@ -301,93 +413,41 @@ function ContextCompactionStatusLine(props: {
       aria-current={props.current ? "step" : undefined}
     >
       <span className="context-compaction-rule" aria-hidden="true" />
-      <span className="context-compaction-label">
-        {props.item.copy.detail}
-      </span>
+      <span className="context-compaction-label">{props.item.copy.detail}</span>
       <span className="context-compaction-rule" aria-hidden="true" />
     </div>
   );
 }
 
 function shouldRenderExpandedDetail(item: ActivityItem): boolean {
-  const sections = item.expandedSections ?? [];
-  if (item.tone === "tool" || item.tone === 'confirmation' || item.tone === "decision") {
-    return sections.length > 0 || item.copy.expandedDetail !== undefined;
-  }
-  if (item.tone === "thinking") {
-    return sections.length > 0 || item.copy.expandedDetail !== undefined;
-  }
-  const hasStructuredSections = sections.some((section) => section.title !== "详情");
-  if (!itemNeedsAttention(item)) return false;
-  if (hasStructuredSections) return true;
-  if (item.tone === "narration" || item.tone === "system") {
-    return false;
-  }
-  return sections.length > 0 || item.copy.expandedDetail !== undefined;
+  return (item.expandedSections?.length ?? 0) > 0 || item.copy.expandedDetail !== undefined;
 }
 
 function itemNeedsAttention(item: ActivityItem): boolean {
-  if (item.tone === 'confirmation' || item.tone === "decision") {
-    return true;
-  }
-  if (item.phase === "failed" || item.phase === "blocked" || item.phase === "cancelled") {
-    return true;
-  }
-  if (item.statusBadge?.tone === "danger" || item.statusBadge?.tone === "warning") {
-    return true;
-  }
-  if (item.badges?.some((badge) => badge.tone === "danger" || badge.tone === "warning")) {
-    return true;
-  }
-  return item.tone === "tool" && item.phase !== "completed";
+  if (item.phase === "failed" || item.phase === "blocked" || item.phase === "cancelled") return true;
+  if (item.statusBadge?.tone === "danger" || item.statusBadge?.tone === "warning") return true;
+  return item.badges?.some((badge) => badge.tone === "danger" || badge.tone === "warning") === true;
 }
 
-type VisibleBadgeEntry = {
-  readonly badge: ActivityBadge;
-  readonly variant: "status" | "meta";
-};
-
-function visibleBadgesForItem(item: ActivityItem): readonly VisibleBadgeEntry[] {
-  const badges: VisibleBadgeEntry[] = [];
-  if (item.statusBadge !== undefined && shouldShowStatusBadge(item.statusBadge)) {
-    badges.push({ badge: item.statusBadge, variant: "status" });
-  }
-  for (const badge of item.badges ?? []) {
-    if (shouldShowMetaBadge(badge)) {
-      badges.push({ badge, variant: "meta" });
-    }
-  }
-  return badges;
+function isActiveActivityItem(item: ActivityItem): boolean {
+  return item.phase === "executing" || item.phase === "preparing" || item.phase === "noted";
 }
 
-function shouldShowStatusBadge(badge: ActivityBadge): boolean {
-  if (badge.tone === "danger" || badge.tone === "warning") {
-    return true;
-  }
-  return badge.label !== "已完成" && badge.label !== "压缩完成";
+function firstAttentionBadge(item: ActivityItem): string | undefined {
+  return item.badges?.find((badge) => badge.tone === "danger" || badge.tone === "warning")?.label ??
+    (item.statusBadge?.tone === "danger" || item.statusBadge?.tone === "warning"
+      ? item.statusBadge.label
+      : undefined);
 }
 
-function shouldShowMetaBadge(badge: ActivityBadge): boolean {
-  return badge.tone === "danger" || badge.tone === "warning";
-}
-
-function ActivityBadgeChip(props: {
-  readonly badge: ActivityBadge;
-  readonly variant: "status" | "meta";
-}): React.ReactElement {
-  return (
-    <span
-      className={`agent-activity-chip ${props.variant}`}
-      data-tone={props.badge.tone ?? "neutral"}
-      data-monospace={props.badge.monospace === true ? "true" : undefined}
-    >
-      {props.badge.label}
-    </span>
-  );
+function classNames(...values: readonly (string | false | undefined)[]): string {
+  return values.filter((value): value is string => typeof value === "string" && value.length > 0).join(" ");
 }
 
 function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentWorkTimelineProps): boolean {
-  return left.collapsed === right.collapsed &&
+  return left.presentation === right.presentation &&
+    left.showLiveStatus === right.showLiveStatus &&
+    left.collapsed === right.collapsed &&
     left.lifecycle === right.lifecycle &&
     left.collapseReason === right.collapseReason &&
     left.selectedItemKey === right.selectedItemKey &&
@@ -426,7 +486,9 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
     left.variant === right.variant &&
     left.tone === right.tone &&
     left.phase === right.phase &&
+    left.startedAt === right.startedAt &&
     left.toolKind === right.toolKind &&
+    activityLeadsEqual(left.lead, right.lead) &&
     lineDeltasEqual(left.lineDelta, right.lineDelta) &&
     left.copy.label === right.copy.label &&
     left.copy.detail === right.copy.detail &&
@@ -436,7 +498,19 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
     expandedSectionsEqual(left.expandedSections, right.expandedSections);
 }
 
-function lineDeltasEqual(left: ActivityLineDelta | undefined, right: ActivityLineDelta | undefined): boolean {
+function activityLeadsEqual(left: ActivityLead | undefined, right: ActivityLead | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return left.action === right.action &&
+    left.subject === right.subject &&
+    left.context === right.context &&
+    left.monospace === right.monospace;
+}
+
+function lineDeltasEqual(
+  left: ActivityItem["lineDelta"],
+  right: ActivityItem["lineDelta"],
+): boolean {
   if (left === right) return true;
   if (left === undefined || right === undefined) return false;
   return left.added === right.added && left.removed === right.removed;
@@ -464,22 +538,24 @@ function badgesEqual(left: ActivityBadge | undefined, right: ActivityBadge | und
 }
 
 function expandedSectionsEqual(
-  left: readonly ActivityExpandedSection[] | undefined,
-  right: readonly ActivityExpandedSection[] | undefined,
+  left: ActivityItem["expandedSections"],
+  right: ActivityItem["expandedSections"],
 ): boolean {
   if (left === right) return true;
   if (left === undefined || right === undefined) return false;
   if (left.length !== right.length) return false;
-  for (let i = 0; i < left.length; i += 1) {
+  for (let index = 0; index < left.length; index += 1) {
+    const leftSection = left[index];
+    const rightSection = right[index];
     if (
-      left[i]?.title !== right[i]?.title ||
-      left[i]?.content !== right[i]?.content ||
-      left[i]?.format !== right[i]?.format ||
-      left[i]?.href !== right[i]?.href ||
-      !sectionMetaEqual(left[i]?.meta, right[i]?.meta) ||
-      !expandedItemsEqual(left[i]?.items, right[i]?.items) ||
-      left[i]?.note !== right[i]?.note ||
-      left[i]?.tone !== right[i]?.tone
+      leftSection?.title !== rightSection?.title ||
+      leftSection?.content !== rightSection?.content ||
+      leftSection?.format !== rightSection?.format ||
+      leftSection?.href !== rightSection?.href ||
+      leftSection?.note !== rightSection?.note ||
+      leftSection?.tone !== rightSection?.tone ||
+      !sectionMetaEqual(leftSection?.meta, rightSection?.meta) ||
+      !expandedItemsEqual(leftSection?.items, rightSection?.items)
     ) {
       return false;
     }
@@ -488,8 +564,8 @@ function expandedSectionsEqual(
 }
 
 function expandedItemsEqual(
-  left: ActivityExpandedSection["items"],
-  right: ActivityExpandedSection["items"],
+  left: NonNullable<ActivityItem["expandedSections"]>[number]["items"],
+  right: NonNullable<ActivityItem["expandedSections"]>[number]["items"],
 ): boolean {
   if (left === right) return true;
   if (left === undefined || right === undefined) return false;
@@ -511,16 +587,14 @@ function expandedItemsEqual(
 }
 
 function sectionMetaEqual(
-  left: ActivityExpandedSection["meta"],
-  right: ActivityExpandedSection["meta"],
+  left: NonNullable<ActivityItem["expandedSections"]>[number]["meta"],
+  right: NonNullable<ActivityItem["expandedSections"]>[number]["meta"],
 ): boolean {
   if (left === right) return true;
   if (left === undefined || right === undefined) return false;
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {
-    if (left[index]?.label !== right[index]?.label || left[index]?.value !== right[index]?.value) {
-      return false;
-    }
+    if (left[index]?.label !== right[index]?.label || left[index]?.value !== right[index]?.value) return false;
   }
   return true;
 }

@@ -126,7 +126,6 @@ test("chat active view keeps previous assistant output visible when the run fail
 
   assert.equal(view.workline.turns[1]?.turn.content, "已经输出的内容。");
   assert.deepEqual(view.statusNotice, {
-    title: "未完成",
     message: "上游模型连接中断。",
     tone: "error",
   });
@@ -169,6 +168,7 @@ function live(runId: string, outputText: string): LiveRunBuffer {
   return {
     runId,
     appliedEventKeys: [],
+    tools: [],
     turns: [
       {
         requestId: "model-1",

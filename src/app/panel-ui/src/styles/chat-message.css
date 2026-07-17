@@ -6,7 +6,9 @@
 
 .chat-active-grid {
   display: grid;
-  width: min(100%, var(--panel-reading-width));
+  width: 100%;
+  max-width: var(--panel-reading-width);
+  min-width: 0;
   margin: 0 auto;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
@@ -14,6 +16,8 @@
 
 .session-stream {
   display: flex;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   flex-direction: column;
   gap: 40px;
@@ -21,6 +25,8 @@
 
 .transcript-list {
   display: flex;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   flex-direction: column;
   gap: 46px;
@@ -46,6 +52,8 @@
 
 .user-message {
   display: flex;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   justify-content: flex-start;
 }
@@ -250,6 +258,7 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
+  align-self: stretch;
   align-items: flex-start;
   gap: var(--space-4);
 }
@@ -281,32 +290,46 @@
 .assistant-message-model {
   min-width: 0;
   max-width: 50%;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   color: color-mix(in oklch, var(--fg) 50%, var(--muted));
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: var(--weight-body);
   letter-spacing: 0;
-  text-overflow: ellipsis;
   text-transform: none;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .assistant-message-body {
   display: grid;
-  width: min(var(--panel-reading-width), 100%);
-  max-width: 100%;
+  width: 100%;
+  max-width: var(--panel-reading-width);
   min-width: 0;
+  align-self: stretch;
   gap: var(--space-4);
   color: var(--fg);
   font-size: 15px;
   line-height: 1.78;
 }
 
+/* Model output is the reading surface; tool activity has a separate utility rail. */
+.assistant-workline .assistant-message-body > .assistant-answer:not(.assistant-answer-pending) {
+  width: 100%;
+  max-width: min(var(--panel-reading-width), 100%);
+  align-self: stretch;
+  border-left: 2px solid color-mix(in oklch, var(--accent) 54%, var(--border));
+  padding: 4px 0 6px 16px;
+}
+
+.assistant-workline .assistant-message-body > .assistant-answer:not(.assistant-answer-pending) .live-stream-box {
+  font-size: 15.5px;
+  line-height: 1.82;
+}
+
 .assistant-workline .assistant-message-body {
   flex: 1 1 auto;
-  width: min(var(--panel-reading-width), 100%);
-  max-width: 100%;
+  width: 100%;
+  max-width: var(--panel-reading-width);
   gap: var(--space-4);
 }
 
@@ -315,8 +338,10 @@
 }
 
 .assistant-answer {
+  width: 100%;
   min-width: 0;
   max-width: 100%;
+  align-self: stretch;
   padding: 0;
 }
 
@@ -330,17 +355,7 @@
   display: flex;
   min-height: 28px;
   align-items: center;
-  gap: 7px;
   padding-top: 0;
-  color: color-mix(in oklch, var(--fg) 48%, var(--muted));
-  font-size: 12.5px;
-  line-height: 1.4;
-}
-
-.assistant-pending-icon {
-  flex: 0 0 auto;
-  color: color-mix(in oklch, var(--accent) 62%, var(--fg));
-  animation: assistant-pending-spin 900ms linear infinite;
 }
 
 .assistant-response-meta {
@@ -392,6 +407,7 @@
   width: 100%;
   min-width: 0;
   max-width: min(var(--panel-reading-width), 100%);
+  align-self: stretch;
   min-height: 1.2em;
   padding-right: 0;
   color: var(--fg);
@@ -407,6 +423,8 @@
 
 .assistant-result-evidence {
   display: grid;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   gap: var(--space-4);
   border-left: var(--border-width-thin) solid color-mix(in oklch, var(--message-assistant-border) 72%, var(--muted));
@@ -462,13 +480,12 @@
 
 .assistant-file-change-path {
   min-width: 0;
-  overflow: hidden;
   color: var(--fg);
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .assistant-file-change-meta {
@@ -608,6 +625,15 @@
     padding-left: var(--space-3);
   }
 
+  .assistant-workline .assistant-message-body > .assistant-answer:not(.assistant-answer-pending) {
+    padding-left: 12px;
+  }
+
+  .assistant-workline .assistant-message-body > .assistant-answer:not(.assistant-answer-pending) .live-stream-box {
+    font-size: 15px;
+    line-height: 1.78;
+  }
+
   .assistant-message-model {
     max-width: 58%;
   }
@@ -691,17 +717,5 @@
   to {
     opacity: 1;
     transform: scaleY(1);
-  }
-}
-
-@keyframes assistant-pending-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .assistant-pending-icon {
-    animation: none;
   }
 }

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createInitialOrdinaryRunState, recordOrdinaryToolResult, transitionOrdinaryRun } from "./state.js";
+import {
+  acceptOrdinaryToolRound,
+  createInitialOrdinaryRunState,
+  recordOrdinaryToolResult,
+  transitionOrdinaryRun,
+} from "./state.js";
 import { ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 
 test("Ordinary run reducer keeps one status, strips ephemeral attachments, and appends monotonic events", () => {
@@ -113,21 +118,9 @@ test("Ordinary approval pauses require the exact approval tool facts", () => {
     durationMs: 0,
     confirmationRequest: request,
   };
-  const sameRequestWithDifferentKeyOrder = {
-    toolCallFactId: request.toolCallFactId,
-    confirmationId: request.confirmationId,
-    actionSummary: request.actionSummary,
-    title: request.title,
-    riskLevel: request.riskLevel,
-    affectedResources: request.affectedResources,
-    requestedAt: request.requestedAt,
-    resumeAvailability: request.resumeAvailability,
-    sourceRefs: request.sourceRefs,
-  };
-  assert.notEqual(JSON.stringify(sameRequestWithDifferentKeyOrder), JSON.stringify(request));
   const approvalStatus = {
     kind: "awaiting_approval" as const,
-    confirmationRequests: [sameRequestWithDifferentKeyOrder],
+    confirmationRequests: [request],
     continuationAvailability: "live_only" as const,
   };
 
@@ -192,4 +185,59 @@ test("Ordinary tool facts are idempotent, ordered, and reject conflicting resolv
     result: { ...result, output: { content: "conflict" } },
     recordedAt: "2026-01-01T00:00:04.000Z",
   }), /different resolved result/u);
+});
+
+test("Ordinary pending root rounds freeze the actual request prefix and reject identity drift", () => {
+  const queued = createInitialOrdinaryRunState({
+    runId: "pending-identity-run",
+    turn: ordinaryRunTurn("pending-identity-run"),
+    runInput: { userMessage: "inspect" },
+    birth: ordinaryRunBirth(),
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-1",
+  });
+  const running = transitionOrdinaryRun({
+    state: queued,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const assistantMessage = {
+    role: "assistant" as const,
+    content: "",
+    toolCalls: [{ callId: "root-call", toolName: "read_file", input: { path: "README.md" } }],
+  };
+  const accepted = acceptOrdinaryToolRound({
+    state: running,
+    canonicalMessagesBeforeRound: [{ role: "user", content: "compacted request prefix" }],
+    assistantMessage,
+    acceptedAt: "2026-01-01T00:00:02.000Z",
+  });
+  assert.equal(accepted.canonicalMessages.length, 1);
+  assert.equal(accepted.canonicalMessages[0]?.role, "user");
+  assert.equal(accepted.canonicalMessages[0]?.content, "compacted request prefix");
+  assert.equal(accepted.pendingToolRound?.assistantMessage.role, "assistant");
+  assert.deepEqual(accepted.pendingToolRound?.assistantMessage.toolCalls, assistantMessage.toolCalls);
+
+  assert.throws(() => acceptOrdinaryToolRound({
+    state: running,
+    canonicalMessagesBeforeRound: running.canonicalMessages,
+    assistantMessage: {
+      ...assistantMessage,
+      toolCalls: [{ ...assistantMessage.toolCalls[0]!, factId: "nested/root-call" }],
+    },
+    acceptedAt: "2026-01-01T00:00:02.000Z",
+  }), /nested tool fact identity/u);
+  assert.throws(() => recordOrdinaryToolResult({
+    state: accepted,
+    result: {
+      callId: "root-call",
+      toolName: "read_file",
+      input: { path: "different.md" },
+      output: { content: "wrong" },
+      status: "completed",
+      durationMs: 1,
+    },
+    recordedAt: "2026-01-01T00:00:03.000Z",
+  }), /does not match its accepted assistant call/u);
 });

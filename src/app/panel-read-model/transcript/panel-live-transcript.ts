@@ -1,5 +1,6 @@
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
-import type { LiveModelTurnBuffer, LiveRunBuffer } from "../run/panel-run-live-buffer.js";
+import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
+import type { LiveModelTurnBuffer, LiveRunBuffer, LiveToolActivity } from "../run/panel-run-live-buffer.js";
 import {
   comparableTranscriptText,
   mergeTranscriptRefs,
@@ -35,6 +36,8 @@ export type LiveTranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly modelUsage?: ModelUsage;
+  readonly toolName?: string;
+  readonly display?: ToolDisplayProjection;
   readonly refs: readonly LiveTranscriptObservationRef[];
 };
 
@@ -67,7 +70,7 @@ export function withLiveTranscriptNodes(
   live: LiveRunBuffer | undefined
 ): readonly LiveTranscriptNode[] {
   if (live === undefined) return nodes;
-  let next = nodes;
+  let next = withLiveToolNodes(nodes, live);
 
   for (const turn of live.turns) {
     if (turn.reasoning.text.trim().length > 0) {
@@ -102,6 +105,52 @@ export function withLiveTranscriptNodes(
   }
 
   return next;
+}
+
+function withLiveToolNodes(
+  nodes: readonly LiveTranscriptNode[],
+  live: LiveRunBuffer,
+): readonly LiveTranscriptNode[] {
+  let next = nodes;
+  for (const tool of live.tools) {
+    if (hasTerminalToolNode(next, tool.callId)) continue;
+    const existing = next.find((node) =>
+      node.nodeId === tool.nodeId ||
+      (node.kind === "tool" && node.eventType === "tool.requested" && hasToolCallRef(node, tool.callId)));
+    const node = liveToolNode(live.runId, tool);
+    next = existing === undefined
+      ? [...next, node]
+      : next.map((item) => item === existing ? node : item);
+  }
+  return next;
+}
+
+function liveToolNode(runId: string, tool: LiveToolActivity): LiveTranscriptNode {
+  return {
+    nodeId: tool.nodeId,
+    runId,
+    sequence: tool.sequence,
+    eventType: "tool.requested",
+    kind: "tool",
+    phase: "executing",
+    title: "",
+    summary: tool.summary,
+    timestamp: tool.timestamp,
+    toolName: tool.toolName,
+    display: tool.display,
+    refs: tool.refs,
+  };
+}
+
+function hasTerminalToolNode(nodes: readonly LiveTranscriptNode[], callId: string): boolean {
+  return nodes.some((node) =>
+    node.kind === "tool" &&
+    (node.eventType === "tool.completed" || node.eventType === "tool.failed" || node.eventType === "tool.cancelled") &&
+    hasToolCallRef(node, callId));
+}
+
+function hasToolCallRef(node: LiveTranscriptNode, callId: string): boolean {
+  return node.refs.some((ref) => ref.kind === "tool_call" && ref.id === callId);
 }
 
 export function liveStreamingAnswer(

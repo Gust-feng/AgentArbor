@@ -8,7 +8,7 @@ import {
 } from "./panel-transcript-confirmation-projection.js";
 
 type TestConfirmation = ConfirmationIdentity & {
-  readonly runId: string;
+  readonly ownerRunId: string;
   readonly actionSummary: string;
 };
 
@@ -61,12 +61,12 @@ test("pending confirmation projection stays scoped to the owning turn", () => {
 
 function confirmation(
   confirmationId: string,
-  runId: string,
+  ownerRunId: string,
   actionSummary: string
 ): TestConfirmation {
   return {
     confirmationId,
-    runId,
+    ownerRunId,
     actionSummary,
   };
 }
@@ -78,7 +78,7 @@ function confirmationNode(
 ): TestConfirmationNode {
   return {
     nodeId,
-    runId: confirmation.runId,
+    runId: confirmation.ownerRunId,
     sequence,
     kind: "confirmation",
     confirmation,

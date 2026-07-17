@@ -16,7 +16,7 @@ test("assistant message view keeps the stream placeholder only before first visi
   assert.equal(view.answer, undefined);
 });
 
-test("assistant message view suppresses the placeholder once workflow activity is visible", () => {
+test("assistant message view replaces the placeholder with provider-returned reasoning", () => {
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [
@@ -32,6 +32,7 @@ test("assistant message view suppresses the placeholder once workflow activity i
 
   assert.equal(view.hasTimeline, true);
   assert.equal(view.awaitingFirstVisibleOutput, false);
+  assert.deepEqual(activityNodeIds(view), ["node-1"]);
 });
 
 test("assistant message view projects answer rendering state outside React", () => {
@@ -84,7 +85,7 @@ test("assistant message view segments body nodes before the fallback answer", ()
   assert.equal(view.copyText, "先说明。\n\n最终回答");
 });
 
-test("assistant message view keeps later reasoning activity after body content arrives", () => {
+test("assistant message view keeps later tool activity after body content arrives", () => {
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [
@@ -122,7 +123,7 @@ test("assistant message view keeps later reasoning activity after body content a
   assert.equal(activity?.defaultCollapsed, false);
 });
 
-test("assistant message view keeps leading activity before the first visible body", () => {
+test("assistant message view keeps leading reasoning before the first visible body", () => {
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [
@@ -154,13 +155,9 @@ test("assistant message view keeps leading activity before the first visible bod
   });
 
   assert.deepEqual(view.segments.map((segment) => segment.kind), ["activity", "body", "activity"]);
-  assert.equal(view.segments[0]?.kind, "activity");
-  assert.deepEqual(view.segments[0]?.kind === "activity" ? view.segments[0].timeline.items.map((item) => item.nodeId) : [], ["thinking-1"]);
-  assert.equal(view.segments[0]?.kind === "activity" ? view.segments[0].defaultCollapsed : undefined, false);
-  assert.equal(view.segments[1]?.kind, "body");
-  assert.equal(view.segments[1]?.kind === "body" ? view.segments[1].text : undefined, "我先展示文件读取。");
-  assert.equal(view.segments[2]?.kind, "activity");
-  assert.deepEqual(view.segments[2]?.kind === "activity" ? view.segments[2].timeline.items.map((item) => item.nodeId) : [], ["tool-1"]);
+  assert.deepEqual(activityNodeIds(view), ["thinking-1", "tool-1"]);
+  const body = view.segments.find((segment) => segment.kind === "body");
+  assert.equal(body?.kind === "body" ? body.text : undefined, "我先展示文件读取。");
 });
 
 test("assistant message view keeps activity segment keys stable while a stage grows", () => {
@@ -249,7 +246,7 @@ test("assistant message view keeps body ordering when an empty body node is pres
   assert.equal(onlySegment?.kind === "body" ? onlySegment.text : undefined, "后续正文。");
 });
 
-test("assistant message view keeps body-later activity in chronological order", () => {
+test("assistant message view keeps reasoning between body blocks", () => {
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [
@@ -281,13 +278,10 @@ test("assistant message view keeps body-later activity in chronological order", 
   });
 
   assert.deepEqual(view.segments.map((segment) => segment.kind), ["body", "activity", "body"]);
-  assert.equal(view.segments[1]?.kind, "activity");
-  assert.deepEqual(view.segments[1]?.kind === "activity" ? view.segments[1].timeline.items.map((item) => item.nodeId) : [], ["thinking-1"]);
-  assert.equal(view.segments[2]?.kind, "body");
-  assert.equal(view.segments[2]?.kind === "body" ? view.segments[2].text : undefined, "第二段正文。");
+  assert.deepEqual(activityNodeIds(view), ["thinking-1"]);
 });
 
-test("assistant message view keeps leading activity before body while collapsing later closed activity", () => {
+test("assistant message view collapses settled reasoning and tool activity independently", () => {
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [
@@ -329,10 +323,8 @@ test("assistant message view keeps leading activity before body while collapsing
   const activitySegments = view.segments.filter((segment) => segment.kind === "activity");
 
   assert.equal(activitySegments.length, 2);
-  assert.deepEqual(activitySegments[0]?.timeline.items.map((item) => item.nodeId), ["thinking-1"]);
-  assert.equal(activitySegments[0]?.defaultCollapsed, false);
-  assert.deepEqual(activitySegments[1]?.timeline.items.map((item) => item.nodeId), ["tool-1"]);
-  assert.equal(activitySegments[1]?.defaultCollapsed, true);
+  assert.deepEqual(activityNodeIds(view), ["thinking-1", "tool-1"]);
+  assert.deepEqual(activitySegments.map((segment) => segment.defaultCollapsed), [false, true]);
 });
 
 test("assistant message view keeps failed activity expanded by default even with later content", () => {
@@ -373,7 +365,7 @@ test("assistant message view keeps failed activity expanded by default even with
 });
 
 test("assistant message view keeps pending confirmation activity expanded by default", () => {
-  const pending = { confirmationId: "confirmation-1", runId: "run-1" };
+  const pending = { confirmationId: "confirmation-1", ownerRunId: "run-1" };
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [
@@ -422,7 +414,7 @@ test("assistant message view keeps pending confirmation activity expanded by def
   assert.equal(activitySegments[1]?.timeline.confirmation.current, pending);
 });
 
-test("assistant message view keeps visible narration activity between body blocks", () => {
+test("assistant message view keeps provider narration between body blocks", () => {
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [
@@ -455,11 +447,10 @@ test("assistant message view keeps visible narration activity between body block
   });
 
   assert.deepEqual(view.segments.map((segment) => segment.kind), ["body", "activity", "body"]);
-  assert.equal(view.segments[1]?.kind, "activity");
-  assert.deepEqual(view.segments[1]?.kind === "activity" ? view.segments[1].timeline.items.map((item) => item.nodeId) : [], ["narration-1"]);
+  assert.deepEqual(activityNodeIds(view), ["narration-1"]);
 });
 
-test("assistant message view keeps leading activity ahead of fallback body once answer copy exists", () => {
+test("assistant message view keeps reasoning ahead of fallback body", () => {
   const view = projectAssistantMessageView({
     content: "最终回答",
     transcriptNodes: [
@@ -475,10 +466,9 @@ test("assistant message view keeps leading activity ahead of fallback body once 
   });
 
   assert.deepEqual(view.segments.map((segment) => segment.kind), ["activity", "body"]);
-  assert.equal(view.segments[0]?.kind, "activity");
-  assert.deepEqual(view.segments[0]?.kind === "activity" ? view.segments[0].timeline.items.map((item) => item.nodeId) : [], ["thinking-1"]);
-  assert.equal(view.segments[1]?.kind, "body");
-  assert.equal(view.segments[1]?.kind === "body" ? view.segments[1].text : undefined, "最终回答");
+  assert.deepEqual(activityNodeIds(view), ["thinking-1"]);
+  const body = view.segments.find((segment) => segment.kind === "body");
+  assert.equal(body?.kind === "body" ? body.text : undefined, "最终回答");
 });
 
 test("assistant message view merges fallback answer into the latest body when the copy overlaps", () => {
@@ -505,10 +495,8 @@ test("assistant message view merges fallback answer into the latest body when th
   });
 
   assert.deepEqual(view.segments.map((segment) => segment.kind), ["activity", "body"]);
-  assert.equal(view.segments[0]?.kind, "activity");
-  assert.deepEqual(view.segments[0]?.kind === "activity" ? view.segments[0].timeline.items.map((item) => item.nodeId) : [], ["thinking-1"]);
-  assert.equal(view.segments[1]?.kind, "body");
-  assert.equal(view.segments[1]?.kind === "body" ? view.segments[1].text : undefined, "最终回答");
+  const body = view.segments.find((segment) => segment.kind === "body");
+  assert.equal(body?.kind === "body" ? body.text : undefined, "最终回答");
   assert.equal(view.copyText, "最终回答");
 });
 
@@ -522,7 +510,7 @@ test("assistant message view suppresses speculative fallback body while a live t
   assert.deepEqual(view.segments.map((segment) => segment.kind), ["awaiting"]);
 });
 
-test("assistant message view keeps leading activity without speculative fallback body during live work", () => {
+test("assistant message view keeps live reasoning instead of a placeholder", () => {
   const view = projectAssistantMessageView({
     content: "这是预览正文",
     keepStreamMounted: true,
@@ -539,8 +527,8 @@ test("assistant message view keeps leading activity without speculative fallback
   });
 
   assert.deepEqual(view.segments.map((segment) => segment.kind), ["activity"]);
-  assert.equal(view.segments[0]?.kind, "activity");
-  assert.deepEqual(view.segments[0]?.kind === "activity" ? view.segments[0].timeline.items.map((item) => item.nodeId) : [], ["thinking-1"]);
+  assert.deepEqual(activityNodeIds(view), ["thinking-1"]);
+  assert.equal(view.awaitingFirstVisibleOutput, false);
 });
 
 test("assistant message view keeps live state on the latest body only", () => {
@@ -585,7 +573,7 @@ test("assistant message view keeps live state on the latest body only", () => {
 });
 
 test("assistant message view treats pending confirmation as workflow content", () => {
-  const pending = { confirmationId: "confirmation-1", runId: "run-1" };
+  const pending = { confirmationId: "confirmation-1", ownerRunId: "run-1" };
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [],
@@ -597,7 +585,7 @@ test("assistant message view treats pending confirmation as workflow content", (
 });
 
 test("assistant message view renders a pending confirmation once around body segments", () => {
-  const pending = { confirmationId: "confirmation-1", runId: "run-1" };
+  const pending = { confirmationId: "confirmation-1", ownerRunId: "run-1" };
   const view = projectAssistantMessageView({
     content: "",
     transcriptNodes: [
@@ -662,4 +650,9 @@ function node(input: {
     timestamp: "2026-06-04T00:00:00.000Z",
     refs: [],
   };
+}
+
+function activityNodeIds(view: ReturnType<typeof projectAssistantMessageView>): readonly string[] {
+  return view.segments.flatMap((segment) =>
+    segment.kind === "activity" ? segment.timeline.items.map((item) => item.nodeId) : []);
 }

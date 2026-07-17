@@ -2,7 +2,54 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { toolStreamDetail, toolSummary } from "./panel-stream-tool-projection.js";
 
-test("tool stream projection keeps command output as safe summary", () => {
+test("requested tool summaries name the tool without manufacturing a status sentence", () => {
+  assert.equal(toolSummary("tool.requested", {
+    toolName: "read_file",
+    input: { path: "src/app.ts" },
+  }), "读取文件");
+  assert.equal(toolSummary("tool.requested", {
+    toolName: "vendor__inspect_schema",
+    input: { path: "database/schema.sql" },
+  }), "inspect schema");
+});
+
+test("requested stream detail preserves concrete objects before completion", () => {
+  const read = toolStreamDetail("tool.requested", {
+    toolName: "read_file",
+    input: { path: "src/app.ts" },
+  });
+  const directory = toolStreamDetail("tool.requested", {
+    toolName: "list_dir",
+    input: { path: "src/components" },
+  });
+
+  assert.equal(read.display?.kind, "read_result");
+  assert.equal(read.display?.kind === "read_result" ? read.display.title : undefined, "src/app.ts");
+  assert.equal(directory.display?.kind, "directory_listing");
+  assert.equal(directory.display?.kind === "directory_listing" ? directory.display.path : undefined, "src/components");
+});
+
+test("requested skill resources keep their concrete path instead of a generic capability label", () => {
+  const payload = {
+    toolName: "read_skill_resource",
+    input: {
+      skillId: "workbench-interface-design",
+      path: "references/principles.md",
+      type: "reference",
+    },
+  };
+  const detail = toolStreamDetail("tool.requested", payload);
+
+  assert.equal(toolSummary("tool.requested", payload), "读取技能资源");
+  assert.equal(detail.display?.kind, "read_result");
+  assert.equal(
+    detail.display?.kind === "read_result" ? detail.display.title : undefined,
+    "references/principles.md",
+  );
+  assert.equal(JSON.stringify(detail).includes("工具能力"), false);
+});
+
+test("tool stream projection keeps command facts in display detail without promoting them to live copy", () => {
   const payload = {
     toolName: "shell_command",
     input: { command: "pnpm", args: ["test"] },
@@ -16,12 +63,24 @@ test("tool stream projection keeps command output as safe summary", () => {
 
   const detail = toolStreamDetail("tool.completed", payload);
 
-  assert.equal(toolSummary("tool.completed", payload), "Shell 命令完成：pnpm test。");
-  assert.equal(detail.command, "pnpm test");
-  assert.equal(detail.preview, "pnpm test · exit 0");
+  assert.equal(toolSummary("tool.completed", payload), "Shell 命令完成。");
+  assertNoToolShadowFields(detail);
   assert.equal(detail.display?.kind, "command_summary");
   assert.equal(detail.display?.kind === "command_summary" ? detail.display.commandLine : undefined, "pnpm test");
-  assert.equal(JSON.stringify(detail).includes("RAW_STDOUT_SENTINEL"), false);
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.stdoutPreview : undefined, "RAW_STDOUT_SENTINEL");
+});
+
+test("tool stream projection preserves bounded read content for expanded detail", () => {
+  const content = `content-start\n${"x".repeat(2_000)}\ncontent-end`;
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "read_file",
+    input: { path: "README.md" },
+    output: { path: "README.md", content },
+  });
+
+  assert.equal(detail.display?.kind, "read_result");
+  assert.equal(detail.display?.kind === "read_result" ? detail.display.contentPreview : undefined, content);
+  assertNoToolShadowFields(detail);
 });
 
 test("tool stream projection preserves failed execution error facts", () => {
@@ -43,7 +102,7 @@ test("tool stream projection preserves failed execution error facts", () => {
   assert.equal(detail.errorFacts?.command, "pnpm");
 });
 
-test("tool stream projection surfaces read HTTP failure facts in preview and detail", () => {
+test("tool stream projection keeps read HTTP failure facts in the structured error envelope", () => {
   const errorFacts = {
     code: "ECONNREFUSED",
     errno: -4078,
@@ -65,11 +124,10 @@ test("tool stream projection surfaces read HTTP failure facts in preview and det
   });
 
   assert.equal(detail.display?.kind, "read_result");
-  assert.equal(detail.display?.kind === "read_result" ? detail.display.errorFacts?.code : undefined, "ECONNREFUSED");
   assert.equal(detail.errorFacts?.code, "ECONNREFUSED");
   assert.equal(detail.errorFacts?.port, 54321);
-  assert.equal(detail.preview?.includes("ECONNREFUSED"), true);
-  assert.equal(detail.preview?.includes("errorFacts"), true);
+  assert.equal(JSON.stringify(detail.display).includes("errorFacts"), false);
+  assertNoToolShadowFields(detail);
 });
 
 test("tool stream projection reads flat HTTP failure facts", () => {
@@ -92,8 +150,8 @@ test("tool stream projection reads flat HTTP failure facts", () => {
 
   assert.equal(detail.errorFacts?.statusCode, 404);
   assert.equal(detail.errorFacts?.statusText, "Not Found");
-  assert.equal(detail.preview?.includes("HTTP 404 Not Found"), true);
-  assert.equal(detail.preview?.includes("errorFacts"), true);
+  assert.equal(detail.display?.kind === "read_result" ? detail.display.error : undefined, "Page read returned HTTP 404 Not Found.");
+  assertNoToolShadowFields(detail);
 });
 
 test("tool stream projection surfaces search invalid-input messages", () => {
@@ -110,8 +168,8 @@ test("tool stream projection surfaces search invalid-input messages", () => {
 
   assert.equal(detail.display?.kind, "search_results");
   assert.equal(detail.display?.kind === "search_results" ? detail.display.message : undefined, "search requires a non-empty query.");
-  assert.equal(detail.preview?.includes("invalid-input"), true);
-  assert.equal(detail.preview?.includes("search requires a non-empty query."), true);
+  assert.equal(JSON.stringify(detail.display).includes("researchStatus"), false);
+  assertNoToolShadowFields(detail);
 });
 
 test("tool stream projection keeps ordinary tool copy free of diagnostic labels", () => {
@@ -136,10 +194,21 @@ test("tool stream projection keeps ordinary tool copy free of diagnostic labels"
     },
   });
 
-  assert.equal(requested.preview, "README.md");
+  assertNoToolShadowFields(requested);
   assert.equal(completedSummary.includes("exit 0"), false);
   assert.equal(completedSummary.includes("耗时"), false);
-  assert.equal(completedSummary.includes("pnpm test"), true);
+  assert.equal(completedSummary.includes("pnpm test"), false);
+});
+
+test("tool stream projection names failed tools as failed", () => {
+  const summary = toolSummary("tool.failed", {
+    toolName: "shell_command",
+    input: { command: "pnpm", args: ["test"] },
+    output: { command: "pnpm", args: ["test"] },
+  });
+
+  assert.equal(summary, "Shell 命令失败。");
+  assert.equal(summary.includes("未完成"), false);
 });
 
 test("tool stream projection prefers commandLine over recombining argv text", () => {
@@ -158,12 +227,20 @@ test("tool stream projection prefers commandLine over recombining argv text", ()
     },
   });
 
-  assert.equal(detail.command, `node -e "console.log('fragile quoted shell')"`);
-  assert.equal(detail.command?.includes(`-e console.log('fragile quoted shell')`), false);
-  assert.equal(detail.preview, `node -e "console.log('fragile quoted shell')" · exit 0`);
+  assert.equal(
+    detail.display?.kind === "command_summary" ? detail.display.commandLine : undefined,
+    `node -e "console.log('fragile quoted shell')"`,
+  );
+  assert.equal(
+    detail.display?.kind === "command_summary"
+      ? detail.display.commandLine?.includes(`-e console.log('fragile quoted shell')`)
+      : true,
+    false,
+  );
+  assertNoToolShadowFields(detail);
 });
 
-test("tool stream projection cleans restored ordinary tool preview labels", () => {
+test("tool stream projection does not recreate a legacy top-level preview", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "shell_command",
     input: {
@@ -175,10 +252,10 @@ test("tool stream projection cleans restored ordinary tool preview labels", () =
     },
   });
 
-  assert.equal(detail.preview, "dir · exit 0");
+  assertNoToolShadowFields(detail);
 });
 
-test("tool stream projection exposes command execution facts for UI display", () => {
+test("tool stream projection keeps command metadata out of the UI display contract", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "shell_command",
     input: {
@@ -206,17 +283,13 @@ test("tool stream projection exposes command execution facts for UI display", ()
   });
 
   assert.equal(detail.display?.kind, "command_summary");
-  assert.equal(detail.display?.kind === "command_summary" ? detail.display.durationMs : undefined, 1530);
-  assert.equal(detail.display?.kind === "command_summary" ? detail.display.pid : undefined, 1234);
-  assert.equal(detail.display?.kind === "command_summary" ? detail.display.logPath : undefined, "C:/Temp/agentarbor-command-logs/pnpm-dev.log");
-  assert.equal(detail.display?.kind === "command_summary" ? detail.display.stopCommand : undefined, "taskkill /pid 1234 /T /F");
-  assert.equal(detail.display?.kind === "command_summary" ? detail.display.portReady : undefined, true);
-  assert.equal(detail.preview?.includes("exit 0"), true);
-  assert.equal(detail.preview?.includes("1.5s"), true);
-  assert.equal(detail.preview?.includes("后台 pid 1234"), true);
-  assert.equal(detail.preview?.includes("port 5173 ready"), true);
-  assert.equal(detail.preview?.includes("stdout truncated 1200 chars 340 omitted"), true);
-  assert.equal(detail.preview?.includes("stderr not truncated 0 chars"), true);
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.commandLine : undefined, "pnpm dev");
+  assert.equal(JSON.stringify(detail.display).includes("durationMs"), false);
+  assert.equal(JSON.stringify(detail.display).includes("pid"), false);
+  assert.equal(JSON.stringify(detail.display).includes("logPath"), false);
+  assert.equal(JSON.stringify(detail.display).includes("stopCommand"), false);
+  assert.equal(JSON.stringify(detail.display).includes("portReady"), false);
+  assertNoToolShadowFields(detail);
 });
 
 test("tool stream projection carries edit diff preview in the file display", () => {
@@ -238,19 +311,43 @@ test("tool stream projection carries edit diff preview in the file display", () 
     },
   });
 
-  assert.equal(detail.preview?.includes("文件已更新"), false);
-  assert.equal(detail.preview?.includes("-old text"), true);
-  assert.equal(detail.preview?.includes("+new text"), true);
   assert.equal(detail.display?.kind, "file_diff_preview");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.path : undefined, "src/app/example.ts");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.operation : undefined, "edit");
-  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.replacements : undefined, 1);
+  assert.equal(JSON.stringify(detail.display).includes("replacements"), false);
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("-old text") : false, true);
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("+new text") : false, true);
-  assert.equal(detail.preview?.includes("INPUT OLD MUST STAY HIDDEN"), false);
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview?.includes("INPUT OLD MUST STAY HIDDEN") : true, false);
+  assertNoToolShadowFields(detail);
 });
 
-test("tool stream projection uses the file diff as the edit preview", () => {
+test("tool stream projection keeps multi-file output in one grouped display", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "workspace_patch",
+    callId: "call-multi-file",
+    output: {
+      files: [
+        {
+          path: "src/app.ts",
+          operation: "edit",
+          diff: { status: "available", unifiedDiff: "@@ -1 +1 @@\n-old\n+new" },
+        },
+        {
+          path: "src/app.test.ts",
+          operation: "create",
+          preview: "+test('app', () => true)",
+        },
+      ],
+    },
+  });
+
+  assert.equal(detail.display?.kind, "file_change_group");
+  assert.deepEqual(detail.display?.kind === "file_change_group"
+    ? detail.display.files.map((file) => file.path)
+    : [], ["src/app.ts", "src/app.test.ts"]);
+});
+
+test("tool stream projection uses the canonical file display for edit diffs", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "edit_file",
     input: {
@@ -267,10 +364,12 @@ test("tool stream projection uses the file diff as the edit preview", () => {
     },
   });
 
-  assert.equal(detail.preview?.includes("-old text"), true);
-  assert.equal(detail.preview?.includes("+new text"), true);
-  assert.equal(detail.preview?.includes("变更预览"), false);
-  assert.equal(detail.preview?.includes("替换：1 处"), false);
+  const preview = detail.display?.kind === "file_diff_preview" ? detail.display.preview : undefined;
+  assert.equal(preview?.includes("-old text"), true);
+  assert.equal(preview?.includes("+new text"), true);
+  assert.equal(preview?.includes("变更预览"), false);
+  assert.equal(preview?.includes("替换：1 处"), false);
+  assertNoToolShadowFields(detail);
 });
 
 test("tool stream projection does not fabricate a diff when canonical generation is unavailable", () => {
@@ -296,10 +395,8 @@ test("tool stream projection does not fabricate a diff when canonical generation
     },
   });
 
-  assert.equal(detail.preview, "src/app/example.ts");
   assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.preview : "unexpected", undefined);
-  assert.equal(detail.preview?.includes("same"), false);
-  assert.equal(detail.preview?.includes("updated"), false);
+  assertNoToolShadowFields(detail);
 });
 
 test("tool stream projection derives structured directory displays from attachment listings", () => {
@@ -324,12 +421,13 @@ test("tool stream projection derives structured directory displays from attachme
   });
 
   assert.equal(detail.display?.kind, "directory_listing");
-  assert.equal(detail.display?.kind === "directory_listing" ? detail.display.totalEntries : undefined, 29);
   assert.equal(detail.display?.kind === "directory_listing" ? detail.display.entries[0]?.path : undefined, "README.md");
-  assert.equal(detail.truncated, true);
+  assert.equal(JSON.stringify(detail.display).includes("totalEntries"), false);
+  assert.equal(JSON.stringify(detail.display).includes("truncated"), false);
+  assertNoToolShadowFields(detail);
 });
 
-test("tool stream projection shows MCP preview without raw media payload", () => {
+test("tool stream projection keeps MCP text in display items without raw media payload", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "docs__lookup",
     input: {
@@ -348,12 +446,18 @@ test("tool stream projection shows MCP preview without raw media payload", () =>
     },
   });
 
-  assert.equal(detail.preview?.includes("冻结快照"), true);
   assert.equal(detail.display?.kind, "generic_tool_summary");
+  assert.equal(
+    detail.display?.kind === "generic_tool_summary"
+      ? detail.display.items?.some((item) => item.includes("冻结快照"))
+      : false,
+    true,
+  );
+  assertNoToolShadowFields(detail);
   assert.equal(JSON.stringify(detail).includes("RAW_BASE64_SENTINEL"), false);
 });
 
-test("tool stream projection keeps raw command facts out of UI detail", () => {
+test("tool stream projection does not leak raw stdout as an unbounded top-level field", () => {
   const payload = {
     toolName: "shell_command",
     input: { commandLine: "pnpm test" },
@@ -368,8 +472,17 @@ test("tool stream projection keeps raw command facts out of UI detail", () => {
   const summary = toolSummary("tool.completed", payload);
   const detailRecord = detail as Readonly<Record<string, unknown>>;
 
-  assert.equal(summary.includes("pnpm test"), true);
+  assert.equal(summary.includes("pnpm test"), false);
   assert.equal(detail.display?.kind, "command_summary");
-  assert.equal(detail.command, "pnpm test");
+  assert.equal("command" in detailRecord, false);
   assert.equal(detailRecord.stdout, undefined);
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.stdoutPreview : undefined, "stdout sentinel");
+  assertNoToolShadowFields(detail);
 });
+
+function assertNoToolShadowFields(detail: ReturnType<typeof toolStreamDetail>): void {
+  const record = detail as Readonly<Record<string, unknown>>;
+  for (const field of ["action", "path", "query", "command", "exitCode", "preview", "truncated"]) {
+    assert.equal(field in record, false, field);
+  }
+}

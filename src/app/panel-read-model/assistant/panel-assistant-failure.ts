@@ -18,11 +18,11 @@ export function assistantTerminalStatus(status: string): AssistantTerminalStatus
   }
 }
 
-export function assistantTerminalNoticeTitle(status: AssistantTerminalStatus): string {
+export function assistantTerminalNoticeTitle(status: AssistantTerminalStatus): string | undefined {
   switch (status) {
     case "blocked": return "需要处理";
     case "cancelled": return "已取消";
-    case "failed": return "未完成";
+    case "failed": return undefined;
   }
 }
 

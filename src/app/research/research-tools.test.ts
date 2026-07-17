@@ -486,7 +486,7 @@ test("ToolCenter read direct bad HTTP URL preserves page error facts through out
   if (display?.kind !== "read_result") {
     throw new Error("expected read_result display");
   }
-  assert.equal(display.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(JSON.stringify(display).includes("errorFacts"), false);
   assert.equal(JSON.stringify(result).includes("recoveryHint"), false);
   assert.doesNotMatch(JSON.stringify(result), suggestionPattern);
 });
@@ -525,9 +525,9 @@ test("ToolCenter search empty query is invalid-input instead of empty results", 
   if (display?.kind !== "search_results") {
     throw new Error("expected search_results display");
   }
-  assert.equal(display.status, "invalid-input");
   assert.equal(display.message, "search requires a non-empty query.");
   assert.equal(display.results.length, 0);
+  assert.equal(JSON.stringify(display).includes("researchStatus"), false);
   assert.equal(JSON.stringify(result).includes("recoveryHint"), false);
   assert.doesNotMatch(JSON.stringify(result), suggestionPattern);
 });

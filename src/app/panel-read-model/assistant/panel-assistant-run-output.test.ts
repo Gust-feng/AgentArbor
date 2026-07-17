@@ -38,7 +38,6 @@ test("visible run problem surfaces failed run details without inventing a report
       undefined
     ),
     {
-      title: "未完成",
       message: "模型连接失败",
       tone: "error",
     }
@@ -54,12 +53,24 @@ test("visible run problem preserves failed run detail text", () => {
   );
 
   assert.deepEqual(problem, {
-    title: "未完成",
     message: "模型连接失败。\nraw provider response: sk-test-secret",
     tone: "error",
   });
   assert.equal(JSON.stringify(problem).includes("raw provider"), true);
   assert.equal(JSON.stringify(problem).includes("sk-test-secret"), true);
+});
+
+test("visible run problem preserves concrete tool and MCP errors without generic failure titles", () => {
+  for (const error of [
+    { code: "tool_boundary_resolution_failed", message: "工具边界不可用" },
+    { code: "mcp_request_timeout", message: "MCP 服务超时" },
+    { code: "ordinary_execution_failed", message: "执行已停止" },
+  ]) {
+    assert.deepEqual(
+      visibleRunProblem({ status: "failed" }, undefined, { error }, undefined),
+      { message: error.message, tone: "error" },
+    );
+  }
 });
 
 test("visible result text follows the product answer priority", () => {

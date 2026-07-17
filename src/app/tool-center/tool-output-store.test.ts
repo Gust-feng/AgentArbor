@@ -29,6 +29,7 @@ test("InMemoryToolOutputStore and read_tool_output reconstruct exact retained te
     sourceToolName: "fixture_large_tool",
     sourceCallId: "call-large-text",
   });
+  assert.ok(retained.expiresAt);
   assert.equal(
     Date.parse(retained.expiresAt) - Date.parse(retained.createdAt),
     DEFAULT_TOOL_OUTPUT_TTL_MS,

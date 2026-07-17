@@ -19,4 +19,5 @@ export type ObservationRef = {
 export type WorkspaceFolderSummary = {
   readonly label: string;
   readonly path?: string;
+  readonly selection: "default" | "explicit";
 };

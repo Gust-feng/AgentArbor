@@ -1,6 +1,9 @@
 .rich-text {
   display: grid;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
+  align-self: stretch;
   gap: var(--rt-gap, 10px);
   color: inherit;
   overflow-wrap: break-word;
@@ -253,7 +256,10 @@
 }
 
 .rich-text-streaming {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
+  align-self: stretch;
   color: var(--fg);
   font-family: var(--rt-body-family, var(--font-sans));
   font-size: var(--rt-body-size, 15px);

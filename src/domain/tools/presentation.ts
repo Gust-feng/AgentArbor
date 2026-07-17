@@ -123,6 +123,14 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayName: "Shell 命令",
     displayDescription: "在当前会话 Shell 中运行命令，适合构建、测试、脚本和通用 CLI 工作流。",
   },
+  call_sub_agent: {
+    displayName: "调用专家",
+    displayDescription: "将一项边界清楚的任务交给已登记专家，并将结果返回当前 Agent。",
+  },
+  spawn_sub_agent: {
+    displayName: "创建专家",
+    displayDescription: "为当前任务创建一个受限的临时专家，并将结果返回当前 Agent。",
+  },
 };
 
 export function toolPresentationForDefinition(definition: ToolDefinition): ToolPresentation {
@@ -134,7 +142,7 @@ export function toolPresentationForName(
   metadata?: ToolDefinitionMetadata,
   description?: string
 ): ToolPresentation {
-  const seed = BUILTIN_TOOL_PRESENTATION[name] ?? fallbackPresentation(metadata);
+  const seed = BUILTIN_TOOL_PRESENTATION[name] ?? fallbackPresentation(name, metadata);
   return {
     displayName: seed.displayName,
     displayDescription: seed.displayDescription || description || "运行时工具。",
@@ -234,35 +242,46 @@ export function toolRiskLabel(risk: ToolRiskLevel | undefined): string {
   }
 }
 
-function fallbackPresentation(metadata: ToolDefinitionMetadata | undefined): ToolPresentationSeed {
+function fallbackPresentation(name: string, metadata: ToolDefinitionMetadata | undefined): ToolPresentationSeed {
+  const displayName = fallbackToolDisplayName(name);
   if (metadata?.category === "filesystem") {
     return {
-      displayName: "文件工具",
+      displayName,
       displayDescription: "在工作区文件边界内读取或修改文件。",
     };
   }
   if (metadata?.category === "terminal") {
     return {
-      displayName: "终端工具",
+      displayName,
       displayDescription: "在工作区执行终端相关操作。",
     };
   }
   if (metadata?.category === "web" || metadata?.category === "research") {
     return {
-      displayName: "资料工具",
+      displayName,
       displayDescription: "读取或检索外部资料，并返回资料摘要。",
     };
   }
   if (metadata?.category === "mcp") {
     return {
-      displayName: "扩展工具",
+      displayName,
       displayDescription: "由外部扩展协议提供的工具能力。",
     };
   }
   return {
-    displayName: "工具能力",
+    displayName,
     displayDescription: "运行时工具。",
   };
+}
+
+function fallbackToolDisplayName(name: string): string {
+  const segments = name.trim().split("__").filter((segment) => segment.length > 0);
+  const leaf = segments.at(-1) ?? name;
+  const normalized = leaf
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized.length === 0 ? "工具" : normalized;
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {

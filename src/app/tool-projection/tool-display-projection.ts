@@ -5,101 +5,89 @@ import { commandProgramFromToolResult, commandTextFromToolResult } from "./comma
 import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";
 import {
   asRecord,
-  booleanOrUndefined,
   isMcpToolName,
   isString,
   numberOrUndefined,
-  readErrorFactsFromOutput,
   readErrorMessageFromOutput,
   searchMessageFromOutput,
   stringArray,
   stringOrUndefined,
 } from "./tool-result-facts.js";
-import { compactSafeText, redactOrdinaryText } from "./tool-projection-text.js";
-
 const SEARCH_DISPLAY_RESULTS_LIMIT = 20;
-const CONTENT_DETAIL_PREVIEW_LIMIT = 12_000;
-const COMMAND_STDOUT_PREVIEW_LIMIT = 16_000;
-const COMMAND_STDERR_PREVIEW_LIMIT = 8_000;
 
 export function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
   const record = asRecord(output);
-  if (request.toolName === "search" && Array.isArray(record.results)) {
-    const results = record.results
+  const input = asRecord(request.input);
+  if (request.toolName === "search") {
+    const results = (Array.isArray(record.results) ? record.results : [])
       .slice(0, SEARCH_DISPLAY_RESULTS_LIMIT)
       .map(projectSearchDisplayItem)
       .filter((item): item is NonNullable<ReturnType<typeof projectSearchDisplayItem>> => item !== undefined);
     return {
       kind: "search_results",
-      query: stringOrUndefined(record.query),
-      status: stringOrUndefined(record.researchStatus),
-      message: compactSafeText(searchMessageFromOutput(record), 500),
+      query: stringOrUndefined(record.query) ?? stringOrUndefined(input.query),
+      message: stringOrUndefined(searchMessageFromOutput(record)),
       results,
-      resultsReturned: record.results.length,
-      truncated: record.results.length > results.length || record.truncated === true,
     };
   }
   if (request.toolName === "read" && Array.isArray(record.items)) {
     return {
       kind: "generic_tool_summary",
       action: toolDisplayName(request.toolName),
-      summary: `读取 ${record.items.length} 个 ref。`,
+      summary: `${record.items.length} 个来源`,
       items: record.items.slice(0, 8).map(batchReadDisplayItem).filter(isString),
     };
   }
   if (request.toolName === "read") {
-    const errorFacts = readErrorFactsFromOutput(record);
     const error = readErrorMessageFromOutput(record);
+    const uri = stringOrUndefined(record.uri) ?? stringOrUndefined(input.uri) ?? stringOrUndefined(input.ref);
+    const url = httpUrl(uri);
     return {
       kind: "read_result",
-      ref: stringOrUndefined(record.ref) ?? stringOrUndefined(asRecord(request.input).ref),
-      source: stringOrUndefined(record.source),
-      status: stringOrUndefined(record.researchStatus),
-      title: stringOrUndefined(record.title),
-      url: stringOrUndefined(record.uri),
-      uri: stringOrUndefined(record.uri),
-      sourceSearchRef: stringOrUndefined(record.sourceSearchRef),
-      contentPreview: compactSafeText(stringOrUndefined(record.contentPreview), CONTENT_DETAIL_PREVIEW_LIMIT),
+      title: stringOrUndefined(record.title) ?? stringOrUndefined(input.title),
+      url,
+      uri,
+      contentPreview: url === undefined ? stringOrUndefined(record.contentPreview) : undefined,
       error,
-      errorFacts,
-      truncated: record.truncated === true,
     };
   }
   if (isContentReadTool(request.toolName)) {
+    const uri = stringOrUndefined(record.uri) ?? stringOrUndefined(input.uri) ?? stringOrUndefined(input.ref);
+    const url = stringOrUndefined(record.url) ?? stringOrUndefined(input.url) ?? httpUrl(uri);
     return {
       kind: "read_result",
-      ref: stringOrUndefined(record.refId),
-      source: stringOrUndefined(record.source),
-      status: stringOrUndefined(record.status) ?? "completed",
-      title: stringOrUndefined(record.title) ?? stringOrUndefined(record.path),
-      url: stringOrUndefined(record.url),
-      uri: stringOrUndefined(record.uri),
-      contentPreview: compactSafeText(
-        stringOrUndefined(record.content) ?? stringOrUndefined(record.text),
-        CONTENT_DETAIL_PREVIEW_LIMIT,
-      ),
-      truncated: record.truncated === true,
+      title: stringOrUndefined(record.title) ?? stringOrUndefined(record.path) ??
+        stringOrUndefined(input.title) ?? stringOrUndefined(input.path),
+      url,
+      uri,
+      contentPreview: url === undefined
+        ? stringOrUndefined(record.content) ?? stringOrUndefined(record.text)
+        : undefined,
     };
   }
   if (request.toolName === "browser_snapshot") {
     return {
       kind: "browser_snapshot",
-      title: stringOrUndefined(record.title),
-      url: stringOrUndefined(record.url),
-      text: compactSafeText(stringOrUndefined(record.text), CONTENT_DETAIL_PREVIEW_LIMIT),
-      truncated: record.truncated === true,
+      title: stringOrUndefined(record.title) ?? stringOrUndefined(input.title),
+      url: stringOrUndefined(record.url) ?? stringOrUndefined(input.url),
     };
   }
   if (request.toolName === "http_request") {
     return {
       kind: "http_response",
-      method: stringOrUndefined(record.method),
-      url: stringOrUndefined(record.url),
+      method: stringOrUndefined(record.method) ?? stringOrUndefined(input.method),
+      url: stringOrUndefined(record.url) ?? stringOrUndefined(input.url),
       statusCode: numberOrUndefined(record.statusCode),
       statusText: stringOrUndefined(record.statusText),
-      durationMs: numberOrUndefined(record.durationMs),
-      bodyPreview: compactSafeText(stringOrUndefined(record.body), CONTENT_DETAIL_PREVIEW_LIMIT),
-      truncated: record.truncated === true,
+      bodyPreview: stringOrUndefined(record.body),
+    };
+  }
+  if (isAgentTaskTool(request.toolName)) {
+    return {
+      kind: "agent_task",
+      agentName: stringOrUndefined(input.sub_agent_name) ?? stringOrUndefined(input.role),
+      task: stringOrUndefined(input.task),
+      result: stringOrUndefined(output),
     };
   }
   if (isMcpToolName(request.toolName)) {
@@ -107,7 +95,6 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       toolName: request.toolName,
       input: request.input,
       output,
-      truncated: record.truncated === true,
     });
   }
   if (request.toolName === "shell_command") {
@@ -119,36 +106,29 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       command: commandProgramFromToolResult(record, request.input),
       args: stringArray(record.args).length > 0 ? stringArray(record.args) : stringArray(asRecord(request.input).args),
       commandLine,
-      cwd: stringOrUndefined(record.cwd),
-      shell: stringOrUndefined(asRecord(record.shell).label),
       exitCode: numberOrUndefined(record.exitCode),
       timedOut: record.timedOut === true,
-      background: record.background === true,
-      pid: numberOrUndefined(record.pid),
-      logRef: stringOrUndefined(record.logRef),
-      logPath: stringOrUndefined(record.logPath),
-      stopCommand: stringOrUndefined(record.stopCommand),
-      durationMs: numberOrUndefined(record.durationMs),
-      waitForPort: numberOrUndefined(record.waitForPort),
-      portReady: record.portReady === true ? true : record.portReady === false ? false : undefined,
-      stdoutTruncated: record.stdoutTruncated === true ? true : record.stdoutTruncated === false ? false : undefined,
-      stderrTruncated: record.stderrTruncated === true ? true : record.stderrTruncated === false ? false : undefined,
-      stdoutChars: numberOrUndefined(record.stdoutChars),
-      stderrChars: numberOrUndefined(record.stderrChars),
-      stdoutOmittedChars: numberOrUndefined(record.stdoutOmittedChars),
-      stderrOmittedChars: numberOrUndefined(record.stderrOmittedChars),
-      outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
-      errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
-      stdoutPreview: compactSafeText(stdout, COMMAND_STDOUT_PREVIEW_LIMIT),
-      stderrPreview: compactSafeText(stderr, COMMAND_STDERR_PREVIEW_LIMIT),
+      stdoutPreview: stdout,
+      stderrPreview: stderr,
     };
   }
   return normalizeToolDisplayForOperation({
     toolName: request.toolName,
     input: request.input,
     output,
-    truncated: record.truncated === true,
   });
+}
+
+function httpUrl(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isContentReadTool(toolName: string): boolean {
@@ -158,17 +138,20 @@ function isContentReadTool(toolName: string): boolean {
     toolName === "read_skill_resource";
 }
 
+function isAgentTaskTool(toolName: string): boolean {
+  return toolName === "call_sub_agent" || toolName === "spawn_sub_agent";
+}
+
 function batchReadDisplayItem(value: unknown): string | undefined {
   const item = asRecord(value);
   const ref = stringOrUndefined(item.ref);
-  const status = stringOrUndefined(item.researchStatus);
   const title = stringOrUndefined(item.title);
   const error = stringOrUndefined(item.error);
   const headline = title ?? ref;
-  if (headline === undefined && status === undefined) {
-    return undefined;
+  if (headline === undefined) {
+    return error;
   }
-  return [status, headline, error].filter(isString).join(" · ");
+  return error === undefined ? headline : `${headline} · ${error}`;
 }
 
 export function projectSearchDisplayItem(value: unknown): Extract<ToolDisplayProjection, { readonly kind: "search_results" }>["results"][number] | undefined {
@@ -178,19 +161,8 @@ export function projectSearchDisplayItem(value: unknown): Extract<ToolDisplayPro
     return undefined;
   }
   return {
-    title: redactOrdinaryText(title, 160),
+    title,
     url: stringOrUndefined(item.url) ?? stringOrUndefined(item.uri),
-    refId: stringOrUndefined(item.refId),
     source: stringOrUndefined(item.source),
-    snippet: compactSafeText(stringOrUndefined(item.snippet), 260),
   };
-}
-
-function summarizeCommandOutput(value: string): string | undefined {
-  const lines = value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .slice(0, 4);
-  return compactSafeText(lines.join("\n"), 420);
 }

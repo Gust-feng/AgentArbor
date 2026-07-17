@@ -197,7 +197,7 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
     assert.equal(output.stdoutTruncated, false);
     assert.equal(output.truncated, false);
     assert.equal(display.kind, "command_summary");
-    assert.equal(String(display.outputSummary).length < stdout.length, true);
+    assert.equal(display.kind === "command_summary" ? display.stdoutPreview : undefined, stdout);
     assert.equal(JSON.stringify(result.output).includes("start-"), true);
     assert.equal(JSON.stringify(result.output).includes("-end"), true);
   } finally {

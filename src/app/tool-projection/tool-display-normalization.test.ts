@@ -31,9 +31,9 @@ test("normalizeToolDisplayForOperation consumes the canonical edit_file unified 
   assert.equal(display.kind, "file_diff_preview");
   assert.equal(display.kind === "file_diff_preview" ? display.path : undefined, "src/app/example.ts");
   assert.equal(display.kind === "file_diff_preview" ? display.operation : undefined, "edit");
-  assert.equal(display.kind === "file_diff_preview" ? display.replacements : undefined, 1);
-  assert.equal(display.kind === "file_diff_preview" ? display.previousLength : undefined, 16);
-  assert.equal(display.kind === "file_diff_preview" ? display.nextLength : undefined, 16);
+  assert.equal(JSON.stringify(display).includes("replacements"), false);
+  assert.equal(JSON.stringify(display).includes("previousLength"), false);
+  assert.equal(JSON.stringify(display).includes("nextLength"), false);
   assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("-const value = 1;") : false, true);
   assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("+const value = 2;") : false, true);
   assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("INPUT MUST NOT") : true, false);
@@ -131,12 +131,25 @@ test("normalizeToolDisplayForOperation derives write_file display without output
   assert.equal(display.kind, "file_change_summary");
   assert.equal(display.kind === "file_change_summary" ? display.path : undefined, "notes/demo.md");
   assert.equal(display.kind === "file_change_summary" ? display.operation : undefined, "append");
-  assert.equal(display.kind === "file_change_summary" ? display.bytes : undefined, 12);
-  assert.equal(display.kind === "file_change_summary" ? display.append : undefined, true);
-  assert.equal(display.kind === "file_change_summary" ? display.previousLength : undefined, 5);
-  assert.equal(display.kind === "file_change_summary" ? display.nextLength : undefined, 17);
-  assert.equal(display.kind === "file_change_summary" ? display.truncated : undefined, true);
-  assert.equal(display.kind === "file_change_summary" ? display.preview?.includes("+ hello") : false, true);
+  assert.equal(display.kind === "file_change_summary" ? display.preview : undefined, "+ hello\n+ world");
+  assert.equal(JSON.stringify(display).includes("bytes"), false);
+  assert.equal(JSON.stringify(display).includes("truncated"), false);
+});
+
+test("normalizeToolDisplayForOperation does not invent a changed line for empty file content", () => {
+  const display = normalizeToolDisplayForOperation({
+    toolName: "create_file",
+    input: {
+      path: "notes/empty.md",
+      content: "",
+    },
+    output: {
+      path: "notes/empty.md",
+    },
+  });
+
+  assert.equal(display.kind, "file_change_summary");
+  assert.equal(display.kind === "file_change_summary" ? display.preview : "unexpected", undefined);
 });
 
 test("normalizeToolDisplayForOperation derives built-in create and delete operations", () => {
@@ -187,8 +200,8 @@ test("normalizeToolDisplayForOperation derives file display from top-level facts
 
   assert.equal(display.kind, "file_change_summary");
   assert.equal(display.kind === "file_change_summary" ? display.path : undefined, "notes/existing.md");
-  assert.equal(display.kind === "file_change_summary" ? display.bytes : undefined, 8);
   assert.equal(display.kind === "file_change_summary" ? display.operation : undefined, "write");
+  assert.equal(JSON.stringify(display).includes("bytes"), false);
 });
 
 test("normalizeToolDisplayForOperation derives explicit custom file operation without raw body", () => {
@@ -236,12 +249,41 @@ test("normalizeToolDisplayForOperation derives structured directory listings fro
 
   assert.equal(display.kind, "directory_listing");
   assert.equal(display.kind === "directory_listing" ? display.path : undefined, ".");
-  assert.equal(display.kind === "directory_listing" ? display.depth : undefined, 1);
-  assert.equal(display.kind === "directory_listing" ? display.entriesReturned : undefined, 9);
-  assert.equal(display.kind === "directory_listing" ? display.totalEntries : undefined, 29);
   assert.equal(display.kind === "directory_listing" ? display.entries[0]?.path : undefined, "README.md");
   assert.equal(display.kind === "directory_listing" ? display.unreadableSamples?.[0]?.path : undefined, "node_modules/.cache");
-  assert.equal(display.kind === "directory_listing" ? display.truncated : undefined, true);
+  assert.equal(JSON.stringify(display).includes("totalEntries"), false);
+  assert.equal(JSON.stringify(display).includes("bytes"), false);
+  assert.equal(JSON.stringify(display).includes("truncated"), false);
+});
+
+test("normalizeToolDisplayForOperation preserves directory and search targets while tools are running", () => {
+  const directory = normalizeToolDisplayForOperation({
+    toolName: "list_dir",
+    input: { path: "src/app", depth: 2 },
+  });
+  const search = normalizeToolDisplayForOperation({
+    toolName: "grep_files",
+    input: { query: "tool.requested", path: "src" },
+  });
+
+  assert.equal(directory.kind, "directory_listing");
+  assert.equal(directory.kind === "directory_listing" ? directory.path : undefined, "src/app");
+  assert.deepEqual(directory.kind === "directory_listing" ? directory.entries : undefined, []);
+  assert.equal(search.kind, "file_search_results");
+  assert.equal(search.kind === "file_search_results" ? search.query : undefined, "tool.requested");
+  assert.equal(search.kind === "file_search_results" ? search.path : undefined, "src");
+  assert.deepEqual(search.kind === "file_search_results" ? search.matches : undefined, []);
+});
+
+test("normalizeToolDisplayForOperation uses a concrete unknown tool name and request target", () => {
+  const display = normalizeToolDisplayForOperation({
+    toolName: "vendor__inspect_schema",
+    input: { path: "database/schema.sql" },
+  });
+
+  assert.equal(display.kind, "generic_tool_summary");
+  assert.equal(display.kind === "generic_tool_summary" ? display.action : undefined, "inspect schema");
+  assert.equal(display.kind === "generic_tool_summary" ? display.summary : undefined, "database/schema.sql");
 });
 
 test("normalizeToolDisplayForOperation derives structured file search results ahead of generic attachment display", () => {
@@ -271,12 +313,56 @@ test("normalizeToolDisplayForOperation derives structured file search results ah
   assert.equal(display.kind === "file_search_results" ? display.path : undefined, ".");
   assert.equal(display.kind === "file_search_results" ? display.matches.length : undefined, 2);
   assert.equal(display.kind === "file_search_results" ? display.matches[0]?.preview : undefined, "needle found here");
-  assert.equal(display.kind === "file_search_results" ? display.skippedSamples?.[0]?.reason : undefined, "binary");
+  assert.equal(JSON.stringify(display).includes("searchedFiles"), false);
+  assert.equal(JSON.stringify(display).includes("skippedSamples"), false);
+});
+
+test("normalizeToolDisplayForOperation turns MCP web text into sources without article excerpts", () => {
+  const display = normalizeToolDisplayForOperation({
+    toolName: "vendor__web_lookup",
+    input: { query: "AgentArbor tool display" },
+    output: {
+      content: [{
+        type: "text",
+        text: [
+          "Title: AgentArbor tool display guide",
+          "URL: https://example.com/agentarbor/tools",
+          "Published: 2026-07-01",
+          "This partial paragraph must not enter the display contract.",
+        ].join("\n"),
+      }],
+    },
+  });
+
+  assert.equal(display.kind, "search_results");
+  assert.equal(display.kind === "search_results" ? display.query : undefined, "AgentArbor tool display");
+  assert.deepEqual(display.kind === "search_results" ? display.results : [], [{
+    title: "AgentArbor tool display guide",
+    url: "https://example.com/agentarbor/tools",
+    source: "example.com",
+  }]);
+  assert.equal(JSON.stringify(display).includes("partial paragraph"), false);
+});
+
+test("normalizeToolDisplayForOperation keeps complete canonical diffs without truncation markers", () => {
+  const body = Array.from({ length: 220 }, (_, index) => `+line ${index + 1}`).join("\n");
+  const display = normalizeToolDisplayForOperation({
+    toolName: "edit_file",
+    input: { path: "src/large.ts" },
+    output: {
+      path: "src/large.ts",
+      diff: { status: "available", unifiedDiff: `@@ -1 +1 @@\n${body}` },
+    },
+  });
+
+  assert.equal(display.kind === "file_diff_preview" ? display.preview?.includes("+line 220") : false, true);
+  assert.equal(JSON.stringify(display).includes("truncated"), false);
 });
 
 test("normalizeToolDisplayForOperation derives compact MCP display from canonical content facts", () => {
   const display = normalizeToolDisplayForOperation({
     toolName: "vendor__lookup",
+    input: { query: "AgentArbor tool display" },
     output: {
       title: "lookup completed",
       refId: "vendor:lookup:1",
@@ -295,8 +381,6 @@ test("normalizeToolDisplayForOperation derives compact MCP display from canonica
   });
 
   assert.equal(display.kind, "generic_tool_summary");
-  assert.equal(display.kind === "generic_tool_summary" ? display.summary : undefined, "lookup completed · vendor:lookup:1");
-  assert.equal(display.kind === "generic_tool_summary" ? display.items?.includes("result text") : false, true);
-  assert.equal(display.kind === "generic_tool_summary" ? display.items?.some((item) => item.includes("image/png")) : false, true);
-  assert.equal(display.kind === "generic_tool_summary" ? display.items?.some((item) => item.includes("2 results")) : false, true);
+  assert.equal(display.kind === "generic_tool_summary" ? display.summary : undefined, "AgentArbor tool display");
+  assert.deepEqual(display.kind === "generic_tool_summary" ? display.items : undefined, ["result text"]);
 });

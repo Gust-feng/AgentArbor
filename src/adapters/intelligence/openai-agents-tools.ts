@@ -60,13 +60,11 @@ export type OpenAIAgentsExecutionState = {
   readonly input: AgentLoopInput;
   readonly baseMessages: readonly ModelMessage[];
   readonly toolResults: ToolCallResult[];
+  readonly requestedFactIds: Set<string>;
   toolResultAcceptanceFailure?: unknown;
   readonly preflightByFactId: Map<string, OpenAIAgentsPreflightFact>;
   readonly interruptionFactIds: WeakMap<object, string>;
   readonly modelInput: OpenAIAgentsInputMapper;
-  lastStreamFinishReason?: string;
-  lastStreamResponseStatus?: string;
-  lastStreamIncompleteReason?: string;
   modelRequestCount: number;
   latestRequestIncludedResponses: number;
   latestRequestMessages?: readonly ModelMessage[];
@@ -142,10 +140,11 @@ function createSdkTool(input: {
       const request = toolCallRequest(providerCallId, factId, input.definition.name, toolInput);
       const preflight = boundary.gateway.preflight(
         request,
-        executionContext(input.execution, boundary, factId),
+        executionContext(input.execution, boundary, request),
         boundary.permission,
       );
       if (preflight.status === "ready") {
+        recordOpenAIAgentsToolRequest(input.execution, preflight.request);
         input.execution.preflightByFactId.set(factId, {
           request: preflight.request,
           needsApproval: false,
@@ -159,6 +158,9 @@ function createSdkTool(input: {
         needsApproval: preflight.status === "approval_required",
         boundary,
       };
+      if (preflight.status !== "approval_required") {
+        recordOpenAIAgentsToolRequest(input.execution, toolRequestFromResult(preflight.result));
+      }
       input.execution.preflightByFactId.set(factId, fact);
       await recordOpenAIAgentsToolResult(input.execution, preflight.result);
       return fact.needsApproval;
@@ -172,6 +174,7 @@ function createSdkTool(input: {
       }
       const boundary = cached?.boundary ?? freezeBoundary(await input.boundary(requireSdkRunContext(runContext)));
       const request = cached?.request ?? toolCallRequest(callId, factId, input.definition.name, toolInput);
+      recordOpenAIAgentsToolRequest(input.execution, request);
       const approvedConfirmationId = cached?.result?.confirmationRequest?.confirmationId;
       const approvedConfirmationIds = cached?.needsApproval === true
         ? uniqueStrings([
@@ -181,7 +184,7 @@ function createSdkTool(input: {
         : boundary.permission.approvedConfirmationIds;
       const result = await boundary.gateway.execute(
         request,
-        executionContext(input.execution, boundary, factId),
+        executionContext(input.execution, boundary, request),
         { ...boundary.permission, approvedConfirmationIds },
       );
       await recordOpenAIAgentsToolResult(input.execution, result);
@@ -242,7 +245,12 @@ function createSdkAgentTool(input: {
       const providerCallId = requiredCallId(callId);
       const factId = scopedToolFactId(childFactScope.getStore(), providerCallId);
       if (!started.has(factId)) {
-        started.set(factId, { input: requiredToolFact(params), at: Date.now() });
+        const toolInput = requiredToolFact(params);
+        started.set(factId, { input: toolInput, at: Date.now() });
+        recordOpenAIAgentsToolRequest(
+          input.execution,
+          toolCallRequest(providerCallId, factId, input.agentTool.toolName, toolInput),
+        );
       }
       return false;
     },
@@ -290,6 +298,15 @@ function createSdkAgentTool(input: {
   agentTool.invoke = async (runContext, rawInput, details) => {
     const callId = requiredCallId(details?.toolCall?.callId);
     const factId = scopedToolFactId(childFactScope.getStore(), callId);
+    recordOpenAIAgentsToolRequest(
+      input.execution,
+      toolCallRequest(
+        callId,
+        factId,
+        input.agentTool.toolName,
+        started.get(factId)?.input ?? parseToolInput(details?.toolCall?.arguments),
+      ),
+    );
     interrupted.delete(factId);
     return childFactScope.run(factId, async () => {
       try {
@@ -420,6 +437,20 @@ export async function recordOpenAIAgentsToolResult(
   }
 }
 
+function recordOpenAIAgentsToolRequest(
+  execution: OpenAIAgentsExecutionState,
+  request: ToolCallRequest,
+): void {
+  const factId = request.factId ?? request.callId;
+  if (execution.requestedFactIds.has(factId)) return;
+  execution.requestedFactIds.add(factId);
+  try {
+    execution.input.onToolRequested?.(structuredClone(request));
+  } catch {
+    // Requested/progress callbacks are live observation only and cannot block execution.
+  }
+}
+
 function invocationResolver(agentTool: AgentLoopAgentTool): (
   input: unknown,
 ) => Promise<AgentLoopAgentToolInvocation> {
@@ -495,12 +526,37 @@ function freezeBoundary(boundary: AgentLoopToolBoundary): FrozenToolBoundary {
 function executionContext(
   execution: OpenAIAgentsExecutionState,
   boundary: FrozenToolBoundary,
-  callId: string,
+  request: ToolCallRequest,
 ): ToolExecutionContext {
   return {
     ...boundary.context,
-    toolCallId: callId,
+    toolCallId: request.factId ?? request.callId,
     abortSignal: execution.abortSignal,
+    ...(execution.input.onToolProgress === undefined
+      ? {}
+      : {
+          reportProgress: (progress) => {
+            try {
+              execution.input.onToolProgress?.({
+                callId: request.callId,
+                ...(request.factId === undefined ? {} : { factId: request.factId }),
+                toolName: request.toolName,
+                progress: structuredClone(progress),
+              });
+            } catch {
+              // Progress is observational and must not change the executor result.
+            }
+          },
+        }),
+  };
+}
+
+function toolRequestFromResult(result: ToolCallResult): ToolCallRequest {
+  return {
+    callId: result.callId,
+    ...(result.factId === undefined ? {} : { factId: result.factId }),
+    toolName: result.toolName,
+    input: result.input,
   };
 }
 

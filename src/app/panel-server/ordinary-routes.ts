@@ -20,6 +20,11 @@ import {
   parseRunInput,
 } from "./request-parsers.js";
 import type { PanelRuntime } from "./runtime.js";
+import { SseResponseWriter } from "./sse-response-writer.js";
+
+const ORDINARY_STREAM_HEARTBEAT_INTERVAL_MS = 5_000;
+const ORDINARY_STREAM_DELTA_COALESCE_MS = 16;
+const ORDINARY_STREAM_MAX_QUEUED_FRAMES = 256;
 
 export async function handlePanelOrdinaryRoute(
   runtime: PanelRuntime,
@@ -248,13 +253,19 @@ async function streamRun(
   let closed = false;
   let streamId = "";
   let lastSequence = cursor?.sequence ?? 0;
-  let writeChain = Promise.resolve();
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let deltaFlushTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingDelta: Extract<OrdinaryRunActivity, { readonly type: "model.output.delta" }> | undefined;
+  const writer = new SseResponseWriter(response, {
+    maxQueuedFrames: ORDINARY_STREAM_MAX_QUEUED_FRAMES,
+    onFailure: () => cleanup(),
+  });
   const unsubscribe = runtime.ordinaryAgentFeature.events.subscribe(runId, (activity) => {
     if (!initialized) {
       buffered.push(activity);
       return;
     }
-    writeChain = writeChain.then(() => writeActivity(activity)).catch(() => cleanup());
+    queueLiveActivity(activity);
   });
   request.once("close", cleanup);
   request.once("error", cleanup);
@@ -275,17 +286,34 @@ async function streamRun(
       connection: "keep-alive",
       "x-accel-buffering": "no",
     });
-    response.write(`: AgentArbor ordinary agent stream ${runId}\n\n`);
+    if (!(await writer.write(`: AgentArbor ordinary agent stream ${runId}\n\n`))) {
+      cleanup();
+      return;
+    }
     if (replay.reset) {
       const resetCursor = encodeOrdinaryPanelCursor({ streamId, sequence: 0 });
-      response.write(`id: ${resetCursor}\n`);
-      response.write("event: run.stream.reset\n");
-      response.write(`data: ${JSON.stringify({ runId, cursor: resetCursor })}\n\n`);
+      if (!(await writer.write(
+        `id: ${resetCursor}\nevent: run.stream.reset\ndata: ${JSON.stringify({ runId, cursor: resetCursor })}\n\n`,
+      ))) {
+        cleanup();
+        return;
+      }
     }
     for (const activity of replay.activities) await writeActivity(activity);
     lastSequence = Math.max(lastSequence, replay.cursor.sequence);
+    while (buffered.length > 0) {
+      for (const activity of buffered.splice(0)) await writeActivity(activity);
+    }
+    if (closed) return;
     initialized = true;
-    for (const activity of buffered.splice(0)) await writeActivity(activity);
+    heartbeat = setInterval(() => {
+      if (closed || response.writableEnded) return;
+      const token = encodeOrdinaryPanelCursor({ streamId, sequence: lastSequence });
+      if (!writer.enqueue(
+        `event: run.stream.heartbeat\ndata: ${JSON.stringify({ runId, cursor: token })}\n\n`,
+      )) cleanup();
+    }, ORDINARY_STREAM_HEARTBEAT_INTERVAL_MS);
+    heartbeat.unref?.();
     const current = await runtime.ordinaryAgentFeature.queries.getRun(runId);
     if (current !== undefined && isTerminal(current)) cleanup();
   } catch (error) {
@@ -308,17 +336,59 @@ async function streamRun(
     const event = batch.events[0];
     if (event !== undefined) {
       const token = encodeOrdinaryPanelCursor({ streamId, sequence: activity.sequence });
-      response.write(`id: ${token}\n`);
-      response.write(`event: ${event.type}\n`);
-      response.write(`data: ${JSON.stringify(event)}\n\n`);
+      if (!(await writer.write(
+        `id: ${token}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+      ))) return cleanup();
     }
     lastSequence = activity.sequence;
     if (isTerminalTransition(activity)) cleanup();
   }
 
+  function queueLiveActivity(activity: OrdinaryRunActivity): void {
+    if (activity.type !== "model.output.delta") {
+      flushPendingDelta();
+      enqueueActivity(activity);
+      return;
+    }
+    if (pendingDelta !== undefined && activity.sequence === pendingDelta.sequence + 1) {
+      pendingDelta = { ...activity, delta: `${pendingDelta.delta}${activity.delta}` };
+    } else {
+      flushPendingDelta();
+      pendingDelta = activity;
+    }
+    if (deltaFlushTimer === undefined) {
+      deltaFlushTimer = setTimeout(flushPendingDelta, ORDINARY_STREAM_DELTA_COALESCE_MS);
+      deltaFlushTimer.unref?.();
+    }
+  }
+
+  function flushPendingDelta(): void {
+    if (deltaFlushTimer !== undefined) {
+      clearTimeout(deltaFlushTimer);
+      deltaFlushTimer = undefined;
+    }
+    const delta = pendingDelta;
+    pendingDelta = undefined;
+    if (delta !== undefined) enqueueActivity(delta);
+  }
+
+  function enqueueActivity(activity: OrdinaryRunActivity): void {
+    if (!writer.enqueueTask(() => writeActivity(activity))) cleanup();
+  }
+
   function cleanup(endResponse = true): void {
     if (closed) return;
     closed = true;
+    if (heartbeat !== undefined) {
+      clearInterval(heartbeat);
+      heartbeat = undefined;
+    }
+    if (deltaFlushTimer !== undefined) {
+      clearTimeout(deltaFlushTimer);
+      deltaFlushTimer = undefined;
+    }
+    pendingDelta = undefined;
+    writer.close();
     unsubscribe();
     request.off("close", cleanup);
     request.off("error", cleanup);

@@ -7,11 +7,24 @@ import {
   textStreamFragmentSourceFromEventId,
   type TextStreamAssembly,
 } from "../transcript/readable-text-fragments.js";
+import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
 
 export type LiveRunBuffer = {
   readonly runId: string;
   readonly turns: readonly LiveModelTurnBuffer[];
+  readonly tools: readonly LiveToolActivity[];
   readonly appliedEventKeys: readonly string[];
+};
+
+export type LiveToolActivity = {
+  readonly callId: string;
+  readonly nodeId: string;
+  readonly sequence: number;
+  readonly toolName?: string;
+  readonly summary?: string;
+  readonly timestamp: string;
+  readonly display?: ToolDisplayProjection;
+  readonly refs: RunEventLike["refs"];
 };
 
 export type LiveModelTurnBuffer = {
@@ -33,6 +46,8 @@ type RunEventLike = {
   readonly runId: string;
   readonly sequence: number;
   readonly type: string;
+  readonly timestamp?: string;
+  readonly toolName?: string;
   readonly summary?: string;
   readonly delta?: string;
   readonly refs: readonly {
@@ -41,6 +56,7 @@ type RunEventLike = {
   }[];
   readonly detail?: {
     readonly preview?: string;
+    readonly display?: ToolDisplayProjection;
   };
 };
 
@@ -48,6 +64,7 @@ export function emptyLiveRun(runId: string): LiveRunBuffer {
   return {
     runId,
     turns: [],
+    tools: [],
     appliedEventKeys: [],
   };
 }
@@ -129,7 +146,40 @@ export function appendLiveRunEvent(
       updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),
     });
   }
-  if (event.type === "tool.requested" || event.type === "confirmation.needed") {
+  if (event.type === "tool.requested" || event.type === "tool.progress") {
+    const callId = event.refs.find((ref) => ref.kind === "tool_call")?.id;
+    const withTool = callId === undefined
+      ? nextRun
+      : withLiveToolActivity(nextRun, {
+          callId,
+          nodeId: event.id,
+          sequence: event.sequence,
+          toolName: event.toolName,
+          summary: event.summary,
+          timestamp: event.timestamp ?? "",
+          display: event.detail?.display,
+          refs: event.refs,
+        });
+    return withLiveModelTurn(withTool, {
+      ...turn,
+      reasoningCompleted: turn.reasoning.text.trim().length > 0 ? true : turn.reasoningCompleted,
+      modelRefs,
+      updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),
+    });
+  }
+  if (isTerminalToolEvent(event)) {
+    const callIds = event.refs.filter((ref) => ref.kind === "tool_call").map((ref) => ref.id);
+    return withLiveModelTurn({
+      ...nextRun,
+      tools: nextRun.tools.filter((tool) => !callIds.includes(tool.callId)),
+    }, {
+      ...turn,
+      reasoningCompleted: turn.reasoning.text.trim().length > 0 ? true : turn.reasoningCompleted,
+      modelRefs,
+      updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),
+    });
+  }
+  if (event.type === "confirmation.needed") {
     return withLiveModelTurn(nextRun, {
       ...turn,
       reasoningCompleted: turn.reasoning.text.trim().length > 0 ? true : turn.reasoningCompleted,
@@ -153,7 +203,13 @@ export function appendLiveRunEvent(
 }
 
 export function isLiveAppendOnlyEvent(event: RunEventLike): boolean {
-  return event.type === "model.output.delta" || event.type === "model.reasoning.delta" || event.type === "model.reasoning.completed";
+  return event.type === "model.output.delta" || event.type === "model.reasoning.delta" ||
+    event.type === "model.reasoning.completed" || event.type === "tool.requested" ||
+    event.type === "tool.progress";
+}
+
+function isTerminalToolEvent(event: RunEventLike): boolean {
+  return event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled";
 }
 
 function isLiveReasoningSettlementEvent(event: RunEventLike): boolean {
@@ -203,6 +259,16 @@ function withLiveModelTurn(live: LiveRunBuffer, turn: LiveModelTurnBuffer): Live
     turns: exists
       ? live.turns.map((item) => item.requestId === turn.requestId ? turn : item)
       : [...live.turns, turn],
+  };
+}
+
+function withLiveToolActivity(live: LiveRunBuffer, activity: LiveToolActivity): LiveRunBuffer {
+  const exists = live.tools.some((item) => item.callId === activity.callId);
+  return {
+    ...live,
+    tools: exists
+      ? live.tools.map((item) => item.callId === activity.callId ? activity : item)
+      : [...live.tools, activity],
   };
 }
 

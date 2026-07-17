@@ -3,13 +3,19 @@ import {
   Agent,
   type AgentOutputType,
   type CallModelInputFilter,
+  type Model,
   type ModelProvider,
+  type ModelRequest,
+  type ModelResponse,
+  type ModelRetryAdvice,
+  type ModelRetryAdviceRequest,
   OpenAIProvider,
   Runner,
   RunContext,
   RunResult,
   RunState,
   type ModelSettings,
+  type StreamEvent,
   isOpenAIChatCompletionsRawModelStreamEvent,
   isOpenAIResponsesRawModelStreamEvent,
   setTracingDisabled,
@@ -33,6 +39,7 @@ import type {
   AgentLoopInput,
   AgentLoopResult,
 } from "../../app/model-runtime/agent-loop.js";
+import { canonicalToolResultMessage } from "../../app/model-runtime/tool-result-message.js";
 import {
   applyOpenAICompatibleChatDialectControls,
   applyOpenAICompatibleChatRequestPolicy,
@@ -45,7 +52,6 @@ import {
   type OpenAIAgentsPendingConfirmation,
 } from "./openai-agents-confirmation.js";
 import {
-  canonicalToolResultMessage,
   canonicalMessagesFromOpenAIAgentsInput,
   createOpenAIAgentsInputMapper,
   modelMessagesForOpenAIProtocol,
@@ -169,6 +175,7 @@ class OpenAIAgentsLoop implements AgentLoop {
       input,
       baseMessages,
       toolResults: [],
+      requestedFactIds: new Set(),
       preflightByFactId: new Map(),
       interruptionFactIds: new WeakMap(),
       modelInput,
@@ -177,7 +184,13 @@ class OpenAIAgentsLoop implements AgentLoop {
     };
     let sdkState: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>> | undefined;
     try {
-      const agent = this.createAgent(execution);
+      const rootModel = withRootToolRoundObserver({
+        model: await this.modelProvider.getModel(this.config.model),
+        protocol: this.config.protocol,
+        execution,
+        onToolRound: input.onToolRound,
+      });
+      const agent = this.createAgent(execution, rootModel);
       sdkState = new RunState(
         new RunContext<SdkExecutionContext>({ execution }),
         modelInput.messages(input.instructions),
@@ -200,7 +213,10 @@ class OpenAIAgentsLoop implements AgentLoop {
     return this.releasePromise;
   }
 
-  private createAgent(execution: ExecutionState): Agent<SdkExecutionContext, AgentOutputType> {
+  private createAgent(
+    execution: ExecutionState,
+    rootModel: Model,
+  ): Agent<SdkExecutionContext, AgentOutputType> {
     const assembly = createOpenAIAgentsToolAssembly({
       execution,
       model: this.config.model,
@@ -209,7 +225,7 @@ class OpenAIAgentsLoop implements AgentLoop {
     return new Agent<SdkExecutionContext, AgentOutputType>({
       name: "AgentArborOrdinaryMechanicalLoop",
       instructions: execution.input.instructions,
-      model: this.config.model,
+      model: rootModel,
       modelSettings: modelSettings({
         config: this.config,
         instructions: execution.input.instructions,
@@ -231,9 +247,7 @@ class OpenAIAgentsLoop implements AgentLoop {
   ): Promise<RunResult<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>> {
     execution.abortSignal = abortSignal;
     const stream = execution.input.onTextDelta !== undefined && supportsSdkStreaming(this.config);
-    const callModelInputFilter = execution.input.maintainContext === undefined
-      ? undefined
-      : createContextMaintenanceFilter(execution, this.config.protocol);
+    const callModelInputFilter = createContextMaintenanceFilter(execution, this.config.protocol);
     if (!stream) {
       return this.runner.run(agent, input, {
         maxTurns: null,
@@ -249,13 +263,14 @@ class OpenAIAgentsLoop implements AgentLoop {
     });
     for await (const event of result) {
       if (isOpenAIChatCompletionsRawModelStreamEvent(event)) {
-        const choice = event.data.event.choices[0];
-        const content = choice?.delta.content;
+        // Some compatible gateways emit non-delta transport events through the
+        // Chat stream channel. They are not text deltas; terminal validation
+        // remains owned by the model boundary guard.
+        const rawEvent = asRecord(event.data.event);
+        const choice = asRecord(Array.isArray(rawEvent.choices) ? rawEvent.choices[0] : undefined);
+        const content = asRecord(choice.delta).content;
         if (typeof content === "string" && content.length > 0) {
           execution.input.onTextDelta?.(content);
-        }
-        if (typeof choice?.finish_reason === "string") {
-          execution.lastStreamFinishReason = choice.finish_reason;
         }
         continue;
       }
@@ -263,14 +278,6 @@ class OpenAIAgentsLoop implements AgentLoop {
         const rawEvent = asRecord(event.data.event);
         if (rawEvent.type === "response.output_text.delta" && typeof rawEvent.delta === "string") {
           execution.input.onTextDelta?.(rawEvent.delta);
-        }
-        if (rawEvent.type === "response.completed" || rawEvent.type === "response.incomplete") {
-          const response = asRecord(rawEvent.response);
-          execution.lastStreamResponseStatus = typeof response.status === "string"
-            ? response.status
-            : rawEvent.type === "response.completed" ? "completed" : "incomplete";
-          const details = asRecord(response.incomplete_details);
-          execution.lastStreamIncompleteReason = typeof details.reason === "string" ? details.reason : undefined;
         }
       }
     }
@@ -378,6 +385,83 @@ class OpenAIAgentsLoop implements AgentLoop {
   }
 }
 
+function withRootToolRoundObserver(input: {
+  readonly model: Model;
+  readonly protocol: OpenAIAgentsLoopProtocol;
+  readonly execution: ExecutionState;
+  readonly onToolRound: AgentLoopInput["onToolRound"];
+}): Model {
+  return input.onToolRound === undefined
+    ? input.model
+    : new RootToolRoundObserverModel(
+        input.model,
+        input.protocol,
+        input.execution,
+        input.onToolRound,
+      );
+}
+
+class RootToolRoundObserverModel implements Model {
+  constructor(
+    private readonly inner: Model,
+    private readonly protocol: OpenAIAgentsLoopProtocol,
+    private readonly execution: ExecutionState,
+    private readonly onToolRound: NonNullable<AgentLoopInput["onToolRound"]>,
+  ) {}
+
+  async getResponse(request: ModelRequest): Promise<ModelResponse> {
+    const response = await this.inner.getResponse(request);
+    await this.acceptToolRound(response);
+    return response;
+  }
+
+  async *getStreamedResponse(request: ModelRequest): AsyncIterable<StreamEvent> {
+    for await (const event of this.inner.getStreamedResponse(request)) {
+      if (event.type === "response_done") {
+        await this.acceptToolRound(event.response);
+      }
+      yield event;
+    }
+  }
+
+  getRetryAdvice(args: ModelRetryAdviceRequest): ModelRetryAdvice | Promise<ModelRetryAdvice | undefined> | undefined {
+    if (args.error instanceof ToolRoundAcceptanceError) {
+      return {
+        suggested: false,
+        reason: "The owning feature did not durably accept the validated tool-call turn.",
+      };
+    }
+    return this.inner.getRetryAdvice?.(args);
+  }
+
+  private async acceptToolRound(response: Pick<ModelResponse, "output">): Promise<void> {
+    const assistantMessage = canonicalMessagesFromOpenAIAgentsInput({
+      protocol: this.protocol,
+      items: response.output,
+    }).find((message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0);
+    if (assistantMessage === undefined) {
+      return;
+    }
+    try {
+      await this.onToolRound({
+        canonicalMessagesBeforeRound: cloneMessages(
+          this.execution.latestRequestMessages ?? this.execution.baseMessages,
+        ),
+        assistantMessage: globalThis.structuredClone(assistantMessage),
+      });
+    } catch (error) {
+      throw new ToolRoundAcceptanceError(error);
+    }
+  }
+}
+
+class ToolRoundAcceptanceError extends Error {
+  constructor(cause: unknown) {
+    super(errorMessage(cause), { cause });
+    this.name = "ToolRoundAcceptanceError";
+  }
+}
+
 function createContextMaintenanceFilter(
   execution: ExecutionState,
   protocol: OpenAIAgentsLoopProtocol,
@@ -389,12 +473,31 @@ function createContextMaintenanceFilter(
       instructions,
       items: modelData.input,
     });
+    let restoredAcceptedToolResult = false;
+    const messagesWithAcceptedToolResults = mappedMessages.map((message) => {
+      if (message.role !== "tool" || message.content.length > 0 || message.toolCallId === undefined) {
+        return message;
+      }
+      const accepted = latestResolvedToolResult(execution.toolResults, message.toolCallId);
+      if (accepted === undefined) return message;
+      restoredAcceptedToolResult = true;
+      return canonicalToolResultMessage(accepted);
+    });
     const canonicalMessages = preserveCanonicalMetadata(
-      mappedMessages,
+      messagesWithAcceptedToolResults,
       execution.latestRequestMessages ?? execution.baseMessages,
     );
     execution.latestRequestMessages = cloneMessages(canonicalMessages);
     execution.latestRequestIncludedResponses = execution.modelRequestCount;
+    if (execution.input.maintainContext === undefined) {
+      execution.modelRequestCount += 1;
+      return restoredAcceptedToolResult
+        ? {
+            instructions,
+            input: createOpenAIAgentsInputMapper({ protocol, messages: canonicalMessages }).messages(instructions),
+          }
+        : modelData;
+    }
     const maintained = await execution.input.maintainContext!({
       messages: canonicalMessages,
       abortSignal: execution.abortSignal,
@@ -407,7 +510,7 @@ function createContextMaintenanceFilter(
       : canonicalMessages;
     execution.latestRequestMessages = cloneMessages(requestMessages);
     execution.modelRequestCount += 1;
-    if (maintained.status === "unchanged") {
+    if (maintained.status === "unchanged" && !restoredAcceptedToolResult) {
       return modelData;
     }
     return {

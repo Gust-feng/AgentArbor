@@ -957,6 +957,7 @@ type SidebarWorkspaceItem = {
   readonly workspaceFolder?: {
     readonly label: string;
     readonly path?: string;
+    readonly selection: "default" | "explicit";
   };
 };
 
@@ -974,8 +975,9 @@ function groupSidebarItemsByWorkspaceFolder<T extends SidebarWorkspaceItem>(
   const groups = new Map<string, { label: string; path?: string; items: T[]; latestTime: number }>();
   for (const item of items) {
     const folder = item.workspaceFolder;
-    const key = folder?.path ?? folder?.label ?? "__ungrouped__";
-    const label = folder?.label ?? "未归类";
+    const isDefaultWorkspace = folder?.selection === "default";
+    const key = isDefaultWorkspace ? "__default_workspace__" : folder?.path ?? folder?.label ?? "__ungrouped__";
+    const label = isDefaultWorkspace ? "默认工作区" : folder?.label ?? "未归类";
     const current = groups.get(key);
     const latestTime = itemTime(item);
     if (current === undefined) {

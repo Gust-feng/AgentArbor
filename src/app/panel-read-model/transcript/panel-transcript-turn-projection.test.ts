@@ -270,7 +270,7 @@ test("assistant turn projection hides stale preview while confirmation is pendin
         summary: "运行命令：dir",
       }),
     ],
-    pending: { confirmationId: "confirmation-call-dir", runId: "run-1" },
+    pending: { confirmationId: "confirmation-call-dir", ownerRunId: "run-1" },
   });
 
   assert.equal(projection.content, "");
@@ -289,7 +289,7 @@ test("assistant turn projection scopes pending confirmations to the owning run",
     latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
     previousEmptyShells: assistantShellSnapshot([]),
     transcriptNodes: [],
-    pending: { confirmationId: "confirmation-1", runId: "run-2" },
+    pending: { confirmationId: "confirmation-1", ownerRunId: "run-2" },
   });
 
   assert.equal(projection.pending, undefined);
@@ -386,6 +386,7 @@ function live(runId: string, outputText: string): LiveRunBuffer {
   return {
     runId,
     appliedEventKeys: [],
+    tools: [],
     turns: [
       {
         requestId: "model-1",

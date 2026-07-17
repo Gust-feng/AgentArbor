@@ -28,7 +28,8 @@ test("completed execution maps canonical facts and releases its run resources on
     },
     async release() { return undefined; },
   });
-  const outcome = await fixture.execution.execute(executionInput());
+  const onToolRound = async (): Promise<void> => undefined;
+  const outcome = await fixture.execution.execute({ ...executionInput(), onToolRound });
 
   assert.deepEqual(outcome, {
     status: "completed",
@@ -39,6 +40,7 @@ test("completed execution maps canonical facts and releases its run resources on
   });
   assert.equal(received?.instructions, ordinaryRunBirth().instructions);
   assert.equal(received?.tools, fixture.resources.tools);
+  assert.equal(received?.onToolRound, onToolRound);
   assert.equal(fixture.releaseCount(), 1);
 });
 

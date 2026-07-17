@@ -43,6 +43,68 @@ test("submitTurn serializes queued turns and rebases the successor on completed 
   ]);
 });
 
+test("a provider failure is terminal and a user message starts a new turn from durable canonical facts", async (t) => {
+  const observedMessages: OrdinaryRunState["canonicalMessages"][] = [];
+  let calls = 0;
+  const run = await fixture(t, {
+    async execute(input) {
+      observedMessages.push(input.messages);
+      calls += 1;
+      if (calls === 1) {
+        return {
+          status: "failed",
+          error: { code: "model_failed", message: "provider disconnected" },
+          canonicalMessages: [
+            ...input.messages,
+            {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ callId: "call-before-disconnect", toolName: "read_file", input: { path: "README.md" } }],
+            },
+            {
+              role: "tool",
+              content: JSON.stringify({ status: "completed", output: { content: "durable tool fact" } }),
+              toolCallId: "call-before-disconnect",
+              toolName: "read_file",
+            },
+          ],
+          toolCalls: [{
+            callId: "call-before-disconnect",
+            toolName: "read_file",
+            input: { path: "README.md" },
+            output: { content: "durable tool fact" },
+            status: "completed",
+            durationMs: 1,
+          }],
+          usage: {},
+        };
+      }
+      return completed(input, "continued in a new model call");
+    },
+  });
+
+  const failed = await run.feature.commands.submitTurn({
+    input: { userMessage: "inspect the project" },
+    birth: ordinaryRunBirth(),
+  });
+  await waitForStatus(run.feature, failed.run.runId, "failed");
+
+  const continued = await run.feature.commands.submitTurn({
+    conversationId: failed.conversation.conversationId,
+    input: { userMessage: "continue from the saved facts" },
+    birth: ordinaryRunBirth(),
+  });
+  await waitForStatus(run.feature, continued.run.runId, "completed");
+
+  assert.equal(calls, 2);
+  assert.equal(continued.run.turn.predecessorRunId, failed.run.runId);
+  assert.deepEqual(observedMessages[1]?.slice(-4).map((message) => message.role), [
+    "user", "assistant", "tool", "user",
+  ]);
+  assert.equal(observedMessages[1]?.at(-2)?.content.includes("durable tool fact"), true);
+  assert.equal(observedMessages[1]?.at(-1)?.content, "continue from the saved facts");
+});
+
 test("cancelling a queued middle turn does not start its successor past an active ancestor", async (t) => {
   let executions = 0;
   const run = await fixture(t, {
@@ -177,12 +239,15 @@ test("two rollbacks preserve a lineage graph across restart and never resurrect 
 });
 
 test("deleteConversation commits a tombstone first, cancels owned work, and is idempotent", async (t) => {
+  const releasedEvidenceOwners: string[] = [];
   const run = await fixture(t, {
     execute(input) {
       return new Promise((resolve) => input.abortSignal.addEventListener("abort", () => resolve({
         status: "cancelled", reason: String(input.abortSignal.reason), canonicalMessages: input.messages, toolCalls: [], usage: {},
       }), { once: true }));
     },
+  }, {
+    releaseToolEvidenceOwner: (ownerId) => { releasedEvidenceOwners.push(ownerId); },
   });
   const submitted = await run.feature.commands.submitTurn({ input: { userMessage: "delete me" }, birth: ordinaryRunBirth() });
   await run.feature.commands.deleteConversation(submitted.conversation.conversationId);
@@ -196,6 +261,7 @@ test("deleteConversation commits a tombstone first, cancels owned work, and is i
     birth: ordinaryRunBirth(),
   }), /deleted/u);
   assert.equal((await createFileSystemOrdinaryConversationControlRepository(run.root).get(submitted.conversation.conversationId))?.state.deletedAt !== undefined, true);
+  assert.deepEqual(releasedEvidenceOwners, [submitted.run.runId]);
 });
 
 test("a failed first run commit leaves only a hidden retry-safe conversation control", async (t) => {
@@ -220,12 +286,19 @@ test("a failed first run commit leaves only a hidden retry-safe conversation con
   assert.equal((await controls.list()).length, 1);
 });
 
-async function fixture(t: test.TestContext, execution: OrdinaryExecutionPort) {
+async function fixture(
+  t: test.TestContext,
+  execution: OrdinaryExecutionPort,
+  options: { readonly releaseToolEvidenceOwner?: (ownerId: string) => void | Promise<void> } = {},
+) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-conversation-"));
   const feature = createOrdinaryAgentFeature({
     repository: createFileSystemOrdinaryRunRepository(root),
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
     execution,
+    ...(options.releaseToolEvidenceOwner === undefined
+      ? {}
+      : { releaseToolEvidenceOwner: options.releaseToolEvidenceOwner }),
     now: clock(),
     idFactory: ids(),
   });

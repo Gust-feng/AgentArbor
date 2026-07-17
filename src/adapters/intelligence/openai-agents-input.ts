@@ -6,7 +6,7 @@ import {
   type ModelMessage,
 } from "../../domain/intelligence/index.js";
 import type { ToolCallRequest, ToolCallResult, ToolFactValue } from "../../domain/tools/index.js";
-import { toolModelAttachmentsFromOutput } from "../../domain/tools/index.js";
+import { canonicalToolResultMessage } from "../../app/model-runtime/tool-result-message.js";
 import { OpenAIModelInputError } from "./openai-model-input-error.js";
 import { openAIResponsesContinuationItems } from "./openai-responses-continuation.js";
 import { openAIResponsesOutputItems } from "./openai-responses-continuation.js";
@@ -80,19 +80,6 @@ export function createOpenAIAgentsInputMapper(input: {
       }
       return sdkToolMessageOutput(message, input.protocol);
     },
-  };
-}
-
-export function canonicalToolResultMessage(result: ToolCallResult): ModelMessage {
-  const attachments = toolModelAttachmentsFromOutput(result.output);
-  return {
-    role: "tool",
-    content: JSON.stringify(result),
-    toolCallId: result.callId,
-    toolName: result.toolName,
-    attachments: attachments === undefined
-      ? undefined
-      : attachments.map((attachment) => globalThis.structuredClone(attachment)),
   };
 }
 

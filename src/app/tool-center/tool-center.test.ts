@@ -1045,7 +1045,7 @@ test("tool display projection ignores oldText/newText preview fields", async () 
   assert.equal(displayJson.includes("old file body"), false);
   assert.equal(displayJson.includes("new file body"), false);
   assert.equal(displayJson.includes("sk-edit-secret"), false);
-  assert.equal(display.kind === "file_diff_preview" ? display.replacements : 0, 1);
+  assert.equal(displayJson.includes("replacements"), false);
 });
 
 test("ToolCenter file diff display exposes the canonical unified diff without redaction", async () => {

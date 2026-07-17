@@ -50,6 +50,7 @@ export function ordinaryRunBirth(): OrdinaryRunBirth {
       securitySummary: "command confirmation enabled",
       warnings: [],
     },
+    workspaceSelection: "explicit",
     informationAccess: {
       sourcePreference: ["codebase"],
       web: {

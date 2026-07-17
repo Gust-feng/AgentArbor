@@ -36,6 +36,7 @@ export type {
   AgentLoopResult,
   AgentLoopToolBoundary,
 } from "./agent-loop.js";
+export { canonicalToolResultMessage } from "./tool-result-message.js";
 
 export type ModelRuntimeRequestPlan = {
   readonly requestId: string;

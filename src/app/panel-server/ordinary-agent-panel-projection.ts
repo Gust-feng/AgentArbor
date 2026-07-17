@@ -182,6 +182,7 @@ export function projectOrdinaryPanelConversation(input: {
     latestRunId: input.conversation.latestRunId,
     workspaceFolder: workspaceFolderSummaryFromPath(
       input.workspaceRun?.birth.capabilitySnapshot.workspace.workspaceDirectory,
+      input.workspaceRun?.birth.workspaceSelection ?? "default",
     ),
     requiresUserAction: pendingAction !== undefined,
     pendingAction,
@@ -236,6 +237,23 @@ function projectBasicRun(
 }
 
 function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): RunEvent {
+  if (activity.type === "tool.requested" || activity.type === "tool.progress") {
+    const payload = liveToolPayload(activity);
+    return {
+      id: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      type: activity.type,
+      title: "",
+      summary: toolSummary("tool.requested", payload),
+      status: "running",
+      timestamp: activity.recordedAt,
+      toolName: activity.request.toolName,
+      refs: [{ kind: "tool_call", id: toolCallFactId(activity.request) }],
+      visibility: "compact",
+      detail: toolStreamDetail("tool.requested", payload),
+    };
+  }
   if (activity.type === "tool.result") {
     const type = activity.result.status === "completed"
       ? "tool.completed"
@@ -363,6 +381,23 @@ function projectTransition(
 
 function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActivity): TranscriptNode {
   const event = projectActivity(run, activity);
+  if (activity.type === "tool.requested" || activity.type === "tool.progress") {
+    return {
+      nodeId: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      // Progress replaces the requested live row instead of creating a log entry.
+      eventType: "tool.requested",
+      kind: "tool",
+      phase: "executing",
+      title: "",
+      summary: event.summary,
+      timestamp: activity.recordedAt,
+      toolName: activity.request.toolName,
+      display: toolStreamDetail("tool.requested", liveToolPayload(activity)).display,
+      refs: event.refs,
+    };
+  }
   if (activity.type === "tool.result") {
     return {
       nodeId: activity.activityId,
@@ -448,8 +483,28 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
 
 function isTranscriptActivity(activity: OrdinaryRunActivity): boolean {
   return activity.type === "model.request" ||
-    activity.type === "model.output.delta" || activity.type === "tool.result" ||
+    activity.type === "model.output.delta" || activity.type === "tool.requested" ||
+    activity.type === "tool.progress" || activity.type === "tool.result" ||
     (activity.event.type !== "run.created" && activity.event.type !== "run.started");
+}
+
+function liveToolPayload(
+  activity: Extract<OrdinaryRunActivity, { readonly type: "tool.requested" | "tool.progress" }>,
+): Readonly<Record<string, unknown>> {
+  const output = activity.type === "tool.progress" && activity.progress.kind === "command_output"
+    ? {
+        stdout: activity.progress.stdoutTail,
+        stderr: activity.progress.stderrTail,
+        stdoutChars: activity.progress.stdoutChars,
+        stderrChars: activity.progress.stderrChars,
+      }
+    : undefined;
+  return {
+    callId: activity.request.callId,
+    toolName: activity.request.toolName,
+    input: activity.request.input,
+    output,
+  };
 }
 
 function isWorkViewEvent(event: RunEvent): boolean {

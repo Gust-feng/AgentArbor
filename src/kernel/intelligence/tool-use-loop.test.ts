@@ -1955,7 +1955,7 @@ test("approval tool messages keep nested partial-output continuation when transp
     durationMs: 1,
     confirmationRequest: {
       confirmationId: "confirmation-large-approval",
-      toolCallFactId: "call-large-approval",
+      toolCallFactId: "tool-fact-large-approval",
       title: "Continue large approval",
       actionSummary: "Continue after inspecting the retained partial result.",
       affectedResources: [],
@@ -1993,7 +1993,7 @@ test("resolved approval history keeps every externalized continuation under aggr
     durationMs: 1,
     confirmationRequest: {
       confirmationId: `confirmation-${label}`,
-      toolCallFactId: "call-multi-stage",
+      toolCallFactId: `tool-fact-${label}`,
       title: `Confirm ${label}`,
       actionSummary: `Confirm ${label} stage.`,
       affectedResources: [],
@@ -2036,7 +2036,7 @@ test("resolved approval aggregate failure preserves a fair preview of every stag
     durationMs: 1,
     confirmationRequest: {
       confirmationId: `confirmation-unretained-${index}`,
-      toolCallFactId: "call-unretained-multi-stage",
+      toolCallFactId: `tool-fact-unretained-${index}`,
       title: `Confirm stage ${index}`,
       actionSummary: `Confirm stage ${index}.`,
       affectedResources: [],
@@ -2096,7 +2096,7 @@ test("resolved approval aggregate fails when only one truncated stage has a cont
     durationMs: 1,
     confirmationRequest: {
       confirmationId: `confirmation-partially-retained-${index}`,
-      toolCallFactId: "call-partially-retained-multi-stage",
+      toolCallFactId: `tool-fact-partially-retained-${index}`,
       title: `Confirm stage ${index}`,
       actionSummary: `Confirm stage ${index}.`,
       affectedResources: [],

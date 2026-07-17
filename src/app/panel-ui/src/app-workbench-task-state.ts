@@ -18,13 +18,15 @@ export function useAppWorkbenchTaskState(app: Pick<AppState, "agentMode" | "conv
 
   useEffect(() => {
     if (app.agentMode !== "normal" || app.conversation === undefined) return;
-    setSelectedWorkspaceDirectory(app.conversation.workspaceFolder?.path);
-  }, [app.agentMode, app.conversation?.conversationId, app.conversation?.workspaceFolder?.path]);
+    const workspace = app.conversation.workspaceFolder;
+    setSelectedWorkspaceDirectory(workspace?.selection === "explicit" ? workspace.path : undefined);
+  }, [app.agentMode, app.conversation?.conversationId, app.conversation?.workspaceFolder?.path, app.conversation?.workspaceFolder?.selection]);
 
   useEffect(() => {
     if (app.agentMode !== "deep" || app.deep === undefined) return;
-    setSelectedWorkspaceDirectory(app.deep.run.workspaceFolder?.path);
-  }, [app.agentMode, app.deep?.run.runId, app.deep?.run.workspaceFolder?.path]);
+    const workspace = app.deep.run.workspaceFolder;
+    setSelectedWorkspaceDirectory(workspace?.selection === "explicit" ? workspace.path : undefined);
+  }, [app.agentMode, app.deep?.run.runId, app.deep?.run.workspaceFolder?.path, app.deep?.run.workspaceFolder?.selection]);
 
   return {
     goal,

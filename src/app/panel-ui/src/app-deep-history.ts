@@ -213,7 +213,8 @@ function conversationWorkspaceFolder(
   const normalized = path.replace(/\\/g, "/");
   const segments = normalized.split("/").filter((segment) => segment.length > 0);
   return {
-    label: segments.at(-1) ?? path,
+    label: (conversation.workspaceSelection ?? "default") === "default" ? "默认工作区" : segments.at(-1) ?? path,
     path,
+    selection: conversation.workspaceSelection ?? "default",
   };
 }

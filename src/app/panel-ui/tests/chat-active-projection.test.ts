@@ -186,7 +186,7 @@ test("active chat projection hides stale conversation preview while confirmation
     },
     run: run("run-1", "running", 3),
     transcriptNodes: [node("run-1", 3, "confirmation", "confirmation.needed", "运行命令：dir")],
-    pending: { confirmationId: "confirmation-call-dir", runId: "run-1" },
+    pending: { confirmationId: "confirmation-call-dir", ownerRunId: "run-1" },
   });
 
   assert.equal(projection.answer, undefined);
@@ -317,6 +317,7 @@ function live(runId: string, outputText: string): LiveRunBuffer {
   return {
     runId,
     appliedEventKeys: [],
+    tools: [],
     turns: [
       {
         requestId: "model-1",

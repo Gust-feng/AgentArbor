@@ -10,7 +10,6 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     chatTranscriptDisplay,
     chatTranscriptChain,
     transcriptTimeline,
-    activityEvidence,
     transcriptConfirmationProjection,
     confirmationDisplayProjection,
     transcriptTimelineCopy,
@@ -39,8 +38,6 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     richTextStyles,
     chatFeedbackStyles,
     transcriptStyles,
-    defaultStyle,
-    glassStyle,
     transcriptConfirmationStyles,
     chatResultStyles,
   ] = await Promise.all([
@@ -49,7 +46,6 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiSource(path.join("components", "chat-transcript-display.tsx")),
     readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
     readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
-    readPanelUiSource(path.join("components", "activity-evidence.tsx")),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-confirmation-projection.ts")),
     readPanelUiSource("confirmation-display-projection.ts"),
     readAppSource(path.join("panel-read-model", "transcript", "panel-transcript-activity-copy.ts")),
@@ -78,8 +74,6 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiStyle("rich-text.css"),
     readPanelUiStyle("chat-feedback.css"),
     readPanelUiStyle("transcript.css"),
-    readPanelUiStyle("style-default.css"),
-    readPanelUiStyle("style-glass.css"),
     readPanelUiStyle("transcript-confirmation.css"),
     readPanelUiStyle("chat-results.css"),
   ]);
@@ -197,35 +191,42 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptTimeline.includes("agent-workline"), true);
   assert.equal(transcriptTimeline.includes("agent-workflow"), false);
   assert.equal(transcriptTimeline.includes("agent-activity"), true);
-  assert.equal(transcriptTimeline.includes("agent-activity-step"), true);
-  assert.equal(transcriptTimeline.includes("agent-activity-step confirmation"), true);
+  assert.equal(transcriptTimeline.includes("agent-record"), true);
+  assert.equal(transcriptTimeline.includes("agent-record-summary"), true);
+  assert.equal(transcriptTimeline.includes("ActivityEvidencePanel"), true);
+  assert.equal(transcriptTimeline.includes("processActivityEntries"), false);
+  assert.equal(transcriptTimeline.includes("ProcessActivityGroup"), false);
+  assert.equal(transcriptTimeline.includes("GroupItemLabel"), false);
+  assert.equal(transcriptTimeline.includes("检查内容"), false);
+  assert.equal(transcriptTimeline.includes("执行命令"), false);
+  assert.equal(transcriptTimeline.includes("agent-activity-step"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-marker"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-toggle"), false);
-  assert.equal(transcriptTimeline.includes("agent-activity-disclosure"), true);
-  assert.equal(transcriptTimeline.includes("expandable={!selectable}"), true);
-  assert.equal(transcriptTimeline.includes("function LineDeltaIndicator"), true);
-  assert.equal(transcriptTimeline.includes("function visibleLineDeltaForItem"), true);
-  assert.equal(transcriptTimeline.includes("agent-activity-line-prefix"), true);
-  assert.equal(transcriptTimeline.includes("agent-activity-line-delta"), true);
-  assert.equal(transcriptTimeline.includes("const delta = item.lineDelta"), true);
-  assert.equal(transcriptTimeline.includes("isLineDeltaRunning"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-disclosure"), false);
+  assert.equal(transcriptTimeline.includes("expandable={!selectable}"), false);
+  assert.equal(transcriptTimeline.includes("function LineDeltaIndicator"), false);
+  assert.equal(transcriptTimeline.includes("function visibleLineDeltaForItem"), false);
+  assert.equal(transcriptTimeline.includes("agent-activity-line-prefix"), false);
+  assert.equal(transcriptTimeline.includes("agent-activity-line-delta"), false);
+  assert.equal(transcriptTimeline.includes("metric.lineDelta"), false);
+  assert.equal(transcriptTimeline.includes("isLineDeltaRunning"), false);
   assert.equal(transcriptTimeline.includes("lineDeltasEqual(left.lineDelta, right.lineDelta)"), true);
-  assert.equal(transcriptTimeline.includes("ActivityEvidencePanel item={item}"), true);
-  assert.equal(activityEvidence.includes('section.format === "source"'), true);
-  assert.equal(activityEvidence.includes('section.format === "quote"'), true);
-  assert.equal(activityEvidence.includes('section.format === "diff"'), true);
-  assert.equal(activityEvidence.includes("function diffLineParts"), true);
-  assert.equal(activityEvidence.includes("function shouldHideSectionTitle"), true);
-  assert.equal(activityEvidence.includes("hideTitle={shouldHideSectionTitle"), true);
-  assert.equal(activityEvidence.includes("function expandedDetailSectionsForItem"), true);
-  assert.equal(activityEvidence.includes('item.tone === "thinking" ? "quote" : "plain"'), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-expanded-detail"), false);
+  assert.equal(transcriptTimeline.includes('props.section.format === "source"'), false);
+  assert.equal(transcriptTimeline.includes('props.section.format === "quote"'), false);
+  assert.equal(transcriptTimeline.includes('props.section.format === "diff"'), false);
+  assert.equal(transcriptTimeline.includes("function diffLineParts"), false);
+  assert.equal(transcriptTimeline.includes("function shouldHideExpandedSectionTitle"), false);
+  assert.equal(transcriptTimeline.includes("data-title-hidden"), false);
+  assert.equal(transcriptTimeline.includes("function expandedDetailSectionsForItem"), false);
+  assert.equal(transcriptTimeline.includes('item.tone === "thinking" ? "quote" : "plain"'), false);
   assert.equal(transcriptTimeline.includes("expandedDetail"), true);
-  assert.equal(transcriptTimeline.includes("function visibleBadgesForItem"), true);
-  assert.equal(transcriptTimeline.includes("shouldShowStatusBadge"), true);
+  assert.equal(transcriptTimeline.includes("function visibleBadgesForItem"), false);
+  assert.equal(transcriptTimeline.includes("shouldShowStatusBadge"), false);
   assert.equal(transcriptTimeline.includes("badge={{ label: item.copy.label"), false);
   assert.equal(transcriptTimeline.includes("item.badges?.map((badge"), false);
   assert.equal(transcriptTimeline.includes("function shouldRenderExpandedDetail"), true);
-  assert.equal(transcriptTimeline.includes('if (item.tone === "thinking")'), true);
+  assert.equal(transcriptTimeline.includes('if (item.tone === "thinking")'), false);
   assert.equal(transcriptTimeline.includes('item.tone === "thinking" || item.tone === "narration" || item.tone === "system"'), false);
   assert.equal(transcriptTimeline.includes("timelineConfirmationProjection"), false);
   assert.equal(transcriptTimeline.includes("confirmationForNode"), false);
@@ -240,10 +241,10 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptTimeline.includes("agent-workline-confirmation"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-rail"), false);
   assert.equal(transcriptTimeline.includes("allWorkflowItems.map"), false);
-  assert.equal(transcriptTimeline.includes("items.map"), true);
-  assert.equal(transcriptTimeline.includes("visibleItems.map"), false);
+  assert.equal(transcriptTimeline.includes("items.map"), false);
+  assert.equal(transcriptTimeline.includes("visibleItems.map"), true);
   assert.equal(transcriptTimeline.includes('"thinking" | "narration" | "tool"'), false);
-  assert.equal(transcriptTimeline.includes('"confirmation"'), false);
+  assert.equal(transcriptTimeline.includes('"confirmation"'), true);
   assert.equal(transcriptTimeline.includes("export function visibleTranscriptNodes"), false);
   assert.equal(transcriptTimeline.includes("node.eventType"), false);
   assert.equal(transcriptTimeline.includes("timelineRowIdentity"), false);
@@ -253,14 +254,14 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptTimeline.includes("readonly collapsed?: boolean"), true);
   assert.equal(transcriptTimeline.includes("readonly lifecycle?:"), true);
   assert.equal(transcriptTimeline.includes("readonly collapseReason?:"), true);
-  assert.equal(transcriptTimeline.includes("data-lifecycle={props.lifecycle}"), true);
-  assert.equal(transcriptTimeline.includes("data-collapse-reason={props.collapseReason}"), true);
+  assert.equal(transcriptTimeline.includes('"data-lifecycle": props.lifecycle'), true);
+  assert.equal(transcriptTimeline.includes('"data-collapse-reason": props.collapseReason'), true);
   assert.equal(chatTranscriptChain.includes("lifecycle={segment.lifecycle}"), true);
   assert.equal(chatTranscriptChain.includes("collapseReason={segment.collapseReason}"), true);
   assert.equal(transcriptTimeline.includes("agent-workline-disclosure"), true);
   assert.equal(transcriptTimeline.includes("agent-workline-summary"), true);
-  assert.equal(transcriptTimeline.includes("agent-workline-summary-text"), true);
-  assert.equal(transcriptTimeline.includes("collapsedTimelineSummary"), true);
+  assert.equal(transcriptTimeline.includes("agent-workline-summary-chip"), false);
+  assert.equal(transcriptTimeline.includes("activityMetrics"), false);
   assert.equal(transcriptTimelineCopy.includes("export function activityLineForNode"), true);
   assert.equal(transcriptTimelineCopy.includes("export function activityItemsForNodes"), true);
   assert.equal(transcriptTimelineCopy.includes("export function displayActivityItemsForNodes"), true);
@@ -343,6 +344,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptChain.includes("export function AssistantMessage"), true);
   assert.equal(chatTranscriptChain.includes("export function AssistantAvatar"), false);
   assert.equal(chatTranscriptChain.includes("export function TypingDots"), false);
+  assert.equal(chatTranscriptChain.includes("typing-dots"), true);
   assert.equal(chatActive.includes("session-placeholder"), false);
   assert.equal(chatTranscriptChain.includes("collapseTimeline"), false);
   assert.equal(chatTranscriptChain.includes("assistant-workline-collapsed"), true);
@@ -401,10 +403,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptChain.includes(".filter((segment) => segment.kind === \"activity\")"), true);
   assert.equal(chatTranscriptChain.includes("className=\"assistant-failure-activity\""), true);
   assert.equal(chatTranscriptChain.includes("activitySegments.map((segment) => ("), true);
-  assert.match(
-    conversationDisplayListProjection,
-    /const terminalStatus = assistantTerminalStatus\(turn\.status\);[\s\S]*items\.push\(terminalStatus !== undefined[\s\S]*workflow,[\s\S]*failure: assistantDisplay\.failure,[\s\S]*terminalStatus,/,
-  );
+  assert.match(conversationDisplayListProjection, /const terminalStatus = assistantTerminalStatus\(turn\.status\);[\s\S]*terminalStatus !== undefined[\s\S]*workflow,[\s\S]*failure: assistantDisplay\.failure/);
   assert.equal(conversationDisplayListProjection.includes("assistantFailureParts("), false);
   assert.equal(chatActive.includes("错误信息："), false);
   assert.equal(chatTranscriptChain.includes("错误信息："), false);
@@ -501,7 +500,9 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(liveStreamText.includes("animateOnMount"), true);
   assert.equal(liveStreamText.includes("shouldAnimateSettledText"), false);
   assert.equal(liveStreamText.includes("setStreamingRender"), false);
-  assert.equal(liveStreamText.includes('live ? "streaming" : "settled"'), true);
+  assert.equal(liveStreamText.includes("streamingRender ? \"streaming\" : \"settled\""), false);
+  assert.equal(liveStreamText.includes("const rendered = live && renderStreamingText !== undefined"), true);
+  assert.equal(liveStreamText.includes('className={`live-stream-box ${live ? "streaming" : "settled"} ${tone}`}'), true);
   assert.equal(liveStreamText.includes("updateFrozenMarkdownStreamState"), false);
   assert.equal(liveStreamText.includes("markdownStreamViewport"), false);
   assert.equal(liveStreamText.includes("live-stream-frozen-chunk"), false);
@@ -510,9 +511,10 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(liveStreamText.includes("live-stream-live-tail-text"), false);
   assert.equal(liveStreamText.includes("renderText(viewport.liveTail)"), false);
   assert.equal(liveStreamText.includes("{viewport.liveTail}</span>"), false);
-  assert.equal(liveStreamText.includes("renderText === undefined ? text : renderText(text)"), true);
-  assert.equal(liveStreamText.includes("renderStreamingText(text)"), true);
-  assert.equal(liveStreamText.includes("consumeStreamingTextFrame"), false);
+  assert.equal(liveStreamText.includes("renderText === undefined ? displayed"), false);
+  assert.equal(liveStreamText.includes("renderText(displayed)"), false);
+  assert.equal(liveStreamText.includes("renderText(text)"), true);
+  assert.equal(liveStreamText.includes("consumeStreamingTextFrame(stateRef.current, latestPropsRef.current.tone)"), false);
   assert.equal(liveStreamText.includes("container.textContent"), false);
   assert.equal(styleEntry.includes('@import "./styles/chat-layout.css"'), true);
   assert.equal(styleEntry.includes('@import "./styles/chat-composer.css"'), true);
@@ -546,6 +548,15 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatComposerStyles.includes(".model-select-button"), false);
   assert.equal(chatComposerStyles.includes(".chat-active-grid"), false);
   assert.equal(chatMessageStyles.includes(".chat-active-grid"), true);
+  assert.equal(chatMessageStyles.includes(".session-stream"), true);
+  assert.equal(chatMessageStyles.includes(".transcript-list"), true);
+  assert.match(chatMessageStyles, /\.chat-active-grid \{[^}]*width: 100%;[^}]*max-width: var\(--panel-reading-width\);[^}]*min-width: 0;/su);
+  assert.match(chatMessageStyles, /\.session-stream \{[^}]*width: 100%;[^}]*max-width: 100%;[^}]*min-width: 0;/su);
+  assert.match(chatMessageStyles, /\.transcript-list \{[^}]*width: 100%;[^}]*max-width: 100%;[^}]*min-width: 0;/su);
+  assert.match(chatMessageStyles, /\.assistant-message \{[^}]*width: 100%;[^}]*max-width: 100%;[^}]*min-width: 0;/su);
+  assert.match(chatMessageStyles, /\.assistant-message-body \{[^}]*width: 100%;[^}]*max-width: var\(--panel-reading-width\);[^}]*min-width: 0;/su);
+  assert.equal(chatMessageStyles.includes(".assistant-message-body"), true);
+  assert.equal(chatMessageStyles.includes(".assistant-message {"), true);
   assert.equal(chatMessageStyles.includes("task-situation"), false);
   assert.equal(chatMessageStyles.includes(".user-message-queued"), true);
   assert.equal(chatMessageStyles.includes(".assistant-workline-collapsed"), true);
@@ -565,6 +576,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatMessageStyles.includes(".live-stream-frozen-chunk"), false);
   assert.equal(chatMessageStyles.includes("transition: color"), false);
   assert.equal(richTextStyles.includes(".rich-text"), true);
+  assert.match(richTextStyles, /\.rich-text \{[^}]*width: 100%;[^}]*max-width: 100%;[^}]*min-width: 0;/su);
   assert.equal(richTextStyles.includes(".live-stream-live-tail-text"), false);
   assert.equal(richTextStyles.includes("white-space: normal"), false);
   assert.equal(richTextStyles.includes("min-height: 1.76em"), true);
@@ -574,36 +586,41 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptStyles.includes(".agent-workline"), true);
   assert.equal(transcriptStyles.includes(".agent-workline-disclosure"), true);
   assert.equal(transcriptStyles.includes(".agent-workline-summary"), true);
-  assert.equal(transcriptStyles.includes(".agent-workline-summary-text"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline-summary-chip"), false);
   assert.equal(transcriptStyles.includes(".agent-workline-summary-icon"), false);
   assert.equal(transcriptStyles.includes(".agent-workline-summary-chevron"), true);
   assert.equal(transcriptStyles.includes(".agent-workflow"), false);
   assert.equal(transcriptStyles.includes(".agent-activity"), true);
-  assert.equal(transcriptStyles.includes(".agent-activity-step"), true);
+  assert.equal(transcriptStyles.includes(".agent-record"), true);
+  assert.equal(transcriptStyles.includes(".agent-record-summary"), true);
+  assert.equal(transcriptStyles.includes(".agent-evidence-panel"), true);
+  assert.equal(transcriptStyles.includes(".agent-record-action"), false);
+  assert.equal(transcriptStyles.includes(".agent-record-group"), false);
+  assert.equal(transcriptStyles.includes(".agent-group-item"), false);
+  assert.match(transcriptStyles, /\.agent-command-line \{[^}]*display: flex;[^}]*width: 100%;[^}]*min-width: 0;/su);
+  assert.match(transcriptStyles, /\.agent-command-line code \{[^}]*flex: 1 1 auto;[^}]*min-width: 0;[^}]*white-space: pre-wrap;[^}]*overflow-wrap: anywhere;/su);
+  assert.equal(transcriptStyles.includes(".agent-command-line > svg"), false);
+  assert.equal(transcriptStyles.includes(".agent-activity-step"), false);
   assert.equal(transcriptStyles.includes(".agent-activity-marker"), false);
   assert.equal(transcriptStyles.includes(".agent-activity-toggle"), false);
-  assert.equal(transcriptStyles.includes(".agent-activity-disclosure"), true);
-  assert.equal(transcriptStyles.includes(".agent-activity-label"), true);
-  assert.equal(transcriptStyles.includes(".agent-activity-line-prefix"), true);
-  assert.equal(transcriptStyles.includes(".agent-activity-line-delta"), true);
-  assert.equal(transcriptStyles.includes(".agent-activity-line-delta-add"), true);
-  assert.equal(transcriptStyles.includes(".agent-activity-line-delta-remove"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-disclosure"), false);
+  assert.equal(transcriptStyles.includes(".agent-activity-label"), false);
+  assert.equal(transcriptStyles.includes(".agent-activity-line-prefix"), false);
+  assert.equal(transcriptStyles.includes(".agent-activity-line-delta"), false);
+  assert.equal(transcriptStyles.includes(".agent-activity-line-delta-add"), false);
+  assert.equal(transcriptStyles.includes(".agent-activity-line-delta-remove"), false);
   assert.equal(transcriptStyles.includes(".agent-workline-summary-chip .agent-activity-line-delta"), false);
-  assert.equal(transcriptStyles.includes("@keyframes agent-line-delta-pulse"), true);
+  assert.equal(transcriptStyles.includes("@keyframes agent-line-delta-pulse"), false);
+  assert.equal(transcriptStyles.includes("@keyframes agent-record-pulse"), true);
   assert.equal(transcriptStyles.includes("prefers-reduced-motion: reduce"), true);
-  assert.equal(transcriptStyles.includes(".agent-activity-detail"), true);
-  assert.equal(transcriptStyles.includes(".agent-evidence-panel"), true);
+  assert.equal(transcriptStyles.includes(".agent-activity-detail"), false);
+  assert.equal(transcriptStyles.includes(".agent-activity-expanded-detail"), false);
   assert.equal(transcriptStyles.includes(".agent-evidence-source"), true);
   assert.equal(transcriptStyles.includes(".agent-evidence-quote"), true);
   assert.equal(transcriptStyles.includes(".agent-evidence-diff"), true);
   assert.equal(transcriptStyles.includes('.agent-evidence-diff-line[data-kind="add"]'), true);
-  assert.equal(transcriptStyles.includes('.agent-activity-disclosure[data-tone="thinking"] .agent-evidence-quote'), true);
-  assert.equal(transcriptStyles.includes("max-height: min(34vh, 360px)"), true);
+  assert.equal(transcriptStyles.includes("max-height: min(36vh, 360px)"), true);
   assert.equal(transcriptStyles.includes("overscroll-behavior: contain"), false);
-  assert.match(transcriptStyles, /\.agent-activity-step\[data-current="true"\]\s*\{[\s\S]*?background:\s*transparent;/);
-  assert.match(transcriptStyles, /\.agent-activity-label\s*\{[\s\S]*?background:\s*transparent;/);
-  assert.equal(defaultStyle.includes(".agent-activity-step[data-current"), false);
-  assert.equal(glassStyle.includes(".agent-activity-step[data-current"), false);
   assert.equal(transcriptStyles.includes(".agent-workline-current"), false);
   assert.equal(transcriptStyles.includes(".agent-workline-label"), false);
   assert.equal(transcriptStyles.includes(".agent-workline-detail"), false);

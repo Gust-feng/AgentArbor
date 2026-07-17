@@ -60,14 +60,32 @@ test("run and conversation projection are protocol-neutral for both supported Op
     assert.equal(view.agentDefinitionRef, run.birth.agentDefinitionRef);
     assert.deepEqual(view.capabilityResolution, run.capabilityResolution);
     assert.equal(conversation.currentRun?.run.runId, run.runId);
-    assert.deepEqual(conversation.workspaceFolder, {
-      label: "workspace",
-      path: "Z:/workspace",
-      selection: "explicit",
-    });
+    assert.deepEqual(conversation.workspaceFolder, { label: "workspace", path: "Z:/workspace", selection: "explicit" });
     assert.equal(conversation.turns[1]?.responseModel?.protocolKind, protocol);
     assert.equal(conversation.turns[1]?.responseModel?.model, run.birth.config.model);
   }
+});
+
+test("legacy conversation projection treats a missing workspace selection as the configured default", () => {
+  const base = runState({ runId: "default-workspace-run", status: { kind: "completed", answer: "done" } });
+  const run: OrdinaryRunState = {
+    ...base,
+    birth: {
+      ...base.birth,
+      workspaceSelection: undefined,
+    },
+  };
+
+  const conversation = projectOrdinaryPanelConversation({
+    conversation: conversationFrom(run),
+    workspaceRun: run,
+  });
+
+  assert.deepEqual(conversation.workspaceFolder, {
+    label: "默认工作区",
+    path: "Z:/workspace",
+    selection: "default",
+  });
 });
 
 test("queued, running, approval and terminal states map without manufacturing another status source", () => {
@@ -192,9 +210,52 @@ test("model request activity is visible as quiet workflow progress", () => {
   assert.equal(node?.summary, "分析工具结果");
 });
 
+test("live tool progress projects one executing command row with bounded output evidence", () => {
+  const run = runState({ runId: "live-command-run", status: { kind: "running" } });
+  const request = {
+    callId: "call-command",
+    toolName: "shell_command",
+    input: { commandLine: "pnpm test" },
+  } as const;
+  const activity: OrdinaryRunActivity = {
+    activityId: "tool-live:call-command",
+    runId: run.runId,
+    sequence: 3,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+    type: "tool.progress",
+    durability: "live_only",
+    request,
+    progress: {
+      kind: "command_output",
+      stdoutTail: "tests are running\n",
+      stdoutChars: 18,
+      stderrChars: 0,
+    },
+  };
+  const replay: OrdinaryRunActivityReplay = {
+    cursor: { streamId: "ordinary-stream-1", sequence: 3 },
+    reset: false,
+    activities: [activity],
+  };
+
+  const batch = projectOrdinaryPanelActivityBatch({ run, replay });
+  const view = projectOrdinaryPanelRunView({ run, fullReplay: replay });
+  const event = batch.events[0];
+  const node = view.workView.transcriptNodes[0];
+
+  assert.equal(event?.type, "tool.progress");
+  assert.equal(event?.detail?.display?.kind, "command_summary");
+  if (event?.detail?.display?.kind === "command_summary") {
+    assert.equal(event.detail.display.commandLine, "pnpm test");
+    assert.equal(event.detail.display.stdoutPreview, "tests are running");
+  }
+  assert.equal(node?.eventType, "tool.requested");
+  assert.equal(node?.phase, "executing");
+  assert.equal(node?.nodeId, "tool-live:call-command");
+});
+
 test("approval projection keeps the complete confirmation and canonical tool result", () => {
-  const request = { ...confirmation("approval-run"), toolCallFactId: "call-approval" };
-  const projectedRequest = { ...request, ownerRunId: "approval-run" };
+  const request = confirmation("approval-run");
   const run = runState({
     runId: "approval-run",
     status: {
@@ -226,11 +287,12 @@ test("approval projection keeps the complete confirmation and canonical tool res
     fullReplay: replay(run, [createdEvent(run), startedEvent(run), requested]),
   });
 
-  assert.deepEqual(view.workView.pendingConfirmation, projectedRequest);
+  const projectedConfirmation = { ...request, ownerRunId: run.runId };
+  assert.deepEqual(view.workView.pendingConfirmation, projectedConfirmation);
   assert.deepEqual(view.detail.toolResults, run.toolCalls);
   assert.equal(view.detail.continuationAvailability, "live");
   const node = view.workView.transcriptNodes.find((item) => item.kind === "confirmation");
-  assert.deepEqual(node?.confirmation, projectedRequest);
+  assert.deepEqual(node?.confirmation, projectedConfirmation);
   assert.equal(view.replay.events.at(-1)?.type, "confirmation.needed");
 });
 
@@ -324,11 +386,7 @@ test("conversation DTO is a one-way projection with full turns, attachments and 
     assistantTurnId: run.turn.assistantTurnId,
   });
   assert.equal(projected.currentRun?.run.runId, run.runId);
-  assert.deepEqual(projected.workspaceFolder, {
-    label: "workspace",
-    path: "Z:/workspace",
-    selection: "explicit",
-  });
+  assert.deepEqual(projected.workspaceFolder, { label: "workspace", path: "Z:/workspace", selection: "explicit" });
   assert.deepEqual(summary.workspaceFolder, projected.workspaceFolder);
   assert.equal(projected.turns[0]?.attachments?.[0]?.summary, "附件摘要 <raw>");
   assert.equal(projected.turns[1]?.content, "");

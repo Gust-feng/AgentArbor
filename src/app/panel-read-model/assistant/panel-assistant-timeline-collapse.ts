@@ -5,7 +5,12 @@ export type TimelineCollapseRunLike = {
 
 export type TimelineCollapseActivityLike = {
   readonly variant?: string;
+  readonly tone?: string;
+  readonly toolKind?: string;
   readonly phase: string;
+  readonly lead?: {
+    readonly subject: string;
+  };
   readonly copy: {
     readonly label?: string;
     readonly detail: string;
@@ -25,6 +30,10 @@ export type TimelineSegmentLifecycle = "open" | "settled" | "attention";
 export type TimelineCollapseDecision = {
   readonly collapsed: boolean;
   readonly reason: TimelineCollapseReason;
+};
+
+export type ActiveTimelineStatus = {
+  readonly label: string;
 };
 
 export function shouldCollapseTimelineAfterTurn(input: {
@@ -113,15 +122,14 @@ export function collapsedTimelineSummary(input: {
   if (input.hasCurrentConfirmation) {
     return "等待处理";
   }
-  const status = timelineStatusLabel(input);
-  if (status !== undefined && status !== "已完成") {
-    return status;
-  }
-  const action = dominantTimelineAction(input.items);
-  if (action !== undefined) {
-    return completedTimelineActionLabel(action);
-  }
-  return input.items.length === 1 ? "完成 1 步" : `完成 ${input.items.length} 步`;
+  return `过程 · ${input.items.length}`;
+}
+
+export function activeTimelineStatus(input: {
+  readonly items: readonly TimelineCollapseActivityLike[];
+}): ActiveTimelineStatus {
+  const current = [...input.items].reverse().find((item) => isActiveTimelinePhase(item.phase));
+  return { label: current === undefined ? "正在处理" : activePhaseCopy(current) };
 }
 
 export function isSettledTimelineStatus(status: string | undefined): boolean {
@@ -161,71 +169,36 @@ function isAttentionTimelinePhase(phase: string): boolean {
     phase === "waiting_approval";
 }
 
-function timelineStatusLabel(input: {
-  readonly items: readonly TimelineCollapseActivityLike[];
-  readonly hasCurrentConfirmation: boolean;
-}): string | undefined {
-  if (input.hasCurrentConfirmation) {
-    return "等待处理";
-  }
-  const phase = input.items.at(-1)?.phase;
-  if (phase === "completed") return "已完成";
-  if (phase === "approved") return "已批准";
-  if (phase === "denied") return "已不执行";
-  if (phase === "guidance") return "已补充要求";
-  if (phase === "cancelled") return "已取消";
-  if (phase === "failed") return "未完成";
-  if (phase === "blocked") return "需要处理";
-  if (phase === "waiting_approval") return "等待处理";
-  if (phase === "noted" || phase === "preparing" || phase === "executing") return "进行中";
-  return undefined;
+function isActiveTimelinePhase(phase: string): boolean {
+  return phase === "noted" || phase === "preparing" || phase === "executing";
 }
 
-type TimelineActionKind = "command" | "edit" | "read" | "search" | "web" | "request" | "other";
-
-function dominantTimelineAction(items: readonly TimelineCollapseActivityLike[]): {
-  readonly kind: TimelineActionKind;
-  readonly count: number;
-} | undefined {
-  const counts = new Map<TimelineActionKind, number>();
-  for (const item of items) {
-    const kind = timelineActionKind(item);
-    if (kind === undefined) {
-      continue;
-    }
-    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+function activePhaseCopy(item: TimelineCollapseActivityLike): string {
+  if (item.variant === "context_compaction" || item.tone === "thinking" || item.tone === "narration") {
+    return "正在处理";
   }
-  if (counts.size === 0) {
-    return items.length > 0 ? { kind: "other", count: items.length } : undefined;
-  }
-  if (counts.size > 1) {
-    return { kind: "other", count: items.length };
-  }
-  const [entry] = counts.entries();
-  return entry === undefined ? undefined : { kind: entry[0], count: entry[1] };
-}
-
-function timelineActionKind(item: TimelineCollapseActivityLike): TimelineActionKind | undefined {
+  const target = activityStatusTarget(item.lead?.subject);
+  if (item.toolKind === "read") return target === undefined ? "正在读取内容" : `正在读取 ${target}`;
+  if (item.toolKind === "directory") return target === undefined ? "正在查看目录" : `正在查看 ${target}`;
+  if (item.toolKind === "web") return target === undefined ? "正在查看内容" : `正在查看 ${target}`;
+  if (item.toolKind === "search") return target === undefined ? "正在搜索" : `正在搜索 ${target}`;
+  if (item.toolKind === "edit") return target === undefined ? "正在修改内容" : `正在修改 ${target}`;
+  if (item.toolKind === "command") return "正在运行命令";
   const label = item.copy.label?.trim();
-  if (label === "命令") return "command";
-  if (label === "编辑" || label === "写入" || label === "创建" || label === "删除" || label === "生成") return "edit";
-  if (label === "读取" || label === "查看") return "read";
-  if (label === "搜索") return "search";
-  if (label === "网页") return "web";
-  if (label === "请求") return "request";
-  return undefined;
+  if (label === "读取" || label === "查看") return "正在查看内容";
+  if (label === "搜索") return "正在搜索";
+  if (label === "编辑" || label === "写入" || label === "创建" || label === "删除" || label === "生成") {
+    return "正在修改内容";
+  }
+  if (label === "网页" || label === "请求") return "正在查看内容";
+  if (label === "命令") return "正在运行命令";
+  return "正在处理";
 }
 
-function completedTimelineActionLabel(action: {
-  readonly kind: TimelineActionKind;
-  readonly count: number;
-}): string {
-  const count = action.count;
-  if (action.kind === "command") return `已运行 ${count} 条命令`;
-  if (action.kind === "edit") return `已编辑 ${count} 个文件`;
-  if (action.kind === "read") return `已读取 ${count} 项`;
-  if (action.kind === "search") return `已搜索 ${count} 次`;
-  if (action.kind === "web") return `已查看 ${count} 个网页`;
-  if (action.kind === "request") return `已发送 ${count} 个请求`;
-  return count === 1 ? "完成 1 步" : `完成 ${count} 步`;
+function activityStatusTarget(value: string | undefined): string | undefined {
+  const target = value?.replace(/\s+/g, " ").trim();
+  if (target === undefined || target.length === 0) {
+    return undefined;
+  }
+  return target.length <= 56 ? target : `${target.slice(0, 55).trimEnd()}…`;
 }

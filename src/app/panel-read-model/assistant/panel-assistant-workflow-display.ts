@@ -131,6 +131,7 @@ function workflowDisplayFromMessageView<
       const effectiveDecision = settledOverride ?? currentDecision;
       const previousCollapse = previousCollapseState(input.previous, segment.segmentKey);
       const inheritPreviousCollapse = previousCollapse.collapsed &&
+        segment.lifecycle === "settled" &&
         !forceVisible &&
         !activitySegmentNeedsAttention(segment, effectiveDecision);
       return {

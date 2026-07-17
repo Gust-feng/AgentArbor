@@ -1,6 +1,7 @@
 import { persistedModelProtocolExtensions, type ModelMessage, type ModelUsage } from "../../domain/intelligence/index.js";
 import type { RunCapabilityResolution } from "../../domain/config/index.js";
 import { toolCallFactId, type ToolCallResult } from "../../domain/tools/index.js";
+import { canonicalToolResultMessage } from "../model-runtime/tool-result-message.js";
 import type {
   OrdinaryRunBirth,
   OrdinaryRunEvent,
@@ -49,7 +50,7 @@ export type OrdinaryRunTransition =
   | {
       readonly type: "block";
       readonly reason: { readonly code: string; readonly message: string };
-      readonly continueBy: "new_turn" | "retry";
+      readonly continueBy: "new_turn";
       readonly canonicalMessages?: readonly ModelMessage[];
       readonly toolCalls?: readonly ToolCallResult[];
     };
@@ -110,6 +111,7 @@ export function transitionOrdinaryRun(input: {
     ...input.state,
     status: nextStatus,
     canonicalMessages: messagesAfter(input.state, input.transition),
+    pendingToolRound: pendingToolRoundAfter(input.state, input.transition),
     toolCalls: toolCallsAfter(input.state, input.transition),
     toolResultRecordedAt: toolResultRecordedAtAfter(input.state, input.transition, input.recordedAt),
     usage: usageAfter(input.state, input.transition),
@@ -125,7 +127,11 @@ export function transitionOrdinaryRun(input: {
   return nextState;
 }
 
-/** An approval pause must name exactly the tool facts awaiting a decision. */
+/**
+ * An approval pause is only meaningful when it names the exact tool facts that
+ * are waiting. Keep this transition invariant aligned with the durable v3
+ * snapshot contract so malformed execution ports fail before persistence.
+ */
 function assertAwaitingApprovalFacts(state: OrdinaryRunState): void {
   if (state.status.kind !== "awaiting_approval") return;
   const approvalFacts = state.toolCalls.filter((result) => result.status === "approval_required");
@@ -140,33 +146,12 @@ function assertAwaitingApprovalFacts(state: OrdinaryRunState): void {
       factsByConfirmationId.size !== approvalFacts.length ||
       requestsById.size !== factsByConfirmationId.size ||
       [...requestsById].some(([confirmationId, request]) =>
-        !sameConfirmationRequest(request, factsByConfirmationId.get(confirmationId)))) {
+        JSON.stringify(request) !== JSON.stringify(factsByConfirmationId.get(confirmationId)))) {
     throw new OrdinaryFeatureError(
       "ordinary_run_state_conflict",
       "An Ordinary approval pause must match its approval tool facts one-to-one",
     );
   }
-}
-
-function sameConfirmationRequest(
-  left: NonNullable<ToolCallResult["confirmationRequest"]>,
-  right: NonNullable<ToolCallResult["confirmationRequest"]> | undefined,
-): boolean {
-  return right !== undefined &&
-    left.confirmationId === right.confirmationId &&
-    left.toolCallFactId === right.toolCallFactId &&
-    left.conversationId === right.conversationId &&
-    left.title === right.title &&
-    left.actionSummary === right.actionSummary &&
-    left.consequence === right.consequence &&
-    left.riskLevel === right.riskLevel &&
-    left.resumeAvailability === right.resumeAvailability &&
-    left.requestedAt === right.requestedAt &&
-    left.expiresAt === right.expiresAt &&
-    left.affectedResources.length === right.affectedResources.length &&
-    left.affectedResources.every((value, index) => value === right.affectedResources[index]) &&
-    left.sourceRefs.length === right.sourceRefs.length &&
-    left.sourceRefs.every((value, index) => value === right.sourceRefs[index]);
 }
 
 function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransition): OrdinaryRunStatus {
@@ -210,9 +195,43 @@ function messagesAfter(state: OrdinaryRunState, transition: OrdinaryRunTransitio
     ]);
   }
   if ("canonicalMessages" in transition && transition.canonicalMessages !== undefined) {
+    // Never replace the write-ahead prefix with a partial assistant/tool group.
+    if (state.pendingToolRound !== undefined && !canonicalMessagesResolveToolRound(
+      transition.canonicalMessages,
+      state.pendingToolRound.assistantMessage,
+    )) {
+      return state.canonicalMessages;
+    }
     return persistableMessages(transition.canonicalMessages);
   }
   return state.canonicalMessages;
+}
+
+function pendingToolRoundAfter(
+  state: OrdinaryRunState,
+  transition: OrdinaryRunTransition,
+): OrdinaryRunState["pendingToolRound"] {
+  if (state.pendingToolRound === undefined) return undefined;
+  if ("canonicalMessages" in transition && transition.canonicalMessages !== undefined &&
+      canonicalMessagesResolveToolRound(transition.canonicalMessages, state.pendingToolRound.assistantMessage)) {
+    return undefined;
+  }
+  return state.pendingToolRound;
+}
+
+function canonicalMessagesResolveToolRound(
+  messages: readonly ModelMessage[],
+  assistantMessage: ModelMessage,
+): boolean {
+  const expectedCalls = assistantMessage.toolCalls ?? [];
+  const assistantIndex = [...messages].reverse().findIndex((message) =>
+    message.role === "assistant" && JSON.stringify(message.toolCalls ?? []) === JSON.stringify(expectedCalls));
+  if (assistantIndex < 0) return false;
+  const absoluteIndex = messages.length - assistantIndex - 1;
+  return expectedCalls.every((call, index) => {
+    const result = messages[absoluteIndex + index + 1];
+    return result?.role === "tool" && result.toolCallId === call.callId && result.toolName === call.toolName;
+  });
 }
 
 function toolCallsAfter(state: OrdinaryRunState, transition: OrdinaryRunTransition): readonly ToolCallResult[] {
@@ -237,14 +256,75 @@ function toolResultRecordedAtAfter(
   return next;
 }
 
-/** Records one executed tool fact without manufacturing a business lifecycle event. */
+/** Durably accepts one validated root assistant turn before any tool enters preflight. */
+export function acceptOrdinaryToolRound(input: {
+  readonly state: OrdinaryRunState;
+  readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
+  readonly assistantMessage: ModelMessage;
+  readonly acceptedAt: string;
+}): OrdinaryRunState {
+  if (input.state.status.kind !== "running") {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      `Ordinary run ${input.state.runId} cannot accept a tool round while ${input.state.status.kind}`,
+    );
+  }
+  const rawCalls = input.assistantMessage.toolCalls ?? [];
+  if (rawCalls.some((call) => call.factId !== undefined && call.factId !== call.callId)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "An Ordinary root tool round cannot contain a nested tool fact identity",
+    );
+  }
+  const canonicalMessages = persistableMessages(input.canonicalMessagesBeforeRound);
+  const assistantMessage = persistableMessages([input.assistantMessage])[0]!;
+  if (assistantMessage.role !== "assistant" || (assistantMessage.toolCalls?.length ?? 0) === 0) {
+    throw new Error("An Ordinary pending tool round requires an assistant message with tool calls");
+  }
+  const callIds = assistantMessage.toolCalls!.map((call) => call.callId);
+  if (new Set(callIds).size !== callIds.length) {
+    throw new Error("An Ordinary pending tool round cannot contain duplicate tool call identities");
+  }
+  if (input.state.pendingToolRound !== undefined) {
+    if (JSON.stringify(input.state.pendingToolRound.assistantMessage) === JSON.stringify(assistantMessage) &&
+        JSON.stringify(input.state.canonicalMessages) === JSON.stringify(canonicalMessages)) {
+      return input.state;
+    }
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      `Ordinary run ${input.state.runId} already has an unresolved tool round`,
+    );
+  }
+  const committedCallIds = new Set(canonicalMessages.flatMap((message) =>
+    message.role === "assistant" ? (message.toolCalls ?? []).map((call) => call.callId) : []));
+  if (callIds.some((callId) => committedCallIds.has(callId) || rootToolResult(input.state.toolCalls, callId) !== undefined)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_tool_result_conflict",
+      `Ordinary run ${input.state.runId} cannot reuse a committed root tool call identity`,
+    );
+  }
+  return {
+    ...input.state,
+    canonicalMessages,
+    pendingToolRound: { assistantMessage, acceptedAt: input.acceptedAt },
+    timestamps: { ...input.state.timestamps, updatedAt: input.acceptedAt },
+  };
+}
+
+/** Records one tool fact and atomically commits a fully resolved root tool round. */
 export function recordOrdinaryToolResult(input: {
   readonly state: OrdinaryRunState;
   readonly result: ToolCallResult;
   readonly recordedAt: string;
 }): OrdinaryRunState {
+  assertPendingRootResultIdentity(input.state, input.result);
   const key = ordinaryToolResultKey(input.result);
-  return {
+  const existing = input.state.toolCalls.find((result) =>
+    toolCallFactId(result) === toolCallFactId(input.result));
+  if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(input.result)) {
+    return finalizeResolvedOrdinaryToolRound(input.state, input.recordedAt);
+  }
+  const recorded = {
     ...input.state,
     toolCalls: mergeOrdinaryToolResults(input.state.toolCalls, [input.result]),
     toolResultRecordedAt: {
@@ -256,6 +336,133 @@ export function recordOrdinaryToolResult(input: {
       updatedAt: input.recordedAt,
     },
   };
+  return finalizeResolvedOrdinaryToolRound(recorded, input.recordedAt);
+}
+
+function assertPendingRootResultIdentity(state: OrdinaryRunState, result: ToolCallResult): void {
+  if (result.factId !== undefined && result.factId !== result.callId) return;
+  const pendingCalls = state.pendingToolRound?.assistantMessage.toolCalls ?? [];
+  const pendingCall = pendingCalls.find((call) => call.callId === result.callId);
+  if (pendingCall === undefined) return;
+  if (pendingCall.toolName !== result.toolName || JSON.stringify(pendingCall.input) !== JSON.stringify(result.input)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_tool_result_conflict",
+      `Ordinary root tool result ${result.callId} does not match its accepted assistant call`,
+    );
+  }
+}
+
+/**
+ * Closes a durable write-ahead round after its live execution owner is gone.
+ * Missing results are explicitly unknown and therefore must never be replayed.
+ */
+export function reconcileInterruptedOrdinaryToolRound(input: {
+  readonly state: OrdinaryRunState;
+  readonly recordedAt: string;
+}): OrdinaryRunState {
+  const pending = input.state.pendingToolRound;
+  if (pending === undefined) return input.state;
+  let state = input.state;
+  for (const call of pending.assistantMessage.toolCalls ?? []) {
+    const existing = rootToolResult(state.toolCalls, call.callId);
+    if (existing !== undefined && existing.status !== "approval_required") continue;
+    const result: ToolCallResult = existing?.status === "approval_required"
+      ? interruptedOrdinaryApprovalResult(input.state, existing)
+      : {
+          callId: existing?.callId ?? call.callId,
+          ...(existing?.factId === undefined ? {} : { factId: existing.factId }),
+          toolName: existing?.toolName ?? call.toolName,
+          input: cloneJson(existing?.input ?? call.input),
+          output: undefined,
+          status: "failed",
+          error: "The process stopped before the tool outcome could be determined. Do not automatically retry this call.",
+          errorDomain: "runtime_error",
+          errorFacts: { code: "tool_execution_outcome_unknown", doNotBlindlyRetry: true },
+          durationMs: existing?.durationMs ?? 0,
+        };
+    state = recordOrdinaryToolResult({ state, result, recordedAt: input.recordedAt });
+  }
+  return finalizeResolvedOrdinaryToolRound(state, input.recordedAt);
+}
+
+/** Closes one approval fact according to the exact durable decision, without replay. */
+export function interruptedOrdinaryApprovalResult(
+  state: OrdinaryRunState,
+  result: ToolCallResult,
+): ToolCallResult {
+  if (result.status !== "approval_required") {
+    throw new Error("Only an approval-required tool fact can be closed as a lost approval");
+  }
+  if (approvalFactWasNotExecuted(state, result)) {
+    return {
+      ...withoutConfirmationRequest(result),
+      status: "cancelled",
+      error: "The tool was not executed because its live confirmation continuation was lost.",
+      errorDomain: "runtime_error",
+      errorFacts: { code: "confirmation_continuation_lost" },
+    };
+  }
+  return {
+    ...withoutConfirmationRequest(result),
+    status: "failed",
+    error: "The process stopped before the approved tool outcome could be determined. Do not automatically retry this call.",
+    errorDomain: "runtime_error",
+    errorFacts: {
+      ...(result.errorFacts ?? {}),
+      code: "tool_execution_outcome_unknown",
+      doNotBlindlyRetry: true,
+    },
+  };
+}
+
+function approvalFactWasNotExecuted(
+  state: OrdinaryRunState,
+  result: ToolCallResult,
+): boolean {
+  const confirmationId = result.confirmationRequest?.confirmationId;
+  if (confirmationId === undefined) return false;
+  const decision = [...state.timeline].reverse().find((event) =>
+    event.type === "run.approval_decided" && event.decision.confirmationId === confirmationId);
+  return decision === undefined || decision.type === "run.approval_decided" &&
+    decision.decision.decision !== "approve_once";
+}
+
+function finalizeResolvedOrdinaryToolRound(
+  state: OrdinaryRunState,
+  recordedAt: string,
+): OrdinaryRunState {
+  const pending = state.pendingToolRound;
+  if (pending === undefined) return state;
+  const results = (pending.assistantMessage.toolCalls ?? []).map((call) =>
+    rootToolResult(state.toolCalls, call.callId));
+  if (results.some((result) => result === undefined || result.status === "approval_required")) {
+    return state;
+  }
+  return {
+    ...state,
+    canonicalMessages: persistableMessages([
+      ...state.canonicalMessages,
+      pending.assistantMessage,
+      ...results.map((result) => canonicalToolResultMessage(result!)),
+    ]),
+    pendingToolRound: undefined,
+    timestamps: { ...state.timestamps, updatedAt: recordedAt },
+  };
+}
+
+function rootToolResult(
+  results: readonly ToolCallResult[],
+  callId: string,
+): ToolCallResult | undefined {
+  return [...results].reverse().find((result) =>
+    result.callId === callId && (result.factId === undefined || result.factId === result.callId));
+}
+
+function withoutConfirmationRequest(
+  result: ToolCallResult,
+): Omit<ToolCallResult, "confirmationRequest" | "status"> {
+  const { confirmationRequest: _confirmationRequest, status: _status, ...base } = result;
+  return base;
 }
 
 export function ordinaryToolResultKey(result: ToolCallResult): string {

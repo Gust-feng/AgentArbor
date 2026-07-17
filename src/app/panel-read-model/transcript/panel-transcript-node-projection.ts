@@ -1,5 +1,6 @@
 import { isStaleModelProgressSummary } from "../panel-model-progress-copy.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
+import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
 import { userVisibleAnswer } from "../assistant/panel-assistant-visible-text.js";
 import { genericItemLabel } from "./panel-transcript-tool-format.js";
 import { isGenericApprovalDecisionText } from "../../text-projection/confirmation-copy.js";
@@ -15,159 +16,7 @@ export type TranscriptObservationRefLike = {
   readonly id: string;
 };
 
-export type TranscriptToolDisplayLike =
-  | {
-      readonly kind: "search_results";
-      readonly query?: string;
-      readonly status?: string;
-      readonly message?: string;
-      readonly results?: readonly {
-        readonly title: string;
-        readonly url?: string;
-        readonly summary?: string;
-        readonly snippet?: string;
-        readonly refId?: string;
-        readonly source?: string;
-      }[];
-      readonly resultsReturned?: number;
-      readonly truncated?: boolean;
-    }
-  | {
-      readonly kind: "directory_listing";
-      readonly path?: string;
-      readonly depth?: number;
-      readonly entriesReturned?: number;
-      readonly totalEntries?: number;
-      readonly unreadableDirectories?: number;
-      readonly unreadableSamples?: readonly {
-        readonly path?: string;
-        readonly errorCode?: string;
-      }[];
-      readonly entries: readonly {
-        readonly path: string;
-        readonly name?: string;
-        readonly kind?: string;
-        readonly bytes?: number;
-        readonly depth?: number;
-      }[];
-      readonly truncated?: boolean;
-    }
-  | {
-      readonly kind: "file_search_results";
-      readonly query?: string;
-      readonly path?: string;
-      readonly engine?: string;
-      readonly searchedFiles?: number;
-      readonly skippedFactsAvailable?: boolean;
-      readonly skippedFiles?: number;
-      readonly skippedBinaryFiles?: number;
-      readonly skippedTooLargeFiles?: number;
-      readonly skippedUnreadableFiles?: number;
-      readonly skippedDirectories?: number;
-      readonly skippedOtherEntries?: number;
-      readonly skippedSamples?: readonly {
-        readonly path?: string;
-        readonly reason?: string;
-        readonly bytes?: number;
-        readonly errorCode?: string;
-      }[];
-      readonly matches: readonly {
-        readonly path: string;
-        readonly line?: number;
-        readonly preview?: string;
-      }[];
-      readonly matchesReturned?: number;
-      readonly truncated?: boolean;
-    }
-  | {
-      readonly kind: "read_result";
-      readonly ref?: string;
-      readonly source?: string;
-      readonly status?: string;
-      readonly title?: string;
-      readonly url?: string;
-      readonly uri?: string;
-      readonly sourceSearchRef?: string;
-      readonly contentPreview?: string;
-      readonly error?: string;
-      readonly truncated?: boolean;
-    }
-  | {
-      readonly kind: "browser_snapshot";
-      readonly title?: string;
-      readonly url?: string;
-      readonly summary?: string;
-      readonly text?: string;
-      readonly truncated?: boolean;
-    }
-  | {
-      readonly kind: "http_response";
-      readonly method?: string;
-      readonly url?: string;
-      readonly statusCode?: number;
-      readonly statusText?: string;
-      readonly durationMs?: number;
-      readonly bodyPreview?: string;
-      readonly truncated?: boolean;
-    }
-  | {
-      readonly kind: "file_change_summary" | "file_diff_preview";
-      readonly path?: string;
-      readonly operation?: "create" | "write" | "append" | "edit" | "delete";
-      readonly summary?: string;
-      readonly preview?: string;
-      readonly bytes?: number;
-      readonly replacements?: number;
-      readonly previousLength?: number;
-      readonly nextLength?: number;
-      readonly append?: boolean;
-      readonly truncated?: boolean;
-    }
-  | {
-      readonly kind: "file_change_group";
-      readonly files: readonly {
-        readonly path: string;
-        readonly operation?: "create" | "write" | "append" | "edit" | "delete";
-        readonly preview?: string;
-        readonly replacements?: number;
-        readonly truncated?: boolean;
-      }[];
-      readonly truncated?: boolean;
-    }
-  | {
-      readonly kind: "command_summary";
-      readonly command?: string;
-      readonly args?: readonly string[];
-      readonly commandLine?: string;
-      readonly cwd?: string;
-      readonly shell?: string;
-      readonly exitCode?: number;
-      readonly timedOut?: boolean;
-      readonly cancelled?: boolean;
-      readonly background?: boolean;
-      readonly pid?: number;
-      readonly logPath?: string;
-      readonly stopCommand?: string;
-      readonly durationMs?: number;
-      readonly waitForPort?: number;
-      readonly portReady?: boolean;
-      readonly stdoutTruncated?: boolean;
-      readonly stderrTruncated?: boolean;
-      readonly stdoutChars?: number;
-      readonly stderrChars?: number;
-      readonly stdoutOmittedChars?: number;
-      readonly stderrOmittedChars?: number;
-      readonly outputSummary?: string;
-      readonly errorSummary?: string;
-      readonly stdoutPreview?: string;
-      readonly stderrPreview?: string;
-    }
-  | {
-      readonly kind: "generic_tool_summary";
-      readonly action?: string;
-      readonly summary?: string;
-      readonly items?: readonly string[];
-    };
+export type TranscriptToolDisplayLike = ToolDisplayProjection;
 
 export type ProjectableTranscriptNode = {
   readonly nodeId: string;
@@ -195,7 +44,7 @@ export type ProjectableTranscriptNode = {
   readonly display?: TranscriptToolDisplayLike;
   readonly confirmation?: {
     readonly confirmationId?: string;
-    readonly runId?: string;
+    readonly ownerRunId?: string;
     readonly actionSummary?: string;
   };
   readonly modelUsage?: ModelUsage;
@@ -302,7 +151,7 @@ export function isFileReadNode(node: ProjectableTranscriptNode): boolean {
   const toolName = normalizedToolName(node.toolName);
   const action = node.display?.kind === "generic_tool_summary" ? node.display.action?.toLowerCase() ?? "" : "";
   const genericText = node.display?.kind === "generic_tool_summary"
-    ? [node.display.action, node.display.summary].filter((value): value is string => value !== undefined).join(" ").toLowerCase()
+    ? [node.display.action, ...(node.display.items ?? [])].filter((value): value is string => value !== undefined).join(" ").toLowerCase()
     : "";
   if (isFileMutationToolName(toolName) || mentionsFileMutation(genericText) || mentionsFileMutation(node.title.toLowerCase())) {
     return false;
@@ -425,8 +274,8 @@ function fileReadLabels(node: ProjectableTranscriptNode): readonly string[] {
   if (display?.kind === "generic_tool_summary" && display.items !== undefined && display.items.length > 0) {
     return display.items.map(genericItemLabel);
   }
-  const summary = display?.kind === "generic_tool_summary" ? display.summary : undefined;
-  return [summary, node.summary].filter((value): value is string => value !== undefined && value.trim().length > 0);
+  const items = display?.kind === "generic_tool_summary" ? display.items : undefined;
+  return [...(items ?? []), node.summary].filter((value): value is string => value !== undefined && value.trim().length > 0);
 }
 
 function isBoringSuccessfulToolResult(node: ProjectableTranscriptNode): boolean {
@@ -436,18 +285,6 @@ function isBoringSuccessfulToolResult(node: ProjectableTranscriptNode): boolean 
   if (display.kind === "command_summary") {
     return display.exitCode === 0 &&
       display.timedOut !== true &&
-      display.cancelled !== true &&
-      display.background !== true &&
-      display.pid === undefined &&
-      display.logPath === undefined &&
-      display.stopCommand === undefined &&
-      display.durationMs === undefined &&
-      display.waitForPort === undefined &&
-      display.portReady === undefined &&
-      display.stdoutTruncated !== true &&
-      display.stderrTruncated !== true &&
-      display.outputSummary === undefined &&
-      display.errorSummary === undefined &&
       display.stdoutPreview === undefined &&
       display.stderrPreview === undefined;
   }

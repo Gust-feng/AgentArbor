@@ -30,6 +30,8 @@ import type { BasicAgentRun, OrdinaryRunCursor, RunEvent } from "./contracts/run
 const FALLBACK_POLL_INTERVAL_MS = 1_200;
 const STREAM_BOOTSTRAP_POLL_INTERVAL_MS = 500;
 const STREAM_BOOTSTRAP_POLL_LIMIT = 12;
+const STREAM_RECONCILIATION_POLL_INTERVAL_MS = 4_000;
+const STREAM_STALE_AFTER_MS = 15_000;
 const APPEND_ONLY_FLUSH_INTERVAL_MS = 16;
 
 export type LiveRunUpdateController = {
@@ -120,6 +122,8 @@ export function createLiveRunUpdateController(
     options.activeRunIdRef.current = runId;
     let lastCursor = subscription.cursor;
     let streamDeliveredEvent = false;
+    let reconciliationStarted = false;
+    let lastStreamSignalAt = Date.now();
     let liveRunSettled = false;
     let streamWork = Promise.resolve();
     const refreshAfterEvent = async (event: RunEvent): Promise<void> => {
@@ -181,6 +185,36 @@ export function createLiveRunUpdateController(
       }
     };
     const stopBootstrapPolling = (): void => stopPolling(options.pollTimer);
+    const reconcile = async (): Promise<void> => {
+      if (!subscriptionIsCurrent(subscription)) return;
+      const runView = await fetchBasicRunView(runId, lastCursor);
+      lastCursor = runView.replay.cursor.token;
+      await applyRunViewProjection(subscription, runView);
+    };
+    const startReconciliationPolling = (): void => {
+      if (reconciliationStarted || liveRunSettled || !subscriptionIsCurrent(subscription)) return;
+      reconciliationStarted = true;
+      stopPolling(options.pollTimer);
+      options.pollTimer.current = window.setInterval(() => {
+        if (!subscriptionIsCurrent(subscription)) {
+          stopPolling(options.pollTimer);
+          return;
+        }
+        if (Date.now() - lastStreamSignalAt >= STREAM_STALE_AFTER_MS) {
+          fallback();
+          return;
+        }
+        enqueueStreamWork(reconcile);
+      }, STREAM_RECONCILIATION_POLL_INTERVAL_MS);
+    };
+    const noteStreamSignal = (): void => {
+      lastStreamSignalAt = Date.now();
+      streamDeliveredEvent = true;
+      if (!reconciliationStarted) {
+        stopBootstrapPolling();
+        startReconciliationPolling();
+      }
+    };
     const startBootstrapPolling = (): void => {
       let attempts = 0;
       let inFlight = false;
@@ -230,15 +264,14 @@ export function createLiveRunUpdateController(
       runId,
       cursor: subscription.cursor,
       onEvent: (event) => {
-        streamDeliveredEvent = true;
-        stopBootstrapPolling();
+        noteStreamSignal();
         enqueueStreamWork(() => refreshAfterEvent(event));
       },
       onReset: (cursor) => {
-        streamDeliveredEvent = true;
-        stopBootstrapPolling();
+        noteStreamSignal();
         enqueueStreamWork(() => refreshAfterReset(cursor));
       },
+      onHeartbeat: noteStreamSignal,
       onError: fallback,
     });
     if (stream === undefined) {
@@ -303,6 +336,7 @@ export function createLiveRunUpdateController(
       });
     } else if (!shouldKeepRefreshing(runView.run.status)) {
       stopPolling(options.pollTimer);
+      stopStream(options.streamRef);
       void options.refreshConversations();
     }
   }

@@ -561,7 +561,7 @@ test("panel UI app shell keeps Agent cluster orchestration outside App", async (
     "selectedItemKey",
     "onSelectItem",
     "data-selected",
-    "aria-pressed={input.selected}",
+    "aria-pressed={props.selected}",
   ]);
   assert.equal(deepView.includes("运行细节"), false);
   assert.equal(deepView.includes("我正在接手这个目标"), false);

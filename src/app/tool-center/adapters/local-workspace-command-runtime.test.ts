@@ -4,6 +4,7 @@ import { createServer as createNetServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import type { ToolExecutionProgress } from "../../../domain/tools/index.js";
 import { ensurePidExited } from "./background-process-test-utils.js";
 import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
 import {
@@ -90,6 +91,39 @@ test("shell_command preserves foreground exit code and stdout stderr facts", asy
     assert.equal(registry.exited[0]?.input?.exitCode, 7);
     assert.equal(registry.listAll()[0]?.status, "exited");
     assert.equal(registry.listAll()[0]?.exitCode, 7);
+  } finally {
+    await removeTempTree(root);
+  }
+});
+
+test("shell_command reports bounded stdout and stderr progress before completion", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-progress-"));
+  try {
+    const progress: ToolExecutionProgress[] = [];
+    const shellCommand = createLocalShellCommandTool(root);
+    const output = await shellCommand.execute({
+      command: process.execPath,
+      args: [
+        "-e",
+        "process.stdout.write('first'); setTimeout(() => process.stderr.write('second'), 180); setTimeout(() => process.exit(0), 300);",
+      ],
+    }, {
+      ...context,
+      reportProgress: (update) => progress.push(update),
+    });
+    const result = asDirectToolFacts(output);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(progress.length >= 2, true);
+    assert.equal(progress.every((update) => update.kind === "command_output"), true);
+    assert.equal(progress.some((update) =>
+      update.kind === "command_output" && update.stdoutTail?.includes("first") === true), true);
+    const finalProgress = progress.at(-1);
+    assert.equal(finalProgress?.kind, "command_output");
+    if (finalProgress?.kind !== "command_output") throw new Error("Expected command output progress");
+    assert.equal(finalProgress.stderrTail?.includes("second"), true);
+    assert.equal(finalProgress.stdoutChars, "first".length);
+    assert.equal(finalProgress.stderrChars, "second".length);
   } finally {
     await removeTempTree(root);
   }

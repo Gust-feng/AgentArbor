@@ -79,7 +79,7 @@ function confirmationSegmentKey(confirmation: ConfirmationIdentity | undefined):
   if (confirmation === undefined) {
     return undefined;
   }
-  return `activity:pending:${keyPart(confirmation.runId)}:${keyPart(confirmation.confirmationId)}`;
+  return `activity:pending:${keyPart(confirmation.ownerRunId)}:${keyPart(confirmation.confirmationId)}`;
 }
 
 function refId(node: ProjectableTranscriptNode | undefined, kind: string): string | undefined {

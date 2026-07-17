@@ -1,6 +1,6 @@
 export type ConfirmationIdentity = {
   readonly confirmationId: string;
-  readonly runId?: string;
+  readonly ownerRunId?: string;
 };
 
 export type ConfirmationNodeLike<TConfirmation extends ConfirmationIdentity> = {
@@ -45,12 +45,12 @@ export function pendingForTurn<TConfirmation extends ConfirmationIdentity>(
   runId: string | undefined
 ): TConfirmation | undefined {
   if (pending === undefined || runId === undefined) return undefined;
-  const pendingRunId = confirmationRunId(pending);
+  const pendingRunId = confirmationOwnerRunId(pending);
   return pendingRunId === undefined || pendingRunId === runId ? pending : undefined;
 }
 
-export function confirmationRunId(confirmation: ConfirmationIdentity): string | undefined {
-  return confirmation.runId;
+export function confirmationOwnerRunId(confirmation: ConfirmationIdentity): string | undefined {
+  return confirmation.ownerRunId;
 }
 
 function pendingMatchesConfirmationNode<TConfirmation extends ConfirmationIdentity>(

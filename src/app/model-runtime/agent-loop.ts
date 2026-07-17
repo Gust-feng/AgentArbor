@@ -2,6 +2,8 @@ import type { ConfirmationDecision, ConfirmationRequest } from "../../domain/con
 import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
 import type {
   ToolCallResult,
+  ToolCallProgress,
+  ToolCallRequest,
   ToolExecutionContext,
   ToolExecutionGateway,
   ToolFactValue,
@@ -42,8 +44,18 @@ export type AgentLoopInput = {
   readonly agentTools?: readonly AgentLoopAgentTool[];
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
+  /** Emitted once when an exact tool request enters its execution boundary. */
+  readonly onToolRequested?: (request: ToolCallRequest) => void;
+  /** Live-only bounded progress emitted by the active tool executor. */
+  readonly onToolProgress?: (progress: ToolCallProgress) => void;
   /** Resolves only after the owning feature has durably accepted the executed tool fact. */
   readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
+  /** Resolves before the SDK may preflight or execute any tool from this validated root turn. */
+  readonly onToolRound?: (input: {
+    /** Exact canonical prefix consumed by the provider for this tool-producing turn. */
+    readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
+    readonly assistantMessage: ModelMessage;
+  }) => Promise<void>;
   /** Runs immediately before every provider request with the exact canonical request history. */
   readonly maintainContext?: (input: {
     readonly messages: readonly ModelMessage[];

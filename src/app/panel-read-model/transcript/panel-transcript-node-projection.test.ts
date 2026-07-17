@@ -372,7 +372,7 @@ test("visible transcript keeps context compaction events when they carry real st
   assert.deepEqual(failed.map((item) => item.nodeId), ["compaction-failed"]);
 });
 
-test("visible transcript projection keeps successful command results with observable facts", () => {
+test("visible transcript projection keeps successful command results with output evidence", () => {
   const projected = visibleTranscriptNodes([
     node({
       nodeId: "completed",
@@ -385,7 +385,7 @@ test("visible transcript projection keeps successful command results with observ
         kind: "command_summary",
         commandLine: "pnpm dev",
         exitCode: 0,
-        durationMs: 1530,
+        stdoutPreview: "ready",
       },
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),

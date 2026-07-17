@@ -163,7 +163,7 @@ test("display activity items keep generic file write summaries visible", () => {
   assert.equal(items.length, 1);
   assert.equal(items[0]?.copy.label, "写入");
   assert.equal(items[0]?.copy.detail, "src/generated.txt");
-  assert.equal(items[0]?.statusBadge?.label, "已完成");
+  assert.equal(items[0]?.statusBadge, undefined);
 });
 
 test("tool activity copy removes redundant target prefixes", () => {
@@ -203,7 +203,58 @@ test("tool activity copy removes redundant target prefixes", () => {
 
   assert.deepEqual(read, { label: "读取", detail: "ability_live_demo_2025-07-31.md" });
   assert.deepEqual(search, { label: "搜索", detail: "能力|capability|demo" });
-  assert.deepEqual(command, { label: "命令", detail: "正在执行命令" });
+  assert.deepEqual(command, { label: "命令", detail: "终端" });
+});
+
+test("tool activity strips internal incomplete wrappers from concrete targets", () => {
+  const items = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.failed",
+      phase: "failed",
+      toolName: "list_dir",
+      display: {
+        kind: "generic_tool_summary",
+        action: "浏览目录",
+        summary: "浏览目录未完成: assets.",
+      },
+    }),
+    node({
+      kind: "tool",
+      eventType: "tool.failed",
+      phase: "failed",
+      toolName: "read_file",
+      display: {
+        kind: "generic_tool_summary",
+        action: "读取文件",
+        summary: "读取文件未完成: app.js.",
+      },
+      nodeId: "node-2",
+      sequence: 2,
+    }),
+  ]);
+
+  assert.deepEqual(items.map((item) => item.lead?.subject), ["assets", "app.js"]);
+  assert.deepEqual(items.map((item) => item.statusBadge), [undefined, undefined]);
+});
+
+test("completed generic file deletion does not create a redundant content card", () => {
+  const item = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "delete_file",
+      display: {
+        kind: "generic_tool_summary",
+        action: "删除文件",
+        summary: "删除文件完成：index.html。",
+      },
+    }),
+  ])[0];
+
+  assert.deepEqual(item?.lead, { action: "删除", subject: "index.html" });
+  assert.equal(item?.expandedSections, undefined);
 });
 
 test("tool activity copy keeps a running command concise", () => {
@@ -221,8 +272,26 @@ test("tool activity copy keeps a running command concise", () => {
 
   assert.deepEqual(copy, {
     label: "命令",
-    detail: "正在执行命令",
+    detail: "终端",
   });
+});
+
+test("tool activity leads preserve complete paths instead of inserting ellipses", () => {
+  const path = `src/${"nested-directory/".repeat(16)}implementation.ts`;
+  const item = displayActivityItemsForNodes([node({
+    kind: "tool",
+    eventType: "tool.completed",
+    phase: "completed",
+    toolName: "read_file",
+    display: {
+      kind: "read_result",
+      title: path,
+      contentPreview: "export const value = true;",
+    },
+  })])[0];
+
+  assert.equal(item?.lead?.subject, path);
+  assert.equal(item?.lead?.subject.includes("…"), false);
 });
 
 test("tool activity copy keeps aggregated file details expandable", () => {
@@ -243,6 +312,26 @@ test("tool activity copy keeps aggregated file details expandable", () => {
     detail: "2 个文件",
     expandedDetail: "README.md\npackage.json",
   });
+});
+
+test("batch research reads use a plain source count and list each source once", () => {
+  const item = displayActivityItemsForNodes([node({
+    kind: "tool",
+    eventType: "tool.completed",
+    phase: "completed",
+    toolName: "read",
+    display: {
+      kind: "generic_tool_summary",
+      action: "资料读取",
+      summary: "2 个来源",
+      items: ["First source", "Second source"],
+    },
+  })])[0];
+
+  assert.deepEqual(item?.lead, { action: "读取", subject: "2 个来源" });
+  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["条目"]);
+  assert.equal(item?.expandedSections?.[0]?.content, "First source\nSecond source");
+  assert.equal(item?.expandedSections?.some((section) => section.content.includes("2 个来源")), false);
 });
 
 test("generic directory activity collapses into one structured entries section", () => {
@@ -266,13 +355,23 @@ test("generic directory activity collapses into one structured entries section",
 
   assert.equal(items[0]?.copy.label, "查看");
   assert.equal(items[0]?.copy.detail, "当前目录");
+  assert.deepEqual(items[0]?.lead, {
+    action: "查看",
+    subject: "当前目录",
+    monospace: true,
+  });
   assert.equal(items[0]?.copy.expandedDetail, undefined);
-  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目", "目录信息"]);
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目"]);
+  assert.equal(items[0]?.expandedSections?.[0]?.format, "path_list");
+  assert.deepEqual(items[0]?.expandedSections?.[0]?.items, [
+    { title: "-57cdf8cd11eed6fe.jpg", monospace: true },
+    { title: "1758895603614.png", monospace: true },
+  ]);
   assert.equal(items[0]?.expandedSections?.[0]?.content, "-57cdf8cd11eed6fe.jpg\n1758895603614.png");
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "摘要" || section.title === "详情"), false);
 });
 
-test("generic article tool results collapse into source and excerpt sections", () => {
+test("generic article tool results keep only the source and omit partial excerpts", () => {
   const articleText = [
     "Title: OpenAI unveils GPT-5.6 amid US AI regulatory drama | The Verge",
     "URL: https://www.theverge.com/ai-artificial-intelligence/957845/openai-gpt-5-6-trump-administration-ai-preview",
@@ -297,24 +396,73 @@ test("generic article tool results collapse into source and excerpt sections", (
 
   assert.equal(items.length, 1);
   assert.equal(items[0]?.copy.label, "网页");
-  assert.equal(items[0]?.copy.detail, "OpenAI unveils GPT-5.6 amid US AI regulatory drama | The Verge · www.theverge.com");
-  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["来源", "摘录"]);
+  assert.equal(items[0]?.copy.detail, "OpenAI unveils GPT-5.6 amid US AI regulatory drama | The Verge");
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["来源"]);
   assert.equal(items[0]?.expandedSections?.[0]?.format, "source");
   assert.equal(
     items[0]?.expandedSections?.[0]?.href,
     "https://www.theverge.com/ai-artificial-intelligence/957845/openai-gpt-5-6-trump-administration-ai-preview"
   );
-  assert.deepEqual(
-    items[0]?.expandedSections?.[0]?.meta?.map((item) => item.value),
-    ["www.theverge.com", "2026-06-26 17:00 UTC", "Hayden Field"]
-  );
-  assert.equal(items[0]?.expandedSections?.[1]?.format, "quote");
-  assert.match(items[0]?.expandedSections?.[1]?.content ?? "", /Less than 24 hours/);
-  assert.doesNotMatch(items[0]?.expandedSections?.[1]?.content ?? "", /^OpenAI unveils GPT-5\.6/m);
-  assert.equal((items[0]?.expandedSections?.[1]?.content.match(/Less than 24 hours/g) ?? []).length, 1);
+  assert.equal(items[0]?.expandedSections?.[0]?.meta, undefined);
+  assert.equal(JSON.stringify(items[0]?.expandedSections).includes("Less than 24 hours"), false);
 });
 
-test("directory listing activity uses total counts and structured sections", () => {
+test("remote reads and browser snapshots expose links without partial page previews", () => {
+  const [readItem, browserItem] = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "read",
+      display: {
+        kind: "read_result",
+        title: "AgentArbor guide",
+        url: "https://example.com/guide",
+        contentPreview: "This is only the beginning of a much longer article...",
+      },
+    }),
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "browser_snapshot",
+      display: {
+        kind: "browser_snapshot",
+        title: "AgentArbor guide",
+        url: "https://example.com/guide",
+      },
+    }),
+  ]);
+
+  assert.deepEqual(readItem?.expandedSections?.map((section) => section.title), ["来源"]);
+  assert.deepEqual(browserItem?.expandedSections?.map((section) => section.title), ["来源"]);
+  assert.equal(JSON.stringify([readItem, browserItem]).includes("incomplete"), false);
+  assert.equal(JSON.stringify([readItem, browserItem]).includes("only the beginning"), false);
+});
+
+test("generic lookup tools show the query as the record and keep output in detail", () => {
+  const item = displayActivityItemsForNodes([node({
+    kind: "tool",
+    eventType: "tool.completed",
+    phase: "completed",
+    toolName: "vendor__lookup",
+    display: {
+      kind: "generic_tool_summary",
+      action: "MCP 工具",
+      summary: "AgentArbor tool display",
+      items: ["Official AgentArbor documentation"],
+    },
+  })])[0];
+
+  assert.deepEqual(item?.lead, {
+    action: "搜索",
+    subject: "AgentArbor tool display",
+  });
+  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["条目"]);
+  assert.equal(item?.expandedSections?.[0]?.content, "Official AgentArbor documentation");
+});
+
+test("directory listing activity keeps only scannable paths and real warnings", () => {
   const items = displayActivityItemsForNodes(activityVisibleNodes([
     node({
       kind: "tool",
@@ -324,14 +472,11 @@ test("directory listing activity uses total counts and structured sections", () 
       display: {
         kind: "directory_listing",
         path: ".",
-        depth: 1,
-        entriesReturned: 9,
-        totalEntries: 29,
         unreadableDirectories: 1,
         unreadableSamples: [{ path: "node_modules/.cache", errorCode: "EPERM" }],
         entries: [
-          { path: "README.md", kind: "file", bytes: 120, depth: 1 },
-          { path: "src", kind: "directory", depth: 1 },
+          { path: "README.md", kind: "file" },
+          { path: "src", kind: "directory" },
         ],
       },
     }),
@@ -339,18 +484,24 @@ test("directory listing activity uses total counts and structured sections", () 
 
   assert.equal(items[0]?.copy.label, "查看");
   assert.equal(items[0]?.copy.detail, "当前目录");
-  assert.deepEqual(items[0]?.badges?.map((badge) => badge.label), ["29 项", "深度 1", "1 个异常目录"]);
-  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目", "异常目录", "目录信息"]);
+  assert.deepEqual(items[0]?.lead, {
+    action: "查看",
+    subject: "当前目录",
+    monospace: true,
+  });
+  assert.deepEqual(items[0]?.badges?.map((badge) => badge.label), ["部分目录不可读"]);
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["条目", "异常目录"]);
   assert.equal(items[0]?.expandedSections?.[0]?.format, "path_list");
   assert.deepEqual(items[0]?.expandedSections?.[0]?.items, [
-    { title: "README.md", meta: [{ value: "file" }, { value: "120 B" }], monospace: true },
-    { title: "src", meta: [{ value: "directory" }], monospace: true },
+    { title: "README.md", monospace: true },
+    { title: "src/", monospace: true },
   ]);
+  assert.equal(items[0]?.expandedSections?.[0]?.content, "README.md\nsrc/");
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "摘要" || section.title === "详情"), false);
   assert.equal(items[0]?.expandedSections?.some((section) => section.title === "目录"), false);
 });
 
-test("completed empty directory activity keeps range facts in disclosure", () => {
+test("completed empty directory activity stays minimal", () => {
   const items = displayActivityItemsForNodes([
     node({
       kind: "tool",
@@ -360,9 +511,7 @@ test("completed empty directory activity keeps range facts in disclosure", () =>
       display: {
         kind: "directory_listing",
         path: ".",
-        depth: 1,
         entries: [],
-        totalEntries: 0,
       },
       refs: [{ kind: "tool_call", id: "tool-list-empty" }],
     }),
@@ -374,9 +523,7 @@ test("completed empty directory activity keeps range facts in disclosure", () =>
       display: {
         kind: "directory_listing",
         path: ".",
-        depth: 1,
         entries: [],
-        totalEntries: 0,
       },
       refs: [{ kind: "tool_call", id: "tool-list-empty" }],
     }),
@@ -384,12 +531,13 @@ test("completed empty directory activity keeps range facts in disclosure", () =>
 
   assert.equal(items.length, 1);
   assert.equal(items[0]?.copy.detail, "当前目录");
+  assert.deepEqual(items[0]?.lead, {
+    action: "查看",
+    subject: "当前目录",
+    monospace: true,
+  });
   assert.equal(items[0]?.copy.expandedDetail, undefined);
-  assert.deepEqual(items[0]?.expandedSections, [{
-    title: "目录信息",
-    content: "位置：当前目录\n总计：0 项\n深度：1",
-    format: "list",
-  }]);
+  assert.equal(items[0]?.expandedSections, undefined);
 });
 
 test("file search activity keeps query, matches, and skipped details structured", () => {
@@ -403,22 +551,23 @@ test("file search activity keeps query, matches, and skipped details structured"
         kind: "file_search_results",
         query: "needle",
         path: ".",
-        searchedFiles: 12,
-        skippedFiles: 3,
-        skippedBinaryFiles: 1,
         matches: [
           { path: "src/index.ts", line: 4, preview: "needle found here" },
           { path: "README.md", line: 8 },
         ],
-        skippedSamples: [{ path: "dist/app.bin", reason: "binary", bytes: 42 }],
       },
     }),
   ]));
 
   assert.equal(items[0]?.copy.label, "搜索");
-  assert.equal(items[0]?.copy.detail, "needle · 当前目录 · 2 处匹配");
-  assert.deepEqual(items[0]?.badges?.map((badge) => badge.label), ["2 处匹配", "12 个文件", "3 个跳过"]);
-  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["命中", "跳过"]);
+  assert.equal(items[0]?.copy.detail, "needle");
+  assert.deepEqual(items[0]?.lead, {
+    action: "搜索",
+    subject: "needle",
+    monospace: true,
+  });
+  assert.equal(items[0]?.badges, undefined);
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["匹配位置"]);
   assert.equal(items[0]?.expandedSections?.[0]?.format, "path_list");
   assert.deepEqual(items[0]?.expandedSections?.[0]?.items, [
     { title: "src/index.ts:4", detail: "needle found here", monospace: true },
@@ -444,20 +593,18 @@ test("file search activity treats match limit as low-noise expanded context", ()
         query: "needle",
         path: ".",
         matches,
-        matchesReturned: 30,
-        truncated: true,
       },
     }),
   ]))[0];
 
-  assert.equal(item?.copy.detail, "needle · 当前目录 · 30 处匹配");
-  assert.equal(item?.badges?.some((badge) => badge.label === "已截断"), false);
-  const hitSection = item?.expandedSections?.find((section) => section.title === "命中");
+  assert.equal(item?.copy.detail, "needle");
+  assert.equal(item?.badges?.some((badge) => badge.label === "已截断") ?? false, false);
+  const hitSection = item?.expandedSections?.find((section) => section.title === "匹配位置");
   assert.equal(hitSection?.content.includes("src/file-29.ts:30 - needle 29"), true);
-  assert.equal(hitSection?.content.includes("仅显示前"), true);
+  assert.equal(hitSection?.content.includes("仅显示前"), false);
 });
 
-test("tool activity copy surfaces safe failed command details", () => {
+test("command copy keeps failure detail out of the primary headline", () => {
   const copy = activityLineForNode(node({
     kind: "tool",
     eventType: "tool.failed",
@@ -468,13 +615,13 @@ test("tool activity copy surfaces safe failed command details", () => {
       command: "pnpm",
       args: ["test"],
       exitCode: 1,
-      errorSummary: "测试失败：1 个断言未通过",
+      stderrPreview: "测试失败：1 个断言未通过",
     },
   }));
 
   assert.deepEqual(copy, {
     label: "命令",
-    detail: "测试失败：1 个断言未通过",
+    detail: "终端",
   });
 });
 
@@ -540,7 +687,7 @@ test("tool activity copy keeps result-only search tools visible", () => {
 
   assert.deepEqual(copy, {
     label: "搜索",
-    detail: "网页资料",
+    detail: "AgentArbor README",
   });
 });
 
@@ -579,16 +726,18 @@ test("search activity keeps sources structured for the evidence view", () => {
           title: "AgentArbor README",
           url: "https://example.com/readme",
           source: "example.com",
-          snippet: "Desktop general-agent workbench.",
         }],
       },
     }),
   ]))[0];
 
+  assert.deepEqual(item?.lead, {
+    action: "搜索",
+    subject: "AgentArbor",
+  });
   assert.equal(item?.expandedSections?.[0]?.format, "source_list");
   assert.deepEqual(item?.expandedSections?.[0]?.items, [{
     title: "AgentArbor README",
-    detail: "Desktop general-agent workbench.",
     href: "https://example.com/readme",
     meta: [{ value: "example.com" }],
   }]);
@@ -642,7 +791,6 @@ test("file change activity uses event summary as diff when display preview is mi
       display: {
         kind: "file_diff_preview",
         path: "src/app.ts",
-        replacements: 1,
       },
     }),
   ])[0];
@@ -773,10 +921,14 @@ test("tool activity derives the default line from display instead of presentatio
   ])[0];
 
   assert.equal(item?.copy.label, "命令");
-  assert.equal(item?.copy.detail, "命令已执行");
+  assert.equal(item?.copy.detail, "终端");
   assert.equal(item?.toolKind, "command");
-  assert.equal(item?.statusBadge?.label, "已完成");
-  assert.equal(item?.expandedSections?.[0]?.content, "命令：pnpm test");
+  assert.equal(item?.statusBadge, undefined);
+  assert.deepEqual(item?.lead, {
+    action: "运行",
+    subject: "终端",
+  });
+  assert.deepEqual(item?.expandedSections, [{ title: "命令", content: "$ pnpm test", format: "console" }]);
 });
 
 test("tool activity derives display kind from display instead of presentation", () => {
@@ -796,6 +948,35 @@ test("tool activity derives display kind from display instead of presentation", 
   assert.equal(item?.copy.label, "编辑");
   assert.equal(item?.copy.detail, "src/app.ts");
   assert.equal(item?.toolKind, "edit");
+  assert.deepEqual(item?.lead, {
+    action: "编辑",
+    subject: "src/app.ts",
+    monospace: true,
+  });
+});
+
+test("failed command lead keeps raw stderr in detail instead of repeating it in the record", () => {
+  const item = activityItemsForNodes([node({
+    kind: "tool",
+    eventType: "tool.failed",
+    phase: "failed",
+    toolName: "shell_command",
+    display: {
+      kind: "command_summary",
+      command: "pnpm",
+      args: ["test"],
+      exitCode: 1,
+      stderrPreview: "1 个断言未通过",
+    },
+  })])[0];
+
+  assert.deepEqual(item?.lead, {
+    action: "运行",
+    subject: "终端",
+    context: "运行失败",
+  });
+  assert.equal(item?.expandedSections?.find((section) => section.title === "输出")?.content, "1 个断言未通过");
+  assert.equal(item?.badges, undefined);
 });
 
 test("activity item projection marks context compaction as a dedicated status row", () => {
@@ -855,15 +1036,19 @@ test("read result activity keeps the target line minimal", () => {
       display: {
         kind: "read_result",
         uri: "Agent.md · 11567 bytes · lines 300-319 of 319",
-        truncated: true,
       },
     }),
   ])[0];
 
   assert.equal(item?.copy.label, "读取");
   assert.equal(item?.copy.detail, "Agent.md");
-  assert.equal(item?.statusBadge?.label, "已完成");
-  assert.deepEqual(item?.badges?.map((badge) => badge.label), ["已截断"]);
+  assert.deepEqual(item?.lead, {
+    action: "读取",
+    subject: "Agent.md",
+    monospace: true,
+  });
+  assert.equal(item?.statusBadge, undefined);
+  assert.equal(item?.badges?.some((badge) => badge.label.includes("截断")) ?? false, false);
 });
 
 test("display activity items omit duplicate run failure after the concrete failure cause", () => {
@@ -962,17 +1147,103 @@ test("activity items expose command status badges and structured sections", () =
         command: "pnpm",
         args: ["test"],
         exitCode: 0,
-        durationMs: 1530,
-        cwd: "Z:/AgentArbor",
-        outputSummary: "全部测试通过",
+        stdoutPreview: "全部测试通过",
       },
     }),
   ])[0];
 
-  assert.equal(item?.statusBadge?.label, "已完成");
+  assert.equal(item?.statusBadge, undefined);
   assert.equal(item?.badges, undefined);
-  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["输出摘要", "执行信息"]);
-  assert.equal(item?.expandedSections?.[1]?.content, "命令：pnpm test");
+  assert.deepEqual(item?.lead, {
+    action: "运行",
+    subject: "终端",
+  });
+  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["命令", "输出"]);
+  assert.equal(item?.expandedSections?.[0]?.content, "$ pnpm test");
+});
+
+test("command detail prefers full bounded stdout and stderr previews", () => {
+  const stdout = Array.from({ length: 10 }, (_, index) => `stdout ${index + 1}`).join("\n");
+  const stderr = "warning one\nwarning two";
+  const item = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "shell_command",
+      display: {
+        kind: "command_summary",
+        commandLine: "pnpm test",
+        exitCode: 1,
+        stdoutPreview: stdout,
+        stderrPreview: stderr,
+      },
+    }),
+  ])[0];
+
+  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["命令", "输出"]);
+  assert.equal(item?.expandedSections?.[1]?.content, `${stdout}\n${stderr}`);
+  assert.equal(item?.expandedSections?.some((section) => section.title === "标准输出" || section.title === "标准错误"), false);
+});
+
+test("long command summaries stay short while detail preserves the exact command", () => {
+  const command = "python - <<'PY' from pathlib import Path; html = Path('index.html').read_text(encoding='utf-8'); print(len(html))";
+  const item = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "shell_command",
+      display: {
+        kind: "command_summary",
+        commandLine: command,
+        exitCode: 0,
+      },
+    }),
+  ])[0];
+
+  assert.equal(item?.lead?.subject, "终端");
+  assert.equal(item?.expandedSections?.[0]?.title, "命令");
+  assert.equal(item?.expandedSections?.[0]?.content, `$ ${command}`);
+
+  const server = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "shell_command",
+      display: {
+        kind: "command_summary",
+        commandLine: "python -m http.server 4173 --bind 0.0.0.0",
+        exitCode: 0,
+      },
+    }),
+  ])[0];
+  assert.equal(server?.lead?.subject, "终端");
+});
+
+test("one multi-file tool call becomes one activity with per-file diffs", () => {
+  const item = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "workspace_patch",
+      display: {
+        kind: "file_change_group",
+        files: [
+          { path: "src/app.ts", operation: "edit", preview: "@@ -1 +1 @@\n-old\n+new" },
+          { path: "src/app.test.ts", operation: "create", preview: "+test('app', () => true)" },
+        ],
+      },
+    }),
+  ])[0];
+
+  assert.equal(item?.toolKind, "edit");
+  assert.deepEqual(item?.lead, { action: "编辑", subject: "2 个文件" });
+  assert.deepEqual(item?.lineDelta, { added: 2, removed: 1 });
+  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["src/app.ts", "src/app.test.ts"]);
+  assert.equal(item?.expandedSections?.every((section) => section.format === "diff"), true);
 });
 
 test("display activity items preserve requested detail and terminal preview for file edits", () => {
@@ -996,7 +1267,6 @@ test("display activity items preserve requested detail and terminal preview for 
       display: {
         kind: "file_diff_preview",
         path: "src/app.ts",
-        replacements: 1,
         preview: "@@ line 2\n- old\n+ new",
       },
       refs: [{ kind: "tool_call", id: "tool-edit-1" }],
@@ -1006,11 +1276,10 @@ test("display activity items preserve requested detail and terminal preview for 
   assert.equal(items.length, 1);
   assert.equal(items[0]?.copy.label, "编辑");
   assert.equal(items[0]?.copy.detail, "src/app.ts");
-  assert.equal(items[0]?.statusBadge?.label, "已完成");
+  assert.equal(items[0]?.statusBadge, undefined);
   assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["差异预览"]);
   assert.equal(items[0]?.expandedSections?.[0]?.format, "diff");
   assert.equal(items[0]?.badges, undefined);
-  assert.deepEqual(items[0]?.lineDelta, { added: 1, removed: 1 });
 });
 
 test("display activity items keep requested file diff when completion has no preview", () => {
@@ -1035,7 +1304,6 @@ test("display activity items keep requested file diff when completion has no pre
       display: {
         kind: "file_diff_preview",
         path: "src/app.ts",
-        replacements: 1,
       },
       refs: [{ kind: "tool_call", id: "tool-edit-request-preview" }],
     }),
@@ -1047,7 +1315,6 @@ test("display activity items keep requested file diff when completion has no pre
   assert.equal(items[0]?.expandedSections?.[0]?.format, "diff");
   assert.equal(items[0]?.expandedSections?.[0]?.content.includes("- old"), true);
   assert.equal(items[0]?.expandedSections?.[0]?.content.includes("+ new"), true);
-  assert.deepEqual(items[0]?.lineDelta, { added: 1, removed: 1 });
 });
 
 test("file creation activity shows new content as a file change diff", () => {
@@ -1061,7 +1328,6 @@ test("file creation activity shows new content as a file change diff", () => {
         kind: "file_change_summary",
         operation: "create",
         path: "src/new-file.ts",
-        bytes: 19,
         preview: "+ export const value = 1;",
       },
     }),
@@ -1072,10 +1338,9 @@ test("file creation activity shows new content as a file change diff", () => {
   assert.equal(item?.badges, undefined);
   assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["新增内容"]);
   assert.equal(item?.expandedSections?.[0]?.format, "diff");
-  assert.deepEqual(item?.lineDelta, { added: 1, removed: 0 });
 });
 
-test("file edit activity line delta ignores diff file headers", () => {
+test("file edit activity keeps full diff headers in detail", () => {
   const item = displayActivityItemsForNodes([
     node({
       kind: "tool",
@@ -1099,7 +1364,32 @@ test("file edit activity line delta ignores diff file headers", () => {
     }),
   ])[0];
 
+  assert.equal(item?.expandedSections?.[0]?.content.includes("--- a/src/app.ts"), true);
   assert.deepEqual(item?.lineDelta, { added: 3, removed: 2 });
+});
+
+test("file edit line delta counts code that begins with diff header characters", () => {
+  const item = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "edit_file",
+      display: {
+        kind: "file_diff_preview",
+        path: "src/counter.ts",
+        preview: [
+          "--- a/src/counter.ts",
+          "+++ b/src/counter.ts",
+          "@@ -1,2 +1,2 @@",
+          "---counter;",
+          "+++counter;",
+        ].join("\r\n"),
+      },
+    }),
+  ])[0];
+
+  assert.deepEqual(item?.lineDelta, { added: 1, removed: 1 });
 });
 
 test("file deletion activity remains visible even without a content preview", () => {
@@ -1113,7 +1403,6 @@ test("file deletion activity remains visible even without a content preview", ()
         kind: "file_change_summary",
         operation: "delete",
         path: "src/obsolete.ts",
-        previousLength: 88,
       },
     }),
   ])[0];
@@ -1138,6 +1427,84 @@ test("sub-agent AgentTool facts remain visible as standard tool activity", () =>
   assert.equal(items.length, 1);
   assert.equal(items[0]?.tone, "tool");
   assert.equal(items[0]?.variant, undefined);
+});
+
+test("sub-agent activity shows the specialist and delegated task instead of generic tool copy", () => {
+  const item = displayActivityItemsForNodes([node({
+    kind: "tool",
+    eventType: "tool.requested",
+    phase: "executing",
+    toolName: "call_sub_agent",
+    display: {
+      kind: "agent_task",
+      agentName: "review-expert",
+      task: "检查工具展示的信息层级",
+    },
+  })])[0];
+
+  assert.deepEqual(item?.copy, { label: "委派", detail: "review-expert" });
+  assert.deepEqual(item?.lead, {
+    action: "委派",
+    subject: "review-expert",
+    context: "检查工具展示的信息层级",
+  });
+  assert.equal(item?.toolKind, "agent");
+});
+
+test("directory activity uses its own tool kind and concrete path", () => {
+  const item = displayActivityItemsForNodes([node({
+    kind: "tool",
+    eventType: "tool.requested",
+    phase: "executing",
+    toolName: "list_dir",
+    display: {
+      kind: "directory_listing",
+      path: "src/components",
+      entries: [],
+    },
+  })])[0];
+
+  assert.deepEqual(item?.lead, { action: "查看", subject: "src/components", monospace: true });
+  assert.equal(item?.toolKind, "directory");
+});
+
+test("live file and directory activity state names the action and concrete target", () => {
+  const [file, directory] = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.requested",
+      phase: "executing",
+      toolName: "read_file",
+      display: {
+        kind: "read_result",
+        title: "src/app/panel-ui/src/components/transcript-timeline.tsx",
+      },
+    }),
+    node({
+      kind: "tool",
+      eventType: "tool.requested",
+      phase: "executing",
+      toolName: "list_dir",
+      display: {
+        kind: "directory_listing",
+        path: "src/app/panel-ui/src/components",
+        entries: [],
+      },
+      nodeId: "node-2",
+      sequence: 2,
+    }),
+  ]);
+
+  assert.deepEqual(file?.lead, {
+    action: "读取",
+    subject: "src/app/panel-ui/src/components/transcript-timeline.tsx",
+    monospace: true,
+  });
+  assert.deepEqual(directory?.lead, {
+    action: "查看",
+    subject: "src/app/panel-ui/src/components",
+    monospace: true,
+  });
 });
 
 function node(input: {

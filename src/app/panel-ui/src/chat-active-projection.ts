@@ -58,7 +58,7 @@ export type ChatActiveRun = {
 export type ChatActiveTranscriptNode = LiveTranscriptNode;
 
 export type ChatActiveStatusNotice = {
-  readonly title: string;
+  readonly title?: string;
   readonly message: string;
   readonly tone: "warning" | "error";
 };

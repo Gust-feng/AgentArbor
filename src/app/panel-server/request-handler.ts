@@ -281,7 +281,11 @@ export async function closePanelServer(
       ordinaryDisposal,
       multiAgentDisposal,
     ]);
-    await runtime.toolOutputStore.clear();
+    if (runtime.toolOutputStore.close !== undefined) {
+      await runtime.toolOutputStore.close();
+    } else {
+      await runtime.toolOutputStore.clear();
+    }
     await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
   })();
   // A forced timeout may return while a broken provider promise is still

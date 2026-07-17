@@ -3,7 +3,7 @@ import test from "node:test";
 import { projectAssistantMessageStructure } from "./panel-assistant-message-structure.js";
 import type { ProjectableTranscriptNode } from "../transcript/panel-transcript-node-projection.js";
 
-test("assistant message structure keeps leading activity before the first visible body", () => {
+test("assistant message structure keeps reasoning and tool activity around the first visible body", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -34,13 +34,12 @@ test("assistant message structure keeps leading activity before the first visibl
   });
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body", "activity"]);
-  assert.equal(structure.segments[0]?.kind, "activity");
-  assert.deepEqual(structure.segments[0]?.kind === "activity" ? structure.segments[0].timeline.items.map((item) => item.nodeId) : [], ["thinking-1"]);
-  assert.equal(structure.segments[1]?.kind, "body");
-  assert.equal(structure.segments[1]?.kind === "body" ? structure.segments[1].text : undefined, "第一段正文。");
+  const body = structure.segments.find((segment) => segment.kind === "body");
+  assert.equal(body?.kind === "body" ? body.text : undefined, "第一段正文。");
+  assert.deepEqual(activityNodeIds(structure), ["thinking-1", "tool-1"]);
 });
 
-test("assistant message structure uses merged activity nodes instead of stale raw duplicates", () => {
+test("assistant message structure deduplicates live and settled reasoning without merging it into the answer", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -73,21 +72,10 @@ test("assistant message structure uses merged activity nodes instead of stale ra
   });
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body"]);
-  assert.equal(structure.segments[0]?.kind, "activity");
-  const activity = structure.segments[0]?.kind === "activity" ? structure.segments[0] : undefined;
-  assert.equal(activity?.timeline.items.length, 1);
-  assert.equal(activity?.timeline.items[0]?.nodeId, "thinking-live");
-  assert.equal(
-    activity?.timeline.items[0]?.copy.detail,
-    "思考中",
-  );
-  assert.equal(
-    activity?.timeline.items[0]?.copy.expandedDetail,
-    "The user is asking me to demonstrate capabilities and inspect the workspace.",
-  );
+  assert.deepEqual(activityNodeIds(structure), ["thinking-live"]);
 });
 
-test("assistant message structure keeps repeated thinking from splitting the workflow after body", () => {
+test("assistant message structure keeps tool activity after body alongside reasoning", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -128,21 +116,10 @@ test("assistant message structure keeps repeated thinking from splitting the wor
   });
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body", "activity"]);
-  assert.deepEqual(
-    structure.segments[0]?.kind === "activity"
-      ? structure.segments[0].timeline.items.map((item) => item.nodeId)
-      : [],
-    ["thinking-live"],
-  );
-  assert.deepEqual(
-    structure.segments[2]?.kind === "activity"
-      ? structure.segments[2].timeline.items.map((item) => item.nodeId)
-      : [],
-    ["tool-1"],
-  );
+  assert.deepEqual(activityNodeIds(structure), ["thinking-live", "tool-1"]);
 });
 
-test("assistant message structure removes repeated thinking inside one post-body activity segment", () => {
+test("assistant message structure keeps post-body reasoning and deduplicates identical snapshots", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -185,17 +162,10 @@ test("assistant message structure removes repeated thinking inside one post-body
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["body", "activity"]);
   const activity = structure.segments[1]?.kind === "activity" ? structure.segments[1] : undefined;
   assert.deepEqual(activity?.timeline.items.map((item) => item.nodeId), ["thinking-live", "tool-1"]);
-  assert.deepEqual(activity?.timeline.items.map((item) => item.copy.detail), [
-    "思考中",
-    "latest AI agent development trends 2025",
-  ]);
-  assert.equal(
-    activity?.timeline.items[0]?.copy.expandedDetail,
-    "The user is asking me to demonstrate my capabilities.",
-  );
+  assert.equal(activity?.timeline.items.some((item) => item.copy.expandedDetail?.includes("demonstrate")), true);
 });
 
-test("assistant message structure removes repeated narration from the same cold projection", () => {
+test("assistant message structure deduplicates provider side narration already represented by reasoning", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -237,18 +207,7 @@ test("assistant message structure removes repeated narration from the same cold 
   });
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body", "activity"]);
-  assert.deepEqual(
-    structure.segments[0]?.kind === "activity"
-      ? structure.segments[0].timeline.items.map((item) => item.nodeId)
-      : [],
-    ["thinking-live"],
-  );
-  assert.deepEqual(
-    structure.segments[2]?.kind === "activity"
-      ? structure.segments[2].timeline.items.map((item) => item.nodeId)
-      : [],
-    ["tool-1"],
-  );
+  assert.deepEqual(activityNodeIds(structure), ["thinking-live", "tool-1"]);
 });
 
 test("assistant message structure exposes segment lifecycle", () => {
@@ -376,8 +335,8 @@ test("assistant message structure merges fallback answer into the latest body wh
   });
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body"]);
-  assert.equal(structure.segments[1]?.kind, "body");
-  assert.equal(structure.segments[1]?.kind === "body" ? structure.segments[1].text : undefined, "最终回答");
+  const body = structure.segments.find((segment) => segment.kind === "body");
+  assert.equal(body?.kind === "body" ? body.text : undefined, "最终回答");
   assert.equal(structure.copyText, "最终回答");
 });
 
@@ -468,4 +427,11 @@ function node(input: {
     modelUsage: input.modelUsage,
     refs: input.refs ?? [],
   };
+}
+
+function activityNodeIds(
+  structure: ReturnType<typeof projectAssistantMessageStructure<ProjectableTranscriptNode>>,
+): readonly string[] {
+  return structure.segments.flatMap((segment) =>
+    segment.kind === "activity" ? segment.timeline.items.map((item) => item.nodeId) : []);
 }

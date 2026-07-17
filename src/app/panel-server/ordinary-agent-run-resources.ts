@@ -213,7 +213,6 @@ export function createOrdinaryAgentRunResourceAcquirer(
         });
         const ownedLoop = loop;
         const processTerminator = options.host.processTerminator;
-        const toolOutputStore = options.host.toolOutputStore;
         const release = idempotentRelease([
           () => ownedLoop.release(),
           resources.release,
@@ -223,9 +222,6 @@ export function createOrdinaryAgentRunResourceAcquirer(
                 input.runId,
                 processTerminator,
               ).then(() => undefined)]),
-          ...(toolOutputStore === undefined
-            ? []
-            : [() => toolOutputStore.releaseOwner(input.runId).then(() => undefined)]),
         ]);
         return {
           loop,

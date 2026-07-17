@@ -13,6 +13,7 @@ test("assistant terminal status maps blocked and cancelled turns to distinct not
   assert.equal(assistantTerminalStatus("completed"), undefined);
   assert.equal(assistantTerminalNoticeTitle("blocked"), "需要处理");
   assert.equal(assistantTerminalNoticeTitle("cancelled"), "已取消");
+  assert.equal(assistantTerminalNoticeTitle("failed"), undefined);
 });
 
 test("assistant failure projection preserves previous output before the error marker", () => {

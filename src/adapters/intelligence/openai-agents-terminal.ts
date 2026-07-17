@@ -44,7 +44,11 @@ class OpenAIAgentsTerminalGuardError extends Error {
   }
 }
 
-/** Validate every root and AgentTool model turn before the SDK can act on it. */
+/**
+ * Guards the SDK model boundary, before Runner can interpret a turn or invoke
+ * any function tool. The same provider is used by the root Agent and AgentTool
+ * children, so every model turn crosses this gate.
+ */
 export function withOpenAIAgentsTerminalGuard(
   provider: ModelProvider,
   protocol: OpenAIAgentsTerminalProtocol,
@@ -101,7 +105,10 @@ class OpenAIAgentsTerminalGuardModel implements Model {
 
   getRetryAdvice(args: ModelRetryAdviceRequest): ModelRetryAdvice | Promise<ModelRetryAdvice | undefined> | undefined {
     if (args.error instanceof OpenAIAgentsTerminalGuardError) {
-      return { suggested: false, reason: "The provider returned a non-completed terminal turn." };
+      return {
+        suggested: false,
+        reason: "The provider returned a non-completed terminal turn.",
+      };
     }
     return this.inner.getRetryAdvice?.(args);
   }
@@ -140,13 +147,14 @@ function assessOpenAIAgentsTerminal(input: {
       preserveCanonicalResponse: false,
     };
   }
+
   const providerData = asRecord(input.response.providerData);
-  const hasToolCalls = input.response.output.some((item) => asRecord(item).type === "function_call");
+  const hasToolCalls = hasSdkToolCalls(input.response.output);
   if (input.protocol === "openai_responses") {
-    const details = asRecord(providerData.incomplete_details);
+    const incompleteDetails = asRecord(providerData.incomplete_details);
     const terminal = assessOpenAIResponsesTerminal({
       status: providerData.status ?? input.fallbackResponsesStatus,
-      incompleteReason: details.reason ?? input.fallbackResponsesIncompleteReason,
+      incompleteReason: incompleteDetails.reason ?? input.fallbackResponsesIncompleteReason,
       hasToolCalls,
     });
     if (terminal.status === "failed") {
@@ -154,18 +162,23 @@ function assessOpenAIAgentsTerminal(input: {
     }
   } else {
     const choices = Array.isArray(providerData.choices) ? providerData.choices : [];
+    const firstChoice = asRecord(choices[0]);
     const terminal = assessOpenAICompatibleChatTerminal({
-      finishReason: asRecord(choices[0]).finish_reason ?? input.fallbackChatFinishReason,
+      finishReason: firstChoice.finish_reason ?? input.fallbackChatFinishReason,
       hasToolCalls,
     });
     if (terminal.status === "failed") {
       return { message: terminal.message, preserveCanonicalResponse: false };
     }
   }
+
   const refusal = refusalFromSdkResponse(input.response);
   return refusal === undefined
     ? undefined
-    : { message: `The model refused the request: ${refusal}`, preserveCanonicalResponse: true };
+    : {
+        message: `The model refused the request: ${refusal}`,
+        preserveCanonicalResponse: true,
+      };
 }
 
 function observeOpenAIAgentsTerminalEvent(
@@ -177,34 +190,74 @@ function observeOpenAIAgentsTerminalEvent(
   if (protocol === "openai_compatible_chat_completions") {
     const choices = Array.isArray(event.choices) ? event.choices : [];
     const finishReason = asRecord(choices[0]).finish_reason;
-    if (finishReason !== undefined && finishReason !== null) observation.chatFinishReason = finishReason;
+    if (finishReason !== undefined && finishReason !== null) {
+      observation.chatFinishReason = finishReason;
+    }
     return;
   }
-  if (!["response.completed", "response.incomplete", "response.failed", "response.cancelled"].includes(String(event.type))) return;
+
+  if (
+    event.type !== "response.completed" &&
+    event.type !== "response.incomplete" &&
+    event.type !== "response.failed" &&
+    event.type !== "response.cancelled"
+  ) {
+    return;
+  }
   const response = asRecord(event.response);
   observation.responsesStatus = response.status ?? terminalResponsesStatus(event.type);
-  observation.responsesIncompleteReason = asRecord(response.incomplete_details).reason;
+  const incompleteDetails = asRecord(response.incomplete_details);
+  observation.responsesIncompleteReason = incompleteDetails.reason;
 }
 
 function terminalResponsesStatus(type: unknown): string | undefined {
-  if (type === "response.completed") return "completed";
-  if (type === "response.incomplete") return "incomplete";
-  if (type === "response.failed") return "failed";
-  if (type === "response.cancelled") return "cancelled";
-  return undefined;
+  switch (type) {
+    case "response.completed":
+      return "completed";
+    case "response.incomplete":
+      return "incomplete";
+    case "response.failed":
+      return "failed";
+    case "response.cancelled":
+      return "cancelled";
+    default:
+      return undefined;
+  }
+}
+
+function hasSdkToolCalls(output: readonly unknown[] | undefined): boolean {
+  return output?.some((item) => asRecord(item).type === "function_call") === true;
 }
 
 function refusalFromSdkResponse(response: SdkRawResponse): string | undefined {
   const providerData = asRecord(response.providerData);
   const choices = Array.isArray(providerData.choices) ? providerData.choices : [];
   const messageRefusal = asRecord(asRecord(choices[0]).message).refusal;
-  if (typeof messageRefusal === "string" && messageRefusal.trim().length > 0) return messageRefusal.trim();
-  for (const raw of [...response.output, ...(Array.isArray(providerData.output) ? providerData.output : [])]) {
-    const item = asRecord(raw);
-    if (typeof item.refusal === "string" && item.refusal.trim().length > 0) return item.refusal.trim();
-    for (const part of Array.isArray(item.content) ? item.content : []) {
-      const refusal = asRecord(part).refusal;
-      if (typeof refusal === "string" && refusal.trim().length > 0) return refusal.trim();
+  if (typeof messageRefusal === "string" && messageRefusal.trim().length > 0) {
+    return messageRefusal.trim();
+  }
+
+  for (const item of response.output ?? []) {
+    const refusal = refusalFromOutputItem(asRecord(item));
+    if (refusal !== undefined) return refusal;
+  }
+  const providerOutput = Array.isArray(providerData.output) ? providerData.output : [];
+  for (const item of providerOutput) {
+    const refusal = refusalFromOutputItem(asRecord(item));
+    if (refusal !== undefined) return refusal;
+  }
+  return undefined;
+}
+
+function refusalFromOutputItem(item: Readonly<Record<string, unknown>>): string | undefined {
+  if (typeof item.refusal === "string" && item.refusal.trim().length > 0) {
+    return item.refusal.trim();
+  }
+  const content = Array.isArray(item.content) ? item.content : [];
+  for (const part of content) {
+    const refusal = asRecord(part).refusal;
+    if (typeof refusal === "string" && refusal.trim().length > 0) {
+      return refusal.trim();
     }
   }
   return undefined;

@@ -279,5 +279,6 @@ function pendingMatchesDisplayRun<TPending extends ConfirmationIdentity>(
   pending: TPending | undefined,
   displayRunId: string,
 ): boolean {
-  return pending !== undefined && (pending.runId === undefined || pending.runId === displayRunId);
+  return pending !== undefined &&
+    (pending.ownerRunId === undefined || pending.ownerRunId === displayRunId);
 }

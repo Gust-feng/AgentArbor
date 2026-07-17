@@ -100,6 +100,7 @@ export type DeepConversationView = {
   readonly followUpTurns?: readonly DeepRunFollowUpTurn[];
   readonly currentObjective?: string;
   readonly birthWorkspaceDirectory?: string;
+  readonly workspaceSelection?: "default" | "explicit";
   readonly pinnedAt?: string;
   readonly isolation: DeepConversationIsolationMark;
   readonly createdAt: string;

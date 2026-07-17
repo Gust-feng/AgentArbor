@@ -6,13 +6,16 @@ export type ToolDisplayNormalizationInput = {
   readonly toolName: string;
   readonly input?: unknown;
   readonly output?: unknown;
-  readonly truncated?: boolean;
 };
 
 export function normalizeToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection {
   const structuredDisplay = structuredToolDisplayForOperation(input);
   if (structuredDisplay !== undefined) {
     return structuredDisplay;
+  }
+  const externalSourceDisplay = externalSourceDisplayForOperation(input);
+  if (externalSourceDisplay !== undefined) {
+    return externalSourceDisplay;
   }
   const fileGroupDisplay = fileChangeGroupDisplayForOperation(input);
   if (fileGroupDisplay !== undefined) {
@@ -46,8 +49,6 @@ function fileChangeGroupDisplayForOperation(
   return {
     kind: "file_change_group",
     files,
-    truncated: booleanOrUndefined(output.truncated) ??
-      (input.truncated === true || files.some((file) => file.truncated === true) ? true : undefined),
   };
 }
 
@@ -55,8 +56,6 @@ function fileChangeGroupItem(value: unknown): {
   readonly path: string;
   readonly operation?: ToolFileDisplayOperation;
   readonly preview?: string;
-  readonly replacements?: number;
-  readonly truncated?: boolean;
 } | undefined {
   const item = asRecord(value);
   const path = stringOrUndefined(item.path);
@@ -69,8 +68,6 @@ function fileChangeGroupItem(value: unknown): {
     path,
     operation: fileDisplayOperationOrUndefined(item.operation) ?? (canonicalDiff === undefined ? undefined : "edit"),
     preview: preview?.text,
-    replacements: numberOrUndefined(item.replacements),
-    truncated: booleanOrUndefined(item.truncated) ?? (preview?.truncated === true ? true : undefined),
   };
 }
 
@@ -78,19 +75,13 @@ function structuredToolDisplayForOperation(input: ToolDisplayNormalizationInput)
   const toolName = input.toolName.trim().toLowerCase();
   const output = asRecord(input.output);
   const inputRecord = asRecord(input.input);
-  const truncated = booleanOrUndefined(output.truncated) ??
-    (input.truncated === true ? true : undefined);
-  if (isDirectoryListingTool(toolName) && Array.isArray(output.entries)) {
-    const entries = output.entries
+  if (isDirectoryListingTool(toolName)) {
+    const entries = (Array.isArray(output.entries) ? output.entries : [])
       .map(directoryEntryDisplayItem)
       .filter((item): item is NonNullable<ReturnType<typeof directoryEntryDisplayItem>> => item !== undefined);
-    const entriesReturned = numberOrUndefined(output.entriesReturned) ?? entries.length;
     return {
       kind: "directory_listing",
       path: stringOrUndefined(output.path) ?? stringOrUndefined(inputRecord.path),
-      depth: numberOrUndefined(output.depth) ?? numberOrUndefined(inputRecord.depth),
-      entriesReturned,
-      totalEntries: numberOrUndefined(output.totalEntries) ?? (truncated === true ? undefined : entriesReturned),
       unreadableDirectories: numberOrUndefined(output.unreadableDirectories),
       unreadableSamples: Array.isArray(output.unreadableSamples)
         ? output.unreadableSamples
@@ -98,37 +89,183 @@ function structuredToolDisplayForOperation(input: ToolDisplayNormalizationInput)
           .filter((item): item is NonNullable<ReturnType<typeof unreadableDirectorySample>> => item !== undefined)
         : undefined,
       entries,
-      truncated,
     };
   }
-  if (isFileSearchTool(toolName) && Array.isArray(output.matches)) {
-    const matches = output.matches
+  if (isFileSearchTool(toolName)) {
+    const matches = (Array.isArray(output.matches) ? output.matches : [])
       .map(fileSearchMatchDisplayItem)
       .filter((item): item is NonNullable<ReturnType<typeof fileSearchMatchDisplayItem>> => item !== undefined);
     return {
       kind: "file_search_results",
       query: stringOrUndefined(output.query) ?? stringOrUndefined(inputRecord.query),
       path: stringOrUndefined(output.path) ?? stringOrUndefined(inputRecord.path),
-      engine: stringOrUndefined(output.engine),
-      searchedFiles: numberOrUndefined(output.searchedFiles),
-      skippedFactsAvailable: booleanOrUndefined(output.skippedFactsAvailable),
-      skippedFiles: numberOrUndefined(output.skippedFiles),
-      skippedBinaryFiles: numberOrUndefined(output.skippedBinaryFiles),
-      skippedTooLargeFiles: numberOrUndefined(output.skippedTooLargeFiles),
       skippedUnreadableFiles: numberOrUndefined(output.skippedUnreadableFiles),
-      skippedDirectories: numberOrUndefined(output.skippedDirectories),
-      skippedOtherEntries: numberOrUndefined(output.skippedOtherEntries),
-      skippedSamples: Array.isArray(output.skippedSamples)
-        ? output.skippedSamples
-          .map(fileSearchSkippedSample)
-          .filter((item): item is NonNullable<ReturnType<typeof fileSearchSkippedSample>> => item !== undefined)
-        : undefined,
       matches,
-      matchesReturned: numberOrUndefined(output.matchesReturned) ?? matches.length,
-      truncated,
     };
   }
   return undefined;
+}
+
+type ExternalSourceDisplayItem = {
+  readonly title: string;
+  readonly url: string;
+  readonly source?: string;
+};
+
+function externalSourceDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection | undefined {
+  const sources = externalSourcesFromValue(input.output);
+  if (sources.length === 0) {
+    return undefined;
+  }
+  const request = asRecord(input.input);
+  const query = stringOrUndefined(request.query) ?? stringOrUndefined(request.searchQuery);
+  if (query !== undefined || sources.length > 1) {
+    return {
+      kind: "search_results",
+      query,
+      results: sources,
+    };
+  }
+  const source = sources[0];
+  return {
+    kind: "read_result",
+    title: source?.title,
+    url: source?.url,
+    uri: source?.url,
+  };
+}
+
+function externalSourcesFromValue(value: unknown, depth = 0): readonly ExternalSourceDisplayItem[] {
+  if (depth > 4) {
+    return [];
+  }
+  if (typeof value === "string") {
+    return externalSourcesFromText(value);
+  }
+  if (Array.isArray(value)) {
+    return uniqueExternalSources(value.flatMap((item) => externalSourcesFromValue(item, depth + 1)));
+  }
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) {
+    return [];
+  }
+
+  const directUrl = externalHttpUrl(
+    stringOrUndefined(record.url) ??
+    stringOrUndefined(record.uri) ??
+    stringOrUndefined(record.href) ??
+    stringOrUndefined(record.link),
+  );
+  const direct = directUrl === undefined
+    ? []
+    : [externalSourceItem(
+        stringOrUndefined(record.title) ?? stringOrUndefined(record.name),
+        directUrl,
+      )];
+  const nested = [
+    record.results,
+    record.items,
+    record.sources,
+    record.data,
+    record.structuredContent,
+    record.content,
+    record.text,
+    record.resource,
+  ].flatMap((item) => externalSourcesFromValue(item, depth + 1));
+  return uniqueExternalSources([...direct, ...nested]);
+}
+
+function externalSourcesFromText(value: string): readonly ExternalSourceDisplayItem[] {
+  const text = value.replace(/\r\n?/g, "\n");
+  const sources: ExternalSourceDisplayItem[] = [];
+  const titleBlocks = text.split(/(?=^\s*Title\s*:)/gimu);
+  for (const block of titleBlocks) {
+    const title = lineField(block, "Title");
+    const url = externalHttpUrl(lineField(block, "URL"));
+    if (url !== undefined) {
+      sources.push(externalSourceItem(title, url));
+    }
+  }
+
+  const markdownLinkPattern = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/giu;
+  for (const match of text.matchAll(markdownLinkPattern)) {
+    const url = externalHttpUrl(match[2]);
+    if (url !== undefined) {
+      sources.push(externalSourceItem(match[1], url));
+    }
+  }
+
+  const urlPattern = /https?:\/\/[^\s<>"']+/giu;
+  for (const match of text.matchAll(urlPattern)) {
+    const url = externalHttpUrl(match[0]);
+    if (url === undefined) {
+      continue;
+    }
+    const line = text.slice(text.lastIndexOf("\n", match.index ?? 0) + 1, text.indexOf("\n", match.index ?? 0) === -1 ? text.length : text.indexOf("\n", match.index ?? 0));
+    const candidate = line.replace(match[0], " ");
+    sources.push(externalSourceItem(candidate, url));
+  }
+  return uniqueExternalSources(sources);
+}
+
+function lineField(text: string, field: string): string | undefined {
+  const match = new RegExp(`^\\s*${field}\\s*:\\s*(.+)$`, "imu").exec(text);
+  return stringOrUndefined(match?.[1]);
+}
+
+function externalSourceItem(title: string | undefined, url: string): ExternalSourceDisplayItem {
+  const source = externalSourceHost(url);
+  return {
+    title: cleanExternalSourceTitle(title, url) ?? source ?? url,
+    url,
+    source,
+  };
+}
+
+function cleanExternalSourceTitle(value: string | undefined, url: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const title = value
+    .replace(url, " ")
+    .replace(/^\s*(?:Title|URL)\s*:\s*/iu, "")
+    .replace(/^\s*#+\s*/u, "")
+    .replace(/[\s|·:：\-–—]+$/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return title.length === 0 || title.length > 280 ? undefined : title;
+}
+
+function externalHttpUrl(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const candidate = value.replace(/[),.;，。；]+$/u, "");
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function externalSourceHost(value: string): string | undefined {
+  try {
+    return new URL(value).hostname.replace(/^www\./u, "") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function uniqueExternalSources(values: readonly ExternalSourceDisplayItem[]): readonly ExternalSourceDisplayItem[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    if (seen.has(value.url)) {
+      return false;
+    }
+    seen.add(value.url);
+    return true;
+  });
 }
 
 function isDirectoryListingTool(toolName: string): boolean {
@@ -171,7 +308,6 @@ function fileChangeDisplay(
   operation: ToolFileDisplayOperation
 ): ToolDisplayProjection {
   const content = stringOrUndefined(inputRecord.content);
-  const append = booleanOrUndefined(outputRecord.append) ?? booleanOrUndefined(inputRecord.append);
   const allowDerivedPreview = isBuiltInFileToolName(input.toolName);
   const preview = operation === "delete" || !allowDerivedPreview
     ? undefined
@@ -183,13 +319,7 @@ function fileChangeDisplay(
     kind: "file_change_summary",
     path: stringOrUndefined(outputRecord.path) ?? stringOrUndefined(inputRecord.path),
     operation,
-    bytes: numberOrUndefined(outputRecord.bytes) ?? contentByteLength(content),
-    append,
-    replacements: numberOrUndefined(outputRecord.replacements),
-    previousLength: numberOrUndefined(outputRecord.previousLength),
-    nextLength: numberOrUndefined(outputRecord.nextLength) ?? content?.length,
     preview: allowDerivedPreview ? stringOrUndefined(outputRecord.preview) ?? preview?.text : undefined,
-    truncated: booleanOrUndefined(outputRecord.truncated) ?? (input.truncated === true || preview?.truncated === true ? true : undefined),
   };
 }
 
@@ -204,15 +334,12 @@ function fileDiffDisplay(
     kind: "file_diff_preview",
     path: stringOrUndefined(outputRecord.path) ?? stringOrUndefined(inputRecord.path),
     operation,
-    replacements: numberOrUndefined(outputRecord.replacements) ?? numberOrUndefined(outputRecord.wouldReplace),
-    previousLength: numberOrUndefined(outputRecord.previousLength),
-    nextLength: numberOrUndefined(outputRecord.nextLength),
     preview: preview?.text,
-    truncated: booleanOrUndefined(outputRecord.truncated) ?? (input.truncated === true || preview?.truncated === true ? true : undefined),
   };
 }
 
 function genericToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection {
+  const request = asRecord(input.input);
   const output = asRecord(input.output);
   const text = stringOrUndefined(output.text) ?? stringOrUndefined(output.content);
   const items = [
@@ -221,15 +348,23 @@ function genericToolDisplayForOperation(input: ToolDisplayNormalizationInput): T
     ...mcpContentItems(output.content),
     ...structuredContentItems(output.structuredContent),
   ]
-    .map((item) => compactText(item, 500))
+    .map((item) => stringOrUndefined(item))
     .filter((item): item is string => item !== undefined)
     .slice(0, 8);
   return {
     kind: "generic_tool_summary",
     action: toolDisplayName(input.toolName),
-    summary: genericFactSummary(output),
+    summary: stringOrUndefined(request.query) ?? genericFactSummary(output) ?? genericRequestTarget(request),
     items: items.length === 0 ? undefined : items,
   };
+}
+
+function genericRequestTarget(request: Readonly<Record<string, unknown>>): string | undefined {
+  return stringOrUndefined(request.path) ??
+    stringOrUndefined(request.url) ??
+    stringOrUndefined(request.uri) ??
+    stringOrUndefined(request.ref) ??
+    stringOrUndefined(request.name);
 }
 
 function fileOperationKind(
@@ -294,7 +429,6 @@ function fileDisplayOperationOrUndefined(value: unknown): ToolFileDisplayOperati
 
 type FilePreviewResult = {
   readonly text: string;
-  readonly truncated: boolean;
 };
 
 function fileWriteDiffPreview(input: {
@@ -302,7 +436,20 @@ function fileWriteDiffPreview(input: {
   readonly mode: "create" | "write" | "append";
 }): FilePreviewResult | undefined {
   if (input.content === undefined) return undefined;
-  return boundedDiffPreview(input.content, "+", input.mode === "append" ? "追加内容" : input.mode === "create" ? "新增内容" : "写入内容");
+  const normalized = input.content.replace(/\r\n?/g, "\n");
+  if (normalized.length === 0) return undefined;
+  if (normalized.trim().length === 0 && !normalized.includes("\n")) {
+    const label = input.mode === "append" ? "追加内容" : input.mode === "create" ? "新增内容" : "写入内容";
+    return { text: `+ ${label}` };
+  }
+  const lines = normalized.endsWith("\n")
+    ? normalized.slice(0, -1).split("\n")
+    : normalized.split("\n");
+  return {
+    text: lines
+      .map((line) => `+ ${line.length === 0 ? " " : line}`)
+      .join("\n"),
+  };
 }
 
 function canonicalEditFileDiffPreview(value: unknown): FilePreviewResult | undefined {
@@ -311,40 +458,17 @@ function canonicalEditFileDiffPreview(value: unknown): FilePreviewResult | undef
     return undefined;
   }
   const unifiedDiff = stringOrUndefined(diff.unifiedDiff);
-  return unifiedDiff === undefined ? undefined : compactDiffText(unifiedDiff, 2_400);
+  return unifiedDiff === undefined ? undefined : completeDiffText(unifiedDiff);
 }
 
 function compactDiffPreview(value: string | undefined): FilePreviewResult | undefined {
-  return value === undefined ? undefined : compactDiffText(value, 2_400);
+  return value === undefined ? undefined : completeDiffText(value);
 }
 
-function boundedDiffPreview(value: string, marker: "+" | "-", fallbackLabel: string): FilePreviewResult | undefined {
-  const safe = fileFragment(value, 1_200);
-  if (safe.trim().length === 0 && !safe.includes("\n")) {
-    return { text: `${marker} ${fallbackLabel}`, truncated: false };
-  }
-  const lines = safe.replace(/\r\n?/g, "\n").split("\n");
-  const visibleLines = lines.slice(0, 14);
-  const text = visibleLines.map((line) => `${marker} ${line.length === 0 ? " " : line}`).join("\n");
-  const truncated = lines.length > visibleLines.length || safe.length < value.length;
-  return { text, truncated };
-}
-
-function compactDiffText(value: string, maxLength: number): FilePreviewResult | undefined {
+function completeDiffText(value: string): FilePreviewResult | undefined {
   const text = value.trimEnd();
   if (text.trim().length === 0) return undefined;
-  if (text.length <= maxLength) return { text, truncated: false };
-  return { text: `${text.slice(0, Math.max(0, maxLength - 15)).trimEnd()}\n... diff truncated`, truncated: true };
-}
-
-function fileFragment(value: string, maxLength: number): string {
-  const text = value
-    .replace(/\r\n?/g, "\n")
-    .replace(/[^\S\n]+/g, " ");
-  if (text.trim().length === 0 && !text.includes("\n")) {
-    return "";
-  }
-  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
+  return { text };
 }
 
 function mcpContentItems(value: unknown): readonly string[] {
@@ -364,32 +488,17 @@ function mcpContentSummary(value: unknown): string | undefined {
     return stringOrUndefined(record.text);
   }
   if (type === "resource_link") {
-    return compactText([
+    return stringOrUndefined([
       stringOrUndefined(record.title) ?? stringOrUndefined(record.name),
       stringOrUndefined(record.uri),
-      stringOrUndefined(record.mimeType),
-      numberOrUndefined(record.size) === undefined ? undefined : `${numberOrUndefined(record.size)} bytes`,
-    ].filter((item): item is string => item !== undefined).join(" · "), 500);
+    ].filter((item): item is string => item !== undefined).join(" · "));
   }
   if (type === "resource") {
     const resource = asRecord(record.resource);
     const resourceText = stringOrUndefined(resource.text);
-    return resourceText ?? compactText([
-      stringOrUndefined(resource.uri),
-      stringOrUndefined(resource.mimeType),
-      numberOrUndefined(resource.byteLength) === undefined ? undefined : `${numberOrUndefined(resource.byteLength)} bytes`,
-    ].filter((item): item is string => item !== undefined).join(" · "), 500);
+    return resourceText ?? stringOrUndefined(resource.uri);
   }
-  const mimeType = stringOrUndefined(record.mimeType);
-  const byteLength = numberOrUndefined(record.byteLength);
-  if (type === undefined) {
-    return undefined;
-  }
-  return [
-    `非文本内容：${type}`,
-    mimeType === undefined ? undefined : `MIME：${mimeType}`,
-    byteLength === undefined ? undefined : `${byteLength} 字节`,
-  ].filter((item): item is string => item !== undefined).join("，");
+  return undefined;
 }
 
 function structuredContentItems(value: unknown): readonly string[] {
@@ -417,12 +526,8 @@ function structuredFactText(value: unknown): string | undefined {
   const parts = uniqueStrings([
     stringOrUndefined(record.title) ?? stringOrUndefined(record.name),
     stringOrUndefined(record.path) ?? stringOrUndefined(record.url) ?? stringOrUndefined(record.uri),
-    stringOrUndefined(record.status) ?? stringOrUndefined(record.researchStatus),
-    countFact("results", record.resultsReturned, record.results),
-    countFact("entries", record.entriesReturned, record.entries),
-    countFact("matches", record.matchesReturned, record.matches),
   ]);
-  return compactText(parts.join(" · "), 500);
+  return stringOrUndefined(parts.join(" · "));
 }
 
 function genericFactSummary(output: Readonly<Record<string, unknown>>): string | undefined {
@@ -430,23 +535,11 @@ function genericFactSummary(output: Readonly<Record<string, unknown>>): string |
     stringOrUndefined(output.title) ?? stringOrUndefined(output.name),
     stringOrUndefined(output.path) ?? stringOrUndefined(output.url) ?? stringOrUndefined(output.uri),
     stringOrUndefined(output.refId) ?? stringOrUndefined(output.ref),
-    stringOrUndefined(output.status) ?? stringOrUndefined(output.researchStatus),
-    numberOrUndefined(output.statusCode) === undefined ? undefined : `HTTP ${numberOrUndefined(output.statusCode)}`,
-    numberOrUndefined(output.bytes) === undefined ? undefined : `${numberOrUndefined(output.bytes)} bytes`,
-    countFact("results", output.resultsReturned, output.results),
-    countFact("entries", output.entriesReturned, output.entries),
-    countFact("matches", output.matchesReturned, output.matches),
-    countFact("rows", output.rowsReturned, output.rows),
   ]);
   if (parts.length > 0) {
-    return compactText(parts.join(" · "), 500);
+    return stringOrUndefined(parts.join(" · "));
   }
-  return compactText(stringOrUndefined(output.message), 500);
-}
-
-function countFact(label: string, explicitCount: unknown, values: unknown): string | undefined {
-  const count = numberOrUndefined(explicitCount) ?? (Array.isArray(values) ? values.length : undefined);
-  return count === undefined ? undefined : `${count} ${label}`;
+  return stringOrUndefined(output.message);
 }
 
 function uniqueStrings(values: readonly (string | undefined)[]): string[] {
@@ -455,10 +548,7 @@ function uniqueStrings(values: readonly (string | undefined)[]): string[] {
 
 function directoryEntryDisplayItem(value: unknown): {
   readonly path: string;
-  readonly name?: string;
   readonly kind?: string;
-  readonly bytes?: number;
-  readonly depth?: number;
 } | undefined {
   const record = asRecord(value);
   const path = stringOrUndefined(record.path) ?? stringOrUndefined(record.name);
@@ -467,10 +557,7 @@ function directoryEntryDisplayItem(value: unknown): {
   }
   return {
     path,
-    name: stringOrUndefined(record.name),
     kind: stringOrUndefined(record.kind),
-    bytes: numberOrUndefined(record.bytes),
-    depth: numberOrUndefined(record.depth),
   };
 }
 
@@ -503,29 +590,7 @@ function fileSearchMatchDisplayItem(value: unknown): {
   return {
     path,
     line: numberOrUndefined(record.line),
-    preview: compactText(stringOrUndefined(record.preview), 500),
-  };
-}
-
-function fileSearchSkippedSample(value: unknown): {
-  readonly path?: string;
-  readonly reason?: string;
-  readonly bytes?: number;
-  readonly errorCode?: string;
-} | undefined {
-  const record = asRecord(value);
-  const path = stringOrUndefined(record.path);
-  const reason = stringOrUndefined(record.reason);
-  const bytes = numberOrUndefined(record.bytes);
-  const errorCode = stringOrUndefined(record.errorCode);
-  if (path === undefined && reason === undefined && bytes === undefined && errorCode === undefined) {
-    return undefined;
-  }
-  return {
-    path,
-    reason,
-    bytes,
-    errorCode,
+    preview: stringOrUndefined(record.preview),
   };
 }
 
@@ -549,19 +614,4 @@ function booleanOrUndefined(value: unknown): boolean | undefined {
   if (value === true) return true;
   if (value === false) return false;
   return undefined;
-}
-
-function contentByteLength(value: string | undefined): number | undefined {
-  return value === undefined ? undefined : Buffer.byteLength(value, "utf8");
-}
-
-function compactText(value: string | undefined, maxLength: number): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const text = value.trim();
-  if (text.length === 0) {
-    return undefined;
-  }
-  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}...`;
 }

@@ -172,7 +172,7 @@ export const MULTI_AGENT_CAPABILITY_PROFILE: CapabilityAgentProfile = {
 
 const MULTI_AGENT_TOOL_OUTPUT_OWNER_PREFIX = "deep-run:";
 
-/** Stable process-local owner shared by the initial run and later child operations. */
+/** Stable evidence owner shared by the initial run and later child operations. */
 function multiAgentToolOutputOwnerId(runId: string): string {
   return `${MULTI_AGENT_TOOL_OUTPUT_OWNER_PREFIX}${runId}`;
 }
@@ -505,7 +505,7 @@ export type MultiAgentFeatureOptions = {
   readonly resolveRunStartFacts?: MultiAgentRunStartFactsResolver;
   readonly reportBackgroundFailure?: MultiAgentBackgroundFailureReporter;
   readonly childContinuationRetention?: DeepChildPendingContinuationRetentionOptions;
-  /** Host cleanup port for process-local retained tool output; no store leaks into the feature. */
+  /** Host cleanup port for retained tool evidence; no store leaks into the feature. */
   readonly releaseToolOutputOwner?: (ownerId: string) => void | Promise<void>;
   /** Test fixture hook. Production composition must not consume internal ports. */
   readonly testOnlyCapturePorts?: (ports: MultiAgentFeatureTestPorts) => void;
@@ -2178,7 +2178,7 @@ async function deleteMultiAgentConversation(
     );
   }
   // Deletion is an ownership cleanup, not a recent-history query. Read every
-  // run so old child contexts and process-local output owners cannot be left
+  // run so old child contexts and retained evidence owners cannot be left
   // behind after newer runs push them outside a presentation limit.
   const records = await feature.runRecordStore.listByConversation(conversationId);
   if (records.some((record) => record.run.status === "running")) {

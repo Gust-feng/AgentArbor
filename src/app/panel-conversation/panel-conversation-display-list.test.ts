@@ -237,13 +237,10 @@ test("conversation display list carries workflow continuity when a standalone ru
   assert.equal(item?.kind === "assistant" ? item.source : undefined, "turn");
   assert.equal(migratedDisplay.state.assistantWorkflowsByRunId.has("run-1"), true);
   assert.equal(activitySegments.length, 2);
-  assert.deepEqual(activitySegments[0]?.timeline.items.map((timelineItem) => timelineItem.copy.detail), [
-    "思考中",
-  ]);
-  assert.deepEqual(activitySegments[0]?.timeline.items.map((timelineItem) => timelineItem.copy.expandedDetail), [
-    "I should inspect the workspace.",
-  ]);
-  assert.deepEqual(activitySegments[1]?.timeline.items.map((timelineItem) => timelineItem.copy.detail), ["README.md"]);
+  assert.deepEqual(
+    activitySegments.flatMap((segment) => segment.timeline.items.map((timelineItem) => timelineItem.nodeId)),
+    ["thinking-live", "tool-1"],
+  );
 });
 
 test("conversation display list keeps failed assistant turns on the unified workflow path", () => {

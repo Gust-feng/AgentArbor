@@ -1,28 +1,34 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isUtf16CodeUnitBoundary, utf16SafeWindowEnd } from "./text-window.js";
 import { MAX_TOOL_OUTPUT_SOURCE_METADATA_JSON_CHARS } from "./tool-output-limits.js";
 
 export const TOOL_OUTPUT_REF_PREFIX = "tool-output://";
 
 export type ToolOutputMediaType = "text/plain" | "application/json";
+export type ToolOutputAvailability = "live_only" | "durable";
 
 export type RetainToolOutputInput = {
   readonly mediaType: ToolOutputMediaType;
   readonly content: string;
   readonly sourceToolName: string;
   readonly sourceCallId: string;
+  readonly sourceFactId?: string;
   /** Runtime trace that owns the retained fact; never exposed through the opaque ref. */
   readonly ownerId?: string;
 };
 
 export type ToolOutputRetention = {
   readonly ref: string;
+  readonly availability: ToolOutputAvailability;
   readonly mediaType: ToolOutputMediaType;
   readonly sourceToolName: string;
   readonly sourceCallId: string;
+  readonly sourceFactId?: string;
   readonly totalChars: number;
+  readonly byteLength: number;
+  readonly sha256: string;
   readonly createdAt: string;
-  readonly expiresAt: string;
+  readonly expiresAt?: string;
 };
 
 export type ToolOutputReadWindow = {
@@ -43,6 +49,8 @@ export interface ToolOutputStore {
   release(ref: string): Promise<boolean>;
   releaseOwner(ownerId: string): Promise<number>;
   clear(): Promise<void>;
+  /** Releases process resources without deleting durable evidence. */
+  close?(): Promise<void>;
 }
 
 export type ToolOutputStoreErrorCode =
@@ -55,6 +63,7 @@ export type ToolOutputStoreErrorCode =
   | "tool_output_capacity_exceeded"
   | "tool_output_ref_generation_failed"
   | "tool_output_not_found"
+  | "tool_output_corrupt"
   | "tool_output_read_budget_exceeded"
   | "tool_output_source_metadata_too_large";
 
@@ -84,6 +93,8 @@ export const DEFAULT_TOOL_OUTPUT_MAX_ITEM_CHARS = 4_000_000;
 export const DEFAULT_TOOL_OUTPUT_MAX_TOTAL_CHARS = 32_000_000;
 
 type StoredToolOutput = ToolOutputRetention & {
+  readonly availability: "live_only";
+  readonly expiresAt: string;
   readonly content: string;
   readonly expiresAtMs: number;
   readonly ownerId?: string;
@@ -164,12 +175,19 @@ export class InMemoryToolOutputStore implements ToolOutputStore {
 
     const ref = this.createUniqueRef();
     const expiresAtMs = nowMs + this.ttlMs;
-    const retention: ToolOutputRetention = {
+    const retention: ToolOutputRetention & {
+      readonly availability: "live_only";
+      readonly expiresAt: string;
+    } = {
       ref,
+      availability: "live_only",
       mediaType: normalized.mediaType,
       sourceToolName: normalized.sourceToolName,
       sourceCallId: normalized.sourceCallId,
+      ...(normalized.sourceFactId === undefined ? {} : { sourceFactId: normalized.sourceFactId }),
       totalChars: normalized.content.length,
+      byteLength: Buffer.byteLength(normalized.content, "utf8"),
+      sha256: createHash("sha256").update(normalized.content, "utf8").digest("hex"),
       createdAt: isoTimestamp(nowMs, "current time"),
       expiresAt: isoTimestamp(expiresAtMs, "expiration time"),
     };
@@ -223,7 +241,11 @@ export class InMemoryToolOutputStore implements ToolOutputStore {
       mediaType: entry.mediaType,
       sourceToolName: entry.sourceToolName,
       sourceCallId: entry.sourceCallId,
+      ...(entry.sourceFactId === undefined ? {} : { sourceFactId: entry.sourceFactId }),
+      availability: entry.availability,
       totalChars: entry.totalChars,
+      byteLength: entry.byteLength,
+      sha256: entry.sha256,
       createdAt: entry.createdAt,
       expiresAt: entry.expiresAt,
       content,
@@ -236,6 +258,10 @@ export class InMemoryToolOutputStore implements ToolOutputStore {
   async clear(): Promise<void> {
     this.entries.clear();
     this.totalChars = 0;
+  }
+
+  async close(): Promise<void> {
+    await this.clear();
   }
 
   async release(ref: string): Promise<boolean> {
@@ -331,8 +357,11 @@ function normalizeRetainInput(input: RetainToolOutputInput): RetainToolOutputInp
   }
   const sourceToolName = nonEmptyText(input.sourceToolName, "sourceToolName");
   const sourceCallId = nonEmptyText(input.sourceCallId, "sourceCallId");
+  const sourceFactId = input.sourceFactId === undefined
+    ? undefined
+    : nonEmptyText(input.sourceFactId, "sourceFactId");
   const ownerId = input.ownerId === undefined ? undefined : nonEmptyText(input.ownerId, "ownerId");
-  const sourceMetadataChars = JSON.stringify({ sourceToolName, sourceCallId }).length;
+  const sourceMetadataChars = JSON.stringify({ sourceToolName, sourceCallId, sourceFactId }).length;
   if (sourceMetadataChars > MAX_TOOL_OUTPUT_SOURCE_METADATA_JSON_CHARS) {
     throw new ToolOutputStoreError(
       "tool_output_source_metadata_too_large",
@@ -348,6 +377,7 @@ function normalizeRetainInput(input: RetainToolOutputInput): RetainToolOutputInp
     content: input.content,
     sourceToolName,
     sourceCallId,
+    ...(sourceFactId === undefined ? {} : { sourceFactId }),
     ...(ownerId === undefined ? {} : { ownerId }),
   };
 }

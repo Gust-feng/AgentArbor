@@ -21,13 +21,14 @@ export type ReadToolOutputResult = {
   readonly mediaType: "text/plain" | "application/json";
   readonly sourceToolName: string;
   readonly sourceCallId: string;
+  readonly sourceFactId?: string;
   readonly content: string;
   readonly startChar: number;
   readonly textChars: number;
   readonly totalChars: number;
   readonly hasMoreAfter: boolean;
   readonly truncated: boolean;
-  readonly continuationAvailability: "live_only";
+  readonly continuationAvailability: "live_only" | "durable";
   readonly continuation?: ToolContinuation;
 };
 
@@ -59,10 +60,10 @@ export function createReadToolOutputTool(store: ToolOutputStore): ToolExecutor {
         ],
         outputNotes: [
           "content is the exact retained text or canonical JSON window; window boundaries never split a UTF-16 surrogate pair.",
-          "sourceToolName and sourceCallId identify the original execution; this read does not execute it again.",
+          "sourceToolName, sourceCallId and optional sourceFactId identify the original execution fact; this read does not execute it again.",
           "truncated is true only when hasMoreAfter is true and continuation.nextInput points to the first unread character.",
-          "continuationAvailability is live_only because retained bytes are process-local and are lost after restart.",
-          "The final window releases the process-local ref; retain the returned content instead of rereading from the beginning.",
+          "continuationAvailability reports whether the retained bytes survive a process restart.",
+          "A live-only ref is released after its final window; durable evidence remains readable until its owning conversation is deleted.",
         ],
         examples: [{
           title: "Continue a retained result",
@@ -121,7 +122,7 @@ export function createReadToolOutputTool(store: ToolOutputStore): ToolExecutor {
         );
       }
       const result = fitReadResultToInlineBudget(slice, maxChars);
-      if (!result.hasMoreAfter) {
+      if (!result.hasMoreAfter && slice.availability === "live_only") {
         await store.release(slice.ref);
       }
       return result;
@@ -200,13 +201,14 @@ function readToolOutputResult(
     mediaType: slice.mediaType,
     sourceToolName: slice.sourceToolName,
     sourceCallId: slice.sourceCallId,
+    ...(slice.sourceFactId === undefined ? {} : { sourceFactId: slice.sourceFactId }),
     content,
     startChar: slice.startChar,
     textChars,
     totalChars: slice.totalChars,
     hasMoreAfter,
     truncated: hasMoreAfter,
-    continuationAvailability: "live_only",
+    continuationAvailability: slice.availability,
     continuation,
   };
 }

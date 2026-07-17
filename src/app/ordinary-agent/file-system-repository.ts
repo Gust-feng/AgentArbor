@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import { persistedModelProtocolExtensions } from "../../domain/intelligence/index.js";
 import { toolCallFactId } from "../../domain/tools/index.js";
 import {
@@ -117,6 +116,7 @@ const birthSchema = z.object({
     outputContractId: z.string().min(1), toolVisibilityProfileId: z.string().min(1), definitionHash: z.string().optional(),
   }).strict(),
   capabilitySnapshot: capabilitySnapshotSchema,
+  workspaceSelection: z.enum(["default", "explicit"]).optional(),
   informationAccess: z.object({
     sourcePreference: z.array(z.string()), web: z.object({
       provider: z.enum(["tavily", "exa", "zai", "metaso", "google", "bing", "model_builtin", "none"]),
@@ -135,7 +135,7 @@ const statusSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("completed"), answer: z.string() }).strict(),
   z.object({ kind: z.literal("failed"), error: z.object({ code: z.string().min(1), message: z.string() }).strict() }).strict(),
   z.object({ kind: z.literal("cancelled"), reason: z.string() }).strict(),
-  z.object({ kind: z.literal("blocked"), reason: z.object({ code: z.string().min(1), message: z.string() }).strict(), continueBy: z.enum(["new_turn", "retry"]) }).strict(),
+  z.object({ kind: z.literal("blocked"), reason: z.object({ code: z.string().min(1), message: z.string() }).strict(), continueBy: z.literal("new_turn") }).strict(),
 ]);
 const capabilityResolutionSchema = z.object({
   resolutionId: z.string().min(1),
@@ -234,6 +234,10 @@ const rawStateSchema = z.object({
   birth: birthSchema,
   status: statusSchema,
   canonicalMessages: z.array(modelMessageSchema),
+  pendingToolRound: z.object({
+    assistantMessage: modelMessageSchema,
+    acceptedAt: z.string().min(1),
+  }).strict().optional(),
   toolCalls: z.array(toolCallSchema),
   toolResultRecordedAt: z.record(z.string(), z.string().min(1)),
   usage: usageSchema,
@@ -249,6 +253,25 @@ const rawStateSchema = z.object({
   const terminal = ["completed", "failed", "cancelled", "blocked"].includes(state.status.kind);
   if (terminal !== (state.timestamps.terminalAt !== undefined)) {
     context.addIssue({ code: "custom", message: "terminal status and terminalAt must agree", path: ["timestamps", "terminalAt"] });
+  }
+  if (state.pendingToolRound !== undefined) {
+    const pendingMessage = state.pendingToolRound.assistantMessage;
+    const pendingCalls = pendingMessage.toolCalls ?? [];
+    if (pendingMessage.role !== "assistant" || pendingCalls.length === 0) {
+      context.addIssue({ code: "custom", message: "pending tool round requires assistant tool calls", path: ["pendingToolRound", "assistantMessage"] });
+    }
+    const pendingIds = pendingCalls.map((call) => call.callId);
+    if (new Set(pendingIds).size !== pendingIds.length) {
+      context.addIssue({ code: "custom", message: "pending tool call identity is duplicated", path: ["pendingToolRound", "assistantMessage", "toolCalls"] });
+    }
+    if (state.status.kind === "queued" || state.status.kind === "completed") {
+      context.addIssue({ code: "custom", message: "run status cannot own a pending tool round", path: ["pendingToolRound"] });
+    }
+    const committedIds = new Set(state.canonicalMessages.flatMap((message) =>
+      message.role === "assistant" ? (message.toolCalls ?? []).map((call) => call.callId) : []));
+    if (pendingIds.some((callId) => committedIds.has(callId))) {
+      context.addIssue({ code: "custom", message: "pending tool round duplicates canonical history", path: ["pendingToolRound", "assistantMessage", "toolCalls"] });
+    }
   }
   if (state.turn.predecessorRunId === state.runId) {
     context.addIssue({ code: "custom", message: "a run cannot be its own predecessor", path: ["turn", "predecessorRunId"] });
@@ -295,35 +318,13 @@ const rawStateSchema = z.object({
       context.addIssue({ code: "custom", message: "awaiting approval requests must match approval tool facts one-to-one", path: ["status", "confirmationRequests"] });
     }
     for (const [confirmationId, request] of statusRequests) {
-      if (!sameConfirmationRequest(request, factRequests.get(confirmationId))) {
+      if (JSON.stringify(request) !== JSON.stringify(factRequests.get(confirmationId))) {
         context.addIssue({ code: "custom", message: "awaiting approval request differs from its tool fact", path: ["status", "confirmationRequests"] });
       }
     }
   }
   validateCanonicalMessageChain(state, context);
 });
-
-function sameConfirmationRequest(
-  left: ConfirmationRequest,
-  right: ConfirmationRequest | undefined,
-): boolean {
-  return right !== undefined &&
-    left.confirmationId === right.confirmationId &&
-    left.toolCallFactId === right.toolCallFactId &&
-    left.conversationId === right.conversationId &&
-    left.title === right.title &&
-    left.actionSummary === right.actionSummary &&
-    left.consequence === right.consequence &&
-    left.riskLevel === right.riskLevel &&
-    left.resumeAvailability === right.resumeAvailability &&
-    left.requestedAt === right.requestedAt &&
-    left.expiresAt === right.expiresAt &&
-    left.affectedResources.length === right.affectedResources.length &&
-    left.affectedResources.every((value, index) => value === right.affectedResources[index]) &&
-    left.sourceRefs.length === right.sourceRefs.length &&
-    left.sourceRefs.every((value, index) => value === right.sourceRefs[index]);
-}
-
 const stateSchema: z.ZodType<OrdinaryRunState> = z.custom<OrdinaryRunState>((value) => rawStateSchema.safeParse(value).success);
 const documentSchema: z.ZodType<OrdinaryRunSnapshotDocument> = z.object({
   schemaVersion: z.literal(ORDINARY_RUN_SCHEMA_VERSION), revision: z.number().int().positive(), savedAt: z.string().min(1), state: stateSchema,
@@ -336,15 +337,70 @@ const summarySchema = z.object({
 const manifestSchema = z.object({ schemaVersion: z.literal(MANIFEST_SCHEMA_VERSION), entries: z.array(summarySchema) }).strict();
 
 export function createFileSystemOrdinaryRunRepository(rootDir: string): OrdinaryRunRepository {
-  let writeQueue = Promise.resolve();
-  const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
-    const result = writeQueue.then(operation, operation);
-    writeQueue = result.then(() => undefined, () => undefined);
+  const runQueues = new Map<string, Promise<void>>();
+  let manifestQueue = Promise.resolve();
+  let manifestEntries: Map<string, OrdinaryRunSummary> | undefined;
+  let manifestDirty = false;
+
+  const enqueueRun = <T>(runId: string, operation: () => Promise<T>): Promise<T> => {
+    const previous = runQueues.get(runId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(() => undefined, () => undefined);
+    runQueues.set(runId, tail);
+    void tail.finally(() => {
+      if (runQueues.get(runId) === tail) runQueues.delete(runId);
+    });
     return result;
   };
+  const enqueueManifest = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = manifestQueue.then(operation, operation);
+    manifestQueue = result.then(() => undefined, () => undefined);
+    return result;
+  };
+
+  async function currentManifest(forceRepair = false): Promise<Map<string, OrdinaryRunSummary>> {
+    if (!forceRepair && !manifestDirty && manifestEntries !== undefined) return manifestEntries;
+    if (!forceRepair && !manifestDirty) {
+      const stored = await readManifest(rootDir);
+      if (stored !== undefined) {
+        manifestEntries = new Map(stored.map((entry) => [entry.runId, entry]));
+        return manifestEntries;
+      }
+    }
+    const rebuilt = new Map((await scanSummaries(rootDir)).map((entry) => [entry.runId, entry]));
+    manifestEntries = rebuilt;
+    manifestDirty = false;
+    try {
+      await writeManifest(rootDir, sortedSummaries(rebuilt.values()));
+    } catch {
+      // The snapshot remains the commit. Keep a usable in-process index and retry
+      // reconciliation on the next access instead of failing an already committed run.
+      manifestDirty = true;
+    }
+    return rebuilt;
+  }
+
+  async function updateManifest(
+    update: (entries: Map<string, OrdinaryRunSummary>) => void,
+  ): Promise<void> {
+    await enqueueManifest(async () => {
+      const current = await currentManifest();
+      const next = new Map(current);
+      update(next);
+      try {
+        await writeManifest(rootDir, sortedSummaries(next.values()));
+      } catch (error) {
+        manifestDirty = true;
+        throw error;
+      }
+      manifestEntries = next;
+      manifestDirty = false;
+    });
+  }
+
   return {
     save(state, expectedRevision) {
-      return enqueue(async () => {
+      return enqueueRun(state.runId, async () => {
         const current = await readSnapshot(rootDir, state.runId);
         const actualRevision = current?.revision ?? 0;
         if (actualRevision !== expectedRevision) {
@@ -362,21 +418,47 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
         const validation = documentSchema.safeParse(document);
         if (!validation.success) throw new OrdinaryRunSnapshotIncompatibleError(state.runId, z.prettifyError(validation.error));
         await writeJsonAtomically(snapshotPath(rootDir, state.runId), document);
-        // The snapshot is the commit. The list manifest is disposable and rebuilt by list().
-        await repairManifest(rootDir).catch(() => undefined);
+        // The snapshot is the commit. Index maintenance is deliberately separate
+        // from run writes so unrelated runs never wait for a full snapshot scan.
+        await updateManifest((entries) => entries.set(state.runId, summaryFromDocument(document))).catch(() => undefined);
         return cloneJson(document);
       });
     },
     get(runId) { return readSnapshot(rootDir, runId); },
     async list(limit = 50) {
-      const summaries = await scanSummaries(rootDir);
-      await writeManifest(rootDir, summaries).catch(() => undefined);
-      return cloneJson(summaries.slice(0, Math.max(0, Math.floor(limit))));
+      const normalizedLimit = Math.max(0, Math.floor(limit));
+      const forceRepair = normalizedLimit >= Number.MAX_SAFE_INTEGER;
+      const summaries = await enqueueManifest(async () => {
+        const entries = await currentManifest(forceRepair);
+        return sortedSummaries(entries.values());
+      });
+      const available: OrdinaryRunSummary[] = [];
+      const invalidRunIds: string[] = [];
+      for (const summary of summaries) {
+        try {
+          const document = await readSnapshot(rootDir, summary.runId);
+          if (document === undefined) {
+            invalidRunIds.push(summary.runId);
+            continue;
+          }
+          available.push(summaryFromDocument(document));
+        } catch (error) {
+          if (!(error instanceof OrdinaryRunSnapshotIncompatibleError)) throw error;
+          invalidRunIds.push(summary.runId);
+        }
+        if (available.length >= normalizedLimit) break;
+      }
+      if (invalidRunIds.length > 0) {
+        await updateManifest((entries) => {
+          for (const runId of invalidRunIds) entries.delete(runId);
+        }).catch(() => undefined);
+      }
+      return cloneJson(available);
     },
     delete(runId) {
-      return enqueue(async () => {
+      return enqueueRun(runId, async () => {
         await fs.rm(runDirectory(rootDir, runId), { recursive: true, force: true });
-        await repairManifest(rootDir).catch(() => undefined);
+        await updateManifest((entries) => entries.delete(runId)).catch(() => undefined);
       });
     },
   };
@@ -398,19 +480,51 @@ async function scanSummaries(rootDir: string): Promise<OrdinaryRunSummary[]> {
     if (isNodeError(error, "ENOENT")) return [];
     throw error;
   });
-  const documents = await Promise.all(entries.filter((entry) => entry.isDirectory()).map((entry) =>
-    readSnapshot(rootDir, decodeURIComponent(entry.name))));
-  return documents.filter((document): document is OrdinaryRunSnapshotDocument => document !== undefined)
-    .map(summaryFromDocument)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const documents = await Promise.allSettled(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+    let runId: string;
+    try {
+      runId = decodeURIComponent(entry.name);
+    } catch {
+      throw new OrdinaryRunSnapshotIncompatibleError(entry.name, "run directory name is invalid");
+    }
+    return readSnapshot(rootDir, runId);
+  }));
+  const summaries: OrdinaryRunSummary[] = [];
+  for (const document of documents) {
+    if (document.status === "fulfilled") {
+      if (document.value !== undefined) summaries.push(summaryFromDocument(document.value));
+      continue;
+    }
+    if (document.reason instanceof OrdinaryRunSnapshotIncompatibleError) continue;
+    throw document.reason;
+  }
+  return sortedSummaries(summaries);
 }
-
-async function repairManifest(rootDir: string): Promise<void> { await writeManifest(rootDir, await scanSummaries(rootDir)); }
 async function writeManifest(rootDir: string, entries: readonly OrdinaryRunSummary[]): Promise<void> {
   const manifest = { schemaVersion: MANIFEST_SCHEMA_VERSION, entries };
   const result = manifestSchema.safeParse(manifest);
   if (!result.success) throw new OrdinaryRunSnapshotIncompatibleError("manifest", z.prettifyError(result.error));
   await writeJsonAtomically(manifestPath(rootDir), manifest);
+}
+
+async function readManifest(rootDir: string): Promise<readonly OrdinaryRunSummary[] | undefined> {
+  try {
+    const raw = await readJson(manifestPath(rootDir), "manifest");
+    if (raw === undefined) return undefined;
+    const parsed = manifestSchema.safeParse(raw);
+    return parsed.success ? parsed.data.entries : undefined;
+  } catch (error) {
+    if (
+      error instanceof OrdinaryRunSnapshotIncompatibleError ||
+      isNodeError(error, "EISDIR") ||
+      isNodeError(error, "ENOTDIR")
+    ) return undefined;
+    throw error;
+  }
+}
+
+function sortedSummaries(entries: Iterable<OrdinaryRunSummary>): OrdinaryRunSummary[] {
+  return [...entries].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 function summaryFromDocument(document: OrdinaryRunSnapshotDocument): OrdinaryRunSummary {
@@ -430,31 +544,35 @@ function validateCanonicalMessageChain(
   context: z.RefinementCtx,
 ): void {
   const messages = state.canonicalMessages;
-  const pending = new Map<string, string>();
+  const pending: Array<{ readonly callId: string; readonly toolName: string }> = [];
   const completed = new Set<string>();
   for (const [index, message] of messages.entries()) {
+    if (pending.length > 0) {
+      const expected = pending[0]!;
+      if (message.role !== "tool" || message.toolCallId !== expected.callId ||
+          message.toolName !== expected.toolName || message.toolCalls !== undefined ||
+          message.protocolExtensions !== undefined) {
+        context.addIssue({ code: "custom", message: "tool results must immediately follow their assistant calls in model order", path: ["canonicalMessages", index] });
+        continue;
+      }
+      pending.shift();
+      completed.add(expected.callId);
+      continue;
+    }
     if (message.role === "assistant") {
       if (message.toolCallId !== undefined || message.toolName !== undefined) {
         context.addIssue({ code: "custom", message: "assistant messages cannot be tool results", path: ["canonicalMessages", index] });
       }
       for (const call of message.toolCalls ?? []) {
-        if (pending.has(call.callId) || completed.has(call.callId)) {
+        if (pending.some((item) => item.callId === call.callId) || completed.has(call.callId)) {
           context.addIssue({ code: "custom", message: "model tool call identity is duplicated", path: ["canonicalMessages", index, "toolCalls"] });
         }
-        pending.set(call.callId, call.toolName);
+        pending.push({ callId: call.callId, toolName: call.toolName });
       }
       continue;
     }
     if (message.role === "tool") {
-      const expectedTool = message.toolCallId === undefined ? undefined : pending.get(message.toolCallId);
-      if (message.toolCallId === undefined || expectedTool === undefined ||
-          (message.toolName !== undefined && message.toolName !== expectedTool) ||
-          message.toolCalls !== undefined || message.protocolExtensions !== undefined) {
-        context.addIssue({ code: "custom", message: "tool result does not match a pending model tool call", path: ["canonicalMessages", index] });
-      } else {
-        pending.delete(message.toolCallId);
-        completed.add(message.toolCallId);
-      }
+      context.addIssue({ code: "custom", message: "tool result does not match a pending model tool call", path: ["canonicalMessages", index] });
       continue;
     }
     if (message.toolCallId !== undefined || message.toolName !== undefined ||
@@ -462,12 +580,7 @@ function validateCanonicalMessageChain(
       context.addIssue({ code: "custom", message: "system/user messages contain tool-only fields", path: ["canonicalMessages", index] });
     }
   }
-  if (pending.size === 0) return;
-  const pendingApprovalCallIds = new Set(state.toolCalls.flatMap((result) =>
-    result.status === "approval_required" ? [result.callId] : []));
-  const awaitingMatchingApproval = state.status.kind === "awaiting_approval" &&
-    [...pending.keys()].every((callId) => pendingApprovalCallIds.has(callId));
-  if (!awaitingMatchingApproval) {
+  if (pending.length > 0) {
     context.addIssue({ code: "custom", message: "canonical messages contain unresolved model tool calls", path: ["canonicalMessages"] });
   }
 }

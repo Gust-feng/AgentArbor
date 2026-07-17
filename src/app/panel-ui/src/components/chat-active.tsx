@@ -290,7 +290,7 @@ export function ChatActive(props: ChatInputProps & {
 function StatusNotice(props: ChatStatusNotice): React.ReactElement {
   return (
     <article className={`status-notice ${props.tone}`}>
-      <h2>{props.title}</h2>
+      {props.title !== undefined && <h2>{props.title}</h2>}
       <RichText text={props.message} />
     </article>
   );

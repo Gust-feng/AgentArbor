@@ -261,7 +261,11 @@ function isAllowedNativeTitleTooltip(finding: {
     return true;
   }
   if (finding.file === "components/activity-evidence.tsx") {
-    return finding.tag === "span" && finding.tagSource.includes("title={item.label}");
+    return (
+      finding.tag === "a" && finding.tagSource.includes("agent-evidence-source")
+    ) || (
+      finding.tag === "span" && finding.tagSource.includes("title={item.label}")
+    );
   }
   return finding.file === "components/copy-action-button.tsx" &&
     finding.tag === "button" &&

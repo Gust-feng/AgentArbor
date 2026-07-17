@@ -321,17 +321,20 @@ export class ToolCenter implements ToolExecutionGateway {
         content: candidate.content,
         sourceToolName: result.toolName,
         sourceCallId: result.callId,
+        sourceFactId: toolCallFactId(result),
         ownerId,
       });
       const deliveryOutput = copyToolModelAttachments(result.output, {
         contentRef: retained.ref,
         mediaType: retained.mediaType,
         contentChars: retained.totalChars,
+        contentBytes: retained.byteLength,
+        contentSha256: retained.sha256,
         contentPreview: preview,
         hasMoreAfter: true,
         truncated: true,
-        expiresAt: retained.expiresAt,
-        continuationAvailability: "live_only",
+        ...(retained.expiresAt === undefined ? {} : { expiresAt: retained.expiresAt }),
+        continuationAvailability: retained.availability,
         continuation: {
           ref: retained.ref,
           nextInput: {
@@ -377,6 +380,7 @@ export class ToolCenter implements ToolExecutionGateway {
         content: candidate.content,
         sourceToolName: result.toolName,
         sourceCallId: result.callId,
+        sourceFactId: toolCallFactId(result),
         ownerId,
       });
       return {
@@ -431,6 +435,7 @@ export class ToolCenter implements ToolExecutionGateway {
         content: candidate.content,
         sourceToolName: result.toolName,
         sourceCallId: result.callId,
+        sourceFactId: toolCallFactId(result),
         ownerId,
       });
       return {
@@ -460,11 +465,13 @@ type RetainedContentDelivery = {
   readonly contentRef: string;
   readonly mediaType: ToolOutputMediaType;
   readonly contentChars: number;
+  readonly contentBytes: number;
+  readonly contentSha256: string;
   readonly contentPreview: string;
   readonly hasMoreAfter: true;
   readonly truncated: true;
-  readonly expiresAt: string;
-  readonly continuationAvailability: "live_only";
+  readonly expiresAt?: string;
+  readonly continuationAvailability: "live_only" | "durable";
   readonly continuation: {
     readonly ref: string;
     readonly nextInput: {
@@ -529,11 +536,13 @@ function retainedContentDelivery(
     contentRef: retained.ref,
     mediaType: retained.mediaType,
     contentChars: retained.totalChars,
+    contentBytes: retained.byteLength,
+    contentSha256: retained.sha256,
     contentPreview: preview,
     hasMoreAfter: true,
     truncated: true,
-    expiresAt: retained.expiresAt,
-    continuationAvailability: "live_only",
+    ...(retained.expiresAt === undefined ? {} : { expiresAt: retained.expiresAt }),
+    continuationAvailability: retained.availability,
     continuation: {
       ref: retained.ref,
       nextInput: {

@@ -19,6 +19,7 @@ import { createSubAgentAgentToolCatalogContribution } from "../sub-agents/sub-ag
 import { toolDefinitionContractHash } from "../capability/tool-definition-contract.js";
 import type { AgentRunResources } from "./agent-run-resources.js";
 import type { AgentToolRegistryContribution } from "../tool-center/index.js";
+import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import { CodedExecutionError } from "../execution-errors/index.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
 
@@ -409,10 +410,18 @@ for (const protocol of ["openai_responses", "openai_compatible_chat_completions"
   });
 }
 
-test("Ordinary run release attempts process and retained-output cleanup even when one cleanup fails", async () => {
+test("Ordinary run release cleans run resources without discarding retained output", async () => {
   const base = ordinaryRunBirth();
   const calls: string[] = [];
   const cleanupFailure = new Error("process cleanup failed");
+  const outputStore = new InMemoryToolOutputStore();
+  const retained = await outputStore.retain({
+    mediaType: "text/plain",
+    content: "continue reading this result",
+    sourceToolName: "shell_command",
+    sourceCallId: "call-retained-output",
+    ownerId: "run-cleanup",
+  });
   const host = {
     processRegistry: {
       register() { return undefined; },
@@ -422,9 +431,7 @@ test("Ordinary run release attempts process and retained-output cleanup even whe
       },
     },
     processTerminator: { killTree: async () => ({ status: "killed" as const }) },
-    toolOutputStore: {
-      async releaseOwner(ownerId: string) { calls.push(`output:${ownerId}`); return 1; },
-    },
+    toolOutputStore: outputStore,
   } as never;
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
     host,
@@ -449,7 +456,11 @@ test("Ordinary run release attempts process and retained-output cleanup even whe
 
   await assert.rejects(acquired.release(), (error: unknown) => error === cleanupFailure);
   await assert.rejects(acquired.release(), (error: unknown) => error === cleanupFailure);
-  assert.deepEqual(calls, ["loop", "host", "process:run-cleanup", "output:run-cleanup"]);
+  assert.deepEqual(calls, ["loop", "host", "process:run-cleanup"]);
+  assert.equal(
+    (await outputStore.read(retained.ref, { startChar: 0, maxChars: 64 }))?.content,
+    "continue reading this result",
+  );
 });
 
 function executionInput(

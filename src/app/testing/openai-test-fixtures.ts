@@ -1,4 +1,5 @@
 import type { PanelProviderFetch } from "../panel-server.js";
+import type { ConfiguredModelProtocolKind } from "../../domain/config/index.js";
 
 export type ResponsesRequestBody = {
   readonly instructions?: string;
@@ -12,6 +13,16 @@ export type ResponsesRequestBody = {
   readonly stream?: boolean;
 };
 
+export type ChatCompletionsRequestBody = {
+  readonly messages?: readonly {
+    readonly role?: string;
+    readonly content?: unknown;
+    readonly tool_call_id?: string;
+  }[];
+  readonly tools?: readonly unknown[];
+  readonly stream?: boolean;
+};
+
 export type CapturedModelMessage = {
   readonly role: string;
   readonly content: string;
@@ -19,6 +30,10 @@ export type CapturedModelMessage = {
 
 export function parseResponsesRequestBody(raw: string | undefined): ResponsesRequestBody {
   return JSON.parse(raw ?? "{}") as ResponsesRequestBody;
+}
+
+export function parseChatCompletionsRequestBody(raw: string | undefined): ChatCompletionsRequestBody {
+  return JSON.parse(raw ?? "{}") as ChatCompletionsRequestBody;
 }
 
 export function extractResponsesMessages(body: ResponsesRequestBody | undefined): readonly CapturedModelMessage[] {
@@ -79,11 +94,20 @@ export function hasResponsesToolDefinition(body: ResponsesRequestBody, name: str
   });
 }
 
+export function hasChatCompletionsToolOutput(body: ChatCompletionsRequestBody): boolean {
+  return (body.messages ?? []).some((message) => message.role === "tool");
+}
+
+export function hasChatCompletionsToolDefinition(body: ChatCompletionsRequestBody, name: string): boolean {
+  return (body.tools ?? []).some((tool) => asTestRecord(asTestRecord(tool).function).name === name);
+}
+
 export function createStubOpenAiResponse(
+  protocol: ConfiguredModelProtocolKind,
   model: string,
   candidateOverrides: Record<string, unknown> = {}
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiJsonResponse(model, {
+  return createOpenAiJsonResponse(protocol, model, {
     candidates: [
       {
         summary: "Stub candidate advice.",
@@ -107,8 +131,11 @@ export function createStubOpenAiResponse(
   });
 }
 
-export function createStubOpenAiAggregationResponse(model: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiJsonResponse(model, {
+export function createStubOpenAiAggregationResponse(
+  protocol: ConfiguredModelProtocolKind,
+  model: string,
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiJsonResponse(protocol, model, {
     aggregationRationale: "Stub aggregation: merged rootlet outputs into unified candidate pool.",
     deduplicationNotes: ["No duplicates detected."],
     implicitRelations: [],
@@ -118,35 +145,45 @@ export function createStubOpenAiAggregationResponse(model: string): Awaited<Retu
   });
 }
 
-export function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiToolCallResponse("configured-tools-model", "call-panel-search", "search", {
+export function createOpenAiSearchToolCallResponse(
+  protocol: ConfiguredModelProtocolKind,
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiToolCallResponse(protocol, "configured-tools-model", "call-panel-search", "search", {
     query: "AgentArbor configured panel search",
     sources: ["web"],
   });
 }
 
 export function createOpenAiReadFileToolCallResponse(
+  protocol: ConfiguredModelProtocolKind,
   filePath = "README.md",
   callId = "call-panel-read-file"
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiToolCallResponse("desktop-tool-detail-model", callId, "read_file", { path: filePath });
+  return createOpenAiToolCallResponse(protocol, "desktop-tool-detail-model", callId, "read_file", { path: filePath });
 }
 
-export function createOpenAiDeleteFileToolCallResponse(filePath: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiToolCallResponse("basic-confirmation-model", "call-panel-write-file", "delete_file", { path: filePath });
+export function createOpenAiDeleteFileToolCallResponse(
+  protocol: ConfiguredModelProtocolKind,
+  filePath: string,
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiToolCallResponse(protocol, "basic-confirmation-model", "call-panel-write-file", "delete_file", { path: filePath });
 }
 
-export function createOpenAiRunCommandToolCallResponse(command: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiToolCallResponse("basic-command-confirmation-model", "call-panel-run-command", "shell_command", { commandLine: command });
+export function createOpenAiRunCommandToolCallResponse(
+  protocol: ConfiguredModelProtocolKind,
+  command: string,
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiToolCallResponse(protocol, "basic-command-confirmation-model", "call-panel-run-command", "shell_command", { commandLine: command });
 }
 
 export function createOpenAiToolCallResponse(
+  protocol: ConfiguredModelProtocolKind,
   model: string,
   callId: string,
   name: string,
   input: Record<string, unknown>
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiFixtureResponse({
+  return createOpenAiFixtureResponse(protocol, {
     id: "resp-test-tool-call",
     model,
     status: "completed",
@@ -161,12 +198,20 @@ export function createOpenAiToolCallResponse(
   });
 }
 
-export function createOpenAiJsonResponse(model: string, output: unknown): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiTextResponse(model, JSON.stringify(output));
+export function createOpenAiJsonResponse(
+  protocol: ConfiguredModelProtocolKind,
+  model: string,
+  output: unknown,
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiTextResponse(protocol, model, JSON.stringify(output));
 }
 
-export function createOpenAiTextResponse(model: string, text: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiFixtureResponse({
+export function createOpenAiTextResponse(
+  protocol: ConfiguredModelProtocolKind,
+  model: string,
+  text: string,
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiFixtureResponse(protocol, {
     id: "resp-test-text",
     model,
     status: "completed",
@@ -186,10 +231,14 @@ export function createOpenAiTextResponse(model: string, text: string): Awaited<R
 }
 
 export function createOpenAiStreamTextResponse(
+  protocol: ConfiguredModelProtocolKind,
   model: string,
   chunks: readonly string[]
 ): Awaited<ReturnType<PanelProviderFetch>> {
   const responseId = "resp-test-stream";
+  if (protocol === "openai_compatible_chat_completions") {
+    return createOpenAiChatStreamTextResponse(model, chunks);
+  }
   return {
     ok: true,
     status: 200,
@@ -206,19 +255,6 @@ export function createOpenAiStreamTextResponse(
         type: "response.completed",
         response: { id: responseId, model, status: "completed" },
       },
-      ...chunks.map((chunk, index) => ({
-        id: `chatcmpl-test-stream-${index}`,
-        object: "chat.completion.chunk",
-        created: 1_776_000_000,
-        model,
-        choices: [
-          {
-            index: 0,
-            delta: { content: chunk },
-            finish_reason: index === chunks.length - 1 ? "stop" : null,
-          },
-        ],
-      })),
     ]),
     json: async () => {
       throw new Error("Streaming response should not be read through json().");
@@ -253,9 +289,32 @@ export function createOpenAiChatStreamTextResponse(
 }
 
 export function createOpenAiStreamReasoningTextResponse(
+  protocol: ConfiguredModelProtocolKind,
   model: string,
   chunks: readonly { readonly kind: "reasoning" | "output"; readonly delta: string }[]
 ): Awaited<ReturnType<PanelProviderFetch>> {
+  if (protocol === "openai_compatible_chat_completions") {
+    return {
+      ok: true,
+      status: 200,
+      body: sseChunks(chunks.map((chunk, index) => ({
+        id: `chatcmpl-test-reasoning-stream-${index}`,
+        object: "chat.completion.chunk",
+        created: 1_776_000_000,
+        model,
+        choices: [
+          {
+            index: 0,
+            delta: chunk.kind === "reasoning" ? { reasoning_content: chunk.delta } : { content: chunk.delta },
+            finish_reason: index === chunks.length - 1 ? "stop" : null,
+          },
+        ],
+      }))),
+      json: async () => {
+        throw new Error("Streaming response should not be read through json().");
+      },
+    };
+  }
   const responseId = "resp-test-reasoning-stream";
   return {
     ok: true,
@@ -273,19 +332,6 @@ export function createOpenAiStreamReasoningTextResponse(
         type: "response.completed",
         response: { id: responseId, model, status: "completed" },
       },
-      ...chunks.map((chunk, index) => ({
-        id: `chatcmpl-test-reasoning-stream-${index}`,
-        object: "chat.completion.chunk",
-        created: 1_776_000_000,
-        model,
-        choices: [
-          {
-            index: 0,
-            delta: chunk.kind === "reasoning" ? { reasoning_content: chunk.delta } : { content: chunk.delta },
-            finish_reason: index === chunks.length - 1 ? "stop" : null,
-          },
-        ],
-      })),
     ]),
     json: async () => {
       throw new Error("Streaming response should not be read through json().");
@@ -293,20 +339,28 @@ export function createOpenAiStreamReasoningTextResponse(
   };
 }
 
-export function createInvalidOpenAiResponse(model: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiJsonResponse(model, {
+export function createInvalidOpenAiResponse(
+  protocol: ConfiguredModelProtocolKind,
+  model: string,
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiJsonResponse(protocol, model, {
     rationale: "bad raw output with provider raw response marker",
     hidden_reasoning: "must not leave provider normalization with Bearer leaked-token, system prompt, and sk-raw-secret",
   });
 }
 
-function createOpenAiFixtureResponse(payload: Record<string, unknown>): Awaited<ReturnType<PanelProviderFetch>> {
+function createOpenAiFixtureResponse(
+  protocol: ConfiguredModelProtocolKind,
+  payload: Record<string, unknown>,
+): Awaited<ReturnType<PanelProviderFetch>> {
   const compatPayload = withChatCompletionsCompatibility(payload);
   return {
     ok: true,
     status: 200,
-    body: sseChunks([...openAiResponsesChunks(payload), ...openAiChatCompletionChunksFromResponses(payload)]),
-    json: async () => compatPayload,
+    body: sseChunks(protocol === "openai_responses"
+      ? openAiResponsesChunks(payload)
+      : openAiChatCompletionChunksFromResponses(payload)),
+    json: async () => protocol === "openai_responses" ? payload : compatPayload,
   };
 }
 
@@ -372,15 +426,22 @@ function openAiResponsesChunks(payload: Record<string, unknown>): readonly unkno
   }
   chunks.push({
     type: "response.completed",
-    response: { id: responseId, model, status: payload.status ?? "completed" },
+    response: {
+      ...payload,
+      id: responseId,
+      model,
+      status: payload.status ?? "completed",
+    },
   });
   return chunks;
 }
 
 function withChatCompletionsCompatibility(payload: Record<string, unknown>): Record<string, unknown> {
   return {
-    ...payload,
+    id: typeof payload.id === "string" ? payload.id : "chatcmpl-test",
     object: "chat.completion",
+    created: 1_776_000_000,
+    model: typeof payload.model === "string" ? payload.model : "test-model",
     choices: openAiChatCompletionChoicesFromResponses(payload),
     usage: {
       prompt_tokens: numberOrZero(asTestRecord(payload.usage).input_tokens),

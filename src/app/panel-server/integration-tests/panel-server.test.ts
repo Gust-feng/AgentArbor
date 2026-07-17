@@ -15,9 +15,9 @@ import {
 import {
   createOpenAiSearchToolCallResponse,
   createStubOpenAiResponse,
-  hasResponsesToolDefinition,
-  hasResponsesToolOutput,
-  parseResponsesRequestBody,
+  hasChatCompletionsToolDefinition,
+  hasChatCompletionsToolOutput,
+  parseChatCompletionsRequestBody,
 } from "../../testing/openai-test-fixtures.js";
 
 test("panel server serves Vite React frontend assets", async () => {
@@ -135,11 +135,12 @@ test("panel tools route can disable web search without using the stored Tavily k
     }
 
     modelFetchCalls += 1;
-    const body = parseResponsesRequestBody(init.body);
-    const hasToolMessage = hasResponsesToolOutput(body);
-    return hasToolMessage || !hasResponsesToolDefinition(body, "search")
-      ? createStubOpenAiResponse("disabled-tools-model")
-      : createOpenAiSearchToolCallResponse();
+    assert.match(url, /\/chat\/completions$/u);
+    const body = parseChatCompletionsRequestBody(init.body);
+    const hasToolMessage = hasChatCompletionsToolOutput(body);
+    return hasToolMessage || !hasChatCompletionsToolDefinition(body, "search")
+      ? createStubOpenAiResponse("openai_compatible_chat_completions", "disabled-tools-model")
+      : createOpenAiSearchToolCallResponse("openai_compatible_chat_completions");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {

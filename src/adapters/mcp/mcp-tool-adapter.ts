@@ -11,7 +11,7 @@ import type {
 import { normalizeToolFactValue, withToolModelAttachments } from "../../domain/tools/index.js";
 import type { ModelInputAttachment } from "../../domain/intelligence/index.js";
 import type { McpConfirmationMode } from "../../domain/config/index.js";
-import type { McpClientWrapper, McpContentPart, McpToolInfo } from "./mcp-client.js";
+import type { McpClientWrapper, McpContentPart, McpProgress, McpToolInfo, McpToolResult } from "./mcp-client.js";
 
 export type McpToolConfirmationStrategy = {
   readonly confirmationMode: McpConfirmationMode;
@@ -75,7 +75,46 @@ async function executeMcpToolForExecutor(
   context: ToolExecutionContext
 ): Promise<McpToolOutput | ToolExecutorResult> {
   const startedAt = Date.now();
-  const mcpResult = await client.callTool(tool.name, input);
+  let mcpResult: McpToolResult;
+  try {
+    mcpResult = await client.callTool(tool.name, input, {
+      signal: context.abortSignal,
+      onProgress: (progress) => reportMcpProgress(context, progress),
+    });
+  } catch (error) {
+    if (context.abortSignal?.aborted === true) {
+      throw error;
+    }
+    const timeoutFacts = mcpRequestTimeoutFacts(error);
+    if (timeoutFacts === undefined) {
+      throw error;
+    }
+    return {
+      kind: "tool_call_result",
+      result: {
+        callId: context.toolCallId ?? `${serverId}__${tool.name}`,
+        toolName: `${serverId}__${tool.name}`,
+        input: input as ToolFactValue | undefined,
+        output: {
+          provider: serverId,
+          tool: tool.name,
+          reason: "mcp_request_idle_timeout",
+        },
+        status: "failed",
+        error: `MCP tool ${serverId}__${tool.name} stopped making progress before returning a result.`,
+        errorDomain: "runtime_error",
+        errorFacts: {
+          code: "mcp_request_idle_timeout",
+          serverId,
+          mcpToolName: tool.name,
+          sourceExecutionStatus: "unknown",
+          doNotBlindlyRetry: true,
+          ...timeoutFacts,
+        },
+        durationMs: Date.now() - startedAt,
+      },
+    };
+  }
   let output: McpToolOutput;
   try {
     output = buildToolOutput(mcpResult);
@@ -110,6 +149,32 @@ async function executeMcpToolForExecutor(
       },
       durationMs: Date.now() - startedAt,
     },
+  };
+}
+
+function reportMcpProgress(context: ToolExecutionContext, progress: McpProgress): void {
+  try {
+    context.reportProgress?.({
+      kind: "mcp_progress",
+      ...(progress.progress === undefined ? {} : { progress: progress.progress }),
+      ...(progress.total === undefined ? {} : { total: progress.total }),
+      ...(progress.message === undefined ? {} : { message: progress.message }),
+    });
+  } catch {
+    // Progress is live-only observation and cannot alter the MCP tool outcome.
+  }
+}
+
+function mcpRequestTimeoutFacts(error: unknown): Readonly<Record<string, string | number>> | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const record = error as { readonly code?: unknown; readonly data?: unknown };
+  if (record.code !== -32001) return undefined;
+  const data = typeof record.data === "object" && record.data !== null
+    ? record.data as Record<string, unknown>
+    : {};
+  return {
+    ...(typeof data.timeout === "number" ? { timeoutMs: data.timeout } : {}),
+    ...(typeof data.maxTotalTimeout === "number" ? { maxTotalTimeoutMs: data.maxTotalTimeout } : {}),
   };
 }
 

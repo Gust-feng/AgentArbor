@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ensureManagedMcpExecutable, mcpRuntimePathEnvironment } from "./mcp-local-runtime.js";
 
@@ -12,10 +13,26 @@ export type McpClientConfig = {
   readonly url?: string;
   readonly env?: Readonly<Record<string, string>>;
   readonly httpHeaders?: Readonly<Record<string, string>>;
+  /** Maximum time without an MCP progress notification before the request is cancelled. */
+  readonly requestIdleTimeoutMs?: number;
+  /** Optional per-server in-flight tool-call limit. Undefined keeps the SDK's existing behavior. */
+  readonly maxConcurrentCalls?: number;
 };
 
 export type McpClientWrapperOptions = {
   readonly transport?: Transport;
+};
+
+export type McpCallOptions = {
+  readonly signal?: AbortSignal;
+  readonly idleTimeoutMs?: number;
+  readonly onProgress?: (progress: McpProgress) => void;
+};
+
+export type McpProgress = {
+  readonly progress?: number;
+  readonly total?: number;
+  readonly message?: string;
 };
 
 export type McpToolInfo = {
@@ -33,11 +50,25 @@ export type McpToolInfo = {
 };
 
 const MAX_MCP_LIST_PAGES = 100;
+export const DEFAULT_MCP_MAX_CONCURRENT_CALLS_PER_SERVER = 4;
 
 export type McpToolResult = {
   readonly content: readonly McpContentPart[];
   readonly structuredContent?: unknown;
   readonly isError?: boolean;
+};
+
+export type McpClientHealth = "healthy" | "degraded";
+
+export type McpClientRuntimeSnapshot = {
+  readonly health: McpClientHealth;
+  readonly activeToolCalls: number;
+  readonly queuedToolCalls: number;
+  readonly maxConcurrentCalls?: number;
+  readonly lastCallFailure?: {
+    readonly message: string;
+    readonly recordedAt: string;
+  };
 };
 
 export type McpPromptInfo = {
@@ -106,11 +137,18 @@ export class McpClientWrapper {
   private client: Client | undefined;
   private connected = false;
   private transport: Transport | undefined;
+  private activeToolCalls = 0;
+  private readonly pendingToolCalls: Array<PendingToolCallSlot> = [];
+  private readonly maxConcurrentCalls: number | undefined;
+  private health: McpClientHealth = "healthy";
+  private lastCallFailure?: McpClientRuntimeSnapshot["lastCallFailure"];
 
   constructor(
     private readonly config: McpClientConfig,
     private readonly options: McpClientWrapperOptions = {}
-  ) {}
+  ) {
+    this.maxConcurrentCalls = positiveOptionalInteger(config.maxConcurrentCalls);
+  }
 
   async connect(): Promise<void> {
     if (this.connected) {
@@ -124,6 +162,8 @@ export class McpClientWrapper {
     try {
       await this.client.connect(this.transport);
       this.connected = true;
+      this.health = "healthy";
+      this.lastCallFailure = undefined;
     } catch (error) {
       await this.disconnect().catch(() => undefined);
       throw error;
@@ -139,6 +179,7 @@ export class McpClientWrapper {
     this.client = undefined;
     this.transport = undefined;
     this.connected = false;
+    this.rejectPendingToolCalls(new Error(`MCP client "${this.config.serverId}" disconnected.`));
     if (client !== undefined) {
       try {
         await client.close();
@@ -171,14 +212,57 @@ export class McpClientWrapper {
     }));
   }
 
-  async callTool(name: string, args: unknown): Promise<McpToolResult> {
+  async callTool(name: string, args: unknown, options: McpCallOptions = {}): Promise<McpToolResult> {
     this.assertConnected();
-    const result = await this.client!.callTool({ name, arguments: args as Record<string, unknown> });
-    const isError = "isError" in result ? (result.isError as boolean) : undefined;
-    const structuredContent = "structuredContent" in result ? result.structuredContent : undefined;
-    const rawContent = "content" in result ? (result.content as readonly unknown[]) : [];
-    const content = rawContent.map(toMcpContentPart);
-    return { content, structuredContent, isError };
+    const releaseSlot = await this.acquireToolCallSlot(options.signal);
+    try {
+      const client = this.client;
+      if (client === undefined) {
+        throw new Error(`MCP client "${this.config.serverId}" is not connected.`);
+      }
+      const result = await client.callTool(
+        { name, arguments: args as Record<string, unknown> },
+        undefined,
+        {
+          signal: options.signal,
+          timeout: options.idleTimeoutMs ?? this.config.requestIdleTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MSEC,
+          // A long-running MCP operation may remain valid indefinitely while it reports progress.
+          resetTimeoutOnProgress: true,
+          // Supplying a handler opts into MCP progress notifications and therefore gives the SDK
+          // a progress token whose idle timeout can be refreshed, even when the caller only needs
+          // the final tool result.
+          onprogress: (progress) => options.onProgress?.({
+            ...(typeof progress.progress === "number" ? { progress: progress.progress } : {}),
+            ...(typeof progress.total === "number" ? { total: progress.total } : {}),
+            ...(typeof progress.message === "string" ? { message: progress.message } : {}),
+          }),
+        },
+      );
+      const isError = "isError" in result ? (result.isError as boolean) : undefined;
+      const structuredContent = "structuredContent" in result ? result.structuredContent : undefined;
+      const rawContent = "content" in result ? (result.content as readonly unknown[]) : [];
+      const content = rawContent.map(toMcpContentPart);
+      this.health = "healthy";
+      this.lastCallFailure = undefined;
+      return { content, structuredContent, isError };
+    } catch (error) {
+      if (options.signal?.aborted !== true) {
+        this.recordCallFailure(error);
+      }
+      throw error;
+    } finally {
+      releaseSlot();
+    }
+  }
+
+  getRuntimeSnapshot(): McpClientRuntimeSnapshot {
+    return {
+      health: this.health,
+      activeToolCalls: this.activeToolCalls,
+      queuedToolCalls: this.pendingToolCalls.length,
+      ...(this.maxConcurrentCalls === undefined ? {} : { maxConcurrentCalls: this.maxConcurrentCalls }),
+      ...(this.lastCallFailure === undefined ? {} : { lastCallFailure: { ...this.lastCallFailure } }),
+    };
   }
 
   async listReferences(): Promise<McpReferenceInfo> {
@@ -231,6 +315,86 @@ export class McpClientWrapper {
       throw new Error(`MCP client "${this.config.serverId}" is not connected.`);
     }
   }
+
+  private acquireToolCallSlot(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted === true) return Promise.reject(abortError(signal.reason));
+    if (this.maxConcurrentCalls === undefined) {
+      return Promise.resolve(() => undefined);
+    }
+    if (this.activeToolCalls < this.maxConcurrentCalls) {
+      this.activeToolCalls += 1;
+      return Promise.resolve(() => this.releaseToolCallSlot());
+    }
+    return new Promise((resolve, reject) => {
+      const slot: PendingToolCallSlot = {
+        signal,
+        resolve: () => {
+          this.activeToolCalls += 1;
+          resolve(() => this.releaseToolCallSlot());
+        },
+        reject,
+      };
+      this.pendingToolCalls.push(slot);
+      signal?.addEventListener("abort", slot.onAbort = () => {
+        const index = this.pendingToolCalls.indexOf(slot);
+        if (index >= 0) this.pendingToolCalls.splice(index, 1);
+        reject(abortError(signal.reason));
+      }, { once: true });
+    });
+  }
+
+  private releaseToolCallSlot(): void {
+    if (this.maxConcurrentCalls === undefined) return;
+    this.activeToolCalls = Math.max(0, this.activeToolCalls - 1);
+    while (this.activeToolCalls < this.maxConcurrentCalls) {
+      const slot = this.pendingToolCalls.shift();
+      if (slot === undefined) return;
+      if (slot.signal?.aborted === true) {
+        slot.reject(abortError(slot.signal.reason));
+        continue;
+      }
+      if (slot.onAbort !== undefined) slot.signal?.removeEventListener("abort", slot.onAbort);
+      slot.resolve();
+      return;
+    }
+  }
+
+  private rejectPendingToolCalls(error: Error): void {
+    for (const slot of this.pendingToolCalls.splice(0)) {
+      if (slot.onAbort !== undefined) slot.signal?.removeEventListener("abort", slot.onAbort);
+      slot.reject(error);
+    }
+  }
+
+  private recordCallFailure(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.health = "degraded";
+    this.lastCallFailure = {
+      message: message.length > 500 ? `${message.slice(0, 497)}...` : message,
+      recordedAt: new Date().toISOString(),
+    };
+  }
+}
+
+type PendingToolCallSlot = {
+  readonly signal?: AbortSignal;
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+  onAbort?: () => void;
+};
+
+function positiveOptionalInteger(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError("MCP maxConcurrentCalls must be a positive safe integer.");
+  }
+  return value;
+}
+
+function abortError(reason: unknown): Error {
+  const error = reason instanceof Error ? reason : new Error(typeof reason === "string" ? reason : "MCP tool call was cancelled.");
+  Object.defineProperty(error, "name", { value: "AbortError", configurable: true });
+  return error;
 }
 
 async function collectPaginated<TItem, TPage extends { readonly nextCursor?: string }>(

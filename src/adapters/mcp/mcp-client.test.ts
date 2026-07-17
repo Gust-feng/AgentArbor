@@ -387,6 +387,172 @@ test("McpClientWrapper callTool handles error result", async () => {
   await client.disconnect();
 });
 
+test("McpClientWrapper bounds per-server concurrency and cancels queued calls", async () => {
+  const server = new McpServer({ name: "slow-server", version: "1.0.0" });
+  let startedResolve: (() => void) | undefined;
+  let releaseResolve: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+  const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+  server.registerTool("slow", { description: "Slow tool" }, async () => {
+    startedResolve?.();
+    await release;
+    return { content: [{ type: "text" as const, text: "done" }] };
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new McpClientWrapper(
+    { serverId: "slow-server", transport: "stdio", maxConcurrentCalls: 1 },
+    { transport: clientTransport },
+  );
+  await client.connect();
+  try {
+    const first = client.callTool("slow", {});
+    await started;
+    const controller = new AbortController();
+    const queued = client.callTool("slow", {}, { signal: controller.signal });
+    controller.abort("queued call cancelled");
+    await assert.rejects(queued, (error: unknown) => {
+      assert.equal(error instanceof Error ? error.name : undefined, "AbortError");
+      return true;
+    });
+    releaseResolve?.();
+    const firstResult = await first;
+    assert.equal(firstResult.content[0]?.type, "text");
+  } finally {
+    await client.disconnect();
+  }
+});
+
+test("McpClientWrapper exposes degraded health after timeout and recovers after success", async () => {
+  const server = new McpServer({ name: "health-server", version: "1.0.0" });
+  let releaseResolve: (() => void) | undefined;
+  const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+  server.registerTool("slow", { description: "Health probe tool" }, async () => {
+    await release;
+    return { content: [{ type: "text" as const, text: "healthy" }] };
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new McpClientWrapper(
+    { serverId: "health-server", transport: "stdio", requestIdleTimeoutMs: 20 },
+    { transport: clientTransport },
+  );
+  await client.connect();
+  try {
+    await assert.rejects(() => client.callTool("slow", {}), /timed out/i);
+    const degraded = client.getRuntimeSnapshot();
+    assert.equal(degraded.health, "degraded");
+    assert.match(degraded.lastCallFailure?.message ?? "", /timed out/i);
+
+    releaseResolve?.();
+    const recovered = await client.callTool("slow", {});
+    assert.equal(recovered.content[0]?.type, "text");
+    assert.deepEqual(client.getRuntimeSnapshot(), {
+      health: "healthy",
+      activeToolCalls: 0,
+      queuedToolCalls: 0,
+    });
+  } finally {
+    releaseResolve?.();
+    await client.disconnect();
+  }
+});
+
+test("McpClientWrapper keeps server health unchanged when the user cancels an active call", async () => {
+  const server = new McpServer({ name: "cancel-server", version: "1.0.0" });
+  let startedResolve: (() => void) | undefined;
+  let releaseResolve: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+  const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+  server.registerTool("wait", { description: "Wait until cancelled" }, async () => {
+    startedResolve?.();
+    await release;
+    return { content: [{ type: "text" as const, text: "released" }] };
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new McpClientWrapper(
+    { serverId: "cancel-server", transport: "stdio", maxConcurrentCalls: 1 },
+    { transport: clientTransport },
+  );
+  await client.connect();
+  try {
+    const controller = new AbortController();
+    const running = client.callTool("wait", {}, { signal: controller.signal });
+    await started;
+    controller.abort("cancelled by user");
+    await assert.rejects(running);
+    assert.equal(controller.signal.aborted, true);
+    assert.deepEqual(client.getRuntimeSnapshot(), {
+      health: "healthy",
+      activeToolCalls: 0,
+      queuedToolCalls: 0,
+      maxConcurrentCalls: 1,
+    });
+  } finally {
+    releaseResolve?.();
+    await client.disconnect();
+  }
+});
+
+test("MCP adapter turns an MCP request timeout into an explicit unknown-outcome failure", async () => {
+  const controller = new AbortController();
+  const timeoutError = Object.assign(new Error("MCP request timed out"), {
+    code: -32001,
+    data: { timeout: 25 },
+  });
+  const client = {
+    async callTool(_name: string, _input: unknown, options?: { readonly signal?: AbortSignal }) {
+      assert.equal(options?.signal?.aborted, false);
+      throw timeoutError;
+    },
+  } as unknown as McpClientWrapper;
+  const executor = createFakeMcpExecutor(client, "slow_tool");
+
+  const output = await executor.execute(
+    { query: "long-running" },
+    {
+      callerAgentId: "test-agent",
+      traceId: "trace-1",
+      goalId: "goal-1",
+      toolCallId: "call-timeout",
+      abortSignal: controller.signal,
+    },
+  );
+
+  assert.equal((output as ToolExecutorResult).kind, "tool_call_result");
+  const result = (output as ToolExecutorResult).result;
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorFacts?.code, "mcp_request_idle_timeout");
+  assert.equal(result.errorFacts?.sourceExecutionStatus, "unknown");
+  assert.equal(result.errorFacts?.doNotBlindlyRetry, true);
+  assert.equal(result.errorFacts?.timeoutMs, 25);
+});
+
+test("MCP adapter forwards progress as live-only tool observation", async () => {
+  const observed: unknown[] = [];
+  const client = {
+    async callTool(_name: string, _input: unknown, options?: { readonly onProgress?: (progress: { progress: number; total: number; message: string }) => void }) {
+      options?.onProgress?.({ progress: 2, total: 5, message: "searching" });
+      return { content: [{ type: "text" as const, text: "result" }] };
+    },
+  } as unknown as McpClientWrapper;
+  const executor = createFakeMcpExecutor(client, "progress_tool");
+
+  const output = await executor.execute(
+    {},
+    {
+      callerAgentId: "test-agent",
+      traceId: "trace-1",
+      goalId: "goal-1",
+      reportProgress: (progress) => observed.push(progress),
+    },
+  );
+
+  assert.equal((output as { readonly kind: string }).kind, undefined);
+  assert.deepEqual(observed, [{ kind: "mcp_progress", progress: 2, total: 5, message: "searching" }]);
+});
+
 test("McpClientWrapper callTool preserves structuredContent", async () => {
   const { client } = await createConnectedPair();
 

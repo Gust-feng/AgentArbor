@@ -1,13 +1,14 @@
 import type { McpServerSettings } from "../../domain/config/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
-import type { McpClientConfig, McpReferenceInfo, McpToolInfo } from "./mcp-client.js";
-import { McpClientWrapper } from "./mcp-client.js";
+import type { McpClientConfig, McpClientHealth, McpReferenceInfo, McpToolInfo } from "./mcp-client.js";
+import { DEFAULT_MCP_MAX_CONCURRENT_CALLS_PER_SERVER, McpClientWrapper } from "./mcp-client.js";
 import { createMcpToolExecutor } from "./mcp-tool-adapter.js";
 
 export type McpManagerConfig = {
   readonly servers: readonly McpServerSettings[];
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly connectTimeoutMs?: number;
+  readonly maxConcurrentCallsPerServer?: number;
 };
 
 export type McpServerStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -18,6 +19,14 @@ export type McpServerRuntimeSnapshot = {
   readonly errorSummary?: string;
   readonly lastConnectedAt?: string;
   readonly toolNames: readonly string[];
+  readonly health: McpClientHealth;
+  readonly activeToolCalls: number;
+  readonly queuedToolCalls: number;
+  readonly maxConcurrentCalls?: number;
+  readonly lastCallFailure?: {
+    readonly message: string;
+    readonly recordedAt: string;
+  };
 };
 
 type ServerEntry = {
@@ -35,6 +44,7 @@ export class McpManager {
 
   constructor(config: McpManagerConfig) {
     this.connectTimeoutMs = Math.max(500, Math.floor(config.connectTimeoutMs ?? 3_000));
+    const maxConcurrentCalls = config.maxConcurrentCallsPerServer ?? DEFAULT_MCP_MAX_CONCURRENT_CALLS_PER_SERVER;
     for (const server of config.servers) {
       if (!server.enabled || !hasCompleteRuntimeConfig(server)) {
         continue;
@@ -52,6 +62,7 @@ export class McpManager {
         url: server.url,
         env: resolvedEnv,
         httpHeaders: resolveHttpHeaders(server, config.env),
+        maxConcurrentCalls,
       };
       this.entries.set(server.serverId, {
         client: new McpClientWrapper(clientConfig),
@@ -130,6 +141,7 @@ export class McpManager {
       errorSummary: entry.errorMessage,
       lastConnectedAt: entry.lastConnectedAt,
       toolNames: entry.tools.map((tool) => tool.name),
+      ...entry.client.getRuntimeSnapshot(),
     }));
   }
 

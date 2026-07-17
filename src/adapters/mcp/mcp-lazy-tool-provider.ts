@@ -1,11 +1,17 @@
 import type { McpServerSettings } from "../../domain/config/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
-import { McpClientWrapper, type McpClientConfig, type McpToolInfo } from "./mcp-client.js";
+import {
+  DEFAULT_MCP_MAX_CONCURRENT_CALLS_PER_SERVER,
+  McpClientWrapper,
+  type McpClientConfig,
+  type McpToolInfo,
+} from "./mcp-client.js";
 import { createLazyMcpToolExecutor } from "./mcp-tool-adapter.js";
 
 export type LazyMcpToolProviderConfig = {
   readonly servers: readonly McpServerSettings[];
   readonly env?: Readonly<Record<string, string | undefined>>;
+  readonly maxConcurrentCallsPerServer?: number;
 };
 
 type LazyServerSession = {
@@ -83,7 +89,9 @@ export class LazyMcpToolExecutorProvider {
     if (session.connecting !== undefined) {
       return session.connecting;
     }
-    const client = new McpClientWrapper(mcpClientConfigFromServer(session.server, this.config.env));
+    const client = new McpClientWrapper(mcpClientConfigFromServer(session.server, this.config.env, {
+      maxConcurrentCallsPerServer: this.config.maxConcurrentCallsPerServer,
+    }));
     session.connecting = client.connect().then(() => {
       session.client = client;
       session.connecting = undefined;
@@ -98,7 +106,8 @@ export class LazyMcpToolExecutorProvider {
 
 export function mcpClientConfigFromServer(
   server: McpServerSettings,
-  env?: Readonly<Record<string, string | undefined>>
+  env?: Readonly<Record<string, string | undefined>>,
+  options: { readonly maxConcurrentCallsPerServer?: number } = {},
 ): McpClientConfig {
   return {
     serverId: server.serverId,
@@ -108,6 +117,7 @@ export function mcpClientConfigFromServer(
     url: server.url,
     env: resolveEnvRefs(server.envSecretRefs, env),
     httpHeaders: resolveHttpHeaders(server, env),
+    maxConcurrentCalls: options.maxConcurrentCallsPerServer ?? DEFAULT_MCP_MAX_CONCURRENT_CALLS_PER_SERVER,
   };
 }
 

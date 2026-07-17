@@ -230,6 +230,27 @@ export type ToolExecutionContext = {
   readonly approvedConfirmationIds?: readonly string[];
   readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly abortSignal?: AbortSignal;
+  /** Live-only bounded execution evidence. Reporting must never change the tool outcome. */
+  readonly reportProgress?: (progress: ToolExecutionProgress) => void;
+};
+
+export type ToolExecutionProgress =
+  | {
+      readonly kind: "command_output";
+      readonly stdoutTail?: string;
+      readonly stderrTail?: string;
+      readonly stdoutChars: number;
+      readonly stderrChars: number;
+    }
+  | {
+      readonly kind: "mcp_progress";
+      readonly progress?: number;
+      readonly total?: number;
+      readonly message?: string;
+    };
+
+export type ToolCallProgress = Pick<ToolCallRequest, "callId" | "factId" | "toolName"> & {
+  readonly progress: ToolExecutionProgress;
 };
 
 export type ToolPermissionCheck = {

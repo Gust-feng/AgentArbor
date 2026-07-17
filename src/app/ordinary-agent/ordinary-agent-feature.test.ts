@@ -467,6 +467,122 @@ test("feature commits cancellation before approval cleanup and cleanup failure c
   assert.equal((await run.feature.queries.getRun("approval-cancel-run"))?.status.kind, "cancelled");
 });
 
+test("cancellation cannot race approval continuation registration or strand a queued successor", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-approval-registration-race-"));
+  const baseRepository = createFileSystemOrdinaryRunRepository(root);
+  const approvalSaveGate = createManualGate();
+  const cancellationObserved = createManualGate();
+  const request = confirmation("approval-registration-race-run");
+  let gateApprovalSave = true;
+  let executionCount = 0;
+  let releaseCalls = 0;
+  const repository = {
+    ...baseRepository,
+    async save(state: OrdinaryRunState, expectedRevision: number) {
+      if (gateApprovalSave && state.runId === "approval-registration-race-run" &&
+          state.status.kind === "awaiting_approval") {
+        gateApprovalSave = false;
+        approvalSaveGate.enter();
+        await approvalSaveGate.released;
+      }
+      return baseRepository.save(state, expectedRevision);
+    },
+  };
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: {
+      async execute(input) {
+        executionCount += 1;
+        if (executionCount > 1) return completedOutcome();
+        input.abortSignal.addEventListener("abort", () => cancellationObserved.enter(), { once: true });
+        return {
+          status: "approval_required",
+          canonicalMessages: [{ role: "user", content: "change file" }],
+          toolCalls: [],
+          usage: {},
+          confirmationRequests: [request],
+          continuation: {
+            availability: "live_only",
+            async decide() { return completedOutcome(); },
+            async release() { releaseCalls += 1; },
+          },
+        };
+      },
+    },
+    now: monotonicClock(),
+    idFactory: deterministicIds(),
+  });
+  t.after(async () => {
+    approvalSaveGate.release();
+    await feature.release();
+    await removeTestDirectory(root);
+  });
+
+  await feature.commands.start(startInput("approval-registration-race-run"));
+  await approvalSaveGate.entered;
+  const successorInput = startInput("approval-registration-race-successor");
+  const successor = await feature.commands.start({
+    ...successorInput,
+    turn: {
+      ...successorInput.turn,
+      ordinal: 2,
+      predecessorRunId: "approval-registration-race-run",
+    },
+  });
+  assert.equal(successor.status.kind, "queued");
+
+  const cancelling = feature.commands.cancel("approval-registration-race-run", "user_stopped");
+  await cancellationObserved.entered;
+  approvalSaveGate.release();
+  assert.equal((await cancelling).status.kind, "cancelled");
+
+  await waitForSettledMicrotasks();
+  assert.equal(releaseCalls, 1);
+  await waitForStatus(feature, "approval-registration-race-successor", "completed");
+  assert.equal(executionCount, 2);
+});
+
+test("feature releases an incoming approval continuation when its snapshot cannot be committed", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-approval-save-failure-"));
+  const baseRepository = createFileSystemOrdinaryRunRepository(root);
+  const request = confirmation("approval-save-failure-run");
+  let releaseCalls = 0;
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...baseRepository,
+      async save(state: OrdinaryRunState, expectedRevision: number) {
+        if (state.status.kind === "awaiting_approval") throw new Error("approval snapshot unavailable");
+        return baseRepository.save(state, expectedRevision);
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: {
+      async execute() {
+        return {
+          status: "approval_required",
+          canonicalMessages: [{ role: "user", content: "change file" }],
+          toolCalls: [],
+          usage: {},
+          confirmationRequests: [request],
+          continuation: {
+            availability: "live_only",
+            async decide() { return completedOutcome(); },
+            async release() { releaseCalls += 1; },
+          },
+        };
+      },
+    },
+    now: monotonicClock(),
+    idFactory: deterministicIds(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("approval-save-failure-run"));
+  await waitForStatus(feature, "approval-save-failure-run", "failed");
+  assert.equal(releaseCalls, 1);
+});
+
 test("feature release disposes a pending live approval continuation once", async (t) => {
   const request = confirmation("approval-feature-release-run");
   let releases = 0;

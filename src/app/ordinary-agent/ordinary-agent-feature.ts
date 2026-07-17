@@ -321,24 +321,50 @@ export function createOrdinaryAgentFeature(input: {
   }
 
   async function applyOutcome(runId: string, outcome: OrdinaryExecutionOutcome): Promise<void> {
-    const document = await load(runId);
-    if (document === undefined || isTerminal(document.state)) return;
     if (outcome.status === "approval_required") {
-      const state = await mutate(runId, {
-        type: "request_approval",
-        status: {
-          kind: "awaiting_approval",
-          confirmationRequests: outcome.confirmationRequests,
-          continuationAvailability: "live_only",
-        },
-        canonicalMessages: outcome.canonicalMessages,
-        toolCalls: outcome.toolCalls,
-        usage: outcome.usage,
-        capabilityResolution: outcome.capabilityResolution,
-      });
-      if (state.status.kind === "awaiting_approval") continuations.set(runId, outcome.continuation);
+      let registered = false;
+      try {
+        registered = await enqueue(runId, async () => {
+          const current = await load(runId);
+          if (current === undefined || isTerminal(current.state)) return false;
+          if (current.state.status.kind !== "running" || continuations.has(runId)) {
+            throw new OrdinaryFeatureError(
+              "ordinary_run_state_conflict",
+              `Ordinary run ${runId} cannot register a second live approval continuation`,
+            );
+          }
+          const state = await commitTransition(runId, {
+            type: "request_approval",
+            status: {
+              kind: "awaiting_approval",
+              confirmationRequests: outcome.confirmationRequests,
+              continuationAvailability: "live_only",
+            },
+            canonicalMessages: outcome.canonicalMessages,
+            toolCalls: outcome.toolCalls,
+            usage: outcome.usage,
+            capabilityResolution: outcome.capabilityResolution,
+          });
+          // The durable pause and its process-local handle are one admission fact.
+          // Cancellation must either observe both inside this FIFO or win before both.
+          if (state.status.kind !== "awaiting_approval") {
+            throw new OrdinaryFeatureError(
+              "ordinary_run_state_conflict",
+              `Ordinary run ${runId} did not enter awaiting approval after accepting its continuation`,
+            );
+          }
+          continuations.set(runId, outcome.continuation);
+          return true;
+        });
+      } catch (error) {
+        await outcome.continuation.release().catch(() => undefined);
+        throw error;
+      }
+      if (!registered) await outcome.continuation.release().catch(() => undefined);
       return;
     }
+    const document = await load(runId);
+    if (document === undefined || isTerminal(document.state)) return;
     if (outcome.status === "completed") {
       await mutate(runId, { type: "complete", answer: outcome.answer, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, capabilityResolution: outcome.capabilityResolution });
       await activateSuccessor(runId);
@@ -714,12 +740,30 @@ export function createOrdinaryAgentFeature(input: {
     }
     if (isTerminal(document.state)) return clone(document.state);
     controllers.get(runId)?.abort(reason);
-    const continuation = continuations.get(runId);
-    continuations.delete(runId);
-    const cancelled = await mutate(runId, { type: "cancel", reason }, { keepTerminal: true });
-    await activateSuccessor(runId);
-    if (continuation !== undefined) await continuation.release().catch(() => undefined);
-    return cancelled;
+    const cancellation = await enqueue(runId, async () => {
+      const current = await load(runId);
+      if (current === undefined) {
+        throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
+      }
+      controllers.get(runId)?.abort(reason);
+      const continuation = continuations.get(runId);
+      continuations.delete(runId);
+      if (isTerminal(current.state)) {
+        return { state: clone(current.state), continuation, wasTerminal: true };
+      }
+      try {
+        const state = await commitTransition(runId, { type: "cancel", reason }, { keepTerminal: true });
+        return { state, continuation, wasTerminal: false };
+      } catch (error) {
+        if (continuation !== undefined) continuations.set(runId, continuation);
+        throw error;
+      }
+    });
+    if (cancellation.continuation !== undefined) {
+      await cancellation.continuation.release().catch(() => undefined);
+    }
+    if (!cancellation.wasTerminal) await activateSuccessor(runId);
+    return cancellation.state;
   }
 
   async function decideApproval(decision: ConfirmationDecision): Promise<OrdinaryRunState> {

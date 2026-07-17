@@ -28,6 +28,7 @@ import {
 import { modelUsageWithTiming, openAIChatUsageFromRecord } from "./model-usage-metrics.js";
 import { providerErrorMessage } from "./provider-error-message.js";
 import { createOpenAIModelRefusalResponse } from "./openai-model-refusal.js";
+import { assessOpenAICompatibleChatTerminal } from "./openai-provider-terminal.js";
 
 export async function normalizeOpenAICompatibleStreamResponse(input: {
   request: ModelRequest;
@@ -210,7 +211,11 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
         },
       ];
     });
-  if (completedToolCalls.length === 0 && finishReason === undefined) {
+  const terminal = assessOpenAICompatibleChatTerminal({
+    finishReason,
+    hasToolCalls: completedToolCalls.length > 0,
+  });
+  if (terminal.status === "failed") {
     return createFailedModelResponse({
       requestId: input.request.requestId,
       providerId: input.providerId,
@@ -219,8 +224,8 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
       model,
       outputKind: input.request.outputContract.outputKind,
       failureKind: "provider_response",
-      retryable: true,
-      message: "OpenAI-compatible provider stream ended without a terminal finish reason.",
+      retryable: terminal.retryable,
+      message: terminal.message,
     });
   }
   const assistantMessage =
@@ -232,19 +237,6 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
           toolCalls: completedToolCalls,
           protocolExtensions: protocolExtensionsFromMap(protocolExtensions),
         };
-  const finalFinishReason = completedToolCalls.length > 0 ? "tool_call" : finishReason;
-  const incompleteResponse = failedResponseForIncompleteStreamFinish({
-    request: input.request,
-    providerId: input.providerId,
-    providerKind: input.providerKind,
-    protocolKind: input.protocolKind,
-    model,
-    finishReason: finalFinishReason,
-  });
-  if (incompleteResponse !== undefined) {
-    return incompleteResponse;
-  }
-
   return {
     responseId: createId("model-response"),
     requestId: input.request.requestId,
@@ -269,7 +261,7 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
       firstTokenLatencyMs:
         firstOutputTokenAtMs === undefined ? undefined : firstOutputTokenAtMs - input.startedAtMs,
     }),
-    finishReason: finalFinishReason,
+    finishReason: terminal.finishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
@@ -277,35 +269,6 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
 
 function hasTokenUsage(value: Pick<NonNullable<ModelResponse["usage"]>, "inputTokens" | "outputTokens" | "totalTokens">): boolean {
   return value.inputTokens !== undefined || value.outputTokens !== undefined || value.totalTokens !== undefined;
-}
-
-function failedResponseForIncompleteStreamFinish(input: {
-  readonly request: ModelRequest;
-  readonly providerId: string;
-  readonly providerKind: "openai_compatible";
-  readonly protocolKind: "openai_compatible_chat_completions";
-  readonly model: string;
-  readonly finishReason: ModelResponse["finishReason"];
-}): ModelResponse | undefined {
-  if (input.finishReason !== "length" && input.finishReason !== "content_filter" && input.finishReason !== "error") {
-    return undefined;
-  }
-  const message = input.finishReason === "length"
-    ? "OpenAI-compatible provider stream returned a truncated response."
-    : input.finishReason === "content_filter"
-      ? "OpenAI-compatible provider stream filtered the response content."
-      : "OpenAI-compatible provider stream returned an error finish reason.";
-  return createFailedModelResponse({
-    requestId: input.request.requestId,
-    providerId: input.providerId,
-    providerKind: input.providerKind,
-    protocolKind: input.protocolKind,
-    model: input.model,
-    outputKind: input.request.outputContract.outputKind,
-    failureKind: "provider_response",
-    retryable: input.finishReason === "length",
-    message,
-  });
 }
 
 function emitReasoningDelta(input: {

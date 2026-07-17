@@ -1624,6 +1624,37 @@ test("OpenAI Responses adapter fails a stream that ends without a terminal respo
   assert.equal(response.failure?.message.includes("terminal response event"), true);
 });
 
+test("OpenAI Responses adapter rejects incomplete and unknown non-stream terminal statuses", async () => {
+  for (const status of ["incomplete", "unexpected_terminal"] as const) {
+    const fetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: `resp-${status}`,
+        model: "gpt-4.1",
+        status,
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: JSON.stringify({ summary: "Partial provider response." }) }],
+        }],
+      }),
+    });
+    const provider = new OpenAIResponsesProvider({
+      baseUrl: "https://api.openai.com",
+      apiKey: "sk-test-key",
+      model: "gpt-4.1",
+      fetch,
+    });
+
+    const response = await provider.complete(createValidModelRequest());
+
+    assert.equal(response.status, "failed");
+    assert.equal(response.finishReason, "error");
+    assert.equal(response.failure?.kind, "provider_response");
+  }
+});
+
 test("OpenAI Responses adapter uses custom providerId", async () => {
   const fetch: FetchLike = async () => ({
     ok: true,

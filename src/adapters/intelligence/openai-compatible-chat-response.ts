@@ -21,6 +21,10 @@ import {
 import { filterOpenAIChatProtocolExtensions } from "./openai-compatible-chat-protocol-extensions.js";
 import { modelUsageWithTiming, openAIChatUsageFromRecord } from "./model-usage-metrics.js";
 import { createOpenAIModelRefusalResponse } from "./openai-model-refusal.js";
+import {
+  assessOpenAICompatibleChatTerminal,
+  normalizeOpenAICompatibleChatFinishReason,
+} from "./openai-provider-terminal.js";
 
 export function normalizeOpenAICompatibleResponse(input: {
   request: ModelRequest;
@@ -53,17 +57,23 @@ export function normalizeOpenAICompatibleResponse(input: {
   const parsedOutput = parseStructuredOutput(content);
   const toolCalls = parseToolCalls(message.tool_calls, message.function_call);
   const assistantMessage = assistantContinuationMessage({ message, content: decoded.rawContent, toolCalls });
-  const finishReason = finishReasonForOpenAI(firstChoice.finish_reason);
-  const incompleteResponse = failedResponseForIncompleteFinish({
-    request: input.request,
-    providerId: input.providerId,
-    providerKind: input.providerKind,
-    protocolKind: input.protocolKind,
-    model: typeof raw.model === "string" ? raw.model : input.model,
-    finishReason,
+  const model = typeof raw.model === "string" ? raw.model : input.model;
+  const terminal = assessOpenAICompatibleChatTerminal({
+    finishReason: firstChoice.finish_reason,
+    hasToolCalls: toolCalls.length > 0,
   });
-  if (incompleteResponse !== undefined && toolCalls.length === 0) {
-    return incompleteResponse;
+  if (terminal.status === "failed") {
+    return createFailedModelResponse({
+      requestId: input.request.requestId,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model,
+      outputKind: input.request.outputContract.outputKind,
+      failureKind: "provider_response",
+      retryable: terminal.retryable,
+      message: terminal.message,
+    });
   }
 
   return {
@@ -72,7 +82,7 @@ export function normalizeOpenAICompatibleResponse(input: {
     providerId: input.providerId,
     providerKind: input.providerKind,
     protocolKind: input.protocolKind,
-    model: typeof raw.model === "string" ? raw.model : input.model,
+    model,
     status: "completed",
     outputKind: input.request.outputContract.outputKind,
     structuredOutput:
@@ -85,26 +95,14 @@ export function normalizeOpenAICompatibleResponse(input: {
       usage: openAIChatUsageFromRecord(raw.usage),
       latencyMs: input.latencyMs,
     }),
-    finishReason,
+    finishReason: terminal.finishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
 }
 
 export function finishReasonForOpenAI(value: unknown): ModelResponse["finishReason"] {
-  switch (value) {
-    case "stop":
-      return "stop";
-    case "length":
-      return "length";
-    case "tool_calls":
-    case "function_call":
-      return "tool_call";
-    case "content_filter":
-      return "content_filter";
-    default:
-      return undefined;
-  }
+  return normalizeOpenAICompatibleChatFinishReason(value);
 }
 
 export function parseToolCalls(value: unknown, legacyFunctionCall?: unknown): ToolCallRequest[] {
@@ -148,35 +146,6 @@ export function protocolExtensionsForResponse(message: Record<string, unknown>):
 
 // 协议扩展判定逻辑已收敛到 openai-compatible-chat-protocol-extensions，此处仅再导出以保持原有导出面。
 export { isProtocolExtensionValue, isStandardOpenAIMessageField } from "./openai-compatible-chat-protocol-extensions.js";
-
-function failedResponseForIncompleteFinish(input: {
-  readonly request: ModelRequest;
-  readonly providerId: string;
-  readonly providerKind: "openai_compatible";
-  readonly protocolKind: "openai_compatible_chat_completions";
-  readonly model: string;
-  readonly finishReason: ModelResponse["finishReason"];
-}): ModelResponse | undefined {
-  if (input.finishReason !== "length" && input.finishReason !== "content_filter" && input.finishReason !== "error") {
-    return undefined;
-  }
-  const message = input.finishReason === "length"
-    ? "OpenAI-compatible provider returned a truncated response."
-    : input.finishReason === "content_filter"
-      ? "OpenAI-compatible provider filtered the response content."
-      : "OpenAI-compatible provider returned an error finish reason.";
-  return createFailedModelResponse({
-    requestId: input.request.requestId,
-    providerId: input.providerId,
-    providerKind: input.providerKind,
-    protocolKind: input.protocolKind,
-    model: input.model,
-    outputKind: input.request.outputContract.outputKind,
-    failureKind: "provider_response",
-    retryable: input.finishReason === "length",
-    message,
-  });
-}
 
 function assistantContinuationMessage(input: {
   readonly message: Record<string, unknown>;

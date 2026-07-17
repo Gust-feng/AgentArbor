@@ -23,6 +23,7 @@ import {
 import { reconcileOpenAIResponsesTerminalOutput } from "./openai-responses-stream-reconciliation.js";
 import { providerErrorMessage } from "./provider-error-message.js";
 import { createOpenAIModelRefusalResponse } from "./openai-model-refusal.js";
+import { assessOpenAIResponsesTerminal } from "./openai-provider-terminal.js";
 
 export function normalizeOpenAIResponsesResponse(input: {
   request: ModelRequest;
@@ -50,17 +51,26 @@ export function normalizeOpenAIResponsesResponse(input: {
       responseId,
     });
   }
-  const finishReason = finishReasonFromStatus(raw.status, toolCalls);
-  const incompleteResponse = failedResponseForIncompleteResponsesFinish({
-    request: input.request,
-    providerId: input.providerId,
-    providerKind: input.providerKind,
-    protocolKind: input.protocolKind,
-    model: typeof raw.model === "string" ? raw.model : input.model,
-    finishReason,
+  const model = typeof raw.model === "string" ? raw.model : input.model;
+  const incompleteDetails = asRecord(raw.incomplete_details);
+  const terminal = assessOpenAIResponsesTerminal({
+    status: raw.status,
+    incompleteReason: incompleteDetails.reason,
+    hasToolCalls: toolCalls.length > 0,
   });
-  if (incompleteResponse !== undefined) {
-    return incompleteResponse;
+  if (terminal.status === "failed") {
+    return createFailedModelResponse({
+      requestId: input.request.requestId,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model,
+      outputKind: input.request.outputContract.outputKind,
+      failureKind: "provider_response",
+      retryable: terminal.retryable,
+      message: terminal.message,
+      responseId,
+    });
   }
 
   return {
@@ -69,7 +79,7 @@ export function normalizeOpenAIResponsesResponse(input: {
     providerId: input.providerId,
     providerKind: input.providerKind,
     protocolKind: input.protocolKind,
-    model: typeof raw.model === "string" ? raw.model : input.model,
+    model,
     status: "completed",
     outputKind: input.request.outputContract.outputKind,
     structuredOutput:
@@ -90,7 +100,7 @@ export function normalizeOpenAIResponsesResponse(input: {
       usage: openAIResponsesUsageFromRecord(raw.usage),
       latencyMs: input.latencyMs,
     }),
-    finishReason,
+    finishReason: terminal.finishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
@@ -110,6 +120,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
   let textContent = "";
   let responseId = createId("model-response");
   let responseStatus: string | undefined;
+  let responseIncompleteReason: string | undefined;
   let model = input.model;
   let deltaIndex = 0;
   let reasoningContent = "";
@@ -233,6 +244,10 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       if (eventType === "response.completed") {
         const response = asRecord(event.response);
         responseStatus = typeof response.status === "string" ? response.status : "completed";
+        const incompleteDetails = asRecord(response.incomplete_details);
+        responseIncompleteReason = typeof incompleteDetails.reason === "string"
+          ? incompleteDetails.reason
+          : undefined;
         const responseUsage = openAIResponsesUsageFromRecord(response.usage);
         if (hasTokenUsage(responseUsage)) {
           usage = responseUsage;
@@ -266,7 +281,18 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       }
 
       if (eventType === "response.incomplete") {
-        responseStatus = "incomplete";
+        const response = asRecord(event.response);
+        responseStatus = typeof response.status === "string" ? response.status : "incomplete";
+        const incompleteDetails = asRecord(response.incomplete_details);
+        responseIncompleteReason = typeof incompleteDetails.reason === "string"
+          ? incompleteDetails.reason
+          : undefined;
+        if (typeof response.id === "string") {
+          responseId = response.id;
+        }
+        if (typeof response.model === "string") {
+          model = response.model;
+        }
         continue;
       }
 
@@ -329,21 +355,6 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       responseId,
     });
   }
-  if (responseStatus === undefined) {
-    return createFailedModelResponse({
-      requestId: input.request.requestId,
-      providerId: input.providerId,
-      providerKind: input.providerKind,
-      protocolKind: input.protocolKind,
-      model,
-      outputKind: input.request.outputContract.outputKind,
-      failureKind: "provider_response",
-      retryable: true,
-      message: "OpenAI Responses provider stream ended without a terminal response event.",
-      responseId,
-    });
-  }
-
   const toolCalls: ToolCallRequest[] = [...toolCallBuilders.entries()]
     .sort(([left], [right]) => left - right)
     .flatMap(([, builder]) => {
@@ -363,17 +374,24 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
     responseOutputItems ?? openAIResponsesOutputItems([...completedOutputItems.entries()]
       .sort(([left], [right]) => left - right)
       .map(([, item]) => item));
-  const finalFinishReason = toolCalls.length > 0 ? "tool_call" : finishReasonFromStatus(responseStatus, toolCalls);
-  const incompleteResponse = failedResponseForIncompleteResponsesFinish({
-    request: input.request,
-    providerId: input.providerId,
-    providerKind: input.providerKind,
-    protocolKind: input.protocolKind,
-    model,
-    finishReason: finalFinishReason,
+  const terminal = assessOpenAIResponsesTerminal({
+    status: responseStatus,
+    incompleteReason: responseIncompleteReason,
+    hasToolCalls: toolCalls.length > 0,
   });
-  if (incompleteResponse !== undefined) {
-    return incompleteResponse;
+  if (terminal.status === "failed") {
+    return createFailedModelResponse({
+      requestId: input.request.requestId,
+      providerId: input.providerId,
+      providerKind: input.providerKind,
+      protocolKind: input.protocolKind,
+      model,
+      outputKind: input.request.outputContract.outputKind,
+      failureKind: "provider_response",
+      retryable: terminal.retryable,
+      message: terminal.message,
+      responseId,
+    });
   }
 
   return {
@@ -405,7 +423,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       firstTokenLatencyMs:
         firstOutputTokenAtMs === undefined ? undefined : firstOutputTokenAtMs - input.startedAtMs,
     }),
-    finishReason: finalFinishReason,
+    finishReason: terminal.finishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
@@ -531,49 +549,4 @@ function assistantMessageFromOutput(input: {
       outputItems: input.outputItems,
     }),
   };
-}
-
-function failedResponseForIncompleteResponsesFinish(input: {
-  readonly request: ModelRequest;
-  readonly providerId: string;
-  readonly providerKind: "openai_compatible";
-  readonly protocolKind: "openai_responses";
-  readonly model: string;
-  readonly finishReason: ModelResponse["finishReason"];
-}): ModelResponse | undefined {
-  if (input.finishReason !== "length" && input.finishReason !== "content_filter" && input.finishReason !== "error") {
-    return undefined;
-  }
-  const message = input.finishReason === "length"
-    ? "OpenAI Responses provider returned an incomplete response."
-    : input.finishReason === "content_filter"
-      ? "OpenAI Responses provider filtered the response content."
-      : "OpenAI Responses provider returned an error finish reason.";
-  return createFailedModelResponse({
-    requestId: input.request.requestId,
-    providerId: input.providerId,
-    providerKind: input.providerKind,
-    protocolKind: input.protocolKind,
-    model: input.model,
-    outputKind: input.request.outputContract.outputKind,
-    failureKind: "provider_response",
-    retryable: input.finishReason === "length",
-    message,
-  });
-}
-
-function finishReasonFromStatus(
-  status: unknown,
-  toolCalls: readonly ToolCallRequest[]
-): ModelResponse["finishReason"] {
-  if (toolCalls.length > 0) {
-    return "tool_call";
-  }
-  if (status === "completed") {
-    return "stop";
-  }
-  if (status === "incomplete") {
-    return "length";
-  }
-  return undefined;
 }

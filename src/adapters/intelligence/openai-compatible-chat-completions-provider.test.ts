@@ -1026,6 +1026,35 @@ test("OpenAI-compatible Chat adapter fails incomplete final finish reasons", asy
   }
 });
 
+test("OpenAI-compatible Chat adapter rejects unknown or missing non-stream terminal finish reasons", async () => {
+  for (const finishReason of ["unexpected_terminal", undefined] as const) {
+    const fetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: `chatcmpl-${finishReason ?? "missing"}`,
+        model: "gpt-compatible-test",
+        choices: [{
+          message: { role: "assistant", content: JSON.stringify({ summary: "Partial provider response." }) },
+          ...(finishReason === undefined ? {} : { finish_reason: finishReason }),
+        }],
+      }),
+    });
+    const provider = new OpenAICompatibleChatCompletionsProvider({
+      baseUrl: "https://llm.example.test",
+      apiKey: "sk-test-secret-token",
+      model: "gpt-compatible-test",
+      fetch,
+    });
+
+    const response = await provider.complete(createValidModelRequest());
+
+    assert.equal(response.status, "failed");
+    assert.equal(response.finishReason, "error");
+    assert.equal(response.failure?.kind, "provider_response");
+  }
+});
+
 
 test("OpenAI-compatible Chat adapter gates parallel tool calls by visible tool risk", async () => {
   const calls: { body: Record<string, unknown> }[] = [];

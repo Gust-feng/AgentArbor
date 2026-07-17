@@ -54,10 +54,12 @@ test("real AI smoke returns an approval pause immediately instead of waiting for
     timeoutMs: 2_000,
     ordinaryAgentExecution: {
       async execute(input) {
+        const approval = approvalToolResult(request);
+        await input.onToolResult?.(approval);
         return {
           status: "approval_required",
           canonicalMessages: input.messages,
-          toolCalls: [],
+          toolCalls: [approval],
           usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
           confirmationRequests: [request],
           continuation: {
@@ -145,5 +147,18 @@ function confirmation(runId: string): ConfirmationRequest {
     resumeAvailability: "live",
     requestedAt: "2026-01-01T00:00:02.000Z",
     sourceRefs: [],
+  };
+}
+
+function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
+  return {
+    callId: `${request.toolCallFactId}:provider-call`,
+    factId: request.toolCallFactId,
+    toolName: "shell_command",
+    input: { commandLine: "echo smoke" },
+    output: undefined,
+    status: "approval_required",
+    durationMs: 0,
+    confirmationRequest: request,
   };
 }

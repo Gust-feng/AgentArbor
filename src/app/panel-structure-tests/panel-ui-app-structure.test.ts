@@ -168,9 +168,11 @@ test("panel UI app shell delegates runtime data and control work", async () => {
   assert.equal(app.includes('from "./app-queued-message-state"'), true);
   assert.equal(app.includes("useAppQueuedMessages({"), true);
   assert.equal(appQueuedMessageState.includes("export function useAppQueuedMessages"), true);
-  assert.equal(appQueuedMessageState.includes("queueReadyAfterRunRef"), true);
   assert.equal(appQueuedMessageState.includes("dispatchedQueueAfterRunRef"), true);
-  assert.equal(appQueuedMessageState.includes("previousRunActivityRef"), true);
+  assert.equal(appQueuedMessageState.includes("queuedMessageDispatchDecision"), true);
+  assert.equal(appQueuedMessageState.includes("queuedMessageMayFollow"), true);
+  assert.equal(appQueuedMessageState.includes("queueReadyAfterRunRef"), false);
+  assert.equal(appQueuedMessageState.includes("previousRunActivityRef"), false);
   assert.equal(appQueuedMessageState.includes("clearQueuedMessages"), true);
   assert.equal(app.includes('from "./app-form-state-sync"'), false);
   assert.equal(app.includes("useAppFormStateSync({"), false);

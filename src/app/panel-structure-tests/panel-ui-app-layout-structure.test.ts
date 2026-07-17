@@ -220,10 +220,10 @@ test("panel UI app shell keeps layout and style ownership split", async () => {
   assert.equal(workspaceStyles.includes(".settings-capabilities"), false);
   assert.equal(workspaceStyles.includes(".service-config-grid"), true);
 });
-test("panel UI native title tooltips stay limited to context usage ring", async () => {
+test("panel UI native title tooltips stay limited to compact inspection targets", async () => {
   const sourceRoot = path.join(process.cwd(), "src", "app", "panel-ui", "src");
   const files = await listPanelUiSourceFiles(sourceRoot);
-  const nativeTitlePattern = /<([a-z][\w.-]*)(?=[\s>/])[^>]*\btitle\s*=/gms;
+  const nativeElementPattern = /<([a-z][\w.-]*)(?=[\s>/])[^>]*>/gms;
   const findings: {
     file: string;
     tag: string;
@@ -233,7 +233,10 @@ test("panel UI native title tooltips stay limited to context usage ring", async 
   await Promise.all(files.map(async (file) => {
     const source = await fs.readFile(file, "utf8");
     let match: RegExpExecArray | null;
-    while ((match = nativeTitlePattern.exec(source)) !== null) {
+    while ((match = nativeElementPattern.exec(source)) !== null) {
+      if (!/\btitle\s*=/u.test(match[0])) {
+        continue;
+      }
       findings.push({
         file: path.relative(sourceRoot, file).replaceAll("\\", "/"),
         tag: match[1],
@@ -242,12 +245,25 @@ test("panel UI native title tooltips stay limited to context usage ring", async 
     }
   }));
 
-  assert.deepEqual(
-    findings.filter((finding) =>
-      finding.file !== "components/chat-empty.tsx" ||
-      finding.tag !== "span" ||
-      !finding.tagSource.includes('className="composer-context-usage"')
-    ),
-    [],
-  );
+  assert.deepEqual(findings.filter((finding) => !isAllowedNativeTitleTooltip(finding)), []);
 });
+
+function isAllowedNativeTitleTooltip(finding: {
+  readonly file: string;
+  readonly tag: string;
+  readonly tagSource: string;
+}): boolean {
+  if (
+    finding.file === "components/chat-empty.tsx" &&
+    finding.tag === "span" &&
+    finding.tagSource.includes('className="composer-context-usage"')
+  ) {
+    return true;
+  }
+  if (finding.file === "components/activity-evidence.tsx") {
+    return finding.tag === "span" && finding.tagSource.includes("title={item.label}");
+  }
+  return finding.file === "components/copy-action-button.tsx" &&
+    finding.tag === "button" &&
+    finding.tagSource.includes("copy-action-button");
+}

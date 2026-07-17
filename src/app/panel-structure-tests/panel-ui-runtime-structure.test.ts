@@ -334,11 +334,11 @@ test("panel React workbench consumes Ordinary Agent projection APIs", async () =
   assert.equal(transcriptTimeline.includes("agent-activity"), true);
   assert.equal(transcriptTimeline.includes("agent-activity-step"), true);
   assert.equal(transcriptTimeline.includes("agent-activity-step confirmation"), true);
-  assert.equal(transcriptTimeline.includes("agent-activity-marker"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-marker"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-toggle"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-disclosure"), true);
-  assert.equal(transcriptTimeline.includes("expandable={!selectable}"), false);
-  assert.equal(transcriptTimeline.includes("agent-activity-expanded-detail"), true);
+  assert.equal(transcriptTimeline.includes("expandable={!selectable}"), true);
+  assert.equal(transcriptTimeline.includes("ActivityEvidencePanel item={item}"), true);
   assert.equal(transcriptTimeline.includes("expandedDetail"), true);
   assert.equal(transcriptTimeline.includes("timelineConfirmationProjection"), false);
   assert.equal(transcriptTimeline.includes("currentConfirmationNode"), false);

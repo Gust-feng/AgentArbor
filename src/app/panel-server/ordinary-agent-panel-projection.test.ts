@@ -60,7 +60,11 @@ test("run and conversation projection are protocol-neutral for both supported Op
     assert.equal(view.agentDefinitionRef, run.birth.agentDefinitionRef);
     assert.deepEqual(view.capabilityResolution, run.capabilityResolution);
     assert.equal(conversation.currentRun?.run.runId, run.runId);
-    assert.deepEqual(conversation.workspaceFolder, { label: "workspace", path: "Z:/workspace" });
+    assert.deepEqual(conversation.workspaceFolder, {
+      label: "workspace",
+      path: "Z:/workspace",
+      selection: "explicit",
+    });
     assert.equal(conversation.turns[1]?.responseModel?.protocolKind, protocol);
     assert.equal(conversation.turns[1]?.responseModel?.model, run.birth.config.model);
   }
@@ -320,7 +324,11 @@ test("conversation DTO is a one-way projection with full turns, attachments and 
     assistantTurnId: run.turn.assistantTurnId,
   });
   assert.equal(projected.currentRun?.run.runId, run.runId);
-  assert.deepEqual(projected.workspaceFolder, { label: "workspace", path: "Z:/workspace" });
+  assert.deepEqual(projected.workspaceFolder, {
+    label: "workspace",
+    path: "Z:/workspace",
+    selection: "explicit",
+  });
   assert.deepEqual(summary.workspaceFolder, projected.workspaceFolder);
   assert.equal(projected.turns[0]?.attachments?.[0]?.summary, "附件摘要 <raw>");
   assert.equal(projected.turns[1]?.content, "");

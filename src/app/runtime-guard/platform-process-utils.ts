@@ -125,12 +125,14 @@ export function runRuntimeGuardCommand(request: RuntimeGuardCommandRequest): Pro
 
 async function killWindowsProcessTree(pid: number, options: KillProcessTreeOptions): Promise<ProcessKillTreeResult> {
   const runner = options.commandRunner ?? runRuntimeGuardCommand;
+  const timeoutMs = normalizePositiveInteger(options.timeoutMs, DEFAULT_KILL_TIMEOUT_MS);
+  const startedAt = Date.now();
   let result: RuntimeGuardCommandResult;
   try {
     result = await runner({
       file: "taskkill",
       args: ["/PID", String(pid), "/T", "/F"],
-      timeoutMs: normalizePositiveInteger(options.timeoutMs, DEFAULT_KILL_TIMEOUT_MS),
+      timeoutMs,
     });
   } catch (error) {
     return {
@@ -140,9 +142,22 @@ async function killWindowsProcessTree(pid: number, options: KillProcessTreeOptio
   }
 
   if (result.exitCode === 0) {
+    const message = compactCommandText(result) || `taskkill completed for pid ${pid}.`;
+    const exitState = await waitForProcessExit(
+      pid,
+      options.signalSender ?? defaultSignalSender,
+      Math.max(0, timeoutMs - (Date.now() - startedAt))
+    );
+    if (exitState === "gone") {
+      return {
+        status: "killed",
+        message,
+      };
+    }
+
     return {
-      status: "killed",
-      message: compactCommandText(result) || `taskkill completed for pid ${pid}.`,
+      status: "unknown",
+      message: `${message} Process exit could not be confirmed.`,
     };
   }
 

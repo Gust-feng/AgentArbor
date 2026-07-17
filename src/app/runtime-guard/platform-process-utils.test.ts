@@ -23,6 +23,9 @@ test("killProcessTree uses taskkill for Windows process trees", async () => {
         stderr: "",
       };
     },
+    signalSender() {
+      throw errnoError("kill ESRCH", "ESRCH");
+    },
   });
 
   assert.equal(result.status, "killed");
@@ -34,6 +37,31 @@ test("killProcessTree uses taskkill for Windows process trees", async () => {
       timeoutMs: 5_000,
     },
   ]);
+});
+
+test("killProcessTree keeps Windows cleanup unresolved when taskkill succeeds but the pid remains live", async () => {
+  let livenessProbes = 0;
+
+  const result = await killProcessTree(4321, {
+    platform: "win32",
+    timeoutMs: 1,
+    commandRunner() {
+      return {
+        exitCode: 0,
+        stdout: "SUCCESS: Sent termination signal.",
+        stderr: "",
+      };
+    },
+    signalSender(pid, signal) {
+      assert.equal(pid, 4321);
+      assert.equal(signal, 0);
+      livenessProbes += 1;
+    },
+  });
+
+  assert.equal(result.status, "unknown");
+  assert.equal(result.message, "SUCCESS: Sent termination signal. Process exit could not be confirmed.");
+  assert.equal(livenessProbes > 0, true);
 });
 
 test("killProcessTree reports exited when Windows taskkill says the process is absent", async () => {
@@ -177,6 +205,9 @@ test("createPlatformProcessTerminator adapts killProcessTree to ProcessTerminato
         stdout: "",
         stderr: "",
       };
+    },
+    signalSender() {
+      throw errnoError("kill ESRCH", "ESRCH");
     },
   });
 

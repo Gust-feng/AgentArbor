@@ -6,8 +6,9 @@ export type CapabilityAgentProfile = {
   readonly toolVisibilityProfile: AgentToolVisibilityProfile;
 };
 import {
-  BasicAgentCapabilitySnapshot,
+  AgentCapabilitySnapshot,
   CapabilityDraft,
+  CapabilitySkillCatalogItem,
   RunCapabilityResolution,
   RunEnabledSkill,
   RunToolExposure,
@@ -21,7 +22,9 @@ import { isToolVisibleToAgentProfile as isVisibleToProfile } from "../agent-prom
 import { createRunCapabilityPlan } from "../model-runtime/model-capability-registry.js";
 
 export type ResolveRunCapabilitiesInput = {
-  readonly snapshot: BasicAgentCapabilitySnapshot;
+  readonly snapshot: AgentCapabilitySnapshot;
+  /** Ordinary supplies its frozen Skill catalog; other features have no Skills. */
+  readonly skillCatalog?: readonly CapabilitySkillCatalogItem[];
   readonly goal: string;
   readonly agentDefinition: CapabilityAgentProfile;
   readonly taskSoil?: TaskSoil;
@@ -111,7 +114,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
     capabilityPlan,
     allowedTools,
     toolExposures,
-    enabledSkills: input.snapshot.skillCatalog
+    enabledSkills: (input.skillCatalog ?? [])
       .filter(isRunEnabledSkill)
       .map((skill): RunEnabledSkill => ({
         id: skill.id,
@@ -149,7 +152,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
   };
 }
 
-function isRunEnabledSkill(skill: BasicAgentCapabilitySnapshot["skillCatalog"][number]): boolean {
+function isRunEnabledSkill(skill: CapabilitySkillCatalogItem): boolean {
   return skill.enabled && (skill.validationStatus === undefined || skill.validationStatus === "valid");
 }
 
@@ -225,7 +228,7 @@ function exposureReason(reasonCode: RunToolExposureReasonCode): string {
 }
 
 function capabilityResolutionWarnings(input: {
-  readonly snapshot: BasicAgentCapabilitySnapshot;
+  readonly snapshot: AgentCapabilitySnapshot;
   readonly allowedTools: readonly string[];
   readonly toolExposures: readonly RunToolExposure[];
 }): readonly string[] {

@@ -25,7 +25,6 @@
  * 现有枚举（{@link DEEP_RUN_MODE}），不在此引入新的 runMode 语义。
  */
 import type {
-  BasicAgentCapabilitySnapshot,
   SanitizedInformationAccessConfig,
 } from "../../domain/config/index.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
@@ -46,6 +45,9 @@ import {
   assertNoDirectChildOutputHandoff,
 } from "../../domain/underground/agent-fabric.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
+import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
+
+export type { MultiAgentCapabilitySnapshot };
 
 // ---------------------------------------------------------------------------
 // 复用领域契约（不重定义）——通过 deep 模块统一入口暴露，方便 DeepRuntime 各
@@ -135,6 +137,8 @@ export type DeepConversation = {
   /** 当前已明确的协作目标；只有 intake 判定可启动协作时才写入。 */
   readonly currentObjective?: string;
   readonly birthWorkspaceDirectory?: string;
+  /** Keeps inherited workspace context distinct from a user-selected project. */
+  readonly workspaceSelection?: "default" | "explicit";
   readonly pinnedAt?: string;
   readonly isolation: DeepConversationIsolationMark;
   /**
@@ -199,7 +203,7 @@ export type DeepRun = {
   /** run 启动时使用的模型运行模式；用于跨进程恢复同一 deep run 的子 Agent loop。 */
   readonly aiMode?: ModelRuntimeMode;
   /** run 启动时冻结的能力快照（FR-003，保证运行中能力边界稳定）。 */
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
   /** 新运行必须持久化；缺失时 post-terminal continuation 必须诚实失败。 */
   readonly continuationFacts?: DeepRunContinuationFacts;
   readonly startedAt: string;

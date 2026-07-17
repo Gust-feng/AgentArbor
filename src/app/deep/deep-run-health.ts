@@ -1,10 +1,6 @@
 import { nowIso } from "../../kernel/id.js";
-import {
-  projectDeepConversationSummary,
-  projectDeepRunSummary,
-} from "../deep/deep-read-model.js";
-import type { DeepConversation, DeepRunStatus } from "../deep/contracts.js";
-import type { DeepRunRecord } from "../deep/deep-runtime.js";
+import type { DeepRunStatus } from "./contracts.js";
+import type { DeepRunRecord } from "./deep-run-record-store.js";
 
 const DEEP_RUN_STALE_AFTER_MS = 2 * 60 * 1_000;
 
@@ -16,40 +12,6 @@ export type DeepRunRuntimeHealthView = {
   readonly canStop: boolean;
   readonly reason: string;
 };
-
-type DeepRunHealthState = {
-  readonly isRunActive: (runId: string) => boolean;
-};
-
-export function projectDeepRunSummaryWithHealth(
-  state: DeepRunHealthState,
-  record: DeepRunRecord,
-  rootRecord?: DeepRunRecord,
-): Record<string, unknown> {
-  return {
-    ...projectDeepRunSummary(record, rootRecord),
-    runtimeHealth: deepRunRuntimeHealth(state, record),
-  };
-}
-
-export function projectDeepConversationSummaryWithHealth(
-  state: DeepRunHealthState,
-  conversation: DeepConversation,
-  latestRunRecord?: DeepRunRecord,
-  latestRootRecord?: DeepRunRecord,
-): Record<string, unknown> {
-  const summary = projectDeepConversationSummary(conversation, latestRunRecord, latestRootRecord);
-  if (latestRunRecord === undefined || summary.latestRun === undefined) {
-    return summary;
-  }
-  return {
-    ...summary,
-    latestRun: {
-      ...asRecord(summary.latestRun),
-      runtimeHealth: deepRunRuntimeHealth(state, latestRunRecord),
-    },
-  };
-}
 
 export function deriveDeepRunRuntimeHealth(input: {
   readonly status: DeepRunStatus;
@@ -102,11 +64,11 @@ export function deriveDeepRunRuntimeHealth(input: {
 }
 
 export function deepRunRuntimeHealth(
-  state: DeepRunHealthState,
+  isRunActive: (runId: string) => boolean,
   record: DeepRunRecord,
   nowMs = Date.now(),
 ): DeepRunRuntimeHealthView {
-  const activeRunIds = state.isRunActive(record.run.runId)
+  const activeRunIds = isRunActive(record.run.runId)
     ? new Set([record.run.runId])
     : new Set<string>();
   return deriveDeepRunRuntimeHealth({
@@ -120,13 +82,16 @@ export function deepRunRuntimeHealth(
 }
 
 export function isTerminalDeepRunStatus(status: DeepRunStatus): boolean {
-  return status !== "running";
+  return status === "completed"
+    || status === "failed"
+    || status === "interrupted"
+    || status === "corrected"
+    || status === "stopped";
 }
 
 function latestDeepRunActivityAt(record: DeepRunRecord): string {
-  const lastEventAt = record.eventSequence.at(-1)?.timestamp;
   return latestTimestampForHealth(
-    lastEventAt,
+    record.eventSequence.at(-1)?.timestamp,
     record.liveProjection?.updatedAt,
     record.updatedAt,
     record.run.updatedAt,
@@ -143,11 +108,4 @@ function latestTimestampForHealth(...values: readonly (string | undefined)[]): s
 function timestampMs(value: string): number {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  return value as Record<string, unknown>;
 }

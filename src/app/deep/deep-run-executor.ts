@@ -5,7 +5,7 @@
  *   - 每个 step 通过 AgentTurnRuntime 调模型产出 {@link DeepDelegationDecision}；
  *   - 分发到 manager 动作分支（direct_answer / spawn_children / wait_children /
  *     continue_child / synthesize / ask_user / stop），每个分支都可执行；
- *   - run 启动时冻结 {@link BasicAgentCapabilitySnapshot}，保证运行中能力边界稳定（FR-003）；
+ *   - run 启动时冻结 {@link MultiAgentCapabilitySnapshot}，保证运行中能力边界稳定（FR-003）；
  *   - manager 在证据不足时按模型决策走 spawn_children（继续派生 child 探索）或
  *     ask_user（向用户澄清），**不伪装成已完成判断**；
  *   - 无可用模型时拒绝运行（需求 A3，AI-first 边界，不 fallback 伪装）。
@@ -52,7 +52,6 @@
  * Plan/directionHandoffPackage/artifact/Fruits；DeepResearchBrief 是低心智计划投影，非 Plan。
  */
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type { ChildAgentRun, ParentSynthesisResult } from "../../domain/underground/agent-fabric.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
@@ -76,6 +75,7 @@ import {
   DEEP_DIRECT_ANSWER_CONTRACT_ID,
 } from "./deep-model-io.js";
 import type { DeepRunControlEvent, DeepRunControlHandle } from "./deep-run-control.js";
+import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 export {
   createDeepRunControlHandle,
 } from "./deep-run-control.js";
@@ -279,7 +279,7 @@ export type StartDeepRunInput = {
   readonly taskSoil: TaskSoil;
   readonly permissionBoundaryRefs: readonly string[];
   readonly confirmationPolicy?: ToolConfirmationPolicy;
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
   readonly modelAvailable: boolean;
   readonly traceId: string;
   readonly goalId: string;

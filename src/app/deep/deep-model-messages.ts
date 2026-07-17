@@ -1,5 +1,4 @@
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
 import type {
   ChildAgentRun,
   ChildAgentRunExecution,
@@ -19,6 +18,7 @@ import type {
   DeepSynthesisMessagesInput,
   DeepTurnMessage,
 } from "./deep-model-contracts.js";
+import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 export function deepDecisionMessages(input: DeepDecisionMessagesInput): readonly DeepTurnMessage[] {
   const correctionSection = formatCorrectionContext(input.correctionContext);
   const followUpSection = formatFollowUpContext(input.followUpContext);
@@ -390,7 +390,7 @@ function formatIntakeContext(context: DeepIntakeContext | undefined): string {
   ].join("\n");
 }
 
-function formatCapabilityToolSection(snapshot: BasicAgentCapabilitySnapshot | undefined): string {
+function formatCapabilityToolSection(snapshot: MultiAgentCapabilitySnapshot | undefined): string {
   if (snapshot === undefined) {
     return "可用工具清单：未提供冻结能力快照；不要编造工具名。";
   }

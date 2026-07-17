@@ -42,7 +42,9 @@ import {
   type DeepChildMessageStore,
 } from "./deep-child-messages.js";
 import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
-import { createMultiAgentFeature } from "./multi-agent-feature.js";
+import {
+  createMultiAgentFeatureTestFixture as createMultiAgentFeature,
+} from "./tests/multi-agent-feature-test-support.js";
 
 test("MultiAgentFeature gives each operation a fresh bus and awaits lease release", async () => {
   const buses: object[] = [];
@@ -311,7 +313,7 @@ test("MultiAgentFeature owns background release failures through an explicit rep
     permissionBoundaryRefs: ["read:workspace:fixture"],
     confirmationPolicy: "full_access",
   });
-  assert.equal(feature.isRunActive(started.runId), false);
+  assert.equal((await feature.queries.getRunRuntimeHealth(started.runId))?.state, "terminal");
   await assert.rejects(
     feature.requestRunControl({ runId: started.runId, action: "interrupt" }),
     (error: unknown) => (
@@ -1975,6 +1977,11 @@ test("MultiAgentFeature conversation deletion cleans runs older than the recent-
         turnOrdinal: index + 2,
         updatedAt,
       },
+      report: oldestRecord.report === undefined ? undefined : {
+        ...oldestRecord.report,
+        runId,
+      },
+      eventSequence: oldestRecord.eventSequence.map((event) => ({ ...event, runId })),
       updatedAt,
     });
   }
@@ -2028,6 +2035,11 @@ test("MultiAgentFeature derives follow-up ordinal when the root is older than 50
         turnOrdinal: index + 1,
         updatedAt,
       },
+      report: rootRecord.report === undefined ? undefined : {
+        ...rootRecord.report,
+        runId,
+      },
+      eventSequence: rootRecord.eventSequence.map((event) => ({ ...event, runId })),
       updatedAt,
     });
   }
@@ -2396,7 +2408,7 @@ class ApprovalFixtureToolBroker implements ToolExecutionBroker {
       durationMs: 1,
       confirmationRequest: {
         confirmationId: "confirm-call-write-approval",
-        runId: "fixture-child-run",
+        toolCallFactId: request.factId ?? request.callId,
         title: "需要确认工具调用",
         actionSummary: "运行 write_file",
         affectedResources: ["notes.md"],

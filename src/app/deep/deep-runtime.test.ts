@@ -265,7 +265,7 @@ class ApprovalRequiredToolBroker implements ToolExecutionBroker {
       durationMs: 1,
       confirmationRequest: {
         confirmationId: `confirm-${request.callId}`,
-        runId: "deep-child-run-test",
+        toolCallFactId: request.factId ?? request.callId,
         title: "需要确认工具调用",
         actionSummary: `运行 ${request.toolName}`,
         affectedResources: [request.toolName],

@@ -339,6 +339,18 @@ test("MultiAgentFeature facade does not expose owned stores or lifecycle registr
   ]) {
     assert.equal(publicFacade.includes(forbidden), false, `${forbidden} must remain feature-internal`);
   }
+  for (const requiredGroup of ["readonly commands:", "readonly queries:", "readonly events:"]) {
+    assert.equal(
+      publicFacade.includes(requiredGroup),
+      true,
+      `MultiAgentFeature must expose its ${requiredGroup.slice(9, -1)} facade`,
+    );
+  }
+  assert.equal(
+    publicFacade.includes("DeepRunRecord"),
+    false,
+    "the production MultiAgentFeature facade must expose projected views instead of raw run records",
+  );
 });
 
 test("deep routes consume composed Multi-Agent services without constructing runtime or stores", async () => {
@@ -362,6 +374,27 @@ test("deep routes consume composed Multi-Agent services without constructing run
     false,
     "deep-routes must use MultiAgentFeature commands/queries instead of reaching into feature-owned state",
   );
+  for (const forbiddenRouteDetail of [
+    "DeepRunRecord",
+    "deep-read-model",
+    "deep-run-health",
+    "isTerminalDeepRunStatus",
+    "serveRunEventSse",
+    "setInterval(flush",
+  ]) {
+    assert.equal(
+      source.includes(forbiddenRouteDetail),
+      false,
+      `deep-routes must not own ${forbiddenRouteDetail}`,
+    );
+  }
+  for (const facadeGroup of ["state.commands.", "state.queries.", "state.events."]) {
+    assert.equal(
+      source.includes(facadeGroup),
+      true,
+      `deep-routes must consume the MultiAgentFeature ${facadeGroup.slice(6, -1)} facade`,
+    );
+  }
   for (const movedBusinessOperation of [
     "buildDeepFollowUpContext",
     "confirmedDeepIntakeContext",

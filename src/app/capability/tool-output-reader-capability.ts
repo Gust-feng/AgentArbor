@@ -22,7 +22,7 @@ export function inheritToolOutputReader(input: {
 }
 
 export function frozenSnapshotHasToolOutputReader(
-  snapshot: BasicAgentCapabilitySnapshot | undefined,
+  snapshot: Pick<BasicAgentCapabilitySnapshot, "toolCatalog"> | undefined,
 ): boolean {
   if (snapshot?.toolCatalog.allowedTools.includes(TOOL_OUTPUT_READER_TOOL_NAME) !== true) {
     return false;

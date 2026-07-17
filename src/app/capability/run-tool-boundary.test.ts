@@ -304,22 +304,24 @@ test("run tool boundary exposes implemented SDK AgentTools without requiring Too
       additionalProperties: false,
     },
   };
+  const snapshot = capabilitySnapshot(
+    [tool("call_sub_agent", "read-write")],
+    ["call_sub_agent"],
+    [
+      subAgentCatalogItem("project-helper", {
+        description: "Project-specific helper from the frozen run catalog.",
+        category: "project",
+        allowedTools: ["read_file"],
+        whenToUse: ["Use for project-specific inspection."],
+        maxSteps: 12,
+      }),
+      subAgentCatalogItem("code-expert", { enabled: false }),
+    ],
+  );
   const boundary = resolveRunToolBoundary({
     agentDefinition: DESKTOP_ROOT_AGENT,
-    snapshot: capabilitySnapshot(
-      [tool("call_sub_agent", "read-write")],
-      ["call_sub_agent"],
-      [
-        subAgentCatalogItem("project-helper", {
-          description: "Project-specific helper from the frozen run catalog.",
-          category: "project",
-          allowedTools: ["read_file"],
-          whenToUse: ["Use for project-specific inspection."],
-          maxSteps: 12,
-        }),
-        subAgentCatalogItem("code-expert", { enabled: false }),
-      ]
-    ),
+    snapshot,
+    subAgentCatalog: snapshot.subAgentCatalog,
     goal: "use frozen sub-agent catalog",
     taskSoil: createTaskSoil({ rawGoal: "use frozen sub-agent catalog" }),
     agentToolDefinitions: [callAgentTool],
@@ -333,16 +335,18 @@ test("run tool boundary exposes implemented SDK AgentTools without requiring Too
 });
 
 test("run tool boundary hides preset sub-agent call tools when no enabled sub-agents exist", () => {
+  const snapshot = capabilitySnapshot(
+    [
+      tool("call_sub_agent", "read-write"),
+      tool("spawn_sub_agent", "read-write"),
+    ],
+    ["call_sub_agent", "spawn_sub_agent"],
+    [subAgentCatalogItem("disabled-helper", { enabled: false })],
+  );
   const boundary = resolveRunToolBoundary({
     agentDefinition: DESKTOP_ROOT_AGENT,
-    snapshot: capabilitySnapshot(
-      [
-        tool("call_sub_agent", "read-write"),
-        tool("spawn_sub_agent", "read-write"),
-      ],
-      ["call_sub_agent", "spawn_sub_agent"],
-      [subAgentCatalogItem("disabled-helper", { enabled: false })]
-    ),
+    snapshot,
+    subAgentCatalog: snapshot.subAgentCatalog,
     goal: "use sub-agent tools",
     taskSoil: createTaskSoil({ rawGoal: "use sub-agent tools" }),
     agentToolDefinitions: [toolDefinition("call_sub_agent"), toolDefinition("spawn_sub_agent")],
@@ -371,6 +375,7 @@ test("run tool boundary applies permissions, profile, model, snapshot, and imple
   const base = {
     agentDefinition: DESKTOP_ROOT_AGENT,
     snapshot,
+    subAgentCatalog: snapshot.subAgentCatalog,
     goal: "delegate",
     taskSoil: createTaskSoil({ rawGoal: "delegate" }),
     agentToolDefinitions: agentTools,

@@ -9,7 +9,6 @@
  * AI-first 边界：fallback 固定 "disabled"——模型不可用或 turn 失败时直接抛错，
  * 不 fallback 伪装成已完成判断（需求 A3）。调用方据此做业务决策（拒绝 run / 标记 child 失败）。
  */
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { IntelligenceChannel, ModelOutputContract } from "../../domain/intelligence/contracts.js";
 import type { ObservationRef } from "../../domain/observation/contracts.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
@@ -19,6 +18,7 @@ import {
   createOpenAITokenCounter,
 } from "../context-maintenance/index.js";
 import type { DeepTurnMessage } from "./deep-model-io.js";
+import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 
 export type ExecuteDeepTurnInput = {
   readonly turnRuntime: AgentTurnRuntime;
@@ -49,7 +49,7 @@ export type DeepTurnContextMaintenanceConfig = {
     readonly displayName: string;
   };
   readonly activeModel?: string;
-  readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
+  readonly modelCapabilities?: MultiAgentCapabilitySnapshot["modelCapabilities"];
 };
 
 /**

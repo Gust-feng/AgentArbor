@@ -57,7 +57,7 @@ export function summarizeTaskSoilInputForIntake(
   return segments.length === 0 ? "(no extra context)" : segments.join("; ");
 }
 
-export function projectDeepConversation(conversation: DeepConversation): Record<string, unknown> {
+export function projectDeepConversation(conversation: DeepConversation) {
   return {
     conversationId: conversation.conversationId,
     title: conversation.title,
@@ -67,6 +67,7 @@ export function projectDeepConversation(conversation: DeepConversation): Record<
     followUpTurns: conversation.followUpTurns ?? [],
     currentObjective: conversation.currentObjective,
     birthWorkspaceDirectory: conversation.birthWorkspaceDirectory,
+    workspaceSelection: conversation.workspaceSelection,
     pinnedAt: conversation.pinnedAt,
     isolation: conversation.isolation,
     createdAt: conversation.createdAt,
@@ -78,18 +79,18 @@ export function projectDeepConversationSummary(
   conversation: DeepConversation,
   latestRunRecord?: DeepRunRecord,
   latestRootRecord?: DeepRunRecord,
-): Record<string, unknown> {
+) {
   const intakeStatus = latestDeepIntakeStatus(conversation);
   const latestRunIsCurrent = latestRunRecord !== undefined &&
     !conversationHasFreshIntake(conversation.updatedAt, intakeStatus, latestRunRecord.run.updatedAt);
   const workspaceFolder = latestRunRecord === undefined
     ? workspaceFolderForDeepConversation(conversation)
-    : workspaceFolderForDeepRecord(latestRootRecord ?? latestRunRecord) ??
-      workspaceFolderForDeepRecord(latestRunRecord) ??
+    : workspaceFolderForDeepRecord(latestRootRecord ?? latestRunRecord, conversation.workspaceSelection) ??
+      workspaceFolderForDeepRecord(latestRunRecord, conversation.workspaceSelection) ??
       workspaceFolderForDeepConversation(conversation);
   const latestRun = latestRunRecord === undefined || !latestRunIsCurrent
     ? undefined
-    : projectDeepRunSummary(latestRunRecord, latestRootRecord);
+    : projectDeepRunSummary(latestRunRecord, latestRootRecord, conversation.workspaceSelection);
   return {
     conversationId: conversation.conversationId,
     title: conversation.title,
@@ -148,12 +149,18 @@ function latestTimestamp(left: string, right: string): string {
   return right.localeCompare(left) > 0 ? right : left;
 }
 
-function workspaceFolderForDeepRecord(record: DeepRunRecord): WorkspaceFolderSummary | undefined {
-  return workspaceFolderSummaryFromPath(workspaceDirectoryFromDeepRunRecord(record));
+function workspaceFolderForDeepRecord(
+  record: DeepRunRecord,
+  selection: WorkspaceFolderSummary["selection"] = "default",
+): WorkspaceFolderSummary | undefined {
+  return workspaceFolderSummaryFromPath(workspaceDirectoryFromDeepRunRecord(record), selection);
 }
 
 function workspaceFolderForDeepConversation(conversation: DeepConversation | undefined): WorkspaceFolderSummary | undefined {
-  return workspaceFolderSummaryFromPath(conversation?.birthWorkspaceDirectory);
+  return workspaceFolderSummaryFromPath(
+    conversation?.birthWorkspaceDirectory,
+    conversation?.workspaceSelection ?? "default",
+  );
 }
 
 export function workspaceDirectoryFromDeepRunRecord(record: DeepRunRecord): string | undefined {
@@ -163,9 +170,10 @@ export function workspaceDirectoryFromDeepRunRecord(record: DeepRunRecord): stri
 export function projectDeepRunSummary(
   record: DeepRunRecord,
   rootRecord?: DeepRunRecord,
-): Record<string, unknown> {
-  const workspaceFolder = workspaceFolderForDeepRecord(rootRecord ?? record) ??
-    workspaceFolderForDeepRecord(record);
+  workspaceSelection: WorkspaceFolderSummary["selection"] = "default",
+) {
+  const workspaceFolder = workspaceFolderForDeepRecord(rootRecord ?? record, workspaceSelection) ??
+    workspaceFolderForDeepRecord(record, workspaceSelection);
   return {
     ...deepConversationRunSummary({
       ...deepConversationRunEnvelope({
@@ -197,8 +205,8 @@ export function projectDeepRunSummary(
 export function projectDeepRunView(
   record: DeepRunRecord,
   conversation?: DeepConversation,
-): Record<string, unknown> {
-  const workspaceFolder = workspaceFolderForDeepRecord(record) ??
+) {
+  const workspaceFolder = workspaceFolderForDeepRecord(record, conversation?.workspaceSelection ?? "default") ??
     workspaceFolderForDeepConversation(conversation);
   return {
     run: {

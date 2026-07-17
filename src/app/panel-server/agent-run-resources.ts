@@ -1,5 +1,5 @@
 import type {
-  BasicAgentCapabilitySnapshot,
+  AgentCapabilitySnapshot,
   CapabilityToolAvailability,
   McpServerSettings,
   SanitizedCommandShellConfig,
@@ -45,8 +45,10 @@ export type AgentRunResourceHost = {
   readonly testOnlyAllowFakeModel?: boolean;
 };
 
-export type AgentRunResources = {
-  readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+export type AgentRunResources<
+  TCapabilitySnapshot extends AgentCapabilitySnapshot = AgentCapabilitySnapshot,
+> = {
+  readonly capabilitySnapshot: TCapabilitySnapshot;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly aiEnvironment: ModelRuntimeEnvironment;
   readonly aiConfig: Extract<ModelRuntimeConfig, { readonly enabled: true }>;
@@ -63,7 +65,7 @@ export type AgentRunResources = {
   readonly toolOutputStore?: ToolOutputStore;
 };
 
-function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly ToolStateSettings[] {
+function toolStatesFromCapabilitySnapshot(snapshot: AgentCapabilitySnapshot): readonly ToolStateSettings[] {
   return snapshot.toolCatalog.tools.map((tool) => ({
     name: tool.name,
     enabled: tool.enabled,
@@ -71,11 +73,11 @@ function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot
   }));
 }
 
-function toolCatalogNamesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly string[] {
+function toolCatalogNamesFromCapabilitySnapshot(snapshot: AgentCapabilitySnapshot): readonly string[] {
   return snapshot.toolCatalog.tools.map((tool) => tool.name);
 }
 
-function toolCatalogAvailabilityFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly CapabilityToolAvailability[] {
+function toolCatalogAvailabilityFromCapabilitySnapshot(snapshot: AgentCapabilitySnapshot): readonly CapabilityToolAvailability[] {
   return snapshot.toolCatalog.tools.map((tool) => ({
     name: tool.name,
     availability: tool.availability,
@@ -83,15 +85,15 @@ function toolCatalogAvailabilityFromCapabilitySnapshot(snapshot: BasicAgentCapab
   }));
 }
 
-export async function prepareAgentRunResources(
+export async function prepareAgentRunResources<TCapabilitySnapshot extends AgentCapabilitySnapshot>(
   runtime: AgentRunResourceHost,
   aiMode: ModelRuntimeMode,
   input: {
-    readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+    readonly capabilitySnapshot: TCapabilitySnapshot;
     readonly informationAccess: SanitizedInformationAccessConfig;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   }
-): Promise<AgentRunResources> {
+): Promise<AgentRunResources<TCapabilitySnapshot>> {
   if (aiMode === "none") {
     throw createModelRuntimeDisabledConfigurationError();
   }
@@ -183,7 +185,7 @@ export function agentRuntimeMode(
 
 async function mcpManagerFromCapabilitySnapshot(
   runtime: AgentRunResourceHost,
-  snapshot: BasicAgentCapabilitySnapshot,
+  snapshot: AgentCapabilitySnapshot,
   env: Readonly<Record<string, string | undefined>>
 ): Promise<LazyMcpToolExecutorProvider | undefined> {
   const servers = snapshot.mcpCatalog

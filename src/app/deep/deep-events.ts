@@ -3,7 +3,7 @@
  *
  * 职责边界：
  *   - 发布 `deep.*` 事件类型到 message bus（EP2 路径①）；
- *   - 同时累积安全投影 {@link DeepRunStreamEvent} 序列（EP3），供 SSE 轮询与 replay；
+ *   - 同时累积安全投影 {@link DeepRunStreamEvent} 序列（EP3），供 durable event facade replay；
  *   - 安全投影口径（FR-007 / design §6.2）：每事件含
  *     id/runId/sequence/type/title/summary/status/timestamp/refs/visibility，
  *     **不含 raw prompt/response/output**；DeepRuntime 内部上下文（AgentRunTree /
@@ -77,7 +77,7 @@ export type DeepRunStreamEventRef = {
 };
 
 /**
- * deep 运行流式事件安全投影（SSE 轮询源 + replay）。
+ * deep 运行流式事件安全投影（durable subscription + replay）。
  *
  * 安全口径（FR-007）：不含 raw prompt/response/output；仅承载可观察的
  * 标题/摘要/状态/引用。完整材料保留在 DeepRunRecord 内部上下文中。
@@ -101,7 +101,7 @@ export type DeepRunStreamEvent = {
 
 /**
  * deep 事件发布器。每个方法既发布 `deep.*` message 到 bus（可观察投影 / 审计），
- * 又追加一条安全投影 {@link DeepRunStreamEvent} 到内部序列（SSE 轮询源 + replay）。
+ * 又追加一条安全投影 {@link DeepRunStreamEvent} 到内部序列（durable subscription + replay）。
  *
  * 一次 deep run 创建一个 publisher 实例；序列号由共享 event stream 机制分配，
  * 保证 SSE cursor 恢复语义。

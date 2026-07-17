@@ -1,5 +1,4 @@
 import type {
-  BasicAgentCapabilitySnapshot,
   SanitizedInformationAccessConfig,
 } from "../../domain/config/index.js";
 import type { IntelligenceChannel } from "../../domain/intelligence/index.js";
@@ -80,6 +79,7 @@ import {
 } from "./deep-model-io.js";
 import {
   buildDeepFollowUpContext,
+  projectDeepConversation,
   summarizeTaskSoilInputForIntake,
   summarizeTerminalDeepRunForIntake,
   fallbackLiveProjectionForRecord,
@@ -123,14 +123,34 @@ import {
   DEEP_MANAGER_MAX_MODEL_ROUNDS,
   DEEP_MANAGER_MAX_TOOL_ROUNDS,
 } from "./deep-run-executor.js";
+import {
+  createMultiAgentRunEventStream,
+  observeDeepRunRecordStore,
+  type MultiAgentFeatureEvents,
+  type MultiAgentRunEventStream,
+} from "./multi-agent-events.js";
+import {
+  createMultiAgentFeatureQueries,
+  projectMultiAgentRunView,
+  type MultiAgentConversationView,
+  type MultiAgentFeatureQueries,
+  type MultiAgentReadModelSource,
+  type MultiAgentRunView,
+} from "./multi-agent-read-model.js";
+import {
+  projectMultiAgentCapabilitySnapshot,
+  type MultiAgentCapabilitySnapshot,
+} from "./multi-agent-capability-snapshot.js";
 
-export type MultiAgentIntakeResult = {
+export type { MultiAgentRunEventUpdate } from "./multi-agent-events.js";
+
+type MultiAgentInternalIntakeResult = {
   readonly status: "needs_input" | "answered" | "plan_ready";
   readonly conversation: DeepConversation;
   readonly intake: DeepIntakeTurn;
 };
 
-export type MultiAgentStartedRun = {
+type MultiAgentInternalStartedRun = {
   readonly conversation: DeepConversation;
   readonly runId: string;
   readonly runKind: AgentArborRunKind;
@@ -160,13 +180,13 @@ function multiAgentToolOutputOwnerId(runId: string): string {
 export type MultiAgentRunResourceLease = {
   readonly intelligenceChannel: IntelligenceChannel;
   readonly toolCenter: ToolExecutionBroker;
-  readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot: MultiAgentCapabilitySnapshot;
   readonly release: () => void | Promise<void>;
 };
 
 export type MultiAgentRunResourceAcquirer = (input: {
   readonly aiMode: ModelRuntimeMode;
-  readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot: MultiAgentCapabilitySnapshot;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
   readonly channelContext: ModelRuntimeChannelContext;
@@ -175,7 +195,7 @@ export type MultiAgentRunResourceAcquirer = (input: {
 export type MultiAgentRunStartFactsResolver = (input: {
   readonly workspaceDirectory?: string;
 }) => Promise<{
-  readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot: MultiAgentCapabilitySnapshot;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly confirmationPolicy: ToolConfirmationPolicy;
 }>;
@@ -185,6 +205,24 @@ export type MultiAgentBackgroundFailureReporter = (input: {
   readonly conversationId: string;
   readonly error: unknown;
 }) => void;
+
+/** @internal Test fixtures only; never expose these ports through the production feature facade. */
+export type MultiAgentFeatureTestPorts = {
+  readonly conversationStore: DeepConversationStore;
+  readonly runRecordStore: DeepRunRecordStore;
+  readonly runRecordWrites: DeepRunRecordWriteCoordinator;
+  readonly childMessageStore: DeepChildMessageStore;
+  readonly childLoopContextStore: DeepChildLoopContextStore;
+  readonly childContinuations: DeepChildPendingContinuationStore;
+  readonly childInstructionQueues: MultiAgentChildInstructionQueueRegistry;
+  readonly trackActiveRun: (input: {
+    readonly runId: string;
+    readonly conversationId: string;
+    readonly promise: Promise<void>;
+    readonly releaseResources?: () => void | Promise<void>;
+  }) => void;
+  readonly controlHandleForRun: (runId: string) => DeepRunControlHandle | undefined;
+};
 
 export class MultiAgentFeatureError extends Error {
   constructor(
@@ -231,7 +269,7 @@ export type MultiAgentChildInstructionQueueLease = {
   readonly release: () => void;
 };
 
-export type MultiAgentFeature = {
+type MultiAgentFeatureOperations = {
   readonly getConversation: (conversationId: string) => Promise<DeepConversation | undefined>;
   readonly listConversations: (limit: number) => Promise<readonly DeepConversation[]>;
   readonly renameConversation: (conversationId: string, title: string) => Promise<DeepConversation>;
@@ -248,6 +286,7 @@ export type MultiAgentFeature = {
     readonly title?: string;
     readonly goal: string;
     readonly birthWorkspaceDirectory?: string;
+    readonly workspaceSelection?: "default" | "explicit";
     readonly taskSoilInput?: DeepConversation["taskSoilInput"];
   }) => Promise<DeepConversation>;
   readonly intake: (input: {
@@ -257,7 +296,7 @@ export type MultiAgentFeature = {
     readonly message: string;
     readonly taskSoilInput?: DeepConversation["taskSoilInput"];
     readonly workspaceDirectory?: string;
-  }) => Promise<MultiAgentIntakeResult>;
+  }) => Promise<MultiAgentInternalIntakeResult>;
   readonly startRun: (input: {
     readonly conversationId: string;
     readonly aiMode: ModelRuntimeMode;
@@ -266,14 +305,14 @@ export type MultiAgentFeature = {
     readonly confirmedObjective?: string;
     readonly confirmedPlan?: string;
     readonly workspaceDirectory?: string;
-  }) => Promise<MultiAgentStartedRun>;
+  }) => Promise<MultiAgentInternalStartedRun>;
   readonly followUp: (input: {
     readonly runId: string;
     readonly aiMode: ModelRuntimeMode;
     readonly message: string;
     readonly taskSoilInput?: DeepConversation["taskSoilInput"];
     readonly workspaceDirectory?: string;
-  }) => Promise<MultiAgentStartedRun & { readonly parentRunId: string }>;
+  }) => Promise<MultiAgentInternalStartedRun & { readonly parentRunId: string }>;
   readonly resumeChild: (input: {
     readonly runId: string;
     readonly childRunId: string;
@@ -313,7 +352,79 @@ export type MultiAgentFeature = {
   readonly dispose: () => Promise<void>;
 };
 
-type MultiAgentFeatureRuntime = MultiAgentFeature & {
+export type MultiAgentIntakeResult = {
+  readonly status: MultiAgentInternalIntakeResult["status"];
+  readonly conversation: MultiAgentConversationView;
+  readonly intake: DeepIntakeTurn;
+};
+
+export type MultiAgentStartedRun = Omit<MultiAgentInternalStartedRun, "conversation"> & {
+  readonly conversation: MultiAgentConversationView;
+  readonly conversationId: string;
+};
+
+export type MultiAgentChildInstructionResult =
+  | {
+      readonly status: "queued";
+      readonly view: MultiAgentRunView;
+      readonly messageRef: string;
+      readonly childStatus: string;
+      readonly queuedCount: number;
+      readonly queuedAt: string;
+    }
+  | {
+      readonly status: "continued";
+      readonly view: MultiAgentRunView;
+      readonly messageRef?: string;
+    }
+  | {
+      readonly status: "rejected";
+      readonly result: Exclude<DeepChildInstructionQueueResult, { readonly status: "queued" }>;
+    };
+
+export type MultiAgentFeature = {
+  readonly commands: {
+    readonly createConversation: (
+      input: Parameters<MultiAgentFeatureOperations["createConversation"]>[0],
+    ) => Promise<MultiAgentConversationView>;
+    readonly intake: (
+      input: Parameters<MultiAgentFeatureOperations["intake"]>[0],
+    ) => Promise<MultiAgentIntakeResult>;
+    readonly startRun: (
+      input: Parameters<MultiAgentFeatureOperations["startRun"]>[0],
+    ) => Promise<MultiAgentStartedRun>;
+    readonly followUp: (
+      input: Parameters<MultiAgentFeatureOperations["followUp"]>[0],
+    ) => Promise<MultiAgentStartedRun & { readonly parentRunId: string }>;
+    readonly renameConversation: (
+      conversationId: string,
+      title: string,
+    ) => Promise<MultiAgentConversationView>;
+    readonly pinConversation: (
+      conversationId: string,
+      pinned: boolean,
+    ) => Promise<MultiAgentConversationView>;
+    readonly deleteConversation: (conversationId: string) => Promise<void>;
+    readonly resumeChild: (
+      input: Parameters<MultiAgentFeatureOperations["resumeChild"]>[0],
+    ) => Promise<MultiAgentRunView>;
+    readonly sendChildInstruction: (
+      input: Parameters<MultiAgentFeatureOperations["sendChildInstruction"]>[0],
+    ) => Promise<MultiAgentChildInstructionResult>;
+    readonly resynthesize: (
+      input: Parameters<MultiAgentFeatureOperations["resynthesize"]>[0],
+    ) => Promise<MultiAgentRunView>;
+    readonly requestRunControl: (
+      input: Parameters<MultiAgentFeatureOperations["requestRunControl"]>[0],
+    ) => Promise<{ readonly status: "requested"; readonly view?: MultiAgentRunView }>;
+  };
+  readonly queries: MultiAgentFeatureQueries;
+  readonly events: MultiAgentFeatureEvents;
+  readonly waitForIdle: () => Promise<void>;
+  readonly dispose: () => Promise<void>;
+};
+
+type MultiAgentFeatureRuntime = MultiAgentFeatureOperations & {
   readonly constraints: readonly Constraint[];
   readonly soilStore: ReadonlySoilStore;
   readonly conversationStore: DeepConversationStore;
@@ -339,6 +450,7 @@ type MultiAgentFeatureRuntime = MultiAgentFeature & {
   readonly waitForActiveRunFinalization: (runId: string) => Promise<void>;
   readonly forgetRun: (runId: string) => void;
   readonly releaseToolOutputOwner: (ownerId: string) => void | Promise<void>;
+  readonly eventStream: MultiAgentRunEventStream;
 };
 
 type DeepChildProjectionResult = Pick<
@@ -385,7 +497,7 @@ function createDeepConversationCommandGate(): DeepConversationCommandGate {
   };
 }
 
-export function createMultiAgentFeature(options: {
+export type MultiAgentFeatureOptions = {
   readonly runtimeHome?: string;
   /** Storage adapter seam used by the composition owner and deterministic persistence tests. */
   readonly runRecordStore?: DeepRunRecordStore;
@@ -395,7 +507,11 @@ export function createMultiAgentFeature(options: {
   readonly childContinuationRetention?: DeepChildPendingContinuationRetentionOptions;
   /** Host cleanup port for process-local retained tool output; no store leaks into the feature. */
   readonly releaseToolOutputOwner?: (ownerId: string) => void | Promise<void>;
-} = {}): MultiAgentFeature {
+  /** Test fixture hook. Production composition must not consume internal ports. */
+  readonly testOnlyCapturePorts?: (ports: MultiAgentFeatureTestPorts) => void;
+};
+
+export function createMultiAgentFeature(options: MultiAgentFeatureOptions = {}): MultiAgentFeature {
   const controlHandles = new Map<string, DeepRunControlHandle>();
   const activeRunConversationIds = new Map<string, string>();
   const activeRuns = new Map<string, Promise<void>>();
@@ -407,9 +523,16 @@ export function createMultiAgentFeature(options: {
   const reportBackgroundFailure = options.reportBackgroundFailure ?? defaultBackgroundFailureReporter;
   const activeOperations = new Set<Promise<unknown>>();
   const conversationCommandGate = createDeepConversationCommandGate();
-  const coordinatedRunRecords = createCoordinatedDeepRunRecordStore(
+  let featureRunRecordStore: DeepRunRecordStore | undefined;
+  const eventStream = createMultiAgentRunEventStream({
+    getRun: (runId) => featureRunRecordStore?.get(runId) ?? Promise.resolve(undefined),
+    isRunLive: (runId) => activeRuns.has(runId),
+  });
+  const coordinatedRunRecords = createCoordinatedDeepRunRecordStore(observeDeepRunRecordStore(
     options.runRecordStore ?? createRunRecordStore(options.runtimeHome),
-  );
+    eventStream,
+  ));
+  featureRunRecordStore = coordinatedRunRecords.store;
   let isQuiescing = false;
   let disposePromise: Promise<void> | undefined;
 
@@ -472,6 +595,7 @@ export function createMultiAgentFeature(options: {
     childContinuations,
     pendingChildInstructionResults,
     childInstructionQueues,
+    eventStream,
     reportBackgroundFailure,
     releaseToolOutputOwner: options.releaseToolOutputOwner ?? (() => undefined),
     getConversation: (conversationId) => feature.conversationStore.get(conversationId),
@@ -513,6 +637,8 @@ export function createMultiAgentFeature(options: {
       title: input.title,
       goal: input.goal,
       birthWorkspaceDirectory: input.birthWorkspaceDirectory,
+      workspaceSelection: input.workspaceSelection ??
+        (input.birthWorkspaceDirectory === undefined ? "default" : "explicit"),
       taskSoilInput: input.taskSoilInput,
     })),
     intake: (input) => {
@@ -658,12 +784,95 @@ export function createMultiAgentFeature(options: {
           childInstructionQueues.clear();
           activeRunConversationIds.clear();
           activeRuns.clear();
+          eventStream.close();
         }
       })();
       return disposePromise;
     },
   };
-  return feature;
+  const readModelSource: MultiAgentReadModelSource = {
+    conversations: feature.conversationStore,
+    runs: feature.runRecordStore,
+    isRunActive: (runId) => feature.isRunActive(runId),
+  };
+  const queries = createMultiAgentFeatureQueries(readModelSource);
+  options.testOnlyCapturePorts?.({
+    conversationStore: feature.conversationStore,
+    runRecordStore: feature.runRecordStore,
+    runRecordWrites: feature.runRecordWrites,
+    childMessageStore: feature.childMessageStore,
+    childLoopContextStore: feature.childLoopContextStore,
+    childContinuations: feature.childContinuations,
+    childInstructionQueues: feature.childInstructionQueues,
+    trackActiveRun: (input) => feature.trackActiveRun(input),
+    controlHandleForRun: (runId) => feature.controlHandleForRun(runId),
+  });
+
+  return {
+    commands: {
+      createConversation: async (input) => projectDeepConversation(await feature.createConversation(input)),
+      intake: async (input) => {
+        const result = await feature.intake(input);
+        return {
+          ...result,
+          conversation: projectDeepConversation(result.conversation),
+        };
+      },
+      startRun: async (input) => {
+        const result = await feature.startRun(input);
+        return {
+          ...result,
+          conversation: projectDeepConversation(result.conversation),
+          conversationId: result.conversation.conversationId,
+        };
+      },
+      followUp: async (input) => {
+        const result = await feature.followUp(input);
+        return {
+          ...result,
+          conversation: projectDeepConversation(result.conversation),
+          conversationId: result.conversation.conversationId,
+        };
+      },
+      renameConversation: async (conversationId, title) =>
+        projectDeepConversation(await feature.renameConversation(conversationId, title)),
+      pinConversation: async (conversationId, pinned) =>
+        projectDeepConversation(await feature.pinConversation(conversationId, pinned)),
+      deleteConversation: (conversationId) => feature.deleteConversation(conversationId),
+      resumeChild: async (input) =>
+        projectMultiAgentRunView(readModelSource, await feature.resumeChild(input)),
+      sendChildInstruction: async (input) => {
+        const result = await feature.sendChildInstruction(input);
+        if (result.status === "rejected") {
+          return result;
+        }
+        const { record, ...metadata } = result;
+        return {
+          ...metadata,
+          view: await projectMultiAgentRunView(readModelSource, record),
+        };
+      },
+      resynthesize: async (input) =>
+        projectMultiAgentRunView(readModelSource, await feature.resynthesize(input)),
+      requestRunControl: async (input) => {
+        const result = await feature.requestRunControl(input);
+        return {
+          status: result.status,
+          view: result.record === undefined
+            ? undefined
+            : await projectMultiAgentRunView(readModelSource, result.record),
+        };
+      },
+    },
+    queries,
+    events: {
+      replay: (runId, afterSequence) => eventStream.replay(runId, afterSequence),
+      admit: (runId, afterSequence) => eventStream.admit(runId, afterSequence),
+      subscribe: (runId, listener) => eventStream.subscribe(runId, listener),
+    },
+    waitForIdle: () => feature.waitForIdle(),
+    dispose: () => feature.dispose(),
+  };
 }
 
 function createConversationStore(runtimeHome: string | undefined): DeepConversationStore {
@@ -767,7 +976,17 @@ function requireResourceAcquirer(
       "Multi-Agent model and tool resources were not composed.",
     );
   }
-  return options.acquireRunResources;
+  const acquireRunResources = options.acquireRunResources;
+  return async (input) => {
+    const resources = await acquireRunResources({
+      ...input,
+      capabilitySnapshot: projectMultiAgentCapabilitySnapshot(input.capabilitySnapshot),
+    });
+    return {
+      ...resources,
+      capabilitySnapshot: projectMultiAgentCapabilitySnapshot(resources.capabilitySnapshot),
+    };
+  };
 }
 
 function requireStartFactsResolver(
@@ -779,15 +998,22 @@ function requireStartFactsResolver(
       "Multi-Agent run-start facts were not composed.",
     );
   }
-  return options.resolveRunStartFacts;
+  const resolveRunStartFacts = options.resolveRunStartFacts;
+  return async (input) => {
+    const facts = await resolveRunStartFacts(input);
+    return {
+      ...facts,
+      capabilitySnapshot: projectMultiAgentCapabilitySnapshot(facts.capabilitySnapshot),
+    };
+  };
 }
 
 async function intakeMultiAgentConversation(
   feature: MultiAgentFeatureRuntime,
   acquireRunResources: MultiAgentRunResourceAcquirer,
   resolveRunStartFacts: MultiAgentRunStartFactsResolver,
-  input: Parameters<MultiAgentFeature["intake"]>[0],
-): Promise<MultiAgentIntakeResult> {
+  input: Parameters<MultiAgentFeatureOperations["intake"]>[0],
+): Promise<MultiAgentInternalIntakeResult> {
   let terminalRun = input.activeRunId === undefined
     ? undefined
     : await requireMultiAgentRunRecord(feature, input.activeRunId);
@@ -814,12 +1040,14 @@ async function intakeMultiAgentConversation(
         title: input.message,
         goal: input.message,
         birthWorkspaceDirectory: workspaceDirectory,
+        workspaceSelection: workspaceDirectory === undefined ? "default" : "explicit",
         taskSoilInput: input.taskSoilInput,
       })
     : mergeMultiAgentConversationTaskSoil(
         await requireMultiAgentConversation(feature, requestedConversationId),
         input.taskSoilInput,
         workspaceDirectory,
+        input.workspaceDirectory === undefined ? undefined : "explicit",
       );
   const startFacts = await resolveRunStartFacts({
     workspaceDirectory: conversation.birthWorkspaceDirectory,
@@ -851,8 +1079,8 @@ async function startMultiAgentConversationRun(
   feature: MultiAgentFeatureRuntime,
   acquireRunResources: MultiAgentRunResourceAcquirer,
   resolveRunStartFacts: MultiAgentRunStartFactsResolver,
-  input: Parameters<MultiAgentFeature["startRun"]>[0],
-): Promise<MultiAgentStartedRun> {
+  input: Parameters<MultiAgentFeatureOperations["startRun"]>[0],
+): Promise<MultiAgentInternalStartedRun> {
   let conversation = await requireMultiAgentConversation(feature, input.conversationId);
   if (feature.hasActiveRunForConversation(input.conversationId)) {
     throw new MultiAgentFeatureError(
@@ -889,6 +1117,7 @@ async function startMultiAgentConversationRun(
     conversation,
     undefined,
     workspaceDirectory,
+    input.workspaceDirectory === undefined ? undefined : "explicit",
   );
   if (conversationWithWorkspace !== conversation) {
     conversation = await feature.conversationStore.upsert(conversationWithWorkspace);
@@ -932,8 +1161,8 @@ async function followUpMultiAgentRun(
   feature: MultiAgentFeatureRuntime,
   acquireRunResources: MultiAgentRunResourceAcquirer,
   resolveRunStartFacts: MultiAgentRunStartFactsResolver,
-  input: Parameters<MultiAgentFeature["followUp"]>[0],
-): Promise<MultiAgentStartedRun & { readonly parentRunId: string }> {
+  input: Parameters<MultiAgentFeatureOperations["followUp"]>[0],
+): Promise<MultiAgentInternalStartedRun & { readonly parentRunId: string }> {
   let previous = await requireMultiAgentRunRecord(feature, input.runId);
   previous = await reconcilePendingChildInstructionResultsForRun(feature, previous);
   if (!isTerminalMultiAgentRun(previous)) {
@@ -957,6 +1186,8 @@ async function followUpMultiAgentRun(
       conversation.birthWorkspaceDirectory ??
       workspaceDirectoryFromDeepRunRecord(previous) ??
       input.workspaceDirectory,
+    workspaceSelection: conversation.workspaceSelection ??
+      (input.workspaceDirectory === undefined ? undefined : "explicit"),
     taskSoilInput,
     permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs ?? conversation.permissionBoundaryRefs,
     updatedAt: nowIso(),
@@ -1251,7 +1482,7 @@ async function executeMultiAgentIntake(
     readonly conversation: DeepConversation;
     readonly message: string;
     readonly terminalRun?: DeepRunRecord;
-    readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+    readonly capabilitySnapshot: MultiAgentCapabilitySnapshot;
     readonly informationAccess: SanitizedInformationAccessConfig;
   },
 ): Promise<DeepIntakeTurn> {
@@ -1328,12 +1559,12 @@ async function createMultiAgentRuntimeConfig(
     readonly conversationId: string;
     readonly controlHandle: DeepRunControlHandle;
     readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-    readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+    readonly capabilitySnapshot: MultiAgentCapabilitySnapshot;
     readonly informationAccess: SanitizedInformationAccessConfig;
   },
 ): Promise<{
   readonly config: DeepRuntimeConfig;
-  readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot: MultiAgentCapabilitySnapshot;
   readonly releaseResources: () => Promise<void>;
 }> {
   const bus = createMultiAgentOperationBus();
@@ -1388,7 +1619,7 @@ async function createExistingMultiAgentTurnRuntime(
 ): Promise<{
   readonly turnRuntime: ReturnType<typeof createDeepTurnRuntime>;
   readonly taskSoil: StartDeepRuntimeInput["taskSoil"];
-  readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot: MultiAgentCapabilitySnapshot;
   readonly releaseResources: () => Promise<void>;
 }> {
   const capabilitySnapshot = record.run.capabilitySnapshot;
@@ -1614,7 +1845,7 @@ async function sendMultiAgentChildInstruction(
     readonly childRunId: string;
     readonly message: string;
   },
-): ReturnType<MultiAgentFeature["sendChildInstruction"]> {
+): ReturnType<MultiAgentFeatureOperations["sendChildInstruction"]> {
   let record = await requireMultiAgentRunRecord(feature, input.runId);
   const pendingReconciliation = await reconcilePendingChildInstructionResult(
     feature,
@@ -2135,17 +2366,21 @@ function mergeMultiAgentConversationTaskSoil(
   conversation: DeepConversation,
   taskSoilInput: DeepConversation["taskSoilInput"] | undefined,
   birthWorkspaceDirectory?: string,
+  workspaceSelection?: "default" | "explicit",
 ): DeepConversation {
   const nextBirthWorkspaceDirectory = conversation.birthWorkspaceDirectory ?? birthWorkspaceDirectory;
+  const nextWorkspaceSelection = conversation.workspaceSelection ?? workspaceSelection;
   if (
     taskSoilInput === undefined &&
-    nextBirthWorkspaceDirectory === conversation.birthWorkspaceDirectory
+    nextBirthWorkspaceDirectory === conversation.birthWorkspaceDirectory &&
+    nextWorkspaceSelection === conversation.workspaceSelection
   ) {
     return conversation;
   }
   return {
     ...conversation,
     birthWorkspaceDirectory: nextBirthWorkspaceDirectory,
+    workspaceSelection: nextWorkspaceSelection,
     taskSoilInput: taskSoilInput ?? conversation.taskSoilInput,
     permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs ?? conversation.permissionBoundaryRefs,
     updatedAt: nowIso(),
@@ -2482,7 +2717,7 @@ function reportMultiAgentBackgroundFailure(
 function deepContextMaintenance(
   goal: string,
   taskSoil: StartDeepRuntimeInput["taskSoil"],
-  capabilitySnapshot: BasicAgentCapabilitySnapshot,
+  capabilitySnapshot: MultiAgentCapabilitySnapshot,
 ) {
   return {
     goal,

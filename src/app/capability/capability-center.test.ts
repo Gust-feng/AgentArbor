@@ -61,6 +61,32 @@ test("CapabilityCenter freezes transient run workspace without changing the defa
   }
 });
 
+test("CapabilityCenter retries a default snapshot after a transient assembly failure", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-snapshot-retry-"));
+  try {
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    const readModel = configCenter.getModelProviderConfig.bind(configCenter);
+    let attempts = 0;
+    configCenter.getModelProviderConfig = async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("transient model configuration read failure");
+      return readModel();
+    };
+    const center = new CapabilityCenter({ configCenter, skillRoots: [], playwrightAvailable: false });
+
+    await assert.rejects(center.snapshot(), /transient model configuration read failure/);
+    const recovered = await center.snapshot();
+
+    assert.equal(attempts, 2);
+    assert.match(recovered.snapshotId, /^capability-snapshot-/);
+  } finally {
+    await removeTestDirectory(directory);
+  }
+});
+
 test("CapabilityCenter discovers project skills from the effective workspace", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-skills-"));
   const userSkillRoot = path.join(directory, "user-skills");
@@ -140,6 +166,7 @@ test("CapabilityCenter discovers project sub-agents and tools from the effective
 
     const defaultSubAgents = await center.listSubAgents();
     const runSnapshot = await center.snapshot({ workspaceDirectory: runWorkspace });
+    const panelCatalog = await center.toolCatalog({ workspaceDirectory: runWorkspace });
 
     assert.deepEqual(defaultSubAgents.map((subAgent) => `${subAgent.name}:${subAgent.sourceKind}`), [
       "default-helper:project",
@@ -151,7 +178,14 @@ test("CapabilityCenter discovers project sub-agents and tools from the effective
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agent"), true);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("spawn_sub_agent"), true);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agents"), false);
+    assert.equal(runSnapshot.toolCatalog.tools.find((tool) => tool.name === "call_sub_agent")?.catalogOnly, true);
+    assert.equal(runSnapshot.toolCatalog.tools.find((tool) => tool.name === "spawn_sub_agent")?.catalogOnly, true);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("read_sub_agent_output"), false);
+    assert.equal(panelCatalog.scope, "desktop-basic");
+    assert.equal(panelCatalog.tools.some((tool) => tool.name === "call_sub_agent"), false);
+    assert.equal(panelCatalog.allowedTools.every((name) =>
+      panelCatalog.tools.some((tool) => tool.name === name && tool.enabledByDefault)), true);
+    assert.equal(panelCatalog.tools.every((tool) => tool.inputSchema.type === "object"), true);
   } finally {
     await removeTestDirectory(directory);
   }

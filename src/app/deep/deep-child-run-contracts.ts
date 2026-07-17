@@ -5,7 +5,6 @@
  * lets the runner, scheduler, persistence adapters, and result mapper share
  * the same boundary without depending on the runner implementation.
  */
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import type {
   ChildAgentRun,
@@ -20,6 +19,7 @@ import type {
   DeepChildLoopContextRecord,
   DeepChildLoopContextStore,
 } from "./deep-child-loop-contexts.js";
+import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 
 export const DEEP_CHILD_AGENT_PROMPT_TEMPLATE_ID = "deep.child.agent.standard.v1";
 export const DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS = 200;
@@ -66,7 +66,7 @@ export type DeepChildAgentRunInput = {
   readonly traceId: string;
   readonly goalId: string;
   readonly confirmationPolicy?: ToolConfirmationPolicy;
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
   readonly childLoopContextStore?: DeepChildLoopContextStore;
   readonly abortSignal?: AbortSignal;
 };

@@ -51,6 +51,8 @@ export type ToolCatalogItem = {
   readonly enabledByDefault: boolean;
   readonly availability: ToolRegistryAvailability["status"];
   readonly disabledReason?: string;
+  /** Definition is intentionally model-catalog-only and has no ToolCenter executor. */
+  readonly catalogOnly?: boolean;
 };
 
 export type ToolCatalogSnapshot = {

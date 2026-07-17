@@ -2,6 +2,9 @@ import type { CapabilityAgentProfile } from "../capability/capability-policy.js"
 import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
 import type { MultiAgentRunResourceAcquirer } from "../deep/multi-agent-feature.js";
 import {
+  projectMultiAgentCapabilitySnapshot,
+} from "../deep/multi-agent-capability-snapshot.js";
+import {
   createAgentToolCenterFactory,
   prepareAgentRunResources,
   type AgentRunResourceHost,
@@ -39,16 +42,17 @@ export function createMultiAgentRunResourceAcquirer(input: {
         taskSoil: request.taskSoil,
         toolCenter,
       });
+      const capabilitySnapshot = projectMultiAgentCapabilitySnapshot({
+        ...resources.capabilitySnapshot,
+        toolCatalog: {
+          ...resources.capabilitySnapshot.toolCatalog,
+          allowedTools: toolBoundary.allowedTools,
+        },
+      });
       return {
         intelligenceChannel: resources.aiConfig.createIntelligenceChannel(request.channelContext),
         toolCenter,
-        capabilitySnapshot: {
-          ...resources.capabilitySnapshot,
-          toolCatalog: {
-            ...resources.capabilitySnapshot.toolCatalog,
-            allowedTools: toolBoundary.allowedTools,
-          },
-        },
+        capabilitySnapshot,
         release: async () => {
           await resources.release();
         },

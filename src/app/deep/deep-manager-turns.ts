@@ -1,5 +1,4 @@
 import type { ObservationRef } from "../../domain/observation/contracts.js";
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type { ChildAgentRun, ParentSynthesisResult } from "../../domain/underground/agent-fabric.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
@@ -26,6 +25,7 @@ import { executeDeepTurn } from "./deep-turn.js";
 import { DEEP_MANAGER_AGENT_ID } from "./child-delegation.js";
 import { synthesizeDeepConclusion } from "./parent-synthesis.js";
 import type { DeepChildScheduler } from "./deep-child-scheduler.js";
+import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 
 /** The stable run facts visible to manager model turns. */
 export type DeepManagerRunContext = {
@@ -33,7 +33,7 @@ export type DeepManagerRunContext = {
   readonly conversation: DeepConversation;
   readonly taskSoil: TaskSoil;
   readonly permissionBoundaryRefs: readonly string[];
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
   readonly traceId: string;
   readonly goalId: string;
   readonly followUpContext?: DeepFollowUpContext;

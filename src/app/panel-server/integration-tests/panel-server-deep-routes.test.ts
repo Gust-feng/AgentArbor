@@ -46,10 +46,8 @@ function startLocalPanelServer(options: PanelServerOptions) {
   return startBasePanelServer({ ...options, testOnlyAllowFakeModel: true });
 }
 import { createFileSystemDeepChildMessageStore } from "../../deep/deep-child-messages.js";
-import {
-  deepChildInstructionQueueRejectionError,
-  deriveDeepRunRuntimeHealth,
-} from "../deep-routes.js";
+import { deriveDeepRunRuntimeHealth } from "../../deep/deep-run-health.js";
+import { deepChildInstructionQueueRejectionError } from "../deep-routes.js";
 import {
   assertSafePanelJsonText,
   readSseUntil,
@@ -617,6 +615,7 @@ test("deep routes list recent runs globally across conversations after restart",
     assert.equal(typeof latest.hasConclusion, "boolean");
     assert.equal(typeof latest.childCount, "number");
     assert.equal(typeof latest.eventCount, "number");
+    assert.equal(latest.runtimeHealth.state, "terminal");
     assert.equal("report" in latest, false);
     assert.equal("agentRunTree" in latest, false);
     assert.equal("eventSequence" in latest, false);
@@ -631,6 +630,7 @@ test("deep routes list recent runs globally across conversations after restart",
     assert.equal(conversationIds.includes(secondConversation.conversationId), true);
     assert.equal(conversations.body.conversations[0].conversationId, secondConversation.conversationId);
     assert.equal(conversations.body.conversations[0].latestRun.runId, secondRun.runId);
+    assert.equal(conversations.body.conversations[0].latestRun.runtimeHealth.state, "terminal");
 
     const limited = await requestJson(server.url, "/api/deep/runs?limit=1");
     assert.equal(limited.status, 200);
@@ -841,6 +841,17 @@ test("deep conversation management supports rename, pin and delete with run clea
     );
     assert.equal(deletedView.status, 404);
     assert.equal(deletedView.body.error.code, "deep_run_not_found");
+
+    const deletedStream = await requestSse(
+      server.url,
+      `/api/deep/runs/${encodeURIComponent(run.runId)}/events?cursor=0`,
+    );
+    assert.equal(deletedStream.status, 404, deletedStream.text);
+    assert.equal(JSON.parse(deletedStream.text).error.code, "deep_run_not_found");
+
+    const unknownStream = await requestSse(server.url, "/api/deep/runs/not-a-real-run/events?cursor=0");
+    assert.equal(unknownStream.status, 404, unknownStream.text);
+    assert.equal(JSON.parse(unknownStream.text).error.code, "deep_run_not_found");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -878,7 +889,7 @@ test("deep SSE streams child activity without raw prompt/response and includes r
     const conversation = await createDeepConversation(server.url, COMPLEX_GOAL, "fake");
     const run = await startDeepRun(server.url, conversation.conversationId, "fake");
 
-    // SSE 轮询：至少等到 child.completed，验证真实 child 生命周期事件已流出。
+    // SSE 订阅：至少等到 child.completed，验证真实 child 生命周期事件已流出。
     // 当前 fake deep 链路可能在多轮 manager/child 循环后以 completed 收束，但不稳定保证一定产出
     // parent_synthesis.completed；本测试聚焦 EP3 安全投影与 child 生命周期事件流式可观察性。
     const stream = await readSseUntil(

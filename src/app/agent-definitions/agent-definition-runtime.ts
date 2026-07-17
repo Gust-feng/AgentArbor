@@ -67,6 +67,7 @@ export function resolveAgentRunCapabilities(input: ResolveAgentRunCapabilitiesIn
   const modelCapabilities = input.modelCapabilities ?? input.snapshot.modelCapabilities;
   return resolveRunCapabilities({
     snapshot: input.snapshot,
+    skillCatalog: input.snapshot.skillCatalog,
     goal: input.goal,
     agentDefinition: input.agentDefinition,
     taskSoil: input.taskSoil,

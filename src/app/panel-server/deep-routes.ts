@@ -27,8 +27,8 @@
  *   - **隔离边界**：deep 端点与普通 `/api/conversations` / `/api/basic-agent/*` 物理隔离；
  *     内部映射 `runKind="underground"` / `runMode="deep"`，复用 run-mode-policy 门控口径。
  *     默认入口仍普通 agent，deep 仅显式触发，不存在自动升级。
- *   - **SSE 轮询模型**：复用 run-routes 的 `setInterval(flush, 100)` 轮询模式，轮询源为
- *     DeepRunRecordStore 中 record.eventSequence（EP3 安全投影）；事件不含 raw prompt/response。
+ *   - **SSE 事件模型**：订阅 Multi-Agent feature 的 durable event facade，先订阅再 replay，
+ *     只用低频 heartbeat 保持连接；事件不含 raw prompt/response/output。
  *
  * 命名红线：消费 contracts.ts 的 SynthesizedConclusion / DeepExplorationReport；
  * 不引入 Plan / artifact / Fruits。
@@ -40,16 +40,14 @@ import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import {
   PanelHttpError,
+  parseStreamCursor,
   readJsonBody,
   writeJson,
   writePanelError,
+  writeSseEvent,
 } from "./http-utils.js";
-import { serveRunEventSse } from "./run-event-sse.js";
 import { deepConversationRunEnvelope } from "../deep/deep-run-view-base.js";
 import type { PanelRuntime } from "./runtime.js";
-import {
-  type DeepRunRecord,
-} from "../deep/deep-runtime.js";
 import type {
   DeepChildInstructionQueueResult,
 } from "../deep/deep-child-scheduler-contracts.js";
@@ -59,16 +57,8 @@ import {
 import {
   MultiAgentFeatureError,
   type MultiAgentFeature,
+  type MultiAgentRunEventUpdate,
 } from "../deep/multi-agent-feature.js";
-import {
-  latestDeepRunRecordsByRoot,
-  projectDeepConversation,
-  projectDeepRunView,
-} from "../deep/deep-read-model.js";
-import {
-  type DeepConversation,
-} from "../deep/contracts.js";
-import type { DeepRunStreamEvent } from "../deep/deep-events.js";
 import {
   parseConfirmationDecision,
   parseConversationPinInput,
@@ -81,15 +71,8 @@ import {
   parseDeepRunStartRequest,
 } from "./request-parsers.js";
 import { parseDeepRunListLimit } from "./deep-route-helpers.js";
-import {
-  deepRunRuntimeHealth,
-  isTerminalDeepRunStatus,
-  projectDeepConversationSummaryWithHealth,
-  projectDeepRunSummaryWithHealth,
-} from "./deep-run-health.js";
 
-export { deriveDeepRunRuntimeHealth } from "./deep-run-health.js";
-export type { DeepRunRuntimeHealthView } from "./deep-run-health.js";
+const DEEP_STREAM_HEARTBEAT_INTERVAL_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // 分发入口
@@ -217,7 +200,7 @@ async function dispatchDeepRoute(
 
   // GET /api/deep/runs/:runId/events（SSE）
   if (rest.length === 3 && rest[0] === "runs" && rest[2] === "events" && method === "GET") {
-    handleDeepRunEventsSse(state, rest[1], request, response, url);
+    await handleDeepRunEventsSse(state, rest[1], request, response, url);
     return true;
   }
 
@@ -297,7 +280,7 @@ async function handleDeepIntake(
     );
   }
 
-  const result = await state.intake({
+  const result = await state.commands.intake({
     aiMode,
     conversationId: input.conversationId,
     activeRunId: input.activeRunId,
@@ -308,7 +291,7 @@ async function handleDeepIntake(
   writeJson(response, 200, {
     ok: true,
     status: result.status,
-    conversation: projectDeepConversation(result.conversation),
+    conversation: result.conversation,
     intake: result.intake,
   });
 }
@@ -325,7 +308,7 @@ async function handleCreateDeepConversation(
 ): Promise<void> {
   const input = parseDeepConversationCreateRequest(await readJsonBody(request));
   const aiMode = await resolveDeepAiMode(runtime, input.aiMode);
-  const conversation = await state.createConversation({
+  const conversation = await state.commands.createConversation({
     aiMode,
     title: input.title,
     goal: input.goal,
@@ -335,7 +318,7 @@ async function handleCreateDeepConversation(
   writeJson(response, 201, {
     ok: true,
     status: "created",
-    conversation: projectDeepConversation(conversation),
+    conversation,
   });
 }
 
@@ -352,7 +335,7 @@ async function handleStartDeepRun(
 ): Promise<void> {
   const input = parseDeepRunStartRequest(await readJsonBody(request));
   const aiMode = await resolveDeepAiMode(runtime, input.aiMode);
-  const started = await state.startRun({
+  const started = await state.commands.startRun({
     conversationId,
     aiMode,
     intakeTurnId: input.intakeTurnId,
@@ -365,10 +348,10 @@ async function handleStartDeepRun(
   writeJson(response, 202, {
     ok: true,
     status: "running",
-    conversation: projectDeepConversation(started.conversation),
+    conversation: started.conversation,
     run: deepConversationRunEnvelope({
       runId: started.runId,
-      conversationId: started.conversation.conversationId,
+      conversationId: started.conversationId,
       status: "running",
       runKind: started.runKind,
       runMode: started.runMode,
@@ -387,7 +370,7 @@ async function handleDeepRunFollowUp(
 ): Promise<void> {
   const input = parseDeepRunFollowUpRequest(await readJsonBody(request));
   const aiMode = await resolveDeepAiMode(runtime, input.aiMode);
-  const started = await state.followUp({
+  const started = await state.commands.followUp({
     runId,
     aiMode,
     message: input.message,
@@ -398,7 +381,7 @@ async function handleDeepRunFollowUp(
   writeJson(response, 202, {
     ok: true,
     status: "running",
-    conversationId: started.conversation.conversationId,
+    conversationId: started.conversationId,
     runId: started.runId,
     parentRunId: started.parentRunId,
   });
@@ -416,7 +399,7 @@ async function handleListDeepConversations(
   const limit = parseDeepRunListLimit(url);
   writeJson(response, 200, {
     ok: true,
-    conversations: await projectDeepConversationSummaries(state, limit),
+    conversations: await state.queries.listConversationSummaries(limit),
   });
 }
 
@@ -425,16 +408,14 @@ async function handleGetDeepConversation(
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const conversation = await ensureDeepConversationLoaded(state, conversationId);
-  const records = await state.listRunsForConversation(conversationId, 200);
-  const runs = await projectLatestDeepRunSummaries(
-    state,
-    records,
-  );
+  const detail = await state.queries.getConversationDetail(conversationId, 200);
+  if (detail === undefined) {
+    throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
+  }
   writeJson(response, 200, {
     ok: true,
-    conversation: projectDeepConversation(conversation),
-    runs,
+    conversation: detail.conversation,
+    runs: detail.runs,
   });
 }
 
@@ -444,17 +425,17 @@ async function handleRenameDeepConversation(
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const conversation = await ensureDeepConversationLoaded(state, conversationId);
+  await ensureDeepConversationExists(state, conversationId);
   const input = parseConversationRenameInput(await readJsonBody(request));
   const title = input.title.trim();
   if (title.length === 0) {
     throw new PanelHttpError(400, "missing_conversation_title", "会话标题不能为空。");
   }
-  const updated = await state.renameConversation(conversationId, title).catch(mapMultiAgentFeatureError);
+  const updated = await state.commands.renameConversation(conversationId, title).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, {
     ok: true,
-    conversation: projectDeepConversation(updated),
-    conversations: await projectDeepConversationSummaries(state, 50),
+    conversation: updated,
+    conversations: await state.queries.listConversationSummaries(50),
   });
 }
 
@@ -464,13 +445,13 @@ async function handlePinDeepConversation(
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
-  await ensureDeepConversationLoaded(state, conversationId);
+  await ensureDeepConversationExists(state, conversationId);
   const input = parseConversationPinInput(await readJsonBody(request));
-  const updated = await state.pinConversation(conversationId, input.pinned).catch(mapMultiAgentFeatureError);
+  const updated = await state.commands.pinConversation(conversationId, input.pinned).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, {
     ok: true,
-    conversation: projectDeepConversation(updated),
-    conversations: await projectDeepConversationSummaries(state, 50),
+    conversation: updated,
+    conversations: await state.queries.listConversationSummaries(50),
   });
 }
 
@@ -479,11 +460,11 @@ async function handleDeleteDeepConversation(
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
-  await state.deleteConversation(conversationId).catch(mapMultiAgentFeatureError);
+  await state.commands.deleteConversation(conversationId).catch(mapMultiAgentFeatureError);
   writeJson(response, 200, {
     ok: true,
     deletedConversationId: conversationId,
-    conversations: await projectDeepConversationSummaries(state, 50),
+    conversations: await state.queries.listConversationSummaries(50),
   });
 }
 
@@ -492,8 +473,7 @@ async function handleListAllDeepRuns(
   response: ServerResponse,
   url: URL,
 ): Promise<void> {
-  const records = await state.listRuns(parseDeepRunListLimit(url));
-  const runs = await projectLatestDeepRunSummaries(state, records);
+  const runs = await state.queries.listRunSummaries(parseDeepRunListLimit(url));
   writeJson(response, 200, { ok: true, runs });
 }
 
@@ -502,15 +482,10 @@ async function handleListDeepRuns(
   conversationId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const conversation = await state.getConversation(conversationId);
-  if (conversation === undefined) {
+  const runs = await state.queries.listConversationRunSummaries(conversationId, 200);
+  if (runs === undefined) {
     throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
   }
-  const records = await state.listRunsForConversation(conversationId, 200);
-  const runs = await projectLatestDeepRunSummaries(
-    state,
-    records,
-  );
   writeJson(response, 200, { ok: true, conversationId, runs });
 }
 
@@ -523,11 +498,11 @@ async function handleGetDeepRunView(
   runId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const record = await state.getRun(runId);
-  if (record === undefined) {
+  const view = await state.queries.getRunView(runId);
+  if (view === undefined) {
     throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行（可能仍在运行中）。");
   }
-  writeJson(response, 200, { ok: true, view: await projectDeepRunViewForResponse(state, record) });
+  writeJson(response, 200, { ok: true, view });
 }
 
 // ---------------------------------------------------------------------------
@@ -535,40 +510,124 @@ async function handleGetDeepRunView(
 // ---------------------------------------------------------------------------
 
 /**
- * SSE 轮询模型（复用 run-routes 口径）：每 100ms 通过 MultiAgentFeature 查询 run，
- * 增量写出 record.eventSequence 中尚未发送的事件；run 进入终态后写完剩余事件并关闭。
- *
- * 当前 deep-runtime 会在 manager 决策、child 启动/完成/失败、综合完成等节点实时 upsert
- * record.eventSequence；SSE 只负责即时触发前端刷新，权威状态仍来自 `/view`。
- * 事件均为安全投影（EP3），不含 raw prompt/response/output。
+ * Subscribe before replay so a durable write that lands during replay is
+ * buffered and de-duplicated by sequence. Heartbeats keep the transport
+ * observable without re-reading the complete run record.
  */
-function handleDeepRunEventsSse(
+async function handleDeepRunEventsSse(
   state: MultiAgentFeature,
   runId: string,
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
-): void {
-  serveRunEventSse<DeepRunStreamEvent>({
-    request,
-    response,
-    url,
-    comment: `AgentArbor multi-agent run stream ${runId}`,
-    poll: async () => {
-      const record = await state.getRun(runId);
-      if (record === undefined) {
-        // run 仍在进行中：record 尚未写入，保持连接（无事件可推）。
-        return { events: [], terminal: false };
-      }
-      return {
-        events: record.eventSequence,
-        terminal: isTerminalDeepRunStatus(record.run.status),
-      };
-    },
-    onPollError: () => {
-      /* 读取失败不中断流；下一轮 flush 重试。 */
-    },
+): Promise<void> {
+  let lastSequence = parseStreamCursor(
+    url.searchParams.get("cursor"),
+    request.headers["last-event-id"],
+  );
+  let initialized = false;
+  let closed = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const buffered: MultiAgentRunEventUpdate[] = [];
+
+  const unsubscribe = state.events.subscribe(runId, (update) => {
+    if (!initialized) {
+      buffered.push(update);
+      return;
+    }
+    try {
+      writeUpdate(update);
+    } catch {
+      cleanup();
+    }
   });
+  const onTransportClosed = (): void => cleanup();
+  request.once("close", onTransportClosed);
+  request.once("error", onTransportClosed);
+  response.once("close", onTransportClosed);
+  response.once("error", onTransportClosed);
+
+  try {
+    const admission = await state.events.admit(runId, lastSequence);
+    if (admission.kind === "missing") {
+      cleanup(false);
+      throw new PanelHttpError(404, "deep_run_not_found", "未找到该多 Agent 运行。");
+    }
+    response.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-store, no-cache",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    response.write(`: AgentArbor multi-agent run stream ${runId}\n\n`);
+    heartbeat = setInterval(() => {
+      if (!closed && !response.writableEnded) {
+        response.write(`: heartbeat ${runId} ${lastSequence}\n\n`);
+      }
+    }, DEEP_STREAM_HEARTBEAT_INTERVAL_MS);
+    heartbeat.unref?.();
+
+    if (admission.kind === "replay") {
+      writeEvents(admission.replay.events);
+    }
+    initialized = true;
+    for (const update of buffered.splice(0)) {
+      writeUpdate(update);
+    }
+    if (admission.kind === "replay" && admission.replay.terminal) {
+      cleanup();
+    }
+  } catch (error) {
+    cleanup(response.headersSent);
+    throw error;
+  }
+
+  function writeEvents(events: readonly {
+    readonly sequence: number;
+    readonly type: string;
+    readonly [key: string]: unknown;
+  }[]): void {
+    for (const event of events) {
+      if (closed || event.sequence <= lastSequence) {
+        continue;
+      }
+      writeSseEvent(response, event);
+      lastSequence = event.sequence;
+    }
+  }
+
+  function writeUpdate(update: MultiAgentRunEventUpdate): void {
+    if (closed) {
+      return;
+    }
+    if (update.kind === "deleted") {
+      cleanup();
+      return;
+    }
+    writeEvents(update.events);
+    if (update.terminal) {
+      cleanup();
+    }
+  }
+
+  function cleanup(endResponse = true): void {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    if (heartbeat !== undefined) {
+      clearInterval(heartbeat);
+      heartbeat = undefined;
+    }
+    unsubscribe();
+    request.off("close", onTransportClosed);
+    request.off("error", onTransportClosed);
+    response.off("close", onTransportClosed);
+    response.off("error", onTransportClosed);
+    if (endResponse && !response.writableEnded) {
+      response.end();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -583,18 +642,18 @@ async function handleDeepRunControl(
   response: ServerResponse,
 ): Promise<void> {
   const input = parseDeepRunControlRequest(await readJsonBody(request), action);
-  const result = await state.requestRunControl({
+  const result = await state.commands.requestRunControl({
     runId,
     action,
     reason: input.reason,
     correctionContext: input.correctionContext,
   }).catch(mapMultiAgentFeatureError);
-  if (result.record !== undefined) {
+  if (result.view !== undefined) {
     writeJson(response, 200, {
       ok: true,
       status: "stopped",
       runId,
-      view: await projectDeepRunViewForResponse(state, result.record),
+      view: result.view,
     });
     return;
   }
@@ -619,13 +678,13 @@ async function handleDeepChildConfirmationDecision(
 ): Promise<void> {
   const body = await readJsonBody(request);
   const parsed = parseConfirmationDecision(body);
-  const updated = await state.resumeChild({
+  const view = await state.commands.resumeChild({
     runId,
     childRunId,
     confirmationId,
     decision: parsed as DeepChildConfirmationDecision,
   }).catch(mapMultiAgentFeatureError);
-  writeJson(response, 200, { ok: true, view: await projectDeepRunViewForResponse(state, updated) });
+  writeJson(response, 200, { ok: true, view });
 }
 
 async function handleDeepChildParentMessage(
@@ -636,7 +695,7 @@ async function handleDeepChildParentMessage(
   response: ServerResponse,
 ): Promise<void> {
   const message = parseDeepChildMessageRequest(await readJsonBody(request));
-  const result = await state.sendChildInstruction({
+  const result = await state.commands.sendChildInstruction({
     runId,
     childRunId,
     message,
@@ -655,7 +714,7 @@ async function handleDeepChildParentMessage(
       queuedCount: result.queuedCount,
       queuedAt: result.queuedAt,
     } : {}),
-    view: await projectDeepRunViewForResponse(state, result.record),
+    view: result.view,
   });
 }
 
@@ -664,10 +723,10 @@ async function handleDeepRunResynthesize(
   runId: string,
   response: ServerResponse,
 ): Promise<void> {
-  const updated = await state.resynthesize({
+  const view = await state.commands.resynthesize({
     runId,
   }).catch(mapMultiAgentFeatureError);
-  writeJson(response, 200, { ok: true, view: await projectDeepRunViewForResponse(state, updated) });
+  writeJson(response, 200, { ok: true, view });
 }
 
 function mapMultiAgentCommandError(error: unknown, operation: "intake" | "run"): never {
@@ -826,106 +885,13 @@ export function deepChildInstructionQueueRejectionError(
   );
 }
 
-// ---------------------------------------------------------------------------
-// 安全投影（view / list / conversation）
-// ---------------------------------------------------------------------------
-
-async function projectLatestDeepRunSummaries(
-  state: MultiAgentFeature,
-  records: readonly DeepRunRecord[],
-): Promise<readonly Record<string, unknown>[]> {
-  return Promise.all(
-    latestDeepRunRecordsByRoot(records).map(async (record) => {
-      const rootRecord = await rootDeepRunRecord(state, record);
-      return projectDeepRunSummaryWithHealth(state, record, rootRecord);
-    })
-  );
-}
-
-async function latestDeepRunRecordsByConversation(
-  state: MultiAgentFeature,
-  records: readonly DeepRunRecord[],
-): Promise<ReadonlyMap<string, { readonly record: DeepRunRecord; readonly rootRecord?: DeepRunRecord }>> {
-  const selected = new Map<string, { readonly record: DeepRunRecord; readonly rootRecord?: DeepRunRecord }>();
-  for (const record of latestDeepRunRecordsByRoot(records)) {
-    if (selected.has(record.run.conversationId)) {
-      continue;
-    }
-    selected.set(record.run.conversationId, {
-      record,
-      rootRecord: await rootDeepRunRecord(state, record),
-    });
-  }
-  return selected;
-}
-
-async function projectDeepConversationSummaries(
-  state: MultiAgentFeature,
-  limit: number,
-): Promise<readonly Record<string, unknown>[]> {
-  const [conversations, records] = await Promise.all([
-    state.listConversations(Math.max(limit, 200)),
-    state.listRuns(500),
-  ]);
-  const latestByConversation = await latestDeepRunRecordsByConversation(state, records);
-  return conversations
-    .map((conversation) => {
-      const latest = latestByConversation.get(conversation.conversationId);
-      return projectDeepConversationSummaryWithHealth(state, conversation, latest?.record, latest?.rootRecord);
-    })
-    .sort((left, right) => {
-      const pinned = summaryPinnedAt(right).localeCompare(summaryPinnedAt(left));
-      return pinned === 0 ? summaryUpdatedAt(right).localeCompare(summaryUpdatedAt(left)) : pinned;
-    })
-    .slice(0, limit);
-}
-
-async function ensureDeepConversationLoaded(
+async function ensureDeepConversationExists(
   state: MultiAgentFeature,
   conversationId: string,
-): Promise<DeepConversation> {
-  const conversation = await state.getConversation(conversationId);
-  if (conversation === undefined) {
+): Promise<void> {
+  if (await state.queries.getConversation(conversationId) === undefined) {
     throw new PanelHttpError(404, "deep_conversation_not_found", "未找到该多 Agent 会话。");
   }
-  return conversation;
-}
-
-async function rootDeepRunRecord(
-  state: MultiAgentFeature,
-  record: DeepRunRecord,
-): Promise<DeepRunRecord | undefined> {
-  const rootRunId = record.run.rootRunId ?? record.run.runId;
-  return rootRunId === record.run.runId ? record : state.getRun(rootRunId);
-}
-
-function summaryUpdatedAt(summary: Record<string, unknown>): string {
-  const candidates = [
-    typeof summary.updatedAt === "string" ? summary.updatedAt : "",
-    typeof summary.titleEditedAt === "string" ? summary.titleEditedAt : "",
-    typeof summary.pinnedAt === "string" ? summary.pinnedAt : "",
-  ];
-  return candidates.sort((left, right) => right.localeCompare(left))[0] ?? "";
-}
-
-function summaryPinnedAt(summary: Record<string, unknown>): string {
-  return typeof summary.pinnedAt === "string" ? summary.pinnedAt : "";
-}
-
-async function projectDeepRunViewForResponse(
-  state: MultiAgentFeature,
-  record: DeepRunRecord,
-): Promise<Record<string, unknown>> {
-  const conversation = await state.getConversation(record.run.conversationId);
-  const view = projectDeepRunView(record, conversation);
-  const run = asRecord(view.run);
-  return {
-    ...view,
-    run: {
-      ...run,
-      runtimeHealth: deepRunRuntimeHealth(state, record),
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -943,14 +909,6 @@ async function resolveDeepAiMode(
   const config = await runtime.configCenter.getModelProviderConfig();
   return config.defaultAiMode;
 }
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  return value as Record<string, unknown>;
-}
-
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {

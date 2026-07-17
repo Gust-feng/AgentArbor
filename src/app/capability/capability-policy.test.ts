@@ -336,6 +336,7 @@ test("run capability policy exposes MCP by default while filtering disabled skil
 
   const resolution = resolveRunCapabilities({
     snapshot,
+    skillCatalog: snapshot.skillCatalog,
     goal: "use skills",
     agentDefinition: DESKTOP_ROOT_AGENT,
     platform: "linux",

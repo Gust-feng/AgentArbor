@@ -1,4 +1,3 @@
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import type { ChildAgentRun } from "../../domain/underground/agent-fabric.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
@@ -20,6 +19,7 @@ import type {
   DeepChildTerminalMaterial,
   ExploreDeepChildFactory,
 } from "./deep-child-scheduler-contracts.js";
+import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 
 export type DeepSchedulerProgressEvent =
   | {
@@ -45,7 +45,7 @@ export function createDeepDefaultScheduler(input: {
   readonly traceId: string;
   readonly goalId: string;
   readonly confirmationPolicy?: ToolConfirmationPolicy;
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
   readonly maxConcurrency?: number;
   readonly maxChildren?: number;
   readonly childIdFactory?: IdFactory;

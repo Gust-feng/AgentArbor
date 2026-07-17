@@ -29,7 +29,11 @@ import {
 } from "../tool-center/builtin-tool-runtime.js";
 import { applyAgentToolRegistryContributions } from "../tool-center/factory.js";
 import { normalizeWorkspaceDirectory } from "../config-center/workspace-settings.js";
-import { ToolRegistry, type ToolCatalogItem } from "../tool-center/tool-registry.js";
+import {
+  ToolRegistry,
+  type ToolCatalogItem,
+  type ToolCatalogSnapshot,
+} from "../tool-center/tool-registry.js";
 import type { ToolOutputStore } from "../tool-center/tool-output-store.js";
 import { discoverSkills, normalizeSkillRoots, parseSkillMarkdown, type SkillRootInput } from "../skills/skill-loader.js";
 import type { SkillStateStore } from "../skills/skill-state-store.js";
@@ -64,10 +68,15 @@ export type CapabilityCenterSnapshotInput = {
   readonly workspaceDirectory?: string;
 };
 
+type CapabilityCenterSnapshotResult = {
+  readonly snapshot: BasicAgentCapabilitySnapshot;
+  readonly desktopToolCatalog: ToolCatalogSnapshot;
+};
+
 export class CapabilityCenter {
   private skillsPromises = new Map<string, Promise<readonly SkillDefinition[]>>();
   private subAgentsPromises = new Map<string, Promise<readonly SubAgentDefinition[]>>();
-  private snapshotPromise?: Promise<BasicAgentCapabilitySnapshot>;
+  private snapshotPromise?: Promise<CapabilityCenterSnapshotResult>;
 
   constructor(private readonly options: CapabilityCenterOptions) {}
 
@@ -126,22 +135,34 @@ export class CapabilityCenter {
   }
 
   async snapshot(input: CapabilityCenterSnapshotInput = {}): Promise<BasicAgentCapabilitySnapshot> {
+    return (await this.snapshotResult(input)).snapshot;
+  }
+
+  /** Panel-facing catalog from the same assembly used to freeze Agent run capabilities. */
+  async toolCatalog(input: CapabilityCenterSnapshotInput = {}): Promise<ToolCatalogSnapshot> {
+    return globalThis.structuredClone((await this.snapshotResult(input)).desktopToolCatalog);
+  }
+
+  private async snapshotResult(
+    input: CapabilityCenterSnapshotInput,
+  ): Promise<CapabilityCenterSnapshotResult> {
     if (input.workspaceDirectory !== undefined) {
       return this.buildSnapshot(input);
     }
     if (this.snapshotPromise === undefined) {
       const current = this.buildSnapshot();
-      this.snapshotPromise = current.catch((error) => {
-        if (this.snapshotPromise === current) {
+      const cached = current.catch((error) => {
+        if (this.snapshotPromise === cached) {
           this.snapshotPromise = undefined;
         }
         throw error;
       });
+      this.snapshotPromise = cached;
     }
     return this.snapshotPromise;
   }
 
-  private async buildSnapshot(input: CapabilityCenterSnapshotInput = {}): Promise<BasicAgentCapabilitySnapshot> {
+  private async buildSnapshot(input: CapabilityCenterSnapshotInput = {}): Promise<CapabilityCenterSnapshotResult> {
     const [activeModel, overrides, toolStates, toolConfirmation, skillTrigger, configuredWorkspace, mcpServers, commandShell, env] = await Promise.all([
       this.options.configCenter.getModelProviderConfig(),
       this.options.configCenter.listModelCapabilityOverrides(),
@@ -232,26 +253,29 @@ export class CapabilityCenter {
     const skillCatalog = await Promise.all(skills.map(projectSkillCatalogItem));
     const subAgentCatalog = subAgents.map(projectSubAgentCatalogItem);
     return {
-      snapshotId: createId("capability-snapshot"),
-      createdAt: nowIso(),
-      activeModel,
-      modelCapabilities,
-      toolCatalog: {
-        scope: "desktop-basic",
-        tools: allTools,
-        allowedTools: allAllowedTools,
+      desktopToolCatalog: globalThis.structuredClone(desktopToolCatalog),
+      snapshot: {
+        snapshotId: createId("capability-snapshot"),
+        createdAt: nowIso(),
+        activeModel,
+        modelCapabilities,
+        toolCatalog: {
+          scope: "desktop-basic",
+          tools: allTools,
+          allowedTools: allAllowedTools,
+        },
+        skillCatalog,
+        subAgentCatalog,
+        skillTrigger,
+        mcpCatalog: mcpServers.map((server): CapabilityMcpCatalogItem =>
+          mcpCatalogItemForServer(server, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
+        ),
+        workspace,
+        commandShell,
+        toolConfirmation,
+        securitySummary: `本轮模型、工具、技能和工作区能力快照。确认策略：${toolConfirmation.label}。`,
+        warnings,
       },
-      skillCatalog,
-      subAgentCatalog,
-      skillTrigger,
-      mcpCatalog: mcpServers.map((server): CapabilityMcpCatalogItem =>
-        mcpCatalogItemForServer(server, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
-      ),
-      workspace,
-      commandShell,
-      toolConfirmation,
-      securitySummary: `本轮模型、工具、技能和工作区能力快照。确认策略：${toolConfirmation.label}。`,
-      warnings,
     };
   }
 
@@ -595,6 +619,7 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     enabled: tool.enabledByDefault,
     availability: tool.availability,
     disabledReason: tool.disabledReason,
+    ...(tool.catalogOnly === true ? { catalogOnly: true } : {}),
   };
 }
 
@@ -629,6 +654,7 @@ function catalogOnlyToolItem(
     scopes,
     enabledByDefault: true,
     availability: "available",
+    catalogOnly: true,
   };
 }
 

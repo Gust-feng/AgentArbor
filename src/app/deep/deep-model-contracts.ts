@@ -1,6 +1,5 @@
 import type { ModelOutputContract } from "../../domain/intelligence/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
 import type { ChildAgentRun } from "../../domain/underground/agent-fabric.js";
 import type {
   DeepChildSpec,
@@ -11,6 +10,7 @@ import type {
   DeepIntakeTurn,
   DeepTaskBoardSnapshot,
 } from "./contracts.js";
+import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 export const DEEP_DECISION_CONTRACT_ID = "deep.decision.v1";
 export const DEEP_INTAKE_CONTRACT_ID = "deep.intake.v1";
 export const DEEP_DIRECT_ANSWER_CONTRACT_ID = "deep.direct_answer.v1";
@@ -150,7 +150,7 @@ export type DeepDecisionMessagesInput = {
    * "可用工具清单"段，引导 manager 设计 childSpec.allowedTools 时从真实可用工具中选取。
    * 仅作为能力声明帮助决策；模型实际工具调用仍经 ToolCenter/确认门。
    */
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
   /**
    * 任务板运行中快照（FR-PROJ-01 单一事实源投影 / FR-SPAWN-02）。携带时在决策消息中
    * 投影任务板安全摘要：当前相位 + 各调度状态计数（pending/running/completed/failed/
@@ -173,7 +173,7 @@ export type DeepIntakeMessagesInput = {
    * 可用工具能力声明：入口理解阶段不能直接执行工具，但必须知道 child 后续能委派哪些
    * 标准工具。否则会把“需要文件/终端证据”的请求误判为不能处理或直接回答。
    */
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
   readonly priorParseError?: string;
 };
 
@@ -194,7 +194,7 @@ export type DeepChildMaterialMessagesInput = {
    * "本 child 被授权可用工具"段（childSpec.allowedTools ∩ 可用工具）及其能力简述，
    * 帮助 child 知道能用什么收集一手证据。仅作能力声明；实际工具调用仍经 ToolCenter/确认门。
    */
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
 };
 
 export type DeepSynthesisMessagesInput = {

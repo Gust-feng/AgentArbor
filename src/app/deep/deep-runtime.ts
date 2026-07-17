@@ -4,7 +4,7 @@
  * 职责边界（design.md §3.1/§5/§7.1/§7.2）：
  *   - 聚合 {@link DeepRunExecutor}（manager 决策循环）+ {@link DeepConversation}（隔离），
  *     把一次 deep run 驱动成完整可观察、可持久化、可复盘的运行记录；
- *   - run 启动时冻结 {@link BasicAgentCapabilitySnapshot}（FR-003），据 activeModel 判定
+ *   - run 启动时冻结 {@link MultiAgentCapabilitySnapshot}（FR-003），据 activeModel 判定
  *     modelAvailable（AI-first 边界，无模型拒绝运行）；
  *   - 从 executor 结果**增量构建 domain {@link AgentRunTree}**（root manager + child runs +
  *     delegation decisions + parent syntheses），复用 agent-fabric 的 tree 操作；
@@ -30,7 +30,6 @@
  * Plan / directionHandoffPackage / artifact / Fruits 产物字段。
  */
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
-import type { BasicAgentCapabilitySnapshot } from "../../domain/config/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
@@ -107,6 +106,10 @@ import {
 import type { DeepChildLoopContextStore } from "./deep-child-loop-contexts.js";
 import { DeepTaskBoard } from "./deep-task-board.js";
 import type { DeepChildPendingContinuationStore } from "./deep-child-continuations.js";
+import {
+  projectMultiAgentCapabilitySnapshot,
+  type MultiAgentCapabilitySnapshot,
+} from "./multi-agent-capability-snapshot.js";
 
 // ---------------------------------------------------------------------------
 // 常量：manager root spec（AgentRunTree root，FR-009 可复盘 root agent 元数据）
@@ -229,7 +232,7 @@ export type StartDeepRuntimeInput = {
   readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly continuationFacts: DeepRunContinuationFacts;
   readonly aiMode?: ModelRuntimeMode;
-  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilitySnapshot?: MultiAgentCapabilitySnapshot;
   readonly modelAvailable: boolean;
   readonly traceId: string;
   readonly goalId: string;
@@ -281,6 +284,9 @@ export async function executeDeepRun(
   config: DeepRuntimeConfig,
 ): Promise<DeepRuntimeRunResult> {
   const startedAt = nowIso();
+  const capabilitySnapshot = input.capabilitySnapshot === undefined
+    ? undefined
+    : projectMultiAgentCapabilitySnapshot(input.capabilitySnapshot);
   // T2-7：复用外部注入的 handle（API 层转发 / 测试脚本化），否则内部创建独立 handle。
   const controlHandle = config.controlHandle ?? createDeepRunControlHandle();
   const runId = input.runId ?? createId("deep-run");
@@ -298,7 +304,7 @@ export async function executeDeepRun(
       runMode: DEEP_RUN_MODE,
     },
     aiMode: input.aiMode,
-    capabilitySnapshot: input.capabilitySnapshot,
+    capabilitySnapshot,
     continuationFacts: input.continuationFacts,
     startedAt,
     updatedAt: startedAt,
@@ -317,7 +323,7 @@ export async function executeDeepRun(
     taskSoil: input.taskSoil,
     permissionBoundaryRefs: input.permissionBoundaryRefs,
     confirmationPolicy: input.confirmationPolicy,
-    capabilitySnapshot: input.capabilitySnapshot,
+    capabilitySnapshot,
     modelAvailable: input.modelAvailable,
     traceId: input.traceId,
     goalId: input.goalId,
@@ -367,7 +373,7 @@ export async function executeDeepRun(
       traceId: input.traceId,
       goalId: input.goalId,
       confirmationPolicy: input.confirmationPolicy,
-      capabilitySnapshot: input.capabilitySnapshot,
+      capabilitySnapshot,
       childLoopContextStore: config.childLoopContextStore,
     });
   const scheduler = new DeepChildScheduler({
@@ -414,7 +420,7 @@ export async function executeDeepRun(
         traceId: input.traceId,
         goalId: input.goalId,
         confirmationPolicy: input.confirmationPolicy,
-        capabilitySnapshot: input.capabilitySnapshot,
+        capabilitySnapshot,
         childLoopContextStore: config.childLoopContextStore,
       }),
     maxConcurrency: config.maxConcurrency,
@@ -583,7 +589,7 @@ export async function executeDeepRun(
     conclusion: executorResult.conclusion,
   });
 
-  // 持久化到隔离 deep 分区（eventSequence 为 SSE 轮询源 + replay，EP3 安全投影）。
+  // 持久化到隔离 deep 分区（eventSequence 为 feature event replay 事实，EP3 安全投影）。
   const finalRun = executorResult.run;
   liveRun = finalRun;
   const updatedAt = nowIso();

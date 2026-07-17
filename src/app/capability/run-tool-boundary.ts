@@ -1,4 +1,10 @@
-import type { BasicAgentCapabilitySnapshot, RunCapabilityPlan, RunCapabilityResolution } from "../../domain/config/index.js";
+import type {
+  AgentCapabilitySnapshot,
+  CapabilitySkillCatalogItem,
+  CapabilitySubAgentCatalogItem,
+  RunCapabilityPlan,
+  RunCapabilityResolution,
+} from "../../domain/config/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolDefinition, ToolExecutionBroker } from "../../domain/tools/index.js";
 import type { CapabilityAgentProfile } from "./capability-policy.js";
@@ -11,10 +17,13 @@ import { hasReadableSelectedSkillResources } from "../skills/skill-resource-tool
 
 export type ResolveRunToolBoundaryInput = {
   readonly agentDefinition: CapabilityAgentProfile;
-  readonly snapshot?: BasicAgentCapabilitySnapshot;
+  readonly snapshot?: AgentCapabilitySnapshot;
+  /** Ordinary-only frozen catalogs; Multi-Agent intentionally omits both. */
+  readonly skillCatalog?: readonly CapabilitySkillCatalogItem[];
+  readonly subAgentCatalog?: readonly CapabilitySubAgentCatalogItem[];
   readonly goal: string;
   readonly taskSoil: TaskSoil;
-  readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
+  readonly modelCapabilities?: AgentCapabilitySnapshot["modelCapabilities"];
   readonly capabilityPlan?: RunCapabilityPlan;
   readonly platform?: NodeJS.Platform;
   readonly toolCenter?: ToolExecutionBroker;
@@ -50,6 +59,7 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
         restrictRunCapabilityResolutionToExecutableTools(
           resolveRunCapabilities({
             snapshot: input.snapshot,
+            skillCatalog: input.skillCatalog,
             goal: input.goal,
             agentDefinition: input.agentDefinition,
             taskSoil: input.taskSoil,
@@ -60,7 +70,7 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
           input.snapshot,
           input.agentToolDefinitions,
         ),
-        input.snapshot
+        input.subAgentCatalog
       ),
       {
         toolCenter: input.toolCenter,
@@ -96,9 +106,9 @@ const PRESET_SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent"]);
 
 export function hidePresetSubAgentToolsWithoutEnabledCatalog(
   resolution: RunCapabilityResolution,
-  snapshot: BasicAgentCapabilitySnapshot
+  subAgentCatalog: readonly CapabilitySubAgentCatalogItem[] | undefined,
 ): RunCapabilityResolution {
-  if (snapshot.subAgentCatalog.some((subAgent) => subAgent.enabled)) {
+  if (subAgentCatalog?.some((subAgent) => subAgent.enabled) === true) {
     return resolution;
   }
   const allowedTools = resolution.allowedTools.filter((toolName) => !PRESET_SUB_AGENT_TOOL_NAMES.has(toolName));
@@ -126,7 +136,7 @@ export function hidePresetSubAgentToolsWithoutEnabledCatalog(
 export function restrictRunCapabilityResolutionToExecutableTools(
   resolution: RunCapabilityResolution,
   toolCenter: ToolExecutionBroker | undefined,
-  snapshot?: BasicAgentCapabilitySnapshot,
+  snapshot?: AgentCapabilitySnapshot,
   agentToolDefinitions: readonly ToolDefinition[] = [],
 ): RunCapabilityResolution {
   const executableDefinitions = new Map([
@@ -188,7 +198,7 @@ export function restrictRunCapabilityResolutionToExecutableTools(
 function toolContractMatchesFrozenSnapshot(
   toolName: string,
   executableDefinitions: ReadonlyMap<string, ToolDefinition>,
-  frozenToolsByName: ReadonlyMap<string, BasicAgentCapabilitySnapshot["toolCatalog"]["tools"][number]>
+  frozenToolsByName: ReadonlyMap<string, AgentCapabilitySnapshot["toolCatalog"]["tools"][number]>
 ): boolean {
   const frozenHash = frozenToolsByName.get(toolName)?.definitionHash;
   if (frozenHash === undefined) {

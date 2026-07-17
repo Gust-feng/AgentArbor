@@ -460,6 +460,8 @@ export type CapabilityToolCatalogItem = {
   readonly enabled: boolean;
   readonly availability: "available" | "unavailable";
   readonly disabledReason?: string;
+  /** Definition is intentionally catalog-only and cannot be executed by ToolCenter. */
+  readonly catalogOnly?: boolean;
 };
 
 export type CapabilityToolAvailability = {
@@ -583,7 +585,8 @@ export type CapabilityMcpCatalogItem = {
   readonly updatedAt: string;
 };
 
-export type BasicAgentCapabilitySnapshot = {
+/** Run-born model, tool, MCP, workspace, and confirmation facts shared by Agent features. */
+export type AgentCapabilitySnapshot = {
   readonly snapshotId: string;
   readonly createdAt: string;
   readonly activeModel: SanitizedModelProviderConfig;
@@ -593,15 +596,19 @@ export type BasicAgentCapabilitySnapshot = {
     readonly tools: readonly CapabilityToolCatalogItem[];
     readonly allowedTools: readonly string[];
   };
-  readonly skillCatalog: readonly CapabilitySkillCatalogItem[];
-  readonly subAgentCatalog: readonly CapabilitySubAgentCatalogItem[];
-  readonly skillTrigger?: SanitizedSkillTriggerConfig;
   readonly mcpCatalog: readonly CapabilityMcpCatalogItem[];
   readonly workspace: SanitizedWorkspaceConfig;
   readonly commandShell?: SanitizedCommandShellConfig;
   readonly toolConfirmation?: SanitizedToolConfirmationConfig;
   readonly securitySummary: string;
   readonly warnings: readonly string[];
+};
+
+/** Ordinary-owned extension for Skills and SDK Sub-Agent tools. */
+export type BasicAgentCapabilitySnapshot = AgentCapabilitySnapshot & {
+  readonly skillCatalog: readonly CapabilitySkillCatalogItem[];
+  readonly subAgentCatalog: readonly CapabilitySubAgentCatalogItem[];
+  readonly skillTrigger?: SanitizedSkillTriggerConfig;
 };
 
 export type RunToolExposureReasonCode =

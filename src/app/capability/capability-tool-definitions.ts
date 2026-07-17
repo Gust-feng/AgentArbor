@@ -1,8 +1,8 @@
-import type { BasicAgentCapabilitySnapshot, CapabilityToolCatalogItem } from "../../domain/config/index.js";
+import type { AgentCapabilitySnapshot, CapabilityToolCatalogItem } from "../../domain/config/index.js";
 import type { ToolDefinition, ToolInputSchema } from "../../domain/tools/index.js";
 
 export function frozenToolDefinitionsForRun(input: {
-  readonly snapshot: BasicAgentCapabilitySnapshot | undefined;
+  readonly snapshot: AgentCapabilitySnapshot | undefined;
   readonly allowedTools: readonly string[];
 }): readonly ToolDefinition[] {
   if (input.snapshot === undefined || input.allowedTools.length === 0) {

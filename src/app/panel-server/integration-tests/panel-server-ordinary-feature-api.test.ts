@@ -112,6 +112,7 @@ test("Ordinary conversation projects its frozen run workspace before and after r
     assert.deepEqual(submitted.body.conversation.workspaceFolder, {
       label: path.basename(workspaceDirectory),
       path: workspaceDirectory,
+      selection: "explicit",
     });
     assert.deepEqual(
       (await requestJson(server.url, "/api/conversations")).body.conversations[0].workspaceFolder,

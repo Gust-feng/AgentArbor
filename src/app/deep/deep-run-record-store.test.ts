@@ -20,6 +20,7 @@ import {
   type DeepRunRecord,
   type DeepRunRecordStore,
 } from "./deep-run-record-store.js";
+import { capabilitySnapshotWithTools } from "./deep-child-agent-runner-test-support.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -116,6 +117,54 @@ for (const implementation of implementations) {
       await fixture.dispose();
     }
   });
+
+  test(`${implementation.name} persists only Multi-Agent capability facts`, async () => {
+    const fixture = await implementation.create();
+    try {
+      const base = capabilitySnapshotWithTools(["read_file"]);
+      const ordinarySnapshot = {
+        ...base,
+        toolCatalog: {
+          ...base.toolCatalog,
+          tools: [
+            ...base.toolCatalog.tools,
+            { ...base.toolCatalog.tools[0]!, name: "spawn_sub_agent", catalogOnly: true },
+          ],
+          allowedTools: [...base.toolCatalog.allowedTools, "spawn_sub_agent"],
+        },
+        skillTrigger: {
+          mode: "keyword",
+          label: "keyword",
+          modelRouterEnabled: false,
+          summary: "ordinary-only routing",
+          updatedAt: "2026-05-01T00:00:00.000Z",
+        },
+      } as const;
+      const stored = await fixture.store.upsert(deepRunRecord({
+        runId: "run-capability-boundary",
+        conversationId: "conversation-capability-boundary",
+        capabilitySnapshot: ordinarySnapshot,
+        updatedAt: "2026-07-01T00:00:00.000Z",
+      }));
+
+      const persistedSnapshot = stored.run.capabilitySnapshot;
+      assert.ok(persistedSnapshot !== undefined);
+      assert.equal("skillCatalog" in persistedSnapshot, false);
+      assert.equal("subAgentCatalog" in persistedSnapshot, false);
+      assert.equal("skillTrigger" in persistedSnapshot, false);
+      assert.deepEqual(persistedSnapshot.toolCatalog.allowedTools, ["read_file"]);
+      assert.equal(
+        persistedSnapshot.toolCatalog.tools.some((tool) => tool.name === "spawn_sub_agent"),
+        false,
+      );
+      assert.deepEqual(
+        (await fixture.store.get("run-capability-boundary"))?.run.capabilitySnapshot,
+        persistedSnapshot,
+      );
+    } finally {
+      await fixture.dispose();
+    }
+  });
 }
 
 test("FileSystemDeepRunRecordStore keeps runs created by fresh processes distinct", async () => {
@@ -150,6 +199,7 @@ function deepRunRecord(input: {
   readonly runId: string;
   readonly conversationId: string;
   readonly rootRunId?: string;
+  readonly capabilitySnapshot?: DeepRunRecord["run"]["capabilitySnapshot"];
   readonly updatedAt: string;
 }): DeepRunRecord {
   const rootSpec = managerSpec(input.updatedAt);
@@ -165,6 +215,7 @@ function deepRunRecord(input: {
         runKind: DEEP_RUN_KIND,
         runMode: DEEP_RUN_MODE,
       },
+      capabilitySnapshot: input.capabilitySnapshot,
       startedAt: input.updatedAt,
       updatedAt: input.updatedAt,
       completedAt: input.updatedAt,

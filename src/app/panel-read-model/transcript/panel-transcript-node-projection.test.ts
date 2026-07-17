@@ -16,15 +16,30 @@ test("activity projection preserves visible thinking even when the text looks li
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking"]);
 });
 
-test("timeline projection excludes internal thinking and answer nodes from the activity rail", () => {
+test("timeline projection keeps settled model activity and tools while excluding answer bodies", () => {
   const projected = timelineVisibleNodes([
-    node({ nodeId: "answer", kind: "answer", eventType: "final.result", sequence: 4, summary: "最终回答" }),
-    node({ nodeId: "body", kind: "body", eventType: "model.output.completed", sequence: 2, text: "正文" }),
+    node({ nodeId: "answer", kind: "answer", eventType: "final.result", sequence: 5, summary: "最终回答" }),
+    node({ nodeId: "body", kind: "body", eventType: "model.output.completed", sequence: 4, text: "正文" }),
     node({ nodeId: "thinking", kind: "thinking", eventType: "model.reasoning.completed", sequence: 1, text: "先确认目标" }),
+    node({ nodeId: "side-output", kind: "system", eventType: "model.output.side", sequence: 2, text: "准备读取项目说明" }),
     node({ nodeId: "tool", kind: "tool", eventType: "tool.completed", phase: "completed", sequence: 3, toolName: "read_file", summary: "README.md" }),
   ]);
 
-  assert.deepEqual(projected.map((item) => item.nodeId), ["tool"]);
+  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking", "side-output", "tool"]);
+});
+
+test("timeline projection keeps runtime model activity through the live-to-settled handoff", () => {
+  const live = timelineVisibleNodes([
+    node({ nodeId: "thinking-live", kind: "thinking", eventType: "model.reasoning.delta", phase: "noted", sequence: 1, text: "先分析目标" }),
+    node({ nodeId: "side-live", kind: "system", eventType: "model.output.side", sequence: 2, text: "准备检查约束" }),
+  ]);
+  const settled = timelineVisibleNodes([
+    node({ nodeId: "thinking-settled", kind: "thinking", eventType: "model.reasoning.completed", phase: "completed", sequence: 1, text: "先分析目标" }),
+    node({ nodeId: "side-settled", kind: "system", eventType: "model.side.completed", phase: "completed", sequence: 2, text: "准备检查约束" }),
+  ]);
+
+  assert.deepEqual(live.map((item) => item.nodeId), ["thinking-live", "side-live"]);
+  assert.deepEqual(settled.map((item) => item.nodeId), ["thinking-settled", "side-settled"]);
 });
 
 test("activity projection deduplicates semantically repeated thinking while keeping the earlier position", () => {

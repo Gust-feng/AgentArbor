@@ -222,8 +222,16 @@ export function visibleTranscriptNodes<TNode extends ProjectableTranscriptNode>(
 
 export function timelineVisibleNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {
   return activityVisibleNodes(nodes)
+    .filter((node) => !isInternalModelActivityNode(node))
     .filter((node) => node.kind !== "answer")
     .filter((node) => node.kind !== "body");
+}
+
+function isInternalModelActivityNode(node: ProjectableTranscriptNode): boolean {
+  return node.kind === "thinking" ||
+    node.eventType === "model.requested" ||
+    node.eventType.startsWith("model.reasoning.") ||
+    isModelSideOutputNode(node);
 }
 
 export function activityVisibleNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {

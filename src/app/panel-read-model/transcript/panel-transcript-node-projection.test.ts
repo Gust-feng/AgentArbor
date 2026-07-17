@@ -16,7 +16,7 @@ test("activity projection preserves visible thinking even when the text looks li
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking"]);
 });
 
-test("timeline projection keeps thinking and excludes answer nodes from the activity rail", () => {
+test("timeline projection excludes internal thinking and answer nodes from the activity rail", () => {
   const projected = timelineVisibleNodes([
     node({ nodeId: "answer", kind: "answer", eventType: "final.result", sequence: 4, summary: "最终回答" }),
     node({ nodeId: "body", kind: "body", eventType: "model.output.completed", sequence: 2, text: "正文" }),
@@ -24,7 +24,7 @@ test("timeline projection keeps thinking and excludes answer nodes from the acti
     node({ nodeId: "tool", kind: "tool", eventType: "tool.completed", phase: "completed", sequence: 3, toolName: "read_file", summary: "README.md" }),
   ]);
 
-  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking", "tool"]);
+  assert.deepEqual(projected.map((item) => item.nodeId), ["tool"]);
 });
 
 test("activity projection deduplicates semantically repeated thinking while keeping the earlier position", () => {

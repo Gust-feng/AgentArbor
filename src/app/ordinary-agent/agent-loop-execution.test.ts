@@ -431,7 +431,7 @@ function approvalResult(
 function confirmation(confirmationId: string): ConfirmationRequest {
   return {
     confirmationId,
-    runId: "run-1",
+    toolCallFactId: "tool-fact-1",
     title: "Confirm",
     actionSummary: "Run tool",
     affectedResources: ["workspace"],
@@ -444,7 +444,6 @@ function confirmation(confirmationId: string): ConfirmationRequest {
 function decision(request: ConfirmationRequest): ConfirmationDecision {
   return {
     confirmationId: request.confirmationId,
-    runId: request.runId,
     decision: "approve_once",
     decidedAt: "2026-01-01T00:00:01.000Z",
   };

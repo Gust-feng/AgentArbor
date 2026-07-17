@@ -224,7 +224,8 @@ export type TranscriptNodePhase =
 
 export type TranscriptConfirmation = {
   readonly confirmationId: string;
-  readonly runId: string;
+  readonly ownerRunId: string;
+  readonly toolCallFactId: string;
   readonly conversationId?: string;
   readonly title: string;
   readonly actionSummary: string;
@@ -318,7 +319,8 @@ export type DesktopWorkView = {
   readonly contextAttachments: readonly ContextAttachment[];
   readonly pendingConfirmation?: {
     readonly confirmationId: string;
-    readonly runId: string;
+    readonly ownerRunId: string;
+    readonly toolCallFactId: string;
     readonly conversationId?: string;
     readonly title: string;
     readonly actionSummary: string;

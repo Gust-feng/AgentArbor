@@ -276,6 +276,15 @@ export type SubmitOrdinaryTurnInput = {
   readonly birth: OrdinaryRunBirth;
 };
 
+/** Ordinary owns the business run; the neutral decision owns only confirmation semantics. */
+export type DecideOrdinaryApprovalInput = {
+  readonly ownerRunId: string;
+  readonly confirmationId: string;
+  readonly decision: ConfirmationDecision["decision"];
+  readonly guidance?: string;
+  readonly decidedAt: string;
+};
+
 export type OrdinaryConversationTurnReadModel =
   | {
       readonly role: "user";
@@ -326,7 +335,7 @@ export interface OrdinaryAgentFeature {
     rollbackConversation(input: { readonly conversationId: string; readonly targetRunId?: string; readonly stepsBack?: number }): Promise<OrdinaryConversationReadModel>;
     deleteConversation(conversationId: string): Promise<void>;
     cancel(runId: string, reason?: string): Promise<OrdinaryRunState>;
-    decideApproval(decision: ConfirmationDecision): Promise<OrdinaryRunState>;
+    decideApproval(input: DecideOrdinaryApprovalInput): Promise<OrdinaryRunState>;
   };
   readonly queries: {
     getRun(runId: string): Promise<OrdinaryRunState | undefined>;

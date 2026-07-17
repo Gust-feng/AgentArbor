@@ -81,7 +81,7 @@ test("tool cancelled events preserve approval cancellation facts for replay", ()
       },
       confirmationRequest: {
         confirmationId: "confirmation-cancelled",
-        runId: "run-cancelled",
+        toolCallFactId: "tool-fact-cancelled",
         title: "Confirm tool",
         actionSummary: "Confirm tool execution.",
         affectedResources: [],

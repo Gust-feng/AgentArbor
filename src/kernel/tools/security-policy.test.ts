@@ -131,6 +131,8 @@ test("tool security policy gates explicit confirmation tools unless exact confir
     decision: pending as Extract<typeof pending, { readonly decision: "approval_required" }>,
   });
   assert.equal(confirmation.confirmationId, "confirmation-call-shell");
+  assert.equal(confirmation.toolCallFactId, "call-shell");
+  assert.equal("runId" in confirmation, false);
   assert.equal(confirmation.resumeAvailability, "live");
   assert.equal(confirmation.title, "Shell 命令");
   assert.equal(confirmation.actionSummary, "Shell 命令：pnpm test");

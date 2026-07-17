@@ -2408,7 +2408,7 @@ class ApprovalFixtureToolBroker implements ToolExecutionBroker {
       durationMs: 1,
       confirmationRequest: {
         confirmationId: "confirm-call-write-approval",
-        runId: "fixture-child-run",
+        toolCallFactId: request.factId ?? request.callId,
         title: "需要确认工具调用",
         actionSummary: "运行 write_file",
         affectedResources: ["notes.md"],

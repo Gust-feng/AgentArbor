@@ -692,7 +692,7 @@ class PermissionAwareToolBroker implements ToolExecutionBroker {
         durationMs: 0,
         confirmationRequest: {
           confirmationId,
-          runId: request.callId,
+          toolCallFactId: request.factId ?? request.callId,
           title: "需要确认",
           actionSummary: `工具 ${request.toolName} 需要确认。`,
           affectedResources: [],

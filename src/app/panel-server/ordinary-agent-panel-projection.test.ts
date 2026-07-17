@@ -189,9 +189,10 @@ test("model request activity is visible as quiet workflow progress", () => {
 });
 
 test("approval projection keeps the complete confirmation and canonical tool result", () => {
-  const request = confirmation("approval-run");
+  const request = { ...confirmation("approval-run"), toolCallFactId: "call-approval" };
+  const projectedRequest = { ...request, ownerRunId: "approval-run" };
   const run = runState({
-    runId: request.runId,
+    runId: "approval-run",
     status: {
       kind: "awaiting_approval",
       confirmationRequests: [request],
@@ -221,11 +222,11 @@ test("approval projection keeps the complete confirmation and canonical tool res
     fullReplay: replay(run, [createdEvent(run), startedEvent(run), requested]),
   });
 
-  assert.deepEqual(view.workView.pendingConfirmation, request);
+  assert.deepEqual(view.workView.pendingConfirmation, projectedRequest);
   assert.deepEqual(view.detail.toolResults, run.toolCalls);
   assert.equal(view.detail.continuationAvailability, "live");
   const node = view.workView.transcriptNodes.find((item) => item.kind === "confirmation");
-  assert.deepEqual(node?.confirmation, request);
+  assert.deepEqual(node?.confirmation, projectedRequest);
   assert.equal(view.replay.events.at(-1)?.type, "confirmation.needed");
 });
 
@@ -500,7 +501,7 @@ function startedEvent(run: OrdinaryRunState): OrdinaryRunEvent {
 function confirmation(runId: string): ConfirmationRequest {
   return {
     confirmationId: `${runId}:confirmation`,
-    runId,
+    toolCallFactId: `${runId}:tool-fact`,
     conversationId: "conversation-1",
     title: "确认执行命令",
     actionSummary: "运行 pnpm test",

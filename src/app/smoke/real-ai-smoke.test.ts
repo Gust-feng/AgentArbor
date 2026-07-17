@@ -137,7 +137,7 @@ function completedToolResult(): ToolCallResult {
 function confirmation(runId: string): ConfirmationRequest {
   return {
     confirmationId: `${runId}-confirmation`,
-    runId,
+    toolCallFactId: `${runId}:tool-fact`,
     title: "Confirm command",
     actionSummary: "Run a command",
     affectedResources: ["workspace"],

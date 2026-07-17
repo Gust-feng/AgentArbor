@@ -3,6 +3,7 @@ import type {
   BasicAgentRun,
   ContextAttachment,
   DesktopWorkViewReadModel,
+  OwnerScopedConfirmationRequest,
   RunEvent,
   TranscriptNode,
 } from "../../domain/basic-agent/index.js";
@@ -422,7 +423,7 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
     };
   }
   const confirmation = activity.event.type === "run.approval_requested"
-    ? activity.event.confirmationRequests[0]
+    ? ownerScopedConfirmation(activity.runId, activity.event.confirmationRequests[0])
     : undefined;
   return {
     nodeId: activity.activityId,
@@ -567,10 +568,19 @@ function projectConversationAttachments(
   return attachments.length === 0 ? undefined : attachments;
 }
 
-function pendingConfirmationFrom(run: OrdinaryRunState): ConfirmationRequest | undefined {
+function pendingConfirmationFrom(run: OrdinaryRunState): OwnerScopedConfirmationRequest | undefined {
   if (run.status.kind !== "awaiting_approval") return undefined;
   const request = run.status.confirmationRequests[0];
-  return request === undefined ? undefined : structuredClone(request);
+  return ownerScopedConfirmation(run.runId, request);
+}
+
+function ownerScopedConfirmation(
+  ownerRunId: string,
+  request: ConfirmationRequest | undefined,
+): OwnerScopedConfirmationRequest | undefined {
+  return request === undefined
+    ? undefined
+    : { ...structuredClone(request), ownerRunId };
 }
 
 function panelStatus(run: OrdinaryRunState): AgentTaskStatus {

@@ -106,7 +106,7 @@ export function transitionOrdinaryRun(input: {
     sequence: nextSequence(input.state.timeline),
     recordedAt: input.recordedAt,
   }, input.transition);
-  return {
+  const nextState: OrdinaryRunState = {
     ...input.state,
     status: nextStatus,
     canonicalMessages: messagesAfter(input.state, input.transition),
@@ -121,6 +121,52 @@ export function transitionOrdinaryRun(input: {
       terminalAt,
     },
   };
+  assertAwaitingApprovalFacts(nextState);
+  return nextState;
+}
+
+/** An approval pause must name exactly the tool facts awaiting a decision. */
+function assertAwaitingApprovalFacts(state: OrdinaryRunState): void {
+  if (state.status.kind !== "awaiting_approval") return;
+  const approvalFacts = state.toolCalls.filter((result) => result.status === "approval_required");
+  const requestsById = new Map(state.status.confirmationRequests.map((request) =>
+    [request.confirmationId, request] as const));
+  const factsByConfirmationId = new Map(approvalFacts.flatMap((result) => {
+    const request = result.confirmationRequest;
+    if (request === undefined || request.toolCallFactId !== toolCallFactId(result)) return [];
+    return [[request.confirmationId, request] as const];
+  }));
+  if (requestsById.size !== state.status.confirmationRequests.length ||
+      factsByConfirmationId.size !== approvalFacts.length ||
+      requestsById.size !== factsByConfirmationId.size ||
+      [...requestsById].some(([confirmationId, request]) =>
+        !sameConfirmationRequest(request, factsByConfirmationId.get(confirmationId)))) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "An Ordinary approval pause must match its approval tool facts one-to-one",
+    );
+  }
+}
+
+function sameConfirmationRequest(
+  left: NonNullable<ToolCallResult["confirmationRequest"]>,
+  right: NonNullable<ToolCallResult["confirmationRequest"]> | undefined,
+): boolean {
+  return right !== undefined &&
+    left.confirmationId === right.confirmationId &&
+    left.toolCallFactId === right.toolCallFactId &&
+    left.conversationId === right.conversationId &&
+    left.title === right.title &&
+    left.actionSummary === right.actionSummary &&
+    left.consequence === right.consequence &&
+    left.riskLevel === right.riskLevel &&
+    left.resumeAvailability === right.resumeAvailability &&
+    left.requestedAt === right.requestedAt &&
+    left.expiresAt === right.expiresAt &&
+    left.affectedResources.length === right.affectedResources.length &&
+    left.affectedResources.every((value, index) => value === right.affectedResources[index]) &&
+    left.sourceRefs.length === right.sourceRefs.length &&
+    left.sourceRefs.every((value, index) => value === right.sourceRefs[index]);
 }
 
 function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransition): OrdinaryRunStatus {

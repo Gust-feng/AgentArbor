@@ -26,6 +26,7 @@ export function pendingOpenAIAgentsConfirmations<TInterruption extends { readonl
       callId === undefined ||
       factId === undefined ||
       fact?.confirmation === undefined ||
+      fact.confirmation.toolCallFactId !== factId ||
       callIds.has(factId) ||
       confirmationIds.has(fact.confirmation.confirmationId)
     ) {
@@ -62,8 +63,7 @@ export function selectOpenAIAgentsConfirmationDecisions<TInterruption>(
     const item = byConfirmationId.get(decision.confirmationId);
     if (
       item === undefined ||
-      seen.has(decision.confirmationId) ||
-      decision.runId !== item.confirmation.runId
+      seen.has(decision.confirmationId)
     ) {
       return undefined;
     }

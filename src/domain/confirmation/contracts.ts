@@ -3,7 +3,8 @@ export type ConfirmationRiskLevel = "low" | "medium" | "high";
 
 export type ConfirmationRequest = {
   readonly confirmationId: string;
-  readonly runId: string;
+  /** Stable ToolCenter fact identity for the exact call the user reviewed. */
+  readonly toolCallFactId: string;
   readonly conversationId?: string;
   readonly title: string;
   readonly actionSummary: string;
@@ -18,7 +19,6 @@ export type ConfirmationRequest = {
 
 export type ConfirmationDecision = {
   readonly confirmationId: string;
-  readonly runId: string;
   readonly decision: "approve_once" | "deny" | "guidance";
   readonly decidedAt: string;
   readonly guidance?: string;

@@ -86,6 +86,60 @@ test("file repository rejects old or malformed snapshots instead of compatibilit
     error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
 });
 
+test("file repository rejects an approval request bound to a different tool fact", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-approval-fact-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("approval-fact-run", "2026-01-01T00:00:00.000Z");
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const request = {
+    confirmationId: "confirmation-1",
+    toolCallFactId: "tool-fact-1",
+    title: "Confirm",
+    actionSummary: "Run command",
+    affectedResources: ["workspace"],
+    riskLevel: "medium" as const,
+    requestedAt: "2026-01-01T00:00:02.000Z",
+    sourceRefs: ["tool:tool-fact-1"],
+  };
+  const paused = transitionOrdinaryRun({
+    state: running,
+    transition: {
+      type: "request_approval",
+      status: { kind: "awaiting_approval", confirmationRequests: [request], continuationAvailability: "live_only" },
+      canonicalMessages: running.canonicalMessages,
+      toolCalls: [{
+        callId: "provider-call",
+        factId: request.toolCallFactId,
+        toolName: "shell_command",
+        input: { command: "write" },
+        output: undefined,
+        status: "approval_required",
+        durationMs: 0,
+        confirmationRequest: request,
+      }],
+      usage: {},
+    },
+    recordedAt: "2026-01-01T00:00:02.000Z",
+    eventId: "event-3",
+  });
+  const malformed = {
+    ...paused,
+    toolCalls: [{
+      ...paused.toolCalls[0]!,
+      confirmationRequest: { ...request, toolCallFactId: "forged-tool-fact" },
+    }],
+  };
+
+  await assert.rejects(repository.save(malformed as never, 0), (error: unknown) =>
+    error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
+});
+
 test("file repository rejects snapshots from retired model providers", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-retired-provider-"));
   t.after(() => removeTestDirectory(root));

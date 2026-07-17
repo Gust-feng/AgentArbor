@@ -131,7 +131,7 @@ export async function handlePanelOrdinaryRoute(
     const confirmationId = decode(confirmation[2]);
     const decision = parseConfirmationDecision(await readJsonBody(request));
     const state = await runtime.ordinaryAgentFeature.commands.decideApproval({
-      runId,
+      ownerRunId: runId,
       confirmationId,
       decision: decision.decision,
       guidance: decision.guidance,

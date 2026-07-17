@@ -259,12 +259,17 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
           status: "approval_required",
           confirmationRequests: [request],
           canonicalMessages: [{ role: "user", content: input.runInput.userMessage }],
-          toolCalls: [],
+          toolCalls: [approvalToolResult(request)],
           usage: { inputTokens: 2, totalTokens: 2 },
           continuation: {
             availability: "live_only",
-            async decide() {
-              return completedOutcome("approved", { inputTokens: 4, outputTokens: 1, totalTokens: 5 });
+            async decide({ decision }) {
+              assert.equal("ownerRunId" in decision, false);
+              assert.equal("toolCallFactId" in decision, false);
+              return {
+                ...completedOutcome("approved", { inputTokens: 4, outputTokens: 1, totalTokens: 5 }),
+                toolCalls: [resolvedApprovalToolResult(request)],
+              };
             },
             async release() { return undefined; },
           },
@@ -288,7 +293,11 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
       body: { goal: "needs approval" },
     });
     const approvalView = await waitForView(server.url, approvalStart.body.run.runId, "approval_needed");
-    const confirmationId = approvalView.body.view.workView.pendingConfirmation.confirmationId;
+    const pending = approvalView.body.view.workView.pendingConfirmation;
+    const confirmationId = pending.confirmationId;
+    assert.equal(pending.ownerRunId, approvalStart.body.run.runId);
+    assert.equal(pending.toolCallFactId, `${approvalStart.body.run.runId}:tool-fact`);
+    assert.notEqual(pending.ownerRunId, pending.toolCallFactId);
     const decided = await requestJson(
       server.url,
       `/api/basic-agent/runs/${approvalStart.body.run.runId}/confirmations/${confirmationId}/decision`,
@@ -563,7 +572,7 @@ test("Panel close releases a pending Ordinary approval continuation once", async
           status: "approval_required",
           confirmationRequests: [request],
           canonicalMessages: input.messages,
-          toolCalls: [],
+          toolCalls: [approvalToolResult(request)],
           usage: {},
           continuation: {
             availability: "live_only",
@@ -660,7 +669,7 @@ function completedOutcome(answer: string, usage: OrdinaryExecutionOutcome["usage
 function confirmation(runId: string): ConfirmationRequest {
   return {
     confirmationId: `${runId}-confirmation`,
-    runId,
+    toolCallFactId: `${runId}:tool-fact`,
     title: "Confirm command",
     actionSummary: "Run a command",
     affectedResources: ["workspace"],
@@ -668,6 +677,29 @@ function confirmation(runId: string): ConfirmationRequest {
     resumeAvailability: "live",
     requestedAt: new Date().toISOString(),
     sourceRefs: [],
+  };
+}
+
+function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
+  return {
+    callId: request.toolCallFactId,
+    toolName: "shell_command",
+    input: { command: "write" },
+    output: undefined,
+    status: "approval_required",
+    durationMs: 0,
+    confirmationRequest: request,
+  };
+}
+
+function resolvedApprovalToolResult(request: ConfirmationRequest): ToolCallResult {
+  return {
+    callId: request.toolCallFactId,
+    toolName: "shell_command",
+    input: { command: "write" },
+    output: { approved: true },
+    status: "completed",
+    durationMs: 1,
   };
 }
 

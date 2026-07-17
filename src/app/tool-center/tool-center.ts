@@ -834,7 +834,7 @@ function toolCallStatus(value: unknown): ToolCallResult["status"] | undefined {
 function normalizeConfirmationRequest(value: unknown): ConfirmationRequest | undefined {
   const record = asPlainRecord(value);
   const confirmationId = nonEmptyString(record.confirmationId);
-  const runId = nonEmptyString(record.runId);
+  const confirmationToolCallFactId = nonEmptyString(record.toolCallFactId);
   const title = nonEmptyString(record.title);
   const actionSummary = nonEmptyString(record.actionSummary);
   const requestedAt = nonEmptyString(record.requestedAt);
@@ -847,7 +847,7 @@ function normalizeConfirmationRequest(value: unknown): ConfirmationRequest | und
   const resumeAvailability = confirmationResumeAvailability(record.resumeAvailability);
   if (
     confirmationId === undefined ||
-    runId === undefined ||
+    confirmationToolCallFactId === undefined ||
     title === undefined ||
     actionSummary === undefined ||
     requestedAt === undefined ||
@@ -863,7 +863,7 @@ function normalizeConfirmationRequest(value: unknown): ConfirmationRequest | und
   }
   return {
     confirmationId,
-    runId,
+    toolCallFactId: confirmationToolCallFactId,
     conversationId,
     title,
     actionSummary,

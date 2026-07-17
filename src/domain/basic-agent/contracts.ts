@@ -13,6 +13,11 @@ export type {
   ConfirmationRiskLevel,
 } from "../confirmation/contracts.js";
 
+/** User-facing approval projection scoped by the feature-owned run. */
+export type OwnerScopedConfirmationRequest = ConfirmationRequest & {
+  readonly ownerRunId: string;
+};
+
 export type AgentTaskStatus =
   | "queued"
   | "planning"
@@ -116,7 +121,7 @@ export type TranscriptNode = {
   readonly timestamp: string;
   readonly toolName?: string;
   readonly display?: ToolDisplayProjection;
-  readonly confirmation?: ConfirmationRequest;
+  readonly confirmation?: OwnerScopedConfirmationRequest;
   readonly modelUsage?: ModelUsage;
   readonly refs: readonly ObservationRef[];
 };
@@ -269,7 +274,7 @@ export type DesktopWorkViewReadModel = {
   readonly headline: string;
   readonly currentAction: string;
   readonly contextAttachments: readonly ContextAttachment[];
-  readonly pendingConfirmation?: ConfirmationRequest;
+  readonly pendingConfirmation?: OwnerScopedConfirmationRequest;
   readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;
   readonly visibleEvents: readonly RunEvent[];

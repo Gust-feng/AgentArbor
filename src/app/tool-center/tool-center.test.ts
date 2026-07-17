@@ -113,6 +113,7 @@ test("ToolCenter uses scoped fact identity for confirmation while preserving pro
   assert.equal(pending.status === "approval_required" ? pending.result.callId : undefined, request.callId);
   assert.equal(pending.status === "approval_required" ? pending.result.factId : undefined, request.factId);
   assert.equal(pending.status === "approval_required" ? pending.result.confirmationRequest?.confirmationId : undefined, confirmationId);
+  assert.equal(pending.status === "approval_required" ? pending.result.confirmationRequest?.toolCallFactId : undefined, request.factId);
 
   const completed = await center.execute(request, context, {
     ...permission,
@@ -380,7 +381,7 @@ test("ToolCenter can accept a tool executor supplied approval_required result", 
       envelope: { legacy: true },
       confirmationRequest: {
         confirmationId: "confirmation-inner-call",
-        runId: "inner-call",
+        toolCallFactId: "inner-call",
         title: "内部工具确认",
         actionSummary: "内部工具需要确认",
         affectedResources: ["inner-resource"],
@@ -407,6 +408,7 @@ test("ToolCenter can accept a tool executor supplied approval_required result", 
   assert.equal("projection" in result, false);
   assert.equal("envelope" in result, false);
   assert.equal(result.confirmationRequest?.confirmationId, "confirmation-inner-call");
+  assert.equal(result.confirmationRequest?.toolCallFactId, "inner-call");
   assert.deepEqual(result.confirmationRequest?.affectedResources, ["inner-resource"]);
   assert.equal(result.confirmationRequest === undefined ? true : "display" in result.confirmationRequest, false);
 });
@@ -426,7 +428,7 @@ test("ToolCenter preserves approval_required when partial output retention fails
       durationMs: 1,
       confirmationRequest: {
         confirmationId: "confirmation-partial-output",
-        runId: "inner-call",
+        toolCallFactId: "inner-call",
         title: "内部工具确认",
         actionSummary: "内部工具需要确认",
         affectedResources: ["inner-resource"],

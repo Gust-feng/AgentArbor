@@ -1451,7 +1451,7 @@ test("executeToolUseLoop pauses when a parallel read-only executor dynamically r
           durationMs: 1,
           confirmationRequest: {
             confirmationId: "confirmation-read-gated",
-            runId: request.callId,
+            toolCallFactId: request.factId ?? request.callId,
             title: "Confirm gated read",
             actionSummary: "Confirm access before continuing the read.",
             affectedResources: ["fixture://gated-read"],
@@ -1511,7 +1511,7 @@ test("executeToolUseLoop closes an approval that races with initial cancellation
         durationMs: 1,
         confirmationRequest: {
           confirmationId: "confirmation-racing-approval",
-          runId: request.callId,
+          toolCallFactId: request.factId ?? request.callId,
           title: "Confirm follow-up",
           actionSummary: "Confirm the gated follow-up.",
           affectedResources: [],
@@ -1596,7 +1596,7 @@ test("parallel read-only preflights publish requests first and never replay addi
         durationMs: 1,
         confirmationRequest: {
           confirmationId,
-          runId: request.callId,
+          toolCallFactId: request.factId ?? request.callId,
           title: `Confirm ${request.toolName}`,
           actionSummary: `Confirm ${request.toolName}.`,
           affectedResources: [`fixture://${request.callId}`],
@@ -1955,7 +1955,7 @@ test("approval tool messages keep nested partial-output continuation when transp
     durationMs: 1,
     confirmationRequest: {
       confirmationId: "confirmation-large-approval",
-      runId: "run-large-approval",
+      toolCallFactId: "call-large-approval",
       title: "Continue large approval",
       actionSummary: "Continue after inspecting the retained partial result.",
       affectedResources: [],
@@ -1993,7 +1993,7 @@ test("resolved approval history keeps every externalized continuation under aggr
     durationMs: 1,
     confirmationRequest: {
       confirmationId: `confirmation-${label}`,
-      runId: "run-multi-stage",
+      toolCallFactId: "call-multi-stage",
       title: `Confirm ${label}`,
       actionSummary: `Confirm ${label} stage.`,
       affectedResources: [],
@@ -2036,7 +2036,7 @@ test("resolved approval aggregate failure preserves a fair preview of every stag
     durationMs: 1,
     confirmationRequest: {
       confirmationId: `confirmation-unretained-${index}`,
-      runId: "run-unretained-multi-stage",
+      toolCallFactId: "call-unretained-multi-stage",
       title: `Confirm stage ${index}`,
       actionSummary: `Confirm stage ${index}.`,
       affectedResources: [],
@@ -2096,7 +2096,7 @@ test("resolved approval aggregate fails when only one truncated stage has a cont
     durationMs: 1,
     confirmationRequest: {
       confirmationId: `confirmation-partially-retained-${index}`,
-      runId: "run-partially-retained-multi-stage",
+      toolCallFactId: "call-partially-retained-multi-stage",
       title: `Confirm stage ${index}`,
       actionSummary: `Confirm stage ${index}.`,
       affectedResources: [],
@@ -2383,7 +2383,7 @@ test("abort closes a new approval returned by approved execution as one cancelle
         durationMs: 1,
         confirmationRequest: {
           confirmationId: approved ? "confirmation-stage-two" : "confirmation-stage-one",
-          runId: request.callId,
+          toolCallFactId: request.factId ?? request.callId,
           title: approved ? "Confirm stage two" : "Confirm stage one",
           actionSummary: approved ? "Confirm stage two." : "Confirm stage one.",
           affectedResources: [],
@@ -2498,7 +2498,7 @@ test("confirmation guidance preserves the pre-approval error fact", async () => 
       durationMs: 1,
       confirmationRequest: {
         confirmationId: "confirmation-guidance-error",
-        runId: request.callId,
+        toolCallFactId: request.factId ?? request.callId,
         title: "Confirm gated step",
         actionSummary: "Confirm the gated step.",
         affectedResources: [],
@@ -3520,7 +3520,7 @@ class PermissionIgnoringToolBroker implements ToolExecutionBroker {
         durationMs: 0,
         confirmationRequest: {
           confirmationId,
-          runId: request.callId,
+          toolCallFactId: request.factId ?? request.callId,
           title: "需要确认",
           actionSummary: `工具 ${request.toolName} 需要确认。`,
           affectedResources: [],
@@ -3616,7 +3616,7 @@ class TestToolBroker implements ToolExecutionBroker {
         durationMs: 0,
         confirmationRequest: {
           confirmationId,
-          runId: request.callId,
+          toolCallFactId: request.factId ?? request.callId,
           title: "需要确认内部网络访问",
           actionSummary: `工具 ${request.toolName} 需要确认后才能读取本机或内网地址。`,
           affectedResources: [],
@@ -3637,7 +3637,7 @@ class TestToolBroker implements ToolExecutionBroker {
         durationMs: 0,
         confirmationRequest: {
           confirmationId,
-          runId: request.callId,
+          toolCallFactId: request.factId ?? request.callId,
           title: "需要确认",
           actionSummary: `工具 ${request.toolName} 需要确认。`,
           affectedResources: [],
@@ -3705,7 +3705,7 @@ class PartialApprovalToolBroker implements ToolExecutionBroker {
         durationMs: 7,
         confirmationRequest: {
           confirmationId,
-          runId: request.callId,
+          toolCallFactId: request.factId ?? request.callId,
           title: "Sub-agent action requires confirmation",
           actionSummary: "Continue the pending sub-agent action.",
           affectedResources: ["pending-resource"],

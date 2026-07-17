@@ -45,7 +45,7 @@ export function confirmationRequestFromSecurityDecision(input: {
 }): ConfirmationRequest {
   return {
     confirmationId: confirmationIdForToolCall(toolCallFactId(input.request)),
-    runId: toolCallFactId(input.request),
+    toolCallFactId: toolCallFactId(input.request),
     title: input.decision.title,
     actionSummary: input.decision.actionSummary,
     consequence: input.decision.consequence,

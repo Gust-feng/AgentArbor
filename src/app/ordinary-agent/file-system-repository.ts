@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import { persistedModelProtocolExtensions } from "../../domain/intelligence/index.js";
 import { toolCallFactId } from "../../domain/tools/index.js";
 import {
@@ -27,14 +28,14 @@ const jsonValueSchema: z.ZodType<unknown> = z.lazy(() => z.union([
   z.null(), z.string(), z.number().finite(), z.boolean(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema),
 ]));
 const confirmationSchema = z.object({
-  confirmationId: z.string().min(1), runId: z.string().min(1), conversationId: z.string().optional(),
+  confirmationId: z.string().min(1), toolCallFactId: z.string().min(1), conversationId: z.string().optional(),
   title: z.string(), actionSummary: z.string(), consequence: z.string().optional(),
   affectedResources: z.array(z.string()), riskLevel: z.enum(["low", "medium", "high"]),
   resumeAvailability: z.enum(["live", "lost_after_restart"]).optional(), requestedAt: z.string().min(1),
   expiresAt: z.string().optional(), sourceRefs: z.array(z.string()),
 }).strict();
 const confirmationDecisionSchema = z.object({
-  confirmationId: z.string().min(1), runId: z.string().min(1),
+  confirmationId: z.string().min(1),
   decision: z.enum(["approve_once", "deny", "guidance"]), decidedAt: z.string().min(1),
   guidance: z.string().optional(),
 }).strict();
@@ -57,7 +58,17 @@ const toolCallSchema = z.object({
   output: jsonValueSchema.optional(), status: z.enum(["completed", "failed", "approval_required", "cancelled"]),
   error: z.string().optional(), errorDomain: z.string().optional(), errorFacts: z.record(z.string(), jsonValueSchema).optional(),
   durationMs: z.number().finite().nonnegative(), confirmationRequest: confirmationSchema.optional(),
-}).strict();
+}).strict().superRefine((result, context) => {
+  if (result.status === "approval_required") {
+    if (result.confirmationRequest === undefined) {
+      context.addIssue({ code: "custom", message: "approval result requires its confirmation request", path: ["confirmationRequest"] });
+    } else if (result.confirmationRequest.toolCallFactId !== (result.factId ?? result.callId)) {
+      context.addIssue({ code: "custom", message: "confirmation request does not match the tool fact identity", path: ["confirmationRequest", "toolCallFactId"] });
+    }
+  } else if (result.confirmationRequest !== undefined) {
+    context.addIssue({ code: "custom", message: "resolved tool result cannot retain a confirmation request", path: ["confirmationRequest"] });
+  }
+});
 const modelMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant", "tool"]), content: z.string(), ref: z.string().optional(),
   toolCallId: z.string().optional(), toolName: z.string().optional(),
@@ -273,8 +284,46 @@ const rawStateSchema = z.object({
       context.addIssue({ code: "custom", message: "resolved tool result occurrence time is missing", path: ["toolResultRecordedAt", resultKey] });
     }
   }
+  if (state.status.kind === "awaiting_approval") {
+    const approvalFacts = state.toolCalls.filter((result) => result.status === "approval_required");
+    const statusRequests = new Map(state.status.confirmationRequests.map((request) => [request.confirmationId, request] as const));
+    const factRequests = new Map(approvalFacts.flatMap((result) => result.confirmationRequest === undefined
+      ? []
+      : [[result.confirmationRequest.confirmationId, result.confirmationRequest] as const]));
+    if (statusRequests.size !== state.status.confirmationRequests.length || factRequests.size !== approvalFacts.length ||
+        statusRequests.size !== factRequests.size) {
+      context.addIssue({ code: "custom", message: "awaiting approval requests must match approval tool facts one-to-one", path: ["status", "confirmationRequests"] });
+    }
+    for (const [confirmationId, request] of statusRequests) {
+      if (!sameConfirmationRequest(request, factRequests.get(confirmationId))) {
+        context.addIssue({ code: "custom", message: "awaiting approval request differs from its tool fact", path: ["status", "confirmationRequests"] });
+      }
+    }
+  }
   validateCanonicalMessageChain(state, context);
 });
+
+function sameConfirmationRequest(
+  left: ConfirmationRequest,
+  right: ConfirmationRequest | undefined,
+): boolean {
+  return right !== undefined &&
+    left.confirmationId === right.confirmationId &&
+    left.toolCallFactId === right.toolCallFactId &&
+    left.conversationId === right.conversationId &&
+    left.title === right.title &&
+    left.actionSummary === right.actionSummary &&
+    left.consequence === right.consequence &&
+    left.riskLevel === right.riskLevel &&
+    left.resumeAvailability === right.resumeAvailability &&
+    left.requestedAt === right.requestedAt &&
+    left.expiresAt === right.expiresAt &&
+    left.affectedResources.length === right.affectedResources.length &&
+    left.affectedResources.every((value, index) => value === right.affectedResources[index]) &&
+    left.sourceRefs.length === right.sourceRefs.length &&
+    left.sourceRefs.every((value, index) => value === right.sourceRefs[index]);
+}
+
 const stateSchema: z.ZodType<OrdinaryRunState> = z.custom<OrdinaryRunState>((value) => rawStateSchema.safeParse(value).success);
 const documentSchema: z.ZodType<OrdinaryRunSnapshotDocument> = z.object({
   schemaVersion: z.literal(ORDINARY_RUN_SCHEMA_VERSION), revision: z.number().int().positive(), savedAt: z.string().min(1), state: stateSchema,

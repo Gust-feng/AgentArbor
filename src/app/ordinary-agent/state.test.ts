@@ -77,6 +77,89 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
   }), /completed status/u);
 });
 
+test("Ordinary approval pauses require the exact approval tool facts", () => {
+  const initial = createInitialOrdinaryRunState({
+    runId: "approval-facts-run",
+    turn: ordinaryRunTurn("approval-facts-run"),
+    runInput: { userMessage: "change the file" },
+    birth: ordinaryRunBirth(),
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-1",
+  });
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const request = {
+    confirmationId: "approval-facts-confirmation",
+    toolCallFactId: "approval-facts-tool",
+    title: "Confirm command",
+    actionSummary: "Run a command",
+    affectedResources: ["workspace"],
+    riskLevel: "medium" as const,
+    resumeAvailability: "live" as const,
+    requestedAt: "2026-01-01T00:00:02.000Z",
+    sourceRefs: [],
+  };
+  const approvalFact = {
+    callId: "provider-call",
+    factId: request.toolCallFactId,
+    toolName: "shell_command",
+    input: { command: "write" },
+    output: undefined,
+    status: "approval_required" as const,
+    durationMs: 0,
+    confirmationRequest: request,
+  };
+  const sameRequestWithDifferentKeyOrder = {
+    toolCallFactId: request.toolCallFactId,
+    confirmationId: request.confirmationId,
+    actionSummary: request.actionSummary,
+    title: request.title,
+    riskLevel: request.riskLevel,
+    affectedResources: request.affectedResources,
+    requestedAt: request.requestedAt,
+    resumeAvailability: request.resumeAvailability,
+    sourceRefs: request.sourceRefs,
+  };
+  assert.notEqual(JSON.stringify(sameRequestWithDifferentKeyOrder), JSON.stringify(request));
+  const approvalStatus = {
+    kind: "awaiting_approval" as const,
+    confirmationRequests: [sameRequestWithDifferentKeyOrder],
+    continuationAvailability: "live_only" as const,
+  };
+
+  assert.throws(() => transitionOrdinaryRun({
+    state: running,
+    transition: {
+      type: "request_approval",
+      status: approvalStatus,
+      canonicalMessages: running.canonicalMessages,
+      toolCalls: [],
+      usage: {},
+    },
+    recordedAt: "2026-01-01T00:00:02.000Z",
+    eventId: "event-3",
+  }), /must match its approval tool facts/u);
+
+  const paused = transitionOrdinaryRun({
+    state: running,
+    transition: {
+      type: "request_approval",
+      status: approvalStatus,
+      canonicalMessages: running.canonicalMessages,
+      toolCalls: [approvalFact],
+      usage: {},
+    },
+    recordedAt: "2026-01-01T00:00:02.000Z",
+    eventId: "event-3",
+  });
+  assert.equal(paused.status.kind, "awaiting_approval");
+  assert.deepEqual(paused.toolCalls, [approvalFact]);
+});
+
 test("Ordinary tool facts are idempotent, ordered, and reject conflicting resolved results", () => {
   const queued = createInitialOrdinaryRunState({
     runId: "tool-facts-run",

@@ -323,7 +323,7 @@ test("feature resumes the exact live approval continuation", async (t) => {
   const approvalOutcome: OrdinaryExecutionOutcome = {
     status: "approval_required",
     canonicalMessages: [{ role: "user", content: "change file" }],
-    toolCalls: [],
+    toolCalls: [approvalToolResult(request)],
     usage: { inputTokens: 3, totalTokens: 3 },
     confirmationRequests: [request],
     continuation: {
@@ -331,7 +331,7 @@ test("feature resumes the exact live approval continuation", async (t) => {
       async decide({ decision }) {
         decided += 1;
         assert.equal(decision.confirmationId, request.confirmationId);
-        return completedOutcome();
+        return { ...completedOutcome(), toolCalls: [resolvedApprovalToolResult(request)] };
       },
       async release() { return undefined; },
     },
@@ -339,9 +339,15 @@ test("feature resumes the exact live approval continuation", async (t) => {
   const run = await fixture(t, { async execute() { return approvalOutcome; } });
   await run.feature.commands.start(startInput("approval-run"));
   await waitForStatus(run.feature, "approval-run", "awaiting_approval");
+  await assert.rejects(run.feature.commands.decideApproval({
+    confirmationId: request.confirmationId,
+    ownerRunId: "missing-run",
+    decision: "approve_once",
+    decidedAt: "2026-01-01T00:00:09.000Z",
+  }), (error: unknown) => error instanceof OrdinaryFeatureError && error.code === "ordinary_run_not_found");
   await run.feature.commands.decideApproval({
     confirmationId: request.confirmationId,
-    runId: "approval-run",
+    ownerRunId: "approval-run",
     decision: "approve_once",
     decidedAt: "2026-01-01T00:00:10.000Z",
   });
@@ -361,11 +367,10 @@ test("feature resumes the exact live approval continuation", async (t) => {
     type: "run.approval_requested",
     recordedAt: requested?.recordedAt,
     confirmationRequests: [request],
-    toolCallIds: [],
+    toolCallIds: [request.toolCallFactId],
   });
   assert.deepEqual(decidedEvent?.type === "run.approval_decided" ? decidedEvent.decision : undefined, {
     confirmationId: request.confirmationId,
-    runId: "approval-run",
     decision: "approve_once",
     decidedAt: "2026-01-01T00:00:10.000Z",
   });
@@ -384,7 +389,7 @@ test("concurrent confirmation decisions have one owner and never consume or bloc
       return {
         status: "approval_required",
         canonicalMessages: [{ role: "user", content: "change file" }],
-        toolCalls: [],
+        toolCalls: [approvalToolResult(request)],
         usage: {},
         confirmationRequests: [request],
         continuation: {
@@ -393,7 +398,7 @@ test("concurrent confirmation decisions have one owner and never consume or bloc
             decideCalls += 1;
             markDecisionEntered?.();
             await decisionGate;
-            return completedOutcome();
+            return { ...completedOutcome(), toolCalls: [resolvedApprovalToolResult(request)] };
           },
           async release() { releaseCalls += 1; },
         },
@@ -404,25 +409,25 @@ test("concurrent confirmation decisions have one owner and never consume or bloc
   await waitForStatus(run.feature, "approval-overlap-run", "awaiting_approval");
 
   try {
-    const first = await run.feature.commands.decideApproval(approvalDecision(request));
+    const first = await run.feature.commands.decideApproval(approvalDecision("approval-overlap-run", request));
     assert.equal(first.status.kind, "running");
     await decisionEntered;
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await assert.rejects(
-        run.feature.commands.decideApproval(approvalDecision(request)),
+        run.feature.commands.decideApproval(approvalDecision("approval-overlap-run", request)),
         (error: unknown) => error instanceof OrdinaryFeatureError &&
           error.code === "ordinary_confirmation_in_progress",
       );
     }
-    assert.equal((await run.feature.queries.getRun(request.runId))?.status.kind, "running");
+    assert.equal((await run.feature.queries.getRun("approval-overlap-run"))?.status.kind, "running");
     assert.equal(decideCalls, 1);
     assert.equal(releaseCalls, 0);
   } finally {
     finishDecision?.();
   }
 
-  await waitForStatus(run.feature, request.runId, "completed");
+  await waitForStatus(run.feature, "approval-overlap-run", "completed");
   assert.equal(decideCalls, 1);
   assert.equal(releaseCalls, 0);
 });
@@ -438,7 +443,7 @@ test("feature commits cancellation before approval cleanup and cleanup failure c
       return {
         status: "approval_required",
         canonicalMessages: [{ role: "user", content: "change file" }],
-        toolCalls: [],
+        toolCalls: [approvalToolResult(request)],
         usage: {},
         confirmationRequests: [request],
         continuation: {
@@ -499,7 +504,7 @@ test("cancellation cannot race approval continuation registration or strand a qu
         return {
           status: "approval_required",
           canonicalMessages: [{ role: "user", content: "change file" }],
-          toolCalls: [],
+          toolCalls: [approvalToolResult(request)],
           usage: {},
           confirmationRequests: [request],
           continuation: {
@@ -562,7 +567,7 @@ test("feature releases an incoming approval continuation when its snapshot canno
         return {
           status: "approval_required",
           canonicalMessages: [{ role: "user", content: "change file" }],
-          toolCalls: [],
+          toolCalls: [approvalToolResult(request)],
           usage: {},
           confirmationRequests: [request],
           continuation: {
@@ -591,7 +596,7 @@ test("feature release disposes a pending live approval continuation once", async
       return {
         status: "approval_required",
         canonicalMessages: [{ role: "user", content: "change file" }],
-        toolCalls: [],
+        toolCalls: [approvalToolResult(request)],
         usage: {},
         confirmationRequests: [request],
         continuation: {
@@ -613,7 +618,7 @@ test("feature release disposes a pending live approval continuation once", async
 test("feature restart turns a persisted approval pause into an honest blocked state", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-restart-"));
   const repository = createFileSystemOrdinaryRunRepository(root);
-  const request = confirmation("restart-run");
+  const request = { ...confirmation("restart-run"), toolCallFactId: "restart-call" };
   const first = await createOrdinaryAgentFeature({
     repository,
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
@@ -748,7 +753,6 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
   const request = confirmation("activity-restart-run");
   const decision = {
     confirmationId: request.confirmationId,
-    runId: request.runId,
     decision: "guidance" as const,
     guidance: "Use the safer path",
     decidedAt: "2026-01-01T00:00:10.000Z",
@@ -762,12 +766,17 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
         return {
           status: "approval_required",
           canonicalMessages: [{ role: "user", content: "change file" }],
-          toolCalls: [],
+          toolCalls: [approvalToolResult(request)],
           usage: { inputTokens: 4, totalTokens: 4 },
           confirmationRequests: [request],
           continuation: {
             availability: "live_only",
-            async decide() { return completedOutcome({ inputTokens: 8, outputTokens: 2, totalTokens: 10 }); },
+            async decide() {
+              return {
+                ...completedOutcome({ inputTokens: 8, outputTokens: 2, totalTokens: 10 }),
+                toolCalls: [resolvedApprovalToolResult(request)],
+              };
+            },
             async release() { return undefined; },
           },
         };
@@ -780,7 +789,7 @@ test("activity restart resets an old cursor, drops live deltas, and replays comp
   await waitForStatus(first, "activity-restart-run", "awaiting_approval");
   const liveReplay = await first.events.replay("activity-restart-run");
   assert.equal(liveReplay?.activities.some((activity) => activity.type === "model.output.delta"), true);
-  await first.commands.decideApproval(decision);
+  await first.commands.decideApproval({ ownerRunId: "activity-restart-run", ...decision });
   await waitForStatus(first, "activity-restart-run", "completed");
   await first.release();
 
@@ -816,10 +825,10 @@ test("feature carries cumulative usage across multiple approval continuations", 
   await run.feature.commands.start(startInput("usage-run"));
   await waitForStatus(run.feature, "usage-run", "awaiting_approval");
   assert.deepEqual((await run.feature.queries.getRun("usage-run"))?.usage, { inputTokens: 3, totalTokens: 3 });
-  await run.feature.commands.decideApproval(approvalDecision(firstRequest));
+  await run.feature.commands.decideApproval(approvalDecision("usage-run", firstRequest));
   await waitForApprovalRequest(run.feature, "usage-run", secondRequest.confirmationId);
   assert.deepEqual((await run.feature.queries.getRun("usage-run"))?.usage, { inputTokens: 7, totalTokens: 7 });
-  await run.feature.commands.decideApproval(approvalDecision(secondRequest));
+  await run.feature.commands.decideApproval(approvalDecision("usage-run", secondRequest));
   const completed = await waitForStatus(run.feature, "usage-run", "completed");
   assert.deepEqual(completed.usage, { inputTokens: 11, outputTokens: 2, totalTokens: 13 });
 });
@@ -1055,7 +1064,7 @@ function confirmation(runId: string): ConfirmationRequest {
 function confirmationWithId(runId: string, confirmationId: string): ConfirmationRequest {
   return {
     confirmationId,
-    runId,
+    toolCallFactId: `${runId}:${confirmationId}:tool-fact`,
     title: "Confirm command",
     actionSummary: "Run a command",
     affectedResources: ["workspace"],
@@ -1066,10 +1075,10 @@ function confirmationWithId(runId: string, confirmationId: string): Confirmation
   };
 }
 
-function approvalDecision(request: ConfirmationRequest) {
+function approvalDecision(ownerRunId: string, request: ConfirmationRequest) {
   return {
     confirmationId: request.confirmationId,
-    runId: request.runId,
+    ownerRunId,
     decision: "approve_once" as const,
     decidedAt: "2026-01-01T00:00:10.000Z",
   };
@@ -1083,14 +1092,43 @@ function approvalOutcome(
   return {
     status: "approval_required",
     canonicalMessages: [{ role: "user", content: "hello" }],
-    toolCalls: [],
+    toolCalls: [approvalToolResult(request)],
     usage,
     confirmationRequests: [request],
     continuation: {
       availability: "live_only",
-      async decide() { return decide(); },
+      async decide() {
+        const outcome = await decide();
+        return {
+          ...outcome,
+          toolCalls: [resolvedApprovalToolResult(request), ...outcome.toolCalls],
+        };
+      },
       async release() { return undefined; },
     },
+  };
+}
+
+function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
+  return {
+    callId: request.toolCallFactId,
+    toolName: "shell_command",
+    input: { command: "write" },
+    output: undefined,
+    status: "approval_required",
+    durationMs: 0,
+    confirmationRequest: request,
+  };
+}
+
+function resolvedApprovalToolResult(request: ConfirmationRequest): ToolCallResult {
+  return {
+    callId: request.toolCallFactId,
+    toolName: "shell_command",
+    input: { command: "write" },
+    output: { approved: true },
+    status: "completed",
+    durationMs: 1,
   };
 }
 

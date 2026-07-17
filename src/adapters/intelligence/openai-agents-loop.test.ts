@@ -1105,6 +1105,7 @@ test("tool approval pauses before execution and approve resumes the exact call o
       if (paused.status !== "approval_required") return;
       const confirmation = paused.confirmationRequests[0];
       assert.equal(confirmation?.confirmationId, "confirmation-call-approved");
+      assert.equal(confirmation?.toolCallFactId, "call-approved");
       const resumed = await paused.continuation.decide({
         decision: decision(confirmation!.confirmationId, "approve_once"),
         abortSignal: new AbortController().signal,
@@ -1640,7 +1641,7 @@ class TestGateway implements ToolExecutionGateway {
           durationMs: 0,
           confirmationRequest: {
             confirmationId: `confirmation-${request.callId}`,
-            runId: request.callId,
+            toolCallFactId: request.factId ?? request.callId,
             title: "Confirm write",
             actionSummary: "Write the requested fact.",
             affectedResources: ["test-resource"],
@@ -1743,7 +1744,6 @@ function decision(
 ): ConfirmationDecision {
   return {
     confirmationId,
-    runId: confirmationId.replace(/^confirmation-/u, ""),
     decision: kind,
     decidedAt: "2026-07-15T00:00:01.000Z",
     guidance,

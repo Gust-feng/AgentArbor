@@ -176,13 +176,13 @@ function fallbackConfirmationRequest(pendingApproval: ToolUseLoopPendingApproval
   const request = pendingApproval.pendingToolCall;
   return {
     confirmationId: pendingApproval.confirmationId,
-    runId: request.callId,
+    toolCallFactId: request.factId ?? request.callId,
     title: toolDisplayName(request.toolName),
     actionSummary: toolDisplayName(request.toolName),
     affectedResources: [],
     riskLevel: "medium",
     requestedAt: new Date().toISOString(),
-    sourceRefs: [`tool:${request.callId}`],
+    sourceRefs: [`tool:${request.factId ?? request.callId}`],
   };
 }
 

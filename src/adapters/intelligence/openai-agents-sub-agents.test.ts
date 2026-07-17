@@ -242,7 +242,7 @@ test("a nested ToolCenter approval pauses the root and resumes the exact child c
 
     const resumedController = new AbortController();
     const resumed = await paused.continuation.decide({
-      decision: approve(confirmation.confirmationId, confirmation.runId),
+      decision: approve(confirmation.confirmationId),
       abortSignal: resumedController.signal,
     });
     assert.equal(resumed.status, "completed", resumed.status === "failed" ? resumed.error : undefined);
@@ -282,7 +282,6 @@ test("nested guidance rejects the child side effect and lets child and parent ag
     const resumed = await paused.continuation.decide({
       decision: {
         confirmationId: confirmation.confirmationId,
-        runId: confirmation.runId,
         decision: "guidance",
         guidance: "use a read-only approach",
         decidedAt: "2026-07-15T00:00:01.000Z",
@@ -353,7 +352,7 @@ test("parallel nested agents surface multiple child confirmations and execute ev
     assert.equal(maxChildInitialActive, 2);
     assert.equal(paused.confirmationRequests.length, 2);
     const decisions = paused.confirmationRequests.map((request): ConfirmationDecision =>
-      approve(request.confirmationId, request.runId));
+      approve(request.confirmationId));
     const resumed = await paused.continuation.decide({
       decisions,
       abortSignal: new AbortController().signal,
@@ -571,7 +570,7 @@ class RecordingGateway implements ToolExecutionGateway {
           durationMs: 0,
           confirmationRequest: {
             confirmationId: `confirmation-${toolCallFactId(request)}`,
-            runId: toolCallFactId(request),
+            toolCallFactId: toolCallFactId(request),
             title: "Confirm nested write",
             actionSummary: "Write one delegated fact.",
             affectedResources: ["nested-resource"],
@@ -671,10 +670,9 @@ function gatedTool(name: string): ToolDefinition {
   };
 }
 
-function approve(confirmationId: string, runId: string): ConfirmationDecision {
+function approve(confirmationId: string): ConfirmationDecision {
   return {
     confirmationId,
-    runId,
     decision: "approve_once",
     decidedAt: "2026-07-15T00:00:01.000Z",
   };

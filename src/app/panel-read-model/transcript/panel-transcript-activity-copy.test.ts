@@ -98,7 +98,8 @@ test("confirmation copy presents concrete confirmation action", () => {
     summary: "删除文件：Z:\\AgentArbor\\tmp.txt",
     confirmation: {
       confirmationId: "confirmation-1",
-      runId: "run-1",
+      ownerRunId: "run-1",
+      toolCallFactId: "tool-fact-1",
       title: "需要你判断",
       actionSummary: "删除文件：Z:\\AgentArbor\\tmp.txt",
       affectedResources: [],
@@ -907,7 +908,8 @@ test("display activity items show a pending command approval once with the concr
       summary: "执行 Shell：pnpm test",
       confirmation: {
         confirmationId: "confirmation-tool-1",
-        runId: "run-1",
+        ownerRunId: "run-1",
+        toolCallFactId: "tool-fact-1",
         title: "执行 Shell",
         actionSummary: "执行 Shell：pnpm test",
         affectedResources: [],

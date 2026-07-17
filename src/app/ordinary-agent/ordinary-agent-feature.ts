@@ -3,6 +3,7 @@ import type { ModelMessage } from "../../domain/intelligence/index.js";
 import { toolCallFactId, type ToolCallResult } from "../../domain/tools/index.js";
 import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import type {
+  DecideOrdinaryApprovalInput,
   OrdinaryAgentFeature,
   OrdinaryConversationControlDocument,
   OrdinaryConversationControlRepository,
@@ -766,38 +767,45 @@ export function createOrdinaryAgentFeature(input: {
     return cancellation.state;
   }
 
-  async function decideApproval(decision: ConfirmationDecision): Promise<OrdinaryRunState> {
+  async function decideApproval(input: DecideOrdinaryApprovalInput): Promise<OrdinaryRunState> {
     assertLive();
     await readyPromise;
+    const ownerRunId = input.ownerRunId;
+    const decision: ConfirmationDecision = {
+      confirmationId: input.confirmationId,
+      decision: input.decision,
+      decidedAt: input.decidedAt,
+      ...(input.guidance === undefined ? {} : { guidance: input.guidance }),
+    };
     const controller = new AbortController();
     let continuation: OrdinaryExecutionContinuation | undefined;
-    const reserved = await enqueue(decision.runId, async () => {
-      if (approvalReservations.has(decision.runId)) {
+    const reserved = await enqueue(ownerRunId, async () => {
+      if (approvalReservations.has(ownerRunId)) {
         throw new OrdinaryFeatureError(
           "ordinary_confirmation_in_progress",
-          `A confirmation decision is already in progress for Ordinary run ${decision.runId}`,
+          `A confirmation decision is already in progress for Ordinary run ${ownerRunId}`,
         );
       }
-      const document = await load(decision.runId);
+      const document = await load(ownerRunId);
       if (document === undefined) {
-        throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${decision.runId} was not found`);
+        throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${ownerRunId} was not found`);
       }
       if (document.state.status.kind !== "awaiting_approval") {
         throw new OrdinaryFeatureError(
           "ordinary_run_state_conflict",
-          `Ordinary run ${decision.runId} is not awaiting approval`,
+          `Ordinary run ${ownerRunId} is not awaiting approval`,
         );
       }
       if (!document.state.status.confirmationRequests.some((request) => request.confirmationId === decision.confirmationId)) {
         throw new OrdinaryFeatureError(
           "ordinary_confirmation_not_found",
-          `Confirmation ${decision.confirmationId} does not belong to Ordinary run ${decision.runId}`,
+          `Confirmation ${decision.confirmationId} does not belong to Ordinary run ${ownerRunId}`,
         );
       }
-      continuation = continuations.get(decision.runId);
+      continuation = continuations.get(ownerRunId);
       if (continuation === undefined) {
         const closed = closeLostApprovalFacts(document.state);
-        return commitTransition(decision.runId, {
+        return commitTransition(ownerRunId, {
           type: "block",
           reason: {
             code: "confirmation_continuation_lost",
@@ -808,45 +816,45 @@ export function createOrdinaryAgentFeature(input: {
           toolCalls: closed.toolCalls,
         });
       }
-      approvalReservations.set(decision.runId, decision.confirmationId);
-      continuations.delete(decision.runId);
-      controllers.set(decision.runId, controller);
+      approvalReservations.set(ownerRunId, decision.confirmationId);
+      continuations.delete(ownerRunId);
+      controllers.set(ownerRunId, controller);
       try {
-        return await commitTransition(decision.runId, { type: "approval_decided", decision });
+        return await commitTransition(ownerRunId, { type: "approval_decided", decision });
       } catch (error) {
-        approvalReservations.delete(decision.runId);
-        controllers.delete(decision.runId);
-        continuations.set(decision.runId, continuation);
+        approvalReservations.delete(ownerRunId);
+        controllers.delete(ownerRunId);
+        continuations.set(ownerRunId, continuation);
         throw error;
       }
     });
     if (continuation === undefined) {
-      await activateSuccessor(decision.runId);
+      await activateSuccessor(ownerRunId);
       return reserved;
     }
     const operation = (async () => {
       try {
-        recordModelRequest(decision.runId, "after_approval");
-        await applyOutcome(decision.runId, await continuation!.decide({ decision, abortSignal: controller.signal }));
+        recordModelRequest(ownerRunId, "after_approval");
+        await applyOutcome(ownerRunId, await continuation!.decide({ decision, abortSignal: controller.signal }));
       } catch (error) {
-        const latest = await load(decision.runId);
+        const latest = await load(ownerRunId);
         if (latest !== undefined && !isTerminal(latest.state)) {
-          await mutate(decision.runId, {
+          await mutate(ownerRunId, {
             type: controller.signal.aborted ? "cancel" : "fail",
             ...(controller.signal.aborted
               ? { reason: cancellationReason(controller.signal.reason) }
               : { error: ordinaryExecutionFailureFacts(error) }),
           } as OrdinaryRunTransition, { keepTerminal: controller.signal.aborted });
-          await activateSuccessor(decision.runId);
+          await activateSuccessor(ownerRunId);
         }
       } finally {
-        if (controllers.get(decision.runId) === controller) controllers.delete(decision.runId);
-        if (approvalReservations.get(decision.runId) === decision.confirmationId) {
-          approvalReservations.delete(decision.runId);
+        if (controllers.get(ownerRunId) === controller) controllers.delete(ownerRunId);
+        if (approvalReservations.get(ownerRunId) === decision.confirmationId) {
+          approvalReservations.delete(ownerRunId);
         }
       }
     })();
-    track(decision.runId, operation);
+    track(ownerRunId, operation);
     return reserved;
   }
 

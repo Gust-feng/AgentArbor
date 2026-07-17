@@ -92,6 +92,8 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 - `cancelled/cancelled`：用户或系统中止。
 - `failed/model_failed`：provider 失败或响应不可用。
 
+provider 失败、404、超时或流式连接断开会永久结束当前模型调用。Ordinary 不在已发布增量或已执行工具事实的原 provider continuation 上自动重试，也不把新请求伪装成旧流恢复。用户只能在同一 conversation 追加一条新消息形成新 run，或回退到先前用户轮次后创建新 lineage；新 run 从上一条可见 lineage 已持久化的 canonical 事实开始。
+
 普通 Agent 不应使用 `maxModelRounds` 或 `maxToolRounds` 作为正常运行边界。默认 Desktop Agent 的 `AgentDefinition.turnPolicy` 不得携带模型轮次或工具轮次上限；旧结构化路径、测试桩或专用 agent 可以有显式预算，但这些预算不能流入默认普通 Desktop Agent 的产品主线。若底层自主 loop 仍接收到显式保护阀，它只能作为异常防护并返回未完成的 paused / blocked 结果，不能合成 completed、不能成为普通验收路径、常规暂停 UX 或模型能力上限。
 
 普通 Agent 的输出预算应来自模型能力解析结果或用户显式配置。模型能力解析必须先按用户选择的协议得到基线能力，再叠加内置模型目录和用户 override；没有命中内置模型目录时只能使用协议基线的保守窗口与输出上限，不能把自定义 OpenAI-compatible / Responses 模型降级为“不支持工具”的未知类型。长回答、报告、代码解释和多步结果应由模型能力、上下文窗口、用户要求和运行边界共同决定。
@@ -129,9 +131,13 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 
 ## 持久化与恢复
 
-会话与运行持久化由 `OrdinaryAgentFeature` 自己负责。它只从上一条可见 lineage 的 `ordinary-run/v2` snapshot 读取 `canonicalMessages`，并把本轮用户消息、assistant 输出和工具事实按真实顺序追加；Panel、旧 RuntimeDatabase 和 UI read-model 都不是恢复来源。
+会话与运行持久化由 `OrdinaryAgentFeature` 自己负责。它只从上一条可见 lineage 的 `ordinary-run/v3` snapshot 读取 `canonicalMessages`，并把本轮用户消息、assistant 输出和工具事实按真实顺序追加；Panel、旧 RuntimeDatabase 和 UI read-model 都不是恢复来源。
 
 `canonicalMessages` 只属于 Ordinary 内部恢复与持久化边界，不进入公开 conversation API 或 SSE；展示层消费单向 read-model，不能因模型恢复需要而把系统提示或 provider continuation 暴露成产品响应，也不能用展示摘要覆盖模型仍可使用的工具正文。
+
+能够完整内联的工具事实直接保存在 `ordinary-run/v3`。超过内联边界的完整正文、结构化 JSON 或失败证据写入 Host-owned `runtime/tool-evidence/`，run snapshot 只保存预览、稳定 `tool-output://` 引用、字符数、byte length、SHA-256 与 continuation 输入。该引用跨进程可读；完整读取不会删除审计证据，删除所属 conversation 时才由 Ordinary 按 run owner 回收。
+
+Ordinary SSE 只是实时观察通道，不拥有运行事实。相邻文本增量可以短窗口合并；Node 写缓冲区返回背压信号时必须等待 `drain`，积压超过本地连接上限时只关闭该观察连接，不取消 Agent。前端随后通过 cursor、run view 和持久化终态对账，不要求逐 token 重放。
 
 普通会话必须是长期可恢复时间线：今天、明天或一年后继续同一 conversation，都应从数据库恢复运行历史、当前分支和可见状态。用户可以回退到上一轮、前四轮或前五轮对话；回退生成新的当前分支或显式截断当前分支，但不能破坏原始审计记录。
 

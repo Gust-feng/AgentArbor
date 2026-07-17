@@ -2,7 +2,7 @@
 
 本目录约束 AgentArbor 默认普通 `agent` 的长期开发方向。目标不是继续堆能力，而是先把当前默认普通 Agent 做成一个可长期演进的高质量主干：单一主循环清楚、Agent 定义清楚、工具暴露与执行边界清楚、前后端职责清楚、用户可见语义朴素稳定。
 
-当前生产链固定为 `request-handler -> ordinary-routes -> OrdinaryAgentFeature -> OpenAI Agents SDK adapter -> ToolCenter`。`OrdinaryAgentFeature` 独占 command/query/event、`ordinary-run/v2`、`canonicalMessages` 和单向 read-model；旧 BasicAgent、Desktop session、Panel run job 与 `MinimalRuntime` 不再是实现入口。
+当前生产链固定为 `request-handler -> ordinary-routes -> OrdinaryAgentFeature -> OpenAI Agents SDK adapter -> ToolCenter`。`OrdinaryAgentFeature` 独占 command/query/event、`ordinary-run/v3`、`canonicalMessages` 和单向 read-model；旧 BasicAgent、Desktop session、Panel run job 与 `MinimalRuntime` 不再是实现入口。
 
 后续多 Agent、deep、Plan、Aboveground 和长期能力建设，都必须建立在这条普通 Agent 主干之上，而不是反向污染它。
 

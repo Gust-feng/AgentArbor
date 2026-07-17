@@ -8,7 +8,7 @@ AgentArbor 是一个面向本地工作区的桌面通用 Agent 项目。它把�
 
 - 默认入口：`Desktop Shell / Panel`
 - 默认模式：`agent`
-- 默认主线：`用户消息 -> OrdinaryAgentFeature -> OpenAI Agents SDK -> ToolCenter/命令确认 -> ordinary-run/v2 -> 结果投影`
+- 默认主线：`用户消息 -> OrdinaryAgentFeature -> OpenAI Agents SDK -> ToolCenter/命令确认 -> ordinary-run/v3 -> 结果投影`
 - 目标产品边界：Multi-Agent 是 Workbench 内的显式“深入协作”功能
 - 当前过渡实现：设置启用后仍从侧栏 `Agent 集群` 进入，后端仍使用 `/api/deep/*` 和独立数据分区
 - 默认请求不会自动升级为 deep

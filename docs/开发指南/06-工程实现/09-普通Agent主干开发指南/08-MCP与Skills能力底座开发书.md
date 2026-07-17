@@ -10,7 +10,7 @@ Capability snapshot
   -> Ordinary run resources
   -> AgentLoop
   -> ToolCenter gateway + SDK AgentTool
-  -> ordinary-run/v2 facts
+  -> ordinary-run/v3 facts
 ```
 
 - 能力在 run 创建时冻结；运行中配置变化只影响新 run。

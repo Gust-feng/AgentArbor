@@ -17,7 +17,7 @@ Desktop Shell / Panel
   -> neutral AgentLoop
   -> OpenAI Agents SDK adapter
   -> ToolCenter / Confirmation
-  -> ordinary-run/v2 canonical facts
+  -> ordinary-run/v3 canonical facts
   -> one-way read-model
 ```
 
@@ -29,7 +29,7 @@ Ordinary 的正式模型-工具循环由 OpenAI Agents SDK 承担。`AgentTurnRu
 - `ordinary routes` 只解析 HTTP/SSE 请求并调用 feature command/query，不推导完成语义，不重建模型历史。
 - `AgentLoop` 只负责机械性的模型-工具-模型执行、流式文本、取消和 live confirmation continuation；业务完成、持久化与恢复由 Ordinary 决定。
 - `ToolCenter` 负责工具执行、权限和命令确认，返回中性 `ToolCallResult`；它不拥有 Ordinary 状态或跨 feature 事件。
-- Ordinary 使用 `ordinary-run/v2` 原子文件快照和独立的 `ordinary-conversation/v1` 控制文档。它不与 Multi-Agent 共享业务仓储。
+- Ordinary 使用 `ordinary-run/v3` 原子文件快照和独立的 `ordinary-conversation/v1` 控制文档。它不与 Multi-Agent 共享业务仓储。
 
 ## 基础能力优先
 

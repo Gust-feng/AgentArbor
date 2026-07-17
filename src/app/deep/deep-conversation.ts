@@ -143,6 +143,7 @@ export type CreateDeepConversationInput = {
   readonly title?: string;
   readonly goal: string;
   readonly birthWorkspaceDirectory?: string;
+  readonly workspaceSelection?: "default" | "explicit";
   readonly taskSoilInput?: DesktopTaskSoilInput;
 };
 
@@ -205,6 +206,8 @@ export function createDeepConversationService(options: {
         title: deriveTitle(input.title, goal),
         goal,
         birthWorkspaceDirectory: emptyToUndefined(input.birthWorkspaceDirectory),
+        workspaceSelection: input.workspaceSelection ??
+          (emptyToUndefined(input.birthWorkspaceDirectory) === undefined ? "default" : "explicit"),
         isolation: createDeepConversationIsolationMark(),
         taskSoilInput: validatedTaskSoilInput,
         permissionBoundaryRefs: validatedTaskSoilInput.permissionBoundaryRefs ?? [],

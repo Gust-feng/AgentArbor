@@ -124,6 +124,17 @@ export type TranscriptToolDisplayLike =
       readonly truncated?: boolean;
     }
   | {
+      readonly kind: "file_change_group";
+      readonly files: readonly {
+        readonly path: string;
+        readonly operation?: "create" | "write" | "append" | "edit" | "delete";
+        readonly preview?: string;
+        readonly replacements?: number;
+        readonly truncated?: boolean;
+      }[];
+      readonly truncated?: boolean;
+    }
+  | {
       readonly kind: "command_summary";
       readonly command?: string;
       readonly args?: readonly string[];
@@ -148,6 +159,8 @@ export type TranscriptToolDisplayLike =
       readonly stderrOmittedChars?: number;
       readonly outputSummary?: string;
       readonly errorSummary?: string;
+      readonly stdoutPreview?: string;
+      readonly stderrPreview?: string;
     }
   | {
       readonly kind: "generic_tool_summary";
@@ -434,7 +447,9 @@ function isBoringSuccessfulToolResult(node: ProjectableTranscriptNode): boolean 
       display.stdoutTruncated !== true &&
       display.stderrTruncated !== true &&
       display.outputSummary === undefined &&
-      display.errorSummary === undefined;
+      display.errorSummary === undefined &&
+      display.stdoutPreview === undefined &&
+      display.stderrPreview === undefined;
   }
   return false;
 }

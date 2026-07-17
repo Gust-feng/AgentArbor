@@ -79,6 +79,38 @@ test("normalizeToolDisplayForOperation uses the canonical diff fact for custom f
   assert.equal(display.kind === "file_diff_preview" ? display.preview : undefined, "@@ line 1\n- old\n+ new");
 });
 
+test("normalizeToolDisplayForOperation keeps one multi-file tool call as a file change group", () => {
+  const display = normalizeToolDisplayForOperation({
+    toolName: "workspace_patch",
+    output: {
+      files: [
+        {
+          path: "src/app.ts",
+          operation: "edit",
+          replacements: 1,
+          diff: {
+            status: "available",
+            unifiedDiff: "@@ -1 +1 @@\n-old app\n+new app",
+          },
+        },
+        {
+          path: "src/app.test.ts",
+          operation: "create",
+          preview: "+ test('app', () => true);",
+        },
+      ],
+    },
+  });
+
+  assert.equal(display.kind, "file_change_group");
+  assert.deepEqual(display.kind === "file_change_group" ? display.files.map((file) => file.path) : [], [
+    "src/app.ts",
+    "src/app.test.ts",
+  ]);
+  assert.equal(display.kind === "file_change_group" ? display.files[0]?.preview?.includes("+new app") : false, true);
+  assert.equal(display.kind === "file_change_group" ? display.files[1]?.operation : undefined, "create");
+});
+
 test("normalizeToolDisplayForOperation derives write_file display without output display", () => {
   const display = normalizeToolDisplayForOperation({
     toolName: "write_file",

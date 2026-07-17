@@ -18,6 +18,10 @@ import {
 import { compactSafeText, redactOrdinaryText } from "./tool-projection-text.js";
 
 const SEARCH_DISPLAY_RESULTS_LIMIT = 20;
+const CONTENT_DETAIL_PREVIEW_LIMIT = 12_000;
+const COMMAND_STDOUT_PREVIEW_LIMIT = 16_000;
+const COMMAND_STDERR_PREVIEW_LIMIT = 8_000;
+
 export function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
   const record = asRecord(output);
   if (request.toolName === "search" && Array.isArray(record.results)) {
@@ -55,7 +59,7 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       url: stringOrUndefined(record.uri),
       uri: stringOrUndefined(record.uri),
       sourceSearchRef: stringOrUndefined(record.sourceSearchRef),
-      contentPreview: compactSafeText(stringOrUndefined(record.contentPreview), 1_200),
+      contentPreview: compactSafeText(stringOrUndefined(record.contentPreview), CONTENT_DETAIL_PREVIEW_LIMIT),
       error,
       errorFacts,
       truncated: record.truncated === true,
@@ -70,7 +74,10 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       title: stringOrUndefined(record.title) ?? stringOrUndefined(record.path),
       url: stringOrUndefined(record.url),
       uri: stringOrUndefined(record.uri),
-      contentPreview: compactSafeText(stringOrUndefined(record.content) ?? stringOrUndefined(record.text), 1_200),
+      contentPreview: compactSafeText(
+        stringOrUndefined(record.content) ?? stringOrUndefined(record.text),
+        CONTENT_DETAIL_PREVIEW_LIMIT,
+      ),
       truncated: record.truncated === true,
     };
   }
@@ -79,7 +86,7 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       kind: "browser_snapshot",
       title: stringOrUndefined(record.title),
       url: stringOrUndefined(record.url),
-      text: compactSafeText(stringOrUndefined(record.text), 900),
+      text: compactSafeText(stringOrUndefined(record.text), CONTENT_DETAIL_PREVIEW_LIMIT),
       truncated: record.truncated === true,
     };
   }
@@ -91,7 +98,7 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       statusCode: numberOrUndefined(record.statusCode),
       statusText: stringOrUndefined(record.statusText),
       durationMs: numberOrUndefined(record.durationMs),
-      bodyPreview: compactSafeText(stringOrUndefined(record.body), 900),
+      bodyPreview: compactSafeText(stringOrUndefined(record.body), CONTENT_DETAIL_PREVIEW_LIMIT),
       truncated: record.truncated === true,
     };
   }
@@ -132,6 +139,8 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       stderrOmittedChars: numberOrUndefined(record.stderrOmittedChars),
       outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
       errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
+      stdoutPreview: compactSafeText(stdout, COMMAND_STDOUT_PREVIEW_LIMIT),
+      stderrPreview: compactSafeText(stderr, COMMAND_STDERR_PREVIEW_LIMIT),
     };
   }
   return normalizeToolDisplayForOperation({

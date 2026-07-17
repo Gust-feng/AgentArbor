@@ -14,11 +14,64 @@ export function normalizeToolDisplayForOperation(input: ToolDisplayNormalization
   if (structuredDisplay !== undefined) {
     return structuredDisplay;
   }
+  const fileGroupDisplay = fileChangeGroupDisplayForOperation(input);
+  if (fileGroupDisplay !== undefined) {
+    return fileGroupDisplay;
+  }
   const fileDisplay = fileToolDisplayForOperation(input);
   if (fileDisplay !== undefined) {
     return fileDisplay;
   }
   return genericToolDisplayForOperation(input);
+}
+
+function fileChangeGroupDisplayForOperation(
+  input: ToolDisplayNormalizationInput,
+): Extract<ToolDisplayProjection, { readonly kind: "file_change_group" }> | undefined {
+  const output = asRecord(input.output);
+  const candidates = Array.isArray(output.files)
+    ? output.files
+    : Array.isArray(output.changes)
+      ? output.changes
+      : undefined;
+  if (candidates === undefined || candidates.length < 2) {
+    return undefined;
+  }
+  const files = candidates
+    .map(fileChangeGroupItem)
+    .filter((item): item is NonNullable<ReturnType<typeof fileChangeGroupItem>> => item !== undefined);
+  if (files.length < 2) {
+    return undefined;
+  }
+  return {
+    kind: "file_change_group",
+    files,
+    truncated: booleanOrUndefined(output.truncated) ??
+      (input.truncated === true || files.some((file) => file.truncated === true) ? true : undefined),
+  };
+}
+
+function fileChangeGroupItem(value: unknown): {
+  readonly path: string;
+  readonly operation?: ToolFileDisplayOperation;
+  readonly preview?: string;
+  readonly replacements?: number;
+  readonly truncated?: boolean;
+} | undefined {
+  const item = asRecord(value);
+  const path = stringOrUndefined(item.path);
+  if (path === undefined) {
+    return undefined;
+  }
+  const canonicalDiff = canonicalEditFileDiffPreview(item.diff);
+  const preview = canonicalDiff ?? compactDiffPreview(stringOrUndefined(item.preview));
+  return {
+    path,
+    operation: fileDisplayOperationOrUndefined(item.operation) ?? (canonicalDiff === undefined ? undefined : "edit"),
+    preview: preview?.text,
+    replacements: numberOrUndefined(item.replacements),
+    truncated: booleanOrUndefined(item.truncated) ?? (preview?.truncated === true ? true : undefined),
+  };
 }
 
 function structuredToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection | undefined {
@@ -259,6 +312,10 @@ function canonicalEditFileDiffPreview(value: unknown): FilePreviewResult | undef
   }
   const unifiedDiff = stringOrUndefined(diff.unifiedDiff);
   return unifiedDiff === undefined ? undefined : compactDiffText(unifiedDiff, 2_400);
+}
+
+function compactDiffPreview(value: string | undefined): FilePreviewResult | undefined {
+  return value === undefined ? undefined : compactDiffText(value, 2_400);
 }
 
 function boundedDiffPreview(value: string, marker: "+" | "-", fallbackLabel: string): FilePreviewResult | undefined {

@@ -7,7 +7,7 @@ import {
   visibleTranscriptNodes,
 } from "./panel-transcript-node-projection.js";
 
-test("activity projection preserves visible thinking even when the text looks like a progress placeholder", () => {
+test("activity projection keeps raw model activity available to the lower-level projection", () => {
   const projected = activityVisibleNodes([
     node({ nodeId: "thinking", kind: "thinking", sequence: 1, summary: "正在判断下一步。" }),
     node({ nodeId: "system", kind: "system", sequence: 2, summary: "正在判断下一步。" }),
@@ -42,7 +42,7 @@ test("timeline projection keeps runtime model activity through the live-to-settl
   assert.deepEqual(settled.map((item) => item.nodeId), ["thinking-settled", "side-settled"]);
 });
 
-test("activity projection deduplicates semantically repeated thinking while keeping the earlier position", () => {
+test("activity projection deduplicates raw model activity while keeping the earlier position", () => {
   const projected = activityVisibleNodes([
     node({
       nodeId: "thinking-live",
@@ -89,7 +89,7 @@ test("activity projection deduplicates semantically repeated thinking while keep
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-live", "body-1", "tool-1"]);
 });
 
-test("activity projection deduplicates exact repeated model activity even when model refs differ", () => {
+test("activity projection deduplicates exact raw model activity even when model refs differ", () => {
   const projected = activityVisibleNodes([
     node({
       nodeId: "thinking-live",
@@ -122,7 +122,7 @@ test("activity projection deduplicates exact repeated model activity even when m
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-live", "body-1"]);
 });
 
-test("activity projection deduplicates repeated model activity across thinking and narration", () => {
+test("activity projection deduplicates repeated raw model activity across thinking and narration", () => {
   const projected = activityVisibleNodes([
     node({
       nodeId: "thinking-1",

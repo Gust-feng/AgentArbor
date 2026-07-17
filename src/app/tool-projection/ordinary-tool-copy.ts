@@ -1,6 +1,7 @@
 export function cleanOrdinaryToolText(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   const cleaned = value
+    .replace(/^(?:目标文件|目标|运行命令|执行命令|执行\s*Shell|命令|浏览网页|页面|搜索文件|搜索|查询|读取文件|浏览目录|编辑文件|写入文件|创建文件|删除文件)(?:未完成|已完成|完成|进行中)\s*[:：]\s*(.+?)(?:[。.]?)$/iu, "$1")
     .replace(/^(?:目标文件|目标|运行命令|执行命令|执行\s*Shell|命令|浏览网页|页面|搜索文件|搜索|查询|读取文件|浏览目录|编辑文件|写入文件|创建文件|删除文件|路径|文件)[:：]\s*/iu, "")
     .replace(/\s*·\s*exit\s+-?\d+\b/gi, "")
     .replace(/\bexit\s+-?\d+\b/gi, "")

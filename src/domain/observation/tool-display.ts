@@ -113,6 +113,18 @@ export type ToolDisplayProjection =
       readonly truncated?: boolean;
     }
   | {
+      /** One tool execution that changed several files. It remains one activity in the transcript. */
+      readonly kind: "file_change_group";
+      readonly files: readonly {
+        readonly path: string;
+        readonly operation?: ToolFileDisplayOperation;
+        readonly preview?: string;
+        readonly replacements?: number;
+        readonly truncated?: boolean;
+      }[];
+      readonly truncated?: boolean;
+    }
+  | {
       readonly kind: "command_summary";
       readonly command?: string;
       readonly args?: readonly string[];
@@ -137,6 +149,8 @@ export type ToolDisplayProjection =
       readonly stderrOmittedChars?: number;
       readonly outputSummary?: string;
       readonly errorSummary?: string;
+      readonly stdoutPreview?: string;
+      readonly stderrPreview?: string;
     }
   | {
       readonly kind: "generic_tool_summary";

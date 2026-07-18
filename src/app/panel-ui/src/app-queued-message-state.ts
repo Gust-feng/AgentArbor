@@ -11,7 +11,6 @@ export type AppQueuedMessageState = {
   readonly enqueueMessage: (content: string) => void;
   readonly removeQueuedMessage: (id: string) => void;
   readonly updateQueuedMessage: (id: string, content: string) => void;
-  readonly clearQueuedMessages: () => void;
 };
 
 export type AppQueuedMessageStateOptions = {
@@ -86,11 +85,6 @@ export function useAppQueuedMessages(
     );
   }, []);
 
-  const clearQueuedMessages = useCallback(() => {
-    dispatchedQueueAfterRunRef.current = undefined;
-    setQueuedMessages([]);
-  }, []);
-
   useEffect(() => {
     const decision = queuedMessageDispatchDecision({
       busy: options.busy,
@@ -99,7 +93,7 @@ export function useAppQueuedMessages(
       dispatchedAfterRunId: dispatchedQueueAfterRunRef.current,
     });
     if (decision.kind !== "dispatch") return;
-    // A completed run may remain visible across several renders. Bind one
+    // A settled run may remain visible across several renders. Bind one
     // dispatch to that run id so StrictMode and unrelated renders cannot send
     // the same or subsequent queued message early.
     dispatchedQueueAfterRunRef.current = decision.sourceRunId;
@@ -117,10 +111,11 @@ export function useAppQueuedMessages(
     enqueueMessage,
     removeQueuedMessage,
     updateQueuedMessage,
-    clearQueuedMessages,
   };
 }
 
 function queuedMessageMayFollow(run: QueuedMessageDispatchRun): boolean {
-  return run.status === "completed" && !run.requiresUserAction;
+  return !run.requiresUserAction &&
+    (run.status === "completed" || run.status === "failed" ||
+      run.status === "cancelled" || run.status === "blocked");
 }

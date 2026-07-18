@@ -61,10 +61,10 @@ describe("live Ordinary run updates", () => {
     await flushPromises();
 
     const stream = runtimeMocks.streamInput as {
-      readonly onEvent: (event: RunEvent) => void;
+      readonly onEvent: (event: RunEvent, cursor: string) => void;
       readonly onHeartbeat: () => void;
     };
-    stream.onEvent(runEvent("tool.requested", 2));
+    stream.onEvent(runEvent("tool.requested", 2), "cursor-2");
     await flushPromises();
     runtimeMocks.safeBasicRunView.mockClear();
 
@@ -81,25 +81,108 @@ describe("live Ordinary run updates", () => {
     await flushPromises();
     expect(runtimeMocks.stream.close).toHaveBeenCalledTimes(1);
   });
+
+  it("reconciles from the cursor delivered with an append-only SSE event", async () => {
+    let state: AppState = {
+      ...createInitialAppState(),
+      conversation: { conversationId: "conversation-1" } as AppState["conversation"],
+    };
+    const controller = createLiveRunUpdateController({
+      setApp: ((next) => {
+        state = typeof next === "function" ? next(state) : next;
+      }) as React.Dispatch<React.SetStateAction<AppState>>,
+      mountedRef: { current: true },
+      pollTimer: { current: undefined },
+      streamRef: { current: undefined },
+      activeRunIdRef: { current: "run-1" },
+      viewEpochRef: { current: 1 },
+      refreshConversations: async () => undefined,
+    });
+
+    controller.startLiveUpdates({
+      runId: "run-1",
+      conversationId: "conversation-1",
+      epoch: 1,
+    });
+    await flushPromises();
+    runtimeMocks.safeBasicRunView.mockClear();
+
+    const stream = runtimeMocks.streamInput as {
+      readonly onEvent: (event: RunEvent, cursor: string) => void;
+    };
+    stream.onEvent(runEvent("model.output.delta", 5, "完整流式正文"), "cursor-5");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(4_000);
+    await flushPromises();
+
+    expect(runtimeMocks.safeBasicRunView).toHaveBeenCalledWith("run-1", "cursor-5");
+  });
+
+  it("ignores an in-flight bootstrap replay after SSE takes ownership", async () => {
+    let resolveBootstrap: ((view: BasicAgentRunView) => void) | undefined;
+    runtimeMocks.safeBasicRunView.mockImplementationOnce(() => new Promise<BasicAgentRunView>((resolve) => {
+      resolveBootstrap = resolve;
+    }));
+    let state: AppState = {
+      ...createInitialAppState(),
+      conversation: { conversationId: "conversation-1" } as AppState["conversation"],
+      run: { runId: "run-1", status: "running" } as AppState["run"],
+    };
+    const controller = createLiveRunUpdateController({
+      setApp: ((next) => {
+        state = typeof next === "function" ? next(state) : next;
+      }) as React.Dispatch<React.SetStateAction<AppState>>,
+      mountedRef: { current: true },
+      pollTimer: { current: undefined },
+      streamRef: { current: undefined },
+      activeRunIdRef: { current: "run-1" },
+      viewEpochRef: { current: 1 },
+      refreshConversations: async () => undefined,
+    });
+
+    controller.startLiveUpdates({
+      runId: "run-1",
+      conversationId: "conversation-1",
+      epoch: 1,
+    });
+    await flushPromises();
+    const stream = runtimeMocks.streamInput as {
+      readonly onEvent: (event: RunEvent, cursor: string) => void;
+    };
+    stream.onEvent(runEvent("model.output.delta", 5, "ABC"), "cursor-5");
+    stream.onEvent(runEvent("model.output.completed", 6), "cursor-6");
+    await flushPromises();
+    expect(state.live?.turns[0]?.output.text).toBe("ABC");
+
+    resolveBootstrap?.(runningView("cursor-5", [
+      runEvent("model.output.delta", 3, "A"),
+      runEvent("model.output.delta", 4, "B"),
+      runEvent("model.output.delta", 5, "C"),
+    ]));
+    await flushPromises();
+
+    expect(state.live?.turns[0]?.output.text).toBe("ABC");
+  });
 });
 
-function runningView(cursor: string): BasicAgentRunView {
+function runningView(cursor: string, events: readonly RunEvent[] = []): BasicAgentRunView {
   return {
     run: { runId: "run-1", status: "running" },
     replay: {
       reset: false,
-      events: [],
+      events,
       cursor: { token: cursor },
     },
   } as unknown as BasicAgentRunView;
 }
 
-function runEvent(type: string, sequence: number): RunEvent {
+function runEvent(type: string, sequence: number, delta?: string): RunEvent {
   return {
     id: `event-${sequence}`,
     runId: "run-1",
     sequence,
     type,
+    delta,
     title: "",
     status: "running",
     timestamp: "2026-01-01T00:00:00.000Z",
@@ -109,6 +192,7 @@ function runEvent(type: string, sequence: number): RunEvent {
 }
 
 async function flushPromises(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 8; index += 1) {
+    await Promise.resolve();
+  }
 }

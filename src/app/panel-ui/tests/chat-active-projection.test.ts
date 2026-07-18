@@ -67,6 +67,25 @@ test("active chat projection ignores stale live answer after a run settles", () 
   assert.equal(projection.liveAnswer, undefined);
 });
 
+test("active chat projection keeps already visible text after cancellation without staying active", () => {
+  const projection = projectChatActive({
+    conversation: {
+      turns: [
+        userTurn("user-1", "继续"),
+        { ...assistantTurn("assistant-1", "", "cancelled"), runId: "run-1" },
+      ],
+      latestRunId: "run-1",
+    },
+    run: run("run-1", "cancelled", 8),
+    transcriptNodes: [],
+    live: live("run-1", "取消前已经显示的正文"),
+  });
+
+  assert.equal(projection.running, false);
+  assert.equal(projection.liveAnswer?.text, "取消前已经显示的正文");
+  assert.equal(projection.statusNotice, undefined);
+});
+
 test("active chat projection prefers conversation run ownership over stale live buffers", () => {
   const projection = projectChatActive({
     conversation: {

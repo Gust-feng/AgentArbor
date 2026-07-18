@@ -126,8 +126,11 @@ export function createLiveRunUpdateController(
     let lastStreamSignalAt = Date.now();
     let liveRunSettled = false;
     let streamWork = Promise.resolve();
-    const refreshAfterEvent = async (event: RunEvent): Promise<void> => {
+    const refreshAfterEvent = async (event: RunEvent, cursor: OrdinaryRunCursor): Promise<void> => {
       if (!subscriptionIsCurrent(subscription)) return;
+      // The SSE id is the backend cursor for every activity included in the frame.
+      // Advance it before reconciliation so coalesced deltas are not replayed individually.
+      lastCursor = cursor;
       if (isLiveAppendOnlyEvent(event)) {
         if (subscriptionIsCurrent(subscription)) {
           appendOnlyBatcher.enqueue({ subscription, event });
@@ -226,6 +229,12 @@ export function createLiveRunUpdateController(
         inFlight = true;
         try {
           const runView = await fetchBasicRunView(runId, lastCursor);
+          // Once SSE has delivered any signal, its ordered stream owns live progress.
+          // An older bootstrap response may contain the same raw deltas that SSE
+          // already delivered as one coalesced frame, so applying it would duplicate text.
+          if (streamDeliveredEvent || !subscriptionIsCurrent(subscription)) {
+            return;
+          }
           lastCursor = runView.replay.cursor.token;
           await applyRunViewProjection(subscription, runView);
           if (runView.replay.events.length > 0 && !streamDeliveredEvent) {
@@ -263,9 +272,9 @@ export function createLiveRunUpdateController(
     const stream = openBasicRunStream({
       runId,
       cursor: subscription.cursor,
-      onEvent: (event) => {
+      onEvent: (event, cursor) => {
         noteStreamSignal();
-        enqueueStreamWork(() => refreshAfterEvent(event));
+        enqueueStreamWork(() => refreshAfterEvent(event, cursor));
       },
       onReset: (cursor) => {
         noteStreamSignal();

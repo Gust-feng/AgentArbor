@@ -220,7 +220,7 @@ function activeLiveForCurrentRun(
   if (run === undefined) {
     return live;
   }
-  return refreshingStatuses.has(run.status) ? live : undefined;
+  return refreshingStatuses.has(run.status) || run.status === "cancelled" ? live : undefined;
 }
 
 function shouldShowStatusNotice(

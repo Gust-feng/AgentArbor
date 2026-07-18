@@ -279,7 +279,7 @@ export function ChatActive(props: ChatInputProps & {
 
       <ChatInputBar
         {...guidanceInputProps}
-        running={view.running}
+        running={props.running ?? view.running}
         placeholder={guidanceInputProps.placeholder ?? "继续输入..."}
         variant="floating"
       />

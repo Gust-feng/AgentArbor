@@ -87,7 +87,7 @@ export function ordinaryWorkViewFromRunView(
 export function openBasicRunStream(input: {
   readonly runId: string;
   readonly cursor?: OrdinaryRunCursor;
-  readonly onEvent: (event: RunEvent) => void;
+  readonly onEvent: (event: RunEvent, cursor: OrdinaryRunCursor) => void;
   readonly onReset: (cursor: OrdinaryRunCursor) => void;
   readonly onHeartbeat?: () => void;
   readonly onError: () => void;
@@ -98,7 +98,8 @@ export function openBasicRunStream(input: {
   const stream = new EventSource(ordinaryRunResourceUrl(input.runId, "stream", input.cursor));
   const handle = (message: MessageEvent<string>): void => {
     try {
-      input.onEvent(JSON.parse(message.data) as RunEvent);
+      if (message.lastEventId.length === 0) throw new Error("Missing event cursor");
+      input.onEvent(JSON.parse(message.data) as RunEvent, message.lastEventId);
     } catch {
       input.onError();
     }

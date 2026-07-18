@@ -190,7 +190,6 @@ export function App(): React.ReactElement {
     enqueueMessage,
     removeQueuedMessage,
     updateQueuedMessage,
-    clearQueuedMessages,
   } = useAppQueuedMessages({
     busy: app.busy,
     currentRun: currentRun.run,
@@ -223,7 +222,6 @@ export function App(): React.ReactElement {
     submitDeepInput,
     enqueueMessage,
     startTask,
-    clearQueuedMessages,
     cancelRun,
     stopDeepTask,
     modelResponding,

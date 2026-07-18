@@ -1,6 +1,6 @@
 import type { AgentMode, ComposerToolConfirmationPolicy } from "./app-config-projection";
 import { isTerminalDeepRunStatus, shouldKeepDeepRunBusy } from "./app-deep-history";
-import type { ChatInputProps, ChatModelOption, QueuedChatMessage } from "./components/chat-empty";
+import type { ChatInputProps, ChatModelOption } from "./components/chat-empty";
 import type { ContextAttachment } from "./contracts/context";
 import type {
   DeepIntakeStatus,
@@ -36,7 +36,6 @@ export type WorkbenchInputPropsOptions = {
   readonly submitDeepInput: () => void | Promise<void>;
   readonly enqueueMessage: (content: string) => void;
   readonly startTask: (explicitGoal?: string) => void | Promise<void>;
-  readonly clearQueuedMessages: () => void;
   readonly cancelRun: () => void | Promise<void>;
   readonly stopDeepTask: () => void | Promise<void>;
   readonly modelResponding: boolean;
@@ -71,6 +70,7 @@ export function buildWorkbenchInputProps(
     onRemoveAttachment: options.removeAttachment,
     contextBusy: options.contextBusy,
     busy: options.busy,
+    running: options.modelResponding,
     models: options.models,
     selectedModelId: options.selectedModelId,
     contextUsage: options.contextUsage,
@@ -94,7 +94,6 @@ export function buildWorkbenchInputProps(
     },
     allowInputWhileBusy: true,
     onCancel: () => {
-      options.clearQueuedMessages();
       void options.cancelRun();
     },
   };

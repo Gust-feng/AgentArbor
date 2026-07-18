@@ -30,6 +30,21 @@ test("queued message dispatch waits while the current run is still active", () =
   }), { kind: "none" });
 });
 
+test("queued message dispatch follows a cancelled run", () => {
+  const message = queuedMessage("message-after-cancel", "use the updated requirement");
+
+  assert.deepEqual(queuedMessageDispatchDecision({
+    busy: false,
+    currentRun: run("run-cancelled", "cancelled"),
+    queuedMessages: [message],
+    dispatchedAfterRunId: undefined,
+  }), {
+    kind: "dispatch",
+    message,
+    sourceRunId: "run-cancelled",
+  });
+});
+
 test("queued message dispatch is one-shot for the same completed run", () => {
   assert.deepEqual(queuedMessageDispatchDecision({
     busy: false,

@@ -10,6 +10,7 @@ import type {
 import {
   filterOpenAIChatContinuationExtensions,
 } from "./openai-compatible-chat-protocol-extensions.js";
+import { normalizeOpenAICompatibleAgentOutput } from "./openai-reasoning-normalizer.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -84,23 +85,26 @@ function enrichResponse<T extends Pick<ModelResponse, "output">>(
   response: T,
   continuation: Readonly<JsonRecord>,
 ): T {
-  if (Object.keys(continuation).length === 0) return response;
-  const targetIndex = response.output.findIndex((item) => item.type === "function_call");
-  const fallbackIndex = targetIndex >= 0
+  const targetIndex = Object.keys(continuation).length === 0
+    ? -1
+    : response.output.findIndex((item) => item.type === "function_call");
+  const continuationIndex = targetIndex >= 0
     ? targetIndex
     : response.output.findIndex((item) => item.type === "message");
-  if (fallbackIndex < 0) return response;
-  const output = response.output.map((item, index) => {
-    if (index !== fallbackIndex) return item;
-    return {
-      ...item,
-      providerData: {
-        ...asRecord(item.providerData),
-        ...continuation,
-      },
-    };
+  const enrichedOutput = continuationIndex < 0
+    ? response.output
+    : response.output.map((item, index) => index !== continuationIndex
+      ? item
+      : {
+          ...item,
+          providerData: {
+            ...asRecord(item.providerData),
+            ...continuation,
+          },
+        });
+  return Object.assign({}, response, {
+    output: normalizeOpenAICompatibleAgentOutput(enrichedOutput),
   });
-  return { ...response, output };
 }
 
 function continuationFromChatResponse(value: unknown): JsonRecord {

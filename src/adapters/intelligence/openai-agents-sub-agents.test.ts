@@ -96,6 +96,39 @@ test("Chat keeps child exchanges private while returning one complete agent-tool
   }
 });
 
+test("Chat Sub-Agent never replays a reasoning-only assistant before its tool call", async () => {
+  const gateway = new RecordingGateway([plainTool("read_fact")]);
+  const fetch = scriptedFetch([
+    () => chatTool("parent-reasoning-delegate", "call_sub_agent", { task: "review facts" }),
+    () => chatReasoningTool("child-reasoning-read", "read_fact", { value: "fact" }),
+    ({ body }) => hasInvalidAssistantMessage(body)
+      ? invalidAssistantMessageResponse()
+      : chatText("child-review-complete"),
+    ({ body }) => {
+      assert.match(chatToolOutput(body, "parent-reasoning-delegate") ?? "", /child-review-complete/u);
+      return chatText("root-used-child-review");
+    },
+  ]);
+  const loop = createLoop({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: CHAT_BASE_URL,
+    fetch: fetch.fetch,
+  });
+
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: ["read_fact"] })],
+    }));
+
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(result.status === "completed" ? result.finalText : undefined, "root-used-child-review");
+    assert.equal(fetch.requests.length, 4);
+  } finally {
+    await loop.release();
+  }
+});
+
 test("Sub-Agent records an incomplete Responses terminal state as a failed tool fact before the parent continues", async () => {
   const observedToolResults: ToolCallResult[] = [];
   const gateway = new RecordingGateway([]);
@@ -822,6 +855,59 @@ function systemText(body: JsonRecord): string | undefined {
 
 function chatTool(callId: string, name: string, input: JsonRecord): Response {
   return chatTools([{ callId, name, input }]);
+}
+
+function chatReasoningTool(callId: string, name: string, input: JsonRecord): Response {
+  return jsonResponse({
+    id: "chat-" + callId,
+    object: "chat.completion",
+    created: 1,
+    model: MODEL,
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: "<think>Inspect the delegated facts.</think>",
+        reasoning_content: "Choose the smallest relevant read.",
+        tool_calls: [{
+          id: callId,
+          type: "function",
+          function: { name, arguments: JSON.stringify(input) },
+        }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+  });
+}
+
+function hasInvalidAssistantMessage(body: JsonRecord): boolean {
+  const messages = Array.isArray(body.messages) ? body.messages.map(parseRecord) : [];
+  return messages.some((message) => message.role === "assistant" &&
+    !hasNonEmptyChatContent(message.content) &&
+    !(Array.isArray(message.tool_calls) && message.tool_calls.length > 0));
+}
+
+function hasNonEmptyChatContent(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (!Array.isArray(value)) return false;
+  return value.some((part) => {
+    if (!isRecord(part)) return false;
+    return part.type === "text" ? typeof part.text === "string" && part.text.trim().length > 0 : true;
+  });
+}
+
+function invalidAssistantMessageResponse(): Response {
+  return new Response(JSON.stringify({
+    error: {
+      message: "Invalid assistant message: content or tool_calls must be set",
+      type: "invalid_request_error",
+      code: "invalid_assistant_message",
+    },
+  }), {
+    status: 400,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function chatTools(calls: readonly { readonly callId: string; readonly name: string; readonly input: JsonRecord }[]): Response {

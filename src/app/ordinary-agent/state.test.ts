@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   acceptOrdinaryToolRound,
   createInitialOrdinaryRunState,
+  reconcileInterruptedOrdinaryToolRound,
   recordOrdinaryToolResult,
   transitionOrdinaryRun,
 } from "./state.js";
@@ -239,5 +240,22 @@ test("Ordinary pending root rounds freeze the actual request prefix and reject i
       durationMs: 1,
     },
     recordedAt: "2026-01-01T00:00:03.000Z",
+  }), /does not match its accepted assistant call/u);
+
+  const inconsistent = {
+    ...accepted,
+    toolCalls: [{
+      callId: "root-call",
+      toolName: "write_file",
+      input: { path: "README.md" },
+      output: { content: "legacy result" },
+      status: "completed" as const,
+      durationMs: 1,
+    }],
+    toolResultRecordedAt: { "root-call:completed": "2026-01-01T00:00:03.000Z" },
+  };
+  assert.throws(() => reconcileInterruptedOrdinaryToolRound({
+    state: inconsistent,
+    recordedAt: "2026-01-01T00:00:04.000Z",
   }), /does not match its accepted assistant call/u);
 });

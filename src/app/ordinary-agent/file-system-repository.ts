@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { persistedModelProtocolExtensions } from "../../domain/intelligence/index.js";
-import { toolCallFactId } from "../../domain/tools/index.js";
+import { isCanonicalToolName, toolCallFactId } from "../../domain/tools/index.js";
 import {
   ORDINARY_RUN_SCHEMA_VERSION,
   OrdinaryFeatureError,
@@ -52,8 +52,11 @@ const usageSchema = z.object({
   outputDurationMs: z.number().finite().nonnegative().optional(),
   outputTokensPerSecond: z.number().finite().nonnegative().optional(),
 }).strict();
+const canonicalToolNameSchema = z.string().min(1).refine(isCanonicalToolName, {
+  message: "tool identity must be a canonical provider-portable name",
+});
 const toolCallSchema = z.object({
-  callId: z.string().min(1), factId: z.string().min(1).optional(), parentToolCallFactId: z.string().min(1).optional(), toolName: z.string().min(1), input: jsonValueSchema.optional(),
+  callId: z.string().min(1), factId: z.string().min(1).optional(), parentToolCallFactId: z.string().min(1).optional(), toolName: canonicalToolNameSchema, input: jsonValueSchema.optional(),
   output: jsonValueSchema.optional(), status: z.enum(["completed", "failed", "approval_required", "cancelled"]),
   error: z.string().optional(), errorDomain: z.string().optional(), errorFacts: z.record(z.string(), jsonValueSchema).optional(),
   durationMs: z.number().finite().nonnegative(), confirmationRequest: confirmationSchema.optional(),
@@ -70,9 +73,9 @@ const toolCallSchema = z.object({
 });
 const modelMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant", "tool"]), content: z.string(), ref: z.string().optional(),
-  toolCallId: z.string().optional(), toolName: z.string().optional(),
+  toolCallId: z.string().optional(), toolName: canonicalToolNameSchema.optional(),
   toolCalls: z.array(z.object({
-    callId: z.string().min(1), toolName: z.string().min(1), input: jsonValueSchema.optional(),
+    callId: z.string().min(1), toolName: canonicalToolNameSchema, input: jsonValueSchema.optional(),
   }).strict()).optional(),
   protocolExtensions: z.record(z.string(), jsonValueSchema).optional(),
 }).strict().superRefine((message, context) => {
@@ -279,6 +282,18 @@ const rawStateSchema = z.object({
     if (pendingIds.some((callId) => committedIds.has(callId))) {
       context.addIssue({ code: "custom", message: "pending tool round duplicates canonical history", path: ["pendingToolRound", "assistantMessage", "toolCalls"] });
     }
+    for (const [index, pendingCall] of pendingCalls.entries()) {
+      const result = state.toolCalls.find((item) =>
+        item.callId === pendingCall.callId && (item.factId === undefined || item.factId === item.callId));
+      if (result !== undefined && (result.toolName !== pendingCall.toolName ||
+          JSON.stringify(result.input) !== JSON.stringify(pendingCall.input))) {
+        context.addIssue({
+          code: "custom",
+          message: "pending tool result does not match its accepted assistant call",
+          path: ["pendingToolRound", "assistantMessage", "toolCalls", index],
+        });
+      }
+    }
   }
   if (state.turn.predecessorRunId === state.runId) {
     context.addIssue({ code: "custom", message: "a run cannot be its own predecessor", path: ["turn", "predecessorRunId"] });
@@ -422,6 +437,10 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
           savedAt: state.timestamps.updatedAt,
           state: cloneJson(state),
         };
+        const stateValidation = rawStateSchema.safeParse(document.state);
+        if (!stateValidation.success) {
+          throw new OrdinaryRunSnapshotIncompatibleError(state.runId, z.prettifyError(stateValidation.error));
+        }
         const validation = documentSchema.safeParse(document);
         if (!validation.success) throw new OrdinaryRunSnapshotIncompatibleError(state.runId, z.prettifyError(validation.error));
         await writeJsonAtomically(snapshotPath(rootDir, state.runId), document);
@@ -474,6 +493,13 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
 async function readSnapshot(rootDir: string, runId: string): Promise<OrdinaryRunSnapshotDocument | undefined> {
   const raw = await readJson(snapshotPath(rootDir, runId), runId);
   if (raw === undefined) return undefined;
+  const rawState = typeof raw === "object" && raw !== null && "state" in raw
+    ? (raw as { readonly state: unknown }).state
+    : undefined;
+  const stateValidation = rawStateSchema.safeParse(rawState);
+  if (!stateValidation.success) {
+    throw new OrdinaryRunSnapshotIncompatibleError(runId, z.prettifyError(stateValidation.error));
+  }
   const result = documentSchema.safeParse(raw);
   if (!result.success || result.data.state.runId !== runId) {
     throw new OrdinaryRunSnapshotIncompatibleError(runId, result.success ? "run identity is invalid" : z.prettifyError(result.error));

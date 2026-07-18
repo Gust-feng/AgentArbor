@@ -63,6 +63,10 @@ export function visibleRunProblem(
   if (error !== undefined) {
     return { title: "出现错误", message: readableAppError(error), tone: "error" };
   }
+  if (detail?.error?.code === "execution_continuation_lost" ||
+      detail?.error?.code === "confirmation_continuation_lost") {
+    return undefined;
+  }
   if (run?.status === "blocked" || run?.status === "paused") {
     return {
       title: workView?.headline ?? "任务没有完成",

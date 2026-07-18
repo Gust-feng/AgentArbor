@@ -130,6 +130,53 @@ test("user cancellation preserves visible assistant text without promoting it to
   assert.equal(assistantTurn?.role === "assistant" ? assistantTurn.interruption : undefined, "user_cancelled");
 });
 
+test("cancellation releases a queued successor before an abort-ignoring model call settles", async (t) => {
+  const firstExecutionStarted = createManualGate();
+  const firstExecutionFinished = createManualGate();
+  let executionCount = 0;
+  const run = await fixture(t, {
+    async execute(input) {
+      executionCount += 1;
+      if (executionCount === 1) {
+        firstExecutionStarted.enter();
+        await firstExecutionFinished.released;
+        return {
+          status: "cancelled",
+          reason: String(input.abortSignal.reason),
+          canonicalMessages: input.messages,
+          toolCalls: [],
+          usage: {},
+        };
+      }
+      return completedOutcome();
+    },
+  });
+  t.after(() => firstExecutionFinished.release());
+
+  await run.feature.commands.start(startInput("cancelled-predecessor"));
+  await firstExecutionStarted.entered;
+  const successorInput = startInput("cancelled-successor");
+  const successor = await run.feature.commands.start({
+    ...successorInput,
+    turn: {
+      ...successorInput.turn,
+      ordinal: 2,
+      predecessorRunId: "cancelled-predecessor",
+    },
+  });
+  assert.equal(successor.status.kind, "queued");
+
+  const cancelled = await run.feature.commands.cancel("cancelled-predecessor", "user_stopped");
+  assert.equal(cancelled.status.kind, "cancelled");
+  assert.notEqual((await run.feature.queries.getRun("cancelled-successor"))?.status.kind, "queued");
+  await waitForStatus(run.feature, "cancelled-successor", "completed");
+
+  firstExecutionFinished.release();
+  await waitForSettledMicrotasks();
+  assert.equal((await run.feature.queries.getRun("cancelled-predecessor"))?.status.kind, "cancelled");
+  assert.equal(executionCount, 2);
+});
+
 test("feature preserves a tool result that completes after cancellation commits", async (t) => {
   const toolResult = resolvedToolResult("call-after-cancel");
   let finishTool: (() => void) | undefined;
@@ -737,6 +784,67 @@ test("a known tool result is retried as a snapshot write without replaying the t
   assert.equal(failed.canonicalMessages.at(-1)?.toolCallId, result.callId);
 });
 
+test("a rejected tool identity is reconciled before the queued successor starts", async (t) => {
+  const roundAccepted = createManualGate();
+  const expected: ModelMessage = {
+    role: "assistant",
+    content: "",
+    toolCalls: [{
+      callId: "call-normalized-tool",
+      toolName: "mcp__query_docs",
+      input: { value: "docs" },
+    }],
+  };
+  const mismatched: ToolCallResult = {
+    callId: "call-normalized-tool",
+    toolName: "mcp__query-docs",
+    input: { value: "docs" },
+    output: { content: "observed result" },
+    status: "completed",
+    durationMs: 1,
+  };
+  let executionCount = 0;
+  const run = await fixture(t, {
+    async execute(input) {
+      executionCount += 1;
+      if (executionCount > 1) return completedOutcome();
+      await input.onToolRound?.({
+        canonicalMessagesBeforeRound: input.messages,
+        assistantMessage: expected,
+      });
+      roundAccepted.enter();
+      await roundAccepted.released;
+      await input.onToolResult?.(mismatched);
+      throw new Error("A mismatched tool result must stop the active execution.");
+    },
+  });
+
+  await run.feature.commands.start(startInput("identity-conflict-predecessor"));
+  await roundAccepted.entered;
+  const successorInput = startInput("identity-conflict-successor");
+  const successor = await run.feature.commands.start({
+    ...successorInput,
+    turn: {
+      ...successorInput.turn,
+      ordinal: 2,
+      predecessorRunId: "identity-conflict-predecessor",
+    },
+  });
+  assert.equal(successor.status.kind, "queued");
+
+  roundAccepted.release();
+  await waitForStatus(run.feature, "identity-conflict-predecessor", "failed");
+  await waitForStatus(run.feature, "identity-conflict-successor", "completed");
+  const failed = await run.feature.queries.getRun("identity-conflict-predecessor");
+  assert.ok(failed !== undefined);
+
+  assert.equal(failed.pendingToolRound, undefined);
+  assert.equal(failed.toolCalls[0]?.toolName, "mcp__query_docs");
+  assert.equal(failed.toolCalls[0]?.status, "failed");
+  assert.equal(failed.toolCalls[0]?.errorFacts?.code, "tool_execution_outcome_unknown");
+  assert.equal(executionCount, 2);
+});
+
 test("feature keeps a durable tool fact when execution subsequently fails", async (t) => {
   const toolResult = resolvedToolResult("call-before-failure");
   const run = await fixture(t, {
@@ -946,8 +1054,9 @@ test("feature commits cancellation before approval cleanup and cleanup failure c
     kind: "cancelled",
     reason: "user_stopped",
   });
-  finishRelease?.();
   assert.equal((await cancelling).status.kind, "cancelled");
+  finishRelease?.();
+  await waitForSettledMicrotasks();
   assert.equal((await run.feature.queries.getRun("approval-cancel-run"))?.status.kind, "cancelled");
 });
 
@@ -1389,6 +1498,106 @@ test("feature restart safely activates a persisted root queued run", async (t) =
   const completed = await waitForStatus(restarted, input.runId, "completed");
   assert.deepEqual(completed.status, { kind: "completed", answer: "final answer" });
   assert.deepEqual(completed.timeline.map((event) => event.type), ["run.created", "run.started", "run.completed"]);
+});
+
+test("restart isolates a legacy tool-identity mismatch and blocks its queued successor", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-missing-predecessor-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const conversationRepository = createFileSystemOrdinaryConversationControlRepository(root);
+  const base = startInput("queued-after-incompatible-run");
+  const input = {
+    ...base,
+    turn: {
+      ...base.turn,
+      ordinal: 2,
+      predecessorRunId: "incompatible-predecessor",
+    },
+  };
+  const predecessorQueued = createInitialOrdinaryRunState({
+    runId: "incompatible-predecessor",
+    turn: {
+      ...input.turn,
+      ordinal: 1,
+      predecessorRunId: undefined,
+      userTurnId: "incompatible-predecessor-user",
+      assistantTurnId: "incompatible-predecessor-assistant",
+    },
+    runInput: input.input,
+    birth: input.birth,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "predecessor-created",
+  });
+  const predecessorRunning = transitionOrdinaryRun({
+    state: predecessorQueued,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "predecessor-started",
+  });
+  const predecessorPending = acceptOrdinaryToolRound({
+    state: predecessorRunning,
+    canonicalMessagesBeforeRound: predecessorRunning.canonicalMessages,
+    assistantMessage: {
+      role: "assistant",
+      content: "",
+      toolCalls: [{
+        callId: "legacy-call",
+        toolName: "mcp__query_docs",
+        input: { query: "identity" },
+      }],
+    },
+    acceptedAt: "2026-01-01T00:00:02.000Z",
+  });
+  await repository.save(predecessorPending, 0);
+  const predecessorSnapshotPath = path.join(root, "runs", "incompatible-predecessor", "snapshot.json");
+  const predecessorSnapshot = JSON.parse(await fs.readFile(predecessorSnapshotPath, "utf8")) as {
+    state: {
+      toolCalls: ToolCallResult[];
+      toolResultRecordedAt: Record<string, string>;
+    };
+  };
+  predecessorSnapshot.state.toolCalls = [{
+    callId: "legacy-call",
+    toolName: "mcp__query-docs",
+    input: { query: "identity" },
+    output: { content: "legacy result" },
+    status: "completed",
+    durationMs: 1,
+  }];
+  predecessorSnapshot.state.toolResultRecordedAt = {
+    "legacy-call:completed": "2026-01-01T00:00:03.000Z",
+  };
+  await fs.writeFile(predecessorSnapshotPath, JSON.stringify(predecessorSnapshot), "utf8");
+  await repository.save(createInitialOrdinaryRunState({
+    runId: input.runId,
+    turn: input.turn,
+    runInput: input.input,
+    birth: input.birth,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "event-created",
+  }), 0);
+  await conversationRepository.save({
+    conversationId: input.turn.conversationId,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    activeLineageId: input.turn.lineageId,
+    lineages: [{
+      lineageId: input.turn.lineageId,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }],
+  }, 0, "2026-01-01T00:00:00.000Z");
+
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository,
+    execution: { async execute() { throw new Error("must not execute a run with a missing predecessor"); } },
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  const blocked = await waitForStatus(restarted, input.runId, "blocked");
+  assert.equal(blocked.status.kind === "blocked" ? blocked.status.reason.code : undefined, "predecessor_run_unavailable");
+  assert.deepEqual(await restarted.queries.listConversations(), []);
+  assert.equal(await restarted.queries.getConversation(input.turn.conversationId), undefined);
 });
 
 test("activity restart resets an old cursor, drops live deltas, and replays complete approval facts", async (t) => {

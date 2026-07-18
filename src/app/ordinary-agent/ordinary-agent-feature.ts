@@ -59,6 +59,7 @@ export function createOrdinaryAgentFeature(input: {
   const idFactory = input.idFactory ?? createId;
   const documents = new Map<string, OrdinaryRunSnapshotDocument>();
   const conversationDocuments = new Map<string, OrdinaryConversationControlDocument>();
+  const unavailableConversationIds = new Set<string>();
   const continuations = new Map<string, OrdinaryExecutionContinuation>();
   const approvalReservations = new Map<string, string>();
   const controllers = new Map<string, AbortController>();
@@ -132,11 +133,36 @@ export function createOrdinaryAgentFeature(input: {
         continue;
       }
       const predecessor = documents.get(document.state.turn.predecessorRunId);
-      if (predecessor !== undefined && isTerminal(predecessor.state)) await activateSuccessor(predecessor.state.runId);
+      if (predecessor === undefined) {
+        await mutate(document.state.runId, {
+          type: "block",
+          reason: {
+            code: "predecessor_run_unavailable",
+            message: "The predecessor run is unavailable or incompatible. This queued run was not started.",
+          },
+          continueBy: "new_turn",
+        });
+      } else if (isTerminal(predecessor.state)) {
+        await activateSuccessor(predecessor.state.runId);
+      }
+    }
+    for (const [conversationId, control] of conversationDocuments) {
+      try {
+        if (conversationView(control) === undefined) {
+          conversationDocuments.delete(conversationId);
+          unavailableConversationIds.add(conversationId);
+        }
+      } catch {
+        // Unsupported or incomplete run lineages remain on disk for diagnosis, but
+        // cannot make unrelated conversations or new tasks unavailable.
+        conversationDocuments.delete(conversationId);
+        unavailableConversationIds.add(conversationId);
+      }
     }
   }
 
   async function loadConversationControl(conversationId: string): Promise<OrdinaryConversationControlDocument | undefined> {
+    if (unavailableConversationIds.has(conversationId)) return undefined;
     const cached = conversationDocuments.get(conversationId);
     if (cached !== undefined) return cached;
     const document = await input.conversationRepository.get(conversationId);
@@ -768,9 +794,14 @@ export function createOrdinaryAgentFeature(input: {
   }
 
   async function settleExecution(runId: string): Promise<void> {
+    let resultPersistenceFailure: unknown;
     for (const result of [...(acceptedToolResults.get(runId)?.values() ?? [])]) {
-      await persistToolResult(runId, result);
-      forgetPersistedToolResults(runId, [result]);
+      try {
+        await persistToolResult(runId, result);
+        forgetPersistedToolResults(runId, [result]);
+      } catch (error) {
+        resultPersistenceFailure ??= error;
+      }
     }
     let current = await load(runId);
     if (current === undefined) return;
@@ -779,21 +810,41 @@ export function createOrdinaryAgentFeature(input: {
       return;
     }
     if (current.state.pendingToolRound !== undefined) {
-      await reconcilePendingToolRound(runId);
+      try {
+        await reconcilePendingToolRound(runId);
+      } catch (error) {
+        throw resultPersistenceFailure === undefined
+          ? error
+          : new AggregateError(
+              [resultPersistenceFailure, error],
+              `Ordinary run ${runId} could not reconcile its terminal tool round`,
+            );
+      }
       current = await load(runId) ?? current;
+      // The durable reconciliation now owns every call in the closed round.
+      // Buffered results that failed its identity contract must not block the successor.
+      if (current.state.pendingToolRound === undefined) acceptedToolResults.delete(runId);
+      resultPersistenceFailure = undefined;
     }
     if (isTerminal(current.state) && current.state.toolCalls.some((result) => result.status === "approval_required")) {
       await reconcileLostApprovalResults(runId);
       current = await load(runId) ?? current;
     }
     if (current.state.pendingToolRound === undefined) acceptedToolResults.delete(runId);
+    if (resultPersistenceFailure !== undefined) throw resultPersistenceFailure;
   }
 
-  function isSettledTerminal(state: OrdinaryRunState): boolean {
-    return isTerminal(state) && state.pendingToolRound === undefined &&
-      !controllers.has(state.runId) && !executions.has(state.runId) &&
-      !approvalReservations.has(state.runId) && !continuations.has(state.runId) &&
-      !acceptedToolResults.has(state.runId);
+  function isSchedulingBarrierCleared(state: OrdinaryRunState): boolean {
+    if (!isTerminal(state) || state.pendingToolRound !== undefined ||
+        approvalReservations.has(state.runId) || continuations.has(state.runId) ||
+        acceptedToolResults.has(state.runId)) {
+      return false;
+    }
+    // Cancellation stops admission before it commits. A pure model call that
+    // ignores abort cannot hold the conversation queue; an accepted tool round
+    // above still keeps the barrier closed until its outcome is reconciled.
+    return state.status.kind === "cancelled" ||
+      (!controllers.has(state.runId) && !executions.has(state.runId));
   }
 
   function track(runId: string, operation: Promise<void>): void {
@@ -802,17 +853,21 @@ export function createOrdinaryAgentFeature(input: {
       if (executions.get(runId) === operation) executions.delete(runId);
       await activateSuccessor(runId);
     });
-    postExecutionTasks.add(postExecution);
-    void postExecution.then(
-      () => { postExecutionTasks.delete(postExecution); },
-      () => { postExecutionTasks.delete(postExecution); },
+    trackPostExecutionTask(postExecution);
+  }
+
+  function trackPostExecutionTask(task: Promise<void>): void {
+    postExecutionTasks.add(task);
+    void task.then(
+      () => { postExecutionTasks.delete(task); },
+      () => { postExecutionTasks.delete(task); },
     );
   }
 
   async function activateSuccessor(predecessorRunId: string): Promise<void> {
     if (released) return;
     const predecessor = await load(predecessorRunId);
-    if (predecessor === undefined || !isSettledTerminal(predecessor.state)) return;
+    if (predecessor === undefined || !isSchedulingBarrierCleared(predecessor.state)) return;
     const control = await loadConversationControl(predecessor.state.turn.conversationId);
     if (control?.state.deletedAt !== undefined) return;
     const candidate = nextEligibleQueuedRun(schedulingRuns(predecessor.state.turn.conversationId, control));
@@ -847,7 +902,7 @@ export function createOrdinaryAgentFeature(input: {
   function nextEligibleQueuedRun(runs: readonly OrdinaryRunState[]): OrdinaryRunState | undefined {
     for (const run of runs) {
       if (run.status.kind === "queued") return run;
-      if (!isSettledTerminal(run)) return undefined;
+      if (!isSchedulingBarrierCleared(run)) return undefined;
     }
     return undefined;
   }
@@ -1149,7 +1204,7 @@ export function createOrdinaryAgentFeature(input: {
       }
     });
     if (cancellation.continuation !== undefined) {
-      await cancellation.continuation.release().catch(() => undefined);
+      trackPostExecutionTask(cancellation.continuation.release().catch(() => undefined));
     }
     if (cancellation.wasTerminal) return cancellation.state;
     const stillHasLiveExecution = controllers.has(runId) || executions.has(runId) || approvalReservations.has(runId);

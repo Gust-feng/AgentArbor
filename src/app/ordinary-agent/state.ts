@@ -1,6 +1,6 @@
 import { persistedModelProtocolExtensions, type ModelMessage, type ModelUsage } from "../../domain/intelligence/index.js";
 import type { RunCapabilityResolution } from "../../domain/config/index.js";
-import { toolCallFactId, type ToolCallResult } from "../../domain/tools/index.js";
+import { toolCallFactId, type ToolCallRequest, type ToolCallResult } from "../../domain/tools/index.js";
 import { canonicalToolResultMessage } from "../model-runtime/tool-result-message.js";
 import type {
   OrdinaryRunBirth,
@@ -183,7 +183,7 @@ function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransitio
       assertStatus(status, ["queued", "running", "awaiting_approval"], transition.type);
       return { kind: "cancelled", reason: transition.reason };
     case "block":
-      assertStatus(status, ["running", "awaiting_approval"], transition.type);
+      assertStatus(status, ["queued", "running", "awaiting_approval"], transition.type);
       return {
         kind: "blocked",
         reason: cloneJson(transition.reason),
@@ -302,7 +302,7 @@ export function acceptOrdinaryToolRound(input: {
   }
   const committedCallIds = new Set(canonicalMessages.flatMap((message) =>
     message.role === "assistant" ? (message.toolCalls ?? []).map((call) => call.callId) : []));
-  if (callIds.some((callId) => committedCallIds.has(callId) || rootToolResult(input.state.toolCalls, callId) !== undefined)) {
+  if (callIds.some((callId) => committedCallIds.has(callId) || rootToolResultByCallId(input.state.toolCalls, callId) !== undefined)) {
     throw new OrdinaryFeatureError(
       "ordinary_tool_result_conflict",
       `Ordinary run ${input.state.runId} cannot reuse a committed root tool call identity`,
@@ -369,7 +369,13 @@ export function reconcileInterruptedOrdinaryToolRound(input: {
   if (pending === undefined) return input.state;
   let state = input.state;
   for (const call of pending.assistantMessage.toolCalls ?? []) {
-    const existing = rootToolResult(state.toolCalls, call.callId);
+    const existing = rootToolResultByCallId(state.toolCalls, call.callId);
+    if (existing !== undefined && !toolResultMatchesAcceptedCall(existing, call)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary root tool result ${existing.callId} does not match its accepted assistant call`,
+      );
+    }
     if (existing !== undefined && existing.status !== "approval_required") continue;
     const result: ToolCallResult = existing?.status === "approval_required"
       ? interruptedOrdinaryApprovalResult(input.state, existing)
@@ -438,8 +444,16 @@ function finalizeResolvedOrdinaryToolRound(
 ): OrdinaryRunState {
   const pending = state.pendingToolRound;
   if (pending === undefined) return state;
-  const results = (pending.assistantMessage.toolCalls ?? []).map((call) =>
-    rootToolResult(state.toolCalls, call.callId));
+  const results = (pending.assistantMessage.toolCalls ?? []).map((call) => {
+    const result = rootToolResultByCallId(state.toolCalls, call.callId);
+    if (result !== undefined && !toolResultMatchesAcceptedCall(result, call)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary root tool result ${result.callId} does not match its accepted assistant call`,
+      );
+    }
+    return result;
+  });
   if (results.some((result) => result === undefined || result.status === "approval_required")) {
     return state;
   }
@@ -455,12 +469,16 @@ function finalizeResolvedOrdinaryToolRound(
   };
 }
 
-function rootToolResult(
+function rootToolResultByCallId(
   results: readonly ToolCallResult[],
   callId: string,
 ): ToolCallResult | undefined {
   return [...results].reverse().find((result) =>
     result.callId === callId && (result.factId === undefined || result.factId === result.callId));
+}
+
+function toolResultMatchesAcceptedCall(result: ToolCallResult, call: ToolCallRequest): boolean {
+  return result.toolName === call.toolName && JSON.stringify(result.input) === JSON.stringify(call.input);
 }
 
 function withoutConfirmationRequest(

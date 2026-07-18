@@ -29,6 +29,23 @@ test("visible run problem gives out-of-fuel a recoverable paused message", () =>
   );
 });
 
+test("visible run problem keeps lost live execution recovery internal", () => {
+  assert.equal(
+    visibleRunProblem(
+      { status: "blocked" },
+      { headline: "任务没有完成", currentAction: "等待运行恢复" },
+      {
+        error: {
+          code: "execution_continuation_lost",
+          message: "The live execution was interrupted when the process restarted.",
+        },
+      },
+      undefined,
+    ),
+    undefined,
+  );
+});
+
 test("visible run problem surfaces failed run details without inventing a report", () => {
   assert.deepEqual(
     visibleRunProblem(

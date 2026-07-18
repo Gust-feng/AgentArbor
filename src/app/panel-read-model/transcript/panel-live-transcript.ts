@@ -37,6 +37,7 @@ export type LiveTranscriptNode = {
   readonly timestamp: string;
   readonly modelUsage?: ModelUsage;
   readonly toolName?: string;
+  readonly parentToolCallFactId?: string;
   readonly display?: ToolDisplayProjection;
   readonly refs: readonly LiveTranscriptObservationRef[];
 };
@@ -137,6 +138,7 @@ function liveToolNode(runId: string, tool: LiveToolActivity): LiveTranscriptNode
     summary: tool.summary,
     timestamp: tool.timestamp,
     toolName: tool.toolName,
+    parentToolCallFactId: tool.parentToolCallFactId,
     display: tool.display,
     refs: tool.refs,
   };

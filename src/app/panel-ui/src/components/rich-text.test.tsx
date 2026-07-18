@@ -2,7 +2,7 @@ import React from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
-import { RichText } from "./rich-text";
+import { RichText, StreamingRichText } from "./rich-text";
 
 test("markdown code blocks expose their language and copy the code", async () => {
   const user = userEvent.setup();
@@ -14,4 +14,14 @@ test("markdown code blocks expose their language and copy the code", async () =>
 
   expect(writeText).toHaveBeenCalledWith("const answer = 42;");
   expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy();
+});
+
+test("streaming rich text preserves completed Markdown blocks while its active tail grows", () => {
+  const { rerender } = render(<StreamingRichText text={"# 标题\n\n正在输出"} />);
+  const heading = screen.getByRole("heading", { name: "标题" });
+
+  rerender(<StreamingRichText text={"# 标题\n\n正在输出更多内容"} />);
+
+  expect(screen.getByRole("heading", { name: "标题" })).toBe(heading);
+  expect(screen.getByText("正在输出更多内容")).toBeTruthy();
 });

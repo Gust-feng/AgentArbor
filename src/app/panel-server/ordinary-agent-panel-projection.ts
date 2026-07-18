@@ -109,8 +109,7 @@ export function projectOrdinaryPanelRunView(input: {
         nextActions: [],
       }
     : undefined;
-  const transcriptNodes = input.fullReplay.activities.flatMap((activity) =>
-    isTranscriptActivity(input.run, activity) ? [projectTranscriptNode(input.run, activity)] : []);
+  const transcriptNodes = projectTranscriptNodes(input.run, input.fullReplay.activities);
   const contextAttachments = projectContextAttachments(input.run);
   const stage = workStage(input.run, fullEvents);
   const workView: OrdinaryPanelWorkView = {
@@ -249,6 +248,7 @@ function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): 
       status: "running",
       timestamp: activity.recordedAt,
       toolName: activity.request.toolName,
+      parentToolCallFactId: activity.request.parentToolCallFactId,
       refs: [{ kind: "tool_call", id: toolCallFactId(activity.request) }],
       visibility: "compact",
       detail: toolStreamDetail("tool.requested", payload),
@@ -279,6 +279,7 @@ function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): 
         : activity.result.status === "cancelled" ? "cancelled" : "failed",
       timestamp: activity.recordedAt,
       toolName: activity.result.toolName,
+      parentToolCallFactId: activity.result.parentToolCallFactId,
       refs: [{ kind: "tool_call", id: toolCallFactId(activity.result) }],
       visibility: "compact",
       detail: toolStreamDetail(type, payload),
@@ -295,6 +296,20 @@ function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): 
       status: "running",
       timestamp: activity.recordedAt,
       refs: [{ kind: "event", id: activity.activityId }],
+      visibility: "compact",
+    };
+  }
+  if (activity.type === "model.reasoning.delta") {
+    return {
+      id: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      type: activity.type,
+      title: "思考",
+      delta: activity.delta,
+      status: "running",
+      timestamp: activity.recordedAt,
+      refs: [{ kind: "model_call", id: activity.modelRequestId }],
       visibility: "compact",
     };
   }
@@ -331,6 +346,14 @@ function projectTransition(
   switch (event.type) {
     case "run.created": return { ...base, type: event.type, title: "", status: "queued" };
     case "run.started": return { ...base, type: event.type, title: "", status: "running" };
+    case "model.reasoning.completed": return {
+      ...base,
+      type: event.type,
+      title: "思考",
+      delta: event.content,
+      status: "completed",
+      refs: [{ kind: "model_call", id: event.modelRequestId }],
+    };
     case "run.approval_requested": {
       const request = event.confirmationRequests[0];
       return {
@@ -394,6 +417,7 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
       summary: event.summary,
       timestamp: activity.recordedAt,
       toolName: activity.request.toolName,
+      parentToolCallFactId: activity.request.parentToolCallFactId,
       display: toolStreamDetail("tool.requested", liveToolPayload(activity)).display,
       refs: event.refs,
     };
@@ -412,6 +436,7 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
       summary: event.summary,
       timestamp: activity.recordedAt,
       toolName: activity.result.toolName,
+      parentToolCallFactId: activity.result.parentToolCallFactId,
       display: toolStreamDetail(
         event.type === "tool.completed"
           ? "tool.completed"
@@ -443,6 +468,21 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
       refs: event.refs,
     };
   }
+  if (activity.type === "model.reasoning.delta") {
+    return {
+      nodeId: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      eventType: activity.type,
+      kind: "thinking",
+      phase: "noted",
+      title: "思考",
+      summary: compact(activity.delta, 180),
+      text: activity.delta,
+      timestamp: activity.recordedAt,
+      refs: event.refs,
+    };
+  }
   if (activity.type === "model.request") {
     return {
       nodeId: activity.activityId,
@@ -469,9 +509,11 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
     phase: transcriptPhase(activity.event),
     title: event.title,
     summary: event.summary,
-    text: activity.event.type === "run.completed" && run.status.kind === "completed"
-      ? run.status.answer
-      : undefined,
+    text: activity.event.type === "model.reasoning.completed"
+      ? activity.event.content
+      : activity.event.type === "run.completed" && run.status.kind === "completed"
+        ? run.status.answer
+        : undefined,
     timestamp: activity.recordedAt,
     confirmation,
     modelUsage: activity.event.type === "run.completed" || activity.event.type === "run.failed"
@@ -481,15 +523,70 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
   };
 }
 
+function projectTranscriptNodes(
+  run: OrdinaryRunState,
+  activities: readonly OrdinaryRunActivity[],
+): readonly TranscriptNode[] {
+  // Output deltas are transport fragments. Keep their exact text in the replay
+  // stream, but expose one logical body node to the transcript read-model.
+  const nodes: TranscriptNode[] = [];
+  let outputDeltas: Array<Extract<OrdinaryRunActivity, { readonly type: "model.output.delta" }>> = [];
+  let reasoningDeltas: Array<Extract<OrdinaryRunActivity, { readonly type: "model.reasoning.delta" }>> = [];
+  const flushOutputDeltas = (): void => {
+    const first = outputDeltas[0];
+    if (first === undefined) return;
+    const node = projectTranscriptNode(run, first);
+    nodes.push({
+      ...node,
+      text: outputDeltas.map((activity) => activity.delta).join(""),
+    });
+    outputDeltas = [];
+  };
+  const flushReasoningDeltas = (): void => {
+    const first = reasoningDeltas[0];
+    if (first === undefined) return;
+    const node = projectTranscriptNode(run, first);
+    nodes.push({
+      ...node,
+      summary: compact(reasoningDeltas.map((activity) => activity.delta).join(""), 180),
+      text: reasoningDeltas.map((activity) => activity.delta).join(""),
+    });
+    reasoningDeltas = [];
+  };
+
+  for (const activity of activities) {
+    if (activity.type === "model.output.delta") {
+      flushReasoningDeltas();
+      outputDeltas.push(activity);
+      continue;
+    }
+    if (activity.type === "model.reasoning.delta") {
+      flushOutputDeltas();
+      reasoningDeltas.push(activity);
+      continue;
+    }
+    flushOutputDeltas();
+    flushReasoningDeltas();
+    if (isTranscriptActivity(run, activity)) {
+      nodes.push(projectTranscriptNode(run, activity));
+    }
+  }
+  flushOutputDeltas();
+  flushReasoningDeltas();
+  return nodes;
+}
+
 function isTranscriptActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): boolean {
+  if (activity.type === "model.output.delta" || activity.type === "model.reasoning.delta") return false;
   if (activity.type === "run.transition" && isQuietInterruption(run) &&
       (activity.event.type === "run.cancelled" || activity.event.type === "run.blocked")) {
     return false;
   }
   return activity.type === "model.request" ||
-    activity.type === "model.output.delta" || activity.type === "tool.requested" ||
+    activity.type === "tool.requested" ||
     activity.type === "tool.progress" || activity.type === "tool.result" ||
-    (activity.event.type !== "run.created" && activity.event.type !== "run.started");
+    (activity.type === "run.transition" &&
+      activity.event.type !== "run.created" && activity.event.type !== "run.started");
 }
 
 function liveToolPayload(
@@ -520,6 +617,7 @@ function isWorkViewEvent(run: OrdinaryRunState, event: RunEvent): boolean {
 }
 
 function transcriptKind(event: OrdinaryRunEvent): TranscriptNode["kind"] {
+  if (event.type === "model.reasoning.completed") return "thinking";
   if (event.type === "run.approval_requested") return "confirmation";
   if (event.type === "run.approval_decided") return "user_decision";
   if (event.type === "run.completed") return "answer";
@@ -530,6 +628,7 @@ function transcriptPhase(event: OrdinaryRunEvent): TranscriptNode["phase"] {
   switch (event.type) {
     case "run.created": return "noted";
     case "run.started": return "executing";
+    case "model.reasoning.completed": return "completed";
     case "run.approval_requested": return "waiting_approval";
     case "run.approval_decided": return event.decision.decision === "deny"
       ? "denied"

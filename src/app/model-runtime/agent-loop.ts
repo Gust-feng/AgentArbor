@@ -44,6 +44,10 @@ export type AgentLoopInput = {
   readonly agentTools?: readonly AgentLoopAgentTool[];
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
+  /** Provider-normalized visible reasoning text for the active model turn. */
+  readonly onReasoningDelta?: (delta: string) => void;
+  /** Authoritative complete reasoning text observed at the model response boundary. */
+  readonly onReasoningCompleted?: (content: string) => Promise<void>;
   /** Emitted once when an exact tool request enters its execution boundary. */
   readonly onToolRequested?: (request: ToolCallRequest) => void;
   /** Live-only bounded progress emitted by the active tool executor. */

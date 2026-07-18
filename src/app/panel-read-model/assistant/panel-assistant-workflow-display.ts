@@ -128,7 +128,9 @@ function workflowDisplayFromMessageView<
         currentDecision.reason !== "needs_attention"
           ? { collapsed: true, reason: "turn_settled" as const }
           : undefined;
-      const effectiveDecision = settledOverride ?? currentDecision;
+      const effectiveDecision = forceVisible
+        ? { collapsed: false, reason: "expanded" as const }
+        : settledOverride ?? currentDecision;
       const previousCollapse = previousCollapseState(input.previous, segment.segmentKey);
       const inheritPreviousCollapse = previousCollapse.collapsed &&
         segment.lifecycle === "settled" &&
@@ -152,7 +154,8 @@ function activitySegmentForcesVisible<
 >(
   segment: Extract<AssistantMessageSegment<TNode, TConfirmation>, { readonly kind: "activity" }>,
 ): boolean {
-  return segment.timeline.items.some((item) => item.variant === "context_compaction");
+  return segment.timeline.items.some((item) =>
+    item.variant === "context_compaction" || item.eventType.startsWith("model.reasoning."));
 }
 
 function activitySegmentNeedsAttention<

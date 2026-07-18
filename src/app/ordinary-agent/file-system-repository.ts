@@ -53,7 +53,7 @@ const usageSchema = z.object({
   outputTokensPerSecond: z.number().finite().nonnegative().optional(),
 }).strict();
 const toolCallSchema = z.object({
-  callId: z.string().min(1), factId: z.string().min(1).optional(), toolName: z.string().min(1), input: jsonValueSchema.optional(),
+  callId: z.string().min(1), factId: z.string().min(1).optional(), parentToolCallFactId: z.string().min(1).optional(), toolName: z.string().min(1), input: jsonValueSchema.optional(),
   output: jsonValueSchema.optional(), status: z.enum(["completed", "failed", "approval_required", "cancelled"]),
   error: z.string().optional(), errorDomain: z.string().optional(), errorFacts: z.record(z.string(), jsonValueSchema).optional(),
   durationMs: z.number().finite().nonnegative(), confirmationRequest: confirmationSchema.optional(),
@@ -195,6 +195,12 @@ const eventBase = {
 const eventSchema = z.discriminatedUnion("type", [
   z.object({ ...eventBase, type: z.literal("run.created") }).strict(),
   z.object({ ...eventBase, type: z.literal("run.started") }).strict(),
+  z.object({
+    ...eventBase,
+    type: z.literal("model.reasoning.completed"),
+    modelRequestId: z.string().min(1),
+    content: z.string().min(1),
+  }).strict(),
   z.object({ ...eventBase, type: z.literal("run.approval_requested"), confirmationRequests: z.array(confirmationSchema).min(1), toolCallIds: z.array(z.string().min(1)) }).strict(),
   z.object({ ...eventBase, type: z.literal("run.approval_decided"), decision: confirmationDecisionSchema }).strict(),
   z.object({ ...eventBase, type: z.literal("run.completed"), toolCallIds: z.array(z.string().min(1)) }).strict(),
@@ -282,7 +288,7 @@ const rawStateSchema = z.object({
   }
   const expectedLastEvent = {
     queued: "run.created",
-    running: ["run.started", "run.approval_decided"],
+    running: ["run.started", "run.approval_decided", "model.reasoning.completed"],
     awaiting_approval: "run.approval_requested",
     completed: "run.completed",
     failed: "run.failed",

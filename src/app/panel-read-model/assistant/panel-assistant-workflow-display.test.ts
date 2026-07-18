@@ -144,7 +144,7 @@ test("assistant workflow display keeps closed stage content stable when earlier 
   );
 });
 
-test("assistant workflow display auto collapses completed reasoning and tool process around body content", () => {
+test("assistant workflow display keeps completed reasoning visible while collapsing routine tool process", () => {
   const display = projectStableAssistantWorkflowDisplay({
     content: "",
     transcriptNodes: [
@@ -179,8 +179,8 @@ test("assistant workflow display auto collapses completed reasoning and tool pro
   const activitySegments = display.workflow.segments.filter((segment) => segment.kind === "activity");
 
   assert.equal(activitySegments.length, 2);
-  assert.deepEqual(activitySegments.map((segment) => segment.collapsed), [true, true]);
-  assert.deepEqual(activitySegments.map((segment) => segment.collapseReason), ["structure", "structure"]);
+  assert.deepEqual(activitySegments.map((segment) => segment.collapsed), [false, true]);
+  assert.deepEqual(activitySegments.map((segment) => segment.collapseReason), ["expanded", "structure"]);
 });
 
 test("assistant workflow display keeps context compaction status visible around body content", () => {
@@ -310,7 +310,7 @@ test("assistant workflow display keeps prefix reasoning and later tool activity"
     activitySegments.flatMap((segment) => segment.timeline.items.map((item) => item.nodeId)),
     ["thinking-live", "tool-1"],
   );
-  assert.deepEqual(activitySegments.map((segment) => segment.collapsed), [true, true]);
+  assert.deepEqual(activitySegments.map((segment) => segment.collapsed), [false, true]);
   assert.deepEqual(activitySegments.map((segment) => segment.lifecycle), ["settled", "settled"]);
 });
 

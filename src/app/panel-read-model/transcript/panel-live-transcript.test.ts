@@ -39,6 +39,7 @@ test("withLiveTranscriptNodes exposes the latest live tool progress without wait
     summary: "正在运行命令。",
     timestamp: "2026-01-01T00:00:01.000Z",
     toolName: "shell_command",
+    parentToolCallFactId: "delegate-fact",
     refs: [{ kind: "tool_call", id: "call-1" }],
     detail: {
       display: {
@@ -55,6 +56,7 @@ test("withLiveTranscriptNodes exposes the latest live tool progress without wait
   assert.equal(projected[0]?.eventType, "tool.requested");
   assert.equal(projected[0]?.phase, "executing");
   assert.equal(projected[0]?.toolName, "shell_command");
+  assert.equal(projected[0]?.parentToolCallFactId, "delegate-fact");
   assert.equal(projected[0]?.display?.kind, "command_summary");
 });
 

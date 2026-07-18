@@ -41,6 +41,8 @@ export type ProjectableTranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
+  /** The parent AgentTool fact for a nested sub-agent mechanical action. */
+  readonly parentToolCallFactId?: string;
   readonly display?: TranscriptToolDisplayLike;
   readonly confirmation?: {
     readonly confirmationId?: string;

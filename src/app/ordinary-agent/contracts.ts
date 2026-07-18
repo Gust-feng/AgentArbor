@@ -147,6 +147,7 @@ type OrdinaryRunEventBase = {
 
 export type OrdinaryRunEvent = OrdinaryRunEventBase & (
   | { readonly type: "run.created" | "run.started" }
+  | { readonly type: "model.reasoning.completed"; readonly modelRequestId: string; readonly content: string }
   | { readonly type: "run.approval_requested"; readonly confirmationRequests: readonly ConfirmationRequest[]; readonly toolCallIds: readonly string[] }
   | { readonly type: "run.approval_decided"; readonly decision: ConfirmationDecision }
   | { readonly type: "run.completed"; readonly toolCallIds: readonly string[] }
@@ -248,6 +249,8 @@ export type OrdinaryExecutionInput = {
   readonly messages: readonly ModelMessage[];
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
+  readonly onReasoningDelta?: (delta: string) => void;
+  readonly onReasoningCompleted?: (content: string) => Promise<void>;
   readonly onToolRequested?: (request: ToolCallRequest) => void;
   readonly onToolProgress?: (progress: ToolCallProgress) => void;
   /** Must settle before any tool in this validated root turn enters preflight. */
@@ -276,6 +279,7 @@ export type OrdinaryRunActivity = OrdinaryRunActivityBase & (
   | { readonly type: "run.transition"; readonly durability: "durable"; readonly event: OrdinaryRunEvent }
   | { readonly type: "model.request"; readonly durability: "live_only"; readonly reason: "initial" | "after_tool" | "after_approval" }
   | { readonly type: "model.output.delta"; readonly durability: "live_only"; readonly delta: string }
+  | { readonly type: "model.reasoning.delta"; readonly durability: "live_only"; readonly modelRequestId: string; readonly delta: string }
   | { readonly type: "tool.requested"; readonly durability: "live_only"; readonly request: ToolCallRequest }
   | {
       readonly type: "tool.progress";

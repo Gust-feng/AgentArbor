@@ -95,7 +95,9 @@ export function projectAssistantMessageStructure<
     transcriptNodes,
     pending: input.pending,
     bodySegments,
-    awaiting: bodySegments.length === 0 && !timeline.hasContent && keepStreamMounted,
+    awaiting: bodySegments.length === 0 &&
+      !assistantResponseHasStarted(timeline) &&
+      keepStreamMounted,
   });
   return {
     timeline,
@@ -104,6 +106,27 @@ export function projectAssistantMessageStructure<
     segments,
     copyText: assistantMessageCopyTextFromSegments(segments),
   };
+}
+
+function assistantResponseHasStarted<
+  TNode extends ProjectableTranscriptNode,
+  TConfirmation extends ConfirmationIdentity,
+>(timeline: AgentWorkTimelineView<TNode, TConfirmation>): boolean {
+  if (timeline.confirmation.current !== undefined) {
+    return true;
+  }
+  return timeline.nodes.some((node) => !isPrefatoryAssistantNode(node));
+}
+
+function isPrefatoryAssistantNode(node: ProjectableTranscriptNode): boolean {
+  // Request preparation may delay the first provider event, but it is not itself a model response.
+  if (node.eventType === "model.requested") {
+    return true;
+  }
+  if (!node.eventType.startsWith("context.compaction.")) {
+    return false;
+  }
+  return node.phase !== "failed" && node.phase !== "blocked" && node.phase !== "cancelled";
 }
 
 export function assistantMessageHasTimeline<

@@ -351,6 +351,157 @@ test("assistant message structure suppresses speculative fallback body while a l
   assert.equal(structure.awaitingFirstVisibleOutput, true);
 });
 
+test("assistant message structure keeps waiting while only the internal model request is visible", () => {
+  const structure = projectAssistantMessageStructure({
+    keepStreamMounted: true,
+    transcriptNodes: [node({
+      nodeId: "model-request",
+      sequence: 1,
+      kind: "system",
+      eventType: "model.requested",
+      phase: "executing",
+      summary: "准备模型请求",
+    })],
+  });
+
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["awaiting"]);
+  assert.equal(structure.awaitingFirstVisibleOutput, true);
+});
+
+test("assistant message structure keeps waiting through successful prefatory context compaction", () => {
+  const structure = projectAssistantMessageStructure({
+    keepStreamMounted: true,
+    transcriptNodes: [
+      node({
+        nodeId: "compaction-requested",
+        sequence: 1,
+        kind: "system",
+        eventType: "context.compaction.requested",
+        phase: "executing",
+        summary: "正在上下文压缩",
+      }),
+      node({
+        nodeId: "compaction-completed",
+        sequence: 2,
+        kind: "system",
+        eventType: "context.compaction.completed",
+        phase: "completed",
+        summary: "上下文压缩完成",
+      }),
+      node({
+        nodeId: "model-request",
+        sequence: 3,
+        kind: "system",
+        eventType: "model.requested",
+        phase: "executing",
+        summary: "准备模型请求",
+      }),
+    ],
+  });
+
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["awaiting"]);
+  assert.equal(structure.awaitingFirstVisibleOutput, true);
+});
+
+test("assistant message structure removes waiting on reasoning and side narration", () => {
+  const cases = [
+    node({
+      nodeId: "reasoning",
+      sequence: 1,
+      kind: "thinking",
+      eventType: "model.reasoning.delta",
+      phase: "noted",
+      text: "正在分析当前问题。",
+    }),
+    node({
+      nodeId: "side-output",
+      sequence: 1,
+      kind: "system",
+      eventType: "model.side.completed",
+      phase: "completed",
+      text: "我先检查相关文件。",
+    }),
+  ];
+
+  for (const activity of cases) {
+    const structure = projectAssistantMessageStructure({
+      keepStreamMounted: true,
+      transcriptNodes: [activity],
+    });
+    assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity"]);
+    assert.equal(structure.awaitingFirstVisibleOutput, false);
+  }
+});
+
+test("assistant message structure removes waiting on failure or cancellation", () => {
+  const cases = [
+    node({
+      nodeId: "compaction-failed",
+      sequence: 1,
+      kind: "system",
+      eventType: "context.compaction.failed",
+      phase: "failed",
+      summary: "上下文压缩失败",
+    }),
+    node({
+      nodeId: "run-cancelled",
+      sequence: 1,
+      kind: "system",
+      eventType: "run.cancelled",
+      phase: "cancelled",
+      summary: "任务已取消",
+    }),
+  ];
+
+  for (const activity of cases) {
+    const structure = projectAssistantMessageStructure({
+      keepStreamMounted: true,
+      transcriptNodes: [activity],
+    });
+    assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity"]);
+    assert.equal(structure.awaitingFirstVisibleOutput, false);
+  }
+});
+
+test("assistant message structure never hides pending confirmation behind waiting", () => {
+  const pending = { confirmationId: "confirmation-1", ownerRunId: "run-1" };
+  const structure = projectAssistantMessageStructure({
+    keepStreamMounted: true,
+    transcriptNodes: [node({
+      nodeId: "model-request",
+      sequence: 1,
+      kind: "system",
+      eventType: "model.requested",
+      phase: "executing",
+      summary: "准备模型请求",
+    })],
+    pending,
+  });
+
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity"]);
+  assert.equal(structure.awaitingFirstVisibleOutput, false);
+  assert.equal(structure.segments[0]?.kind === "activity"
+    ? structure.segments[0].timeline.confirmation.current
+    : undefined, pending);
+});
+
+test("assistant message structure removes the waiting indicator on the first live body", () => {
+  const structure = projectAssistantMessageStructure({
+    keepStreamMounted: true,
+    transcriptNodes: [node({
+      nodeId: "live-body",
+      sequence: 1,
+      kind: "body",
+      eventType: "model.output.delta",
+      phase: "noted",
+      text: "我先检查当前问题。",
+    })],
+  });
+
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["body"]);
+  assert.equal(structure.awaitingFirstVisibleOutput, false);
+});
+
 test("assistant message structure keeps post-tool continuation inside the workflow activity", () => {
   const structure = projectAssistantMessageStructure({
     keepStreamMounted: true,

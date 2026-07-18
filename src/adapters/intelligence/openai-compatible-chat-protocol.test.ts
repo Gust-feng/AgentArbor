@@ -6,7 +6,7 @@ import {
   resolveOpenAICompatibleChatDialect,
 } from "./openai-compatible-chat-protocol.js";
 
-test("Kimi K3 omits the legacy Moonshot thinking field", () => {
+test("Kimi K3 uses its top-level max reasoning effort and omits legacy Moonshot thinking", () => {
   const dialect = resolveOpenAICompatibleChatDialect({
     providerProfileId: "moonshot",
     baseUrl: "https://api.moonshot.ai/v1",
@@ -21,6 +21,6 @@ test("Kimi K3 omits the legacy Moonshot thinking field", () => {
     dialect,
   });
 
-  assert.equal(dialect.reasoningControl, "none");
-  assert.deepEqual(request, { tool_choice: "required" });
+  assert.equal(dialect.reasoningControl, "kimi_k3_reasoning_effort");
+  assert.deepEqual(request, { reasoning_effort: "max", tool_choice: "required" });
 });

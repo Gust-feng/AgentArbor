@@ -11,8 +11,7 @@ import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
 import {
   decodeOpenAICompatibleChatMessage,
   type OpenAICompatibleChatDecodedContent,
-  type OpenAICompatibleChatDialect,
-} from "./openai-compatible-chat-protocol.js";
+} from "./openai-reasoning-normalizer.js";
 import {
   asRecord,
   parseStructuredOutput,
@@ -33,14 +32,13 @@ export function normalizeOpenAICompatibleResponse(input: {
   providerKind: "openai_compatible";
   protocolKind: "openai_compatible_chat_completions";
   model: string;
-  dialect: OpenAICompatibleChatDialect;
   latencyMs: number;
 }): ModelResponse {
   const raw = asRecord(input.raw);
   const choices = Array.isArray(raw.choices) ? raw.choices : [];
   const firstChoice = asRecord(choices[0]);
   const message = asRecord(firstChoice.message);
-  const decoded = decodeOpenAICompatibleChatMessage({ message, dialect: input.dialect });
+  const decoded = decodeOpenAICompatibleChatMessage(message);
   const content = decoded.textContent;
   const refusal = typeof message.refusal === "string" ? message.refusal : "";
   if (refusal.trim().length > 0) {

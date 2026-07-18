@@ -170,7 +170,6 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
             providerKind: this.providerKind,
             protocolKind: this.protocolKind,
             model: this.model,
-            dialect: this.dialect,
             latencyMs: Date.now() - startedAt,
           });
         }
@@ -185,7 +184,6 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         providerKind: this.providerKind,
         protocolKind: this.protocolKind,
         model: this.model,
-        dialect: this.dialect,
         latencyMs: Date.now() - startedAt,
       });
     } catch (error) {

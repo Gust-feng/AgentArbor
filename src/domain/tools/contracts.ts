@@ -164,6 +164,8 @@ export type ToolCallRequest = {
   readonly callId: string;
   /** Application fact identity when the provider call id is only unique inside a nested run. */
   readonly factId?: string;
+  /** The delegated AgentTool fact that owns this nested mechanical tool call. */
+  readonly parentToolCallFactId?: string;
   readonly toolName: string;
   readonly input: ToolFactValue | undefined;
 };
@@ -173,6 +175,8 @@ export type ToolCallResult = {
   readonly callId: string;
   /** Application fact identity when the provider call id is only unique inside a nested run. */
   readonly factId?: string;
+  /** The delegated AgentTool fact that owns this nested mechanical tool call. */
+  readonly parentToolCallFactId?: string;
   readonly toolName: string;
   readonly input: ToolFactValue | undefined;
   readonly output: ToolFactValue | undefined;

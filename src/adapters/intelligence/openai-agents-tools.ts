@@ -137,7 +137,13 @@ function createSdkTool(input: {
         return existing.needsApproval;
       }
       const boundary = freezeBoundary(await input.boundary(requireSdkRunContext(runContext)));
-      const request = toolCallRequest(providerCallId, factId, input.definition.name, toolInput);
+      const request = toolCallRequest(
+        providerCallId,
+        factId,
+        input.definition.name,
+        toolInput,
+        input.factScope?.(),
+      );
       const preflight = boundary.gateway.preflight(
         request,
         executionContext(input.execution, boundary, request),
@@ -152,17 +158,18 @@ function createSdkTool(input: {
         });
         return false;
       }
+      const result = withParentToolCallFactId(preflight.result, request);
       const fact: OpenAIAgentsPreflightFact = {
         request,
-        result: preflight.result,
+        result,
         needsApproval: preflight.status === "approval_required",
         boundary,
       };
       if (preflight.status !== "approval_required") {
-        recordOpenAIAgentsToolRequest(input.execution, toolRequestFromResult(preflight.result));
+        recordOpenAIAgentsToolRequest(input.execution, toolRequestFromResult(result));
       }
       input.execution.preflightByFactId.set(factId, fact);
-      await recordOpenAIAgentsToolResult(input.execution, preflight.result);
+      await recordOpenAIAgentsToolResult(input.execution, result);
       return fact.needsApproval;
     },
     execute: async (toolInput, runContext, details) => {
@@ -173,7 +180,13 @@ function createSdkTool(input: {
         return input.execution.modelInput.toolResult(cached.result);
       }
       const boundary = cached?.boundary ?? freezeBoundary(await input.boundary(requireSdkRunContext(runContext)));
-      const request = cached?.request ?? toolCallRequest(callId, factId, input.definition.name, toolInput);
+      const request = cached?.request ?? toolCallRequest(
+        callId,
+        factId,
+        input.definition.name,
+        toolInput,
+        input.factScope?.(),
+      );
       recordOpenAIAgentsToolRequest(input.execution, request);
       const approvedConfirmationId = cached?.result?.confirmationRequest?.confirmationId;
       const approvedConfirmationIds = cached?.needsApproval === true
@@ -182,11 +195,11 @@ function createSdkTool(input: {
             ...(approvedConfirmationId === undefined ? [] : [approvedConfirmationId]),
           ])
         : boundary.permission.approvedConfirmationIds;
-      const result = await boundary.gateway.execute(
+      const result = withParentToolCallFactId(await boundary.gateway.execute(
         request,
         executionContext(input.execution, boundary, request),
         { ...boundary.permission, approvedConfirmationIds },
-      );
+      ), request);
       await recordOpenAIAgentsToolResult(input.execution, result);
       return input.execution.modelInput.toolResult(result);
     },
@@ -249,7 +262,7 @@ function createSdkAgentTool(input: {
         started.set(factId, { input: toolInput, at: Date.now() });
         recordOpenAIAgentsToolRequest(
           input.execution,
-          toolCallRequest(providerCallId, factId, input.agentTool.toolName, toolInput),
+          toolCallRequest(providerCallId, factId, input.agentTool.toolName, toolInput, undefined),
         );
       }
       return false;
@@ -305,6 +318,7 @@ function createSdkAgentTool(input: {
         factId,
         input.agentTool.toolName,
         started.get(factId)?.input ?? parseToolInput(details?.toolCall?.arguments),
+        undefined,
       ),
     );
     interrupted.delete(factId);
@@ -555,6 +569,7 @@ function toolRequestFromResult(result: ToolCallResult): ToolCallRequest {
   return {
     callId: result.callId,
     ...(result.factId === undefined ? {} : { factId: result.factId }),
+    ...(result.parentToolCallFactId === undefined ? {} : { parentToolCallFactId: result.parentToolCallFactId }),
     toolName: result.toolName,
     input: result.input,
   };
@@ -607,13 +622,26 @@ function assertUniqueToolNames(
   }
 }
 
-function toolCallRequest(callId: string, factId: string, toolName: string, input: unknown): ToolCallRequest {
+function toolCallRequest(
+  callId: string,
+  factId: string,
+  toolName: string,
+  input: unknown,
+  parentToolCallFactId: string | undefined,
+): ToolCallRequest {
   return {
     callId,
     ...optionalFactId(callId, factId),
+    ...(parentToolCallFactId === undefined ? {} : { parentToolCallFactId }),
     toolName,
     input: input as ToolFactValue,
   };
+}
+
+function withParentToolCallFactId(result: ToolCallResult, request: ToolCallRequest): ToolCallResult {
+  return request.parentToolCallFactId === undefined || result.parentToolCallFactId !== undefined
+    ? result
+    : { ...result, parentToolCallFactId: request.parentToolCallFactId };
 }
 
 function scopedToolFactId(scope: string | undefined, providerCallId: string): string {

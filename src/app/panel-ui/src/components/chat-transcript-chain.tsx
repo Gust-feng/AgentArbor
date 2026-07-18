@@ -13,11 +13,10 @@ import type { ConversationTurn, ConversationTurnAttachment } from "../contracts/
 import { compact } from "../text";
 import type { TranscriptNode } from "../contracts/run";
 import type { LiveAnswerTone } from "../../../panel-read-model/transcript/panel-live-transcript";
-import { stabilizeStreamingMarkdown } from "../streaming-text";
 import type { AssistantWorkflowDisplay } from "../../../panel-read-model/assistant/panel-assistant-workflow-display";
 import type { ConversationDisplayItem } from "../../../panel-conversation/panel-conversation-display-list";
 import { LiveStreamBox } from "./live-stream-text";
-import { RichText } from "./rich-text";
+import { RichText, StreamingRichText } from "./rich-text";
 import type { ChatModelOption } from "./chat-empty";
 import {
   assistantTerminalNoticeTitle,
@@ -74,7 +73,6 @@ export function TranscriptChain(props: {
             <UserMessage
               key={item.key}
               content={item.turn.content}
-              status={item.turn.status}
               attachments={item.turn.attachments}
             />
           );
@@ -112,24 +110,15 @@ export function TranscriptChain(props: {
 
 const UserMessage = React.memo(function UserMessage(props: {
   readonly content: string;
-  readonly status: string;
   readonly attachments?: readonly ConversationTurnAttachment[];
 }): React.ReactElement {
-  const { content, status } = props;
-  const queued = status === "pending";
+  const { content } = props;
   return (
-    <article className="user-message" {...(queued ? { "data-entering": "" } : undefined)}>
+    <article className="user-message">
       <div className="user-message-wrap">
         <UserMessageAttachments attachments={props.attachments} />
         {content.trim().length > 0 && (
           <UserMessageContent content={content} />
-        )}
-        {queued && (
-          <p className="user-message-queued" role="status" aria-label="等待当前回复完成">
-            <span aria-hidden="true" />
-            <span aria-hidden="true" />
-            <span aria-hidden="true" />
-          </p>
         )}
       </div>
     </article>
@@ -230,15 +219,9 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
   if (workflow === undefined) {
     return <AssistantPendingBlock reason="initial" />;
   }
-  const entering = props.animateOnMount === true || props.live === true;
-  const hasAwaitingSegment = workflow.segments.some((segment) => segment.kind === "awaiting");
-  const liveActivitySegmentIndex = hasAwaitingSegment
-    ? -1
-    : workflow.segments.findIndex((segment) => segment.kind === "activity" && segment.lifecycle === "open");
   return (
     <article
       className="assistant-message assistant-workline"
-      {...(entering ? { "data-entering": "" } : undefined)}
     >
       <AssistantMessageLabel model={props.model} />
       <div className="assistant-message-body">
@@ -249,7 +232,6 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
               segment={segment}
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy === true}
-              showLiveStatus={index === liveActivitySegmentIndex}
             />
           );
         })}
@@ -336,7 +318,6 @@ function AssistantWorkflowSegment(props: {
   readonly segment: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>["segments"][number];
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
-  readonly showLiveStatus?: boolean;
 }): React.ReactElement {
   const segment = props.segment;
   if (segment.kind === "activity") {
@@ -349,7 +330,6 @@ function AssistantWorkflowSegment(props: {
         collapseReason={segment.collapseReason}
         onDecision={props.onDecision}
         confirmationBusy={props.confirmationBusy}
-        showLiveStatus={props.showLiveStatus}
       />
     );
   }
@@ -383,12 +363,8 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
         live={props.live === true}
         animateOnMount={props.animateOnMount === true}
         tone={props.liveTone ?? "formal"}
-        renderText={(displayed) => <RichText text={displayed} />}
-        renderStreamingText={(displayed) => (
-          <div className="rich-text rich-text-streaming">
-            <RichText text={stabilizeStreamingMarkdown(displayed)} />
-          </div>
-        )}
+        renderText={(displayed) => <StreamingRichText text={displayed} live={false} />}
+        renderStreamingText={(displayed) => <StreamingRichText text={displayed} />}
       />
       {props.showActions && (
         <div className="turn-actions">

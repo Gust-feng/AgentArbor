@@ -24,6 +24,7 @@ export type LiveToolActivity = {
   readonly summary?: string;
   readonly timestamp: string;
   readonly display?: ToolDisplayProjection;
+  readonly parentToolCallFactId?: string;
   readonly refs: RunEventLike["refs"];
 };
 
@@ -48,6 +49,7 @@ type RunEventLike = {
   readonly type: string;
   readonly timestamp?: string;
   readonly toolName?: string;
+  readonly parentToolCallFactId?: string;
   readonly summary?: string;
   readonly delta?: string;
   readonly refs: readonly {
@@ -158,6 +160,7 @@ export function appendLiveRunEvent(
           summary: event.summary,
           timestamp: event.timestamp ?? "",
           display: event.detail?.display,
+          parentToolCallFactId: event.parentToolCallFactId,
           refs: event.refs,
         });
     return withLiveModelTurn(withTool, {

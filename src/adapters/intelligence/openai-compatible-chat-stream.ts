@@ -12,8 +12,8 @@ import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
 import {
   OpenAICompatibleThinkTagStreamSplitter,
   reasoningTextFromRecord,
-  type OpenAICompatibleChatDialect,
-} from "./openai-compatible-chat-protocol.js";
+} from "./openai-reasoning-normalizer.js";
+import type { OpenAICompatibleChatDialect } from "./openai-compatible-chat-protocol.js";
 import {
   finishReasonForOpenAI,
   isProtocolExtensionValue,

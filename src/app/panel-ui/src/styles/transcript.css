@@ -19,17 +19,6 @@
   padding: 2px 0 0;
 }
 
-.agent-live-work-status {
-  display: flex;
-  min-height: 24px;
-  align-items: center;
-  padding-left: 2px;
-}
-
-.agent-live-work-dots {
-  min-height: 18px;
-}
-
 .agent-confirmation-activity {
   display: grid;
   min-width: 0;
@@ -90,6 +79,60 @@
 .agent-workline-summary-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.agent-reasoning-disclosure {
+  width: 100%;
+  min-width: 0;
+  border-top: 1px solid color-mix(in oklch, var(--border) 76%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 76%, transparent);
+}
+
+.agent-reasoning-disclosure > summary {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 0;
+  color: color-mix(in oklch, var(--fg) 58%, var(--muted));
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.35;
+  list-style: none;
+  transition: color var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.agent-reasoning-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-reasoning-disclosure > summary:hover,
+.agent-reasoning-disclosure > summary:focus-visible,
+.agent-reasoning-disclosure[open] > summary {
+  color: var(--fg);
+}
+
+.agent-reasoning-disclosure > summary:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 48%, transparent);
+  outline-offset: 3px;
+}
+
+.agent-reasoning-chevron {
+  flex: 0 0 auto;
+  color: color-mix(in oklch, var(--fg) 42%, var(--muted));
+  transition: transform var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.agent-reasoning-disclosure[open] > summary .agent-reasoning-chevron {
+  transform: rotate(90deg);
+}
+
+.agent-reasoning-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 0 14px 21px;
+  color: color-mix(in oklch, var(--fg) 78%, var(--muted));
+  user-select: text;
 }
 
 .agent-activity {
@@ -321,6 +364,28 @@
   max-width: 100%;
   min-width: 0;
   padding: 0 0 14px;
+}
+
+.agent-record-children {
+  display: grid;
+  gap: 0;
+  margin: 3px 0 2px 6px;
+  padding: 2px 0 0 9px;
+  border-left: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
+}
+
+.agent-record-children .agent-record {
+  width: 100%;
+  margin-left: 0;
+  padding-left: 24px;
+}
+
+.agent-record-children .agent-record::before {
+  left: 7px;
+}
+
+.agent-record-children .agent-record-icon {
+  left: -24px;
 }
 
 /* Content-native evidence */

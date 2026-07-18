@@ -255,19 +255,6 @@
   color: var(--muted);
 }
 
-.rich-text-streaming {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  align-self: stretch;
-  color: var(--fg);
-  font-family: var(--rt-body-family, var(--font-sans));
-  font-size: var(--rt-body-size, 15px);
-  line-height: var(--rt-body-lh, 1.76);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .rich-divider {
   width: 100%;
   border: 0;
@@ -276,8 +263,7 @@
 }
 
 @media (max-width: 720px) {
-  .assistant-answer .rich-text,
-  .rich-text-streaming {
+  .assistant-answer .rich-text {
     font-size: 15px;
     line-height: 1.78;
   }

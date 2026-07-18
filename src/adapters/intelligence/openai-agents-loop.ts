@@ -46,6 +46,10 @@ import {
   resolveOpenAICompatibleChatDialect,
 } from "./openai-compatible-chat-protocol.js";
 import {
+  completedReasoningFromAgentOutput,
+  OpenAIReasoningStreamNormalizer,
+} from "./openai-reasoning-normalizer.js";
+import {
   pendingOpenAIAgentsConfirmations,
   rejectedOpenAIAgentsToolResult,
   selectOpenAIAgentsConfirmationDecisions,
@@ -184,11 +188,12 @@ class OpenAIAgentsLoop implements AgentLoop {
     };
     let sdkState: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>> | undefined;
     try {
-      const rootModel = withRootToolRoundObserver({
+      const rootModel = withRootModelTurnObserver({
         model: await this.modelProvider.getModel(this.config.model),
         protocol: this.config.protocol,
         execution,
         onToolRound: input.onToolRound,
+        onReasoningCompleted: input.onReasoningCompleted,
       });
       const agent = this.createAgent(execution, rootModel);
       sdkState = new RunState(
@@ -246,7 +251,7 @@ class OpenAIAgentsLoop implements AgentLoop {
     abortSignal: AbortSignal,
   ): Promise<RunResult<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>> {
     execution.abortSignal = abortSignal;
-    const stream = execution.input.onTextDelta !== undefined && supportsSdkStreaming(this.config);
+    const stream = hasStreamObserver(execution.input) && supportsSdkStreaming(this.config);
     const callModelInputFilter = createContextMaintenanceFilter(execution, this.config.protocol);
     if (!stream) {
       return this.runner.run(agent, input, {
@@ -261,26 +266,20 @@ class OpenAIAgentsLoop implements AgentLoop {
       stream: true,
       callModelInputFilter,
     });
+    const reasoningStream = new OpenAIReasoningStreamNormalizer(this.config.protocol);
     for await (const event of result) {
+      let rawEvent: unknown;
       if (isOpenAIChatCompletionsRawModelStreamEvent(event)) {
         // Some compatible gateways emit non-delta transport events through the
         // Chat stream channel. They are not text deltas; terminal validation
         // remains owned by the model boundary guard.
-        const rawEvent = asRecord(event.data.event);
-        const choice = asRecord(Array.isArray(rawEvent.choices) ? rawEvent.choices[0] : undefined);
-        const content = asRecord(choice.delta).content;
-        if (typeof content === "string" && content.length > 0) {
-          execution.input.onTextDelta?.(content);
-        }
-        continue;
-      }
-      if (isOpenAIResponsesRawModelStreamEvent(event)) {
-        const rawEvent = asRecord(event.data.event);
-        if (rawEvent.type === "response.output_text.delta" && typeof rawEvent.delta === "string") {
-          execution.input.onTextDelta?.(rawEvent.delta);
-        }
-      }
+        rawEvent = event.data.event;
+      } else if (isOpenAIResponsesRawModelStreamEvent(event)) {
+        rawEvent = event.data.event;
+      } else continue;
+      emitNormalizedStreamDelta(reasoningStream.push(rawEvent), execution.input);
     }
+    emitNormalizedStreamDelta(reasoningStream.flush(), execution.input);
     await result.completed;
     if (result.cancelled) {
       throw abortError("OpenAI Agents SDK stream was cancelled.");
@@ -385,81 +384,105 @@ class OpenAIAgentsLoop implements AgentLoop {
   }
 }
 
-function withRootToolRoundObserver(input: {
+function hasStreamObserver(input: AgentLoopInput): boolean {
+  return input.onTextDelta !== undefined || input.onReasoningDelta !== undefined;
+}
+
+function withRootModelTurnObserver(input: {
   readonly model: Model;
   readonly protocol: OpenAIAgentsLoopProtocol;
   readonly execution: ExecutionState;
   readonly onToolRound: AgentLoopInput["onToolRound"];
+  readonly onReasoningCompleted: AgentLoopInput["onReasoningCompleted"];
 }): Model {
-  return input.onToolRound === undefined
+  return input.onToolRound === undefined && input.onReasoningCompleted === undefined
     ? input.model
-    : new RootToolRoundObserverModel(
+    : new RootModelTurnObserver(
         input.model,
         input.protocol,
         input.execution,
         input.onToolRound,
+        input.onReasoningCompleted,
       );
 }
 
-class RootToolRoundObserverModel implements Model {
+class RootModelTurnObserver implements Model {
   constructor(
     private readonly inner: Model,
     private readonly protocol: OpenAIAgentsLoopProtocol,
     private readonly execution: ExecutionState,
-    private readonly onToolRound: NonNullable<AgentLoopInput["onToolRound"]>,
+    private readonly onToolRound: AgentLoopInput["onToolRound"],
+    private readonly onReasoningCompleted: AgentLoopInput["onReasoningCompleted"],
   ) {}
 
   async getResponse(request: ModelRequest): Promise<ModelResponse> {
     const response = await this.inner.getResponse(request);
-    await this.acceptToolRound(response);
+    await this.acceptModelTurn(response);
     return response;
   }
 
   async *getStreamedResponse(request: ModelRequest): AsyncIterable<StreamEvent> {
     for await (const event of this.inner.getStreamedResponse(request)) {
       if (event.type === "response_done") {
-        await this.acceptToolRound(event.response);
+        await this.acceptModelTurn(event.response);
       }
       yield event;
     }
   }
 
   getRetryAdvice(args: ModelRetryAdviceRequest): ModelRetryAdvice | Promise<ModelRetryAdvice | undefined> | undefined {
-    if (args.error instanceof ToolRoundAcceptanceError) {
+    if (args.error instanceof ModelTurnAcceptanceError) {
       return {
         suggested: false,
-        reason: "The owning feature did not durably accept the validated tool-call turn.",
+        reason: "The owning feature did not durably accept the observed model turn.",
       };
     }
     return this.inner.getRetryAdvice?.(args);
   }
 
+  private async acceptModelTurn(response: Pick<ModelResponse, "output">): Promise<void> {
+    const reasoning = completedReasoningFromAgentOutput(response.output);
+    try {
+      if (reasoning.length > 0) {
+        await this.onReasoningCompleted?.(reasoning);
+      }
+      await this.acceptToolRound(response);
+    } catch (error) {
+      throw new ModelTurnAcceptanceError(error);
+    }
+  }
+
   private async acceptToolRound(response: Pick<ModelResponse, "output">): Promise<void> {
-    const assistantMessage = canonicalMessagesFromOpenAIAgentsInput({
+    if (this.onToolRound === undefined) return;
+    const providerAssistantMessage = canonicalMessagesFromOpenAIAgentsInput({
       protocol: this.protocol,
       items: response.output,
     }).find((message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0);
-    if (assistantMessage === undefined) {
+    if (providerAssistantMessage === undefined) {
       return;
     }
-    try {
-      await this.onToolRound({
-        canonicalMessagesBeforeRound: cloneMessages(
-          this.execution.latestRequestMessages ?? this.execution.baseMessages,
-        ),
-        assistantMessage: globalThis.structuredClone(assistantMessage),
-      });
-    } catch (error) {
-      throw new ToolRoundAcceptanceError(error);
-    }
+    await this.onToolRound({
+      canonicalMessagesBeforeRound: cloneMessages(
+        this.execution.latestRequestMessages ?? this.execution.baseMessages,
+      ),
+      assistantMessage: globalThis.structuredClone(providerAssistantMessage),
+    });
   }
 }
 
-class ToolRoundAcceptanceError extends Error {
+class ModelTurnAcceptanceError extends Error {
   constructor(cause: unknown) {
     super(errorMessage(cause), { cause });
-    this.name = "ToolRoundAcceptanceError";
+    this.name = "ModelTurnAcceptanceError";
   }
+}
+
+function emitNormalizedStreamDelta(
+  delta: { readonly reasoningDelta: string; readonly textDelta: string },
+  input: AgentLoopInput,
+): void {
+  if (delta.reasoningDelta.length > 0) input.onReasoningDelta?.(delta.reasoningDelta);
+  if (delta.textDelta.length > 0) input.onTextDelta?.(delta.textDelta);
 }
 
 function createContextMaintenanceFilter(

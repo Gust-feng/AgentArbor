@@ -832,6 +832,7 @@ function worklineActivityItem(input: {
   return {
     nodeId: input.itemId,
     key: input.key,
+    eventType: "deep.workline.activity",
     copy: {
       label: input.label,
       detail: activityDetailText(input.title, input.detail),

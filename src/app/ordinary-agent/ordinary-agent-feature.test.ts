@@ -351,6 +351,105 @@ test("feature activity stream supports output delta subscribe and cursor replay 
     activity.type === "tool.result" && activity.durability === "durable"), true);
 });
 
+test("feature streams reasoning live and persists one completed reasoning fact", async (t) => {
+  let emitReasoning: ((delta: string) => void) | undefined;
+  let finish: ((outcome: OrdinaryExecutionOutcome) => void) | undefined;
+  let markEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const run = await fixture(t, {
+    execute(input) {
+      emitReasoning = input.onReasoningDelta;
+      markEntered?.();
+      return new Promise<OrdinaryExecutionOutcome>((resolve) => { finish = resolve; });
+    },
+  });
+  await run.feature.commands.start(startInput("reasoning-run"));
+  await entered;
+
+  emitReasoning?.("先分析");
+  emitReasoning?.("，再回答");
+  const live = await run.feature.events.replay("reasoning-run");
+  assert.deepEqual(live?.activities.filter((activity) => activity.type === "model.reasoning.delta")
+    .map((activity) => activity.delta), ["先分析", "，再回答"]);
+
+  finish?.(completedOutcome());
+  await waitForStatus(run.feature, "reasoning-run", "completed");
+  const settled = await run.feature.events.replay("reasoning-run");
+  assert.equal(settled?.activities.some((activity) => activity.type === "model.reasoning.delta"), false);
+  const completedReasoning = settled?.activities.find((activity) =>
+    activity.type === "run.transition" && activity.event.type === "model.reasoning.completed");
+  assert.equal(completedReasoning?.type === "run.transition" &&
+    completedReasoning.event.type === "model.reasoning.completed"
+    ? completedReasoning.event.content
+    : undefined, "先分析，再回答");
+
+  await run.feature.release();
+  const restarted = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(run.root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(run.root),
+    execution: executionFor("completed"),
+    now: monotonicClock("2026-01-02T00:00:00.000Z"),
+    idFactory: deterministicIds(100),
+  });
+  t.after(() => restarted.release());
+  const replayed = await restarted.events.replay("reasoning-run");
+  assert.equal(replayed?.activities.some((activity) =>
+    activity.type === "run.transition" && activity.event.type === "model.reasoning.completed" &&
+    activity.event.content === "先分析，再回答"), true);
+});
+
+test("feature persists authoritative completed reasoning when the provider emits no live reasoning deltas", async (t) => {
+  const reasoning = "Kimi 在最终模型响应中返回的完整 reasoning_content";
+  const run = await fixture(t, {
+    async execute(input) {
+      await input.onReasoningCompleted?.(reasoning);
+      return completedOutcome();
+    },
+  });
+
+  await run.feature.commands.start(startInput("completed-reasoning-run"));
+  await waitForStatus(run.feature, "completed-reasoning-run", "completed");
+  const replay = await run.feature.events.replay("completed-reasoning-run");
+  const reasoningEvents = replay?.activities.filter((activity) =>
+    activity.type === "run.transition" && activity.event.type === "model.reasoning.completed") ?? [];
+  assert.equal(reasoningEvents.length, 1);
+  assert.equal(reasoningEvents[0]?.type === "run.transition" &&
+    reasoningEvents[0].event.type === "model.reasoning.completed"
+    ? reasoningEvents[0].event.content
+    : undefined, reasoning);
+});
+
+test("feature ignores reasoning that arrives after the root model request completed", async (t) => {
+  const authoritativeReasoning = "父 Agent 的完整思考";
+  const observationGate = createManualGate();
+  const run = await fixture(t, {
+    async execute(input) {
+      input.onReasoningDelta?.("父 Agent 的流式思考");
+      await input.onReasoningCompleted?.(authoritativeReasoning);
+      input.onReasoningDelta?.("Sub-Agent 的迟到思考");
+      await input.onReasoningCompleted?.("Sub-Agent 的完成思考");
+      observationGate.enter();
+      await observationGate.released;
+      return completedOutcome();
+    },
+  });
+  t.after(() => observationGate.release());
+
+  await run.feature.commands.start(startInput("late-reasoning-run"));
+  await observationGate.entered;
+  const liveReplay = await run.feature.events.replay("late-reasoning-run");
+  assert.equal(liveReplay?.activities.some((activity) => activity.type === "model.reasoning.delta"), false);
+  const reasoningEvents = liveReplay?.activities.filter((activity) =>
+    activity.type === "run.transition" && activity.event.type === "model.reasoning.completed") ?? [];
+  assert.equal(reasoningEvents.length, 1);
+  assert.equal(reasoningEvents[0]?.type === "run.transition" &&
+    reasoningEvents[0].event.type === "model.reasoning.completed"
+    ? reasoningEvents[0].event.content
+    : undefined, authoritativeReasoning);
+  observationGate.release();
+  await waitForStatus(run.feature, "late-reasoning-run", "completed");
+});
+
 test("feature exposes one live tool row from request through progress and keeps only the durable result after settlement", async (t) => {
   let emitRequested: ((request: ToolCallRequest) => void) | undefined;
   let emitProgress: ((progress: ToolCallProgress) => void) | undefined;

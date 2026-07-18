@@ -24,8 +24,10 @@ import type {
   ActivityToolKind,
   ActivityItem,
 } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
-import { resolveActivityToolKind } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
-import { activeTimelineStatus } from "../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
+import {
+  isVisibleOrdinaryActivityItem,
+  resolveActivityToolKind,
+} from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
 import type { AgentWorkTimelineView } from "../../../panel-read-model/assistant/panel-agent-work-timeline-view";
 import { ActivityEvidencePanel } from "./activity-evidence";
 
@@ -38,7 +40,6 @@ type AgentWorkTimelineProps = {
   readonly collapsed?: boolean;
   readonly lifecycle?: "open" | "settled" | "attention";
   readonly collapseReason?: string;
-  readonly showLiveStatus?: boolean;
   readonly selectedItemKey?: string;
   readonly selectableItemKeys?: readonly string[];
   readonly onSelectItem?: (item: ActivityItem) => void;
@@ -55,8 +56,13 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
   if (!props.view.hasContent) return null;
 
   const visibleItems = props.presentation === "agent_work"
-    ? items.filter(isOrdinaryWorkRecord)
+    ? items.filter(isVisibleOrdinaryActivityItem)
     : items;
+  const reasoningOnly = visibleItems.length > 0 && visibleItems.every(isReasoningActivityItem);
+  const autoOpenWorkRecords = props.lifecycle === "open" ||
+    props.lifecycle === "attention" ||
+    props.collapsed === false ||
+    confirmation.current !== undefined;
   const itemActivity = visibleItems.length === 0 ? null : (
     <div className="agent-activity">
       {visibleItems.map((item, index) => {
@@ -103,24 +109,19 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
     "data-lifecycle": props.lifecycle,
     "data-collapse-reason": props.collapseReason,
   } as const;
-  const autoOpenWorkRecords = props.lifecycle === "open" ||
-    props.lifecycle === "attention" ||
-    props.collapsed === false ||
-    confirmation.current !== undefined;
+
+  if (props.presentation === "agent_work" && reasoningOnly) {
+    return (
+      <section {...worklineProps} data-reasoning-only="true">
+        <ReasoningDisclosure autoOpen={autoOpenWorkRecords} items={visibleItems} />
+        {confirmationActivity}
+      </section>
+    );
+  }
 
   if (props.presentation === "agent_work" && confirmation.current === undefined) {
-    const status = activeTimelineStatus({ items });
     return (
       <section {...worklineProps}>
-        {props.showLiveStatus !== false && props.lifecycle === "open" && (
-          <div className="agent-live-work-status" role="status" aria-live="polite" aria-label={status.label}>
-            <span className="typing-dots agent-live-work-dots" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
-          </div>
-        )}
         {visibleItems.length > 0 && (
           <WorkRecordDisclosure autoOpen={autoOpenWorkRecords}>{itemActivity}</WorkRecordDisclosure>
         )}
@@ -186,13 +187,37 @@ function WorkRecordDisclosure(props: {
   );
 }
 
-function isOrdinaryWorkRecord(item: ActivityItem): boolean {
-  return item.tone === "tool" ||
-    item.phase === "failed" ||
-    item.phase === "blocked" ||
-    item.phase === "cancelled" ||
-    item.tone === "confirmation" ||
-    item.tone === "decision";
+function ReasoningDisclosure(props: {
+  readonly autoOpen: boolean;
+  readonly items: readonly ActivityItem[];
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(props.autoOpen);
+  const previousAutoOpen = React.useRef(props.autoOpen);
+  React.useEffect(() => {
+    if (previousAutoOpen.current === props.autoOpen) {
+      return;
+    }
+    previousAutoOpen.current = props.autoOpen;
+    setOpen(props.autoOpen);
+  }, [props.autoOpen]);
+  const active = props.items.some(isActiveActivityItem);
+
+  return (
+    <details
+      className="agent-reasoning-disclosure"
+      open={open}
+      data-running={active ? "true" : undefined}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary aria-label={open ? "收起思考过程" : "展开思考过程"}>
+        <ChevronRight className="agent-reasoning-chevron" size={14} aria-hidden="true" />
+        <span>{active ? "思考中" : "思考过程"}</span>
+      </summary>
+      <div className="agent-reasoning-body">
+        {props.items.map((item) => <ActivityEvidencePanel item={item} key={item.key} />)}
+      </div>
+    </details>
+  );
 }
 
 function ActivityRecord(props: {
@@ -203,6 +228,7 @@ function ActivityRecord(props: {
   readonly toolKind: ActivityToolKind;
   readonly onSelectItem?: (item: ActivityItem) => void;
 }): React.ReactElement {
+  const hasChildren = (props.item.children?.length ?? 0) > 0;
   const expandable = shouldRenderExpandedDetail(props.item);
   const recordClass = classNames("agent-record", props.item.tone, props.item.phase);
   const summary = (
@@ -217,25 +243,28 @@ function ActivityRecord(props: {
 
   if (props.selectable) {
     return (
-      <button
-        type="button"
-        className={classNames(recordClass, "agent-record-selectable")}
-        data-current={props.current ? "true" : undefined}
-        data-selected={props.selected ? "true" : undefined}
-        data-selectable="true"
-        data-tool-kind={props.toolKind}
-        data-running={isActiveActivityItem(props.item) ? "true" : undefined}
-        aria-current={props.current ? "step" : undefined}
-        aria-pressed={props.selected}
-        onClick={() => props.onSelectItem?.(props.item)}
-      >
-        {summary}
-      </button>
+      <div className="agent-record-group">
+        <button
+          type="button"
+          className={classNames(recordClass, "agent-record-selectable")}
+          data-current={props.current ? "true" : undefined}
+          data-selected={props.selected ? "true" : undefined}
+          data-selectable="true"
+          data-tool-kind={props.toolKind}
+          data-running={isActiveActivityItem(props.item) ? "true" : undefined}
+          aria-current={props.current ? "step" : undefined}
+          aria-pressed={props.selected}
+          onClick={() => props.onSelectItem?.(props.item)}
+        >
+          {summary}
+        </button>
+        {hasChildren && <NestedActivityRecords items={props.item.children!} />}
+      </div>
     );
   }
 
   if (!expandable) {
-    return (
+    const record = (
       <div
         className={recordClass}
         data-current={props.current ? "true" : undefined}
@@ -246,14 +275,21 @@ function ActivityRecord(props: {
         {summary}
       </div>
     );
+    return hasChildren ? (
+      <div className="agent-record-group">
+        {record}
+        <NestedActivityRecords items={props.item.children!} />
+      </div>
+    ) : record;
   }
 
-  return (
-    <details
+  const record = (
+    <ActivityRecordDisclosure
       className={recordClass}
-      data-current={props.current ? "true" : undefined}
-      data-tool-kind={props.toolKind}
-      data-running={isActiveActivityItem(props.item) ? "true" : undefined}
+      initiallyOpen={isReasoningActivityItem(props.item)}
+      current={props.current}
+      toolKind={props.toolKind}
+      running={isActiveActivityItem(props.item)}
     >
       <ActivityRecordSummary
         item={props.item}
@@ -265,7 +301,53 @@ function ActivityRecord(props: {
       <div className="agent-record-body">
         <ActivityEvidencePanel item={props.item} />
       </div>
+    </ActivityRecordDisclosure>
+  );
+  return hasChildren ? (
+    <div className="agent-record-group">
+      {record}
+      <NestedActivityRecords items={props.item.children!} />
+    </div>
+  ) : record;
+}
+
+function ActivityRecordDisclosure(props: {
+  readonly className: string;
+  readonly initiallyOpen: boolean;
+  readonly current: boolean;
+  readonly toolKind: ActivityToolKind;
+  readonly running: boolean;
+  readonly children: React.ReactNode;
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(props.initiallyOpen);
+  return (
+    <details
+      className={props.className}
+      open={open}
+      data-current={props.current ? "true" : undefined}
+      data-tool-kind={props.toolKind}
+      data-running={props.running ? "true" : undefined}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      {props.children}
     </details>
+  );
+}
+
+function NestedActivityRecords(props: { readonly items: readonly ActivityItem[] }): React.ReactElement {
+  return (
+    <div className="agent-record-children" aria-label="子 Agent 操作">
+      {props.items.map((item, index) => (
+        <ActivityRecord
+          current={index === props.items.length - 1 && isActiveActivityItem(item)}
+          item={item}
+          key={item.key}
+          selectable={false}
+          selected={false}
+          toolKind={item.toolKind ?? resolveActivityToolKind(item)}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -433,6 +515,10 @@ function isActiveActivityItem(item: ActivityItem): boolean {
   return item.phase === "executing" || item.phase === "preparing" || item.phase === "noted";
 }
 
+function isReasoningActivityItem(item: ActivityItem): boolean {
+  return item.eventType.startsWith("model.reasoning.");
+}
+
 function firstAttentionBadge(item: ActivityItem): string | undefined {
   return item.badges?.find((badge) => badge.tone === "danger" || badge.tone === "warning")?.label ??
     (item.statusBadge?.tone === "danger" || item.statusBadge?.tone === "warning"
@@ -446,7 +532,6 @@ function classNames(...values: readonly (string | false | undefined)[]): string 
 
 function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentWorkTimelineProps): boolean {
   return left.presentation === right.presentation &&
-    left.showLiveStatus === right.showLiveStatus &&
     left.collapsed === right.collapsed &&
     left.lifecycle === right.lifecycle &&
     left.collapseReason === right.collapseReason &&
@@ -483,6 +568,9 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
   if (left === undefined || right === undefined) return false;
   return left.nodeId === right.nodeId &&
     left.key === right.key &&
+    left.eventType === right.eventType &&
+    left.toolCallFactId === right.toolCallFactId &&
+    left.parentToolCallFactId === right.parentToolCallFactId &&
     left.variant === right.variant &&
     left.tone === right.tone &&
     left.phase === right.phase &&
@@ -495,7 +583,8 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
     left.copy.expandedDetail === right.copy.expandedDetail &&
     badgesEqual(left.statusBadge, right.statusBadge) &&
     badgeListsEqual(left.badges, right.badges) &&
-    expandedSectionsEqual(left.expandedSections, right.expandedSections);
+    expandedSectionsEqual(left.expandedSections, right.expandedSections) &&
+    activityItemsEqual(left.children ?? [], right.children ?? []);
 }
 
 function activityLeadsEqual(left: ActivityLead | undefined, right: ActivityLead | undefined): boolean {

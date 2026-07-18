@@ -68,6 +68,8 @@ export function createOrdinaryAgentFeature(input: {
   const mutationQueues = new Map<string, Promise<void>>();
   const activityStreams = new Map<string, { streamId: string; nextSequence: number; activities: OrdinaryRunActivity[] }>();
   const listeners = new Map<string, Set<(activity: OrdinaryRunActivity) => void>>();
+  const activeModelRequestIds = new Map<string, string>();
+  const reasoningBuffers = new Map<string, { readonly modelRequestId: string; content: string }>();
   const visibleAssistantBuffers = new Map<string, string>();
   const visibleAssistantCheckpointTimers = new Map<string, NodeJS.Timeout>();
   let released = false;
@@ -229,6 +231,10 @@ export function createOrdinaryAgentFeature(input: {
 
   function recordTransition(event: OrdinaryRunEvent): void {
     const stream = streamFor(event.runId);
+    if (event.type === "model.reasoning.completed") {
+      stream.activities = stream.activities.filter((activity) =>
+        activity.type !== "model.reasoning.delta" || activity.modelRequestId !== event.modelRequestId);
+    }
     const durableCallIds = toolCallIds(event);
     stream.activities = stream.activities.map((activity) =>
       activity.type === "tool.result" && durableCallIds.includes(toolCallFactId(activity.result))
@@ -249,6 +255,8 @@ export function createOrdinaryAgentFeature(input: {
       // Final state is durable. Drop potentially large live-only deltas after subscribers
       // observe the terminal boundary; replay remains truthful from durable transitions.
       stream.activities = stream.activities.filter((item) => item.durability === "durable");
+      activeModelRequestIds.delete(event.runId);
+      reasoningBuffers.delete(event.runId);
       clearVisibleAssistantCheckpoint(event.runId);
     }
   }
@@ -310,6 +318,60 @@ export function createOrdinaryAgentFeature(input: {
     visibleAssistantBuffers.delete(runId);
   }
 
+  function recordReasoningDelta(runId: string, delta: string): void {
+    if (released || delta.length === 0) return;
+    const state = documents.get(runId)?.state;
+    if (state?.status.kind !== "running") return;
+    const modelRequestId = activeModelRequestIds.get(runId);
+    if (modelRequestId === undefined) return;
+    // AgentTool streams can settle after the owning root model response. Once
+    // that request has a durable reasoning fact, later deltas belong elsewhere.
+    if (state.timeline.some((event) =>
+      event.type === "model.reasoning.completed" && event.modelRequestId === modelRequestId)) return;
+    const buffer = reasoningBuffers.get(runId);
+    if (buffer === undefined || buffer.modelRequestId !== modelRequestId) {
+      reasoningBuffers.set(runId, { modelRequestId, content: delta });
+    } else {
+      buffer.content += delta;
+    }
+    const stream = streamFor(runId);
+    const activity: OrdinaryRunActivity = {
+      activityId: idFactory("ordinary-activity"),
+      runId,
+      sequence: stream.nextSequence++,
+      recordedAt: now(),
+      type: "model.reasoning.delta",
+      durability: "live_only",
+      modelRequestId,
+      delta,
+    };
+    stream.activities.push(activity);
+    emit(activity);
+  }
+
+  async function completeReasoning(runId: string, authoritativeContent?: string): Promise<void> {
+    const modelRequestId = activeModelRequestIds.get(runId);
+    if (modelRequestId === undefined) return;
+    const buffered = reasoningBuffers.get(runId);
+    if (buffered?.modelRequestId === modelRequestId) reasoningBuffers.delete(runId);
+    const content = authoritativeContent !== undefined && authoritativeContent.length > 0
+      ? authoritativeContent
+      : buffered?.modelRequestId === modelRequestId ? buffered.content : undefined;
+    if (content === undefined || content.length === 0) return;
+    const document = await load(runId);
+    if (document?.state.status.kind !== "running") return;
+    const existing = document.state.timeline.find((event) =>
+      event.type === "model.reasoning.completed" && event.modelRequestId === modelRequestId);
+    if (existing?.type === "model.reasoning.completed") {
+      return;
+    }
+    await mutate(runId, {
+      type: "record_reasoning",
+      modelRequestId,
+      content,
+    });
+  }
+
   function recordModelRequest(runId: string, reason: "initial" | "after_tool" | "after_approval"): void {
     if (released) return;
     if (documents.get(runId)?.state.status.kind !== "running") return;
@@ -326,6 +388,7 @@ export function createOrdinaryAgentFeature(input: {
       reason,
     };
     stream.activities.push(activity);
+    activeModelRequestIds.set(runId, activity.activityId);
     emit(activity);
   }
 
@@ -649,6 +712,8 @@ export function createOrdinaryAgentFeature(input: {
         messages: document.state.canonicalMessages,
         abortSignal: controller.signal,
         onTextDelta: (delta) => recordOutputDelta(runId, delta),
+        onReasoningDelta: (delta) => recordReasoningDelta(runId, delta),
+        onReasoningCompleted: (content) => completeReasoning(runId, content),
         onToolRequested: (request) => recordToolRequested(runId, request),
         onToolProgress: (progress) => recordToolProgress(runId, progress),
         onToolRound: ({ canonicalMessagesBeforeRound, assistantMessage }) => persistToolRound({
@@ -665,17 +730,24 @@ export function createOrdinaryAgentFeature(input: {
           }
         },
       });
+      await completeReasoning(runId);
       rememberToolResults(runId, outcome.toolCalls);
       await applyOutcome(runId, outcome);
       forgetPersistedToolResults(runId, outcome.toolCalls);
     } catch (error) {
+      let failure = error;
+      try {
+        await completeReasoning(runId);
+      } catch (reasoningError) {
+        failure = reasoningError;
+      }
       const latest = await load(runId);
       if (latest !== undefined && !isTerminal(latest.state)) {
         await mutate(runId, {
           type: controller.signal.aborted ? "cancel" : "fail",
           ...(controller.signal.aborted
             ? { reason: cancellationReason(controller.signal.reason) }
-            : { error: ordinaryExecutionFailureFacts(error) }),
+            : { error: ordinaryExecutionFailureFacts(failure) }),
           ...(outcome === undefined
             ? {}
             : {
@@ -1151,17 +1223,24 @@ export function createOrdinaryAgentFeature(input: {
       try {
         recordModelRequest(ownerRunId, "after_approval");
         outcome = await continuation!.decide({ decision, abortSignal: controller.signal });
+        await completeReasoning(ownerRunId);
         rememberToolResults(ownerRunId, outcome.toolCalls);
         await applyOutcome(ownerRunId, outcome);
         forgetPersistedToolResults(ownerRunId, outcome.toolCalls);
       } catch (error) {
+        let failure = error;
+        try {
+          await completeReasoning(ownerRunId);
+        } catch (reasoningError) {
+          failure = reasoningError;
+        }
         const latest = await load(ownerRunId);
         if (latest !== undefined && !isTerminal(latest.state)) {
           await mutate(ownerRunId, {
             type: controller.signal.aborted ? "cancel" : "fail",
             ...(controller.signal.aborted
               ? { reason: cancellationReason(controller.signal.reason) }
-              : { error: ordinaryExecutionFailureFacts(error) }),
+              : { error: ordinaryExecutionFailureFacts(failure) }),
             ...(outcome === undefined
               ? {}
               : {
@@ -1300,6 +1379,8 @@ export function createOrdinaryAgentFeature(input: {
       await releaseContinuations();
       listeners.clear();
       activityStreams.clear();
+      activeModelRequestIds.clear();
+      reasoningBuffers.clear();
       visibleAssistantBuffers.clear();
       visibleAssistantCheckpointTimers.clear();
       approvalReservations.clear();

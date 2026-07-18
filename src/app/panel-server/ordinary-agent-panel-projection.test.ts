@@ -163,6 +163,43 @@ test("restart reset and live text delta remain explicit activity facts", () => {
   assert.deepEqual(batch.events.map((event) => event.sequence), [1, 2, 3]);
 });
 
+test("running transcript projects consecutive output deltas as one logical body", () => {
+  const run = runState({ runId: "coalesced-delta-run", status: { kind: "running" } });
+  const deltas = ["我是通过 API ", "使用的 OpenAI AI 助手，", "在这里与你交流。"];
+  const activities: OrdinaryRunActivity[] = [
+    transitionActivity(run, createdEvent(run), 1),
+    transitionActivity(run, startedEvent(run), 2),
+    ...deltas.map((delta, index): OrdinaryRunActivity => ({
+      activityId: `activity-delta-${index + 1}`,
+      runId: run.runId,
+      sequence: index + 3,
+      recordedAt: `2026-01-01T00:00:0${index + 3}.000Z`,
+      type: "model.output.delta",
+      durability: "live_only",
+      delta,
+    })),
+  ];
+
+  const view = projectOrdinaryPanelRunView({
+    run,
+    fullReplay: {
+      cursor: { streamId: "ordinary-stream-1", sequence: activities.length },
+      reset: false,
+      activities,
+    },
+  });
+  const bodyNodes = view.workView.transcriptNodes.filter((node) => node.kind === "body");
+
+  assert.equal(bodyNodes.length, 1);
+  assert.equal(bodyNodes[0]?.nodeId, "activity-delta-1");
+  assert.equal(bodyNodes[0]?.sequence, 3);
+  assert.equal(bodyNodes[0]?.text, deltas.join(""));
+  assert.deepEqual(
+    view.replay.events.filter((event) => event.type === "model.output.delta").map((event) => event.delta),
+    deltas,
+  );
+});
+
 test("model request activity is visible as quiet workflow progress", () => {
   const run = runState({ runId: "model-request-run", status: { kind: "running" } });
   const fullReplay: OrdinaryRunActivityReplay = {
@@ -214,6 +251,7 @@ test("live tool progress projects one executing command row with bounded output 
   const run = runState({ runId: "live-command-run", status: { kind: "running" } });
   const request = {
     callId: "call-command",
+    parentToolCallFactId: "delegate-fact",
     toolName: "shell_command",
     input: { commandLine: "pnpm test" },
   } as const;
@@ -244,6 +282,7 @@ test("live tool progress projects one executing command row with bounded output 
   const node = view.workView.transcriptNodes[0];
 
   assert.equal(event?.type, "tool.progress");
+  assert.equal(event?.parentToolCallFactId, "delegate-fact");
   assert.equal(event?.detail?.display?.kind, "command_summary");
   if (event?.detail?.display?.kind === "command_summary") {
     assert.equal(event.detail.display.commandLine, "pnpm test");
@@ -361,6 +400,38 @@ test("terminal projection preserves raw answer, full tool output, usage and atta
   const toolNode = view.workView.transcriptNodes.find((node) => node.eventType === "tool.completed");
   assert.equal(toolNode?.toolName, "read_file");
   assert.equal(toolNode?.display?.kind, "read_result");
+});
+
+test("completed reasoning projects as a durable thinking node with full text", () => {
+  const run = runState({ runId: "reasoning-run", status: { kind: "completed", answer: "最终答案" } });
+  const reasoning: OrdinaryRunEvent = {
+    eventId: "event-reasoning",
+    runId: run.runId,
+    sequence: 3,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+    type: "model.reasoning.completed",
+    modelRequestId: "model-request-1",
+    content: "先分析完整上下文，再组织答案。",
+  };
+  const completed: OrdinaryRunEvent = {
+    eventId: "event-completed",
+    runId: run.runId,
+    sequence: 4,
+    recordedAt: "2026-01-01T00:00:04.000Z",
+    type: "run.completed",
+    toolCallIds: [],
+  };
+  const view = projectOrdinaryPanelRunView({
+    run: { ...run, timeline: [createdEvent(run), startedEvent(run), reasoning, completed] },
+    fullReplay: replay(run, [createdEvent(run), startedEvent(run), reasoning, completed]),
+  });
+
+  const node = view.workView.transcriptNodes.find((item) => item.kind === "thinking");
+  assert.equal(node?.eventType, "model.reasoning.completed");
+  assert.equal(node?.phase, "completed");
+  assert.equal(node?.text, reasoning.content);
+  assert.deepEqual(node?.refs, [{ kind: "model_call", id: reasoning.modelRequestId }]);
+  assert.equal(view.replay.events.find((event) => event.type === "model.reasoning.completed")?.delta, reasoning.content);
 });
 
 test("conversation DTO is a one-way projection with full turns, attachments and current run", () => {

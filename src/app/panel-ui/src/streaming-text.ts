@@ -1,116 +1,100 @@
-/**
- * Panel stream text state keeps backend target text separate from painted text.
- * New deltas are compared against the previous target, not the lagging display,
- * so fast model chunks do not enqueue duplicate characters.
- */
 export type StreamingTextTone = "formal" | "process" | "thinking";
+
+const STREAM_SMOOTH_WINDOW_MS = 90;
+const STREAM_MAX_LAG_MS = 160;
+const ESTIMATED_FRAME_MS = 1000 / 60;
 
 export type StreamingTextState = {
   readonly target: string;
   readonly displayed: string;
-  readonly queue: readonly string[];
+  readonly animationStartedAt?: number;
+  readonly deadlineAt?: number;
 };
 
 export function createStreamingTextState(text = ""): StreamingTextState {
   return {
     target: text,
     displayed: text,
-    queue: [],
   };
 }
 
 export function createInitialStreamingTextState(
   text: string,
+  live: boolean,
   animateOnMount: boolean,
-  tone: StreamingTextTone
+  now: number,
 ): StreamingTextState {
-  if (text.length === 0 || !animateOnMount) {
+  if (!live || !animateOnMount || text.length === 0) {
     return createStreamingTextState(text);
   }
-  return consumeStreamingTextFrame(
-    updateStreamingTextTarget(createStreamingTextState(""), text, true),
-    tone
-  );
+  return updateStreamingTextTarget(createStreamingTextState(), text, true, now);
 }
 
 export function updateStreamingTextTarget(
   state: StreamingTextState,
   target: string,
-  live: boolean
+  live: boolean,
+  now: number,
 ): StreamingTextState {
   if (!live) {
     return createStreamingTextState(target);
   }
-
   if (target === state.target) {
     return state;
   }
-
-  if (target.startsWith(state.target)) {
-    return {
-      ...state,
-      target,
-      queue: [...state.queue, ...Array.from(target.slice(state.target.length))],
-    };
+  if (state.target.startsWith(target)) {
+    return state;
+  }
+  if (!target.startsWith(state.displayed)) {
+    return createStreamingTextState(target);
   }
 
-  if (target.startsWith(state.displayed)) {
-    return {
-      target,
-      displayed: state.displayed,
-      queue: Array.from(target.slice(state.displayed.length)),
-    };
-  }
-
-  if (state.displayed.startsWith(target)) {
-    return {
-      target: state.displayed,
-      displayed: state.displayed,
-      queue: [],
-    };
-  }
-
-  const stablePrefix = sharedPrefix(state.target, target);
-  const appendOnlySuffix = target.slice(stablePrefix.length);
+  const smoothing = state.displayed.length < state.target.length &&
+    state.animationStartedAt !== undefined &&
+    state.deadlineAt !== undefined;
+  const animationStartedAt = smoothing ? state.animationStartedAt : now;
+  const deadlineAt = smoothing
+    ? Math.min(
+        animationStartedAt + STREAM_MAX_LAG_MS,
+        Math.max(state.deadlineAt ?? now, now + STREAM_SMOOTH_WINDOW_MS),
+      )
+    : now + STREAM_SMOOTH_WINDOW_MS;
   return {
-    target: `${state.displayed}${appendOnlySuffix}`,
+    target,
     displayed: state.displayed,
-    queue: Array.from(appendOnlySuffix),
+    animationStartedAt,
+    deadlineAt,
   };
 }
 
 export function consumeStreamingTextFrame(
   state: StreamingTextState,
-  tone: StreamingTextTone
+  now: number,
 ): StreamingTextState {
-  if (state.queue.length === 0) {
-    return state;
+  if (state.displayed === state.target) {
+    return state.animationStartedAt === undefined && state.deadlineAt === undefined
+      ? state
+      : createStreamingTextState(state.target);
   }
-  const count = streamingCharsPerFrame(tone, state.queue.length);
-  const nextChars = state.queue.slice(0, count);
-  return {
-    ...state,
-    displayed: `${state.displayed}${nextChars.join("")}`,
-    queue: state.queue.slice(count),
-  };
+  if (!state.target.startsWith(state.displayed)) {
+    return createStreamingTextState(state.target);
+  }
+
+  const remaining = Array.from(state.target.slice(state.displayed.length));
+  const remainingMs = Math.max(0, (state.deadlineAt ?? now) - now);
+  if (remainingMs <= ESTIMATED_FRAME_MS) {
+    return createStreamingTextState(state.target);
+  }
+  const remainingFrames = Math.max(1, Math.ceil(remainingMs / ESTIMATED_FRAME_MS));
+  const revealCount = Math.max(1, Math.ceil(remaining.length / remainingFrames));
+  const displayed = `${state.displayed}${remaining.slice(0, revealCount).join("")}`;
+  return displayed === state.target
+    ? createStreamingTextState(state.target)
+    : { ...state, displayed };
 }
 
-export function streamingCharsPerFrame(tone: StreamingTextTone, queueLength: number): number {
-  const baseline = tone === "thinking" ? 3 : tone === "process" ? 2 : 2;
-  const catchup = queueLength > 720 ? 10 : queueLength > 360 ? 7 : queueLength > 160 ? 5 : baseline;
-  return Math.max(1, catchup);
-}
-
-function sharedPrefix(left: string, right: string): string {
-  const leftChars = Array.from(left);
-  const rightChars = Array.from(right);
-  const maxLength = Math.min(leftChars.length, rightChars.length);
-  for (let index = 0; index < maxLength; index += 1) {
-    if (leftChars[index] !== rightChars[index]) {
-      return leftChars.slice(0, index).join("");
-    }
-  }
-  return leftChars.slice(0, maxLength).join("");
+export function streamingTextHasPendingDisplay(state: StreamingTextState): boolean {
+  return state.displayed !== state.target;
 }
 
 /**
@@ -132,6 +116,45 @@ export function stabilizeStreamingMarkdown(value: string): string {
     parts[index] = stabilizeInlineMarkdown(parts[index]);
   }
   return parts.join("```");
+}
+
+export type StreamingMarkdownSegments = {
+  readonly completedBlocks: readonly string[];
+  readonly activeBlock: string;
+};
+
+/**
+ * A completed block cannot be changed by later append-only deltas, so its
+ * Markdown tree can remain mounted while only the active tail is reparsed.
+ */
+export function splitStreamingMarkdown(value: string): StreamingMarkdownSegments {
+  const text = value.replace(/\r\n/g, "\n");
+  const completedBlocks: string[] = [];
+  let blockStart = 0;
+  let lineStart = 0;
+  let fenced = false;
+
+  while (lineStart < text.length) {
+    const lineEnd = text.indexOf("\n", lineStart);
+    const end = lineEnd === -1 ? text.length : lineEnd + 1;
+    const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+    if (/^\s*```/u.test(line)) {
+      fenced = !fenced;
+    }
+    if (!fenced && line.trim().length === 0 && end > blockStart) {
+      const block = text.slice(blockStart, end);
+      if (block.trim().length > 0) {
+        completedBlocks.push(block);
+      }
+      blockStart = end;
+    }
+    lineStart = end;
+  }
+
+  return {
+    completedBlocks,
+    activeBlock: text.slice(blockStart),
+  };
 }
 
 function stabilizeInlineMarkdown(value: string): string {

@@ -44,6 +44,7 @@ export type ModelReasoningControlKind =
   | "openai_responses_reasoning_effort"
   | "openai_chat_reasoning_effort"
   | "deepseek_reasoning_effort"
+  | "kimi_k3_reasoning_effort"
   | "thinking_enabled_disabled"
   | "thinking_disabled"
   | "reasoning_split";

@@ -2,21 +2,47 @@ import React from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CopyActionButton } from "./copy-action-button";
+import { splitStreamingMarkdown, stabilizeStreamingMarkdown } from "../streaming-text";
 
-export function RichText({ text }: { readonly text: string }): React.ReactElement {
+export const RichText = React.memo(function RichText({ text }: { readonly text: string }): React.ReactElement {
   return (
     <div className="rich-text">
-      <ReactMarkdown
-        components={markdownComponents}
-        remarkPlugins={[remarkGfm]}
-        skipHtml
-        urlTransform={safeUrlTransform}
-      >
-        {normalizeMarkdownLineEndings(text)}
-      </ReactMarkdown>
+      <RichTextContent text={text} />
+    </div>
+  );
+});
+
+export function StreamingRichText({ text, live = true }: { readonly text: string; readonly live?: boolean }): React.ReactElement {
+  if (!live) {
+    return (
+      <div className="rich-text">
+        <RichTextContent text={text} />
+      </div>
+    );
+  }
+  const segments = splitStreamingMarkdown(text);
+  return (
+    <div className="rich-text rich-text-streaming">
+      {segments.completedBlocks.map((block, index) => (
+        <RichTextContent key={index} text={block} />
+      ))}
+      {segments.activeBlock.length > 0 && <RichTextContent text={stabilizeStreamingMarkdown(segments.activeBlock)} />}
     </div>
   );
 }
+
+const RichTextContent = React.memo(function RichTextContent({ text }: { readonly text: string }): React.ReactElement {
+  return (
+    <ReactMarkdown
+      components={markdownComponents}
+      remarkPlugins={[remarkGfm]}
+      skipHtml
+      urlTransform={safeUrlTransform}
+    >
+      {normalizeMarkdownLineEndings(text)}
+    </ReactMarkdown>
+  );
+});
 
 function normalizeMarkdownLineEndings(value: string): string {
   return value.replace(/\r\n/g, "\n");

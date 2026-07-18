@@ -142,6 +142,7 @@ export type RunEvent = {
   readonly status: TaskStatus;
   readonly timestamp: string;
   readonly toolName?: string;
+  readonly parentToolCallFactId?: string;
   readonly refs: readonly ObservationRef[];
   readonly visibility: "compact" | "expanded" | "debug";
   readonly detail?: {
@@ -249,6 +250,7 @@ export type TranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
+  readonly parentToolCallFactId?: string;
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: TranscriptConfirmation;
   readonly modelUsage?: ModelUsage;

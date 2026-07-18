@@ -69,6 +69,9 @@ function item(input: {
   return {
     nodeId: `${input.tone}:${input.detail}`,
     key: `${input.tone}:${input.detail}`,
+    eventType: input.tone === "thinking"
+      ? "model.reasoning.completed"
+      : input.tone === "narration" ? "model.side.completed" : "test.activity",
     copy: {
       label: input.label,
       detail: input.detail,

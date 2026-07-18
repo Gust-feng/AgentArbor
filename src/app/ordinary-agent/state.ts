@@ -14,6 +14,7 @@ import { OrdinaryFeatureError } from "./contracts.js";
 
 export type OrdinaryRunTransition =
   | { readonly type: "start"; readonly priorCanonicalMessages?: readonly ModelMessage[] }
+  | { readonly type: "record_reasoning"; readonly modelRequestId: string; readonly content: string }
   | {
       readonly type: "request_approval";
       readonly status: Extract<OrdinaryRunStatus, { readonly kind: "awaiting_approval" }>;
@@ -159,6 +160,10 @@ function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransitio
     case "start":
       assertStatus(status, ["queued"], transition.type);
       return { kind: "running" };
+    case "record_reasoning":
+      assertStatus(status, ["running"], transition.type);
+      if (transition.content.length === 0) throw new Error("Recorded model reasoning must not be empty");
+      return status;
     case "request_approval":
       assertStatus(status, ["running"], transition.type);
       if (transition.status.confirmationRequests.length === 0) {
@@ -516,6 +521,12 @@ function eventForTransition(
 ): OrdinaryRunEvent {
   switch (transition.type) {
     case "start": return { ...base, type: "run.started" };
+    case "record_reasoning": return {
+      ...base,
+      type: "model.reasoning.completed",
+      modelRequestId: transition.modelRequestId,
+      content: transition.content,
+    };
     case "request_approval": return {
       ...base,
       type: "run.approval_requested",

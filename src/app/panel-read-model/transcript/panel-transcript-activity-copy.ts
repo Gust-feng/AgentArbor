@@ -67,6 +67,14 @@ export type ActivityLead = {
 export type ActivityItem = {
   readonly nodeId: string;
   readonly key: string;
+  /** Source event identity used for presentation decisions without parsing display copy. */
+  readonly eventType: string;
+  /** Stable tool fact identity used to attach nested sub-agent work. */
+  readonly toolCallFactId?: string;
+  /** Parent AgentTool fact for nested sub-agent work. */
+  readonly parentToolCallFactId?: string;
+  /** Nested mechanical activity owned by this AgentTool invocation. */
+  readonly children?: readonly ActivityItem[];
   readonly variant?: "context_compaction";
   readonly copy: ActivityLineCopy;
   readonly tone: "thinking" | "narration" | "tool" | "confirmation" | "decision" | "system";
@@ -81,6 +89,16 @@ export type ActivityItem = {
 };
 
 export type ActivityToolKind = NonNullable<ActivityItem["toolKind"]>;
+
+export function isVisibleOrdinaryActivityItem(item: ActivityItem): boolean {
+  return item.eventType.startsWith("model.reasoning.") ||
+    item.tone === "tool" ||
+    item.phase === "failed" ||
+    item.phase === "blocked" ||
+    item.phase === "cancelled" ||
+    item.tone === "confirmation" ||
+    item.tone === "decision";
+}
 
 export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLineCopy | undefined {
   if (node.kind === "thinking") {
@@ -167,6 +185,7 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
     const item: ActivityItem = {
       nodeId: node.nodeId,
       key: activityItemKey(node),
+      eventType: node.eventType,
       variant: activityVariantForNode(node),
       copy,
       tone,
@@ -216,7 +235,7 @@ export function displayActivityItemsForNodes(nodes: readonly ProjectableTranscri
         : item,
     );
   }
-  return items;
+  return nestDelegatedActivityItems(items);
 }
 
 function isRedundantRunFailureItem(
@@ -267,6 +286,9 @@ function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLin
   return {
     nodeId: node.nodeId,
     key: activityItemKey(node),
+    eventType: node.eventType,
+    toolCallFactId: toolCallIdForActivityNode(node),
+    ...(node.parentToolCallFactId === undefined ? {} : { parentToolCallFactId: node.parentToolCallFactId }),
     variant: activityVariantForNode(node),
     copy,
     tone,
@@ -279,6 +301,32 @@ function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLin
     badges: activityBadgesForNode(node),
     expandedSections: activityExpandedSectionsForNode(node, copy),
   };
+}
+
+function nestDelegatedActivityItems(items: readonly ActivityItem[]): readonly ActivityItem[] {
+  const parents = new Map<string, number>();
+  for (const [index, item] of items.entries()) {
+    if (item.toolKind === "agent" && item.toolCallFactId !== undefined) {
+      parents.set(item.toolCallFactId, index);
+    }
+  }
+  const childIndexes = new Set<number>();
+  const childrenByParent = new Map<number, ActivityItem[]>();
+  for (const [index, item] of items.entries()) {
+    const parentIndex = item.parentToolCallFactId === undefined
+      ? undefined
+      : parents.get(item.parentToolCallFactId);
+    if (parentIndex === undefined || parentIndex === index) continue;
+    const children = childrenByParent.get(parentIndex) ?? [];
+    children.push(item);
+    childrenByParent.set(parentIndex, children);
+    childIndexes.add(index);
+  }
+  return items.flatMap((item, index) => {
+    if (childIndexes.has(index)) return [];
+    const children = childrenByParent.get(index);
+    return children === undefined ? [item] : [{ ...item, children }];
+  });
 }
 
 function activityLeadForNode(

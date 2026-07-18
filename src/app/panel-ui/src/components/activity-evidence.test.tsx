@@ -44,6 +44,7 @@ test("linked read evidence keeps only the source and omits partial page content"
   const readItem: ActivityItem = {
     nodeId: "read-node",
     key: "read-item",
+    eventType: "tool.completed",
     copy: { label: "读取", detail: "AgentArbor documentation" },
     tone: "tool",
     phase: "completed",
@@ -77,6 +78,7 @@ test("web search evidence renders one source link and ignores duplicate excerpts
   const searchItem: ActivityItem = {
     nodeId: "search-node",
     key: "search-item",
+    eventType: "tool.completed",
     copy: { label: "搜索", detail: "AgentArbor" },
     tone: "tool",
     phase: "completed",
@@ -115,6 +117,7 @@ test("command evidence keeps the command and output without internal execution m
   const commandItem: ActivityItem = {
     nodeId: "command-node",
     key: "command-item",
+    eventType: "tool.completed",
     copy: { label: "命令", detail: "pnpm test" },
     tone: "tool",
     phase: "completed",
@@ -140,6 +143,7 @@ function item(section: NonNullable<ActivityItem["expandedSections"]>[number]): A
   return {
     nodeId: "node-1",
     key: "item-1",
+    eventType: "tool.completed",
     copy: { label: "搜索", detail: "AgentArbor" },
     tone: "tool",
     phase: "completed",

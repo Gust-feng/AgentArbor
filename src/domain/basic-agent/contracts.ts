@@ -70,6 +70,8 @@ export type RunEvent = {
   readonly status: AgentTaskStatus;
   readonly timestamp: string;
   readonly toolName?: string;
+  /** The parent AgentTool fact for a nested sub-agent mechanical action. */
+  readonly parentToolCallFactId?: string;
   readonly refs: readonly ObservationRef[];
   readonly visibility: RunEventVisibility;
   readonly detail?: {
@@ -121,6 +123,8 @@ export type TranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
+  /** The parent AgentTool fact for a nested sub-agent mechanical action. */
+  readonly parentToolCallFactId?: string;
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: OwnerScopedConfirmationRequest;
   readonly modelUsage?: ModelUsage;

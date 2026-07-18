@@ -1451,6 +1451,40 @@ test("sub-agent activity shows the specialist and delegated task instead of gene
   assert.equal(item?.toolKind, "agent");
 });
 
+test("nested sub-agent tool activity appears under its delegation instead of as a peer", () => {
+  const items = displayActivityItemsForNodes([
+    node({
+      nodeId: "delegate",
+      kind: "tool",
+      eventType: "tool.requested",
+      phase: "executing",
+      toolName: "call_sub_agent",
+      display: {
+        kind: "agent_task",
+        agentName: "review-expert",
+        task: "检查配置文件",
+      },
+      refs: [{ kind: "tool_call", id: "delegate-fact" }],
+    }),
+    node({
+      nodeId: "nested-read",
+      sequence: 2,
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "read_file",
+      display: { kind: "read_result", title: "src/config.ts", contentPreview: "export const config = {};" },
+      refs: [{ kind: "tool_call", id: "nested-read-fact" }],
+      parentToolCallFactId: "delegate-fact",
+    }),
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.toolKind, "agent");
+  assert.deepEqual(items[0]?.children?.map((item) => item.toolCallFactId), ["nested-read-fact"]);
+  assert.equal(items[0]?.children?.[0]?.parentToolCallFactId, "delegate-fact");
+});
+
 test("directory activity uses its own tool kind and concrete path", () => {
   const item = displayActivityItemsForNodes([node({
     kind: "tool",
@@ -1520,6 +1554,7 @@ function node(input: {
   readonly refs?: TranscriptNode["refs"];
   readonly nodeId?: string;
   readonly sequence?: number;
+  readonly parentToolCallFactId?: string;
 }): TranscriptNode {
   return {
     nodeId: input.nodeId ?? "node-1",
@@ -1533,6 +1568,7 @@ function node(input: {
     text: input.text,
     timestamp: "2026-06-04T00:00:00.000Z",
     toolName: input.toolName,
+    parentToolCallFactId: input.parentToolCallFactId,
     display: input.display,
     confirmation: input.confirmation,
     refs: input.refs ?? [],

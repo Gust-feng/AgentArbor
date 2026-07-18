@@ -638,6 +638,9 @@ function activityWithPhases(
       items: items.map((item) => ({
         nodeId: item.nodeId,
         key: item.nodeId,
+        eventType: item.tone === "thinking"
+          ? "model.reasoning.completed"
+          : item.tone === "narration" ? "model.side.completed" : "test.activity",
         copy: { detail: item.detail },
         tone: item.tone,
         phase: item.phase,

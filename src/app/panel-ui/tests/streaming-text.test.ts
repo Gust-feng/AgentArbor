@@ -4,127 +4,83 @@ import {
   consumeStreamingTextFrame,
   createInitialStreamingTextState,
   createStreamingTextState,
+  splitStreamingMarkdown,
   stabilizeStreamingMarkdown,
+  streamingTextHasPendingDisplay,
   updateStreamingTextTarget,
-  type StreamingTextState,
 } from "../src/streaming-text.js";
 
-test("streaming target appends only the new suffix while display lags", () => {
-  const laggingState: StreamingTextState = {
-    target: "你好",
-    displayed: "你",
-    queue: ["好"],
-  };
+test("streaming text spreads a provider chunk across several frames", () => {
+  const target = "abcdefghijklmnopqrst";
+  const pending = updateStreamingTextTarget(createStreamingTextState(), target, true, 0);
+  const firstFrame = consumeStreamingTextFrame(pending, 0);
 
-  const updated = updateStreamingTextTarget(laggingState, "你好世界", true);
-
-  assert.equal(updated.displayed, "你");
-  assert.equal(updated.target, "你好世界");
-  assert.equal(updated.queue.join(""), "好世界");
+  assert.equal(firstFrame.displayed.length > 0, true);
+  assert.equal(firstFrame.displayed.length < target.length, true);
+  assert.equal(streamingTextHasPendingDisplay(firstFrame), true);
 });
 
-test("streaming target replacement never retracts already displayed text", () => {
-  const laggingState: StreamingTextState = {
-    target: "准备读取文件",
-    displayed: "准备读",
-    queue: Array.from("取文件"),
-  };
+test("streaming text reaches the authoritative target by its deadline", () => {
+  const target = "abcdefghijklmnopqrstuvwxyz";
+  const pending = updateStreamingTextTarget(createStreamingTextState(), target, true, 0);
 
-  const updated = updateStreamingTextTarget(laggingState, "准备总结结果", true);
-
-  assert.equal(updated.displayed, "准备读");
-  assert.equal(updated.target, "准备读总结结果");
-  assert.equal(updated.queue.join(""), "总结结果");
+  assert.equal(consumeStreamingTextFrame(pending, pending.deadlineAt ?? 0).displayed, target);
 });
 
-test("streaming target ignores stale shorter targets once text is visible", () => {
-  const visibleState: StreamingTextState = {
-    target: "完整输出",
-    displayed: "完整输出",
-    queue: [],
-  };
+test("continuous chunks extend smoothing without exceeding the bounded lag", () => {
+  const first = updateStreamingTextTarget(createStreamingTextState(), "abcdefghij", true, 0);
+  const partiallyDisplayed = consumeStreamingTextFrame(first, 16);
+  const extended = updateStreamingTextTarget(partiallyDisplayed, "abcdefghijklmnopqrstuvwxyz", true, 80);
 
-  const updated = updateStreamingTextTarget(visibleState, "完整", true);
-
-  assert.equal(updated.displayed, "完整输出");
-  assert.equal(updated.target, "完整输出");
-  assert.equal(updated.queue.join(""), "");
+  assert.equal(extended.animationStartedAt, 0);
+  assert.equal(extended.deadlineAt, 160);
 });
 
-test("settled target flushes all pending stream state", () => {
-  const streamingState: StreamingTextState = {
-    target: "旧输出",
-    displayed: "旧",
-    queue: ["输", "出"],
-  };
+test("streaming text never splits a surrogate pair", () => {
+  const pending = updateStreamingTextTarget(createStreamingTextState(), "😀😀😀😀😀😀", true, 0);
+  const firstFrame = consumeStreamingTextFrame(pending, 0);
 
-  const updated = updateStreamingTextTarget(streamingState, "最终输出", false);
-
-  assert.deepEqual(updated, createStreamingTextState("最终输出"));
+  assert.equal(Array.from(firstFrame.displayed).every((value) => value === "😀"), true);
+  assert.equal(firstFrame.displayed.includes("�"), false);
 });
 
-test("streaming frame consumes a paced visible burst", () => {
-  const state: StreamingTextState = {
-    target: "abcdef",
-    displayed: "ab",
-    queue: Array.from("cdef"),
-  };
+test("settled and restored text renders completely without replay", () => {
+  const pending = updateStreamingTextTarget(createStreamingTextState(), "正在流式输出", true, 0);
+  const partial = consumeStreamingTextFrame(pending, 0);
 
-  const updated = consumeStreamingTextFrame(state, "formal");
-
-  assert.equal(updated.displayed, "abcd");
-  assert.equal(updated.queue.join(""), "ef");
+  assert.deepEqual(updateStreamingTextTarget(partial, "最终完整输出", false, 20), createStreamingTextState("最终完整输出"));
+  assert.deepEqual(
+    createInitialStreamingTextState("恢复中的完整输出", true, false, 0),
+    createStreamingTextState("恢复中的完整输出"),
+  );
 });
 
-test("streaming first live target can paint immediately", () => {
-  const updated = updateStreamingTextTarget(createStreamingTextState(""), "你好世界", true);
-  const firstFrame = consumeStreamingTextFrame(updated, "formal");
+test("new live text waits for the first display frame instead of consuming twice on mount", () => {
+  const initial = createInitialStreamingTextState("abcdefghijklmnopqrst", true, true, 0);
 
-  assert.equal(firstFrame.displayed, "你好");
-  assert.equal(firstFrame.queue.join(""), "世界");
+  assert.equal(initial.displayed, "");
+  assert.equal(streamingTextHasPendingDisplay(initial), true);
 });
 
-test("streaming initial state does not replay restored live text on mount", () => {
-  const initial = createInitialStreamingTextState("你好世界", false, "formal");
-
-  assert.equal(initial.displayed, "你好世界");
-  assert.equal(initial.queue.join(""), "");
+test("streaming Markdown keeps completed blocks separate from the active tail", () => {
+  assert.deepEqual(splitStreamingMarkdown("# 标题\n\n第一段\n\n第二段"), {
+    completedBlocks: ["# 标题\n\n", "第一段\n\n"],
+    activeBlock: "第二段",
+  });
 });
 
-test("settled animated initial state also paints the first frame", () => {
-  const initial = createInitialStreamingTextState("等待后返回的完整答案。", true, "formal");
-
-  assert.equal(initial.displayed, "等待");
-  assert.equal(initial.queue.join(""), "后返回的完整答案。");
+test("streaming Markdown does not split an unfinished fenced code block", () => {
+  assert.deepEqual(splitStreamingMarkdown("说明\n\n```ts\nconst value = 1;\n\n"), {
+    completedBlocks: ["说明\n\n"],
+    activeBlock: "```ts\nconst value = 1;\n\n",
+  });
 });
 
-test("streaming initial state still animates when mount animation is explicitly requested", () => {
-  const initial = createInitialStreamingTextState("你好世界", true, "formal");
-
-  assert.equal(initial.displayed, "你好");
-  assert.equal(initial.queue.join(""), "世界");
-});
-
-test("streaming first frame can fully settle very short catch-up text", () => {
-  const updated = updateStreamingTextTarget(createStreamingTextState(""), "好", true);
-  const firstFrame = consumeStreamingTextFrame(updated, "formal");
-
-  assert.equal(firstFrame.displayed, "好");
-  assert.equal(firstFrame.queue.length, 0);
-});
-
-test("settled catch-up can animate from an empty displayed shell", () => {
-  const pendingShell: StreamingTextState = {
-    target: "",
-    displayed: "",
-    queue: [],
-  };
-
-  const updated = updateStreamingTextTarget(pendingShell, "等待后返回的完整答案。", true);
-  const firstFrame = consumeStreamingTextFrame(updated, "formal");
-
-  assert.equal(firstFrame.displayed, "等待");
-  assert.equal(firstFrame.queue.join(""), "后返回的完整答案。");
+test("streaming Markdown closes a finished fenced block at the following blank line", () => {
+  assert.deepEqual(splitStreamingMarkdown("```ts\nconst value = 1;\n```\n\n下一段"), {
+    completedBlocks: ["```ts\nconst value = 1;\n```\n\n"],
+    activeBlock: "下一段",
+  });
 });
 
 test("stabilizeStreamingMarkdown leaves complete markdown unchanged", () => {

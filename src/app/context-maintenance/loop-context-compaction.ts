@@ -9,9 +9,7 @@ import type {
   AgentLoopTokenCounter,
   MaintainAgentLoopContextInput,
 } from "./contracts.js";
-import { createOpenAITokenCounter } from "./token-counter.js";
 
-const DEFAULT_INPUT_TOKEN_BUDGET = 4_500;
 const DEFAULT_THRESHOLD_RATIO = 0.8;
 const DEFAULT_PRESERVE_RECENT_MESSAGES = 10;
 const MAX_COMPACTION_OUTPUT_TOKENS = 2_000;
@@ -23,7 +21,7 @@ const MAX_COMPACTION_OUTPUT_TOKENS = 2_000;
 export async function compactAgentLoopContextIfNeeded(
   input: MaintainAgentLoopContextInput
 ): Promise<AgentLoopContextMaintenanceResult> {
-  const tokenCounter = input.tokenCounter ?? createOpenAITokenCounter();
+  const tokenCounter = input.tokenCounter;
   const tokenCount = loopContextTokenCount(tokenCounter, input.messages, input.tools);
   const threshold = loopContextThreshold(input.modelCapabilities, input.thresholdRatio ?? DEFAULT_THRESHOLD_RATIO);
   if (tokenCount < threshold) {
@@ -35,7 +33,12 @@ export async function compactAgentLoopContextIfNeeded(
     input.preserveRecentMessages ?? DEFAULT_PRESERVE_RECENT_MESSAGES
   );
   if (split.compactible.length === 0) {
-    return { status: "unchanged", tokenCount, threshold };
+    return {
+      status: "failed",
+      tokenCount,
+      threshold,
+      message: "Context exceeds its compaction threshold, but only required messages remain.",
+    };
   }
 
   const requestId = createId("model-request");
@@ -103,17 +106,30 @@ export async function compactAgentLoopContextIfNeeded(
     modelRequestId: requestId,
     modelResponseId: response.responseId,
   };
+  const compactedMessages = assembleCompactedLoopMessages(
+    input.messages,
+    split.preservedIndexes,
+    summary,
+    input.compactedContextRole ?? "system",
+  );
+  const compactedTokenCount = loopContextTokenCount(tokenCounter, compactedMessages, input.tools);
+  if (compactedTokenCount >= input.modelCapabilities.contextWindowTokens) {
+    return {
+      status: "failed",
+      tokenCount,
+      threshold,
+      message: `Context compaction did not reduce the request below the model window (${compactedTokenCount}/${input.modelCapabilities.contextWindowTokens} tokens).`,
+      requestId,
+      responseId: response.responseId,
+    };
+  }
+
   return {
     status: "compacted",
     tokenCount,
     threshold,
     conversationSummary: summary,
-    messages: assembleCompactedLoopMessages(
-      input.messages,
-      split.preservedIndexes,
-      summary,
-      input.compactedContextRole ?? "system",
-    ),
+    messages: compactedMessages,
   };
 }
 
@@ -312,9 +328,9 @@ function loopContextTokenCount(
     counter.countText(serializeToolsForTokenBudget(tools));
 }
 
-function loopContextThreshold(capabilities: ModelCapabilities | undefined, ratio: number): number {
-  const windowTokens = capabilities?.contextWindowTokens ?? DEFAULT_INPUT_TOKEN_BUDGET;
-  return Math.max(1_000, Math.floor(windowTokens * clampRatio(ratio)));
+function loopContextThreshold(capabilities: ModelCapabilities, ratio: number): number {
+  const windowTokens = capabilities.contextWindowTokens;
+  return Math.max(1, Math.floor(windowTokens * clampRatio(ratio)));
 }
 
 function serializeToolsForTokenBudget(tools: readonly ToolDefinition[]): string {

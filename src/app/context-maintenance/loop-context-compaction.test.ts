@@ -38,6 +38,7 @@ test("neutral loop context compaction replaces compactible messages with a conti
     }],
     intelligenceChannel: channel,
     tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(10_000),
     thresholdRatio: 0.1,
     preserveRecentMessages: 2,
   });
@@ -146,6 +147,79 @@ test("loop context budget includes tool arguments and protocol continuation item
 
   assert.equal(result.status, "compacted");
   assert.equal(channel.requests.length, 1);
+});
+
+test("context maintenance requires the compacted request to fit the frozen model window", async () => {
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "continue",
+    traceId: "trace-compaction-insufficient",
+    goalId: "goal-compaction-insufficient",
+    messages: [
+      { role: "system", content: "system boundary", ref: "prompt:system" },
+      { role: "user", content: "older context ".repeat(180), ref: "conversation:old-user" },
+      { role: "assistant", content: "recent context", ref: "conversation:recent-assistant" },
+      { role: "user", content: "Current user message: continue", ref: "context:goal:current" },
+    ],
+    tools: [],
+    intelligenceChannel: new TestIntelligenceChannel("summary ".repeat(300)),
+    tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(2_000),
+    thresholdRatio: 0.8,
+    preserveRecentMessages: 2,
+  });
+
+  assert.equal(result.status, "failed");
+  if (result.status !== "failed") {
+    return;
+  }
+  assert.match(result.message, /did not reduce the request below the model window/u);
+});
+
+test("context maintenance fails rather than silently using an implicit window", async () => {
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "continue",
+    traceId: "trace-required-context-window",
+    goalId: "goal-required-context-window",
+    messages: [{
+      role: "user",
+      content: `Current user message: ${"continue ".repeat(200)}`,
+      ref: "context:goal:current",
+    }],
+    tools: [],
+    intelligenceChannel: new TestIntelligenceChannel("unused"),
+    tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(100),
+    thresholdRatio: 0.8,
+    preserveRecentMessages: 2,
+  });
+
+  assert.equal(result.status, "failed");
+  if (result.status !== "failed") {
+    return;
+  }
+  assert.match(result.message, /only required messages remain/u);
+});
+
+test("context threshold never exceeds the frozen model window", async () => {
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "continue",
+    traceId: "trace-small-context-window",
+    goalId: "goal-small-context-window",
+    messages: [{
+      role: "user",
+      content: `Current user message: ${"continue ".repeat(20)}`,
+      ref: "context:goal:current",
+    }],
+    tools: [],
+    intelligenceChannel: new TestIntelligenceChannel("unused"),
+    tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(100),
+    thresholdRatio: 0.8,
+    preserveRecentMessages: 2,
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.threshold, 80);
 });
 
 class TestIntelligenceChannel implements IntelligenceChannel {

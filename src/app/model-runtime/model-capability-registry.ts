@@ -25,10 +25,12 @@ export const CONTEXT_WINDOW_FALLBACK_TOKENS = 128_000;
 
 const VERIFIED_AT = "2026-06-28";
 const OPENAI_FORMAT_PROVIDER_VERIFIED_AT = "2026-06-28";
+const OPENAI_GPT_5_6_VERIFIED_AT = "2026-07-18";
+const KIMI_K3_VERIFIED_AT = "2026-07-17";
 
 export const PROTOCOL_BASELINE_MODEL_CAPABILITIES: ModelCapabilities = {
   contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
-  maxOutputTokens: 4_000,
+  maxOutputTokens: 32_768,
   supportsToolCalling: false,
   supportsParallelToolCalls: false,
   supportsStructuredOutputs: false,
@@ -60,6 +62,63 @@ const PROTOCOL_TOOL_CALL_CAPABILITIES: Record<ConfiguredModelProtocolKind, Proto
 };
 
 const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
+  {
+    providerKind: "openai_compatible",
+    modelPattern: "gpt-5.6-sol",
+    label: "GPT-5.6 Sol",
+    capabilities: {
+      contextWindowTokens: 1_050_000,
+      maxOutputTokens: 128_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: true,
+      supportsStructuredOutputs: true,
+      supportsStreaming: true,
+      supportsVisionInput: true,
+      supportsReasoningEffort: true,
+      supportsReasoningOutput: true,
+      preferredApiStyle: "responses",
+      stability: "stable",
+      lastVerifiedAt: OPENAI_GPT_5_6_VERIFIED_AT,
+    },
+  },
+  {
+    providerKind: "openai_compatible",
+    modelPattern: "gpt-5.6-terra",
+    label: "GPT-5.6 Terra",
+    capabilities: {
+      contextWindowTokens: 1_050_000,
+      maxOutputTokens: 128_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: true,
+      supportsStructuredOutputs: true,
+      supportsStreaming: true,
+      supportsVisionInput: true,
+      supportsReasoningEffort: true,
+      supportsReasoningOutput: true,
+      preferredApiStyle: "responses",
+      stability: "stable",
+      lastVerifiedAt: OPENAI_GPT_5_6_VERIFIED_AT,
+    },
+  },
+  {
+    providerKind: "openai_compatible",
+    modelPattern: "gpt-5.6-luna",
+    label: "GPT-5.6 Luna",
+    capabilities: {
+      contextWindowTokens: 1_050_000,
+      maxOutputTokens: 128_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: true,
+      supportsStructuredOutputs: true,
+      supportsStreaming: true,
+      supportsVisionInput: true,
+      supportsReasoningEffort: true,
+      supportsReasoningOutput: true,
+      preferredApiStyle: "responses",
+      stability: "stable",
+      lastVerifiedAt: OPENAI_GPT_5_6_VERIFIED_AT,
+    },
+  },
   {
     providerKind: "openai_compatible",
     modelPattern: "gpt-5.5",
@@ -331,6 +390,30 @@ const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
       stability: "deprecated",
       supportsReasoningOutput: false,
       lastVerifiedAt: OPENAI_FORMAT_PROVIDER_VERIFIED_AT,
+    },
+  },
+  {
+    providerKind: "openai_compatible",
+    providerProfileId: "moonshot",
+    protocolKind: "openai_compatible_chat_completions",
+    modelPattern: "kimi-k3",
+    label: "Kimi K3",
+    reasoningControl: "none",
+    capabilities: {
+      contextWindowTokens: 1_048_576,
+      maxOutputTokens: 128_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: true,
+      supportsStreaming: true,
+      supportsVisionInput: true,
+      // K3 always reasons; its only documented effort is `max`, which is not
+      // a user-selectable value in the current OpenAI-compatible settings UI.
+      supportsReasoningEffort: false,
+      supportsReasoningOutput: true,
+      preferredApiStyle: "chat_completions",
+      stability: "stable",
+      lastVerifiedAt: KIMI_K3_VERIFIED_AT,
     },
   },
   {

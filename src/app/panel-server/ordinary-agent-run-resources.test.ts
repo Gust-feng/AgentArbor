@@ -327,7 +327,7 @@ for (const protocol of ["openai_responses", "openai_compatible_chat_completions"
       activeModel: config,
       modelCapabilities: {
         ...base.capabilitySnapshot.modelCapabilities,
-        contextWindowTokens: 1_000,
+        contextWindowTokens: 10_000,
       },
       workspace: { ...base.capabilitySnapshot.workspace, workspaceDirectory: process.cwd() },
     };
@@ -351,7 +351,7 @@ for (const protocol of ["openai_responses", "openai_compatible_chat_completions"
     });
     const oldMessages = Array.from({ length: 12 }, (_, index): ModelMessage => ({
       role: index % 2 === 0 ? "user" : "assistant",
-      content: `old-${index}-${"x".repeat(220)}`,
+      content: `old-${index}-${"x".repeat(1_000)}`,
       ref: `old:${index}`,
     }));
     const acquired = await acquirer.acquire({

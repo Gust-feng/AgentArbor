@@ -49,7 +49,7 @@ export type DeepTurnContextMaintenanceConfig = {
     readonly displayName: string;
   };
   readonly activeModel?: string;
-  readonly modelCapabilities?: MultiAgentCapabilitySnapshot["modelCapabilities"];
+  readonly modelCapabilities: MultiAgentCapabilitySnapshot["modelCapabilities"];
 };
 
 /**

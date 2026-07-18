@@ -52,6 +52,16 @@ export function resolveOpenAICompatibleChatDialect(input: {
         streamDeltaMode: "incremental",
       };
     case "moonshot":
+      if (isKimiK3Model(input.model)) {
+        return {
+          profileId,
+          reasoningControl: "none",
+          preserveFullAssistantMessage: true,
+          supportsStreaming: true,
+          supportsStreamUsage: false,
+          streamDeltaMode: "incremental",
+        };
+      }
       return {
         profileId,
         reasoningControl: "thinking_enabled_disabled",
@@ -391,6 +401,10 @@ function isModernGLMThinkingModel(model: string): boolean {
   return normalized.includes("glm-5.1") ||
     normalized.includes("glm-5") ||
     normalized.includes("glm-4.7");
+}
+
+function isKimiK3Model(model: string): boolean {
+  return model.toLowerCase().includes("kimi-k3");
 }
 
 function possibleTagSuffixLength(value: string, tag: string): number {

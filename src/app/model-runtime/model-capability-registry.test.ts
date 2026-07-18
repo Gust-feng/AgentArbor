@@ -119,6 +119,15 @@ test("model capability registry resolves current OpenAI-compatible model familie
   assert.equal(capabilities.preferredApiStyle, "responses");
 });
 
+test("model capability registry resolves the GPT-5.6 model line from exact IDs", () => {
+  for (const model of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+    const capabilities = resolveModelCapabilities({ profile: profile(model) });
+    assert.equal(capabilities.contextWindowTokens, 1_050_000);
+    assert.equal(capabilities.maxOutputTokens, 128_000);
+    assert.equal(capabilities.preferredApiStyle, "responses");
+  }
+});
+
 test("model capability registry matches specific compact families before broad GPT-5", () => {
   const capabilities = resolveModelCapabilities({ profile: profile("gpt-5.4-mini") });
 
@@ -250,6 +259,24 @@ test("model capability registry keeps provider-specific reasoning controls conse
   assert.equal(minimax.supportsVisionInput, false);
 });
 
+test("model capability registry resolves Kimi K3 before the generic Kimi family", () => {
+  const kimiK3 = resolveModelCapabilities({
+    profile: profile("kimi-k3", {
+      profileId: "moonshot",
+      label: "Kimi",
+      baseUrl: "https://api.moonshot.ai/v1",
+    }),
+  });
+
+  assert.equal(kimiK3.contextWindowTokens, 1_048_576);
+  assert.equal(kimiK3.maxOutputTokens, 128_000);
+  assert.equal(kimiK3.supportsToolCalling, true);
+  assert.equal(kimiK3.supportsStructuredOutputs, true);
+  assert.equal(kimiK3.supportsVisionInput, true);
+  assert.equal(kimiK3.supportsReasoningEffort, false);
+  assert.equal(kimiK3.reasoningControl, "none");
+});
+
 test("model capability registry keeps MiniMax M2 and M3 multimodal metadata separate", () => {
   const minimaxM2 = resolveModelCapabilities({
     profile: profile("MiniMax-M2", {
@@ -322,6 +349,8 @@ test("protocol baseline models keep tool calling while budgets stay conservative
   });
 
   assert.equal(overrideApplied, true);
+  assert.equal(PROTOCOL_BASELINE_MODEL_CAPABILITIES.contextWindowTokens, 256_000);
+  assert.equal(PROTOCOL_BASELINE_MODEL_CAPABILITIES.maxOutputTokens, 32_768);
   assert.equal(chatBaseline.contextWindowTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.contextWindowTokens);
   assert.equal(chatBaseline.maxOutputTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.maxOutputTokens);
   assert.equal(chatBaseline.supportsToolCalling, true);

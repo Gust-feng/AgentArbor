@@ -51,8 +51,10 @@ export type MaintainAgentLoopContextInput = {
   readonly messages: readonly ModelMessage[];
   readonly tools: readonly ToolDefinition[];
   readonly intelligenceChannel: IntelligenceChannel;
-  readonly modelCapabilities?: ModelCapabilities;
-  readonly tokenCounter?: AgentLoopTokenCounter;
+  /** Frozen run capability: the sole capacity basis for context compaction. */
+  readonly modelCapabilities: ModelCapabilities;
+  /** Counter selected for the frozen run model; no generic tokenizer fallback is allowed here. */
+  readonly tokenCounter: AgentLoopTokenCounter;
   readonly thresholdRatio?: number;
   readonly preserveRecentMessages?: number;
   /** Defaults to system for existing runtimes; SDK-backed Ordinary uses user to keep one leading system instruction. */

@@ -3,6 +3,7 @@
 @import "./styles/foundation.css";
 @import "./styles/shell.css";
 @import "./styles/chat-layout.css";
+@import "./styles/development-notice.css";
 @import "./styles/chat-composer.css";
 @import "./styles/chat-message.css";
 @import "./styles/rich-text.css";

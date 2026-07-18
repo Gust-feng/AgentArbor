@@ -144,7 +144,7 @@ test("panel UI app shell delegates settings and sidebar ownership", async () => 
   assert.equal(appRunController.includes("function startLiveUpdates"), false);
   assert.equal(appRunController.includes("function startPolling"), false);
   assert.equal(appRunController.includes("safeWorkSession"), false);
-  assert.equal(appRunController.includes("loadObservedRunReadModel"), true);
+  assert.equal(appRunController.includes("loadObservedRunReadModel"), false);
   assert.equal(appRunController.includes("safeBasicRunView"), false);
   assert.equal(appRunController.includes("ordinaryWorkViewFromRunView"), false);
   assert.equal(appTaskSubmission.includes("options.startLiveUpdates({"), true);
@@ -383,6 +383,8 @@ test("panel UI app shell delegates settings and sidebar ownership", async () => 
   assert.equal(sidebar.includes("疑似卡住"), false);
   assert.equal(sidebar.includes("Agent 集群"), true);
   assert.equal(sidebar.includes("Deep 模式"), false);
+  assert.equal(settingsDialog.includes("MULTI_AGENT_ENTRY_AVAILABLE &&"), true);
+  assert.equal(appShellState.includes("isMultiAgentEntryEnabled(loadAgentClusterEnabledPreference())"), true);
   assert.equal(appWorkbenchShellProps.includes("export function buildSidebarProps"), true);
   assert.equal(app.includes("agentClusterActive={agentClusterActive}"), false);
   assert.equal(app.includes("agentClusterEnabled={agentClusterEnabled}"), false);

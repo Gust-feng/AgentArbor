@@ -10,6 +10,7 @@ import type {
 import type { SkillDefinition } from "./contracts/skills";
 import type { SubAgentDefinition } from "./contracts/sub-agents";
 import type { McpServerCatalogItem, ToolsResponse } from "./contracts/tools";
+import { MULTI_AGENT_ENTRY_AVAILABLE } from "./app-multi-agent-availability";
 
 export type AppBootstrapState = Pick<
   AppState,
@@ -17,6 +18,12 @@ export type AppBootstrapState = Pick<
 >;
 
 export async function loadAppBootstrap(): Promise<AppBootstrapState> {
+  const deepConversationsRequest = MULTI_AGENT_ENTRY_AVAILABLE
+    ? getJson<ListDeepConversationSummariesResponse>("/api/deep/conversations?limit=50")
+    : Promise.resolve<ListDeepConversationSummariesResponse>({ ok: true, conversations: [] });
+  const deepRunsRequest = MULTI_AGENT_ENTRY_AVAILABLE
+    ? getJson<ListDeepRunSummariesResponse>("/api/deep/runs?limit=50")
+    : Promise.resolve<ListDeepRunSummariesResponse>({ ok: true, runs: [] });
   const [config, tools, mcp, appUpdate, skills, subAgents, conversations, deepConversations, deepRuns] = await Promise.all([
     getJson<ConfigResponse>("/api/config"),
     getJson<ToolsResponse>("/api/config/tools"),
@@ -25,8 +32,8 @@ export async function loadAppBootstrap(): Promise<AppBootstrapState> {
     getJson<{ readonly skills: readonly SkillDefinition[] }>("/api/skills"),
     getJson<{ readonly subAgents: readonly SubAgentDefinition[] }>("/api/config/sub-agents"),
     getJson<{ readonly conversations: readonly ConversationSummary[] }>("/api/conversations"),
-    getJson<ListDeepConversationSummariesResponse>("/api/deep/conversations?limit=50"),
-    getJson<ListDeepRunSummariesResponse>("/api/deep/runs?limit=50"),
+    deepConversationsRequest,
+    deepRunsRequest,
   ]);
   return {
     config,

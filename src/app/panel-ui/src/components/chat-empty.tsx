@@ -16,6 +16,7 @@ import type { ModelCapabilities } from "../contracts/config";
 import { modelCapabilitySummary } from "../model-capability-display";
 import type { ModelProviderIdentity } from "../model-provider-logos";
 import type { ContextWindowUsage } from "../context-window-usage";
+import { DevelopmentDataNotice } from "./development-data-notice";
 
 type ComposerChipFeedback = "model" | "reasoning" | "access";
 
@@ -102,14 +103,16 @@ export function ChatEmpty(props: ChatInputProps & {
               <p className="chat-empty-subheading">{MULTI_AGENT_EMPTY_HINT}</p>
             )}
             {props.error && <div className="system-error-line">{props.error}</div>}
+            {!isDeep && <DevelopmentDataNotice dismissible />}
+            {!isDeep && (
+              <div className="chat-empty-composer">
+                <ChatInputBar {...props} variant="embedded" placeholder="输入任务..." />
+              </div>
+            )}
           </section>
         </div>
       </main>
-      <ChatInputBar
-        {...props}
-        variant="floating"
-        placeholder={isDeep ? MULTI_AGENT_PLACEHOLDER : "输入任务..."}
-      />
+      {isDeep && <ChatInputBar {...props} variant="floating" placeholder={MULTI_AGENT_PLACEHOLDER} />}
     </div>
   );
 }

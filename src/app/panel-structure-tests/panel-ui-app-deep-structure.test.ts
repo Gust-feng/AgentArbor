@@ -701,6 +701,9 @@ test("panel UI app shell keeps Agent cluster orchestration outside App", async (
   assert.equal(appAttachments.includes("/api/context/attachments/upload"), true);
   assert.equal(appBootstrap.includes("export async function loadAppBootstrap"), true);
   assert.equal(appBootstrap.includes("export function applyAppBootstrap"), true);
+  assert.equal(appBootstrap.includes("MULTI_AGENT_ENTRY_AVAILABLE"), true);
+  assert.equal(appBootstrap.includes(": Promise.resolve<ListDeepConversationSummariesResponse>({ ok: true, conversations: [] })"), true);
+  assert.equal(appBootstrap.includes(": Promise.resolve<ListDeepRunSummariesResponse>({ ok: true, runs: [] })"), true);
   assert.equal(appBootstrap.includes('getJson<ConfigResponse>("/api/config")'), true);
   assert.equal(appBootstrap.includes('getJson<ToolsResponse>("/api/config/tools")'), true);
   assert.equal(appBootstrap.includes('getJson<{ readonly catalog?: readonly McpServerCatalogItem[] }>("/api/config/mcp")'), true);

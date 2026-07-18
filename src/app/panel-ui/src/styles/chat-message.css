@@ -58,10 +58,6 @@
   justify-content: flex-start;
 }
 
-.user-message[data-entering] {
-  animation: msg-enter-up var(--motion-enter-duration) var(--motion-ease-spring) both;
-}
-
 .user-message-wrap {
   width: min(100%, 620px);
   min-width: 0;
@@ -235,24 +231,6 @@
   line-height: 1.35;
 }
 
-.user-message-queued {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 10px 0 0;
-  padding: 1px 0;
-  line-height: 1;
-}
-
-.user-message-queued > span {
-  width: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--accent);
-  opacity: 0.38;
-  animation: queued-dot-breathe 1.18s ease-in-out infinite;
-}
-
 .assistant-message {
   display: flex;
   width: 100%;
@@ -268,23 +246,12 @@
   gap: var(--space-4);
 }
 
-.assistant-message[data-entering] {
-  animation: msg-enter-up var(--motion-enter-duration) var(--motion-ease-spring) both;
-  animation-delay: calc(var(--motion-stagger-unit) * 1.5);
-}
-
 .assistant-message-label::after {
   content: "";
   flex: 1 1 auto;
   min-width: 32px;
   height: 1px;
   background: color-mix(in oklch, var(--border) 84%, transparent);
-}
-
-.assistant-message[data-entering] .assistant-message-label::after {
-  transform-origin: left center;
-  animation: label-line-grow 420ms var(--motion-ease-spring) both;
-  animation-delay: calc(var(--motion-stagger-unit) * 3);
 }
 
 .assistant-message-model {
@@ -343,12 +310,6 @@
   max-width: 100%;
   align-self: stretch;
   padding: 0;
-}
-
-.assistant-message[data-entering] .assistant-answer {
-  transform-origin: top center;
-  animation: border-grow-down 360ms var(--motion-ease-spring) both;
-  animation-delay: calc(var(--motion-stagger-unit) * 2);
 }
 
 .assistant-answer-pending {
@@ -662,60 +623,5 @@
 
   .assistant-message-model {
     max-width: 100%;
-  }
-}
-
-.user-message-queued > span:nth-child(2) {
-  animation-delay: 120ms;
-}
-
-.user-message-queued > span:nth-child(3) {
-  animation-delay: 240ms;
-}
-
-@keyframes queued-dot-breathe {
-  0%,
-  100% {
-    opacity: 0.28;
-    transform: scale(0.86);
-  }
-  45% {
-    opacity: 0.8;
-    transform: scale(1.08);
-  }
-}
-
-/* ── Message entry choreography ── */
-
-@keyframes msg-enter-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes label-line-grow {
-  from {
-    transform: scaleX(0);
-    opacity: 0;
-  }
-  to {
-    transform: scaleX(1);
-    opacity: 1;
-  }
-}
-
-@keyframes border-grow-down {
-  from {
-    opacity: 0;
-    transform: scaleY(0.4);
-  }
-  to {
-    opacity: 1;
-    transform: scaleY(1);
   }
 }

@@ -11,11 +11,20 @@ test("streaming assistant answers keep streaming text without a visible cursor n
   ]);
 
   assert.equal(chatTranscriptChain.includes("LiveStreamBox"), true);
-  assert.equal(chatTranscriptChain.includes('className="rich-text rich-text-streaming"'), true);
-  assert.equal(chatTranscriptChain.includes("stabilizeStreamingMarkdown(displayed)"), true);
+  assert.equal(chatTranscriptChain.includes('className="rich-text rich-text-streaming"'), false);
+  assert.equal(chatTranscriptChain.includes(
+    'renderText={(displayed) => <StreamingRichText text={displayed} live={false} />}',
+  ), true);
+  assert.equal(chatTranscriptChain.includes(
+    'renderStreamingText={(displayed) => <StreamingRichText text={displayed} />}',
+  ), true);
+  assert.equal(chatTranscriptChain.includes("stabilizeStreamingMarkdown(displayed)"), false);
+  assert.equal(chatTranscriptChain.includes('"data-entering"'), false);
   assert.equal(chatTranscriptChain.includes('className="stream-cursor"'), false);
+  assert.equal(chatMessageStyles.includes(".assistant-message[data-entering]"), false);
   assert.equal(chatMessageStyles.includes(".stream-cursor"), false);
   assert.equal(chatMessageStyles.includes("stream-cursor-blink"), false);
+  assert.equal(richTextStyles.includes(".rich-text-streaming"), false);
   assert.equal(richTextStyles.includes(".stream-cursor"), false);
   assert.equal(richTextStyles.includes("stream-cursor-blink"), false);
 });

@@ -26,6 +26,8 @@ import type {
   SkillTriggerMode,
 } from "../contracts/config";
 import type { AppUpdateInfo, AppUpdateStatus } from "../contracts/app-update";
+import { DevelopmentDataNotice } from "./development-data-notice";
+import { MULTI_AGENT_ENTRY_AVAILABLE } from "../app-multi-agent-availability";
 import type { SkillDefinition } from "../contracts/skills";
 import type { SubAgentDefinition } from "../contracts/sub-agents";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
@@ -297,6 +299,7 @@ function AboutSettings(props: {
   const runtimeDirectory = product?.runtimeDirectory ?? "未提供";
   const updateStatus = checkingUpdate ? "checking" : props.appUpdate?.status ?? "idle";
   const updateLink = appUpdateActionUrl(props.appUpdate);
+  const releaseNotes = nonEmptyUpdateNotes(props.appUpdate?.latest?.notes);
   const canCheckUpdate = props.appUpdate?.canCheck !== false && updateStatus !== "downloading" && updateStatus !== "installing";
   const canInstallUpdate = props.appUpdate?.canInstall === true && updateStatus === "downloaded";
 
@@ -347,28 +350,32 @@ function AboutSettings(props: {
         <AboutFact icon={<Monitor size={16} />} label="默认入口" value={defaultEntry} />
       </section>
 
-      <section className="settings-card about-agent-cluster-card">
-        <div className="settings-card-title-row">
-          <h3>Agent 集群</h3>
-          <span>beta</span>
-        </div>
-        <div className="about-agent-cluster-row">
-          <div className="about-agent-cluster-copy">
-            <strong>启用 Agent 集群</strong>
-            <span>当前版本仍处于测试阶段，可能出现运行中断、结果不稳定、状态恢复异常等意外情况；开启后仅在“新任务”下方显示入口，默认启动仍进入桌面 Agent。</span>
+      {MULTI_AGENT_ENTRY_AVAILABLE && (
+        <section className="settings-card about-agent-cluster-card">
+          <div className="settings-card-title-row">
+            <h3>Agent 集群</h3>
+            <span>beta</span>
           </div>
-          <button
-            type="button"
-            className="appearance-toggle-switch about-agent-cluster-switch"
-            role="switch"
-            aria-checked={props.agentClusterEnabled}
-            aria-label="启用 Agent 集群 beta"
-            onClick={() => props.onAgentClusterEnabledChange(!props.agentClusterEnabled)}
-          >
-            <span />
-          </button>
-        </div>
-      </section>
+          <div className="about-agent-cluster-row">
+            <div className="about-agent-cluster-copy">
+              <strong>启用 Agent 集群</strong>
+              <span>当前版本仍处于测试阶段，可能出现运行中断、结果不稳定、状态恢复异常等意外情况；开启后仅在“新任务”下方显示入口，默认启动仍进入桌面 Agent。</span>
+            </div>
+            <button
+              type="button"
+              className="appearance-toggle-switch about-agent-cluster-switch"
+              role="switch"
+              aria-checked={props.agentClusterEnabled}
+              aria-label="启用 Agent 集群 beta"
+              onClick={() => props.onAgentClusterEnabledChange(!props.agentClusterEnabled)}
+            >
+              <span />
+            </button>
+          </div>
+        </section>
+      )}
+
+      <DevelopmentDataNotice />
 
       <section className="settings-card about-update-card">
         <div className="settings-card-title-row">
@@ -389,6 +396,12 @@ function AboutSettings(props: {
           </span>
           <span>{appUpdateSummary(props.appUpdate, checkingUpdate)}</span>
         </div>
+        {releaseNotes !== undefined && (
+          <div className="about-update-notes" aria-label="更新说明">
+            <strong>更新说明</strong>
+            <p>{releaseNotes}</p>
+          </div>
+        )}
         {props.appUpdate?.progress !== undefined && updateStatus === "downloading" && (
           <div className="about-update-progress" aria-label="更新下载进度">
             <span style={{ width: `${Math.min(100, Math.max(0, props.appUpdate.progress.percent))}%` }} />
@@ -500,6 +513,11 @@ function appUpdateSummary(update: AppUpdateInfo | undefined, checking: boolean):
 function appUpdateActionUrl(update: AppUpdateInfo | undefined): string | undefined {
   if (update?.status !== "available") return undefined;
   return update.latest?.releasePageUrl ?? update.latest?.downloadUrl;
+}
+
+function nonEmptyUpdateNotes(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized === undefined || normalized.length === 0 ? undefined : normalized;
 }
 
 function formatCheckedAt(value: string): string {

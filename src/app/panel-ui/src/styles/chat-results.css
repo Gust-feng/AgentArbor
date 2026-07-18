@@ -12,10 +12,6 @@
   box-shadow: none;
 }
 
-.assistant-message[data-entering] .status-notice {
-  animation: notice-enter var(--motion-enter-duration) var(--motion-ease-spring) both;
-}
-
 .confirmation-actions {
   display: flex;
   flex-wrap: wrap;
@@ -169,18 +165,6 @@
   50% {
     transform: translateY(-5px);
     opacity: 1;
-  }
-}
-
-@keyframes notice-enter {
-  from {
-    opacity: 0;
-    transform: translateX(-4px);
-    border-left-color: transparent;
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 

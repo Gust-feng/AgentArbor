@@ -8,6 +8,7 @@ import { type SettingsGroup } from "./components/settings-types";
 import { type Screen } from "./components/sidebar";
 import type { AgentMode } from "./app-config-projection";
 import { readLocalPreference, writeLocalPreference } from "./app-local-preferences";
+import { isMultiAgentEntryEnabled } from "./app-multi-agent-availability";
 
 export type AppShellStateOptions = {
   readonly agentMode: AgentMode;
@@ -44,7 +45,9 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsedPreference);
   const [startupAnimationEnabled, setStartupAnimationEnabled] = useState(getStartupAnimationEnabled);
   const [modelUsageDisplayEnabled, setModelUsageDisplayEnabled] = useState(getModelUsageDisplayEnabled);
-  const [agentClusterEnabled, setAgentClusterEnabled] = useState(loadAgentClusterEnabledPreference);
+  const [agentClusterEnabled, setAgentClusterEnabled] = useState(() =>
+    isMultiAgentEntryEnabled(loadAgentClusterEnabledPreference())
+  );
   const [pinningConversationIds, setPinningConversationIds] = useState<ReadonlySet<string>>(() => new Set());
   const [inputCloseSignal, setInputCloseSignal] = useState(0);
 
@@ -64,9 +67,10 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
   }
 
   function changeAgentClusterEnabled(enabled: boolean): void {
-    setAgentClusterEnabled(enabled);
+    const nextEnabled = isMultiAgentEntryEnabled(enabled);
+    setAgentClusterEnabled(nextEnabled);
     persistAgentClusterEnabledPreference(enabled);
-    if (!enabled && options.agentMode === "deep") {
+    if (!nextEnabled && options.agentMode === "deep") {
       options.onExitDeepMode();
     }
   }

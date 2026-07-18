@@ -5,7 +5,11 @@ import { InMemoryEventLog } from "../events/in-memory-event-log.js";
 import { nowIso } from "../id.js";
 import { InMemoryMessageBus } from "../messages/in-memory-message-bus.js";
 import { NativeIntelligenceChannel, type ModelRequestRetryPolicy } from "./channel.js";
-import { createFailedModelResponse } from "./failures.js";
+import {
+  createFailedModelResponse,
+  modelErrorMessageFromError,
+  modelFailureKindFromError,
+} from "./failures.js";
 import { pendingModelOutputValidation } from "./validation.js";
 
 test("IntelligenceChannel rejects requests missing purpose, output contract, or budget", async () => {
@@ -306,6 +310,30 @@ test("IntelligenceChannel preserves sanitized provider error cause", async () =>
   assert.equal(failedPayload.failureKind, "provider_network");
   assert.equal(failedPayload.failureMessage?.includes("fetch failed ECONNRESET"), true);
   assert.equal(failedPayload.failureMessage?.includes("sk-channel-cause-secret"), true);
+});
+
+test("model failure normalization classifies an interrupted response body as a retryable network failure", () => {
+  const error = new TypeError("terminated", {
+    cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+  });
+
+  assert.equal(modelFailureKindFromError(error), "provider_network");
+  assert.match(modelErrorMessageFromError(error), /terminated.*other side closed/iu);
+});
+
+test("model failure normalization follows SDK-style error wrappers without looping", () => {
+  const wrapper = new Error("Tool call failed") as Error & { error?: unknown };
+  const connectionError = new Error("Connection error.", {
+    cause: new TypeError("terminated"),
+  }) as Error & { error?: unknown };
+  wrapper.error = connectionError;
+  connectionError.error = wrapper;
+
+  assert.equal(modelFailureKindFromError(wrapper), "provider_network");
+  assert.match(
+    modelErrorMessageFromError(wrapper),
+    /Tool call failed.*Connection error.*terminated/iu,
+  );
 });
 
 test("IntelligenceChannel turns contract-violating output into a failed response", async () => {

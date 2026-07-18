@@ -536,6 +536,179 @@ test("streaming consumes the SDK stream, emits text deltas, and awaits completio
   });
 });
 
+test("compatible Chat streaming exposes provider reasoning_content separately from answer text", async () => {
+  const fetch = scriptedFetch([() => chatReasoningTextStream(["先分析", "，再回答"], ["最终", "答案"])]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_compatible_chat_completions",
+      baseUrl: CHAT_BASE_URL,
+      requestSettings: { stream: true },
+      providerProfileId: "moonshot",
+      model: "kimi-k3",
+    });
+    const reasoning: string[] = [];
+    const completedReasoning: string[] = [];
+    const answer: string[] = [];
+    try {
+      const result = await loop.execute({
+        ...loopInput([{ role: "system", content: SYSTEM }, { role: "user", content: "reason first" }]),
+        onReasoningDelta: (delta) => reasoning.push(delta),
+        onReasoningCompleted: async (content) => { completedReasoning.push(content); },
+        onTextDelta: (delta) => answer.push(delta),
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(reasoning.join(""), "先分析，再回答");
+      assert.deepEqual(completedReasoning, ["先分析，再回答"]);
+      assert.equal(answer.join(""), "最终答案");
+      assert.equal(result.status === "completed" ? result.finalText : undefined, "最终答案");
+    } finally {
+      await loop.release();
+    }
+  });
+  assert.equal(fetch.requests[0]?.body.reasoning_effort, "max");
+  assert.equal(fetch.requests[0]?.body.thinking, undefined);
+});
+
+test("compatible Chat normalizes MiniMax reasoning_details and tagged content through the shared reasoning boundary", async () => {
+  const fetch = scriptedFetch([() => jsonResponse({
+    id: "chat-minimax-reasoning",
+    object: "chat.completion",
+    created: 1,
+    model: "MiniMax-M2.7",
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        reasoning_details: [{ text: "先检查约束。" }],
+        content: "<think>再比较候选。</think>选择稳定方案。",
+      },
+      finish_reason: "stop",
+    }],
+    usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
+  })]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_compatible_chat_completions",
+      baseUrl: "https://api.minimaxi.com/v1",
+      providerProfileId: "minimax",
+      model: "MiniMax-M2.7",
+      requestSettings: { stream: true },
+    });
+    const completedReasoning: string[] = [];
+    try {
+      const result = await loop.execute({
+        ...loopInput([{ role: "system", content: SYSTEM }, { role: "user", content: "reason first" }]),
+        onReasoningCompleted: async (content) => { completedReasoning.push(content); },
+        onTextDelta: () => undefined,
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.status === "completed" ? result.finalText : undefined, "选择稳定方案。");
+      assert.deepEqual(completedReasoning, ["先检查约束。\n\n再比较候选。"]);
+    } finally {
+      await loop.release();
+    }
+  });
+  assert.equal(fetch.requests[0]?.body.reasoning_split, true);
+  assert.equal(fetch.requests[0]?.body.stream, false);
+});
+
+test("Responses completion exposes normalized reasoning summaries", async () => {
+  const fetch = scriptedFetch([() => jsonResponse({
+    id: "resp-reasoning-summary",
+    object: "response",
+    created_at: 1,
+    status: "completed",
+    model: MODEL,
+    output: [{
+      id: "reasoning-summary",
+      type: "reasoning",
+      summary: [{ type: "summary_text", text: "核对证据后再作答。" }],
+    }, {
+      id: "reasoning-answer",
+      type: "message",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text: "证据充分。", annotations: [] }],
+    }],
+    usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 },
+  })]);
+  await withGlobalFetch(fetch.fetch, async () => {
+    const loop = createLoop({
+      protocol: "openai_responses",
+      baseUrl: OFFICIAL_BASE_URL,
+      requestSettings: { reasoningSummary: "detailed" },
+    });
+    const completedReasoning: string[] = [];
+    try {
+      const result = await loop.execute({
+        ...loopInput([{ role: "system", content: SYSTEM }, { role: "user", content: "summarize reasoning" }]),
+        onReasoningCompleted: async (content) => { completedReasoning.push(content); },
+      });
+      assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+      assert.equal(result.status === "completed" ? result.finalText : undefined, "证据充分。");
+      assert.deepEqual(completedReasoning, ["核对证据后再作答。"]);
+    } finally {
+      await loop.release();
+    }
+  });
+});
+
+test("model transport retries a network failure only before the first provider stream event", async () => {
+  const fetch = scriptedFetch([
+    () => { throw new TypeError("terminated", { cause: new Error("other side closed") }); },
+    () => chatTextStream(["retry-", "complete"]),
+  ]);
+  const loop = createLoop({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: CHAT_BASE_URL,
+    fetch: fetch.fetch,
+    requestSettings: { stream: true },
+  });
+  const deltas: string[] = [];
+  try {
+    const result = await loop.execute({
+      ...loopInput([{ role: "system", content: SYSTEM }, { role: "user", content: "retry transport" }]),
+      onTextDelta: (delta) => deltas.push(delta),
+    });
+
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(result.status === "completed" ? result.finalText : undefined, "retry-complete");
+    assert.equal(fetch.requests.length, 2);
+    assert.equal(deltas.join(""), "retry-complete");
+  } finally {
+    await loop.release();
+  }
+});
+
+test("model transport does not retry after a provider stream event and preserves the network cause", async () => {
+  const fetch = scriptedFetch([
+    () => chatTextStreamThenError("partial", new TypeError("terminated", {
+      cause: new Error("other side closed"),
+    })),
+  ]);
+  const loop = createLoop({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: CHAT_BASE_URL,
+    fetch: fetch.fetch,
+    requestSettings: { stream: true },
+  });
+  const deltas: string[] = [];
+  try {
+    const result = await loop.execute({
+      ...loopInput([{ role: "system", content: SYSTEM }, { role: "user", content: "do not mix attempts" }]),
+      onTextDelta: (delta) => deltas.push(delta),
+    });
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.status === "failed" ? result.errorCode : undefined, "provider_network");
+    assert.match(result.status === "failed" ? result.error : "", /terminated.*other side closed/iu);
+    assert.equal(fetch.requests.length, 1);
+    assert.equal(deltas.join(""), "partial");
+  } finally {
+    await loop.release();
+  }
+});
+
 test("compatible Chat rejects a length-truncated final response without persisting partial assistant text", async () => {
   const fetch = scriptedFetch([() => chatTextWithFinishReason("partial answer", "length")]);
   await withGlobalFetch(fetch.fetch, async () => {
@@ -1218,6 +1391,16 @@ test("compatible provider profiles apply their frozen request dialects and safe 
     },
   }, {
     profile: "moonshot",
+    model: "kimi-k3",
+    settings: { reasoningEffort: "high", temperature: 0.2, topP: 0.8 },
+    assertBody: (body) => {
+      assert.equal(body.reasoning_effort, "max");
+      assert.equal(body.thinking, undefined);
+      assert.equal(body.temperature, undefined);
+      assert.equal(body.top_p, undefined);
+    },
+  }, {
+    profile: "moonshot",
     model: "kimi-k2.6",
     settings: { reasoningEffort: "high", temperature: 0.2, topP: 0.8 },
     assertBody: (body) => {
@@ -1559,6 +1742,32 @@ test("an allowed tool executes once through the gateway and returns the complete
       await loop.release();
     }
   });
+});
+
+test("non-portable tool identities fail before the provider request instead of requiring runtime remapping", async () => {
+  const canonicalToolName = "mcp__query-docs";
+  const gateway = new TestGateway(plainTool(canonicalToolName));
+  const fetch = scriptedFetch([]);
+  const loop = createLoop({
+    protocol: "openai_responses",
+    baseUrl: OFFICIAL_BASE_URL,
+    fetch: fetch.fetch,
+  });
+  try {
+    const result = await loop.execute({
+      ...loopInput([
+        { role: "system", content: SYSTEM },
+        { role: "user", content: "query docs" },
+      ], gateway),
+    });
+
+    assert.equal(result.status, "failed");
+    assert.match(result.status === "failed" ? result.error : "", /not provider-portable/u);
+    assert.equal(fetch.requests.length, 0);
+    assert.equal(gateway.executions.length, 0);
+  } finally {
+    await loop.release();
+  }
 });
 
 test("context maintenance runs before every model request and persists the compacted request history", async () => {
@@ -2281,6 +2490,21 @@ function chatTextStream(chunks: readonly string[]): Response {
   return chatTextStreamWithFinishReason(chunks, "stop");
 }
 
+function chatReasoningTextStream(reasoningChunks: readonly string[], textChunks: readonly string[]): Response {
+  const events = [
+    ...reasoningChunks.map((reasoningContent, index) => chatStreamChunk({
+      ...(index === 0 ? { role: "assistant" } : {}),
+      reasoning_content: reasoningContent,
+    }, null)),
+    ...textChunks.map((content) => chatStreamChunk({ content }, null)),
+    chatStreamChunk({}, "stop"),
+  ];
+  return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 function chatTextStreamWithFinishReason(chunks: readonly string[], finishReason: string): Response {
   const events = [
     chatStreamChunk({ role: "assistant", content: chunks[0] ?? "" }, null),
@@ -2288,6 +2512,20 @@ function chatTextStreamWithFinishReason(chunks: readonly string[], finishReason:
     chatStreamChunk({}, finishReason),
   ];
   return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function chatTextStreamThenError(text: string, error: Error): Response {
+  const encoder = new TextEncoder();
+  const event = `data: ${JSON.stringify(chatStreamChunk({ role: "assistant", content: text }, null))}\n\n`;
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(event));
+      setTimeout(() => controller.error(error), 10);
+    },
+  }), {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });

@@ -10,6 +10,7 @@ import {
   type ModelRetryAdvice,
   type ModelRetryAdviceRequest,
   OpenAIProvider,
+  retryPolicies,
   Runner,
   RunContext,
   RunResult,
@@ -33,6 +34,10 @@ import type {
   ToolDefinition,
 } from "../../domain/tools/index.js";
 import { modelVisibleToolDescription } from "../../domain/tools/index.js";
+import {
+  modelErrorMessageFromError,
+  modelFailureKindFromError,
+} from "../../kernel/intelligence/failures.js";
 import type {
   AgentLoop,
   AgentLoopAgentTool,
@@ -111,6 +116,7 @@ type PendingInterruption = OpenAIAgentsPendingConfirmation<SdkInterruption>;
 setTracingDisabled(true);
 
 const globalOpenAIFetch: typeof fetch = (input, init) => globalThis.fetch(input, init);
+const MODEL_TRANSPORT_MAX_RETRIES = 2;
 
 export function createOpenAIAgentsLoop(config: OpenAIAgentsLoopConfig): AgentLoop {
   return new OpenAIAgentsLoop(config);
@@ -129,23 +135,18 @@ class OpenAIAgentsLoop implements AgentLoop {
     validateRequestSettings(config.protocol, config.requestSettings);
     this.config = config;
     const configuredFetch = config.fetch === undefined ? undefined : toOpenAIFetch(config.fetch);
-    const openAIClient = config.protocol === "openai_responses"
-      ? new OpenAI({
-          apiKey: config.apiKey,
-          baseURL: config.baseUrl,
-          fetch: withOpenAIResponsesStreamReconciliation(configuredFetch ?? globalOpenAIFetch),
-        })
-      : configuredFetch === undefined
-        ? undefined
-        : new OpenAI({
-            apiKey: config.apiKey,
-            baseURL: config.baseUrl,
-            fetch: configuredFetch,
-          });
+    // The Agents SDK owns model retries because it knows whether a stream has
+    // emitted provider events. Disable client retries to avoid multiplying attempts.
+    const openAIClient = new OpenAI({
+      apiKey: config.apiKey,
+      baseURL: config.baseUrl,
+      maxRetries: 0,
+      ...(config.protocol === "openai_responses"
+        ? { fetch: withOpenAIResponsesStreamReconciliation(configuredFetch ?? globalOpenAIFetch) }
+        : configuredFetch === undefined ? {} : { fetch: configuredFetch }),
+    });
     this.provider = new OpenAIProvider({
-      ...(openAIClient === undefined
-        ? { apiKey: config.apiKey, baseURL: config.baseUrl }
-        : { openAIClient }),
+      openAIClient,
       useResponses: config.protocol === "openai_responses",
       strictFeatureValidation: true,
       cacheResponsesWebSocketModels: false,
@@ -226,6 +227,7 @@ class OpenAIAgentsLoop implements AgentLoop {
       execution,
       model: this.config.model,
       nestedModelSettings: nestedModelSettings(this.config),
+      streamAgentTools: execution.input.onTextDelta !== undefined && supportsSdkStreaming(this.config),
     });
     return new Agent<SdkExecutionContext, AgentOutputType>({
       name: "AgentArborOrdinaryMechanicalLoop",
@@ -629,6 +631,21 @@ function modelSettings(input: {
       ? undefined
       : settings?.parallelToolCalls,
     store: settings?.store,
+    retry: {
+      maxRetries: MODEL_TRANSPORT_MAX_RETRIES,
+      backoff: {
+        initialDelayMs: 300,
+        maxDelayMs: 2_000,
+        multiplier: 2,
+        jitter: true,
+      },
+      policy: retryPolicies.any(
+        retryPolicies.providerSuggested(),
+        retryPolicies.networkError(),
+        retryPolicies.retryAfter(),
+        retryPolicies.httpStatus([408, 409, 429, 500, 502, 503, 504]),
+      ),
+    },
     providerData,
   };
 }
@@ -841,8 +858,8 @@ function terminalErrorResult(
   execution: ExecutionState,
   sdkState?: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>>,
 ): AgentLoopResult {
-  const message = errorMessage(error);
-  const errorCode = contextMaintenanceErrorCode(error);
+  const message = modelErrorMessageFromError(error, errorMessage(error));
+  const errorCode = contextMaintenanceErrorCode(error) ?? transportFailureCode(error);
   const stateResponses = sdkState === undefined ? [] : new RunResult(sdkState).rawResponses;
   const preservedTerminalResponse = preservedOpenAIAgentsTerminalResponse(error);
   const rawResponses = preservedTerminalResponse === undefined
@@ -864,6 +881,13 @@ function terminalErrorResult(
           ? {}
           : { errorCode }),
       };
+}
+
+function transportFailureCode(error: unknown): string | undefined {
+  const kind = modelFailureKindFromError(error);
+  return kind === "provider_network" || kind === "provider_timeout"
+    ? kind
+    : undefined;
 }
 
 class ContextMaintenanceError extends Error {

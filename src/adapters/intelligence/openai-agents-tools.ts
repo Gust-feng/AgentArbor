@@ -19,6 +19,10 @@ import type {
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
 import { modelVisibleToolDescription, normalizeToolFactValue } from "../../domain/tools/index.js";
+import {
+  modelErrorMessageFromError,
+  modelFailureKindFromError,
+} from "../../kernel/intelligence/failures.js";
 import type {
   AgentLoopAgentTool,
   AgentLoopAgentToolInvocation,
@@ -83,26 +87,36 @@ export function createOpenAIAgentsToolAssembly(input: {
   readonly execution: OpenAIAgentsExecutionState;
   readonly model: string;
   readonly nestedModelSettings: ModelSettings;
+  readonly streamAgentTools: boolean;
 }): OpenAIAgentsToolAssembly {
   const definitions = frozenToolDefinitions(input.execution.input);
   const agentTools = [...(input.execution.input.agentTools ?? [])];
   assertUniqueToolNames(definitions, agentTools);
+  const mechanicalTools = definitions.map((definition) => ({
+    canonicalName: definition.name,
+    tool: createSdkTool({
+      definition,
+      execution: input.execution,
+      boundary: async () => input.execution.input.tools,
+    }),
+  }));
+  const sdkAgentTools = agentTools.map((agentTool) => ({
+    canonicalName: agentTool.toolName,
+    tool: createSdkAgentTool({
+      agentTool,
+      mechanicalTools: definitions,
+      execution: input.execution,
+      model: input.model,
+      modelSettings: input.nestedModelSettings,
+      stream: input.streamAgentTools,
+    }),
+  }));
+  for (const entry of [...mechanicalTools, ...sdkAgentTools]) {
+    assertSdkToolIdentity(entry.tool, entry.canonicalName);
+  }
   return {
     definitions,
-    tools: [
-      ...definitions.map((definition) => createSdkTool({
-        definition,
-        execution: input.execution,
-        boundary: async () => input.execution.input.tools,
-      })),
-      ...agentTools.map((agentTool) => createSdkAgentTool({
-        agentTool,
-        mechanicalTools: definitions,
-        execution: input.execution,
-        model: input.model,
-        modelSettings: input.nestedModelSettings,
-      })),
-    ],
+    tools: [...mechanicalTools, ...sdkAgentTools].map((entry) => entry.tool),
   };
 }
 
@@ -212,6 +226,7 @@ function createSdkAgentTool(input: {
   readonly execution: OpenAIAgentsExecutionState;
   readonly model: string;
   readonly modelSettings: ModelSettings;
+  readonly stream: boolean;
 }): Tool<OpenAIAgentsSdkExecutionContext> {
   const childFactScope = new AsyncLocalStorage<string>();
   const resolveContribution = invocationResolver(input.agentTool);
@@ -304,6 +319,7 @@ function createSdkAgentTool(input: {
         (item.factId ?? item.callId) === factId && item.status === "completed");
       return recorded === undefined ? finalOutput : agentToolModelOutput(input.execution, recorded);
     },
+    ...(input.stream ? { onStream: () => undefined } : {}),
     runOptions,
     resumeState: { contextStrategy: "merge" },
   });
@@ -410,7 +426,13 @@ async function recordAgentToolFailure(input: {
     ? typeof input.output === "string" && input.output.length > 0
       ? input.output
       : "The sub-agent invocation failed."
-    : errorMessage(input.error);
+    : modelErrorMessageFromError(input.error, errorMessage(input.error));
+  // Agent.asTool converts nested runner exceptions into a failed string result
+  // before our wrapper sees them. Both paths are failure evidence for the same fact.
+  const failureEvidence = input.error ?? input.output;
+  const failureKind = input.aborted || failureEvidence === undefined
+    ? undefined
+    : modelFailureKindFromError(failureEvidence);
   const result: ToolCallResult = {
     callId: input.callId,
     ...optionalFactId(input.callId, input.factId),
@@ -420,7 +442,12 @@ async function recordAgentToolFailure(input: {
     status: input.aborted ? "cancelled" : "failed",
     error: input.aborted ? cancellationMessage(input.execution.abortSignal.reason) : message,
     errorDomain: input.aborted ? "runtime_error" : "model_error",
-    errorFacts: { code: input.aborted ? "sub_agent_cancelled" : "sub_agent_execution_failed" },
+    errorFacts: {
+      code: input.aborted ? "sub_agent_cancelled" : "sub_agent_execution_failed",
+      ...(failureKind === "provider_network" || failureKind === "provider_timeout"
+        ? { causeCode: failureKind, retryable: true }
+        : {}),
+    },
     durationMs: input.startedAt === undefined ? 0 : Math.max(0, Date.now() - input.startedAt),
   };
   await recordOpenAIAgentsToolResult(input.execution, result);
@@ -620,6 +647,26 @@ function assertUniqueToolNames(
     }
     seen.add(name);
   }
+}
+
+function assertSdkToolIdentity(
+  toolValue: Tool<OpenAIAgentsSdkExecutionContext>,
+  canonicalName: string,
+): void {
+  const sdkName = requiredSdkToolName(toolValue);
+  if (sdkName !== canonicalName) {
+    throw new Error(
+      `Tool ${canonicalName} is not provider-portable; OpenAI Agents SDK changed its name to ${sdkName}. ` +
+      "Normalize external tool names before registering them.",
+    );
+  }
+}
+
+function requiredSdkToolName(toolValue: Tool<OpenAIAgentsSdkExecutionContext>): string {
+  if ("name" in toolValue && typeof toolValue.name === "string" && toolValue.name.length > 0) {
+    return toolValue.name;
+  }
+  throw new Error("OpenAI Agents SDK created a tool without a provider-visible name.");
 }
 
 function toolCallRequest(

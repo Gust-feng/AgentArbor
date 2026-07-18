@@ -207,6 +207,13 @@ test("model capability registry does not infer provider ownership from shared mo
 });
 
 test("model capability registry keeps provider-specific reasoning controls conservative", () => {
+  const kimiK3 = resolveModelCapabilities({
+    profile: profile("kimi-k3", {
+      profileId: "moonshot",
+      label: "Kimi",
+      baseUrl: "https://api.moonshot.cn/v1",
+    }),
+  });
   const kimi = resolveModelCapabilities({
     profile: profile("kimi-k2.6", {
       profileId: "moonshot",
@@ -228,6 +235,13 @@ test("model capability registry keeps provider-specific reasoning controls conse
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     }),
   });
+  const glm47 = resolveModelCapabilities({
+    profile: profile("glm-4.7", {
+      profileId: "glm",
+      label: "GLM",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    }),
+  });
   const minimax = resolveModelCapabilities({
     profile: profile("MiniMax-M2", {
       profileId: "minimax",
@@ -236,6 +250,8 @@ test("model capability registry keeps provider-specific reasoning controls conse
     }),
   });
 
+  assert.equal(kimiK3.reasoningControl, "kimi_k3_reasoning_effort");
+  assert.equal(kimiK3.supportsReasoningOutput, true);
   assert.equal(kimi.reasoningControl, "thinking_enabled_disabled");
   assert.equal(kimi.supportsReasoningEffort, false);
   assert.equal(kimi.supportsReasoningOutput, true);
@@ -252,6 +268,9 @@ test("model capability registry keeps provider-specific reasoning controls conse
   assert.equal(glm51.supportsReasoningOutput, true);
   assert.equal(glm51.supportsStreaming, true);
   assert.equal(glm51.supportsVisionInput, false);
+  assert.equal(glm47.reasoningControl, "thinking_enabled_disabled");
+  assert.equal(glm47.supportsReasoningOutput, true);
+  assert.equal(glm47.supportsStreaming, true);
   assert.equal(minimax.reasoningControl, "reasoning_split");
   assert.equal(minimax.supportsReasoningEffort, false);
   assert.equal(minimax.supportsReasoningOutput, true);
@@ -274,7 +293,7 @@ test("model capability registry resolves Kimi K3 before the generic Kimi family"
   assert.equal(kimiK3.supportsStructuredOutputs, true);
   assert.equal(kimiK3.supportsVisionInput, true);
   assert.equal(kimiK3.supportsReasoningEffort, false);
-  assert.equal(kimiK3.reasoningControl, "none");
+  assert.equal(kimiK3.reasoningControl, "kimi_k3_reasoning_effort");
 });
 
 test("model capability registry keeps MiniMax M2 and M3 multimodal metadata separate", () => {

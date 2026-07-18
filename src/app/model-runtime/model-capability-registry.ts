@@ -398,7 +398,7 @@ const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
     protocolKind: "openai_compatible_chat_completions",
     modelPattern: "kimi-k3",
     label: "Kimi K3",
-    reasoningControl: "none",
+    reasoningControl: "kimi_k3_reasoning_effort",
     capabilities: {
       contextWindowTokens: 1_048_576,
       maxOutputTokens: 128_000,
@@ -466,7 +466,7 @@ const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
     protocolKind: "openai_compatible_chat_completions",
     modelPattern: "glm-4.7",
     label: "GLM 4.7 family",
-    reasoningControl: "thinking_disabled",
+    reasoningControl: "thinking_enabled_disabled",
     capabilities: {
       contextWindowTokens: 200_000,
       maxOutputTokens: 128_000,
@@ -478,7 +478,7 @@ const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
       supportsReasoningEffort: false,
       preferredApiStyle: "chat_completions",
       stability: "stable",
-      supportsReasoningOutput: false,
+      supportsReasoningOutput: true,
       lastVerifiedAt: OPENAI_FORMAT_PROVIDER_VERIFIED_AT,
     },
   },

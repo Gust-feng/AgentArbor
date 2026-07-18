@@ -91,6 +91,8 @@ test("Chat keeps child exchanges private while returning one complete agent-tool
       ["child-read-call", "completed"],
       ["parent-delegate-call", "completed"],
     ]);
+    assert.equal(observedToolResults[0]?.parentToolCallFactId, "parent-delegate-call");
+    assert.equal(observedToolResults[1]?.parentToolCallFactId, undefined);
   } finally {
     await loop.release();
   }
@@ -124,6 +126,104 @@ test("Chat Sub-Agent never replays a reasoning-only assistant before its tool ca
     assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
     assert.equal(result.status === "completed" ? result.finalText : undefined, "root-used-child-review");
     assert.equal(fetch.requests.length, 4);
+  } finally {
+    await loop.release();
+  }
+});
+
+test("Sub-Agent uses the same streaming transport as a streaming Ordinary run", async () => {
+  const gateway = new RecordingGateway([]);
+  const fetch = scriptedFetch([
+    () => chatToolStream("parent-stream-delegate", "call_sub_agent", { task: "stream child" }),
+    () => chatTextStream(["child-", "streamed"]),
+    () => chatTextStream(["root-", "complete"]),
+  ]);
+  const loop = createLoop({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: CHAT_BASE_URL,
+    fetch: fetch.fetch,
+    requestSettings: { stream: true },
+  });
+  const deltas: string[] = [];
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: [] })],
+      onTextDelta: (delta) => deltas.push(delta),
+    }));
+
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(result.status === "completed" ? result.finalText : undefined, "root-complete");
+    assert.deepEqual(fetch.requests.map(({ body }) => body.stream), [true, true, true]);
+    assert.equal(deltas.join(""), "root-complete");
+  } finally {
+    await loop.release();
+  }
+});
+
+test("Responses Sub-Agent keeps streaming across delegation and parent synthesis", async () => {
+  const gateway = new RecordingGateway([]);
+  const fetch = scriptedFetch([
+    () => responsesToolStream("responses-parent-delegate", "call_sub_agent", { task: "stream child" }),
+    () => responsesTextStream(["responses-child-", "streamed"], "responses-child"),
+    () => responsesTextStream(["responses-root-", "complete"], "responses-root"),
+  ]);
+  const loop = createLoop({
+    protocol: "openai_responses",
+    baseUrl: OFFICIAL_BASE_URL,
+    fetch: fetch.fetch,
+    requestSettings: { stream: true },
+  });
+  const deltas: string[] = [];
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: [] })],
+      onTextDelta: (delta) => deltas.push(delta),
+    }));
+
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(result.status === "completed" ? result.finalText : undefined, "responses-root-complete");
+    assert.deepEqual(fetch.requests.map(({ body }) => body.stream), [true, true, true]);
+    assert.equal(deltas.join(""), "responses-root-complete");
+  } finally {
+    await loop.release();
+  }
+});
+
+test("Sub-Agent exhausts only its model-request retry budget and returns classified failure facts", async () => {
+  const gateway = new RecordingGateway([]);
+  const connectionFailure = () => {
+    throw new TypeError("terminated", { cause: new Error("other side closed") });
+  };
+  const fetch = scriptedFetch([
+    () => chatTool("parent-failed-delegate", "call_sub_agent", { task: "retry child" }),
+    connectionFailure,
+    connectionFailure,
+    connectionFailure,
+    () => chatText("root handled classified child failure"),
+  ]);
+  const loop = createLoop({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: CHAT_BASE_URL,
+    fetch: fetch.fetch,
+  });
+  try {
+    const result = await loop.execute(loopInput({
+      gateway,
+      agentTools: [agentTool({ toolName: "call_sub_agent", allowedTools: [] })],
+    }));
+
+    assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+    assert.equal(fetch.requests.length, 5);
+    const failed = result.toolResults.find((item) => item.callId === "parent-failed-delegate");
+    assert.equal(failed?.status, "failed");
+    assert.deepEqual(failed?.errorFacts, {
+      code: "sub_agent_execution_failed",
+      causeCode: "provider_network",
+      retryable: true,
+    });
+    assert.match(failed?.error ?? "", /connection error|terminated/iu);
   } finally {
     await loop.release();
   }
@@ -533,6 +633,7 @@ test("aborting the root while a child model request is active cancels the nested
     assert.equal(requestCount, 2);
     const cancelled = observedToolResults.find((item) => item.callId === "parent-cancel");
     assert.equal(cancelled?.status, "cancelled");
+    assert.deepEqual(cancelled?.errorFacts, { code: "sub_agent_cancelled" });
     assert.equal(result.toolResults.find((item) => item.callId === "parent-cancel")?.status, "cancelled");
   } finally {
     await loop.release();
@@ -737,6 +838,7 @@ function loopInput(input: {
     readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
     readonly assistantMessage: ModelMessage;
   }) => Promise<void>;
+  readonly onTextDelta?: (delta: string) => void;
 }) {
   const allowedTools = input.gateway.list().map((definition) => definition.name);
   return {
@@ -762,6 +864,7 @@ function loopInput(input: {
     abortSignal: input.abortSignal ?? new AbortController().signal,
     onToolResult: input.onToolResult,
     onToolRound: input.onToolRound,
+    onTextDelta: input.onTextDelta,
   };
 }
 
@@ -935,6 +1038,147 @@ function chatTools(calls: readonly { readonly callId: string; readonly name: str
 
 function chatText(text: string): Response {
   return chatTextWithFinishReason(text, "stop");
+}
+
+function chatTextStream(chunks: readonly string[]): Response {
+  const events = [
+    chatStreamChunk({ role: "assistant", content: chunks[0] ?? "" }, null),
+    ...chunks.slice(1).map((content) => chatStreamChunk({ content }, null)),
+    chatStreamChunk({}, "stop"),
+  ];
+  return eventStreamResponse(events);
+}
+
+function chatToolStream(callId: string, name: string, input: JsonRecord): Response {
+  return eventStreamResponse([
+    chatStreamChunk({
+      role: "assistant",
+      tool_calls: [{
+        index: 0,
+        id: callId,
+        type: "function",
+        function: { name, arguments: JSON.stringify(input) },
+      }],
+    }, null),
+    chatStreamChunk({}, "tool_calls"),
+  ]);
+}
+
+function chatStreamChunk(delta: JsonRecord, finishReason: string | null): JsonRecord {
+  return {
+    id: "chat-sub-agent-stream",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: MODEL,
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+  };
+}
+
+function eventStreamResponse(events: readonly JsonRecord[]): Response {
+  const body = `${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function responsesTextStream(chunks: readonly string[], id: string): Response {
+  const text = chunks.join("");
+  const itemId = `${id}-message`;
+  const message = {
+    id: itemId,
+    type: "message",
+    status: "completed",
+    role: "assistant",
+    content: [{ type: "output_text", text, annotations: [] }],
+  };
+  return responsesEventStream([{
+    type: "response.created",
+    response: responsesStreamState(id, "in_progress", [], null),
+  }, {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { ...message, status: "in_progress", content: [] },
+  }, ...chunks.map((delta) => ({
+    type: "response.output_text.delta",
+    item_id: itemId,
+    output_index: 0,
+    content_index: 0,
+    delta,
+  })), {
+    type: "response.output_item.done",
+    output_index: 0,
+    item: message,
+  }, {
+    type: "response.completed",
+    response: responsesStreamState(id, "completed", [message], {
+      input_tokens: 3,
+      output_tokens: 2,
+      total_tokens: 5,
+    }),
+  }]);
+}
+
+function responsesToolStream(callId: string, name: string, input: JsonRecord): Response {
+  const id = `responses-${callId}`;
+  const item = {
+    id: `${id}-function-call`,
+    type: "function_call",
+    status: "completed",
+    call_id: callId,
+    name,
+    arguments: JSON.stringify(input),
+  };
+  return responsesEventStream([{
+    type: "response.created",
+    response: responsesStreamState(id, "in_progress", [], null),
+  }, {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { ...item, status: "in_progress", arguments: "" },
+  }, {
+    type: "response.function_call_arguments.done",
+    item_id: item.id,
+    output_index: 0,
+    arguments: item.arguments,
+  }, {
+    type: "response.output_item.done",
+    output_index: 0,
+    item,
+  }, {
+    type: "response.completed",
+    response: responsesStreamState(id, "completed", [item], {
+      input_tokens: 3,
+      output_tokens: 2,
+      total_tokens: 5,
+    }),
+  }]);
+}
+
+function responsesStreamState(
+  id: string,
+  status: "in_progress" | "completed",
+  output: readonly JsonRecord[],
+  usage: JsonRecord | null,
+): JsonRecord {
+  return {
+    id,
+    object: "response",
+    created_at: 1,
+    status,
+    model: MODEL,
+    output,
+    usage,
+  };
+}
+
+function responsesEventStream(events: readonly JsonRecord[]): Response {
+  const body = `${events.map((event) =>
+    `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
 }
 
 function chatTextWithFinishReason(text: string, finishReason: string): Response {

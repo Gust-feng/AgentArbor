@@ -11,6 +11,9 @@ import { createId, nowIso } from "../id.js";
 import { redactSensitiveText } from "../redaction.js";
 import { failedModelOutputValidation } from "./validation.js";
 
+const MAX_MODEL_ERROR_CHAIN_DEPTH = 8;
+const MODEL_ERROR_NESTED_FIELDS = ["cause", "error"] as const;
+
 export function createFailedModelResponse(input: {
   requestId: string;
   providerId: string;
@@ -74,7 +77,7 @@ export function createFailedModelResponseFromError(input: {
     outputKind: input.outputKind,
     failureKind,
     retryable: isRetryableModelFailure(failureKind),
-    message: safeModelErrorMessage(input.error, input.fallbackMessage),
+    message: modelErrorMessageFromError(input.error, input.fallbackMessage),
     responseId: input.responseId,
   });
 }
@@ -84,7 +87,7 @@ export function modelFailureKindFromError(error: unknown): ModelFailureKind {
   if (/\b(timeout|timed out|etimedout)\b/.test(message)) {
     return "provider_timeout";
   }
-  if (/\b(network|connection error|fetch failed|econnreset|econnrefused|enotfound|eai_again|socket|dns)\b/.test(message) ||
+  if (/\b(network|connection error|fetch failed|terminated|econnreset|econnrefused|enotfound|eai_again|socket|dns)\b/.test(message) ||
     message.includes("other side closed")) {
     return "provider_network";
   }
@@ -104,7 +107,7 @@ export function isRetryableModelFailure(kind: ModelFailureKind): boolean {
   return kind === "provider_network" || kind === "provider_timeout" || kind === "provider_rate_limit" || kind === "provider_response";
 }
 
-function safeModelErrorMessage(error: unknown, fallbackMessage = "Model request failed."): string {
+export function modelErrorMessageFromError(error: unknown, fallbackMessage = "Model request failed."): string {
   const redacted = redactSensitiveText(rawModelErrorMessage(error, fallbackMessage)).replace(/\s+/g, " ").trim();
   if (redacted.length === 0) {
     return fallbackMessage;
@@ -113,21 +116,60 @@ function safeModelErrorMessage(error: unknown, fallbackMessage = "Model request 
 }
 
 function rawModelErrorMessage(error: unknown, fallbackMessage = "Model request failed."): string {
-  if (error instanceof Error) {
-    const cause = rawErrorCauseMessage(error);
-    return cause === undefined ? error.message : `${error.message} Cause: ${cause}`;
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  return fallbackMessage;
+  const messages = modelErrorChain(error)
+    .map(errorChainMessage)
+    .filter((message): message is string => message !== undefined && message.length > 0);
+  return messages.length === 0 ? fallbackMessage : messages.join(" Cause: ");
 }
 
-function rawErrorCauseMessage(error: Error): string | undefined {
-  const cause = (error as { readonly cause?: unknown }).cause;
-  if (cause === undefined) {
+function modelErrorChain(error: unknown): readonly unknown[] {
+  const chain: unknown[] = [];
+  const visited = new WeakSet<object>();
+
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > MAX_MODEL_ERROR_CHAIN_DEPTH) {
+      return;
+    }
+    if (isObjectLike(value)) {
+      if (visited.has(value)) {
+        return;
+      }
+      visited.add(value);
+    }
+    chain.push(value);
+    for (const field of MODEL_ERROR_NESTED_FIELDS) {
+      const nested = readErrorField(value, field);
+      if (nested !== undefined) {
+        visit(nested, depth + 1);
+      }
+    }
+  };
+
+  visit(error, 0);
+  return chain;
+}
+
+function errorChainMessage(value: unknown): string | undefined {
+  if (value instanceof Error || typeof value === "string") {
+    return typeof value === "string" ? value : value.message;
+  }
+  return undefined;
+}
+
+function readErrorField(
+  value: unknown,
+  field: typeof MODEL_ERROR_NESTED_FIELDS[number],
+): unknown {
+  if (!isObjectLike(value)) {
     return undefined;
   }
-  const message = rawModelErrorMessage(cause, "");
-  return message.length === 0 ? undefined : message;
+  try {
+    return Reflect.get(value, field);
+  } catch {
+    return undefined;
+  }
+}
+
+function isObjectLike(value: unknown): value is object {
+  return (typeof value === "object" && value !== null) || typeof value === "function";
 }

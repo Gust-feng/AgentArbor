@@ -423,7 +423,7 @@ test("CapabilityCenter applies MCP enabledTools and confirmation mode before mod
       command: "node",
       confirmationMode: "always",
       toolExposureMode: "selected",
-      enabledTools: ["lookup"],
+      enabledTools: ["query-docs"],
       autoApprovedTools: [],
       enabled: true,
     });
@@ -432,7 +432,7 @@ test("CapabilityCenter applies MCP enabledTools and confirmation mode before mod
       connectedAt: "2026-06-20T00:00:00.000Z",
       cachedTools: [
         {
-          name: "lookup",
+          name: "query-docs",
           description: "Lookup docs through MCP.",
           inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
           annotations: { readOnlyHint: true },
@@ -451,9 +451,18 @@ test("CapabilityCenter applies MCP enabledTools and confirmation mode before mod
       skillRoots: [],
     }).snapshot();
 
-    assert.deepEqual(snapshot.mcpCatalog[0]?.tools.map((tool) => tool.name), ["docs__lookup", "docs__mutate"]);
-    assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
-    assert.deepEqual(snapshot.toolCatalog.allowedTools.filter((name) => name.startsWith("docs__")), ["docs__lookup"]);
+    assert.deepEqual(snapshot.mcpCatalog[0]?.tools.map((tool) => ({
+      name: tool.name,
+      protocolName: tool.protocolName,
+    })), [
+      { name: "docs__mutate", protocolName: "mutate" },
+      { name: "docs__query_docs", protocolName: "query-docs" },
+    ]);
+    assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => ({
+      name: tool.name,
+      protocolName: tool.protocolName,
+    })), [{ name: "docs__query_docs", protocolName: "query-docs" }]);
+    assert.deepEqual(snapshot.toolCatalog.allowedTools.filter((name) => name.startsWith("docs__")), ["docs__query_docs"]);
     assert.equal(snapshot.mcpCatalog[0]?.exposedTools[0]?.requiresConfirmation, true);
   } finally {
     await removeTestDirectory(directory);

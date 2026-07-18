@@ -44,6 +44,16 @@ function createTestServer() {
     })
   );
   server.registerTool(
+    "query-docs",
+    {
+      description: "Queries documentation",
+      inputSchema: { query: z.string() },
+    },
+    async (args) => ({
+      content: [{ type: "text" as const, text: `Docs: ${args.query}` }],
+    }),
+  );
+  server.registerTool(
     "fail_tool",
     {
       description: "Always fails",
@@ -201,7 +211,7 @@ test("McpClientWrapper listTools returns expected format", async () => {
   const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
-  assert.equal(tools.length, 7);
+  assert.equal(tools.length, 8);
 
   const echo = tools.find((t) => t.name === "echo");
   assert.ok(echo);
@@ -584,7 +594,7 @@ test("createMcpToolExecutor creates correct namespaced ToolExecutor", async () =
   const echoTool = tools.find((t) => t.name === "echo")!;
   const executor = createMcpToolExecutor(client, echoTool, "my-server");
 
-  assert.equal(executor.definition.name, "my-server__echo");
+  assert.equal(executor.definition.name, "my_server__echo");
   assert.equal(executor.definition.description, "Echoes input back");
   assert.equal(executor.definition.metadata?.category, "mcp");
   assert.equal(executor.definition.metadata?.riskLevel, "medium");
@@ -600,6 +610,23 @@ test("createMcpToolExecutor creates correct namespaced ToolExecutor", async () =
   assert.match(outputNotes, /rejects tool-origin binary attachments/i);
   assert.match(outputNotes, /failed ToolCallResult/i);
   assert.equal(executor.definition.modelContract?.whenNotToUse?.join("\n").includes("built-in"), false);
+
+  await client.disconnect();
+});
+
+test("MCP tool identity is canonicalized once while remote invocation keeps the original name", async () => {
+  const { client } = await createConnectedPair();
+  const tool = (await client.listTools()).find((item) => item.name === "query-docs")!;
+  const executor = createMcpToolExecutor(client, tool, "my-server");
+
+  assert.equal(executor.definition.name, "my_server__query_docs");
+  assert.deepEqual(
+    await executor.execute(
+      { query: "identity" },
+      { callerAgentId: "test-agent", traceId: "trace-identity", goalId: "goal-identity" },
+    ),
+    { content: [{ type: "text", text: "Docs: identity" }] },
+  );
 
   await client.disconnect();
 });
@@ -633,6 +660,25 @@ test("createCachedMcpToolExecutor compacts verbose MCP descriptions for model vi
   assert.match(modelVisibleToolDescription(executor.definition), /^Search documentation for a query/m);
 });
 
+test("MCP canonical name collisions fail during registration", () => {
+  const first = createCachedMcpToolExecutor({
+    name: "query-docs",
+    description: "First query tool.",
+    inputSchema: { type: "object", properties: {} },
+  }, "docs");
+  const second = createCachedMcpToolExecutor({
+    name: "query_docs",
+    description: "Second query tool.",
+    inputSchema: { type: "object", properties: {} },
+  }, "docs");
+  const center = new ToolCenter();
+  center.register(first);
+
+  assert.equal(first.definition.name, "docs__query_docs");
+  assert.equal(second.definition.name, "docs__query_docs");
+  assert.throws(() => center.register(second), /already registered/u);
+});
+
 test("createMcpToolExecutor infers read-only metadata from annotations", async () => {
   const { client } = await createConnectedPair();
 
@@ -643,7 +689,7 @@ test("createMcpToolExecutor infers read-only metadata from annotations", async (
     autoApprovedTools: [],
   });
 
-  assert.equal(executor.definition.name, "my-server__read_only_tool");
+  assert.equal(executor.definition.name, "my_server__read_only_tool");
   assert.equal(executor.definition.metadata?.category, "mcp");
   assert.equal(executor.definition.metadata?.riskLevel, "low");
   assert.equal(executor.definition.metadata?.operationType, "read-only");
@@ -677,7 +723,7 @@ test("createMcpToolExecutor requires confirmation for unsafe MCP tools in unsafe
   await client.disconnect();
 });
 
-test("createMcpToolExecutor honors always mode and autoApprovedTools", async () => {
+test("createMcpToolExecutor matches auto approval only by the original MCP method name", async () => {
   const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
@@ -694,6 +740,10 @@ test("createMcpToolExecutor honors always mode and autoApprovedTools", async () 
   });
   const destructiveExecutor = createMcpToolExecutor(client, destructiveTool, "my-server", {
     confirmationMode: "always",
+    autoApprovedTools: ["destructive_tool"],
+  });
+  const namespacedAliasExecutor = createMcpToolExecutor(client, destructiveTool, "my-server", {
+    confirmationMode: "always",
     autoApprovedTools: ["my-server__destructive_tool"],
   });
 
@@ -701,6 +751,7 @@ test("createMcpToolExecutor honors always mode and autoApprovedTools", async () 
   assert.equal(echoExecutor.definition.metadata?.requiresConfirmation, true);
   assert.equal(readOnlyExecutor.definition.metadata?.requiresConfirmation, false);
   assert.equal(destructiveExecutor.definition.metadata?.requiresConfirmation, false);
+  assert.equal(namespacedAliasExecutor.definition.metadata?.requiresConfirmation, true);
 
   await client.disconnect();
 });
@@ -841,10 +892,10 @@ test("createMcpToolExecutor execute preserves MCP error content", async () => {
   const executorResult = output as ToolExecutorResult;
   assert.equal(executorResult.kind, "tool_call_result");
   assert.equal(executorResult.result.callId, "call-fail");
-  assert.equal(executorResult.result.toolName, "my-server__fail_tool");
+  assert.equal(executorResult.result.toolName, "my_server__fail_tool");
   assert.deepEqual(executorResult.result.input, {});
   assert.equal(executorResult.result.status, "failed");
-  assert.equal(executorResult.result.error, "MCP tool my-server__fail_tool reported an error.");
+  assert.equal(executorResult.result.error, "MCP tool my_server__fail_tool reported an error.");
   assert.equal(executorResult.result.errorDomain, "tool_error");
   assert.deepEqual(executorResult.result.errorFacts, {
     code: "mcp_tool_error",
@@ -1595,13 +1646,14 @@ test("McpManager separates discovered tools from exposed registry tools", async 
   await manager.connectAll();
 
   const discoveredTools = manager.getDiscoveredToolsForRegistry();
-  assert.equal(discoveredTools.length, 7);
+  assert.equal(discoveredTools.length, 8);
   const names = discoveredTools.map((t) => t.definition.name).sort();
   assert.deepEqual(names, [
     "srv__destructive_tool",
     "srv__echo",
     "srv__fail_tool",
     "srv__open_world_tool",
+    "srv__query_docs",
     "srv__read_only_tool",
     "srv__resource_tool",
     "srv__structured_tool",
@@ -1813,7 +1865,7 @@ test("McpManager applies MCP confirmationMode and autoApprovedTools", async () =
         confirmationMode: "always",
         toolExposureMode: "selected",
         enabledTools: ["echo", "read_only_tool", "destructive_tool", "open_world_tool"],
-        autoApprovedTools: ["read_only_tool", "srv__destructive_tool"],
+        autoApprovedTools: ["read_only_tool", "destructive_tool"],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },

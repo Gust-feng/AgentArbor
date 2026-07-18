@@ -27,6 +27,24 @@ test("ToolCenter registers, lists, executes, and unregisters tools", async () =>
   assert.equal(center.has("echo"), false);
 });
 
+test("ToolCenter rejects a duplicate tool identity instead of replacing its executor", () => {
+  const center = new ToolCenter();
+  center.register(testTool("echo", async () => ({ source: "first" })));
+
+  assert.throws(
+    () => center.register(testTool("echo", async () => ({ source: "second" }))),
+    /already registered/u,
+  );
+});
+
+test("ToolCenter rejects non-canonical tool identities at registration", () => {
+  const center = new ToolCenter();
+  assert.throws(
+    () => center.register(testTool("query-docs", async () => ({ ok: true }))),
+    /not a canonical provider-portable name/u,
+  );
+});
+
 test("ToolCenter preflight returns a detached ready request without execution or output retention", () => {
   let executions = 0;
   let retentions = 0;

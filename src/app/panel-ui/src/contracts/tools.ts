@@ -42,6 +42,10 @@ export type ToolCatalogItem = {
   readonly confirmationLabel?: string;
 };
 
+export type McpToolCatalogItem = ToolCatalogItem & {
+  readonly protocolName: string;
+};
+
 export type McpServerCatalogItem = {
   readonly serverId: string;
   readonly label: string;
@@ -79,8 +83,8 @@ export type McpServerCatalogItem = {
   readonly resourceCount?: number;
   readonly resourceTemplateCount?: number;
   readonly referencesCachedAt?: string;
-  readonly tools: readonly ToolCatalogItem[];
-  readonly exposedTools?: readonly ToolCatalogItem[];
+  readonly tools: readonly McpToolCatalogItem[];
+  readonly exposedTools?: readonly McpToolCatalogItem[];
   readonly updatedAt: string;
 };
 

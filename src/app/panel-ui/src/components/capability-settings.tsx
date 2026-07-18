@@ -980,20 +980,20 @@ function McpServerPanel(props: {
                         <span>跳过确认</span>
                       </div>
                       {visibleTools.map((tool) => {
-                        const enabled = isMcpToolEnabled(activeServer, tool.name);
-                        const autoApproved = isMcpToolAutoApproved(activeServer, tool.name);
+                        const enabled = isMcpToolEnabled(activeServer, tool.protocolName);
+                        const autoApproved = isMcpToolAutoApproved(activeServer, tool.protocolName);
                         return (
                           <McpToolAuthorizationRow
                             key={tool.name}
-                            title={mcpToolDisplayTitle(activeServer, tool)}
+                            title={mcpToolDisplayTitle(tool)}
                             detail={mcpToolDisplayDetail(tool)}
                             meta={mcpToolDisplayMeta(tool)}
                             enabled={enabled}
                             autoApproved={autoApproved}
-                            onToggle={() => props.onUpdateTool?.(activeServer.serverId, tool.name, !enabled)}
+                            onToggle={() => props.onUpdateTool?.(activeServer.serverId, tool.protocolName, !enabled)}
                             onToggleAutoApproval={() => props.onUpdateTool?.(
                               activeServer.serverId,
-                              tool.name,
+                              tool.protocolName,
                               enabled || !autoApproved,
                               !autoApproved
                             )}
@@ -1680,15 +1680,13 @@ function normalizeMcpServerId(value: string): string {
 }
 
 function mcpToolDisplayTitle(
-  server: NonNullable<ToolsResponse["mcpCatalog"]>[number],
   tool: NonNullable<ToolsResponse["mcpCatalog"]>[number]["tools"][number],
 ): string {
   const title = tool.displayName?.trim();
   if (title !== undefined && title.length > 0 && title !== "扩展工具") {
     return title;
   }
-  const localName = tool.name.startsWith(`${server.serverId}__`) ? tool.name.slice(`${server.serverId}__`.length) : tool.name;
-  return localName || tool.name;
+  return tool.protocolName || tool.name;
 }
 
 function mcpToolDisplayDetail(tool: NonNullable<ToolsResponse["mcpCatalog"]>[number]["tools"][number]): string | undefined {
@@ -1754,14 +1752,12 @@ function isMcpToolEnabled(server: NonNullable<ToolsResponse["mcpCatalog"]>[numbe
     return false;
   }
   const enabledTools = server.enabledTools ?? [];
-  const localName = toolName.startsWith(`${server.serverId}__`) ? toolName.slice(`${server.serverId}__`.length) : toolName;
-  return enabledTools.includes(toolName) || enabledTools.includes(localName);
+  return enabledTools.includes(toolName);
 }
 
 function isMcpToolAutoApproved(server: NonNullable<ToolsResponse["mcpCatalog"]>[number], toolName: string): boolean {
   const autoApprovedTools = server.autoApprovedTools ?? [];
-  const localName = toolName.startsWith(`${server.serverId}__`) ? toolName.slice(`${server.serverId}__`.length) : toolName;
-  return autoApprovedTools.includes(toolName) || autoApprovedTools.includes(localName);
+  return autoApprovedTools.includes(toolName);
 }
 
 function transportLabel(transport: "stdio" | "http"): string {

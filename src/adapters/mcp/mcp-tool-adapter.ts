@@ -8,7 +8,11 @@ import type {
   ToolInputSchema,
   ToolModelContract,
 } from "../../domain/tools/index.js";
-import { normalizeToolFactValue, withToolModelAttachments } from "../../domain/tools/index.js";
+import {
+  canonicalNamespacedToolName,
+  normalizeToolFactValue,
+  withToolModelAttachments,
+} from "../../domain/tools/index.js";
 import type { ModelInputAttachment } from "../../domain/intelligence/index.js";
 import type { McpConfirmationMode } from "../../domain/config/index.js";
 import type { McpClientWrapper, McpContentPart, McpProgress, McpToolInfo, McpToolResult } from "./mcp-client.js";
@@ -32,10 +36,11 @@ export function createMcpToolExecutor(
   serverId: string,
   confirmationStrategy: McpToolConfirmationStrategy = DEFAULT_CONFIRMATION_STRATEGY
 ): ToolExecutor {
+  const definition = createMcpToolDefinition(tool, serverId, confirmationStrategy);
   return {
-    definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
+    definition,
     async execute(input: unknown, context: ToolExecutionContext): Promise<unknown | ToolExecutorResult> {
-      return executeMcpToolForExecutor(client, tool, serverId, input, context);
+      return executeMcpToolForExecutor(client, tool, serverId, definition.name, input, context);
     },
   };
 }
@@ -46,10 +51,11 @@ export function createLazyMcpToolExecutor(
   serverId: string,
   confirmationStrategy: McpToolConfirmationStrategy = DEFAULT_CONFIRMATION_STRATEGY
 ): ToolExecutor {
+  const definition = createMcpToolDefinition(tool, serverId, confirmationStrategy);
   return {
-    definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
+    definition,
     async execute(input: unknown, context: ToolExecutionContext): Promise<unknown | ToolExecutorResult> {
-      return executeMcpToolForExecutor(await getClient(), tool, serverId, input, context);
+      return executeMcpToolForExecutor(await getClient(), tool, serverId, definition.name, input, context);
     },
   };
 }
@@ -59,10 +65,11 @@ export function createCachedMcpToolExecutor(
   serverId: string,
   confirmationStrategy: McpToolConfirmationStrategy = DEFAULT_CONFIRMATION_STRATEGY
 ): ToolExecutor {
+  const definition = createMcpToolDefinition(tool, serverId, confirmationStrategy);
   return {
-    definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
+    definition,
     async execute(): Promise<unknown> {
-      throw new Error(`MCP tool "${serverId}__${tool.name}" is cached for catalog use and requires a live MCP connection to execute.`);
+      throw new Error(`MCP tool "${definition.name}" is cached for catalog use and requires a live MCP connection to execute.`);
     },
   };
 }
@@ -71,6 +78,7 @@ async function executeMcpToolForExecutor(
   client: McpClientWrapper,
   tool: Pick<McpToolInfo, "name">,
   serverId: string,
+  canonicalName: string,
   input: unknown,
   context: ToolExecutionContext
 ): Promise<McpToolOutput | ToolExecutorResult> {
@@ -92,8 +100,8 @@ async function executeMcpToolForExecutor(
     return {
       kind: "tool_call_result",
       result: {
-        callId: context.toolCallId ?? `${serverId}__${tool.name}`,
-        toolName: `${serverId}__${tool.name}`,
+        callId: context.toolCallId ?? canonicalName,
+        toolName: canonicalName,
         input: input as ToolFactValue | undefined,
         output: {
           provider: serverId,
@@ -101,7 +109,7 @@ async function executeMcpToolForExecutor(
           reason: "mcp_request_idle_timeout",
         },
         status: "failed",
-        error: `MCP tool ${serverId}__${tool.name} stopped making progress before returning a result.`,
+        error: `MCP tool ${canonicalName} stopped making progress before returning a result.`,
         errorDomain: "runtime_error",
         errorFacts: {
           code: "mcp_request_idle_timeout",
@@ -126,6 +134,7 @@ async function executeMcpToolForExecutor(
       context,
       serverId,
       toolName: tool.name,
+      canonicalName,
       startedAt,
     });
   }
@@ -135,12 +144,12 @@ async function executeMcpToolForExecutor(
   return {
     kind: "tool_call_result",
     result: {
-      callId: context.toolCallId ?? `${serverId}__${tool.name}`,
-      toolName: `${serverId}__${tool.name}`,
+      callId: context.toolCallId ?? canonicalName,
+      toolName: canonicalName,
       input: input as ToolFactValue | undefined,
       output: output as ToolFactValue,
       status: "failed",
-      error: `MCP tool ${serverId}__${tool.name} reported an error.`,
+      error: `MCP tool ${canonicalName} reported an error.`,
       errorDomain: "tool_error",
       errorFacts: {
         code: "mcp_tool_error",
@@ -183,7 +192,7 @@ function createMcpToolDefinition(
   serverId: string,
   confirmationStrategy: McpToolConfirmationStrategy
 ): ToolExecutor["definition"] {
-  const namespacedName = `${serverId}__${tool.name}`;
+  const namespacedName = canonicalNamespacedToolName(serverId, tool.name);
   const inputSchema = toolInputSchema(tool);
   const compactDescription = compactMcpToolDescription(tool, serverId);
   const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, {
@@ -201,6 +210,7 @@ function createMcpToolDefinition(
       inputSchema,
       metadata,
       compactDescription,
+      canonicalName: namespacedName,
     }),
     metadata,
   };
@@ -223,6 +233,7 @@ function createMcpToolModelContract(input: {
   readonly inputSchema: ToolInputSchema;
   readonly metadata: ToolDefinitionMetadata;
   readonly compactDescription: string;
+  readonly canonicalName: string;
 }): ToolModelContract {
   const propertyNames = Object.keys(input.inputSchema.properties);
   const required = new Set(input.inputSchema.required ?? []);
@@ -249,7 +260,7 @@ function createMcpToolModelContract(input: {
     ],
     inputNotes,
     usageNotes: [
-      `The model-visible tool name is ${input.serverId}__${input.tool.name}; the MCP server receives the original tool name ${input.tool.name}.`,
+      `The model-visible tool name is ${input.canonicalName}; the MCP server receives the original tool name ${input.tool.name}.`,
       "MCP annotations are advisory; rely on the tool description, schema, and returned result when deciding follow-up steps.",
     ],
     outputNotes: [
@@ -419,11 +430,7 @@ function requiresMcpToolConfirmation(input: {
   readonly riskLevel: ToolDefinitionMetadata["riskLevel"];
   readonly operationType: ToolDefinitionMetadata["operationType"];
 }): boolean {
-  if (mcpToolNameSetHas(
-    input.confirmationStrategy.autoApprovedTools,
-    input.serverId,
-    input.toolName
-  )) {
+  if (input.confirmationStrategy.autoApprovedTools.includes(input.toolName)) {
     return false;
   }
   if (input.confirmationStrategy.confirmationMode === "never") {
@@ -436,12 +443,6 @@ function requiresMcpToolConfirmation(input: {
     return false;
   }
   return input.riskLevel === "high" || input.operationType === "external-submit";
-}
-
-function mcpToolNameSetHas(tools: readonly string[], serverId: string, toolName: string): boolean {
-  const localName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
-  const namespacedName = `${serverId}__${localName}`;
-  return tools.includes(localName) || tools.includes(namespacedName);
 }
 
 function buildToolOutput(result: {
@@ -728,6 +729,7 @@ function mcpPostExecutionDeliveryFailure(input: {
   readonly context: ToolExecutionContext;
   readonly serverId: string;
   readonly toolName: string;
+  readonly canonicalName: string;
   readonly startedAt: number;
 }): ToolExecutorResult {
   const errorRecord = plainRecord(input.error);
@@ -748,12 +750,12 @@ function mcpPostExecutionDeliveryFailure(input: {
   return {
     kind: "tool_call_result",
     result: {
-      callId: input.context.toolCallId ?? `${input.serverId}__${input.toolName}`,
-      toolName: `${input.serverId}__${input.toolName}`,
+      callId: input.context.toolCallId ?? input.canonicalName,
+      toolName: input.canonicalName,
       input: normalizeFactWithoutThrowing(input.input),
       output,
       status: "failed",
-      error: `MCP tool ${input.serverId}__${input.toolName} returned, but its result could not be delivered: ${message}`,
+      error: `MCP tool ${input.canonicalName} returned, but its result could not be delivered: ${message}`,
       errorDomain: "runtime_error",
       errorFacts: {
         ...(causeFacts ?? {}),

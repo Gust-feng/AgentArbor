@@ -541,6 +541,11 @@ export type CapabilitySubAgentCatalogItem = {
   readonly bodyHash?: string;
 };
 
+export type CapabilityMcpToolCatalogItem = CapabilityToolCatalogItem & {
+  /** Exact method name used by the MCP protocol, configuration, and remote executor. */
+  readonly protocolName: string;
+};
+
 export type CapabilityMcpCatalogItem = {
   readonly serverId: string;
   readonly label: string;
@@ -556,7 +561,9 @@ export type CapabilityMcpCatalogItem = {
   readonly envSecretRefCount: number;
   readonly authSecretRefCount: number;
   readonly toolExposureMode: McpToolExposureMode;
+  /** Original MCP protocol method names. They are never canonical model-visible identities. */
   readonly enabledTools: readonly string[];
+  /** Original MCP protocol method names approved to bypass confirmation. */
   readonly autoApprovedTools: readonly string[];
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
@@ -581,8 +588,9 @@ export type CapabilityMcpCatalogItem = {
     readonly enabledTools: readonly string[];
     readonly autoApprovedTools: readonly string[];
   };
-  readonly tools: readonly CapabilityToolCatalogItem[];
-  readonly exposedTools: readonly CapabilityToolCatalogItem[];
+  /** `name` is canonical/model-visible; `protocolName` is the exact MCP method name. */
+  readonly tools: readonly CapabilityMcpToolCatalogItem[];
+  readonly exposedTools: readonly CapabilityMcpToolCatalogItem[];
   readonly updatedAt: string;
 };
 

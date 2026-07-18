@@ -429,6 +429,17 @@ test("tool registry accepts enabled MCP tools without optional model guidance", 
   assert.deepEqual(registry.catalog("mcp").allowedTools, ["mcp_thin_tool"]);
 });
 
+test("tool registry rejects duplicate canonical tool identities", () => {
+  const registry = new ToolRegistry();
+  const executor = mcpToolExecutor();
+  registry.register({ executor, scopes: ["mcp"], enabledByDefault: true });
+
+  assert.throws(
+    () => registry.register({ executor, scopes: ["desktop-basic"], enabledByDefault: true }),
+    /already registered/u,
+  );
+});
+
 function mcpToolExecutor(): ToolExecutor {
   return {
     definition: {

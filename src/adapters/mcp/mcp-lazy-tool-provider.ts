@@ -185,7 +185,7 @@ function isToolEnabled(server: McpServerSettings, toolName: string): boolean {
   if (server.toolExposureMode === "all") {
     return true;
   }
-  return server.enabledTools.includes(toolName) || server.enabledTools.includes(`${server.serverId}__${toolName}`);
+  return server.enabledTools.includes(toolName);
 }
 
 function hasCompleteRuntimeConfig(server: McpServerSettings): boolean {

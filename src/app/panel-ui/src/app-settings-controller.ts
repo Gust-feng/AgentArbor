@@ -970,7 +970,8 @@ function updateLocalMcpCatalogServer(
     if (server.serverId !== serverId) {
       return server;
     }
-    const exposedTools = server.tools.filter((tool) => isLocalMcpToolEnabled(server.serverId, patch.toolExposureMode, patch.enabledTools, tool.name));
+    const exposedTools = server.tools.filter((tool) =>
+      isLocalMcpToolEnabled(patch.toolExposureMode, patch.enabledTools, tool.protocolName));
     return {
       ...server,
       toolExposureMode: patch.toolExposureMode,
@@ -1032,20 +1033,16 @@ function mcpToolPatchFromCatalog(
   const currentServer = catalog.find((server) => server.serverId === serverId);
   const currentTools = new Set(currentServer?.enabledTools ?? []);
   const currentAutoApprovedTools = new Set(currentServer?.autoApprovedTools ?? []);
-  const normalizedToolName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
   if (enabled) {
-    currentTools.add(normalizedToolName);
+    currentTools.add(toolName);
   } else {
-    currentTools.delete(normalizedToolName);
     currentTools.delete(toolName);
-    currentAutoApprovedTools.delete(normalizedToolName);
     currentAutoApprovedTools.delete(toolName);
   }
   if (autoApproved !== undefined) {
     if (autoApproved) {
-      currentAutoApprovedTools.add(normalizedToolName);
+      currentAutoApprovedTools.add(toolName);
     } else {
-      currentAutoApprovedTools.delete(normalizedToolName);
       currentAutoApprovedTools.delete(toolName);
     }
   }
@@ -1057,13 +1054,11 @@ function mcpToolPatchFromCatalog(
 }
 
 function isLocalMcpToolEnabled(
-  serverId: string,
   exposureMode: NonNullable<McpServerCatalogItem["toolExposureMode"]>,
   enabledTools: readonly string[],
   toolName: string
 ): boolean {
   if (exposureMode === "none") return false;
   if (exposureMode === "all") return true;
-  const localName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
-  return enabledTools.includes(toolName) || enabledTools.includes(localName);
+  return enabledTools.includes(toolName);
 }

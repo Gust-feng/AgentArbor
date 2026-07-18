@@ -12,6 +12,7 @@ import type {
   ToolRuntimeHint,
 } from "../../domain/tools/index.js";
 import {
+  assertCanonicalToolName,
   toolPresentationForDefinition,
   validateModelVisibleToolContract,
 } from "../../domain/tools/index.js";
@@ -71,6 +72,10 @@ export class ToolRegistry {
   constructor(private readonly options: ToolRegistryOptions = {}) {}
 
   register(entry: ToolRegistryEntry): void {
+    assertCanonicalToolName(entry.executor.definition.name);
+    if (this.entries.has(entry.executor.definition.name)) {
+      throw new Error(`Tool ${entry.executor.definition.name} is already registered.`);
+    }
     const metadata = requireToolMetadata(entry.executor.definition);
     const scopes = uniqueScopes(entry.scopes);
     const availability = entry.availability ?? { status: "available" as const };

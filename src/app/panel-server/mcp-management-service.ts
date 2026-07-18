@@ -1,6 +1,7 @@
 import type { McpReferenceInfo } from "../../adapters/mcp/index.js";
 import { ensureManagedMcpExecutable, installMcpExecutable, McpManager, resolveMcpExecutable } from "../../adapters/mcp/index.js";
 import type { McpCachedReferenceInfo, McpCachedToolInfo, McpServerSettings } from "../../domain/config/index.js";
+import { canonicalNamespacedToolName } from "../../domain/tools/index.js";
 import type { CapabilityCenter } from "../capability/capability-center.js";
 import type { ConfigCenter } from "../config-center/index.js";
 import { PanelHttpError } from "./http-utils.js";
@@ -195,7 +196,7 @@ export async function testPanelMcpServer(
       const connectedAt = snapshot.lastConnectedAt ?? new Date().toISOString();
       const testedTools = manager.getServerTools(server.serverId).map((tool) => ({
         name: tool.name,
-        namespacedName: `${serverId}__${tool.name}`,
+        namespacedName: canonicalNamespacedToolName(serverId, tool.name),
         title: tool.title,
         description: tool.description,
         readOnlyHint: tool.annotations?.readOnlyHint,

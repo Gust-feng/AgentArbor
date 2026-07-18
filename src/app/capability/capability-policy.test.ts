@@ -454,8 +454,10 @@ function capabilitySnapshot(
         toolExposureMode: "all",
         enabledTools: [],
         autoApprovedTools: [],
-        tools: tools.filter((tool) => tool.scopes.includes("mcp")),
-        exposedTools: tools.filter((tool) => tool.scopes.includes("mcp")),
+        tools: tools.filter((tool) => tool.scopes.includes("mcp"))
+          .map((tool) => ({ ...tool, protocolName: tool.name.replace(/^docs__/u, "") })),
+        exposedTools: tools.filter((tool) => tool.scopes.includes("mcp"))
+          .map((tool) => ({ ...tool, protocolName: tool.name.replace(/^docs__/u, "") })),
         updatedAt: "2026-05-13T00:00:00.000Z",
       },
     ],

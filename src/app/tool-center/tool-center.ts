@@ -14,6 +14,7 @@ import type {
   ToolSecurityDecision,
 } from "../../domain/tools/index.js";
 import {
+  assertCanonicalToolName,
   copyToolModelAttachments,
   isToolErrorDomain,
   InvalidToolFactError,
@@ -69,6 +70,10 @@ export class ToolCenter implements ToolExecutionGateway {
   }
 
   register(executor: ToolExecutor): void {
+    assertCanonicalToolName(executor.definition.name);
+    if (this.tools.has(executor.definition.name)) {
+      throw new Error(`Tool ${executor.definition.name} is already registered.`);
+    }
     const metadata = normalizeToolMetadata(executor.definition);
     this.tools.set(executor.definition.name, {
       ...executor,

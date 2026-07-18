@@ -86,7 +86,7 @@ docs/
 - `.opencode/` 保存 OpenCode 开发适配文件。
 - `.claude/` 保存 Claude Code 开发适配文件。
 - `.agentarbor/` 是未来 Plan Package 的默认存储目录名，只在 Plan 契约、读写规则、权限边界和真实出生依据稳定后增量创建；它不是产品概念树节点，不保存最终资产，也不替代 Global Soil。
-- `src/` 保存 AgentArbor TypeScript 实现代码；当前按 Workbench、Ordinary、Multi-Agent、Sub-Agent、中性能力和 Host Composition Root 收口。现有侧栏 Agent 集群按钮、`/api/deep/*` 与分库存储是过渡实现，不是需要永久保持的产品边界；迁移期间必须保持行为与数据格式诚实。
+- `src/` 保存 AgentArbor TypeScript 实现代码；当前按 Workbench、Ordinary、Multi-Agent、Sub-Agent、中性能力和 Host Composition Root 收口。Agent 集群产品入口当前暂时隐藏，`/api/deep/*`、内部 surface 与分库存储仍是过渡实现；迁移期间必须保持行为与数据格式诚实。
 
 `docs/开发指南/` 负责当前开发规则。
 

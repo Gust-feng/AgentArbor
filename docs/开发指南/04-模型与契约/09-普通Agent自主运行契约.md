@@ -79,6 +79,10 @@ while not cancelled:
 
 ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一防线。OpenAI Agents SDK adapter 必须在进入具体执行 broker 前按本轮 `allowedTools` 裁剪工具；ToolCenter 和 adapter 可以重复校验与命令确认，但只能返回执行事实，不能生产模型或 UI 投影。每个工具结果必须先由 Ordinary feature 持久化为 canonical 事实，才允许返回模型；provider `callId` 与应用 `factId` 分离，不能因父/子 Agent 或并行 child 的 call id 重复而复用权限、确认或结果。工具失败、拒绝、取消和确认等待都应以标准结果回传模型，让模型基于真实工具世界继续判断。
 
+工具身份必须在进入 AgentArbor 可执行 catalog 时一次性冻结为只含 ASCII 字母、数字和下划线的 provider-portable canonical name。外部 adapter 可以另外保留 MCP 等协议的原始方法名用于远端调用，但 ToolCenter、模型调用、工具结果、Ordinary 持久化和 read-model 必须始终使用同一个 canonical name，不得在 provider 执行后反向猜测或回译名称。归一化后重名必须在 catalog/registry 装配期明确失败，不能由 `Map.set()` 静默覆盖。
+
+MCP 配置中的 `enabledTools` 与 `autoApprovedTools` 只保存远端协议原始方法名；MCP catalog 同时显式携带 `protocolName` 与 canonical `name`。配置、Panel 和 executor 按 `protocolName` 工作，模型与 Ordinary 事实按 canonical `name` 工作，两者只在 MCP catalog 装配边界建立一次映射，任何下游模块都不得从 canonical name 反向推测协议原名或兼容多套别名。
+
 工具结果回到模型时，应优先提供足以继续开发判断的真实内容。前端展示同一工具调用事实的紧凑视图即可，不要求工具生成解释性文本，也不得用 UI 标题、摘要或固定建议替代模型消息、正文、stdout/stderr、文件片段或错误信息。
 
 ## 停止语义
@@ -92,13 +96,15 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 - `cancelled/cancelled`：用户或系统中止。
 - `failed/model_failed`：provider 失败或响应不可用。
 
-provider 失败、404、超时或流式连接断开会永久结束当前模型调用。Ordinary 不在已发布增量或已执行工具事实的原 provider continuation 上自动重试，也不把新请求伪装成旧流恢复。用户只能在同一 conversation 追加一条新消息形成新 run，或回退到先前用户轮次后创建新 lineage；新 run 从上一条可见 lineage 已持久化的 canonical 事实开始。
+provider 失败、404、超时或流式连接断开若不能安全重试，会永久结束当前模型调用。模型传输重试只能由 OpenAI Agents SDK adapter 单点拥有：OpenAI client 自身关闭隐式重试；单次模型请求在尚未收到任何 provider 事件时，最多对明确的网络失败、超时、限流和临时服务状态做两次带退避重试。工具结果已经持久化不妨碍重试其后的纯模型请求，因为重试只再次读取同一 canonical 输入，不重新执行工具；一旦本次模型请求已经收到任意 provider 事件、用户可见增量或新工具调用事实，则不得自动重试、拼接两个 attempt 或把新请求伪装成旧流恢复。无法安全重试时，用户只能在同一 conversation 追加一条新消息形成新 run，或回退到先前用户轮次后创建新 lineage；新 run 从上一条可见 lineage 已持久化的 canonical 事实开始。
 
 普通 Agent 不应使用 `maxModelRounds` 或 `maxToolRounds` 作为正常运行边界。默认 Desktop Agent 的 `AgentDefinition.turnPolicy` 不得携带模型轮次或工具轮次上限；旧结构化路径、测试桩或专用 agent 可以有显式预算，但这些预算不能流入默认普通 Desktop Agent 的产品主线。若底层自主 loop 仍接收到显式保护阀，它只能作为异常防护并返回未完成的 paused / blocked 结果，不能合成 completed、不能成为普通验收路径、常规暂停 UX 或模型能力上限。
 
 普通 Agent 的输出预算应来自模型能力解析结果或用户显式配置。模型能力解析必须先按用户选择的协议得到基线能力，再叠加内置模型目录和用户 override；没有命中内置模型目录时只能使用协议基线的保守窗口与输出上限，不能把自定义 OpenAI-compatible / Responses 模型降级为“不支持工具”的未知类型。长回答、报告、代码解释和多步结果应由模型能力、上下文窗口、用户要求和运行边界共同决定。
 
 普通 Agent 也不应默认给每次模型请求套固定短延迟预算。用户取消、进程中止、provider 自身超时和外部网络失败是硬边界；普通任务的耗时上限应来自用户明确要求、运行环境策略或 provider 真实失败，而不是前端体验层预设的固定秒数。
+
+用户取消的是 Ordinary run，而不是等待 provider、SDK 或工具 Promise 自行结束。Ordinary feature 必须先持久化取消终态、停止新输出和新工具调度，再由资源 owner 在后台传播 `AbortSignal` 并释放 transport、continuation 与进程资源；取消命令不得等待可能忽略 abort 的纯模型调用。只有已经接受工具轮且执行结果尚未确定时，后续 run 才继续等待该工具事实收口。Panel 可以立即收起运行控件并停止观察连接，但不能展示 runtime、transport、清理阶段或 continuation 丢失等内部提示，也不能清空用户在运行中追加的消息；取消前已显示的正文可以继续显示为未完成内容，但不能进入 completed 正式回答或 canonical 历史。
 
 已经向用户展示的流式正文必须作为独立的 durable view checkpoint 保存。该 checkpoint 不是模型完成事实、不能进入 `canonicalMessages`，也不能被下一轮当作正式 assistant 历史；它只用于主动取消或进程退出后恢复用户已经看见的会话表面。主动取消不生成“已取消”assistant 消息、错误卡或原因文案；没有已显示正文和真实工具过程时，该 assistant turn 在默认视图中保持无形。
 

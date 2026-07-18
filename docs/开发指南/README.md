@@ -22,11 +22,11 @@
 
 ## 一句话定位
 
-AgentArbor 是一个桌面通用 Agent Workbench。用户默认直接使用 Ordinary Agent；需要多路探索时显式选择 Multi-Agent；Ordinary 也可以把局部任务交给 Sub-Agent 工具。当前 UI 仍以 beta 侧栏按钮进入 Agent 集群，后端仍使用 `/api/deep/*` 和独立数据分区，这是待迁移的实现事实，不是目标产品结构。
+AgentArbor 是一个桌面通用 Agent Workbench。用户默认直接使用 Ordinary Agent；需要多路探索时显式选择 Multi-Agent；Ordinary 也可以把局部任务交给 Sub-Agent 工具。当前 release 暂时隐藏 Agent 集群产品入口，后端仍使用 `/api/deep/*` 和独立数据分区，这是待迁移的实现事实，不是目标产品结构。
 
 ## 架构原则
 
-- 用户只面对一个 Workbench；Ordinary 与 Multi-Agent 是其中两种 surface，不是两个产品。目标入口是普通输入与单次“深入协作”动作；当前 beta 侧栏入口在 UI 收口完成前诚实保留。
+- 用户只面对一个 Workbench；Ordinary 与 Multi-Agent 是其中两种 surface，不是两个产品。目标入口是普通输入与单次“深入协作”动作；当前 beta 侧栏入口已暂时隐藏，但内部 surface 仍保留到 UI 收口完成。
 - Desktop Shell 包含 Task Inbox、Workspace Context、Main Canvas、Artifact Area 和 Observation Panel。
 - Task Soil 保存当前任务目标、文件引用、项目上下文、网页材料、临时约束、权限边界和本轮运行材料。
 - Global Soil 保存长期偏好、Capability Asset、Path Bias、历史约束、失败模式和治理后的长期事实。

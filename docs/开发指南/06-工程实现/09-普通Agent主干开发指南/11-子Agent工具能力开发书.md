@@ -122,6 +122,7 @@ Sub-Agent 权限只允许收窄：
 
 - 父模型显式提供 `task` 和可选 `context`，工程层不额外构造隐藏任务状态或摘要账本。
 - SDK nested Agent 自己完成模型-工具-模型循环。
+- 父 Ordinary run 使用流式模型传输时，SDK AgentTool 的 nested Agent 必须使用同一流式能力和取消信号；nested stream 由 SDK 完整消费但不建设第二套 Sub-Agent SSE 或 read-model。模型请求的有限重试继续由同一个 SDK adapter 管理，不能在 Sub-Agent 模块、AgentTool wrapper 或 ToolCenter 再叠加重试。
 - AgentTool 返回 nested Agent 的完整最终输出，父模型把它作为局部材料继续推理。
 - 不创建专用 trace、独立 read-model、独立事件流或 sidecar。
 - AgentTool requested/result 作为 Ordinary 标准 tool facts 持久化和展示，不发布专用 `sub_agent.*` 事件。
@@ -148,6 +149,7 @@ Sub-Agent 与 Deep child 独立：
 - 所有 Sub-Agent AgentTool 均从 nested Agent 工具集合中排除。
 - 工具确认能够在父 Ordinary run 中暂停和恢复，且不重复执行已完成工具。
 - nested Agent 的完整结果回到父模型，不依赖续读工具、trace store 或 UI read-model。
+- OpenAI Responses 与 OpenAI-compatible Chat 下，父 run 开启流式传输时 nested Agent 的每轮模型请求也保持流式；网络失败只在尚未收到 provider 事件时有限重试，取消和已产生事件后的断流不得重试。
 - AgentTool 只形成 Ordinary 标准 tool facts，不形成专用 Sub-Agent 事件。
 - OpenAI Responses 与 OpenAI-compatible Chat 都通过同一 `AgentLoop` / feature 契约使用该能力。
 

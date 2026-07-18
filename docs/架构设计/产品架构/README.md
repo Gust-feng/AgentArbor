@@ -21,7 +21,7 @@ Workbench
 
 ## 当前实现状态
 
-目标产品边界已经统一，入口实现仍处于迁移期：默认入口是普通 Agent；Multi-Agent 仍通过设置 beta 开关和侧栏 `Agent 集群` 按钮进入；后端仍使用 `/api/deep/*`、Deep DTO 与独立数据分区。详情以 [CURRENT_RUNTIME_MODE.md](../../../CURRENT_RUNTIME_MODE.md) 为准。
+目标产品边界已经统一，入口实现仍处于迁移期：默认入口是普通 Agent；当前 release 暂时隐藏 Multi-Agent 的设置 beta 开关和侧栏 `Agent 集群` 按钮，后端 `/api/deep/*`、内部 surface、Deep DTO 与独立数据分区仍保留。详情以 [CURRENT_RUNTIME_MODE.md](../../../CURRENT_RUNTIME_MODE.md) 为准。
 
 ## 当前决策
 

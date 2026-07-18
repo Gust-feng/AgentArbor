@@ -6,7 +6,7 @@
 
 - Ordinary 始终是默认工作方式。
 - Multi-Agent 只能由用户显式进入，不自动升级普通请求。
-- 当前 UI 仍通过 beta 开关和侧栏 `Agent 集群` 暴露，这是待收口的 Workbench 入口形态，不代表第二个产品。
+- 当前 release 暂时隐藏 beta 开关和侧栏 `Agent 集群` 入口；内部 Multi-Agent surface 仍是待收口的 Workbench 过渡实现，不代表第二个产品。
 - 正式后端入口只有 `/api/deep/*`；旧 `/api/underground/*` 已删除。
 - Multi-Agent 与 Ordinary 共享模型、工具、确认、上下文机械能力和 Host 适配，不共享业务状态、事件、仓储或 read-model。
 

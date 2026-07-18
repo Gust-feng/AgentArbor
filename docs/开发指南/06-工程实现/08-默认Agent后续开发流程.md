@@ -18,7 +18,7 @@
 - 启动和普通提交默认走 Ordinary Agent。
 - Multi-Agent 只能由用户显式选择，不根据关键词、长度、文件数或模型判断自动升级。
 - Sub-Agent 由 Ordinary 模型按工具契约自主调用，不要求用户切换模式。
-- 当前 Multi-Agent 仍通过设置 beta 开关和侧栏 `Agent 集群` 入口进入，后端仍使用 `/api/deep/*` 和独立数据分区；这是待收口实现，不能提前写成已经迁移。
+- 当前 Multi-Agent 的设置 beta 开关和侧栏 `Agent 集群` 入口暂时隐藏，后端仍使用 `/api/deep/*`、内部 surface 和独立数据分区；这是待收口实现，不能把入口隐藏写成已经迁移完成。
 
 ## 开发顺序
 

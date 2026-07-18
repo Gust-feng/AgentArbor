@@ -54,6 +54,7 @@ export function createOrdinaryAgentFeature(input: {
   readonly now?: () => string;
   readonly idFactory?: IdFactory;
 }): OrdinaryAgentFeature {
+  const visibleAssistantCheckpointIntervalMs = 250;
   const now = input.now ?? nowIso;
   const idFactory = input.idFactory ?? createId;
   const documents = new Map<string, OrdinaryRunSnapshotDocument>();
@@ -67,6 +68,8 @@ export function createOrdinaryAgentFeature(input: {
   const mutationQueues = new Map<string, Promise<void>>();
   const activityStreams = new Map<string, { streamId: string; nextSequence: number; activities: OrdinaryRunActivity[] }>();
   const listeners = new Map<string, Set<(activity: OrdinaryRunActivity) => void>>();
+  const visibleAssistantBuffers = new Map<string, string>();
+  const visibleAssistantCheckpointTimers = new Map<string, NodeJS.Timeout>();
   let released = false;
 
   const readyPromise = recoverPersistedRuns();
@@ -183,8 +186,11 @@ export function createOrdinaryAgentFeature(input: {
       throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
     }
     if (options.keepTerminal === true && isTerminal(current.state)) return clone(current.state);
+    const visibleAssistantText = visibleAssistantBuffers.get(runId);
     const state = transitionOrdinaryRun({
-      state: current.state,
+      state: visibleAssistantText === undefined || visibleAssistantText === current.state.visibleAssistantText
+        ? current.state
+        : { ...current.state, visibleAssistantText },
       transition,
       recordedAt: now(),
       eventId: idFactory("ordinary-event"),
@@ -243,12 +249,17 @@ export function createOrdinaryAgentFeature(input: {
       // Final state is durable. Drop potentially large live-only deltas after subscribers
       // observe the terminal boundary; replay remains truthful from durable transitions.
       stream.activities = stream.activities.filter((item) => item.durability === "durable");
+      clearVisibleAssistantCheckpoint(event.runId);
     }
   }
 
   function recordOutputDelta(runId: string, delta: string): void {
     if (released || delta.length === 0) return;
-    if (documents.get(runId)?.state.status.kind !== "running") return;
+    const document = documents.get(runId);
+    if (document?.state.status.kind !== "running") return;
+    const visibleAssistantText = `${visibleAssistantBuffers.get(runId) ?? document.state.visibleAssistantText ?? ""}${delta}`;
+    visibleAssistantBuffers.set(runId, visibleAssistantText);
+    scheduleVisibleAssistantCheckpoint(runId);
     const stream = streamFor(runId);
     const activity: OrdinaryRunActivity = {
       activityId: idFactory("ordinary-activity"),
@@ -261,6 +272,42 @@ export function createOrdinaryAgentFeature(input: {
     };
     stream.activities.push(activity);
     emit(activity);
+  }
+
+  function scheduleVisibleAssistantCheckpoint(runId: string): void {
+    if (visibleAssistantCheckpointTimers.has(runId)) return;
+    const timer = setTimeout(() => {
+      visibleAssistantCheckpointTimers.delete(runId);
+      const checkpoint = persistVisibleAssistantCheckpoint(runId).catch(() => undefined);
+      postExecutionTasks.add(checkpoint);
+      void checkpoint.finally(() => postExecutionTasks.delete(checkpoint));
+    }, visibleAssistantCheckpointIntervalMs);
+    timer.unref?.();
+    visibleAssistantCheckpointTimers.set(runId, timer);
+  }
+
+  async function persistVisibleAssistantCheckpoint(runId: string): Promise<void> {
+    await enqueue(runId, async () => {
+      const visibleAssistantText = visibleAssistantBuffers.get(runId);
+      if (visibleAssistantText === undefined) return;
+      const current = await load(runId);
+      if (current === undefined || current.state.status.kind !== "running" ||
+          current.state.visibleAssistantText === visibleAssistantText) {
+        return;
+      }
+      const saved = await input.repository.save({
+        ...current.state,
+        visibleAssistantText,
+      }, current.revision);
+      documents.set(runId, saved);
+    });
+  }
+
+  function clearVisibleAssistantCheckpoint(runId: string): void {
+    const timer = visibleAssistantCheckpointTimers.get(runId);
+    if (timer !== undefined) clearTimeout(timer);
+    visibleAssistantCheckpointTimers.delete(runId);
+    visibleAssistantBuffers.delete(runId);
   }
 
   function recordModelRequest(runId: string, reason: "initial" | "after_tool" | "after_approval"): void {
@@ -1241,6 +1288,9 @@ export function createOrdinaryAgentFeature(input: {
       if (released) return;
       released = true;
       await readyPromise.catch(() => undefined);
+      for (const timer of visibleAssistantCheckpointTimers.values()) clearTimeout(timer);
+      visibleAssistantCheckpointTimers.clear();
+      await Promise.allSettled([...visibleAssistantBuffers.keys()].map(persistVisibleAssistantCheckpoint));
       for (const controller of controllers.values()) controller.abort("ordinary_feature_released");
       await releaseContinuations();
       await Promise.allSettled(executions.values());
@@ -1250,6 +1300,8 @@ export function createOrdinaryAgentFeature(input: {
       await releaseContinuations();
       listeners.clear();
       activityStreams.clear();
+      visibleAssistantBuffers.clear();
+      visibleAssistantCheckpointTimers.clear();
       approvalReservations.clear();
       acceptedToolResults.clear();
       documents.clear();

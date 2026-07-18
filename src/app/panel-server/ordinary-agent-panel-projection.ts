@@ -110,7 +110,7 @@ export function projectOrdinaryPanelRunView(input: {
       }
     : undefined;
   const transcriptNodes = input.fullReplay.activities.flatMap((activity) =>
-    isTranscriptActivity(activity) ? [projectTranscriptNode(input.run, activity)] : []);
+    isTranscriptActivity(input.run, activity) ? [projectTranscriptNode(input.run, activity)] : []);
   const contextAttachments = projectContextAttachments(input.run);
   const stage = workStage(input.run, fullEvents);
   const workView: OrdinaryPanelWorkView = {
@@ -122,7 +122,7 @@ export function projectOrdinaryPanelRunView(input: {
     pendingConfirmation,
     answer,
     deliverable: undefined,
-    visibleEvents: fullEvents.filter(isWorkViewEvent),
+    visibleEvents: fullEvents.filter((event) => isWorkViewEvent(input.run, event)),
     transcriptNodes,
     workSummary: {
       summary: workSummary(input.run.toolCalls.length, contextAttachments.length, pendingConfirmation !== undefined),
@@ -481,7 +481,11 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
   };
 }
 
-function isTranscriptActivity(activity: OrdinaryRunActivity): boolean {
+function isTranscriptActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): boolean {
+  if (activity.type === "run.transition" && isQuietInterruption(run) &&
+      (activity.event.type === "run.cancelled" || activity.event.type === "run.blocked")) {
+    return false;
+  }
   return activity.type === "model.request" ||
     activity.type === "model.output.delta" || activity.type === "tool.requested" ||
     activity.type === "tool.progress" || activity.type === "tool.result" ||
@@ -507,7 +511,10 @@ function liveToolPayload(
   };
 }
 
-function isWorkViewEvent(event: RunEvent): boolean {
+function isWorkViewEvent(run: OrdinaryRunState, event: RunEvent): boolean {
+  if (isQuietInterruption(run) && (event.type === "run.cancelled" || event.type === "run.blocked")) {
+    return false;
+  }
   return event.type !== "run.created" && event.type !== "run.started" &&
     event.type !== "model.output.delta" && event.type !== "final.result";
 }
@@ -582,6 +589,7 @@ function projectConversationTurn(turn: OrdinaryConversationTurnReadModel): Ordin
     title: "",
     content: turn.content,
     status: conversationTurnStatus(turn.status),
+    interruption: turn.interruption,
     createdAt: turn.createdAt,
     updatedAt: turn.updatedAt,
     runId: turn.runId,
@@ -680,6 +688,7 @@ function workStage(run: OrdinaryRunState, events: readonly RunEvent[]): DesktopW
 }
 
 function workHeadline(run: OrdinaryRunState): string {
+  if (isQuietInterruption(run)) return "";
   switch (run.status.kind) {
     case "awaiting_approval": return "待处理";
     case "completed": return "已回答";
@@ -691,6 +700,7 @@ function workHeadline(run: OrdinaryRunState): string {
 }
 
 function currentAction(run: OrdinaryRunState): string {
+  if (isQuietInterruption(run)) return "";
   if (run.status.kind === "awaiting_approval") {
     return run.status.confirmationRequests[0]?.actionSummary ?? "等待确认";
   }
@@ -722,6 +732,15 @@ function stopReason(run: OrdinaryRunState): string | undefined {
   if (run.status.kind === "blocked") return run.status.reason.code;
   if (run.status.kind === "cancelled") return "cancelled";
   return undefined;
+}
+
+function isQuietInterruption(run: OrdinaryRunState): boolean {
+  return run.status.kind === "cancelled" || (
+    run.status.kind === "blocked" && (
+      run.status.reason.code === "execution_continuation_lost" ||
+      run.status.reason.code === "confirmation_continuation_lost"
+    )
+  );
 }
 
 function continuationAvailability(run: OrdinaryRunState): OrdinaryPanelRunDetail["continuationAvailability"] {

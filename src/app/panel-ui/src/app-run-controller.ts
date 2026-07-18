@@ -2,13 +2,14 @@ import type React from "react";
 import { getJson, postJson } from "./api";
 import { decideRunConfirmation } from "./app-confirmation-decisions";
 import { type ComposerReasoningEffort, type ComposerToolConfirmationPolicy, type VisibleAiMode } from "./app-config-projection";
-import { createRunReadModelPatch } from "./app-run-projection";
 import { createLiveRunUpdateController, type LiveRunSubscription } from "./app-live-run-updates";
-import { loadObservedRunReadModel } from "./app-observed-run-read-model";
-import { stopLiveUpdates } from "./app-runtime-controls";
+import {
+  appStateWithSettledRunProjection,
+  loadSettledRunProjection,
+} from "./app-run-observation-settlement";
+import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import { loadConversationSession, resetConversationSession } from "./app-conversation-session";
 import { submitPanelTask } from "./app-task-submission";
-import { nextRunCapabilityState } from "./run-capability-state";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
 import type { ConversationSummary } from "./contracts/conversation";
@@ -48,6 +49,7 @@ export type AppRunControllerOptions = {
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
   readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
+  readonly setCancellingRunId: React.Dispatch<React.SetStateAction<string | undefined>>;
 };
 
 export function createAppRunController(options: AppRunControllerOptions): AppRunController {
@@ -85,38 +87,46 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
 
   async function cancelRun(): Promise<void> {
     if (currentRunId === undefined) return;
-    const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
-    const observed = await loadObservedRunReadModel({
-      runId: currentRunId,
-      conversationId: response.run.conversationId,
-      preferredConversation: options.app.conversation,
-      requireFreshRunView: true,
-    });
-    const observedRun = observed.run ?? response.run;
+    const cancellationEpoch = options.viewEpochRef.current;
+    options.setCancellingRunId(currentRunId);
     stopLiveUpdates(options.pollTimer, options.streamRef);
-    options.activeRunIdRef.current = currentRunId;
-    options.setApp((previous) => {
-      const readModel = createRunReadModelPatch(previous, {
-        runId: currentRunId,
-        workView: observed.workView,
-        detail: observed.detail,
-        reusePreviousWorkView: false,
+    try {
+      const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
+      if (!options.mountedRef.current) return;
+      options.activeRunIdRef.current = currentRunId;
+      options.setApp((previous) => {
+        if (previous.run?.runId !== currentRunId) return previous;
+        return {
+          ...previous,
+          run: response.run,
+          busy: false,
+        };
       });
-      const capabilityState = nextRunCapabilityState(previous, {
+      options.setCancellingRunId((pending) => pending === currentRunId ? undefined : pending);
+      void loadSettledRunProjection({
         runId: currentRunId,
-        capabilityResolution: observed.capabilityResolution,
-      });
-      return {
-        ...previous,
-        ...capabilityState,
-        conversation: observed.conversation ?? previous.conversation,
-        run: observedRun,
-        busy: false,
-        live: undefined,
-        ...readModel,
-      };
-    });
-    void refreshConversations();
+        run: response.run,
+        workView: options.app.workView,
+        capabilityResolution: options.app.capabilityResolution,
+      }).then((settled) => {
+        if (!options.mountedRef.current || options.viewEpochRef.current !== cancellationEpoch) return;
+        options.setApp((previous) => previous.run?.runId === currentRunId
+          ? appStateWithSettledRunProjection(previous, settled)
+          : previous);
+      }).catch(() => undefined);
+      void refreshConversations().catch(() => undefined);
+    } catch {
+      if (!options.mountedRef.current) return;
+      options.setCancellingRunId((pending) => pending === currentRunId ? undefined : pending);
+      const current = options.app.run;
+      if (current?.runId === currentRunId && shouldKeepRefreshing(current.status)) {
+        liveUpdates.startLiveUpdates({
+          runId: currentRunId,
+          conversationId: options.app.conversation?.conversationId,
+          epoch: options.viewEpochRef.current,
+        });
+      }
+    }
   }
 
   async function decideConfirmation(decision: "approve_once" | "deny" | "guidance", guidance?: string): Promise<void> {

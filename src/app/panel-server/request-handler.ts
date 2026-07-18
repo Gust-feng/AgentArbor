@@ -32,6 +32,9 @@ import { OrdinaryFeatureError } from "../ordinary-agent/contracts.js";
 import { OrdinaryPanelCursorError } from "./ordinary-agent-panel-projection.js";
 import { handlePanelOrdinaryRoute } from "./ordinary-routes.js";
 import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
+import { resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
+import { resolveAgentArborRuntimePaths } from "../../adapters/runtime-storage/index.js";
+import { acquirePanelRuntimeDirectoryLease } from "./runtime-directory-lease.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 const PANEL_REQUEST_DRAIN_TIMEOUT_MS = 1_000;
@@ -52,19 +55,61 @@ export class PanelShutdownTimeoutError extends Error {
 }
 
 export async function startLocalPanelServer(options: PanelServerOptions = {}): Promise<StartedPanelServer> {
-  const runtime = createPanelRuntime(options);
-  const server = createServer(createPanelRequestHandler(runtime));
-  const host = options.host ?? "127.0.0.1";
-  const port = options.port ?? 9090;
+  const runtimeDirectory = runtimeDirectoryForLease(options);
+  const lease = runtimeDirectory === undefined
+    ? undefined
+    : await acquirePanelRuntimeDirectoryLease(runtimeDirectory);
+  let runtime: PanelRuntime | undefined;
+  try {
+    const createdRuntime = createPanelRuntime(options);
+    runtime = createdRuntime;
+    const server = createServer(createPanelRequestHandler(createdRuntime));
+    const host = options.host ?? "127.0.0.1";
+    const port = options.port ?? 9090;
 
-  await listen(server, port, host);
-  const address = server.address() as AddressInfo;
-  return {
-    url: `http://${host}:${address.port}/`,
-    configDirectory: runtime.configDirectory,
-    runtimeDirectory: runtime.runtimePaths?.runtimeHome,
-    close: () => closePanelServer(server, runtime),
-  };
+    await listen(server, port, host);
+    const address = server.address() as AddressInfo;
+    let closing: Promise<void> | undefined;
+    return {
+      url: `http://${host}:${address.port}/`,
+      configDirectory: createdRuntime.configDirectory,
+      runtimeDirectory: createdRuntime.runtimePaths?.runtimeHome,
+      close: () => closing ??= (async () => {
+        try {
+          await closePanelServer(server, createdRuntime);
+        } finally {
+          await lease?.release();
+        }
+      })(),
+    };
+  } catch (startError) {
+    const cleanupErrors: unknown[] = [];
+    if (runtime !== undefined) {
+      try {
+        await disposePanelRuntimeAfterFailedStart(runtime);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    try {
+      await lease?.release();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [startError, ...cleanupErrors],
+        "Panel server startup and cleanup both failed.",
+      );
+    }
+    throw startError;
+  }
+}
+
+function runtimeDirectoryForLease(options: PanelServerOptions): string | undefined {
+  if (options.configCenter !== undefined && options.configDirectory === undefined) return undefined;
+  const configDirectory = options.configDirectory ?? resolveAgentArborConfigDirectory();
+  return resolveAgentArborRuntimePaths(configDirectory).runtimeHome;
 }
 
 export function createPanelRequestHandler(options: PanelServerOptions | PanelRuntime = {}): (request: IncomingMessage, response: ServerResponse) => void {
@@ -313,6 +358,35 @@ export async function closePanelServer(
   }
   if (serverCloseError !== undefined) {
     throw serverCloseError;
+  }
+}
+
+async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promise<void> {
+  runtime.isQuiescing = true;
+  const cleanupResults = await Promise.allSettled([
+    cleanupPanelRuntimeOwnedBackgroundProcesses(runtime),
+    runtime.ordinaryAgentFeature.release(),
+    runtime.multiAgentFeature.dispose(),
+  ]);
+  const cleanupErrors = cleanupResults.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []
+  );
+  try {
+    if (runtime.toolOutputStore.close !== undefined) {
+      await runtime.toolOutputStore.close();
+    } else {
+      await runtime.toolOutputStore.clear();
+    }
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  try {
+    await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Panel runtime cleanup after failed startup did not complete.");
   }
 }
 

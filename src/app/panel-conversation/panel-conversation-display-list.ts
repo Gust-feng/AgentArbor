@@ -276,7 +276,9 @@ function conversationDisplayItemsFromTurns<
       continue;
     }
     const { assistant, workflow } = assistantDisplay;
-    const terminalStatus = assistantTerminalStatus(turn.status);
+    const terminalStatus = turn.interruption === undefined
+      ? assistantTerminalStatus(turn.status)
+      : undefined;
     items.push(terminalStatus !== undefined
       ? {
           kind: "assistant",

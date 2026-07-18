@@ -162,6 +162,12 @@ export type OrdinaryRunState = {
   readonly birth: OrdinaryRunBirth;
   readonly status: OrdinaryRunStatus;
   readonly canonicalMessages: readonly ModelMessage[];
+  /**
+   * Durable checkpoint of assistant text that was already visible while the
+   * run was live. It restores the conversation surface after interruption but
+   * is never a completed answer or canonical model history.
+   */
+  readonly visibleAssistantText?: string;
   /** Durable write-ahead fact until every root call has a resolved tool result. */
   readonly pendingToolRound?: OrdinaryPendingToolRound;
   readonly toolCalls: readonly ToolCallResult[];
@@ -331,6 +337,8 @@ export type OrdinaryConversationTurnReadModel =
       readonly runId: string;
       readonly content: string;
       readonly status: OrdinaryRunStatus["kind"];
+      /** Quiet product treatment for a terminal run whose live continuation cannot resume. */
+      readonly interruption?: "user_cancelled" | "runtime_stopped";
       readonly model: SanitizedModelProviderConfig;
       readonly createdAt: string;
       readonly updatedAt: string;

@@ -101,6 +101,7 @@ export type OrdinaryPanelConversationTurn = {
   readonly title: string;
   readonly content: string;
   readonly status: OrdinaryPanelConversationTurnStatus;
+  readonly interruption?: "user_cancelled" | "runtime_stopped";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly runId?: string;

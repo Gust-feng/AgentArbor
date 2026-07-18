@@ -37,6 +37,7 @@ export type WorklineConversationTurn = {
   readonly title?: string;
   readonly content: string;
   readonly status: string;
+  readonly interruption?: "user_cancelled" | "runtime_stopped";
   readonly runId?: string;
   readonly attachments?: readonly WorklineConversationTurnAttachment[];
 };

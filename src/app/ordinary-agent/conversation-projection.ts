@@ -78,6 +78,7 @@ export function projectOrdinaryConversation(input: {
       runId: run.runId,
       content: assistantContent(run),
       status: run.status.kind,
+      ...interruptionProjection(run),
       model: structuredClone(run.birth.config),
       createdAt: run.timestamps.createdAt,
       updatedAt: run.timestamps.updatedAt,
@@ -97,11 +98,33 @@ function compactTitle(value: string): string {
 }
 
 function assistantContent(run: OrdinaryRunState): string {
+  if (interruptionProjection(run).interruption !== undefined) {
+    return run.visibleAssistantText ?? "";
+  }
   switch (run.status.kind) {
     case "completed": return run.status.answer;
     case "failed": return run.status.error.message;
-    case "cancelled": return run.status.reason;
+    case "cancelled": return "";
     case "blocked": return run.status.reason.message;
     default: return "";
   }
+}
+
+function interruptionProjection(
+  run: OrdinaryRunState,
+): { readonly interruption?: "user_cancelled" | "runtime_stopped" } {
+  if (run.status.kind === "cancelled") {
+    return {
+      interruption: run.status.reason === "cancelled_by_user"
+        ? "user_cancelled"
+        : "runtime_stopped",
+    };
+  }
+  if (run.status.kind === "blocked" && (
+    run.status.reason.code === "execution_continuation_lost" ||
+    run.status.reason.code === "confirmation_continuation_lost"
+  )) {
+    return { interruption: "runtime_stopped" };
+  }
+  return {};
 }

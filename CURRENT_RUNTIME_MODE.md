@@ -47,6 +47,9 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - 默认普通路径中的 Task Soil 只是本轮会话输入、上下文引用、权限边界和运行材料的上下文包，不负责驱动任务状态推进
 - “模型不再调用工具”且 provider 返回明确完成终态，才表示本轮普通 Agent 正常完成
 - 工具调用、确认等待、工具失败后继续判断，都是普通运行的一部分
+- Ordinary 会定期把已经流式展示的 assistant 正文保存为 `visibleAssistantText`。它只用于取消或进程退出后的视图恢复，不是 completed 回答，也不进入 `canonicalMessages`。主动取消后，Panel 保留已有正文和真实工具过程；没有正文或过程时不生成 assistant 占位，也不显示“已取消”卡片或内部原因
+- 软件退出或进程异常结束后，live-only continuation 不会伪恢复。重新进入会话时，Panel 恢复退出前已保存的正文、工具事实和会话位置，不显示 continuation、runtime 或进程重启错误；用户只能追加新消息形成新 run，或回退到之前的用户消息创建新 lineage
+- `runtimeHome` 是单写者边界。同一运行目录同时只能由一个 Panel/Electron 后端持有；第二个实例必须拒绝启动，不能因端口不同或开发 watch 重启而改写另一个实例的 Ordinary/Multi-Agent 运行态
 - `provider` 失败、网络失败、上下文维护失败、进程失败都不是正常完成
 - provider 404、超时、失败或流式断开会永久结束当前模型调用；后端不在原 provider continuation 上重试。用户只能在同一 conversation 追加新消息创建新 run，或回退到旧用户轮次创建新 lineage；新 run 读取已持久化 canonical 工具事实和消息
 - `out_of_fuel` 与 `context_overflow` 必须投影为 `blocked` / `paused`，不能被包装成 `completed`

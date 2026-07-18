@@ -112,6 +112,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const [savingWorkspace, setSavingWorkspace] = useState(false);
   const [savingDesktopAgent, setSavingDesktopAgent] = useState(false);
   const [savingTools, setSavingTools] = useState(false);
+  const [cancellingRunId, setCancellingRunId] = useState<string | undefined>(undefined);
 
   const mountedRef = useRef(true);
   const pollTimer = useRef<number | undefined>(undefined);
@@ -194,7 +195,9 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     latestModelUsage,
     options.selectedModelContextWindowTokens,
   ]);
-  const modelResponding = currentRun.run !== undefined && shouldKeepRefreshing(currentRun.run.status);
+  const modelResponding = currentRun.run !== undefined &&
+    currentRun.run.runId !== cancellingRunId &&
+    shouldKeepRefreshing(currentRun.run.status);
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
   const pendingConversationCount = options.app.conversations.filter(isConversationWaitingForUser).length;
   const pendingCount = Math.max(pendingConversationCount, pendingConfirmation === undefined ? 0 : 1);
@@ -221,6 +224,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     activeRunIdRef,
     viewEpochRef,
     conversationLoadAbortRef,
+    setCancellingRunId,
   }), [
     confirmationBusy,
     options.aiMode,

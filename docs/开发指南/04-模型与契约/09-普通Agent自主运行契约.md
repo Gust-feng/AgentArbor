@@ -100,6 +100,10 @@ provider 失败、404、超时或流式连接断开会永久结束当前模型�
 
 普通 Agent 也不应默认给每次模型请求套固定短延迟预算。用户取消、进程中止、provider 自身超时和外部网络失败是硬边界；普通任务的耗时上限应来自用户明确要求、运行环境策略或 provider 真实失败，而不是前端体验层预设的固定秒数。
 
+已经向用户展示的流式正文必须作为独立的 durable view checkpoint 保存。该 checkpoint 不是模型完成事实、不能进入 `canonicalMessages`，也不能被下一轮当作正式 assistant 历史；它只用于主动取消或进程退出后恢复用户已经看见的会话表面。主动取消不生成“已取消”assistant 消息、错误卡或原因文案；没有已显示正文和真实工具过程时，该 assistant turn 在默认视图中保持无形。
+
+进程退出后，live-only 模型或确认 continuation 仍按内部事实收口为不可续接状态，但默认 Panel 只恢复退出前持久化的可见正文、工具事实和会话位置，不显示进程重启、continuation 丢失或 runtime 错误。这里恢复的是视图，不是继续执行：用户只能追加新消息创建新 run，或回退到之前的用户消息创建新 lineage。Host 必须对 `runtimeHome` 实施单写者所有权；不同端口和开发 watch 实例不能同时恢复或改写同一运行目录。
+
 用户可见暂停文案必须使用产品语言，例如：
 
 ```text
@@ -146,6 +150,7 @@ Ordinary SSE 只是实时观察通道，不拥有运行事实。相邻文本增�
 - 从上一轮 `canonicalMessages` 恢复原始角色、工具调用/结果和允许持久化的 provider continuation；根系统指令由该 run 冻结的 AgentDefinition 重新放在最前面。
 - 恢复时若本轮冻结协议与历史 continuation 所属协议不同，只迁移可移植消息以及已记录的工具调用/结果事实，并在本轮 canonical 基线中移除旧协议 continuation；历史 run snapshot 保持原样，不能回写篡改审计事实。
 - 失败、blocked 或取消 run 若已经形成 canonical 消息，下一轮沿用其中真实消息；若在模型调用前失败，则使用更早的 canonical context。不得另造“中断上下文”，Panel 错误文案也不能冒充模型输出。
+- `visibleAssistantText` 只恢复用户已经看见的正文，不参与下一轮模型上下文；进程退出后的静默视图恢复不得被解释为同一模型调用可以续跑。
 - 附件字节、未知 provider 私有字段、悬空 continuation 和无法证明结果的内部执行对象一律不持久化，不能为了“续跑”伪造 tool call/result 对。
 - 开发期旧 snapshot 直接视为不兼容数据；不得从可见回答、event payload 或当前全局配置迁移、双读或猜测回填。
 

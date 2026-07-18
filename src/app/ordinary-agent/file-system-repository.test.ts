@@ -15,17 +15,21 @@ test("file repository atomically replaces the canonical snapshot and advances re
   const initial = state("run-one", "2026-01-01T00:00:00.000Z");
 
   const revisionOne = await repository.save(initial, 0);
-  const running = transitionOrdinaryRun({
+  const running = {
+    ...transitionOrdinaryRun({
     state: initial,
     transition: { type: "start" },
     recordedAt: "2026-01-01T00:00:01.000Z",
     eventId: "event-2",
-  });
+    }),
+    visibleAssistantText: "durable visible draft",
+  };
   const revisionTwo = await repository.save(running, revisionOne.revision);
 
   assert.equal(revisionOne.revision, 1);
   assert.equal(revisionTwo.revision, 2);
   assert.deepEqual(await repository.get("run-one"), revisionTwo);
+  assert.equal((await repository.get("run-one"))?.state.visibleAssistantText, "durable visible draft");
   assert.deepEqual((await repository.list()).map((item) => ({ runId: item.runId, status: item.status })), [
     { runId: "run-one", status: "running" },
   ]);

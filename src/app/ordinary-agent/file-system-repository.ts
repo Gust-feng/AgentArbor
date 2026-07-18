@@ -234,6 +234,7 @@ const rawStateSchema = z.object({
   birth: birthSchema,
   status: statusSchema,
   canonicalMessages: z.array(modelMessageSchema),
+  visibleAssistantText: z.string().optional(),
   pendingToolRound: z.object({
     assistantMessage: modelMessageSchema,
     acceptedAt: z.string().min(1),

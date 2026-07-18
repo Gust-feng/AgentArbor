@@ -17,11 +17,72 @@ import { startLocalPanelServer } from "../../panel-server.js";
 import { ToolCenter } from "../../tool-center/index.js";
 import { closePanelServer, createPanelRequestHandler } from "../request-handler.js";
 import { createPanelRuntime } from "../runtime.js";
+import { PanelRuntimeDirectoryInUseError } from "../runtime-directory-lease.js";
 import {
   removeTemporaryTree,
   requestJson,
   requestSse,
 } from "./panel-server-test-utils.js";
+
+test("Panel host rejects a second writer for the same runtime directory", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-single-writer-"));
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    ordinaryAgentExecution: completedExecution("first owner", {}),
+  });
+  try {
+    await assert.rejects(
+      startLocalPanelServer({
+        port: 0,
+        configDirectory: directory,
+        ordinaryAgentExecution: completedExecution("second owner", {}),
+      }),
+      (error: unknown) => error instanceof PanelRuntimeDirectoryInUseError,
+    );
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Panel host releases runtime resources and its lease when port binding fails", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-bind-failure-"));
+  const occupiedServer = createServer();
+  await new Promise<void>((resolve, reject) => {
+    occupiedServer.once("error", reject);
+    occupiedServer.listen(0, "127.0.0.1", () => {
+      occupiedServer.off("error", reject);
+      resolve();
+    });
+  });
+  const address = occupiedServer.address();
+  assert.ok(address !== null && typeof address === "object");
+
+  try {
+    await assert.rejects(
+      startLocalPanelServer({
+        host: "127.0.0.1",
+        port: address.port,
+        configDirectory: directory,
+        ordinaryAgentExecution: completedExecution("must not start", {}),
+      }),
+      (error: unknown) => error instanceof Error && "code" in error && error.code === "EADDRINUSE",
+    );
+
+    const restarted = await startLocalPanelServer({
+      port: 0,
+      configDirectory: directory,
+      ordinaryAgentExecution: completedExecution("started after bind failure", {}),
+    });
+    await restarted.close();
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      occupiedServer.close((error) => error === undefined ? resolve() : reject(error));
+    });
+    await removeTemporaryTree(directory);
+  }
+});
 
 test("Ordinary Panel entry submits directly to the feature and exposes the canonical view and usage", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-panel-"));

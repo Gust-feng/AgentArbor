@@ -82,10 +82,17 @@ export function projectStableAssistantTurnDisplay<
     run: input.run,
     turnStatus: input.projectedTurn.turn.status,
   });
-  const terminalStatus = assistantTerminalStatus(input.projectedTurn.turn.status);
+  const terminalStatus = input.projectedTurn.turn.interruption === undefined
+    ? assistantTerminalStatus(input.projectedTurn.turn.status)
+    : undefined;
   const failure = terminalStatus === undefined ? undefined : assistantFailureParts(assistant.content);
+  const projectedNodes = assistant.runProjection.nodes as readonly TNode[];
+  const interruptionNodes = input.projectedTurn.turn.interruption === undefined
+    ? projectedNodes
+    : projectedNodes.filter((node) =>
+        !(node.kind === "system" && (node.phase === "cancelled" || node.phase === "blocked")));
   const workflowTranscriptNodes = transcriptNodesWithoutFailureEcho(
-    assistant.runProjection.nodes as readonly TNode[],
+    interruptionNodes,
     failure,
   );
   const workflow = projectStableAssistantWorkflowDisplay({

@@ -395,6 +395,65 @@ test("conversation DTO is a one-way projection with full turns, attachments and 
   assert.equal(ordinary.turns[0]?.content, run.input.userMessage);
 });
 
+test("quiet interruptions restore visible text without cancellation or restart notices", () => {
+  const cases: readonly {
+    readonly runId: string;
+    readonly status: OrdinaryRunStatus;
+    readonly event: "run.cancelled" | "run.blocked";
+    readonly interruption: "user_cancelled" | "runtime_stopped";
+  }[] = [{
+    runId: "cancelled-view-run",
+    status: { kind: "cancelled", reason: "cancelled_by_user" },
+    event: "run.cancelled",
+    interruption: "user_cancelled",
+  }, {
+    runId: "restarted-view-run",
+    status: {
+      kind: "blocked",
+      reason: {
+        code: "execution_continuation_lost",
+        message: "The live execution was interrupted when the process restarted.",
+      },
+      continueBy: "new_turn",
+    },
+    event: "run.blocked",
+    interruption: "runtime_stopped",
+  }];
+
+  for (const item of cases) {
+    const run = runState({
+      runId: item.runId,
+      status: item.status,
+      visibleAssistantText: "退出前已经显示的正文",
+    });
+    const terminalEvent: OrdinaryRunEvent = item.event === "run.cancelled"
+      ? {
+          eventId: `${item.runId}-terminal`, runId: item.runId, sequence: 1,
+          recordedAt: run.timestamps.updatedAt, type: "run.cancelled",
+          reason: "cancelled_by_user", toolCallIds: [],
+        }
+      : {
+          eventId: `${item.runId}-terminal`, runId: item.runId, sequence: 1,
+          recordedAt: run.timestamps.updatedAt, type: "run.blocked",
+          code: "execution_continuation_lost",
+        };
+    const view = projectOrdinaryPanelRunView({ run, fullReplay: replay(run, [terminalEvent]) });
+    const conversation = projectOrdinaryPanelConversation({
+      conversation: conversationFrom(run),
+      currentRun: view,
+      workspaceRun: run,
+    });
+
+    assert.equal(conversation.turns[1]?.content, "退出前已经显示的正文");
+    assert.equal(conversation.turns[1]?.interruption, item.interruption);
+    assert.equal(conversation.preview, "退出前已经显示的正文");
+    assert.equal(view.workView.headline, "");
+    assert.equal(view.workView.currentAction, "");
+    assert.equal(view.workView.visibleEvents.some((event) => event.type === item.event), false);
+    assert.equal(view.workView.transcriptNodes.some((node) => node.eventType === item.event), false);
+  }
+});
+
 function runState(input: {
   readonly runId: string;
   readonly status: OrdinaryRunStatus;
@@ -402,6 +461,7 @@ function runState(input: {
   readonly toolCalls?: OrdinaryRunState["toolCalls"];
   readonly usage?: OrdinaryRunState["usage"];
   readonly withAttachment?: boolean;
+  readonly visibleAssistantText?: string;
 }): OrdinaryRunState {
   const baseBirth = ordinaryRunBirth();
   const protocol = input.protocol ?? "openai_responses";
@@ -457,6 +517,7 @@ function runState(input: {
     birth,
     status: input.status,
     canonicalMessages: [{ role: "user", content: "请读取附件并回答" }],
+    visibleAssistantText: input.visibleAssistantText,
     toolCalls: input.toolCalls ?? [],
     toolResultRecordedAt: Object.fromEntries((input.toolCalls ?? []).map((result) => [
       `${result.callId}:${result.status}`,
@@ -506,8 +567,13 @@ function conversationFrom(run: OrdinaryRunState): OrdinaryConversationReadModel 
       role: "assistant",
       turnId: run.turn.assistantTurnId,
       runId: run.runId,
-      content: run.status.kind === "completed" ? run.status.answer : "",
+      content: run.status.kind === "completed" ? run.status.answer : run.visibleAssistantText ?? "",
       status: run.status.kind,
+      interruption: run.status.kind === "cancelled"
+        ? "user_cancelled"
+        : run.status.kind === "blocked" && run.status.reason.code === "execution_continuation_lost"
+          ? "runtime_stopped"
+          : undefined,
       model: run.birth.config,
       createdAt: run.timestamps.createdAt,
       updatedAt: run.timestamps.updatedAt,

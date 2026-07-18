@@ -98,6 +98,38 @@ test("feature cancellation aborts live execution and cannot be overwritten by a 
   assert.equal((await run.feature.queries.getRun("cancelled-run"))?.status.kind, "cancelled");
 });
 
+test("user cancellation preserves visible assistant text without promoting it to canonical history", async (t) => {
+  const outputVisible = createManualGate();
+  const run = await fixture(t, {
+    execute(input) {
+      input.onTextDelta?.("已经显示的未完成回答");
+      outputVisible.enter();
+      return new Promise((resolve) => input.abortSignal.addEventListener("abort", () => resolve({
+        status: "cancelled",
+        reason: String(input.abortSignal.reason),
+        canonicalMessages: input.messages,
+        toolCalls: [],
+        usage: {},
+      }), { once: true }));
+    },
+  });
+  const submitted = await run.feature.commands.submitTurn({
+    input: { userMessage: "请继续回答" },
+    birth: ordinaryRunBirth(),
+  });
+  await outputVisible.entered;
+
+  const cancelled = await run.feature.commands.cancel(submitted.run.runId);
+  const conversation = await run.feature.queries.getConversation(submitted.conversation.conversationId);
+  const assistantTurn = conversation?.turns.find((turn) => turn.role === "assistant");
+
+  assert.equal(cancelled.visibleAssistantText, "已经显示的未完成回答");
+  assert.equal(cancelled.canonicalMessages.some((message) =>
+    message.role === "assistant" && message.content === "已经显示的未完成回答"), false);
+  assert.equal(assistantTurn?.content, "已经显示的未完成回答");
+  assert.equal(assistantTurn?.role === "assistant" ? assistantTurn.interruption : undefined, "user_cancelled");
+});
+
 test("feature preserves a tool result that completes after cancellation commits", async (t) => {
   const toolResult = resolvedToolResult("call-after-cancel");
   let finishTool: (() => void) | undefined;
@@ -1202,12 +1234,15 @@ test("feature restart blocks an interrupted running execution instead of replayi
     eventId: "event-created",
   });
   await repository.save(initial, 0);
-  await repository.save(transitionOrdinaryRun({
+  await repository.save({
+    ...transitionOrdinaryRun({
     state: initial,
     transition: { type: "start" },
     recordedAt: "2026-01-01T00:00:01.000Z",
     eventId: "event-started",
-  }), 1);
+    }),
+    visibleAssistantText: "退出前已经显示的正文",
+  }, 1);
   let executions = 0;
   const restarted = createOrdinaryAgentFeature({
     repository,
@@ -1228,6 +1263,7 @@ test("feature restart blocks an interrupted running execution instead of replayi
     continueBy: "new_turn",
   });
   assert.equal(executions, 0);
+  assert.equal(state?.visibleAssistantText, "退出前已经显示的正文");
 });
 
 test("feature restart safely activates a persisted root queued run", async (t) => {

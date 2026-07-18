@@ -336,6 +336,55 @@ test("conversation display list gives blocked turns one terminal notice instead 
   assert.deepEqual(item?.kind === "assistant" ? item.workflow?.segments : undefined, []);
 });
 
+test("conversation display list renders quiet interruption text as a normal response without a terminal notice", () => {
+  const turns = [
+    turn("user-1", "user", "继续", "completed"),
+    {
+      ...turn("assistant-1", "assistant", "退出前已经显示的正文", "cancelled"),
+      runId: "run-1",
+      interruption: "user_cancelled" as const,
+    },
+  ];
+  const display = projectConversationDisplayList({
+    previous: createConversationWorkflowDisplayState(),
+    conversationId: "conversation-1",
+    projectedTurns: [projected(turns[0]!), projected(turns[1]!, "run-1")],
+    turns,
+    cachedNodesByRunId: {
+      "run-1": [
+        transcriptNode({
+          nodeId: "body-1",
+          runId: "run-1",
+          sequence: 1,
+          kind: "body",
+          eventType: "model.output.completed",
+          text: "退出前已经显示的正文",
+        }),
+        transcriptNode({
+          nodeId: "run-cancelled-1",
+          runId: "run-1",
+          sequence: 2,
+          kind: "system",
+          eventType: "run.cancelled",
+          phase: "cancelled",
+          summary: "cancelled_by_user",
+        }),
+      ],
+    },
+    currentRunNodes: [],
+  });
+
+  const item = display.items[1];
+  assert.equal(item?.kind, "assistant");
+  assert.equal(item?.kind === "assistant" ? item.failure : undefined, undefined);
+  assert.equal(item?.kind === "assistant" ? item.terminalStatus : undefined, undefined);
+  assert.deepEqual(
+    item?.kind === "assistant" ? item.workflow?.segments.map((segment) => segment.kind) : [],
+    ["body"],
+  );
+  assert.equal(JSON.stringify(item).includes("cancelled_by_user"), false);
+});
+
 test("conversation display list projects standalone failed runs like failed assistant turns", () => {
   const turns = [
     turn("user-1", "user", "继续", "completed"),

@@ -3,6 +3,7 @@ import { Link2, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog, SkillTriggerMode } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import type { McpServerForm, ToolForm } from "./settings-types";
+import "./capability-settings.css";
 
 const SAVED_API_KEY_MASK = "****************";
 type McpCatalogServer = NonNullable<ToolsResponse["mcpCatalog"]>[number];
@@ -54,7 +55,7 @@ export function BasicCapabilitiesSettings(props: {
   readonly onSaveSkillTriggerMode: (mode: SkillTriggerMode) => void;
 }): React.ReactElement {
   return (
-    <div className="service-settings-stack">
+    <div className="basic-capabilities-settings">
       <WebSearchSettings
         tools={props.tools}
         toolForm={props.toolForm}
@@ -70,15 +71,20 @@ export function BasicCapabilitiesSettings(props: {
         onSave={props.onSaveDesktopAgentSystemPrompt}
         onReset={props.onResetDesktopAgentSystemPrompt}
       />
-      <ModelUsageDisplaySettings
-        enabled={props.modelUsageDisplayEnabled}
-        onChange={props.onModelUsageDisplayChange}
-      />
-      <SkillTriggerSettings
-        config={props.config}
-        saving={props.savingTools}
-        onSave={props.onSaveSkillTriggerMode}
-      />
+      <section className="capability-settings-section capability-runtime-preferences" aria-label="运行偏好">
+        <h3>运行偏好</h3>
+        <div className="capability-preference-list">
+          <ModelUsageDisplaySettings
+            enabled={props.modelUsageDisplayEnabled}
+            onChange={props.onModelUsageDisplayChange}
+          />
+          <SkillTriggerSettings
+            config={props.config}
+            saving={props.savingTools}
+            onSave={props.onSaveSkillTriggerMode}
+          />
+        </div>
+      </section>
       <ModelInformationSettings
         config={props.config}
         modelCatalogs={props.modelCatalogs}
@@ -94,22 +100,20 @@ function ModelUsageDisplaySettings(props: {
   readonly onChange: (enabled: boolean) => void;
 }): React.ReactElement {
   return (
-    <section className="settings-card service-settings-card" aria-label="回答展示">
-      <h3>回答展示</h3>
-      <div className="model-info-toggle-grid" aria-label="回答展示开关">
-        <div className="model-info-toggle-row">
-          <span>模型 token 信息</span>
-          <button
-            type="button"
-            className="capability-toggle"
-            aria-pressed={props.enabled}
-            onClick={() => props.onChange(!props.enabled)}
-          >
-            {props.enabled ? "显示" : "隐藏"}
-          </button>
-        </div>
+    <div className="capability-preference-row" aria-label="回答展示">
+      <div className="capability-preference-copy">
+        <strong>回答展示</strong>
+        <span>模型 token 信息</span>
       </div>
-    </section>
+      <button
+        type="button"
+        className="capability-toggle"
+        aria-pressed={props.enabled}
+        onClick={() => props.onChange(!props.enabled)}
+      >
+        {props.enabled ? "显示" : "隐藏"}
+      </button>
+    </div>
   );
 }
 
@@ -132,25 +136,23 @@ function SkillTriggerSettings(props: {
   };
 
   return (
-    <section className="settings-card service-settings-card" aria-busy={props.saving === true}>
-      <h3>Skills 触发方式</h3>
-      <div className="service-config-grid">
-        <label>
-          触发方式
-          <SettingsSelectControl
-            id="skill-trigger-mode"
-            ariaLabel="Skills 触发方式"
-            value={draftMode}
-            options={[
-              { value: "keyword", label: "显式/关键词触发" },
-              { value: "model", label: "语义路由" },
-            ]}
-            onChange={updateMode}
-            disabled={props.saving === true}
-          />
-        </label>
+    <div className="capability-preference-row" aria-busy={props.saving === true}>
+      <div className="capability-preference-copy">
+        <strong>Skills 触发方式</strong>
+        <span>决定何时加载可用技能</span>
       </div>
-    </section>
+      <SettingsSelectControl
+        id="skill-trigger-mode"
+        ariaLabel="Skills 触发方式"
+        value={draftMode}
+        options={[
+          { value: "keyword", label: "显式/关键词触发" },
+          { value: "model", label: "语义路由" },
+        ]}
+        onChange={updateMode}
+        disabled={props.saving === true}
+      />
+    </div>
   );
 }
 
@@ -177,8 +179,8 @@ function DesktopAgentPromptSettings(props: {
         : "自定义"
     : "加载中";
   return (
-    <section className="settings-card service-settings-card desktop-agent-prompt-card" aria-busy={props.saving === true}>
-      <div className="settings-card-title-row">
+    <section className="capability-settings-section desktop-agent-prompt-card" aria-busy={props.saving === true}>
+      <div className="capability-section-title-row">
         <h3>系统提示词</h3>
         <div className="desktop-agent-prompt-actions">
           <button
@@ -282,8 +284,8 @@ function ModelInformationSettings(props: {
   };
 
   return (
-    <section className="settings-card service-settings-card model-info-card" aria-busy={props.saving === true}>
-      <div className="settings-card-title-row">
+    <section className="capability-settings-section model-info-card" aria-busy={props.saving === true}>
+      <div className="capability-section-title-row">
         <h3>模型信息</h3>
         <button
           type="button"
@@ -538,7 +540,7 @@ function WebSearchSettings(props: {
     props.onSaveTools({ ...props.toolForm, apiKey });
   };
   return (
-    <section className="settings-card service-settings-card" aria-busy={props.saving === true}>
+    <section className="capability-settings-section web-search-settings" aria-busy={props.saving === true}>
       <h3>网络搜索</h3>
       <div className="service-config-grid web-search-config-grid">
         <label>

@@ -1,5 +1,5 @@
 import React from "react";
-import { RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw } from "lucide-react";
 import type { SkillDefinition } from "../contracts/skills";
 
 export function SkillSettings(props: {
@@ -12,16 +12,24 @@ export function SkillSettings(props: {
   return (
     <section className="skills-settings">
       <header className="skills-toolbar">
-        <span>{enabledCount} / {props.skills.length} 启用</span>
-        <button
-          type="button"
-          className="skills-refresh-button"
-          onClick={props.onRefreshSkills}
-          disabled={props.saving}
-        >
-          <RefreshCw size={14} />
-          {props.saving ? "刷新中" : "刷新"}
-        </button>
+        <div className="skills-toolbar-copy">
+          <strong>技能库</strong>
+        </div>
+        <div className="skills-toolbar-actions">
+          <span className="skills-enabled-summary">
+            <i aria-hidden="true" />
+            {enabledCount} / {props.skills.length} 已启用
+          </span>
+          <button
+            type="button"
+            className="skills-refresh-button"
+            onClick={props.onRefreshSkills}
+            disabled={props.saving}
+          >
+            <RefreshCw size={14} />
+            {props.saving ? "刷新中" : "刷新"}
+          </button>
+        </div>
       </header>
       {props.skills.length === 0 ? (
         <div className="skills-empty">暂无技能</div>
@@ -46,27 +54,38 @@ function SkillRow(props: {
   readonly saving?: boolean;
   readonly onToggle: () => void;
 }): React.ReactElement {
+  const [descriptionExpanded, setDescriptionExpanded] = React.useState(false);
   const lastUsed = skillLastUsedView(props.skill.lastUsedAt);
   const hasCategory = props.skill.category !== undefined && props.skill.category.length > 0;
   const sourceLabel = skillSourceLabel(props.skill);
-  const hasMeta = hasCategory || sourceLabel !== undefined || lastUsed !== undefined;
+  const description = skillSummary(props.skill);
+  const hasMeta = lastUsed !== undefined;
   const toggleActionLabel = props.skill.enabled ? "停用" : "启用";
+  const canExpandDescription = description.length > 120;
   return (
     <article className={`skills-row ${props.skill.enabled ? "" : "disabled"}`}>
       <div className="skills-row-main">
-        <div className="skills-row-title">
-          <strong>{props.skill.name}</strong>
-          <span className={props.skill.enabled ? "enabled" : "disabled"}>{props.skill.enabled ? "启用" : "停用"}</span>
-        </div>
-        <p>{skillSummary(props.skill)}</p>
+        <header className="skills-row-title">
+          <strong title={props.skill.name}>{props.skill.name}</strong>
+          <div className="skills-row-title-meta">
+            {sourceLabel !== undefined && <span className="source">{sourceLabel}</span>}
+            {hasCategory && <span>{props.skill.category}</span>}
+          </div>
+        </header>
+        <p className="skills-row-description" data-expanded={descriptionExpanded || undefined}>{description}</p>
+        {canExpandDescription && (
+          <button
+            type="button"
+            className="skills-description-toggle"
+            aria-expanded={descriptionExpanded}
+            onClick={() => setDescriptionExpanded((expanded) => !expanded)}
+          >
+            <span>{descriptionExpanded ? "收起说明" : "查看完整说明"}</span>
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
+        )}
         {hasMeta && (
           <div className="skills-row-meta">
-            {sourceLabel !== undefined && (
-              <span className="source">
-                {sourceLabel}
-              </span>
-            )}
-            {hasCategory && <span>{props.skill.category}</span>}
             {lastUsed !== undefined && (
               <span className={lastUsed.kind === "invalid" ? "muted" : undefined}>
                 最近使用：{lastUsed.dateTime === undefined ? (
@@ -84,13 +103,14 @@ function SkillRow(props: {
       </div>
       <button
         type="button"
-        className="capability-toggle"
+        className="skills-state-toggle"
         aria-pressed={props.skill.enabled}
         aria-label={`${toggleActionLabel} ${props.skill.name}`}
         onClick={props.onToggle}
         disabled={props.saving}
       >
-        {toggleActionLabel}
+        <span aria-hidden="true" />
+        {props.skill.enabled ? "已启用" : "已停用"}
       </button>
     </article>
   );

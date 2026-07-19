@@ -1,0 +1,113 @@
+.basic-capabilities-settings {
+  overflow: hidden;
+  border: var(--border-width-thin) solid var(--panel-card-border);
+  border-radius: var(--radius-xl);
+  background: var(--panel-card-bg);
+  box-shadow: var(--panel-card-shadow);
+  backdrop-filter: var(--panel-card-backdrop-filter);
+  -webkit-backdrop-filter: var(--panel-card-backdrop-filter);
+}
+
+.capability-settings-section {
+  display: grid;
+  gap: var(--space-4);
+  padding: 20px 24px;
+}
+
+.capability-settings-section + .capability-settings-section {
+  border-top: var(--border-width-thin) solid color-mix(in oklch, var(--border) 72%, transparent);
+}
+
+.capability-settings-section h3 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: var(--weight-heading);
+}
+
+.capability-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.basic-capabilities-settings .service-config-grid,
+.basic-capabilities-settings .model-info-grid {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.capability-runtime-preferences {
+  gap: 12px;
+}
+
+.capability-preference-list {
+  display: grid;
+  border: 1px solid var(--row-border);
+  border-radius: var(--radius-lg);
+  background: var(--row-bg);
+}
+
+.capability-preference-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 12px 14px;
+}
+
+.capability-preference-row + .capability-preference-row {
+  border-top: 1px solid color-mix(in oklch, var(--row-border) 78%, transparent);
+}
+
+.capability-preference-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.capability-preference-copy strong {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: var(--weight-body);
+}
+
+.capability-preference-copy span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-preference-row .settings-select-control {
+  width: min(240px, 44%);
+  flex: 0 0 auto;
+}
+
+.desktop-agent-prompt-card .desktop-agent-prompt-field textarea {
+  min-height: 144px;
+  max-height: 320px;
+}
+
+@media (max-width: 760px) {
+  .capability-settings-section {
+    padding: 18px;
+  }
+
+  .capability-section-title-row,
+  .capability-preference-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .capability-section-title-row .desktop-agent-prompt-actions {
+    justify-content: flex-start;
+  }
+
+  .capability-preference-row .settings-select-control {
+    width: 100%;
+  }
+}

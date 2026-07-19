@@ -17,6 +17,7 @@ import {
   RunState,
   type ModelSettings,
   type StreamEvent,
+  type Usage as SdkUsage,
   isOpenAIChatCompletionsRawModelStreamEvent,
   isOpenAIResponsesRawModelStreamEvent,
   setTracingDisabled,
@@ -67,6 +68,10 @@ import {
 } from "./openai-agents-input.js";
 import { withOpenAICompatibleChatProfile } from "./openai-agents-provider-profile.js";
 import { toOpenAIFetch, type FetchLike } from "./openai-fetch-bridge.js";
+import {
+  mergeCumulativeModelUsage,
+  modelUsageFromOpenAIAgentsSdk,
+} from "./openai-agents-usage.js";
 import { withOpenAIResponsesStreamReconciliation } from "./openai-responses-stream-reconciliation.js";
 import {
   preservedOpenAIAgentsTerminalResponse,
@@ -187,6 +192,7 @@ class OpenAIAgentsLoop implements AgentLoop {
       modelRequestCount: 0,
       firstTokenLatencyTotalMs: 0,
       firstTokenLatencySampleCount: 0,
+      contextMaintenanceUsage: {},
       latestRequestIncludedResponses: 0,
       deliveredToolResultCallIds: new Set(
         baseMessages.flatMap((message) => message.role === "tool" && message.toolCallId !== undefined
@@ -554,6 +560,7 @@ function createContextMaintenanceFilter(
       hasUnseenToolResults,
       abortSignal: execution.abortSignal,
     });
+    accumulateContextMaintenanceUsage(execution, maintained.usage);
     if (maintained.status === "failed") {
       throw new ContextMaintenanceError(maintained.code, maintained.error);
     }
@@ -797,52 +804,21 @@ function toolResultMessage(result: ToolCallResult): ModelMessage {
   return canonicalToolResultMessage(result);
 }
 
-function usageFromSdk(usage: {
-  readonly requests: number;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly totalTokens: number;
-  readonly inputTokensDetails: readonly Readonly<Record<string, number>>[];
-  readonly outputTokensDetails: readonly Readonly<Record<string, number>>[];
-}, execution: Pick<
+function usageFromSdk(usage: SdkUsage, execution: Pick<
   ExecutionState,
-  "firstTokenLatencyTotalMs" | "firstTokenLatencySampleCount"
+  "firstTokenLatencyTotalMs" | "firstTokenLatencySampleCount" | "contextMaintenanceUsage"
 >): ModelUsage {
-  const cachedInputTokens = sumDetail(usage.inputTokensDetails, "cached_tokens");
-  const cacheWriteInputTokens = sumDetail(usage.inputTokensDetails, "cache_write_tokens");
-  const reasoningOutputTokens = sumDetail(usage.outputTokensDetails, "reasoning_tokens");
-  return compactUsage({
-    requestCount: usage.requests,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    totalTokens: usage.totalTokens,
-    cachedInputTokens,
-    cacheWriteInputTokens,
-    uncachedInputTokens: cachedInputTokens === undefined
-      ? undefined
-      : Math.max(0, usage.inputTokens - cachedInputTokens),
-    reasoningOutputTokens,
-    firstTokenLatencyMs: execution.firstTokenLatencySampleCount === 0
-      ? undefined
-      : execution.firstTokenLatencyTotalMs / execution.firstTokenLatencySampleCount,
+  return modelUsageFromOpenAIAgentsSdk({
+    usage,
+    firstTokenLatencyTotalMs: execution.firstTokenLatencyTotalMs,
+    firstTokenLatencySampleCount: execution.firstTokenLatencySampleCount,
+    contextMaintenanceUsage: execution.contextMaintenanceUsage,
   });
 }
 
-function sumDetail(details: readonly Readonly<Record<string, number>>[], key: string): number | undefined {
-  let found = false;
-  let total = 0;
-  for (const detail of details) {
-    const value = detail[key];
-    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-      found = true;
-      total += value;
-    }
-  }
-  return found ? total : undefined;
-}
-
-function compactUsage(usage: ModelUsage): ModelUsage {
-  return Object.fromEntries(Object.entries(usage).filter(([, value]) => value !== undefined));
+function accumulateContextMaintenanceUsage(execution: ExecutionState, usage: ModelUsage | undefined): void {
+  if (usage === undefined) return;
+  execution.contextMaintenanceUsage = mergeCumulativeModelUsage(execution.contextMaintenanceUsage, usage);
 }
 
 export function openAIAgentsPromptCacheKey(
@@ -912,7 +888,8 @@ function terminalErrorResult(
 ): AgentLoopResult {
   const message = modelErrorMessageFromError(error, errorMessage(error));
   const errorCode = contextMaintenanceErrorCode(error) ?? transportFailureCode(error);
-  const stateResponses = sdkState === undefined ? [] : new RunResult(sdkState).rawResponses;
+  const stateResult = sdkState === undefined ? undefined : new RunResult(sdkState);
+  const stateResponses = stateResult?.rawResponses ?? [];
   const preservedTerminalResponse = preservedOpenAIAgentsTerminalResponse(error);
   const rawResponses = preservedTerminalResponse === undefined
     ? stateResponses
@@ -920,7 +897,9 @@ function terminalErrorResult(
   const facts = {
     messages: canonicalMessagesForResult(execution, rawResponses, execution.modelInput.protocol),
     toolResults: cloneToolResults(execution.toolResults),
-    usage: {},
+    usage: stateResult === undefined
+      ? execution.contextMaintenanceUsage
+      : usageFromSdk(stateResult.runContext.usage, execution),
     confirmationRequests: [],
   };
   return isAbortError(error) || execution.abortSignal.aborted

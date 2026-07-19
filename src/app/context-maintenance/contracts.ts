@@ -1,5 +1,5 @@
 import type { ModelCapabilities } from "../../domain/config/index.js";
-import type { IntelligenceChannel, ModelMessage } from "../../domain/intelligence/index.js";
+import type { IntelligenceChannel, ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
 import type { ToolDefinition } from "../../domain/tools/index.js";
 
 export type AgentLoopTokenCounter = {
@@ -30,6 +30,7 @@ export type AgentLoopContextMaintenanceResult =
       readonly threshold: number;
       readonly messages: readonly ModelMessage[];
       readonly conversationSummary: AgentLoopContextSummary;
+      readonly usage?: ModelUsage;
     }
   | {
       readonly status: "failed";
@@ -38,6 +39,7 @@ export type AgentLoopContextMaintenanceResult =
       readonly message: string;
       readonly requestId?: string;
       readonly responseId?: string;
+      readonly usage?: ModelUsage;
     };
 
 export type MaintainAgentLoopContextInput = {

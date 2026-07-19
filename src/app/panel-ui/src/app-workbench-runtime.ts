@@ -17,7 +17,7 @@ import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import {
   contextWindowUsageFrom,
   latestModelUsageFromEvents,
-  latestModelUsageFromTranscript,
+  latestModelUsageForRunFromTranscript,
   type ContextWindowUsage,
 } from "./context-window-usage";
 import { isConversationWaitingForUser } from "./conversation-state";
@@ -173,8 +173,10 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const hasNormalConversationContext =
     !options.agentClusterActive && (options.app.conversation !== undefined || currentRun.run !== undefined);
   const latestModelUsage = useMemo(
-    () => latestModelUsageFromEvents(currentRun.events) ?? latestModelUsageFromTranscript(currentRun.transcriptNodes),
-    [currentRun.events, currentRun.transcriptNodes],
+    () => latestModelUsageFromEvents(currentRun.events) ?? (currentRun.run === undefined
+      ? undefined
+      : latestModelUsageForRunFromTranscript(currentRun.run.runId, currentRun.transcriptNodes)),
+    [currentRun.events, currentRun.run, currentRun.transcriptNodes],
   );
   const contextUsage = useMemo(() => {
     if (!hasNormalConversationContext) {

@@ -516,7 +516,10 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
         : undefined,
     timestamp: activity.recordedAt,
     confirmation,
-    modelUsage: activity.event.type === "run.completed" || activity.event.type === "run.failed"
+    modelUsage: activity.event.type === "run.approval_requested" ||
+      activity.event.type === "run.completed" ||
+      activity.event.type === "run.failed" ||
+      activity.event.type === "run.cancelled"
       ? structuredClone(run.usage)
       : undefined,
     refs: event.refs,

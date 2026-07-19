@@ -80,6 +80,7 @@ export async function compactAgentLoopContextIfNeeded(
       message: response.failure?.message ?? "Context compaction model call failed.",
       requestId,
       responseId: response.responseId,
+      usage: response.usage,
     };
   }
 
@@ -98,6 +99,7 @@ export async function compactAgentLoopContextIfNeeded(
       message: "Context compaction returned an empty continuation prompt.",
       requestId,
       responseId: response.responseId,
+      usage: response.usage,
     };
   }
 
@@ -123,6 +125,7 @@ export async function compactAgentLoopContextIfNeeded(
       message: `Context compaction did not reduce the request below the model window (${compactedTokenCount}/${input.modelCapabilities.contextWindowTokens} tokens).`,
       requestId,
       responseId: response.responseId,
+      usage: response.usage,
     };
   }
 
@@ -132,6 +135,7 @@ export async function compactAgentLoopContextIfNeeded(
     threshold,
     conversationSummary: summary,
     messages: compactedMessages,
+    usage: response.usage,
   };
 }
 

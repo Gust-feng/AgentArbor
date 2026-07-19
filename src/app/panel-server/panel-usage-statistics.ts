@@ -377,9 +377,8 @@ function normalizedUsage(usage: ModelUsage | undefined): {
   }
   const inputTokens = nonNegativeAmount(usage.inputTokens);
   const outputTokens = nonNegativeAmount(usage.outputTokens);
-  const reasoningOutputTokens = nonNegativeAmount(usage.reasoningOutputTokens);
   const totalTokens = usage.totalTokens === undefined
-    ? inputTokens + outputTokens + reasoningOutputTokens
+    ? inputTokens + outputTokens
     : nonNegativeAmount(usage.totalTokens);
   const cacheSavedTokens = nonNegativeAmount(usage.cachedInputTokens);
   const usageEvidence = inputTokens + outputTokens + totalTokens + cacheSavedTokens +

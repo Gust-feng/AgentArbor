@@ -8,7 +8,7 @@ import {
   type Tool,
   tool,
 } from "@openai/agents";
-import type { ModelMessage } from "../../domain/intelligence/index.js";
+import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -74,6 +74,7 @@ export type OpenAIAgentsExecutionState = {
   firstTokenObservedForRequestCount?: number;
   firstTokenLatencyTotalMs: number;
   firstTokenLatencySampleCount: number;
+  contextMaintenanceUsage: ModelUsage;
   latestRequestIncludedResponses: number;
   latestRequestMessages?: readonly ModelMessage[];
   readonly deliveredToolResultCallIds: Set<string>;

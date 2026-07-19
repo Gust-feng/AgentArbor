@@ -14,9 +14,13 @@ export type ContextWindowUsage = {
 
 export type ContextWindowUsageModelUsage = {
   readonly inputTokens?: number;
+  readonly latestAgentRequest?: {
+    readonly inputTokens?: number;
+  };
 };
 
 export type ContextWindowUsageTranscriptNode = {
+  readonly runId?: string;
   readonly modelUsage?: ContextWindowUsageModelUsage;
 };
 
@@ -35,7 +39,7 @@ export function contextWindowUsageFrom(input: {
     return undefined;
   }
 
-  const providerInputTokens = finiteTokenCount(input.modelUsage?.inputTokens);
+  const providerInputTokens = finiteTokenCount(input.modelUsage?.latestAgentRequest?.inputTokens);
   if (providerInputTokens !== undefined) {
     return availableContextWindowUsage({
       source: "provider_usage",
@@ -53,12 +57,15 @@ export function contextWindowUsageFrom(input: {
   };
 }
 
-export function latestModelUsageFromTranscript(
+export function latestModelUsageForRunFromTranscript(
+  runId: string,
   nodes: readonly ContextWindowUsageTranscriptNode[]
 ): ContextWindowUsageModelUsage | undefined {
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
-    const usage = nodes[index]?.modelUsage;
-    if (finiteTokenCount(usage?.inputTokens) !== undefined) {
+    const node = nodes[index];
+    if (node?.runId !== runId) continue;
+    const usage = node.modelUsage;
+    if (finiteTokenCount(usage?.latestAgentRequest?.inputTokens) !== undefined) {
       return usage;
     }
   }
@@ -70,7 +77,7 @@ export function latestModelUsageFromEvents(
 ): ContextWindowUsageModelUsage | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const usage = events[index]?.detail?.modelUsage;
-    if (finiteTokenCount(usage?.inputTokens) !== undefined) {
+    if (finiteTokenCount(usage?.latestAgentRequest?.inputTokens) !== undefined) {
       return usage;
     }
   }
@@ -91,7 +98,7 @@ function availableContextWindowUsage(input: {
     percent,
     ringPercent: clamp(percent, 0, 100),
     tone: usageTone(percent),
-    label: `已用${displayPercent}%上下文容量`,
+    label: `最近一次模型请求已用${displayPercent}%上下文容量`,
   };
 }
 

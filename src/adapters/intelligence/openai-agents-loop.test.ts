@@ -85,6 +85,14 @@ test("compatible Chat sends a stable cache identity with one local history and m
         cachedInputTokens: 7,
         uncachedInputTokens: 5,
         reasoningOutputTokens: 2,
+        latestAgentRequest: {
+          inputTokens: 12,
+          outputTokens: 4,
+          totalTokens: 16,
+          cachedInputTokens: 7,
+          uncachedInputTokens: 5,
+          reasoningOutputTokens: 2,
+        },
       });
     } finally {
       await loop.release();
@@ -1818,6 +1826,14 @@ test("context maintenance runs before every model request and persists the compa
               { role: "system", content: SYSTEM },
               { role: "user", content: "# Compacted Context\nBoth sources were inspected." },
             ],
+            usage: {
+              requestCount: 1,
+              inputTokens: 100,
+              outputTokens: 10,
+              totalTokens: 110,
+              cachedInputTokens: 60,
+              uncachedInputTokens: 40,
+            },
           };
         },
       });
@@ -1827,6 +1843,19 @@ test("context maintenance runs before every model request and persists the compa
       assert.deepEqual(result.messages.map((message) => message.role), ["system", "user", "assistant"]);
       assert.equal(result.messages.some((message) => message.toolCallId !== undefined), false);
       assert.equal(result.messages.at(-1)?.content, "context-final");
+      assert.equal(result.usage.requestCount, 3);
+      assert.equal(result.usage.inputTokens, 106);
+      assert.equal(result.usage.outputTokens, 14);
+      assert.equal(result.usage.totalTokens, 120);
+      assert.equal(result.usage.cachedInputTokens, 60);
+      assert.deepEqual(result.usage.latestAgentRequest, {
+        inputTokens: 3,
+        outputTokens: 2,
+        totalTokens: 5,
+        cachedInputTokens: 0,
+        uncachedInputTokens: 3,
+        reasoningOutputTokens: 0,
+      });
     } finally {
       await loop.release();
     }
@@ -1893,6 +1922,12 @@ test("context maintenance failure stops the next provider request and preserves 
                 status: "failed",
                 code: "context_compaction_failed",
                 error: "Context compaction failed before the next request.",
+                usage: {
+                  requestCount: 1,
+                  inputTokens: 40,
+                  outputTokens: 5,
+                  totalTokens: 45,
+                },
               };
         },
       });
@@ -1903,6 +1938,18 @@ test("context maintenance failure stops the next provider request and preserves 
       assert.equal(result.messages.filter((message) => message.toolCalls?.[0]?.callId === "call-before-compaction").length, 1);
       assert.equal(result.messages.filter((message) => message.toolCallId === "call-before-compaction").length, 1);
       assert.equal(result.toolResults.some((toolResult) => toolResult.status === "completed"), true);
+      assert.equal(result.usage.requestCount, 2);
+      assert.equal(result.usage.inputTokens, 43);
+      assert.equal(result.usage.outputTokens, 7);
+      assert.equal(result.usage.totalTokens, 50);
+      assert.deepEqual(result.usage.latestAgentRequest, {
+        inputTokens: 3,
+        outputTokens: 2,
+        totalTokens: 5,
+        cachedInputTokens: 0,
+        uncachedInputTokens: 3,
+        reasoningOutputTokens: 0,
+      });
     } finally {
       await loop.release();
     }

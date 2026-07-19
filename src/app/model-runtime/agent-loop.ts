@@ -67,9 +67,9 @@ export type AgentLoopInput = {
     readonly hasUnseenToolResults: boolean;
     readonly abortSignal: AbortSignal;
   }) => Promise<
-    | { readonly status: "unchanged" }
-    | { readonly status: "compacted"; readonly messages: readonly ModelMessage[] }
-    | { readonly status: "failed"; readonly code: string; readonly error: string }
+    | { readonly status: "unchanged"; readonly usage?: ModelUsage }
+    | { readonly status: "compacted"; readonly messages: readonly ModelMessage[]; readonly usage?: ModelUsage }
+    | { readonly status: "failed"; readonly code: string; readonly error: string; readonly usage?: ModelUsage }
   >;
 };
 

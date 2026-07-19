@@ -52,6 +52,15 @@ const usageSchema = z.object({
   firstTokenLatencyMs: z.number().finite().nonnegative().optional(),
   outputDurationMs: z.number().finite().nonnegative().optional(),
   outputTokensPerSecond: z.number().finite().nonnegative().optional(),
+  latestAgentRequest: z.object({
+    inputTokens: z.number().finite().nonnegative().optional(),
+    outputTokens: z.number().finite().nonnegative().optional(),
+    totalTokens: z.number().finite().nonnegative().optional(),
+    cachedInputTokens: z.number().finite().nonnegative().optional(),
+    cacheWriteInputTokens: z.number().finite().nonnegative().optional(),
+    uncachedInputTokens: z.number().finite().nonnegative().optional(),
+    reasoningOutputTokens: z.number().finite().nonnegative().optional(),
+  }).strict().optional(),
 }).strict();
 const toolMetricHistogramSchema = z.object({
   bounds: z.array(z.number().finite().nonnegative()),

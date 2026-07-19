@@ -297,6 +297,11 @@ test("approval projection keeps the complete confirmation and canonical tool res
   const request = confirmation("approval-run");
   const run = runState({
     runId: "approval-run",
+    usage: {
+      requestCount: 1,
+      inputTokens: 250,
+      latestAgentRequest: { inputTokens: 120 },
+    },
     status: {
       kind: "awaiting_approval",
       confirmationRequests: [request],
@@ -332,6 +337,7 @@ test("approval projection keeps the complete confirmation and canonical tool res
   assert.equal(view.detail.continuationAvailability, "live");
   const node = view.workView.transcriptNodes.find((item) => item.kind === "confirmation");
   assert.deepEqual(node?.confirmation, projectedConfirmation);
+  assert.deepEqual(node?.modelUsage, run.usage);
   assert.equal(view.replay.events.at(-1)?.type, "confirmation.needed");
 });
 

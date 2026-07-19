@@ -326,15 +326,21 @@ function createOrdinaryContextMaintainer(input: {
         message: facts?.message ?? "Ordinary context could not be compacted.",
       };
     });
+    const resultUsage = "usage" in result ? result.usage : undefined;
     if (result.status === "failed") {
       return {
         status: "failed",
         code: "context_compaction_failed",
         error: result.message,
+        ...(resultUsage === undefined ? {} : { usage: resultUsage }),
       };
     }
     return result.status === "compacted"
-      ? { status: "compacted", messages: result.messages }
+      ? {
+          status: "compacted",
+          messages: result.messages,
+          ...(resultUsage === undefined ? {} : { usage: resultUsage }),
+        }
       : { status: "unchanged" };
   };
 }

@@ -201,6 +201,36 @@ test("file repository validates cumulative usage before committing an Ordinary s
   assert.equal(await repository.get("invalid-usage-run"), undefined);
 });
 
+test("file repository round-trips optional latest Agent request usage and rejects invalid values", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-latest-request-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const withLatestRequest = {
+    ...state("latest-request-run", "2026-01-01T00:00:00.000Z"),
+    usage: {
+      requestCount: 11,
+      inputTokens: 411_553,
+      latestAgentRequest: {
+        inputTokens: 60_000,
+        outputTokens: 1_000,
+        totalTokens: 61_000,
+        cachedInputTokens: 50_000,
+        uncachedInputTokens: 10_000,
+      },
+    },
+  };
+
+  await repository.save(withLatestRequest, 0);
+  assert.deepEqual((await repository.get(withLatestRequest.runId))?.state.usage, withLatestRequest.usage);
+  await assert.rejects(
+    repository.save({
+      ...state("invalid-latest-request", "2026-01-01T00:00:01.000Z"),
+      usage: { latestAgentRequest: { inputTokens: -1 } },
+    }, 0),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError,
+  );
+});
+
 test("file repository restores v3 snapshots with or without optional tool metrics", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-metrics-"));
   t.after(() => removeTestDirectory(root));

@@ -156,6 +156,17 @@ export type ModelToolChoice =
 
 export type ModelToolCall = ToolCallRequest;
 
+/** Provider-reported token usage for one model request. */
+export type ModelRequestUsage = {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly totalTokens?: number;
+  readonly cachedInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+  readonly uncachedInputTokens?: number;
+  readonly reasoningOutputTokens?: number;
+};
+
 export type ModelUsage = {
   /** Number of provider API requests represented by this usage snapshot. */
   readonly requestCount?: number;
@@ -199,6 +210,12 @@ export type ModelUsage = {
    * are both known.
    */
   readonly outputTokensPerSecond?: number;
+  /**
+   * The most recent non-compaction request reported by the Agent model loop.
+   * This remains separate from cumulative run totals so context capacity is
+   * never inferred from usage accumulated across multiple requests.
+   */
+  readonly latestAgentRequest?: ModelRequestUsage;
 };
 
 export type ModelOutputDelta = {

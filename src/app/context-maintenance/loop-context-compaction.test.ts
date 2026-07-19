@@ -4,6 +4,7 @@ import type {
   IntelligenceChannel,
   ModelRequest,
   ModelResponse,
+  ModelUsage,
 } from "../../domain/intelligence/index.js";
 import { compactAgentLoopContextIfNeeded } from "./index.js";
 import type { AgentLoopTokenCounter } from "./contracts.js";
@@ -354,14 +355,44 @@ test("context threshold never exceeds the frozen model window", async () => {
   assert.equal(result.threshold, 80);
 });
 
+test("context compaction returns provider usage without changing its decision", async () => {
+  const usage: ModelUsage = {
+    requestCount: 1,
+    inputTokens: 90,
+    outputTokens: 10,
+    totalTokens: 100,
+  };
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "continue",
+    traceId: "trace-compaction-usage",
+    goalId: "goal-compaction-usage",
+    messages: [
+      { role: "user", content: "old context ".repeat(80), ref: "context:old" },
+      { role: "user", content: "Current user message: continue", ref: "context:current" },
+    ],
+    tools: [],
+    intelligenceChannel: new TestIntelligenceChannel("short summary", usage),
+    tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(2_000),
+    thresholdRatio: 0.2,
+    preserveRecentTokenBudget: 100,
+  });
+
+  assert.equal(result.status, "compacted");
+  assert.deepEqual(result.status === "compacted" ? result.usage : undefined, usage);
+});
+
 class TestIntelligenceChannel implements IntelligenceChannel {
   readonly requests: ModelRequest[] = [];
 
-  constructor(private readonly textOutput: string) {}
+  constructor(
+    private readonly textOutput: string,
+    private readonly usage?: ModelUsage,
+  ) {}
 
   async request(request: ModelRequest): Promise<ModelResponse> {
     this.requests.push(request);
-    return completedResponse(request.requestId, this.textOutput);
+    return completedResponse(request.requestId, this.textOutput, this.usage);
   }
 
   validateResponse(_request: ModelRequest, response: ModelResponse) {
@@ -369,7 +400,7 @@ class TestIntelligenceChannel implements IntelligenceChannel {
   }
 }
 
-function completedResponse(requestId: string, textOutput: string): ModelResponse {
+function completedResponse(requestId: string, textOutput: string, usage?: ModelUsage): ModelResponse {
   return {
     responseId: `model-response-${requestId}`,
     requestId,
@@ -380,6 +411,7 @@ function completedResponse(requestId: string, textOutput: string): ModelResponse
     status: "completed",
     outputKind: "explanation",
     textOutput,
+    usage,
     validation: {
       status: "passed",
       checkedAt: "2026-06-02T00:00:00.000Z",

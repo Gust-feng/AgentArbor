@@ -583,7 +583,7 @@ function inputUsageItem(usage: AssistantModelUsage): AssistantModelUsageItem | u
       key: "input",
       icon: ArrowUp,
       text: cacheParts.length === 0 ? `${inputText} tokens` : `${inputText} tokens (${cacheParts.join(" · ")})`,
-      title: "本次模型请求的总输入上下文 token；括号内为 provider 报告的缓存命中与缓存写入。系统提示、工具 schema、历史对话和附件上下文都可能计入总输入。",
+      title: "本轮所有模型请求的累计输入 token；括号内为 provider 报告的累计缓存命中与缓存写入。该数值用于使用统计，不代表单次请求的上下文占用。",
     };
   }
   if (cachedText !== undefined || cacheWriteText !== undefined || uncachedText !== undefined) {

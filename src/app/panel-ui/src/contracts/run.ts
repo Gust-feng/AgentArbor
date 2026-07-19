@@ -161,6 +161,7 @@ export type RunEvent = {
 };
 
 export type ModelUsage = {
+  readonly requestCount?: number;
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly totalTokens?: number;
@@ -173,6 +174,15 @@ export type ModelUsage = {
   readonly firstTokenLatencyMs?: number;
   readonly outputDurationMs?: number;
   readonly outputTokensPerSecond?: number;
+  readonly latestAgentRequest?: {
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly totalTokens?: number;
+    readonly cachedInputTokens?: number;
+    readonly cacheWriteInputTokens?: number;
+    readonly uncachedInputTokens?: number;
+    readonly reasoningOutputTokens?: number;
+  };
 };
 
 export type PanelStreamEvent = {

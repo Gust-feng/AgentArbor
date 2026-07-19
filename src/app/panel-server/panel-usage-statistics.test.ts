@@ -60,7 +60,7 @@ test("panel usage statistics aggregates canonical Ordinary conversations and run
     requestCount: 3,
     inputTokens: 200,
     outputTokens: 50,
-    totalTokens: 260,
+    totalTokens: 250,
     cacheSavedTokens: 45,
     cacheHitRate: 0.225,
     firstTokenLatency: {
@@ -90,7 +90,7 @@ test("panel usage statistics aggregates canonical Ordinary conversations and run
       requestCount: 1,
       inputTokens: 80,
       outputTokens: 20,
-      totalTokens: 110,
+      totalTokens: 100,
       cacheSavedTokens: 5,
       cacheHitRate: 0.0625,
       averageFirstTokenLatencyMs: 300,

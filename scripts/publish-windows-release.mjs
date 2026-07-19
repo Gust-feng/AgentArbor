@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
@@ -21,6 +21,10 @@ const assets = [
   releaseArtifacts.latestPath,
 ];
 const target = process.env.GITHUB_SHA ?? readGitHead();
+const releaseNotesPath = join(process.cwd(), ".github", "release-notes", `${tag}.md`);
+const releaseNotes = existsSync(releaseNotesPath)
+  ? readFileSync(releaseNotesPath, "utf8").trim()
+  : `AgentArbor ${tag}`;
 
 if (runGh(["release", "view", tag], { allowFailure: true }) === 0) {
   runGh(["release", "upload", tag, ...assets, "--clobber"]);
@@ -33,7 +37,8 @@ if (runGh(["release", "view", tag], { allowFailure: true }) === 0) {
     "--title",
     tag,
     "--notes",
-    `AgentArbor ${tag}`,
+    releaseNotes,
+    "--generate-notes",
     "--target",
     target,
   ]);

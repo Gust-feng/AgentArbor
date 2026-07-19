@@ -2,6 +2,10 @@ allowBuilds:
   electron: true
   electron-winstaller: false
 
+overrides:
+  hono: 4.12.30
+  qs: 6.15.3
+
 # @openai/agents 0.13.3 is pinned and covered by the local protocol, approval,
 # cancellation, session, and no-hosted-tracing contract probes. Keep the
 # repository-wide release-age policy intact and exempt only this verified SDK set.

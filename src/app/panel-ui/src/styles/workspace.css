@@ -1715,12 +1715,11 @@
 }
 
 .skills-row-title strong {
-  overflow: hidden;
+  min-width: 0;
   color: var(--fg);
   font-size: 15px;
   font-weight: var(--weight-heading);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .skills-row-title-meta {

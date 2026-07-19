@@ -56,8 +56,10 @@ type GrepMatch = { readonly path: string; readonly line: number; readonly previe
 type ListDirEntry = {
   /** Path relative to the requested list root; the root itself is returned once on the page. */
   readonly path: string;
+  readonly name: string;
   readonly kind: "directory" | "file" | "symlink" | "other";
   readonly bytes?: number;
+  readonly depth: number;
 };
 
 type ReadContentWindow = {
@@ -279,7 +281,7 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_R
           "offset selects the next entry window after a bounded result.",
         ],
         outputNotes: [
-          "entries contains paths relative to the returned root path with kind and optional bytes.",
+          "entries contains relative paths, entry names, traversal depths, kinds, and optional byte sizes.",
           "totalEntries is the full enumerated entry count when traversal completes.",
           "scanComplete reports whether the requested tree was fully enumerated.",
           "hasMoreAfter reports whether more entries exist; nextOffset identifies the next plain list_dir call.",
@@ -662,8 +664,10 @@ async function listDirectoryTree(input: {
         throwIfAborted(input.abortSignal);
         entries.push({
           path: relativeListEntryPath(input.absolutePath, absoluteChild),
+          name: child.name,
           kind: directoryEntryKind(child),
           bytes: stat?.size,
+          depth: entryDepth,
         });
       }
       if (child.isDirectory()) {

@@ -44,7 +44,6 @@ export function DeveloperToolStatistics(): React.ReactElement {
           type="button"
           className="usage-v3-icon-button"
           aria-label={activeQuery.isFetching ? "刷新中" : "刷新使用统计"}
-          title="刷新使用统计"
           onClick={() => void activeQuery.refetch()}
           disabled={activeQuery.isFetching}
         >
@@ -126,7 +125,6 @@ function UsageStatisticsContent(props: {
             type="button"
             className="usage-v3-icon-button"
             aria-label={query.isFetching ? "刷新中" : "刷新使用统计"}
-            title="刷新使用统计"
             onClick={() => void query.refetch()}
             disabled={query.isFetching}
           >

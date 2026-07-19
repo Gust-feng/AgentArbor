@@ -66,7 +66,7 @@ function SkillRow(props: {
     <article className={`skills-row ${props.skill.enabled ? "" : "disabled"}`}>
       <div className="skills-row-main">
         <header className="skills-row-title">
-          <strong title={props.skill.name}>{props.skill.name}</strong>
+          <strong>{props.skill.name}</strong>
           <div className="skills-row-title-meta">
             {sourceLabel !== undefined && <span className="source">{sourceLabel}</span>}
             {hasCategory && <span>{props.skill.category}</span>}

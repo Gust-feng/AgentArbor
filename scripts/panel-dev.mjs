@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs as parseNodeArgs } from "node:util";
+import { stopDevelopmentProcessTree } from "./panel-dev-process-tree.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_FRONTEND_PORT = 4305;
@@ -98,7 +99,7 @@ pushChild(spawnLabeled("vite", process.execPath, [
 let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
-    stopAll(0);
+    void stopAll(0);
   });
 }
 
@@ -110,7 +111,7 @@ if (args.smoke || args.desktop) {
     });
     if (args.smoke) {
       console.log("[dev] smoke check passed.");
-      stopAll(0);
+      void stopAll(0);
     } else {
       pushChild(spawnLabeled("electron", process.execPath, [
         electronBin,
@@ -126,7 +127,7 @@ if (args.smoke || args.desktop) {
     }
   } catch (error) {
     console.error(`[dev] startup check failed: ${errorMessage(error)}`);
-    stopAll(1);
+    void stopAll(1);
   }
 }
 
@@ -271,7 +272,7 @@ function pushChild(child) {
     }
     const reason = signal === null ? `code ${code ?? 1}` : `signal ${signal}`;
     console.error(`[dev] ${child.label} exited with ${reason}.`);
-    stopAll(code ?? 1);
+    void stopAll(code ?? 1);
   });
 }
 
@@ -279,6 +280,7 @@ function spawnLabeled(label, command, commandArgs, options = {}) {
   const child = spawn(command, commandArgs, {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
     ...options,
   });
   child.label = label;
@@ -354,17 +356,13 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function stopAll(exitCode) {
+async function stopAll(exitCode) {
   if (stopping) {
     return;
   }
   stopping = true;
-  for (const child of children) {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill();
-    }
-  }
-  setTimeout(() => process.exit(exitCode), 500).unref();
+  process.exitCode = exitCode;
+  await Promise.allSettled(children.map((child) => stopDevelopmentProcessTree(child)));
 }
 
 function printHelp() {

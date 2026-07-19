@@ -272,7 +272,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "basicCapabilities", label: "基础能力", icon: <SlidersHorizontal size={15} /> },
   { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
-  { id: "subAgents", label: "子 Agent", icon: <Bot size={15} /> },
+  { id: "subAgents", label: "Sub Agent", icon: <Bot size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },

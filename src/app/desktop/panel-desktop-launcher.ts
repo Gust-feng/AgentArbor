@@ -63,7 +63,7 @@ export type PanelDesktopDependencies = {
   readonly selectContextAttachment?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly whenReady: Promise<void>;
   readonly onWindowAllClosed: (handler: () => void) => void;
-  readonly onBeforeQuit: (handler: () => void) => void;
+  readonly onBeforeQuit: (handler: () => Promise<void>) => void;
   readonly onSessionClosed?: () => void;
   readonly quit: () => void;
 };
@@ -81,23 +81,17 @@ export async function startPanelDesktopSession(
     appUpdateService: args.smoke || args.windowSmoke || args.devUrl !== undefined ? undefined : dependencies.appUpdateService,
   });
   const panelUrl = args.devUrl ?? server.url;
-  let closed = false;
+  let closePromise: Promise<void> | undefined;
 
-  const closeServer = async (): Promise<void> => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    await server.close();
-    dependencies.onSessionClosed?.();
+  const closeServer = (): Promise<void> => {
+    closePromise ??= (async () => {
+      await server.close();
+      dependencies.onSessionClosed?.();
+    })();
+    return closePromise;
   };
 
-  dependencies.onBeforeQuit(() => {
-    void closeServer().catch((error: unknown) => {
-      console.error("关闭桌面面板服务器失败。");
-      console.error(error);
-    });
-  });
+  dependencies.onBeforeQuit(closeServer);
   dependencies.onWindowAllClosed(() => {
     void (async () => {
       await closeServer();

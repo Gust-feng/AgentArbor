@@ -47,6 +47,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - 默认普通路径中的 Task Soil 只是本轮会话输入、上下文引用、权限边界和运行材料的上下文包，不负责驱动任务状态推进
 - “模型不再调用工具”且 provider 返回明确完成终态，才表示本轮普通 Agent 正常完成
 - 工具调用、确认等待、工具失败后继续判断，都是普通运行的一部分
+- 一次性命令使用 `shell_command` 并绑定当前 run；长期服务使用 `start_process`，默认以 `workspace_session` 生命周期登记到 Host-owned `ProcessRegistry`，返回稳定 `processId`、运行状态、端口事实和 `command-log://` 引用。后续由 `inspect_process` 查询、`stop_process` 按稳定身份停止；run release 只清理 `lifetime: "run"`，Panel runtime 关闭时先停止进程注册，再清理所有仍未结束的 owned 前台/后台进程，因此 `workspace_session` 只跨 run 存活、不跨应用存活。`shell_command(background=true)` 保留兼容，但默认复用 workspace-session 语义。
 - 用户取消由 Ordinary feature 先提交为持久化终态，并立即停止该 run 的新输出与新工具调度；provider transport、live continuation 和其他运行资源随后由原 owner 在后台释放，取消接口与下一条消息不能等待不响应取消的底层 Promise。若取消时没有已接受但结果未定的工具轮，后续消息可以在旧执行资源仍在清理时启动；已有在途工具事实时仍须先完成结果收口，不能越过副作用未知边界
 - Ordinary 会定期把已经流式展示的 assistant 正文保存为 `visibleAssistantText`。它只用于取消或进程退出后的视图恢复，不是 completed 回答，也不进入 `canonicalMessages`。主动取消后，Panel 保留已有正文和真实工具过程；没有正文或过程时不生成 assistant 占位，也不显示“已取消”卡片或内部原因
 - 软件退出或进程异常结束后，live-only continuation 不会伪恢复。重新进入会话时，Panel 恢复退出前已保存的正文、工具事实和会话位置，不显示 continuation、runtime 或进程重启错误；用户只能追加新消息形成新 run，或回退到之前的用户消息创建新 lineage

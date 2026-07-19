@@ -210,6 +210,7 @@ function assemblePanelRuntime(input: {
         configCenter: input.configCenter,
         providerFetch: input.providerFetch,
         processRegistry,
+        processTerminator,
         toolOutputStore,
         testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
       },
@@ -388,14 +389,10 @@ function resolveAppUpdateService(options: PanelServerOptions): AppUpdateServiceL
   });
 }
 
-export async function cleanupPanelRuntimeOwnedBackgroundProcesses(
+export async function cleanupPanelRuntimeOwnedProcesses(
   runtime: PanelRuntime
-): Promise<ProcessRegistryCleanupResult | undefined> {
-  try {
-    return await runtime.processRegistry.cleanupOwnedBackgroundProcesses(runtime.processTerminator);
-  } catch {
-    return undefined;
-  }
+): Promise<ProcessRegistryCleanupResult> {
+  return runtime.processRegistry.cleanupOwnedProcesses(runtime.processTerminator);
 }
 
 async function modelProviderConfigForRun(

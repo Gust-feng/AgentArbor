@@ -239,7 +239,7 @@ test("cleanupByRun terminates only owned active processes for the requested run"
     ]
   );
   assert.equal(result.fact.scope, "run");
-  assert.equal(result.fact.reason, "cancel");
+  assert.equal(result.fact.reason, "run_release");
   assert.equal(result.fact.runId, "run-cleanup");
   assert.equal(registry.get("owned-active")?.facts[0]?.kind, "kill_tree");
   assert.equal(registry.get("owned-active")?.facts[0]?.resultStatus, "killed");
@@ -258,6 +258,69 @@ test("cleanupByRun terminates only owned active processes for the requested run"
   assert.equal(registry.get("unowned-active")?.status, "running");
   assert.equal(registry.get("other-run-active")?.status, "running");
   assert.equal(registry.get("owned-exited")?.status, "exited");
+});
+
+test("cleanupByRun preserves workspace-session services until registry shutdown", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:05:30.000Z") });
+  registry.register({
+    processId: "workspace-service",
+    runId: "run-service",
+    pid: 21006,
+    kind: "background",
+    lifetime: "workspace_session",
+    owned: true,
+    commandLine: "pnpm dev",
+    cwd: "Z:\\AgentArbor",
+    startedAt: "2026-06-15T00:00:00.000Z",
+    status: "running",
+  });
+
+  const killedPids: number[] = [];
+  const terminator = {
+    killTree(pid: number) {
+      killedPids.push(pid);
+      return { status: "killed" as const };
+    },
+  };
+
+  const runCleanup = await registry.cleanupByRun("run-service", terminator);
+  assert.deepEqual(runCleanup.attempted, []);
+  assert.equal(registry.get("workspace-service")?.status, "running");
+
+  const shutdownCleanup = await registry.cleanupOwnedBackgroundProcesses(terminator);
+  assert.deepEqual(killedPids, [21006]);
+  assert.equal(shutdownCleanup.attempted[0]?.processId, "workspace-service");
+  assert.equal(registry.get("workspace-service")?.status, "killed");
+});
+
+test("stopOwned terminates one stable managed process without touching siblings", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:05:45.000Z") });
+  registerProcess(registry, {
+    processId: "managed-target",
+    runId: "run-managed",
+    pid: 21007,
+    owned: true,
+    status: "running",
+  });
+  registerProcess(registry, {
+    processId: "managed-sibling",
+    runId: "run-managed",
+    pid: 21008,
+    owned: true,
+    status: "running",
+  });
+
+  const result = await registry.stopOwned("managed-target", {
+    killTree(pid) {
+      assert.equal(pid, 21007);
+      return { status: "killed", signal: "SIGTERM" };
+    },
+  });
+
+  assert.equal(result.status, "stopped");
+  assert.equal(result.process.status, "killed");
+  assert.equal(registry.get("managed-target")?.status, "killed");
+  assert.equal(registry.get("managed-sibling")?.status, "running");
 });
 
 test("cleanupOwnedBackgroundProcesses terminates only owned unresolved background records on shutdown", async () => {
@@ -337,6 +400,64 @@ test("cleanupOwnedBackgroundProcesses terminates only owned unresolved backgroun
   assert.deepEqual(
     registry.listCleanupFacts()[0]?.attempted.map((attempt) => attempt.outcome),
     ["killed", "already-exited"]
+  );
+});
+
+test("cleanupOwnedProcesses closes registration and terminates all owned unresolved processes", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:06:30.000Z") });
+  registerProcess(registry, {
+    processId: "shutdown-all-background",
+    runId: "run-shutdown-all-a",
+    pid: 21201,
+    owned: true,
+    status: "running",
+  });
+  registerProcess(registry, {
+    processId: "shutdown-all-foreground",
+    runId: "run-shutdown-all-b",
+    pid: 21202,
+    owned: true,
+    status: "running",
+    kind: "foreground",
+  });
+  registerProcess(registry, {
+    processId: "shutdown-all-unowned",
+    runId: "run-shutdown-all-c",
+    pid: 21203,
+    owned: false,
+    status: "running",
+  });
+
+  const killedPids: number[] = [];
+  const result = await registry.cleanupOwnedProcesses({
+    killTree(pid) {
+      killedPids.push(pid);
+      return { status: "killed" };
+    },
+  });
+
+  assert.deepEqual(killedPids, [21201, 21202]);
+  assert.deepEqual(result.attempted.map((attempt) => attempt.processId), [
+    "shutdown-all-background",
+    "shutdown-all-foreground",
+  ]);
+  assert.deepEqual(result.skipped.map((skip) => [skip.processId, skip.reason]), [
+    ["shutdown-all-unowned", "unowned"],
+  ]);
+  assert.equal(registry.get("shutdown-all-background")?.status, "killed");
+  assert.equal(registry.get("shutdown-all-foreground")?.status, "killed");
+  assert.throws(
+    () => registry.register({
+      processId: "late-process",
+      pid: 21204,
+      kind: "background",
+      owned: true,
+      commandLine: "late-process",
+      cwd: "Z:\\AgentArbor",
+      startedAt: "2026-06-15T00:06:31.000Z",
+      status: "running",
+    }),
+    /no longer accepts registrations/
   );
 });
 

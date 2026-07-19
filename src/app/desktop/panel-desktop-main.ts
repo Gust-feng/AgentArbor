@@ -42,6 +42,7 @@ const activeDesktopSessions = new Set<PanelDesktopSession>();
 const startupWindowStates = new WeakMap<BrowserWindow, DesktopStartupWindowState>();
 const mainWindowStates = new WeakMap<BrowserWindow, DesktopMainWindowState>();
 let desktopLocalPreferenceStore: DesktopLocalPreferenceStore | undefined;
+let desktopExitCleanup: Promise<void> | undefined;
 const startupHandoffFallbackTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const startupNativeControlRestoreTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const STARTUP_WINDOW_EXPAND_CHANNEL = "agentarbor:startup-window-expand";
@@ -179,7 +180,7 @@ type DesktopMainWindowState = {
 main().catch((error: unknown) => {
   console.error("AgentArbor 桌面面板启动失败。");
   console.error(error);
-  app.exit(1);
+  exitDesktopAfterCleanup(1);
 });
 
 async function main(): Promise<void> {
@@ -207,8 +208,26 @@ async function main(): Promise<void> {
         });
       },
       onBeforeQuit: (handler) => {
-        app.on("before-quit", () => {
-          void handler();
+        let cleanupStarted = false;
+        let cleanupComplete = false;
+        app.on("before-quit", (event) => {
+          if (cleanupComplete) {
+            return;
+          }
+          event.preventDefault();
+          if (cleanupStarted) {
+            return;
+          }
+          cleanupStarted = true;
+          void handler()
+            .catch((error: unknown) => {
+              console.error("关闭桌面面板服务器失败。");
+              console.error(error);
+            })
+            .finally(() => {
+              cleanupComplete = true;
+              app.quit();
+            });
         });
       },
       onSessionClosed: () => {
@@ -241,8 +260,23 @@ async function main(): Promise<void> {
     clearStartupWindowSmokeTimeout();
     console.error("AgentArbor 桌面面板启动失败。");
     console.error(error);
-    app.exit(1);
+    exitDesktopAfterCleanup(1);
   }
+}
+
+function exitDesktopAfterCleanup(exitCode: number): void {
+  desktopExitCleanup ??= (async () => {
+    const results = await Promise.allSettled(
+      [...activeDesktopSessions].map((session) => session.close())
+    );
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("强制退出前关闭桌面面板服务器失败。");
+        console.error(result.reason);
+      }
+    }
+    app.exit(exitCode);
+  })();
 }
 
 function configureDesktopAppIdentity(): void {
@@ -856,7 +890,7 @@ function scheduleStartupWindowSmokeTimeout(): void {
   startupWindowSmokeTimeout = setTimeout(() => {
     console.error("AgentArbor desktop window smoke timed out before startup handoff completed.");
     printStartupWindowSmokeEvents();
-    app.exit(1);
+    exitDesktopAfterCleanup(1);
   }, STARTUP_WINDOW_SMOKE_TIMEOUT_MS);
 }
 
@@ -869,7 +903,7 @@ function completeStartupWindowSmokeIfRequested(mainWindow: BrowserWindow): void 
   if (timelineError !== undefined) {
     console.error(timelineError);
     printStartupWindowSmokeEvents();
-    app.exit(1);
+    exitDesktopAfterCleanup(1);
     return;
   }
   clearStartupWindowSmokeTimeout();

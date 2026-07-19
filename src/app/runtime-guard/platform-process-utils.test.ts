@@ -215,6 +215,7 @@ test("createPlatformProcessTerminator adapts killProcessTree to ProcessTerminato
     processId: "process-a",
     pid: 4321,
     kind: "background",
+    lifetime: "run",
     owned: true,
     commandLine: "node server.js",
     cwd: "Z:\\AgentArbor",

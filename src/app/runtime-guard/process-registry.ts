@@ -11,6 +11,8 @@ export type ProcessStatus = "starting" | "running" | "exited" | "killing" | "kil
 
 export type ProcessKind = "background" | "foreground";
 
+export type ProcessLifetime = "run" | "workspace_session";
+
 export type ProcessPortFact = {
   readonly port: number;
   readonly host: LocalPortHost;
@@ -56,6 +58,7 @@ export type ProcessRecord = {
   readonly toolCallId?: string;
   readonly pid?: number;
   readonly kind: ProcessKind;
+  readonly lifetime: ProcessLifetime;
   readonly owned: boolean;
   readonly commandLine: string;
   readonly cwd: string;
@@ -71,7 +74,8 @@ export type ProcessRecord = {
   readonly facts: readonly ProcessFact[];
 };
 
-export type ProcessRegistration = Omit<ProcessRecord, "ports" | "facts"> & {
+export type ProcessRegistration = Omit<ProcessRecord, "lifetime" | "ports" | "facts"> & {
+  readonly lifetime?: ProcessLifetime;
   readonly ports?: readonly ProcessPortFact[];
   readonly facts?: readonly ProcessFact[];
 };
@@ -84,7 +88,7 @@ export type MarkProcessExitedInput = {
   readonly exitedAt?: string;
 };
 
-export type ProcessCleanupSkipReason = "unowned" | "inactive_status";
+export type ProcessCleanupSkipReason = "unowned" | "inactive_status" | "lifetime_mismatch";
 
 export type ProcessCleanupSkip = {
   readonly processId: string;
@@ -104,7 +108,7 @@ export type ProcessCleanupAttempt = {
   readonly killTree: ProcessKillTreeResult;
 };
 
-export type ProcessCleanupReason = "cancel" | "shutdown";
+export type ProcessCleanupReason = "run_release" | "cancel" | "shutdown";
 
 export type ProcessCleanupScope = "run" | "registry";
 
@@ -129,8 +133,24 @@ export type ProcessCleanupResult = {
 export type ProcessCleanupOptions = {
   readonly includeUnowned?: boolean;
   readonly statuses?: readonly ProcessStatus[];
+  readonly lifetimes?: readonly ProcessLifetime[];
   readonly reason?: ProcessCleanupReason;
 };
+
+export type ProcessStopResult =
+  | {
+      readonly status: "not_found";
+      readonly processId: string;
+    }
+  | {
+      readonly status: "not_owned" | "already_stopped";
+      readonly process: ProcessRecord;
+    }
+  | {
+      readonly status: "stopped" | "unknown" | "failed";
+      readonly process: ProcessRecord;
+      readonly killTree: ProcessKillTreeResult;
+    };
 
 export type ProcessRegistryCleanupResult = {
   readonly kind: "process_registry_cleanup";
@@ -149,6 +169,7 @@ export type ProcessRunProcessSummary = {
   readonly toolCallId?: string;
   readonly pid?: number;
   readonly kind: ProcessKind;
+  readonly lifetime: ProcessLifetime;
   readonly owned: boolean;
   readonly commandLine: string;
   readonly cwd: string;
@@ -193,18 +214,23 @@ export class InMemoryProcessRegistry {
   private readonly cleanupFacts: ProcessCleanupFact[] = [];
   private readonly residueSummaries: ProcessRunResidueSummary[] = [];
   private readonly now: ProcessRegistryClock;
+  private acceptingRegistrations = true;
 
   constructor(options: { readonly now?: ProcessRegistryClock } = {}) {
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
   register(input: ProcessRegistration): ProcessRecord {
+    if (!this.acceptingRegistrations) {
+      throw new Error("Process registry is shutting down and no longer accepts registrations.");
+    }
     if (this.records.has(input.processId)) {
       throw new Error(`Process already registered: ${input.processId}`);
     }
 
     const record: ProcessRecord = {
       ...input,
+      lifetime: input.lifetime ?? "run",
       ports: clonePortFacts(input.ports ?? []),
       facts: cloneFacts(input.facts ?? []),
     };
@@ -305,11 +331,12 @@ export class InMemoryProcessRegistry {
     const cleanup = await this.cleanupMatchingRecords({
       scope: "run",
       runId,
-      reason: options.reason ?? "cancel",
+      reason: options.reason ?? "run_release",
       records: Array.from(this.records.values()).filter((record) => record.runId === runId),
       terminator,
       includeUnowned: options.includeUnowned ?? false,
       statuses: options.statuses ?? UNRESOLVED_PROCESS_STATUSES,
+      lifetimes: options.lifetimes ?? ["run"],
     });
 
     return {
@@ -332,6 +359,7 @@ export class InMemoryProcessRegistry {
       terminator,
       includeUnowned: false,
       statuses: options.statuses ?? UNRESOLVED_PROCESS_STATUSES,
+      lifetimes: options.lifetimes,
     });
     return {
       kind: "process_registry_cleanup",
@@ -343,6 +371,56 @@ export class InMemoryProcessRegistry {
     };
   }
 
+  async cleanupOwnedProcesses(
+    terminator: ProcessTerminator,
+    options: Omit<ProcessCleanupOptions, "includeUnowned"> = {}
+  ): Promise<ProcessRegistryCleanupResult> {
+    // Closing admission before the first await prevents a new owned process
+    // from escaping after the shutdown snapshot has been taken.
+    this.acceptingRegistrations = false;
+    const cleanup = await this.cleanupMatchingRecords({
+      scope: "registry",
+      reason: options.reason ?? "shutdown",
+      records: Array.from(this.records.values()),
+      terminator,
+      includeUnowned: false,
+      statuses: options.statuses ?? UNRESOLVED_PROCESS_STATUSES,
+      lifetimes: options.lifetimes,
+    });
+    return {
+      kind: "process_registry_cleanup",
+      reason: cleanup.fact.reason,
+      observedAt: cleanup.fact.observedAt,
+      attempted: cleanup.attempted,
+      skipped: cleanup.skipped,
+      fact: cleanup.fact,
+    };
+  }
+
+  async stopOwned(processId: string, terminator: ProcessTerminator): Promise<ProcessStopResult> {
+    const record = this.records.get(processId);
+    if (record === undefined) {
+      return { status: "not_found", processId };
+    }
+    if (!record.owned) {
+      return { status: "not_owned", process: cloneRecord(record) };
+    }
+    if (!isUnresolvedStatus(record.status)) {
+      return { status: "already_stopped", process: cloneRecord(record) };
+    }
+
+    const attempt = await this.terminateRecord(record, terminator);
+    const process = cloneRecord(this.records.get(processId) ?? record);
+    if (attempt.outcome === "killed" || attempt.outcome === "already-exited") {
+      return { status: "stopped", process, killTree: attempt.killTree };
+    }
+    return {
+      status: attempt.outcome === "error" ? "failed" : "unknown",
+      process,
+      killTree: attempt.killTree,
+    };
+  }
+
   private async cleanupMatchingRecords(input: {
     readonly scope: ProcessCleanupScope;
     readonly runId?: string;
@@ -351,6 +429,7 @@ export class InMemoryProcessRegistry {
     readonly terminator: ProcessTerminator;
     readonly includeUnowned: boolean;
     readonly statuses: readonly ProcessStatus[];
+    readonly lifetimes?: readonly ProcessLifetime[];
   }): Promise<{
     readonly attempted: readonly ProcessCleanupAttempt[];
     readonly skipped: readonly ProcessCleanupSkip[];
@@ -369,47 +448,11 @@ export class InMemoryProcessRegistry {
         skipped.push(cleanupSkip(record, "inactive_status"));
         continue;
       }
-
-      const before = this.records.get(record.processId);
-      if (before === undefined) {
+      if (input.lifetimes !== undefined && !input.lifetimes.includes(record.lifetime)) {
+        skipped.push(cleanupSkip(record, "lifetime_mismatch"));
         continue;
       }
-
-      this.records.set(record.processId, cloneRecord({ ...before, status: "killing" }));
-
-      const killTree = await this.killTree(record, input.terminator);
-      const observedAt = this.now();
-      const latest = this.records.get(record.processId) ?? before;
-      const nextStatus = latest.status === "exited" ? "exited" : processStatusFromKillTree(killTree);
-      const fact: ProcessKillTreeFact = {
-        kind: "kill_tree",
-        observedAt,
-        pid: before.pid,
-        beforeStatus: before.status,
-        resultStatus: killTree.status,
-        exitCode: killTree.exitCode,
-        signal: killTree.signal,
-        message: killTree.message,
-        errorMessage: killTree.errorMessage,
-      };
-      const next: ProcessRecord = {
-        ...latest,
-        status: nextStatus,
-        endedAt: isTerminalStatus(nextStatus) ? latest.endedAt ?? observedAt : latest.endedAt,
-        exitCode: killTree.exitCode ?? latest.exitCode,
-        signal: killTree.signal ?? latest.signal,
-        facts: [...latest.facts, fact],
-      };
-
-      this.records.set(record.processId, cloneRecord(next));
-      attempted.push({
-        processId: record.processId,
-        pid: before.pid,
-        beforeStatus: before.status,
-        afterStatus: next.status,
-        outcome: cleanupOutcomeFromKillTree(killTree),
-        killTree: cloneKillTreeResult(killTree),
-      });
+      attempted.push(await this.terminateRecord(record, input.terminator));
     }
 
     const cleanupBase: ProcessCleanupFact = {
@@ -428,6 +471,48 @@ export class InMemoryProcessRegistry {
       attempted: attempted.map(cloneCleanupAttempt),
       skipped: skipped.map(cloneCleanupSkip),
       fact: cloneCleanupFact(cleanupFact),
+    };
+  }
+
+  private async terminateRecord(
+    record: ProcessRecord,
+    terminator: ProcessTerminator,
+  ): Promise<ProcessCleanupAttempt> {
+    const before = this.records.get(record.processId) ?? record;
+    this.records.set(record.processId, cloneRecord({ ...before, status: "killing" }));
+
+    const killTree = await this.killTree(before, terminator);
+    const observedAt = this.now();
+    const latest = this.records.get(record.processId) ?? before;
+    const nextStatus = latest.status === "exited" ? "exited" : processStatusFromKillTree(killTree);
+    const fact: ProcessKillTreeFact = {
+      kind: "kill_tree",
+      observedAt,
+      pid: before.pid,
+      beforeStatus: before.status,
+      resultStatus: killTree.status,
+      exitCode: killTree.exitCode,
+      signal: killTree.signal,
+      message: killTree.message,
+      errorMessage: killTree.errorMessage,
+    };
+    const next: ProcessRecord = {
+      ...latest,
+      status: nextStatus,
+      endedAt: isTerminalStatus(nextStatus) ? latest.endedAt ?? observedAt : latest.endedAt,
+      exitCode: killTree.exitCode ?? latest.exitCode,
+      signal: killTree.signal ?? latest.signal,
+      facts: [...latest.facts, fact],
+    };
+
+    this.records.set(record.processId, cloneRecord(next));
+    return {
+      processId: record.processId,
+      pid: before.pid,
+      beforeStatus: before.status,
+      afterStatus: next.status,
+      outcome: cleanupOutcomeFromKillTree(killTree),
+      killTree: cloneKillTreeResult(killTree),
     };
   }
 
@@ -592,6 +677,7 @@ function cloneRunProcessSummary(summary: ProcessRunProcessSummary): ProcessRunPr
   const clone: ProcessRunProcessSummary = {
     processId: summary.processId,
     kind: summary.kind,
+    lifetime: summary.lifetime,
     owned: summary.owned,
     commandLine: summary.commandLine,
     cwd: summary.cwd,
@@ -642,6 +728,7 @@ function processRunProcessSummary(record: ProcessRecord): ProcessRunProcessSumma
     toolCallId: record.toolCallId,
     pid: record.pid,
     kind: record.kind,
+    lifetime: record.lifetime,
     owned: record.owned,
     commandLine: record.commandLine,
     cwd: record.cwd,

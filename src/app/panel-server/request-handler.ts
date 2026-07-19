@@ -20,7 +20,7 @@ import { handlePanelContextRoute } from "./context-routes.js";
 import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 import { parseSkillStateRequest } from "./request-parsers.js";
 import {
-  cleanupPanelRuntimeOwnedBackgroundProcesses,
+  cleanupPanelRuntimeOwnedProcesses,
   createPanelRuntime,
   isPanelRuntime,
   type PanelRuntime,
@@ -320,7 +320,7 @@ export async function closePanelServer(
   });
 
   const runtimeCleanup = (async () => {
-    await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
+    await cleanupPanelRuntimeOwnedProcesses(runtime);
     await waitForPanelRequestIdle(server, runtime);
     await Promise.all([
       ordinaryDisposal,
@@ -331,7 +331,6 @@ export async function closePanelServer(
     } else {
       await runtime.toolOutputStore.clear();
     }
-    await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
   })();
   // A forced timeout may return while a broken provider promise is still
   // pending. Own its eventual rejection so shutdown never creates an unhandled
@@ -364,7 +363,7 @@ export async function closePanelServer(
 async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promise<void> {
   runtime.isQuiescing = true;
   const cleanupResults = await Promise.allSettled([
-    cleanupPanelRuntimeOwnedBackgroundProcesses(runtime),
+    cleanupPanelRuntimeOwnedProcesses(runtime),
     runtime.ordinaryAgentFeature.release(),
     runtime.multiAgentFeature.dispose(),
   ]);
@@ -377,11 +376,6 @@ async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promi
     } else {
       await runtime.toolOutputStore.clear();
     }
-  } catch (error) {
-    cleanupErrors.push(error);
-  }
-  try {
-    await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
   } catch (error) {
     cleanupErrors.push(error);
   }

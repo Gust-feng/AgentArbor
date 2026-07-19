@@ -23,6 +23,7 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
     ownerId: "ordinary-run",
   });
   const disposalOrder: string[] = [];
+  let processCleanupCount = 0;
   const runtime = {
     isQuiescing: false,
     activeRequestJobs: new Set<Promise<void>>(),
@@ -33,7 +34,10 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
       async dispose() { disposalOrder.push("multi-agent"); },
     },
     processRegistry: {
-      async cleanupOwnedBackgroundProcesses() { return undefined; },
+      async cleanupOwnedProcesses() {
+        processCleanupCount += 1;
+        return undefined;
+      },
     },
     processTerminator: {},
     toolOutputStore: outputStore,
@@ -43,5 +47,6 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
 
   assert.equal(runtime.isQuiescing, true);
   assert.deepEqual(disposalOrder.sort(), ["multi-agent", "ordinary"]);
+  assert.equal(processCleanupCount, 1);
   assert.equal(await outputStore.read(retained.ref, { startChar: 0, maxChars: 64 }), undefined);
 });

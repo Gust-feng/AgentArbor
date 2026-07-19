@@ -62,6 +62,7 @@ export type AgentRunResources<
   readonly toolContributions: readonly AgentToolRegistryContribution[];
   readonly release: () => Promise<void>;
   readonly processRegistry?: LocalCommandProcessRegistry;
+  readonly processTerminator?: ProcessTerminator;
   readonly toolOutputStore?: ToolOutputStore;
 };
 
@@ -164,6 +165,7 @@ export async function prepareAgentRunResources<TCapabilitySnapshot extends Agent
       await mcpManager?.disconnectAll?.().catch(() => undefined);
     },
     processRegistry: runtime.processRegistry,
+    processTerminator: runtime.processTerminator,
     toolOutputStore: runtime.toolOutputStore,
   };
 }
@@ -242,6 +244,7 @@ export function createAgentToolCenterFactory(
     playwrightAvailable: resources.playwrightAvailable,
     toolRegistryScopes: resources.toolRegistryScopes,
     processRegistry: resources.processRegistry,
+    processTerminator: resources.processTerminator,
     contributions: [...resources.toolContributions, ...(context?.contributions ?? [])],
     taskSoil: context?.taskSoil,
     modelCapabilities: resources.capabilitySnapshot.modelCapabilities,

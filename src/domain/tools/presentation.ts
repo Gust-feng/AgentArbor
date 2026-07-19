@@ -123,6 +123,18 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayName: "Shell 命令",
     displayDescription: "在当前会话 Shell 中运行命令，适合构建、测试、脚本和通用 CLI 工作流。",
   },
+  start_process: {
+    displayName: "启动进程",
+    displayDescription: "启动跨本轮运行持续存在的工作区服务，并返回稳定进程标识和日志引用。",
+  },
+  inspect_process: {
+    displayName: "检查进程",
+    displayDescription: "按稳定进程标识检查工作区受管进程的状态、端口和日志引用。",
+  },
+  stop_process: {
+    displayName: "停止进程",
+    displayDescription: "按稳定进程标识停止一个工作区受管进程。",
+  },
   call_sub_agent: {
     displayName: "调用专家",
     displayDescription: "将一项边界清楚的任务交给已登记专家，并将结果返回当前 Agent。",

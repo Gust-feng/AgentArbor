@@ -15,6 +15,7 @@ import type { ToolRegistryScope } from "./tool-registry.js";
 import type { ConfigCenter } from "../config-center/index.js";
 import { ToolRegistry, type ToolRegistryEntry } from "./tool-registry.js";
 import type { LocalCommandProcessRegistry } from "./adapters/local-workspace-command-tools.js";
+import type { ProcessTerminator } from "../runtime-guard/index.js";
 import type { ToolOutputStore } from "./tool-output-store.js";
 
 export type AgentToolRuntimeContext = {
@@ -40,6 +41,7 @@ export type CreateAgentToolCenterOptions = {
   readonly toolRegistryScopes?: readonly ToolRegistryScope[];
   readonly commandShell?: SanitizedCommandShellConfig;
   readonly processRegistry?: LocalCommandProcessRegistry;
+  readonly processTerminator?: ProcessTerminator;
   readonly contributions?: readonly AgentToolRegistryContribution[];
   readonly taskSoil?: TaskSoil;
   readonly modelCapabilities?: ModelCapabilities;

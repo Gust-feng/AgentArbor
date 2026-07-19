@@ -24,6 +24,7 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "http_request",
     "inspect_context_attachment_archive",
     "inspect_context_attachment_table",
+    "inspect_process",
     "list_context_attachment_files",
     "list_context_attachments",
     "list_dir",
@@ -36,6 +37,8 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "search",
     "search_context_attachment_files",
     "shell_command",
+    "start_process",
+    "stop_process",
     "write_file",
   ]);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.requiresConfirmation, true);
@@ -82,6 +85,9 @@ test("desktop-basic model-visible tools satisfy the executable factual contract"
     "edit_file",
     "delete_file",
     "shell_command",
+    "start_process",
+    "inspect_process",
+    "stop_process",
     "list_context_attachments",
     "read_context_attachment_text",
     "read_context_attachment_pdf_text",

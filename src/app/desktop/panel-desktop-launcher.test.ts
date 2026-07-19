@@ -79,7 +79,7 @@ test("panel desktop smoke starts and closes the local server without creating a 
     closes: 0,
     sessionClosed: 0,
   };
-  let beforeQuitHandler: (() => void) | undefined;
+  let beforeQuitHandler: (() => Promise<void>) | undefined;
   let windowAllClosedHandler: (() => void) | undefined;
   const dependencies: PanelDesktopDependencies = {
     startPanelServer: async (options) => {
@@ -147,7 +147,7 @@ test("panel desktop smoke starts and closes the local server without creating a 
   assert.equal(beforeQuitHandler !== undefined, true);
   assert.equal(windowAllClosedHandler !== undefined, true);
 
-  beforeQuitHandler?.();
+  await beforeQuitHandler?.();
   await flushMicrotasks();
   windowAllClosedHandler?.();
   await flushMicrotasks();
@@ -207,7 +207,7 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
     quits: 0,
     sessionClosed: 0,
   };
-  let beforeQuitHandler: (() => void) | undefined;
+  let beforeQuitHandler: (() => Promise<void>) | undefined;
   let windowAllClosedHandler: (() => void) | undefined;
   let createdWindow: FakePanelDesktopWindow | undefined;
   const dependencies: PanelDesktopDependencies = {
@@ -278,7 +278,7 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
   assert.equal(calls.sessionClosed, 1);
   assert.equal(calls.quits, 1);
 
-  beforeQuitHandler?.();
+  await beforeQuitHandler?.();
   await flushMicrotasks();
   assert.equal(calls.closes, 1);
   assert.equal(calls.sessionClosed, 1);
@@ -286,6 +286,66 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
   await session.close();
   assert.equal(calls.closes, 1);
   assert.equal(calls.sessionClosed, 1);
+});
+
+test("panel desktop session shares an in-flight server close across quit signals", async () => {
+  let beforeQuitHandler: (() => Promise<void>) | undefined;
+  let windowAllClosedHandler: (() => void) | undefined;
+  let resolveClose!: () => void;
+  const closeGate = new Promise<void>((resolve) => {
+    resolveClose = resolve;
+  });
+  const calls = { closes: 0, quits: 0, sessionClosed: 0 };
+  const session = await startPanelDesktopSession(
+    {
+      host: "127.0.0.1",
+      port: 0,
+      smoke: false,
+      windowSmoke: false,
+    },
+    {
+      startPanelServer: async () => ({
+        url: "http://127.0.0.1:54330/",
+        close: async () => {
+          calls.closes += 1;
+          await closeGate;
+        },
+      }),
+      createWindow: () => createFakePanelDesktopWindow(),
+      whenReady: Promise.resolve(),
+      onBeforeQuit: (handler) => {
+        beforeQuitHandler = handler;
+      },
+      onWindowAllClosed: (handler) => {
+        windowAllClosedHandler = handler;
+      },
+      onSessionClosed: () => {
+        calls.sessionClosed += 1;
+      },
+      quit: () => {
+        calls.quits += 1;
+      },
+    },
+  );
+
+  windowAllClosedHandler?.();
+  await flushMicrotasks();
+  const beforeQuit = beforeQuitHandler?.();
+  await flushMicrotasks();
+
+  assert.equal(calls.closes, 1);
+  assert.equal(calls.quits, 0);
+  assert.equal(calls.sessionClosed, 0);
+
+  resolveClose();
+  await beforeQuit;
+  await flushMicrotasks();
+
+  assert.equal(calls.closes, 1);
+  assert.equal(calls.quits, 1);
+  assert.equal(calls.sessionClosed, 1);
+  await session.close();
+  assert.equal(calls.closes, 1);
 });
 
 test("panel desktop session injects workspace picker only outside smoke mode", async () => {

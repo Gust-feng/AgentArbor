@@ -97,7 +97,7 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       output,
     });
   }
-  if (request.toolName === "shell_command") {
+  if (request.toolName === "shell_command" || request.toolName === "start_process" || request.toolName === "stop_process") {
     const stdout = stringOrUndefined(record.stdout);
     const stderr = stringOrUndefined(record.stderr);
     const commandLine = commandTextFromToolResult(record, request.input);

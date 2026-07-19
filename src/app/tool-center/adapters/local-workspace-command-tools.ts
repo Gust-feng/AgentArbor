@@ -21,9 +21,12 @@ import {
   type LocalPortProbeFact,
   type PortOccupantProbe,
   type ProcessPortFact,
+  type ProcessLifetime,
   type ProcessRecord,
   type ProcessRecordUpdate,
   type ProcessRegistration,
+  type ProcessStopResult,
+  type ProcessTerminator,
 } from "../../runtime-guard/index.js";
 import { toSanitizedCommandShellConfig } from "../../config-center/command-shell-settings.js";
 import {
@@ -69,6 +72,8 @@ type CommandExecutionResult = {
   readonly cancelled?: boolean;
   readonly signal?: string;
   readonly background?: boolean;
+  readonly processState?: ProcessRecord["status"];
+  readonly lifetime?: ProcessLifetime;
   readonly pid?: number;
   readonly logRef?: string;
   readonly logPath?: string;
@@ -99,6 +104,8 @@ type CommandLogTarget = {
 export type LocalCommandProcessRegistry = {
   readonly register: (input: ProcessRegistration) => unknown;
   readonly listAll?: () => readonly ProcessRecord[];
+  readonly get?: (processId: string) => ProcessRecord | undefined;
+  readonly stopOwned?: (processId: string, terminator: ProcessTerminator) => Promise<ProcessStopResult>;
   readonly update?: (processId: string, patch: ProcessRecordUpdate) => unknown;
   readonly markExited?: (
     processId: string,
@@ -172,6 +179,7 @@ export function createLocalShellCommandTool(
         positiveInteger(record.waitForPortTimeoutMs) ?? DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS
       );
       const background = record.background === true;
+      const lifetime = background ? processLifetime(record.lifetime) : "run";
       const cwd = await resolveCommandCwd(rootDirectory, record.cwd);
       const processFacts = commandProcessFacts(options.processRegistry, context);
       const progress = createCommandProgressReporter(context);
@@ -211,13 +219,14 @@ export function createLocalShellCommandTool(
             preStartPortOccupancy,
             startedAt,
           }),
+          lifetime,
           truncated: false,
         });
       }
       const rawOutcome = background
         ? normalized.directProgram === undefined || !executeDirectly
-          ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
-          : await runBackgroundProgramCommand(commandShell, normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
+          ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, lifetime, processFacts)
+          : await runBackgroundProgramCommand(commandShell, normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, lifetime, processFacts)
         : normalized.directProgram === undefined || !executeDirectly
           ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts, progress)
           : await runProgramCommand(normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts, progress);
@@ -238,6 +247,8 @@ export function createLocalShellCommandTool(
         directArgs: normalized.directArgs,
         shell: commandShell,
         result,
+        processId: rawOutcome.processId,
+        lifetime,
         truncated: false,
       });
     },
@@ -282,7 +293,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
       inputNotes: [
         "commandLine is the normal complete shell command line.",
         "command plus args executes a program directly with argv and bypasses shell parsing.",
-        "background=true starts a detached process and returns immediately with pid, logRef, diagnostic logPath, and stopCommand.",
+        "background=true starts a workspace-session managed process and returns immediately with processId, pid, state, lifetime, logRef, diagnostic logPath, and stopCommand.",
         "cwd optionally selects a workspace-relative working directory; omit it to run from the workspace root.",
         `backgroundWaitMs watches a background command for early exit and initial logs; defaults to ${DEFAULT_BACKGROUND_WAIT_MS} and is capped at ${MAX_BACKGROUND_WAIT_MS}.`,
         `waitForPort optionally waits for a localhost TCP port to become reachable after a background command starts; waitForPortTimeoutMs defaults to ${DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS} and is capped at ${MAX_WAIT_FOR_PORT_TIMEOUT_MS}.`,
@@ -296,7 +307,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
       usageNotes: [
         "Choose the command form yourself based on the current shell and the task.",
         "Use commandLine for normal shell commands, pipelines, redirection, chaining, environment expansion, shell builtins, and shell-native quoting.",
-        "Use background=true for dev servers, file watchers, long-running demos, and other commands expected to keep running.",
+        "Prefer start_process for dev servers, file watchers, long-running demos, and other commands expected to keep running. background=true remains compatible and uses the same workspace-session lifetime by default.",
         "Use command and args when quoting would be fragile, especially for inline scripts such as node -e, python -c, or paths and arguments that are easier to express as argv.",
         "Use this tool for normal filesystem commands such as mkdir, rmdir, copy, move, and recursive cleanup.",
         "For dev servers, combine background=true with waitForPort so the tool returns only after the local port is reachable or the port wait times out.",
@@ -310,7 +321,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "shell records the shell that executed the command.",
         "cwd records the workspace-relative working directory used for the command.",
         "timedOut is true when the foreground command exceeded timeoutMs; stdout/stderr contain captured output before termination.",
-        "background, pid, logRef, logPath, and stopCommand describe detached background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
+        "background, processId, processState, lifetime, pid, logRef, logPath, and stopCommand describe managed background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
         "Use logRef as the controlled command-log entry point. logPath is retained only as a diagnostic filesystem detail.",
         "When output is truncated or a background log can keep growing, continuation.nextInput reads the controlled logRef.",
         "durationMs records total observed tool execution time; portReady records whether waitForPort became reachable.",
@@ -382,6 +393,11 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
           type: "boolean",
           description: "If true, start the command as a detached background process and return pid, logRef, diagnostic logPath, and stopCommand without waiting for the process to exit.",
         },
+        lifetime: {
+          type: "string",
+          enum: ["run", "workspace_session"],
+          description: "Background process lifetime. Defaults to workspace_session so services survive the Agent run; run binds cleanup to the current run.",
+        },
         backgroundWaitMs: {
           type: "number",
           description: `Optional background startup observation window in milliseconds. Defaults to ${DEFAULT_BACKGROUND_WAIT_MS}; maximum ${MAX_BACKGROUND_WAIT_MS}.`,
@@ -407,6 +423,8 @@ function commandToolOutput(input: {
   readonly directArgs: readonly string[];
   readonly shell: SanitizedCommandShellConfig;
   readonly result: CommandExecutionResult;
+  readonly processId?: string;
+  readonly lifetime: ProcessLifetime;
   readonly truncated: boolean;
 }): {
   readonly refId: string;
@@ -435,6 +453,9 @@ function commandToolOutput(input: {
   readonly cancelled?: boolean;
   readonly signal?: string;
   readonly background?: boolean;
+  readonly processId?: string;
+  readonly processState?: ProcessRecord["status"];
+  readonly lifetime?: ProcessLifetime;
   readonly pid?: number;
   readonly logRef?: string;
   readonly logPath?: string;
@@ -493,6 +514,11 @@ function commandToolOutput(input: {
     cancelled: input.result.cancelled === true ? true : undefined,
     signal: input.result.signal,
     background: input.result.background === true ? true : undefined,
+    ...(input.result.background === true && input.processId !== undefined
+      ? { processId: input.processId }
+      : {}),
+    processState: input.result.processState,
+    lifetime: input.result.background === true ? input.lifetime : undefined,
     pid: input.result.pid,
     logRef: input.result.logRef,
     logPath: input.result.logPath,
@@ -666,12 +692,8 @@ function registerCommandProcess(
     toolCallId: facts.toolCallId,
     owned: true,
   };
-  try {
-    facts.registry.register(registration);
-    return processId;
-  } catch {
-    return undefined;
-  }
+  facts.registry.register(registration);
+  return processId;
 }
 
 function markCommandProcessExited(
@@ -893,6 +915,7 @@ async function runBackgroundShellCommand(
   workingDirectory: string,
   relativeCwd: string,
   waitMs: number,
+  lifetime: ProcessLifetime,
   processFacts: CommandProcessFacts | undefined
 ): Promise<CommandExecutionOutcome> {
   const logTarget = await createCommandLogTarget(commandLine);
@@ -905,6 +928,7 @@ async function runBackgroundShellCommand(
     waitMs,
     stopShellSyntax: shell.syntax,
     platform: shell.platform,
+    lifetime,
     logTarget,
     captureMode: "shell-redirection",
     windowsVerbatimArguments: shell.syntax === "cmd",
@@ -920,6 +944,7 @@ async function runBackgroundProgramCommand(
   workingDirectory: string,
   relativeCwd: string,
   waitMs: number,
+  lifetime: ProcessLifetime,
   processFacts: CommandProcessFacts | undefined
 ): Promise<CommandExecutionOutcome> {
   return runBackgroundCommand({
@@ -931,6 +956,7 @@ async function runBackgroundProgramCommand(
     waitMs,
     stopShellSyntax: shell.syntax,
     platform: shell.platform,
+    lifetime,
     processFacts,
   });
 }
@@ -1076,14 +1102,26 @@ async function runSpawnedCommand(
       reject(error);
       return;
     }
-    processId = registerCommandProcess(processFacts, {
-      kind: "foreground",
-      pid: child.pid,
-      commandLine: options.commandLine,
-      cwd: workingDirectory,
-      startedAt: new Date().toISOString(),
-      status: "running",
-    });
+    try {
+      processId = registerCommandProcess(processFacts, {
+        kind: "foreground",
+        lifetime: "run",
+        pid: child.pid,
+        commandLine: options.commandLine,
+        cwd: workingDirectory,
+        startedAt: new Date().toISOString(),
+        status: "running",
+      });
+    } catch (error) {
+      child.once("error", () => undefined);
+      terminateProcessTree(child);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      closeLog();
+      removeLog();
+      reject(error);
+      return;
+    }
     if (child.stdout === null || child.stderr === null) {
       closeLog();
       removeLog();
@@ -1306,6 +1344,7 @@ async function runBackgroundCommand(input: {
   readonly waitMs: number;
   readonly stopShellSyntax: SanitizedCommandShellConfig["syntax"];
   readonly platform: NodeJS.Platform;
+  readonly lifetime: ProcessLifetime;
   readonly logTarget?: CommandLogTarget;
   readonly captureMode?: "stdio" | "shell-redirection";
   readonly windowsVerbatimArguments?: boolean;
@@ -1329,8 +1368,6 @@ async function runBackgroundCommand(input: {
     const start = await waitForBackgroundStart(child, input.waitMs);
     if (start.status === "exited") {
       earlyExit = { code: start.code, signal: start.signal };
-    } else {
-      child.unref();
     }
   } finally {
     if (logFd !== undefined) {
@@ -1344,6 +1381,7 @@ async function runBackgroundCommand(input: {
   if (earlyExit !== undefined) {
     const processId = registerCommandProcess(input.processFacts, {
       kind: "background",
+      lifetime: input.lifetime,
       pid,
       commandLine: input.commandLine,
       cwd: input.workingDirectory,
@@ -1362,6 +1400,9 @@ async function runBackgroundCommand(input: {
         stdout: logPreview.text,
         stderr,
         exitCode: typeof earlyExit.code === "number" ? earlyExit.code : COMMAND_CANCELLED_EXIT_CODE,
+        background: true,
+        processState: "exited",
+        lifetime: input.lifetime,
         cwd: input.relativeCwd,
         signal: earlyExit.signal ?? undefined,
         logRef: logTarget.ref,
@@ -1375,17 +1416,26 @@ async function runBackgroundCommand(input: {
     };
   }
   const stopCommand = pid === undefined ? undefined : stopCommandForPid(pid, input.platform, input.stopShellSyntax);
-  const processId = registerCommandProcess(input.processFacts, {
-    kind: "background",
-    pid,
-    commandLine: input.commandLine,
-    cwd: input.workingDirectory,
-    startedAt,
-    status: "running",
-    logRef: logTarget.ref,
-    logPath,
-    stopCommand,
-  });
+  let processId: string | undefined;
+  try {
+    processId = registerCommandProcess(input.processFacts, {
+      kind: "background",
+      lifetime: input.lifetime,
+      pid,
+      commandLine: input.commandLine,
+      cwd: input.workingDirectory,
+      startedAt,
+      status: "running",
+      logRef: logTarget.ref,
+      logPath,
+      stopCommand,
+    });
+  } catch (error) {
+    child.once("error", () => undefined);
+    terminateProcessTree(child);
+    throw error;
+  }
+  child.unref();
   const initialLogPreview = await readBackgroundLogPreview(logPath, BACKGROUND_LOG_PREVIEW_CHARS);
   const stdout = [
     `Started background process${pid === undefined ? "" : ` pid ${pid}`}.`,
@@ -1398,9 +1448,11 @@ async function runBackgroundCommand(input: {
     result: {
       stdout,
       stderr: "",
-      exitCode: 0,
+      exitCode: null,
       cwd: input.relativeCwd,
       background: true,
+      processState: "running",
+      lifetime: input.lifetime,
       pid,
       logRef: logTarget.ref,
       logPath,
@@ -1700,6 +1752,16 @@ function optionalPort(value: unknown): number | undefined {
     throw new Error("waitForPort must be an integer TCP port between 1 and 65535.");
   }
   return port;
+}
+
+function processLifetime(value: unknown): ProcessLifetime {
+  if (value === undefined) {
+    return "workspace_session";
+  }
+  if (value === "run" || value === "workspace_session") {
+    return value;
+  }
+  throw new Error("lifetime must be run or workspace_session.");
 }
 
 async function shouldExecuteDirectly(input: {

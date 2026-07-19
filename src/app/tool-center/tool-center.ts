@@ -1101,7 +1101,7 @@ function sanitizeError(error: unknown, toolName: string): SanitizedToolError {
 }
 
 function defaultToolErrorDomain(toolName: string, facts: ToolErrorFacts | undefined): ToolErrorDomain {
-  if (toolName === "shell_command") {
+  if (toolName === "shell_command" || toolName === "start_process" || toolName === "stop_process" || toolName === "inspect_process") {
     return "process_error";
   }
   const code = typeof facts?.code === "string" ? facts.code.toLowerCase() : undefined;

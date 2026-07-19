@@ -157,12 +157,14 @@ test("shell_command records background process facts and port wait facts", async
     const result = asDirectToolFacts(output);
 
     try {
-      assert.equal(result.exitCode, 0);
+      assert.equal(result.exitCode, null);
       assert.equal(result.background, true);
+      assert.equal(result.processState, "running");
+      assert.equal(result.lifetime, "workspace_session");
       assert.equal(result.waitForPort, port);
       assert.equal(result.portReady, true);
       assert.equal(typeof result.pid, "number");
-      assert.equal("processId" in result, false);
+      assert.equal(typeof result.processId, "string");
       assertControlledLogRef(result);
       assert.equal(registry.registered.length, 1);
       assert.equal(registry.registered[0]?.kind, "background");
@@ -186,6 +188,40 @@ test("shell_command records background process facts and port wait facts", async
     } finally {
       await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 2_000 }, processContext);
       await ensurePidExited(typeof result.pid === "number" ? result.pid : undefined, 5_000);
+    }
+  } finally {
+    await removeTempTree(root);
+  }
+});
+
+test("shell_command terminates a child when app shutdown closes process registration", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
+  try {
+    const registry = new InMemoryProcessRegistry();
+    await registry.cleanupOwnedProcesses({ killTree: () => ({ status: "killed" as const }) });
+    const pidFile = path.join(root, "started.pid");
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
+
+    await assert.rejects(
+      shellCommand.execute({
+        command: process.execPath,
+        args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`],
+        background: true,
+        backgroundWaitMs: 100,
+      }, processContext),
+      /no longer accepts registrations/
+    );
+
+    try {
+      const pid = Number(await readFile(pidFile, "utf8"));
+      assert.equal(Number.isInteger(pid), true);
+      await ensurePidExited(pid, 5_000);
+    } catch (error) {
+      // Shutdown can terminate the child before its script reaches the first
+      // filesystem write. In that case the missing marker is itself expected.
+      if (!(error instanceof Error) || !/ENOENT/u.test(error.message)) {
+        throw error;
+      }
     }
   } finally {
     await removeTempTree(root);
@@ -218,8 +254,10 @@ test("shell_command returns background metadata when waitForPort is cancelled", 
       stopCommand = typeof result.stopCommand === "string" ? result.stopCommand : undefined;
       backgroundPid = typeof result.pid === "number" ? result.pid : undefined;
 
-      assert.equal(result.exitCode, 0);
+      assert.equal(result.exitCode, null);
       assert.equal(result.background, true);
+      assert.equal(result.processState, "running");
+      assert.equal(result.lifetime, "workspace_session");
       assert.equal(typeof result.pid, "number");
       assertControlledLogRef(result);
       assert.equal(typeof result.logPath, "string");
@@ -227,7 +265,7 @@ test("shell_command returns background metadata when waitForPort is cancelled", 
       assert.equal(result.waitForPort, port);
       assert.equal(result.portReady, false);
       assert.equal(result.portWaitCancelled, true);
-      assert.equal("processId" in result, false);
+      assert.equal(typeof result.processId, "string");
       assert.match(String(result.stderr), new RegExp(`Port wait for ${port} was cancelled before the port became ready\\.`));
       assert.equal(registry.registered.length, 1);
       assert.equal(registry.registered[0]?.kind, "background");
@@ -265,10 +303,12 @@ test("shell_command returns a controlled logRef for background command logs", as
     const result = asDirectToolFacts(output);
 
     try {
-      assert.equal(result.exitCode, 0);
+      assert.equal(result.exitCode, null);
       assert.equal(result.background, true);
+      assert.equal(result.processState, "running");
+      assert.equal(result.lifetime, "workspace_session");
       assertControlledLogRef(result);
-      assert.equal("processId" in result, false);
+      assert.equal(typeof result.processId, "string");
       assert.equal(registry.registered.length, 1);
       assert.equal(registry.registered[0]?.kind, "background");
       assert.equal(registry.registered[0]?.status, "running");
@@ -321,12 +361,14 @@ test("shell_command returns factual background waitForPort timeout state", async
     }, context);
     const result = asDirectToolFacts(output);
 
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, null);
     assert.equal(result.background, true);
+    assert.equal(result.processState, "running");
+    assert.equal(result.lifetime, "workspace_session");
     assertControlledLogRef(result);
     assert.equal(result.waitForPort, port);
     assert.equal(result.portReady, false);
-    assert.equal("processId" in result, false);
+    assert.equal(typeof result.processId, "string");
     assert.match(String(result.stderr), new RegExp(`Port ${port} did not become ready within 250ms\\.`));
     assert.equal(registry.registered.length, 1);
     assert.equal(registry.registered[0]?.kind, "background");
@@ -383,8 +425,11 @@ test("shell_command records post-start external port occupant facts", async () =
     stopCommand = typeof result.stopCommand === "string" ? result.stopCommand : undefined;
     backgroundPid = typeof result.pid === "number" ? result.pid : undefined;
 
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, null);
     assert.equal(result.background, true);
+    assert.equal(result.processState, "running");
+    assert.equal(result.lifetime, "workspace_session");
+    assert.equal(typeof result.processId, "string");
     assert.equal(result.waitForPort, port);
     assert.equal(result.portReady, true);
     assert.equal(registry.portFacts.length, 1);

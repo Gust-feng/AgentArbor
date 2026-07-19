@@ -75,6 +75,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
       args: ["server.mjs", String(port)],
       cwd: "demo",
       background: true,
+      lifetime: "run",
       backgroundWaitMs: 500,
       waitForPort: port,
       waitForPortTimeoutMs: 5_000,
@@ -88,7 +89,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     serverPid = numberField(startResult.pid);
     const logRef = stringField(startResult.logRef);
 
-    assert.equal(startResult.exitCode, 0);
+    assert.equal(startResult.exitCode, null);
     assert.equal(startResult.background, true);
     assert.equal(startResult.waitForPort, port);
     assert.equal(startResult.portReady, true);
@@ -179,6 +180,7 @@ test("runtime guard starts a background dev server, records waitForPort, and cle
         command: process.execPath,
         args: ["-e", nodeHttpServerScript(port, "owned-dev-server-ready")],
         background: true,
+        lifetime: "run",
         backgroundWaitMs: 50,
         waitForPort: port,
         waitForPortTimeoutMs: 4_000,
@@ -188,7 +190,7 @@ test("runtime guard starts a background dev server, records waitForPort, and cle
     const result = asRecord(output);
     ownedPid = numberField(result.pid);
 
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, null);
     assert.equal(result.background, true);
     assert.equal(result.waitForPort, port);
     assert.equal(result.portReady, true);
@@ -198,6 +200,7 @@ test("runtime guard starts a background dev server, records waitForPort, and cle
     const record = onlyRecord(registry.listByRun(runId));
     assert.equal(record.pid, ownedPid);
     assert.equal(record.kind, "background");
+    assert.equal(record.lifetime, "run");
     assert.equal(record.owned, true);
     assert.equal(record.status, "running");
     assert.equal(record.logRef, result.logRef);

@@ -54,7 +54,28 @@ export function createMultiAgentRunResourceAcquirer(input: {
         toolCenter,
         capabilitySnapshot,
         release: async () => {
-          await resources.release();
+          const failures: unknown[] = [];
+          try {
+            await resources.release();
+          } catch (error) {
+            failures.push(error);
+          }
+          if (input.host.processTerminator !== undefined && request.taskSoil.traceId !== undefined) {
+            try {
+              await input.host.processRegistry.cleanupByRun(
+                request.taskSoil.traceId,
+                input.host.processTerminator,
+              );
+            } catch (error) {
+              failures.push(error);
+            }
+          }
+          if (failures.length === 1) {
+            throw failures[0];
+          }
+          if (failures.length > 1) {
+            throw new AggregateError(failures, "Multi-Agent run resource release failed");
+          }
         },
       };
     } catch (error) {

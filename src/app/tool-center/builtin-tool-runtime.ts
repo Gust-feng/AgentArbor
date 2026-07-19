@@ -7,6 +7,7 @@ import type {
 import type { Constraint } from "../../domain/constraints.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolCategory, ToolDefinition, ToolExecutor } from "../../domain/tools/index.js";
+import type { ProcessTerminator } from "../runtime-guard/index.js";
 import {
   createBrowserSnapshotTool,
 } from "./adapters/browser-tool.js";
@@ -30,6 +31,7 @@ import {
   createLocalShellCommandTool,
   type LocalCommandProcessRegistry,
 } from "./adapters/local-workspace-command-tools.js";
+import { createLocalManagedProcessTools } from "./adapters/local-workspace-managed-process-tools.js";
 import {
   createLocalWorkspaceSandboxPolicy,
 } from "./adapters/local-workspace-sandbox.js";
@@ -49,6 +51,7 @@ export type CreateAgentToolRegistryOptions = {
   readonly baseToolScopes?: readonly ToolRegistryScope[];
   readonly commandShell?: SanitizedCommandShellConfig;
   readonly processRegistry?: LocalCommandProcessRegistry;
+  readonly processTerminator?: ProcessTerminator;
   readonly taskSoil?: TaskSoil;
   readonly modelCapabilities?: ModelCapabilities;
   readonly toolOutputStore?: ToolOutputStore;
@@ -91,6 +94,12 @@ export function createAgentToolRegistry(
     createLocalEditFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
+    ...createLocalManagedProcessTools(workspaceRoot, {
+      sandboxPolicy,
+      commandShell,
+      processRegistry: options.processRegistry,
+      processTerminator: options.processTerminator,
+    }),
     ...createContextAttachmentTools({
       taskSoil: options.taskSoil,
       workspaceRoot,

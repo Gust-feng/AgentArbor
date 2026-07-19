@@ -39,6 +39,7 @@ export type PanelUiAppStructureSources = {
   readonly chatEmpty: string;
   readonly workbenchShell: string;
   readonly workbenchMain: string;
+  readonly workbenchBootstrapLoading: string;
   readonly chatTranscriptChain: string;
   readonly transcriptTimeline: string;
   readonly sidebar: string;
@@ -108,6 +109,7 @@ export async function readPanelUiAppStructureSources(): Promise<PanelUiAppStruct
     chatEmpty,
     workbenchShell,
     workbenchMain,
+    workbenchBootstrapLoading,
     chatTranscriptChain,
     transcriptTimeline,
     sidebar,
@@ -174,6 +176,7 @@ export async function readPanelUiAppStructureSources(): Promise<PanelUiAppStruct
     readPanelUiSource(path.join("components", "chat-empty.tsx")),
     readPanelUiSource(path.join("components", "workbench-shell.tsx")),
     readPanelUiSource(path.join("components", "workbench-main.tsx")),
+    readPanelUiSource(path.join("components", "workbench-bootstrap-loading.tsx")),
     readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
     readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
     readPanelUiSource(path.join("components", "sidebar.tsx")),
@@ -241,6 +244,7 @@ export async function readPanelUiAppStructureSources(): Promise<PanelUiAppStruct
     chatEmpty,
     workbenchShell,
     workbenchMain,
+    workbenchBootstrapLoading,
     chatTranscriptChain,
     transcriptTimeline,
     sidebar,

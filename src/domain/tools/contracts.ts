@@ -348,4 +348,10 @@ export interface ToolExecutionGateway extends ToolExecutionBroker {
     context: ToolExecutionContext,
     permission: ToolPermissionCheck
   ): ToolExecutionPreflight;
+  /** Applies the same model-delivery envelope to a tool-like fact produced outside a registered executor. */
+  deliverResult?(
+    result: ToolCallResult,
+    permission: ToolPermissionCheck,
+    ownerId: string,
+  ): Promise<ToolCallResult>;
 }

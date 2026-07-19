@@ -91,6 +91,57 @@ test("ResearchRuntime follows configured source preference and links search trac
   assert.equal(result.trace.sourceSteps.length, 1);
 });
 
+test("ResearchRuntime keeps older search refs readable for the lifetime of the run", async () => {
+  const observedSourceRefs: Array<string | undefined> = [];
+  const adapter: InformationSourceAdapter = {
+    source: "codebase",
+    async search(request) {
+      return {
+        status: "completed",
+        results: Array.from({ length: request.query === "later" ? 32 : 1 }, (_, index) => ({
+          refId: request.query === "later" ? `opaque-later-${index}` : `opaque-${request.query}`,
+          source: "codebase" as const,
+          title: `${request.query}-${index}`,
+          uri: `repo://${request.query}-${index}.md`,
+          snippet: `${request.query}-${index}`,
+          status: "available" as const,
+        })),
+      };
+    },
+    async read(request) {
+      observedSourceRefs.push(request.sourceResult?.refId);
+      return {
+        status: "completed",
+        result: {
+          refId: request.ref,
+          source: "codebase",
+          title: request.sourceResult?.title ?? request.ref,
+          uri: request.sourceResult?.uri ?? `repo://${request.ref}.md`,
+          status: "completed",
+          summary: "content",
+          contentPreview: "content",
+          startChar: 0,
+          contentChars: 7,
+          charCount: 7,
+          hasMoreAfter: false,
+          truncated: false,
+          sourceSearchRef: request.sourceResult?.refId,
+        },
+      };
+    },
+  };
+  const runtime = new ResearchRuntime({
+    adapters: [adapter],
+    sourcePreference: ["codebase"],
+  });
+
+  await runtime.search({ query: "first", limit: 1 });
+  await runtime.search({ query: "later", limit: 32 });
+  await runtime.read({ ref: "opaque-first", source: "codebase" });
+
+  assert.deepEqual(observedSourceRefs, ["opaque-first"]);
+});
+
 test("ResearchRuntime searches web refs and reads selected pages through previews", async () => {
   const secret = "tvly-research-secret";
   const tavilyCalls: Record<string, unknown>[] = [];

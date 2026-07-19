@@ -11,7 +11,7 @@ import { createVisibleOutputStreamProjector } from "../../kernel/intelligence/vi
 import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
 import {
   OpenAICompatibleThinkTagStreamSplitter,
-  reasoningTextFromRecord,
+  reasoningDeltaTextFromRecord,
 } from "./openai-reasoning-normalizer.js";
 import type { OpenAICompatibleChatDialect } from "./openai-compatible-chat-protocol.js";
 import {
@@ -73,7 +73,7 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
       const choices = Array.isArray(raw.choices) ? raw.choices : [];
       const firstChoice = asRecord(choices[0]);
       const delta = asRecord(firstChoice.delta);
-      const reasoningChunk = reasoningTextFromRecord(delta);
+      const reasoningChunk = reasoningDeltaTextFromRecord(delta);
       const reasoningUpdate = streamDeltaText({
         next: reasoningChunk,
         previous: cumulativeReasoning,

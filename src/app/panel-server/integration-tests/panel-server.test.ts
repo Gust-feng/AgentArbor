@@ -21,7 +21,8 @@ import {
 } from "../../testing/openai-test-fixtures.js";
 
 test("panel server serves Vite React frontend assets", async () => {
-  const server = await startLocalPanelServer({ port: 0 });
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-assets-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const html = await requestText(server.url, "/");
     const assetPaths = extractPanelAssetPaths(html.text);
@@ -45,11 +46,13 @@ test("panel server serves Vite React frontend assets", async () => {
     assert.equal((await requestText(server.url, "/assets/%2e%2e/index.html")).status, 404);
   } finally {
     await server.close();
+    await removeTemporaryTree(directory);
   }
 });
 
 test("panel server serves real brand favicon assets", async () => {
-  const server = await startLocalPanelServer({ port: 0 });
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-favicon-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const svg = await requestBuffer(server.url, "/favicon.svg");
     const ico = await requestBuffer(server.url, "/favicon.ico");
@@ -63,6 +66,7 @@ test("panel server serves real brand favicon assets", async () => {
     assert.equal(ico.body.readUInt16LE(4) > 0, true);
   } finally {
     await server.close();
+    await removeTemporaryTree(directory);
   }
 });
 

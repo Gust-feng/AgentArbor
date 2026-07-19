@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs, type BigIntStats } from "node:fs";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { SkillRuntimeResourceType } from "./skill-loader.js";
 
 export const DEFAULT_SKILL_RESOURCE_MAX_CHARS = 16_000;
@@ -14,6 +15,8 @@ export type SkillResourceResolverInput = SkillResourcePackageInput & {
   readonly relativePath: string;
   readonly type: SkillRuntimeResourceType;
   readonly maxChars?: number;
+  readonly startChar?: number;
+  readonly abortSignal?: AbortSignal;
 };
 
 export type SkillResourceResolverErrorCode =
@@ -23,6 +26,7 @@ export type SkillResourceResolverErrorCode =
   | "path_escape"
   | "resource_type_mismatch"
   | "invalid_max_chars"
+  | "invalid_start_char"
   | "package_not_found"
   | "package_not_directory"
   | "source_not_found"
@@ -58,6 +62,21 @@ export type SkillResourceErrorFacts = {
 
 export type SkillResourceResolverResult = SkillResourceResolvedFacts | SkillResourceErrorFacts;
 
+type SkillResourceFileIdentity = {
+  readonly device: bigint;
+  readonly inode: bigint;
+  readonly size: bigint;
+  readonly modifiedAtNs: bigint;
+  readonly changedAtNs: bigint;
+};
+
+class SkillResourceReadError extends Error {
+  constructor(readonly code: SkillResourceResolverErrorCode, message: string) {
+    super(message);
+    this.name = "SkillResourceReadError";
+  }
+}
+
 export async function resolveSkillResource(input: SkillResourceResolverInput): Promise<SkillResourceResolverResult> {
   return resolveSkillResourceInternal(input, { includeReferenceContent: false });
 }
@@ -83,6 +102,10 @@ async function resolveSkillResourceInternal(
   if (typeof maxChars !== "number") {
     return errorFacts(input.type, normalized.relativePath, maxChars);
   }
+  const startChar = normalizeStartChar(input.startChar);
+  if (typeof startChar !== "number") {
+    return errorFacts(input.type, normalized.relativePath, startChar);
+  }
 
   const packageFacts = await resolvePackageFacts(input);
   if (!packageFacts.ok) {
@@ -107,7 +130,7 @@ async function resolveSkillResourceInternal(
     return errorFacts(input.type, normalized.relativePath, "cross_package_path");
   }
 
-  const stat = await fs.stat(resourceRealPath).catch((error: unknown) => {
+  const stat = await fs.stat(resourceRealPath, { bigint: true }).catch((error: unknown) => {
     if (isFileNotFound(error)) {
       return undefined;
     }
@@ -122,34 +145,89 @@ async function resolveSkillResourceInternal(
   if (!stat.isFile()) {
     return errorFacts(input.type, normalized.relativePath, "resource_not_file");
   }
-
-  const bytes = await fs.readFile(resourceRealPath).catch(() => undefined);
-  if (bytes === undefined) {
+  if (stat.size > BigInt(Number.MAX_SAFE_INTEGER)) {
     return errorFacts(input.type, normalized.relativePath, "resource_read_failed");
   }
 
-  return resourceFacts({
-    bytes,
+  const facts = await resourceFactsFromFile({
+    resourceRealPath,
+    expectedIdentity: fileIdentity(stat),
     includeReferenceContent: options.includeReferenceContent,
     maxChars,
+    startChar,
     relativePath: normalized.relativePath,
     type: input.type,
+    abortSignal: input.abortSignal,
+  }).catch((error: unknown) => {
+    if (input.abortSignal?.aborted === true) {
+      throw input.abortSignal.reason instanceof Error ? input.abortSignal.reason : error;
+    }
+    if (error instanceof SkillResourceReadError) {
+      return errorFacts(input.type, normalized.relativePath, error.code);
+    }
+    return undefined;
   });
+  if (facts === undefined) {
+    return errorFacts(input.type, normalized.relativePath, "resource_read_failed");
+  }
+  return facts;
 }
 
-function resourceFacts(input: {
-  readonly bytes: Buffer;
+async function resourceFactsFromFile(input: {
+  readonly resourceRealPath: string;
+  readonly expectedIdentity: SkillResourceFileIdentity;
   readonly includeReferenceContent: boolean;
   readonly maxChars: number;
+  readonly startChar: number;
   readonly relativePath: string;
   readonly type: SkillRuntimeResourceType;
-}): SkillResourceResolvedFacts {
+  readonly abortSignal?: AbortSignal;
+}): Promise<SkillResourceResolvedFacts> {
+  const hash = createHash("sha256");
+  const decoder = input.type === "reference" ? new StringDecoder("utf8") : undefined;
+  let observedBytes = 0;
+  let charCount = 0;
+  let capturedText = "";
+  const captureStart = Math.max(0, input.startChar - 1);
+  const requestedEnd = Math.min(Number.MAX_SAFE_INTEGER, input.startChar + input.maxChars);
+  const captureEnd = Math.min(Number.MAX_SAFE_INTEGER, requestedEnd + 1);
+  const appendText = (text: string) => {
+    if (text.length === 0) return;
+    const chunkStart = charCount;
+    const chunkEnd = chunkStart + text.length;
+    charCount = chunkEnd;
+    if (!input.includeReferenceContent || capturedText.length >= captureEnd - captureStart) return;
+    const overlapStart = Math.max(captureStart, chunkStart);
+    const overlapEnd = Math.min(captureEnd, chunkEnd);
+    if (overlapEnd > overlapStart) {
+      capturedText += text.slice(overlapStart - chunkStart, overlapEnd - chunkStart);
+    }
+  };
+  const stream = createReadStream(input.resourceRealPath, { signal: input.abortSignal });
+  for await (const rawChunk of stream) {
+    const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
+    observedBytes += chunk.byteLength;
+    hash.update(chunk);
+    if (decoder !== undefined) appendText(decoder.write(chunk));
+  }
+  if (decoder !== undefined) appendText(decoder.end());
+  const finalStat = await fs.stat(input.resourceRealPath, { bigint: true });
+  if (!finalStat.isFile()) {
+    throw new Error("Skill resource changed while it was being read.");
+  }
+  const finalIdentity = fileIdentity(finalStat);
+  if (
+    observedBytes !== Number(input.expectedIdentity.size) ||
+    !sameFileIdentity(input.expectedIdentity, finalIdentity)
+  ) {
+    throw new Error("Skill resource changed while it was being read.");
+  }
   const base = {
     ok: true as const,
     relativePath: input.relativePath,
     type: input.type,
-    contentHash: hashBuffer(input.bytes),
-    byteLength: input.bytes.byteLength,
+    contentHash: `sha256:${hash.digest("hex")}`,
+    byteLength: observedBytes,
   };
 
   if (input.type === "script") {
@@ -169,13 +247,26 @@ function resourceFacts(input: {
     };
   }
 
-  const text = input.bytes.toString("utf8");
-  const truncated = text.length > input.maxChars;
+  let content = "";
+  if (input.includeReferenceContent && input.startChar <= charCount) {
+    const localStart = input.startChar - captureStart;
+    if (!isUtf16CodeUnitBoundary(capturedText, localStart)) {
+      throw new SkillResourceReadError(
+        "invalid_start_char",
+        "Skill resource startChar must not split a UTF-16 surrogate pair.",
+      );
+    }
+    const localEnd = utf16SafeWindowEnd(capturedText, localStart, input.maxChars);
+    content = capturedText.slice(localStart, localEnd);
+  }
+  const truncated = input.includeReferenceContent
+    ? charCount > input.startChar + content.length
+    : charCount > requestedEnd;
   return {
     ...base,
-    charCount: text.length,
+    charCount,
     truncated,
-    ...(input.includeReferenceContent ? { content: truncated ? text.slice(0, input.maxChars) : text } : {}),
+    ...(input.includeReferenceContent ? { content } : {}),
   };
 }
 
@@ -278,10 +369,61 @@ function normalizeMaxChars(value: number | undefined): number | SkillResourceRes
   if (value === undefined) {
     return DEFAULT_SKILL_RESOURCE_MAX_CHARS;
   }
-  if (!Number.isFinite(value) || value < 0) {
+  if (!Number.isSafeInteger(value) || value < 0) {
     return "invalid_max_chars";
   }
-  return Math.floor(value);
+  return value;
+}
+
+function normalizeStartChar(value: number | undefined): number | SkillResourceResolverErrorCode {
+  if (value === undefined) {
+    return 0;
+  }
+  if (!Number.isSafeInteger(value) || value < 0) {
+    return "invalid_start_char";
+  }
+  return value;
+}
+
+function fileIdentity(stat: BigIntStats): SkillResourceFileIdentity {
+  return {
+    device: stat.dev,
+    inode: stat.ino,
+    size: stat.size,
+    modifiedAtNs: stat.mtimeNs,
+    changedAtNs: stat.ctimeNs,
+  };
+}
+
+function sameFileIdentity(left: SkillResourceFileIdentity, right: SkillResourceFileIdentity): boolean {
+  return left.device === right.device &&
+    left.inode === right.inode &&
+    left.size === right.size &&
+    left.modifiedAtNs === right.modifiedAtNs &&
+    left.changedAtNs === right.changedAtNs;
+}
+
+function isUtf16CodeUnitBoundary(value: string, offset: number): boolean {
+  return offset <= 0 ||
+    offset >= value.length ||
+    !isHighSurrogate(value.charCodeAt(offset - 1)) ||
+    !isLowSurrogate(value.charCodeAt(offset));
+}
+
+function utf16SafeWindowEnd(value: string, start: number, maxCodeUnits: number): number {
+  let end = Math.min(value.length, start + maxCodeUnits);
+  if (!isUtf16CodeUnitBoundary(value, end)) {
+    end -= 1;
+  }
+  return Math.max(start, end);
+}
+
+function isHighSurrogate(value: number): boolean {
+  return value >= 0xd800 && value <= 0xdbff;
+}
+
+function isLowSurrogate(value: number): boolean {
+  return value >= 0xdc00 && value <= 0xdfff;
 }
 
 function errorFacts(
@@ -312,7 +454,9 @@ function errorMessageFor(code: SkillResourceResolverErrorCode): string {
     case "resource_type_mismatch":
       return "Skill resource path does not match the requested resource type.";
     case "invalid_max_chars":
-      return "Skill resource maxChars must be a non-negative finite number.";
+      return "Skill resource maxChars must be a non-negative safe integer.";
+    case "invalid_start_char":
+      return "Skill resource startChar must be a non-negative safe integer and must not split a UTF-16 surrogate pair.";
     case "package_not_found":
       return "Skill package directory does not exist.";
     case "package_not_directory":
@@ -337,10 +481,6 @@ function errorMessageFor(code: SkillResourceResolverErrorCode): string {
 function isInsideOrEqual(basePath: string, candidatePath: string): boolean {
   const relative = path.relative(basePath, candidatePath);
   return relative === "" || (relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function hashBuffer(value: Buffer): string {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
 function isFileNotFound(error: unknown): boolean {

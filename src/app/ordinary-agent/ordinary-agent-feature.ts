@@ -30,6 +30,7 @@ import type {
 } from "./contracts.js";
 import { OrdinaryFeatureError } from "./contracts.js";
 import { executionErrorFacts } from "../execution-errors/index.js";
+import { canonicalToolResultMessage } from "../model-runtime/tool-result-message.js";
 import {
   normalizeOrdinaryConversationTitle,
   projectOrdinaryConversation,
@@ -690,6 +691,7 @@ export function createOrdinaryAgentFeature(input: {
             canonicalMessages: outcome.canonicalMessages,
             toolCalls: outcome.toolCalls,
             usage: outcome.usage,
+            toolMetrics: outcome.toolMetrics,
             capabilityResolution: outcome.capabilityResolution,
           });
           // The durable pause and its process-local handle are one admission fact.
@@ -713,14 +715,14 @@ export function createOrdinaryAgentFeature(input: {
     const document = await load(runId);
     if (document === undefined || isTerminal(document.state)) return;
     if (outcome.status === "completed") {
-      await mutate(runId, { type: "complete", answer: outcome.answer, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, capabilityResolution: outcome.capabilityResolution });
+      await mutate(runId, { type: "complete", answer: outcome.answer, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
       return;
     }
     if (outcome.status === "cancelled") {
-      await mutate(runId, { type: "cancel", reason: outcome.reason, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, capabilityResolution: outcome.capabilityResolution });
+      await mutate(runId, { type: "cancel", reason: outcome.reason, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
       return;
     }
-    await mutate(runId, { type: "fail", error: outcome.error, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, capabilityResolution: outcome.capabilityResolution });
+    await mutate(runId, { type: "fail", error: outcome.error, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
   }
 
   async function runExecution(runId: string): Promise<void> {
@@ -780,6 +782,7 @@ export function createOrdinaryAgentFeature(input: {
                 canonicalMessages: outcome.canonicalMessages,
                 toolCalls: outcome.toolCalls,
                 usage: outcome.usage,
+                toolMetrics: outcome.toolMetrics,
                 capabilityResolution: outcome.capabilityResolution,
               }),
         } as OrdinaryRunTransition, { keepTerminal: controller.signal.aborted });
@@ -1302,6 +1305,7 @@ export function createOrdinaryAgentFeature(input: {
                   canonicalMessages: outcome.canonicalMessages,
                   toolCalls: outcome.toolCalls,
                   usage: outcome.usage,
+                  toolMetrics: outcome.toolMetrics,
                   capabilityResolution: outcome.capabilityResolution,
                 }),
           } as OrdinaryRunTransition, { keepTerminal: controller.signal.aborted });
@@ -1341,12 +1345,7 @@ export function createOrdinaryAgentFeature(input: {
         ...closedResults.flatMap((result): readonly ModelMessage[] =>
           existingToolMessages.has(result.callId) || !canonicalToolCalls.has(result.callId)
           ? []
-          : [{
-              role: "tool",
-              content: JSON.stringify(result),
-              toolCallId: result.callId,
-              toolName: result.toolName,
-            }]),
+          : [canonicalToolResultMessage(result)]),
       ],
       toolCalls: closedResults,
     };

@@ -57,6 +57,7 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
   assert.equal(response.status, "completed");
   assert.deepEqual(response.structuredOutput, { summary: "Mapped provider response." });
   assert.deepEqual(response.usage, {
+    requestCount: 1,
     inputTokens: 11,
     outputTokens: 7,
     totalTokens: 18,

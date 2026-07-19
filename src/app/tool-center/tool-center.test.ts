@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ToolCallRequest, ToolCallResult, ToolExecutor } from "../../domain/tools/index.js";
+import type { ToolCallRequest, ToolCallResult, ToolExecutionMetricEvent, ToolExecutionMetricsSink, ToolExecutor } from "../../domain/tools/index.js";
 import { toolModelAttachmentsFromOutput, withToolModelAttachments } from "../../domain/tools/index.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
+import { createOpenAITokenCounter } from "../context-maintenance/token-counter.js";
+import { canonicalToolResultMessage } from "../model-runtime/tool-result-message.js";
 import { createReadToolOutputTool } from "./adapters/tool-output-read-tool.js";
 import { ToolCenter } from "./tool-center.js";
 import { InMemoryToolOutputStore, type ToolOutputStore } from "./tool-output-store.js";
@@ -25,6 +27,56 @@ test("ToolCenter registers, lists, executes, and unregisters tools", async () =>
 
   center.unregister("echo");
   assert.equal(center.has("echo"), false);
+});
+
+test("ToolCenter keeps the tool fact unchanged when its metrics sink fails and counts the drop", async () => {
+  let dropped = 0;
+  const metricsSink: ToolExecutionMetricsSink = {
+    record() { throw new Error("metrics unavailable"); },
+    recordDropped() { dropped += 1; },
+  };
+  const center = new ToolCenter({ metricsSink });
+  center.register(testTool("echo", async () => ({ ok: true })));
+
+  const result = await center.execute(
+    { callId: "call-metrics-failure", toolName: "echo", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("echo"),
+  );
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.output, { ok: true });
+  assert.equal(dropped, 1);
+});
+
+test("ToolCenter links producer-native continuation pages without retaining their input", async () => {
+  const metricEvents: ToolExecutionMetricEvent[] = [];
+  const center = new ToolCenter({ metricsSink: { record: (event) => metricEvents.push(event) } });
+  center.register(testTool("read_file", async (input) => {
+    const startChar = Number((input as { readonly startChar?: unknown }).startChar ?? 0);
+    return startChar === 0
+      ? { content: "first", textChars: 5, hasMoreAfter: true, nextStartChar: 5 }
+      : { content: "last", textChars: 4, hasMoreAfter: false };
+  }, "read-only"));
+  const context = { callerAgentId: "agent-test", traceId: "trace-native-chain", goalId: "goal-test" };
+
+  await center.execute(
+    { callId: "native-page-1", toolName: "read_file", input: { path: "README.md" } },
+    context,
+    allowTools("read_file"),
+  );
+  await center.execute(
+    { callId: "native-page-2", toolName: "read_file", input: { path: "README.md", startChar: 5 } },
+    context,
+    allowTools("read_file"),
+  );
+
+  const pages = metricEvents.filter((event): event is Extract<ToolExecutionMetricEvent, { readonly kind: "execution" }> =>
+    event.kind === "execution");
+  assert.equal(pages[0]?.continuation?.offered, true);
+  assert.equal(pages[1]?.continuation?.completed, true);
+  assert.equal(pages[0]?.continuation?.chainHash, pages[1]?.continuation?.chainHash);
+  assert.equal(JSON.stringify(pages).includes("README.md"), false);
 });
 
 test("ToolCenter rejects a duplicate tool identity instead of replacing its executor", () => {
@@ -474,7 +526,12 @@ test("ToolCenter preserves approval_required when partial output retention fails
 
 test("ToolCenter marks completed side-effect delivery failed without inviting a retry", async () => {
   const store = new InMemoryToolOutputStore({ maxItemChars: 8 });
-  const center = new ToolCenter({ outputStore: store, maxInlineOutputChars: 4 });
+  const metricEvents: ToolExecutionMetricEvent[] = [];
+  const center = new ToolCenter({
+    outputStore: store,
+    maxInlineOutputChars: 4,
+    metricsSink: { record: (event) => metricEvents.push(event) },
+  });
   center.register(createReadToolOutputTool(store));
   let applied = 0;
   center.register(testTool("submit_fixture", async () => {
@@ -502,6 +559,10 @@ test("ToolCenter marks completed side-effect delivery failed without inviting a 
   assert.equal(delivery.doNotBlindlyRetry, true);
   assert.equal(delivery.truncated, undefined);
   assert.equal(delivery.continuation, undefined);
+  const metric = metricEvents.find((event) => event.kind === "execution");
+  assert.equal(metric?.kind, "execution");
+  if (metric?.kind !== "execution") throw new Error("Expected execution metric");
+  assert.equal(metric.retentionFailure, "capacity_failure");
 });
 
 test("ToolCenter rebuilds explicit failed results with JSON-safe error facts", async () => {
@@ -614,6 +675,115 @@ test("ToolCenter retains oversized successful read-only output without rerunning
   assert.equal(typeof output.contentPreview, "string");
   assert.equal(typeof output.contentRef, "string");
   assert.equal(typeof output.continuation, "object");
+});
+
+test("ToolCenter applies a fixed token budget to the complete model-visible result envelope", async () => {
+  const store = new InMemoryToolOutputStore();
+  const counter = { countText: (text: string) => text.length };
+  const metricEvents: ToolExecutionMetricEvent[] = [];
+  const center = new ToolCenter({
+    outputStore: store,
+    outputTokenCounter: counter,
+    targetInlineBodyTokens: 120,
+    maxInlineOutputTokens: 1_000,
+    metricsSink: { record: (event) => metricEvents.push(event) },
+  });
+  center.register(createReadToolOutputTool(store));
+  center.register(testTool("token_bounded_read", async () => ({ content: "x".repeat(2_000) })));
+
+  const result = await center.execute(
+    { callId: "call-token-bounded", toolName: "token_bounded_read", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("token_bounded_read", "read_tool_output"),
+  );
+  const output = result.output as Readonly<Record<string, unknown>>;
+  const envelope = JSON.stringify(canonicalToolResultMessage(result));
+
+  assert.equal(typeof output.contentRef, "string");
+  assert.equal(counter.countText(String(output.contentPreview)) <= 120, true);
+  assert.equal(counter.countText(envelope) <= 1_000, true);
+  assert.equal(envelope.includes("contentSha256"), false);
+  assert.equal(envelope.includes("continuationAvailability"), false);
+  assert.equal(envelope.includes(String(output.contentRef)), true, "the executable nextInput must retain the opaque ref");
+  const metric = metricEvents.find((event) => event.kind === "execution");
+  assert.equal(metric?.kind, "execution");
+  if (metric?.kind !== "execution") throw new Error("Expected execution metric");
+  assert.equal(metric.retained?.reason, "envelope_limit");
+  assert.equal(metric.rawBodyTokens, JSON.stringify({ content: "x".repeat(2_000) }).length);
+  assert.equal((metric.rawEnvelopeTokens ?? 0) > (metric.finalEnvelopeTokens ?? 0), true);
+  assert.equal((metric.finalEnvelopeTokens ?? 0) <= 1_000, true);
+});
+
+test("ToolCenter applies the same retained envelope to a catalog-only Sub-Agent result", async () => {
+  const store = new InMemoryToolOutputStore();
+  const counter = { countText: (text: string) => text.length };
+  const center = new ToolCenter({
+    outputStore: store,
+    outputTokenCounter: counter,
+    targetInlineBodyTokens: 120,
+    maxInlineOutputTokens: 1_000,
+  });
+  center.register(createReadToolOutputTool(store));
+  const raw: ToolCallResult = {
+    callId: "call-sub-agent-large",
+    toolName: "call_sub_agent",
+    input: { task: "inspect" },
+    output: `complete-sub-agent-output:${"x".repeat(3_000)}`,
+    status: "completed",
+    durationMs: 10,
+  };
+
+  const delivered = await center.deliverResult(
+    raw,
+    allowTools("read_tool_output"),
+    "run-sub-agent-large",
+  );
+  const output = delivered.output as Readonly<Record<string, unknown>>;
+
+  assert.equal(delivered.status, "completed");
+  assert.equal(typeof output.contentRef, "string");
+  assert.equal(counter.countText(JSON.stringify(canonicalToolResultMessage(delivered))) <= 1_000, true);
+  const continuation = output.continuation as { readonly nextInput: ToolCallRequest["input"] };
+  const read = await center.execute(
+    { callId: "read-sub-agent-large", toolName: "read_tool_output", input: continuation.nextInput },
+    { callerAgentId: "agent-test", traceId: "run-sub-agent-large", goalId: "goal-test" },
+    allowTools("read_tool_output"),
+  );
+  assert.match(String((read.output as Readonly<Record<string, unknown>>).content), /complete-sub-agent-output/u);
+});
+
+test("ToolCenter keeps a large tool input as a fact without repeating it in the model result", async () => {
+  let retainCalls = 0;
+  const store: ToolOutputStore = {
+    async retain() {
+      retainCalls += 1;
+      throw new Error("A small output must not be retained because its input is large.");
+    },
+    async read() { return undefined; },
+    async release() { return false; },
+    async releaseOwner() { return 0; },
+    async clear() {},
+  };
+  const counter = createOpenAITokenCounter("gpt-4o");
+  const center = new ToolCenter({ outputStore: store, outputTokenCounter: counter });
+  center.register(testTool("large_input_write", async () => ({ written: true }), "read-write"));
+  const marker = "MODEL_INPUT_MUST_NOT_BE_REPEATED";
+  const input = { path: "large.txt", content: `${marker}:${"x".repeat(600_000)}` };
+
+  const result = await center.execute(
+    { callId: "call-large-input", factId: "fact-large-input", toolName: "large_input_write", input },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("large_input_write"),
+  );
+  const message = canonicalToolResultMessage(result);
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.output, { written: true });
+  assert.deepEqual(result.input, input);
+  assert.equal(result.factId, "fact-large-input");
+  assert.equal(retainCalls, 0);
+  assert.equal(message.content.includes(marker), false);
+  assert.equal(counter.countText(JSON.stringify(message)) <= 6_000, true);
 });
 
 test("ToolCenter retains oversized explicit failure evidence without losing original facts", async () => {

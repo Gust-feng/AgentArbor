@@ -45,6 +45,16 @@ test("Chat stream normalization handles reasoning fields and think tags across c
   assert.equal(observations.map((item) => item.textDelta).join(""), "Final answer.");
 });
 
+test("Chat stream normalization preserves reasoning delta boundary whitespace", () => {
+  const normalizer = new OpenAIReasoningStreamNormalizer("openai_compatible_chat_completions");
+  const observations = [
+    normalizer.push({ choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }] }),
+    normalizer.push({ choices: [{ delta: { reasoning_content: " user" }, finish_reason: null }] }),
+  ];
+
+  assert.equal(observations.map((item) => item.reasoningDelta).join(""), "The user");
+});
+
 test("Responses stream normalization exposes summary and answer as separate facts", () => {
   const normalizer = new OpenAIReasoningStreamNormalizer("openai_responses");
   assert.deepEqual(normalizer.push({

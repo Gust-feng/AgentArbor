@@ -7,6 +7,7 @@ import { OrdinaryFeatureError } from "./contracts.js";
 import { createFileSystemOrdinaryRunRepository, OrdinaryRunSnapshotIncompatibleError } from "./file-system-repository.js";
 import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js";
 import { ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
+import { OrdinaryToolMetricsCollector } from "./tool-runtime-metrics.js";
 
 test("file repository atomically replaces the canonical snapshot and advances revisions", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-repository-"));
@@ -200,6 +201,46 @@ test("file repository validates cumulative usage before committing an Ordinary s
   assert.equal(await repository.get("invalid-usage-run"), undefined);
 });
 
+test("file repository restores v3 snapshots with or without optional tool metrics", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-metrics-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const withoutMetrics = state("without-tool-metrics", "2026-01-01T00:00:00.000Z");
+  await repository.save(withoutMetrics, 0);
+  assert.equal((await repository.get(withoutMetrics.runId))?.state.toolMetrics, undefined);
+
+  const collector = new OrdinaryToolMetricsCollector();
+  collector.record({
+    kind: "execution",
+    toolName: "read_file",
+    operationType: "read-only",
+    status: "completed",
+    rawBodyTokens: 120,
+    rawEnvelopeTokens: 180,
+    finalEnvelopeTokens: 180,
+  });
+  collector.record({
+    kind: "execution",
+    toolName: "shell_command",
+    operationType: "execute",
+    status: "completed",
+    rawBodyTokens: 20,
+    rawEnvelopeTokens: 40,
+    finalEnvelopeTokens: 40,
+  });
+  const withMetrics = {
+    ...state("with-tool-metrics", "2026-01-01T00:00:01.000Z"),
+    toolMetrics: collector.snapshot(),
+  };
+  await repository.save(withMetrics, 0);
+  assert.deepEqual((await repository.get(withMetrics.runId))?.state.toolMetrics, withMetrics.toolMetrics);
+
+  await assert.rejects(
+    repository.save({ ...state("invalid-tool-metrics", "2026-01-01T00:00:02.000Z"), toolMetrics: { schemaVersion: "ordinary-tool-metrics/v1" } } as never, 0),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError,
+  );
+});
+
 test("file repository persists the effective capability resolution and rejects malformed facts", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-capability-resolution-"));
   t.after(() => removeTestDirectory(root));
@@ -221,7 +262,7 @@ test("file repository persists the effective capability resolution and rejects m
       answer: "done",
       canonicalMessages: [...running.canonicalMessages, { role: "assistant", content: "done" }],
       toolCalls: [],
-      usage: { inputTokens: 4, outputTokens: 1, totalTokens: 5 },
+      usage: { requestCount: 2, inputTokens: 4, outputTokens: 1, totalTokens: 5 },
       capabilityResolution: resolution,
     },
     recordedAt: "2026-01-01T00:00:02.000Z",
@@ -229,7 +270,9 @@ test("file repository persists the effective capability resolution and rejects m
   });
 
   await repository.save(completed, started.revision);
-  assert.deepEqual((await repository.get("capability-run"))?.state.capabilityResolution, resolution);
+  const restored = (await repository.get("capability-run"))?.state;
+  assert.deepEqual(restored?.capabilityResolution, resolution);
+  assert.equal(restored?.usage.requestCount, 2);
 
   const malformed = { ...state("bad-capability-run", "2026-01-01T00:00:00.000Z"), capabilityResolution: { resolutionId: "partial" } };
   await assert.rejects(repository.save(malformed as never, 0), (error: unknown) =>

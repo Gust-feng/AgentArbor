@@ -41,6 +41,9 @@ type ResearchReadContinuation = {
   };
 };
 
+const MAX_RESEARCH_READ_BATCH_ITEMS = 16;
+const MAX_CONCURRENT_RESEARCH_READS = 4;
+
 export function createResearchSearchTool(researchRuntime: InformationAccess): ToolExecutor {
   const capabilities = researchRuntime.getCapabilities?.();
   const searchableSources = capabilities?.defaultSearchSources ?? ["web", "codebase"];
@@ -161,12 +164,15 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
         ],
         inputNotes: [
           "ref is required and may be a returned refId, HTTP/HTTPS URL, command-log:// ref, repo:// URI, repository path, or an array of those strings.",
+          `A batch accepts at most ${MAX_RESEARCH_READ_BATCH_ITEMS} refs and reads at most ${MAX_CONCURRENT_RESEARCH_READS} refs concurrently.`,
           "source is optional and should only disambiguate refs.",
           "maxLength bounds one returned character window.",
           "startChar is a zero-based character offset used only to execute a returned continuation.",
         ],
         runtimeHints: [
           { label: "readable sources", value: readableDescription || "none" },
+          { label: "maximum batch refs", value: String(MAX_RESEARCH_READ_BATCH_ITEMS) },
+          { label: "maximum concurrent reads", value: String(MAX_CONCURRENT_RESEARCH_READS) },
         ],
         usageNotes: [
           "Use read to expand a search ref, URL, command-log:// ref, repo:// URI, or repository path into content the model can continue reasoning over.",
@@ -198,7 +204,11 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
           ref: {
             oneOf: [
               { type: "string" },
-              { type: "array", items: { type: "string" } },
+              {
+                type: "array",
+                items: { type: "string" },
+                maxItems: MAX_RESEARCH_READ_BATCH_ITEMS,
+              },
             ],
             description: "Research ref, http/https URL, command-log:// ref, repo:// URI, repository path, or an array of those strings.",
           },
@@ -224,7 +234,10 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
       };
       const refs = refsFromInput(record.ref);
       if (refs !== undefined) {
-        const results = await Promise.all(refs.map(async (ref) => {
+        if (refs.length > MAX_RESEARCH_READ_BATCH_ITEMS) {
+          throw new Error(`research read accepts at most ${MAX_RESEARCH_READ_BATCH_ITEMS} refs per batch.`);
+        }
+        const results = await mapWithConcurrency(refs, MAX_CONCURRENT_RESEARCH_READS, context.abortSignal, async (ref) => {
           try {
             const result = await researchRuntime.read({
               ref,
@@ -233,6 +246,9 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
             });
             return batchReadItemFromResult(result, requestFacts);
           } catch (error) {
+            if (isCancellation(error, context.abortSignal)) {
+              throw cancellationError(context.abortSignal?.reason ?? error);
+            }
             return {
               item: {
                 ref,
@@ -242,7 +258,7 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
               } satisfies BatchReadItem,
             };
           }
-        }));
+        });
         const continuations = results
           .map((result) => result.continuation)
           .filter((continuation): continuation is ResearchReadContinuation => continuation !== undefined);
@@ -373,6 +389,67 @@ function refsFromInput(value: unknown): readonly string[] | undefined {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "read failed for this ref.";
+}
+
+async function mapWithConcurrency<TInput, TOutput>(
+  inputs: readonly TInput[],
+  concurrency: number,
+  abortSignal: AbortSignal | undefined,
+  operation: (input: TInput) => Promise<TOutput>,
+): Promise<readonly TOutput[]> {
+  const results = new Array<TOutput>(inputs.length);
+  let nextIndex = 0;
+  let stopped = false;
+  const workers = Array.from(
+    { length: Math.min(concurrency, inputs.length) },
+    async () => {
+      while (true) {
+        if (stopped) return;
+        throwIfCancelled(abortSignal);
+        const index = nextIndex;
+        if (index >= inputs.length) {
+          return;
+        }
+        nextIndex += 1;
+        try {
+          results[index] = await operation(inputs[index]!);
+        } catch (error) {
+          stopped = true;
+          throw error;
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) {
+    return;
+  }
+  throw cancellationError(signal.reason);
+}
+
+function isCancellation(error: unknown, signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true ||
+    (error instanceof Error && error.name === "AbortError");
+}
+
+function cancellationError(reason: unknown): Error {
+  if (reason instanceof Error && reason.name === "AbortError") {
+    return reason;
+  }
+  const error = new Error(
+    reason instanceof Error && reason.message.trim().length > 0
+      ? reason.message
+      : typeof reason === "string" && reason.trim().length > 0
+        ? reason
+        : "research read was cancelled.",
+    reason instanceof Error ? { cause: reason } : undefined,
+  );
+  error.name = "AbortError";
+  return error;
 }
 
 function informationSourcesOrUndefined(value: unknown): readonly InformationSourceKind[] | undefined {

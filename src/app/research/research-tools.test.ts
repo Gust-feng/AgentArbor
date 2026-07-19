@@ -13,7 +13,7 @@ import type {
   InformationSourceKind,
 } from "../../domain/research/index.js";
 import { ConfigCenter } from "../config-center/index.js";
-import type { FetchLike } from "../tool-center/index.js";
+import { ToolCenter, type FetchLike } from "../tool-center/index.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
 import { createDefaultResearchRuntime } from "./research-runtime.js";
 import { createResearchReadTool, createResearchSearchTool } from "./research-tools.js";
@@ -269,6 +269,150 @@ test("research read tool batches multiple refs without changing per-item content
   assert.deepEqual(read.map((item) => item.contentPreview), ["content for src/a.ts", "content for src/b.ts"]);
   assert.deepEqual(read.map((item) => item.truncated), [false, false]);
   assert.equal(output.continuations, undefined);
+});
+
+test("research read tool bounds batch fan-out concurrency", async () => {
+  let active = 0;
+  let maxActive = 0;
+  let started = 0;
+  let resolveStarted!: () => void;
+  let releaseReads!: () => void;
+  const firstWaveStarted = new Promise<void>((resolve) => { resolveStarted = resolve; });
+  const release = new Promise<void>((resolve) => { releaseReads = resolve; });
+  const runtime = fixedResearchRuntime({
+    read: async (request) => {
+      active += 1;
+      started += 1;
+      maxActive = Math.max(maxActive, active);
+      if (started === 4) resolveStarted();
+      await release;
+      active -= 1;
+      return fixedReadResult({
+        ref: request.ref,
+        status: "completed",
+        source: "codebase",
+        contentPreview: request.ref,
+      });
+    },
+  });
+  const running = createResearchReadTool(runtime).execute(
+    { ref: Array.from({ length: 12 }, (_, index) => `ref-${index}`) },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+  );
+
+  await firstWaveStarted;
+  assert.equal(started, 4);
+  assert.equal(maxActive, 4);
+  releaseReads();
+  const output = await running as { readonly items: readonly unknown[] };
+  assert.equal(output.items.length, 12);
+  assert.equal(maxActive, 4);
+});
+
+test("research read tool rejects oversized batches before calling a provider", async () => {
+  let calls = 0;
+  const runtime = fixedResearchRuntime({
+    read: async (request) => {
+      calls += 1;
+      return fixedReadResult({ ref: request.ref, status: "completed", source: "codebase" });
+    },
+  });
+
+  await assert.rejects(
+    () => createResearchReadTool(runtime).execute(
+      { ref: Array.from({ length: 17 }, (_, index) => `ref-${index}`) },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    ),
+    /at most 16 refs/u,
+  );
+  assert.equal(calls, 0);
+});
+
+test("research read tool propagates batch cancellation instead of reporting provider failure", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const runtime = fixedResearchRuntime({
+    read: async () => {
+      calls += 1;
+      const error = new Error("cancelled by adapter");
+      error.name = "AbortError";
+      throw error;
+    },
+  });
+
+  await assert.rejects(
+    () => createResearchReadTool(runtime).execute(
+      { ref: Array.from({ length: 12 }, (_, index) => `ref-${index}`) },
+      {
+        callerAgentId: "agent-test",
+        traceId: "trace-test",
+        goalId: "goal-test",
+        abortSignal: controller.signal,
+      },
+    ),
+    (error: unknown) => error instanceof Error && error.name === "AbortError",
+  );
+  assert.equal(calls <= 4, true);
+});
+
+test("research read tool normalizes an aborted signal reason to AbortError", async () => {
+  const controller = new AbortController();
+  controller.abort(new Error("cancelled by user"));
+  let calls = 0;
+  const runtime = fixedResearchRuntime({
+    read: async (request) => {
+      calls += 1;
+      return fixedReadResult({ ref: request.ref, status: "completed", source: "codebase" });
+    },
+  });
+
+  await assert.rejects(
+    () => createResearchReadTool(runtime).execute(
+      { ref: ["a.md", "b.md"] },
+      {
+        callerAgentId: "agent-test",
+        traceId: "trace-test",
+        goalId: "goal-test",
+        abortSignal: controller.signal,
+      },
+    ),
+    (error: unknown) => error instanceof Error &&
+      error.name === "AbortError" &&
+      error.message === "cancelled by user",
+  );
+  assert.equal(calls, 0);
+});
+
+test("ToolCenter records in-flight research batch cancellation as cancelled", async () => {
+  const controller = new AbortController();
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const runtime = fixedResearchRuntime({
+    read: async (request) => {
+      signalStarted();
+      return new Promise<InformationReadResult>((_resolve, reject) => {
+        request.abortSignal?.addEventListener("abort", () => reject(request.abortSignal?.reason), { once: true });
+      });
+    },
+  });
+  const center = new ToolCenter();
+  center.register(createResearchReadTool(runtime));
+  const executing = center.execute(
+    { callId: "call-cancel-batch", toolName: "read", input: { ref: ["a.md", "b.md"] } },
+    {
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      abortSignal: controller.signal,
+    },
+    { callerAgentId: "agent-test", allowedTools: ["read"] },
+  );
+
+  await started;
+  controller.abort(new Error("cancelled by user"));
+  const result = await executing;
+
+  assert.equal(result.status, "cancelled");
 });
 
 test("research batch read exposes each executable continuation only at the top level", async () => {

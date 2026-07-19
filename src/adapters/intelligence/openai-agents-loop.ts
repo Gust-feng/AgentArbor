@@ -185,7 +185,14 @@ class OpenAIAgentsLoop implements AgentLoop {
       interruptionFactIds: new WeakMap(),
       modelInput,
       modelRequestCount: 0,
+      firstTokenLatencyTotalMs: 0,
+      firstTokenLatencySampleCount: 0,
       latestRequestIncludedResponses: 0,
+      deliveredToolResultCallIds: new Set(
+        baseMessages.flatMap((message) => message.role === "tool" && message.toolCallId !== undefined
+          ? [message.toolCallId]
+          : []),
+      ),
     };
     let sdkState: RunState<SdkExecutionContext, Agent<SdkExecutionContext, AgentOutputType>> | undefined;
     try {
@@ -279,9 +286,9 @@ class OpenAIAgentsLoop implements AgentLoop {
       } else if (isOpenAIResponsesRawModelStreamEvent(event)) {
         rawEvent = event.data.event;
       } else continue;
-      emitNormalizedStreamDelta(reasoningStream.push(rawEvent), execution.input);
+      emitNormalizedStreamDelta(reasoningStream.push(rawEvent), execution);
     }
-    emitNormalizedStreamDelta(reasoningStream.flush(), execution.input);
+    emitNormalizedStreamDelta(reasoningStream.flush(), execution);
     await result.completed;
     if (result.cancelled) {
       throw abortError("OpenAI Agents SDK stream was cancelled.");
@@ -310,7 +317,7 @@ class OpenAIAgentsLoop implements AgentLoop {
             };
       });
       if (pending === undefined) {
-        return failedResult(execution, usageFromSdk(result.runContext.usage), "The SDK interruption did not match an exact ToolCenter confirmation fact.");
+        return failedResult(execution, usageFromSdk(result.runContext.usage, execution), "The SDK interruption did not match an exact ToolCenter confirmation fact.");
       }
       return this.approvalRequiredResult(agent, result, execution, pending);
     }
@@ -320,7 +327,7 @@ class OpenAIAgentsLoop implements AgentLoop {
       finalText,
       messages: canonicalMessagesForResult(execution, result.rawResponses, this.config.protocol),
       toolResults: cloneToolResults(execution.toolResults),
-      usage: usageFromSdk(result.runContext.usage),
+      usage: usageFromSdk(result.runContext.usage, execution),
       confirmationRequests: [],
     };
   }
@@ -331,7 +338,7 @@ class OpenAIAgentsLoop implements AgentLoop {
     execution: ExecutionState,
     pending: readonly PendingInterruption[],
   ): AgentLoopResult {
-    const usage = usageFromSdk(result.runContext.usage);
+    const usage = usageFromSdk(result.runContext.usage, execution);
     let decided = false;
     return {
       status: "approval_required",
@@ -481,10 +488,23 @@ class ModelTurnAcceptanceError extends Error {
 
 function emitNormalizedStreamDelta(
   delta: { readonly reasoningDelta: string; readonly textDelta: string },
-  input: AgentLoopInput,
+  execution: ExecutionState,
 ): void {
-  if (delta.reasoningDelta.length > 0) input.onReasoningDelta?.(delta.reasoningDelta);
-  if (delta.textDelta.length > 0) input.onTextDelta?.(delta.textDelta);
+  if (delta.reasoningDelta.length > 0) execution.input.onReasoningDelta?.(delta.reasoningDelta);
+  if (delta.textDelta.length > 0) {
+    recordFirstOutputToken(execution);
+    execution.input.onTextDelta?.(delta.textDelta);
+  }
+}
+
+function recordFirstOutputToken(execution: ExecutionState): void {
+  const startedAtMs = execution.activeModelRequestStartedAtMs;
+  if (startedAtMs === undefined || execution.firstTokenObservedForRequestCount === execution.modelRequestCount) {
+    return;
+  }
+  execution.firstTokenObservedForRequestCount = execution.modelRequestCount;
+  execution.firstTokenLatencyTotalMs += Math.max(0, Date.now() - startedAtMs);
+  execution.firstTokenLatencySampleCount += 1;
 }
 
 function createContextMaintenanceFilter(
@@ -512,10 +532,16 @@ function createContextMaintenanceFilter(
       messagesWithAcceptedToolResults,
       execution.latestRequestMessages ?? execution.baseMessages,
     );
+    const hasUnseenToolResults = canonicalMessages.some(
+      (message) => message.role === "tool" &&
+        message.toolCallId !== undefined &&
+        !execution.deliveredToolResultCallIds.has(message.toolCallId),
+    );
     execution.latestRequestMessages = cloneMessages(canonicalMessages);
     execution.latestRequestIncludedResponses = execution.modelRequestCount;
     if (execution.input.maintainContext === undefined) {
-      execution.modelRequestCount += 1;
+      markDeliveredToolResults(execution, canonicalMessages);
+      markModelRequestStarted(execution);
       return restoredAcceptedToolResult
         ? {
             instructions,
@@ -525,6 +551,7 @@ function createContextMaintenanceFilter(
     }
     const maintained = await execution.input.maintainContext!({
       messages: canonicalMessages,
+      hasUnseenToolResults,
       abortSignal: execution.abortSignal,
     });
     if (maintained.status === "failed") {
@@ -534,7 +561,8 @@ function createContextMaintenanceFilter(
       ? maintained.messages
       : canonicalMessages;
     execution.latestRequestMessages = cloneMessages(requestMessages);
-    execution.modelRequestCount += 1;
+    markDeliveredToolResults(execution, requestMessages);
+    markModelRequestStarted(execution);
     if (maintained.status === "unchanged" && !restoredAcceptedToolResult) {
       return modelData;
     }
@@ -543,6 +571,22 @@ function createContextMaintenanceFilter(
       input: createOpenAIAgentsInputMapper({ protocol, messages: requestMessages }).messages(instructions),
     };
   };
+}
+
+function markModelRequestStarted(execution: ExecutionState): void {
+  execution.modelRequestCount += 1;
+  execution.activeModelRequestStartedAtMs = Date.now();
+}
+
+function markDeliveredToolResults(
+  execution: ExecutionState,
+  messages: readonly ModelMessage[],
+): void {
+  messages.forEach((message) => {
+    if (message.role === "tool" && message.toolCallId !== undefined) {
+      execution.deliveredToolResultCallIds.add(message.toolCallId);
+    }
+  });
 }
 
 function preserveCanonicalMetadata(
@@ -754,16 +798,21 @@ function toolResultMessage(result: ToolCallResult): ModelMessage {
 }
 
 function usageFromSdk(usage: {
+  readonly requests: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
   readonly inputTokensDetails: readonly Readonly<Record<string, number>>[];
   readonly outputTokensDetails: readonly Readonly<Record<string, number>>[];
-}): ModelUsage {
+}, execution: Pick<
+  ExecutionState,
+  "firstTokenLatencyTotalMs" | "firstTokenLatencySampleCount"
+>): ModelUsage {
   const cachedInputTokens = sumDetail(usage.inputTokensDetails, "cached_tokens");
   const cacheWriteInputTokens = sumDetail(usage.inputTokensDetails, "cache_write_tokens");
   const reasoningOutputTokens = sumDetail(usage.outputTokensDetails, "reasoning_tokens");
   return compactUsage({
+    requestCount: usage.requests,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     totalTokens: usage.totalTokens,
@@ -773,6 +822,9 @@ function usageFromSdk(usage: {
       ? undefined
       : Math.max(0, usage.inputTokens - cachedInputTokens),
     reasoningOutputTokens,
+    firstTokenLatencyMs: execution.firstTokenLatencySampleCount === 0
+      ? undefined
+      : execution.firstTokenLatencyTotalMs / execution.firstTokenLatencySampleCount,
   });
 }
 

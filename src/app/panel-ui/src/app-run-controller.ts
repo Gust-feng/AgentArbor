@@ -10,6 +10,7 @@ import {
 import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import { loadConversationSession, resetConversationSession } from "./app-conversation-session";
 import { submitPanelTask } from "./app-task-submission";
+import { invalidateUsageStatistics } from "./usage-statistics-query";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
 import type { ConversationSummary } from "./contracts/conversation";
@@ -83,6 +84,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
   async function refreshConversations(): Promise<void> {
     const response = await getJson<{ readonly conversations: readonly ConversationSummary[] }>("/api/conversations");
     options.setApp((previous) => ({ ...previous, conversations: response.conversations ?? [] }));
+    invalidateUsageStatistics();
   }
 
   async function cancelRun(): Promise<void> {

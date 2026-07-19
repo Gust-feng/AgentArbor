@@ -43,7 +43,7 @@ export class McpManager {
   private readonly connectTimeoutMs: number;
 
   constructor(config: McpManagerConfig) {
-    this.connectTimeoutMs = Math.max(500, Math.floor(config.connectTimeoutMs ?? 3_000));
+    this.connectTimeoutMs = Math.max(10, Math.floor(config.connectTimeoutMs ?? 3_000));
     const maxConcurrentCalls = config.maxConcurrentCallsPerServer ?? DEFAULT_MCP_MAX_CONCURRENT_CALLS_PER_SERVER;
     for (const server of config.servers) {
       if (!server.enabled || !hasCompleteRuntimeConfig(server)) {
@@ -154,8 +154,8 @@ export class McpManager {
     if (entry === undefined || entry.status !== "connected") {
       return undefined;
     }
-    return withTimeout(
-      entry.client.listReferences(),
+    return withAbortTimeout(
+      (signal) => entry.client.listReferences({ signal, timeoutMs: this.connectTimeoutMs }),
       this.connectTimeoutMs,
       `MCP server "${entry.config.serverId}" did not list prompts/resources before timeout.`
     );
@@ -168,13 +168,13 @@ export class McpManager {
   private async connectEntry(entry: ServerEntry): Promise<void> {
     entry.status = "connecting";
     try {
-      await withTimeout(
-        entry.client.connect(),
+      await withAbortTimeout(
+        (signal) => entry.client.connect({ signal, timeoutMs: this.connectTimeoutMs }),
         this.connectTimeoutMs,
         `MCP server "${entry.config.serverId}" did not connect before timeout.`
       );
-      entry.tools = await withTimeout(
-        entry.client.listTools(),
+      entry.tools = await withAbortTimeout(
+        (signal) => entry.client.listTools({ signal, timeoutMs: this.connectTimeoutMs }),
         this.connectTimeoutMs,
         `MCP server "${entry.config.serverId}" did not list tools before timeout.`
       );
@@ -278,6 +278,31 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
       promise,
       new Promise<T>((_resolve, reject) => {
         timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+async function withAbortTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  const controller = new AbortController();
+  let timeout: NodeJS.Timeout | undefined;
+  const timeoutError = new Error(message);
+  try {
+    return await Promise.race([
+      operation(controller.signal),
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort(timeoutError);
+          reject(timeoutError);
+        }, timeoutMs);
       }),
     ]);
   } finally {

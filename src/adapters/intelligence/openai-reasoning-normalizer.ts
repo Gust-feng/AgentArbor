@@ -41,14 +41,14 @@ export class OpenAIReasoningStreamNormalizer {
     const delta = asRecord(choice.delta);
     const split = this.thinkTagSplitter.push(stringValue(delta.content));
     const normalized = {
-      reasoningDelta: joinReasoningText(reasoningTextFromRecord(delta), split.reasoningDelta),
+      reasoningDelta: joinReasoningDeltas(reasoningDeltaTextFromRecord(delta), split.reasoningDelta),
       textDelta: split.textDelta,
     };
     if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
       const flushed = this.thinkTagSplitter.flush();
       this.thinkTagSplitter = new OpenAICompatibleThinkTagStreamSplitter();
       return {
-        reasoningDelta: joinReasoningText(normalized.reasoningDelta, flushed.reasoningDelta),
+        reasoningDelta: joinReasoningDeltas(normalized.reasoningDelta, flushed.reasoningDelta),
         textDelta: `${normalized.textDelta}${flushed.textDelta}`,
       };
     }
@@ -168,6 +168,17 @@ export function reasoningTextFromRecord(record: Record<string, unknown>): string
     stringValue(record.reasoning),
     reasoningDetailsText(record.reasoning_details),
   ]);
+}
+
+/** Streaming deltas are protocol fragments, so their boundary whitespace is significant. */
+export function reasoningDeltaTextFromRecord(record: Record<string, unknown>): string {
+  for (const candidate of [
+    stringValue(record.reasoning_content),
+    stringValue(record.reasoning),
+  ]) {
+    if (candidate.length > 0) return candidate.replace(/\r\n/g, "\n");
+  }
+  return reasoningDetailsText(record.reasoning_details);
 }
 
 export function splitThinkTagContent(content: string): {
@@ -327,6 +338,10 @@ function joinReasoningText(...parts: readonly string[]): string {
     .map((part) => part.replace(/\r\n/g, "\n"))
     .filter((part) => part.trim().length > 0)
     .join("\n\n");
+}
+
+function joinReasoningDeltas(...parts: readonly string[]): string {
+  return parts.filter((part) => part.length > 0).join("");
 }
 
 function possibleTagSuffixLength(value: string, tag: string): number {

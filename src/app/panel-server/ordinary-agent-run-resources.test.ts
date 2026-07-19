@@ -125,7 +125,11 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   assert.equal(AGENT_TOOL_NAMES.some((name) => acquired.tools.gateway.has(name)), false);
   assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["call_sub_agent", "spawn_sub_agent"]);
   assert.ok(acquired.maintainContext);
-  await acquired.maintainContext({ messages: acquired.resolvedMessages, abortSignal: execution.abortSignal });
+  await acquired.maintainContext({
+    messages: acquired.resolvedMessages,
+    hasUnseenToolResults: false,
+    abortSignal: execution.abortSignal,
+  });
   const countedTools = countedToolContracts.join("\n");
   assert.match(countedTools, /Available specialists: reviewer/u);
   assert.match(countedTools, /sub_agent_name/u);
@@ -280,6 +284,7 @@ test("Ordinary resources classify tool-boundary and compaction failures without 
   assert.ok(compactionResources.maintainContext);
   assert.deepEqual(await compactionResources.maintainContext({
     messages: compactionResources.resolvedMessages,
+    hasUnseenToolResults: false,
     abortSignal: input.abortSignal,
   }), {
     status: "failed",
@@ -304,6 +309,7 @@ test("Ordinary resources classify tool-boundary and compaction failures without 
   assert.ok(thrownCompactionResources.maintainContext);
   assert.deepEqual(await thrownCompactionResources.maintainContext({
     messages: thrownCompactionResources.resolvedMessages,
+    hasUnseenToolResults: false,
     abortSignal: input.abortSignal,
   }), {
     status: "failed",
@@ -388,6 +394,7 @@ for (const protocol of ["openai_responses", "openai_compatible_chat_completions"
     assert.ok(acquired.maintainContext);
     const maintained = await acquired.maintainContext({
       messages: acquired.resolvedMessages,
+      hasUnseenToolResults: false,
       abortSignal: controller.signal,
     });
     assert.equal(maintained.status, "compacted");

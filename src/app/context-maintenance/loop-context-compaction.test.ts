@@ -8,6 +8,99 @@ import type {
 import { compactAgentLoopContextIfNeeded } from "./index.js";
 import type { AgentLoopTokenCounter } from "./contracts.js";
 
+test("new tool results crossing the threshold compact old context and remain raw for the main model", async () => {
+  const channel = new TestIntelligenceChannel("short summary");
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "inspect",
+    traceId: "trace-threshold-tool-result",
+    goalId: "goal-threshold-tool-result",
+    messages: [
+      { role: "system", content: "system" },
+      { role: "user", content: "old context ".repeat(70), ref: "old-context" },
+      { role: "user", content: "Current user message: inspect", ref: "context:goal:inspect" },
+      { role: "assistant", content: "", toolCalls: [{ callId: "call-1", toolName: "read_file", input: {} }] },
+      { role: "tool", content: "x".repeat(200), toolCallId: "call-1", toolName: "read_file" },
+    ],
+    tools: [],
+    intelligenceChannel: channel,
+    tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(2_000),
+    thresholdRatio: 0.5,
+    preserveRecentTokenBudget: 0,
+    preserveLatestToolInteraction: true,
+  });
+
+  assert.equal(result.status, "compacted");
+  if (result.status !== "compacted") return;
+  assert.equal(channel.requests.length, 1);
+  assert.equal(result.messages.some((message) => message.ref === "old-context"), false);
+  assert.equal(result.messages.some((message) => message.toolCalls?.[0]?.callId === "call-1"), true);
+  assert.equal(result.messages.some((message) => message.toolCallId === "call-1"), true);
+});
+
+test("physical-window pressure compacts old context but preserves the latest unseen tool interaction", async () => {
+  const channel = new TestIntelligenceChannel("short summary");
+  const toolCalls = Array.from({ length: 12 }, (_, index) => ({
+    callId: `latest-${index}`,
+    toolName: "read_file",
+    input: {},
+  }));
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "inspect",
+    traceId: "trace-preserve-latest-tool-result",
+    goalId: "goal-preserve-latest-tool-result",
+    messages: [
+      { role: "system", content: "system" },
+      { role: "user", content: "old ".repeat(250), ref: "old-context" },
+      { role: "user", content: "Current user message: inspect", ref: "context:goal:latest" },
+      { role: "assistant", content: "", toolCalls, ref: "latest-tool-call" },
+      ...toolCalls.map((call) => ({ role: "tool" as const, content: "result", toolCallId: call.callId, toolName: call.toolName })),
+    ],
+    tools: [],
+    intelligenceChannel: channel,
+    tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(1_000),
+    thresholdRatio: 0.5,
+    preserveLatestToolInteraction: true,
+    preserveRecentTokenBudget: 0,
+  });
+
+  assert.equal(result.status, "compacted");
+  if (result.status !== "compacted") return;
+  assert.equal(result.messages.some((message) => message.ref === "old-context"), false);
+  assert.equal(result.messages.filter((message) => message.role === "tool").length, 12);
+  assert.equal(result.messages.some((message) => message.ref === "latest-tool-call"), true);
+});
+
+test("required current and unseen tool messages consume the recent token budget", async () => {
+  const channel = new TestIntelligenceChannel("short summary");
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "inspect",
+    traceId: "trace-required-tail-budget",
+    goalId: "goal-required-tail-budget",
+    messages: [
+      { role: "system", content: "system" },
+      { role: "user", content: "old context ".repeat(70), ref: "old-context" },
+      { role: "user", content: `Current user message: ${"inspect ".repeat(10)}`, ref: "context:goal:inspect" },
+      { role: "assistant", content: "earlier round that should be compacted", ref: "earlier-round" },
+      { role: "assistant", content: "", toolCalls: [{ callId: "call-latest", toolName: "read_file", input: {} }] },
+      { role: "tool", content: "latest result", toolCallId: "call-latest", toolName: "read_file" },
+    ],
+    tools: [],
+    intelligenceChannel: channel,
+    tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(2_000),
+    thresholdRatio: 0.5,
+    preserveRecentTokenBudget: 100,
+    preserveLatestToolInteraction: true,
+  });
+
+  assert.equal(result.status, "compacted");
+  if (result.status !== "compacted") return;
+  assert.equal(result.messages.some((message) => message.ref === "earlier-round"), false);
+  assert.equal(result.messages.some((message) => message.toolCallId === "call-latest"), true);
+});
+
 test("neutral loop context compaction replaces compactible messages with a continuation prompt", async () => {
   const channel = new TestIntelligenceChannel("## Goal\nContinue safely.\n\n## Next Steps\nUse preserved context.");
   const result = await compactAgentLoopContextIfNeeded({
@@ -40,7 +133,7 @@ test("neutral loop context compaction replaces compactible messages with a conti
     tokenCounter: characterTokenCounter(),
     modelCapabilities: modelCapabilities(10_000),
     thresholdRatio: 0.1,
-    preserveRecentMessages: 2,
+    preserveRecentTokenBudget: 200,
   });
 
   assert.equal(result.status, "compacted");
@@ -88,7 +181,7 @@ test("loop context compaction never preserves only part of a parallel tool inter
     intelligenceChannel: channel,
     tokenCounter: characterTokenCounter(),
     thresholdRatio: 0.1,
-    preserveRecentMessages: 10,
+    preserveRecentTokenBudget: 100,
     modelCapabilities: modelCapabilities(1_000),
   });
 
@@ -101,6 +194,45 @@ test("loop context compaction never preserves only part of a parallel tool inter
   const compactionInput = JSON.stringify(channel.requests[0]?.sanitizedMessages);
   assert.equal(compactionInput.includes("read_file#call-0"), true);
   assert.equal(compactionInput.includes("toolResultFor: read_file#call-11"), true);
+});
+
+test("recent token budget preserves a complete parallel tool interaction in original order", async () => {
+  const channel = new TestIntelligenceChannel("## Goal\nContinue with the recent tool facts.");
+  const result = await compactAgentLoopContextIfNeeded({
+    goal: "inspect the files",
+    traceId: "trace-preserve-complete-tool-round",
+    goalId: "goal-preserve-complete-tool-round",
+    messages: [
+      { role: "system", content: "system boundary", ref: "prompt:system" },
+      { role: "user", content: "old context ".repeat(100), ref: "old-context" },
+      { role: "user", content: "Current user message: inspect the files", ref: "context:goal:tool-round" },
+      {
+        role: "assistant",
+        content: "",
+        ref: "recent-tool-call",
+        toolCalls: [
+          { callId: "call-a", toolName: "read_file", input: { path: "a.ts" } },
+          { callId: "call-b", toolName: "read_file", input: { path: "b.ts" } },
+        ],
+      },
+      { role: "tool", content: "result-a", toolCallId: "call-a", toolName: "read_file", ref: "recent-result-a" },
+      { role: "tool", content: "result-b", toolCallId: "call-b", toolName: "read_file", ref: "recent-result-b" },
+    ],
+    tools: [],
+    intelligenceChannel: channel,
+    tokenCounter: characterTokenCounter(),
+    modelCapabilities: modelCapabilities(2_000),
+    thresholdRatio: 0.5,
+    preserveRecentTokenBudget: 500,
+  });
+
+  assert.equal(result.status, "compacted");
+  if (result.status !== "compacted") return;
+  assert.equal(result.messages.some((message) => message.ref === "old-context"), false);
+  assert.deepEqual(
+    result.messages.flatMap((message) => message.ref?.startsWith("recent-") === true ? [message.ref] : []),
+    ["recent-tool-call", "recent-result-a", "recent-result-b"],
+  );
 });
 
 test("loop context budget includes tool arguments and protocol continuation items", async () => {
@@ -141,7 +273,7 @@ test("loop context budget includes tool arguments and protocol continuation item
     intelligenceChannel: channel,
     tokenCounter: characterTokenCounter(),
     thresholdRatio: 0.1,
-    preserveRecentMessages: 2,
+    preserveRecentTokenBudget: 100,
     modelCapabilities: modelCapabilities(1_000),
   });
 
@@ -165,7 +297,7 @@ test("context maintenance requires the compacted request to fit the frozen model
     tokenCounter: characterTokenCounter(),
     modelCapabilities: modelCapabilities(2_000),
     thresholdRatio: 0.8,
-    preserveRecentMessages: 2,
+    preserveRecentTokenBudget: 100,
   });
 
   assert.equal(result.status, "failed");
@@ -190,7 +322,7 @@ test("context maintenance fails rather than silently using an implicit window", 
     tokenCounter: characterTokenCounter(),
     modelCapabilities: modelCapabilities(100),
     thresholdRatio: 0.8,
-    preserveRecentMessages: 2,
+    preserveRecentTokenBudget: 100,
   });
 
   assert.equal(result.status, "failed");
@@ -215,7 +347,7 @@ test("context threshold never exceeds the frozen model window", async () => {
     tokenCounter: characterTokenCounter(),
     modelCapabilities: modelCapabilities(100),
     thresholdRatio: 0.8,
-    preserveRecentMessages: 2,
+    preserveRecentTokenBudget: 100,
   });
 
   assert.equal(result.status, "failed");

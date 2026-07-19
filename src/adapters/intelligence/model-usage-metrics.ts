@@ -58,6 +58,7 @@ export function modelUsageWithTiming(input: {
       ? undefined
       : Math.max(0, latencyMs - firstTokenLatencyMs);
   return compactUsage({
+    requestCount: 1,
     inputTokens: normalizeTokenCount(input.usage?.inputTokens),
     outputTokens: normalizeTokenCount(input.usage?.outputTokens),
     totalTokens: normalizeTokenCount(input.usage?.totalTokens),

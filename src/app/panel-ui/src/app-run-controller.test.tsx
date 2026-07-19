@@ -4,9 +4,18 @@ import { createInitialAppState, type AppState } from "./app-state";
 import { createAppRunController } from "./app-run-controller";
 import type { BasicAgentRun, BasicAgentRunView } from "./contracts/run";
 
+const statisticsMocks = vi.hoisted(() => ({
+  invalidateUsageStatistics: vi.fn(),
+}));
+
+vi.mock("./usage-statistics-query", () => ({
+  invalidateUsageStatistics: statisticsMocks.invalidateUsageStatistics,
+}));
+
 describe("ordinary run cancellation", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    statisticsMocks.invalidateUsageStatistics.mockReset();
   });
 
   it("settles local interaction before the command returns and consumes the durable cancelled run without notices", async () => {
@@ -78,6 +87,7 @@ describe("ordinary run cancellation", () => {
     await vi.waitFor(() => {
       expect(app.workView?.stage).toBe("cancelled");
       expect(app.conversation?.turns[1]?.interruption).toBe("user_cancelled");
+      expect(statisticsMocks.invalidateUsageStatistics).toHaveBeenCalledOnce();
     });
   });
 });

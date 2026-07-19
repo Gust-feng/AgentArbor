@@ -135,6 +135,97 @@ test("readSkillResource truncates reference content by maxChars while keeping fu
   }
 });
 
+test("readSkillResource streams a late reference window while preserving full hash and counts", async () => {
+  const fixture = await createSkillFixture("reference-late-window");
+  try {
+    const content = `${"x".repeat(2_000_000)}tail`;
+    await fs.mkdir(path.join(fixture.packagePath, "references"), { recursive: true });
+    await fs.writeFile(path.join(fixture.packagePath, "references", "large.txt"), content, "utf8");
+
+    const result = expectResolved(await readSkillResource({
+      ...fixture,
+      relativePath: "references/large.txt",
+      type: "reference",
+      startChar: 2_000_000,
+      maxChars: 4,
+    }));
+
+    assert.equal(result.content, "tail");
+    assert.equal(result.charCount, content.length);
+    assert.equal(result.byteLength, Buffer.byteLength(content, "utf8"));
+    assert.equal(result.contentHash, hashBuffer(Buffer.from(content, "utf8")));
+    assert.equal(result.truncated, false);
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("readSkillResource keeps large UTF-8 streams on safe UTF-16 continuation boundaries", async () => {
+  const fixture = await createSkillFixture("reference-emoji-boundary");
+  try {
+    const content = `${"a".repeat(65_535)}😀z${"b".repeat(70_000)}`;
+    await fs.mkdir(path.join(fixture.packagePath, "references"), { recursive: true });
+    await fs.writeFile(path.join(fixture.packagePath, "references", "unicode.txt"), content, "utf8");
+
+    const beforeEmoji = expectResolved(await readSkillResource({
+      ...fixture,
+      relativePath: "references/unicode.txt",
+      type: "reference",
+      startChar: 65_533,
+      maxChars: 3,
+    }));
+    assert.equal(beforeEmoji.content, "aa");
+    assert.equal(beforeEmoji.truncated, true);
+    assert.equal(beforeEmoji.charCount, content.length);
+    assert.equal(beforeEmoji.contentHash, hashBuffer(Buffer.from(content, "utf8")));
+
+    const fromEmoji = expectResolved(await readSkillResource({
+      ...fixture,
+      relativePath: "references/unicode.txt",
+      type: "reference",
+      startChar: 65_535,
+      maxChars: 3,
+    }));
+    assert.equal(fromEmoji.content, "😀z");
+    assert.equal(fromEmoji.truncated, true);
+
+    const splitEmoji = expectError(await readSkillResource({
+      ...fixture,
+      relativePath: "references/unicode.txt",
+      type: "reference",
+      startChar: 65_536,
+      maxChars: 3,
+    }));
+    assert.equal(splitEmoji.errorCode, "invalid_start_char");
+    assert.match(splitEmoji.errorMessage, /surrogate pair/u);
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("readSkillResource propagates cancellation from the file stream", async () => {
+  const fixture = await createSkillFixture("reference-cancel");
+  try {
+    await fs.mkdir(path.join(fixture.packagePath, "references"), { recursive: true });
+    await fs.writeFile(path.join(fixture.packagePath, "references", "large.txt"), "x".repeat(1_000_000), "utf8");
+    const controller = new AbortController();
+    controller.abort(new Error("cancel skill read"));
+
+    await assert.rejects(
+      readSkillResource({
+        ...fixture,
+        relativePath: "references/large.txt",
+        type: "reference",
+        maxChars: 10,
+        abortSignal: controller.signal,
+      }),
+      /cancel skill read/u,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
 test("resolveSkillResource hashes are stable across read limits", async () => {
   const fixture = await createSkillFixture("hash-stable");
   try {

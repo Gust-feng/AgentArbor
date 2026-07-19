@@ -60,6 +60,34 @@ test("process registry registers background processes, lists by run, and appends
   ]);
 });
 
+test("process registry appends command log capacity facts without changing process state", () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:01:00.000Z") });
+  registerProcess(registry, {
+    processId: "log-limited-process",
+    runId: "run-log-limit",
+    pid: 12003,
+    owned: true,
+    status: "running",
+  });
+
+  const updated = registry.appendFact("log-limited-process", {
+    kind: "command_log_limit",
+    observedAt: "2026-06-15T00:01:01.000Z",
+    limitBytes: 1_024,
+    observedBytes: 1_100,
+    action: "terminate_process",
+  });
+
+  assert.equal(updated?.status, "running");
+  assert.deepEqual(registry.get("log-limited-process")?.facts, [{
+    kind: "command_log_limit",
+    observedAt: "2026-06-15T00:01:01.000Z",
+    limitBytes: 1_024,
+    observedBytes: 1_100,
+    action: "terminate_process",
+  }]);
+});
+
 test("process registry preserves local port probe facts", () => {
   const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:02:00.000Z") });
   registerProcess(registry, {
@@ -241,8 +269,7 @@ test("cleanupByRun terminates only owned active processes for the requested run"
   assert.equal(result.fact.scope, "run");
   assert.equal(result.fact.reason, "run_release");
   assert.equal(result.fact.runId, "run-cleanup");
-  assert.equal(registry.get("owned-active")?.facts[0]?.kind, "kill_tree");
-  assert.equal(registry.get("owned-active")?.facts[0]?.resultStatus, "killed");
+  assert.equal(firstKillTreeFact(registry.get("owned-active")).resultStatus, "killed");
   assert.equal(result.summary.totalCount, 4);
   assert.equal(result.summary.statuses.killed, 2);
   assert.equal(result.summary.statuses.running, 1);
@@ -511,8 +538,9 @@ test("cleanupByRun records already-exited kill-tree observations without claimin
   assert.equal(result.attempted[0]?.outcome, "already-exited");
   assert.equal(record?.status, "exited");
   assert.equal(record?.endedAt, "2026-06-15T00:12:00.000Z");
-  assert.equal(record?.facts[0]?.resultStatus, "exited");
-  assert.equal(record?.facts[0]?.message, "Process 22500 was not running.");
+  const killTreeFact = firstKillTreeFact(record);
+  assert.equal(killTreeFact.resultStatus, "exited");
+  assert.equal(killTreeFact.message, "Process 22500 was not running.");
   assert.equal(result.summary.statuses.exited, 1);
   assert.equal(result.summary.residualCount, 0);
 });
@@ -553,10 +581,11 @@ test("cleanupByRun records unknown and failed kill-tree facts without recovery a
   const failedRecord = registry.get("failed-after-cleanup");
 
   assert.equal(unknownRecord?.status, "unknown");
-  assert.equal(unknownRecord?.facts[0]?.resultStatus, "unknown");
+  assert.equal(firstKillTreeFact(unknownRecord).resultStatus, "unknown");
   assert.equal(failedRecord?.status, "unknown");
-  assert.equal(failedRecord?.facts[0]?.resultStatus, "failed");
-  assert.equal(failedRecord?.facts[0]?.errorMessage, "access denied");
+  const failedKillTreeFact = firstKillTreeFact(failedRecord);
+  assert.equal(failedKillTreeFact.resultStatus, "failed");
+  assert.equal(failedKillTreeFact.errorMessage, "access denied");
   assert.deepEqual(
     cleanup.attempted.map((attempt) => [attempt.processId, attempt.outcome]),
     [
@@ -695,6 +724,15 @@ function registerProcess(
     startedAt: "2026-06-15T00:00:00.000Z",
     status: input.status,
   });
+}
+
+function firstKillTreeFact(record: ProcessRecord | undefined) {
+  const fact = record?.facts[0];
+  assert.equal(fact?.kind, "kill_tree");
+  if (fact?.kind !== "kill_tree") {
+    throw new Error("Expected the first process fact to be a kill-tree fact.");
+  }
+  return fact;
 }
 
 function fixedNow(value: string): () => string {

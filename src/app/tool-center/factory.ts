@@ -17,6 +17,8 @@ import { ToolRegistry, type ToolRegistryEntry } from "./tool-registry.js";
 import type { LocalCommandProcessRegistry } from "./adapters/local-workspace-command-tools.js";
 import type { ProcessTerminator } from "../runtime-guard/index.js";
 import type { ToolOutputStore } from "./tool-output-store.js";
+import type { ToolOutputTokenCounter } from "./tool-output-limits.js";
+import type { ToolExecutionMetricsSink } from "../../domain/tools/index.js";
 
 export type AgentToolRuntimeContext = {
   readonly constraints?: readonly Constraint[];
@@ -46,6 +48,8 @@ export type CreateAgentToolCenterOptions = {
   readonly taskSoil?: TaskSoil;
   readonly modelCapabilities?: ModelCapabilities;
   readonly toolOutputStore?: ToolOutputStore;
+  readonly outputTokenCounter?: ToolOutputTokenCounter;
+  readonly metricsSink?: ToolExecutionMetricsSink;
 };
 
 export function createDefaultToolCenter(
@@ -74,7 +78,11 @@ export async function createConfiguredToolCenterFactory(
 
 function createToolCenter(input: CreateAgentToolCenterOptions): ToolExecutionGateway {
   const registry = new ToolRegistry({
-    toolCenter: { outputStore: input.toolOutputStore },
+    toolCenter: {
+      outputStore: input.toolOutputStore,
+      outputTokenCounter: input.outputTokenCounter,
+      metricsSink: input.metricsSink,
+    },
   });
   applyAgentToolRegistryContributions(registry, input, input.contributions ?? []);
   createAgentToolRegistry(input, registry);

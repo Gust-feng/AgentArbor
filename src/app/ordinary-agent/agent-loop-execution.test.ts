@@ -40,7 +40,14 @@ test("completed execution maps canonical facts and releases its run resources on
   });
   assert.equal(received?.instructions, ordinaryRunBirth().instructions);
   assert.equal(received?.tools, fixture.resources.tools);
-  assert.equal(received?.onToolRound, onToolRound);
+  assert.notEqual(received?.onToolRound, onToolRound);
+  const assistantMessage: ModelMessage = {
+    role: "assistant",
+    content: "",
+    toolCalls: [{ callId: "call-1", toolName: "read_file", input: { path: "README.md" } }],
+  };
+  await received?.onToolRound?.({ canonicalMessagesBeforeRound: executionInput().messages, assistantMessage });
+  assert.deepEqual(fixture.registeredToolRounds(), [assistantMessage.toolCalls]);
   assert.equal(fixture.releaseCount(), 1);
 });
 
@@ -372,10 +379,12 @@ function executionFixture(
   } = {},
 ) {
   let releases = 0;
+  const registeredToolRounds: NonNullable<ModelMessage["toolCalls"]>[] = [];
   const resources: OrdinaryAgentLoopRunResources = {
     loop,
     resolvedMessages: options.resolvedMessages ?? executionInput().messages,
     tools: toolBoundary(),
+    registerToolRound(toolCalls) { registeredToolRounds.push(toolCalls); },
     ...(options.agentTools === undefined ? {} : { agentTools: options.agentTools }),
     ...(options.capabilityResolution === undefined ? {} : { capabilityResolution: options.capabilityResolution }),
     async release() { releases += 1; },
@@ -391,6 +400,7 @@ function executionFixture(
       },
     }),
     releaseCount: () => releases,
+    registeredToolRounds: () => registeredToolRounds,
   };
 }
 

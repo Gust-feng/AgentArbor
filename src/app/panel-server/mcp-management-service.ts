@@ -1,5 +1,10 @@
-import type { McpReferenceInfo } from "../../adapters/mcp/index.js";
-import { ensureManagedMcpExecutable, installMcpExecutable, McpManager, resolveMcpExecutable } from "../../adapters/mcp/index.js";
+import {
+  ensureManagedMcpExecutable,
+  installMcpExecutable,
+  McpManager,
+  resolveMcpExecutable,
+  type McpReferenceInfo,
+} from "../../adapters/mcp/index.js";
 import type { McpCachedReferenceInfo, McpCachedToolInfo, McpServerSettings } from "../../domain/config/index.js";
 import { canonicalNamespacedToolName } from "../../domain/tools/index.js";
 import type { CapabilityCenter } from "../capability/capability-center.js";
@@ -28,6 +33,7 @@ export type PanelMcpTestResult = {
   readonly connectedAt?: string;
   readonly errorCode?: string;
   readonly errorSummary?: string;
+  readonly referenceErrorSummary?: string;
   readonly tools: readonly PanelMcpToolSummary[];
   readonly catalog: Awaited<ReturnType<CapabilityCenter["snapshot"]>>["mcpCatalog"];
 };
@@ -203,14 +209,24 @@ export async function testPanelMcpServer(
         destructiveHint: tool.annotations?.destructiveHint,
         openWorldHint: tool.annotations?.openWorldHint,
       }));
-      const references = (await manager.getServerReferences(server.serverId).catch(() => emptyMcpReferenceInfo())) ?? emptyMcpReferenceInfo();
+      let references: McpReferenceInfo | undefined;
+      let referenceErrorSummary: string | undefined;
+      try {
+        references = await manager.getServerReferences(server.serverId);
+      } catch (error) {
+        referenceErrorSummary = panelMcpErrorMessage(
+          error instanceof Error ? error.message : "MCP prompts/resources 获取失败。",
+        );
+      }
       if (options.persistConnectionState !== false) {
         await runtime.configCenter.updateMcpServerConnectionState({
           serverId,
           connectedAt,
           errorSummary: undefined,
           cachedTools: manager.getServerTools(server.serverId).map(cachedToolFromMcpTool),
-          cachedReferences: cachedReferencesFromMcpReferenceInfo(references),
+          ...(references === undefined ? {} : {
+            cachedReferences: cachedReferencesFromMcpReferenceInfo(references),
+          }),
         });
         runtime.capabilityCenter.invalidate();
       }
@@ -218,6 +234,7 @@ export async function testPanelMcpServer(
         ok: true,
         connectedAt,
         tools: testedTools,
+        ...(referenceErrorSummary === undefined ? {} : { referenceErrorSummary }),
         catalog: (await runtime.capabilityCenter.snapshot()).mcpCatalog,
       };
     }
@@ -279,10 +296,6 @@ function cachedReferencesFromMcpReferenceInfo(references: McpReferenceInfo): Mcp
       mimeType: template.mimeType,
     })),
   };
-}
-
-function emptyMcpReferenceInfo(): McpReferenceInfo {
-  return { prompts: [], resources: [], resourceTemplates: [] };
 }
 
 export async function listPanelMcpReferences(

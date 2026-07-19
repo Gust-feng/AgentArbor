@@ -1,4 +1,5 @@
 import type { ReadonlySoilStore } from "../../domain/soil/index.js";
+import { createHash } from "node:crypto";
 import type { IntelligenceChannel, ModelMessage } from "../../domain/intelligence/index.js";
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
@@ -28,6 +29,8 @@ import type {
   AcquireOrdinaryAgentLoopRunResourcesInput,
   OrdinaryAgentLoopRunResourceAcquirer,
 } from "../ordinary-agent/agent-loop-execution.js";
+import { OrderedToolExecutionGateway } from "../ordinary-agent/ordered-tool-execution-gateway.js";
+import { OrdinaryToolMetricsCollector } from "../ordinary-agent/tool-runtime-metrics.js";
 import { createSkillToolRegistryContribution } from "../skills/skill-resource-tool.js";
 import {
   createSubAgentAgentToolCatalogContribution,
@@ -134,8 +137,14 @@ export function createOrdinaryAgentRunResourceAcquirer(
           abortSignal: input.abortSignal,
         }) ?? [];
         const toolRuntime = { constraints: taskSoil.constraints };
+        const toolMetrics = new OrdinaryToolMetricsCollector();
+        const tokenCounter = (dependencies.createTokenCounter ?? createOpenAITokenCounter)(
+          input.birth.config.model,
+        );
         const toolCenter = createAgentToolCenterFactory(options.host.providerFetch, resources)(toolRuntime, {
           taskSoil,
+          outputTokenCounter: tokenCounter,
+          metricsSink: toolMetrics,
           contributions: [
             ...createHostAgentToolContributions({
               runtime: toolRuntime,
@@ -174,7 +183,8 @@ export function createOrdinaryAgentRunResourceAcquirer(
             "Ordinary tool boundary could not be resolved.",
           );
         }
-        const tools = ordinaryToolBoundary(input, definition, toolCenter, toolBoundary.allowedTools);
+        const orderedToolGateway = new OrderedToolExecutionGateway(toolCenter, toolMetrics);
+        const tools = ordinaryToolBoundary(input, definition, orderedToolGateway, toolBoundary.allowedTools);
         const agentTools = await createSubAgentAgentTools({
           registry,
           parentAllowedTools: toolBoundary.allowedTools,
@@ -202,7 +212,8 @@ export function createOrdinaryAgentRunResourceAcquirer(
           resources,
           tools: toolBoundary.toolDefinitions,
           compactContext: dependencies.compactContext ?? compactAgentLoopContextIfNeeded,
-          tokenCounter: (dependencies.createTokenCounter ?? createOpenAITokenCounter)(input.birth.config.model),
+          tokenCounter,
+          toolMetrics,
         });
         loop = (dependencies.createAgentLoop ?? createModelRuntimeAgentLoop)({
           mode: input.birth.aiMode,
@@ -215,6 +226,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
         const processTerminator = options.host.processTerminator;
         const release = idempotentRelease([
           () => ownedLoop.release(),
+          () => orderedToolGateway.close(),
           resources.release,
           ...(processTerminator === undefined
             ? []
@@ -228,6 +240,8 @@ export function createOrdinaryAgentRunResourceAcquirer(
           resolvedMessages: messagesWithAttachments,
           tools,
           maintainContext,
+          toolMetrics,
+          registerToolRound: (toolCalls) => orderedToolGateway.registerToolRound(toolCalls),
           ...(toolBoundary.capabilityResolution === undefined
             ? {}
             : { capabilityResolution: toolBoundary.capabilityResolution }),
@@ -253,11 +267,36 @@ function createOrdinaryContextMaintainer(input: {
   readonly tools: ReturnType<typeof resolveRunToolBoundary>["toolDefinitions"];
   readonly compactContext: typeof compactAgentLoopContextIfNeeded;
   readonly tokenCounter: AgentLoopTokenCounter;
+  readonly toolMetrics: OrdinaryToolMetricsCollector;
 }): NonNullable<AgentLoopInput["maintainContext"]> {
   const channel = lazyIntelligenceChannel(() => input.resources.aiConfig.createIntelligenceChannel({
     bus: new InMemoryMessageBus(new InMemoryEventLog()),
   }));
-  return async ({ messages, abortSignal }) => {
+  return async ({ messages, hasUnseenToolResults, abortSignal }) => {
+    const serializedDefinitions = JSON.stringify(input.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })));
+    const definitionTokens = input.tokenCounter.countText(serializedDefinitions);
+    input.toolMetrics.recordDefinitionRequest(input.tools.length, definitionTokens);
+    input.tools.forEach((tool) => input.toolMetrics.record({
+      kind: "definition",
+      toolName: tool.name,
+      operationType: tool.metadata?.operationType ?? "read-write",
+      definitionHash: createHash("sha256").update(JSON.stringify({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })).digest("hex"),
+      definitionTokens: input.tokenCounter.countText(JSON.stringify({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+      totalDefinitionTokens: definitionTokens,
+      toolCount: input.tools.length,
+    }));
     const result = await input.compactContext({
       goal: input.input.runInput.userMessage,
       traceId: input.input.runId,
@@ -272,6 +311,7 @@ function createOrdinaryContextMaintainer(input: {
       modelCapabilities: input.resources.capabilitySnapshot.modelCapabilities,
       tokenCounter: input.tokenCounter,
       compactedContextRole: "user",
+      preserveLatestToolInteraction: hasUnseenToolResults,
       abortSignal,
     }).catch((error: unknown) => {
       const wrapped = expectedOrWrappedExecutionError(

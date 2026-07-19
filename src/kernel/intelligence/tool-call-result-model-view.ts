@@ -4,7 +4,7 @@ import type { ToolCallResult, ToolResult } from "../../domain/tools/index.js";
 export function toolCallResultToModelToolResult(result: ToolCallResult): ToolResult {
   if (result.status === "failed" || result.status === "cancelled") {
     return {
-      body: toolCallOutputToModelBody(result.output),
+      body: toolCallOutputToModelBody(result.output, result.toolName),
       error: {
         message: result.error ?? (result.status === "cancelled"
           ? "Tool execution was cancelled."
@@ -32,15 +32,79 @@ export function toolCallResultToModelToolResult(result: ToolCallResult): ToolRes
           },
     };
   }
-  return { body: toolCallOutputToModelBody(result.output) };
+  return { body: toolCallOutputToModelBody(result.output, result.toolName) };
 }
 
-export function toolCallOutputToModelBody(output: ToolCallResult["output"]): ToolResult["body"] {
+export function toolCallOutputToModelBody(
+  output: ToolCallResult["output"],
+  toolName?: string,
+): ToolResult["body"] {
   if (output === undefined) {
     return { format: "none" };
   }
   if (typeof output === "string") {
     return { format: "text", text: output };
   }
-  return { format: "json", value: output };
+  return { format: "json", value: toolModelOutputProjection(output, toolName) };
+}
+
+/** Keep canonical execution facts intact while removing only duplicated transport/input facts from model delivery. */
+function toolModelOutputProjection(
+  output: Exclude<ToolCallResult["output"], string | undefined>,
+  toolName: string | undefined,
+): Exclude<ToolCallResult["output"], string | undefined> {
+  if (Array.isArray(output) || output === null) return output;
+  const record = output as Readonly<Record<string, unknown>>;
+  if (typeof record.contentRef === "string" && isRecord(record.continuation)) {
+    return compactRecord(record, [
+      "contentRef",
+      "contentBytes",
+      "contentSha256",
+      "expiresAt",
+      "continuationAvailability",
+    ], true);
+  }
+  if (toolName === "read_tool_output") {
+    return compactRecord(record, [
+      "ref",
+      "sourceToolName",
+      "sourceCallId",
+      "sourceFactId",
+      "continuationAvailability",
+    ], true);
+  }
+  if (toolName === "read_file") return compactRecord(record, ["path"]);
+  if (toolName === "list_dir") {
+    return compactRecord(record, ["path", "depth", "offset", "limit", "maxDepth", "maxEntries"]);
+  }
+  if (toolName === "grep_files") {
+    return compactRecord(record, ["query", "path", "offset", "limit", "maxOffset", "offsetCeiling"]);
+  }
+  if (toolName === "shell_command") {
+    return compactRecord(record, ["command", "commandLine", "args", "logPath"]);
+  }
+  if (toolName === "web_search") return compactRecord(record, ["query"]);
+  return output;
+}
+
+function compactRecord(
+  record: Readonly<Record<string, unknown>>,
+  omittedKeys: readonly string[],
+  compactContinuation = false,
+): Exclude<ToolCallResult["output"], string | undefined> {
+  const omitted = new Set(omittedKeys);
+  const value: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(record)) {
+    if (omitted.has(key)) continue;
+    if (compactContinuation && key === "continuation" && isRecord(item)) {
+      value.continuation = { nextInput: item.nextInput };
+      continue;
+    }
+    value[key] = item;
+  }
+  return value as Exclude<ToolCallResult["output"], string | undefined>;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

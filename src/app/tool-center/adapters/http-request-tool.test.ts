@@ -3,6 +3,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { ToolCenter } from "../tool-center.js";
+import { InMemoryToolOutputStore } from "../tool-output-store.js";
 import { createHttpRequestTool, type HttpRequestErrorFacts, type HttpRequestFetchLike } from "./http-request-tool.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
@@ -304,6 +305,34 @@ test("http_request stops continuation at the startChar ceiling without hiding ov
   assert.equal(result.errorFacts?.retryable, false);
 });
 
+test("http_request fails explicitly when a GET exceeds the exact retained snapshot ceiling", async () => {
+  const center = new ToolCenter();
+  center.register(createHttpRequestTool({
+    maxBodyChars: 5,
+    outputStore: new InMemoryToolOutputStore(),
+    fetch: async () => ({
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: async () => `${"x".repeat(2_000_001)}tail`,
+    }),
+  }));
+
+  const result = await center.execute(
+    { callId: "call-http-snapshot-ceiling", toolName: "http_request", input: { url: "https://example.test/huge" } },
+    context,
+    { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] },
+  );
+  const output = asIncompleteHttpOutput(result.output);
+
+  assert.equal(result.status, "failed");
+  assert.equal(output.responseBodyComplete, false);
+  assert.equal("continuation" in output, false);
+  assert.equal(result.errorFacts?.code, "http_response_snapshot_limit_reached");
+  assert.equal(result.errorFacts?.requestCompleted, true);
+  assert.equal(result.errorFacts?.retryable, false);
+});
+
 test("http_request fails partial side-effecting responses without a replay continuation", async () => {
   for (const method of ["POST", "PUT", "DELETE"] as const) {
     const center = new ToolCenter();
@@ -338,6 +367,51 @@ test("http_request fails partial side-effecting responses without a replay conti
     assert.equal(errorFacts?.requestCompleted, true);
     assert.equal(errorFacts?.retryable, false);
   }
+});
+
+test("http_request continues one retained GET response without issuing another request", async () => {
+  let requests = 0;
+  const tool = createHttpRequestTool({
+    maxBodyChars: 4,
+    outputStore: new InMemoryToolOutputStore(),
+    fetch: async () => {
+      requests += 1;
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: new Headers({ "content-type": "text/plain" }),
+        text: async () => "abcdefghijkl",
+      };
+    },
+  });
+
+  const first = asHttpOutput(await tool.execute({ url: "https://example.test/stable" }, context));
+  const secondInput = asRecord(asRecord(first.continuation).nextInput);
+  const second = asRecord(await tool.execute(secondInput, context));
+  const third = asRecord(await tool.execute(asRecord(asRecord(second.continuation).nextInput), context));
+
+  assert.equal(requests, 1);
+  assert.equal(typeof secondInput.responseRef, "string");
+  assert.equal(`${first.body}${second.body}${third.body}`, "abcdefghijkl");
+  assert.equal(second.headers, undefined);
+  assert.equal(third.continuation, undefined);
+});
+
+test("http_request reports a missing retained response without replaying the request", async () => {
+  let requests = 0;
+  const tool = createHttpRequestTool({
+    outputStore: new InMemoryToolOutputStore(),
+    fetch: async () => {
+      requests += 1;
+      throw new Error("must not request again");
+    },
+  });
+
+  await assert.rejects(
+    tool.execute({ responseRef: "tool-output://missing", startChar: 4 }, context),
+    (error: unknown) => error instanceof Error && (error as Error & { readonly code?: string }).code === "tool_output_not_found",
+  );
+  assert.equal(requests, 0);
 });
 
 type TestServer = {
@@ -430,6 +504,13 @@ function asIncompleteHttpOutput(value: unknown): IncompleteHttpOutputForTest {
   assert.equal(typeof output.bodyPreview, "string");
   assert.equal(output.responseBodyComplete, false);
   return value as IncompleteHttpOutputForTest;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+  return value as Record<string, unknown>;
 }
 
 function rejectingFetch(error: unknown): HttpRequestFetchLike {

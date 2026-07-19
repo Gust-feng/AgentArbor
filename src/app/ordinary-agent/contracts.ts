@@ -16,6 +16,7 @@ import type {
 } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
+import type { OrdinaryToolMetricsSnapshot } from "./tool-runtime-metrics.js";
 
 export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v3" as const;
 export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v1" as const;
@@ -176,6 +177,7 @@ export type OrdinaryRunState = {
   readonly toolResultRecordedAt: Readonly<Record<string, string>>;
   /** Cumulative provider usage for this run, including every live approval continuation segment. */
   readonly usage: ModelUsage;
+  readonly toolMetrics?: OrdinaryToolMetricsSnapshot;
   /** Effective capability boundary resolved from the frozen birth snapshot and executable Host tools. */
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly timeline: readonly OrdinaryRunEvent[];
@@ -215,6 +217,7 @@ export type OrdinaryExecutionFacts = {
   readonly toolCalls: readonly ToolCallResult[];
   /** Cumulative usage for the whole live execution/continuation chain. */
   readonly usage: ModelUsage;
+  readonly toolMetrics?: OrdinaryToolMetricsSnapshot;
   readonly capabilityResolution?: RunCapabilityResolution;
 };
 

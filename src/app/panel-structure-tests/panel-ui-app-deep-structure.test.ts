@@ -36,6 +36,7 @@ test("panel UI app shell keeps Agent cluster orchestration outside App", async (
     chatEmpty,
     workbenchShell,
     workbenchMain,
+    workbenchBootstrapLoading,
     chatTranscriptChain,
     transcriptTimeline,
     sidebar,
@@ -156,8 +157,10 @@ test("panel UI app shell keeps Agent cluster orchestration outside App", async (
   assert.equal(workbenchMain.includes("onChildConfirmation={props.onChildConfirmation}"), true);
   assert.equal(workbenchMain.includes("onResynthesize={props.onResynthesize}"), true);
   assert.equal(workbenchMain.includes("onStopRun={props.onStopRun}"), true);
-  assert.equal(workbenchMain.includes('className="app-bootstrap-loading"'), true);
-  assert.equal(workbenchMain.includes("正在初始化工作台"), true);
+  assert.equal(workbenchMain.includes('from "./workbench-bootstrap-loading"'), true);
+  assert.equal(workbenchMain.includes("<WorkbenchBootstrapLoading />"), true);
+  assert.equal(workbenchBootstrapLoading.includes('className="app-bootstrap-loading"'), true);
+  assert.equal(workbenchBootstrapLoading.includes("正在准备工作台"), true);
   assert.equal(workbenchMain.includes("export function WorkbenchMain"), true);
   assert.equal(workbenchMain.includes('from "./multi-agent-workspace"'), true);
   assert.equal(workbenchMain.includes('from "./chat-empty"'), true);

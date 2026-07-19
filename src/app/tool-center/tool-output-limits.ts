@@ -1,4 +1,11 @@
 export const DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS = 180_000;
+/** Fixed model-visible budgets; they deliberately do not scale with model context windows. */
+export const DEFAULT_TARGET_INLINE_TOOL_BODY_TOKENS = 4_000;
+export const DEFAULT_MAX_INLINE_TOOL_RESULT_TOKENS = 6_000;
+
+export type ToolOutputTokenCounter = {
+  countText(text: string): number;
+};
 
 // Producer-managed text windows need room for paths, headers, status, and
 // continuation metadata before ToolCenter applies the full-result limit.

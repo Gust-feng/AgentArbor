@@ -1,6 +1,9 @@
 import type { McpServerSettings } from "../../domain/config/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
 import {
+  assertMcpCatalogWithinLimits,
+  DEFAULT_MCP_MAX_TOOL_CATALOG_BYTES,
+  DEFAULT_MCP_MAX_TOOL_CATALOG_ITEMS,
   DEFAULT_MCP_MAX_CONCURRENT_CALLS_PER_SERVER,
   McpClientWrapper,
   type McpClientConfig,
@@ -12,18 +15,32 @@ export type LazyMcpToolProviderConfig = {
   readonly servers: readonly McpServerSettings[];
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly maxConcurrentCallsPerServer?: number;
+  /** Aggregate model-visible MCP tool boundary across every configured server. */
+  readonly maxToolCatalogItems?: number;
+  readonly maxToolCatalogBytes?: number;
+};
+
+export type LazyMcpToolProviderOptions = {
+  readonly createClient?: (config: McpClientConfig) => McpClientWrapper;
 };
 
 type LazyServerSession = {
   readonly server: McpServerSettings;
   client?: McpClientWrapper;
   connecting?: Promise<McpClientWrapper>;
+  connectAbortController?: AbortController;
 };
 
 export class LazyMcpToolExecutorProvider {
   private readonly sessions = new Map<string, LazyServerSession>();
+  private lifecycleGeneration = 0;
+  private closed = false;
+  private disconnecting?: Promise<void>;
 
-  constructor(private readonly config: LazyMcpToolProviderConfig) {
+  constructor(
+    private readonly config: LazyMcpToolProviderConfig,
+    private readonly options: LazyMcpToolProviderOptions = {},
+  ) {
     for (const server of config.servers) {
       if (!server.enabled || !hasCompleteRuntimeConfig(server) || (server.cachedTools?.length ?? 0) === 0) {
         continue;
@@ -33,75 +50,139 @@ export class LazyMcpToolExecutorProvider {
   }
 
   getToolsForRegistry(): readonly ToolExecutor[] {
-    const executors: ToolExecutor[] = [];
+    const selected: Array<{ readonly session: LazyServerSession; readonly tool: McpToolInfo }> = [];
     for (const session of this.sessions.values()) {
       for (const tool of session.server.cachedTools ?? []) {
         if (!isToolEnabled(session.server, tool.name)) {
           continue;
         }
-        executors.push(createLazyMcpToolExecutor(
-          () => this.getClient(session),
-          tool as McpToolInfo,
-          session.server.serverId,
-          {
-            confirmationMode: session.server.confirmationMode,
-            autoApprovedTools: session.server.autoApprovedTools,
-          }
-        ));
+        selected.push({ session, tool: tool as McpToolInfo });
       }
     }
-    return executors;
+    this.assertToolCatalogWithinLimits(selected.map((entry) => entry.tool));
+    return selected.map(({ session, tool }) =>
+      createLazyMcpToolExecutor(
+        () => this.getClient(session),
+        tool,
+        session.server.serverId,
+        {
+          confirmationMode: session.server.confirmationMode,
+          autoApprovedTools: session.server.autoApprovedTools,
+        },
+      ));
   }
 
   getDiscoveredToolsForRegistry(): readonly ToolExecutor[] {
-    const executors: ToolExecutor[] = [];
+    const discovered: Array<{ readonly session: LazyServerSession; readonly tool: McpToolInfo }> = [];
     for (const session of this.sessions.values()) {
       for (const tool of session.server.cachedTools ?? []) {
-        executors.push(createLazyMcpToolExecutor(
-          () => this.getClient(session),
-          tool as McpToolInfo,
-          session.server.serverId,
-          {
-            confirmationMode: session.server.confirmationMode,
-            autoApprovedTools: session.server.autoApprovedTools,
-          }
-        ));
+        discovered.push({ session, tool: tool as McpToolInfo });
       }
     }
-    return executors;
+    this.assertToolCatalogWithinLimits(discovered.map((entry) => entry.tool));
+    return discovered.map(({ session, tool }) =>
+      createLazyMcpToolExecutor(
+        () => this.getClient(session),
+        tool,
+        session.server.serverId,
+        {
+          confirmationMode: session.server.confirmationMode,
+          autoApprovedTools: session.server.autoApprovedTools,
+        },
+      ));
   }
 
   async disconnectAll(): Promise<void> {
-    const clients = [...this.sessions.values()]
+    if (this.disconnecting !== undefined) {
+      return this.disconnecting;
+    }
+    this.closed = true;
+    this.lifecycleGeneration += 1;
+    for (const session of this.sessions.values()) {
+      session.connectAbortController?.abort(new Error("Lazy MCP provider is closing."));
+    }
+
+    const connecting = [...this.sessions.values()]
+      .map((session) => session.connecting)
+      .filter((attempt): attempt is Promise<McpClientWrapper> => attempt !== undefined);
+    const initiallyConnected = [...this.sessions.values()]
       .map((session) => session.client)
       .filter((client): client is McpClientWrapper => client !== undefined);
-    await Promise.allSettled(clients.map((client) => client.disconnect()));
-    for (const session of this.sessions.values()) {
-      session.client = undefined;
-      session.connecting = undefined;
-    }
+
+    this.disconnecting = (async () => {
+      // A connecting client owns a transport before it becomes visible as session.client.
+      // Wait for every attempt so its stale-path cleanup has completed before release returns.
+      await Promise.allSettled(connecting);
+      const clients = new Set(initiallyConnected);
+      for (const session of this.sessions.values()) {
+        if (session.client !== undefined) {
+          clients.add(session.client);
+        }
+      }
+      await Promise.allSettled([...clients].map((client) => client.disconnect()));
+      for (const session of this.sessions.values()) {
+        session.client = undefined;
+        session.connecting = undefined;
+        session.connectAbortController = undefined;
+      }
+    })();
+    return this.disconnecting;
   }
 
   private async getClient(session: LazyServerSession): Promise<McpClientWrapper> {
+    if (this.closed) {
+      throw lazyProviderClosedError();
+    }
     if (session.client?.isConnected() === true) {
       return session.client;
     }
     if (session.connecting !== undefined) {
       return session.connecting;
     }
-    const client = new McpClientWrapper(mcpClientConfigFromServer(session.server, this.config.env, {
+    const clientConfig = mcpClientConfigFromServer(session.server, this.config.env, {
       maxConcurrentCallsPerServer: this.config.maxConcurrentCallsPerServer,
-    }));
-    session.connecting = client.connect().then(() => {
-      session.client = client;
-      session.connecting = undefined;
-      return client;
-    }).catch((error) => {
-      session.connecting = undefined;
-      throw error;
     });
-    return session.connecting;
+    const client = this.options.createClient?.(clientConfig) ?? new McpClientWrapper(clientConfig);
+    const generation = this.lifecycleGeneration;
+    const abortController = new AbortController();
+    session.connectAbortController = abortController;
+    let connecting!: Promise<McpClientWrapper>;
+    connecting = client.connect({ signal: abortController.signal }).then(() => {
+      if (this.closed || generation !== this.lifecycleGeneration) {
+        throw lazyProviderClosedError();
+      }
+      session.client = client;
+      return client;
+    }).catch(async (error: unknown) => {
+      await client.disconnect().catch(() => undefined);
+      if (this.closed || generation !== this.lifecycleGeneration) {
+        throw lazyProviderClosedError();
+      }
+      throw error;
+    }).finally(() => {
+      if (session.connecting === connecting) {
+        session.connecting = undefined;
+        session.connectAbortController = undefined;
+      }
+    });
+    session.connecting = connecting;
+    return connecting;
   }
+
+  private assertToolCatalogWithinLimits(tools: readonly McpToolInfo[]): void {
+    assertMcpCatalogWithinLimits(
+      "model-visible tools",
+      tools,
+      this.config.maxToolCatalogItems ?? DEFAULT_MCP_MAX_TOOL_CATALOG_ITEMS,
+      this.config.maxToolCatalogBytes ?? DEFAULT_MCP_MAX_TOOL_CATALOG_BYTES,
+    );
+  }
+}
+
+function lazyProviderClosedError(): Error {
+  const error = new Error("Lazy MCP provider is closed.");
+  error.name = "AbortError";
+  return error;
 }
 
 export function mcpClientConfigFromServer(

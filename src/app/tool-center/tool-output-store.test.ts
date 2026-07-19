@@ -6,6 +6,9 @@ import {
   type ToolExecutionContext,
 } from "../../domain/tools/index.js";
 import { createReadToolOutputTool, MAX_TOOL_OUTPUT_READ_CHARS } from "./adapters/tool-output-read-tool.js";
+import { createOpenAITokenCounter } from "../context-maintenance/token-counter.js";
+import { canonicalToolResultMessage } from "../model-runtime/tool-result-message.js";
+import { ToolCenter } from "./tool-center.js";
 import {
   DEFAULT_TOOL_OUTPUT_TTL_MS,
   InMemoryToolOutputStore,
@@ -259,6 +262,54 @@ test("read_tool_output stays within the inline budget under worst-case JSON esca
   assert.equal(output.textChars, MAX_TOOL_OUTPUT_READ_CHARS);
   assert.equal(JSON.stringify(output).length <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS, true);
   assert.equal(output.hasMoreAfter, true);
+});
+
+test("read_tool_output uses the same fixed token page budget as producer results", async () => {
+  const store = deterministicStore();
+  const retained = await store.retain(retainInput("x".repeat(8_000), "call-token-page"));
+  const counter = { countText: (text: string) => text.length };
+  const tool = createReadToolOutputTool(store, {
+    outputTokenCounter: counter,
+    targetInlineBodyTokens: 300,
+    maxInlineOutputTokens: 1_200,
+  });
+  const output = await executeReadTool(tool, {
+    ref: retained.ref,
+    startChar: 0,
+    maxChars: MAX_TOOL_OUTPUT_READ_CHARS,
+  });
+
+  assert.equal(counter.countText(output.content) <= 300, true);
+  assert.equal(output.hasMoreAfter, true);
+  assert.equal(asReadInput(output.continuation?.nextInput).startChar, output.textChars);
+});
+
+test("read_tool_output fits the final model projection while preserving its actual input and fact id", async () => {
+  const store = deterministicStore();
+  const retained = await store.retain(retainInput("reader content", "call-reader-source"));
+  const counter = createOpenAITokenCounter("gpt-4o");
+  const center = new ToolCenter({
+    outputStore: store,
+    outputTokenCounter: counter,
+  });
+  center.register(createReadToolOutputTool(store, { outputTokenCounter: counter }));
+  const input = { ref: retained.ref, startChar: 0, maxChars: MAX_TOOL_OUTPUT_READ_CHARS };
+  const factId = "reader-fact-actual";
+
+  const result = await center.execute(
+    { callId: "call-reader-actual", factId, toolName: "read_tool_output", input },
+    TOOL_CONTEXT,
+    { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["read_tool_output"] },
+  );
+  const message = canonicalToolResultMessage(result);
+  const output = result.output as ReadToolOutput;
+
+  assert.deepEqual(result.input, input);
+  assert.equal(result.factId, factId);
+  assert.equal(output.textChars > 0, true);
+  assert.equal(output.hasMoreAfter, false);
+  assert.equal(message.content.includes(factId), false);
+  assert.equal(counter.countText(JSON.stringify(message)) <= 6_000, true);
 });
 
 test("read_tool_output shrinks escaped windows for long provenance without skipping content", async () => {

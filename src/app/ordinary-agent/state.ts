@@ -10,6 +10,7 @@ import type {
   OrdinaryRunStatus,
   OrdinaryRunTurn,
 } from "./contracts.js";
+import type { OrdinaryToolMetricsSnapshot } from "./tool-runtime-metrics.js";
 import { OrdinaryFeatureError } from "./contracts.js";
 
 export type OrdinaryRunTransition =
@@ -22,6 +23,7 @@ export type OrdinaryRunTransition =
       readonly toolCalls: readonly ToolCallResult[];
       readonly usage: ModelUsage;
       readonly capabilityResolution?: RunCapabilityResolution;
+      readonly toolMetrics?: OrdinaryToolMetricsSnapshot;
     }
   | { readonly type: "approval_decided"; readonly decision: import("../../domain/confirmation/index.js").ConfirmationDecision }
   | {
@@ -31,6 +33,7 @@ export type OrdinaryRunTransition =
       readonly toolCalls: readonly ToolCallResult[];
       readonly usage: ModelUsage;
       readonly capabilityResolution?: RunCapabilityResolution;
+      readonly toolMetrics?: OrdinaryToolMetricsSnapshot;
     }
   | {
       readonly type: "fail";
@@ -39,6 +42,7 @@ export type OrdinaryRunTransition =
       readonly toolCalls?: readonly ToolCallResult[];
       readonly usage?: ModelUsage;
       readonly capabilityResolution?: RunCapabilityResolution;
+      readonly toolMetrics?: OrdinaryToolMetricsSnapshot;
     }
   | {
       readonly type: "cancel";
@@ -47,6 +51,7 @@ export type OrdinaryRunTransition =
       readonly toolCalls?: readonly ToolCallResult[];
       readonly usage?: ModelUsage;
       readonly capabilityResolution?: RunCapabilityResolution;
+      readonly toolMetrics?: OrdinaryToolMetricsSnapshot;
     }
   | {
       readonly type: "block";
@@ -117,6 +122,7 @@ export function transitionOrdinaryRun(input: {
     toolResultRecordedAt: toolResultRecordedAtAfter(input.state, input.transition, input.recordedAt),
     usage: usageAfter(input.state, input.transition),
     capabilityResolution: capabilityResolutionAfter(input.state, input.transition),
+    toolMetrics: toolMetricsAfter(input.state, input.transition),
     timeline: [...input.state.timeline, event],
     timestamps: {
       ...input.state.timestamps,
@@ -586,6 +592,15 @@ function capabilityResolutionAfter(
   return "capabilityResolution" in transition && transition.capabilityResolution !== undefined
     ? cloneJson(transition.capabilityResolution)
     : state.capabilityResolution;
+}
+
+function toolMetricsAfter(
+  state: OrdinaryRunState,
+  transition: OrdinaryRunTransition,
+): OrdinaryToolMetricsSnapshot | undefined {
+  return "toolMetrics" in transition && transition.toolMetrics !== undefined
+    ? cloneJson(transition.toolMetrics)
+    : state.toolMetrics;
 }
 
 function assertStatus(status: OrdinaryRunStatus, allowed: readonly OrdinaryRunStatus["kind"][], action: string): void {

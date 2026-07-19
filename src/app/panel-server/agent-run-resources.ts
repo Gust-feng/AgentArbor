@@ -34,6 +34,8 @@ import {
   createMcpToolRegistryContribution,
   type McpToolExecutorProvider,
 } from "../mcp/mcp-tool-contribution.js";
+import type { AgentLoopTokenCounter } from "../context-maintenance/index.js";
+import type { ToolExecutionMetricsSink } from "../../domain/tools/index.js";
 
 export type AgentRunResourceHost = {
   readonly configCenter: ConfigCenter;
@@ -231,6 +233,8 @@ export function createAgentToolCenterFactory(
   return (toolRuntime: AgentToolRuntimeContext, context?: {
     readonly contributions?: readonly AgentToolRegistryContribution[];
     readonly taskSoil?: TaskSoil;
+    readonly outputTokenCounter?: AgentLoopTokenCounter;
+    readonly metricsSink?: ToolExecutionMetricsSink;
   }) => createDefaultToolCenter({
     runtime: toolRuntime,
     env: resources.aiEnvironment,
@@ -249,5 +253,7 @@ export function createAgentToolCenterFactory(
     taskSoil: context?.taskSoil,
     modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
     toolOutputStore: resources.toolOutputStore,
+    outputTokenCounter: context?.outputTokenCounter,
+    metricsSink: context?.metricsSink,
   });
 }

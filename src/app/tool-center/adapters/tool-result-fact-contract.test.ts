@@ -51,12 +51,12 @@ test("shell_command reports factual truncation and omitted counts only after out
     assert.equal(output.truncated, true);
     assert.equal(output.stdoutTruncated, true);
     assert.equal(output.stderrTruncated, true);
-    assert.equal(String(output.stdout).length, 16_000);
-    assert.equal(String(output.stderr).length, 8_000);
+    assert.equal(String(output.stdout).length, 12_000);
+    assert.equal(String(output.stderr).length, 4_000);
     assert.equal(output.stdoutChars, stdoutChars);
     assert.equal(output.stderrChars, stderrChars);
-    assert.equal(output.stdoutOmittedChars, stdoutChars - 16_000);
-    assert.equal(output.stderrOmittedChars, stderrChars - 8_000);
+    assert.equal(output.stdoutOmittedChars, stdoutChars - 12_000);
+    assert.equal(output.stderrOmittedChars, stderrChars - 4_000);
     assert.doesNotMatch(JSON.stringify(output), suggestionPattern);
   } finally {
     await rm(root, { recursive: true, force: true });

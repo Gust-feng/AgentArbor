@@ -89,6 +89,33 @@ test("read_skill_resource continues beyond the former startChar ceiling without 
   }
 });
 
+test("read_skill_resource continuation never splits an emoji at a stream boundary", async () => {
+  const referenceContent = `${"a".repeat(65_535)}😀z`;
+  const fixture = await createFixture({ referenceContent });
+  try {
+    const tool = createReadSkillResourceTool([fixture.skillContext()]);
+    const first = asRecord(await tool.execute({
+      skillId: "sample-skill",
+      type: "reference",
+      path: "references/guide.md",
+      maxChars: 3,
+      startChar: 65_533,
+    }, executionContext()));
+    const nextInput = asRecord(asRecord(first.continuation).nextInput);
+
+    assert.equal(first.content, "aa");
+    assert.equal(first.truncated, true);
+    assert.equal(nextInput.startChar, 65_535);
+
+    const second = asRecord(await tool.execute(nextInput as ToolFactValue, executionContext()));
+    assert.equal(second.content, "😀z");
+    assert.equal(second.truncated, false);
+    assert.equal(second.continuation, undefined);
+  } finally {
+    await fixture.remove();
+  }
+});
+
 test("read_skill_resource rejects fractional continuation offsets", async () => {
   const fixture = await createFixture();
   try {

@@ -69,6 +69,7 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
     truncated: false,
   });
   assert.deepEqual(response.usage, {
+    requestCount: 1,
     inputTokens: 20,
     outputTokens: 10,
     totalTokens: 30,

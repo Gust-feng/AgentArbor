@@ -7,10 +7,14 @@ import {
 } from "../tool-output-store.js";
 import {
   DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS,
+  DEFAULT_MAX_INLINE_TOOL_RESULT_TOKENS,
+  DEFAULT_TARGET_INLINE_TOOL_BODY_TOKENS,
   MAX_TOOL_OUTPUT_READ_CHARS,
+  type ToolOutputTokenCounter,
 } from "../tool-output-limits.js";
 import { asRecord, throwIfAborted } from "./local-workspace-common.js";
 import { utf16SafePrefixLength } from "../text-window.js";
+import { toolResultMessage } from "../../../kernel/intelligence/tool-use-loop-messages.js";
 
 export const MIN_TOOL_OUTPUT_READ_CHARS = 2;
 export const DEFAULT_TOOL_OUTPUT_READ_CHARS = MAX_TOOL_OUTPUT_READ_CHARS;
@@ -32,7 +36,11 @@ export type ReadToolOutputResult = {
   readonly continuation?: ToolContinuation;
 };
 
-export function createReadToolOutputTool(store: ToolOutputStore): ToolExecutor {
+export function createReadToolOutputTool(store: ToolOutputStore, options: {
+  readonly outputTokenCounter?: ToolOutputTokenCounter;
+  readonly targetInlineBodyTokens?: number;
+  readonly maxInlineOutputTokens?: number;
+} = {}): ToolExecutor {
   return {
     definition: {
       name: "read_tool_output",
@@ -121,7 +129,12 @@ export function createReadToolOutputTool(store: ToolOutputStore): ToolExecutor {
           { ref },
         );
       }
-      const result = fitReadResultToInlineBudget(slice, maxChars);
+      const result = fitReadResultToInlineBudget(slice, maxChars, {
+        outputTokenCounter: options.outputTokenCounter,
+        targetInlineBodyTokens: options.targetInlineBodyTokens ?? DEFAULT_TARGET_INLINE_TOOL_BODY_TOKENS,
+        maxInlineOutputTokens: options.maxInlineOutputTokens ?? DEFAULT_MAX_INLINE_TOOL_RESULT_TOKENS,
+        callId: context.toolCallId ?? "read-tool-output",
+      });
       if (!result.hasMoreAfter && slice.availability === "live_only") {
         await store.release(slice.ref);
       }
@@ -133,9 +146,15 @@ export function createReadToolOutputTool(store: ToolOutputStore): ToolExecutor {
 function fitReadResultToInlineBudget(
   slice: ToolOutputSlice,
   requestedMaxChars: number,
+  tokenBudget: {
+    readonly outputTokenCounter?: ToolOutputTokenCounter;
+    readonly targetInlineBodyTokens: number;
+    readonly maxInlineOutputTokens: number;
+    readonly callId: string;
+  },
 ): ReadToolOutputResult {
   const full = readToolOutputResult(slice, slice.content, requestedMaxChars);
-  if (serializedReadResultChars(full) <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS) {
+  if (readResultFits(full, tokenBudget)) {
     return full;
   }
 
@@ -150,7 +169,7 @@ function fitReadResultToInlineBudget(
       slice.content.slice(0, prefixLength),
       requestedMaxChars,
     );
-    if (serializedReadResultChars(candidate) <= DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS) {
+    if (readResultFits(candidate, tokenBudget)) {
       if (candidate.textChars > 0 && (best === undefined || candidate.textChars > best.textChars)) {
         best = candidate;
       }
@@ -175,6 +194,29 @@ function fitReadResultToInlineBudget(
     );
   }
   return best;
+}
+
+function readResultFits(
+  result: ReadToolOutputResult,
+  budget: {
+    readonly outputTokenCounter?: ToolOutputTokenCounter;
+    readonly targetInlineBodyTokens: number;
+    readonly maxInlineOutputTokens: number;
+    readonly callId: string;
+  },
+): boolean {
+  if (serializedReadResultChars(result) > DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS) return false;
+  const counter = budget.outputTokenCounter;
+  if (counter === undefined) return true;
+  if (counter.countText(result.content) > budget.targetInlineBodyTokens) return false;
+  return counter.countText(JSON.stringify(toolResultMessage({
+    callId: budget.callId,
+    toolName: "read_tool_output",
+    input: undefined,
+    output: result,
+    status: "completed",
+    durationMs: 0,
+  }))) <= budget.maxInlineOutputTokens;
 }
 
 function readToolOutputResult(

@@ -50,7 +50,15 @@ export type ProcessKillTreeFact = {
   readonly errorMessage?: string;
 };
 
-export type ProcessFact = ProcessKillTreeFact;
+export type ProcessCommandLogLimitFact = {
+  readonly kind: "command_log_limit";
+  readonly observedAt: string;
+  readonly limitBytes: number;
+  readonly observedBytes: number;
+  readonly action: "terminate_process";
+};
+
+export type ProcessFact = ProcessKillTreeFact | ProcessCommandLogLimitFact;
 
 export type ProcessRecord = {
   readonly processId: string;
@@ -319,6 +327,19 @@ export class InMemoryProcessRegistry {
       ports: [...current.ports, clonePortFact(fact)],
     };
 
+    this.records.set(processId, cloneRecord(next));
+    return cloneRecord(next);
+  }
+
+  appendFact(processId: string, fact: ProcessFact): ProcessRecord | undefined {
+    const current = this.records.get(processId);
+    if (current === undefined) {
+      return undefined;
+    }
+    const next: ProcessRecord = {
+      ...current,
+      facts: [...current.facts, { ...fact }],
+    };
     this.records.set(processId, cloneRecord(next));
     return cloneRecord(next);
   }

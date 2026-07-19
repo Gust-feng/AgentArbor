@@ -63,6 +63,8 @@ export type AgentLoopInput = {
   /** Runs immediately before every provider request with the exact canonical request history. */
   readonly maintainContext?: (input: {
     readonly messages: readonly ModelMessage[];
+    /** True when this request contains tool results the main model has not consumed. */
+    readonly hasUnseenToolResults: boolean;
     readonly abortSignal: AbortSignal;
   }) => Promise<
     | { readonly status: "unchanged" }

@@ -6,6 +6,7 @@ import type {
   ToolFactValue,
 } from "../../../domain/tools/index.js";
 import { DEFAULT_MAX_INLINE_TOOL_CONTENT_JSON_CHARS } from "../tool-output-limits.js";
+import { ToolOutputStoreError, type ToolOutputStore } from "../tool-output-store.js";
 
 export type HttpRequestMethod = "GET" | "HEAD" | "POST" | "PUT" | "DELETE";
 
@@ -37,6 +38,7 @@ export type HttpRequestToolOptions = {
   readonly defaultTimeoutMs?: number;
   readonly maxTimeoutMs?: number;
   readonly maxBodyChars?: number;
+  readonly outputStore?: ToolOutputStore;
 };
 
 export type HttpRequestToolOutput = {
@@ -68,6 +70,15 @@ export type HttpRequestIncompleteOutput = {
   readonly startChar: number;
   readonly bodyChars: number;
   readonly startCharCeiling: number;
+};
+
+export type HttpRequestContinuationOutput = {
+  readonly body: string;
+  readonly startChar: number;
+  readonly bodyChars: number;
+  readonly hasMoreAfter: boolean;
+  readonly truncated: boolean;
+  readonly continuation?: ToolContinuation;
 };
 
 export type HttpRequestErrorFacts = {
@@ -187,9 +198,9 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
           },
           body: { description: "Optional string or JSON-serializable request body for POST, PUT, or DELETE." },
           startChar: { type: "number", description: "Zero-based body character offset for continuing a truncated GET response." },
+          responseRef: { type: "string", description: "Opaque GET response reference from continuation.nextInput; do not construct manually." },
           timeoutMs: { type: "number", description: `Optional timeout in milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS}.` },
         },
-        required: ["url"],
         additionalProperties: false,
       },
     },
@@ -202,12 +213,37 @@ async function executeHttpRequest(
   context: ToolExecutionContext,
   options: HttpRequestToolOptions,
   maxBodyChars: number
-): Promise<HttpRequestToolOutput | ToolExecutorResult> {
+): Promise<HttpRequestToolOutput | HttpRequestContinuationOutput | ToolExecutorResult> {
   throwIfAborted(context.abortSignal);
   const record = asRecord(input);
+  const responseRef = optionalNonEmptyString(record.responseRef);
+  const startChar = boundedBodyStartChar(record.startChar);
+  if (responseRef !== undefined) {
+    if (options.outputStore === undefined) {
+      throw new ToolOutputStoreError(
+        "invalid_tool_output_store_configuration",
+        "http_request response continuation storage is unavailable.",
+      );
+    }
+    const slice = await options.outputStore.read(responseRef, { startChar, maxChars: maxBodyChars });
+    if (slice === undefined) {
+      throw new ToolOutputStoreError("tool_output_not_found", "http_request retained response was not found.");
+    }
+    const continuation = slice.hasMoreAfter
+      ? { nextInput: { responseRef, startChar: slice.startChar + slice.textChars } }
+      : undefined;
+    if (!slice.hasMoreAfter && slice.availability === "live_only") await options.outputStore.release(responseRef);
+    return {
+      body: slice.content,
+      startChar: slice.startChar,
+      bodyChars: slice.textChars,
+      hasMoreAfter: slice.hasMoreAfter,
+      truncated: slice.hasMoreAfter,
+      continuation,
+    } as HttpRequestContinuationOutput;
+  }
   const url = requireHttpUrl(record.url);
   const method = methodFromInput(record.method);
-  const startChar = boundedBodyStartChar(record.startChar);
   if (startChar > 0 && method !== "GET") {
     throw new Error("http_request startChar continuation is only supported for GET requests.");
   }
@@ -237,10 +273,21 @@ async function executeHttpRequest(
       signal: requestSignal,
     });
     const bodyResult = method === "HEAD"
-      ? { body: "", startChar: 0, bodyChars: 0, hasMoreAfter: false, reachedStartCharCeiling: false, startCharCeiling: MAX_BODY_START_CHAR, truncated: false }
-      : await readResponseBody(response, maxBodyChars, startChar);
+      ? { body: "", startChar: 0, bodyChars: 0, hasMoreAfter: false, reachedStartCharCeiling: false, startCharCeiling: MAX_BODY_START_CHAR, truncated: false, fullBody: undefined }
+      : await readResponseBody(response, maxBodyChars, startChar, method === "GET" && options.outputStore !== undefined);
     const durationMs = Date.now() - startedAt;
     const statusText = response.statusText ?? "";
+    const retained = method === "GET" && bodyResult.fullBody !== undefined && bodyResult.hasMoreAfter && options.outputStore !== undefined
+      ? await options.outputStore.retain({
+          mediaType: "text/plain",
+          content: bodyResult.fullBody,
+          sourceToolName: "http_request",
+          sourceCallId: context.toolCallId ?? "http_request",
+          sourceFactId: context.toolCallId,
+          ownerId: context.traceId,
+        })
+      : undefined;
+    const snapshotUnavailable = method === "GET" && options.outputStore !== undefined && bodyResult.hasMoreAfter && bodyResult.fullBody === undefined;
     const output: HttpRequestToolOutput = {
       url,
       method,
@@ -255,19 +302,17 @@ async function executeHttpRequest(
       reachedStartCharCeiling: bodyResult.reachedStartCharCeiling,
       startCharCeiling: bodyResult.startCharCeiling,
       truncated: bodyResult.truncated,
-      continuation: method !== "GET" || bodyResult.nextStartChar === undefined
+      continuation: method !== "GET" || bodyResult.nextStartChar === undefined || snapshotUnavailable
         ? undefined
         : {
             nextInput: {
-              url,
-              method,
-              ...(Object.keys(headers).length === 0 ? {} : { headers }),
+              ...(retained === undefined ? { url, method, ...(Object.keys(headers).length === 0 ? {} : { headers }) } : { responseRef: retained.ref }),
               startChar: bodyResult.nextStartChar,
-              timeoutMs,
+              ...(retained === undefined ? { timeoutMs } : {}),
             },
           },
     };
-    if (bodyResult.hasMoreAfter && (method !== "GET" || bodyResult.nextStartChar === undefined)) {
+    if (bodyResult.hasMoreAfter && (method !== "GET" || bodyResult.nextStartChar === undefined || snapshotUnavailable)) {
       const continuationLimitReached = method === "GET";
       return {
         kind: "tool_call_result",
@@ -278,12 +323,14 @@ async function executeHttpRequest(
           output: incompleteHttpResponseOutput(output),
           status: "failed",
           error: continuationLimitReached
-            ? "HTTP GET completed, but the response body exceeds the supported continuation range."
+            ? snapshotUnavailable
+              ? "HTTP GET completed, but the response body exceeds the exact snapshot retention range."
+              : "HTTP GET completed, but the response body exceeds the supported continuation range."
             : "HTTP request completed, but the response body cannot be fully observed without replaying a side-effecting request.",
           errorDomain: "runtime_error",
           errorFacts: {
             code: continuationLimitReached
-              ? "http_response_continuation_limit_reached"
+              ? snapshotUnavailable ? "http_response_snapshot_limit_reached" : "http_response_continuation_limit_reached"
               : "http_response_continuation_unavailable",
             requestCompleted: true,
             retryable: false,
@@ -382,6 +429,10 @@ function headersFromInput(value: unknown): Record<string, string> {
   return headers;
 }
 
+function optionalNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
 function bodyFromInput(value: unknown, method: HttpRequestMethod, headers: Record<string, string>): string | undefined {
   if (value === undefined) {
     return undefined;
@@ -415,7 +466,8 @@ function setDefaultContentType(headers: Record<string, string>): void {
 async function readResponseBody(
   response: HttpRequestFetchResponseLike,
   maxBodyChars: number,
-  startChar: number
+  startChar: number,
+  captureFullBody = false,
 ): Promise<{
   readonly body: string;
   readonly startChar: number;
@@ -425,14 +477,25 @@ async function readResponseBody(
   readonly reachedStartCharCeiling: boolean;
   readonly startCharCeiling: number;
   readonly truncated: boolean;
+  readonly fullBody?: string;
 }> {
   const readLimit = startChar + maxBodyChars + 1;
   if (response.body !== undefined && response.body !== null) {
-    return bodyWindow(await readStreamBody(response.body, readLimit), startChar, maxBodyChars);
+    const text = await readStreamBody(
+      response.body,
+      captureFullBody ? MAX_BODY_START_CHAR + 1 : readLimit,
+    );
+    return {
+      ...bodyWindow(text, startChar, maxBodyChars),
+      ...(captureFullBody && text.length <= MAX_BODY_START_CHAR ? { fullBody: text } : {}),
+    };
   }
   if (response.text !== undefined) {
     const text = await response.text();
-    return bodyWindow(text, startChar, maxBodyChars);
+    return {
+      ...bodyWindow(text, startChar, maxBodyChars),
+      ...(captureFullBody && text.length <= MAX_BODY_START_CHAR ? { fullBody: text } : {}),
+    };
   }
   return { body: "", startChar, bodyChars: 0, hasMoreAfter: false, reachedStartCharCeiling: false, startCharCeiling: MAX_BODY_START_CHAR, truncated: false };
 }

@@ -12,7 +12,9 @@ import type {
   ToolExecutorResult,
   ToolPermissionCheck,
   ToolSecurityDecision,
+  ToolExecutionMetricsSink,
 } from "../../domain/tools/index.js";
+import { createHash } from "node:crypto";
 import {
   assertCanonicalToolName,
   copyToolModelAttachments,
@@ -29,6 +31,7 @@ import {
   confirmationRequestFromSecurityDecision,
   evaluateToolCallSecurity,
 } from "../../kernel/tools/index.js";
+import { toolResultMessage } from "../../kernel/intelligence/tool-use-loop-messages.js";
 import {
   ToolOutputStoreError,
   type ToolOutputMediaType,
@@ -36,7 +39,10 @@ import {
 } from "./tool-output-store.js";
 import {
   DEFAULT_MAX_INLINE_TOOL_OUTPUT_CHARS,
+  DEFAULT_MAX_INLINE_TOOL_RESULT_TOKENS,
+  DEFAULT_TARGET_INLINE_TOOL_BODY_TOKENS,
   MAX_TOOL_OUTPUT_READ_CHARS,
+  type ToolOutputTokenCounter,
 } from "./tool-output-limits.js";
 import { utf16SafePrefixLength } from "./text-window.js";
 
@@ -44,6 +50,10 @@ export type ToolCenterOptions = {
   readonly platform?: NodeJS.Platform;
   readonly outputStore?: ToolOutputStore;
   readonly maxInlineOutputChars?: number;
+  readonly outputTokenCounter?: ToolOutputTokenCounter;
+  readonly maxInlineOutputTokens?: number;
+  readonly targetInlineBodyTokens?: number;
+  readonly metricsSink?: ToolExecutionMetricsSink;
 };
 
 const RETAINED_TOOL_OUTPUT_PREVIEW_CHARS = 4_000;
@@ -62,11 +72,27 @@ export class ToolCenter implements ToolExecutionGateway {
   private readonly platform: NodeJS.Platform;
   private readonly outputStore: ToolOutputStore | undefined;
   private readonly maxInlineOutputChars: number;
+  private readonly outputTokenCounter: ToolOutputTokenCounter | undefined;
+  private readonly maxInlineOutputTokens: number;
+  private readonly targetInlineBodyTokens: number;
+  private readonly metricsSink: ToolExecutionMetricsSink | undefined;
 
   constructor(options: ToolCenterOptions = {}) {
     this.platform = options.platform ?? process.platform;
     this.outputStore = options.outputStore;
     this.maxInlineOutputChars = positiveInlineOutputLimit(options.maxInlineOutputChars);
+    this.outputTokenCounter = options.outputTokenCounter;
+    this.maxInlineOutputTokens = positiveTokenLimit(
+      options.maxInlineOutputTokens,
+      DEFAULT_MAX_INLINE_TOOL_RESULT_TOKENS,
+      "maxInlineOutputTokens",
+    );
+    this.targetInlineBodyTokens = positiveTokenLimit(
+      options.targetInlineBodyTokens,
+      DEFAULT_TARGET_INLINE_TOOL_BODY_TOKENS,
+      "targetInlineBodyTokens",
+    );
+    this.metricsSink = options.metricsSink;
   }
 
   register(executor: ToolExecutor): void {
@@ -116,6 +142,7 @@ export class ToolCenter implements ToolExecutionGateway {
     const startedAt = Date.now();
     const preflight = this.preflightInternal(request, context, permission, startedAt);
     if (preflight.status !== "ready") {
+      this.recordExecutionMetric(preflight.result, preflight.result);
       return preflight.result;
     }
     const factRequest = preflight.request;
@@ -131,11 +158,13 @@ export class ToolCenter implements ToolExecutionGateway {
       });
     } catch (error) {
       if (isAbortSignalAborted(context.abortSignal) && isAbortError(error)) {
-        return cancelledToolResult(factRequest, startedAt, {
+        const cancelled = cancelledToolResult(factRequest, startedAt, {
           abortRequested: true,
           sourceExecutionStatus: "unknown",
           doNotBlindlyRetry: true,
         });
+        this.recordExecutionMetric(cancelled, cancelled);
+        return cancelled;
       }
       const sanitized = sanitizeError(error, factRequest.toolName);
       const abortRequestedFacts: ToolErrorFacts = {
@@ -150,25 +179,33 @@ export class ToolCenter implements ToolExecutionGateway {
             facts: mergeToolErrorFacts(sanitized.facts, abortRequestedFacts),
             fullFacts: mergeToolErrorFacts(sanitized.fullFacts, abortRequestedFacts),
           };
-      return this.prepareThrownErrorForDelivery(
-        failedToolResult(factRequest, startedAt, failure),
+      const rawFailure = failedToolResult(factRequest, startedAt, failure);
+      const deliveryStartedAt = Date.now();
+      const delivered = await this.prepareThrownErrorForDelivery(
+        rawFailure,
         permission,
         failure,
         context.traceId,
       );
+      this.recordExecutionMetric(rawFailure, delivered, Date.now() - deliveryStartedAt);
+      return delivered;
     }
 
     // Once the executor resolves, its returned value is the execution fact. A late abort
     // belongs to the owning loop; replacing this fact with `cancelled` could replay a side effect.
     try {
       if (isToolExecutorResult(output)) {
-        return this.prepareResultForDelivery(
-          normalizeExecutorResult(output.result, factRequest, startedAt),
+        const rawResult = normalizeExecutorResult(output.result, factRequest, startedAt);
+        const deliveryStartedAt = Date.now();
+        const delivered = await this.prepareResultForDelivery(
+          rawResult,
           permission,
           context.traceId,
         );
+        this.recordExecutionMetric(rawResult, delivered, Date.now() - deliveryStartedAt);
+        return delivered;
       }
-      return this.prepareResultForDelivery({
+      const rawResult: ToolCallResult = {
         callId: factRequest.callId,
         ...toolFactIdentity(factRequest),
         toolName: factRequest.toolName,
@@ -176,25 +213,131 @@ export class ToolCenter implements ToolExecutionGateway {
         output: normalizeToolFactValue(output),
         status: "completed",
         durationMs: Date.now() - startedAt,
-      }, permission, context.traceId);
+      };
+      const deliveryStartedAt = Date.now();
+      const delivered = await this.prepareResultForDelivery(rawResult, permission, context.traceId);
+      this.recordExecutionMetric(rawResult, delivered, Date.now() - deliveryStartedAt);
+      return delivered;
     } catch (error) {
       const sanitized = sanitizeError(error, factRequest.toolName);
       const sourceExecutionStatus = isToolExecutorResult(output)
         ? toolCallStatus(output.result.status) ?? "unknown"
         : "completed";
       const failed = failedToolResult(factRequest, startedAt, sanitized);
-      return this.prepareResultForDelivery(
-        {
+      const rawFailure: ToolCallResult = {
           ...failed,
           errorFacts: mergeToolErrorFacts(sanitized.facts, {
             sourceExecutionStatus,
             doNotBlindlyRetry: true,
             outputDeliveryPhase: "executor_result_normalization",
           }),
-        },
-        permission,
-        context.traceId,
+      };
+      const deliveryStartedAt = Date.now();
+      const delivered = await this.prepareResultForDelivery(rawFailure, permission, context.traceId);
+      this.recordExecutionMetric(rawFailure, delivered, Date.now() - deliveryStartedAt);
+      return delivered;
+    }
+  }
+
+  async deliverResult(
+    result: ToolCallResult,
+    permission: ToolPermissionCheck,
+    ownerId: string,
+  ): Promise<ToolCallResult> {
+    const deliveryStartedAt = Date.now();
+    const delivered = await this.prepareResultForDelivery(result, permission, ownerId);
+    this.recordExecutionMetric(result, delivered, Date.now() - deliveryStartedAt);
+    return delivered;
+  }
+
+  private recordExecutionMetric(raw: ToolCallResult, delivered: ToolCallResult, deliveryMs?: number): void {
+    const sink = this.metricsSink;
+    if (sink === undefined) return;
+    try {
+      const rawBody = raw.output === undefined ? "" : JSON.stringify(raw.output);
+      const rawInput = raw.input === undefined ? "" : JSON.stringify(raw.input);
+      const rawEnvelopeTokens = this.outputTokenCounter === undefined
+        ? undefined
+        : toolResultEnvelopeTokens(this.outputTokenCounter, raw);
+      const finalEnvelopeTokens = this.outputTokenCounter === undefined
+        ? undefined
+        : toolResultEnvelopeTokens(this.outputTokenCounter, delivered);
+      const deliveredOutput = recordFromUnknown(delivered.output);
+      const continuation = recordFromUnknown(deliveredOutput.continuation);
+      const inputRecord = recordFromUnknown(raw.input);
+      const continuationInput = recordFromUnknown(continuation.nextInput);
+      const producerContinuation = nativeProducerContinuation(raw.toolName, inputRecord, deliveredOutput);
+      const chainValue = producerContinuation?.chainValue ??
+        continuationIdentity(continuationInput) ?? continuationIdentity(inputRecord);
+      const continuationObserved = producerContinuation !== undefined || Object.keys(continuation).length > 0 ||
+        raw.toolName === TOOL_OUTPUT_READER_NAME || chainValue !== undefined;
+      const retained = typeof deliveredOutput.contentRef === "string";
+      const retentionFailed = deliveredOutput.retentionFailed === true;
+      const deliveredErrorFacts = recordFromUnknown(delivered.errorFacts);
+      const retentionFailureCode = stringFromUnknown(
+        deliveredErrorFacts.outputDeliveryCode ?? deliveredErrorFacts.errorEvidenceCode,
       );
+      const bodyLimit = rawBody.length > this.maxInlineOutputChars;
+      const envelopeLimit = rawEnvelopeTokens !== undefined && rawEnvelopeTokens > this.maxInlineOutputTokens;
+      sink.record({
+        kind: "execution",
+        toolName: raw.toolName,
+        operationType: this.tools.get(raw.toolName)?.definition.metadata?.operationType ?? "read-write",
+        status: delivered.status,
+        inputTokens: this.outputTokenCounter === undefined
+          ? undefined
+          : this.outputTokenCounter.countText(rawInput),
+        rawBodyTokens: this.outputTokenCounter === undefined
+          ? undefined
+          : this.outputTokenCounter.countText(rawBody),
+        rawEnvelopeTokens,
+        finalEnvelopeTokens,
+        outputChars: rawBody.length,
+        outputBytes: Buffer.byteLength(rawBody, "utf8"),
+        durationMs: raw.durationMs,
+        ...(retained
+          ? {
+              retained: {
+                reason: bodyLimit && envelopeLimit
+                  ? "body_and_envelope_limit" as const
+                  : bodyLimit
+                    ? "body_limit" as const
+                    : "envelope_limit" as const,
+                chars: numberFromUnknown(deliveredOutput.contentChars),
+                bytes: numberFromUnknown(deliveredOutput.contentBytes),
+                availability: deliveredOutput.continuationAvailability === "durable" ? "durable" as const : "live_only" as const,
+              },
+            }
+          : {}),
+        ...(retentionFailed
+          ? { retentionFailure: retentionFailureReason(retentionFailureCode) }
+          : {}),
+        ...(!retained && !retentionFailed ? {} : { retentionMs: deliveryMs }),
+        ...(!continuationObserved
+          ? {}
+          : {
+              continuation: {
+                kind: raw.toolName === TOOL_OUTPUT_READER_NAME ? "read_tool_output" as const : "native" as const,
+                offered: producerContinuation?.offered ?? Object.keys(continuation).length > 0,
+                completed: delivered.status === "completed" &&
+                  (producerContinuation?.completed ?? Object.keys(continuation).length === 0),
+                ...(chainValue === undefined
+                  ? {}
+                  : { chainHash: createHash("sha256").update(chainValue).digest("hex") }),
+                pageChars: producerContinuation?.pageChars ??
+                  numberFromUnknown(deliveredOutput.textChars) ?? numberFromUnknown(deliveredOutput.bodyChars),
+                ...(delivered.status !== "failed"
+                  ? {}
+                  : { failure: continuationFailure(deliveredErrorFacts) }),
+              },
+            }),
+      });
+    } catch {
+      try {
+        sink.recordDropped?.();
+      } catch {
+        // Metrics are observational and must never replace a tool fact.
+      }
     }
   }
 
@@ -291,6 +434,7 @@ export class ToolCenter implements ToolExecutionGateway {
     const failureCandidate = oversizedExplicitFailureCandidate(
       result,
       this.maxInlineOutputChars,
+      this.exceedsTokenEnvelope(result),
     );
     if (failureCandidate !== undefined) {
       return this.prepareExplicitFailureForDelivery(
@@ -303,7 +447,11 @@ export class ToolCenter implements ToolExecutionGateway {
     const inlineOutputLimit = result.status === "approval_required"
       ? Math.min(this.maxInlineOutputChars, MAX_INLINE_APPROVAL_PARTIAL_OUTPUT_CHARS)
       : this.maxInlineOutputChars;
-    const candidate = oversizedOutputCandidate(result.output, inlineOutputLimit);
+    const candidate = oversizedOutputCandidate(
+      result.output,
+      inlineOutputLimit,
+      this.exceedsTokenEnvelope(result),
+    );
     if (candidate === undefined) {
       return result;
     }
@@ -329,28 +477,14 @@ export class ToolCenter implements ToolExecutionGateway {
         sourceFactId: toolCallFactId(result),
         ownerId,
       });
-      const deliveryOutput = copyToolModelAttachments(result.output, {
-        contentRef: retained.ref,
-        mediaType: retained.mediaType,
-        contentChars: retained.totalChars,
-        contentBytes: retained.byteLength,
-        contentSha256: retained.sha256,
-        contentPreview: preview,
-        hasMoreAfter: true,
-        truncated: true,
-        ...(retained.expiresAt === undefined ? {} : { expiresAt: retained.expiresAt }),
-        continuationAvailability: retained.availability,
-        continuation: {
-          ref: retained.ref,
-          nextInput: {
-            ref: retained.ref,
-            startChar: 0,
-            maxChars: RETAINED_TOOL_OUTPUT_READ_CHARS,
-          },
-          note: "Call read_tool_output with nextInput to read the retained result without executing the original tool again.",
-        },
-      });
-      return { ...result, output: deliveryOutput };
+      const deliveryOutput = copyToolModelAttachments(
+        result.output,
+        retainedContentDelivery(preview, retained),
+      );
+      return this.fitRetainedDeliveryPreview(
+        { ...result, output: deliveryOutput },
+        candidate.content,
+      );
     } catch (error) {
       const storeError = error instanceof ToolOutputStoreError ? error : undefined;
       return outputRetentionFailure(result, candidate, preview, {
@@ -388,7 +522,7 @@ export class ToolCenter implements ToolExecutionGateway {
         sourceFactId: toolCallFactId(result),
         ownerId,
       });
-      return {
+      return this.fitRetainedDeliveryPreview({
         ...result,
         output: copyToolModelAttachments(
           result.output,
@@ -396,7 +530,7 @@ export class ToolCenter implements ToolExecutionGateway {
         ),
         error: retainedErrorMessage(result.error),
         errorFacts: retainedExplicitFailureFacts(result.errorFacts, retained),
-      };
+      }, candidate.content);
     } catch (storeFailure) {
       const storeError = storeFailure instanceof ToolOutputStoreError ? storeFailure : undefined;
       return explicitFailureRetentionFailure(result, candidate, preview, {
@@ -407,15 +541,57 @@ export class ToolCenter implements ToolExecutionGateway {
     }
   }
 
+  private exceedsTokenEnvelope(result: ToolCallResult): boolean {
+    return this.outputTokenCounter !== undefined &&
+      toolResultEnvelopeTokens(this.outputTokenCounter, result) > this.maxInlineOutputTokens;
+  }
+
+  private fitRetainedDeliveryPreview(
+    result: ToolCallResult,
+    sourceContent: string,
+  ): ToolCallResult {
+    if (this.outputTokenCounter === undefined) return result;
+    const output = result.output;
+    if (typeof output !== "object" || output === null || Array.isArray(output)) return result;
+    let low = 0;
+    let high = sourceContent.length;
+    let best = "";
+    while (low <= high) {
+      const requestedLength = Math.floor((low + high) / 2);
+      const prefixLength = utf16SafePrefixLength(sourceContent, requestedLength);
+      const preview = prefixLength < sourceContent.length
+        ? `${sourceContent.slice(0, Math.max(0, utf16SafePrefixLength(sourceContent, prefixLength - 1)))}…`
+        : sourceContent;
+      const candidate = {
+        ...result,
+        output: { ...output, contentPreview: preview },
+      };
+      const fits = this.outputTokenCounter.countText(preview) <= this.targetInlineBodyTokens &&
+        toolResultEnvelopeTokens(this.outputTokenCounter, candidate) <= this.maxInlineOutputTokens;
+      if (fits) {
+        best = preview;
+        low = requestedLength + 1;
+      } else {
+        high = requestedLength - 1;
+      }
+    }
+    return { ...result, output: { ...output, contentPreview: best } };
+  }
+
   private async prepareThrownErrorForDelivery(
     result: ToolCallResult,
     permission: ToolPermissionCheck,
     error: SanitizedToolError,
     ownerId: string,
   ): Promise<ToolCallResult> {
-    const candidate = oversizedThrownErrorCandidate(error, this.maxInlineOutputChars);
+    const completeErrorResult = { ...result, errorFacts: error.fullFacts };
+    const candidate = oversizedThrownErrorCandidate(
+      error,
+      this.maxInlineOutputChars,
+      this.exceedsTokenEnvelope(completeErrorResult),
+    );
     if (candidate === undefined) {
-      return { ...result, errorFacts: error.fullFacts };
+      return completeErrorResult;
     }
 
     const preview = retainedOutputPreview(candidate.content);
@@ -443,10 +619,10 @@ export class ToolCenter implements ToolExecutionGateway {
         sourceFactId: toolCallFactId(result),
         ownerId,
       });
-      return {
+      return this.fitRetainedDeliveryPreview({
         ...deliveryResult,
         output: retainedContentDelivery(preview, retained),
-      };
+      }, candidate.content);
     } catch (storeFailure) {
       const storeError = storeFailure instanceof ToolOutputStoreError ? storeFailure : undefined;
       return errorRetentionFailure(deliveryResult, candidate, preview, {
@@ -491,17 +667,18 @@ type RetainedContentDelivery = {
 function oversizedOutputCandidate(
   output: ToolCallResult["output"],
   maxInlineChars: number,
+  exceedsTokenEnvelope = false,
 ): OversizedOutputCandidate | undefined {
   if (output === undefined) {
     return undefined;
   }
   if (typeof output === "string") {
-    return JSON.stringify(output).length > maxInlineChars
+    return JSON.stringify(output).length > maxInlineChars || exceedsTokenEnvelope
       ? { mediaType: "text/plain", content: output }
       : undefined;
   }
   const content = JSON.stringify(output);
-  return content.length > maxInlineChars
+  return content.length > maxInlineChars || exceedsTokenEnvelope
     ? { mediaType: "application/json", content }
     : undefined;
 }
@@ -509,6 +686,7 @@ function oversizedOutputCandidate(
 function oversizedExplicitFailureCandidate(
   result: ToolCallResult,
   maxInlineChars: number,
+  exceedsTokenEnvelope = false,
 ): OversizedOutputCandidate | undefined {
   if (result.status !== "failed" && result.status !== "cancelled") {
     return undefined;
@@ -520,9 +698,16 @@ function oversizedExplicitFailureCandidate(
     ...(result.errorDomain === undefined ? {} : { errorDomain: result.errorDomain }),
     ...(result.errorFacts === undefined ? {} : { errorFacts: result.errorFacts }),
   });
-  return content.length > maxInlineChars
+  return content.length > maxInlineChars || exceedsTokenEnvelope
     ? { mediaType: "application/json", content }
     : undefined;
+}
+
+function toolResultEnvelopeTokens(
+  counter: ToolOutputTokenCounter,
+  result: ToolCallResult,
+): number {
+  return counter.countText(JSON.stringify(toolResultMessage(result)));
 }
 
 function retainedOutputPreview(content: string): string {
@@ -563,13 +748,14 @@ function retainedContentDelivery(
 function oversizedThrownErrorCandidate(
   error: SanitizedToolError,
   maxInlineChars: number,
+  exceedsTokenEnvelope = false,
 ): OversizedOutputCandidate | undefined {
   const content = JSON.stringify({
     message: error.message,
     errorDomain: error.errorDomain,
     ...(error.fullFacts === undefined ? {} : { facts: error.fullFacts }),
   });
-  return content.length > maxInlineChars
+  return content.length > maxInlineChars || exceedsTokenEnvelope
     ? { mediaType: "application/json", content }
     : undefined;
 }
@@ -717,6 +903,14 @@ function positiveInlineOutputLimit(value: number | undefined): number {
   return resolved;
 }
 
+function positiveTokenLimit(value: number | undefined, fallback: number, name: string): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new Error(`ToolCenter ${name} must be a positive safe integer.`);
+  }
+  return resolved;
+}
+
 function isToolExecutorResult(value: unknown): value is ToolExecutorResult {
   return (
     typeof value === "object" &&
@@ -725,6 +919,74 @@ function isToolExecutorResult(value: unknown): value is ToolExecutorResult {
     typeof (value as { readonly result?: unknown }).result === "object" &&
     (value as { readonly result?: unknown }).result !== null
   );
+}
+
+function recordFromUnknown(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+}
+
+function numberFromUnknown(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+}
+
+function stringFromUnknown(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function retentionFailureReason(code: string | undefined): "capacity_failure" | "serialization_failure" {
+  return code === "tool_output_capacity_exceeded" || code === "tool_output_item_too_large"
+    ? "capacity_failure"
+    : "serialization_failure";
+}
+
+function continuationFailure(
+  facts: Readonly<Record<string, unknown>>,
+): "expired" | "read_failed" {
+  const code = stringFromUnknown(facts.code);
+  return code === "tool_output_expired" || code === "tool_output_not_found"
+    ? "expired"
+    : "read_failed";
+}
+
+function continuationIdentity(record: Readonly<Record<string, unknown>>): string | undefined {
+  for (const key of ["ref", "snapshotRef", "responseRef"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) return `${key}:${value}`;
+  }
+  return undefined;
+}
+
+function nativeProducerContinuation(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  output: Readonly<Record<string, unknown>>,
+): {
+  readonly offered: boolean;
+  readonly completed: boolean;
+  readonly chainValue: string;
+  readonly pageChars?: number;
+} | undefined {
+  const contract = toolName === "read_file"
+    ? { nextKeys: ["nextStartChar", "nextStartLine"], startKeys: ["startChar", "startLine"], identityKeys: ["path"] }
+    : toolName === "list_dir"
+      ? { nextKeys: ["nextOffset"], startKeys: ["offset"], identityKeys: ["path", "depth"] }
+      : toolName === "grep_files"
+        ? { nextKeys: ["nextOffset"], startKeys: ["offset"], identityKeys: ["path", "query"] }
+        : undefined;
+  if (contract === undefined) return undefined;
+  const offered = contract.nextKeys.some((key) => numberFromUnknown(output[key]) !== undefined);
+  const isContinuationRequest = contract.startKeys.some((key) => (numberFromUnknown(input[key]) ?? 0) > 0);
+  if (!offered && !isContinuationRequest) return undefined;
+  const identity = Object.fromEntries(contract.identityKeys.map((key) => [key, input[key] ?? null]));
+  return {
+    offered,
+    completed: !offered,
+    chainValue: `${toolName}:${JSON.stringify(identity)}`,
+    pageChars: numberFromUnknown(output.textChars) ??
+      (typeof output.content === "string" ? output.content.length : JSON.stringify(output).length),
+  };
 }
 
 function normalizeExecutorResult(

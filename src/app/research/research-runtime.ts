@@ -70,6 +70,7 @@ export class ResearchRuntime implements InformationAccess {
   private readonly sourcePreference: readonly InformationSourceKind[];
   private readonly defaultLimit: number;
   private readonly defaultReadMaxLength: number;
+  // One runtime belongs to one Agent run; retain every ref so earlier search results remain readable.
   private readonly searchResultsByRef = new Map<string, SearchResultRef>();
 
   constructor(options: ResearchRuntimeOptions) {

@@ -157,6 +157,8 @@ export type ModelToolChoice =
 export type ModelToolCall = ToolCallRequest;
 
 export type ModelUsage = {
+  /** Number of provider API requests represented by this usage snapshot. */
+  readonly requestCount?: number;
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly totalTokens?: number;
@@ -184,7 +186,8 @@ export type ModelUsage = {
   /**
    * Time from request dispatch to the first user-visible output token. This is
    * only populated for real streaming responses where the adapter can observe
-   * the first visible output delta.
+   * the first visible output delta. A cumulative multi-request snapshot reports
+   * the average across its observed request samples.
    */
   readonly firstTokenLatencyMs?: number;
   /**

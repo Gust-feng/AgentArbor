@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createBrowserSnapshotTool, type BrowserAutomation } from "./browser-tool.js";
+import { InMemoryToolOutputStore } from "../tool-output-store.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
@@ -113,6 +114,47 @@ test("browser_snapshot rejects fractional continuation offsets", async () => {
     () => tool.execute({ url: "https://example.com", startChar: 1.5 }, context),
     /non-negative safe integer/
   );
+});
+
+test("browser_snapshot distinguishes navigation and retained-snapshot failures", async () => {
+  const navigation = createBrowserSnapshotTool({
+    automation: { async snapshot() { throw new Error("navigation unavailable"); } },
+  });
+  await assert.rejects(
+    navigation.execute({ url: "https://example.com/failure" }, context),
+    (error: unknown) => error instanceof Error && (error as Error & { readonly code?: string }).code === "browser_navigation_failed",
+  );
+
+  const retained = createBrowserSnapshotTool({
+    outputStore: new InMemoryToolOutputStore(),
+    automation: { async snapshot() { throw new Error("must not navigate"); } },
+  });
+  await assert.rejects(
+    retained.execute({ snapshotRef: "tool-output://missing", startChar: 0 }, context),
+    (error: unknown) => error instanceof Error && (error as Error & { readonly code?: string }).code === "tool_output_not_found",
+  );
+});
+
+test("browser_snapshot continues from one retained snapshot without navigating again", async () => {
+  let navigations = 0;
+  const tool = createBrowserSnapshotTool({
+    outputStore: new InMemoryToolOutputStore(),
+    automation: {
+      async snapshot(input) {
+        navigations += 1;
+        return { url: input.url, title: "Stable", text: "abcdefghijkl" };
+      },
+    },
+  });
+
+  const first = asRecord(await tool.execute({ url: "https://example.com/stable", maxTextChars: 4 }, context));
+  const second = asRecord(await tool.execute(asRecord(asRecord(first.continuation).nextInput), context));
+  const third = asRecord(await tool.execute(asRecord(asRecord(second.continuation).nextInput), context));
+
+  assert.equal(navigations, 1);
+  assert.equal(`${first.text}${second.text}${third.text}`, "abcdefghijkl");
+  assert.equal(second.url, undefined);
+  assert.equal(third.continuation, undefined);
 });
 
 function asRecord(value: unknown): Record<string, unknown> {

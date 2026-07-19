@@ -10,6 +10,7 @@ import {
   type AgentRunResourceHost,
 } from "./agent-run-resources.js";
 import { createHostAgentToolContributions } from "./agent-tool-contributions.js";
+import { createOpenAITokenCounter } from "../context-maintenance/index.js";
 
 /**
  * Composition adapter between the neutral Host resource factory and the
@@ -29,6 +30,7 @@ export function createMultiAgentRunResourceAcquirer(input: {
       const toolRuntime = { constraints: request.taskSoil.constraints };
       const toolCenter = createAgentToolCenterFactory(input.host.providerFetch, resources)(toolRuntime, {
         taskSoil: request.taskSoil,
+        outputTokenCounter: createOpenAITokenCounter(request.capabilitySnapshot.activeModel.model),
         contributions: createHostAgentToolContributions({
           runtime: toolRuntime,
           resources,

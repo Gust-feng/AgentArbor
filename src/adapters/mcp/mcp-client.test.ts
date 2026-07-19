@@ -19,7 +19,7 @@ import { toolResultMessage } from "../../kernel/intelligence/tool-use-loop-messa
 import { createReadToolOutputTool } from "../../app/tool-center/adapters/tool-output-read-tool.js";
 import { InMemoryToolOutputStore } from "../../app/tool-center/tool-output-store.js";
 import { ToolCenter } from "../../app/tool-center/tool-center.js";
-import { McpClientWrapper } from "./mcp-client.js";
+import { McpCatalogLimitError, McpClientWrapper } from "./mcp-client.js";
 import {
   createCachedMcpToolExecutor,
   createMcpToolExecutor,
@@ -329,6 +329,98 @@ test("McpClientWrapper follows MCP pagination for tools and references", async (
   await client.disconnect();
 });
 
+test("McpClientWrapper rejects a tool catalog that exceeds the configured item boundary", async () => {
+  const transport = new PaginatedMcpTestTransport({
+    pages: {
+      "tools/list": [{
+        tools: [
+          { name: "first", inputSchema: { type: "object" } },
+          { name: "second", inputSchema: { type: "object" } },
+        ],
+      }],
+    },
+  });
+  const client = new McpClientWrapper(
+    { serverId: "large-tool-catalog", transport: "stdio", maxToolCatalogItems: 1 },
+    { transport },
+  );
+
+  await client.connect();
+  await assert.rejects(
+    () => client.listTools(),
+    (error: unknown) => {
+      assert.ok(error instanceof McpCatalogLimitError);
+      assert.equal(error.code, "mcp_catalog_limit_exceeded");
+      assert.equal(error.catalogKind, "tools");
+      assert.equal(error.unit, "items");
+      assert.equal(error.observed, 2);
+      assert.equal(error.limit, 1);
+      return true;
+    },
+  );
+  await client.disconnect();
+});
+
+test("McpClientWrapper rejects a tool catalog that exceeds the serialized metadata boundary", async () => {
+  const transport = new PaginatedMcpTestTransport({
+    pages: {
+      "tools/list": [{
+        tools: [{
+          name: "oversized",
+          description: "x".repeat(256),
+          inputSchema: { type: "object" },
+        }],
+      }],
+    },
+  });
+  const client = new McpClientWrapper(
+    { serverId: "large-tool-metadata", transport: "stdio", maxToolCatalogBytes: 128 },
+    { transport },
+  );
+
+  await client.connect();
+  await assert.rejects(
+    () => client.listTools(),
+    (error: unknown) => {
+      assert.ok(error instanceof McpCatalogLimitError);
+      assert.equal(error.catalogKind, "tools");
+      assert.equal(error.unit, "serialized_bytes");
+      assert.equal(error.observed > error.limit, true);
+      return true;
+    },
+  );
+  await client.disconnect();
+});
+
+test("McpClientWrapper applies one shared item boundary to the complete reference catalog", async () => {
+  const transport = new PaginatedMcpTestTransport({
+    pages: {
+      "prompts/list": [{ prompts: [{ name: "draft" }] }],
+      "resources/list": [{ resources: [{ uri: "docs://guide", name: "guide" }] }],
+      "resources/templates/list": [{ resourceTemplates: [] }],
+    },
+  });
+  const client = new McpClientWrapper(
+    { serverId: "large-reference-catalog", transport: "stdio", maxReferenceCatalogItems: 1 },
+    { transport },
+  );
+
+  await client.connect();
+  await assert.rejects(
+    () => client.listReferences(),
+    (error: unknown) => {
+      assert.ok(error instanceof McpCatalogLimitError);
+      assert.equal(error.code, "mcp_catalog_limit_exceeded");
+      assert.equal(error.catalogKind, "references");
+      assert.equal(error.unit, "items");
+      assert.equal(error.observed, 2);
+      assert.equal(error.limit, 1);
+      return true;
+    },
+  );
+  await client.disconnect();
+});
+
 test("McpClientWrapper rejects repeated MCP pagination cursors", async () => {
   const client = new McpClientWrapper(
     { serverId: "repeated-cursor-server", transport: "stdio" },
@@ -364,6 +456,44 @@ test("McpClientWrapper rejects repeated MCP pagination cursors", async () => {
 
   await client.connect();
   await assert.rejects(() => client.listTools(), /repeated cursor/);
+  await client.disconnect();
+});
+
+test("McpClientWrapper reports reference listing failures instead of projecting an empty catalog", async () => {
+  const transport = new PaginatedMcpTestTransport({
+    pages: {},
+    failures: {
+      "prompts/list": { code: -32000, message: "prompt catalog denied" },
+    },
+  });
+  const client = new McpClientWrapper(
+    { serverId: "reference-failure-server", transport: "stdio" },
+    { transport },
+  );
+
+  await client.connect();
+  await assert.rejects(
+    () => client.listReferences(),
+    /MCP prompts listing failed:.*prompt catalog denied/u,
+  );
+  await client.disconnect();
+});
+
+test("McpClientWrapper treats an explicitly unsupported reference method as an empty category", async () => {
+  const transport = new PaginatedMcpTestTransport({
+    pages: {},
+    failures: {
+      "prompts/list": { code: -32601, message: "Method not found" },
+    },
+  });
+  const client = new McpClientWrapper(
+    { serverId: "unsupported-reference-server", transport: "stdio" },
+    { transport },
+  );
+
+  await client.connect();
+  const references = await client.listReferences();
+  assert.deepEqual(references.prompts, []);
   await client.disconnect();
 });
 
@@ -1917,6 +2047,43 @@ test("McpManager connection error sets server status to error", async () => {
   assert.equal(manager.getToolsForRegistry().length, 0);
 });
 
+test("McpManager aborts a timed-out connect and a late initialize response cannot revive it", async () => {
+  const transport = new DelayedInitializeTransport();
+  const manager = new McpManager({
+    connectTimeoutMs: 20,
+    servers: [{
+      serverId: "slow-connect",
+      label: "Slow connect",
+      transport: "stdio",
+      command: "unused",
+      envSecretRefs: [],
+      confirmationMode: "always",
+      toolExposureMode: "none",
+      enabledTools: [],
+      autoApprovedTools: [],
+      enabled: true,
+      updatedAt: "2026-07-19T00:00:00.000Z",
+    }],
+  });
+  const entry = manager.getEntryForTesting("slow-connect");
+  assert.ok(entry);
+  entry.client = new McpClientWrapper(
+    { serverId: "slow-connect", transport: "stdio" },
+    { transport },
+  );
+
+  const connecting = manager.connectAll();
+  await transport.initializeRequested;
+  await connecting;
+  assert.equal(manager.getServerStatuses()["slow-connect"], "error");
+  assert.equal(entry.client.isConnected(), false);
+  transport.respondToInitialize();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(entry.client.isConnected(), false);
+  assert.equal(transport.closeCalls > 0, true);
+});
+
 async function fileExists(file: string): Promise<boolean> {
   try {
     await fs.access(file);
@@ -1973,6 +2140,7 @@ class PaginatedMcpTestTransport implements Transport {
   constructor(
     private readonly options: {
       readonly pages: Readonly<Record<string, readonly TestMcpPage[]>>;
+      readonly failures?: Readonly<Record<string, { readonly code: number; readonly message: string }>>;
     }
   ) {}
 
@@ -2007,6 +2175,16 @@ class PaginatedMcpTestTransport implements Transport {
       return;
     }
 
+    const failure = this.options.failures?.[message.method];
+    if (failure !== undefined) {
+      this.onmessage?.({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: failure,
+      });
+      return;
+    }
+
     const pages = this.options.pages[message.method] ?? [emptyPageFor(message.method)];
     const cursor = cursorFromMessage(message);
     const callCursors = this.calls.get(message.method) ?? [];
@@ -2022,6 +2200,46 @@ class PaginatedMcpTestTransport implements Transport {
 
   cursorsFor(method: string): readonly (string | undefined)[] {
     return this.calls.get(method) ?? [];
+  }
+}
+
+class DelayedInitializeTransport implements Transport {
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+  onmessage?: (message: JSONRPCMessage) => void;
+  closeCalls = 0;
+  private initializeId: string | number | undefined;
+  private resolveInitializeRequested!: () => void;
+  readonly initializeRequested = new Promise<void>((resolve) => {
+    this.resolveInitializeRequested = resolve;
+  });
+
+  async start(): Promise<void> {}
+
+  async close(): Promise<void> {
+    this.closeCalls += 1;
+  }
+
+  async send(message: JSONRPCMessage): Promise<void> {
+    if ("method" in message && "id" in message && message.method === "initialize") {
+      this.initializeId = message.id;
+      this.resolveInitializeRequested();
+    }
+  }
+
+  respondToInitialize(): void {
+    if (this.initializeId === undefined) {
+      throw new Error("initialize was not requested");
+    }
+    this.onmessage?.({
+      jsonrpc: "2.0",
+      id: this.initializeId,
+      result: {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+        capabilities: { tools: {} },
+        serverInfo: { name: "delayed-server", version: "1.0.0" },
+      },
+    });
   }
 }
 

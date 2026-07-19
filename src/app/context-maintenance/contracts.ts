@@ -56,8 +56,11 @@ export type MaintainAgentLoopContextInput = {
   /** Counter selected for the frozen run model; no generic tokenizer fallback is allowed here. */
   readonly tokenCounter: AgentLoopTokenCounter;
   readonly thresholdRatio?: number;
-  readonly preserveRecentMessages?: number;
+  /** Token budget for the optional recent interaction tail. */
+  readonly preserveRecentTokenBudget?: number;
   /** Defaults to system for existing runtimes; SDK-backed Ordinary uses user to keep one leading system instruction. */
   readonly compactedContextRole?: "system" | "user";
+  /** Keep the latest complete tool interaction raw while compacting older context. */
+  readonly preserveLatestToolInteraction?: boolean;
   readonly abortSignal?: AbortSignal;
 };

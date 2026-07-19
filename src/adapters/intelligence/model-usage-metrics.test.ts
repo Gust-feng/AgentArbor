@@ -18,6 +18,7 @@ test("model usage metrics derive first-token timing and output token speed from 
   });
 
   assert.deepEqual(usage, {
+    requestCount: 1,
     inputTokens: 120,
     outputTokens: 60,
     totalTokens: 180,
@@ -35,6 +36,7 @@ test("model usage metrics do not invent token speed without output token counts"
   });
 
   assert.deepEqual(usage, {
+    requestCount: 1,
     latencyMs: 1_200,
     firstTokenLatencyMs: 300,
     outputDurationMs: 900,

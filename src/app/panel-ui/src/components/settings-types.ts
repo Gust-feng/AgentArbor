@@ -43,4 +43,5 @@ export type SettingsGroup =
   | "workspace"
   | "appearance"
   | "statistics"
+  | "developer"
   | "about";

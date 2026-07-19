@@ -25,6 +25,9 @@ export type OrdinaryAgentLoopRunResources = {
   readonly agentTools?: readonly AgentLoopAgentTool[];
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly maintainContext?: AgentLoopInput["maintainContext"];
+  /** Registers root provider order before SDK tool preflight callbacks can race. */
+  readonly registerToolRound?: (toolCalls: NonNullable<ModelMessage["toolCalls"]>) => void;
+  readonly toolMetrics?: import("./tool-runtime-metrics.js").OrdinaryToolMetricsCollector;
   /** Releases every run-scoped resource created by the acquirer, including the loop. */
   release(): Promise<void>;
 };
@@ -81,11 +84,21 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           onReasoningCompleted: executionInput.onReasoningCompleted,
           onToolRequested: executionInput.onToolRequested,
           onToolProgress: executionInput.onToolProgress,
-          onToolRound: executionInput.onToolRound,
+          onToolRound: async (round) => {
+            resources.registerToolRound?.(round.assistantMessage.toolCalls ?? []);
+            await executionInput.onToolRound?.(round);
+          },
           onToolResult: executionInput.onToolResult,
           maintainContext: resources.maintainContext,
         });
-        return await mapAgentLoopResult(result, lease, input.onReleaseError, {}, resources.capabilityResolution);
+        return await mapAgentLoopResult(
+          result,
+          lease,
+          input.onReleaseError,
+          {},
+          resources.capabilityResolution,
+          resources.toolMetrics,
+        );
       } catch (error) {
         await releaseWithoutReplacingOutcome(lease, input.onReleaseError);
         throw error;
@@ -118,12 +131,14 @@ async function mapAgentLoopResult(
   onReleaseError?: (error: unknown) => void,
   previousUsage: ModelUsage = {},
   capabilityResolution?: RunCapabilityResolution,
+  toolMetrics?: import("./tool-runtime-metrics.js").OrdinaryToolMetricsCollector,
 ): Promise<OrdinaryExecutionOutcome> {
   const usage = latestCumulativeUsage(previousUsage, result.usage);
   const facts = {
     canonicalMessages: result.messages,
     toolCalls: result.toolResults,
     usage,
+    ...(toolMetrics === undefined ? {} : { toolMetrics: toolMetrics.snapshot() }),
     ...(capabilityResolution === undefined ? {} : { capabilityResolution }),
   } as const;
 
@@ -132,7 +147,7 @@ async function mapAgentLoopResult(
       ...facts,
       status: "approval_required",
       confirmationRequests: result.confirmationRequests,
-      continuation: mapContinuation(result.continuation, lease, onReleaseError, usage, capabilityResolution),
+      continuation: mapContinuation(result.continuation, lease, onReleaseError, usage, capabilityResolution, toolMetrics),
     };
   }
 
@@ -156,6 +171,7 @@ function mapContinuation(
   onReleaseError?: (error: unknown) => void,
   previousUsage: ModelUsage = {},
   capabilityResolution?: RunCapabilityResolution,
+  toolMetrics?: import("./tool-runtime-metrics.js").OrdinaryToolMetricsCollector,
 ): OrdinaryExecutionContinuation {
   let consumed = false;
   return {
@@ -170,6 +186,7 @@ function mapContinuation(
           onReleaseError,
           previousUsage,
           capabilityResolution,
+          toolMetrics,
         );
       } catch (error) {
         await releaseWithoutReplacingOutcome(lease, onReleaseError);

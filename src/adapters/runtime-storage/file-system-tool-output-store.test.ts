@@ -135,6 +135,112 @@ test("FileSystemToolOutputStore fails fast when durable evidence content is dama
   );
 });
 
+test("FileSystemToolOutputStore invalidates verified read cache when evidence changes", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-cache-invalidate-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new FileSystemToolOutputStore(root, { createRefToken: () => "cached-evidence" });
+  const retained = await store.retain(retainInput("original", "call-cache", "run-cache"));
+  assert.equal((await store.read(retained.ref, { startChar: 0, maxChars: 3 }))?.content, "ori");
+  const contentPath = path.join(root, "entries", "cached-evidence", "content.txt");
+  await fs.writeFile(contentPath, "changed!", "utf8");
+  const changedTime = new Date(Date.now() + 2_000);
+  await fs.utimes(contentPath, changedTime, changedTime);
+
+  await assert.rejects(
+    store.read(retained.ref, { startChar: 3, maxChars: 3 }),
+    (error: unknown) => error instanceof ToolOutputStoreError && error.code === "tool_output_corrupt",
+  );
+});
+
+test("FileSystemToolOutputStore streams one large verification and reuses its bounded window index", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-indexed-read-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const content = `${"a".repeat(65_535)}😀中${"b".repeat(70_000)}😀tail`;
+  const store = new FileSystemToolOutputStore(root, {
+    createRefToken: () => "indexed-evidence",
+    maxReadCacheBytes: 8,
+  });
+  const retained = await store.retain(retainInput(content, "call-indexed", "run-indexed"));
+
+  const firstStart = 65_533;
+  const first = await store.read(retained.ref, { startChar: firstStart, maxChars: 8 });
+  assert.equal(first?.content, content.slice(firstStart, firstStart + 8));
+  assert.equal(first?.textChars, 8);
+  assert.equal(first?.hasMoreAfter, true);
+
+  const internals = store as unknown as {
+    readonly verifiedFiles: Map<string, { readonly checkpoints: readonly unknown[] }>;
+    readonly cachedContent: Map<string, unknown>;
+  };
+  const verifiedAfterFirstRead = internals.verifiedFiles.get(retained.ref);
+  assert.ok(verifiedAfterFirstRead);
+  assert.equal((verifiedAfterFirstRead?.checkpoints.length ?? 0) >= 3, true);
+  assert.equal(internals.cachedContent.has(retained.ref), false);
+
+  const secondStart = content.length - 7;
+  const second = await store.read(retained.ref, { startChar: secondStart, maxChars: 7 });
+  assert.equal(second?.content, content.slice(secondStart));
+  assert.equal(second?.hasMoreAfter, false);
+  assert.equal(internals.verifiedFiles.get(retained.ref), verifiedAfterFirstRead);
+  assert.equal(internals.cachedContent.has(retained.ref), false);
+
+  await assert.rejects(
+    store.read(retained.ref, { startChar: 65_536, maxChars: 4 }),
+    (error: unknown) => error instanceof ToolOutputStoreError &&
+      error.code === "invalid_tool_output_window" && error.facts.startChar === 65_536,
+  );
+
+  const contentPath = path.join(root, "entries", "indexed-evidence", "content.txt");
+  await fs.writeFile(contentPath, `${content.slice(0, -1)}!`, "utf8");
+  const changedTime = new Date(Date.now() + 2_000);
+  await fs.utimes(contentPath, changedTime, changedTime);
+  await assert.rejects(
+    store.read(retained.ref, { startChar: secondStart, maxChars: 7 }),
+    (error: unknown) => error instanceof ToolOutputStoreError && error.code === "tool_output_corrupt",
+  );
+});
+
+test("FileSystemToolOutputStore rejects an item above the durable byte limit without writing it", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-item-limit-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new FileSystemToolOutputStore(root, {
+    createRefToken: () => "oversized-evidence",
+    maxItemBytes: 4,
+    maxTotalBytes: 20,
+    maxEntries: 2,
+  });
+
+  await assert.rejects(
+    store.retain(retainInput("😀a", "call-large", "run-large")),
+    (error: unknown) => error instanceof ToolOutputStoreError &&
+      error.code === "tool_output_item_too_large" && error.facts.incomingBytes === 5,
+  );
+  await assert.rejects(() => fs.access(path.join(root, "entries", "oversized-evidence")));
+});
+
+test("FileSystemToolOutputStore enforces durable entry and total byte capacity across restart", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-capacity-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let token = 0;
+  const options = {
+    createRefToken: () => `capacity-${token += 1}`,
+    maxItemBytes: 10,
+    maxTotalBytes: 6,
+    maxEntries: 2,
+  };
+  const first = new FileSystemToolOutputStore(root, options);
+  await first.retain(retainInput("abc", "call-1", "run-capacity"));
+  await first.close();
+
+  const restarted = new FileSystemToolOutputStore(root, options);
+  await restarted.retain(retainInput("de", "call-2", "run-capacity"));
+  await assert.rejects(
+    restarted.retain(retainInput("fg", "call-3", "run-capacity")),
+    (error: unknown) => error instanceof ToolOutputStoreError &&
+      error.code === "tool_output_capacity_exceeded",
+  );
+});
+
 function retainInput(content: string, sourceCallId: string, ownerId: string) {
   return {
     mediaType: "text/plain" as const,

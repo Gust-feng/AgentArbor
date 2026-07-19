@@ -146,8 +146,8 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
     assert.equal(emptyRangeFacts.hasMoreAfter, false);
 
     const listed = await listDir.execute({ path: "src" }, context);
-    const entries = asDirectToolFacts(listed).entries as readonly { readonly name: string }[];
-    assert.deepEqual(entries.map((entry) => entry.name), ["note.txt"]);
+    const entries = asDirectToolFacts(listed).entries as readonly { readonly path: string }[];
+    assert.deepEqual(entries.map((entry) => entry.path), ["note.txt"]);
 
     const grep = await grepFiles.execute({ path: "src", query: "needle" }, context);
     const matches = asDirectToolFacts(grep).matches as readonly { readonly path: string; readonly line: number }[];
@@ -812,14 +812,14 @@ test("local shell_command bounds foreground process lifetime and output volume",
     }, context);
     const largeResult = asDirectToolFacts(largeOutput);
     assert.equal(asRecord(largeOutput).truncated, true);
-    assert.equal(String(largeResult.stdout).length, 16_000);
-    assert.equal(String(largeResult.stderr).length, 8_000);
+    assert.equal(String(largeResult.stdout).length, 12_000);
+    assert.equal(String(largeResult.stderr).length, 4_000);
     assert.equal(largeResult.stdoutTruncated, true);
     assert.equal(largeResult.stderrTruncated, true);
     assert.equal(largeResult.stdoutChars, 140_000);
     assert.equal(largeResult.stderrChars, 70_000);
-    assert.equal(largeResult.stdoutOmittedChars, 124_000);
-    assert.equal(largeResult.stderrOmittedChars, 62_000);
+    assert.equal(largeResult.stdoutOmittedChars, 128_000);
+    assert.equal(largeResult.stderrOmittedChars, 66_000);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -837,7 +837,7 @@ test("local shell_command can start long-running commands in the background with
     const result = asDirectToolFacts(started);
     const logPath = String(result.logPath);
 
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, null);
     assert.equal(result.background, true);
     assert.equal(typeof result.pid, "number");
     assert.match(String(result.stopCommand), process.platform === "win32" ? /taskkill/ : /kill -TERM/);
@@ -878,7 +878,7 @@ test("local shell_command waits for a background server port", async () => {
     }, context);
     const result = asDirectToolFacts(started);
 
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, null);
     assert.equal(result.background, true);
     assert.equal(result.waitForPort, port);
     assert.equal(result.portReady, true);
@@ -907,7 +907,7 @@ test("local shell_command reports when a requested background port is not ready"
     }, context);
     const result = asDirectToolFacts(started);
 
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, null);
     assert.equal(result.background, true);
     assert.equal(result.waitForPort, port);
     assert.equal(result.portReady, false);
@@ -933,7 +933,7 @@ test("local shell_command captures shell-native background command output", asyn
     const result = asDirectToolFacts(started);
     const logPath = String(result.logPath);
 
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, null);
     assert.equal(result.background, true);
     assert.equal(typeof result.pid, "number");
     assert.match(String(result.stdout), /Started background process/);
@@ -963,7 +963,8 @@ test("local shell_command reports background commands that exit immediately", as
     const result = asDirectToolFacts(exited);
 
     assert.equal(result.exitCode, 7);
-    assert.equal(result.background, undefined);
+    assert.equal(result.background, true);
+    assert.equal(result.processState, "exited");
     assert.equal(typeof result.logPath, "string");
     assert.match(String(result.stdout), /background failed fast/);
     assert.match(String(result.stderr), /exited before it stayed running/);
@@ -985,7 +986,8 @@ test("local shell_command reports background commands that fail during the start
     const result = asDirectToolFacts(exited);
 
     assert.equal(result.exitCode, 9);
-    assert.equal(result.background, undefined);
+    assert.equal(result.background, true);
+    assert.equal(result.processState, "exited");
     assert.equal(typeof result.logPath, "string");
     assert.match(String(result.stdout), /background delayed fail/);
     assert.match(String(result.stderr), /exited before it stayed running/);

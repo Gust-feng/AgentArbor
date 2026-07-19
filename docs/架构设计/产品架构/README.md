@@ -26,6 +26,7 @@ Workbench
 ## 当前决策
 
 - [ADR-0028-AgentArbor统一Workbench与功能模块化单体架构](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)：当前产品边界、功能所有权、共享能力与组合根事实源。
+- [ADR-0029-工具结果交付与Ordinary有序执行调度](ADR-0029-工具结果交付与Ordinary有序执行调度.md)：固定单结果包络、逐工具输出所有权、无工具数量/批量总预算限制与 Ordinary 有序读写执行。
 - [ADR-0024-桌面基础Agent与基础设施优先路线](ADR-0024-桌面基础Agent与基础设施优先路线.md)：保留 Ordinary Agent 默认和基础能力优先。
 - [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)：保留 Multi-Agent 的 manager、TaskBoard、scheduler、child 和 parent synthesis 闭环。
 - [ADR-0026-子Agent工具能力架构](ADR-0026-子Agent工具能力架构.md)：Sub-Agent 是 Ordinary Agent 工具能力。

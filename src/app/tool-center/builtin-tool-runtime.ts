@@ -38,6 +38,8 @@ import {
 import { createReadToolOutputTool } from "./adapters/tool-output-read-tool.js";
 import { ToolRegistry, type ToolRegistryScope } from "./tool-registry.js";
 import type { ToolOutputStore } from "./tool-output-store.js";
+import type { ToolOutputTokenCounter } from "./tool-output-limits.js";
+import type { ToolExecutionMetricsSink } from "../../domain/tools/index.js";
 
 export type CreateAgentToolRegistryOptions = {
   readonly runtime?: { readonly constraints?: readonly Constraint[] };
@@ -55,6 +57,8 @@ export type CreateAgentToolRegistryOptions = {
   readonly taskSoil?: TaskSoil;
   readonly modelCapabilities?: ModelCapabilities;
   readonly toolOutputStore?: ToolOutputStore;
+  readonly outputTokenCounter?: ToolOutputTokenCounter;
+  readonly metricsSink?: ToolExecutionMetricsSink;
 };
 
 export type ToolRegistryFetchLike = (
@@ -77,7 +81,11 @@ export function createAgentToolRegistry(
   registry?: ToolRegistry,
 ): ToolRegistry {
   const targetRegistry = registry ?? new ToolRegistry({
-    toolCenter: { outputStore: options.toolOutputStore },
+    toolCenter: {
+      outputStore: options.toolOutputStore,
+      outputTokenCounter: options.outputTokenCounter,
+      metricsSink: options.metricsSink,
+    },
   });
   const env = options.env ?? process.env;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
@@ -86,9 +94,9 @@ export function createAgentToolRegistry(
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
   const baseToolScopes = options.baseToolScopes ?? ["agent-basic"];
   const executors: readonly ToolExecutor[] = [
-    createLocalReadFileTool(workspaceRoot, { sandboxPolicy }),
-    createLocalListDirTool(workspaceRoot, { sandboxPolicy }),
-    createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy }),
+    createLocalReadFileTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
+    createLocalListDirTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
+    createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
     createLocalCreateFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalWriteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalEditFileTool(workspaceRoot, { sandboxPolicy }),
@@ -105,9 +113,11 @@ export function createAgentToolRegistry(
       workspaceRoot,
       supportsVisionInput: options.modelCapabilities?.supportsVisionInput,
     }),
-    createHttpRequestTool(),
-    createBrowserSnapshotTool(),
-    ...(options.toolOutputStore === undefined ? [] : [createReadToolOutputTool(options.toolOutputStore)]),
+    createHttpRequestTool({ outputStore: options.toolOutputStore }),
+    createBrowserSnapshotTool({ outputStore: options.toolOutputStore }),
+    ...(options.toolOutputStore === undefined ? [] : [createReadToolOutputTool(options.toolOutputStore, {
+      outputTokenCounter: options.outputTokenCounter,
+    })]),
   ];
   const toolCatalogNames =
     options.toolCatalogNames === undefined ? undefined : new Set(options.toolCatalogNames);

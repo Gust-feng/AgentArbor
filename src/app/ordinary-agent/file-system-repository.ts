@@ -39,6 +39,7 @@ const confirmationDecisionSchema = z.object({
   guidance: z.string().optional(),
 }).strict();
 const usageSchema = z.object({
+  requestCount: z.number().int().nonnegative().optional(),
   inputTokens: z.number().finite().nonnegative().optional(),
   outputTokens: z.number().finite().nonnegative().optional(),
   totalTokens: z.number().finite().nonnegative().optional(),
@@ -51,6 +52,60 @@ const usageSchema = z.object({
   firstTokenLatencyMs: z.number().finite().nonnegative().optional(),
   outputDurationMs: z.number().finite().nonnegative().optional(),
   outputTokensPerSecond: z.number().finite().nonnegative().optional(),
+}).strict();
+const toolMetricHistogramSchema = z.object({
+  bounds: z.array(z.number().finite().nonnegative()),
+  counts: z.array(z.number().int().nonnegative()),
+  count: z.number().int().nonnegative(),
+  sum: z.number().finite().nonnegative(),
+  max: z.number().finite().nonnegative(),
+}).strict().superRefine((histogram, context) => {
+  if (histogram.counts.length !== histogram.bounds.length + 1) {
+    context.addIssue({ code: "custom", message: "histogram counts must include one overflow bucket", path: ["counts"] });
+  }
+  if (histogram.counts.reduce((sum, count) => sum + count, 0) !== histogram.count) {
+    context.addIssue({ code: "custom", message: "histogram count must equal its bucket total", path: ["count"] });
+  }
+});
+const toolMetricCountRecordSchema = z.record(z.string(), z.number().int().nonnegative());
+const toolMetricsSchema = z.object({
+  schemaVersion: z.literal("ordinary-tool-metrics/v1"),
+  definitionRequestCount: z.number().int().nonnegative(),
+  definitionToolCount: toolMetricHistogramSchema,
+  totalDefinitionTokens: toolMetricHistogramSchema,
+  metricsDroppedCount: z.number().int().nonnegative(),
+  tools: z.array(z.object({
+    toolName: z.string().min(1),
+    operationType: z.enum(["read-only", "read-write", "execute", "external-submit"]),
+    definitionHash: z.string().min(1).optional(),
+    definitionTokens: toolMetricHistogramSchema,
+    calls: z.number().int().nonnegative(),
+    completed: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    cancelled: z.number().int().nonnegative(),
+    approvalRequired: z.number().int().nonnegative(),
+    retained: z.number().int().nonnegative(),
+    retentionFailures: z.number().int().nonnegative(),
+    retentionAvailability: toolMetricCountRecordSchema,
+    retentionMs: toolMetricHistogramSchema,
+    continuationsOffered: z.number().int().nonnegative(),
+    continuationsCompleted: z.number().int().nonnegative(),
+    continuationReadFailures: z.number().int().nonnegative(),
+    continuationExpired: z.number().int().nonnegative(),
+    continuationChars: z.number().int().nonnegative(),
+    inputTokens: toolMetricHistogramSchema,
+    rawBodyTokens: toolMetricHistogramSchema,
+    rawEnvelopeTokens: toolMetricHistogramSchema,
+    finalEnvelopeTokens: toolMetricHistogramSchema,
+    queueWaitMs: toolMetricHistogramSchema,
+    executionMs: toolMetricHistogramSchema,
+    continuationPages: toolMetricHistogramSchema,
+    outputChars: z.number().int().nonnegative(),
+    outputBytes: z.number().int().nonnegative(),
+    maxActive: z.number().int().nonnegative(),
+    queuedCancelled: z.number().int().nonnegative(),
+    retentionReasons: toolMetricCountRecordSchema,
+  }).strict()),
 }).strict();
 const canonicalToolNameSchema = z.string().min(1).refine(isCanonicalToolName, {
   message: "tool identity must be a canonical provider-portable name",
@@ -251,6 +306,7 @@ const rawStateSchema = z.object({
   toolCalls: z.array(toolCallSchema),
   toolResultRecordedAt: z.record(z.string(), z.string().min(1)),
   usage: usageSchema,
+  toolMetrics: toolMetricsSchema.optional(),
   capabilityResolution: capabilityResolutionSchema.optional(),
   timeline: z.array(eventSchema).min(1),
   timestamps: z.object({ createdAt: z.string().min(1), updatedAt: z.string().min(1), terminalAt: z.string().optional() }).strict(),

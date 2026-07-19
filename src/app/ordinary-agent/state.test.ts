@@ -242,6 +242,26 @@ test("Ordinary pending root rounds freeze the actual request prefix and reject i
     recordedAt: "2026-01-01T00:00:03.000Z",
   }), /does not match its accepted assistant call/u);
 
+  const resolved = recordOrdinaryToolResult({
+    state: accepted,
+    result: {
+      callId: "root-call",
+      toolName: "read_file",
+      input: { path: "README.md" },
+      output: { content: "contents" },
+      status: "completed",
+      durationMs: 1,
+    },
+    recordedAt: "2026-01-01T00:00:03.000Z",
+  });
+  const modelPayload = JSON.parse(resolved.canonicalMessages.at(-1)?.content ?? "{}") as {
+    readonly input?: unknown;
+    readonly body?: { readonly value?: unknown };
+  };
+  assert.deepEqual(resolved.toolCalls[0]?.input, { path: "README.md" });
+  assert.equal(modelPayload.input, undefined);
+  assert.deepEqual(modelPayload.body?.value, { content: "contents" });
+
   const inconsistent = {
     ...accepted,
     toolCalls: [{

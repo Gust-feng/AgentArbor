@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentLoopAgentTool } from "../../app/model-runtime/agent-loop.js";
+import { canonicalToolResultMessage } from "../../app/model-runtime/tool-result-message.js";
 import {
   SPAWN_SUB_AGENT_TOOL_NAME,
   createSubAgentAgentTools,
@@ -84,7 +85,7 @@ test("Chat keeps child exchanges private while returning one complete agent-tool
     assert.equal(parentResult?.output, fullOutput);
     const canonicalToolMessages = result.messages.filter((message) => message.role === "tool");
     assert.deepEqual(canonicalToolMessages.map((message) => message.toolCallId), ["parent-delegate-call"]);
-    assert.equal(canonicalToolMessages[0]?.content, JSON.stringify(parentResult));
+    assert.equal(canonicalToolMessages[0]?.content, canonicalToolResultMessage(parentResult!).content);
     assert.equal(parentObservedToolOutput, canonicalToolMessages[0]?.content);
     assert.equal(result.messages.some((message) => message.toolCallId === "child-read-call"), false);
     assert.deepEqual(observedToolResults.map((item) => [item.callId, item.status]), [
@@ -434,7 +435,12 @@ test("root and child provider call-id collisions keep separate facts and permiss
     );
     const rootToolMessage = result.messages.find((message) =>
       message.toolCallId === "shared-provider-call" && message.toolName === "read_fact");
-    assert.deepEqual((JSON.parse(rootToolMessage?.content ?? "{}") as ToolCallResult).input, { value: "root" });
+    const rootToolPayload = JSON.parse(rootToolMessage?.content ?? "{}") as {
+      readonly body?: { readonly format?: string; readonly text?: string };
+      readonly input?: unknown;
+    };
+    assert.equal(rootToolPayload.input, undefined);
+    assert.deepEqual(rootToolPayload.body, { format: "text", text: "gateway:read_fact" });
   } finally {
     await loop.release();
   }

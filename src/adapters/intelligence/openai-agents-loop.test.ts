@@ -78,6 +78,7 @@ test("compatible Chat sends a stable cache identity with one local history and m
         "chat-finished",
       ]);
       assert.deepEqual(result.usage, {
+        requestCount: 1,
         inputTokens: 12,
         outputTokens: 4,
         totalTokens: 16,
@@ -530,6 +531,8 @@ test("streaming consumes the SDK stream, emits text deltas, and awaits completio
       assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
       assert.equal(result.status === "completed" ? result.finalText : undefined, "stream-complete");
       assert.equal(deltas.join(""), "stream-complete");
+      assert.equal(result.usage.requestCount, 1);
+      assert.equal(typeof result.usage.firstTokenLatencyMs, "number");
     } finally {
       await loop.release();
     }
@@ -1309,6 +1312,8 @@ test("Responses executes a compacted streamed function call and pairs its result
       assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
       assert.equal(result.status === "completed" ? result.finalText : undefined, "tool-stream-finished");
       assert.equal(deltas.join(""), "tool-stream-finished");
+      assert.equal(result.usage.requestCount, 2);
+      assert.equal(typeof result.usage.firstTokenLatencyMs, "number");
       assert.deepEqual(gateway.executions.map(({ request }) => request.callId), ["call-streamed-read"]);
       assert.equal(result.messages.some((message) => message.toolCallId === "call-streamed-read"), true);
     } finally {
@@ -1773,6 +1778,7 @@ test("non-portable tool identities fail before the provider request instead of r
 test("context maintenance runs before every model request and persists the compacted request history", async () => {
   const gateway = new TestGateway([plainTool("read_first"), plainTool("read_second")]);
   const maintained: ModelMessage[][] = [];
+  const unseenToolResultFlags: boolean[] = [];
   const fetch = scriptedFetch([
     () => chatTools([
       { callId: "call-context-first", name: "read_first", input: { value: "first" } },
@@ -1794,8 +1800,9 @@ test("context maintenance runs before every model request and persists the compa
           { role: "system", content: SYSTEM },
           { role: "user", content: "inspect both sources" },
         ], gateway),
-        maintainContext: async ({ messages }) => {
+        maintainContext: async ({ messages, hasUnseenToolResults }) => {
           maintained.push(messages.map((message) => structuredClone(message)));
+          unseenToolResultFlags.push(hasUnseenToolResults);
           if (maintained.length === 1) return { status: "unchanged" };
           assert.deepEqual(messages.at(-3)?.toolCalls?.map((call) => call.callId), [
             "call-context-first",
@@ -1816,6 +1823,7 @@ test("context maintenance runs before every model request and persists the compa
       });
       assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
       assert.equal(maintained.length, 2);
+      assert.deepEqual(unseenToolResultFlags, [false, true]);
       assert.deepEqual(result.messages.map((message) => message.role), ["system", "user", "assistant"]);
       assert.equal(result.messages.some((message) => message.toolCallId !== undefined), false);
       assert.equal(result.messages.at(-1)?.content, "context-final");

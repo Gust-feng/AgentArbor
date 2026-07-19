@@ -48,7 +48,7 @@ export function createReadSkillResourceTool(
           "path is required and must be one of that skill's indexed resources.",
           "type is required: reference, asset, or script.",
           "maxChars only applies to reference text and is capped by the runtime.",
-          "startChar continues a truncated reference from any non-negative safe character offset.",
+          "startChar continues a truncated reference from a non-negative safe UTF-16 offset and must not split a surrogate pair.",
         ],
         outputNotes: [
           "Reference resources include content, hash, byte length, char count, and truncation facts.",
@@ -111,13 +111,14 @@ export function createReadSkillResourceTool(
 
       const maxChars = Math.min(MAX_MAX_CHARS, positiveInteger(record.maxChars) ?? DEFAULT_MAX_CHARS);
       const startChar = startCharFromInput(record.startChar);
-      const readEndChar = safeWindowEnd(startChar, maxChars);
       const result = await readSkillResource({
         packagePath: resource.packagePath,
         sourcePath: resource.sourcePath,
         relativePath,
         type,
-        maxChars: type === "reference" ? readEndChar : maxChars,
+        maxChars,
+        startChar: type === "reference" ? startChar : 0,
+        abortSignal: context.abortSignal,
       });
       if (!result.ok) {
         throw Object.assign(new Error(result.errorMessage), {
@@ -142,7 +143,7 @@ export function createReadSkillResourceTool(
         });
       }
 
-      const content = result.content?.slice(startChar, readEndChar);
+      const content = result.content;
       const endChar = startChar + (content?.length ?? 0);
       const hasMoreAfter = result.type === "reference" && (result.charCount ?? 0) > endChar;
       return {
@@ -176,10 +177,6 @@ function startCharFromInput(value: unknown): number {
     throw new Error("read_skill_resource startChar must be a non-negative safe integer.");
   }
   return value;
-}
-
-function safeWindowEnd(startChar: number, maxChars: number): number {
-  return Math.min(Number.MAX_SAFE_INTEGER, startChar + maxChars);
 }
 
 export function hasReadableSelectedSkillResources(

@@ -70,8 +70,13 @@ export type OpenAIAgentsExecutionState = {
   readonly interruptionFactIds: WeakMap<object, string>;
   readonly modelInput: OpenAIAgentsInputMapper;
   modelRequestCount: number;
+  activeModelRequestStartedAtMs?: number;
+  firstTokenObservedForRequestCount?: number;
+  firstTokenLatencyTotalMs: number;
+  firstTokenLatencySampleCount: number;
   latestRequestIncludedResponses: number;
   latestRequestMessages?: readonly ModelMessage[];
+  readonly deliveredToolResultCallIds: Set<string>;
 };
 
 export type OpenAIAgentsSdkExecutionContext = {
@@ -311,9 +316,10 @@ function createSdkAgentTool(input: {
           status: "completed",
           durationMs: start === undefined ? 0 : Math.max(0, Date.now() - start.at),
         };
-        await recordOpenAIAgentsToolResult(input.execution, toolResult);
+        const delivered = await deliverAgentToolResult(input.execution, toolResult);
+        await recordOpenAIAgentsToolResult(input.execution, delivered);
         settled.add(factId);
-        return agentToolModelOutput(input.execution, toolResult);
+        return agentToolModelOutput(input.execution, delivered);
       }
       const recorded = input.execution.toolResults.find((item) =>
         (item.factId ?? item.callId) === factId && item.status === "completed");
@@ -450,8 +456,24 @@ async function recordAgentToolFailure(input: {
     },
     durationMs: input.startedAt === undefined ? 0 : Math.max(0, Date.now() - input.startedAt),
   };
-  await recordOpenAIAgentsToolResult(input.execution, result);
-  return agentToolModelOutput(input.execution, result);
+  const delivered = await deliverAgentToolResult(input.execution, result);
+  await recordOpenAIAgentsToolResult(input.execution, delivered);
+  return agentToolModelOutput(input.execution, delivered);
+}
+
+async function deliverAgentToolResult(
+  execution: OpenAIAgentsExecutionState,
+  result: ToolCallResult,
+): Promise<ToolCallResult> {
+  const deliver = execution.input.tools.gateway.deliverResult;
+  return deliver === undefined
+    ? result
+    : deliver.call(
+        execution.input.tools.gateway,
+        result,
+        execution.input.tools.permission,
+        execution.input.tools.context.traceId,
+      );
 }
 
 function agentToolModelOutput(

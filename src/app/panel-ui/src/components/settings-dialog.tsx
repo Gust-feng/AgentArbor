@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChartColumn,
   CloudCog,
+  Code2,
   Database,
   Download,
   ExternalLink,
@@ -37,7 +38,7 @@ import { ModelSettings } from "./model-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { SkillSettings } from "./skill-settings";
 import { SubAgentSettings } from "./sub-agent-settings";
-import { UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
+import { DeveloperToolStatistics, UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
 import { WorkspaceSettings } from "./workspace-settings";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
@@ -152,10 +153,10 @@ export function SettingsDialog(props: {
                 className={group.id === activeGroup ? "active" : ""}
                 onClick={() => setActiveGroup(group.id)}
                 onFocus={() => {
-                  if (group.id === "statistics") preloadUsageStatistics();
+                  if (group.id === "statistics" || group.id === "developer") preloadUsageStatistics();
                 }}
                 onMouseEnter={() => {
-                  if (group.id === "statistics") preloadUsageStatistics();
+                  if (group.id === "statistics" || group.id === "developer") preloadUsageStatistics();
                 }}
               >
                 {group.icon}
@@ -250,6 +251,7 @@ export function SettingsDialog(props: {
             )}
             {activeGroup === "appearance" && <AppearanceSettings />}
             {activeGroup === "statistics" && <UsageStatisticsSettings />}
+            {activeGroup === "developer" && <DeveloperToolStatistics />}
             {activeGroup === "about" && (
               <AboutSettings
                 config={props.config}
@@ -276,6 +278,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },
+  { id: "developer", label: "开发者选项", icon: <Code2 size={15} /> },
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 

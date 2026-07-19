@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { createServer as createNetServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ToolExecutionProgress } from "../../../domain/tools/index.js";
 import { ensurePidExited } from "./background-process-test-utils.js";
-import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
+import { createLocalShellCommandTool, pruneLocalCommandLogs } from "./local-workspace-command-tools.js";
 import {
   InMemoryProcessRegistry,
   type PortOccupantProbe,
@@ -320,6 +320,100 @@ test("shell_command returns a controlled logRef for background command logs", as
     }
   } finally {
     await removeTempTree(root);
+  }
+});
+
+test("shell_command terminates a managed background process instead of dropping output at the log boundary", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-log-limit-"));
+  const registry = new InMemoryProcessRegistry();
+  const shellCommand = createLocalShellCommandTool(root, {
+    processRegistry: registry,
+    maxBackgroundLogBytes: 2_048,
+  });
+  let pid: number | undefined;
+  let logPath: string | undefined;
+  try {
+    const result = asDirectToolFacts(await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", "setInterval(() => process.stdout.write('x'.repeat(8192)), 1);"],
+      background: true,
+      backgroundWaitMs: 20,
+    }, processContext));
+    pid = typeof result.pid === "number" ? result.pid : undefined;
+    logPath = typeof result.logPath === "string" ? result.logPath : undefined;
+    const processId = String(result.processId);
+
+    await waitForCondition(() => {
+      const record = registry.get(processId);
+      return record?.facts.some((fact) => fact.kind === "command_log_limit") === true &&
+        (record.status === "exited" || record.status === "killed");
+    }, 5_000);
+    await ensurePidExited(pid, 5_000);
+
+    const record = registry.get(processId);
+    const limitFact = record?.facts.find((fact) => fact.kind === "command_log_limit");
+    assert.equal(limitFact?.kind, "command_log_limit");
+    if (limitFact?.kind === "command_log_limit") {
+      assert.equal(limitFact.limitBytes, 2_048);
+      assert.equal(limitFact.observedBytes > limitFact.limitBytes, true);
+      assert.equal(limitFact.action, "terminate_process");
+    }
+    assert.match(await readFile(logPath!, "utf8"), /terminated because its command log exceeded 2048 bytes/u);
+  } finally {
+    await ensurePidExited(pid, 2_000);
+    if (logPath !== undefined) await rm(logPath, { force: true });
+    await removeTempTree(root);
+  }
+});
+
+test("shell_command marks a detached background process exited after the startup window", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
+  try {
+    const registry = createRecordingProcessRegistry();
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
+    const output = asDirectToolFacts(await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => process.exit(7), 100);"],
+      background: true,
+      backgroundWaitMs: 10,
+    }, processContext));
+
+    assert.equal(output.background, true);
+    const exit = await registry.nextExit;
+    assert.equal(exit.input?.exitCode, 7);
+    assert.equal(registry.listAll()[0]?.status, "exited");
+    if (typeof output.logPath === "string") {
+      await rm(output.logPath, { force: true });
+    }
+  } finally {
+    await removeTempTree(root);
+  }
+});
+
+test("command log maintenance removes expired logs and preserves active logs", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agentarbor-command-log-maintenance-"));
+  try {
+    const expired = path.join(directory, "expired.log");
+    const active = path.join(directory, "active.log");
+    await writeFile(expired, "old", "utf8");
+    await writeFile(active, "active", "utf8");
+    const oldTime = new Date("2026-07-01T00:00:00.000Z");
+    await utimes(expired, oldTime, oldTime);
+    await utimes(active, oldTime, oldTime);
+
+    const result = await pruneLocalCommandLogs({
+      directory,
+      now: Date.parse("2026-07-19T00:00:00.000Z"),
+      maxAgeMs: 24 * 60 * 60 * 1_000,
+      maxTotalBytes: 1_000,
+      activeLogPaths: new Set([active]),
+    });
+
+    assert.equal(result.removed, 1);
+    await assert.rejects(() => readFile(expired, "utf8"));
+    assert.equal(await readFile(active, "utf8"), "active");
+  } finally {
+    await removeTempTree(directory);
   }
 });
 
@@ -671,6 +765,16 @@ async function removeTempTree(root: string): Promise<void> {
   await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
+async function waitForCondition(condition: () => boolean, timeoutMs: number): Promise<void> {
+  const startedAt = Date.now();
+  while (!condition()) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Condition was not observed within ${timeoutMs}ms.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 async function unusedLocalPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createNetServer();
@@ -772,10 +876,19 @@ function createRecordingProcessRegistry() {
     readonly input?: { readonly exitCode?: number; readonly signal?: string; readonly exitedAt?: string };
   }> = [];
   const portFacts: ProcessPortFact[] = [];
+  let resolveNextExit!: (value: {
+    readonly processId: string;
+    readonly input?: { readonly exitCode?: number; readonly signal?: string; readonly exitedAt?: string };
+  }) => void;
+  const nextExit = new Promise<{
+    readonly processId: string;
+    readonly input?: { readonly exitCode?: number; readonly signal?: string; readonly exitedAt?: string };
+  }>((resolve) => { resolveNextExit = resolve; });
   return {
     registered,
     updates,
     exited,
+    nextExit,
     portFacts,
     register(input: ProcessRegistration): unknown {
       registered.push(input);
@@ -790,6 +903,7 @@ function createRecordingProcessRegistry() {
       input?: { readonly exitCode?: number; readonly signal?: string; readonly exitedAt?: string }
     ): unknown {
       exited.push({ processId, input });
+      resolveNextExit({ processId, input });
       return registry.markExited(processId, input);
     },
     appendPortFact(processId: string, fact: ProcessPortFact): unknown {

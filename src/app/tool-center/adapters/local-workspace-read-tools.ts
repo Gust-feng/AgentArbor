@@ -24,7 +24,13 @@ import {
   isUtf16CodeUnitBoundary,
   utf16SafePrefixLength,
 } from "../text-window.js";
-import { DEFAULT_MAX_INLINE_TOOL_CONTENT_JSON_CHARS } from "../tool-output-limits.js";
+import {
+  DEFAULT_MAX_INLINE_TOOL_CONTENT_JSON_CHARS,
+  DEFAULT_MAX_INLINE_TOOL_RESULT_TOKENS,
+  DEFAULT_TARGET_INLINE_TOOL_BODY_TOKENS,
+  type ToolOutputTokenCounter,
+} from "../tool-output-limits.js";
+import { toolResultMessage } from "../../../kernel/intelligence/tool-use-loop-messages.js";
 import {
   assertSandboxAllowed,
   createLocalWorkspaceSandboxPolicy,
@@ -48,11 +54,10 @@ const RIPGREP_TIMEOUT_MS = 10_000;
 
 type GrepMatch = { readonly path: string; readonly line: number; readonly preview: string };
 type ListDirEntry = {
+  /** Path relative to the requested list root; the root itself is returned once on the page. */
   readonly path: string;
-  readonly name: string;
   readonly kind: "directory" | "file" | "symlink" | "other";
   readonly bytes?: number;
-  readonly depth: number;
 };
 
 type ReadContentWindow = {
@@ -96,6 +101,7 @@ type GrepFacts = {
 
 export type LocalWorkspaceReadToolOptions = LocalWorkspaceToolOptions & {
   readonly ripgrepSearch?: RipgrepSearchRunner | false;
+  readonly outputTokenCounter?: ToolOutputTokenCounter;
 };
 
 export type RipgrepSearchRunner = (request: {
@@ -106,7 +112,7 @@ export type RipgrepSearchRunner = (request: {
   readonly abortSignal?: AbortSignal;
 }) => Promise<readonly GrepMatch[] | undefined>;
 
-export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceToolOptions = {}): ToolExecutor {
+export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceReadToolOptions = {}): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
   return {
     definition: {
@@ -233,7 +239,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       const nextStartLine = nextStartChar === undefined && hasMoreAfter && content.range !== undefined
         ? content.range.endLine + 1
         : undefined;
-      return {
+      const output = {
         refId: `workspace:file:${target.relativePath}`,
         path: target.relativePath,
         bytes: stat.size,
@@ -247,22 +253,23 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         textChars: content.startChar === undefined ? undefined : returnedTextChars,
         charCount: content.charCount,
         truncated: hasMoreAfter,
-        nextStartChar,
+        nextStartChar: nextStartChar ?? (returned.truncated ? returnedTextChars : undefined),
         nextStartLine,
       };
+      return fitReadOutput(output, options.outputTokenCounter, context.toolCallId);
     },
   };
 }
 
-export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceToolOptions = {}): ToolExecutor {
+export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceReadToolOptions = {}): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
   return {
     definition: {
       name: "list_dir",
-      description: "List files and folders under a local workspace directory. Returns factual path, name, kind, size, and depth metadata.",
+      description: "List files and folders under a local workspace directory with relative paths, kinds, sizes, and continuation facts.",
       modelContract: {
         usageNotes: [
-          "List a workspace directory and return entry paths, names, kinds, byte sizes, depths, and counts.",
+          "List a workspace directory and return one root path plus relative entry paths, kinds, byte sizes, and counts.",
           "Use to discover project structure before reading or editing files.",
           "Use when the exact file path is unknown.",
           "Do not use for text search inside files; use grep_files for that.",
@@ -272,7 +279,7 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_R
           "offset selects the next entry window after a bounded result.",
         ],
         outputNotes: [
-          "entries contains directory entries with path, name, kind, bytes, and depth.",
+          "entries contains paths relative to the returned root path with kind and optional bytes.",
           "totalEntries is the full enumerated entry count when traversal completes.",
           "scanComplete reports whether the requested tree was fully enumerated.",
           "hasMoreAfter reports whether more entries exist; nextOffset identifies the next plain list_dir call.",
@@ -329,7 +336,7 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_R
       const entries = jsonBoundedItems(listed.entries, COLLECTION_ITEMS_JSON_MAX_CHARS);
       const hasMoreAfter = listed.hasMoreAfter || entries.length < listed.entries.length;
       const nextOffset = hasMoreAfter ? offset + entries.length : undefined;
-      return {
+      const output = {
         refId: `workspace:dir:${target.relativePath}`,
         path: target.relativePath,
         depth,
@@ -347,6 +354,7 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_R
         truncated: hasMoreAfter,
         nextOffset,
       };
+      return fitCollectionOutput(output, "entries", options.outputTokenCounter, context.toolCallId);
     },
   };
 }
@@ -501,15 +509,104 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
           },
         };
       }
-      return {
+      const output = {
         ...observation,
         matches: returnedMatches,
         searchComplete: !hasMoreAfter,
         truncated: hasMoreAfter,
         nextOffset,
       };
+      return fitCollectionOutput(output, "matches", options.outputTokenCounter, context.toolCallId);
     },
   };
+}
+
+function fitReadOutput<T extends Readonly<Record<string, unknown>> & { readonly content: string }>(
+  output: T,
+  counter: ToolOutputTokenCounter | undefined,
+  callId: string | undefined,
+): T {
+  if (counter === undefined || modelOutputFits("read_file", output, counter, callId)) return output;
+  let low = 0;
+  let high = output.content.length;
+  let best: T | undefined;
+  while (low <= high) {
+    const requestedLength = Math.floor((low + high) / 2);
+    const length = utf16SafePrefixLength(output.content, requestedLength);
+    const startChar = typeof output.startChar === "number" ? output.startChar : 0;
+    const candidate = {
+      ...output,
+      content: output.content.slice(0, length),
+      textChars: length,
+      hasMoreAfter: true,
+      truncated: true,
+      nextStartChar: startChar + length,
+      nextStartLine: undefined,
+    } as T;
+    if (length > 0 && modelOutputFits("read_file", candidate, counter, callId)) {
+      best = candidate;
+      low = requestedLength + 1;
+    } else {
+      high = requestedLength - 1;
+    }
+  }
+  if (best === undefined) throw new Error("read_file metadata exceeds the fixed model result budget.");
+  return best;
+}
+
+function fitCollectionOutput<T extends Readonly<Record<string, unknown>>>(
+  output: T,
+  collectionKey: "entries" | "matches",
+  counter: ToolOutputTokenCounter | undefined,
+  callId: string | undefined,
+): T {
+  if (counter === undefined || modelOutputFits(collectionKey === "entries" ? "list_dir" : "grep_files", output, counter, callId)) {
+    return output;
+  }
+  const items = Array.isArray(output[collectionKey]) ? output[collectionKey] : [];
+  const toolName = collectionKey === "entries" ? "list_dir" : "grep_files";
+  let low = 1;
+  let high = items.length;
+  let best: T | undefined;
+  while (low <= high) {
+    const count = Math.floor((low + high) / 2);
+    const offset = typeof output.offset === "number" ? output.offset : 0;
+    const candidate = {
+      ...output,
+      [collectionKey]: items.slice(0, count),
+      [collectionKey === "entries" ? "entriesReturned" : "matchesReturned"]: count,
+      hasMoreAfter: true,
+      truncated: true,
+      nextOffset: offset + count,
+      ...(collectionKey === "matches" ? { searchComplete: false } : {}),
+    } as T;
+    if (modelOutputFits(toolName, candidate, counter, callId)) {
+      best = candidate;
+      low = count + 1;
+    } else {
+      high = count - 1;
+    }
+  }
+  if (best === undefined) throw new Error(`${toolName} metadata exceeds the fixed model result budget.`);
+  return best;
+}
+
+function modelOutputFits(
+  toolName: string,
+  output: Readonly<Record<string, unknown>>,
+  counter: ToolOutputTokenCounter,
+  callId: string | undefined,
+): boolean {
+  if (counter.countText(JSON.stringify(output)) > DEFAULT_TARGET_INLINE_TOOL_BODY_TOKENS) return false;
+  const message = toolResultMessage({
+    callId: callId ?? toolName,
+    toolName,
+    input: undefined,
+    output: output as ToolFactValue,
+    status: "completed",
+    durationMs: 0,
+  });
+  return counter.countText(JSON.stringify(message)) <= DEFAULT_MAX_INLINE_TOOL_RESULT_TOKENS;
 }
 
 async function listDirectoryTree(input: {
@@ -564,11 +661,9 @@ async function listDirectoryTree(input: {
         const stat = await fs.stat(absoluteChild).catch(() => undefined);
         throwIfAborted(input.abortSignal);
         entries.push({
-          path: toWorkspaceRelative(input.rootDirectory, absoluteChild),
-          name: child.name,
+          path: relativeListEntryPath(input.absolutePath, absoluteChild),
           kind: directoryEntryKind(child),
           bytes: stat?.size,
-          depth: entryDepth,
         });
       }
       if (child.isDirectory()) {
@@ -589,6 +684,10 @@ async function listDirectoryTree(input: {
     unreadableSamples,
     hasMoreAfter: totalEntries > input.offset + entries.length,
   };
+}
+
+function relativeListEntryPath(listRoot: string, absolutePath: string): string {
+  return path.relative(listRoot, absolutePath).split(path.sep).join("/");
 }
 
 function jsonBoundedItems<T>(items: readonly T[], maxChars: number): readonly T[] {

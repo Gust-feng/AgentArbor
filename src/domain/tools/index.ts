@@ -1,4 +1,5 @@
 export * from "./contracts.js";
+export * from "./tool-execution-metrics.js";
 export * from "./error-facts.js";
 export * from "./fact-value.js";
 export * from "./model-contract.js";

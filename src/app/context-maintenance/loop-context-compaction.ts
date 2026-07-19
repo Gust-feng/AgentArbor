@@ -11,7 +11,7 @@ import type {
 } from "./contracts.js";
 
 const DEFAULT_THRESHOLD_RATIO = 0.8;
-const DEFAULT_PRESERVE_RECENT_MESSAGES = 10;
+const DEFAULT_PRESERVE_RECENT_TOKEN_BUDGET = 40_000;
 const MAX_COMPACTION_OUTPUT_TOKENS = 2_000;
 
 /**
@@ -30,7 +30,9 @@ export async function compactAgentLoopContextIfNeeded(
 
   const split = splitLoopMessagesForCompaction(
     input.messages,
-    input.preserveRecentMessages ?? DEFAULT_PRESERVE_RECENT_MESSAGES
+    input.tokenCounter,
+    input.preserveRecentTokenBudget ?? defaultPreserveRecentTokenBudget(input.modelCapabilities),
+    input.preserveLatestToolInteraction === true,
   );
   if (split.compactible.length === 0) {
     return {
@@ -181,7 +183,9 @@ function loopCompactionMessages(input: {
 
 function splitLoopMessagesForCompaction(
   messages: readonly ModelMessage[],
-  preserveRecentMessages: number
+  tokenCounter: AgentLoopTokenCounter,
+  preserveRecentTokenBudget: number,
+  preserveLatestToolInteraction: boolean,
 ): {
   readonly compactible: readonly { readonly message: ModelMessage; readonly index: number }[];
   readonly preservedIndexes: ReadonlySet<number>;
@@ -198,15 +202,130 @@ function splitLoopMessagesForCompaction(
   if (currentUserIndex !== undefined) {
     preserved.add(currentUserIndex);
   }
-  const recentCount = Math.max(2, Math.floor(preserveRecentMessages));
-  for (let index = Math.max(0, messages.length - recentCount); index < messages.length; index += 1) {
-    preserved.add(index);
+  if (preserveLatestToolInteraction) {
+    preserveLatestCompleteToolInteraction(messages, preserved);
   }
+  preserveRecentInteractionTail(
+    messages,
+    tokenCounter,
+    preserveRecentTokenBudget,
+    preserved,
+  );
   preserveOnlyCompleteToolInteractionGroups(messages, preserved);
   const compactible = messages
     .map((message, index) => ({ message, index }))
     .filter((entry) => !preserved.has(entry.index));
   return { compactible, preservedIndexes: preserved };
+}
+
+type MessageGroup = {
+  readonly indexes: readonly number[];
+  readonly tokenCount: number;
+};
+
+function preserveRecentInteractionTail(
+  messages: readonly ModelMessage[],
+  tokenCounter: AgentLoopTokenCounter,
+  tokenBudget: number,
+  preserved: Set<number>,
+): void {
+  const requiredTokenCount = tokenCountForIndexes(
+    messages,
+    [...preserved].filter((index) => messages[index]?.role !== "system"),
+    tokenCounter,
+  );
+  let remaining = Math.max(0, Math.floor(tokenBudget) - requiredTokenCount);
+  for (const group of messageGroupsFromEnd(messages, tokenCounter)) {
+    if (group.indexes.some((index) => preserved.has(index))) continue;
+    if (group.tokenCount > remaining) break;
+    group.indexes.forEach((index) => preserved.add(index));
+    remaining -= group.tokenCount;
+  }
+}
+
+function messageGroupsFromEnd(
+  messages: readonly ModelMessage[],
+  tokenCounter: AgentLoopTokenCounter,
+): readonly MessageGroup[] {
+  const groups: MessageGroup[] = [];
+  const groupedIndexes = new Set<number>();
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (groupedIndexes.has(index) || messages[index]?.role === "system") continue;
+    const message = messages[index]!;
+    if (message.role === "tool") {
+      const assistantIndex = findToolCallAssistantIndex(messages, message.toolCallId);
+      if (assistantIndex !== undefined && !groupedIndexes.has(assistantIndex)) {
+        const callIds = new Set(messages[assistantIndex]?.toolCalls?.map((call) => call.callId));
+        const indexes = [
+          assistantIndex,
+          ...messages
+            .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+            .filter(({ candidate }) => candidate.role === "tool" && candidate.toolCallId !== undefined && callIds.has(candidate.toolCallId))
+            .map(({ candidateIndex }) => candidateIndex),
+        ].sort((left, right) => left - right);
+        indexes.forEach((groupIndex) => groupedIndexes.add(groupIndex));
+        groups.push({ indexes, tokenCount: tokenCountForIndexes(messages, indexes, tokenCounter) });
+        continue;
+      }
+    }
+    if (message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0) {
+      const callIds = new Set(message.toolCalls?.map((call) => call.callId));
+      const indexes = [
+        index,
+        ...messages
+          .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+          .filter(({ candidate }) => candidate.role === "tool" && candidate.toolCallId !== undefined && callIds.has(candidate.toolCallId))
+          .map(({ candidateIndex }) => candidateIndex),
+      ].sort((left, right) => left - right);
+      indexes.forEach((groupIndex) => groupedIndexes.add(groupIndex));
+      groups.push({ indexes, tokenCount: tokenCountForIndexes(messages, indexes, tokenCounter) });
+      continue;
+    }
+    groupedIndexes.add(index);
+    groups.push({ indexes: [index], tokenCount: tokenCounter.countMessage(message) });
+  }
+  return groups;
+}
+
+function findToolCallAssistantIndex(
+  messages: readonly ModelMessage[],
+  toolCallId: string | undefined,
+): number | undefined {
+  if (toolCallId === undefined) return undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant" && messages[index]?.toolCalls?.some((call) => call.callId === toolCallId)) {
+      return index;
+    }
+  }
+  return undefined;
+}
+
+function tokenCountForIndexes(
+  messages: readonly ModelMessage[],
+  indexes: readonly number[],
+  tokenCounter: AgentLoopTokenCounter,
+): number {
+  return indexes.reduce((total, index) => total + tokenCounter.countMessage(messages[index]!), 0);
+}
+
+function preserveLatestCompleteToolInteraction(
+  messages: readonly ModelMessage[],
+  preserved: Set<number>,
+): void {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant" || (message.toolCalls?.length ?? 0) === 0) continue;
+    const callIds = new Set(message.toolCalls?.map((call) => call.callId));
+    const resultIndexes = messages
+      .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+      .filter(({ candidate }) => candidate.role === "tool" && candidate.toolCallId !== undefined && callIds.has(candidate.toolCallId))
+      .map(({ candidateIndex }) => candidateIndex);
+    if (resultIndexes.length !== callIds.size) return;
+    preserved.add(index);
+    resultIndexes.forEach((resultIndex) => preserved.add(resultIndex));
+    return;
+  }
 }
 
 function findCurrentUserMessageIndex(messages: readonly ModelMessage[]): number | undefined {
@@ -252,6 +371,11 @@ function preserveOnlyCompleteToolInteractionGroups(
         groupedToolResultIndexes.add(groupIndex);
       }
     });
+    const complete = calls.every((call) => (toolResultIndexes.get(call.callId)?.length ?? 0) === 1);
+    if (!complete) {
+      group.forEach((groupIndex) => preserved.delete(groupIndex));
+      return;
+    }
     const preservedCount = [...group].filter((groupIndex) => preserved.has(groupIndex)).length;
     if (preservedCount === 0 || preservedCount === group.size) {
       return;
@@ -331,6 +455,13 @@ function loopContextTokenCount(
 function loopContextThreshold(capabilities: ModelCapabilities, ratio: number): number {
   const windowTokens = capabilities.contextWindowTokens;
   return Math.max(1, Math.floor(windowTokens * clampRatio(ratio)));
+}
+
+function defaultPreserveRecentTokenBudget(capabilities: ModelCapabilities): number {
+  return Math.min(
+    DEFAULT_PRESERVE_RECENT_TOKEN_BUDGET,
+    Math.max(2, Math.floor(capabilities.contextWindowTokens * 0.15)),
+  );
 }
 
 function serializeToolsForTokenBudget(tools: readonly ToolDefinition[]): string {

@@ -17,6 +17,14 @@ export type McpClientConfig = {
   readonly requestIdleTimeoutMs?: number;
   /** Optional per-server in-flight tool-call limit. Undefined keeps the SDK's existing behavior. */
   readonly maxConcurrentCalls?: number;
+  /** Maximum number of tool definitions accepted from one MCP server. */
+  readonly maxToolCatalogItems?: number;
+  /** Maximum UTF-8 bytes accepted from one server's serialized tool definitions. */
+  readonly maxToolCatalogBytes?: number;
+  /** Maximum combined prompts, resources, and templates accepted from one MCP server. */
+  readonly maxReferenceCatalogItems?: number;
+  /** Maximum combined UTF-8 bytes for one server's serialized reference metadata. */
+  readonly maxReferenceCatalogBytes?: number;
 };
 
 export type McpClientWrapperOptions = {
@@ -27,6 +35,11 @@ export type McpCallOptions = {
   readonly signal?: AbortSignal;
   readonly idleTimeoutMs?: number;
   readonly onProgress?: (progress: McpProgress) => void;
+};
+
+export type McpLifecycleRequestOptions = {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
 };
 
 export type McpProgress = {
@@ -51,6 +64,26 @@ export type McpToolInfo = {
 
 const MAX_MCP_LIST_PAGES = 100;
 export const DEFAULT_MCP_MAX_CONCURRENT_CALLS_PER_SERVER = 4;
+export const DEFAULT_MCP_MAX_TOOL_CATALOG_ITEMS = 128;
+export const DEFAULT_MCP_MAX_TOOL_CATALOG_BYTES = 128 * 1024;
+export const DEFAULT_MCP_MAX_REFERENCE_CATALOG_ITEMS = 1_024;
+export const DEFAULT_MCP_MAX_REFERENCE_CATALOG_BYTES = 1024 * 1024;
+
+export type McpCatalogLimitUnit = "items" | "serialized_bytes";
+
+export class McpCatalogLimitError extends Error {
+  readonly code = "mcp_catalog_limit_exceeded";
+
+  constructor(
+    readonly catalogKind: string,
+    readonly unit: McpCatalogLimitUnit,
+    readonly observed: number,
+    readonly limit: number,
+  ) {
+    super(`MCP ${catalogKind} catalog exceeded ${unit} limit: observed ${observed}, limit ${limit}.`);
+    this.name = "McpCatalogLimitError";
+  }
+}
 
 export type McpToolResult = {
   readonly content: readonly McpContentPart[];
@@ -140,37 +173,80 @@ export class McpClientWrapper {
   private activeToolCalls = 0;
   private readonly pendingToolCalls: Array<PendingToolCallSlot> = [];
   private readonly maxConcurrentCalls: number | undefined;
+  private readonly maxToolCatalogItems: number;
+  private readonly maxToolCatalogBytes: number;
+  private readonly maxReferenceCatalogItems: number;
+  private readonly maxReferenceCatalogBytes: number;
   private health: McpClientHealth = "healthy";
   private lastCallFailure?: McpClientRuntimeSnapshot["lastCallFailure"];
+  private lifecycleGeneration = 0;
 
   constructor(
     private readonly config: McpClientConfig,
     private readonly options: McpClientWrapperOptions = {}
   ) {
     this.maxConcurrentCalls = positiveOptionalInteger(config.maxConcurrentCalls);
+    this.maxToolCatalogItems = positiveCatalogLimit(
+      config.maxToolCatalogItems ?? DEFAULT_MCP_MAX_TOOL_CATALOG_ITEMS,
+      "maxToolCatalogItems",
+    );
+    this.maxToolCatalogBytes = positiveCatalogLimit(
+      config.maxToolCatalogBytes ?? DEFAULT_MCP_MAX_TOOL_CATALOG_BYTES,
+      "maxToolCatalogBytes",
+    );
+    this.maxReferenceCatalogItems = positiveCatalogLimit(
+      config.maxReferenceCatalogItems ?? DEFAULT_MCP_MAX_REFERENCE_CATALOG_ITEMS,
+      "maxReferenceCatalogItems",
+    );
+    this.maxReferenceCatalogBytes = positiveCatalogLimit(
+      config.maxReferenceCatalogBytes ?? DEFAULT_MCP_MAX_REFERENCE_CATALOG_BYTES,
+      "maxReferenceCatalogBytes",
+    );
   }
 
-  async connect(): Promise<void> {
+  async connect(options: McpLifecycleRequestOptions = {}): Promise<void> {
     if (this.connected) {
       return;
     }
-    this.transport = this.options.transport ?? await buildTransport(this.config);
-    this.client = new Client(
+    const generation = ++this.lifecycleGeneration;
+    const transport = this.options.transport ?? await buildTransport(this.config);
+    if (generation !== this.lifecycleGeneration) {
+      await transport.close().catch(() => undefined);
+      throw staleConnectionAttemptError(this.config.serverId);
+    }
+    const client = new Client(
       { name: `agentarbor-${this.config.serverId}`, version: "0.1.0" },
       { capabilities: {} }
     );
+    this.transport = transport;
+    this.client = client;
     try {
-      await this.client.connect(this.transport);
+      await client.connect(transport, lifecycleRequestOptions(options));
+      if (
+        generation !== this.lifecycleGeneration ||
+        this.client !== client ||
+        this.transport !== transport
+      ) {
+        throw staleConnectionAttemptError(this.config.serverId);
+      }
       this.connected = true;
       this.health = "healthy";
       this.lastCallFailure = undefined;
     } catch (error) {
-      await this.disconnect().catch(() => undefined);
+      if (this.client === client && this.transport === transport) {
+        this.lifecycleGeneration += 1;
+        this.client = undefined;
+        this.transport = undefined;
+        this.connected = false;
+        this.rejectPendingToolCalls(new Error(`MCP client "${this.config.serverId}" disconnected.`));
+      }
+      await closeClientAndTransport(client, transport);
       throw error;
     }
   }
 
   async disconnect(): Promise<void> {
+    this.lifecycleGeneration += 1;
     const client = this.client;
     const transport = this.transport;
     if (client === undefined && transport === undefined) {
@@ -190,11 +266,20 @@ export class McpClientWrapper {
     await transport?.close();
   }
 
-  async listTools(): Promise<readonly McpToolInfo[]> {
+  async listTools(options: McpLifecycleRequestOptions = {}): Promise<readonly McpToolInfo[]> {
     this.assertConnected();
+    const catalogBudget = createMcpCatalogBudget(
+      "tools",
+      this.maxToolCatalogItems,
+      this.maxToolCatalogBytes,
+    );
     const rawTools = await collectPaginated(
-      (cursor) => this.client!.listTools(cursor === undefined ? undefined : { cursor }),
-      (page) => page.tools
+      (cursor) => this.client!.listTools(
+        cursor === undefined ? undefined : { cursor },
+        lifecycleRequestOptions(options),
+      ),
+      (page) => page.tools,
+      catalogBudget,
     );
     cacheSdkToolMetadata(this.client!, rawTools);
     return rawTools.map((tool) => ({
@@ -265,44 +350,64 @@ export class McpClientWrapper {
     };
   }
 
-  async listReferences(): Promise<McpReferenceInfo> {
+  async listReferences(options: McpLifecycleRequestOptions = {}): Promise<McpReferenceInfo> {
     this.assertConnected();
-    const [prompts, resources, resourceTemplates] = await Promise.all([
-      collectPaginated(
-        (cursor) => this.client!.listPrompts(cursor === undefined ? undefined : { cursor }),
-        (page) => page.prompts
-      ).then((result) => result.map((prompt) => ({
-        name: prompt.name,
-        title: prompt.title,
-        description: prompt.description,
-        arguments: prompt.arguments?.map((argument) => ({
-          name: argument.name,
-          description: argument.description,
-          required: argument.required,
-        })),
-      }))).catch(() => [] as McpPromptInfo[]),
-      collectPaginated(
-        (cursor) => this.client!.listResources(cursor === undefined ? undefined : { cursor }),
-        (page) => page.resources
-      ).then((result) => result.map((resource) => ({
-        uri: resource.uri,
-        name: resource.name,
-        title: resource.title,
-        description: resource.description,
-        mimeType: resource.mimeType,
-        size: resource.size,
-      }))).catch(() => [] as McpResourceInfo[]),
-      collectPaginated(
-        (cursor) => this.client!.listResourceTemplates(cursor === undefined ? undefined : { cursor }),
-        (page) => page.resourceTemplates
-      ).then((result) => result.map((resourceTemplate) => ({
-        uriTemplate: resourceTemplate.uriTemplate,
-        name: resourceTemplate.name,
-        title: resourceTemplate.title,
-        description: resourceTemplate.description,
-        mimeType: resourceTemplate.mimeType,
-      }))).catch(() => [] as McpResourceTemplateInfo[]),
-    ]);
+    // MCP exposes three list methods, but they form one reference catalog and share one budget.
+    const catalogBudget = createMcpCatalogBudget(
+      "references",
+      this.maxReferenceCatalogItems,
+      this.maxReferenceCatalogBytes,
+    );
+    const prompts = await collectPaginated(
+      (cursor) => this.client!.listPrompts(
+        cursor === undefined ? undefined : { cursor },
+        lifecycleRequestOptions(options),
+      ),
+      (page) => page.prompts,
+      catalogBudget,
+    ).then((result) => result.map((prompt) => ({
+      name: prompt.name,
+      title: prompt.title,
+      description: prompt.description,
+      arguments: prompt.arguments?.map((argument) => ({
+        name: argument.name,
+        description: argument.description,
+        required: argument.required,
+      })),
+    }))).catch((error: unknown) => referenceListFailure("prompts", error, [] as McpPromptInfo[]));
+    const resources = await collectPaginated(
+      (cursor) => this.client!.listResources(
+        cursor === undefined ? undefined : { cursor },
+        lifecycleRequestOptions(options),
+      ),
+      (page) => page.resources,
+      catalogBudget,
+    ).then((result) => result.map((resource) => ({
+      uri: resource.uri,
+      name: resource.name,
+      title: resource.title,
+      description: resource.description,
+      mimeType: resource.mimeType,
+      size: resource.size,
+    }))).catch((error: unknown) => referenceListFailure("resources", error, [] as McpResourceInfo[]));
+    const resourceTemplates = await collectPaginated(
+      (cursor) => this.client!.listResourceTemplates(
+        cursor === undefined ? undefined : { cursor },
+        lifecycleRequestOptions(options),
+      ),
+      (page) => page.resourceTemplates,
+      catalogBudget,
+    ).then((result) => result.map((resourceTemplate) => ({
+      uriTemplate: resourceTemplate.uriTemplate,
+      name: resourceTemplate.name,
+      title: resourceTemplate.title,
+      description: resourceTemplate.description,
+      mimeType: resourceTemplate.mimeType,
+    }))).catch((error: unknown) => referenceListFailure(
+      "resource templates",
+      error,
+      [] as McpResourceTemplateInfo[],
+    ));
     return { prompts, resources, resourceTemplates };
   }
 
@@ -376,6 +481,50 @@ export class McpClientWrapper {
   }
 }
 
+function lifecycleRequestOptions(options: McpLifecycleRequestOptions): {
+  readonly signal?: AbortSignal;
+  readonly timeout?: number;
+} | undefined {
+  if (options.signal === undefined && options.timeoutMs === undefined) {
+    return undefined;
+  }
+  return {
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
+  };
+}
+
+async function closeClientAndTransport(client: Client, transport: Transport): Promise<void> {
+  try {
+    await client.close();
+    return;
+  } catch {
+  }
+  await transport.close().catch(() => undefined);
+}
+
+function staleConnectionAttemptError(serverId: string): Error {
+  const error = new Error(`MCP client "${serverId}" connection attempt is no longer current.`);
+  error.name = "AbortError";
+  return error;
+}
+
+function referenceListFailure<T>(kind: string, error: unknown, unsupportedValue: T): T {
+  if (isMethodNotFound(error)) {
+    return unsupportedValue;
+  }
+  if (error instanceof McpCatalogLimitError) {
+    throw error;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  throw new Error(`MCP ${kind} listing failed: ${message}`, { cause: error });
+}
+
+function isMethodNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    "code" in error && (error as { readonly code?: unknown }).code === -32601;
+}
+
 type PendingToolCallSlot = {
   readonly signal?: AbortSignal;
   readonly resolve: () => void;
@@ -391,6 +540,13 @@ function positiveOptionalInteger(value: number | undefined): number | undefined 
   return value;
 }
 
+function positiveCatalogLimit(value: number, field: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`MCP ${field} must be a positive safe integer.`);
+  }
+  return value;
+}
+
 function abortError(reason: unknown): Error {
   const error = reason instanceof Error ? reason : new Error(typeof reason === "string" ? reason : "MCP tool call was cancelled.");
   Object.defineProperty(error, "name", { value: "AbortError", configurable: true });
@@ -399,14 +555,17 @@ function abortError(reason: unknown): Error {
 
 async function collectPaginated<TItem, TPage extends { readonly nextCursor?: string }>(
   loadPage: (cursor?: string) => Promise<TPage>,
-  itemsFromPage: (page: TPage) => readonly TItem[]
+  itemsFromPage: (page: TPage) => readonly TItem[],
+  catalogBudget: McpCatalogBudget,
 ): Promise<readonly TItem[]> {
   const items: TItem[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
   for (let pageIndex = 0; pageIndex < MAX_MCP_LIST_PAGES; pageIndex += 1) {
     const page = await loadPage(cursor);
-    items.push(...itemsFromPage(page));
+    const pageItems = itemsFromPage(page);
+    catalogBudget.consume(pageItems);
+    items.push(...pageItems);
     const nextCursor = page.nextCursor;
     if (nextCursor === undefined || nextCursor.length === 0) {
       return items;
@@ -418,6 +577,53 @@ async function collectPaginated<TItem, TPage extends { readonly nextCursor?: str
     cursor = nextCursor;
   }
   throw new Error(`MCP list pagination exceeded ${MAX_MCP_LIST_PAGES} pages.`);
+}
+
+type McpCatalogBudget = {
+  readonly consume: (items: readonly unknown[]) => void;
+};
+
+export function assertMcpCatalogWithinLimits(
+  catalogKind: string,
+  items: readonly unknown[],
+  maxItems: number,
+  maxSerializedBytes: number,
+): void {
+  createMcpCatalogBudget(
+    catalogKind,
+    positiveCatalogLimit(maxItems, "maxCatalogItems"),
+    positiveCatalogLimit(maxSerializedBytes, "maxCatalogBytes"),
+  ).consume(items);
+}
+
+function createMcpCatalogBudget(
+  catalogKind: string,
+  maxItems: number,
+  maxSerializedBytes: number,
+): McpCatalogBudget {
+  let itemCount = 0;
+  // Include JSON array delimiters so the recorded byte boundary matches the complete catalog.
+  let serializedBytes = 2;
+  return {
+    consume(items) {
+      for (const item of items) {
+        itemCount += 1;
+        if (itemCount > maxItems) {
+          throw new McpCatalogLimitError(catalogKind, "items", itemCount, maxItems);
+        }
+        const serialized = JSON.stringify(item) ?? "null";
+        serializedBytes += Buffer.byteLength(serialized, "utf8") + (itemCount > 1 ? 1 : 0);
+        if (serializedBytes > maxSerializedBytes) {
+          throw new McpCatalogLimitError(
+            catalogKind,
+            "serialized_bytes",
+            serializedBytes,
+            maxSerializedBytes,
+          );
+        }
+      }
+    },
+  };
 }
 
 function cacheSdkToolMetadata(

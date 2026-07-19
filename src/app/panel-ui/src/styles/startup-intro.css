@@ -366,7 +366,10 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
   transition-delay: var(--startup-intro-composer-settle-delay), 0ms;
 }
 
-.app-root[data-startup-intro] .app-bootstrap-spinner {
+.app-root[data-startup-intro] .app-bootstrap-visual,
+.app-root[data-startup-intro] .app-bootstrap-visual *,
+.app-root[data-startup-intro] .app-bootstrap-progress,
+.app-root[data-startup-intro] .app-bootstrap-progress * {
   animation-play-state: paused;
 }
 

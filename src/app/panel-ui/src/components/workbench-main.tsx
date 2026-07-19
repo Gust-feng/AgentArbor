@@ -3,6 +3,7 @@ import type { CurrentRunProjection } from "../app-run-projection";
 import { ChatActive } from "./chat-active";
 import { ChatEmpty, type ChatInputProps } from "./chat-empty";
 import { MultiAgentWorkspace } from "./multi-agent-workspace";
+import { WorkbenchBootstrapLoading } from "./workbench-bootstrap-loading";
 
 type WorkbenchMainProps = {
   readonly isBootstrapping: boolean;
@@ -37,12 +38,7 @@ type WorkbenchMainProps = {
 
 export function WorkbenchMain(props: WorkbenchMainProps): React.ReactElement {
   if (props.isBootstrapping) {
-    return (
-      <div className="app-bootstrap-loading">
-        <div className="app-bootstrap-spinner" />
-        <p>正在初始化工作台</p>
-      </div>
-    );
+    return <WorkbenchBootstrapLoading />;
   }
 
   if (props.deepActive) {

@@ -178,6 +178,11 @@ test("Sub-Agent catalog contribution never installs a fake ToolCenter executor",
     CALL_SUB_AGENT_TOOL_NAME,
     SPAWN_SUB_AGENT_TOOL_NAME,
   ]);
+  const callDescription = contribution.definitions.find((definition) => definition.name === CALL_SUB_AGENT_TOOL_NAME)?.description;
+  const spawnDescription = contribution.definitions.find((definition) => definition.name === SPAWN_SUB_AGENT_TOOL_NAME)?.description;
+  assert.equal(callDescription, "Delegate one bounded task to an available specialist. Available specialists: reviewer: Reviews one bounded change.");
+  assert.equal(spawnDescription, "Delegate one bounded task to a temporary specialist.");
+  assert.doesNotMatch(spawnDescription, /saved|delegate to another agent/u);
   assert.equal(registry.createToolCenter("desktop-basic").has(CALL_SUB_AGENT_TOOL_NAME), false);
   assert.equal(registry.createToolCenter("desktop-basic").has(SPAWN_SUB_AGENT_TOOL_NAME), false);
 });

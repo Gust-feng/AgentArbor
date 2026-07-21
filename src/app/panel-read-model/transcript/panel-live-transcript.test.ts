@@ -140,6 +140,44 @@ test("withLiveTranscriptNodes keeps live body ordered before later tool activity
   );
 });
 
+test("withLiveTranscriptNodes keeps output after a tool in a later body node", () => {
+  const live = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
+    {
+      id: "output-before-tool",
+      runId: "run-1",
+      sequence: 1,
+      type: "model.output.delta",
+      delta: "我先读取文件。",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    },
+    {
+      id: "output-after-tool",
+      runId: "run-1",
+      sequence: 4,
+      type: "model.output.delta",
+      delta: "文件已经读取完成。",
+      refs: [{ kind: "model_call", id: "model-2" }],
+    },
+  ]);
+  const merged = withLiveTranscriptNodes([
+    node({
+      nodeId: "tool-completed",
+      sequence: 3,
+      eventType: "tool.completed",
+      kind: "tool",
+      phase: "completed",
+    }),
+  ], live);
+
+  assert.deepEqual(
+    merged
+      .slice()
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((item) => `${item.kind}:${item.text ?? ""}`),
+    ["body:我先读取文件。", "tool:", "body:文件已经读取完成。"],
+  );
+});
+
 test("withLiveTranscriptNodes replaces existing side text node instead of duplicating it", () => {
   const existing = node({
     nodeId: "side-existing",

@@ -3,13 +3,6 @@ import type { ModelRequest, ModelToolChoice } from "../../domain/intelligence/in
 import type { ToolDefinition, ToolDefinitionMetadata } from "../../domain/tools/index.js";
 
 export {
-  createModelRuntimeAgentLoop,
-} from "./agent-loop-factory.js";
-export type {
-  CreateModelRuntimeAgentLoopInput,
-  ModelRuntimeAgentLoopFactoryDependencies,
-} from "./agent-loop-factory.js";
-export {
   fetchModelRuntimeModelCatalog,
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
@@ -36,6 +29,13 @@ export type {
   AgentLoopResult,
   AgentLoopToolBoundary,
 } from "./agent-loop.js";
+export type {
+  AgentSessionExecutionRefs,
+  AgentSessionEntryRef,
+  AgentSessionRef,
+  AgentSessionRepository,
+  AgentSessionWriteCheckpoint,
+} from "./agent-session.js";
 export { canonicalToolResultMessage } from "./tool-result-message.js";
 
 export type ModelRuntimeRequestPlan = {

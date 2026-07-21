@@ -63,8 +63,8 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
 
   const shellCommand = catalog.tools.find((tool) => tool.name === "shell_command");
   assert.equal(shellCommand?.displayDescription, "在当前会话 Shell 中运行命令，适合构建、测试、脚本和通用 CLI 工作流。");
-  assert.match(shellCommand?.description ?? "", /current integrated shell/);
-  assert.match(shellCommand?.description ?? "", /Use commandLine for normal shell-native command execution/);
+  assert.match(shellCommand?.description ?? "", /current workspace shell/);
+  assert.match(shellCommand?.description ?? "", /Use commandLine for shell syntax/);
   assert.doesNotMatch(shellCommand?.description ?? "", /HTTP requests/);
   assert.equal(shellCommand?.runtimeHints?.[0]?.kind, "command_shell");
 });
@@ -107,7 +107,7 @@ test("desktop-basic model-visible tools satisfy the executable factual contract"
   }
 });
 
-test("model-visible tool description prioritizes factual limits within an explicit budget", () => {
+test("model-visible tool description is a concise objective capability summary", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: process.cwd(),
@@ -118,13 +118,9 @@ test("model-visible tool description prioritizes factual limits within an explic
   assert.notEqual(shellCommand, undefined);
   const description = modelVisibleToolDescription(shellCommand!);
 
-  assert.match(description, /^Run a real workspace command/m);
-  assert.match(description, /\nAvoid for: /);
-  assert.match(description, /\nOutputs: .*stdout/);
-  assert.match(description, /\nRuntime: current shell=/);
-  assert.match(description, /continuation\.nextInput/);
-  assert.match(description, /package manager, build, test, git/);
-  assert.doesNotMatch(description, /HTTP requests/);
+  assert.match(description, /^Run a command in the current workspace shell\./);
+  assert.match(description, /commandLine for shell syntax/);
+  assert.doesNotMatch(description, /stdout|Runtime:|continuation|package manager|dev servers/);
   assert.equal(description.length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS, true);
   assert.equal(description.includes("When to use"), false);
   assert.doesNotMatch(description, /Shell 命令|需确认|终端命令|风险|运行时工具/);
@@ -148,11 +144,9 @@ test("web tool descriptions clearly separate raw HTTP from rendered browser read
   const browserDescription = modelVisibleToolDescription(browserSnapshot!);
 
   assert.match(httpDescription, /^Send a bounded stateless HTTP or HTTPS request/m);
-  assert.match(httpDescription, /session state=no OAuth flow, no cookie jar/);
-  assert.match(httpDescription, /Avoid for: Do not use for rendered page inspection/);
-  assert.match(browserDescription, /^Open an HTTP or HTTPS page in a fresh Playwright browser session/m);
-  assert.match(browserDescription, /Avoid for: Do not use for API endpoints, simple raw HTTP fetches/);
-  assert.match(browserDescription, /session state=fresh isolated browser session; no existing login state/);
+  assert.doesNotMatch(httpDescription, /OAuth|cookie jar|Avoid for/);
+  assert.match(browserDescription, /^Read rendered text from an HTTP\(S\) page in an isolated browser session\./m);
+  assert.doesNotMatch(browserDescription, /Playwright|Avoid for|session state=/);
 });
 
 test("desktop-basic tool descriptions stay plain and do not expose deep product terms", () => {

@@ -43,7 +43,7 @@ export type RunRealAiSmokeOptions = {
   readonly providerFetch?: PanelProviderFetch;
   readonly configDirectory?: string;
   readonly timeoutMs?: number;
-  /** Deterministic test seam. Production always uses the composed OpenAI Agents SDK loop. */
+  /** Deterministic test seam. Production uses the composed Agent Session loop. */
   readonly ordinaryAgentExecution?: OrdinaryExecutionPort;
 };
 

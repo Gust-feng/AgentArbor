@@ -557,6 +557,45 @@ test("tool requests keep live output separate from side text", () => {
   assert.equal(buffer.appliedEventKeys.length, 2);
 });
 
+test("live run buffer keeps model output on its own side of a tool boundary", () => {
+  const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
+    event({
+      id: "output-before-tool",
+      sequence: 1,
+      type: "model.output.delta",
+      delta: "我先读取文件。",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+    event({
+      id: "tool-requested",
+      sequence: 2,
+      type: "tool.requested",
+      refs: [{ kind: "tool_call", id: "tool-1" }],
+    }),
+    event({
+      id: "tool-completed",
+      sequence: 3,
+      type: "tool.completed",
+      refs: [{ kind: "tool_call", id: "tool-1" }],
+    }),
+    event({
+      id: "output-after-tool",
+      sequence: 4,
+      type: "model.output.delta",
+      delta: "文件已经读取完成。",
+      refs: [{ kind: "model_call", id: "model-2" }],
+    }),
+  ]);
+
+  assert.deepEqual(
+    buffer.turns.map((turn) => [turn.requestId, turn.output.text]),
+    [
+      ["model-1", "我先读取文件。"],
+      ["model-2", "文件已经读取完成。"],
+    ],
+  );
+});
+
 test("tool events do not move the original live output sequence forward", () => {
   const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
     event({

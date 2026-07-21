@@ -1,6 +1,8 @@
 import { isStaleModelProgressSummary } from "../panel-model-progress-copy.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
+import type { ToolFailureAttribution } from "../../../domain/tools/index.js";
+import type { DelegatedAgentExecutionMetadata } from "../../../domain/tools/index.js";
 import { userVisibleAnswer } from "../assistant/panel-assistant-visible-text.js";
 import { genericItemLabel } from "./panel-transcript-tool-format.js";
 import { isGenericApprovalDecisionText } from "../../text-projection/confirmation-copy.js";
@@ -41,8 +43,11 @@ export type ProjectableTranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
+  readonly failureAttribution?: ToolFailureAttribution;
+  readonly error?: string;
   /** The parent AgentTool fact for a nested sub-agent mechanical action. */
   readonly parentToolCallFactId?: string;
+  readonly delegatedExecution?: DelegatedAgentExecutionMetadata;
   readonly display?: TranscriptToolDisplayLike;
   readonly confirmation?: {
     readonly confirmationId?: string;

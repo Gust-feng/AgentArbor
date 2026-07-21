@@ -4,32 +4,32 @@
 
 状态：Accepted
 
-承接关系：[ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md) 取代了“双运行时并列产品”口径，但保留本 ADR 的两个核心决策：Ordinary Agent 是默认工作方式，基础 Agent 能力优先于产品功能扩张。本文按当前实现更新 Ordinary 主线；Multi-Agent 内部闭环见 [ADR-0025](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)。
+承接关系：[ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md) 取代了“双运行时并列产品”口径，[ADR-0030](ADR-0030-AgentArbor-Pi原生底层架构.md) 进一步取代了本文中 Ordinary 的 OpenAI Agents SDK、canonical history 和 v3 snapshot 实现口径，但保留本 ADR 的两个核心决策：Ordinary Agent 是默认工作方式，基础 Agent 能力优先于产品功能扩张。Multi-Agent 内部闭环见 [ADR-0025](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)。
 
 ## 决策
 
-AgentArbor 当前只把一条路径作为默认主线：用户在 Workbench 中提交消息，由 Ordinary Agent 理解上下文、调用授权工具、处理命令确认，并返回完整结果。Multi-Agent 只能由用户显式进入；Sub-Agent 是 Ordinary 的 SDK AgentTool，不是第三套运行时。
+AgentArbor 当前只把一条路径作为默认主线：用户在 Workbench 中提交消息，由 Ordinary Agent 理解上下文、调用授权工具、处理命令确认，并返回完整结果。Multi-Agent 只能由用户显式进入；Sub-Agent 是 Ordinary 的 Pi AgentTool，不是第三套运行时。
 
 ```text
 Desktop Shell / Panel
   -> ordinary routes
   -> OrdinaryAgentFeature
   -> neutral AgentLoop
-  -> OpenAI Agents SDK adapter
+  -> Agent Session adapter（Pi AgentHarness/Session）
   -> ToolCenter / Confirmation
-  -> ordinary-run/v3 canonical facts
+  -> ordinary-run/v4 + Pi Session facts
   -> one-way read-model
 ```
 
-Ordinary 的正式模型-工具循环由 OpenAI Agents SDK 承担。`AgentTurnRuntime` 继续服务 Deep child 和其他单轮模型消费者，但不再是 Ordinary 生产主链。`model-runtime` 负责从冻结的模型配置创建中性 `AgentLoop`；feature、Panel 和工具模块不得直接创建外部 SDK 对象。
+Ordinary 的正式模型-工具循环由 Pi AgentHarness/Session 承担。`AgentTurnRuntime` 继续服务 Deep child 和其他单轮模型消费者，但不再是 Ordinary 生产主链。`model-runtime` 与 Host composition 负责从冻结的模型配置创建 Session adapter；feature、Panel 和工具模块不得直接创建外部 SDK 对象。
 
 ## 功能所有权
 
-- `OrdinaryAgentFeature` 自己拥有 conversation、run、状态、事件、确认 continuation、canonical 模型消息、工具事实、usage、文件仓储和 read-model。
+- `OrdinaryAgentFeature` 自己拥有 conversation、run、状态、事件、确认 continuation、Session 引用、工具事实、usage、文件仓储和 read-model；Pi Session 拥有模型消息树和活动 branch。
 - `ordinary routes` 只解析 HTTP/SSE 请求并调用 feature command/query，不推导完成语义，不重建模型历史。
 - `AgentLoop` 只负责机械性的模型-工具-模型执行、流式文本、取消和 live confirmation continuation；业务完成、持久化与恢复由 Ordinary 决定。
 - `ToolCenter` 负责工具执行、权限和命令确认，返回中性 `ToolCallResult`；它不拥有 Ordinary 状态或跨 feature 事件。
-- Ordinary 使用 `ordinary-run/v3` 原子文件快照和独立的 `ordinary-conversation/v1` 控制文档。它不与 Multi-Agent 共享业务仓储。
+- Ordinary 使用 `ordinary-run/v4` 文件快照、Pi Session 和独立的 `ordinary-conversation/v2` 控制文档。它不与 Multi-Agent 共享业务仓储。
 
 ## 基础能力优先
 
@@ -48,7 +48,7 @@ Ordinary 的正式模型-工具循环由 OpenAI Agents SDK 承担。`AgentTurnRu
 
 - Ordinary 是默认入口，不因任务复杂、历史状态或模型判断自动升级为 Multi-Agent。
 - Multi-Agent 只通过显式 `/api/deep/*` 功能入口运行，内部状态与 Ordinary 隔离。
-- Sub-Agent 只贡献 `call_sub_agent` 和 `spawn_sub_agent` 两个 SDK AgentTool；调用与结果进入父 Ordinary run，不能递归，也不建立独立 trace store 或 read-model。
+- Sub-Agent 只贡献 `call_sub_agent` 和 `spawn_sub_agent` 两个 Pi AgentTool；调用与结果进入父 Ordinary run，不能递归，也不建立独立 trace store 或 read-model。
 - Task Soil、Plan、Aboveground、Fruits、Governance 和 Global Soil 是按真实需求出生的长期能力，不是普通请求的必经阶段。
 - 普通回答、工具结果、错误、文件正文和 stdout/stderr 不得被“安全摘要”或展示投影替换。UI 摘要只能是额外展示字段。
 

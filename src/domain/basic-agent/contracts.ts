@@ -6,6 +6,8 @@ import type { ToolDisplayProjection } from "../observation/tool-display.js";
 import type {
   ToolErrorDomain,
   ToolErrorFacts,
+  ToolFailureAttribution,
+  DelegatedAgentExecutionMetadata,
 } from "../tools/contracts.js";
 export type {
   ConfirmationDecision,
@@ -86,6 +88,7 @@ export type RunEvent = {
     readonly error?: string;
     readonly errorDomain?: ToolErrorDomain;
     readonly errorFacts?: ToolErrorFacts;
+    readonly delegatedExecution?: DelegatedAgentExecutionMetadata;
   };
 };
 
@@ -123,8 +126,14 @@ export type TranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
+  /** Proven source of a terminal tool failure, when the executor can distinguish it. */
+  readonly failureAttribution?: ToolFailureAttribution;
+  /** The unmodified tool error remains available to the activity detail projection. */
+  readonly error?: string;
   /** The parent AgentTool fact for a nested sub-agent mechanical action. */
   readonly parentToolCallFactId?: string;
+  /** Execution measurement for the delegated AgentTool that owns this node. */
+  readonly delegatedExecution?: DelegatedAgentExecutionMetadata;
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: OwnerScopedConfirmationRequest;
   readonly modelUsage?: ModelUsage;

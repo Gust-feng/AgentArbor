@@ -88,11 +88,11 @@ export function validateSubAgentFrontmatter(
       path: "description",
       message: "SUB_AGENT.md frontmatter must include description.",
     });
-  } else if (description.length > 1024) {
+  } else if (description.length > 160) {
     issues.push({
       code: "invalid_description",
       path: "description",
-      message: "Sub-agent description must be 1-1024 characters.",
+      message: "Sub-agent description must be 1-160 characters.",
     });
   }
 

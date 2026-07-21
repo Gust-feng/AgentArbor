@@ -2,6 +2,7 @@ import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.j
 import type { RunCapabilityResolution } from "../../domain/config/index.js";
 import { executionErrorFacts } from "../execution-errors/index.js";
 import type {
+  AgentSessionEntryRef,
   AgentLoop,
   AgentLoopAgentTool,
   AgentLoopInput,
@@ -24,10 +25,11 @@ export type OrdinaryAgentLoopRunResources = {
   readonly tools: AgentLoopToolBoundary;
   readonly agentTools?: readonly AgentLoopAgentTool[];
   readonly capabilityResolution?: RunCapabilityResolution;
-  readonly maintainContext?: AgentLoopInput["maintainContext"];
-  /** Registers root provider order before SDK tool preflight callbacks can race. */
-  readonly registerToolRound?: (toolCalls: NonNullable<ModelMessage["toolCalls"]>) => void;
   readonly toolMetrics?: import("./tool-runtime-metrics.js").OrdinaryToolMetricsCollector;
+  /** Revokes this run's Session writer to its last feature-accepted protocol boundary. */
+  readonly revokeSessionTo?: (target: AgentSessionEntryRef | null) => Promise<void>;
+  /** Releases only the Session writer after Ordinary has committed terminal state. */
+  readonly releaseSession?: () => Promise<void>;
   /** Releases every run-scoped resource created by the acquirer, including the loop. */
   release(): Promise<void>;
 };
@@ -38,23 +40,32 @@ export interface OrdinaryAgentLoopRunResourceAcquirer {
 
 /**
  * Adapts the neutral model-tool loop to Ordinary's feature-owned execution outcomes.
- * SDK continuations remain live-only inside this lease and never enter durable state.
+ * Agent Session continuations remain live-only inside this lease and never enter durable state.
  */
 export function createOrdinaryAgentLoopExecutionPort(input: {
   readonly resources: OrdinaryAgentLoopRunResourceAcquirer;
   readonly onReleaseError?: (error: unknown) => void;
 }): OrdinaryExecutionPort {
+  const sessionControls = new Map<string, ActiveSessionControl>();
   return {
     async execute(executionInput) {
+      if (sessionControls.has(executionInput.runId)) {
+        throw new Error(`Ordinary run ${executionInput.runId} already has an active execution control.`);
+      }
+      const sessionControl = createActiveSessionControl();
+      sessionControls.set(executionInput.runId, sessionControl);
       let resources: OrdinaryAgentLoopRunResources;
       try {
         resources = await input.resources.acquire(executionInput);
       } catch (error) {
+        sessionControl.finish();
+        if (sessionControls.get(executionInput.runId) === sessionControl) {
+          sessionControls.delete(executionInput.runId);
+        }
         if (executionInput.abortSignal.aborted) {
           return {
             status: "cancelled",
             reason: cancellationReason(executionInput.abortSignal.reason),
-            canonicalMessages: executionInput.messages,
             toolCalls: [],
             usage: {},
           };
@@ -64,13 +75,13 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           return {
             status: "failed",
             error: facts,
-            canonicalMessages: executionInput.messages,
             toolCalls: [],
             usage: {},
           };
         }
         throw error;
       }
+      sessionControl.attach(resources);
       const lease = createResourceLease(resources);
       try {
         const result = await resources.loop.execute({
@@ -84,12 +95,8 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           onReasoningCompleted: executionInput.onReasoningCompleted,
           onToolRequested: executionInput.onToolRequested,
           onToolProgress: executionInput.onToolProgress,
-          onToolRound: async (round) => {
-            resources.registerToolRound?.(round.assistantMessage.toolCalls ?? []);
-            await executionInput.onToolRound?.(round);
-          },
+          onSessionWriteCheckpoint: executionInput.onSessionWriteCheckpoint,
           onToolResult: executionInput.onToolResult,
-          maintainContext: resources.maintainContext,
         });
         return await mapAgentLoopResult(
           result,
@@ -104,6 +111,14 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
         throw error;
       }
     },
+    async finalizeSession(runId, target) {
+      const control = sessionControls.get(runId);
+      if (control === undefined) {
+        throw new Error(`Ordinary run ${runId} has no active Session control.`);
+      }
+      await control.finalize(target);
+      if (sessionControls.get(runId) === control) sessionControls.delete(runId);
+    },
   };
 }
 
@@ -115,11 +130,15 @@ type ResourceLease = {
   release(): Promise<void>;
 };
 
-function createResourceLease(resources: OrdinaryAgentLoopRunResources): ResourceLease {
+function createResourceLease(
+  resources: OrdinaryAgentLoopRunResources,
+): ResourceLease {
   let releasePromise: Promise<void> | undefined;
   return {
     release() {
-      releasePromise ??= Promise.resolve().then(() => resources.release());
+      releasePromise ??= Promise.resolve().then(async () => {
+        await resources.release();
+      });
       return releasePromise;
     },
   };
@@ -135,7 +154,7 @@ async function mapAgentLoopResult(
 ): Promise<OrdinaryExecutionOutcome> {
   const usage = latestCumulativeUsage(previousUsage, result.usage);
   const facts = {
-    canonicalMessages: result.messages,
+    ...(result.session === undefined ? {} : { session: result.session }),
     toolCalls: result.toolResults,
     usage,
     ...(toolMetrics === undefined ? {} : { toolMetrics: toolMetrics.snapshot() }),
@@ -153,7 +172,10 @@ async function mapAgentLoopResult(
 
   await releaseWithoutReplacingOutcome(lease, onReleaseError);
   if (result.status === "completed") {
-    return { ...facts, status: "completed", answer: result.finalText };
+    if (result.session === undefined) {
+      throw new Error("A completed Ordinary Agent Session loop must return durable Session refs.");
+    }
+    return { ...facts, session: result.session, status: "completed", answer: result.finalText };
   }
   if (result.status === "cancelled") {
     return { ...facts, status: "cancelled", reason: result.error ?? "cancelled" };
@@ -218,4 +240,80 @@ async function releaseWithoutReplacingOutcome(
       // Diagnostics cannot replace the already-known model/tool outcome either.
     }
   }
+}
+
+type ActiveSessionControl = {
+  attach(resources: OrdinaryAgentLoopRunResources): void;
+  finalize(target?: AgentSessionEntryRef | null): Promise<void>;
+  finish(): void;
+};
+
+function createActiveSessionControl(): ActiveSessionControl {
+  let resources: OrdinaryAgentLoopRunResources | undefined;
+  let requested = false;
+  let targetLeaf: AgentSessionEntryRef | null = null;
+  let finished = false;
+  let revokePromise: Promise<void> | undefined;
+  let pending: ReturnType<typeof deferred<void>> | undefined;
+
+  const startRevoke = (): Promise<void> => {
+    if (!requested || finished) return Promise.resolve();
+    if (resources?.revokeSessionTo === undefined) return Promise.resolve();
+    revokePromise ??= resources.revokeSessionTo(targetLeaf).catch((error: unknown) => {
+      revokePromise = undefined;
+      throw error;
+    });
+    return revokePromise;
+  };
+
+  return {
+    attach(acquired) {
+      if (resources !== undefined) throw new Error("Ordinary Session control already has acquired resources.");
+      resources = acquired;
+      if (requested) {
+        void startRevoke().then(
+          () => pending?.resolve(),
+          (error: unknown) => pending?.reject(error),
+        );
+      } else {
+        pending?.resolve();
+      }
+    },
+    async finalize(target) {
+      const shouldRevoke = target !== undefined;
+      if (requested && shouldRevoke && JSON.stringify(targetLeaf) !== JSON.stringify(target)) {
+        return Promise.reject(new Error("Ordinary Session revoke target cannot change."));
+      }
+      if (shouldRevoke) {
+        requested = true;
+        targetLeaf = target;
+      }
+      if (finished) return;
+      if (resources === undefined) {
+        pending ??= deferred<void>();
+        await pending.promise;
+      }
+      if (shouldRevoke) await startRevoke();
+      await resources?.releaseSession?.();
+      finished = true;
+    },
+    finish() {
+      finished = true;
+      pending?.resolve();
+    },
+  };
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  resolve(value: T | PromiseLike<T>): void;
+  reject(reason?: unknown): void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((accept, decline) => {
+    resolve = accept;
+    reject = decline;
+  });
+  return { promise, resolve, reject };
 }

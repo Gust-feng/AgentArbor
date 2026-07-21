@@ -246,6 +246,8 @@ export type ModelFailureKind =
   | "provider_timeout"
   | "provider_network"
   | "provider_response"
+  | "content_filtered"
+  | "output_truncated"
   | "output_validation";
 
 export type ModelFailure = {

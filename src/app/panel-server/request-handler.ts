@@ -25,7 +25,6 @@ import {
   isPanelRuntime,
   type PanelRuntime,
 } from "./runtime.js";
-import { handlePanelDeepRoute } from "./deep-routes.js";
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
 import { handlePanelAppUpdateRoute } from "./app-update-routes.js";
 import { OrdinaryFeatureError } from "../ordinary-agent/contracts.js";
@@ -203,8 +202,15 @@ async function handlePanelRequest(
     throw new PanelHttpError(503, "panel_runtime_quiescing", "面板正在关闭，不能接受新的请求。");
   }
 
-  // /api/deep/* —— deep 产品 API 端点族（T3-1/T3-2/T3-3）。前缀明确，置于分发链靠前。
-  if (await handlePanelDeepRoute(runtime, request, response, url)) {
+  if (url.pathname.startsWith("/api/deep/")) {
+    writePanelError(
+      response,
+      new PanelHttpError(
+        410,
+        "multi_agent_deferred",
+        "Multi-Agent 已从当前运行时剥离，等待未来重构后再开放。",
+      ),
+    );
     return;
   }
 
@@ -309,11 +315,6 @@ export async function closePanelServer(
   runtime.isQuiescing = true;
   const ordinaryDisposal = runtime.ordinaryAgentFeature.release();
   void ordinaryDisposal.catch(() => undefined);
-  // dispose() closes Multi-Agent command admission synchronously before its
-  // asynchronous cleanup starts. This covers requests that already passed the
-  // Panel gate but are still reading their body or resolving configuration.
-  const multiAgentDisposal = runtime.multiAgentFeature.dispose();
-  void multiAgentDisposal.catch(() => undefined);
   let serverCloseError: unknown;
   const serverClosed = close(server).catch((error: unknown) => {
     serverCloseError = error;
@@ -322,10 +323,8 @@ export async function closePanelServer(
   const runtimeCleanup = (async () => {
     await cleanupPanelRuntimeOwnedProcesses(runtime);
     await waitForPanelRequestIdle(server, runtime);
-    await Promise.all([
-      ordinaryDisposal,
-      multiAgentDisposal,
-    ]);
+    await ordinaryDisposal;
+    await runtime.releaseAgentSessionStorage();
     if (runtime.toolOutputStore.close !== undefined) {
       await runtime.toolOutputStore.close();
     } else {
@@ -365,11 +364,15 @@ async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promi
   const cleanupResults = await Promise.allSettled([
     cleanupPanelRuntimeOwnedProcesses(runtime),
     runtime.ordinaryAgentFeature.release(),
-    runtime.multiAgentFeature.dispose(),
   ]);
   const cleanupErrors = cleanupResults.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : []
   );
+  try {
+    await runtime.releaseAgentSessionStorage();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
   try {
     if (runtime.toolOutputStore.close !== undefined) {
       await runtime.toolOutputStore.close();

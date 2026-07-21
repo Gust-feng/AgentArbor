@@ -69,6 +69,7 @@ export type CapabilityCenterOptions = {
   readonly fetch?: ToolRegistryFetchLike;
   readonly playwrightAvailable?: boolean;
   readonly toolOutputStore?: ToolOutputStore;
+  readonly resolveModelCapabilities?: typeof resolveModelCapabilities;
 };
 
 export type CapabilityCenterSnapshotInput = {
@@ -203,7 +204,7 @@ export class CapabilityCenter {
             baseEnv: env,
           }),
         });
-    const modelCapabilities = resolveModelCapabilities({ profile: activeModel, overrides });
+    const modelCapabilities = (this.options.resolveModelCapabilities ?? resolveModelCapabilities)({ profile: activeModel, overrides });
     const subAgentRoots = this.subAgentRootsFor({ workspaceDirectory: workspace.workspaceDirectory });
     const toolRegistryOptions = {
       env,

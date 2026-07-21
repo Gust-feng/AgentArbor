@@ -102,6 +102,61 @@ test("LazyMcpToolExecutorProvider cancels and awaits a connection that finishes 
   assert.equal(connected, false);
 });
 
+test("lazy MCP tool cancellation stops waiting without cancelling a shared connection", async () => {
+  let resolveConnect!: () => void;
+  const connectGate = new Promise<void>((resolve) => {
+    resolveConnect = resolve;
+  });
+  let callToolCalls = 0;
+  let connected = false;
+  const client = {
+    async connect() {
+      await connectGate;
+      connected = true;
+    },
+    async disconnect() {
+      connected = false;
+    },
+    isConnected() {
+      return connected;
+    },
+    async callTool() {
+      callToolCalls += 1;
+      return { content: [{ type: "text" as const, text: "found" }] };
+    },
+  } as unknown as McpClientWrapper;
+  const provider = new LazyMcpToolExecutorProvider(
+    { servers: [TEST_SERVER] },
+    { createClient: () => client },
+  );
+  const executor = provider.getToolsForRegistry()[0];
+  assert.ok(executor);
+
+  const cancellation = new AbortController();
+  const cancelledExecution = executor.execute(
+    {},
+    {
+      callerAgentId: "test-agent",
+      traceId: "trace-cancelled",
+      goalId: "goal-1",
+      abortSignal: cancellation.signal,
+    },
+  );
+  cancellation.abort(new Error("run cancelled"));
+  await assert.rejects(cancelledExecution, /run cancelled/u);
+  assert.equal(callToolCalls, 0);
+
+  // The shared provider connection is still allowed to finish for another caller.
+  resolveConnect();
+  const result = await executor.execute(
+    {},
+    { callerAgentId: "test-agent", traceId: "trace-next", goalId: "goal-2" },
+  );
+  assert.deepEqual(result, { content: [{ type: "text", text: "found" }] });
+  assert.equal(callToolCalls, 1);
+  await provider.disconnectAll();
+});
+
 test("LazyMcpToolExecutorProvider disconnects an established client once across repeated close calls", async () => {
   let disconnectCalls = 0;
   let connected = false;

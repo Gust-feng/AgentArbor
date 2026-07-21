@@ -10,7 +10,7 @@ export type MultiAgentCapabilitySnapshot = AgentCapabilitySnapshot;
 export function projectMultiAgentCapabilitySnapshot(
   snapshot: MultiAgentCapabilitySnapshot,
 ): MultiAgentCapabilitySnapshot {
-  // Catalog-only definitions are contributed by Ordinary's SDK AgentTool path;
+  // Catalog-only definitions are contributed by Ordinary's Pi AgentTool path;
   // Deep has no executor for them and must not persist them as run capabilities.
   const tools = snapshot.toolCatalog.tools.filter((tool) => tool.catalogOnly !== true);
   const executableToolNames = new Set(tools.map((tool) => tool.name));

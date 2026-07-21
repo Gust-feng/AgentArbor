@@ -47,13 +47,12 @@ export type AgentRunResourceHost = {
   readonly testOnlyAllowFakeModel?: boolean;
 };
 
-export type AgentRunResources<
+export type AgentHostRunResources<
   TCapabilitySnapshot extends AgentCapabilitySnapshot = AgentCapabilitySnapshot,
 > = {
   readonly capabilitySnapshot: TCapabilitySnapshot;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly aiEnvironment: ModelRuntimeEnvironment;
-  readonly aiConfig: Extract<ModelRuntimeConfig, { readonly enabled: true }>;
   readonly workspaceRoot: string;
   readonly commandShell?: SanitizedCommandShellConfig;
   readonly toolStates: readonly ToolStateSettings[];
@@ -66,6 +65,12 @@ export type AgentRunResources<
   readonly processRegistry?: LocalCommandProcessRegistry;
   readonly processTerminator?: ProcessTerminator;
   readonly toolOutputStore?: ToolOutputStore;
+};
+
+export type AgentRunResources<
+  TCapabilitySnapshot extends AgentCapabilitySnapshot = AgentCapabilitySnapshot,
+> = AgentHostRunResources<TCapabilitySnapshot> & {
+  readonly aiConfig: Extract<ModelRuntimeConfig, { readonly enabled: true }>;
 };
 
 function toolStatesFromCapabilitySnapshot(snapshot: AgentCapabilitySnapshot): readonly ToolStateSettings[] {
@@ -144,13 +149,56 @@ export async function prepareAgentRunResources<TCapabilitySnapshot extends Agent
   if (!aiConfig.enabled) {
     throw createModelRuntimeDisabledConfigurationError(aiConfig.summaryInput);
   }
-  const mcpManager = await mcpManagerFromCapabilitySnapshot(runtime, capabilitySnapshot, aiEnvironment);
+  const hostResources = await prepareAgentHostRunResourcesWithEnvironment(
+    runtime,
+    input,
+    aiEnvironment,
+  );
 
+  return {
+    ...hostResources,
+    aiConfig,
+  };
+}
+
+/**
+ * Acquires Host-owned tools, MCP connections, and execution settings without
+ * constructing a model runtime. Ordinary uses this boundary because its model
+ * loop is provided by the Session adapter; Multi-Agent composes the same Host
+ * resources with its existing IntelligenceChannel runtime above.
+ */
+export async function prepareAgentHostRunResources<
+  TCapabilitySnapshot extends AgentCapabilitySnapshot,
+>(
+  runtime: AgentRunResourceHost,
+  input: {
+    readonly capabilitySnapshot: TCapabilitySnapshot;
+    readonly informationAccess: SanitizedInformationAccessConfig;
+  },
+): Promise<AgentHostRunResources<TCapabilitySnapshot>> {
+  const aiEnvironment = await runtime.configCenter.createModelRuntimeEnvironment({
+    modelProvider: input.capabilitySnapshot.activeModel,
+    informationAccess: input.informationAccess,
+  });
+  return prepareAgentHostRunResourcesWithEnvironment(runtime, input, aiEnvironment);
+}
+
+async function prepareAgentHostRunResourcesWithEnvironment<
+  TCapabilitySnapshot extends AgentCapabilitySnapshot,
+>(
+  runtime: AgentRunResourceHost,
+  input: {
+    readonly capabilitySnapshot: TCapabilitySnapshot;
+    readonly informationAccess: SanitizedInformationAccessConfig;
+  },
+  aiEnvironment: ModelRuntimeEnvironment,
+): Promise<AgentHostRunResources<TCapabilitySnapshot>> {
+  const capabilitySnapshot = input.capabilitySnapshot;
+  const mcpManager = await mcpManagerFromCapabilitySnapshot(runtime, capabilitySnapshot, aiEnvironment);
   return {
     capabilitySnapshot,
     informationAccess: input.informationAccess,
     aiEnvironment,
-    aiConfig,
     workspaceRoot: capabilitySnapshot.workspace.workspaceDirectory,
     commandShell: capabilitySnapshot.commandShell,
     toolStates: toolStatesFromCapabilitySnapshot(capabilitySnapshot),
@@ -228,7 +276,7 @@ async function mcpManagerFromCapabilitySnapshot(
 
 export function createAgentToolCenterFactory(
   providerFetch: PanelProviderFetch | undefined,
-  resources: AgentRunResources
+  resources: AgentHostRunResources
 ) {
   return (toolRuntime: AgentToolRuntimeContext, context?: {
     readonly contributions?: readonly AgentToolRegistryContribution[];

@@ -6,7 +6,6 @@ import type {
   ToolExecutorResult,
   ToolFactValue,
   ToolInputSchema,
-  ToolModelContract,
 } from "../../domain/tools/index.js";
 import {
   canonicalNamespacedToolName,
@@ -55,9 +54,54 @@ export function createLazyMcpToolExecutor(
   return {
     definition,
     async execute(input: unknown, context: ToolExecutionContext): Promise<unknown | ToolExecutorResult> {
-      return executeMcpToolForExecutor(await getClient(), tool, serverId, definition.name, input, context);
+      const client = await waitForMcpClient(getClient(), context.abortSignal);
+      return executeMcpToolForExecutor(client, tool, serverId, definition.name, input, context);
     },
   };
+}
+
+/**
+ * A lazy client may be shared by several tool calls. Abort only this caller's
+ * wait; the provider owns the connection attempt and closes it during cleanup.
+ */
+async function waitForMcpClient(
+  clientPromise: Promise<McpClientWrapper>,
+  signal: AbortSignal | undefined,
+): Promise<McpClientWrapper> {
+  if (signal === undefined) {
+    return clientPromise;
+  }
+  if (signal.aborted) {
+    throw mcpAbortError(signal.reason);
+  }
+  return await new Promise<McpClientWrapper>((resolve, reject) => {
+    const cleanup = (): void => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = (): void => {
+      cleanup();
+      reject(mcpAbortError(signal.reason));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    clientPromise.then(
+      (client) => {
+        cleanup();
+        resolve(client);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
+function mcpAbortError(reason: unknown): Error {
+  const error = reason instanceof Error
+    ? reason
+    : new Error(typeof reason === "string" ? reason : "MCP tool call was cancelled.");
+  Object.defineProperty(error, "name", { value: "AbortError", configurable: true });
+  return error;
 }
 
 export function createCachedMcpToolExecutor(
@@ -193,7 +237,6 @@ function createMcpToolDefinition(
   confirmationStrategy: McpToolConfirmationStrategy
 ): ToolExecutor["definition"] {
   const namespacedName = canonicalNamespacedToolName(serverId, tool.name);
-  const inputSchema = toolInputSchema(tool);
   const compactDescription = compactMcpToolDescription(tool, serverId);
   const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, {
     serverId,
@@ -203,15 +246,7 @@ function createMcpToolDefinition(
   return {
     name: namespacedName,
     description: compactDescription,
-    inputSchema,
-    modelContract: createMcpToolModelContract({
-      serverId,
-      tool,
-      inputSchema,
-      metadata,
-      compactDescription,
-      canonicalName: namespacedName,
-    }),
+    inputSchema: toolInputSchema(tool),
     metadata,
   };
 }
@@ -224,65 +259,6 @@ function toolInputSchema(tool: McpToolInfo): ToolInputSchema {
     additionalProperties: typeof tool.inputSchema.additionalProperties === "boolean"
       ? tool.inputSchema.additionalProperties
       : undefined,
-  };
-}
-
-function createMcpToolModelContract(input: {
-  readonly serverId: string;
-  readonly tool: McpToolInfo;
-  readonly inputSchema: ToolInputSchema;
-  readonly metadata: ToolDefinitionMetadata;
-  readonly compactDescription: string;
-  readonly canonicalName: string;
-}): ToolModelContract {
-  const propertyNames = Object.keys(input.inputSchema.properties);
-  const required = new Set(input.inputSchema.required ?? []);
-  const requiredNames = propertyNames.filter((name) => required.has(name));
-  const optionalNames = propertyNames.filter((name) => !required.has(name));
-  const inputNotes = [
-    propertyNames.length === 0
-      ? "Input is a JSON object; this MCP tool declares no named input fields."
-      : `Input is a JSON object with fields: ${propertyNames.join(", ")}.`,
-    requiredNames.length === 0 ? "No required input fields are declared." : `Required fields: ${requiredNames.join(", ")}.`,
-    optionalNames.length === 0 ? undefined : `Optional fields: ${optionalNames.join(", ")}.`,
-    input.inputSchema.additionalProperties === false
-      ? "Do not include fields outside the declared MCP input schema."
-      : "Additional fields may be accepted only if the MCP server supports them.",
-  ].filter(isString);
-  return {
-    purpose: input.compactDescription,
-    whenToUse: [
-      `Use when the task needs the ${input.tool.name} capability exposed by MCP server ${input.serverId}.`,
-      "Use only for the operation described by the MCP tool description and input schema.",
-    ],
-    whenNotToUse: [
-      "Do not use for operations outside the capability described by this MCP tool.",
-    ],
-    inputNotes,
-    usageNotes: [
-      `The model-visible tool name is ${input.canonicalName}; the MCP server receives the original tool name ${input.tool.name}.`,
-      "MCP annotations are advisory; rely on the tool description, schema, and returned result when deciding follow-up steps.",
-    ],
-    outputNotes: [
-      "Returns one canonical fact body: content[] plus optional structuredContent; a content text block is omitted only when it is parseable JSON and deeply identical to structuredContent, and no duplicate summary or result wrapper is added.",
-      "Text content is preserved once and is not truncated by the MCP adapter. MCP structuredContent remains opaque because the protocol defines no generic continuation; when the current canonical result exceeds the shared inline budget, the Host ToolOutputStore retains that result for read_tool_output.",
-      "Image, audio, and non-image embedded resource bytes are passed out of band as typed model attachments with MIME, filename or URI, and byte-length facts instead of being copied into the JSON body.",
-      "Tool-origin media keeps its tool-result role and factual provenance: Responses can carry image and file outputs directly, while Chat Completions rejects tool-origin binary attachments instead of changing their source role. The current OpenAI adapters reject tool-origin audio. Unsupported protocols or formats fail explicitly.",
-      "MCP isError=true produces a failed ToolCallResult while preserving the canonical MCP error content once; protocol, connection, or transport exceptions also fail the tool call.",
-    ],
-    runtimeHints: [
-      { label: "MCP server", value: input.serverId },
-      { label: "MCP tool", value: input.tool.name },
-      ...(input.tool.title === undefined ? [] : [{ label: "MCP title", value: input.tool.title }]),
-      { label: "operation", value: input.metadata.operationType },
-      { label: "requires confirmation", value: String(input.metadata.requiresConfirmation) },
-    ],
-    examples: [
-      {
-        title: "Call MCP tool",
-        input: exampleInputForSchema(input.inputSchema),
-      },
-    ],
   };
 }
 
@@ -904,47 +880,6 @@ function extensionForMimeType(mimeType: string): string {
   }
 }
 
-function exampleInputForSchema(schema: ToolInputSchema): Readonly<Record<string, unknown>> {
-  const entries = Object.entries(schema.properties);
-  if (entries.length === 0) {
-    return {};
-  }
-  const required = new Set(schema.required ?? []);
-  const selected = entries
-    .filter(([name]) => required.has(name))
-    .concat(entries.filter(([name]) => !required.has(name)))
-    .slice(0, 3);
-  const result: Record<string, unknown> = {};
-  for (const [name, propertySchema] of selected) {
-    result[name] = exampleValueForJsonSchema(propertySchema);
-  }
-  return result;
-}
-
-function exampleValueForJsonSchema(value: unknown): unknown {
-  const schema = recordOrUndefined(value);
-  const type = typeof schema?.type === "string" ? schema.type : undefined;
-  if (Array.isArray(schema?.enum) && schema.enum.length > 0) {
-    return schema.enum[0];
-  }
-  if (type === "string") {
-    return "example";
-  }
-  if (type === "number" || type === "integer") {
-    return 1;
-  }
-  if (type === "boolean") {
-    return true;
-  }
-  if (type === "array") {
-    return [];
-  }
-  if (type === "object") {
-    return {};
-  }
-  return "example";
-}
-
 function recordOrEmpty(value: unknown): Record<string, unknown> {
   return recordOrUndefined(value) ?? {};
 }
@@ -957,8 +892,4 @@ function recordOrUndefined(value: unknown): Record<string, unknown> | undefined 
 
 function stringArrayOrUndefined(value: unknown): readonly string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
-}
-
-function isString(value: string | undefined): value is string {
-  return value !== undefined;
 }

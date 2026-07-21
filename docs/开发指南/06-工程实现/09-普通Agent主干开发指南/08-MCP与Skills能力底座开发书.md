@@ -9,12 +9,12 @@ Capability snapshot
   -> frozen tool / skill / MCP / Sub-Agent catalog
   -> Ordinary run resources
   -> AgentLoop
-  -> ToolCenter gateway + SDK AgentTool
-  -> ordinary-run/v3 facts
+  -> ToolCenter gateway + Pi AgentTool
+  -> ordinary-run/v4 facts + Pi Session tool messages
 ```
 
 - 能力在 run 创建时冻结；运行中配置变化只影响新 run。
-- ToolCenter 只执行普通工具。Skills 贡献上下文和受控资源读取；Sub-Agent 贡献 SDK AgentTool；MCP 贡献外部工具 executor。
+- ToolCenter 只执行普通工具。Skills 贡献上下文和受控资源读取；Sub-Agent 贡献 Pi AgentTool；MCP 贡献外部工具 executor。
 - capability catalog 可以保存 catalog-only definition，但不能向 ToolRegistry 注册没有真实 executor 的假工具。
 - 所有调用、确认、结果、取消和 usage 归父 Ordinary run，不建设平行 runner、trace store 或 read-model。
 
@@ -54,19 +54,19 @@ Skill 启停和 `markUsed` 只使用 source-qualified `stateKey` 的 v2 状态�
 
 ## Sub-Agent
 
-Sub-Agent 只向 Ordinary SDK loop 贡献两个 AgentTool：
+Sub-Agent 只向 Ordinary Agent Session loop 贡献两个 AgentTool：
 
 - `call_sub_agent`：调用已登记专家。
 - `spawn_sub_agent`：创建一次性专家。
 
-AgentTool definition 进入冻结 capability catalog，但不向普通 ToolRegistry 注册 stub executor。运行时由 SDK adapter 执行 nested agent；权限以父 run 冻结工具为上限，Sub-Agent 声明只能进一步收窄。nested tool set 强制排除全部 Sub-Agent 工具，因此不能递归。
+AgentTool definition 进入冻结 capability catalog，但不向普通 ToolRegistry 注册 stub executor。运行时由 Agent Session adapter 执行 nested agent；权限以父 run 冻结工具为上限，Sub-Agent 声明只能进一步收窄。nested tool set 强制排除全部 Sub-Agent 工具，因此不能递归。
 
 完整输出直接回到父模型并形成 Ordinary 标准 tool facts。旧 `call_sub_agents`、专用续读工具、自研 runner、事件/trace store 和独立 Panel read-model 已删除。
 
-## Canonical 上下文
+## Session 上下文
 
-- Skill 正文只在被选中并成功加载后进入当前模型消息，随后作为 canonical 消息的一部分持久化。
-- MCP 与 Sub-Agent 工具调用/结果按普通工具协议进入 canonical messages；不得另外生成摘要历史或从 UI 事件回填。
+- Skill 正文只在被选中并成功加载后进入当前 Pi Session 请求，并由 Session transcript 持久化；Ordinary snapshot 只保存稳定 ref，不复制消息正文。
+- MCP 与 Sub-Agent 工具调用/结果按普通工具协议进入 Pi Session；Ordinary 只持有业务工具事实，不得另建 canonical messages、摘要历史或从 UI 事件回填模型上下文。
 - 工具附件字节只服务当前请求，不进入持久化消息；引用和元数据按工具事实契约处理。
 - 模型需要更多文件或网页材料时再次调用相应工具，不建设替模型决定下一步的通用续读工作流。
 

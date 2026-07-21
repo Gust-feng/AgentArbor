@@ -613,7 +613,7 @@ export type AgentCapabilitySnapshot = {
   readonly warnings: readonly string[];
 };
 
-/** Ordinary-owned extension for Skills and SDK Sub-Agent tools. */
+/** Ordinary-owned extension for Skills and Sub-Agent AgentTool contributions. */
 export type BasicAgentCapabilitySnapshot = AgentCapabilitySnapshot & {
   readonly skillCatalog: readonly CapabilitySkillCatalogItem[];
   readonly subAgentCatalog: readonly CapabilitySubAgentCatalogItem[];

@@ -39,7 +39,7 @@ Workbench
 - Sub-Agent 是 Ordinary Agent 的工具能力，不是第三种模式；它的输出是父 Agent 使用的局部材料。
 - Workbench 只组合导航、输入、历史和展示，不拥有 Ordinary 或 Multi-Agent 的业务状态。
 
-当前实现仍保留设置中的 beta 开关、侧栏“Agent 集群”按钮、`/api/deep/*`、Deep DTO 和独立数据目录。这些是统一 Workbench 下尚待收口的实现形态，不代表 UI 已经完成合并，也不构成新的产品边界。
+当前实现已将 Multi-Agent 从生产运行时延期隔离：设置 beta 开关、侧栏“Agent 集群”按钮、Deep 历史加载和 `/api/deep/*` 均不再启用，后者固定返回 `410 multi_agent_deferred`。Deep DTO、独立数据目录和实现源码保留为未来重构参考，不构成当前产品入口。
 
 ### 2. 采用同仓功能模块化单体
 
@@ -47,7 +47,7 @@ Workbench
 
 模块化先按功能闭环，再按技术层分层：
 
-- Ordinary Agent 与 Multi-Agent 分别拥有自己的 command、query、event、业务状态、仓储端口、read-model 和测试。Sub-Agent 只拥有定义发现、SDK AgentTool 贡献、输入解析、权限收窄和测试；其 capability 条目是 catalog-only definition，与冻结 run 的普通工具边界使用同一曝光决策，不在 ToolRegistry 注册假 executor。调用、确认、结果与持久化事实归父 Ordinary run。
+- Ordinary Agent 与 Multi-Agent 分别拥有自己的 command、query、event、业务状态、仓储端口、read-model 和测试。Sub-Agent 只拥有定义发现、Pi AgentTool 贡献、输入解析、权限收窄和测试；其 capability 条目是 catalog-only definition，与冻结 run 的普通工具边界使用同一曝光决策，不在 ToolRegistry 注册假 executor。调用、确认、结果与持久化事实归父 Ordinary run。
 - Workbench Shell 拥有导航和展示组合，不拥有或持久化功能业务状态。
 - 模型接入、工具执行原语、确认、上下文机械算法、tokenizer、消息完整性、配置读取和系统适配属于中性能力。
 - `domain / app / kernel / adapters` 可以作为模块内部或跨模块的技术分层，但不能取代功能所有权。
@@ -70,9 +70,9 @@ Workbench
 
 ### 4. 唯一后端 Composition Root
 
-后端只有一个 Composition Root。目标边界是由它创建 Host 级资源，装配 Ordinary Agent 与 Multi-Agent 各自的精确公开端口，并把这些端口交给 HTTP/SSE adapter。
+后端只有一个 Composition Root。长期目标是由它创建 Host 级资源，按产品阶段装配可用 feature 的精确公开端口，并把这些端口交给 HTTP/SSE adapter。
 
-当前实现中，`createPanelRuntime()` 同时创建 `OrdinaryAgentFeature` 与 `MultiAgentFeature`。Ordinary 的正式入口只通过 `ordinary-routes` 调用 feature command/query；Multi-Agent 的正式入口只通过 `/api/deep/*` 调用 feature command/query。旧 BasicAgent、Desktop session、Panel run job、应用层 Underground 与 `MinimalRuntime` 已删除。
+当前实现中，`createPanelRuntime()` 只创建 `OrdinaryAgentFeature`。Ordinary 的正式入口只通过 `ordinary-routes` 调用 feature command/query；延期的 Multi-Agent 不存在正式 HTTP 入口。旧 BasicAgent、Desktop session、Panel run job、应用层 Underground 与 `MinimalRuntime` 已删除。
 
 - 只有 Composition Root 可以同时导入并装配多个 feature 和具体 adapter。
 - route 只解析 HTTP、调用 feature command/query、映射协议响应；不得创建 feature store、provider、ToolCenter 或隐藏的 runtime。

@@ -476,6 +476,14 @@ function makeActivityLead(input: {
 }
 
 function activityStatusBadge(node: ProjectableTranscriptNode): ActivityBadge | undefined {
+  if (node.kind === "tool" && node.phase === "failed") {
+    if (node.failureAttribution === "schema_validation") {
+      return { label: "参数不符合工具要求", tone: "warning" };
+    }
+    if (node.failureAttribution === "execution_failure") {
+      return { label: "工具执行失败", tone: "danger" };
+    }
+  }
   if (isContextCompactionNode(node)) {
     if (node.phase === "executing" || node.phase === "noted") return { label: "压缩中", tone: "accent" };
     if (node.phase === "completed") return { label: "压缩完成", tone: "success" };
@@ -683,6 +691,23 @@ function activityExpandedSectionsForNode(
     }
   } else if (display?.kind === "generic_tool_summary") {
     sections.push(...genericToolSections(display, copy));
+  }
+  if (node.delegatedExecution !== undefined) {
+    const usage = node.delegatedExecution.usage;
+    const totalTokens = usage.totalTokens;
+    const inputTokens = usage.inputTokens;
+    const outputTokens = usage.outputTokens;
+    const tokenSummary = totalTokens === undefined
+      ? "未报告"
+      : `${totalTokens}（输入 ${inputTokens ?? 0}，输出 ${outputTokens ?? 0}）`;
+    sections.push({
+      title: "执行统计",
+      content: `模型轮次：${node.delegatedExecution.modelRounds}\n工具调用：${node.delegatedExecution.toolCallCount}\nToken：${tokenSummary}`,
+      format: "plain",
+    });
+  }
+  if (node.error !== undefined) {
+    sections.push({ title: "错误", content: node.error, format: "diagnostics", tone: "danger" });
   }
   const fallback = copy.expandedDetail === undefined ? [] : [{ title: "详情", content: copy.expandedDetail }];
   const allSections = dedupeExpandedSections(appendSectionsWithoutDuplicateContent(sections, fallback));

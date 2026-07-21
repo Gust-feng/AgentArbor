@@ -10,7 +10,7 @@ AgentArbor 的 `agent` 不是所有自动化逻辑的泛称。只有具备目标
 - Multi-Agent：用户显式选择的深入协作功能，当前内部沿用 `deep` / `DeepRuntime`，负责 intake、manager、多路 child 探索、父层综合、纠正和停止。
 - Sub-Agent：Ordinary Agent 按需调用的工具能力，不是独立模式或 Multi-Agent child。
 
-Ordinary 与 Multi-Agent 只共享模型、工具、确认、上下文机械算法和系统适配等中性能力，并分别拥有业务流程、状态、事件、仓储与 read-model。Sub-Agent 只拥有定义与 SDK AgentTool 贡献，执行事实进入父 Ordinary run；Workbench Shell 只组合导航和展示。不得以共享为名建设统一 Run runtime、RuntimeDatabase 业务仓储、全局状态或跨 feature Panel read-model。
+Ordinary 与 Multi-Agent 只共享模型、工具、确认、上下文机械算法和系统适配等中性能力，并分别拥有业务流程、状态、事件、仓储与 read-model。Sub-Agent 只拥有定义与 Pi AgentTool 贡献，执行事实进入父 Ordinary run；Workbench Shell 只组合导航和展示。不得以共享为名建设统一 Run runtime、RuntimeDatabase 业务仓储、全局状态或跨 feature Panel read-model。
 
 默认普通 Agent 的产品交互是线性会话驱动，不是任务驱动。它可以处理用户以“任务”形式输入的请求，但运行时只把每一轮用户消息、历史对话、上下文引用、工具结果和确认决定串成同一条 conversation 时间线；它不维护独立任务生命周期、任务拆解状态机、Plan 交接对象或多 agent 协作状态。任务驱动、目标成形、多候选探索和 Plan 交接留给后续显式 deep / Agent 集群能力。
 
@@ -44,6 +44,7 @@ Multi-Agent 必须通过中性能力端口复用模型、工具、确认和系�
 | 多 child/rootlet 探索并由父层综合 | `Underground` / `deep` / `Agent cluster` | 普通会话内部隐式触发 |
 | 可持久化、可验证、可恢复的方向交接对象 | `Plan` / `Plan Package` | 普通回答或临时摘要叫 Plan |
 | 纯函数、helper、adapter 或 formatter | `helper` / `service` / `adapter` | `agent` |
+| 外部底层依赖的生产适配 | 按职责命名，如 `session-backed-agent-loop`、`model-provider-collection` | `pi-runtime`、`pi-manager`、`pi-utils` 等供应商前缀或空泛容器名 |
 | 普通会话中模型自主调用的专家助手 | `sub-agent` / `子 Agent` / `call_sub_agent` | `child` / `rootlet` / `deep child`（这些是 deep 编排术语） |
 
 `atomic` 只能用于真正具有事务边界的场景：全部校验通过才写入、失败不落盘、或有明确回滚/一致性保证。用户可见工具说明和普通文档应优先使用“编辑”“补丁”“变更集”等直白词。
@@ -55,7 +56,8 @@ Multi-Agent 必须通过中性能力端口复用模型、工具、确认和系�
 - 历史 `work_session` 请求别名不能再被接口层映射为 deep；开发期旧数据直接废弃，不建设兼容入口。
 - 普通路径不展示 fake Plan、fake report、fake artifact、未出生的 Routines、团队 agent 或 deep 占位入口。
 - 新增概念前必须说明它承担的独立职责、输入输出、失败方式、测试边界和可观察投影；否则使用朴素名称。
-- 子 Agent（sub-agent）是普通 Agent 的工具能力，不是独立编排流程；它通过 SDK 原生 `call_sub_agent` / `spawn_sub_agent` AgentTool 被模型自主调用，不维护独立任务生命周期、不派生 Plan、不走 `/api/deep/*` 入口。子 Agent 的工具集强制排除 Sub-Agent 工具，因此不能递归派生。子 Agent 与 deep child/rootlet 是不同概念：deep child 由 DeepRuntime 编排，走 manager 自由决策循环和 DeepTaskBoard；子 Agent 由 Ordinary 的 OpenAI Agents SDK loop 调用，并通过父 run 的 ToolCenter 执行获准工具（见 ADR-0026）。
+- 生产文件名、函数名和公开类型必须表达稳定职责，不以当前外部依赖名代替职责。供应商名称只出现在依赖导入、必要的协议差异注释、能力契约测试与架构决策中；更换底层依赖时，中性调用方不应因为命名泄漏而跟随改名。
+- 子 Agent（sub-agent）是普通 Agent 的工具能力，不是独立编排流程；它通过 Pi AgentTool 适配的 `call_sub_agent` / `spawn_sub_agent` 被模型自主调用，不维护独立任务生命周期、不派生 Plan、不走 `/api/deep/*` 入口。子 Agent 的工具集强制排除 Sub-Agent 工具，因此不能递归派生。子 Agent 与 deep child/rootlet 是不同概念：deep child 由 DeepRuntime 编排，走 manager 自由决策循环和 DeepTaskBoard；子 Agent 由 Ordinary 的 Pi AgentHarness 调用，并通过父 run 的 ToolCenter 执行获准工具（见 ADR-0026）。
 - 工程边界可以保护权限、预算、审计、验证和命令确认，但不能替 agent 判断目标、工具选择、候选取舍或是否继续探索；普通模型正文、工具结果、错误信息、文件内容、stdout/stderr 和开发上下文不得被脱敏或安全投影吞掉。
 
 这条口径的目标是同时避免两种错误：一是为了当前简单实现删除未来 deep / agent 集群方向；二是在默认普通 Agent 中提前使用超出实际职责的重命名、伪协议和伪复杂流程。

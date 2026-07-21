@@ -84,6 +84,9 @@ export function createFailedModelResponseFromError(input: {
 
 export function modelFailureKindFromError(error: unknown): ModelFailureKind {
   const message = rawModelErrorMessage(error).toLowerCase();
+  if (/\bcontent[ _-]?filter(?:ed)?\b/.test(message)) {
+    return "content_filtered";
+  }
   if (/\b(timeout|timed out|etimedout)\b/.test(message)) {
     return "provider_timeout";
   }

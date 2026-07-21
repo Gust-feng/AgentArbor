@@ -18,46 +18,22 @@ export class OrdinaryConversationSnapshotIncompatibleError extends Error {
   }
 }
 
-const lineageSchema = z.object({
-  lineageId: z.string().min(1),
-  parentLineageId: z.string().min(1).optional(),
-  forkFromRunId: z.string().min(1).optional(),
-  createdAt: z.string().min(1),
-}).strict();
 const stateSchema: z.ZodType<OrdinaryConversationControlState> = z.object({
   conversationId: z.string().min(1),
   createdAt: z.string().min(1),
+  sessionRef: z.object({
+    sessionId: z.string().min(1),
+    storageKey: z.string().min(1),
+    sessionCwd: z.string().min(1),
+    createdAt: z.string().min(1),
+  }).strict(),
   titleOverride: z.string().min(1).max(80).optional(),
   titleEditedAt: z.string().min(1).optional(),
   pinnedAt: z.string().min(1).optional(),
   deletedAt: z.string().min(1).optional(),
-  activeLineageId: z.string().min(1),
-  lineages: z.array(lineageSchema).min(1),
 }).strict().superRefine((state, context) => {
   if ((state.titleOverride === undefined) !== (state.titleEditedAt === undefined)) {
     context.addIssue({ code: "custom", message: "title override and edit time must appear together" });
-  }
-  const ids = new Set(state.lineages.map((lineage) => lineage.lineageId));
-  if (ids.size !== state.lineages.length || !ids.has(state.activeLineageId)) {
-    context.addIssue({ code: "custom", message: "lineage graph identity is invalid" });
-  }
-  for (const lineage of state.lineages) {
-    if (lineage.parentLineageId !== undefined && !ids.has(lineage.parentLineageId)) {
-      context.addIssue({ code: "custom", message: "lineage parent was not found" });
-    }
-    if ((lineage.parentLineageId === undefined) !== (lineage.forkFromRunId === undefined)) {
-      context.addIssue({ code: "custom", message: "non-root lineage must name both parent and fork run" });
-    }
-    const visited = new Set<string>([lineage.lineageId]);
-    let parentId = lineage.parentLineageId;
-    while (parentId !== undefined) {
-      if (visited.has(parentId)) {
-        context.addIssue({ code: "custom", message: "lineage graph contains a cycle" });
-        break;
-      }
-      visited.add(parentId);
-      parentId = state.lineages.find((candidate) => candidate.lineageId === parentId)?.parentLineageId;
-    }
   }
 });
 const documentSchema: z.ZodType<OrdinaryConversationControlDocument> = z.object({
@@ -104,8 +80,15 @@ export function createFileSystemOrdinaryConversationControlRepository(rootDir: s
         if (isNodeError(error, "ENOENT")) return [];
         throw error;
       });
-      const documents = await Promise.all(entries.filter((entry) => entry.isDirectory()).map((entry) =>
-        readDocument(rootDir, decodeURIComponent(entry.name))));
+      const documents = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+        try {
+          return await readDocument(rootDir, decodeURIComponent(entry.name));
+        } catch (error) {
+          // Enumeration isolates unsupported or damaged generations; explicit reads remain strict.
+          if (error instanceof OrdinaryConversationSnapshotIncompatibleError) return undefined;
+          throw error;
+        }
+      }));
       return documents.filter((item): item is OrdinaryConversationControlDocument => item !== undefined)
         .map(summary)
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))

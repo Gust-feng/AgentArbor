@@ -139,7 +139,7 @@ test("validateModelVisibleToolContract requires execution and side-effect metada
   assert.ok(validation.missing.includes("metadata.fileOperation"));
 });
 
-test("modelVisibleToolDescription uses stable field order without keyword selection", () => {
+test("modelVisibleToolDescription exposes only the objective tool description", () => {
   const definition: ToolDefinition = {
     ...completeToolDefinition(),
     modelContract: {
@@ -158,30 +158,15 @@ test("modelVisibleToolDescription uses stable field order without keyword select
   };
   const description = modelVisibleToolDescription(definition);
 
-  const orderedFragments = [
-    definition.description,
-    "Outputs: Result fact with continuation.nextInput.",
-    "Runtime: shell=PowerShell",
-    "Avoid for: Limit fact.",
-    "Notes: Ordinary first note. Second note contains background=true. Ordinary final note.",
-    "Inputs: Input fact.",
-    "Use for: Optional recommendation.",
-    'Examples: {"key":"one"} {"key":"two"}',
-  ];
-  let previousIndex = -1;
-  for (const fragment of orderedFragments) {
-    const index = description.indexOf(fragment);
-    assert.ok(index > previousIndex, `expected stable order for: ${fragment}`);
-    previousIndex = index;
-  }
-  assert.equal(description.match(/Ordinary first note\./gu)?.length, 1);
+  assert.equal(description, definition.description);
+  assert.doesNotMatch(description, /continuation|PowerShell|background|Optional recommendation/);
 });
 
-test("modelVisibleToolDescription applies an explicit budget after factual result guidance", () => {
+test("modelVisibleToolDescription applies the explicit budget to its objective description", () => {
   const description = modelVisibleToolDescription(
     {
       ...completeToolDefinition(),
-      description: "Read a bounded resource.",
+      description: `Read a bounded resource. ${"objective detail ".repeat(40)}`,
       modelContract: {
         outputNotes: ["truncated=true includes continuation.nextInput for the unread range."],
         runtimeHints: [{ label: "source", value: "workspace" }],
@@ -192,12 +177,12 @@ test("modelVisibleToolDescription applies an explicit budget after factual resul
   );
 
   assert.equal(description.length <= 220, true);
-  assert.match(description, /continuation\.nextInput/);
-  assert.match(description, /Additional tool guidance omitted by description budget/);
-  assert.doesNotMatch(description, /x{100}/);
+  assert.match(description, /^Read a bounded resource\./);
+  assert.match(description, /…\[truncated\]$/);
+  assert.doesNotMatch(description, /continuation\.nextInput|x{100}/);
 });
 
-test("an oversized objective cannot consume result and continuation facts", () => {
+test("an oversized objective is bounded without appending model contract prose", () => {
   const description = modelVisibleToolDescription({
     ...completeToolDefinition(),
     description: `Read a bounded resource. ${"objective detail ".repeat(800)}`,
@@ -212,10 +197,8 @@ test("an oversized objective cannot consume result and continuation facts", () =
 
   assert.equal(description.length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS, true);
   assert.match(description, /^Read a bounded resource\./);
-  assert.match(description, /…\[truncated\]/);
-  assert.match(description, /Outputs: truncated=true includes continuation\.nextInput/);
-  assert.match(description, /Runtime: source=workspace/);
-  assert.match(description, /Notes: The operation is read-only/);
+  assert.match(description, /…\[truncated\]$/);
+  assert.doesNotMatch(description, /continuation\.nextInput|Runtime:|read-only/);
 });
 
 test("invalid optional examples cannot hide or break a factual tool description", () => {
@@ -235,6 +218,7 @@ test("invalid optional examples cannot hide or break a factual tool description"
 test("default model-visible description budget remains explicit and bounded", () => {
   const definition: ToolDefinition = {
     ...completeToolDefinition(),
+    description: "y".repeat(MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS * 2),
     modelContract: {
       outputNotes: ["y".repeat(MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS * 2)],
     },

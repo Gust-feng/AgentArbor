@@ -2,7 +2,7 @@
 
 日期：2026-06
 
-状态：Accepted（2026-07 更新为 OpenAI Agents SDK 原生 AgentTool 实现）
+状态：Accepted（2026-07 更新为 Pi AgentTool 原生适配实现）
 
 承接关系：演进 [ADR-0024](ADR-0024-桌面基础Agent与基础设施优先路线.md) 的 Ordinary 工具体系，与 [ADR-0025](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 的 Multi-Agent 闭环互补。[ADR-0028](ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md) 继续确认 Sub-Agent 是 Ordinary Agent 的工具能力，而不是产品模式。
 
@@ -10,11 +10,11 @@
 
 Ordinary Agent 经常需要把一个边界清楚的局部任务交给专家，但这不需要启动 Multi-Agent 的 manager、TaskBoard、scheduler、run tree 和 parent synthesis。
 
-早期实现为此自建了 Sub-Agent runner、批量工具、输出续读、事件、trace 和 read-model。随着 Ordinary 正式切换到 OpenAI Agents SDK，这些机制与 SDK 原生 AgentTool 重复，并在父 run 之外制造了第二套执行与观察事实。
+早期实现为此自建了 Sub-Agent runner、批量工具、输出续读、事件、trace 和 read-model。随着 Ordinary 正式切换到 Pi AgentHarness，这些机制与 Pi AgentTool 能力重复，并在父 run 之外制造了第二套执行与观察事实。
 
 ## 决策
 
-Sub-Agent 继续作为 Ordinary Agent 的工具能力，但正式实现采用 OpenAI Agents SDK 原生 AgentTool：
+Sub-Agent 继续作为 Ordinary Agent 的工具能力，但正式实现采用 Pi AgentHarness 原生 AgentTool 适配：
 
 - `call_sub_agent` 调用一个已登记且启用的专家。
 - `spawn_sub_agent` 创建一个只服务本次调用、不会持久化的一次性专家。
@@ -23,7 +23,7 @@ Sub-Agent 继续作为 Ordinary Agent 的工具能力，但正式实现采用 Op
 - 旧自研 runner、Sub-Agent 事件、trace store、独立 read-model 和独立持久化退役。
 - nested Agent 的完整最终输出直接作为 AgentTool 结果返回父模型。
 
-Sub-Agent 不拥有独立 conversation、task board、run tree、业务状态、仓储或 UI surface。Ordinary feature 仍是父 run 的状态、确认 continuation、持久化和 read-model owner；OpenAI Agents SDK adapter 只负责 nested Agent 的机械模型-工具循环。AgentTool 调用与结果作为 Ordinary 标准 tool facts 持久化和展示，不发布专用 Sub-Agent 事件。
+Sub-Agent 不拥有独立 conversation、task board、run tree、业务状态、仓储或 UI surface。Ordinary feature 仍是父 run 的状态、确认 continuation、持久化和 read-model owner；Pi AgentTool adapter 只负责 nested Agent 的机械模型-工具循环。AgentTool 调用与结果作为 Ordinary 标准 tool facts 持久化和展示，不发布专用 Sub-Agent 事件。
 
 ## 定义与发现
 
@@ -59,10 +59,10 @@ parent allowedTools
 
 Sub-Agent 通过精确端口复用 Ordinary 已装配的能力：
 
-- OpenAI Agents SDK loop 创建并运行 nested Agent。
+- Pi AgentHarness 创建并运行 nested Agent。
 - 父 `ToolExecutionGateway` / ToolCenter 执行 nested Agent 的机械工具调用。
 - 父 run 的命令确认、拒绝、取消与 continuation 处理确认边界。
-- Ordinary canonical history 保存模型实际消费的 AgentTool 调用与结果。
+- Pi Session 保存模型实际消费的 AgentTool 调用与结果，Ordinary 只保存稳定 Session refs 和工具事实。
 
 不创建第二套 model runtime、ToolCenter、registry、confirmation gate、repository 或 read-model。工具调用已经产生确定结果后，确认恢复不得重放该调用。
 
@@ -79,7 +79,7 @@ Sub-Agent 与 Deep child 不是同一业务对象：
 
 收益：
 
-- 删除与 OpenAI Agents SDK 重复的自研执行循环和观察链。
+- 删除与 Pi AgentHarness 重复的自研执行循环和观察链。
 - Sub-Agent 权限、工具调用与确认自然复用 Ordinary 的正式主链。
 - 父模型直接获得完整结果，不需要输出引用或专用续读协议。
 - Sub-Agent 保持轻量，不演变成第二套 Multi-Agent。
@@ -88,7 +88,7 @@ Sub-Agent 与 Deep child 不是同一业务对象：
 
 - 不再提供批量 Sub-Agent 协议；父模型需要时自行发起多个 AgentTool 调用。
 - 不再提供 Sub-Agent 专用 trace、独立 UI 详情或跨进程生命周期恢复。
-- SDK adapter 的行为测试必须覆盖 AgentTool 权限、确认、取消和结果回传。
+- Agent Session adapter 的行为测试必须覆盖 AgentTool 权限、确认、取消和结果回传。
 
 ## 验收约束
 
@@ -99,7 +99,7 @@ Sub-Agent 与 Deep child 不是同一业务对象：
 - 内部工具确认进入父 Ordinary continuation，恢复时不重复执行已完成工具。
 - 完整 AgentTool 结果返回父模型，不依赖专用续读、trace 或 UI 投影。
 - AgentTool 只形成 Ordinary 标准 tool facts，不发布专用 Sub-Agent 事件。
-- OpenAI Responses 与 OpenAI-compatible Chat 通过同一 Ordinary `AgentLoop` 契约使用该能力。
+- Pi provider/model binding 通过同一 Ordinary `AgentLoop` 契约使用该能力。
 - Sub-Agent 不读取或写入 Deep store、TaskBoard、run tree 或 read-model。
 
 ## 非目标

@@ -238,6 +238,46 @@ test("tool activity strips internal incomplete wrappers from concrete targets", 
   assert.deepEqual(items.map((item) => item.statusBadge), [undefined, undefined]);
 });
 
+test("tool failure attribution distinguishes invalid parameters from failed execution", () => {
+  const [invalidParameters, executionFailure, legacyFailure] = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.failed",
+      phase: "failed",
+      toolName: "read_file",
+      summary: "读取文件失败。",
+      error: "path must be a non-empty string",
+      failureAttribution: "schema_validation",
+    }),
+    node({
+      kind: "tool",
+      eventType: "tool.failed",
+      phase: "failed",
+      toolName: "shell_command",
+      summary: "命令失败。",
+      error: "spawn pnpm ENOENT",
+      failureAttribution: "execution_failure",
+      nodeId: "node-2",
+      sequence: 2,
+    }),
+    node({
+      kind: "tool",
+      eventType: "tool.failed",
+      phase: "failed",
+      toolName: "search",
+      summary: "搜索失败。",
+      nodeId: "node-3",
+      sequence: 3,
+    }),
+  ]);
+
+  assert.deepEqual(invalidParameters?.statusBadge, { label: "参数不符合工具要求", tone: "warning" });
+  assert.equal(invalidParameters?.expandedSections?.find((section) => section.title === "错误")?.content, "path must be a non-empty string");
+  assert.deepEqual(executionFailure?.statusBadge, { label: "工具执行失败", tone: "danger" });
+  assert.equal(executionFailure?.expandedSections?.find((section) => section.title === "错误")?.content, "spawn pnpm ENOENT");
+  assert.equal(legacyFailure?.statusBadge, undefined);
+});
+
 test("completed generic file deletion does not create a redundant content card", () => {
   const item = displayActivityItemsForNodes([
     node({
@@ -1465,6 +1505,11 @@ test("nested sub-agent tool activity appears under its delegation instead of as 
         task: "检查配置文件",
       },
       refs: [{ kind: "tool_call", id: "delegate-fact" }],
+      delegatedExecution: {
+        modelRounds: 2,
+        toolCallCount: 1,
+        usage: { inputTokens: 18, outputTokens: 7, totalTokens: 25 },
+      },
     }),
     node({
       nodeId: "nested-read",
@@ -1483,6 +1528,11 @@ test("nested sub-agent tool activity appears under its delegation instead of as 
   assert.equal(items[0]?.toolKind, "agent");
   assert.deepEqual(items[0]?.children?.map((item) => item.toolCallFactId), ["nested-read-fact"]);
   assert.equal(items[0]?.children?.[0]?.parentToolCallFactId, "delegate-fact");
+  assert.deepEqual(items[0]?.expandedSections?.find((section) => section.title === "执行统计"), {
+    title: "执行统计",
+    content: "模型轮次：2\n工具调用：1\nToken：25（输入 18，输出 7）",
+    format: "plain",
+  });
 });
 
 test("directory activity uses its own tool kind and concrete path", () => {
@@ -1549,6 +1599,9 @@ function node(input: {
   readonly summary?: string;
   readonly text?: string;
   readonly toolName?: string;
+  readonly failureAttribution?: TranscriptNode["failureAttribution"];
+  readonly error?: string;
+  readonly delegatedExecution?: TranscriptNode["delegatedExecution"];
   readonly display?: TranscriptNode["display"];
   readonly confirmation?: TranscriptNode["confirmation"];
   readonly refs?: TranscriptNode["refs"];
@@ -1568,7 +1621,10 @@ function node(input: {
     text: input.text,
     timestamp: "2026-06-04T00:00:00.000Z",
     toolName: input.toolName,
+    failureAttribution: input.failureAttribution,
+    error: input.error,
     parentToolCallFactId: input.parentToolCallFactId,
+    delegatedExecution: input.delegatedExecution,
     display: input.display,
     confirmation: input.confirmation,
     refs: input.refs ?? [],

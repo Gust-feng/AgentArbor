@@ -52,11 +52,11 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
     definition: {
       name: "search",
       description: [
-        "Search currently available AgentArbor information sources and return refs with titles, URLs/URIs, source names, statuses, and snippets.",
+        "Search available information sources and return references with titles, locations, status, and snippets.",
         searchableSources.length > 0
-          ? `Model-visible search sources now: ${searchableDescription}.`
-          : "No model-visible search source is currently configured.",
-        "Use read with a returned ref when the full preview is needed.",
+          ? `Available sources: ${searchableDescription}.`
+          : "No search source is configured.",
+        "Use read with a returned reference when more content is required.",
       ].join(" "),
       modelContract: {
         purpose: "Search the currently available AgentArbor information sources and return refs the model can inspect with read.",
@@ -147,10 +147,10 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
     definition: {
       name: "read",
       description: [
-        "Read a research ref, HTTP/HTTPS URL, command-log:// ref, repo:// URI, or repository path and return the actual content preview for model use.",
-        "Pass ref as a string to read one source, or as a string array to read multiple refs in one call.",
+        "Read a reference, HTTP(S) URL, command-log reference, repository URI, or repository path.",
+        "Pass one reference or an array of references.",
         `Readable sources now: ${readableDescription || "none"}.`,
-        "Each item exposes contentPreview. Truncated reads always return a top-level executable continuation that starts at the first unread character. Batch output contains items and top-level continuations and does not fail the whole batch when one ref fails.",
+        "Use a returned continuation to read the next content range.",
       ].join(" "),
       modelContract: {
         purpose: "Read one or more research refs, URLs, command log refs, repo URIs, or repository paths and return contentPreview for model reasoning.",

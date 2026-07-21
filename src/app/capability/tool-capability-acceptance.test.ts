@@ -69,8 +69,8 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal("background" in shellDefinition!.inputSchema.properties, true);
     assert.equal("backgroundWaitMs" in shellDefinition!.inputSchema.properties, true);
     assert.equal("cwd" in shellDefinition!.inputSchema.properties, true);
-    assert.match(modelVisibleToolDescription(shellDefinition!), /background=true/);
-    assert.match(modelVisibleToolDescription(shellDefinition!), /dev servers/);
+    assert.match(modelVisibleToolDescription(shellDefinition!), /^Run a command in the current workspace shell\./);
+    assert.doesNotMatch(modelVisibleToolDescription(shellDefinition!), /background=true|dev servers/);
 
     const mkdir = await executeTool("call-mkdir", "shell_command", { commandLine: platformMakeDirectoryCommand("demo") });
     assert.equal(mkdir.status, "completed");

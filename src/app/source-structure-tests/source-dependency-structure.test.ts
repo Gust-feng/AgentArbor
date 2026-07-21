@@ -219,20 +219,20 @@ test("model runtime owns no tool construction", async () => {
   assert.deepEqual(violations, [], "model-runtime must create providers/channels only; tool assembly belongs to tool-center");
 });
 
-test("model-runtime is the only production owner allowed to create the OpenAI Agents loop adapter", async () => {
+test("Ordinary Host composition is the only production caller allowed to create the Agent Session loop", async () => {
   const root = process.cwd();
-  const adapterDefinition = path.join(root, "src", "adapters", "intelligence", "openai-agents-loop.ts");
-  const modelRuntimeRoot = path.join(root, "src", "app", "model-runtime");
+  const adapterDefinition = path.join(root, "src", "adapters", "intelligence", "agent-session-loop.ts");
+  const hostComposition = path.join(root, "src", "app", "panel-server", "ordinary-agent-run-resources.ts");
   const files = (await collectSourceFiles(path.join(root, "src")))
     .filter((file) => !isTestAssetSource(file));
   const violations: string[] = [];
 
   for (const file of files) {
-    if (file === adapterDefinition || isPathWithin(file, modelRuntimeRoot)) {
+    if (file === adapterDefinition || file === hostComposition) {
       continue;
     }
     const source = await fs.readFile(file, "utf8");
-    if (/\bcreateOpenAIAgentsLoop\s*\(/u.test(source)) {
+    if (/\bcreateAgentSessionLoop\s*\(/u.test(source)) {
       violations.push(relativePath(file));
     }
   }
@@ -240,7 +240,7 @@ test("model-runtime is the only production owner allowed to create the OpenAI Ag
   assert.deepEqual(
     violations,
     [],
-    "features and hosts must request AgentLoop from model-runtime instead of constructing the provider adapter",
+    "features and routes must receive the Session-backed AgentLoop through the Host composition adapter",
   );
 });
 
@@ -290,9 +290,8 @@ test("tool infrastructure does not depend on product feature implementations", a
   assert.deepEqual(productScopeLeaks, [], "neutral tool infrastructure must not choose a Desktop scope");
 });
 
-test("MultiAgentFeature is constructed only by the panel runtime composition root", async () => {
+test("MultiAgentFeature remains detached from production composition", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const compositionRoot = path.join(appRoot, "panel-server", "runtime.ts");
   const productionFiles = (await collectSourceFiles(appRoot)).filter((file) => !isTestAssetSource(file));
   const callSites: string[] = [];
 
@@ -308,8 +307,8 @@ test("MultiAgentFeature is constructed only by the panel runtime composition roo
 
   assert.deepEqual(
     callSites.sort(),
-    [relativePath(compositionRoot)],
-    "only panel-server/runtime.ts may call createMultiAgentFeature in production"
+    [],
+    "the deferred Multi-Agent source must not be constructed by production code",
   );
 });
 
@@ -353,7 +352,7 @@ test("MultiAgentFeature facade does not expose owned stores or lifecycle registr
   );
 });
 
-test("deep routes consume composed Multi-Agent services without constructing runtime or stores", async () => {
+test("deferred deep routes remain a thin reconstruction adapter without constructing runtime or stores", async () => {
   const deepRoutes = path.join(process.cwd(), "src", "app", "panel-server", "deep-routes.ts");
   const source = await fs.readFile(deepRoutes, "utf8");
   const forbiddenImports = sourceImportBindings(source, deepRoutes)
@@ -470,6 +469,7 @@ function isForbiddenDeepRouteImport(name: string): boolean {
   return name === "MinimalRuntime" ||
     name === "createMinimalRuntime" ||
     name === "prepareAgentRunResources" ||
+    name === "prepareAgentHostRunResources" ||
     name === "createAgentToolCenterFactory" ||
     name === "createDeepTurnRuntime" ||
     name === "createDeepConversationService" ||
@@ -484,6 +484,7 @@ function isForbiddenDeepRouteImport(name: string): boolean {
 function isForbiddenDeepRouteInvocation(name: string): boolean {
   return name === "createMinimalRuntime" ||
     name === "prepareAgentRunResources" ||
+    name === "prepareAgentHostRunResources" ||
     name === "createAgentToolCenterFactory" ||
     name === "createDeepTurnRuntime" ||
     name === "createDeepConversationService" ||

@@ -1,7 +1,12 @@
-import { persistedModelProtocolExtensions, type ModelMessage, type ModelUsage } from "../../domain/intelligence/index.js";
+import type { ModelUsage } from "../../domain/intelligence/index.js";
 import type { RunCapabilityResolution } from "../../domain/config/index.js";
 import { toolCallFactId, type ToolCallRequest, type ToolCallResult } from "../../domain/tools/index.js";
-import { canonicalToolResultMessage } from "../model-runtime/tool-result-message.js";
+import type {
+  AgentSessionExecutionRefs,
+  AgentSessionEntryRef,
+  AgentSessionRef,
+  AgentSessionWriteCheckpoint,
+} from "../model-runtime/agent-session.js";
 import type {
   OrdinaryRunBirth,
   OrdinaryRunEvent,
@@ -14,12 +19,13 @@ import type { OrdinaryToolMetricsSnapshot } from "./tool-runtime-metrics.js";
 import { OrdinaryFeatureError } from "./contracts.js";
 
 export type OrdinaryRunTransition =
-  | { readonly type: "start"; readonly priorCanonicalMessages?: readonly ModelMessage[] }
+  | { readonly type: "start" }
+  | { readonly type: "record_session_checkpoint"; readonly checkpoint: AgentSessionWriteCheckpoint }
   | { readonly type: "record_reasoning"; readonly modelRequestId: string; readonly content: string }
   | {
       readonly type: "request_approval";
       readonly status: Extract<OrdinaryRunStatus, { readonly kind: "awaiting_approval" }>;
-      readonly canonicalMessages: readonly ModelMessage[];
+      readonly session?: AgentSessionExecutionRefs;
       readonly toolCalls: readonly ToolCallResult[];
       readonly usage: ModelUsage;
       readonly capabilityResolution?: RunCapabilityResolution;
@@ -29,7 +35,7 @@ export type OrdinaryRunTransition =
   | {
       readonly type: "complete";
       readonly answer: string;
-      readonly canonicalMessages: readonly ModelMessage[];
+      readonly session: AgentSessionExecutionRefs;
       readonly toolCalls: readonly ToolCallResult[];
       readonly usage: ModelUsage;
       readonly capabilityResolution?: RunCapabilityResolution;
@@ -38,7 +44,7 @@ export type OrdinaryRunTransition =
   | {
       readonly type: "fail";
       readonly error: { readonly code: string; readonly message: string };
-      readonly canonicalMessages?: readonly ModelMessage[];
+      readonly session?: AgentSessionExecutionRefs;
       readonly toolCalls?: readonly ToolCallResult[];
       readonly usage?: ModelUsage;
       readonly capabilityResolution?: RunCapabilityResolution;
@@ -47,7 +53,7 @@ export type OrdinaryRunTransition =
   | {
       readonly type: "cancel";
       readonly reason: string;
-      readonly canonicalMessages?: readonly ModelMessage[];
+      readonly session?: AgentSessionExecutionRefs;
       readonly toolCalls?: readonly ToolCallResult[];
       readonly usage?: ModelUsage;
       readonly capabilityResolution?: RunCapabilityResolution;
@@ -57,16 +63,16 @@ export type OrdinaryRunTransition =
       readonly type: "block";
       readonly reason: { readonly code: string; readonly message: string };
       readonly continueBy: "new_turn";
-      readonly canonicalMessages?: readonly ModelMessage[];
+      readonly session?: AgentSessionExecutionRefs;
       readonly toolCalls?: readonly ToolCallResult[];
     };
 
 export function createInitialOrdinaryRunState(input: {
   readonly runId: string;
+  readonly sessionRef: AgentSessionRef;
   readonly turn: OrdinaryRunTurn;
   readonly runInput: OrdinaryRunInput;
   readonly birth: OrdinaryRunBirth;
-  readonly priorCanonicalMessages?: readonly ModelMessage[];
   readonly recordedAt: string;
   readonly eventId: string;
 }): OrdinaryRunState {
@@ -74,17 +80,14 @@ export function createInitialOrdinaryRunState(input: {
       input.turn.userTurnId.length === 0 || input.turn.assistantTurnId.length === 0) {
     throw new Error("Ordinary run and turn identities must not be empty");
   }
-  const canonicalMessages = persistableMessages([
-    ...(input.priorCanonicalMessages ?? []),
-    { role: "user", content: input.runInput.userMessage },
-  ]);
   return {
     runId: input.runId,
+    sessionRef: cloneJson(input.sessionRef),
     turn: cloneJson(input.turn),
     input: cloneJson(input.runInput),
     birth: cloneJson(input.birth),
     status: { kind: "queued" },
-    canonicalMessages,
+    session: { phase: "not_started" },
     toolCalls: [],
     toolResultRecordedAt: {},
     usage: {},
@@ -116,14 +119,14 @@ export function transitionOrdinaryRun(input: {
   const nextState: OrdinaryRunState = {
     ...input.state,
     status: nextStatus,
-    canonicalMessages: messagesAfter(input.state, input.transition),
+    session: sessionAfter(input.state, input.transition),
     pendingToolRound: pendingToolRoundAfter(input.state, input.transition),
     toolCalls: toolCallsAfter(input.state, input.transition),
     toolResultRecordedAt: toolResultRecordedAtAfter(input.state, input.transition, input.recordedAt),
     usage: usageAfter(input.state, input.transition),
     capabilityResolution: capabilityResolutionAfter(input.state, input.transition),
     toolMetrics: toolMetricsAfter(input.state, input.transition),
-    timeline: [...input.state.timeline, event],
+    timeline: event === undefined ? input.state.timeline : [...input.state.timeline, event],
     timestamps: {
       ...input.state.timestamps,
       updatedAt: input.recordedAt,
@@ -131,13 +134,243 @@ export function transitionOrdinaryRun(input: {
     },
   };
   assertAwaitingApprovalFacts(nextState);
+  assertOrdinaryToolFactGraph(nextState);
+  assertOrdinarySessionState(nextState);
   return nextState;
 }
 
+function sessionAfter(
+  state: OrdinaryRunState,
+  transition: OrdinaryRunTransition,
+): OrdinaryRunState["session"] {
+  if (transition.type === "record_session_checkpoint") {
+    if (transition.checkpoint.sessionId !== state.sessionRef.sessionId) {
+      throw new OrdinaryFeatureError(
+        "ordinary_run_state_conflict",
+        "Ordinary Session checkpoint does not match the run Session identity",
+      );
+    }
+    return applySessionCheckpoint(state.session, transition.checkpoint);
+  }
+  if ("session" in transition && transition.session !== undefined) {
+    assertExecutionRefsBelongToSession(state.sessionRef, transition.session);
+    if (state.session.phase !== "not_started" &&
+        !sameEntryRef(state.session.startLeafRef, transition.session.startLeafRef)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_run_state_conflict",
+        "Ordinary execution cannot change its captured Session start leaf",
+      );
+    }
+    if (transition.type === "complete") {
+      if (state.session.phase !== "completion_candidate" || transition.session.latestLeafRef === null ||
+          !sameEntryRef(state.session.startLeafRef, transition.session.startLeafRef) ||
+          !sameEntryRef(state.session.assistantEntryRef, transition.session.latestLeafRef)) {
+        throw new OrdinaryFeatureError(
+          "ordinary_run_state_conflict",
+          "Ordinary completion requires its Session response candidate as a rollbackable end leaf",
+        );
+      }
+      return {
+        phase: "rollbackable",
+        startLeafRef: cloneJson(state.session.startLeafRef),
+        endLeafRef: cloneJson(state.session.assistantEntryRef),
+        compactionEntryRefs: cloneJson(transition.session.compactionEntryRefs),
+      };
+    }
+    return sessionPhaseFromExecutionRefs(transition.session);
+  }
+  if ((transition.type === "fail" || transition.type === "cancel" || transition.type === "block") &&
+      state.session.phase === "completion_candidate") {
+    return {
+      phase: "rollbackable",
+      startLeafRef: cloneJson(state.session.startLeafRef),
+      endLeafRef: cloneJson(state.session.rollbackLeafRef),
+      compactionEntryRefs: cloneJson(state.session.compactionEntryRefs),
+    };
+  }
+  return state.session;
+}
+
+function applySessionCheckpoint(
+  current: OrdinaryRunState["session"],
+  checkpoint: AgentSessionWriteCheckpoint,
+): OrdinaryRunState["session"] {
+  assertCheckpointEntrySessions(checkpoint);
+  if (checkpoint.kind === "start_leaf_captured") {
+    if (current.phase !== "not_started") {
+      throw new OrdinaryFeatureError("ordinary_run_state_conflict", "Ordinary run Session start leaf was already captured");
+    }
+    return {
+      phase: "started",
+      startLeafRef: cloneJson(checkpoint.startLeafRef),
+      compactionEntryRefs: [],
+    };
+  }
+  if (current.phase === "not_started") {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "Ordinary Session checkpoint arrived before the run captured its start leaf",
+    );
+  }
+  switch (checkpoint.kind) {
+    case "input_entry_committed":
+      if (current.phase !== "started") {
+        throw new OrdinaryFeatureError("ordinary_run_state_conflict", "Ordinary Session input entry was already committed");
+      }
+      return {
+        phase: "rollbackable",
+        startLeafRef: cloneJson(current.startLeafRef),
+        endLeafRef: cloneJson(checkpoint.inputEntryRef),
+        compactionEntryRefs: [],
+      };
+    case "assistant_tool_call_entry_committed":
+      if (current.phase !== "rollbackable") {
+        throw new OrdinaryFeatureError("ordinary_run_state_conflict", "Ordinary Session tool round requires a rollbackable prefix");
+      }
+      return current;
+    case "tool_result_entries_committed":
+      if (current.phase !== "rollbackable") {
+        throw new OrdinaryFeatureError("ordinary_run_state_conflict", "Ordinary Session tool results require a rollbackable prefix");
+      }
+      return {
+        phase: "rollbackable",
+        startLeafRef: cloneJson(current.startLeafRef),
+        endLeafRef: cloneJson(checkpoint.toolRoundLeafRef),
+        compactionEntryRefs: cloneJson(current.compactionEntryRefs),
+      };
+    case "compaction_entry_committed":
+      if (current.phase !== "rollbackable") {
+        throw new OrdinaryFeatureError("ordinary_run_state_conflict", "Ordinary Session compaction requires a rollbackable prefix");
+      }
+      return {
+        phase: "rollbackable",
+        startLeafRef: cloneJson(current.startLeafRef),
+        endLeafRef: cloneJson(checkpoint.compactionEntryRef),
+        compactionEntryRefs: [
+          ...current.compactionEntryRefs,
+          cloneJson(checkpoint.compactionEntryRef),
+        ],
+      };
+    case "assistant_response_entry_committed":
+      if (current.phase !== "rollbackable") {
+        throw new OrdinaryFeatureError("ordinary_run_state_conflict", "Ordinary Session response requires a rollbackable prefix");
+      }
+      return {
+        phase: "completion_candidate",
+        startLeafRef: cloneJson(current.startLeafRef),
+        rollbackLeafRef: cloneJson(current.endLeafRef),
+        assistantEntryRef: cloneJson(checkpoint.assistantEntryRef),
+        compactionEntryRefs: cloneJson(current.compactionEntryRefs),
+      };
+  }
+}
+
+function assertCheckpointEntrySessions(checkpoint: AgentSessionWriteCheckpoint): void {
+  const refs = checkpoint.kind === "start_leaf_captured"
+    ? [checkpoint.startLeafRef]
+    : checkpoint.kind === "input_entry_committed"
+      ? [checkpoint.inputEntryRef]
+      : checkpoint.kind === "assistant_tool_call_entry_committed"
+        ? [checkpoint.assistantEntryRef]
+        : checkpoint.kind === "tool_result_entries_committed"
+          ? [checkpoint.toolRoundLeafRef]
+          : checkpoint.kind === "compaction_entry_committed"
+            ? [checkpoint.compactionEntryRef]
+            : [checkpoint.assistantEntryRef];
+  if (refs.some((ref) => ref !== null && ref.sessionId !== checkpoint.sessionId)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "Ordinary Session checkpoint contains an entry from a different Session",
+    );
+  }
+}
+
+function sessionPhaseFromExecutionRefs(refs: AgentSessionExecutionRefs): OrdinaryRunState["session"] {
+  if (refs.safeLeafRef === null) {
+    return {
+      phase: "started",
+      startLeafRef: cloneJson(refs.startLeafRef),
+      compactionEntryRefs: cloneJson(refs.compactionEntryRefs),
+    };
+  }
+  return {
+    phase: "rollbackable",
+    startLeafRef: cloneJson(refs.startLeafRef),
+    endLeafRef: cloneJson(refs.safeLeafRef),
+    compactionEntryRefs: cloneJson(refs.compactionEntryRefs),
+  };
+}
+
+function assertExecutionRefsBelongToSession(
+  sessionRef: AgentSessionRef,
+  refs: AgentSessionExecutionRefs,
+): void {
+  const entryRefs = [
+    refs.startLeafRef,
+    refs.inputEntryRef,
+    refs.safeLeafRef,
+    refs.latestLeafRef,
+    ...refs.compactionEntryRefs,
+  ].filter((ref): ref is AgentSessionEntryRef => ref !== null && ref !== undefined);
+  if (refs.sessionId !== sessionRef.sessionId || entryRefs.some((ref) => ref.sessionId !== sessionRef.sessionId)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "Ordinary execution Session refs do not belong to the run Session",
+    );
+  }
+}
+
+function assertOrdinarySessionState(state: OrdinaryRunState): void {
+  const refs: AgentSessionEntryRef[] = [];
+  if (state.session.phase !== "not_started") {
+    if (state.session.startLeafRef !== null) refs.push(state.session.startLeafRef);
+    refs.push(...state.session.compactionEntryRefs);
+  }
+  if (state.session.phase === "rollbackable") refs.push(state.session.endLeafRef);
+  if (state.session.phase === "completion_candidate") {
+    refs.push(state.session.rollbackLeafRef, state.session.assistantEntryRef);
+  }
+  if (state.pendingToolRound !== undefined) {
+    refs.push(state.pendingToolRound.assistantEntryRef);
+    if (state.session.phase !== "rollbackable") {
+      throw new OrdinaryFeatureError(
+        "ordinary_run_state_conflict",
+        "An Ordinary pending tool round requires a rollbackable Session phase",
+      );
+    }
+  }
+  if (refs.some((ref) => ref.sessionId !== state.sessionRef.sessionId)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "Ordinary run Session positions must belong to its conversation Session",
+    );
+  }
+  if (state.status.kind === "completed" &&
+      (state.session.phase !== "rollbackable" || state.pendingToolRound !== undefined)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "An Ordinary completed run requires a rollbackable Session end leaf",
+    );
+  }
+  if (state.session.phase === "completion_candidate" && state.pendingToolRound !== undefined) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "An Ordinary Session response candidate cannot coexist with a pending tool round",
+    );
+  }
+}
+
+function sameEntryRef(left: AgentSessionEntryRef | null, right: AgentSessionEntryRef | null): boolean {
+  return left === null || right === null
+    ? left === right
+    : left.sessionId === right.sessionId && left.entryId === right.entryId;
+}
+
 /**
- * An approval pause is only meaningful when it names the exact tool facts that
- * are waiting. Keep this transition invariant aligned with the durable v3
- * snapshot contract so malformed execution ports fail before persistence.
+ * An approval pause names the exact tool facts that are still awaiting a
+ * decision. A prior decision may already have released another tool from the
+ * same Pi batch; its original approval fact remains until ToolCenter records a
+ * terminal result, so it is justified by the durable decision event instead.
  */
 function assertAwaitingApprovalFacts(state: OrdinaryRunState): void {
   if (state.status.kind !== "awaiting_approval") return;
@@ -149,14 +382,17 @@ function assertAwaitingApprovalFacts(state: OrdinaryRunState): void {
     if (request === undefined || request.toolCallFactId !== toolCallFactId(result)) return [];
     return [[request.confirmationId, request] as const];
   }));
+  const decidedConfirmationIds = new Set(state.timeline.flatMap((event) =>
+    event.type === "run.approval_decided" ? [event.decision.confirmationId] : []));
   if (requestsById.size !== state.status.confirmationRequests.length ||
       factsByConfirmationId.size !== approvalFacts.length ||
-      requestsById.size !== factsByConfirmationId.size ||
       [...requestsById].some(([confirmationId, request]) =>
-        JSON.stringify(request) !== JSON.stringify(factsByConfirmationId.get(confirmationId)))) {
+        JSON.stringify(request) !== JSON.stringify(factsByConfirmationId.get(confirmationId))) ||
+      [...factsByConfirmationId.keys()].some((confirmationId) =>
+        !requestsById.has(confirmationId) && !decidedConfirmationIds.has(confirmationId))) {
     throw new OrdinaryFeatureError(
       "ordinary_run_state_conflict",
-      "An Ordinary approval pause must match its approval tool facts one-to-one",
+      "An Ordinary approval pause must match its approval tool facts that remain pending or have durable approval decisions",
     );
   }
 }
@@ -169,6 +405,9 @@ function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransitio
     case "record_reasoning":
       assertStatus(status, ["running"], transition.type);
       if (transition.content.length === 0) throw new Error("Recorded model reasoning must not be empty");
+      return status;
+    case "record_session_checkpoint":
+      assertStatus(status, ["running", "failed", "cancelled", "blocked"], transition.type);
       return status;
     case "request_approval":
       assertStatus(status, ["running"], transition.type);
@@ -198,51 +437,35 @@ function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransitio
   }
 }
 
-function messagesAfter(state: OrdinaryRunState, transition: OrdinaryRunTransition): readonly ModelMessage[] {
-  if (transition.type === "start" && transition.priorCanonicalMessages !== undefined) {
-    return persistableMessages([
-      ...transition.priorCanonicalMessages,
-      { role: "user", content: state.input.userMessage },
-    ]);
-  }
-  if ("canonicalMessages" in transition && transition.canonicalMessages !== undefined) {
-    // Never replace the write-ahead prefix with a partial assistant/tool group.
-    if (state.pendingToolRound !== undefined && !canonicalMessagesResolveToolRound(
-      transition.canonicalMessages,
-      state.pendingToolRound.assistantMessage,
-    )) {
-      return state.canonicalMessages;
-    }
-    return persistableMessages(transition.canonicalMessages);
-  }
-  return state.canonicalMessages;
-}
-
 function pendingToolRoundAfter(
   state: OrdinaryRunState,
   transition: OrdinaryRunTransition,
 ): OrdinaryRunState["pendingToolRound"] {
-  if (state.pendingToolRound === undefined) return undefined;
-  if ("canonicalMessages" in transition && transition.canonicalMessages !== undefined &&
-      canonicalMessagesResolveToolRound(transition.canonicalMessages, state.pendingToolRound.assistantMessage)) {
-    return undefined;
+  if (transition.type !== "record_session_checkpoint") return state.pendingToolRound;
+  const checkpoint = transition.checkpoint;
+  if (checkpoint.kind === "assistant_tool_call_entry_committed") {
+    return acceptedOrdinaryToolRound({
+      state,
+      assistantEntryRef: checkpoint.assistantEntryRef,
+      toolCallIds: checkpoint.toolCallIds,
+    });
   }
-  return state.pendingToolRound;
-}
-
-function canonicalMessagesResolveToolRound(
-  messages: readonly ModelMessage[],
-  assistantMessage: ModelMessage,
-): boolean {
-  const expectedCalls = assistantMessage.toolCalls ?? [];
-  const assistantIndex = [...messages].reverse().findIndex((message) =>
-    message.role === "assistant" && JSON.stringify(message.toolCalls ?? []) === JSON.stringify(expectedCalls));
-  if (assistantIndex < 0) return false;
-  const absoluteIndex = messages.length - assistantIndex - 1;
-  return expectedCalls.every((call, index) => {
-    const result = messages[absoluteIndex + index + 1];
-    return result?.role === "tool" && result.toolCallId === call.callId && result.toolName === call.toolName;
-  });
+  if (checkpoint.kind !== "tool_result_entries_committed") return state.pendingToolRound;
+  const pending = state.pendingToolRound;
+  if (pending === undefined || JSON.stringify(pending.toolCallIds) !== JSON.stringify(checkpoint.toolCallIds)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "Ordinary Session tool result checkpoint does not match its pending provider order",
+    );
+  }
+  const results = pending.toolCallIds.map((callId) => rootToolResultByCallId(state.toolCalls, callId));
+  if (results.some((result) => result === undefined || result.status === "approval_required")) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "Ordinary Session tool result checkpoint requires every root ToolCallResult fact",
+    );
+  }
+  return undefined;
 }
 
 function toolCallsAfter(state: OrdinaryRunState, transition: OrdinaryRunTransition): readonly ToolCallResult[] {
@@ -270,9 +493,8 @@ function toolResultRecordedAtAfter(
 /** Durably accepts one validated root assistant turn before any tool enters preflight. */
 export function acceptOrdinaryToolRound(input: {
   readonly state: OrdinaryRunState;
-  readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
-  readonly assistantMessage: ModelMessage;
-  readonly acceptedAt: string;
+  readonly assistantEntryRef: AgentSessionEntryRef;
+  readonly toolCallIds: readonly string[];
 }): OrdinaryRunState {
   if (input.state.status.kind !== "running") {
     throw new OrdinaryFeatureError(
@@ -280,25 +502,9 @@ export function acceptOrdinaryToolRound(input: {
       `Ordinary run ${input.state.runId} cannot accept a tool round while ${input.state.status.kind}`,
     );
   }
-  const rawCalls = input.assistantMessage.toolCalls ?? [];
-  if (rawCalls.some((call) => call.factId !== undefined && call.factId !== call.callId)) {
-    throw new OrdinaryFeatureError(
-      "ordinary_run_state_conflict",
-      "An Ordinary root tool round cannot contain a nested tool fact identity",
-    );
-  }
-  const canonicalMessages = persistableMessages(input.canonicalMessagesBeforeRound);
-  const assistantMessage = persistableMessages([input.assistantMessage])[0]!;
-  if (assistantMessage.role !== "assistant" || (assistantMessage.toolCalls?.length ?? 0) === 0) {
-    throw new Error("An Ordinary pending tool round requires an assistant message with tool calls");
-  }
-  const callIds = assistantMessage.toolCalls!.map((call) => call.callId);
-  if (new Set(callIds).size !== callIds.length) {
-    throw new Error("An Ordinary pending tool round cannot contain duplicate tool call identities");
-  }
+  const pendingToolRound = acceptedOrdinaryToolRound(input);
   if (input.state.pendingToolRound !== undefined) {
-    if (JSON.stringify(input.state.pendingToolRound.assistantMessage) === JSON.stringify(assistantMessage) &&
-        JSON.stringify(input.state.canonicalMessages) === JSON.stringify(canonicalMessages)) {
+    if (JSON.stringify(input.state.pendingToolRound) === JSON.stringify(pendingToolRound)) {
       return input.state;
     }
     throw new OrdinaryFeatureError(
@@ -306,34 +512,62 @@ export function acceptOrdinaryToolRound(input: {
       `Ordinary run ${input.state.runId} already has an unresolved tool round`,
     );
   }
-  const committedCallIds = new Set(canonicalMessages.flatMap((message) =>
-    message.role === "assistant" ? (message.toolCalls ?? []).map((call) => call.callId) : []));
-  if (callIds.some((callId) => committedCallIds.has(callId) || rootToolResultByCallId(input.state.toolCalls, callId) !== undefined)) {
+  if (pendingToolRound.toolCallIds.some((callId) => rootToolResultByCallId(input.state.toolCalls, callId) !== undefined)) {
     throw new OrdinaryFeatureError(
       "ordinary_tool_result_conflict",
       `Ordinary run ${input.state.runId} cannot reuse a committed root tool call identity`,
     );
   }
-  return {
+  const nextState: OrdinaryRunState = {
     ...input.state,
-    canonicalMessages,
-    pendingToolRound: { assistantMessage, acceptedAt: input.acceptedAt },
-    timestamps: { ...input.state.timestamps, updatedAt: input.acceptedAt },
+    pendingToolRound,
+  };
+  assertOrdinaryToolFactGraph(nextState);
+  return nextState;
+}
+
+function acceptedOrdinaryToolRound(input: {
+  readonly state: OrdinaryRunState;
+  readonly assistantEntryRef: AgentSessionEntryRef;
+  readonly toolCallIds: readonly string[];
+}): NonNullable<OrdinaryRunState["pendingToolRound"]> {
+  if (input.state.session.phase !== "rollbackable") {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "An Ordinary pending tool round requires a rollbackable Session prefix",
+    );
+  }
+  if (input.assistantEntryRef.sessionId !== input.state.sessionRef.sessionId) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "An Ordinary pending tool round cannot reference a different Session",
+    );
+  }
+  if (input.toolCallIds.length === 0) throw new Error("An Ordinary pending tool round requires tool call identities");
+  if (new Set(input.toolCallIds).size !== input.toolCallIds.length) {
+    throw new Error("An Ordinary pending tool round cannot contain duplicate tool call identities");
+  }
+  return {
+    assistantEntryRef: cloneJson(input.assistantEntryRef),
+    toolCallIds: [...input.toolCallIds],
   };
 }
 
-/** Records one tool fact and atomically commits a fully resolved root tool round. */
+/** Records one factual tool result; Session checkpoint commits the ordered round boundary. */
 export function recordOrdinaryToolResult(input: {
   readonly state: OrdinaryRunState;
   readonly result: ToolCallResult;
   readonly recordedAt: string;
 }): OrdinaryRunState {
-  assertPendingRootResultIdentity(input.state, input.result);
+  assertOrdinaryToolFactGraph({
+    ...input.state,
+    toolCalls: [...input.state.toolCalls, input.result],
+  });
   const key = ordinaryToolResultKey(input.result);
   const existing = input.state.toolCalls.find((result) =>
     toolCallFactId(result) === toolCallFactId(input.result));
   if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(input.result)) {
-    return finalizeResolvedOrdinaryToolRound(input.state, input.recordedAt);
+    return input.state;
   }
   const recorded = {
     ...input.state,
@@ -347,20 +581,7 @@ export function recordOrdinaryToolResult(input: {
       updatedAt: input.recordedAt,
     },
   };
-  return finalizeResolvedOrdinaryToolRound(recorded, input.recordedAt);
-}
-
-function assertPendingRootResultIdentity(state: OrdinaryRunState, result: ToolCallResult): void {
-  if (result.factId !== undefined && result.factId !== result.callId) return;
-  const pendingCalls = state.pendingToolRound?.assistantMessage.toolCalls ?? [];
-  const pendingCall = pendingCalls.find((call) => call.callId === result.callId);
-  if (pendingCall === undefined) return;
-  if (pendingCall.toolName !== result.toolName || JSON.stringify(pendingCall.input) !== JSON.stringify(result.input)) {
-    throw new OrdinaryFeatureError(
-      "ordinary_tool_result_conflict",
-      `Ordinary root tool result ${result.callId} does not match its accepted assistant call`,
-    );
-  }
+  return recorded;
 }
 
 /**
@@ -369,12 +590,19 @@ function assertPendingRootResultIdentity(state: OrdinaryRunState, result: ToolCa
  */
 export function reconcileInterruptedOrdinaryToolRound(input: {
   readonly state: OrdinaryRunState;
+  readonly orderedToolCalls: readonly ToolCallRequest[];
   readonly recordedAt: string;
 }): OrdinaryRunState {
   const pending = input.state.pendingToolRound;
   if (pending === undefined) return input.state;
+  if (JSON.stringify(input.orderedToolCalls.map((call) => call.callId)) !== JSON.stringify(pending.toolCallIds)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "Interrupted tool reconciliation does not match its provider-ordered Session tool calls",
+    );
+  }
   let state = input.state;
-  for (const call of pending.assistantMessage.toolCalls ?? []) {
+  for (const call of input.orderedToolCalls) {
     const existing = rootToolResultByCallId(state.toolCalls, call.callId);
     if (existing !== undefined && !toolResultMatchesAcceptedCall(existing, call)) {
       throw new OrdinaryFeatureError(
@@ -399,7 +627,7 @@ export function reconcileInterruptedOrdinaryToolRound(input: {
         };
     state = recordOrdinaryToolResult({ state, result, recordedAt: input.recordedAt });
   }
-  return finalizeResolvedOrdinaryToolRound(state, input.recordedAt);
+  return state;
 }
 
 /** Closes one approval fact according to the exact durable decision, without replay. */
@@ -444,47 +672,96 @@ function approvalFactWasNotExecuted(
     decision.decision.decision !== "approve_once";
 }
 
-function finalizeResolvedOrdinaryToolRound(
-  state: OrdinaryRunState,
-  recordedAt: string,
-): OrdinaryRunState {
-  const pending = state.pendingToolRound;
-  if (pending === undefined) return state;
-  const results = (pending.assistantMessage.toolCalls ?? []).map((call) => {
-    const result = rootToolResultByCallId(state.toolCalls, call.callId);
-    if (result !== undefined && !toolResultMatchesAcceptedCall(result, call)) {
-      throw new OrdinaryFeatureError(
-        "ordinary_tool_result_conflict",
-        `Ordinary root tool result ${result.callId} does not match its accepted assistant call`,
-      );
-    }
-    return result;
-  });
-  if (results.some((result) => result === undefined || result.status === "approval_required")) {
-    return state;
-  }
-  return {
-    ...state,
-    canonicalMessages: persistableMessages([
-      ...state.canonicalMessages,
-      pending.assistantMessage,
-      ...results.map((result) => canonicalToolResultMessage(result!)),
-    ]),
-    pendingToolRound: undefined,
-    timestamps: { ...state.timestamps, updatedAt: recordedAt },
-  };
-}
-
 function rootToolResultByCallId(
   results: readonly ToolCallResult[],
   callId: string,
 ): ToolCallResult | undefined {
   return [...results].reverse().find((result) =>
-    result.callId === callId && (result.factId === undefined || result.factId === result.callId));
+    result.callId === callId && isRootOrdinaryToolResult(result));
+}
+
+function isRootOrdinaryToolResult(
+  result: Pick<ToolCallResult, "callId" | "factId" | "parentToolCallFactId">,
+): boolean {
+  return result.parentToolCallFactId === undefined &&
+    (result.factId === undefined || result.factId === result.callId);
 }
 
 function toolResultMatchesAcceptedCall(result: ToolCallResult, call: ToolCallRequest): boolean {
   return result.toolName === call.toolName && JSON.stringify(result.input) === JSON.stringify(call.input);
+}
+
+/**
+ * Nested mechanical calls belong to one already-known root invocation in this run.
+ * Keeping this graph one level deep prevents orphan activity and recursive ownership
+ * from being manufactured by a provider-scoped call id.
+ */
+export function assertOrdinaryToolFactGraph(
+  state: {
+    readonly runId: string;
+    readonly pendingToolRound?: {
+      readonly toolCallIds: readonly string[];
+    };
+    readonly toolCalls: readonly {
+      readonly callId: string;
+      readonly factId?: string;
+      readonly parentToolCallFactId?: string;
+    }[];
+  },
+): void {
+  const rootFactIds = new Set<string>();
+  for (const callId of state.pendingToolRound?.toolCallIds ?? []) rootFactIds.add(callId);
+
+  const nestedResults: Array<{
+    readonly callId: string;
+    readonly factId: string;
+    readonly parentToolCallFactId: string;
+  }> = [];
+  for (const result of state.toolCalls) {
+    if (result.parentToolCallFactId === undefined) {
+      if (result.factId !== undefined && result.factId !== result.callId) {
+        throw new OrdinaryFeatureError(
+          "ordinary_tool_result_conflict",
+          `Ordinary nested tool fact ${result.factId} must reference its parent root tool fact`,
+        );
+      }
+      rootFactIds.add(toolCallFactId(result));
+      continue;
+    }
+    if (result.factId === undefined || result.factId === result.callId) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary nested tool result ${result.callId} must have a factId different from its provider callId`,
+      );
+    }
+    nestedResults.push({
+      callId: result.callId,
+      factId: result.factId,
+      parentToolCallFactId: result.parentToolCallFactId,
+    });
+  }
+
+  const nestedFactIds = new Set(nestedResults.map((result) => result.factId));
+  for (const result of nestedResults) {
+    if (rootFactIds.has(result.factId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary nested tool fact ${result.factId} identity conflicts with a root tool fact`,
+      );
+    }
+    if (nestedFactIds.has(result.parentToolCallFactId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary nested tool fact ${result.factId} cannot reference nested tool fact ${result.parentToolCallFactId} as its parent`,
+      );
+    }
+    if (!rootFactIds.has(result.parentToolCallFactId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary nested tool fact ${result.factId} references unknown root tool fact ${result.parentToolCallFactId} in run ${state.runId}`,
+      );
+    }
+  }
 }
 
 function withoutConfirmationRequest(
@@ -542,8 +819,17 @@ function mergeOrdinaryToolResults(
 function eventForTransition(
   base: Omit<OrdinaryRunEvent, "type">,
   transition: OrdinaryRunTransition,
-): OrdinaryRunEvent {
+): OrdinaryRunEvent | undefined {
   switch (transition.type) {
+    case "record_session_checkpoint":
+      return transition.checkpoint.kind === "compaction_entry_committed"
+        ? {
+            ...base,
+            type: "context.compaction.completed",
+            compactionEntryRef: cloneJson(transition.checkpoint.compactionEntryRef),
+            tokensBefore: transition.checkpoint.tokensBefore,
+          }
+        : undefined;
     case "start": return { ...base, type: "run.started" };
     case "record_reasoning": return {
       ...base,
@@ -616,22 +902,6 @@ function isTerminal(status: OrdinaryRunStatus): boolean {
 
 function nextSequence(events: readonly OrdinaryRunEvent[]): number {
   return (events.at(-1)?.sequence ?? 0) + 1;
-}
-
-export function persistableMessages(messages: readonly ModelMessage[]): readonly ModelMessage[] {
-  return messages.map((message) => ({
-    role: message.role,
-    content: message.content,
-    ref: message.ref,
-    toolCallId: message.toolCallId,
-    toolName: message.toolName,
-    toolCalls: message.toolCalls?.map((call) => ({
-      callId: call.callId,
-      toolName: call.toolName,
-      input: cloneJson(call.input),
-    })),
-    protocolExtensions: persistedModelProtocolExtensions(message.protocolExtensions),
-  }));
 }
 
 function cloneJson<T>(value: T): T {

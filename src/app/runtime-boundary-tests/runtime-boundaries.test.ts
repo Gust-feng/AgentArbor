@@ -7,12 +7,13 @@ test("runtime keeps external LLM SDKs behind provider adapters", () => {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
   };
-  const allowedAdapterOnlyPackages = ["openai", "@openai/agents"];
+  const allowedAdapterOnlyPackages = ["openai"];
   const prohibitedPackages = [
     "ai",
     "@ai-sdk/openai",
     "@anthropic-ai/sdk",
     "@google/genai",
+    "@openai/agents",
     "langchain",
     "@langchain/core",
   ];
@@ -88,6 +89,7 @@ function normalizedPath(file: string): string {
 function isAllowedProviderAdapterCompositionRoot(file: string): boolean {
   return [
     join("src", "app", "model-runtime", "factory.ts"),
-    join("src", "app", "model-runtime", "agent-loop-factory.ts"),
+    join("src", "app", "panel-server", "runtime.ts"),
+    join("src", "app", "panel-server", "ordinary-agent-run-resources.ts"),
   ].some((compositionRoot) => file.endsWith(compositionRoot));
 }

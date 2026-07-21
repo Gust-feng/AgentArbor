@@ -1,5 +1,41 @@
 import type { RunCapabilityResolution } from "../../domain/config/index.js";
 import type { OrdinaryRunBirth, OrdinaryRunTurn } from "./contracts.js";
+import type {
+  AgentSessionEntryRef,
+  AgentSessionRef,
+  AgentSessionRepository,
+} from "../model-runtime/agent-session.js";
+
+export function ordinaryAgentSessionRef(sessionId = "agent-session-1"): AgentSessionRef {
+  return {
+    sessionId,
+    storageKey: `${sessionId}.jsonl`,
+    sessionCwd: "Z:/workspace",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+export function ordinaryAgentSessionRepository(): AgentSessionRepository {
+  const leaves = new Map<string, AgentSessionEntryRef | null>();
+  return {
+    async create(input) {
+      const ref = ordinaryAgentSessionRef(input.sessionId);
+      leaves.set(ref.sessionId, null);
+      return { ...ref, sessionCwd: input.sessionCwd };
+    },
+    async getActiveLeaf(ref) { return leaves.get(ref.sessionId) ?? null; },
+    async moveActiveLeaf(ref, target) {
+      leaves.set(ref.sessionId, target);
+      return target;
+    },
+    async getActiveBranchEntryRefs() { return []; },
+    async readToolCalls() { return []; },
+    async reconcileToolResultEntries() {
+      throw new Error("Test Agent Session repository has no transcript storage.");
+    },
+    async delete(ref) { leaves.delete(ref.sessionId); },
+  };
+}
 
 export function ordinaryRunBirth(): OrdinaryRunBirth {
   const config = {
@@ -69,7 +105,6 @@ export function ordinaryRunBirth(): OrdinaryRunBirth {
 export function ordinaryRunTurn(runId: string): OrdinaryRunTurn {
   return {
     conversationId: "conversation-1",
-    lineageId: "lineage-1",
     ordinal: 1,
     userTurnId: `${runId}-user-turn`,
     assistantTurnId: `${runId}-assistant-turn`,

@@ -4,7 +4,7 @@
 
 这里只保留产品架构、协议边界、工作区结构和历史植物学架构资料。历史经验、推进记录、阶段计划、文档结构治理流水、准备包和草案包不放在这里。
 
-当前产品架构事实源是 [ADR-0028-AgentArbor统一Workbench与功能模块化单体架构](产品架构/ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)。[ADR-0022-AgentArbor桌面通用Agent与双运行时架构](产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md) 的并列产品口径已被部分取代，[ADR-0018-AgentArbor原生概念树架构](产品架构/ADR-0018-AgentArbor原生概念树架构.md) 保留为历史脉络和术语背景。其他 ADR 和详细架构资料不能覆盖 ADR-0028 与当前开发指南。
+当前产品架构事实源是 [ADR-0028-AgentArbor统一Workbench与功能模块化单体架构](产品架构/ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)，Ordinary 与共享底层迁移到 Pi 的决策以 [ADR-0030-AgentArbor Pi 原生底层架构](产品架构/ADR-0030-AgentArbor-Pi原生底层架构.md) 为准。[ADR-0022-AgentArbor桌面通用Agent与双运行时架构](产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md) 的并列产品口径已被部分取代，[ADR-0018-AgentArbor原生概念树架构](产品架构/ADR-0018-AgentArbor原生概念树架构.md) 保留为历史脉络和术语背景。其他 ADR 和详细架构资料不能覆盖 ADR-0028、ADR-0030 与当前开发指南。
 
 如果想先看一份面向读者的总览，可先读 [产品说明](产品架构/README.md)。
 

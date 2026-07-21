@@ -179,7 +179,10 @@ export class ToolCenter implements ToolExecutionGateway {
             facts: mergeToolErrorFacts(sanitized.facts, abortRequestedFacts),
             fullFacts: mergeToolErrorFacts(sanitized.fullFacts, abortRequestedFacts),
           };
-      const rawFailure = failedToolResult(factRequest, startedAt, failure);
+      const rawFailure = {
+        ...failedToolResult(factRequest, startedAt, failure),
+        failureAttribution: "execution_failure" as const,
+      };
       const deliveryStartedAt = Date.now();
       const delivered = await this.prepareThrownErrorForDelivery(
         rawFailure,
@@ -1063,6 +1066,7 @@ function normalizeExecutorResult(
         : "Tool execution failed.",
     errorDomain,
     errorFacts,
+    ...(status === "failed" ? { failureAttribution: "execution_failure" as const } : {}),
     durationMs,
   };
 }
@@ -1251,8 +1255,15 @@ function cancelledToolResult(
   };
 }
 
-function toolFactIdentity(request: ToolCallRequest): { readonly factId?: string } {
-  return request.factId === undefined ? {} : { factId: request.factId };
+function toolFactIdentity(
+  request: ToolCallRequest,
+): Pick<ToolCallRequest, "factId" | "parentToolCallFactId"> {
+  return {
+    ...(request.factId === undefined ? {} : { factId: request.factId }),
+    ...(request.parentToolCallFactId === undefined
+      ? {}
+      : { parentToolCallFactId: request.parentToolCallFactId }),
+  };
 }
 
 function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {

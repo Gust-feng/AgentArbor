@@ -75,18 +75,25 @@ test("ToolCenter owns executor fact normalization while adapters only normalize 
   const root = process.cwd();
   const sourceRoot = path.join(root, "src");
   const mcpAdapter = path.join(sourceRoot, "adapters", "mcp", "mcp-tool-adapter.ts");
-  const openAIAgentsToolsAdapter = path.join(
+  const agentSessionLoopAdapter = path.join(
     sourceRoot,
     "adapters",
     "intelligence",
-    "openai-agents-tools.ts",
+    "agent-session-loop.ts",
+  );
+  const fileSystemSessionAdapter = path.join(
+    sourceRoot,
+    "adapters",
+    "intelligence",
+    "file-system-agent-session-repository.ts",
   );
   const allowedCallers = new Set([
     path.join(sourceRoot, "app", "tool-center", "tool-center.ts"),
     path.join(sourceRoot, "domain", "tools", "fact-value.ts"),
     path.join(sourceRoot, "domain", "tools", "error-facts.ts"),
     mcpAdapter,
-    openAIAgentsToolsAdapter,
+    agentSessionLoopAdapter,
+    fileSystemSessionAdapter,
   ]);
   const violations: string[] = [];
   const files = (await collectSourceFiles(sourceRoot)).filter((file) => !isTestAssetSource(file));
@@ -106,16 +113,16 @@ test("ToolCenter owns executor fact normalization while adapters only normalize 
     [],
     "production consumers must trust ToolCallResult facts instead of normalizing them again",
   );
-  const openAIAgentsTools = await fs.readFile(openAIAgentsToolsAdapter, "utf8");
+  const agentSessionLoop = await fs.readFile(agentSessionLoopAdapter, "utf8");
   assert.equal(
-    openAIAgentsTools.includes("const fact = normalizeToolFactValue(value);"),
+    agentSessionLoop.includes("normalizeToolFactValue("),
     true,
-    "the OpenAI SDK adapter must normalize unknown agent-tool params at its external boundary",
+    "the Agent Session adapter must normalize unknown tool params at its external boundary",
   );
   assert.equal(
-    openAIAgentsTools.includes("normalizeToolErrorFacts("),
+    agentSessionLoop.includes("normalizeToolErrorFacts("),
     false,
-    "the OpenAI SDK adapter must trust ToolCenter error facts",
+    "the Agent Session adapter must trust ToolCenter error facts",
   );
 });
 

@@ -30,8 +30,8 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
     ordinaryAgentFeature: {
       async release() { disposalOrder.push("ordinary"); },
     },
-    multiAgentFeature: {
-      async dispose() { disposalOrder.push("multi-agent"); },
+    async releaseAgentSessionStorage() {
+      disposalOrder.push("session-storage");
     },
     processRegistry: {
       async cleanupOwnedProcesses() {
@@ -46,7 +46,8 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
   await closePanelServer(server, runtime);
 
   assert.equal(runtime.isQuiescing, true);
-  assert.deepEqual(disposalOrder.sort(), ["multi-agent", "ordinary"]);
+  assert.deepEqual(disposalOrder.slice(0, 1), ["ordinary"]);
+  assert.equal(disposalOrder.at(-1), "session-storage");
   assert.equal(processCleanupCount, 1);
   assert.equal(await outputStore.read(retained.ref, { startChar: 0, maxChars: 64 }), undefined);
 });

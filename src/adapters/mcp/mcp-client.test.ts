@@ -731,15 +731,7 @@ test("createMcpToolExecutor creates correct namespaced ToolExecutor", async () =
   assert.equal(executor.definition.metadata?.operationType, "execute");
   const validation = validateModelVisibleToolContract(executor.definition);
   assert.equal(validation.ok, true, validation.missing.join(", "));
-  assert.equal(executor.definition.modelContract?.runtimeHints?.some((hint) => hint.value === "my-server"), true);
-  const outputNotes = executor.definition.modelContract?.outputNotes?.join("\n") ?? "";
-  assert.match(outputNotes, /one canonical fact body/i);
-  assert.match(outputNotes, /not truncated/i);
-  assert.match(outputNotes, /typed model attachments/i);
-  assert.match(outputNotes, /tool-origin media keeps its tool-result role/i);
-  assert.match(outputNotes, /rejects tool-origin binary attachments/i);
-  assert.match(outputNotes, /failed ToolCallResult/i);
-  assert.equal(executor.definition.modelContract?.whenNotToUse?.join("\n").includes("built-in"), false);
+  assert.equal(executor.definition.modelContract, undefined);
 
   await client.disconnect();
 });
@@ -785,7 +777,7 @@ test("createCachedMcpToolExecutor compacts verbose MCP descriptions for model vi
     executor.definition.description,
     "Search documentation for a query and return the most relevant passages. Use this for current API references that are not already present in the workspace."
   );
-  assert.equal(executor.definition.modelContract?.purpose, executor.definition.description);
+  assert.equal(executor.definition.modelContract, undefined);
   assert.equal(executor.definition.description.includes("Workflow guidance"), false);
   assert.match(modelVisibleToolDescription(executor.definition), /^Search documentation for a query/m);
 });

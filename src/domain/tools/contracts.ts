@@ -79,6 +79,9 @@ export type ToolErrorFactValue =
 
 export type ToolErrorFacts = Readonly<Record<string, ToolErrorFactValue>>;
 
+/** The proven phase that produced a failed ToolCallResult. */
+export type ToolFailureAttribution = "schema_validation" | "execution_failure";
+
 export type ToolRuntimeHint =
   | {
       readonly kind: "command_shell";
@@ -170,6 +173,29 @@ export type ToolCallRequest = {
   readonly input: ToolFactValue | undefined;
 };
 
+/**
+ * Measurement facts for one AgentTool delegation. The parent run remains the
+ * owner of the tool result; this records only the child work it delegated.
+ */
+export type DelegatedAgentExecutionMetadata = {
+  readonly modelRounds: number;
+  readonly toolCallCount: number;
+  readonly usage: DelegatedAgentUsage;
+};
+
+/** Usage attributable to one delegated AgentTool invocation, independent of a model adapter. */
+export type DelegatedAgentUsage = {
+  readonly requestCount?: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly totalTokens?: number;
+  readonly cachedInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+  readonly uncachedInputTokens?: number;
+  readonly reasoningOutputTokens?: number;
+  readonly estimatedCostUsd?: number;
+};
+
 export type ToolCallResult = {
   /** Provider/protocol call id. It must be returned unchanged to the originating model. */
   readonly callId: string;
@@ -184,6 +210,10 @@ export type ToolCallResult = {
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
+  /** Present only when AgentArbor can prove the phase that produced this failure. */
+  readonly failureAttribution?: ToolFailureAttribution;
+  /** Present only for a completed, failed, or cancelled delegated AgentTool invocation. */
+  readonly delegatedExecution?: DelegatedAgentExecutionMetadata;
   readonly durationMs: number;
   readonly confirmationRequest?: ConfirmationRequest;
 };

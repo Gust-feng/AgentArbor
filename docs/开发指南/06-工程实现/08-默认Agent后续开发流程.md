@@ -2,7 +2,7 @@
 
 ## 目标
 
-后续开发沿统一 Workbench 主线推进：Ordinary Agent 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是 Ordinary 的 SDK AgentTool。Ordinary 与 Multi-Agent 共享中性模型、工具、确认、上下文算法和系统 adapter，不共享业务状态、事件、仓储或 read-model；Sub-Agent 调用事实进入父 Ordinary run。
+后续开发沿统一 Workbench 主线推进：Ordinary Agent 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是 Ordinary 的 Pi AgentTool。Ordinary 与 Multi-Agent 共享中性模型、工具、确认、上下文算法和系统 adapter，不共享业务状态、事件、仓储或 read-model；Sub-Agent 调用事实进入父 Ordinary run。
 
 每轮开发先回答：
 
@@ -46,8 +46,8 @@
 ### 3. 共享能力中性化
 
 - `model-runtime` 只创建 provider/channel 与协议能力，不创建 ToolCenter、Desktop Skill 或 feature registry。
-- ToolCenter 工厂归工具能力模块；Host 向 ToolCenter 装配文件、命令、浏览器、HTTP、研究、MCP 与 Skills 资源工具，并向 Ordinary SDK loop 装配 Sub-Agent AgentTool。
-- Ordinary 使用中性的 `AgentLoop` 端口，生产实现由 OpenAI Agents SDK adapter 提供；Multi-Agent 仍可使用自己的运行端口，两者不共享业务状态或完成语义。
+- ToolCenter 工厂归工具能力模块；Host 向 ToolCenter 装配文件、命令、浏览器、HTTP、研究、MCP 与 Skills 资源工具，并向 Ordinary Agent Session loop 装配 Sub-Agent AgentTool。
+- Ordinary 使用中性的 `AgentLoop` 端口，生产实现由 Pi AgentHarness/Session adapter 提供；Multi-Agent 仍可使用自己的运行端口，两者不共享业务状态或完成语义。
 - Deep 只共享 tokenizer、消息完整性和压缩执行等机械能力，不依赖 Ordinary compaction facade。
 - 拆除 `MinimalRuntime` service locator，改为精确依赖注入；不新建 `RuntimeServices` 属性包。
 
@@ -67,7 +67,7 @@
 
 - 已删除 `/api/underground/*`、旧 root exports、demo、BasicAgent/Desktop/Panel 旧执行链、应用层 Underground 与未被正式路径使用的旧实现。
 - Ordinary 持久化已归 feature-owned repository，旧 RuntimeDatabase 与旧 snapshot 不兼容读取。
-- Sub-Agent 已切换到 SDK 原生 AgentTool，旧 runner、事件、trace、批量与专用续读能力已退役。
+- Sub-Agent 已切换到 Pi AgentTool，旧 runner、事件、trace、批量与专用续读能力已退役。
 - Deep 仍需要的 `domain/underground/agent-fabric` run-tree 契约保持有效；后续只做 Multi-Agent owner 内部归位。
 - 不提前抽象通用 blob/journal/repository；出现两个稳定消费者后再提取。
 

@@ -4,13 +4,13 @@
 
 Sub-Agent 是 Ordinary Agent 的工具能力，不是独立运行模式，也不是 Multi-Agent 的 child。模型可以把一个边界清楚的局部任务交给专家，专家完整返回结果，父 Agent 决定如何继续。
 
-当前正式实现直接使用 OpenAI Agents SDK 的 AgentTool 机制，不再维护自研 Sub-Agent runner、事件体系、trace store、独立 read-model 或输出续读协议。
+当前正式实现直接使用 Pi AgentHarness 的 AgentTool 适配机制，不再维护自研 Sub-Agent runner、事件体系、trace store、独立 read-model 或输出续读协议。
 
 ```text
 OrdinaryAgentFeature
-  -> OpenAI Agents SDK loop
+  -> Pi AgentHarness loop
       -> call_sub_agent / spawn_sub_agent
-          -> SDK nested Agent
+          -> Agent Session nested Agent
               -> parent ToolExecutionGateway -> ToolCenter
           -> complete result -> parent model
 ```
@@ -33,12 +33,12 @@ OrdinaryAgentFeature
 - 发现、解析、校验和登记 `SUB_AGENT.md`。
 - 向 capability catalog 贡献两个 catalog-only 工具定义，并与冻结 run 的普通工具边界使用同一曝光决策。
 - 为每个冻结的 Ordinary run 生成 `call_sub_agent` / `spawn_sub_agent` AgentTool 定义。
-- 把工具输入解析为 SDK nested Agent 的 instructions、input、caller identity 和工具权限。
+- 把工具输入解析为 Agent Session nested Agent 的 instructions、input、caller identity 和工具权限。
 - 对 Sub-Agent 工具权限做确定性收窄并阻止递归。
 
-catalog-only 定义不向 ToolRegistry 注册假 executor；真正执行只发生在 OpenAI Agents SDK adapter 创建的 AgentTool 中。一个 Sub-Agent 工具只有同时进入冻结 capability snapshot、通过 AgentDefinition/tool exposure 决策并能生成本轮 AgentTool 时才向模型可见。
+catalog-only 定义不向 ToolRegistry 注册假 executor；真正执行只发生在 Pi AgentTool adapter 创建的 AgentTool 中。一个 Sub-Agent 工具只有同时进入冻结 capability snapshot、通过 AgentDefinition/tool exposure 决策并能生成本轮 AgentTool 时才向模型可见。
 
-Sub-Agent 模块不拥有 Ordinary run 状态、conversation、持久化、确认 continuation 或 UI projection。OpenAI Agents SDK adapter 负责 nested Agent 的机械循环；Ordinary feature 继续拥有父 run 的业务事实。
+Sub-Agent 模块不拥有 Ordinary run 状态、conversation、持久化、确认 continuation 或 UI projection。Pi AgentHarness adapter 负责 nested Agent 的机械循环；Ordinary feature 继续拥有父 run 的业务事实。
 
 ## 定义与发现
 
@@ -121,19 +121,19 @@ Sub-Agent 权限只允许收窄：
 ## 上下文与结果
 
 - 父模型显式提供 `task` 和可选 `context`，工程层不额外构造隐藏任务状态或摘要账本。
-- SDK nested Agent 自己完成模型-工具-模型循环。
-- 父 Ordinary run 使用流式模型传输时，SDK AgentTool 的 nested Agent 必须使用同一流式能力和取消信号；nested stream 由 SDK 完整消费但不建设第二套 Sub-Agent SSE 或 read-model。模型请求的有限重试继续由同一个 SDK adapter 管理，不能在 Sub-Agent 模块、AgentTool wrapper 或 ToolCenter 再叠加重试。
+- Pi nested AgentTool 自己完成模型-工具-模型循环。
+- 父 Ordinary run 使用流式模型传输时，Pi AgentTool 的 nested Agent 必须使用同一流式能力和取消信号；nested stream 由 Pi 完整消费但不建设第二套 Sub-Agent SSE 或 read-model。模型请求的重试继续由 provider binding 管理，不能在 Sub-Agent 模块、AgentTool wrapper 或 ToolCenter 再叠加重试。
 - AgentTool 返回 nested Agent 的完整最终输出，父模型把它作为局部材料继续推理。
 - 不创建专用 trace、独立 read-model、独立事件流或 sidecar。
 - AgentTool requested/result 作为 Ordinary 标准 tool facts 持久化和展示，不发布专用 `sub_agent.*` 事件。
 - 不提供专用输出续读工具；如果父模型需要补充材料，应再次调用现有工具或再次委派一个明确任务。
-- Ordinary 的 canonical history 只保存模型实际消费的 AgentTool 调用与结果，不从 UI 投影回填。
+- Pi Session 只保存模型实际消费的 AgentTool 调用与结果；Ordinary snapshot 只保存 Session 引用，不从 UI 投影回填。
 
 ## 与 Multi-Agent 的边界
 
 Sub-Agent 与 Deep child 独立：
 
-- Sub-Agent 是 Ordinary 中的 SDK AgentTool，没有独立 task board 或 run tree。
+- Sub-Agent 是 Ordinary 中的 Pi AgentTool，没有独立 task board 或 run tree。
 - Deep child 由 Multi-Agent manager、TaskBoard 和 scheduler 编排，使用 `/api/deep/*` 的业务事实。
 - 两者可以共享模型、ToolCenter、确认和上下文机械能力，但不共享状态、事件、仓储或 read-model。
 - 不允许在两者之间自动升级、转换状态或复用 continuation。

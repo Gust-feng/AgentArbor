@@ -1,5 +1,5 @@
 /**
- * deep-routes.ts —— `/api/deep/*` 产品 API 端点族（T3-1 / T3-2 / T3-3，闭环3 批次C-1）。
+ * deep-routes.ts —— 延期的 `/api/deep/*` 重建适配器。
  *
  * 端点族（design §6.1 / §6.3，落地 FR-001 / FR-002 / FR-007 / FR-008）：
  *   POST   /api/deep/conversations              创建独立 deep 会话（携带 workspace 上下文）
@@ -18,10 +18,8 @@
  *   POST   /api/deep/runs/:runId/stop           停止（尝试产出部分结论）
  *
  * 工程要点：
- *   - **EP1（严禁 mock 模型接入）**：从 PanelRuntime 取 configCenter / capabilityCenter，
- *     复用 desktop-run-resources 冻结模型环境、ToolCenter、MCP 与命令 shell 能力后构造
- *     IntelligenceChannel → AgentTurnRuntime → executeDeepRun；child 与普通桌面 Agent 共用
- *     标准模型-工具-模型循环和确认门，不绑定临时 provider 私有字段。
+ *   - 当前生产 Panel 不导入也不调用本模块；恢复前必须用独立方案重新装配模型、工具、
+ *     确认与持久化边界，不能把历史实现直接接回 Ordinary runtime。
  *   - **EP4（controlHandle 注册表）**：MultiAgentFeature 持有每个在途 run 的控制句柄；
  *     interrupt / correct / stop 端点经其显式查询契约转发到运行侧（T2-7 control point）。
  *   - **隔离边界**：deep 端点与普通 `/api/conversations` / `/api/basic-agent/*` 物理隔离；
@@ -47,7 +45,7 @@ import {
   writeSseEvent,
 } from "./http-utils.js";
 import { deepConversationRunEnvelope } from "../deep/deep-run-view-base.js";
-import type { PanelRuntime } from "./runtime.js";
+import type { ConfigCenter } from "../config-center/index.js";
 import type {
   DeepChildInstructionQueueResult,
 } from "../deep/deep-child-scheduler-contracts.js";
@@ -79,11 +77,19 @@ const DEEP_STREAM_HEARTBEAT_INTERVAL_MS = 15_000;
 // ---------------------------------------------------------------------------
 
 /**
- * deep 路由分发器。匹配 `/api/deep/` 前缀时返回 true 并处理；否则返回 false 交回主分发链。
- * 放在 handlePanelRequest 分发链靠前位置（`/api/deep` 前缀明确，不与普通路由冲突）。
+ * 延期路由分发器。未来重建时可匹配 `/api/deep/` 前缀；当前主分发链不调用它。
  */
+/**
+ * Kept as a future reconstruction seam. The active Panel runtime deliberately
+ * does not satisfy this contract and never calls this route family.
+ */
+export type DeferredMultiAgentRouteRuntime = {
+  readonly configCenter: ConfigCenter;
+  readonly multiAgentFeature: MultiAgentFeature;
+};
+
 export async function handlePanelDeepRoute(
-  runtime: PanelRuntime,
+  runtime: DeferredMultiAgentRouteRuntime,
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
@@ -117,7 +123,7 @@ export async function handlePanelDeepRoute(
 
 /** 按 pathname + method 分流到各子端点。返回 true 表示已处理。 */
 async function dispatchDeepRoute(
-  runtime: PanelRuntime,
+  runtime: DeferredMultiAgentRouteRuntime,
   state: MultiAgentFeature,
   request: IncomingMessage,
   response: ServerResponse,
@@ -265,7 +271,7 @@ async function dispatchDeepRoute(
 // ---------------------------------------------------------------------------
 
 async function handleDeepIntake(
-  runtime: PanelRuntime,
+  runtime: DeferredMultiAgentRouteRuntime,
   state: MultiAgentFeature,
   request: IncomingMessage,
   response: ServerResponse,
@@ -302,7 +308,7 @@ async function handleDeepIntake(
 
 async function handleCreateDeepConversation(
   state: MultiAgentFeature,
-  runtime: PanelRuntime,
+  runtime: DeferredMultiAgentRouteRuntime,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
@@ -328,7 +334,7 @@ async function handleCreateDeepConversation(
 
 async function handleStartDeepRun(
   state: MultiAgentFeature,
-  runtime: PanelRuntime,
+  runtime: DeferredMultiAgentRouteRuntime,
   conversationId: string,
   request: IncomingMessage,
   response: ServerResponse,
@@ -362,7 +368,7 @@ async function handleStartDeepRun(
 }
 
 async function handleDeepRunFollowUp(
-  runtime: PanelRuntime,
+  runtime: DeferredMultiAgentRouteRuntime,
   state: MultiAgentFeature,
   runId: string,
   request: IncomingMessage,
@@ -900,7 +906,7 @@ async function ensureDeepConversationExists(
 
 /** 解析 deep 运行的 aiMode：请求体优先，否则取 configCenter 的默认 AI 模式。 */
 async function resolveDeepAiMode(
-  runtime: PanelRuntime,
+  runtime: DeferredMultiAgentRouteRuntime,
   requestedAiMode: ModelRuntimeMode | undefined,
 ): Promise<ModelRuntimeMode> {
   if (requestedAiMode !== undefined) {

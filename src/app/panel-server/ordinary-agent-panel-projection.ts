@@ -266,6 +266,8 @@ function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): 
       error: activity.result.error,
       errorDomain: activity.result.errorDomain,
       errorFacts: activity.result.errorFacts,
+      failureAttribution: activity.result.failureAttribution,
+      delegatedExecution: activity.result.delegatedExecution,
     };
     return {
       id: activity.activityId,
@@ -295,7 +297,7 @@ function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): 
       delta: activity.delta,
       status: "running",
       timestamp: activity.recordedAt,
-      refs: [{ kind: "event", id: activity.activityId }],
+      refs: [{ kind: "model_call", id: activity.modelRequestId }],
       visibility: "compact",
     };
   }
@@ -323,7 +325,7 @@ function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): 
       summary: modelRequestSummary(activity.reason),
       status: "running",
       timestamp: activity.recordedAt,
-      refs: [{ kind: "event", id: activity.activityId }],
+      refs: [{ kind: "model_call", id: activity.activityId }],
       visibility: "compact",
     };
   }
@@ -353,6 +355,13 @@ function projectTransition(
       delta: event.content,
       status: "completed",
       refs: [{ kind: "model_call", id: event.modelRequestId }],
+    };
+    case "context.compaction.completed": return {
+      ...base,
+      type: event.type,
+      title: "整理上下文",
+      summary: "上下文压缩完成",
+      status: "completed",
     };
     case "run.approval_requested": {
       const request = event.confirmationRequests[0];
@@ -436,7 +445,10 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
       summary: event.summary,
       timestamp: activity.recordedAt,
       toolName: activity.result.toolName,
+      failureAttribution: activity.result.failureAttribution,
+      error: activity.result.error,
       parentToolCallFactId: activity.result.parentToolCallFactId,
+      delegatedExecution: activity.result.delegatedExecution,
       display: toolStreamDetail(
         event.type === "tool.completed"
           ? "tool.completed"
@@ -449,6 +461,8 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
           error: activity.result.error,
           errorDomain: activity.result.errorDomain,
           errorFacts: activity.result.errorFacts,
+          failureAttribution: activity.result.failureAttribution,
+          delegatedExecution: activity.result.delegatedExecution,
         },
       ).display,
       refs: event.refs,
@@ -560,11 +574,19 @@ function projectTranscriptNodes(
   for (const activity of activities) {
     if (activity.type === "model.output.delta") {
       flushReasoningDeltas();
+      if (outputDeltas[0]?.modelRequestId !== undefined &&
+          outputDeltas[0].modelRequestId !== activity.modelRequestId) {
+        flushOutputDeltas();
+      }
       outputDeltas.push(activity);
       continue;
     }
     if (activity.type === "model.reasoning.delta") {
       flushOutputDeltas();
+      if (reasoningDeltas[0]?.modelRequestId !== undefined &&
+          reasoningDeltas[0].modelRequestId !== activity.modelRequestId) {
+        flushReasoningDeltas();
+      }
       reasoningDeltas.push(activity);
       continue;
     }
@@ -632,6 +654,7 @@ function transcriptPhase(event: OrdinaryRunEvent): TranscriptNode["phase"] {
     case "run.created": return "noted";
     case "run.started": return "executing";
     case "model.reasoning.completed": return "completed";
+    case "context.compaction.completed": return "completed";
     case "run.approval_requested": return "waiting_approval";
     case "run.approval_decided": return event.decision.decision === "deny"
       ? "denied"

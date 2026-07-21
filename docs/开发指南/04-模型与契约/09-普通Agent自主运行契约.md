@@ -21,7 +21,7 @@
 
 ## 运行入口
 
-普通 Desktop Agent 通过 `OrdinaryAgentFeature` 进入标准模型-工具-模型循环。feature 调用中性的 `AgentLoop` 端口；当前生产 adapter 使用 OpenAI Agents SDK，同时支持 OpenAI Responses 与 OpenAI-compatible Chat。SDK 只负责机械循环和 live confirmation continuation，不拥有 Ordinary 的业务状态、完成语义、仓储或 read-model。
+普通 Desktop Agent 通过 `OrdinaryAgentFeature` 进入标准模型-工具-模型循环。feature 调用中性的 `AgentLoop` 端口；当前生产 adapter 使用 Pi AgentHarness/Session 和 pi-ai provider binding。Pi 只负责机械循环、Session、压缩和 provider transport，不拥有 Ordinary 的业务状态、完成语义、仓储或 read-model。
 
 `execute` 的模型可见工具只包含本轮授权后的外部能力工具：
 
@@ -77,7 +77,7 @@ while not cancelled:
 - 普通开发工具结果回传。
 - tool event 审计。
 
-ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一防线。OpenAI Agents SDK adapter 必须在进入具体执行 broker 前按本轮 `allowedTools` 裁剪工具；ToolCenter 和 adapter 可以重复校验与命令确认，但只能返回执行事实，不能生产模型或 UI 投影。每个工具结果必须先由 Ordinary feature 持久化为 canonical 事实，才允许返回模型；provider `callId` 与应用 `factId` 分离，不能因父/子 Agent 或并行 child 的 call id 重复而复用权限、确认或结果。工具失败、拒绝、取消和确认等待都应以标准结果回传模型，让模型基于真实工具世界继续判断。
+ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一防线。Pi AgentTool adapter 必须在进入具体执行 broker 前按本轮 `allowedTools` 裁剪工具；ToolCenter 和 adapter 可以重复校验与命令确认，但只能返回执行事实，不能生产模型或 UI 投影。每个工具结果必须先由 Ordinary feature 持久化为 AgentArbor 工具事实，才允许作为有界消息返回 Pi Session；provider `callId` 与应用 `factId` 分离，不能因父/子 Agent 或并行 child 的 call id 重复而复用权限、确认或结果。工具失败、拒绝、取消和确认等待都应以标准结果回传模型，让模型基于真实工具世界继续判断。
 
 工具身份必须在进入 AgentArbor 可执行 catalog 时一次性冻结为只含 ASCII 字母、数字和下划线的 provider-portable canonical name。外部 adapter 可以另外保留 MCP 等协议的原始方法名用于远端调用，但 ToolCenter、模型调用、工具结果、Ordinary 持久化和 read-model 必须始终使用同一个 canonical name，不得在 provider 执行后反向猜测或回译名称。归一化后重名必须在 catalog/registry 装配期明确失败，不能由 `Map.set()` 静默覆盖。
 
@@ -96,7 +96,7 @@ Ordinary 对 `AgentLoop.execute` / live confirmation continuation 技术结果�
 - `cancelled/cancelled`：用户或系统中止。
 - `failed/model_failed`：provider 失败或响应不可用。
 
-provider 失败、404、超时或流式连接断开若不能安全重试，会永久结束当前模型调用。模型传输重试只能由 OpenAI Agents SDK adapter 单点拥有：OpenAI client 自身关闭隐式重试；单次模型请求在尚未收到任何 provider 事件时，最多对明确的网络失败、超时、限流和临时服务状态做两次带退避重试。工具结果已经持久化不妨碍重试其后的纯模型请求，因为重试只再次读取同一 canonical 输入，不重新执行工具；一旦本次模型请求已经收到任意 provider 事件、用户可见增量或新工具调用事实，则不得自动重试、拼接两个 attempt 或把新请求伪装成旧流恢复。无法安全重试时，用户只能在同一 conversation 追加一条新消息形成新 run，或回退到先前用户轮次后创建新 lineage；新 run 从上一条可见 lineage 已持久化的 canonical 事实开始。
+provider 失败、404、超时或流式连接断开若不能安全重试，会永久结束当前模型调用。模型传输重试和动态认证由 Pi provider binding 单点拥有；Ordinary 不复制 provider client 或重试器。工具结果已经持久化不妨碍重试其后的纯模型请求，因为重试只再次读取同一 Session branch，不重新执行工具；一旦本次模型请求已经收到任意 provider 事件、用户可见增量或新工具调用事实，则不得自动拼接多个 attempt。无法安全重试时，用户只能追加新消息形成新 run，或回退到历史 Session leaf 后创建新分支。
 
 普通 Agent 不应使用 `maxModelRounds` 或 `maxToolRounds` 作为正常运行边界。默认 Desktop Agent 的 `AgentDefinition.turnPolicy` 不得携带模型轮次或工具轮次上限；旧结构化路径、测试桩或专用 agent 可以有显式预算，但这些预算不能流入默认普通 Desktop Agent 的产品主线。若底层自主 loop 仍接收到显式保护阀，它只能作为异常防护并返回未完成的 paused / blocked 结果，不能合成 completed、不能成为普通验收路径、常规暂停 UX 或模型能力上限。
 
@@ -104,11 +104,11 @@ provider 失败、404、超时或流式连接断开若不能安全重试，会�
 
 普通 Agent 也不应默认给每次模型请求套固定短延迟预算。用户取消、进程中止、provider 自身超时和外部网络失败是硬边界；普通任务的耗时上限应来自用户明确要求、运行环境策略或 provider 真实失败，而不是前端体验层预设的固定秒数。
 
-用户取消的是 Ordinary run，而不是等待 provider、SDK 或工具 Promise 自行结束。Ordinary feature 必须先持久化取消终态、停止新输出和新工具调度，再由资源 owner 在后台传播 `AbortSignal` 并释放 transport、continuation 与进程资源；取消命令不得等待可能忽略 abort 的纯模型调用。只有已经接受工具轮且执行结果尚未确定时，后续 run 才继续等待该工具事实收口。Panel 可以立即收起运行控件并停止观察连接，但不能展示 runtime、transport、清理阶段或 continuation 丢失等内部提示，也不能清空用户在运行中追加的消息；取消前已显示的正文可以继续显示为未完成内容，但不能进入 completed 正式回答或 canonical 历史。
+用户取消的是 Ordinary run，而不是等待 provider、Pi 或工具 Promise 自行结束。Ordinary feature 必须先持久化取消终态、停止新输出和新工具调度，再由资源 owner 在后台传播 `AbortSignal` 并释放 transport、continuation 与进程资源；取消命令不得等待可能忽略 abort 的纯模型调用。只有已经接受工具轮且执行结果尚未确定时，后续 run 才继续等待该工具事实收口。Panel 可以立即收起运行控件并停止观察连接，但不能展示 runtime、transport、清理阶段或 continuation 丢失等内部提示，也不能清空用户在运行中追加的消息；取消前已显示的正文可以继续显示为未完成内容，但不能进入 completed 正式回答或 Pi Session 历史。
 
-已经向用户展示的流式正文必须作为独立的 durable view checkpoint 保存。该 checkpoint 不是模型完成事实、不能进入 `canonicalMessages`，也不能被下一轮当作正式 assistant 历史；它只用于主动取消或进程退出后恢复用户已经看见的会话表面。主动取消不生成“已取消”assistant 消息、错误卡或原因文案；没有已显示正文和真实工具过程时，该 assistant turn 在默认视图中保持无形。
+已经向用户展示的流式正文必须作为独立的 durable view checkpoint 保存。该 checkpoint 不是模型完成事实、不能写入 Pi Session，也不能被下一轮当作正式 assistant 历史；它只用于主动取消或进程退出后恢复用户已经看见的会话表面。主动取消不生成“已取消”assistant 消息、错误卡或原因文案；没有已显示正文和真实工具过程时，该 assistant turn 在默认视图中保持无形。
 
-进程退出后，live-only 模型或确认 continuation 仍按内部事实收口为不可续接状态，但默认 Panel 只恢复退出前持久化的可见正文、工具事实和会话位置，不显示进程重启、continuation 丢失或 runtime 错误。这里恢复的是视图，不是继续执行：用户只能追加新消息创建新 run，或回退到之前的用户消息创建新 lineage。Host 必须对 `runtimeHome` 实施单写者所有权；不同端口和开发 watch 实例不能同时恢复或改写同一运行目录。
+进程退出后，live-only 模型或确认 continuation 仍按内部事实收口为不可续接状态，但默认 Panel 只恢复退出前持久化的可见正文、工具事实和 Session 位置，不显示进程重启、continuation 丢失或 runtime 错误。这里恢复的是视图，不是继续执行：用户只能追加新消息创建新 run，或回退到 Pi Session 的历史 leaf 创建新分支。Host 必须对 `runtimeHome` 实施单写者所有权；不同端口和开发 watch 实例不能同时恢复或改写同一运行目录。
 
 用户可见暂停文案必须使用产品语言，例如：
 
@@ -120,7 +120,7 @@ provider 失败、404、超时或流式连接断开若不能安全重试，会�
 
 ## 上下文装配
 
-上下文管理只有两个明确边界：Ordinary 负责装配本轮模型输入，模型调用前的 loop maintenance 负责在物理窗口不足时压缩较早消息。该检查必须发生在首次请求以及每次工具调用后的下一次请求前，并以即将发送的完整请求为准。未触发压缩时，canonical 消息不得被摘要、投影或字符预算改写；触发压缩时必须保留系统边界、当前请求、完整工具交互和未完成事项，失败则明确暂停，不能带着超限或残缺上下文继续调用模型。
+上下文管理只有两个明确边界：Ordinary 负责装配本轮模型输入，Pi AgentHarness/Session 负责在请求边界保护物理窗口并压缩较早消息。该检查必须发生在首次请求以及每次工具调用后的下一次请求前，并以即将发送的完整请求为准。未触发压缩时，Pi Session 消息不得被展示投影或字符预算改写；触发压缩时必须保留系统边界、当前请求、完整工具交互和未完成事项，失败则明确暂停，不能带着超限或残缺上下文继续调用模型。
 
 装配规则：
 
@@ -129,23 +129,23 @@ provider 失败、404、超时或流式连接断开若不能安全重试，会�
 - Panel 可见对话、工具 lifecycle event 和 read-model 只服务展示、审计或 Skill 路由，不能重新拼成另一份模型历史。
 - Token 统计必须来自模型能力目录或专用 tokenizer / provider 计量能力，且覆盖正文、工具调用参数、协议扩展和附件元数据；本地无法精确计量的二进制附件必须预留保守预算，provider 仍是最终计量边界，不能用字符数粗略估算作为最终裁剪依据。
 - 达到模型上下文阈值时优先进行 AI 压缩；只有压缩失败且外部硬边界无法恢复时，才能中断运行。
-- 超预算时由 loop-level compaction 压缩旧上下文，不能丢系统边界、当前用户消息和必要工具结果；除此之外不得在模型调用前静默省略或替换 canonical 消息。
+- 超预算时由 Pi compaction 压缩旧上下文，不能丢系统边界、当前用户消息和必要工具结果；除此之外不得在模型调用前静默省略或替换 Session 消息。
 - 摘要必须保留继续开发所需的关键事实，不能因为摘要或投影丢失普通回答、工具结果和错误信息。
 - 同一次 assistant tool call 与其全部 tool result 是不可拆分的上下文组；压缩要么保留整组，要么把整组交给压缩，不能留下悬空调用或孤立结果。
-- 映射到 Chat Completions wire payload 时，带 `tool_calls` 的 assistant message 后必须连续跟随该批次全部对应 tool message；canonical assistant 同时含正文和工具调用时，正文不能被映射成夹在 tool call 与 tool result 之间的独立 assistant message。
-- 同一协议连续运行时，OpenAI Responses 手动上下文必须保留并回传上一轮 output items；Responses 请求 `reasoning.encrypted_content`，使推理与 function call continuation 不被消息文本替代。Chat Completions 保留累计 `messages` 顺序，并只持久化受支持 provider profile 的 reasoning 续接白名单。用户在同一 conversation 切换 Responses 与 Chat Completions 时，产品会话继续存在，但 adapter 必须从 canonical `user / assistant / tool` 事实建立新的协议上下文段；旧协议 reasoning、加密 output item 和私有续接字段不得发送给目标协议，也不得声称无损转换。
-- Responses streaming 必须保留 live text delta，并在 SDK 解析前按同一 SSE 响应的 `output_index`、item id、call id、类型和事件顺序归并 output item lifecycle 与 terminal response snapshot；terminal output 允许省略已由 item 事件完整给出的 reasoning 或压缩数组，因此不得把 terminal 数组下标当作流式 `output_index`。缺少重复 item status 时可以由已完成 item 事件或响应自身的 `completed / incomplete` 终态补齐，不得把某一个可选中间事件写成成功前提；恢复后的完整 item 必须继续交给 SDK 标准转换和 canonical continuation。不得通过关闭 streaming、过滤 output item 或伪造完成状态绕过 SDK/协议错误；身份冲突、显式非法状态和 provider failure 必须作为协议失败暴露。
+- Pi provider adapter 映射工具协议时，assistant tool call 后必须连续跟随该批次全部对应 tool result；正文不能插入工具协议组之间。
+- 同一协议连续运行时，Pi provider/model binding 保留协议 continuation；用户切换 provider/protocol 时由 Pi 按公开能力建立新的上下文段，Ordinary 不复制或伪造 provider 私有 continuation。
+- 流式输出、事件顺序、provider stop reason 和 continuation 由 Pi AgentHarness/provider adapter 归一化；AgentArbor 只映射为 Ordinary live activity 和终态事实，不关闭 streaming、过滤事件或伪造完成。
 - 所有 OpenAI-compatible 请求的稳定系统指令、工具定义和既有消息必须位于动态用户输入之前；`prompt_cache_key` 只能由稳定协议事实生成，不能随 conversation id、run id、本轮动态正文或中转 Base URL 变化。缓存命中、写入和未缓存 token 以 provider usage 为准。
 
 普通 Agent loop 内不做任务完成判断。上下文压缩服务于 loop 连续运行，而不是替模型总结任务或决定停止。
 
 ## 持久化与恢复
 
-会话与运行持久化由 `OrdinaryAgentFeature` 自己负责。它只从上一条可见 lineage 的 `ordinary-run/v3` snapshot 读取 `canonicalMessages`，并把本轮用户消息、assistant 输出和工具事实按真实顺序追加；Panel、旧 RuntimeDatabase 和 UI read-model 都不是恢复来源。
+会话与运行持久化由 `OrdinaryAgentFeature` 自己负责。它只从 `ordinary-conversation/v2` 的 Session ref 和 Pi active leaf 读取上下文，并在 `ordinary-run/v4` snapshot 中保存 Session refs、工具事实、usage、状态和展示 checkpoint；Panel、旧 RuntimeDatabase 和 UI read-model 都不是恢复来源。
 
-`canonicalMessages` 只属于 Ordinary 内部恢复与持久化边界，不进入公开 conversation API 或 SSE；展示层消费单向 read-model，不能因模型恢复需要而把系统提示或 provider continuation 暴露成产品响应，也不能用展示摘要覆盖模型仍可使用的工具正文。
+Pi Session entries 只属于 Pi 的恢复与持久化边界，不进入公开 conversation API 或 SSE；展示层消费单向 read-model，不能因模型恢复需要而把系统提示或 provider continuation 暴露成产品响应，也不能用展示摘要覆盖模型仍可使用的工具正文。
 
-能够完整内联的工具事实直接保存在 `ordinary-run/v3`。超过内联边界的完整正文、结构化 JSON 或失败证据写入 Host-owned `runtime/tool-evidence/`，run snapshot 只保存预览、稳定 `tool-output://` 引用、字符数、byte length、SHA-256 与 continuation 输入。该引用跨进程可读；完整读取不会删除审计证据，删除所属 conversation 时才由 Ordinary 按 run owner 回收。
+能够完整内联的工具事实直接保存在 `ordinary-run/v4`。超过内联边界的完整正文、结构化 JSON 或失败证据写入 Host-owned `runtime/tool-evidence/`，run snapshot 只保存预览、稳定 `tool-output://` 引用、字符数、byte length、SHA-256 与 continuation 输入。该引用跨进程可读；完整读取不会删除审计证据，删除所属 conversation 时才由 Ordinary 按 run owner 回收。
 
 Ordinary SSE 只是实时观察通道，不拥有运行事实。相邻文本增量可以短窗口合并；Node 写缓冲区返回背压信号时必须等待 `drain`，积压超过本地连接上限时只关闭该观察连接，不取消 Agent。前端随后通过 cursor、run view 和持久化终态对账，不要求逐 token 重放。
 
@@ -153,9 +153,9 @@ Ordinary SSE 只是实时观察通道，不拥有运行事实。相邻文本增�
 
 恢复对话时必须区分可复用事实与不可伪造的运行时状态：
 
-- 从上一轮 `canonicalMessages` 恢复原始角色、工具调用/结果和允许持久化的 provider continuation；根系统指令由该 run 冻结的 AgentDefinition 重新放在最前面。
-- 恢复时若本轮冻结协议与历史 continuation 所属协议不同，只迁移可移植消息以及已记录的工具调用/结果事实，并在本轮 canonical 基线中移除旧协议 continuation；历史 run snapshot 保持原样，不能回写篡改审计事实。
-- 失败、blocked 或取消 run 若已经形成 canonical 消息，下一轮沿用其中真实消息；若在模型调用前失败，则使用更早的 canonical context。不得另造“中断上下文”，Panel 错误文案也不能冒充模型输出。
+- 从 conversation 的 Pi active leaf 恢复原始角色、工具调用/结果和 Pi continuation；根系统指令由该 run 冻结的 AgentDefinition 重新交给 Pi Harness。
+- provider/protocol 切换由 Pi provider binding 按公开能力处理；历史 Session 保持原样，不能回写篡改审计事实。
+- 失败、blocked 或取消 run 若已经形成 Pi Session 消息，下一轮沿用其中真实消息；若在模型调用前失败，则使用更早的 Session context。不得另造“中断上下文”，Panel 错误文案也不能冒充模型输出。
 - `visibleAssistantText` 只恢复用户已经看见的正文，不参与下一轮模型上下文；进程退出后的静默视图恢复不得被解释为同一模型调用可以续跑。
 - 附件字节、未知 provider 私有字段、悬空 continuation 和无法证明结果的内部执行对象一律不持久化，不能为了“续跑”伪造 tool call/result 对。
 - 开发期旧 snapshot 直接视为不兼容数据；不得从可见回答、event payload 或当前全局配置迁移、双读或猜测回填。
@@ -181,7 +181,7 @@ Ordinary SSE 只是实时观察通道，不拥有运行事实。相邻文本增�
 - 模型可在可见工具集合内自由选择工具；Runtime 不用固定阶段或关键词路由替模型挑工具。
 - 工具调用必须经过 ToolCenter、权限裁剪、命令确认和审计。
 - 工具调用后，真实工具结果必须回到下一轮模型请求，不能被摘要或投影替代。
-- 新一轮会话以及进程重启后，上一条可见 lineage 的 `canonicalMessages` 按原顺序进入模型上下文；协议不变时保留原生 continuation，协议变化时从可移植消息和已完成工具事实建立新的上下文段。失败、blocked 和取消 run 不产生第二套产品上下文表示，旧格式数据不兼容恢复。
+- 新一轮会话以及进程重启后，Pi active leaf 按原顺序进入模型上下文；失败、blocked 和取消 run 不产生第二套产品上下文表示，旧 `v3/v1` 格式数据不兼容恢复。
 - 工具后下一轮无工具调用时 `completed`，答案来自模型最终文本。
 - 普通 Agent 不因工具次数或模型轮次达到工程上限而停止。
 - 上下文达到阈值时触发 AI 压缩并继续，而不是停止或丢失关键历史。

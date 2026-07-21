@@ -4,6 +4,6 @@ export * from "./conversation-control-repository.js";
 export * from "./conversation-projection.js";
 export * from "./file-system-repository.js";
 export * from "./ordinary-agent-feature.js";
-export * from "./ordered-tool-execution-gateway.js";
+export * from "./tool-execution-observation-gateway.js";
 export * from "./state.js";
 export * from "./tool-runtime-metrics.js";

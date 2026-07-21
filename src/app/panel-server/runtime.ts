@@ -1,5 +1,9 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import {
+  FileSystemAgentSessionRepository,
+} from "../../adapters/intelligence/index.js";
 import {
   FileSystemToolOutputStore,
   resolveAgentArborRuntimePaths,
@@ -14,12 +18,6 @@ import type { AgentDefinitionRegistry } from "../agent-definitions/agent-definit
 import { runAgentDefinitionRef } from "../agent-definitions/agent-definition-runtime.js";
 import { desktopAgentDefinitionFromConfig } from "../agent-prompts/desktop-agent-configured-definition.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
-import {
-  createMultiAgentFeature,
-  MULTI_AGENT_CAPABILITY_PROFILE,
-  type MultiAgentFeature,
-} from "../deep/multi-agent-feature.js";
-import { projectMultiAgentCapabilitySnapshot } from "../deep/multi-agent-capability-snapshot.js";
 import {
   createAppUpdateService,
   createUnsupportedAppUpdateService,
@@ -63,7 +61,6 @@ import type {
 } from "./types.js";
 import { desktopCapabilitySnapshotForRunStart } from "./desktop-run-model-settings.js";
 import { PanelHttpError } from "./http-utils.js";
-import { createMultiAgentRunResourceAcquirer } from "./multi-agent-run-resources.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
 import { resolveTriggeredSkillContexts } from "./skill-service.js";
 import type { PanelRunInput } from "./request-parsers.js";
@@ -90,10 +87,10 @@ export type PanelRuntime = {
   readonly subAgentRoots: readonly SubAgentRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
-  readonly multiAgentFeature: MultiAgentFeature;
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
+  readonly releaseAgentSessionStorage: () => Promise<void>;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
 
@@ -202,34 +199,12 @@ function assemblePanelRuntime(input: {
     fetch: input.providerFetch,
     toolOutputStore,
   });
-  const multiAgentFeature = createMultiAgentFeature({
-    runtimeHome: input.runtimePaths?.runtimeHome,
-    releaseToolOutputOwner: (ownerId) => toolOutputStore.releaseOwner(ownerId).then(() => undefined),
-    acquireRunResources: createMultiAgentRunResourceAcquirer({
-      host: {
-        configCenter: input.configCenter,
-        providerFetch: input.providerFetch,
-        processRegistry,
-        processTerminator,
-        toolOutputStore,
-        testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
-      },
-      agentDefinition: MULTI_AGENT_CAPABILITY_PROFILE,
-    }),
-    resolveRunStartFacts: async ({ workspaceDirectory }) => {
-      const [capabilitySnapshot, informationAccess, toolConfirmation] = await Promise.all([
-        capabilityCenter.snapshot(workspaceDirectory === undefined ? {} : { workspaceDirectory }),
-        input.configCenter.getInformationAccessConfig(),
-        input.configCenter.getToolConfirmationConfig(),
-      ]);
-      return {
-        capabilitySnapshot: projectMultiAgentCapabilitySnapshot(capabilitySnapshot),
-        informationAccess,
-        confirmationPolicy: toolConfirmation.policy,
-      };
-    },
-  });
   const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
+  const agentSessionEnvironment = new NodeExecutionEnv({ cwd: ordinaryRuntimeRoot });
+  const agentSessionRepository = new FileSystemAgentSessionRepository({
+    fileSystem: agentSessionEnvironment,
+    sessionsRoot: path.join(ordinaryRuntimeRoot, "agent-sessions"),
+  });
   const ordinaryRunResources = createOrdinaryAgentRunResourceAcquirer({
     host: {
       configCenter: input.configCenter,
@@ -239,6 +214,7 @@ function assemblePanelRuntime(input: {
       toolOutputStore,
       testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
     },
+    sessionRepository: agentSessionRepository,
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: ({ ref, instructions }) =>
       agentDefinitionOverrides.get(runAgentDefinitionRefCacheKey(ref)) ??
@@ -266,11 +242,13 @@ function assemblePanelRuntime(input: {
   const ordinaryAgentFeature = createOrdinaryAgentFeature({
     repository: createFileSystemOrdinaryRunRepository(ordinaryRuntimeRoot),
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(ordinaryRuntimeRoot),
+    sessionRepository: agentSessionRepository,
     releaseToolEvidenceOwner: (ownerId) => toolOutputStore.releaseOwner(ownerId).then(() => undefined),
     execution: input.ordinaryAgentExecution ?? createOrdinaryAgentLoopExecutionPort({
       resources: ordinaryRunResources,
       onReleaseError: (error) => console.error("[panel-server] Ordinary run resource release failed", error),
     }),
+    ...(input.ordinaryAgentExecution === undefined ? {} : { testOnlyAllowSessionlessExecution: true }),
   });
   const runtime: PanelRuntime = {
     isQuiescing: false,
@@ -294,10 +272,10 @@ function assemblePanelRuntime(input: {
     resolveSubAgentRoots: input.resolveSubAgentRoots,
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
-    multiAgentFeature,
     ordinaryAgentFeature,
     prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
     toolOutputStore,
+    releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
   return runtime;
 }
@@ -311,7 +289,7 @@ function resolveOrdinaryRuntimeRoot(input: {
   if (runtimeHome === undefined) {
     throw new Error("Ordinary Agent requires a runtime directory.");
   }
-  return path.join(runtimeHome, "ordinary");
+  return path.join(runtimeHome, "ordinary-agent");
 }
 
 function resolveToolEvidenceRoot(input: {

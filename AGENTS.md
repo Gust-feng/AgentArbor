@@ -8,7 +8,7 @@
 
 ## 功能模块化开发原则
 
-AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术层分层。`domain`、`app`、`kernel`、`adapters` 等横向层只能作为实现手段，不能取代功能所有权；Ordinary Agent 与 Multi-Agent 必须分别拥有自己的输入输出契约、运行过程、业务状态、事件、仓储、可观察投影和测试边界。Sub-Agent 是 Ordinary 的 SDK AgentTool 贡献，只拥有定义发现、输入解析、权限收窄和测试；capability 只保存 catalog-only definition，与冻结 run 的普通工具边界使用同一曝光决策，不向 ToolRegistry 注册假 executor。调用、确认、结果与持久化事实归父 Ordinary run，不建设平行 runner、状态、事件、仓储或 read-model。
+AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术层分层。`domain`、`app`、`kernel`、`adapters` 等横向层只能作为实现手段，不能取代功能所有权；Ordinary Agent 与 Multi-Agent 必须分别拥有自己的输入输出契约、运行过程、业务状态、事件、仓储、可观察投影和测试边界。Sub-Agent 是 Ordinary 的 provider-neutral `AgentLoopAgentTool` 贡献，只拥有定义发现、输入解析、权限收窄和测试；capability 只保存 catalog-only definition，与冻结 run 的普通工具边界使用同一曝光决策，不向 ToolRegistry 注册假 executor。调用、确认、结果与持久化事实归父 Ordinary run，不建设平行 runner、状态、事件、仓储或 read-model。
 
 中性基础设施只提供可复用机械能力，例如模型接入、工具执行、确认、tokenizer、消息完整性、上下文压缩执行、外部协议适配和配置读取；业务事件、状态、完成语义、仓储和 read-model 留在 owning feature。Workbench Shell 只组合入口、导航和展示。Task Soil、Plan、Aboveground、Fruits、Governance 和 Global Soil 是按需演进的长期功能模块，不是每次请求必经的全局工作流。开发时必须优先判断当前变更属于哪个功能闭环，避免为了追随横向分层而把同一功能拆散到多个无主文件中。
 
@@ -42,7 +42,7 @@ AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术
 
 ## 项目定位
 
-AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户只面对一个 Workbench；Ordinary Agent 是默认工作方式，Multi-Agent 是用户显式选择的深入协作功能，Sub-Agent 是 Ordinary Agent 按需调用的 SDK AgentTool。Ordinary 与 Multi-Agent 共享模型、工具、确认、上下文机械算法和系统适配，但不共享业务状态、事件、仓储或 read-model；Sub-Agent 调用事实进入父 Ordinary run。
+AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户只面对一个 Workbench；Ordinary Agent 是默认工作方式，Multi-Agent 是用户显式选择的深入协作功能，Sub-Agent 是 Ordinary Agent 按需调用的 provider-neutral `AgentLoopAgentTool`。Ordinary 与 Multi-Agent 共享模型、工具、确认、上下文机械算法和系统适配，但不共享业务状态、事件、仓储或 read-model；Sub-Agent 调用事实进入父 Ordinary run。
 
 当前正式产品主线是：
 

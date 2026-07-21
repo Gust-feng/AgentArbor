@@ -157,6 +157,12 @@ export type RunEvent = {
     readonly error?: string;
     readonly errorDomain?: string;
     readonly errorFacts?: ToolErrorFacts;
+    readonly failureAttribution?: "schema_validation" | "execution_failure";
+    readonly delegatedExecution?: {
+      readonly modelRounds: number;
+      readonly toolCallCount: number;
+      readonly usage: ModelUsage;
+    };
   };
 };
 
@@ -206,6 +212,12 @@ export type PanelStreamEvent = {
     readonly error?: string;
     readonly errorDomain?: string;
     readonly errorFacts?: ToolErrorFacts;
+    readonly failureAttribution?: "schema_validation" | "execution_failure";
+    readonly delegatedExecution?: {
+      readonly modelRounds: number;
+      readonly toolCallCount: number;
+      readonly usage: ModelUsage;
+    };
     readonly truncated?: boolean;
     readonly modelUsage?: ModelUsage;
   };
@@ -260,7 +272,14 @@ export type TranscriptNode = {
   readonly text?: string;
   readonly timestamp: string;
   readonly toolName?: string;
+  readonly failureAttribution?: "schema_validation" | "execution_failure";
+  readonly error?: string;
   readonly parentToolCallFactId?: string;
+  readonly delegatedExecution?: {
+    readonly modelRounds: number;
+    readonly toolCallCount: number;
+    readonly usage: ModelUsage;
+  };
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: TranscriptConfirmation;
   readonly modelUsage?: ModelUsage;

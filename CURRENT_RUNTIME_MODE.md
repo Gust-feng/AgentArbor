@@ -4,13 +4,13 @@
 
 ## 产品边界与当前实现的区别
 
-当前产品架构已经统一为一个 Workbench：Ordinary Agent 是默认工作方式，Multi-Agent 是用户显式选择的深入协作功能，Sub-Agent 是 Ordinary Agent 的工具能力。Ordinary 与 Multi-Agent 共享模型、工具、确认、上下文机械算法和系统适配，但分别拥有业务流程、状态、事件、仓储和 read-model；Sub-Agent 只拥有定义发现与 AgentTool 贡献，其执行事实归父 Ordinary run。当前事实源是 ADR-0028。
+当前产品架构以一个 Workbench 和 Ordinary Agent 为主线；Sub-Agent 是 Ordinary Agent 的工具能力。Multi-Agent 的现有源码保留为延期重构参考，不属于当前生产功能。当前事实源是 ADR-0028，延期边界见《Multi-Agent 延期模块边界》。
 
-UI 收口尚未完成。当前产品入口暂时隐藏 Agent 集群 beta 开关与侧栏 `Agent 集群` 按钮，Panel 启动也不加载 Deep 历史；持久化 Agent mode、独立 `/api/deep/*`、Deep DTO 以及与 Ordinary 物理分离的数据目录仍保留。以下章节按真实代码记录这些行为；它们是统一 Workbench 下的过渡实现，不能被解释为两个产品，也不能把入口隐藏写成 Multi-Agent 后端已经移除。
+Multi-Agent 的 Panel UI、Deep DTO 和实现源码暂时保留，以便未来重构复用其中可验证的局部机制；当前 Panel 不装配其 feature、不加载 Deep 历史，也不接受 `/api/deep/*` 请求。该路径统一返回 `410 multi_agent_deferred`，不会创建 provider、ToolCenter、store 或后台运行。
 
-后端阶段一至阶段三要求的唯一组合根、资源所有权和中性依赖方向已经完成：`createPanelRuntime()` 是唯一生产组合根，同时创建 `OrdinaryAgentFeature` 与 `MultiAgentFeature`。Ordinary 的 conversation、run 状态、canonical 模型历史、工具事实、确认 continuation、仓储和事件重放由 feature 自己拥有；`ordinary-routes` 只做 HTTP/SSE 适配。Multi-Agent 的 conversation/run/child store、control/continuation registry、instruction queue 与 active run tracking 同样由 feature 内部持有；`/api/deep/*` 不创建 runtime、store 或 ToolCenter。两类 feature 的资源都在 Panel runtime 关闭时由各自 owner 释放。
+后端只有一个生产组合根：`createPanelRuntime()`。它当前只创建 `OrdinaryAgentFeature` 及其所需的中性资源；`ordinary-routes` 只做 HTTP/SSE 适配。Multi-Agent 的 feature、store、control registry 和资源装配不进入当前生产运行时，也不参与关闭流程。
 
-Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -> OrdinaryAgentFeature -> OpenAI Agents SDK adapter -> ToolCenter`。OpenAI Responses 与 OpenAI-compatible Chat 共用同一 feature 契约；SDK 负责模型-工具循环和 live confirmation continuation，Ordinary feature 负责业务状态、持久化和 read-model 事实。旧 BasicAgent、Desktop session、Panel run job、应用层 Underground、`MinimalRuntime`、旧 conversation/run route、`/api/desktop/runs` 与 `/api/underground/*` 已删除。Panel JSON 输入已在 HTTP 边界使用 Zod 校验；当前尚未完成的是 Workbench/UI surface 隔离。
+Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -> OrdinaryAgentFeature -> Agent Session adapter -> Pi AgentHarness/Session -> ToolCenter`。Pi 负责模型-工具循环、Session 分支和压缩；Ordinary feature 负责业务状态、持久化和 read-model 事实。旧 BasicAgent、Desktop session、Panel run job、应用层 Underground、`MinimalRuntime`、旧 conversation/run route、`/api/desktop/runs` 与 `/api/underground/*` 已删除。Panel JSON 输入已在 HTTP 边界使用 Zod 校验；当前尚未完成的是 Workbench/UI surface 隔离。
 
 ## 当前默认运行方式
 
@@ -18,14 +18,13 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 
 - 用户入口：`Desktop Shell / Panel`
 - 默认运行模式：`agent`
-- 默认执行主线：`用户消息 -> OrdinaryAgentFeature -> OpenAI Agents SDK 主循环 -> ToolCenter/命令确认 -> ordinary-run/v3 -> 事实 read-model`
+- 默认执行主线：`用户消息 -> OrdinaryAgentFeature -> Pi AgentHarness/Session -> ToolCenter/命令确认 -> ordinary-run/v4 -> 事实 read-model`
 - 默认交互形态：线性会话驱动；用户在同一个 conversation 中一轮接一轮补充上下文、要求和判断
-- 当前 Agent 集群 beta 的产品入口暂时隐藏：`设置 -> 关于` 不显示 beta 开关，侧栏“新任务”下方不显示 `Agent 集群` 按钮，Panel 启动不请求 Deep 历史；正式后端入口 `/api/deep/*` 与内部 `deep` / `DeepRuntime` 实现继续保留（当前为 manager 自由决策循环 + 一层 child 的最小协作闭环，见 ADR-0025）
-- 默认仍为普通 `agent`，启动后不因历史 Agent 集群运行抢占普通入口，也不自动把普通请求升级为 Agent 集群；`deep` 只能由用户显式触发，不存在自动升级
+- Multi-Agent 的入口、历史加载和生产 API 已全部停用；`/api/deep/*` 返回 `410 multi_agent_deferred`，保留源码不代表可触发 `deep` run
 - `/api/conversations` 是普通 `agent` 的唯一提交入口；旧 `/api/desktop/runs` 已删除
-- 当前生产模型协议只支持 `openai_responses` 与 `openai_compatible_chat_completions`；fake provider 仅供测试。旧 provider 协议、旧 settings schema 和旧本地运行记录直接失效，不迁移、不双读
+- 当前 Ordinary 通过 Pi provider/model binding 使用冻结的模型协议能力；自定义 OpenAI-compatible endpoint 仍由 provider binding 接入，fake provider 仅供测试。Chat binding 把 DeepSeek、Kimi、GLM、MiniMax 的冻结请求方言映射到 Pi `compat` 与公开 payload hook，并按冻结能力声明视觉输入；动态 API key 每次请求重新解析，清空后不会回退旧 key。普通 Agent 的语义 Skills 路由使用同一 Pi Models/provider binding 的窄无工具通道，并保留现有 JSON 校验与确定性 fallback。仓库通过 pnpm patch 固化 pi-ai 0.80.10 的必要上游补齐：Chat/Responses `stream:false`、refusal diagnostic、Responses hosted output continuation 与 `incomplete_details.reason`、MiniMax 累计 delta 和文本 `reasoning_details`；Responses provider-native Web Search 由冻结 binding 注入 hosted tool，并只在 provider/API/model 相同的 Session 后续轮次回放 opaque output item。provider error、refusal、content filter、输出截断与 context overflow 都形成 Ordinary 可观察失败。Pi 公共消息契约仍不能无损表达普通 file/audio 与 URL/file-id 附件，provider transport 也没有 Host 自定义 fetch 注入口；相关旧 Chat/Responses transport 只作为延期 Multi-Agent 的源码依赖保留，不进入当前生产组合根
 - Panel 普通输入栏可选择“当前工作区”作为本轮普通 `agent` 运行的工作根目录；该选择只作为前端会话内的显式覆盖，不写入设置。未选择当前工作区时，新 run 使用设置页保存的工作区作为默认工作区
-- 正式 Agent 集群后端入口为 `/api/deep/*`；旧 `/api/underground/*` 已删除。Deep 仍使用 `domain/underground/agent-fabric` 中有效的 run-tree 领域契约，这不构成第二个 HTTP 入口
+- `/api/deep/*` 已停用；旧 `/api/underground/*` 已删除。Deep 及其 run-tree 契约仅作为未来重构的代码基础保留
 
 ## 当前真实工作方式
 
@@ -39,7 +38,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 4. 把工具结果回传模型
 5. 模型不再调用工具且 provider 返回明确完成终态时，形成最终结果
 
-生产实现由 OpenAI Agents SDK adapter 执行上述机械循环。SDK 不是业务状态 owner：每个工具结果必须先由 `OrdinaryAgentFeature` 持久化为 canonical 工具事实，才能返回给模型；SDK 的 provider call id 与应用事实 id 分开保存，避免父/子 Agent 或并行 child 复用 call id 时串用权限、确认或结果。确认、取消、provider 失败和进程退出都保留已经发生的完整 assistant/tool 事实，不会从 Panel 展示文本反向恢复模型上下文。同一协议继续运行时，adapter 原样回放该协议允许持久化的 continuation；用户在同一 conversation 切换 Responses 与 Chat Completions 时，产品会话保持不变，但 adapter 会从可移植的 user/assistant/tool 事实建立新的协议上下文段，旧协议 reasoning、加密 output item 和私有续接字段不做伪无损转换，也不会进入目标协议请求或后续 canonical 基线。Responses 保持真实流式输出；adapter 在 SDK 解析前按同一 SSE 响应的 `output_index`、item id、call id、类型和事件顺序归并 output item lifecycle 与 terminal response snapshot，不能把 terminal 压缩后的数组下标当作流式 `output_index`。terminal snapshot 省略 reasoning、完整 item 或重复 status 时，已完成 item 事件与响应自身的 `completed / incomplete` 终态共同提供恢复事实，不要求某一个可选中间事件必然存在；恢复后的完整 reasoning、message 和 function call 仍交给 SDK 标准转换并进入正式 continuation。身份冲突、显式非法状态和 provider failure 必须明确失败，不能关闭 streaming、过滤 item 或伪造成功。Chat wire payload 中带 `tool_calls` 的 assistant 后必须连续跟随该批次全部 tool result，正文与工具调用同时存在时不能把正文插入两者之间。adapter 在每次实际模型请求前通过 SDK `callModelInputFilter` 执行 token 检查与必要压缩；未达到阈值时保持请求消息和顺序不变，压缩失败则停止请求。Chat 只有 `finish_reason: stop`、Responses 只有 `status: completed` 才能成为完成；截断正文只可作为 live delta 展示，不能写入下一轮正式历史。
+生产实现由 Agent Session adapter 执行上述机械循环。Pi AgentHarness/Session 是 Ordinary 模型上下文、分支、压缩和 provider transport 的事实源；Ordinary feature 只保存 `sessionRef`、entry refs、工具事实、usage、终态和展示 checkpoint。每个工具结果仍必须先由 `OrdinaryAgentFeature` 持久化为 AgentArbor 工具事实，才能作为有界消息回到 Pi Session。确认、取消、provider 失败和进程退出都保留已经发生的完整工具事实，不会从 Panel 展示文本反向恢复模型上下文。Pi 的事件只通过 adapter 映射为 Ordinary live activity，不能直接写业务终态；Ordinary 的模型协议、动态 API key 和窄语义 Skills 路由由同一 Pi provider binding 负责。延期 Multi-Agent 源码不参与当前 provider 或业务 owner 决策。
 
 这意味着：
 
@@ -49,18 +48,18 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - 工具调用、确认等待、工具失败后继续判断，都是普通运行的一部分
 - 一次性命令使用 `shell_command` 并绑定当前 run；长期服务使用 `start_process`，默认以 `workspace_session` 生命周期登记到 Host-owned `ProcessRegistry`，返回稳定 `processId`、运行状态、端口事实和 `command-log://` 引用。后续由 `inspect_process` 查询、`stop_process` 按稳定身份停止；run release 只清理 `lifetime: "run"`，Panel runtime 关闭时先停止进程注册，再清理所有仍未结束的 owned 前台/后台进程，因此 `workspace_session` 只跨 run 存活、不跨应用存活。`shell_command(background=true)` 保留兼容，但默认复用 workspace-session 语义。
 - 用户取消由 Ordinary feature 先提交为持久化终态，并立即停止该 run 的新输出与新工具调度；provider transport、live continuation 和其他运行资源随后由原 owner 在后台释放，取消接口与下一条消息不能等待不响应取消的底层 Promise。若取消时没有已接受但结果未定的工具轮，后续消息可以在旧执行资源仍在清理时启动；已有在途工具事实时仍须先完成结果收口，不能越过副作用未知边界
-- Ordinary 会定期把已经流式展示的 assistant 正文保存为 `visibleAssistantText`。它只用于取消或进程退出后的视图恢复，不是 completed 回答，也不进入 `canonicalMessages`。主动取消后，Panel 保留已有正文和真实工具过程；没有正文或过程时不生成 assistant 占位，也不显示“已取消”卡片或内部原因
-- 软件退出或进程异常结束后，live-only continuation 不会伪恢复。重新进入会话时，Panel 恢复退出前已保存的正文、工具事实和会话位置，不显示 continuation、runtime 或进程重启错误；用户只能追加新消息形成新 run，或回退到之前的用户消息创建新 lineage
-- `runtimeHome` 是单写者边界。同一运行目录同时只能由一个 Panel/Electron 后端持有；第二个实例必须拒绝启动，不能因端口不同或开发 watch 重启而改写另一个实例的 Ordinary/Multi-Agent 运行态
+- Ordinary 会定期把已经流式展示的 assistant 正文保存为 `visibleAssistantText`。它只用于取消或进程退出后的视图恢复，不是 completed 回答，也不写入 Pi Session。主动取消后，Panel 保留已有正文和真实工具过程；没有正文或过程时不生成 assistant 占位，也不显示“已取消”卡片或内部原因
+- 软件退出或进程异常结束后，live-only continuation 不会伪恢复。重新进入会话时，Panel 恢复退出前已保存的正文、工具事实和 Session 位置，不显示 continuation、runtime 或进程重启错误；用户只能追加新消息，或回退到 Pi Session 的历史 leaf 创建新分支
+- `runtimeHome` 是单写者边界。同一运行目录同时只能由一个 Panel/Electron 后端持有；第二个实例必须拒绝启动，不能因端口不同或开发 watch 重启而改写另一个实例的 Ordinary 运行态
 - `provider` 失败、网络失败、上下文维护失败、进程失败都不是正常完成
-- provider 404、超时、失败或流式断开若不能安全重试，会永久结束当前模型调用。模型传输只允许 OpenAI Agents SDK adapter 在尚未收到任何 provider 事件前，对明确的临时失败做有限退避重试；一旦出现 provider 事件、用户可见增量或工具调用事实就不得重试或拼接 attempt。无法安全重试时，用户只能在同一 conversation 追加新消息创建新 run，或回退到旧用户轮次创建新 lineage；新 run 读取已持久化 canonical 工具事实和消息
+- provider 404、超时、失败或流式断开若不能安全重试，会永久结束当前模型调用。Ordinary 的认证解析、provider transport 和语义 Skills 路由由 Pi provider binding 负责，Ordinary adapter 不复制 provider client 或重试器。一旦出现 provider 事件、用户可见增量或工具调用事实就不得拼接多个 attempt。无法安全重试时，用户只能追加新消息创建新 run，或回退到历史 Session leaf 创建新分支
 - `out_of_fuel` 与 `context_overflow` 必须投影为 `blocked` / `paused`，不能被包装成 `completed`
 - 默认普通 Agent 当前不设置固定模型/工具轮次上限；若未来某个普通 Agent 需要轮次边界，必须由 `AgentDefinition.turnPolicy` 显式冻结并进入 run ref，而不是由前端、route helper 或临时执行参数私自决定
 - 普通主循环消费的 `AgentDefinition.turnPolicy.purpose` 必须是 `desktop_agent`；Ordinary 不再读取或回放历史 `desktop_chat` / `work_session_*` purpose，它们不能成为普通 AgentDefinition 或普通主循环的执行定义
 
-### 2. 一个显式 Agent 集群最小协作闭环
+### 2. 延期的 Agent 集群参考实现
 
-当前软件保留普通 Agent 之外的 Agent 集群 beta 运行路径。它属于同一 Workbench 下的 Multi-Agent 功能，并使用独立 Deep conversation / run 业务事实；当前版本暂时隐藏设置开关与侧栏入口，因此用户不能从产品界面新进入或恢复该路径。
+`src/app/deep/`、`deep-routes.ts` 和关联 Panel 模块保留历史实现与测试，供未来重构筛选可复用机制。当前生产组合根不创建 `MultiAgentFeature`，主路由不调用 Deep route adapter，下面的内容只说明保留源码的原有行为，不能被解释为当前可用功能。
 
 - 编排边界：`DeepRunExecutor` 维持 manager 动作循环（`direct_answer / spawn_children / wait_children / continue_child / synthesize / ask_user / stop`），其中 `spawn_children` 会把 child 放入 `DeepTaskBoard` 后经 `DeepChildScheduler` 真实并发启动；`wait_children` 会真实等待在途 child；`continue_child` 表示父层审查或操作已有 child，并给同一个 child run 追加指令继续标准 Agent loop；若目标 child 仍是 `pending / running`，追加指令先进入 scheduler FIFO 队列，等当前 child loop 到达材料边界后以同一 `childRunId` 续跑，不抢占当前模型/工具调用；`synthesize` 前会先启动并等待 pending / running child 清场，且只在已有 child 材料时由父层综合产出 `SynthesizedConclusion`。
 - 当前协作边界：只允许 manager + 一层 child（`depth = 1`）；child 由 `DeepChildAgentRunner` 作为显式 child Agent run 执行，父 Agent 派生 `DeepChildSpec`（目标、角色、工具授权、可选轮次预算），派生时把父层生成的 objective 冻结到 child `AgentSpec.instructions` 作为 run 出生事实。child 调用中性的 `AgentTurnRuntime.execute(input, semantics)`，由 Multi-Agent 自己选择 final-output-only 投影，再经 ToolCenter 与 Confirmation Gate 完成标准模型-工具-模型循环。模型、基础工具、Research 与 MCP 由唯一后端 Composition Root 通过中性工厂和 contribution 装配；Multi-Agent 不复用 Ordinary 实现，`/api/deep/*` 也不创建 provider、ToolCenter、store 或 runtime。child 未显式设置 `maxModelRounds / maxToolRounds` 时默认各 200 轮，显式更小值保留，超过 200 时钳制到 200；轮次边界只作失控保护，耗尽后进入未完成状态，不能替父 Agent 判断任务已经完成。child 模型请求不写入固定输出/延迟预算。child 若遇到 `approval_required`、`out_of_fuel` 或 `context_overflow`，会进入 `blocked` child run，而不是误报 failed；child 自身中断或异常停止会进入 `interrupted` child run，不再被任务板误投影为 completed。
@@ -85,9 +84,9 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - 前端在打开会话，以及提交消息、确认决策、取消运行、运行结算、历史 transcript 读取后的刷新路径中，都应优先消费这些后端 read-model，而不是自行拼装运行状态、工作视图、结果详情和事件
 - 前端点击普通 run 取消后，只在本地立即收起运行控件并停止当前观察连接，不展示“正在取消”、runtime 重建、transport 关闭或资源清理等内部提示；取消前已经显示的模型正文继续保留，但不冒充 completed 正式回答。后端取消响应到达后直接消费其持久化 run 终态，再在后台读取完整 conversation 投影。运行中已经追加到输入队列的用户消息不得因取消而清空，并在取消终态不需要用户处理时自动成为下一轮输入
 - 当前 Panel 前端通过 `/api/conversations` 提交普通运行，通过 `/api/basic-agent/runs/:id/view` 与 `/stream` 读取同一 Ordinary read-model；`/api/desktop/runs`、无生产客户端的 work-session route 及 `workSession` 响应别名均已删除
-- 历史运行和恢复只读取 `OrdinaryRunState`：run 出生事实、status、`canonicalMessages`、工具事实、usage 与 timeline 在同一 snapshot 中提交；conversation control 只保存分支、标题、置顶和删除事实。WorkView、Panel conversation 和 SSE 都是单向展示投影，不能反向拼装模型历史
-- Ordinary 使用 `ordinary-run/v3` snapshot：每个 run 原子写入 `runtime/ordinary/runs/<runId>/snapshot.json`，列表 manifest 只是可重建索引；conversation control 使用独立的 `ordinary-conversation/v1` 文档。旧 RuntimeDatabase、raw `run.json`、sidecar event/tool-call 和旧 schema 均不读取、不迁移、不双写
-- Ordinary live 状态只由 `OrdinaryAgentFeature` 拥有的 run status 决定；正式回答、当前确认和 canonical 消息都在同一 feature 事实中。Panel 只消费 read-model，额外 title/summary/preview 可以有界压缩，但不能覆盖正式回答或模型可继续使用的工具事实
+- 历史运行和恢复只读取 `OrdinaryRunState`：run 出生事实、status、Session phase、工具事实、usage 与 timeline 在同一 snapshot 中提交；conversation control 只保存 Session ref、标题、置顶和删除事实。WorkView、Panel conversation 和 SSE 都是单向展示投影，不能反向拼装模型历史
+- Ordinary 使用 `ordinary-run/v4` snapshot：每个 run 原子写入 `runtime/ordinary-agent/runs/<runId>/snapshot.json`，列表 manifest 只是可重建索引；conversation control 使用独立的 `ordinary-conversation/v2` 文档。旧 RuntimeDatabase、raw `run.json`、sidecar event/tool-call 和旧 schema 均不读取、不迁移、不双写
+- Ordinary live 状态只由 `OrdinaryAgentFeature` 拥有的 run status 决定；正式回答、当前确认和工具业务事实属于 Ordinary，模型 transcript 与 active leaf 属于 Pi Session，Ordinary snapshot 只保存稳定 Session/entry ref。Panel 只消费 read-model，额外 title/summary/preview 可以有界压缩，但不能覆盖正式回答或模型可继续使用的工具事实
 - 普通 `agent` run 的 live model stream 只接受 `desktop_agent` 的用户可见模型增量；`desktop_chat`、`work_session_*` purpose、`desktop.chat.*` 输出契约和旧 read-model alias 已清除，不读取旧本地记录
 
 前端不是 Agent 引擎，也不负责推导任务状态、补全工具语义或重建运行事实。
@@ -103,27 +102,25 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - 工程决定本轮 Agent 能看见哪些工具
 - 当前默认普通 `agent` 的工具可见性由后端结构化能力快照与 `AgentDefinition.toolVisibilityProfile` 共同裁剪，不再依赖工具名前缀约定
 - 普通 `agent` 只有在后端已经冻结 `capabilitySnapshot` 后，才会把工具暴露给模型；裸 `ToolCenter` 只负责执行，不再单独决定模型可见工具
-- 模型可见工具准入只要求真实 executor identity、客观 description、有效 input schema 和执行/副作用元数据；`modelContract` 的用法、输入/输出说明、runtime hints 和 examples 是可选增强。工具执行域不再携带用户预览策略，Panel/read-model 自行从事实派生展示。provider 描述使用 section-aware 显式字符预算：客观 description 有独立上限，result/continuation、runtime 和限制/副作用事实优先，不再用关键词挑选说明
+- 模型可见工具准入只要求真实 executor identity、客观 description、有效 input schema 和执行/副作用元数据。provider 只接收不超过 512 字符的客观 `description` 与 schema；`modelContract` 的用法、输入/输出说明、runtime hints 和 examples 不进入模型上下文。结果与 continuation 只通过实际 `ToolCallResult` 表达。工具执行域不再携带用户预览策略，Panel/read-model 自行从事实派生展示
 - `ToolCenter` 只执行工具、权限/策略校验与命令确认，并返回 `ToolCallResult` 执行事实；不保存逐 run 调用计数或预算，不生成模型消息、UI display、envelope 或持久化投影。轮次/预算由 Agent loop 决策，模型、事件和 Panel 分别从同一事实单向派生自己的消费视图
 - 新写入的工具 lifecycle event payload 是唯一可重放工具事实：requested 保存一次 input，终态保存有界 output/error/duration 并保留 continuation；`RuntimeToolCallRecord` 只保留 callId、终态、错误、引用和时间索引，不复制 input/output。live 与 replay 从同一 reducer 消费该 payload。旧 `projection / envelope / display` 记录不再读取或迁移，旧 snapshot 不满足新契约时属于开发期失效数据
 - 工具 input/output 只接受 JSON-safe `ToolFactValue`；模型 `ToolResult` 正文在 `none / text / json` 中三选一，同一完整 output 不再同时写入文本和结构化字段。工具消息协议已有的 call id/name 不在正文重复，附件字节只走带外模型输入
 - 通用 ToolCenter/kernel 只读取工具输出顶层 `continuation / continuations`。MCP 规范没有通用工具结果 continuation，因此 MCP adapter 不再按 `structuredContent.continuation / continuations` 的字段形状猜测分页或提升可执行 `nextInput`；`structuredContent` 原样作为服务端事实保留。只有拥有明确分页或稳定引用契约的 producer/adapter 才返回 canonical continuation。`read_file / list_dir / grep_files` 自身返回有界事实和 `nextStartChar / nextStartLine / nextOffset`；模型需要更多内容时，把下一位置值映射回 `startChar / startLine / offset` 再次调用原工具，不构造额外的通用续读工具。真实 offset ceiling 或副作用请求无法安全重放时，必须返回明确失败事实，不得返回 `completed + truncated` 的死引用，也不得生成会重放 POST/PUT/DELETE 的 synthetic continuation
 - ToolCenter 对每个模型可见工具结果使用不随模型上下文窗口变化的固定 token 边界：正文预览目标为 4,000 tokens，完整工具结果包络硬上限为 6,000 tokens；18 万字符边界只作为未注入 tokenizer 的兼容兜底，不设置单轮工具数量或并行结果总量上限。超过边界时，ToolCenter 使用每个 PanelRuntime 唯一、Host-owned 的文件系统持久化 `ToolOutputStore` 保存当前完整文本或序列化 JSON。结果返回有界预览、opaque `tool-output://` 引用和 `read_tool_output` 的下一段输入，并保留带外附件；显式 failed/cancelled 的超大 output、error 与 errorFacts 作为一份完整失败证据保存。父 run 必须冻结并授权 reader，Deep child / Sub-Agent 在真实 broker 也具备 reader 时把它作为 transport companion 自动继承，不扩张其他业务工具。读取不会重新执行原工具；`read_tool_output` 使用同一 4,000/6,000 token 边界，以 UTF-16 code-unit offset 按实际包络动态缩小当前页，避免长 provider call id 或高转义正文造成二次截断与偏移跳跃；窗口不得拆分 surrogate pair，最后一段读完只释放 live-only 测试存储的 ref，持久化证据继续保留用于审计。持久化 evidence 不设置 TTL，也不静默淘汰旧证据；Host 默认允许单项最多 256 MiB、总计最多 4 GiB、最多 10,000 项，达到边界时以 `tool_output_item_too_large` / `tool_output_capacity_exceeded` 明确失败。Ordinary 引用在所属 conversation 删除前保留；Deep run 为 post-terminal child continuation 保留稳定 owner，在删除所属 Multi-Agent conversation 时回收；Panel 关闭只等待在途写入完成，不删除持久化证据。首次读取仍校验完整 SHA-256，进程内对未发生文件变化的已验证正文使用 64 MiB LRU 读取缓存，避免分页时重复整文件读取和哈希。模型附件字节只服务当前 provider 请求，不进入 Deep child 持久化上下文；为保证 OpenAI Responses 的跨轮 reasoning/function-call 恢复，Deep 只对白名单 `openai_responses_output_items` 做 JSON-safe 验证并原样保留有效 output items。已知该 key 但内容无效或为空时，Deep child context persistence 以稳定错误 `model_protocol_continuation_not_persistable` 明确失败，不能静默丢弃后声称可恢复；其他未知 protocol extension key 仍忽略。`tool-output://` 引用元数据随工具事实持久化并携带 `continuationAvailability: "durable"`；完整内容、UTF-8 byte length 与 SHA-256 写入 `runtime/tool-evidence/`，不复制进 run snapshot，进程重启后同一 ref 仍可读取。磁盘写入、容量拒绝或完整性校验失败时返回明确 delivery failure；原 failed/cancelled/approval 状态、错误域、错误码和确认请求必须保留，只有原 completed 结果因无法完整交付而转为 failed
-- Ordinary 不限制模型在同一轮选择多少工具，也不设置同批结果总预算；run-scoped 有序 gateway 只控制实际执行顺序。连续只读调用可以并行，非只读调用全局 FIFO 且独占，排在写调用之后的读取必须等待；排队取消形成 `cancelled` 工具事实而不进入 executor。该调度器只属于 Ordinary，Deep 保留自己的批执行规则，MCP 每 server 4 并发和 Research 内部 4 并发仍只是 producer 资源边界。
+- Ordinary 不限制模型在同一轮选择多少工具，也不设置同批结果总预算；Pi AgentTool 的 `executionMode` 负责实际调度。纯只读批次可并行，包含副作用工具的批次按 assistant 源序串行；AgentArbor 只记录执行观察，不再维护 FIFO/写屏障调度器。Deep 保留自己的批执行规则，MCP 每 server 4 并发和 Research 内部 4 并发仍只是 producer 资源边界。
 - `read_file / list_dir / grep_files` 使用当前模型 tokenizer 在 producer 端缩小正文或集合页，正常页优先保持在 6,000-token 完整包络内，不借 ToolOutputStore 保存分页状态。HTTP GET 与 `browser_snapshot` 在 Host store 可用时保留一次响应/页面快照，后续 continuation 从同一 opaque snapshot ref 读取，不重新请求或导航；副作用 HTTP 请求仍禁止透明重放。
-- Ordinary run 在线聚合工具定义、执行结果、retained、continuation 和调度指标，只保存 token/字符/字节计数、固定 histogram、状态、原因、耗时和 definition hash，不保存路径、URL、命令、headers 或正文。终态聚合进入可选 `ordinary-run/v3.toolMetrics`；旧 v3 快照缺失该字段时按空指标读取。`/api/runtime/usage-statistics` 与设置统计页从 run snapshot 合并分位数，指标采集失败不得改变工具事实。
+- Ordinary run 在线聚合工具定义、执行结果、retained、continuation 和调度指标，只保存 token/字符/字节计数、固定 histogram、状态、原因、耗时和 definition hash，不保存路径、URL、命令、headers 或正文。终态聚合进入可选 `ordinary-run/v4.toolMetrics`；旧 v4 快照缺失该字段时按空指标读取。`/api/runtime/usage-statistics` 与设置统计页从 run snapshot 合并分位数，指标采集失败不得改变工具事实。
 - Research `read` 的数组输入是单个工具内部的 producer 扇出，不是普通 Agent 工具轮次或并行工具总量：单批最多 16 个 ref、同时最多读取 4 个；普通 per-ref 失败继续形成 partial facts，取消会停止调度新读取并作为整次工具取消向外传播。Search ref 映射只存在于当前 Research runtime，支持模型在本轮内回读较早结果，并在本轮结束后随 runtime 一起释放。
 - `read_skill_resource` 对 reference、asset 和 script 使用流式文件读取；完整 SHA-256 与 byte/char facts 仍按全文件计算，但内存只保留请求的 reference 字符窗口，取消会终止文件流。
 - 命令日志继续为 stdout/stderr continuation 提供真实文件；活跃进程日志不会被维护任务删除，非活跃日志超过 7 天会清理，非活跃集合超过 512 MiB 时按最旧优先回收。仍在运行且持续产生输出的单个后台进程不做静默截断；其磁盘增长受宿主可用空间约束。
-- MCP adapter 只保留服务端 `content[]` 与可选 JSON 对象 `structuredContent` 的单份语义事实，不生成 `summary / mcpResult / result` 多份包装；外部 `structuredContent` 不是 JSON 对象或不满足 JSON-safe 边界时明确失败。只对“text 可解析 JSON 且与 structuredContent 深度完全相等”的精确镜像做无损去重，其他内容完整保留；`isError=true` 成为正式工具失败。图片、音频和非图片 embedded resource blob 分别转成带外 `image / audio / file` 类型的 `ModelInputAttachment`，JSON 只保留 MIME、文件名/URI、byteLength 和附件索引；单个 MCP 结果当前最多 16 个模型附件、单附件最多 20 MiB、合计最多 32 MiB。附件预算或结果归一化在远端调用返回后失败时，必须作为 post-execution delivery failure 保留真实 `sourceExecutionStatus` 与 `doNotBlindlyRetry`，不能声称远端未执行或诱导盲目重试。OpenAI-compatible Chat Completions 只映射原始 user 消息中的 image、inline/file-id file 与内联 wav/mp3 `input_audio`；tool-origin 二进制附件必须明确 `request_validation`，不得改变来源角色；OpenAI Responses 支持 user/tool-origin image 与 file，内联 file 使用官方 `data:<mime>;base64,<data>`，但当前拒绝 user/tool-origin audio；对 inline file_data 和携带 byteLength 的 file_id/file_url，发送前执行单文件小于 50 MB、整份请求文件合计不超过 50 MB 的校验，未知远端文件大小仍由 provider 最终校验；其他无法由 provider 协议消费的媒体同样必须形成可观察失败，不能伪装成普通 file 或静默丢弃
+- MCP adapter 只保留服务端 `content[]` 与可选 JSON 对象 `structuredContent` 的单份语义事实，不生成 `summary / mcpResult / result` 多份包装；外部 `structuredContent` 不是 JSON 对象或不满足 JSON-safe 边界时明确失败。只对“text 可解析 JSON 且与 structuredContent 深度完全相等”的精确镜像做无损去重，其他内容完整保留；`isError=true` 成为正式工具失败。图片、音频和非图片 embedded resource blob 分别转成带外 `image / audio / file` 类型的 `ModelInputAttachment`，JSON 只保留 MIME、文件名/URI、byteLength 和附件索引；单个 MCP 结果当前最多 16 个模型附件、单附件最多 20 MiB、合计最多 32 MiB。附件预算或结果归一化在远端调用返回后失败时，必须作为 post-execution delivery failure 保留真实 `sourceExecutionStatus` 与 `doNotBlindlyRetry`，不能声称远端未执行或诱导盲目重试。Ordinary 的 Pi AgentTool transport 当前只无损承载 inline image：图片字节可进入紧接的 provider 请求，但 Pi Session 只保存占位文本；tool-origin file/audio 或 URL/file-id image 会形成 `tool_result_attachment_not_supported`，保留来源执行状态并禁止盲目重试，不会静默丢弃。共享旧 transport 仍保持原有协议边界：OpenAI-compatible Chat Completions 只映射原始 user 消息中的 image、inline/file-id file 与内联 wav/mp3 `input_audio`；tool-origin 二进制附件必须明确 `request_validation`，不得改变来源角色；OpenAI Responses 支持 user/tool-origin image 与 file，内联 file 使用官方 `data:<mime>;base64,<data>`，但当前拒绝 user/tool-origin audio；对 inline file_data 和携带 byteLength 的 file_id/file_url，发送前执行单文件小于 50 MB、整份请求文件合计不超过 50 MB 的校验，未知远端文件大小仍由 provider 最终校验；其他无法由 provider 协议消费的媒体同样必须形成可观察失败，不能伪装成普通 file 或静默丢弃
 - Agent loop 对 read-only 并行结果中的动态 `approval_required` 仍会暂停；等待确认、deny/guidance、多阶段再次确认或取消时，确认前正文、附件、错误和可执行 continuation 都保留给模型。用户 guidance 不做固定 1,000 字截断；pending call/confirmation 身份不一致时 fail closed，不能执行工具
-- Ordinary 在每次状态提交时保存模型实际消费的 `canonicalMessages`：原始 `user / assistant / tool` 顺序、工具调用参数、工具结果和最终 assistant 输出保持一致；OpenAI Responses 额外保留白名单 output items，OpenAI-compatible Chat 只保留 `reasoning / reasoning_content / reasoning_details` 白名单续接字段，其他厂商私有响应不持久化。下一轮只读取上一条可见 lineage 的 canonical 消息并追加当前 Skill、任务引用和用户消息，不从 Panel 可见对话、活动事件或摘要重建第二份历史。附件字节只服务当前请求，不进入持久化上下文；旧 snapshot 直接拒绝
-- Ordinary 模型上下文不按固定字符数或消息数静默裁剪；容量只由冻结的模型 token budget 与 loop-level context compaction 管理。80% 阈值是下一次请求前的压缩缓冲，不是工具结果的提前截断点：请求前低于阈值、执行工具后才越过阈值时，最新未消费工具批次原样进入主模型一次；后续请求再把已消费工具结果连同旧历史压成新的语义基线。若新工具批次已使请求达到物理窗口，则立即压缩旧历史但仍完整保留最新工具协议组；保留后仍无法装入时明确失败。压缩不得拆开 assistant tool call 与对应 tool result；压缩成功后的 canonical 历史不能重新混入已被压缩的旧消息，也不对已经进入摘要的工具结果建立额外留存规则。失败、blocked 或取消 run 已经形成的 canonical 消息仍可被下一轮看到，Panel 错误文案和可见回答不能冒充模型历史
-- 所有 OpenAI-compatible Chat Completions 与 Responses 请求保持稳定前缀：系统指令、工具定义与既有消息顺序不因展示投影或跨轮恢复而改写，并携带由协议、模型、根指令、输出契约和工具定义生成的稳定 `prompt_cache_key`，不因中转 Base URL 改变。Responses 请求同时请求 `reasoning.encrypted_content`；`model_builtin` 网页搜索在 Responses 协议中注入 SDK hosted Web Search，且搜索开关进入缓存身份，只有非 Responses 协议会明确拒绝。DeepSeek、Kimi、GLM 与 MiniMax 的 thinking、reasoning 和流式差异只由冻结 provider profile 的 adapter 处理，不进入 Ordinary 业务状态。OpenAI Agents SDK adapter 是 Ordinary 与 Sub-Agent 模型请求的唯一重试 owner，OpenAI client 不再叠加隐式重试；网络、超时、限流和临时服务失败只在当前模型请求尚未产生任何 provider 事件时最多重试两次，已有事件后明确失败。运行计量保留 provider 报告的 cached input、cache write 与 uncached input tokens，不能用估算值冒充缓存命中
-- `canonicalMessages` 是 Ordinary 内部恢复事实，不属于公开 read-model；普通运行 API、conversation 投影和 SSE 不返回系统提示或 provider continuation。Panel 只展示单向投影，但不得用摘要替换正式回答和工具结果
+- Pi Session 保存模型实际消费的消息、工具协议组、活动 leaf 与 compaction entries；Ordinary snapshot 只保存 Session ref/entry ref，不复制 transcript。每次请求前的上下文窗口保护、压缩和 provider continuation 由 Pi AgentHarness/Session 负责，压缩不得拆开未完成的工具协议组；失败、blocked 或取消的业务状态仍由 Ordinary feature 记录
+- Pi provider/model binding 负责稳定前缀、协议 continuation、prompt cache、动态 API key 解析和 provider 方言；配置只保存自定义 OpenAI-compatible provider 及用户选择的模型能力覆盖，不维护第二套 provider credential 或认证操作状态。普通运行 API、conversation 投影和 SSE 不返回 Pi 私有 Session entries 或 continuation。Panel 只展示单向投影，但不得用摘要替换正式回答和工具结果
 - Panel 的工具生命周期投影使用 `tool.requested / tool.completed / tool.failed / tool.cancelled`，确认等待使用 `user_approval.requested`。Ordinary 的 `tool.requested` 与 `tool.progress` 都是 live-only 活动；真正持久化并参与重启重放的工具事实仍是终态 `ToolCallResult`。当前命令工具只上报有界 stdout/stderr 尾部与累计字符数；进度不写入 snapshot、不替代终态结果，也不能影响执行结果。Ordinary SSE 使用 heartbeat 保持连接可观察，Panel 同时做低频增量对账，并在流静默后自动降级轮询，不能依赖切换 conversation 才补齐活动
 - Ordinary SSE 对相邻文本 delta 做 16ms 短窗口合并，完整帧串行写入；`response.write()` 返回 false 时等待 `drain`，单连接积压超过 256 帧时只关闭观察连接，不取消 Agent。权威状态仍由 run snapshot/view 与 cursor 对账提供
-- Panel 关闭会在首个异步清理前同步停止 Ordinary 与 Multi-Agent 新工作准入并请求停止现有 run；等待在途 HTTP 请求最多 1 秒后使用 Node `closeAllConnections()` 终止卡住的连接，整个运行资源清理另有 30 秒 Host hard deadline。若 provider 或其他在途 operation 不响应取消，关闭返回明确 `panel_shutdown_timeout`，桌面宿主可继续退出而不会永久挂起；关闭期间新 Ordinary 请求返回 `panel_runtime_quiescing`，已越过 Panel gate 的 Deep command 返回 `deep_feature_quiescing`
+- Panel 关闭会在首个异步清理前同步停止 Ordinary 新工作准入并请求停止现有 run；等待在途 HTTP 请求最多 1 秒后使用 Node `closeAllConnections()` 终止卡住的连接，整个运行资源清理另有 30 秒 Host hard deadline。若 provider 或其他在途 operation 不响应取消，关闭返回明确 `panel_shutdown_timeout`，桌面宿主可继续退出而不会永久挂起；关闭期间新 Ordinary 请求返回 `panel_runtime_quiescing`
 - 普通 `agent` 的本轮模型配置事实来自 run 创建时冻结的 `capabilitySnapshot.activeModel`；执行、持久化、恢复和用户可见 read-model 不能再用当前全局模型配置覆盖它
 - 普通 `agent` 的本轮模型能力事实来自 run 创建时冻结的 `capabilitySnapshot.modelCapabilities`；直接调用参数里的临时 `modelCapabilities` 只能服务没有冻结快照的测试或兼容调用，不能覆盖已创建 run 的上下文窗口、输出预算、工具调用能力或流式能力
 - 普通 `agent` 的附件读图工具只在本轮模型能力支持视觉输入时进入可用工具集合；工具读取的图片字节只作为临时 `ModelMessage.attachments` 进入下一轮模型请求，不进入事件、run record 或 Panel read-model，工具 JSON 结果只保留图片元数据和本轮模型输入状态
@@ -134,7 +131,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - 普通 `agent` 的技能可见与触发集合也来自 run 创建时冻结的 `capabilitySnapshot.skillCatalog`；执行期间的当前 skill 启停状态只影响新 run，不改写已创建 run
 - 普通 `agent` 默认发现用户级 `$HOME/.agents/skills` 和项目级 `$WORKSPACE/.agents/skills`；设置页使用当前配置工作区，本轮普通 run 使用 run 创建时冻结的工作区，未显式提供工作区时才落到默认配置工作区。项目级 skill 具有更高 precedence。宿主可通过显式 `additionalSkillRoots` 接入 admin/plugin 等受管来源，但这只是显式来源挂载，不是 marketplace、installer、自动更新或回滚机制；默认不自动扫描 managed marketplace。来源层级、root id 和 precedence 会进入冻结 skill catalog 与 run capability 投影；默认显式/关键词选择只使用安全 metadata，不暴露绝对路径；显式 opt-in 的模型路由同样只能看到安全来源 metadata
 - 普通 `agent` 的 skill 启停和 `markUsed` 状态只使用 source-qualified `stateKey` 的 v2 文件；旧 `skillId`、旧版本或损坏状态直接视为空状态，不迁移、不回退
-- 普通 `agent` 的默认 skill 选择采用 progressive disclosure：基于本轮 frozen skill catalog 做确定性显式/关键词选择，显式 `$skill` 直接选择，关键词或触发器命中才加载正文；默认不发起 `skill_routing` 前置模型请求，也不把全量 skill 候选发给模型。设置页“基础能力 -> Skills 触发方式”可显式切换为“语义路由”；只有该设置冻结到新 run 的 `capabilitySnapshot.skillTrigger.mode = "model"` 时，普通 Agent 才会在主请求前额外发起 `purpose: "skill_routing"` 的模型路由请求
+- 普通 `agent` 的默认 skill 选择采用 progressive disclosure：基于本轮 frozen skill catalog 做确定性显式/关键词选择，显式 `$skill` 直接选择，关键词或触发器命中才加载正文；默认不发起 `skill_routing` 前置模型请求，也不把全量 skill 候选发给模型。设置页“基础能力 -> Skills 触发方式”可显式切换为“语义路由”；只有该设置冻结到新 run 的 `capabilitySnapshot.skillTrigger.mode = "model"` 时，普通 Agent 才会在主请求前额外发起 `purpose: "skill_routing"` 的模型路由请求。该请求只使用 Pi 的无工具文本/JSON 通道；不符合窄契约时由现有 Skills fallback 处理，不把共享 Multi-Agent 通道强行切换到 Pi
 - 普通 `agent` 只在 skill 被本轮选中后读取 `SKILL.md` 正文，并校验 run 创建时冻结的正文 hash；hash 不一致时 fail closed，不注入正文
 - 普通 `agent` 只允许本轮已选中且成功加载的 skill 通过 `read_skill_resource` 按需读取 indexed `references`、`assets` 和 `scripts`；reference 内容作为工具结果回到模型，assets/scripts 不返回 raw body，scripts 不自动执行
 - skill `evals/` 只作为 loader/doctor 的本地质量评估 artifact 被发现、索引和统计；它不是运行时资源，不进入 frozen runtime resource index，也不能通过 `read_skill_resource` 读取或注入模型输入。当前 doctor 默认做确定性 JSON 结构、case 数、routing 断言、quality/regression 的 `qualityBaseline` with/without skill 记录和字面量质量检查；显式传入模型通道时可通过 `skill_routing` 跑 routing eval，但仍不自动生成 with/without 输出、不调用 LLM judge、不评估运行时真实回答质量
@@ -143,9 +140,9 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - MCP 的 `enabledTools / autoApprovedTools` 保存远端协议原始方法名；MCP catalog 显式同时携带原始 `protocolName` 和模型可见 canonical `name`。二者只在 catalog 装配时建立映射，Panel、配置和远端 executor 不从 canonical name 反推协议名，Ordinary 工具事实也不保存第二套别名
 - MCP 同步工具调用使用官方 SDK 的 `AbortSignal`、progress token 与 `resetTimeoutOnProgress`：当前限制的是无进度空闲时间，不是 Agent 总运行时间；持续进度会延长调用，超时按结果未知的失败事实记录并禁止盲目重试，用户取消保持 `cancelled` 且不把服务器误标为故障。每个服务器默认最多并发 4 个调用，超出后按 FIFO 排队且排队调用可取消；进度只形成 live-only 活动，不能改写终态。进程在同步调用完成前退出时，Ordinary 用已持久化的工具轮把缺失结果收口为 `tool_execution_outcome_unknown` 并进入 `blocked`，不会自动重放副作用。MCP Tasks 当前仍是上游实验 API，尚未作为稳定、可持久化恢复的产品能力暴露
 - MCP connect、工具枚举和引用枚举的超时都会中止底层协议请求；连接尝试使用代次校验，迟到结果不能把已超时并断开的 client 重新标为 connected。run 释放时会取消并等待仍在连接的 lazy client，关闭是终止且幂等的，迟到连接不能重新写回 session。prompts/resources/templates 只有在远端明确返回 method-not-found 时才投影为空集合，其他枚举失败必须形成可观察错误。单个服务的工具目录以及一轮 run 聚合后的模型可见 MCP 工具目录默认都不得超过 128 项或 128 KiB 序列化 metadata；prompts/resources/templates 共享单服务 1,024 项、1 MiB 的引用目录预算。任一边界超出时整个对应目录明确失败，不缓存、发布或伪装成成功的半截目录。
-- Sub-Agent 当前只向 Ordinary 的 SDK loop 贡献两个原生 AgentTool：`call_sub_agent` 调用已登记专家，`spawn_sub_agent` 创建一次性专家。capability catalog 只保存 catalog-only definition，不向 ToolRegistry 注册假 executor；模型曝光与冻结 run 的普通工具边界使用同一决策。它们使用父 run 冻结的可执行工具上限，声明只能进一步收窄权限；nested Agent 工具集中强制排除所有 Sub-Agent 工具，因此不能递归。父 Ordinary run 使用流式模型传输时，nested Agent 同样通过 SDK AgentTool 使用流式传输并继承取消信号，但 child stream 不形成独立 SSE/read-model。旧批量/专用续读工具、自研 runner、事件/trace store 与独立 read-model 已退役；完整输出作为父 Ordinary 工具事实交回，超过统一 6,000-token 包络时由父 run 的 ToolCenter 保留完整 evidence 并返回 `read_tool_output` continuation，不做自动摘要。调用与结果只形成 Ordinary 标准 tool facts，不发布专用 `sub_agent.*` 事件（见 ADR-0026）
+- Sub-Agent 当前只向 Ordinary 的 Pi AgentTool 适配层贡献两个工具：`call_sub_agent` 调用已登记专家，`spawn_sub_agent` 创建一次性专家。capability catalog 只保存 catalog-only definition，不向 ToolRegistry 注册假 executor；模型曝光与冻结 run 的普通工具边界使用同一决策。它们使用父 run 冻结的可执行工具上限，声明只能进一步收窄权限；nested Agent 工具集中强制排除所有 Sub-Agent 工具，因此不能递归。父 Ordinary run 使用 Pi AgentHarness 创建嵌套执行并继承取消信号，但 child stream 不形成独立 SSE/read-model。旧批量/专用续读工具、自研 runner、事件/trace store 与独立 read-model 已退役；完整输出作为父 Ordinary 工具事实交回，不做自动摘要。调用与结果只形成 Ordinary 标准 tool facts，不发布专用 `sub_agent.*` 事件（见 ADR-0026）
 - 工程决定哪些工具可以执行、哪些需要命令确认、哪些被隐藏
-- Ordinary 的 OpenAI Agents SDK adapter 在调用 ToolCenter 前必须强制校验本轮 `allowedTools`；ToolCenter 仍可重复校验，但不能成为唯一防线。`AgentTurnRuntime` 仅服务 Deep child，不是 Ordinary 生产主链
+- Ordinary 的 Pi AgentTool 适配层在调用 ToolCenter 前必须强制校验本轮 `allowedTools`；ToolCenter 仍可重复校验，但不能成为唯一防线。`AgentTurnRuntime` 仅服务 Deep child，不是 Ordinary 生产主链
 - 模型只能在本轮可见工具集合内自主选择
 - 模型不能绕过 ToolCenter、权限、命令确认和本地策略沙箱；但普通回答、工具结果和错误信息不得被脱敏或安全投影链路吞掉
 
@@ -160,12 +157,12 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 
 ### 6. 当前默认产品边界
 
-当前默认入口仍是普通桌面 Agent；`deep` 是统一 Workbench 内保留但暂不暴露产品入口的 Multi-Agent 功能，不能混入默认 Ordinary 路径。
+当前唯一可运行的产品入口是普通桌面 Agent。Multi-Agent 的代码和测试被延期保留，不能混入默认 Ordinary 路径。
 
-- 产品只有一个 Workbench；Ordinary 与 Multi-Agent 的业务状态、事件、仓储与 read-model 分别归各自 owner，Sub-Agent 的调用与结果归父 Ordinary run
-- 默认入口仍为普通 `agent`；当前 release 暂时隐藏 Agent 集群设置开关与侧栏按钮（正式后端路径 `/api/deep/*` 和内部 `runMode: "deep"` 仍保留），普通请求不会自动转为 deep
-- 当前显式 Agent 集群已落地 manager 自由决策循环、一层 child、`DeepTaskBoard` 单一事实源、`DeepChildScheduler` 实时并发、`DeepResearchBrief`、聊天态动态协作投影、专属工作区壳层、跨会话历史恢复与 parent synthesize，但仍不是完整 Agent Team
-- Multi-Agent 内部闭环按 ADR-0025 推进，模块所有权与 Composition Root 按 ADR-0028 收口；任何变更必须证明不改变 Ordinary 的工具可见性、事件投影、确认语义和首屏文案
+- 产品当前只装配 Ordinary 的业务状态、事件、仓储与 read-model；Sub-Agent 的调用与结果归父 Ordinary run
+- 默认入口为普通 `agent`；Agent 集群设置开关、侧栏按钮、Deep 历史加载与 `/api/deep/*` 均已停用，普通请求不会自动或显式转为 deep
+- 已有的 manager、child、TaskBoard、scheduler 与 synthesis 源码只作为未来重构参考，不构成当前 Agent Team 或可恢复的历史运行
+- 恢复 Multi-Agent 前必须重新确认其模型通道、附件、确认、持久化、入口和 Panel surface，不能直接重新接通历史 API
 - 当前不包含多层递归、child 互聊、team mailbox、Plan 交接、Aboveground Execution Runtime、Governance Pipeline 或 Global Soil 回流
 - 普通文件编辑、读写、命令、搜索等动作必须使用朴素命名，不能包装成过重概念
 

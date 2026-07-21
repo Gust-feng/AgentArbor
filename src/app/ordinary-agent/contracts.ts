@@ -7,7 +7,7 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import type { ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
+import type { ModelUsage } from "../../domain/intelligence/index.js";
 import type {
   ToolCallProgress,
   ToolCallRequest,
@@ -15,11 +15,17 @@ import type {
   ToolConfirmationPolicy,
 } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
+import type {
+  AgentSessionExecutionRefs,
+  AgentSessionEntryRef,
+  AgentSessionRef,
+  AgentSessionWriteCheckpoint,
+} from "../model-runtime/agent-session.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 import type { OrdinaryToolMetricsSnapshot } from "./tool-runtime-metrics.js";
 
-export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v3" as const;
-export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v1" as const;
+export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v4" as const;
+export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v2" as const;
 
 export type OrdinaryFeatureErrorCode =
   | "ordinary_feature_released"
@@ -69,29 +75,21 @@ export type OrdinaryRunInput = {
 
 export type OrdinaryRunTurn = {
   readonly conversationId: string;
-  readonly lineageId: string;
   readonly ordinal: number;
   readonly userTurnId: string;
   readonly assistantTurnId: string;
   readonly predecessorRunId?: string;
 };
 
-export type OrdinaryConversationLineage = {
-  readonly lineageId: string;
-  readonly parentLineageId?: string;
-  readonly forkFromRunId?: string;
-  readonly createdAt: string;
-};
-
 export type OrdinaryConversationControlState = {
   readonly conversationId: string;
   readonly createdAt: string;
+  /** Pi Session owns the transcript tree and active branch. */
+  readonly sessionRef: AgentSessionRef;
   readonly titleOverride?: string;
   readonly titleEditedAt?: string;
   readonly pinnedAt?: string;
   readonly deletedAt?: string;
-  readonly activeLineageId: string;
-  readonly lineages: readonly OrdinaryConversationLineage[];
 };
 
 export type OrdinaryConversationControlDocument = {
@@ -134,10 +132,32 @@ export type OrdinaryRunStatus =
     };
 
 export type OrdinaryPendingToolRound = {
-  /** Exact validated root assistant turn accepted before any tool preflight or execution. */
-  readonly assistantMessage: ModelMessage;
-  readonly acceptedAt: string;
+  /** Pi Session entry containing the provider-ordered root tool calls. */
+  readonly assistantEntryRef: AgentSessionEntryRef;
+  readonly toolCallIds: readonly string[];
 };
+
+/** Durable positions for one run without copying Pi's transcript or branch tree. */
+export type OrdinaryRunSessionPhase =
+  | { readonly phase: "not_started" }
+  | {
+      readonly phase: "started";
+      readonly startLeafRef: AgentSessionEntryRef | null;
+      readonly compactionEntryRefs: readonly AgentSessionEntryRef[];
+    }
+  | {
+      readonly phase: "rollbackable";
+      readonly startLeafRef: AgentSessionEntryRef | null;
+      readonly endLeafRef: AgentSessionEntryRef;
+      readonly compactionEntryRefs: readonly AgentSessionEntryRef[];
+    }
+  | {
+      readonly phase: "completion_candidate";
+      readonly startLeafRef: AgentSessionEntryRef | null;
+      readonly rollbackLeafRef: AgentSessionEntryRef;
+      readonly assistantEntryRef: AgentSessionEntryRef;
+      readonly compactionEntryRefs: readonly AgentSessionEntryRef[];
+    };
 
 type OrdinaryRunEventBase = {
   readonly eventId: string;
@@ -149,6 +169,11 @@ type OrdinaryRunEventBase = {
 export type OrdinaryRunEvent = OrdinaryRunEventBase & (
   | { readonly type: "run.created" | "run.started" }
   | { readonly type: "model.reasoning.completed"; readonly modelRequestId: string; readonly content: string }
+  | {
+      readonly type: "context.compaction.completed";
+      readonly compactionEntryRef: AgentSessionEntryRef;
+      readonly tokensBefore: number;
+    }
   | { readonly type: "run.approval_requested"; readonly confirmationRequests: readonly ConfirmationRequest[]; readonly toolCallIds: readonly string[] }
   | { readonly type: "run.approval_decided"; readonly decision: ConfirmationDecision }
   | { readonly type: "run.completed"; readonly toolCallIds: readonly string[] }
@@ -159,11 +184,12 @@ export type OrdinaryRunEvent = OrdinaryRunEventBase & (
 
 export type OrdinaryRunState = {
   readonly runId: string;
+  readonly sessionRef: AgentSessionRef;
   readonly turn: OrdinaryRunTurn;
   readonly input: OrdinaryRunInput;
   readonly birth: OrdinaryRunBirth;
   readonly status: OrdinaryRunStatus;
-  readonly canonicalMessages: readonly ModelMessage[];
+  readonly session: OrdinaryRunSessionPhase;
   /**
    * Durable checkpoint of assistant text that was already visible while the
    * run was live. It restores the conversation surface after interruption but
@@ -213,7 +239,6 @@ export interface OrdinaryRunRepository {
 }
 
 export type OrdinaryExecutionFacts = {
-  readonly canonicalMessages: readonly ModelMessage[];
   readonly toolCalls: readonly ToolCallResult[];
   /** Cumulative usage for the whole live execution/continuation chain. */
   readonly usage: ModelUsage;
@@ -222,15 +247,25 @@ export type OrdinaryExecutionFacts = {
 };
 
 export type OrdinaryExecutionOutcome =
-  | (OrdinaryExecutionFacts & { readonly status: "completed"; readonly answer: string })
+  | (OrdinaryExecutionFacts & {
+      readonly status: "completed";
+      readonly answer: string;
+      readonly session: AgentSessionExecutionRefs;
+    })
   | (OrdinaryExecutionFacts & {
       readonly status: "approval_required";
+      readonly session?: AgentSessionExecutionRefs;
       readonly confirmationRequests: readonly ConfirmationRequest[];
       readonly continuation: OrdinaryExecutionContinuation;
     })
-  | (OrdinaryExecutionFacts & { readonly status: "cancelled"; readonly reason: string })
+  | (OrdinaryExecutionFacts & {
+      readonly status: "cancelled";
+      readonly reason: string;
+      readonly session?: AgentSessionExecutionRefs;
+    })
   | (OrdinaryExecutionFacts & {
       readonly status: "failed";
+      readonly session?: AgentSessionExecutionRefs;
       readonly error: { readonly code: string; readonly message: string };
     });
 
@@ -246,21 +281,17 @@ export interface OrdinaryExecutionContinuation {
 
 export type OrdinaryExecutionInput = {
   readonly runId: string;
+  readonly sessionRef: AgentSessionRef;
   readonly birth: OrdinaryRunBirth;
   /** Durable user input, including attachment refs that must be resolved per request. */
   readonly runInput: OrdinaryRunInput;
-  readonly messages: readonly ModelMessage[];
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
   readonly onReasoningDelta?: (delta: string) => void;
   readonly onReasoningCompleted?: (content: string) => Promise<void>;
   readonly onToolRequested?: (request: ToolCallRequest) => void;
   readonly onToolProgress?: (progress: ToolCallProgress) => void;
-  /** Must settle before any tool in this validated root turn enters preflight. */
-  readonly onToolRound?: (input: {
-    readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
-    readonly assistantMessage: ModelMessage;
-  }) => Promise<void>;
+  readonly onSessionWriteCheckpoint?: (checkpoint: AgentSessionWriteCheckpoint) => Promise<void>;
   /** Must settle before the executed result is returned to the model. */
   readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
 };
@@ -281,7 +312,12 @@ type OrdinaryRunActivityBase = {
 export type OrdinaryRunActivity = OrdinaryRunActivityBase & (
   | { readonly type: "run.transition"; readonly durability: "durable"; readonly event: OrdinaryRunEvent }
   | { readonly type: "model.request"; readonly durability: "live_only"; readonly reason: "initial" | "after_tool" | "after_approval" }
-  | { readonly type: "model.output.delta"; readonly durability: "live_only"; readonly delta: string }
+  | {
+      readonly type: "model.output.delta";
+      readonly durability: "live_only";
+      readonly modelRequestId: string;
+      readonly delta: string;
+    }
   | { readonly type: "model.reasoning.delta"; readonly durability: "live_only"; readonly modelRequestId: string; readonly delta: string }
   | { readonly type: "tool.requested"; readonly durability: "live_only"; readonly request: ToolCallRequest }
   | {
@@ -302,14 +338,19 @@ export type OrdinaryRunActivityReplay = {
 
 export interface OrdinaryExecutionPort {
   execute(input: OrdinaryExecutionInput): Promise<OrdinaryExecutionOutcome>;
+  /** Finalizes an active Session writer after Ordinary durably commits terminal state. */
+  finalizeSession?(
+    runId: string,
+    target?: import("../model-runtime/agent-session.js").AgentSessionEntryRef | null,
+  ): Promise<void>;
 }
 
 export type StartOrdinaryRunInput = {
   readonly runId: string;
+  readonly sessionRef: AgentSessionRef;
   readonly turn: OrdinaryRunTurn;
   readonly input: OrdinaryRunInput;
   readonly birth: OrdinaryRunBirth;
-  readonly priorCanonicalMessages?: readonly ModelMessage[];
 };
 
 export type SubmitOrdinaryTurnInput = {
@@ -358,7 +399,6 @@ export type OrdinaryConversationReadModel = {
   readonly pinnedAt?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly activeLineage: OrdinaryConversationLineage;
   readonly activeRunId?: string;
   readonly latestRunId?: string;
   readonly queuedRunIds: readonly string[];

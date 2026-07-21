@@ -31,6 +31,7 @@ import type {
 import { OrdinaryFeatureError } from "./contracts.js";
 import { executionErrorFacts } from "../execution-errors/index.js";
 import { canonicalToolResultMessage } from "../model-runtime/tool-result-message.js";
+import type { AgentSessionEntryRef, AgentSessionRepository } from "../model-runtime/agent-session.js";
 import {
   normalizeOrdinaryConversationTitle,
   projectOrdinaryConversation,
@@ -51,6 +52,9 @@ export function createOrdinaryAgentFeature(input: {
   readonly repository: OrdinaryRunRepository;
   readonly conversationRepository: OrdinaryConversationControlRepository;
   readonly execution: OrdinaryExecutionPort;
+  readonly sessionRepository: AgentSessionRepository;
+  /** Test-only seam for injected executions that can emit refs but cannot write a real Session. */
+  readonly testOnlyAllowSessionlessExecution?: boolean;
   readonly releaseToolEvidenceOwner?: (ownerId: string) => void | Promise<void>;
   readonly now?: () => string;
   readonly idFactory?: IdFactory;
@@ -72,9 +76,13 @@ export function createOrdinaryAgentFeature(input: {
   const listeners = new Map<string, Set<(activity: OrdinaryRunActivity) => void>>();
   const activeModelRequestIds = new Map<string, string>();
   const reasoningBuffers = new Map<string, { readonly modelRequestId: string; content: string }>();
+  const sessionsAwaitingFinalization = new Set<string>();
+  const sessionFinalizationPending = new Set<string>();
+  const sessionFinalizationFailures = new Map<string, unknown>();
   const visibleAssistantBuffers = new Map<string, string>();
   const visibleAssistantCheckpointTimers = new Map<string, NodeJS.Timeout>();
   let released = false;
+  let releasePromise: Promise<void> | undefined;
 
   const readyPromise = recoverPersistedRuns();
   // Observe eager recovery immediately; public calls still await the original rejected promise.
@@ -127,8 +135,23 @@ export function createOrdinaryAgentFeature(input: {
         });
       }
     }
+    for (const [conversationId, control] of conversationDocuments) {
+      try {
+        if (await conversationView(control) === undefined) {
+          conversationDocuments.delete(conversationId);
+          unavailableConversationIds.add(conversationId);
+        }
+      } catch {
+        // Unsupported or incomplete Session branches remain on disk for diagnosis, but
+        // cannot make unrelated conversations or new tasks unavailable.
+        conversationDocuments.delete(conversationId);
+        unavailableConversationIds.add(conversationId);
+      }
+    }
     for (const document of documents.values()) {
       if (document.state.status.kind !== "queued") continue;
+      const conversationId = document.state.turn.conversationId;
+      if (unavailableConversationIds.has(conversationId)) continue;
       if (document.state.turn.predecessorRunId === undefined) {
         await activateRootQueued(document.state.runId);
         continue;
@@ -145,19 +168,6 @@ export function createOrdinaryAgentFeature(input: {
         });
       } else if (isTerminal(predecessor.state)) {
         await activateSuccessor(predecessor.state.runId);
-      }
-    }
-    for (const [conversationId, control] of conversationDocuments) {
-      try {
-        if (conversationView(control) === undefined) {
-          conversationDocuments.delete(conversationId);
-          unavailableConversationIds.add(conversationId);
-        }
-      } catch {
-        // Unsupported or incomplete run lineages remain on disk for diagnosis, but
-        // cannot make unrelated conversations or new tasks unavailable.
-        conversationDocuments.delete(conversationId);
-        unavailableConversationIds.add(conversationId);
       }
     }
   }
@@ -227,7 +237,9 @@ export function createOrdinaryAgentFeature(input: {
     const saved = await input.repository.save(state, current.revision);
     documents.set(runId, saved);
     syncDurableToolResults(state);
-    recordTransition(state.timeline.at(-1)!);
+    if (state.timeline.length > current.state.timeline.length) {
+      recordTransition(state.timeline.at(-1)!);
+    }
     return clone(state);
   }
 
@@ -292,6 +304,8 @@ export function createOrdinaryAgentFeature(input: {
     if (released || delta.length === 0) return;
     const document = documents.get(runId);
     if (document?.state.status.kind !== "running") return;
+    const modelRequestId = activeModelRequestIds.get(runId);
+    if (modelRequestId === undefined) return;
     const visibleAssistantText = `${visibleAssistantBuffers.get(runId) ?? document.state.visibleAssistantText ?? ""}${delta}`;
     visibleAssistantBuffers.set(runId, visibleAssistantText);
     scheduleVisibleAssistantCheckpoint(runId);
@@ -303,6 +317,7 @@ export function createOrdinaryAgentFeature(input: {
       recordedAt: now(),
       type: "model.output.delta",
       durability: "live_only",
+      modelRequestId,
       delta,
     };
     stream.activities.push(activity);
@@ -500,29 +515,6 @@ export function createOrdinaryAgentFeature(input: {
     if (accepted.size === 0) acceptedToolResults.delete(runId);
   }
 
-  async function persistToolRound(inputRound: {
-    readonly runId: string;
-    readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
-    readonly assistantMessage: ModelMessage;
-  }): Promise<void> {
-    const { runId } = inputRound;
-    await enqueue(runId, async () => {
-      const current = await load(runId);
-      if (current === undefined) {
-        throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
-      }
-      const accepted = acceptOrdinaryToolRound({
-        state: current.state,
-        canonicalMessagesBeforeRound: inputRound.canonicalMessagesBeforeRound,
-        assistantMessage: inputRound.assistantMessage,
-        acceptedAt: now(),
-      });
-      if (accepted === current.state) return;
-      const saved = await input.repository.save(accepted, current.revision);
-      documents.set(runId, saved);
-    });
-  }
-
   async function persistToolResult(runId: string, result: ToolCallResult): Promise<void> {
     await enqueue(runId, async () => {
       const current = await load(runId);
@@ -559,17 +551,69 @@ export function createOrdinaryAgentFeature(input: {
     });
   }
 
-  async function reconcilePendingToolRound(runId: string): Promise<OrdinaryRunState | undefined> {
+  async function reconcilePendingToolRound(
+    runId: string,
+    options: { readonly persistState?: boolean } = {},
+  ): Promise<OrdinaryRunState | undefined> {
+    const persistState = options.persistState ?? true;
     return enqueue(runId, async () => {
       const current = await load(runId);
       if (current === undefined || current.state.pendingToolRound === undefined) {
         return current === undefined ? undefined : clone(current.state);
       }
-      const reconciled = reconcileInterruptedOrdinaryToolRound({ state: current.state, recordedAt: now() });
-      const saved = await input.repository.save(reconciled, current.revision);
-      documents.set(runId, saved);
-      syncDurableToolResults(reconciled);
-      return clone(reconciled);
+      const pending = current.state.pendingToolRound;
+      const orderedToolCalls = await input.sessionRepository.readToolCalls({
+        sessionRef: current.state.sessionRef,
+        assistantEntryRef: pending.assistantEntryRef,
+      });
+      const recordedAt = now();
+      let state = reconcileInterruptedOrdinaryToolRound({
+        state: current.state,
+        orderedToolCalls,
+        recordedAt,
+      });
+      let document = current;
+      if (persistState && state !== current.state) {
+        document = await input.repository.save(state, current.revision);
+        documents.set(runId, document);
+        syncDurableToolResults(state);
+      }
+      const rootResults = pending.toolCallIds.map((callId) =>
+        state.toolCalls.find((result) => toolCallFactId(result) === callId && result.parentToolCallFactId === undefined));
+      if (rootResults.some((result) => result === undefined)) {
+        throw new OrdinaryFeatureError(
+          "ordinary_run_state_conflict",
+          `Ordinary run ${runId} cannot reconcile a Session tool round without every root result`,
+        );
+      }
+      const toolRoundLeafRef = await input.sessionRepository.reconcileToolResultEntries({
+        sessionRef: state.sessionRef,
+        assistantEntryRef: pending.assistantEntryRef,
+        ...(state.session.phase === "rollbackable"
+          ? { recoveryLeafRef: state.session.endLeafRef }
+          : {}),
+        orderedResults: rootResults as readonly ToolCallResult[],
+      });
+      if (!persistState) return clone(state);
+      state = transitionOrdinaryRun({
+        state,
+        transition: {
+          type: "record_session_checkpoint",
+          checkpoint: {
+            kind: "tool_result_entries_committed",
+            sessionId: state.sessionRef.sessionId,
+            toolRoundLeafRef,
+            toolCallIds: pending.toolCallIds,
+          },
+        },
+        recordedAt: now(),
+        eventId: idFactory("ordinary-event"),
+      });
+      if (persistState) {
+        document = await input.repository.save(state, document.revision);
+        documents.set(runId, document);
+      }
+      return clone(state);
     });
   }
 
@@ -584,11 +628,6 @@ export function createOrdinaryAgentFeature(input: {
       for (const result of closed.toolCalls) {
         state = recordOrdinaryToolResult({ state, result, recordedAt });
       }
-      state = {
-        ...state,
-        canonicalMessages: closed.canonicalMessages,
-        timestamps: { ...state.timestamps, updatedAt: recordedAt },
-      };
       const saved = await input.repository.save(state, current.revision);
       documents.set(runId, saved);
       syncDurableToolResults(state);
@@ -600,7 +639,8 @@ export function createOrdinaryAgentFeature(input: {
     runId: string,
     reason: { readonly code: string; readonly message: string },
   ): Promise<OrdinaryRunState> {
-    return enqueue(runId, async () => {
+    const reconciled = await reconcilePendingToolRound(runId, { persistState: false });
+    const blocked = await enqueue(runId, async () => {
       const current = await load(runId);
       if (current === undefined) {
         throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
@@ -612,19 +652,17 @@ export function createOrdinaryAgentFeature(input: {
         );
       }
       const recordedAt = now();
-      let state = reconcileInterruptedOrdinaryToolRound({ state: current.state, recordedAt });
+      let state = reconciled ?? current.state;
       const closed = closeLostApprovalFacts(state);
       for (const result of closed.toolCalls) {
         state = recordOrdinaryToolResult({ state, result, recordedAt });
       }
-      state = { ...state, canonicalMessages: closed.canonicalMessages };
       state = transitionOrdinaryRun({
         state,
         transition: {
           type: "block",
           reason,
           continueBy: "new_turn",
-          canonicalMessages: state.canonicalMessages,
         },
         recordedAt,
         eventId: idFactory("ordinary-event"),
@@ -635,6 +673,8 @@ export function createOrdinaryAgentFeature(input: {
       recordTransition(state.timeline.at(-1)!);
       return clone(state);
     });
+    if (blocked.pendingToolRound === undefined) return blocked;
+    return await reconcilePendingToolRound(runId) ?? blocked;
   }
 
   function recordDurableToolResult(runId: string, result: ToolCallResult, recordedAt: string): void {
@@ -688,7 +728,7 @@ export function createOrdinaryAgentFeature(input: {
               confirmationRequests: outcome.confirmationRequests,
               continuationAvailability: "live_only",
             },
-            canonicalMessages: outcome.canonicalMessages,
+            session: outcome.session,
             toolCalls: outcome.toolCalls,
             usage: outcome.usage,
             toolMetrics: outcome.toolMetrics,
@@ -715,45 +755,82 @@ export function createOrdinaryAgentFeature(input: {
     const document = await load(runId);
     if (document === undefined || isTerminal(document.state)) return;
     if (outcome.status === "completed") {
-      await mutate(runId, { type: "complete", answer: outcome.answer, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+      const state = await mutate(runId, { type: "complete", answer: outcome.answer, session: outcome.session, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+      await finalizeExecutionSession(runId, state, false);
       return;
     }
     if (outcome.status === "cancelled") {
-      await mutate(runId, { type: "cancel", reason: outcome.reason, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+      const state = await mutate(runId, { type: "cancel", reason: outcome.reason, session: outcome.session, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+      await finalizeExecutionSession(runId, state, true);
       return;
     }
-    await mutate(runId, { type: "fail", error: outcome.error, canonicalMessages: outcome.canonicalMessages, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+    const state = await mutate(runId, { type: "fail", error: outcome.error, session: outcome.session, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+    await finalizeExecutionSession(runId, state, true);
+  }
+
+  async function finalizeExecutionSession(
+    runId: string,
+    state: OrdinaryRunState,
+    restoreSafeLeaf: boolean,
+  ): Promise<void> {
+    const finalize = input.execution.finalizeSession;
+    if (finalize === undefined) return;
+    sessionFinalizationPending.add(runId);
+    const target = restoreSafeLeaf
+      ? rollbackLeafRef(state)
+      : undefined;
+    let firstFailure: unknown;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        await finalize(runId, target);
+        sessionsAwaitingFinalization.delete(runId);
+        sessionFinalizationPending.delete(runId);
+        sessionFinalizationFailures.delete(runId);
+        return;
+      } catch (error) {
+        if (state.session.phase === "not_started" && errorMessage(error).includes("has no active Session control")) {
+          sessionsAwaitingFinalization.delete(runId);
+          sessionFinalizationPending.delete(runId);
+          sessionFinalizationFailures.delete(runId);
+          return;
+        }
+        firstFailure ??= error;
+      }
+    }
+    sessionFinalizationFailures.set(runId, firstFailure);
+    throw firstFailure;
   }
 
   async function runExecution(runId: string): Promise<void> {
     const document = await load(runId);
     if (document === undefined || document.state.status.kind !== "running") return;
+    const sessionRef = document.state.sessionRef;
     const controller = new AbortController();
     controllers.set(runId, controller);
+    if (input.execution.finalizeSession !== undefined) sessionsAwaitingFinalization.add(runId);
     let outcome: OrdinaryExecutionOutcome | undefined;
     try {
       recordModelRequest(runId, "initial");
       outcome = await input.execution.execute({
         runId,
+        sessionRef,
         birth: document.state.birth,
         runInput: document.state.input,
-        messages: document.state.canonicalMessages,
         abortSignal: controller.signal,
         onTextDelta: (delta) => recordOutputDelta(runId, delta),
         onReasoningDelta: (delta) => recordReasoningDelta(runId, delta),
         onReasoningCompleted: (content) => completeReasoning(runId, content),
         onToolRequested: (request) => recordToolRequested(runId, request),
         onToolProgress: (progress) => recordToolProgress(runId, progress),
-        onToolRound: ({ canonicalMessagesBeforeRound, assistantMessage }) => persistToolRound({
-          runId,
-          canonicalMessagesBeforeRound,
-          assistantMessage,
-        }),
+        onSessionWriteCheckpoint: (checkpoint) => mutate(runId, {
+          type: "record_session_checkpoint",
+          checkpoint,
+        }).then(() => undefined),
         onToolResult: async (result) => {
           rememberToolResults(runId, [result]);
           await persistToolResult(runId, result);
           forgetPersistedToolResults(runId, [result]);
-          if (result.status !== "approval_required") {
+          if (result.status !== "approval_required" && result.parentToolCallFactId === undefined) {
             recordModelRequest(runId, "after_tool");
           }
         },
@@ -771,7 +848,7 @@ export function createOrdinaryAgentFeature(input: {
       }
       const latest = await load(runId);
       if (latest !== undefined && !isTerminal(latest.state)) {
-        await mutate(runId, {
+        const terminal = await mutate(runId, {
           type: controller.signal.aborted ? "cancel" : "fail",
           ...(controller.signal.aborted
             ? { reason: cancellationReason(controller.signal.reason) }
@@ -779,19 +856,25 @@ export function createOrdinaryAgentFeature(input: {
           ...(outcome === undefined
             ? {}
             : {
-                canonicalMessages: outcome.canonicalMessages,
+                session: outcome.session,
                 toolCalls: outcome.toolCalls,
                 usage: outcome.usage,
                 toolMetrics: outcome.toolMetrics,
                 capabilityResolution: outcome.capabilityResolution,
               }),
         } as OrdinaryRunTransition, { keepTerminal: controller.signal.aborted });
+        await finalizeExecutionSession(runId, terminal, true);
       }
     } finally {
       try {
         await settleExecution(runId);
       } finally {
-        if (controllers.get(runId) === controller) controllers.delete(runId);
+        // A live approval continuation resumes the same Pi harness. Keep its
+        // original controller so cancellation and late tool facts remain tied
+        // to the run until that harness actually reaches a terminal outcome.
+        if (outcome?.status !== "approval_required" && controllers.get(runId) === controller) {
+          controllers.delete(runId);
+        }
       }
     }
   }
@@ -840,7 +923,7 @@ export function createOrdinaryAgentFeature(input: {
   function isSchedulingBarrierCleared(state: OrdinaryRunState): boolean {
     if (!isTerminal(state) || state.pendingToolRound !== undefined ||
         approvalReservations.has(state.runId) || continuations.has(state.runId) ||
-        acceptedToolResults.has(state.runId)) {
+        acceptedToolResults.has(state.runId) || sessionFinalizationPending.has(state.runId)) {
       return false;
     }
     // Cancellation stops admission before it commits. A pure model call that
@@ -873,28 +956,28 @@ export function createOrdinaryAgentFeature(input: {
     if (predecessor === undefined || !isSchedulingBarrierCleared(predecessor.state)) return;
     const control = await loadConversationControl(predecessor.state.turn.conversationId);
     if (control?.state.deletedAt !== undefined) return;
-    const candidate = nextEligibleQueuedRun(schedulingRuns(predecessor.state.turn.conversationId, control));
+    const candidate = nextEligibleQueuedRun(await schedulingRuns(predecessor.state.turn.conversationId, control));
     if (candidate === undefined) return;
     const activated = await enqueue(candidate.runId, async () => {
       const current = await load(candidate.runId);
       if (current === undefined || current.state.status.kind !== "queued") return undefined;
       const latestControl = await loadConversationControl(current.state.turn.conversationId);
       if (latestControl?.state.deletedAt !== undefined) return undefined;
-      const latestRuns = schedulingRuns(current.state.turn.conversationId, latestControl);
+      const latestRuns = await schedulingRuns(current.state.turn.conversationId, latestControl);
       const latestCandidate = nextEligibleQueuedRun(latestRuns);
       if (latestCandidate?.runId !== current.state.runId) return undefined;
       return commitTransition(current.state.runId, {
         type: "start",
-        priorCanonicalMessages: canonicalMessagesBefore(latestRuns, current.state.runId),
       });
     });
     if (activated?.status.kind === "running") track(activated.runId, runExecution(activated.runId));
   }
 
-  function schedulingRuns(
+  async function schedulingRuns(
     conversationId: string,
     control: OrdinaryConversationControlDocument | undefined,
-  ): readonly OrdinaryRunState[] {
+  ): Promise<readonly OrdinaryRunState[]> {
+    if (unavailableConversationIds.has(conversationId)) return [];
     if (control !== undefined) return visibleRuns(control);
     return [...documents.values()]
       .map((document) => document.state)
@@ -910,24 +993,6 @@ export function createOrdinaryAgentFeature(input: {
     return undefined;
   }
 
-  function canonicalMessagesBefore(
-    runs: readonly OrdinaryRunState[],
-    runId: string,
-  ): OrdinaryRunState["canonicalMessages"] {
-    const runIndex = runs.findIndex((run) => run.runId === runId);
-    if (runIndex < 0) throw new Error(`Ordinary queued run ${runId} was not found in its visible lineage`);
-    let messages: OrdinaryRunState["canonicalMessages"] = [];
-    for (const run of runs.slice(0, runIndex)) {
-      if (run.timeline.some((event) => event.type === "run.started")) {
-        messages = run.canonicalMessages;
-      } else {
-        // A queued turn cancelled before execution has no model-authored history.
-        messages = [...messages, { role: "user", content: run.input.userMessage }];
-      }
-    }
-    return messages;
-  }
-
   async function activateRootQueued(runId: string): Promise<void> {
     if (released) return;
     const activated = await enqueue(runId, async () => {
@@ -935,8 +1000,14 @@ export function createOrdinaryAgentFeature(input: {
       if (current === undefined || current.state.status.kind !== "queued" || current.state.turn.predecessorRunId !== undefined) {
         return undefined;
       }
-      const control = await loadConversationControl(current.state.turn.conversationId);
+      const conversationId = current.state.turn.conversationId;
+      if (unavailableConversationIds.has(conversationId)) return undefined;
+      const control = await loadConversationControl(conversationId);
       if (control?.state.deletedAt !== undefined) return undefined;
+      if (control !== undefined) {
+        const candidate = nextEligibleQueuedRun(await visibleRuns(control));
+        if (candidate?.runId !== runId) return undefined;
+      }
       return commitTransition(runId, { type: "start" });
     });
     if (activated?.status.kind === "running") track(activated.runId, runExecution(activated.runId));
@@ -979,10 +1050,10 @@ export function createOrdinaryAgentFeature(input: {
     }
     const initial = createInitialOrdinaryRunState({
       runId: startInput.runId,
+      sessionRef: startInput.sessionRef,
       turn: startInput.turn,
       runInput: startInput.input,
       birth: startInput.birth,
-      priorCanonicalMessages: startInput.priorCanonicalMessages,
       recordedAt: now(),
       eventId: idFactory("ordinary-event"),
     });
@@ -1027,36 +1098,41 @@ export function createOrdinaryAgentFeature(input: {
           );
         }
         const createdAt = now();
-        const lineageId = idFactory("ordinary-lineage");
+        const sessionRef = await input.sessionRepository.create({
+          sessionId: idFactory("agent-session"),
+          sessionCwd: submitInput.birth.capabilitySnapshot.workspace.workspaceDirectory,
+        });
         const state: OrdinaryConversationControlState = {
           conversationId,
           createdAt,
-          activeLineageId: lineageId,
-          lineages: [{ lineageId, createdAt }],
+          sessionRef,
         };
-        control = await input.conversationRepository.save(state, 0, createdAt);
+        try {
+          control = await input.conversationRepository.save(state, 0, createdAt);
+        } catch (error) {
+          await input.sessionRepository.delete(sessionRef).catch(() => undefined);
+          throw error;
+        }
         conversationDocuments.set(conversationId, control);
       }
       assertConversationWritable(control);
-      const runs = visibleRuns(control);
+      const runs = await visibleRuns(control);
       const predecessor = runs.at(-1);
-      const activeLineage = requireActiveLineage(control);
       const runId = idFactory("ordinary-run");
       const run = await startWithinConversation({
         runId,
+        sessionRef: control.state.sessionRef,
         turn: {
           conversationId,
-          lineageId: activeLineage.lineageId,
           ordinal: (predecessor?.turn.ordinal ?? 0) + 1,
           userTurnId: idFactory("ordinary-user-turn"),
           assistantTurnId: idFactory("ordinary-assistant-turn"),
-          predecessorRunId: predecessor?.runId,
+          ...(predecessor === undefined ? {} : { predecessorRunId: predecessor.runId }),
         },
         input: submitInput.input,
         birth: submitInput.birth,
-        priorCanonicalMessages: predecessor?.canonicalMessages,
       });
-      const conversation = conversationView(control);
+      const conversation = await conversationView(control);
       if (conversation === undefined) throw new Error(`Ordinary conversation ${conversationId} has no visible run after submission`);
       return { conversation, run };
     });
@@ -1104,9 +1180,13 @@ export function createOrdinaryAgentFeature(input: {
     readonly targetRunId?: string;
     readonly stepsBack?: number;
   }): Promise<OrdinaryConversationReadModel> {
-    const control = await mutateConversation(rollback.conversationId, (state, changedAt) => {
-      const current = conversationDocuments.get(rollback.conversationId)!;
-      const runs = visibleRuns(current);
+    const control = await enqueue(`conversation:${rollback.conversationId}`, async () => {
+      const current = await loadConversationControl(rollback.conversationId);
+      if (current === undefined) {
+        throw new OrdinaryFeatureError("ordinary_conversation_not_found", `Ordinary conversation ${rollback.conversationId} was not found`);
+      }
+      assertConversationWritable(current);
+      const runs = await visibleRuns(current);
       if (runs.some((run) => !isTerminal(run))) {
         throw new OrdinaryFeatureError("ordinary_conversation_busy", "Cannot roll back a busy Ordinary conversation");
       }
@@ -1114,23 +1194,20 @@ export function createOrdinaryAgentFeature(input: {
       const target = rollback.targetRunId === undefined
         ? completed[Math.max(0, completed.length - Math.max(1, Math.floor(rollback.stepsBack ?? 1)) - 1)]
         : completed.find((run) => run.runId === rollback.targetRunId);
-      if (target === undefined) {
+      if (target === undefined || target.session.phase !== "rollbackable") {
+        throw new OrdinaryFeatureError("ordinary_rollback_target_not_found", "Ordinary rollback target was not found in completed visible runs");
+      }
+      const targetIndex = runs.findIndex((run) => run.runId === target.runId);
+      const unretiredPreSessionTurns = runs.slice(targetIndex + 1).filter((run) =>
+        run.session.phase === "not_started" && isTerminal(run));
+      if (unretiredPreSessionTurns.length > 0) {
         throw new OrdinaryFeatureError(
-          "ordinary_rollback_target_not_found",
-          "Ordinary rollback target was not found in completed visible runs",
+          "ordinary_run_state_conflict",
+          "Cannot roll back across terminal turns that never entered the Session until those turns have a durable retirement fact",
         );
       }
-      const lineageId = idFactory("ordinary-lineage");
-      return {
-        ...state,
-        activeLineageId: lineageId,
-        lineages: [...state.lineages, {
-          lineageId,
-          parentLineageId: state.activeLineageId,
-          forkFromRunId: target.runId,
-          createdAt: changedAt,
-        }],
-      };
+      await input.sessionRepository.moveActiveLeaf(current.state.sessionRef, target.session.endLeafRef);
+      return current;
     });
     return requireConversationView(control);
   }
@@ -1160,20 +1237,26 @@ export function createOrdinaryAgentFeature(input: {
         activityStreams.delete(document.state.runId);
         listeners.delete(document.state.runId);
       }
+      await input.sessionRepository.delete(tombstone.state.sessionRef);
     });
   }
 
-  function visibleRuns(control: OrdinaryConversationControlDocument): readonly OrdinaryRunState[] {
-    return visibleOrdinaryConversationRuns(control, [...documents.values()].map((document) => document.state));
+  async function visibleRuns(control: OrdinaryConversationControlDocument): Promise<readonly OrdinaryRunState[]> {
+    const runs = [...documents.values()].map((document) => document.state);
+    const activeBranch = await input.sessionRepository.getActiveBranchEntryRefs(control.state.sessionRef);
+    const branch = activeBranch.length === 0 && input.testOnlyAllowSessionlessExecution === true
+      ? snapshotBranchRefsForSessionlessTestExecution(runs, control.state.sessionRef)
+      : activeBranch;
+    return visibleOrdinaryConversationRuns(control, runs, branch);
   }
 
-  function conversationView(control: OrdinaryConversationControlDocument): OrdinaryConversationReadModel | undefined {
+  async function conversationView(control: OrdinaryConversationControlDocument): Promise<OrdinaryConversationReadModel | undefined> {
     if (control.state.deletedAt !== undefined) return undefined;
-    return projectOrdinaryConversation({ control, runs: visibleRuns(control) });
+    return projectOrdinaryConversation({ control, runs: await visibleRuns(control) });
   }
 
-  function requireConversationView(control: OrdinaryConversationControlDocument): OrdinaryConversationReadModel {
-    const view = conversationView(control);
+  async function requireConversationView(control: OrdinaryConversationControlDocument): Promise<OrdinaryConversationReadModel> {
+    const view = await conversationView(control);
     if (view === undefined) throw new Error(`Ordinary conversation ${control.state.conversationId} has no visible turns`);
     return view;
   }
@@ -1185,7 +1268,13 @@ export function createOrdinaryAgentFeature(input: {
     if (document === undefined) {
       throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
     }
-    if (isTerminal(document.state)) return clone(document.state);
+    if (isTerminal(document.state)) {
+      if (sessionFinalizationPending.has(runId)) {
+        await finalizeExecutionSession(runId, document.state, document.state.status.kind !== "completed");
+        await activateSuccessor(runId);
+      }
+      return clone(document.state);
+    }
     controllers.get(runId)?.abort(reason);
     const cancellation = await enqueue(runId, async () => {
       const current = await load(runId);
@@ -1206,10 +1295,16 @@ export function createOrdinaryAgentFeature(input: {
         throw error;
       }
     });
+    if (cancellation.wasTerminal) {
+      if (cancellation.continuation !== undefined) {
+        trackPostExecutionTask(cancellation.continuation.release().catch(() => undefined));
+      }
+      return cancellation.state;
+    }
+    await finalizeExecutionSession(runId, cancellation.state, true);
     if (cancellation.continuation !== undefined) {
       trackPostExecutionTask(cancellation.continuation.release().catch(() => undefined));
     }
-    if (cancellation.wasTerminal) return cancellation.state;
     const stillHasLiveExecution = controllers.has(runId) || executions.has(runId) || approvalReservations.has(runId);
     if (!stillHasLiveExecution) await settleExecution(runId);
     await activateSuccessor(runId);
@@ -1227,7 +1322,8 @@ export function createOrdinaryAgentFeature(input: {
       decidedAt: input.decidedAt,
       ...(input.guidance === undefined ? {} : { guidance: input.guidance }),
     };
-    const controller = new AbortController();
+    let controller: AbortController | undefined;
+    let createdController = false;
     let continuation: OrdinaryExecutionContinuation | undefined;
     const reserved = await enqueue(ownerRunId, async () => {
       if (approvalReservations.has(ownerRunId)) {
@@ -1256,14 +1352,22 @@ export function createOrdinaryAgentFeature(input: {
       if (continuation === undefined) {
         return clone(document.state);
       }
+      controller = controllers.get(ownerRunId);
+      if (controller === undefined) {
+        // A live-only continuation normally retains the original run
+        // controller. This fallback keeps older in-process continuations
+        // cancellable without claiming they are durable across restart.
+        controller = new AbortController();
+        controllers.set(ownerRunId, controller);
+        createdController = true;
+      }
       approvalReservations.set(ownerRunId, decision.confirmationId);
       continuations.delete(ownerRunId);
-      controllers.set(ownerRunId, controller);
       try {
         return await commitTransition(ownerRunId, { type: "approval_decided", decision });
       } catch (error) {
         approvalReservations.delete(ownerRunId);
-        controllers.delete(ownerRunId);
+        if (createdController && controllers.get(ownerRunId) === controller) controllers.delete(ownerRunId);
         continuations.set(ownerRunId, continuation);
         throw error;
       }
@@ -1280,7 +1384,7 @@ export function createOrdinaryAgentFeature(input: {
       let outcome: OrdinaryExecutionOutcome | undefined;
       try {
         recordModelRequest(ownerRunId, "after_approval");
-        outcome = await continuation!.decide({ decision, abortSignal: controller.signal });
+        outcome = await continuation!.decide({ decision, abortSignal: controller!.signal });
         await completeReasoning(ownerRunId);
         rememberToolResults(ownerRunId, outcome.toolCalls);
         await applyOutcome(ownerRunId, outcome);
@@ -1295,26 +1399,27 @@ export function createOrdinaryAgentFeature(input: {
         const latest = await load(ownerRunId);
         if (latest !== undefined && !isTerminal(latest.state)) {
           await mutate(ownerRunId, {
-            type: controller.signal.aborted ? "cancel" : "fail",
-            ...(controller.signal.aborted
-              ? { reason: cancellationReason(controller.signal.reason) }
+            type: controller!.signal.aborted ? "cancel" : "fail",
+            ...(controller!.signal.aborted
+              ? { reason: cancellationReason(controller!.signal.reason) }
               : { error: ordinaryExecutionFailureFacts(failure) }),
             ...(outcome === undefined
               ? {}
               : {
-                  canonicalMessages: outcome.canonicalMessages,
                   toolCalls: outcome.toolCalls,
                   usage: outcome.usage,
                   toolMetrics: outcome.toolMetrics,
                   capabilityResolution: outcome.capabilityResolution,
                 }),
-          } as OrdinaryRunTransition, { keepTerminal: controller.signal.aborted });
+          } as OrdinaryRunTransition, { keepTerminal: controller!.signal.aborted });
         }
       } finally {
         try {
           await settleExecution(ownerRunId);
         } finally {
-          if (controllers.get(ownerRunId) === controller) controllers.delete(ownerRunId);
+          if (outcome?.status !== "approval_required" && controllers.get(ownerRunId) === controller) {
+            controllers.delete(ownerRunId);
+          }
           if (approvalReservations.get(ownerRunId) === decision.confirmationId) {
             approvalReservations.delete(ownerRunId);
           }
@@ -1326,7 +1431,6 @@ export function createOrdinaryAgentFeature(input: {
   }
 
   function closeLostApprovalFacts(state: OrdinaryRunState): {
-    readonly canonicalMessages: readonly ModelMessage[];
     readonly toolCalls: readonly ToolCallResult[];
   } {
     const closedResults = state.toolCalls
@@ -1335,20 +1439,7 @@ export function createOrdinaryAgentFeature(input: {
         state,
         result as ToolCallResult & { readonly status: "approval_required" },
       ));
-    const existingToolMessages = new Set(state.canonicalMessages.flatMap((message) =>
-      message.role === "tool" && message.toolCallId !== undefined ? [message.toolCallId] : []));
-    const canonicalToolCalls = new Set(state.canonicalMessages.flatMap((message) =>
-      message.role === "assistant" ? (message.toolCalls ?? []).map((call) => call.callId) : []));
-    return {
-      canonicalMessages: [
-        ...state.canonicalMessages,
-        ...closedResults.flatMap((result): readonly ModelMessage[] =>
-          existingToolMessages.has(result.callId) || !canonicalToolCalls.has(result.callId)
-          ? []
-          : [canonicalToolResultMessage(result)]),
-      ],
-      toolCalls: closedResults,
-    };
+    return { toolCalls: closedResults };
   }
 
   function assertLive(): void {
@@ -1369,14 +1460,12 @@ export function createOrdinaryAgentFeature(input: {
       async getConversation(conversationId) {
         await readyPromise;
         const control = await loadConversationControl(conversationId);
-        return control === undefined ? undefined : clone(conversationView(control));
+        return control === undefined ? undefined : clone(await conversationView(control));
       },
       async listConversations(limit = 50) {
         await readyPromise;
-        const views = [...conversationDocuments.values()].flatMap((control) => {
-          const view = conversationView(control);
-          return view === undefined ? [] : [view];
-        }).sort((left, right) => {
+        const projected = await Promise.all([...conversationDocuments.values()].map((control) => conversationView(control)));
+        const views = projected.filter((view): view is OrdinaryConversationReadModel => view !== undefined).sort((left, right) => {
           const pinned = (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "");
           return pinned === 0 ? right.updatedAt.localeCompare(left.updatedAt) : pinned;
         });
@@ -1418,36 +1507,73 @@ export function createOrdinaryAgentFeature(input: {
       },
     },
     async release() {
-      if (released) return;
+      if (releasePromise !== undefined) return releasePromise;
       released = true;
-      await readyPromise.catch(() => undefined);
-      for (const timer of visibleAssistantCheckpointTimers.values()) clearTimeout(timer);
-      visibleAssistantCheckpointTimers.clear();
-      await Promise.allSettled([...visibleAssistantBuffers.keys()].map(persistVisibleAssistantCheckpoint));
-      for (const controller of controllers.values()) controller.abort("ordinary_feature_released");
-      await releaseContinuations();
-      await Promise.allSettled(executions.values());
-      await Promise.allSettled(postExecutionTasks);
-      await Promise.allSettled(mutationQueues.values());
-      // An abort-ignoring execution may have returned an approval while release awaited it.
-      await releaseContinuations();
-      listeners.clear();
-      activityStreams.clear();
-      activeModelRequestIds.clear();
-      reasoningBuffers.clear();
-      visibleAssistantBuffers.clear();
-      visibleAssistantCheckpointTimers.clear();
-      approvalReservations.clear();
-      acceptedToolResults.clear();
-      documents.clear();
-      conversationDocuments.clear();
+      const attempt = releaseFeatureResources();
+      releasePromise = attempt;
+      try {
+        await attempt;
+      } catch (error) {
+        // The feature remains quiesced, but a later release call may retry a
+        // failed Session finalization against the same sticky safe leaf.
+        releasePromise = undefined;
+        throw error;
+      }
     },
   };
+
+  async function releaseFeatureResources(): Promise<void> {
+    await readyPromise.catch(() => undefined);
+    for (const timer of visibleAssistantCheckpointTimers.values()) clearTimeout(timer);
+    visibleAssistantCheckpointTimers.clear();
+    await Promise.allSettled([...visibleAssistantBuffers.keys()].map(persistVisibleAssistantCheckpoint));
+    for (const controller of controllers.values()) controller.abort("ordinary_feature_released");
+    await releaseContinuations();
+    await Promise.allSettled(executions.values());
+    await Promise.allSettled(postExecutionTasks);
+    await Promise.allSettled(mutationQueues.values());
+    // An abort-ignoring execution may have returned an approval while release awaited it.
+    await releaseContinuations();
+    await finalizeRemainingSessions();
+    listeners.clear();
+    activityStreams.clear();
+    activeModelRequestIds.clear();
+    reasoningBuffers.clear();
+    sessionsAwaitingFinalization.clear();
+    sessionFinalizationPending.clear();
+    sessionFinalizationFailures.clear();
+    visibleAssistantBuffers.clear();
+    visibleAssistantCheckpointTimers.clear();
+    approvalReservations.clear();
+    acceptedToolResults.clear();
+    documents.clear();
+    conversationDocuments.clear();
+  }
 
   async function releaseContinuations(): Promise<void> {
     const pending = [...continuations.values()];
     continuations.clear();
     await Promise.allSettled(pending.map((continuation) => continuation.release()));
+  }
+
+  async function finalizeRemainingSessions(): Promise<void> {
+    const failures: unknown[] = [];
+    for (const runId of [...sessionsAwaitingFinalization]) {
+      const document = await load(runId);
+      if (document === undefined) continue;
+      try {
+        await finalizeExecutionSession(
+          runId,
+          document.state,
+          document.state.status.kind !== "completed",
+        );
+      } catch (error) {
+        failures.push(sessionFinalizationFailures.get(runId) ?? error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Failed to finalize one or more Ordinary Agent Sessions.");
+    }
   }
 
   function activityCursor(stream: { readonly streamId: string; readonly nextSequence: number }): OrdinaryRunActivityCursor {
@@ -1555,10 +1681,30 @@ function assertConversationWritable(document: OrdinaryConversationControlDocumen
     );
   }
 }
-function requireActiveLineage(document: OrdinaryConversationControlDocument) {
-  const lineage = document.state.lineages.find((item) => item.lineageId === document.state.activeLineageId);
-  if (lineage === undefined) throw new Error(`Ordinary conversation ${document.state.conversationId} active lineage was not found`);
-  return lineage;
+function rollbackLeafRef(state: OrdinaryRunState): AgentSessionEntryRef | null {
+  switch (state.session.phase) {
+    case "not_started": return null;
+    case "started": return state.session.startLeafRef;
+    case "rollbackable": return state.session.endLeafRef;
+    case "completion_candidate": return state.session.rollbackLeafRef;
+  }
+}
+function snapshotBranchRefsForSessionlessTestExecution(
+  runs: readonly OrdinaryRunState[],
+  sessionRef: OrdinaryConversationControlState["sessionRef"],
+): readonly AgentSessionEntryRef[] {
+  return runs
+    .filter((run) => run.sessionRef.sessionId === sessionRef.sessionId)
+    .sort((left, right) => left.turn.ordinal - right.turn.ordinal)
+    .flatMap((run): readonly AgentSessionEntryRef[] => {
+      switch (run.session.phase) {
+        case "rollbackable": return [run.session.endLeafRef];
+        case "completion_candidate": return [run.session.assistantEntryRef];
+        case "not_started":
+        case "started":
+          return [];
+      }
+    });
 }
 function cancellationReason(value: unknown): string { return typeof value === "string" ? value : "cancelled"; }
 function ordinaryExecutionFailureFacts(value: unknown): { readonly code: string; readonly message: string } {

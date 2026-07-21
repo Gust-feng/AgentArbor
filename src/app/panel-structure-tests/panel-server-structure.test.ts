@@ -48,7 +48,6 @@ test("ordinary-routes is a thin HTTP adapter over OrdinaryAgentFeature", async (
   assert.match(source, /runtime\.ordinaryAgentFeature\.(commands|queries|events)\./);
 
   for (const forbiddenImport of [
-    "@openai/agents",
     "adapters/intelligence",
     "model-runtime/factory",
     "tool-center/tool-center",

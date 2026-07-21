@@ -171,6 +171,7 @@ test("ToolCenter uses scoped fact identity for confirmation while preserving pro
   const request = {
     callId: "shared-provider-call",
     factId: "agent-tool:8:parent-a/tool:shared-provider-call",
+    parentToolCallFactId: "agent-tool:8:parent-a",
     toolName: "scoped_write",
     input: { value: "one" },
   };
@@ -182,6 +183,10 @@ test("ToolCenter uses scoped fact identity for confirmation while preserving pro
   const confirmationId = `confirmation-${request.factId}`;
   assert.equal(pending.status === "approval_required" ? pending.result.callId : undefined, request.callId);
   assert.equal(pending.status === "approval_required" ? pending.result.factId : undefined, request.factId);
+  assert.equal(
+    pending.status === "approval_required" ? pending.result.parentToolCallFactId : undefined,
+    request.parentToolCallFactId,
+  );
   assert.equal(pending.status === "approval_required" ? pending.result.confirmationRequest?.confirmationId : undefined, confirmationId);
   assert.equal(pending.status === "approval_required" ? pending.result.confirmationRequest?.toolCallFactId : undefined, request.factId);
 
@@ -192,6 +197,7 @@ test("ToolCenter uses scoped fact identity for confirmation while preserving pro
   assert.equal(completed.status, "completed");
   assert.equal(completed.callId, request.callId);
   assert.equal(completed.factId, request.factId);
+  assert.equal(completed.parentToolCallFactId, request.parentToolCallFactId);
   assert.equal(executedToolCallId, request.factId);
 });
 
@@ -207,7 +213,13 @@ test("ToolCenter preflight blocks policy, registration, permission, and invalid-
   circular.self = circular;
 
   const blockedUrl = center.preflight(
-    { callId: "call-ftp", toolName: "browser_snapshot", input: { url: "ftp://example.test/file" } },
+    {
+      callId: "call-ftp",
+      factId: "agent-tool:8:parent-b/tool:call-ftp",
+      parentToolCallFactId: "agent-tool:8:parent-b",
+      toolName: "browser_snapshot",
+      input: { url: "ftp://example.test/file" },
+    },
     context,
     allowTools("browser_snapshot"),
   );
@@ -239,6 +251,14 @@ test("ToolCenter preflight blocks policy, registration, permission, and invalid-
   assert.equal(executions, 0);
   assert.equal(blockedUrl.status, "blocked");
   assert.equal(blockedUrl.status === "blocked" ? blockedUrl.result.errorFacts?.code : undefined, "url_protocol_blocked");
+  assert.equal(
+    blockedUrl.status === "blocked" ? blockedUrl.result.factId : undefined,
+    "agent-tool:8:parent-b/tool:call-ftp",
+  );
+  assert.equal(
+    blockedUrl.status === "blocked" ? blockedUrl.result.parentToolCallFactId : undefined,
+    "agent-tool:8:parent-b",
+  );
   assert.equal(unknown.status, "blocked");
   assert.match(unknown.status === "blocked" ? unknown.result.error ?? "" : "", /未注册/);
   assert.equal(unauthorized.status, "blocked");
@@ -899,16 +919,51 @@ test("ToolCenter preserves complete thrown errors that fit the inline result bud
     });
   }));
 
+  const request: ToolCallRequest = {
+    callId: "call-inline-thrown-failure",
+    factId: "agent-tool:8:parent-c/tool:call-inline-thrown-failure",
+    parentToolCallFactId: "agent-tool:8:parent-c",
+    toolName: "inline_thrown_failure",
+    input: {},
+  };
   const result = await center.execute(
-    { callId: "call-inline-thrown-failure", toolName: "inline_thrown_failure", input: {} },
+    request,
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
     allowTools("inline_thrown_failure"),
   );
 
   assert.equal(result.status, "failed");
+  assert.equal(result.factId, request.factId);
+  assert.equal(result.parentToolCallFactId, request.parentToolCallFactId);
   assert.equal(result.error, message);
   assert.equal(result.errorFacts?.detail, detail);
+  assert.equal(result.failureAttribution, "execution_failure");
   assert.equal(result.output, undefined);
+});
+
+test("ToolCenter attributes executor-reported failures to execution", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("reported_execution_failure", async (_input, context) => ({
+    kind: "tool_call_result",
+    result: {
+      callId: context.toolCallId ?? "missing-call-id",
+      toolName: "reported_execution_failure",
+      input: {},
+      output: undefined,
+      status: "failed",
+      error: "The tool ran and reported a failure.",
+      durationMs: 1,
+    },
+  })));
+
+  const result = await center.execute(
+    { callId: "call-reported-execution-failure", toolName: "reported_execution_failure", input: {} },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("reported_execution_failure"),
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.failureAttribution, "execution_failure");
 });
 
 test("ToolCenter retains oversized thrown stderr and HTTP-like bodies behind read_tool_output", async () => {
@@ -1459,8 +1514,15 @@ test("ToolCenter maps an aborted throw to cancelled only for an abort error", as
     throw Object.assign(new Error("operation aborted"), { name: "AbortError" });
   }));
 
+  const request: ToolCallRequest = {
+    callId: "call-abort-error",
+    factId: "agent-tool:8:parent-d/tool:call-abort-error",
+    parentToolCallFactId: "agent-tool:8:parent-d",
+    toolName: "abort_error",
+    input: {},
+  };
   const result = await center.execute(
-    { callId: "call-abort-error", toolName: "abort_error", input: {} },
+    request,
     {
       callerAgentId: "agent-test",
       traceId: "trace-test",
@@ -1471,6 +1533,8 @@ test("ToolCenter maps an aborted throw to cancelled only for an abort error", as
   );
 
   assert.equal(result.status, "cancelled");
+  assert.equal(result.factId, request.factId);
+  assert.equal(result.parentToolCallFactId, request.parentToolCallFactId);
   assert.equal(result.errorFacts?.abortRequested, true);
   assert.equal(result.errorFacts?.sourceExecutionStatus, "unknown");
   assert.equal(result.errorFacts?.doNotBlindlyRetry, true);

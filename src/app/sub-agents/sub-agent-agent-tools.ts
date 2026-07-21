@@ -15,8 +15,8 @@ const AGENT_TOOL_NAMES = new Set([
   SPAWN_SUB_AGENT_TOOL_NAME,
 ]);
 
-const CALL_SUB_AGENT_DESCRIPTION = "Call one registered specialist for a bounded task.";
-const SPAWN_SUB_AGENT_DESCRIPTION = "Create one temporary specialist for this call. It is not saved and cannot delegate to another agent.";
+const CALL_SUB_AGENT_DESCRIPTION = "Delegate one bounded task to an available specialist.";
+const SPAWN_SUB_AGENT_DESCRIPTION = "Delegate one bounded task to a temporary specialist.";
 const callSubAgentInputSchema: ToolInputSchema = {
   type: "object",
   properties: {

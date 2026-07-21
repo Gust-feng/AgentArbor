@@ -4,12 +4,12 @@ import type {
   AgentToolRegistryContribution,
   AgentToolRuntimeContext,
 } from "../tool-center/factory.js";
-import type { AgentRunResources } from "./agent-run-resources.js";
+import type { AgentHostRunResources } from "./agent-run-resources.js";
 
 /** Feature contributions selected by the application Host for every Agent run. */
 export function createHostAgentToolContributions(input: {
   readonly runtime: AgentToolRuntimeContext;
-  readonly resources: AgentRunResources;
+  readonly resources: AgentHostRunResources;
   readonly providerFetch?: AgentToolProviderFetch;
 }): readonly AgentToolRegistryContribution[] {
   return [createResearchToolRegistryContribution({

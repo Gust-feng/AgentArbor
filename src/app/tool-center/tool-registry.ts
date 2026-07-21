@@ -223,9 +223,9 @@ function uniqueScopes(scopes: readonly ToolRegistryScope[]): readonly ToolRegist
  * 「进模型可见集合」的硬门槛（FR-TOOL-001 / FR-TOOL-002）。
  *
  * 这里只校验 executor identity、客观 description、input schema 和执行/副作用元数据。
- * `modelContract` 的推荐用法、参数/输出说明、runtime hints 和 examples 都是可选增强，
- * 不得因为缺失这些描述而隐藏可执行工具。真实 result/continuation 边界由 ToolCenter
- * 与 executor 行为契约验证，不用散文字段代替。
+ * `modelContract` 的推荐用法、参数/输出说明、runtime hints 和 examples 不进入 provider
+ * 输入；不得因为缺失这些元数据而隐藏可执行工具。真实 result/continuation 边界由
+ * ToolCenter 与 executor 行为契约验证，不用散文字段代替。
  *
  * scope 是 Host 自定义的路由标签，不能决定契约是否完整；所有默认启用且可用的
  * registry entry 都必须满足同一事实契约，不依赖工具名关键词或硬编码白名单。

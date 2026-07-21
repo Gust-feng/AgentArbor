@@ -1,5 +1,11 @@
 import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
-import type { ToolErrorDomain, ToolErrorFacts, ToolFactValue } from "../../../domain/tools/index.js";
+import type {
+  DelegatedAgentExecutionMetadata,
+  DelegatedAgentUsage,
+  ToolErrorDomain,
+  ToolErrorFacts,
+  ToolFactValue,
+} from "../../../domain/tools/index.js";
 import { isToolErrorDomain, toolDisplayName } from "../../../domain/tools/index.js";
 import { projectToolDisplay } from "../../tool-projection/tool-display-projection.js";
 
@@ -9,6 +15,7 @@ export type PanelRunStreamEventDetail = {
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
+  readonly delegatedExecution?: DelegatedAgentExecutionMetadata;
 };
 
 export function toolSummary(
@@ -52,7 +59,51 @@ export function toolStreamDetail(
         : undefined,
     errorDomain,
     errorFacts,
+    delegatedExecution: delegatedExecutionFromPayload(payload),
   };
+}
+
+function delegatedExecutionFromPayload(
+  payload: Readonly<Record<string, unknown>>,
+): DelegatedAgentExecutionMetadata | undefined {
+  const candidate = asRecord(payload.delegatedExecution);
+  const usage = asRecord(candidate.usage);
+  const modelRounds = candidate.modelRounds;
+  const toolCallCount = candidate.toolCallCount;
+  if (!isNonnegativeInteger(modelRounds) || !isNonnegativeInteger(toolCallCount)) {
+    return undefined;
+  }
+  return {
+    modelRounds,
+    toolCallCount,
+    usage: delegatedUsageFromRecord(usage),
+  };
+}
+
+function delegatedUsageFromRecord(usage: Readonly<Record<string, unknown>>): DelegatedAgentUsage {
+  return {
+    ...numberUsageFact(usage, "requestCount"),
+    ...numberUsageFact(usage, "inputTokens"),
+    ...numberUsageFact(usage, "outputTokens"),
+    ...numberUsageFact(usage, "totalTokens"),
+    ...numberUsageFact(usage, "cachedInputTokens"),
+    ...numberUsageFact(usage, "cacheWriteInputTokens"),
+    ...numberUsageFact(usage, "uncachedInputTokens"),
+    ...numberUsageFact(usage, "reasoningOutputTokens"),
+    ...numberUsageFact(usage, "estimatedCostUsd"),
+  };
+}
+
+function numberUsageFact(
+  usage: Readonly<Record<string, unknown>>,
+  key: keyof DelegatedAgentUsage,
+): Partial<DelegatedAgentUsage> {
+  const value = usage[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? { [key]: value } : {};
+}
+
+function isNonnegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function toolErrorDomainOrUndefined(value: unknown): ToolErrorDomain | undefined {

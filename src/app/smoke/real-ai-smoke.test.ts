@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import test from "node:test";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
@@ -10,6 +12,27 @@ const configuredEnv = {
   AGENTARBOR_MODEL_NAME: "smoke-model",
   AGENTARBOR_MODEL_PROTOCOL: "openai_compatible_chat_completions",
 };
+
+test("real AI smoke traverses the production Agent Session loop through a local OpenAI-compatible stream", async (t) => {
+  const provider = await createOpenAICompatibleFixture();
+  t.after(provider.close);
+
+  const summary = await runRealAiSmoke(undefined, {
+    env: {
+      ...configuredEnv,
+      AGENTARBOR_MODEL_BASE_URL: `${provider.url}/v1`,
+    },
+    timeoutMs: 10_000,
+  });
+
+  assert.equal(summary.status, "completed", summary.status === "failed" ? summary.message : undefined);
+  if (summary.status !== "completed") return;
+  assert.equal(summary.answer, "Observed the workspace root through list_dir.");
+  assert.equal(summary.toolCallCount, 1);
+  assert.equal(provider.requests.length, 2);
+  assert.equal(provider.requests[0]?.authorization, "Bearer sk-smoke-test");
+  assert.equal(hasToolResultMessage(provider.requests[1]?.body), true);
+});
 
 test("real AI smoke uses the formal Ordinary feature entry and reports canonical completion", async () => {
   const summary = await runRealAiSmoke("finish the smoke", {
@@ -31,10 +54,11 @@ test("real AI smoke rejects a completed run without a persisted tool fact", asyn
     env: configuredEnv,
     ordinaryAgentExecution: {
       async execute(input) {
+        const session = await prepareCompletedSession(input);
         return {
           status: "completed",
           answer: "unsupported smoke success",
-          canonicalMessages: [...input.messages, { role: "assistant", content: "unsupported smoke success" }],
+          session,
           toolCalls: [],
           usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
         };
@@ -55,10 +79,11 @@ test("real AI smoke returns an approval pause immediately instead of waiting for
     ordinaryAgentExecution: {
       async execute(input) {
         const approval = approvalToolResult(request);
+        const session = await prepareToolRound(input, approval);
         await input.onToolResult?.(approval);
         return {
           status: "approval_required",
-          canonicalMessages: input.messages,
+          session,
           toolCalls: [approval],
           usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
           confirmationRequests: [request],
@@ -81,11 +106,10 @@ test("real AI smoke reports an Ordinary terminal failure without inventing an an
   const summary = await runRealAiSmoke("fail the smoke", {
     env: { ...configuredEnv, AGENTARBOR_MODEL_PROTOCOL: "openai_responses" },
     ordinaryAgentExecution: {
-      async execute(input) {
+      async execute() {
         return {
           status: "failed",
           error: { code: "provider_failed", message: "provider unavailable" },
-          canonicalMessages: input.messages,
           toolCalls: [],
           usage: {},
         };
@@ -113,11 +137,19 @@ function completedExecution(answer: string): OrdinaryExecutionPort {
   return {
     async execute(input) {
       const toolResult = completedToolResult();
+      await prepareToolRound(input, toolResult);
       await input.onToolResult?.(toolResult);
+      await input.onSessionWriteCheckpoint?.({
+        kind: "tool_result_entries_committed",
+        sessionId: input.sessionRef.sessionId,
+        toolRoundLeafRef: entry(input, "tool-result"),
+        toolCallIds: [toolResult.callId],
+      });
+      const session = await prepareCompletedSession(input, true);
       return {
         status: "completed",
         answer,
-        canonicalMessages: [...input.messages, { role: "assistant", content: answer }],
+        session,
         toolCalls: [toolResult],
         usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
       };
@@ -136,6 +168,74 @@ function completedToolResult(): ToolCallResult {
   };
 }
 
+async function prepareCompletedSession(
+  input: Parameters<OrdinaryExecutionPort["execute"]>[0],
+  hasExistingSession = false,
+) {
+  if (!hasExistingSession) {
+    await input.onSessionWriteCheckpoint?.({
+      kind: "start_leaf_captured",
+      sessionId: input.sessionRef.sessionId,
+      startLeafRef: null,
+    });
+    await input.onSessionWriteCheckpoint?.({
+      kind: "input_entry_committed",
+      sessionId: input.sessionRef.sessionId,
+      inputEntryRef: entry(input, "input"),
+    });
+  }
+  const assistantEntryRef = entry(input, "assistant");
+  await input.onSessionWriteCheckpoint?.({
+    kind: "assistant_response_entry_committed",
+    sessionId: input.sessionRef.sessionId,
+    assistantEntryRef,
+  });
+  return {
+    sessionId: input.sessionRef.sessionId,
+    startLeafRef: null,
+    inputEntryRef: entry(input, "input"),
+    safeLeafRef: assistantEntryRef,
+    latestLeafRef: assistantEntryRef,
+    compactionEntryRefs: [],
+  } as const;
+}
+
+async function prepareToolRound(
+  input: Parameters<OrdinaryExecutionPort["execute"]>[0],
+  result: ToolCallResult,
+) {
+  await input.onSessionWriteCheckpoint?.({
+    kind: "start_leaf_captured",
+    sessionId: input.sessionRef.sessionId,
+    startLeafRef: null,
+  });
+  const inputEntryRef = entry(input, "input");
+  await input.onSessionWriteCheckpoint?.({
+    kind: "input_entry_committed",
+    sessionId: input.sessionRef.sessionId,
+    inputEntryRef,
+  });
+  const assistantEntryRef = entry(input, "tool-call");
+  await input.onSessionWriteCheckpoint?.({
+    kind: "assistant_tool_call_entry_committed",
+    sessionId: input.sessionRef.sessionId,
+    assistantEntryRef,
+    toolCallIds: [result.callId],
+  });
+  return {
+    sessionId: input.sessionRef.sessionId,
+    startLeafRef: null,
+    inputEntryRef,
+    safeLeafRef: assistantEntryRef,
+    latestLeafRef: assistantEntryRef,
+    compactionEntryRefs: [],
+  } as const;
+}
+
+function entry(input: Parameters<OrdinaryExecutionPort["execute"]>[0], kind: string) {
+  return { sessionId: input.sessionRef.sessionId, entryId: `${input.runId}-${kind}` } as const;
+}
+
 function confirmation(runId: string): ConfirmationRequest {
   return {
     confirmationId: `${runId}-confirmation`,
@@ -152,8 +252,7 @@ function confirmation(runId: string): ConfirmationRequest {
 
 function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
   return {
-    callId: `${request.toolCallFactId}:provider-call`,
-    factId: request.toolCallFactId,
+    callId: request.toolCallFactId,
     toolName: "shell_command",
     input: { commandLine: "echo smoke" },
     output: undefined,
@@ -161,4 +260,109 @@ function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
     durationMs: 0,
     confirmationRequest: request,
   };
+}
+
+async function createOpenAICompatibleFixture(): Promise<{
+  readonly url: string;
+  readonly requests: Array<{ readonly authorization?: string; readonly body: unknown }>;
+  readonly close: () => Promise<void>;
+}> {
+  const requests: Array<{ readonly authorization?: string; readonly body: unknown }> = [];
+  const server = createServer((request, response) => {
+    void handleOpenAICompatibleRequest(request, response, requests).catch((error: unknown) => {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: error instanceof Error ? error.message : String(error) } }));
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise<void>((resolve, reject) => {
+      server.close((error) => error === undefined ? resolve() : reject(error));
+    }),
+  };
+}
+
+async function handleOpenAICompatibleRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requests: Array<{ readonly authorization?: string; readonly body: unknown }>,
+): Promise<void> {
+  if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+    response.writeHead(404).end();
+    return;
+  }
+  const body = JSON.parse(await readRequestBody(request)) as unknown;
+  requests.push({
+    ...(request.headers.authorization === undefined ? {} : { authorization: request.headers.authorization }),
+    body,
+  });
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  if (requests.length === 1) {
+    writeSse(response, completionChunk({
+      delta: {
+        role: "assistant",
+        tool_calls: [{
+          index: 0,
+          id: "smoke-list-root",
+          type: "function",
+          function: { name: "list_dir", arguments: JSON.stringify({ path: "." }) },
+        }],
+      },
+      finishReason: "tool_calls",
+    }));
+  } else {
+    writeSse(response, completionChunk({
+      delta: { role: "assistant", content: "Observed the workspace root through list_dir." },
+      finishReason: "stop",
+    }));
+  }
+  writeSse(response, {
+    id: `chatcmpl-smoke-${requests.length}`,
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "smoke-model",
+    choices: [],
+    usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
+  });
+  response.end("data: [DONE]\n\n");
+}
+
+function completionChunk(input: { readonly delta: unknown; readonly finishReason: "tool_calls" | "stop" }) {
+  return {
+    id: "chatcmpl-smoke",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "smoke-model",
+    choices: [{ index: 0, delta: input.delta, finish_reason: input.finishReason }],
+  };
+}
+
+function writeSse(response: ServerResponse, value: unknown): void {
+  response.write(`data: ${JSON.stringify(value)}\n\n`);
+}
+
+async function readRequestBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function hasToolResultMessage(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || !("messages" in body)) return false;
+  const messages = (body as { readonly messages?: unknown }).messages;
+  return Array.isArray(messages) && messages.some((message) =>
+    typeof message === "object" && message !== null && (message as { readonly role?: unknown }).role === "tool");
 }

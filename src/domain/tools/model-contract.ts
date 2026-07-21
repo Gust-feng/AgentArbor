@@ -12,15 +12,7 @@ export type ModelVisibleToolContractValidation = {
   readonly missing: readonly string[];
 };
 
-export const MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS = 4_096;
-
-const DESCRIPTION_SECTION_BUDGET = {
-  objective: { ratio: 0.2, maxChars: 512 },
-  outputs: { ratio: 0.38, maxChars: 1_536 },
-  runtime: { ratio: 0.1, maxChars: 400 },
-  limits: { ratio: 0.1, maxChars: 400 },
-  notes: { ratio: 0.17, maxChars: 700 },
-} as const;
+export const MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS = 512;
 
 export type ModelVisibleToolDescriptionOptions = {
   readonly maxChars?: number;
@@ -29,59 +21,18 @@ export type ModelVisibleToolDescriptionOptions = {
 /**
  * 生成 provider function/tool 的描述正文。
  *
- * `description` 是客观能力说明，也是唯一必需正文。`modelContract` 只提供可选增强；增强项
- * 按固定字段顺序进入显式字符预算，不按关键词、内容位置或推测的任务意图挑选。客观 description
- * 有独立上限，不能吞掉结果/continuation、运行环境和副作用/限制事实。输入 schema
- * 作为独立 provider 字段发送，因此参数提示、推荐用法和示例在上述事实之后再使用剩余预算。
+ * Provider 已独立接收输入 schema；模型只需要工具的客观能力摘要。运行时策略、确认、
+ * provider 协议、存储和展示细节不属于工具选择信息，不能拼接进模型上下文。
+ *
+ * `modelContract` 保留在 capability snapshot 中供产品侧使用，但不再隐式扩大 provider 的
+ * tool description。跨字段约束应优先进入 schema，动态 continuation 以实际工具结果表达。
  */
 export function modelVisibleToolDescription(
   definition: ToolDefinition,
   options: ModelVisibleToolDescriptionOptions = {}
 ): string {
   const maxChars = normalizedDescriptionBudget(options.maxChars);
-  const sections: string[] = [];
-  const contract = definition.modelContract;
-  const purpose = firstNonEmpty(definition.description, contract?.purpose);
-  if (purpose !== undefined) {
-    sections.push(fitSectionBudget(
-      purpose,
-      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.objective)
-    ));
-  }
-  if (contract !== undefined) {
-    const seen = new Set(purpose === undefined ? [] : [normalizeComparableText(purpose)]);
-    appendDescriptionSection(
-      sections,
-      seen,
-      "Outputs",
-      contract.outputNotes,
-      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.outputs)
-    );
-    appendRuntimeHints(
-      sections,
-      seen,
-      contract.runtimeHints,
-      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.runtime)
-    );
-    appendDescriptionSection(
-      sections,
-      seen,
-      "Avoid for",
-      contract.whenNotToUse,
-      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.limits)
-    );
-    appendDescriptionSection(
-      sections,
-      seen,
-      "Notes",
-      contract.usageNotes,
-      sectionBudget(maxChars, DESCRIPTION_SECTION_BUDGET.notes)
-    );
-    appendDescriptionSection(sections, seen, "Inputs", contract.inputNotes);
-    appendDescriptionSection(sections, seen, "Use for", contract.whenToUse);
-    appendExamples(sections, seen, contract.examples);
-  }
-  return fitDescriptionBudget(sections.join("\n"), maxChars);
+  return fitDescriptionBudget(definition.description.trim(), maxChars);
 }
 
 /**
@@ -92,8 +43,7 @@ export function modelVisibleToolDescription(
  * 另由 ToolCenter 归一化为 `ToolCallResult`，截断时必须在输出顶层提供真实
  * `continuation / continuations`。这些运行时事实不能用一段 `outputNotes` 散文伪装成静态校验。
  *
- * `modelContract` 内的 whenToUse / usageNotes / inputNotes / outputNotes / runtimeHints / examples
- * 都是可选描述增强，缺失或无法序列化时不能隐藏一个本来可执行的工具。
+ * 可选的 `modelContract` 不是模型可见工具契约的一部分，不能隐藏一个本来可执行的工具。
  */
 export function validateModelVisibleToolContract(
   definition: ToolDefinition
@@ -233,106 +183,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function firstNonEmpty(...values: readonly (string | undefined)[]): string | undefined {
-  for (const value of values) {
-    if (hasText(value)) {
-      return value.trim();
-    }
-  }
-  return undefined;
-}
-
 function hasText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-function appendDescriptionSection(
-  sections: string[],
-  seen: Set<string>,
-  title: string,
-  value: readonly string[] | undefined,
-  maxChars?: number
-): void {
-  const items = uniqueTextItems(value, seen);
-  if (items.length > 0) {
-    const section = `${title}: ${items.join(" ")}`;
-    sections.push(maxChars === undefined ? section : fitSectionBudget(section, maxChars));
-  }
-}
-
-function appendRuntimeHints(
-  sections: string[],
-  seen: Set<string>,
-  hints: readonly { readonly label: string; readonly value: string }[] | undefined,
-  maxChars: number
-): void {
-  if (!Array.isArray(hints)) {
-    return;
-  }
-  const items = uniqueTextItems(
-    hints
-      .filter((hint) => hasText(hint?.label) && hasText(hint?.value))
-      .map((hint) => `${hint.label.trim()}=${hint.value.trim()}`),
-    seen
-  );
-  if (items.length > 0) {
-    sections.push(fitSectionBudget(`Runtime: ${items.join("; ")}`, maxChars));
-  }
-}
-
-function appendExamples(
-  sections: string[],
-  seen: Set<string>,
-  examples: readonly { readonly input: Readonly<Record<string, unknown>> }[] | undefined
-): void {
-  if (!Array.isArray(examples)) {
-    return;
-  }
-  const serialized = examples
-    .map((example) => serializeExample(example?.input))
-    .filter((value): value is string => value !== undefined);
-  const items = uniqueTextItems(serialized, seen);
-  if (items.length > 0) {
-    sections.push(`Examples: ${items.join(" ")}`);
-  }
-}
-
-function serializeExample(value: Readonly<Record<string, unknown>> | undefined): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return undefined;
-  }
-}
-
-function uniqueTextItems(
-  value: readonly string[] | undefined,
-  seen: Set<string>
-): readonly string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const result: string[] = [];
-  for (const item of value) {
-    if (!hasText(item)) {
-      continue;
-    }
-    const text = item.trim();
-    const comparable = normalizeComparableText(text);
-    if (seen.has(comparable)) {
-      continue;
-    }
-    seen.add(comparable);
-    result.push(text);
-  }
-  return result;
-}
-
-function normalizeComparableText(value: string): string {
-  return value.replace(/\s+/gu, " ").trim();
 }
 
 function normalizedDescriptionBudget(value: number | undefined): number {
@@ -342,38 +194,11 @@ function normalizedDescriptionBudget(value: number | undefined): number {
   return Math.max(1, Math.floor(value));
 }
 
-function sectionBudget(
-  total: number,
-  policy: { readonly ratio: number; readonly maxChars: number }
-): number {
-  return Math.max(1, Math.min(policy.maxChars, Math.floor(total * policy.ratio)));
-}
-
-function fitSectionBudget(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  const marker = " …[truncated]";
-  if (marker.length >= maxChars) {
-    return value.slice(0, maxChars);
-  }
-  const bodyLimit = maxChars - marker.length;
-  const candidate = value.slice(0, bodyLimit);
-  const completeBoundary = Math.max(candidate.lastIndexOf("\n"), candidate.lastIndexOf(".") + 1);
-  const wordBoundary = candidate.lastIndexOf(" ");
-  const cutoff = completeBoundary >= Math.floor(bodyLimit / 2)
-    ? completeBoundary
-    : wordBoundary > 0
-      ? wordBoundary
-      : bodyLimit;
-  return `${candidate.slice(0, cutoff).trimEnd()}${marker}`;
-}
-
 function fitDescriptionBudget(value: string, maxChars: number): string {
   if (value.length <= maxChars) {
     return value;
   }
-  const marker = "\n[Additional tool guidance omitted by description budget.]";
+  const marker = " …[truncated]";
   if (marker.length >= maxChars) {
     return value.slice(0, maxChars);
   }

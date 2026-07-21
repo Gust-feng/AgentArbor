@@ -34,7 +34,7 @@ export type ResolveRunToolBoundaryInput = {
 export type ResolvedRunToolBoundary = {
   /** ToolCenter-backed tools allowed to execute in this run. */
   readonly allowedTools: readonly string[];
-  /** SDK AgentTools allowed by the same frozen capability resolution. */
+  /** Pi AgentTools allowed by the same frozen capability resolution. */
   readonly allowedAgentToolNames: readonly string[];
   readonly toolDefinitions: readonly ToolDefinition[];
   readonly capabilityResolution?: RunCapabilityResolution;

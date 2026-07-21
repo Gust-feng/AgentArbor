@@ -6,10 +6,10 @@ import test from "node:test";
 import { OrdinaryFeatureError } from "./contracts.js";
 import { createFileSystemOrdinaryRunRepository, OrdinaryRunSnapshotIncompatibleError } from "./file-system-repository.js";
 import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js";
-import { ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
+import { ordinaryAgentSessionRef, ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 import { OrdinaryToolMetricsCollector } from "./tool-runtime-metrics.js";
 
-test("file repository atomically replaces the canonical snapshot and advances revisions", async (t) => {
+test("file repository atomically replaces the v4 snapshot and advances revisions", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-repository-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -34,9 +34,12 @@ test("file repository atomically replaces the canonical snapshot and advances re
   assert.deepEqual((await repository.list()).map((item) => ({ runId: item.runId, status: item.status })), [
     { runId: "run-one", status: "running" },
   ]);
-  const snapshot = JSON.parse(await fs.readFile(path.join(root, "runs", "run-one", "snapshot.json"), "utf8")) as { revision: number };
+  const snapshotText = await fs.readFile(path.join(root, "runs", "run-one", "snapshot.json"), "utf8");
+  const snapshot = JSON.parse(snapshotText) as { revision: number };
   const manifest = JSON.parse(await fs.readFile(path.join(root, "manifest.json"), "utf8")) as Record<string, unknown>;
   assert.equal(snapshot.revision, 2);
+  assert.equal(snapshotText.includes("canonicalMessages"), false);
+  assert.equal(snapshotText.includes("lineageId"), false);
   assert.equal("state" in manifest, false, "the manifest must remain a list index rather than a recovery fact");
   assert.equal((await fs.readdir(path.join(root, "runs", "run-one", ".tmp"))).length, 0);
   await assert.rejects(repository.save(running, 1), (error: unknown) =>
@@ -51,6 +54,7 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
   t.after(() => removeTestDirectory(root));
   const stateWithAttachment = createInitialOrdinaryRunState({
     runId: "attachment-run",
+    sessionRef: ordinaryAgentSessionRef(),
     turn: ordinaryRunTurn("attachment-run"),
     runInput: {
       userMessage: "inspect attachment",
@@ -60,15 +64,6 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
       },
     },
     birth: ordinaryRunBirth(),
-    priorCanonicalMessages: [{
-      role: "user",
-      content: "image",
-      attachments: [{
-        attachmentId: "image-1",
-        kind: "image",
-        source: { kind: "data", mimeType: "image/png", data: "BASE64_MUST_NOT_REACH_DISK" },
-      }],
-    }],
     recordedAt: "2026-01-01T00:00:00.000Z",
     eventId: "event-1",
   });
@@ -91,22 +86,52 @@ test("file repository rejects old or malformed snapshots instead of compatibilit
     error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
 });
 
-test("file repository rejects the retired ordinary-run/v2 confirmation identity schema", async (t) => {
+test("file repository explicitly rejects ordinary-run/v3 without migration", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-v2-incompatible-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
   const saved = await repository.save(state("v2-run", "2026-01-01T00:00:00.000Z"), 0);
   await fs.writeFile(
     path.join(root, "runs", "v2-run", "snapshot.json"),
-    JSON.stringify({ ...saved, schemaVersion: "ordinary-run/v2" }),
+    JSON.stringify({ ...saved, schemaVersion: "ordinary-run/v3" }),
     "utf8",
   );
 
   await assert.rejects(
     repository.get("v2-run"),
     (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
-      error.message.includes("ordinary-run/v3"),
+      error.message.includes("ordinary-run/v4"),
   );
+});
+
+test("file repository round-trips a provider-ordered pending Session tool round", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-pending-session-round-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("pending-session-round", "2026-01-01T00:00:00.000Z");
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const rollbackable = withInputEntry(running);
+  const pending = transitionOrdinaryRun({
+    state: rollbackable,
+    transition: { type: "record_session_checkpoint", checkpoint: {
+      kind: "assistant_tool_call_entry_committed",
+      sessionId: "agent-session-1",
+      assistantEntryRef: entryRef("assistant-tools"),
+      toolCallIds: ["call-2", "call-1"],
+    } },
+    recordedAt: "2026-01-01T00:00:01.300Z",
+    eventId: "checkpoint-tools",
+  });
+  await repository.save(pending, 0);
+  assert.deepEqual((await repository.get(pending.runId))?.state.pendingToolRound, {
+    assistantEntryRef: entryRef("assistant-tools"),
+    toolCallIds: ["call-2", "call-1"],
+  });
 });
 
 test("file repository rejects the retired in-place retry continuation", async (t) => {
@@ -231,7 +256,7 @@ test("file repository round-trips optional latest Agent request usage and reject
   );
 });
 
-test("file repository restores v3 snapshots with or without optional tool metrics", async (t) => {
+test("file repository restores v4 snapshots with or without optional tool metrics", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-metrics-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -286,11 +311,11 @@ test("file repository persists the effective capability resolution and rejects m
   const started = await repository.save(running, created.revision);
   const resolution = ordinaryCapabilityResolution();
   const completed = transitionOrdinaryRun({
-    state: running,
+    state: withResponseCandidate(running),
     transition: {
       type: "complete",
       answer: "done",
-      canonicalMessages: [...running.canonicalMessages, { role: "assistant", content: "done" }],
+      session: executionRefs("answer-entry"),
       toolCalls: [],
       usage: { requestCount: 2, inputTokens: 4, outputTokens: 1, totalTokens: 5 },
       capabilityResolution: resolution,
@@ -322,21 +347,43 @@ test("file repository round-trips nested tool facts that share one provider call
     eventId: "event-2",
   });
   const started = await repository.save(running, created.revision);
-  const toolCalls = ["parent-a", "parent-b"].map((parent) => ({
+  const parents = ["parent-a", "parent-b"];
+  const rootToolCalls = parents.map((parent) => ({
+    callId: parent,
+    toolName: "call_sub_agent",
+    input: { agentId: parent },
+    output: { answer: parent },
+    status: "completed" as const,
+    delegatedExecution: {
+      modelRounds: 2,
+      toolCallCount: 1,
+      usage: { requestCount: 2, inputTokens: 18, outputTokens: 7, totalTokens: 25 },
+    },
+    durationMs: 2,
+  }));
+  const nestedToolCalls = parents.map((parent) => ({
     callId: "shared-provider-call",
     factId: `agent-tool:${parent.length}:${parent}/tool:shared-provider-call`,
+    parentToolCallFactId: parent,
     toolName: "read_fact",
     input: { parent },
-    output: { value: parent },
-    status: "completed" as const,
+    ...(parent === "parent-a"
+      ? {
+          output: undefined,
+          status: "failed" as const,
+          error: "The nested tool executed and failed.",
+          failureAttribution: "execution_failure" as const,
+        }
+      : { output: { value: parent }, status: "completed" as const }),
     durationMs: 1,
   }));
+  const toolCalls = [...rootToolCalls, ...nestedToolCalls];
   const completed = transitionOrdinaryRun({
-    state: running,
+    state: withResponseCandidate(running),
     transition: {
       type: "complete",
       answer: "done",
-      canonicalMessages: [...running.canonicalMessages, { role: "assistant", content: "done" }],
+      session: executionRefs("answer-entry"),
       toolCalls,
       usage: {},
     },
@@ -345,8 +392,65 @@ test("file repository round-trips nested tool facts that share one provider call
   });
 
   const saved = await repository.save(completed, started.revision);
-  assert.deepEqual((await repository.get("scoped-tool-run"))?.state.toolCalls, toolCalls);
-  assert.equal(Object.keys(saved.state.toolResultRecordedAt).length, 2);
+  const persistedToolCalls = (await repository.get("scoped-tool-run"))?.state.toolCalls;
+  assert.equal(persistedToolCalls?.length, 4);
+  assert.equal(persistedToolCalls?.[2]?.factId, nestedToolCalls[0]?.factId);
+  assert.equal(persistedToolCalls?.[2]?.status, "failed");
+  assert.equal(persistedToolCalls?.[2]?.failureAttribution, "execution_failure");
+  assert.equal(persistedToolCalls?.[2]?.output, undefined);
+  assert.deepEqual(persistedToolCalls?.[0]?.delegatedExecution, rootToolCalls[0]?.delegatedExecution);
+  assert.equal(Object.keys(saved.state.toolResultRecordedAt).length, 4);
+});
+
+test("file repository rejects malformed or orphaned nested tool fact graphs", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-invalid-nested-facts-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const rootResult = {
+    callId: "delegation-call",
+    toolName: "call_sub_agent",
+    input: { agentId: "reviewer" },
+    output: { answer: "reviewed" },
+    status: "completed" as const,
+    durationMs: 2,
+  };
+  const nestedResult = {
+    callId: "read-call",
+    factId: "delegation-call/tool:read-call",
+    parentToolCallFactId: "delegation-call",
+    toolName: "read_file",
+    input: { path: "README.md" },
+    output: { content: "contents" },
+    status: "completed" as const,
+    durationMs: 1,
+  };
+  const cases = [
+    [{ ...nestedResult, parentToolCallFactId: "missing-root" }],
+    [rootResult, { ...nestedResult, factId: undefined }],
+    [rootResult, nestedResult, {
+      ...nestedResult,
+      callId: "nested-child",
+      factId: "delegation-call/tool:nested-child",
+      parentToolCallFactId: nestedResult.factId,
+    }],
+    [rootResult, { ...nestedResult, parentToolCallFactId: undefined }],
+  ];
+
+  for (const [index, toolCalls] of cases.entries()) {
+    const invalid = {
+      ...state(`invalid-nested-facts-${index}`, "2026-01-01T00:00:00.000Z"),
+      toolCalls,
+      toolResultRecordedAt: Object.fromEntries(toolCalls.map((result) => [
+        `${"factId" in result && result.factId !== undefined ? result.factId : result.callId}:${result.status}`,
+        "2026-01-01T00:00:01.000Z",
+      ])),
+    };
+    await assert.rejects(
+      repository.save(invalid, 0),
+      (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
+        /nested tool (?:fact|result)|known root tool fact|root tool fact/u.test(error.message),
+    );
+  }
 });
 
 test("a broken disposable manifest cannot invalidate a committed snapshot", async (t) => {
@@ -373,11 +477,58 @@ test("a broken disposable manifest cannot invalidate a committed snapshot", asyn
 function state(runId: string, recordedAt: string) {
   return createInitialOrdinaryRunState({
     runId,
+    sessionRef: ordinaryAgentSessionRef(),
     turn: ordinaryRunTurn(runId),
     runInput: { userMessage: "hello" },
     birth: ordinaryRunBirth(),
     recordedAt,
     eventId: "event-1",
+  });
+}
+
+function entryRef(entryId: string) {
+  return { sessionId: "agent-session-1", entryId };
+}
+
+function executionRefs(latestEntryId: string) {
+  return {
+    sessionId: "agent-session-1",
+    startLeafRef: null,
+    inputEntryRef: entryRef("input-entry"),
+    safeLeafRef: entryRef("input-entry"),
+    latestLeafRef: entryRef(latestEntryId),
+    compactionEntryRefs: [],
+  };
+}
+
+function withResponseCandidate(stateValue: ReturnType<typeof transitionOrdinaryRun>) {
+  const input = withInputEntry(stateValue);
+  return transitionOrdinaryRun({
+    state: input,
+    transition: { type: "record_session_checkpoint", checkpoint: {
+      kind: "assistant_response_entry_committed", sessionId: "agent-session-1", assistantEntryRef: entryRef("answer-entry"),
+    } },
+    recordedAt: "2026-01-01T00:00:01.300Z",
+    eventId: "checkpoint-response",
+  });
+}
+
+function withInputEntry(stateValue: ReturnType<typeof transitionOrdinaryRun>) {
+  const started = transitionOrdinaryRun({
+    state: stateValue,
+    transition: { type: "record_session_checkpoint", checkpoint: {
+      kind: "start_leaf_captured", sessionId: "agent-session-1", startLeafRef: null,
+    } },
+    recordedAt: "2026-01-01T00:00:01.100Z",
+    eventId: "checkpoint-start",
+  });
+  return transitionOrdinaryRun({
+    state: started,
+    transition: { type: "record_session_checkpoint", checkpoint: {
+      kind: "input_entry_committed", sessionId: "agent-session-1", inputEntryRef: entryRef("input-entry"),
+    } },
+    recordedAt: "2026-01-01T00:00:01.200Z",
+    eventId: "checkpoint-input",
   });
 }
 

@@ -1,8 +1,13 @@
 import type { ReadonlySoilStore } from "../../domain/soil/index.js";
-import { createHash } from "node:crypto";
-import type { IntelligenceChannel, ModelMessage } from "../../domain/intelligence/index.js";
-import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
-import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
+import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import type { ExecutionEnv, Session } from "@earendil-works/pi-agent-core";
+import {
+  createAgentSessionLoop,
+  createModelCollectionChannel,
+  createModelProviderBinding,
+} from "../../adapters/intelligence/index.js";
+import type { AgentSessionEntryRef, AgentSessionRef } from "../model-runtime/agent-session.js";
+import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
   agentDefinitionRefMatchesDefinition,
@@ -10,26 +15,26 @@ import {
 } from "../agent-definitions/agent-definition-ref.js";
 import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
 import {
-  compactAgentLoopContextIfNeeded,
   createOpenAITokenCounter,
   type AgentLoopTokenCounter,
 } from "../context-maintenance/index.js";
 import {
-  assembleDesktopAgentModelInput,
+  buildDesktopAgentModelInput,
 } from "../desktop-agent/desktop-agent-model-input.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-contracts.js";
 import { CodedExecutionError, executionErrorFacts } from "../execution-errors/index.js";
 import {
-  createModelRuntimeAgentLoop,
   type AgentLoop,
   type AgentLoopInput,
   type AgentLoopToolBoundary,
+  type ModelRuntimeConfig,
 } from "../model-runtime/index.js";
+import { resolveOpenAIModelRuntimeConfig } from "../model-runtime/factory.js";
 import type {
   AcquireOrdinaryAgentLoopRunResourcesInput,
   OrdinaryAgentLoopRunResourceAcquirer,
 } from "../ordinary-agent/agent-loop-execution.js";
-import { OrderedToolExecutionGateway } from "../ordinary-agent/ordered-tool-execution-gateway.js";
+import { ToolExecutionObservationGateway } from "../ordinary-agent/tool-execution-observation-gateway.js";
 import { OrdinaryToolMetricsCollector } from "../ordinary-agent/tool-runtime-metrics.js";
 import { createSkillToolRegistryContribution } from "../skills/skill-resource-tool.js";
 import {
@@ -42,9 +47,9 @@ import { attachDesktopFileInputsToModelMessages } from "../task-soil/desktop-age
 import { createTaskSoilFromDesktopInput } from "../task-soil/task-soil-workspace.js";
 import {
   createAgentToolCenterFactory,
-  prepareAgentRunResources,
+  prepareAgentHostRunResources,
   type AgentRunResourceHost,
-  type AgentRunResources,
+  type AgentHostRunResources,
 } from "./agent-run-resources.js";
 import { createHostAgentToolContributions } from "./agent-tool-contributions.js";
 
@@ -60,31 +65,41 @@ export type OrdinaryAgentSkillContextResolver = (input: {
   readonly goal: string;
   readonly catalog: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["capabilitySnapshot"]["skillCatalog"];
   readonly triggerMode: "keyword" | "model";
-  readonly canonicalMessages: AcquireOrdinaryAgentLoopRunResourcesInput["messages"];
+  /** Current request messages used only for skill discovery; Session owns history. */
+  readonly modelMessages: readonly ModelMessage[];
   /** Temporary neutral channel factory used only by Host-owned semantic skill routing. */
-  readonly createIntelligenceChannel: AgentRunResources["aiConfig"]["createIntelligenceChannel"];
+  readonly createIntelligenceChannel: Extract<ModelRuntimeConfig, { readonly enabled: true }>["createIntelligenceChannel"];
   readonly abortSignal: AbortSignal;
 }) => Promise<readonly DesktopAgentSkillContext[]>;
 
 export type CreateOrdinaryAgentRunResourceAcquirerInput = {
   readonly host: AgentRunResourceHost;
+  readonly sessionRepository: {
+    acquire(ref: AgentSessionRef): Promise<AgentSessionWriterLease>;
+  };
   readonly soilStore: ReadonlySoilStore;
   readonly resolveAgentDefinition: OrdinaryAgentDefinitionResolver;
   readonly resolveSkillContexts?: OrdinaryAgentSkillContextResolver;
   readonly resolveSubAgentRoots: (workspaceRoot: string) => readonly SubAgentRootInput[];
 };
 
+type AgentSessionWriterLease = {
+  readonly session: Session;
+  revokeTo(target: AgentSessionEntryRef | null): Promise<void>;
+  release(): Promise<void>;
+};
+
 type OrdinaryAgentRunResourceAcquirerDependencies = {
-  readonly prepareRunResources?: (
+  readonly prepareHostResources?: (
     runtime: AgentRunResourceHost,
-    aiMode: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["aiMode"],
     input: {
       readonly capabilitySnapshot: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["capabilitySnapshot"];
       readonly informationAccess: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["informationAccess"];
     },
-  ) => Promise<AgentRunResources<AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["capabilitySnapshot"]>>;
-  readonly createAgentLoop?: typeof createModelRuntimeAgentLoop;
-  readonly compactContext?: typeof compactAgentLoopContextIfNeeded;
+  ) => Promise<AgentHostRunResources<AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["capabilitySnapshot"]>>;
+  readonly createSessionLoop?: typeof createAgentSessionLoop;
+  readonly createProviderBinding?: typeof createModelProviderBinding;
+  readonly createExecutionEnvironment?: (cwd: string) => ExecutionEnv;
   readonly createTokenCounter?: (model?: string) => AgentLoopTokenCounter;
   readonly resolveToolBoundary?: typeof resolveRunToolBoundary;
 };
@@ -106,7 +121,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
           "Ordinary run resources could not be acquired.",
         );
       });
-      const resources = await (dependencies.prepareRunResources ?? prepareAgentRunResources)(options.host, input.birth.aiMode, {
+      const resources = await (dependencies.prepareHostResources ?? prepareAgentHostRunResources)(options.host, {
         capabilitySnapshot: input.birth.capabilitySnapshot,
         informationAccess: input.birth.informationAccess,
       }).catch((error: unknown) => {
@@ -117,6 +132,8 @@ export function createOrdinaryAgentRunResourceAcquirer(
         );
       });
       let loop: AgentLoop | undefined;
+      let sessionLease: AgentSessionWriterLease | undefined;
+      let executionEnvironment: ExecutionEnv | undefined;
       try {
         const taskSoil = createTaskSoilFromDesktopInput({
           goal: input.runInput.userMessage,
@@ -127,13 +144,28 @@ export function createOrdinaryAgentRunResourceAcquirer(
           soilStore: options.soilStore,
           taskSoilInput: input.runInput.taskSoil,
         });
+        const providerBinding = await createCustomProviderBindingForRun(options, dependencies, input, resources.aiEnvironment);
+        const currentModelMessages: readonly ModelMessage[] = [{
+          role: "user",
+          content: input.runInput.userMessage,
+        }];
+        const createSkillRoutingChannel = (context: Parameters<Extract<ModelRuntimeConfig, { readonly enabled: true }>["createIntelligenceChannel"]>[0]) =>
+          createModelCollectionChannel({
+            modelRegistry: providerBinding.modelRegistry,
+            selectedModel: providerBinding.selectedModel,
+            thinkingLevel: providerBinding.thinkingLevel,
+            transformProviderPayload: providerBinding.transformProviderPayload,
+            providerKind: input.birth.config.providerKind,
+            bus: context.bus,
+            supportedPurposes: ["skill_routing"],
+          });
         const skillContexts = await options.resolveSkillContexts?.({
           runId: input.runId,
           goal: input.runInput.userMessage,
           catalog: input.birth.capabilitySnapshot.skillCatalog,
           triggerMode: input.birth.capabilitySnapshot.skillTrigger?.mode ?? "keyword",
-          canonicalMessages: input.messages,
-          createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
+          modelMessages: currentModelMessages,
+          createIntelligenceChannel: createSkillRoutingChannel,
           abortSignal: input.abortSignal,
         }) ?? [];
         const toolRuntime = { constraints: taskSoil.constraints };
@@ -183,8 +215,8 @@ export function createOrdinaryAgentRunResourceAcquirer(
             "Ordinary tool boundary could not be resolved.",
           );
         }
-        const orderedToolGateway = new OrderedToolExecutionGateway(toolCenter, toolMetrics);
-        const tools = ordinaryToolBoundary(input, definition, orderedToolGateway, toolBoundary.allowedTools);
+        const observedToolGateway = new ToolExecutionObservationGateway(toolCenter, toolMetrics);
+        const tools = ordinaryToolBoundary(input, definition, observedToolGateway, toolBoundary.allowedTools);
         const agentTools = await createSubAgentAgentTools({
           registry,
           parentAllowedTools: toolBoundary.allowedTools,
@@ -192,12 +224,10 @@ export function createOrdinaryAgentRunResourceAcquirer(
           exposedToolNames: toolBoundary.allowedAgentToolNames,
           dynamicSpawnAvailable: true,
         });
-        const modelInput = assembleDesktopAgentModelInput({
+        const modelInput = buildDesktopAgentModelInput({
           agentDefinition: definition,
-          instructions: input.birth.instructions,
           goal: input.runInput.userMessage,
           taskSoil,
-          canonicalMessages: input.messages,
           skillContexts,
         });
         const messagesWithAttachments = await attachDesktopFileInputsToModelMessages({
@@ -206,27 +236,23 @@ export function createOrdinaryAgentRunResourceAcquirer(
           modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
           workspaceRoot: resources.workspaceRoot,
         });
-        const maintainContext = createOrdinaryContextMaintainer({
-          input,
-          definition,
-          resources,
-          tools: toolBoundary.toolDefinitions,
-          compactContext: dependencies.compactContext ?? compactAgentLoopContextIfNeeded,
-          tokenCounter,
-          toolMetrics,
-        });
-        loop = (dependencies.createAgentLoop ?? createModelRuntimeAgentLoop)({
-          mode: input.birth.aiMode,
-          env: resources.aiEnvironment,
-          modelProvider: input.birth.config,
-          providerProfileId: input.birth.capabilitySnapshot.modelCapabilities.protocolProfileId,
-          providerFetch: options.host.providerFetch,
+        executionEnvironment = (dependencies.createExecutionEnvironment ??
+          ((cwd: string) => new NodeExecutionEnv({ cwd })))(resources.workspaceRoot);
+        sessionLease = await options.sessionRepository.acquire(input.sessionRef);
+        loop = (dependencies.createSessionLoop ?? createAgentSessionLoop)({
+          executionEnvironment,
+          modelRegistry: providerBinding.modelRegistry,
+          selectedModel: providerBinding.selectedModel,
+          thinkingLevel: providerBinding.thinkingLevel,
+          transformProviderPayload: providerBinding.transformProviderPayload,
+          agentSession: sessionLease.session,
         });
         const ownedLoop = loop;
+        const ownedSessionLease = sessionLease;
+        const ownedExecutionEnvironment = executionEnvironment;
         const processTerminator = options.host.processTerminator;
         const release = idempotentRelease([
           () => ownedLoop.release(),
-          () => orderedToolGateway.close(),
           resources.release,
           ...(processTerminator === undefined
             ? []
@@ -234,14 +260,15 @@ export function createOrdinaryAgentRunResourceAcquirer(
                 input.runId,
                 processTerminator,
               ).then(() => undefined)]),
+          () => ownedExecutionEnvironment.cleanup(),
         ]);
         return {
           loop,
           resolvedMessages: messagesWithAttachments,
           tools,
-          maintainContext,
           toolMetrics,
-          registerToolRound: (toolCalls) => orderedToolGateway.registerToolRound(toolCalls),
+          revokeSessionTo: (target) => ownedSessionLease.revokeTo(target),
+          releaseSession: ownedSessionLease.release,
           ...(toolBoundary.capabilityResolution === undefined
             ? {}
             : { capabilityResolution: toolBoundary.capabilityResolution }),
@@ -249,7 +276,12 @@ export function createOrdinaryAgentRunResourceAcquirer(
           release,
         };
       } catch (error) {
-        await releaseAfterAcquireFailure(loop, resources.release);
+        await releaseAfterAcquireFailure(
+          loop,
+          sessionLease,
+          executionEnvironment,
+          resources.release,
+        );
         throw expectedOrWrappedExecutionError(
           error,
           "run_resource_acquisition_failed",
@@ -260,101 +292,45 @@ export function createOrdinaryAgentRunResourceAcquirer(
   };
 }
 
-function createOrdinaryContextMaintainer(input: {
-  readonly input: AcquireOrdinaryAgentLoopRunResourcesInput;
-  readonly definition: AgentDefinition;
-  readonly resources: AgentRunResources;
-  readonly tools: ReturnType<typeof resolveRunToolBoundary>["toolDefinitions"];
-  readonly compactContext: typeof compactAgentLoopContextIfNeeded;
-  readonly tokenCounter: AgentLoopTokenCounter;
-  readonly toolMetrics: OrdinaryToolMetricsCollector;
-}): NonNullable<AgentLoopInput["maintainContext"]> {
-  const channel = lazyIntelligenceChannel(() => input.resources.aiConfig.createIntelligenceChannel({
-    bus: new InMemoryMessageBus(new InMemoryEventLog()),
-  }));
-  return async ({ messages, hasUnseenToolResults, abortSignal }) => {
-    const serializedDefinitions = JSON.stringify(input.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })));
-    const definitionTokens = input.tokenCounter.countText(serializedDefinitions);
-    input.toolMetrics.recordDefinitionRequest(input.tools.length, definitionTokens);
-    input.tools.forEach((tool) => input.toolMetrics.record({
-      kind: "definition",
-      toolName: tool.name,
-      operationType: tool.metadata?.operationType ?? "read-write",
-      definitionHash: createHash("sha256").update(JSON.stringify({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-      })).digest("hex"),
-      definitionTokens: input.tokenCounter.countText(JSON.stringify({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-      })),
-      totalDefinitionTokens: definitionTokens,
-      toolCount: input.tools.length,
-    }));
-    const result = await input.compactContext({
-      goal: input.input.runInput.userMessage,
-      traceId: input.input.runId,
-      goalId: input.input.runId,
-      agentIdentity: {
-        agentId: input.definition.agentId,
-        displayName: input.definition.displayName,
-      },
-      messages,
-      tools: input.tools,
-      intelligenceChannel: channel,
-      modelCapabilities: input.resources.capabilitySnapshot.modelCapabilities,
-      tokenCounter: input.tokenCounter,
-      compactedContextRole: "user",
-      preserveLatestToolInteraction: hasUnseenToolResults,
-      abortSignal,
-    }).catch((error: unknown) => {
-      const wrapped = expectedOrWrappedExecutionError(
-        error,
-        "context_compaction_failed",
-        "Ordinary context could not be compacted.",
-      );
-      const facts = executionErrorFacts(wrapped);
-      return {
-        status: "failed" as const,
-        code: facts?.code ?? "context_compaction_failed",
-        message: facts?.message ?? "Ordinary context could not be compacted.",
-      };
-    });
-    const resultUsage = "usage" in result ? result.usage : undefined;
-    if (result.status === "failed") {
-      return {
-        status: "failed",
-        code: "context_compaction_failed",
-        error: result.message,
-        ...(resultUsage === undefined ? {} : { usage: resultUsage }),
-      };
-    }
-    return result.status === "compacted"
-      ? {
-          status: "compacted",
-          messages: result.messages,
-          ...(resultUsage === undefined ? {} : { usage: resultUsage }),
-        }
-      : { status: "unchanged" };
-  };
-}
-
-function lazyIntelligenceChannel(create: () => IntelligenceChannel): IntelligenceChannel {
-  let channel: IntelligenceChannel | undefined;
-  const get = (): IntelligenceChannel => {
-    channel ??= create();
-    return channel;
-  };
-  return {
-    request: (request, options) => get().request(request, options),
-    validateResponse: (request, response) => get().validateResponse(request, response),
-  };
+async function createCustomProviderBindingForRun(
+  options: CreateOrdinaryAgentRunResourceAcquirerInput,
+  dependencies: OrdinaryAgentRunResourceAcquirerDependencies,
+  input: AcquireOrdinaryAgentLoopRunResourcesInput,
+  environment: Readonly<Record<string, string | undefined>>,
+) {
+  const mode = requireOpenAIModelRuntimeMode(input.birth.aiMode);
+  const resolvedProvider = resolveOpenAIModelRuntimeConfig({
+    mode,
+    env: environment,
+    modelProvider: input.birth.config,
+  });
+  return (dependencies.createProviderBinding ?? createModelProviderBinding)({
+    protocol: resolvedProvider.protocol,
+    baseUrl: resolvedProvider.baseUrl,
+    model: resolvedProvider.model,
+    profileId: input.birth.config.profileId,
+    apiKey: resolvedProvider.apiKey,
+    resolveApiKey: async () => {
+      const currentEnvironment = await options.host.configCenter.createModelRuntimeEnvironment({
+        modelProvider: input.birth.config,
+        informationAccess: input.birth.informationAccess,
+      });
+      return resolveOpenAIModelRuntimeConfig({
+        mode,
+        env: currentEnvironment,
+        modelProvider: input.birth.config,
+      }).apiKey;
+    },
+    providerProfileId: resolvedProvider.providerProfileId,
+    requestSettings: resolvedProvider.requestSettings,
+    enableWebSearch: resolvedProvider.enableWebSearch,
+    supportsVisionInput:
+      input.birth.capabilitySnapshot.modelCapabilities.supportsVisionInput === true,
+    supportsReasoningOutput:
+      input.birth.capabilitySnapshot.modelCapabilities.supportsReasoningOutput === true,
+    contextWindow: input.birth.capabilitySnapshot.modelCapabilities.contextWindowTokens,
+    maxOutputTokens: input.birth.capabilitySnapshot.modelCapabilities.maxOutputTokens,
+  });
 }
 
 async function resolveFrozenAgentDefinition(
@@ -445,10 +421,24 @@ async function releaseAll(releasers: readonly (() => Promise<void>)[]): Promise<
 
 async function releaseAfterAcquireFailure(
   loop: AgentLoop | undefined,
+  sessionLease: AgentSessionWriterLease | undefined,
+  executionEnvironment: ExecutionEnv | undefined,
   releaseHostResources: () => Promise<void>,
 ): Promise<void> {
   await releaseAll([
     ...(loop === undefined ? [] : [() => loop.release()]),
+    ...(sessionLease === undefined ? [] : [sessionLease.release]),
     releaseHostResources,
+    ...(executionEnvironment === undefined ? [] : [() => executionEnvironment.cleanup()]),
   ]).catch(() => undefined);
+}
+
+function requireOpenAIModelRuntimeMode(
+  mode: AcquireOrdinaryAgentLoopRunResourcesInput["birth"]["aiMode"],
+): "openai-compatible" | "openai-responses" {
+  if (mode === "openai-compatible" || mode === "openai-responses") return mode;
+  throw new CodedExecutionError(
+    "unsupported_provider_protocol",
+    `Ordinary Session loop does not support runtime mode ${mode}.`,
+  );
 }

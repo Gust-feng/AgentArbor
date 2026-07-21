@@ -3,38 +3,82 @@ import type {
   OrdinaryConversationReadModel,
   OrdinaryRunState,
 } from "./contracts.js";
+import type { AgentSessionEntryRef } from "../model-runtime/agent-session.js";
 
 export function visibleOrdinaryConversationRuns(
   control: OrdinaryConversationControlDocument,
   allRuns: readonly OrdinaryRunState[],
+  activeBranchEntryRefs: readonly AgentSessionEntryRef[],
 ): readonly OrdinaryRunState[] {
   const conversationRuns = allRuns.filter((run) => run.turn.conversationId === control.state.conversationId);
-  const byId = new Map(conversationRuns.map((run) => [run.runId, run]));
-  const activeLineage = control.state.lineages.find((lineage) => lineage.lineageId === control.state.activeLineageId);
-  if (activeLineage === undefined) throw new Error(`Ordinary conversation ${control.state.conversationId} active lineage was not found`);
-  const ancestors: OrdinaryRunState[] = [];
-  let cursor = activeLineage.forkFromRunId;
-  const seen = new Set<string>();
-  while (cursor !== undefined) {
-    if (seen.has(cursor)) throw new Error(`Ordinary conversation ${control.state.conversationId} contains a run cycle`);
-    seen.add(cursor);
-    const run = byId.get(cursor);
-    if (run === undefined) throw new Error(`Ordinary conversation fork run ${cursor} was not found`);
-    ancestors.push(run);
-    cursor = run.turn.predecessorRunId;
+  assertConversationSessionOwnership(control, conversationRuns, activeBranchEntryRefs);
+  if (activeBranchEntryRefs.length === 0 && conversationRuns.some(hasDurableSessionEntry)) {
+    throw new Error(`Ordinary conversation ${control.state.conversationId} has durable runs but no active Session branch`);
   }
-  ancestors.reverse();
-  const current = conversationRuns
-    .filter((run) => run.turn.lineageId === activeLineage.lineageId)
-    .sort((left, right) => left.turn.ordinal - right.turn.ordinal);
-  let predecessor = ancestors.at(-1)?.runId;
-  for (const run of current) {
-    if (run.turn.predecessorRunId !== predecessor) {
-      throw new Error(`Ordinary conversation lineage ${activeLineage.lineageId} is not contiguous`);
+  const branchIndex = new Map(activeBranchEntryRefs.map((entry, index) => [sessionEntryKey(entry), index]));
+  const onBranch = conversationRuns
+    .map((run) => ({ run, index: activeBranchIndex(run, branchIndex) }))
+    .filter((item): item is { readonly run: OrdinaryRunState; readonly index: number } => item.index !== undefined)
+    .sort((left, right) => left.index - right.index)
+    .map((item) => item.run);
+  const visible = [...onBranch];
+  const included = new Set(visible.map((run) => run.runId));
+  let predecessorRunId = visible.at(-1)?.runId;
+  while (true) {
+    const candidates = conversationRuns.filter((run) =>
+      !included.has(run.runId) &&
+      run.turn.predecessorRunId === predecessorRunId &&
+      isPendingOrPreSessionTerminal(run)
+    );
+    if (candidates.length === 0) break;
+    if (candidates.length > 1) {
+      throw new Error(`Ordinary conversation ${control.state.conversationId} has multiple pending successors`);
     }
-    predecessor = run.runId;
+    const next = candidates[0]!;
+    visible.push(next);
+    included.add(next.runId);
+    predecessorRunId = next.runId;
   }
-  return [...ancestors, ...current];
+  return visible;
+}
+
+function assertConversationSessionOwnership(
+  control: OrdinaryConversationControlDocument,
+  runs: readonly OrdinaryRunState[],
+  activeBranchEntryRefs: readonly AgentSessionEntryRef[],
+): void {
+  const sessionId = control.state.sessionRef.sessionId;
+  for (const run of runs) {
+    if (run.sessionRef.sessionId !== sessionId) {
+      throw new Error(`Ordinary run ${run.runId} does not belong to conversation Session ${sessionId}`);
+    }
+  }
+  for (const entryRef of activeBranchEntryRefs) {
+    if (entryRef.sessionId !== sessionId) {
+      throw new Error(`Ordinary conversation ${control.state.conversationId} received a foreign Session branch entry`);
+    }
+  }
+}
+
+function hasDurableSessionEntry(run: OrdinaryRunState): boolean {
+  switch (run.session.phase) {
+    case "not_started": return false;
+    case "started": return run.session.startLeafRef !== null ||
+      run.session.compactionEntryRefs.length > 0 ||
+      run.pendingToolRound !== undefined;
+    case "rollbackable":
+    case "completion_candidate":
+      return true;
+  }
+}
+
+function isPendingOrPreSessionTerminal(run: OrdinaryRunState): boolean {
+  if (run.status.kind === "queued" || run.status.kind === "running" || run.status.kind === "awaiting_approval") {
+    return true;
+  }
+  // A run cancelled or failed before its first Session write has no branch
+  // entry of its own. It remains a product turn and must not hide successors.
+  return run.session.phase === "not_started";
 }
 
 export function projectOrdinaryConversation(input: {
@@ -42,8 +86,6 @@ export function projectOrdinaryConversation(input: {
   readonly runs: readonly OrdinaryRunState[];
 }): OrdinaryConversationReadModel | undefined {
   if (input.control.state.deletedAt !== undefined || input.runs.length === 0) return undefined;
-  const activeLineage = input.control.state.lineages.find((lineage) => lineage.lineageId === input.control.state.activeLineageId);
-  if (activeLineage === undefined) throw new Error(`Ordinary conversation ${input.control.state.conversationId} active lineage was not found`);
   const first = input.runs[0]!;
   const latest = input.runs.at(-1)!;
   const active = input.runs.find((run) => run.status.kind === "running" || run.status.kind === "awaiting_approval");
@@ -59,7 +101,6 @@ export function projectOrdinaryConversation(input: {
     pinnedAt: input.control.state.pinnedAt,
     createdAt: input.control.state.createdAt,
     updatedAt,
-    activeLineage: structuredClone(activeLineage),
     activeRunId: active?.runId,
     latestRunId: latest.runId,
     queuedRunIds: queued,
@@ -84,6 +125,22 @@ export function projectOrdinaryConversation(input: {
       updatedAt: run.timestamps.updatedAt,
     }]),
   };
+}
+
+function activeBranchIndex(
+  run: OrdinaryRunState,
+  branchIndex: ReadonlyMap<string, number>,
+): number | undefined {
+  const entryRef = run.session.phase === "rollbackable"
+    ? run.session.endLeafRef
+    : run.session.phase === "completion_candidate"
+      ? run.session.assistantEntryRef
+      : undefined;
+  return entryRef === undefined ? undefined : branchIndex.get(sessionEntryKey(entryRef));
+}
+
+function sessionEntryKey(ref: AgentSessionEntryRef): string {
+  return `${ref.sessionId}\u0000${ref.entryId}`;
 }
 
 export function normalizeOrdinaryConversationTitle(value: string): string {

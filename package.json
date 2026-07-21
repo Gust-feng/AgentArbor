@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "description": "AgentArbor desktop general-agent workbench.",
   "scripts": {
     "clean:dist": "node scripts/clean-dist.mjs",
@@ -46,8 +49,9 @@
     "vitest": "4.1.10"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-ai": "0.80.10",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@openai/agents": "0.13.3",
     "@tanstack/react-query": "5.101.2",
     "diff": "9.0.0",
     "electron-updater": "^6.6.2",

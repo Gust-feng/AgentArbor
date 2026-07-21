@@ -1,6 +1,6 @@
 # 系统架构
 
-本章定义 AgentArbor 的主要功能边界。当前产品只有一个 Workbench；Ordinary Agent 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是 Ordinary 的 SDK AgentTool。Ordinary 与 Multi-Agent 只共享中性模型、工具、确认、上下文算法和系统适配，不共享业务状态；Sub-Agent 调用事实归父 Ordinary run。
+本章定义 AgentArbor 的主要功能边界。当前产品只有一个 Workbench；Ordinary Agent 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是 Ordinary 的 Pi AgentTool。Ordinary 与 Multi-Agent 只共享中性模型、工具、确认、上下文算法和系统适配，不共享业务状态；Sub-Agent 调用事实归父 Ordinary run。
 
 架构重点是保证功能闭环有明确 owner、调用只经过公开端口、后端只有一个 Composition Root、事件和状态不被多层重复加工。Plan、Aboveground、Governance 和 Global Soil 仍可按真实需求演进，但不是每次请求必经链路。
 

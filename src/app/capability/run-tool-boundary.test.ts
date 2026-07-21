@@ -293,7 +293,7 @@ test("run tool boundary can activate latent read_skill_resource after skill sele
   assert.equal(boundary.capabilityResolution?.warnings.includes("已隐藏 1 个不可用工具。"), false);
 });
 
-test("run tool boundary exposes implemented SDK AgentTools without requiring ToolCenter executors", () => {
+test("run tool boundary exposes implemented Pi AgentTools without requiring ToolCenter executors", () => {
   const callAgentTool = {
     ...toolDefinition("call_sub_agent"),
     description: "Call a frozen project-helper specialist.",
@@ -365,7 +365,7 @@ test("run tool boundary hides preset sub-agent call tools when no enabled sub-ag
   );
 });
 
-test("run tool boundary applies permissions, profile, model, snapshot, and implementation gates to SDK AgentTools", () => {
+test("run tool boundary applies permissions, profile, model, snapshot, and implementation gates to Pi AgentTools", () => {
   const agentTools = [toolDefinition("call_sub_agent"), toolDefinition("spawn_sub_agent")];
   const snapshot = capabilitySnapshot(
     [tool("call_sub_agent", "read-write"), tool("spawn_sub_agent", "read-write")],

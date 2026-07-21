@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,9 +13,6 @@ import {
   requestJson,
 } from "./panel-server-test-utils.js";
 import {
-  createOpenAiSearchToolCallResponse,
-  createStubOpenAiResponse,
-  hasChatCompletionsToolDefinition,
   hasChatCompletionsToolOutput,
   parseChatCompletionsRequestBody,
 } from "../../testing/openai-test-fixtures.js";
@@ -91,6 +88,19 @@ test("panel config route returns product runtime metadata for settings about pag
   }
 });
 
+test("panel reports the deferred Multi-Agent API instead of constructing its runtime", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-deferred-multi-agent-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const response = await requestJson(server.url, "/api/deep/conversations");
+    assert.equal(response.status, 410);
+    assert.equal(response.body.error.code, "multi_agent_deferred");
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel usage statistics route reads the empty Ordinary feature store", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-usage-statistics-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
@@ -130,65 +140,108 @@ test("panel tools route can disable web search without using the stored Tavily k
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-tools-disabled-"));
   const modelSecret = "sk-disabled-tools-secret";
   const tavilySecret = "tvly-disabled-panel-secret";
-  let modelFetchCalls = 0;
   let tavilyFetchCalls = 0;
+  const modelProvider = await startPanelChatCompletionsProvider();
   const providerFetch: PanelProviderFetch = async (url, init) => {
     if (url === "https://api.tavily.com/search") {
       tavilyFetchCalls += 1;
       throw new Error("Disabled web search provider must not call Tavily fetch.");
     }
 
-    modelFetchCalls += 1;
-    assert.match(url, /\/chat\/completions$/u);
-    const body = parseChatCompletionsRequestBody(init.body);
-    const hasToolMessage = hasChatCompletionsToolOutput(body);
-    return hasToolMessage || !hasChatCompletionsToolDefinition(body, "search")
-      ? createStubOpenAiResponse("openai_compatible_chat_completions", "disabled-tools-model")
-      : createOpenAiSearchToolCallResponse("openai_compatible_chat_completions");
+    throw new Error(`Unexpected provider fetch from panel test: ${url} ${init.method}`);
   };
-  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
-    await requestJson(server.url, "/api/config/model-provider", {
-      method: "POST",
-      body: {
-        baseUrl: "https://provider.example",
-        model: "disabled-tools-model",
-        apiKey: modelSecret,
-      },
-    });
-    await requestJson(server.url, "/api/config/tools/web-search", {
-      method: "POST",
-      body: {
-        provider: "tavily",
-        apiKey: tavilySecret,
-        maxResults: 1,
-      },
-    });
-    const disabled = await requestJson(server.url, "/api/config/tools/web-search", {
-      method: "POST",
-      body: { provider: "none" },
-    });
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+    try {
+      await requestJson(server.url, "/api/config/model-provider", {
+        method: "POST",
+        body: {
+          baseUrl: modelProvider.baseUrl,
+          model: "disabled-tools-model",
+          apiKey: modelSecret,
+        },
+      });
+      await requestJson(server.url, "/api/config/tools/web-search", {
+        method: "POST",
+        body: {
+          provider: "tavily",
+          apiKey: tavilySecret,
+          maxResults: 1,
+        },
+      });
+      const disabled = await requestJson(server.url, "/api/config/tools/web-search", {
+        method: "POST",
+        body: { provider: "none" },
+      });
 
-    const started = await requestJson(server.url, "/api/conversations", {
-      method: "POST",
-      body: { goal: "Build a small deterministic helper.", aiMode: "openai-compatible" },
-    });
-    const run = await waitForOrdinaryView(server.url, started.body.run.runId, "completed");
+      const started = await requestJson(server.url, "/api/conversations", {
+        method: "POST",
+        body: { goal: "Build a small deterministic helper.", aiMode: "openai-compatible" },
+      });
+      const run = await waitForOrdinaryView(server.url, started.body.run.runId, "completed");
 
-    assert.equal(disabled.status, 200);
-    assert.equal(disabled.body.tools.webSearch.provider, "none");
-    assert.equal(disabled.body.tools.webSearch.status, "disabled");
-    assert.equal(disabled.body.tools.webSearch.secretConfigured, false);
-    assert.equal(disabled.text.includes(tavilySecret), false);
-    assert.equal(started.status, 202);
-    assert.equal(run.status, 200);
-    assert.equal(modelFetchCalls >= 1, true);
-    assert.equal(tavilyFetchCalls, 0);
-    assert.equal(run.body.view.detail.toolResults.some((result: { status: string }) => result.status === "completed"), true);
-    assert.equal(JSON.stringify(run.body).includes(modelSecret), false);
-    assert.equal(JSON.stringify(run.body).includes(tavilySecret), false);
+      assert.equal(disabled.status, 200);
+      assert.equal(disabled.body.tools.webSearch.provider, "none");
+      assert.equal(disabled.body.tools.webSearch.status, "disabled");
+      assert.equal(disabled.body.tools.webSearch.secretConfigured, false);
+      assert.equal(disabled.text.includes(tavilySecret), false);
+      assert.equal(started.status, 202);
+      assert.equal(run.status, 200);
+      assert.equal(modelProvider.requestCount >= 1, true);
+      assert.equal(tavilyFetchCalls, 0);
+      assert.equal(JSON.stringify(run.body).includes(modelSecret), false);
+      assert.equal(JSON.stringify(run.body).includes(tavilySecret), false);
+    } finally {
+      await server.close();
+    }
   } finally {
-    await server.close();
+    await modelProvider.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel Ordinary completes a real tool round through the configured model transport", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-session-tool-round-"));
+  const workspace = path.join(directory, "workspace");
+  await fs.mkdir(workspace, { recursive: true });
+  await fs.writeFile(path.join(workspace, "README.md"), "native session tool evidence", "utf8");
+  const modelProvider = await startPanelChatCompletionsProvider({
+    name: "read_file",
+    input: { path: "README.md" },
+  });
+  try {
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    try {
+      await requestJson(server.url, "/api/config/model-provider", {
+        method: "POST",
+        body: {
+          baseUrl: modelProvider.baseUrl,
+          model: "session-tool-model",
+          apiKey: "sk-session-tool-test",
+        },
+      });
+      const started = await requestJson(server.url, "/api/conversations", {
+        method: "POST",
+        body: {
+          goal: "Read README.md and report what it contains.",
+          aiMode: "openai-compatible",
+          workspaceDirectory: workspace,
+        },
+      });
+      const run = await waitForOrdinaryView(server.url, started.body.run.runId, "completed");
+
+      assert.equal(started.status, 202);
+      assert.equal(modelProvider.requestCount, 2);
+      assert.equal(run.body.view.workView.answer.content, "The requested file was read successfully.");
+      assert.equal(run.body.view.detail.toolResults.length, 1);
+      assert.equal(run.body.view.detail.toolResults[0].toolName, "read_file");
+      assert.equal(run.body.view.detail.toolResults[0].status, "completed");
+      assert.match(JSON.stringify(run.body.view.detail.toolResults[0].output), /native session tool evidence/u);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await modelProvider.close();
     await removeTemporaryTree(directory);
   }
 });
@@ -390,6 +443,99 @@ function extractPanelAssetPaths(html: string): readonly string[] {
     paths.add(match[1] ?? "");
   }
   return [...paths].filter((value) => value.length > 0);
+}
+
+async function startPanelChatCompletionsProvider(toolCall?: {
+  readonly name: string;
+  readonly input: Readonly<Record<string, unknown>>;
+}): Promise<{
+  readonly baseUrl: string;
+  readonly requestCount: number;
+  close(): Promise<void>;
+}> {
+  let requestCount = 0;
+  const server = createServer(async (request, response) => {
+    try {
+      if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+        response.writeHead(404).end();
+        return;
+      }
+      requestCount += 1;
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+      }
+      const body = parseChatCompletionsRequestBody(Buffer.concat(chunks).toString("utf8"));
+      const shouldCallTool = toolCall !== undefined && !hasChatCompletionsToolOutput(body);
+      const payload = shouldCallTool
+        ? {
+            id: "chatcmpl-panel-tool-call",
+            object: "chat.completion.chunk",
+            created: 1_776_000_000,
+            model: "session-tool-model",
+            choices: [{
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [{
+                  index: 0,
+                  id: "call-panel-session-tool",
+                  type: "function",
+                  function: {
+                    name: toolCall.name,
+                    arguments: JSON.stringify(toolCall.input),
+                  },
+                }],
+              },
+              finish_reason: "tool_calls",
+            }],
+          }
+        : {
+            id: "chatcmpl-panel-complete",
+            object: "chat.completion.chunk",
+            created: 1_776_000_001,
+            model: toolCall === undefined ? "disabled-tools-model" : "session-tool-model",
+            choices: [{
+              index: 0,
+              delta: {
+                role: "assistant",
+                content: toolCall === undefined
+                  ? "Configured tools remained disabled."
+                  : "The requested file was read successfully.",
+              },
+              finish_reason: "stop",
+            }],
+          };
+      response.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      response.end(`data: ${JSON.stringify(payload)}\n\ndata: [DONE]\n\n`);
+    } catch (error) {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: String(error) } }));
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    throw new Error("Panel test model provider did not bind a TCP port.");
+  }
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    get requestCount() { return requestCount; },
+    close: () => new Promise<void>((resolve, reject) => {
+      server.close((error) => error === undefined ? resolve() : reject(error));
+    }),
+  };
 }
 
 async function waitForOrdinaryView(baseUrl: string, runId: string, status: string) {

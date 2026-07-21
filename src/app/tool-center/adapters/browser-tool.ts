@@ -28,7 +28,7 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
   return {
     definition: {
       name: "browser_snapshot",
-      description: "Open an HTTP or HTTPS page in a fresh Playwright browser session and return a text snapshot. Requires Playwright at runtime.",
+      description: "Read rendered text from an HTTP(S) page in an isolated browser session.",
       modelContract: {
         purpose: "Open an HTTP or HTTPS page in a fresh Playwright browser session and return the page title, final URL, and body text snapshot.",
         whenToUse: [

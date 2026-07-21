@@ -1,16 +1,13 @@
 allowBuilds:
+  # Pi installs optional provider SDKs that do not run install-time builds here.
+  '@google/genai': false
   electron: true
   electron-winstaller: false
+  protobufjs: false
 
 overrides:
   hono: 4.12.30
   qs: 6.15.3
 
-# @openai/agents 0.13.3 is pinned and covered by the local protocol, approval,
-# cancellation, session, and no-hosted-tracing contract probes. Keep the
-# repository-wide release-age policy intact and exempt only this verified SDK set.
-minimumReleaseAgeExclude:
-  - "@openai/agents"
-  - "@openai/agents-core"
-  - "@openai/agents-openai"
-  - "@openai/agents-realtime"
+patchedDependencies:
+  '@earendil-works/pi-ai@0.80.10': patches/@earendil-works__pi-ai@0.80.10.patch

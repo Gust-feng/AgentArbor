@@ -1,4 +1,3 @@
-import type { AgentOutputItem } from "@openai/agents";
 import type { ModelReasoningOutputProjection } from "../../domain/intelligence/index.js";
 import { asRecord } from "./provider-value-utils.js";
 
@@ -60,89 +59,6 @@ export class OpenAIReasoningStreamNormalizer {
     this.thinkTagSplitter = new OpenAICompatibleThinkTagStreamSplitter();
     return flushed;
   }
-}
-
-/**
- * Keeps compatible Chat reasoning observable without creating a standalone
- * reasoning-only assistant message when the SDK replays the turn. Strict Chat
- * gateways require every assistant message to contain text or tool calls.
- */
-export function normalizeOpenAICompatibleAgentOutput(
-  output: readonly AgentOutputItem[],
-): AgentOutputItem[] {
-  const normalizedOutput: AgentOutputItem[] = [];
-  const reasoningCandidates: string[] = [];
-
-  for (const item of output) {
-    if (item.type === "reasoning") {
-      reasoningCandidates.push(reasoningTextFromSdkReasoningItem(item));
-      continue;
-    }
-    reasoningCandidates.push(reasoningTextFromRecord(asRecord(item.providerData)));
-    if (item.type !== "message" || item.role !== "assistant") {
-      normalizedOutput.push(item);
-      continue;
-    }
-    const normalizedMessage = {
-      ...item,
-      content: item.content.map((part) => {
-        reasoningCandidates.push(reasoningTextFromRecord(asRecord(part.providerData)));
-        if (part.type !== "output_text") return part;
-        const split = splitThinkTagContent(part.text);
-        reasoningCandidates.push(split.reasoningContent);
-        return split.textContent === part.text ? part : { ...part, text: split.textContent };
-      }),
-    };
-    if (hasReplayableAssistantContent(normalizedMessage.content)) {
-      normalizedOutput.push(normalizedMessage);
-    }
-  }
-
-  const reasoning = mergeReasoningCandidates(reasoningCandidates);
-  if (reasoning.length === 0) return normalizedOutput;
-  const targetIndex = replayableReasoningTargetIndex(normalizedOutput);
-  if (targetIndex >= 0) {
-    const target = normalizedOutput[targetIndex]!;
-    const targetReasoning = completedReasoningFromAgentOutput([target]);
-    if (targetReasoning === reasoning) return normalizedOutput;
-    normalizedOutput[targetIndex] = {
-      ...target,
-      providerData: {
-        ...asRecord(target.providerData),
-        reasoning,
-      },
-    };
-    return normalizedOutput;
-  }
-
-  // A reasoning-only terminal response has no legal Chat continuation target.
-  // Keep it observable so the terminal guard can report the incomplete turn;
-  // it is never replayed as a successful model turn.
-  return [{
-    type: "reasoning",
-    content: [],
-    rawContent: [{ type: "reasoning_text", text: reasoning }],
-  }, ...normalizedOutput];
-}
-
-export function completedReasoningFromAgentOutput(output: readonly unknown[]): string {
-  const candidates: string[] = [];
-  for (const rawItem of output) {
-    const item = asRecord(rawItem);
-    candidates.push(reasoningTextFromRecord(asRecord(item.providerData)));
-    if (item.type === "reasoning") {
-      candidates.push(reasoningTextFromSdkReasoningItem(item));
-    }
-    if (!Array.isArray(item.content)) continue;
-    for (const rawPart of item.content) {
-      const part = asRecord(rawPart);
-      candidates.push(reasoningTextFromRecord(asRecord(part.providerData)));
-      if (part.type === "output_text") {
-        candidates.push(splitThinkTagContent(stringValue(part.text)).reasoningContent);
-      }
-    }
-  }
-  return mergeReasoningCandidates(candidates);
 }
 
 export function decodeOpenAICompatibleChatMessage(
@@ -299,26 +215,6 @@ function normalizeResponsesStreamEvent(event: Record<string, unknown>): Normaliz
   return event.type === "response.output_text.delta" && typeof event.delta === "string"
     ? { reasoningDelta: "", textDelta: event.delta }
     : { reasoningDelta: "", textDelta: "" };
-}
-
-function reasoningTextFromSdkReasoningItem(item: Record<string, unknown>): string {
-  return mergeReasoningCandidates([item.content, item.rawContent, item.raw_content]
-    .flatMap((value) => Array.isArray(value) ? value : [])
-    .map((part) => asRecord(part).text)
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0));
-}
-
-function replayableReasoningTargetIndex(output: readonly AgentOutputItem[]): number {
-  const toolCallIndex = output.findIndex((item) => item.type === "function_call");
-  return toolCallIndex >= 0
-    ? toolCallIndex
-    : output.findIndex((item) => item.type === "message" && item.role === "assistant");
-}
-
-function hasReplayableAssistantContent(
-  content: Extract<AgentOutputItem, { readonly role: "assistant" }>["content"],
-): boolean {
-  return content.some((part) => part.type !== "output_text" || part.text.trim().length > 0);
 }
 
 function reasoningDetailsText(value: unknown): string {

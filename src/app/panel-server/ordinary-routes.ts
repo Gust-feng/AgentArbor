@@ -350,7 +350,11 @@ async function streamRun(
       enqueueActivity(activity);
       return;
     }
-    if (pendingDelta !== undefined && activity.sequence === pendingDelta.sequence + 1) {
+    if (
+      pendingDelta !== undefined &&
+      activity.sequence === pendingDelta.sequence + 1 &&
+      activity.modelRequestId === pendingDelta.modelRequestId
+    ) {
       pendingDelta = { ...activity, delta: `${pendingDelta.delta}${activity.delta}` };
     } else {
       flushPendingDelta();

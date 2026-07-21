@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { persistedModelProtocolExtensions } from "../../domain/intelligence/index.js";
 import { isCanonicalToolName, toolCallFactId } from "../../domain/tools/index.js";
 import {
   ORDINARY_RUN_SCHEMA_VERSION,
@@ -11,6 +10,7 @@ import {
   type OrdinaryRunState,
   type OrdinaryRunSummary,
 } from "./contracts.js";
+import { assertOrdinaryToolFactGraph } from "./state.js";
 
 const MANIFEST_SCHEMA_VERSION = "ordinary-run-manifest/v1" as const;
 
@@ -123,6 +123,12 @@ const toolCallSchema = z.object({
   callId: z.string().min(1), factId: z.string().min(1).optional(), parentToolCallFactId: z.string().min(1).optional(), toolName: canonicalToolNameSchema, input: jsonValueSchema.optional(),
   output: jsonValueSchema.optional(), status: z.enum(["completed", "failed", "approval_required", "cancelled"]),
   error: z.string().optional(), errorDomain: z.string().optional(), errorFacts: z.record(z.string(), jsonValueSchema).optional(),
+  failureAttribution: z.enum(["schema_validation", "execution_failure"]).optional(),
+  delegatedExecution: z.object({
+    modelRounds: z.number().int().nonnegative(),
+    toolCallCount: z.number().int().nonnegative(),
+    usage: usageSchema,
+  }).strict().optional(),
   durationMs: z.number().finite().nonnegative(), confirmationRequest: confirmationSchema.optional(),
 }).strict().superRefine((result, context) => {
   if (result.status === "approval_required") {
@@ -134,22 +140,8 @@ const toolCallSchema = z.object({
   } else if (result.confirmationRequest !== undefined) {
     context.addIssue({ code: "custom", message: "resolved tool result cannot retain a confirmation request", path: ["confirmationRequest"] });
   }
-});
-const modelMessageSchema = z.object({
-  role: z.enum(["system", "user", "assistant", "tool"]), content: z.string(), ref: z.string().optional(),
-  toolCallId: z.string().optional(), toolName: canonicalToolNameSchema.optional(),
-  toolCalls: z.array(z.object({
-    callId: z.string().min(1), toolName: canonicalToolNameSchema, input: jsonValueSchema.optional(),
-  }).strict()).optional(),
-  protocolExtensions: z.record(z.string(), jsonValueSchema).optional(),
-}).strict().superRefine((message, context) => {
-  if (message.protocolExtensions === undefined) return;
-  try {
-    if (persistedModelProtocolExtensions(message.protocolExtensions) === undefined) {
-      context.addIssue({ code: "custom", message: "unknown protocol extensions are not durable" });
-    }
-  } catch (error) {
-    context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "protocol extension is invalid" });
+  if (result.failureAttribution !== undefined && result.status !== "failed") {
+    context.addIssue({ code: "custom", message: "failure attribution requires a failed tool result", path: ["failureAttribution"] });
   }
 });
 const configSchema = z.object({
@@ -256,6 +248,10 @@ const capabilityResolutionSchema = z.object({
   warnings: z.array(z.string()),
   createdAt: z.string().min(1),
 }).strict();
+const sessionEntryRefSchema = z.object({
+  sessionId: z.string().min(1),
+  entryId: z.string().min(1),
+}).strict();
 const eventBase = {
   eventId: z.string().min(1), runId: z.string().min(1), sequence: z.number().int().positive(), recordedAt: z.string().min(1),
 };
@@ -268,6 +264,12 @@ const eventSchema = z.discriminatedUnion("type", [
     modelRequestId: z.string().min(1),
     content: z.string().min(1),
   }).strict(),
+  z.object({
+    ...eventBase,
+    type: z.literal("context.compaction.completed"),
+    compactionEntryRef: sessionEntryRefSchema,
+    tokensBefore: z.number().int().nonnegative(),
+  }).strict(),
   z.object({ ...eventBase, type: z.literal("run.approval_requested"), confirmationRequests: z.array(confirmationSchema).min(1), toolCallIds: z.array(z.string().min(1)) }).strict(),
   z.object({ ...eventBase, type: z.literal("run.approval_decided"), decision: confirmationDecisionSchema }).strict(),
   z.object({ ...eventBase, type: z.literal("run.completed"), toolCallIds: z.array(z.string().min(1)) }).strict(),
@@ -275,10 +277,37 @@ const eventSchema = z.discriminatedUnion("type", [
   z.object({ ...eventBase, type: z.literal("run.cancelled"), reason: z.string(), toolCallIds: z.array(z.string().min(1)) }).strict(),
   z.object({ ...eventBase, type: z.literal("run.blocked"), code: z.string().min(1) }).strict(),
 ]);
+const sessionPhaseSchema = z.discriminatedUnion("phase", [
+  z.object({ phase: z.literal("not_started") }).strict(),
+  z.object({
+    phase: z.literal("started"),
+    startLeafRef: sessionEntryRefSchema.nullable(),
+    compactionEntryRefs: z.array(sessionEntryRefSchema),
+  }).strict(),
+  z.object({
+    phase: z.literal("rollbackable"),
+    startLeafRef: sessionEntryRefSchema.nullable(),
+    endLeafRef: sessionEntryRefSchema,
+    compactionEntryRefs: z.array(sessionEntryRefSchema),
+  }).strict(),
+  z.object({
+    phase: z.literal("completion_candidate"),
+    startLeafRef: sessionEntryRefSchema.nullable(),
+    rollbackLeafRef: sessionEntryRefSchema,
+    assistantEntryRef: sessionEntryRefSchema,
+    compactionEntryRefs: z.array(sessionEntryRefSchema),
+  }).strict(),
+]);
 const rawStateSchema = z.object({
   runId: z.string().min(1),
+  sessionRef: z.object({
+    sessionId: z.string().min(1),
+    storageKey: z.string().min(1),
+    sessionCwd: z.string().min(1),
+    createdAt: z.string().min(1),
+  }).strict(),
   turn: z.object({
-    conversationId: z.string().min(1), lineageId: z.string().min(1), ordinal: z.number().int().positive(),
+    conversationId: z.string().min(1), ordinal: z.number().int().positive(),
     userTurnId: z.string().min(1), assistantTurnId: z.string().min(1), predecessorRunId: z.string().min(1).optional(),
   }).strict(),
   input: z.object({
@@ -306,11 +335,11 @@ const rawStateSchema = z.object({
   }).strict(),
   birth: birthSchema,
   status: statusSchema,
-  canonicalMessages: z.array(modelMessageSchema),
+  session: sessionPhaseSchema,
   visibleAssistantText: z.string().optional(),
   pendingToolRound: z.object({
-    assistantMessage: modelMessageSchema,
-    acceptedAt: z.string().min(1),
+    assistantEntryRef: sessionEntryRefSchema,
+    toolCallIds: z.array(z.string().min(1)).min(1),
   }).strict().optional(),
   toolCalls: z.array(toolCallSchema),
   toolResultRecordedAt: z.record(z.string(), z.string().min(1)),
@@ -330,35 +359,37 @@ const rawStateSchema = z.object({
     context.addIssue({ code: "custom", message: "terminal status and terminalAt must agree", path: ["timestamps", "terminalAt"] });
   }
   if (state.pendingToolRound !== undefined) {
-    const pendingMessage = state.pendingToolRound.assistantMessage;
-    const pendingCalls = pendingMessage.toolCalls ?? [];
-    if (pendingMessage.role !== "assistant" || pendingCalls.length === 0) {
-      context.addIssue({ code: "custom", message: "pending tool round requires assistant tool calls", path: ["pendingToolRound", "assistantMessage"] });
-    }
-    const pendingIds = pendingCalls.map((call) => call.callId);
+    const pendingIds = state.pendingToolRound.toolCallIds;
     if (new Set(pendingIds).size !== pendingIds.length) {
-      context.addIssue({ code: "custom", message: "pending tool call identity is duplicated", path: ["pendingToolRound", "assistantMessage", "toolCalls"] });
+      context.addIssue({ code: "custom", message: "pending tool call identity is duplicated", path: ["pendingToolRound", "toolCallIds"] });
     }
     if (state.status.kind === "queued" || state.status.kind === "completed") {
       context.addIssue({ code: "custom", message: "run status cannot own a pending tool round", path: ["pendingToolRound"] });
     }
-    const committedIds = new Set(state.canonicalMessages.flatMap((message) =>
-      message.role === "assistant" ? (message.toolCalls ?? []).map((call) => call.callId) : []));
-    if (pendingIds.some((callId) => committedIds.has(callId))) {
-      context.addIssue({ code: "custom", message: "pending tool round duplicates canonical history", path: ["pendingToolRound", "assistantMessage", "toolCalls"] });
+    if (state.session.phase !== "rollbackable") {
+      context.addIssue({ code: "custom", message: "pending tool round requires a rollbackable Session prefix", path: ["session"] });
     }
-    for (const [index, pendingCall] of pendingCalls.entries()) {
-      const result = state.toolCalls.find((item) =>
-        item.callId === pendingCall.callId && (item.factId === undefined || item.factId === item.callId));
-      if (result !== undefined && (result.toolName !== pendingCall.toolName ||
-          JSON.stringify(result.input) !== JSON.stringify(pendingCall.input))) {
-        context.addIssue({
-          code: "custom",
-          message: "pending tool result does not match its accepted assistant call",
-          path: ["pendingToolRound", "assistantMessage", "toolCalls", index],
-        });
-      }
-    }
+  }
+  const sessionRefs = state.session.phase === "not_started"
+    ? []
+    : [
+        state.session.startLeafRef,
+        ...state.session.compactionEntryRefs,
+        ...(state.session.phase === "rollbackable" ? [state.session.endLeafRef] : []),
+        ...(state.session.phase === "completion_candidate"
+          ? [state.session.rollbackLeafRef, state.session.assistantEntryRef]
+          : []),
+      ].filter((ref) => ref !== null);
+  if (state.pendingToolRound !== undefined) sessionRefs.push(state.pendingToolRound.assistantEntryRef);
+  if (sessionRefs.some((ref) => ref.sessionId !== state.sessionRef.sessionId)) {
+    context.addIssue({ code: "custom", message: "run Session entry ref belongs to a different Session", path: ["session"] });
+  }
+  if (state.status.kind === "completed" &&
+      (state.session.phase !== "rollbackable" || state.pendingToolRound !== undefined)) {
+    context.addIssue({ code: "custom", message: "completed run requires a rollbackable Session end leaf", path: ["session"] });
+  }
+  if (state.session.phase === "completion_candidate" && state.pendingToolRound !== undefined) {
+    context.addIssue({ code: "custom", message: "Session response candidate cannot coexist with a pending tool round", path: ["session"] });
   }
   if (state.turn.predecessorRunId === state.runId) {
     context.addIssue({ code: "custom", message: "a run cannot be its own predecessor", path: ["turn", "predecessorRunId"] });
@@ -368,7 +399,7 @@ const rawStateSchema = z.object({
   }
   const expectedLastEvent = {
     queued: "run.created",
-    running: ["run.started", "run.approval_decided", "model.reasoning.completed"],
+    running: ["run.started", "run.approval_decided", "model.reasoning.completed", "context.compaction.completed"],
     awaiting_approval: "run.approval_requested",
     completed: "run.completed",
     failed: "run.failed",
@@ -394,15 +425,27 @@ const rawStateSchema = z.object({
       context.addIssue({ code: "custom", message: "resolved tool result occurrence time is missing", path: ["toolResultRecordedAt", resultKey] });
     }
   }
+  try {
+    assertOrdinaryToolFactGraph(state);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "Ordinary nested tool fact graph is invalid",
+      path: ["toolCalls"],
+    });
+  }
   if (state.status.kind === "awaiting_approval") {
     const approvalFacts = state.toolCalls.filter((result) => result.status === "approval_required");
     const statusRequests = new Map(state.status.confirmationRequests.map((request) => [request.confirmationId, request] as const));
     const factRequests = new Map(approvalFacts.flatMap((result) => result.confirmationRequest === undefined
       ? []
       : [[result.confirmationRequest.confirmationId, result.confirmationRequest] as const]));
+    const decidedConfirmationIds = new Set(state.timeline.flatMap((event) =>
+      event.type === "run.approval_decided" ? [event.decision.confirmationId] : []));
     if (statusRequests.size !== state.status.confirmationRequests.length || factRequests.size !== approvalFacts.length ||
-        statusRequests.size !== factRequests.size) {
-      context.addIssue({ code: "custom", message: "awaiting approval requests must match approval tool facts one-to-one", path: ["status", "confirmationRequests"] });
+        [...factRequests.keys()].some((confirmationId) =>
+          !statusRequests.has(confirmationId) && !decidedConfirmationIds.has(confirmationId))) {
+      context.addIssue({ code: "custom", message: "awaiting approval facts must be pending or have a durable decision", path: ["status", "confirmationRequests"] });
     }
     for (const [confirmationId, request] of statusRequests) {
       if (JSON.stringify(request) !== JSON.stringify(factRequests.get(confirmationId))) {
@@ -410,7 +453,6 @@ const rawStateSchema = z.object({
       }
     }
   }
-  validateCanonicalMessageChain(state, context);
 });
 const stateSchema: z.ZodType<OrdinaryRunState> = z.custom<OrdinaryRunState>((value) => rawStateSchema.safeParse(value).success);
 const documentSchema: z.ZodType<OrdinaryRunSnapshotDocument> = z.object({
@@ -635,52 +677,6 @@ function summaryFromDocument(document: OrdinaryRunSnapshotDocument): OrdinaryRun
     createdAt: document.state.timestamps.createdAt,
     updatedAt: document.state.timestamps.updatedAt,
   };
-}
-
-function validateCanonicalMessageChain(
-  state: z.infer<typeof rawStateSchema>,
-  context: z.RefinementCtx,
-): void {
-  const messages = state.canonicalMessages;
-  const pending: Array<{ readonly callId: string; readonly toolName: string }> = [];
-  const completed = new Set<string>();
-  for (const [index, message] of messages.entries()) {
-    if (pending.length > 0) {
-      const expected = pending[0]!;
-      if (message.role !== "tool" || message.toolCallId !== expected.callId ||
-          message.toolName !== expected.toolName || message.toolCalls !== undefined ||
-          message.protocolExtensions !== undefined) {
-        context.addIssue({ code: "custom", message: "tool results must immediately follow their assistant calls in model order", path: ["canonicalMessages", index] });
-        continue;
-      }
-      pending.shift();
-      completed.add(expected.callId);
-      continue;
-    }
-    if (message.role === "assistant") {
-      if (message.toolCallId !== undefined || message.toolName !== undefined) {
-        context.addIssue({ code: "custom", message: "assistant messages cannot be tool results", path: ["canonicalMessages", index] });
-      }
-      for (const call of message.toolCalls ?? []) {
-        if (pending.some((item) => item.callId === call.callId) || completed.has(call.callId)) {
-          context.addIssue({ code: "custom", message: "model tool call identity is duplicated", path: ["canonicalMessages", index, "toolCalls"] });
-        }
-        pending.push({ callId: call.callId, toolName: call.toolName });
-      }
-      continue;
-    }
-    if (message.role === "tool") {
-      context.addIssue({ code: "custom", message: "tool result does not match a pending model tool call", path: ["canonicalMessages", index] });
-      continue;
-    }
-    if (message.toolCallId !== undefined || message.toolName !== undefined ||
-        message.toolCalls !== undefined || message.protocolExtensions !== undefined) {
-      context.addIssue({ code: "custom", message: "system/user messages contain tool-only fields", path: ["canonicalMessages", index] });
-    }
-  }
-  if (pending.length > 0) {
-    context.addIssue({ code: "custom", message: "canonical messages contain unresolved model tool calls", path: ["canonicalMessages"] });
-  }
 }
 
 async function readJson(filePath: string, runId: string): Promise<unknown | undefined> {

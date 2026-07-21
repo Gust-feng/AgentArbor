@@ -19,7 +19,7 @@ import {
 } from "./agent-loop-execution.js";
 import { ordinaryCapabilityResolution, ordinaryRunBirth } from "./test-support.js";
 
-test("completed execution maps canonical facts and releases its run resources once", async () => {
+test("completed execution maps Session facts and releases its run resources once", async () => {
   let received: AgentLoopInput | undefined;
   const fixture = executionFixture({
     async execute(input) {
@@ -28,26 +28,17 @@ test("completed execution maps canonical facts and releases its run resources on
     },
     async release() { return undefined; },
   });
-  const onToolRound = async (): Promise<void> => undefined;
-  const outcome = await fixture.execution.execute({ ...executionInput(), onToolRound });
+  const outcome = await fixture.execution.execute(executionInput());
 
   assert.deepEqual(outcome, {
     status: "completed",
     answer: "done",
-    canonicalMessages: completedResult().messages,
+    session: sessionRefs(),
     toolCalls: [],
     usage: {},
   });
   assert.equal(received?.instructions, ordinaryRunBirth().instructions);
   assert.equal(received?.tools, fixture.resources.tools);
-  assert.notEqual(received?.onToolRound, onToolRound);
-  const assistantMessage: ModelMessage = {
-    role: "assistant",
-    content: "",
-    toolCalls: [{ callId: "call-1", toolName: "read_file", input: { path: "README.md" } }],
-  };
-  await received?.onToolRound?.({ canonicalMessagesBeforeRound: executionInput().messages, assistantMessage });
-  assert.deepEqual(fixture.registeredToolRounds(), [assistantMessage.toolCalls]);
   assert.equal(fixture.releaseCount(), 1);
 });
 
@@ -60,7 +51,7 @@ test("cleanup failure cannot replace a known completed outcome", async () => {
       async execute() { return completedResult(); },
       async release() { return undefined; },
     },
-    resolvedMessages: executionInput().messages,
+    resolvedMessages: [{ role: "user", content: "hello" }],
     tools: toolBoundary(),
     async release() { releases += 1; throw cleanupError; },
   } satisfies OrdinaryAgentLoopRunResources;
@@ -101,7 +92,6 @@ test("resource acquisition maps only explicitly coded execution failures", async
 
     assert.equal(outcome.status, "failed");
     assert.deepEqual(outcome.status === "failed" ? outcome.error : undefined, failure.facts);
-    assert.equal(outcome.canonicalMessages, input.messages);
   }
 
   const unknown = new Error("unexpected defect");
@@ -117,7 +107,6 @@ test("failed loop result maps to Ordinary failure and releases resources", async
       return {
         status: "failed",
         error: "invalid provider response",
-        messages: [{ role: "user", content: "hello" }],
         toolResults: [],
         usage: {},
         confirmationRequests: [],
@@ -142,7 +131,6 @@ test("classified loop failure keeps the context-compaction code in Ordinary stat
         status: "failed",
         errorCode: "context_compaction_failed",
         error: "Context compaction failed before the next provider request.",
-        messages: [{ role: "user", content: "hello" }],
         toolResults: [],
         usage: {},
         confirmationRequests: [],
@@ -230,7 +218,6 @@ test("execution forwards live text deltas and preserves prior cumulative usage w
           return {
             status: "failed",
             error: "provider disconnected",
-            messages: input.messages,
             toolResults: [],
             usage: {},
             confirmationRequests: [],
@@ -287,7 +274,6 @@ test("cancellation signal reaches the loop and cancelled execution releases reso
         input.abortSignal.addEventListener("abort", () => resolve({
           status: "cancelled",
           error: String(input.abortSignal.reason),
-          messages: input.messages,
           toolResults: [],
           usage: {},
           confirmationRequests: [],
@@ -305,6 +291,35 @@ test("cancellation signal reaches the loop and cancelled execution releases reso
   assert.equal(observedSignal, controller.signal);
   assert.deepEqual(outcome.status === "cancelled" ? outcome.reason : undefined, "ordinary_feature_released");
   assert.equal(fixture.releaseCount(), 1);
+});
+
+test("feature-owned Session revoke reaches the active lease without waiting for model settlement", async () => {
+  let finishLoop!: (result: AgentLoopResult) => void;
+  let loopEntered!: () => void;
+  const entered = new Promise<void>((resolve) => { loopEntered = resolve; });
+  const run = new Promise<AgentLoopResult>((resolve) => { finishLoop = resolve; });
+  const revokedTargets: unknown[] = [];
+  const resources: OrdinaryAgentLoopRunResources = {
+    loop: {
+      async execute() { loopEntered(); return run; },
+      async release() { return undefined; },
+    },
+    resolvedMessages: [{ role: "user", content: "hello" }],
+    tools: toolBoundary(),
+    async revokeSessionTo(target) { revokedTargets.push(target); },
+    async release() { return undefined; },
+  };
+  const execution = createOrdinaryAgentLoopExecutionPort({
+    resources: { async acquire() { return resources; } },
+  });
+  const executing = execution.execute(executionInput());
+  await entered;
+  const safeLeafRef = { sessionId: "session-1", entryId: "safe-leaf" };
+
+  await execution.finalizeSession?.("run-1", safeLeafRef);
+  assert.deepEqual(revokedTargets, [safeLeafRef]);
+  finishLoop(completedResult());
+  assert.equal((await executing).status, "completed");
 });
 
 test("loop exceptions release resources and preserve the original failure", async () => {
@@ -360,9 +375,9 @@ test("the acquirer may reattach ephemeral inputs and contribute native agent too
       permissionBoundaryRefs: ["read:file:image.png"],
     },
   };
-  await fixture.execution.execute({ ...executionInput(), runInput, messages: persistedMessages });
+  await fixture.execution.execute({ ...executionInput(), runInput });
 
-  assert.equal(acquiredInput?.messages, persistedMessages);
+  assert.equal(acquiredInput?.runInput.userMessage, runInput.userMessage);
   assert.equal(acquiredInput?.runInput, runInput);
   assert.equal(loopInput?.messages, resolvedMessages);
   assert.equal(loopInput?.messages[0]?.attachments?.[0]?.attachmentId, "image-1");
@@ -379,12 +394,10 @@ function executionFixture(
   } = {},
 ) {
   let releases = 0;
-  const registeredToolRounds: NonNullable<ModelMessage["toolCalls"]>[] = [];
   const resources: OrdinaryAgentLoopRunResources = {
     loop,
-    resolvedMessages: options.resolvedMessages ?? executionInput().messages,
+    resolvedMessages: options.resolvedMessages ?? [{ role: "user", content: "hello" }],
     tools: toolBoundary(),
-    registerToolRound(toolCalls) { registeredToolRounds.push(toolCalls); },
     ...(options.agentTools === undefined ? {} : { agentTools: options.agentTools }),
     ...(options.capabilityResolution === undefined ? {} : { capabilityResolution: options.capabilityResolution }),
     async release() { releases += 1; },
@@ -400,16 +413,20 @@ function executionFixture(
       },
     }),
     releaseCount: () => releases,
-    registeredToolRounds: () => registeredToolRounds,
   };
 }
 
 function executionInput(abortSignal = new AbortController().signal) {
   return {
     runId: "run-1",
+    sessionRef: {
+      sessionId: "session-1",
+      storageKey: "session-1.jsonl",
+      sessionCwd: "C:/workspace",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
     birth: ordinaryRunBirth(),
     runInput: { userMessage: "hello" },
-    messages: [{ role: "user", content: "hello" }] satisfies readonly ModelMessage[],
     abortSignal,
   };
 }
@@ -418,11 +435,22 @@ function completedResult(usage: Extract<AgentLoopResult, { readonly status: "com
   return {
     status: "completed",
     finalText: "done",
-    messages: [{ role: "user", content: "hello" }, { role: "assistant", content: "done" }],
+    session: sessionRefs(),
     toolResults: [],
     usage,
     confirmationRequests: [],
   };
+}
+
+function sessionRefs() {
+  return {
+    sessionId: "session-1",
+    startLeafRef: null,
+    inputEntryRef: { sessionId: "session-1", entryId: "input" },
+    safeLeafRef: { sessionId: "session-1", entryId: "input" },
+    latestLeafRef: { sessionId: "session-1", entryId: "answer" },
+    compactionEntryRefs: [],
+  } as const;
 }
 
 function approvalResult(
@@ -432,7 +460,6 @@ function approvalResult(
 ): Extract<AgentLoopResult, { readonly status: "approval_required" }> {
   return {
     status: "approval_required",
-    messages: [{ role: "user", content: "hello" }],
     toolResults: [],
     usage,
     confirmationRequests: [request],

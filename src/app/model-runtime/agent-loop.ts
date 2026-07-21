@@ -10,6 +10,7 @@ import type {
   ToolInputSchema,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
+import type { AgentSessionEntryRef, AgentSessionExecutionRefs, AgentSessionWriteCheckpoint } from "./agent-session.js";
 
 export type AgentLoopToolBoundary = {
   readonly gateway: ToolExecutionGateway;
@@ -54,23 +55,8 @@ export type AgentLoopInput = {
   readonly onToolProgress?: (progress: ToolCallProgress) => void;
   /** Resolves only after the owning feature has durably accepted the executed tool fact. */
   readonly onToolResult?: (result: ToolCallResult) => Promise<void>;
-  /** Resolves before the SDK may preflight or execute any tool from this validated root turn. */
-  readonly onToolRound?: (input: {
-    /** Exact canonical prefix consumed by the provider for this tool-producing turn. */
-    readonly canonicalMessagesBeforeRound: readonly ModelMessage[];
-    readonly assistantMessage: ModelMessage;
-  }) => Promise<void>;
-  /** Runs immediately before every provider request with the exact canonical request history. */
-  readonly maintainContext?: (input: {
-    readonly messages: readonly ModelMessage[];
-    /** True when this request contains tool results the main model has not consumed. */
-    readonly hasUnseenToolResults: boolean;
-    readonly abortSignal: AbortSignal;
-  }) => Promise<
-    | { readonly status: "unchanged"; readonly usage?: ModelUsage }
-    | { readonly status: "compacted"; readonly messages: readonly ModelMessage[]; readonly usage?: ModelUsage }
-    | { readonly status: "failed"; readonly code: string; readonly error: string; readonly usage?: ModelUsage }
-  >;
+  /** Resolves after the owning feature durably accepts a provider-owned Session checkpoint. */
+  readonly onSessionWriteCheckpoint?: (checkpoint: AgentSessionWriteCheckpoint) => Promise<void>;
 };
 
 export type AgentLoopContinuation = {
@@ -85,11 +71,12 @@ export type AgentLoopContinuation = {
 };
 
 type AgentLoopResultFacts = {
-  readonly messages: readonly ModelMessage[];
   readonly toolResults: readonly ToolCallResult[];
   /** Cumulative usage for this execute/continuation chain, not a per-resume delta. */
   readonly usage: ModelUsage;
   readonly confirmationRequests: readonly ConfirmationRequest[];
+  /** Present for agent Session loops; branch-local fake loops may omit it during migration. */
+  readonly session?: AgentSessionExecutionRefs;
 };
 
 export type AgentLoopResult =

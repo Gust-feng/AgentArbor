@@ -12,7 +12,7 @@ import {
 
 const PANEL_SERVER_ROOT = path.join(process.cwd(), "src", "app", "panel-server");
 
-test("panel runtime is the only composition root for Ordinary and Multi-Agent features", async () => {
+test("panel runtime composes Ordinary without reactivating the deferred Multi-Agent feature", async () => {
   const runtimeFile = path.join(PANEL_SERVER_ROOT, "runtime.ts");
   const runtime = await readSource(runtimeFile);
   const imports = sourceImportBindings(runtime, runtimeFile);
@@ -25,15 +25,9 @@ test("panel runtime is the only composition root for Ordinary and Multi-Agent fe
     ),
     true,
   );
-  assert.equal(
-    imports.some((binding) =>
-      binding.importedName === "createMultiAgentFeature" &&
-      binding.moduleSpecifier === "../deep/multi-agent-feature.js"
-    ),
-    true,
-  );
   assert.equal(invocations.called.includes("createOrdinaryAgentFeature"), true);
-  assert.equal(invocations.called.includes("createMultiAgentFeature"), true);
+  assert.equal(imports.some((binding) => binding.moduleSpecifier.includes("../deep/")), false);
+  assert.equal(invocations.called.includes("createMultiAgentFeature"), false);
 
   const otherCompositionRoots: string[] = [];
   for (const file of await collectSourceFiles(PANEL_SERVER_ROOT)) {
@@ -43,8 +37,7 @@ test("panel runtime is the only composition root for Ordinary and Multi-Agent fe
     const source = await readSource(file);
     const bindings = sourceImportBindings(source, file);
     if (bindings.some((binding) =>
-      binding.importedName === "createOrdinaryAgentFeature" ||
-      binding.importedName === "createMultiAgentFeature"
+      binding.importedName === "createOrdinaryAgentFeature"
     )) {
       otherCompositionRoots.push(relativePath(file));
     }
@@ -61,7 +54,7 @@ test("PanelRuntime exposes feature facades instead of the retired Ordinary execu
   );
 
   assert.match(runtimeContract, /readonly ordinaryAgentFeature: OrdinaryAgentFeature;/);
-  assert.match(runtimeContract, /readonly multiAgentFeature: MultiAgentFeature;/);
+  assert.doesNotMatch(runtimeContract, /multiAgentFeature|MultiAgentFeature/);
 
   for (const retiredField of [
     "runExecutor",

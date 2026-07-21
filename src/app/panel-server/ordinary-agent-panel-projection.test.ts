@@ -10,6 +10,7 @@ import type {
   OrdinaryRunStatus,
 } from "../ordinary-agent/contracts.js";
 import {
+  ordinaryAgentSessionRef,
   ordinaryCapabilityResolution,
   ordinaryRunBirth,
   ordinaryRunTurn,
@@ -144,6 +145,7 @@ test("restart reset and live text delta remain explicit activity facts", () => {
       recordedAt: "2026-01-01T00:00:03.000Z",
       type: "model.output.delta",
       durability: "live_only",
+      modelRequestId: "model-request-1",
       delta: "原始增量 <keep>",
     },
   ];
@@ -160,7 +162,29 @@ test("restart reset and live text delta remain explicit activity facts", () => {
   assert.equal(parseOrdinaryPanelCursor(batch.cursor.token)?.streamId, "stream-after-restart");
   assert.equal(batch.events.at(-1)?.type, "model.output.delta");
   assert.equal(batch.events.at(-1)?.delta, "原始增量 <keep>");
+  assert.deepEqual(batch.events.at(-1)?.refs, [{ kind: "model_call", id: "model-request-1" }]);
   assert.deepEqual(batch.events.map((event) => event.sequence), [1, 2, 3]);
+});
+
+test("a persisted context compaction checkpoint projects as a completed system activity", () => {
+  const run = runState({ runId: "compaction-run", status: { kind: "running" } });
+  const event: OrdinaryRunEvent = {
+    eventId: "compaction-run:compacted",
+    runId: run.runId,
+    sequence: 3,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+    type: "context.compaction.completed",
+    compactionEntryRef: { sessionId: run.sessionRef.sessionId, entryId: "compaction-entry" },
+    tokensBefore: 4_096,
+  };
+
+  const view = projectOrdinaryPanelRunView({ run, fullReplay: replay(run, [createdEvent(run), startedEvent(run), event]) });
+
+  const node = (view.detail.transcript?.transcriptNodes ?? [])
+    .find((item) => item.eventType === "context.compaction.completed");
+  assert.equal(node?.kind, "system");
+  assert.equal(node?.phase, "completed");
+  assert.equal(node?.summary, "上下文压缩完成");
 });
 
 test("running transcript projects consecutive output deltas as one logical body", () => {
@@ -176,6 +200,7 @@ test("running transcript projects consecutive output deltas as one logical body"
       recordedAt: `2026-01-01T00:00:0${index + 3}.000Z`,
       type: "model.output.delta",
       durability: "live_only",
+      modelRequestId: "model-request-1",
       delta,
     })),
   ];
@@ -241,10 +266,151 @@ test("model request activity is visible as quiet workflow progress", () => {
 
   assert.equal(view.replay.events.at(-1)?.type, "model.requested");
   assert.equal(view.replay.events.at(-1)?.summary, "分析工具结果");
+  assert.deepEqual(view.replay.events.at(-1)?.refs, [{ kind: "model_call", id: "activity-model-request" }]);
   assert.equal(node?.eventType, "model.requested");
   assert.equal(node?.kind, "system");
   assert.equal(node?.phase, "executing");
   assert.equal(node?.summary, "分析工具结果");
+});
+
+test("adjacent model fragments never merge across model request identities", () => {
+  const run = runState({ runId: "model-identity-boundary-run", status: { kind: "running" } });
+  const activities: OrdinaryRunActivity[] = [
+    transitionActivity(run, createdEvent(run), 1),
+    transitionActivity(run, startedEvent(run), 2),
+    {
+      activityId: "output-first",
+      runId: run.runId,
+      sequence: 3,
+      recordedAt: "2026-01-01T00:00:03.000Z",
+      type: "model.output.delta",
+      durability: "live_only",
+      modelRequestId: "model-request-1",
+      delta: "第一段正文。",
+    },
+    {
+      activityId: "output-second",
+      runId: run.runId,
+      sequence: 4,
+      recordedAt: "2026-01-01T00:00:04.000Z",
+      type: "model.output.delta",
+      durability: "live_only",
+      modelRequestId: "model-request-2",
+      delta: "第二段正文。",
+    },
+    {
+      activityId: "reasoning-first",
+      runId: run.runId,
+      sequence: 5,
+      recordedAt: "2026-01-01T00:00:05.000Z",
+      type: "model.reasoning.delta",
+      durability: "live_only",
+      modelRequestId: "model-request-1",
+      delta: "第一段思考。",
+    },
+    {
+      activityId: "reasoning-second",
+      runId: run.runId,
+      sequence: 6,
+      recordedAt: "2026-01-01T00:00:06.000Z",
+      type: "model.reasoning.delta",
+      durability: "live_only",
+      modelRequestId: "model-request-2",
+      delta: "第二段思考。",
+    },
+  ];
+  const view = projectOrdinaryPanelRunView({
+    run,
+    fullReplay: {
+      cursor: { streamId: "identity-boundary-stream", sequence: 6 },
+      reset: false,
+      activities,
+    },
+  });
+
+  assert.deepEqual(
+    view.workView.transcriptNodes
+      .filter((node) => node.kind === "body" || node.kind === "thinking")
+      .map((node) => `${node.kind}:${node.text}`),
+    [
+      "body:第一段正文。",
+      "body:第二段正文。",
+      "thinking:第一段思考。",
+      "thinking:第二段思考。",
+    ],
+  );
+});
+
+test("failed tool transcript nodes retain failure attribution and raw error", () => {
+  const run = runState({ runId: "failed-tool-transcript-run", status: { kind: "running" } });
+  const activity: OrdinaryRunActivity = {
+    activityId: "tool:call-invalid:failed",
+    runId: run.runId,
+    sequence: 3,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+    type: "tool.result",
+    durability: "durable",
+    result: {
+      callId: "call-invalid",
+      toolName: "read_file",
+      input: { path: "" },
+      output: undefined,
+      status: "failed",
+      error: "path must be a non-empty string",
+      failureAttribution: "schema_validation",
+      durationMs: 1,
+    },
+  };
+
+  const view = projectOrdinaryPanelRunView({
+    run,
+    fullReplay: {
+      cursor: { streamId: "ordinary-stream-1", sequence: activity.sequence },
+      reset: false,
+      activities: [activity],
+    },
+  });
+  const node = view.workView.transcriptNodes[0];
+
+  assert.equal(node?.failureAttribution, "schema_validation");
+  assert.equal(node?.error, "path must be a non-empty string");
+});
+
+test("delegated tool transcript nodes retain execution measurement", () => {
+  const run = runState({ runId: "delegated-tool-transcript-run", status: { kind: "running" } });
+  const activity: OrdinaryRunActivity = {
+    activityId: "tool:delegate:completed",
+    runId: run.runId,
+    sequence: 3,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+    type: "tool.result",
+    durability: "durable",
+    result: {
+      callId: "delegate",
+      toolName: "call_sub_agent",
+      input: { task: "inspect" },
+      output: "review complete",
+      status: "completed",
+      delegatedExecution: {
+        modelRounds: 2,
+        toolCallCount: 1,
+        usage: { inputTokens: 18, outputTokens: 7, totalTokens: 25 },
+      },
+      durationMs: 1,
+    },
+  };
+
+  const view = projectOrdinaryPanelRunView({
+    run,
+    fullReplay: {
+      cursor: { streamId: "ordinary-stream-1", sequence: activity.sequence },
+      reset: false,
+      activities: [activity],
+    },
+  });
+
+  assert.deepEqual(view.replay.events[0]?.detail?.delegatedExecution, activity.result.delegatedExecution);
+  assert.deepEqual(view.workView.transcriptNodes[0]?.delegatedExecution, activity.result.delegatedExecution);
 });
 
 test("live tool progress projects one executing command row with bounded output evidence", () => {
@@ -568,6 +734,7 @@ function runState(input: {
   const turn = ordinaryRunTurn(input.runId);
   return {
     runId: input.runId,
+    sessionRef: ordinaryAgentSessionRef(),
     turn,
     input: {
       userMessage: "请读取附件并回答",
@@ -593,7 +760,7 @@ function runState(input: {
     },
     birth,
     status: input.status,
-    canonicalMessages: [{ role: "user", content: "请读取附件并回答" }],
+    session: { phase: "not_started" },
     visibleAssistantText: input.visibleAssistantText,
     toolCalls: input.toolCalls ?? [],
     toolResultRecordedAt: Object.fromEntries((input.toolCalls ?? []).map((result) => [
@@ -627,7 +794,6 @@ function conversationFrom(run: OrdinaryRunState): OrdinaryConversationReadModel 
     title: "测试对话",
     createdAt: run.timestamps.createdAt,
     updatedAt: run.timestamps.updatedAt,
-    activeLineage: { lineageId: run.turn.lineageId, createdAt: run.timestamps.createdAt },
     activeRunId: run.status.kind === "running" || run.status.kind === "awaiting_approval" ? run.runId : undefined,
     latestRunId: run.runId,
     queuedRunIds: run.status.kind === "queued" ? [run.runId] : [],

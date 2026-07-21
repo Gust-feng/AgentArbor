@@ -271,12 +271,7 @@ export function createLocalShellCommandTool(
 function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): ToolDefinition {
   return {
     name: "shell_command",
-    description: [
-      "Run a real workspace command in the current integrated shell.",
-      shellUsageSentence(commandShell),
-      "Use commandLine for normal shell-native command execution, including mkdir, copy, move, delete, package manager, build, test, git, and binary-file workflows.",
-      "Use command plus args when you want direct argv execution without shell parsing.",
-    ].join(" "),
+    description: "Run a command in the current workspace shell. Use commandLine for shell syntax, or command and args for direct process execution.",
     metadata: {
       category: "terminal",
       riskLevel: "medium",
@@ -1904,10 +1899,6 @@ function normalizeCommandShellConfig(value: SanitizedCommandShellConfig | undefi
     notes: [...value.notes],
     commandLineParameter: "commandLine",
   };
-}
-
-function shellUsageSentence(shell: SanitizedCommandShellConfig): string {
-  return `Current runtime shell is ${shell.label} (${shell.syntax}) via ${shell.executable}.`;
 }
 
 function requireCommand(value: unknown): string {

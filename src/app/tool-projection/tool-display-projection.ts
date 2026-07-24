@@ -18,7 +18,7 @@ const SEARCH_DISPLAY_RESULTS_LIMIT = 20;
 export function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
   const record = asRecord(output);
   const input = asRecord(request.input);
-  if (request.toolName === "search") {
+  if (request.toolName === "ResearchSearch") {
     const results = (Array.isArray(record.results) ? record.results : [])
       .slice(0, SEARCH_DISPLAY_RESULTS_LIMIT)
       .map(projectSearchDisplayItem)
@@ -30,7 +30,7 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       results,
     };
   }
-  if (request.toolName === "read" && Array.isArray(record.items)) {
+  if (request.toolName === "ResearchRead" && Array.isArray(record.items)) {
     return {
       kind: "generic_tool_summary",
       action: toolDisplayName(request.toolName),
@@ -38,7 +38,7 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       items: record.items.slice(0, 8).map(batchReadDisplayItem).filter(isString),
     };
   }
-  if (request.toolName === "read") {
+  if (request.toolName === "ResearchRead") {
     const error = readErrorMessageFromOutput(record);
     const uri = stringOrUndefined(record.uri) ?? stringOrUndefined(input.uri) ?? stringOrUndefined(input.ref);
     const url = httpUrl(uri);
@@ -65,14 +65,14 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
         : undefined,
     };
   }
-  if (request.toolName === "browser_snapshot") {
+  if (request.toolName === "WebFetch") {
     return {
-      kind: "browser_snapshot",
+      kind: "web_fetch",
       title: stringOrUndefined(record.title) ?? stringOrUndefined(input.title),
       url: stringOrUndefined(record.url) ?? stringOrUndefined(input.url),
     };
   }
-  if (request.toolName === "http_request") {
+  if (request.toolName === "HttpRequest") {
     return {
       kind: "http_response",
       method: stringOrUndefined(record.method) ?? stringOrUndefined(input.method),
@@ -97,7 +97,7 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       output,
     });
   }
-  if (request.toolName === "shell_command" || request.toolName === "start_process" || request.toolName === "stop_process") {
+  if (request.toolName === "Shell" || request.toolName === "ProcessStop") {
     const stdout = stringOrUndefined(record.stdout);
     const stderr = stringOrUndefined(record.stderr);
     const commandLine = commandTextFromToolResult(record, request.input);
@@ -132,14 +132,14 @@ function httpUrl(value: string | undefined): string | undefined {
 }
 
 function isContentReadTool(toolName: string): boolean {
-  return toolName === "read_file" ||
-    toolName === "read_context_attachment_text" ||
-    toolName === "read_context_attachment_pdf_text" ||
-    toolName === "read_skill_resource";
+  return toolName === "Read" ||
+    toolName === "AttachmentRead" ||
+    toolName === "AttachmentReadPdf" ||
+    toolName === "SkillRead";
 }
 
 function isAgentTaskTool(toolName: string): boolean {
-  return toolName === "call_sub_agent" || toolName === "spawn_sub_agent";
+  return toolName === "Agent" || toolName === "AgentSpawn";
 }
 
 function batchReadDisplayItem(value: unknown): string | undefined {

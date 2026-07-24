@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { isCanonicalToolName, toolCallFactId } from "../../domain/tools/index.js";
+import { cloneToolInputSchema, isCanonicalToolName, toolCallFactId, type ToolInputSchema } from "../../domain/tools/index.js";
 import {
   ORDINARY_RUN_SCHEMA_VERSION,
   OrdinaryFeatureError,
@@ -26,6 +26,14 @@ export class OrdinaryRunSnapshotIncompatibleError extends Error {
 const jsonValueSchema: z.ZodType<unknown> = z.lazy(() => z.union([
   z.null(), z.string(), z.number().finite(), z.boolean(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema),
 ]));
+const toolInputSchemaSchema = z.custom<ToolInputSchema>((value) => {
+  try {
+    cloneToolInputSchema(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, "a complete object tool input schema is required");
 const confirmationSchema = z.object({
   confirmationId: z.string().min(1), toolCallFactId: z.string().min(1), conversationId: z.string().optional(),
   title: z.string(), actionSummary: z.string(), consequence: z.string().optional(),
@@ -159,7 +167,14 @@ const capabilitySnapshotSchema = z.object({
   }).passthrough(),
   toolCatalog: z.object({
     scope: z.literal("desktop-basic"),
-    tools: z.array(z.object({ name: z.string().min(1), description: z.string(), enabled: z.boolean(), availability: z.enum(["available", "unavailable"]) }).passthrough()),
+    tools: z.array(z.object({
+      name: z.string().min(1),
+      description: z.string(),
+      inputSchema: toolInputSchemaSchema,
+      definitionHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+      enabled: z.boolean(),
+      availability: z.enum(["available", "unavailable"]),
+    }).passthrough()),
     allowedTools: z.array(z.string()),
   }).passthrough(),
   skillCatalog: z.array(z.object({ id: z.string().min(1), name: z.string(), description: z.string(), enabled: z.boolean() }).passthrough()),

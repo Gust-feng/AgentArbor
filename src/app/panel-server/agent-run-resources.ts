@@ -205,7 +205,7 @@ async function prepareAgentHostRunResourcesWithEnvironment<
     toolCatalogNames: toolCatalogNamesFromCapabilitySnapshot(capabilitySnapshot),
     toolCatalogAvailability: toolCatalogAvailabilityFromCapabilitySnapshot(capabilitySnapshot),
     playwrightAvailable: capabilitySnapshot.toolCatalog.tools.some(
-      (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
+      (tool) => tool.name === "WebFetch" && tool.availability === "available"
     ),
     toolRegistryScopes: mcpManager === undefined ? ["desktop-basic"] : ["desktop-basic", "mcp"],
     toolContributions: mcpManager === undefined

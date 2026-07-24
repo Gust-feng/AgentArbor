@@ -5,7 +5,7 @@ import { InMemoryToolOutputStore } from "../tool-output-store.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-test("browser_snapshot returns bounded browser page facts through injected automation", async () => {
+test("web_fetch returns bounded browser page facts through injected automation", async () => {
   const automation: BrowserAutomation = {
     async snapshot(input) {
       return {
@@ -31,7 +31,7 @@ test("browser_snapshot returns bounded browser page facts through injected autom
   assert.equal(record.truncated, true);
 });
 
-test("browser_snapshot continues truncated page text with startChar", async () => {
+test("web_fetch continues truncated page text with startChar", async () => {
   const automation: BrowserAutomation = {
     async snapshot() {
       return {
@@ -55,7 +55,7 @@ test("browser_snapshot continues truncated page text with startChar", async () =
   assert.equal(Number(asRecord(asRecord(record.continuation).nextInput).startChar) > Number(record.startChar), true);
 });
 
-test("browser_snapshot continues beyond the former startChar ceiling without inserting ellipsis", async () => {
+test("web_fetch continues beyond the former startChar ceiling without inserting ellipsis", async () => {
   const pageText = `${"x".repeat(2_000_000)}abcdef`;
   const automation: BrowserAutomation = {
     async snapshot() {
@@ -89,7 +89,7 @@ test("browser_snapshot continues beyond the former startChar ceiling without ins
   assert.equal(`${first.text}${second.text}`.includes("..."), false);
 });
 
-test("browser_snapshot rejects non-http urls", async () => {
+test("web_fetch rejects non-http urls", async () => {
   const tool = createBrowserSnapshotTool({
     automation: {
       async snapshot() {
@@ -101,7 +101,7 @@ test("browser_snapshot rejects non-http urls", async () => {
   await assert.rejects(() => tool.execute({ url: "file:///etc/passwd" }, context), /HTTP or HTTPS/);
 });
 
-test("browser_snapshot rejects fractional continuation offsets", async () => {
+test("web_fetch rejects fractional continuation offsets", async () => {
   const tool = createBrowserSnapshotTool({
     automation: {
       async snapshot() {
@@ -116,7 +116,7 @@ test("browser_snapshot rejects fractional continuation offsets", async () => {
   );
 });
 
-test("browser_snapshot distinguishes navigation and retained-snapshot failures", async () => {
+test("web_fetch distinguishes navigation and retained-snapshot failures", async () => {
   const navigation = createBrowserSnapshotTool({
     automation: { async snapshot() { throw new Error("navigation unavailable"); } },
   });
@@ -135,7 +135,7 @@ test("browser_snapshot distinguishes navigation and retained-snapshot failures",
   );
 });
 
-test("browser_snapshot continues from one retained snapshot without navigating again", async () => {
+test("web_fetch continues from one retained snapshot without navigating again", async () => {
   let navigations = 0;
   const tool = createBrowserSnapshotTool({
     outputStore: new InMemoryToolOutputStore(),

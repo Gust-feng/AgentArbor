@@ -65,7 +65,7 @@ export function toSanitizedToolConfirmationConfig(
       label: "完全访问",
       shellCommandConfirmation: "skipped_by_full_access",
       shellCommandRequiresConfirmation: false,
-      summary: "shell_command 会跳过逐条确认。",
+      summary: "shell 会跳过逐条确认。",
       riskDisclosure: "这不是 sandbox；工具仍经过 ToolCenter、事件、runtime facts 和日志。",
       updatedAt: normalized.updatedAt,
     };
@@ -75,7 +75,7 @@ export function toSanitizedToolConfirmationConfig(
     label: "标准访问",
     shellCommandConfirmation: "prompt",
     shellCommandRequiresConfirmation: true,
-    summary: "shell_command 执行前需要确认。",
+    summary: "shell 执行前需要确认。",
     riskDisclosure: "命令执行前由确认门阻塞，批准后仍通过 ToolCenter 执行并记录。",
     updatedAt: normalized.updatedAt,
   };

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tool Design"
+  short_description: "审查并改进 Agent 工具定义、可见性、执行与结果契约"
+  default_prompt: "Use $tool-design to review this agent tool change against its owning contracts and select focused verification."

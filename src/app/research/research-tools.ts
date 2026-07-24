@@ -50,7 +50,7 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
   const searchableDescription = formatSourceList(searchableSources);
   return {
     definition: {
-      name: "search",
+      name: "ResearchSearch",
       description: [
         "Search available information sources and return references with titles, locations, status, and snippets.",
         searchableSources.length > 0
@@ -58,40 +58,6 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
           : "No search source is configured.",
         "Use read with a returned reference when more content is required.",
       ].join(" "),
-      modelContract: {
-        purpose: "Search the currently available AgentArbor information sources and return refs the model can inspect with read.",
-        whenToUse: [
-          "Use when you need to locate current source material before answering or editing.",
-          "Use when you need refs from the currently model-visible information sources.",
-        ],
-        whenNotToUse: [
-          "Do not use as the final evidence for detailed work; expand important refs with read first.",
-        ],
-        inputNotes: [
-          "query is required and should describe the information need.",
-          "site is optional and limits web-like search sources to a domain, for example example.com.",
-          "sources is optional; omit it unless a specific currently available source is needed.",
-          "limit optionally caps returned refs.",
-        ],
-        runtimeHints: [
-          { label: "searchable sources", value: searchableDescription || "none" },
-        ],
-        usageNotes: [
-          "Search returns real refs from currently available sources only.",
-          "Use site only for domain-limited research; source adapters that cannot apply a site constraint may ignore it.",
-          "Leave sources empty unless the user explicitly needs a particular available source.",
-          "Call read with a returned ref before relying on a snippet for detailed work.",
-        ],
-        outputNotes: [
-          "results[].refId is the value to pass to read.",
-          "results[].uri or results[].url identifies the source location when available.",
-          "status explains whether the search completed, was empty, partial, or unavailable.",
-        ],
-        examples: [
-          { title: "Search current codebase and available sources", input: { query: "tool self description", limit: 5 } },
-          { title: "Search one domain", input: { query: "AgentArbor docs", site: "example.com", sources: ["web"] } },
-        ],
-      },
       metadata: {
         category: "research",
         riskLevel: "low",
@@ -145,53 +111,13 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
   const readableDescription = formatSourceList(readableSources);
   return {
     definition: {
-      name: "read",
+      name: "ResearchRead",
       description: [
-        "Read a reference, HTTP(S) URL, command-log reference, repository URI, or repository path.",
+        "Read a reference, HTTP(S) URL, command-log reference, repository URI, or repository path and return contentPreview with source and status facts.",
         "Pass one reference or an array of references.",
         `Readable sources now: ${readableDescription || "none"}.`,
         "Use a returned continuation to read the next content range.",
       ].join(" "),
-      modelContract: {
-        purpose: "Read one or more research refs, URLs, command log refs, repo URIs, or repository paths and return contentPreview for model reasoning.",
-        whenToUse: [
-          "Use after search when a snippet is not enough.",
-          "Use directly for a known URL, command-log:// ref, repo:// URI, or workspace path that should be inspected.",
-          "Use a ref array when several refs are needed and independent per-ref status is acceptable.",
-        ],
-        whenNotToUse: [
-          "Do not use for writing or editing files; it only reads content.",
-        ],
-        inputNotes: [
-          "ref is required and may be a returned refId, HTTP/HTTPS URL, command-log:// ref, repo:// URI, repository path, or an array of those strings.",
-          `A batch accepts at most ${MAX_RESEARCH_READ_BATCH_ITEMS} refs and reads at most ${MAX_CONCURRENT_RESEARCH_READS} refs concurrently.`,
-          "source is optional and should only disambiguate refs.",
-          "maxLength bounds one returned character window.",
-          "startChar is a zero-based character offset used only to execute a returned continuation.",
-        ],
-        runtimeHints: [
-          { label: "readable sources", value: readableDescription || "none" },
-          { label: "maximum batch refs", value: String(MAX_RESEARCH_READ_BATCH_ITEMS) },
-          { label: "maximum concurrent reads", value: String(MAX_CONCURRENT_RESEARCH_READS) },
-        ],
-        usageNotes: [
-          "Use read to expand a search ref, URL, command-log:// ref, repo:// URI, or repository path into content the model can continue reasoning over.",
-          "For batch reads, inspect each items[] status and error instead of assuming every ref succeeded.",
-          "Do not treat UI activity text as the read result; inspect contentPreview and status.",
-          "Use continuation.nextInput or continuations[].nextInput to continue from unread text without repeating the previous window.",
-        ],
-        outputNotes: [
-          "Single ref calls return contentPreview and an optional top-level continuation.",
-          "Batch ref calls return items[] and optional top-level continuations[].",
-          "truncated=true only appears with an executable continuation from the first unread character.",
-          "sourceSearchRef links the read result back to a search result when available.",
-        ],
-        examples: [
-          { title: "Read search result", input: { ref: "research:web:example", maxLength: 6000 } },
-          { title: "Read multiple search results", input: { ref: ["research:web:one", "research:web:two"], maxLength: 4000 } },
-          { title: "Read repository path", input: { ref: "src/app/research/research-tools.ts", source: "codebase" } },
-        ],
-      },
       metadata: {
         category: "research",
         riskLevel: "low",

@@ -16,8 +16,8 @@ Ordinary Agent 经常需要把一个边界清楚的局部任务交给专家，�
 
 Sub-Agent 继续作为 Ordinary Agent 的工具能力，但正式实现采用 Pi AgentHarness 原生 AgentTool 适配：
 
-- `call_sub_agent` 调用一个已登记且启用的专家。
-- `spawn_sub_agent` 创建一个只服务本次调用、不会持久化的一次性专家。
+- `agent_call` 调用一个已登记且启用的专家。
+- `agent_spawn` 创建一个只服务本次调用、不会持久化的一次性专家。
 - 两个工具只向 capability catalog 提供 catalog-only definition，并与冻结 Ordinary run 的普通工具边界使用同一曝光决策；不向 ToolRegistry 注册假 executor。
 - 旧批量与专用续读工具退役。
 - 旧自研 runner、Sub-Agent 事件、trace store、独立 read-model 和独立持久化退役。
@@ -48,10 +48,10 @@ parent allowedTools
   - all Sub-Agent tools
 ```
 
-- `call_sub_agent` 使用专家定义的 `allowed-tools` 做可选收窄。
-- `spawn_sub_agent.allowed_tools: null` 表示继承父 run 可执行工具上限；数组表示显式收窄；空数组表示不给工具。
+- `agent_call` 使用专家定义的 `allowed-tools` 做可选收窄。
+- `agent_spawn.allowed_tools: null` 表示继承父 run 可执行工具上限；数组表示显式收窄；空数组表示不给工具。
 - 请求父 run 未授权或当前不可执行的工具时明确失败。
-- `call_sub_agent`、`spawn_sub_agent` 和已退役的旧 Sub-Agent 工具名都不得进入 nested Agent 工具集合。
+- `agent_call`、`agent_spawn` 和已退役的旧 Sub-Agent 工具名都不得进入 nested Agent 工具集合。
 
 因此 Sub-Agent 不能递归派生，也不能借定义文件或动态输入扩张父 run 权限。
 
@@ -92,7 +92,7 @@ Sub-Agent 与 Deep child 不是同一业务对象：
 
 ## 验收约束
 
-- 正式目录只暴露 `call_sub_agent` 与 `spawn_sub_agent`。
+- 正式目录只暴露 `agent_call` 与 `agent_spawn`。
 - capability catalog 只保存两个工具的定义；曝光必须经过冻结 run 的普通工具边界，ToolRegistry 不注册假 executor。
 - nested Agent 只能使用父 run 已授权且当前可执行的工具。
 - Sub-Agent 工具不会出现在 nested Agent 工具集合中。

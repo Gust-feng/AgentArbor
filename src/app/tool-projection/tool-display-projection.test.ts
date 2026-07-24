@@ -4,11 +4,11 @@ import { projectToolDisplay } from "./tool-display-projection.js";
 
 test("projectToolDisplay keeps concrete request targets before tool output exists", () => {
   const read = projectToolDisplay(
-    { callId: "call-read-live", toolName: "read_file", input: { path: "src/app/runtime.ts" } },
+    { callId: "call-read-live", toolName: "read", input: { path: "src/app/runtime.ts" } },
     undefined,
   );
   const browser = projectToolDisplay(
-    { callId: "call-browser-live", toolName: "browser_snapshot", input: { url: "https://example.test/docs" } },
+    { callId: "call-browser-live", toolName: "web_fetch", input: { url: "https://example.test/docs" } },
     undefined,
   );
   const http = projectToolDisplay(
@@ -22,8 +22,8 @@ test("projectToolDisplay keeps concrete request targets before tool output exist
 
   assert.equal(read.kind, "read_result");
   assert.equal(read.kind === "read_result" ? read.title : undefined, "src/app/runtime.ts");
-  assert.equal(browser.kind, "browser_snapshot");
-  assert.equal(browser.kind === "browser_snapshot" ? browser.url : undefined, "https://example.test/docs");
+  assert.equal(browser.kind, "web_fetch");
+  assert.equal(browser.kind === "web_fetch" ? browser.url : undefined, "https://example.test/docs");
   assert.equal(http.kind, "http_response");
   assert.equal(http.kind === "http_response" ? http.method : undefined, "POST");
   assert.equal(http.kind === "http_response" ? http.url : undefined, "https://example.test/api/check");
@@ -33,7 +33,7 @@ test("projectToolDisplay gives sub-agent calls a task-native display", () => {
   const requested = projectToolDisplay(
     {
       callId: "call-agent-live",
-      toolName: "call_sub_agent",
+      toolName: "agent_call",
       input: {
         sub_agent_name: "review-expert",
         task: "检查工具展示的信息层级",
@@ -45,7 +45,7 @@ test("projectToolDisplay gives sub-agent calls a task-native display", () => {
   const completed = projectToolDisplay(
     {
       callId: "call-agent-live",
-      toolName: "call_sub_agent",
+      toolName: "agent_call",
       input: {
         sub_agent_name: "review-expert",
         task: "检查工具展示的信息层级",
@@ -64,7 +64,7 @@ test("projectToolDisplay gives sub-agent calls a task-native display", () => {
 
 test("projectToolDisplay consumes flat shell facts and keeps stdout out of the activity summary", () => {
   const display = projectToolDisplay(
-    { callId: "call-shell", toolName: "shell_command", input: { command: "node", args: ["-v"] } },
+    { callId: "call-shell", toolName: "shell", input: { command: "node", args: ["-v"] } },
     {
       command: "node",
       commandLine: "node -v",
@@ -88,7 +88,7 @@ test("projectToolDisplay keeps useful bounded stdout and stderr previews separat
   const stderr = Array.from({ length: 8 }, (_, index) => `stderr line ${index + 1}`).join("\n");
   const output = { commandLine: "pnpm test", exitCode: 1, stdout, stderr };
   const display = projectToolDisplay(
-    { callId: "call-shell-detail", toolName: "shell_command", input: { commandLine: "pnpm test" } },
+    { callId: "call-shell-detail", toolName: "shell", input: { commandLine: "pnpm test" } },
     output,
   );
 
@@ -104,7 +104,7 @@ test("projectToolDisplay keeps full command output in expandable detail", () => 
   const stdout = "x".repeat(20_000);
   const output = { commandLine: "node task.js", exitCode: 0, stdout };
   const display = projectToolDisplay(
-    { callId: "call-shell-bounded", toolName: "shell_command", input: { commandLine: "node task.js" } },
+    { callId: "call-shell-bounded", toolName: "shell", input: { commandLine: "node task.js" } },
     output,
   );
 
@@ -114,7 +114,7 @@ test("projectToolDisplay keeps full command output in expandable detail", () => 
 
 test("projectToolDisplay consumes flat research read facts", () => {
   const display = projectToolDisplay(
-    { callId: "call-read", toolName: "read", input: { ref: "research:web:one" } },
+    { callId: "call-read", toolName: "research_read", input: { ref: "research:web:one" } },
     {
       ref: "research:web:one",
       researchStatus: "completed",
@@ -136,7 +136,7 @@ test("projectToolDisplay consumes flat research read facts", () => {
 
 test("projectToolDisplay presents batch reads as sources without ref or status jargon", () => {
   const display = projectToolDisplay(
-    { callId: "call-read-batch", toolName: "read", input: {} },
+    { callId: "call-read-batch", toolName: "research_read", input: {} },
     {
       items: [
         { ref: "research:web:one", researchStatus: "completed", title: "First source" },
@@ -157,7 +157,7 @@ test("projectToolDisplay presents batch reads as sources without ref or status j
 
 test("projectToolDisplay keeps sources and HTTP content without webpage excerpts", () => {
   const search = projectToolDisplay(
-    { callId: "call-search", toolName: "search", input: { query: "AgentArbor" } },
+    { callId: "call-search", toolName: "research_search", input: { query: "AgentArbor" } },
     {
       query: "AgentArbor",
       researchStatus: "completed",
@@ -169,7 +169,7 @@ test("projectToolDisplay keeps sources and HTTP content without webpage excerpts
     },
   );
   const browser = projectToolDisplay(
-    { callId: "call-browser", toolName: "browser_snapshot", input: { url: "https://example.test" } },
+    { callId: "call-browser", toolName: "web_fetch", input: { url: "https://example.test" } },
     { title: "Example", url: "https://example.test", text: "page text", truncated: true },
   );
   const http = projectToolDisplay(
@@ -187,7 +187,7 @@ test("projectToolDisplay keeps sources and HTTP content without webpage excerpts
 
   assert.equal(search.kind, "search_results");
   assert.equal(search.kind === "search_results" ? search.results.length : undefined, 2);
-  assert.equal(browser.kind, "browser_snapshot");
+  assert.equal(browser.kind, "web_fetch");
   assert.equal(JSON.stringify(browser).includes("page text"), false);
   assert.equal(JSON.stringify(browser).includes("truncated"), false);
   assert.equal(http.kind, "http_response");
@@ -200,7 +200,7 @@ test("projectToolDisplay keeps read and HTTP detail beyond the former short-summ
   const readContent = `read-start\n${"r".repeat(2_000)}\nread-end`;
   const responseBody = `http-start\n${"h".repeat(2_000)}\nhttp-end`;
   const read = projectToolDisplay(
-    { callId: "call-read-detail", toolName: "read_file", input: { path: "README.md" } },
+    { callId: "call-read-detail", toolName: "read", input: { path: "README.md" } },
     { path: "README.md", content: readContent },
   );
   const http = projectToolDisplay(
@@ -231,7 +231,7 @@ test("projectToolDisplay does not interpret legacy action, summary, or result wr
 test("projectToolDisplay keeps complete source titles instead of clipping them", () => {
   const title = `A complete source title ${"with meaningful context ".repeat(12).trim()}`;
   const display = projectToolDisplay(
-    { callId: "call-search-title", toolName: "search", input: { query: "AgentArbor" } },
+    { callId: "call-search-title", toolName: "research_search", input: { query: "AgentArbor" } },
     { query: "AgentArbor", results: [{ title, url: "https://example.test/complete-title" }] },
   );
 

@@ -38,14 +38,14 @@ Multi-Agent 必须通过中性能力端口复用模型、工具、确认和系�
 
 | 场景 | 推荐命名 | 避免命名 |
 | --- | --- | --- |
-| 修改一个文本文件 | `FileEdit` / `edit_file` / `Patch` | `Atomic Mutation` / `Plan Rewrite` |
+| 修改一个文本文件 | `FileEdit` / `edit` / `Patch` | `Atomic Mutation` / `Plan Rewrite` |
 | 多个编辑先全部校验再一次落盘 | `ChangeSet` / `batch edit`；确有全成功/全失败语义时可用 `atomic` | 用 `atomic` 包装普通修改 |
 | 模型按需调用工具并回答 | `Basic Agent Run` / `普通 Agent run` | `Underground flow` / `deep run` |
 | 多 child/rootlet 探索并由父层综合 | `Underground` / `deep` / `Agent cluster` | 普通会话内部隐式触发 |
 | 可持久化、可验证、可恢复的方向交接对象 | `Plan` / `Plan Package` | 普通回答或临时摘要叫 Plan |
 | 纯函数、helper、adapter 或 formatter | `helper` / `service` / `adapter` | `agent` |
 | 外部底层依赖的生产适配 | 按职责命名，如 `session-backed-agent-loop`、`model-provider-collection` | `pi-runtime`、`pi-manager`、`pi-utils` 等供应商前缀或空泛容器名 |
-| 普通会话中模型自主调用的专家助手 | `sub-agent` / `子 Agent` / `call_sub_agent` | `child` / `rootlet` / `deep child`（这些是 deep 编排术语） |
+| 普通会话中模型自主调用的专家助手 | `sub-agent` / `子 Agent` / `agent_call` | `child` / `rootlet` / `deep child`（这些是 deep 编排术语） |
 
 `atomic` 只能用于真正具有事务边界的场景：全部校验通过才写入、失败不落盘、或有明确回滚/一致性保证。用户可见工具说明和普通文档应优先使用“编辑”“补丁”“变更集”等直白词。
 
@@ -57,7 +57,7 @@ Multi-Agent 必须通过中性能力端口复用模型、工具、确认和系�
 - 普通路径不展示 fake Plan、fake report、fake artifact、未出生的 Routines、团队 agent 或 deep 占位入口。
 - 新增概念前必须说明它承担的独立职责、输入输出、失败方式、测试边界和可观察投影；否则使用朴素名称。
 - 生产文件名、函数名和公开类型必须表达稳定职责，不以当前外部依赖名代替职责。供应商名称只出现在依赖导入、必要的协议差异注释、能力契约测试与架构决策中；更换底层依赖时，中性调用方不应因为命名泄漏而跟随改名。
-- 子 Agent（sub-agent）是普通 Agent 的工具能力，不是独立编排流程；它通过 Pi AgentTool 适配的 `call_sub_agent` / `spawn_sub_agent` 被模型自主调用，不维护独立任务生命周期、不派生 Plan、不走 `/api/deep/*` 入口。子 Agent 的工具集强制排除 Sub-Agent 工具，因此不能递归派生。子 Agent 与 deep child/rootlet 是不同概念：deep child 由 DeepRuntime 编排，走 manager 自由决策循环和 DeepTaskBoard；子 Agent 由 Ordinary 的 Pi AgentHarness 调用，并通过父 run 的 ToolCenter 执行获准工具（见 ADR-0026）。
+- 子 Agent（sub-agent）是普通 Agent 的工具能力，不是独立编排流程；它通过 Pi AgentTool 适配的 `agent_call` / `agent_spawn` 被模型自主调用，不维护独立任务生命周期、不派生 Plan、不走 `/api/deep/*` 入口。子 Agent 的工具集强制排除 Sub-Agent 工具，因此不能递归派生。子 Agent 与 deep child/rootlet 是不同概念：deep child 由 DeepRuntime 编排，走 manager 自由决策循环和 DeepTaskBoard；子 Agent 由 Ordinary 的 Pi AgentHarness 调用，并通过父 run 的 ToolCenter 执行获准工具（见 ADR-0026）。
 - 工程边界可以保护权限、预算、审计、验证和命令确认，但不能替 agent 判断目标、工具选择、候选取舍或是否继续探索；普通模型正文、工具结果、错误信息、文件内容、stdout/stderr 和开发上下文不得被脱敏或安全投影吞掉。
 
 这条口径的目标是同时避免两种错误：一是为了当前简单实现删除未来 deep / agent 集群方向；二是在默认普通 Agent 中提前使用超出实际职责的重命名、伪协议和伪复杂流程。

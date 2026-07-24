@@ -54,22 +54,22 @@ Skills 是能力包：它提供可复用说明、参考资料、脚本和资产�
 3. 默认选择：普通 agent 在 runtime / trace 出生后，基于本轮 frozen skill catalog 做确定性 progressive disclosure；显式 `$skill` 直接选择，关键词/触发器命中才加载正文。默认不调用 `skill_routing`，也不把全量 skill 候选发给模型。设置页“基础能力 -> Skills 触发方式”可显式切为语义路由；只有新 run 冻结 `skillTrigger.mode = "model"` 后，`skill_routing` 才作为普通路径的 opt-in 前置路由使用。内部评测仍可显式使用该 router。
 4. body 选中后加载：只有本轮普通 agent 选中某个 skill 后，才读取 `SKILL.md` 正文并注入当前用户模型消息。
 5. `allowed-tools` 声明审计：若选中的 loaded skill 声明了 `allowed-tools`，普通 agent 只记录和校验这些工具是否存在于本轮 capability / tool / profile / permission / executable 边界内；声明不能让不可见工具变可见，也不能把普通 agent 原本可见的工具隐藏掉。当前不提供 skill 级免确认授权。
-6. `references/` 按需读取：只有本轮已选中且成功加载的 skill，才允许模型通过普通只读工具 `read_skill_resource` 读取其 indexed `references/*`。读取结果作为 tool result 回到模型，不在初始模型消息中预注入。
-7. `scripts/` 元数据按需读取但不执行：`read_skill_resource` 只返回脚本 hash、大小和“必须经 ToolCenter/确认边界执行”的事实；loader、resolver 和资源工具都不能自动执行脚本。
-8. `assets/` 按需使用：资产是输出模板、样例或素材，不默认进入模型上下文；`read_skill_resource` 对 asset 只返回 hash、大小等事实，不返回 raw asset body。
-9. `evals/` 本地质量 artifact：loader/doctor 可以索引 `evals/*`、校验、统计并提示缺失，但 `evals/` 不属于运行时资源，不进入 frozen runtime resource index 或模型输入，也不能通过 `read_skill_resource` 读取。
+6. `references/` 按需读取：只有本轮已选中且成功加载的 skill，才允许模型通过普通只读工具 `skill_read` 读取其 indexed `references/*`。读取结果作为 tool result 回到模型，不在初始模型消息中预注入。
+7. `scripts/` 元数据按需读取但不执行：`skill_read` 只返回脚本 hash、大小和“必须经 ToolCenter/确认边界执行”的事实；loader、resolver 和资源工具都不能自动执行脚本。
+8. `assets/` 按需使用：资产是输出模板、样例或素材，不默认进入模型上下文；`skill_read` 对 asset 只返回 hash、大小等事实，不返回 raw asset body。
+9. `evals/` 本地质量 artifact：loader/doctor 可以索引 `evals/*`、校验、统计并提示缺失，但 `evals/` 不属于运行时资源，不进入 frozen runtime resource index 或模型输入，也不能通过 `skill_read` 读取。
 
 `SKILL.md` frontmatter 使用标准 YAML parser 解析，支持多行字符串、flow mapping、锚点/alias 和 merge。非法 YAML 不应导致发现流程崩溃，而应通过现有校验路径形成 disabled diagnostic。
 
-当前可以宣称：metadata、version、provenance 和本轮可选集合来自 run 创建时冻结的 skill catalog；被选中 skill 的正文加载会校验冻结 hash，hash 不一致时 fail closed 且不注入正文；本轮已选 loaded skill 的 indexed references/assets/scripts 可以通过 `read_skill_resource` 按需读取，并校验 run 创建时冻结的资源 hash，hash 不一致时 fail closed；`evals/` 只用于 loader/doctor 本地质量门校验统计，显式传入模型通道时可复用 `skill_routing` 跑 routing eval；quality/regression case 可以声明 `qualityBaseline`，由 doctor 做 with/without skill 记录完整性、分数差和字面量质量检查。不能宣称 evals 进入 frozen runtime resource index、模型输入或 `read_skill_resource`，不能宣称 references/assets/scripts 会自动进入上下文或自动执行，也不能宣称当前会自动生成 with/without 输出、调用 LLM judge 或评估运行时真实回答质量。
+当前可以宣称：metadata、version、provenance 和本轮可选集合来自 run 创建时冻结的 skill catalog；被选中 skill 的正文加载会校验冻结 hash，hash 不一致时 fail closed 且不注入正文；本轮已选 loaded skill 的 indexed references/assets/scripts 可以通过 `skill_read` 按需读取，并校验 run 创建时冻结的资源 hash，hash 不一致时 fail closed；`evals/` 只用于 loader/doctor 本地质量门校验统计，显式传入模型通道时可复用 `skill_routing` 跑 routing eval；quality/regression case 可以声明 `qualityBaseline`，由 doctor 做 with/without skill 记录完整性、分数差和字面量质量检查。不能宣称 evals 进入 frozen runtime resource index、模型输入或 `skill_read`，不能宣称 references/assets/scripts 会自动进入上下文或自动执行，也不能宣称当前会自动生成 with/without 输出、调用 LLM judge 或评估运行时真实回答质量。
 
 ## 当前不做
 
 - 不做 RAG ingest、chunk、embedding、vector store 或 retrieval policy。
 - 不用关键词、文件数量或任务复杂度把普通请求自动升级为 deep。
 - 不让 skill 脚本在发现、快照或触发阶段自动执行。
-- 不让 `read_skill_resource` 读取未选中、未成功加载、omitted、未索引或 hash 不匹配的 skill resource。
-- 不让 `read_skill_resource` 读取 `evals/`；eval artifacts 只服务本地质量门和后续评估体系。
+- 不让 `skill_read` 读取未选中、未成功加载、omitted、未索引或 hash 不匹配的 skill resource。
+- 不让 `skill_read` 读取 `evals/`；eval artifacts 只服务本地质量门和后续评估体系。
 - 不让 `allowed-tools` 扩张工具能力，也不让它作为全局白名单削弱普通 agent 的工具可见集合；当前只做冻结、展示、审计和不可用声明 warning。
 - 不为 skill body、工具结果或文件正文建立第二套副本；模型实际消费的内容按 Pi Session 契约进入当前 branch，provider 原始 HTTP 响应、secret 与附件字节不进入 Ordinary snapshot。
 - 不把 Skills 作为 Plan、Handoff、Governance 或任务编排层。

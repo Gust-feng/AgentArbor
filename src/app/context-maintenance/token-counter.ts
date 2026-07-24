@@ -5,10 +5,12 @@ import type { AgentLoopTokenCounter } from "./contracts.js";
 const DEFAULT_MODEL = "gpt-4o";
 
 export function createOpenAITokenCounter(model = DEFAULT_MODEL): AgentLoopTokenCounter {
-  const encoding = encodingForOpenAIModel(model);
+  const resolved = encodingForOpenAIModel(model);
+  const encoding = resolved.encoding;
   return {
     source: "openai_tiktoken",
     model,
+    tokenizerMatch: resolved.tokenizerMatch,
     countText(text) {
       return encoding.encode(text).length;
     },
@@ -21,11 +23,14 @@ export function createOpenAITokenCounter(model = DEFAULT_MODEL): AgentLoopTokenC
   };
 }
 
-function encodingForOpenAIModel(model: string): Tiktoken {
+function encodingForOpenAIModel(model: string): {
+  readonly encoding: Tiktoken;
+  readonly tokenizerMatch: "model" | "fallback";
+} {
   try {
-    return encodingForModel(model as never);
+    return { encoding: encodingForModel(model as never), tokenizerMatch: "model" };
   } catch {
-    return getEncoding("o200k_base");
+    return { encoding: getEncoding("o200k_base"), tokenizerMatch: "fallback" };
   }
 }
 

@@ -5,6 +5,7 @@ import {
   type Model,
   type Models,
   type OpenAICompletionsCompat,
+  type OpenAIResponsesCompat,
   type ProviderStreams,
 } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -168,8 +169,10 @@ function createConfiguredProviderModel(
 function createProviderCompat(
   options: ModelProviderBindingOptions,
   api: "openai-completions" | "openai-responses",
-): OpenAICompletionsCompat | undefined {
+): OpenAICompletionsCompat | OpenAIResponsesCompat | undefined {
   if (api === "openai-responses") {
+    // Provider identity does not prove that the selected model supports native
+    // tool search. Keep it disabled until the frozen model capability says so.
     return undefined;
   }
 
@@ -211,7 +214,6 @@ function createProviderCompat(
         ...(options.model.toLowerCase().includes("kimi-k3")
           ? {
               requiresReasoningContentOnAssistantMessages: true,
-              deferredToolsMode: "kimi" as const,
             }
           : {}),
       };

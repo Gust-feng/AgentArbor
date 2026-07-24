@@ -43,44 +43,13 @@ export function createReadToolOutputTool(store: ToolOutputStore, options: {
 } = {}): ToolExecutor {
   return {
     definition: {
-      name: "read_tool_output",
+      name: "ReadOutput",
       description: "Read an exact character window from a retained tool result without executing the original tool again.",
       metadata: {
         category: "other",
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-      },
-      modelContract: {
-        purpose: "Continue reading a large tool result from a tool-output:// reference without repeating the source operation.",
-        whenToUse: [
-          "Use when another tool result provides a tool-output:// continuation ref.",
-          "Use continuation.nextInput exactly to read the next unread character window.",
-        ],
-        whenNotToUse: [
-          "Do not use this tool to rerun, refresh, paginate, or otherwise contact the original source.",
-          "Do not use it for workspace files, command logs, HTTP pagination, or Sub-Agent outputs that provide their own reader tool.",
-        ],
-        inputNotes: [
-          `ref must use the ${TOOL_OUTPUT_REF_PREFIX} scheme returned by a previous tool result.`,
-          "startChar is a zero-based UTF-16 code-unit offset, defaults to 0, and must not split a surrogate pair.",
-          `maxChars defaults to ${DEFAULT_TOOL_OUTPUT_READ_CHARS}, must be at least ${MIN_TOOL_OUTPUT_READ_CHARS}, and cannot exceed ${MAX_TOOL_OUTPUT_READ_CHARS}.`,
-        ],
-        outputNotes: [
-          "content is the exact retained text or canonical JSON window; window boundaries never split a UTF-16 surrogate pair.",
-          "sourceToolName, sourceCallId and optional sourceFactId identify the original execution fact; this read does not execute it again.",
-          "truncated is true only when hasMoreAfter is true and continuation.nextInput points to the first unread character.",
-          "continuationAvailability reports whether the retained bytes survive a process restart.",
-          "A live-only ref is released after its final window; durable evidence remains readable until its owning conversation is deleted.",
-        ],
-        examples: [{
-          title: "Continue a retained result",
-          input: {
-            ref: "tool-output://example-ref",
-            startChar: 0,
-            maxChars: DEFAULT_TOOL_OUTPUT_READ_CHARS,
-          },
-        }],
       },
       inputSchema: {
         type: "object",
@@ -112,11 +81,11 @@ export function createReadToolOutputTool(store: ToolOutputStore, options: {
       const startChar = optionalInteger(record.startChar, "startChar") ?? 0;
       const maxChars = optionalInteger(record.maxChars, "maxChars") ?? DEFAULT_TOOL_OUTPUT_READ_CHARS;
       if (startChar < 0) {
-        throw new Error("read_tool_output startChar must be a non-negative integer.");
+        throw new Error("read_output startChar must be a non-negative integer.");
       }
       if (maxChars < MIN_TOOL_OUTPUT_READ_CHARS || maxChars > MAX_TOOL_OUTPUT_READ_CHARS) {
         throw new Error(
-          `read_tool_output maxChars must be between ${MIN_TOOL_OUTPUT_READ_CHARS} and ${MAX_TOOL_OUTPUT_READ_CHARS}.`,
+          `read_output maxChars must be between ${MIN_TOOL_OUTPUT_READ_CHARS} and ${MAX_TOOL_OUTPUT_READ_CHARS}.`,
         );
       }
 
@@ -211,7 +180,7 @@ function readResultFits(
   if (counter.countText(result.content) > budget.targetInlineBodyTokens) return false;
   return counter.countText(JSON.stringify(toolResultMessage({
     callId: budget.callId,
-    toolName: "read_tool_output",
+    toolName: "ReadOutput",
     input: undefined,
     output: result,
     status: "completed",
@@ -235,7 +204,7 @@ function readToolOutputResult(
           startChar: nextStartChar,
           maxChars: requestedMaxChars,
         },
-        note: "Call read_tool_output with nextInput to read the next retained segment; the original tool will not run again.",
+        note: "Call read_output with nextInput to read the next retained segment; the original tool will not run again.",
       }
     : undefined;
   return {
@@ -261,7 +230,7 @@ function serializedReadResultChars(result: ReadToolOutputResult): number {
 
 function requiredToolOutputRef(value: unknown): string {
   if (typeof value !== "string" || !value.startsWith(TOOL_OUTPUT_REF_PREFIX)) {
-    throw new Error(`read_tool_output ref must use the ${TOOL_OUTPUT_REF_PREFIX} scheme.`);
+    throw new Error(`read_output ref must use the ${TOOL_OUTPUT_REF_PREFIX} scheme.`);
   }
   return value;
 }
@@ -271,7 +240,7 @@ function optionalInteger(value: unknown, fieldName: string): number | undefined 
     return undefined;
   }
   if (!Number.isSafeInteger(value)) {
-    throw new Error(`read_tool_output ${fieldName} must be a safe integer.`);
+    throw new Error(`read_output ${fieldName} must be a safe integer.`);
   }
   return value as number;
 }

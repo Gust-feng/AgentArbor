@@ -8,7 +8,20 @@ import type { ToolFactValue } from "../../domain/tools/index.js";
 import { ToolCenter } from "../tool-center/tool-center.js";
 import { createReadSkillResourceTool } from "./skill-resource-tool.js";
 
-test("read_skill_resource reads only indexed resources from loaded selected skills", async () => {
+test("skill_read publishes closed integer bounds for resource windows", () => {
+  const schema = createReadSkillResourceTool().definition.inputSchema;
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.required, ["skillId", "path", "type"]);
+  assert.deepEqual(schema.properties.maxChars, {
+    type: "integer",
+    minimum: 1,
+    maximum: 64_000,
+    description: "Maximum reference characters to return.",
+  });
+  assert.equal((schema.properties.startChar as { readonly type?: unknown }).type, "integer");
+});
+
+test("skill_read reads only indexed resources from loaded selected skills", async () => {
   const fixture = await createFixture();
   try {
     const tool = createReadSkillResourceTool([fixture.skillContext()]);
@@ -30,16 +43,16 @@ test("read_skill_resource reads only indexed resources from loaded selected skil
   }
 });
 
-test("read_skill_resource continues beyond the former startChar ceiling without repeating a window", async () => {
+test("skill_read continues beyond the former startChar ceiling without repeating a window", async () => {
   const referenceContent = `${"x".repeat(2_000_000)}abc`;
   const fixture = await createFixture({ referenceContent });
   try {
     const center = new ToolCenter();
     center.register(createReadSkillResourceTool([fixture.skillContext()]));
-    const permission = { callerAgentId: "agent", allowedTools: ["read_skill_resource"] };
+    const permission = { callerAgentId: "agent", allowedTools: ["skill_read"] };
     const first = await center.execute({
       callId: "call-skill-before-ceiling",
-      toolName: "read_skill_resource",
+      toolName: "skill_read",
       input: {
         skillId: "sample-skill",
         type: "reference",
@@ -60,7 +73,7 @@ test("read_skill_resource continues beyond the former startChar ceiling without 
 
     const second = await center.execute({
       callId: "call-skill-former-ceiling",
-      toolName: "read_skill_resource",
+      toolName: "skill_read",
       input: nextInput as ToolFactValue,
     }, executionContext(), permission);
     const secondOutput = asRecord(second.output);
@@ -74,7 +87,7 @@ test("read_skill_resource continues beyond the former startChar ceiling without 
 
     const third = await center.execute({
       callId: "call-skill-beyond-former-ceiling",
-      toolName: "read_skill_resource",
+      toolName: "skill_read",
       input: thirdInput as ToolFactValue,
     }, executionContext(), permission);
     const thirdOutput = asRecord(third.output);
@@ -89,7 +102,7 @@ test("read_skill_resource continues beyond the former startChar ceiling without 
   }
 });
 
-test("read_skill_resource continuation never splits an emoji at a stream boundary", async () => {
+test("skill_read continuation never splits an emoji at a stream boundary", async () => {
   const referenceContent = `${"a".repeat(65_535)}😀z`;
   const fixture = await createFixture({ referenceContent });
   try {
@@ -116,7 +129,7 @@ test("read_skill_resource continuation never splits an emoji at a stream boundar
   }
 });
 
-test("read_skill_resource rejects fractional continuation offsets", async () => {
+test("skill_read rejects fractional continuation offsets", async () => {
   const fixture = await createFixture();
   try {
     const tool = createReadSkillResourceTool([fixture.skillContext()]);
@@ -134,7 +147,7 @@ test("read_skill_resource rejects fractional continuation offsets", async () => 
   }
 });
 
-test("read_skill_resource rejects unselected, omitted, failed, and unindexed resources", async () => {
+test("skill_read rejects unselected, omitted, failed, and unindexed resources", async () => {
   const fixture = await createFixture();
   try {
     const loadedTool = createReadSkillResourceTool([fixture.skillContext()]);
@@ -166,7 +179,7 @@ test("read_skill_resource rejects unselected, omitted, failed, and unindexed res
   }
 });
 
-test("read_skill_resource reports assets and scripts without returning raw content", async () => {
+test("skill_read reports assets and scripts without returning raw content", async () => {
   const fixture = await createFixture();
   try {
     const tool = createReadSkillResourceTool([fixture.skillContext()]);
@@ -194,7 +207,7 @@ test("read_skill_resource reports assets and scripts without returning raw conte
   }
 });
 
-test("read_skill_resource fails closed when resource hash changed after run creation", async () => {
+test("skill_read fails closed when resource hash changed after run creation", async () => {
   const fixture = await createFixture();
   try {
     const tool = createReadSkillResourceTool([fixture.skillContext()]);

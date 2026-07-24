@@ -52,33 +52,8 @@ type ParsedAttachmentTable = ParsedDelimitedTable | ParsedSpreadsheetTable;
 export function createInspectContextAttachmentTableTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
   return {
     definition: {
-      name: "inspect_context_attachment_table",
+      name: "AttachmentInspectTable",
       description: "Inspect a CSV, TSV, or XLSX context attachment and return sheet, column, row-count, and sample-row facts.",
-      modelContract: {
-        usageNotes: [
-          "Inspect a table from a current context attachment selected by attachmentId or ref.",
-          "Use for CSV, TSV, semicolon-separated text tables, or XLSX workbooks before reading specific rows.",
-          "For project attachments, path is required and must point to the table file inside the attached project.",
-          "For XLSX, omit sheetName/sheetIndex to inspect the first sheet; use returned sheets to choose another sheet.",
-          "This tool does not parse legacy XLS binary spreadsheets, PDFs, images, or archives; it returns an unsupported reason for those formats.",
-          "Local absolute paths are not accepted as input and are not returned in output.",
-        ],
-        outputNotes: [
-          "table=true means rows were parsed as a supported table format.",
-          "format is delimited or xlsx; XLSX results include sheetName, sheetIndex, and sheets.",
-          "columns contains header columns when headerRow is true.",
-          "sampleRows contains bounded row samples with rowNumber and values, plus record when headers are available.",
-          "reason explains unsupported or unreadable table targets without returning local paths.",
-        ],
-        runtimeHints: [
-          { label: "supported formats", value: "csv, tsv, semicolon-separated text, xlsx" },
-          { label: "max sample rows", value: String(MAX_TABLE_SAMPLE_ROWS) },
-        ],
-        examples: [
-          { title: "Inspect attached CSV", input: { attachmentId: "ctx_sales_csv", sampleRows: 5 } },
-          { title: "Inspect CSV inside project", input: { attachmentId: "ctx_project", path: "data/sales.csv" } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -161,33 +136,8 @@ export function createInspectContextAttachmentTableTool(options: ContextAttachme
 export function createReadContextAttachmentTableTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
   return {
     definition: {
-      name: "read_context_attachment_table",
+      name: "AttachmentReadTable",
       description: "Read a bounded row window from a CSV, TSV, or XLSX context attachment as structured table rows.",
-      modelContract: {
-        usageNotes: [
-          "Read a bounded physical row window from a supported table attachment.",
-          "Use inspect_context_attachment_table first when you need column names or row counts.",
-          "For project attachments, path is required and must point to the table file inside the attached project.",
-          "For XLSX, omit sheetName/sheetIndex to read the first sheet; use inspect_context_attachment_table to discover sheets.",
-          "startRow is 1-based physical row number. With headerRow=true, data usually starts at row 2.",
-          "This tool does not parse legacy XLS binary spreadsheets, PDFs, images, or archives.",
-        ],
-        outputNotes: [
-          "rows[] contains rowNumber, values, and record when headers are available.",
-          "format is delimited or xlsx; XLSX results include sheetName, sheetIndex, and sheets.",
-          "columns contains header columns when headerRow is true.",
-          "hasMoreBefore/hasMoreAfter indicate whether another row window may be needed.",
-          "continuation.nextInput provides the next executable row-window call when truncated is true.",
-          "reason explains unsupported or unreadable table targets without returning local paths.",
-        ],
-        runtimeHints: [
-          { label: "max rows per call", value: String(MAX_TABLE_READ_ROWS) },
-          { label: "supported formats", value: "csv, tsv, semicolon-separated text, xlsx" },
-        ],
-        examples: [
-          { title: "Read first data rows", input: { attachmentId: "ctx_sales_csv", startRow: 2, rowCount: 50 } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -259,7 +209,7 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
               rowCount,
               headerRow,
             }),
-            note: "Continue read_context_attachment_table with the same attachment/path/sheet/header settings and startRow.",
+            note: "Continue attachment_read_table with the same attachment/path/sheet/header settings and startRow.",
           };
       const facts = {
         attachmentId: entry.attachmentId,

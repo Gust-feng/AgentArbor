@@ -64,7 +64,7 @@ function toolModelOutputProjection(
       "continuationAvailability",
     ], true);
   }
-  if (toolName === "read_tool_output") {
+  if (toolName === "ReadOutput") {
     return compactRecord(record, [
       "ref",
       "sourceToolName",
@@ -73,17 +73,17 @@ function toolModelOutputProjection(
       "continuationAvailability",
     ], true);
   }
-  if (toolName === "read_file") return compactRecord(record, ["path"]);
-  if (toolName === "list_dir") {
+  if (toolName === "Read") return compactRecord(record, ["path"]);
+  if (toolName === "List") {
     return compactRecord(record, ["path", "depth", "offset", "limit", "maxDepth", "maxEntries"]);
   }
-  if (toolName === "grep_files") {
+  if (toolName === "Grep" || toolName === "Glob") {
     return compactRecord(record, ["query", "path", "offset", "limit", "maxOffset", "offsetCeiling"]);
   }
-  if (toolName === "shell_command") {
+  if (toolName === "Shell") {
     return compactRecord(record, ["command", "commandLine", "args", "logPath"]);
   }
-  if (toolName === "web_search") return compactRecord(record, ["query"]);
+  if (toolName === "WebSearch") return compactRecord(record, ["query"]);
   return output;
 }
 

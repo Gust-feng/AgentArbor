@@ -7,7 +7,6 @@ import { applyPatch } from "diff";
 import { MAX_LOCAL_WORKSPACE_FILE_BYTES } from "./local-workspace-common.js";
 import {
   createLocalGrepFilesTool,
-  createLocalListDirTool,
 } from "./local-workspace-read-tools.js";
 import {
   createLocalEditFileTool,
@@ -16,67 +15,7 @@ import {
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-test("local list_dir reports recursive entry facts without truncating small results", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-list-"));
-  try {
-    await mkdir(path.join(root, "src", "nested"), { recursive: true });
-    await writeFile(path.join(root, "readme.md"), "root", "utf8");
-    await writeFile(path.join(root, "src", "nested", "deep.txt"), "deep", "utf8");
-
-    const listDir = createLocalListDirTool(root);
-    const listed = await listDir.execute({ path: ".", depth: 3 }, context);
-    const output = asDirectToolFacts(listed);
-    const entries = (output.entries as readonly unknown[]).map(asRecord);
-    const byPath = new Map(entries.map((entry) => [String(entry.path), entry]));
-
-    assert.equal(output.truncated, false);
-    assert.equal(output.depth, 3);
-    assert.equal(output.entriesReturned, 4);
-    assert.equal(output.totalEntries, 4);
-    assert.equal(output.scanComplete, true);
-    assert.equal(byPath.get("readme.md")?.name, "readme.md");
-    assert.equal(byPath.get("readme.md")?.kind, "file");
-    assert.equal(byPath.get("readme.md")?.bytes, 4);
-    assert.equal(byPath.get("readme.md")?.depth, 1);
-    assert.equal(byPath.get("src")?.kind, "directory");
-    assert.equal(typeof byPath.get("src")?.bytes, "number");
-    assert.equal(byPath.get("src")?.depth, 1);
-    assert.equal(byPath.get("src/nested")?.depth, 2);
-    assert.equal(byPath.get("src/nested/deep.txt")?.name, "deep.txt");
-    assert.equal(byPath.get("src/nested/deep.txt")?.kind, "file");
-    assert.equal(byPath.get("src/nested/deep.txt")?.bytes, 4);
-    assert.equal(byPath.get("src/nested/deep.txt")?.depth, 3);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("local list_dir caps large results at the tool maximum", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-list-large-"));
-  try {
-    for (let index = 0; index < 205; index += 1) {
-      await writeFile(path.join(root, `file-${String(index).padStart(3, "0")}.txt`), "x", "utf8");
-    }
-
-    const listDir = createLocalListDirTool(root);
-    const listed = await listDir.execute({ path: "." }, context);
-    const output = asDirectToolFacts(listed);
-    const entries = output.entries as readonly unknown[];
-
-    assert.equal(output.truncated, true);
-    assert.equal(output.depth, 1);
-    assert.equal(output.maxEntries, 200);
-    assert.equal(output.entriesReturned, 200);
-    assert.equal(output.totalEntries, undefined);
-    assert.equal(output.scanComplete, false);
-    assert.equal(entries.length, 200);
-    assert.equal(JSON.stringify(output).length < 180_000, true);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("local grep_files JS fallback reports factual skipped file counts", async () => {
+test("local grep JS fallback reports factual skipped file counts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-grep-"));
   try {
     await mkdir(path.join(root, "src"), { recursive: true });
@@ -110,7 +49,7 @@ test("local grep_files JS fallback reports factual skipped file counts", async (
   }
 });
 
-test("local grep_files rg engine leaves skipped facts unavailable", async () => {
+test("local grep rg engine leaves skipped facts unavailable", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-grep-rg-"));
   try {
     const grepFiles = createLocalGrepFilesTool(root, {
@@ -129,7 +68,7 @@ test("local grep_files rg engine leaves skipped facts unavailable", async () => 
   }
 });
 
-test("local edit_file dryRun reports replacement facts without writing", async () => {
+test("local edit reports replacement facts after writing", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-edit-"));
   try {
     const file = path.join(root, "notes.txt");
@@ -139,16 +78,12 @@ test("local edit_file dryRun reports replacement facts without writing", async (
     const editFile = createLocalEditFileTool(root);
     const edited = await editFile.execute({
       path: "notes.txt",
-      dryRun: true,
       edits: [{ oldText: "beta", newText: "BETA" }],
     }, context);
     const result = asDirectToolFacts(edited);
 
-    assert.equal(result.dryRun, true);
-    assert.equal(result.wouldReplace, 1);
-    assert.equal(result.replacements, 0);
-    assert.equal(result.previousLength, original.length);
-    assert.equal(result.nextLength, original.replace("beta", "BETA").length);
+    assert.equal(result.changed, true);
+    assert.equal(result.replacements, 1);
     assert.equal(typeof result.beforeHash, "string");
     assert.equal(typeof result.afterHash, "string");
     assert.notEqual(result.beforeHash, result.afterHash);
@@ -156,25 +91,24 @@ test("local edit_file dryRun reports replacement facts without writing", async (
     assert.equal(diff.status, "available");
     assert.equal(typeof diff.unifiedDiff, "string");
     assert.equal(applyPatch(original, String(diff.unifiedDiff)), original.replace("beta", "BETA"));
-    assert.equal(await readFile(file, "utf8"), original);
+    assert.equal(await readFile(file, "utf8"), original.replace("beta", "BETA"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local edit_file records an unchanged canonical diff without fabricating a patch", async () => {
+test("local edit records an unchanged canonical diff without fabricating a patch", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-edit-unchanged-"));
   try {
     const file = path.join(root, "notes.txt");
     await writeFile(file, "same\n", "utf8");
     const result = asDirectToolFacts(await createLocalEditFileTool(root).execute({
       path: "notes.txt",
-      dryRun: true,
       edits: [{ oldText: "same", newText: "same" }],
     }, context));
 
     assert.deepEqual(result.diff, { status: "unchanged" });
-    assert.equal(result.wouldReplace, 1);
+    assert.equal(result.changed, false);
     assert.equal(result.replacements, 0);
     assert.equal(await readFile(file, "utf8"), "same\n");
   } finally {
@@ -182,7 +116,7 @@ test("local edit_file records an unchanged canonical diff without fabricating a 
   }
 });
 
-test("local edit_file reports the canonical diff input limit without blocking a dry run", async () => {
+test("local edit reports the canonical diff input limit without blocking the write", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-edit-limit-"));
   try {
     const file = path.join(root, "large.txt");
@@ -190,7 +124,6 @@ test("local edit_file reports the canonical diff input limit without blocking a 
     await writeFile(file, original, "utf8");
     const result = asDirectToolFacts(await createLocalEditFileTool(root).execute({
       path: "large.txt",
-      dryRun: true,
       edits: [{ oldText: "a", newText: "b" }],
     }, context));
     const diff = asRecord(result.diff);
@@ -201,13 +134,13 @@ test("local edit_file reports the canonical diff input limit without blocking a 
     assert.equal(diff.afterChars, original.length);
     assert.equal(diff.maxInputChars, EDIT_FILE_DIFF_MAX_INPUT_CHARS);
     assert.equal(diff.unifiedDiff, undefined);
-    assert.equal(await readFile(file, "utf8"), original);
+    assert.equal(await readFile(file, "utf8"), `b${original.slice(1)}`);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local edit_file failure messages include facts without next-step suggestions", async () => {
+test("local edit failure messages include facts without next-step suggestions", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-facts-edit-error-"));
   try {
     await writeFile(path.join(root, "notes.txt"), "same\nsame\n", "utf8");
@@ -217,22 +150,9 @@ test("local edit_file failure messages include facts without next-step suggestio
       () => editFile.execute({ path: "notes.txt", edits: [{ oldText: "same", newText: "once" }] }, context),
       (error) => {
         const message = errorMessage(error);
-        assert.match(message, /matched 2 locations/);
+        assert.match(message, /must match exactly once/);
         assert.match(message, /matches=2/);
-        assert.match(message, /availableMatches=2/);
         assert.equal(message.includes("provide occurrence"), false);
-        assert.equal(message.includes("try reading"), false);
-        return true;
-      }
-    );
-
-    await assert.rejects(
-      () => editFile.execute({ path: "notes.txt", edits: [{ oldText: "same", newText: "third", occurrence: 3 }] }, context),
-      (error) => {
-        const message = errorMessage(error);
-        assert.match(message, /requested occurrence 3/);
-        assert.match(message, /requestedOccurrence=3/);
-        assert.match(message, /availableMatches=2/);
         assert.equal(message.includes("try reading"), false);
         return true;
       }

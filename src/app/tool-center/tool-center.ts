@@ -17,6 +17,8 @@ import type {
 import { createHash } from "node:crypto";
 import {
   assertCanonicalToolName,
+  cloneToolInputSchema,
+  cloneToolJsonSchema,
   copyToolModelAttachments,
   isToolErrorDomain,
   InvalidToolFactError,
@@ -59,7 +61,7 @@ export type ToolCenterOptions = {
 const RETAINED_TOOL_OUTPUT_PREVIEW_CHARS = 4_000;
 const RETAINED_TOOL_OUTPUT_READ_CHARS = MAX_TOOL_OUTPUT_READ_CHARS;
 const MAX_INLINE_APPROVAL_PARTIAL_OUTPUT_CHARS = 24_000;
-const TOOL_OUTPUT_READER_NAME = "read_tool_output";
+const TOOL_OUTPUT_READER_NAME = "ReadOutput";
 
 type ToolExecutionPreflightInternal =
   | (Extract<ToolExecutionPreflight, { readonly status: "ready" }> & {
@@ -105,6 +107,11 @@ export class ToolCenter implements ToolExecutionGateway {
       ...executor,
       definition: {
         ...executor.definition,
+        inputSchema: cloneToolInputSchema(executor.definition.inputSchema),
+        outputSchema:
+          executor.definition.outputSchema === undefined
+            ? undefined
+            : cloneToolJsonSchema(executor.definition.outputSchema),
         metadata,
       },
     });
@@ -320,7 +327,7 @@ export class ToolCenter implements ToolExecutionGateway {
           ? {}
           : {
               continuation: {
-                kind: raw.toolName === TOOL_OUTPUT_READER_NAME ? "read_tool_output" as const : "native" as const,
+                kind: raw.toolName === TOOL_OUTPUT_READER_NAME ? "read_output" as const : "native" as const,
                 offered: producerContinuation?.offered ?? Object.keys(continuation).length > 0,
                 completed: delivered.status === "completed" &&
                   (producerContinuation?.completed ?? Object.keys(continuation).length === 0),
@@ -467,7 +474,7 @@ export class ToolCenter implements ToolExecutionGateway {
     ) {
       return outputRetentionFailure(result, candidate, preview, {
         code: "tool_output_reader_unavailable",
-        message: "Tool output exceeded the model transport budget, but read_tool_output is not available in this run.",
+        message: "Tool output exceeded the model transport budget, but read_output is not available in this run.",
       });
     }
 
@@ -512,7 +519,7 @@ export class ToolCenter implements ToolExecutionGateway {
     ) {
       return explicitFailureRetentionFailure(result, candidate, preview, {
         code: "tool_error_reader_unavailable",
-        message: "Tool failure evidence exceeded the model transport budget, but read_tool_output is not available in this run.",
+        message: "Tool failure evidence exceeded the model transport budget, but read_output is not available in this run.",
       });
     }
 
@@ -609,7 +616,7 @@ export class ToolCenter implements ToolExecutionGateway {
     ) {
       return errorRetentionFailure(deliveryResult, candidate, preview, {
         code: "tool_error_reader_unavailable",
-        message: "Tool error evidence exceeded the model transport budget, but read_tool_output is not available in this run.",
+        message: "Tool error evidence exceeded the model transport budget, but read_output is not available in this run.",
       });
     }
 
@@ -743,7 +750,7 @@ function retainedContentDelivery(
         startChar: 0,
         maxChars: RETAINED_TOOL_OUTPUT_READ_CHARS,
       },
-      note: "Call read_tool_output with nextInput to read the retained result without executing the original tool again.",
+      note: "Call read_output with nextInput to read the retained result without executing the original tool again.",
     },
   };
 }
@@ -971,18 +978,25 @@ function nativeProducerContinuation(
   readonly chainValue: string;
   readonly pageChars?: number;
 } | undefined {
-  const contract = toolName === "read_file"
+  const contract = toolName === "Read"
     ? { nextKeys: ["nextStartChar", "nextStartLine"], startKeys: ["startChar", "startLine"], identityKeys: ["path"] }
-    : toolName === "list_dir"
+    : toolName === "List"
       ? { nextKeys: ["nextOffset"], startKeys: ["offset"], identityKeys: ["path", "depth"] }
-      : toolName === "grep_files"
+      : toolName === "Grep"
         ? { nextKeys: ["nextOffset"], startKeys: ["offset"], identityKeys: ["path", "query"] }
         : undefined;
   if (contract === undefined) return undefined;
-  const offered = contract.nextKeys.some((key) => numberFromUnknown(output[key]) !== undefined);
+  const outputContinuation = recordFromUnknown(output.continuation);
+  const continuationInput = recordFromUnknown(outputContinuation.nextInput);
+  const offered = contract.startKeys.some((key) => numberFromUnknown(continuationInput[key]) !== undefined) ||
+    contract.nextKeys.some((key) => numberFromUnknown(output[key]) !== undefined);
   const isContinuationRequest = contract.startKeys.some((key) => (numberFromUnknown(input[key]) ?? 0) > 0);
   if (!offered && !isContinuationRequest) return undefined;
-  const identity = Object.fromEntries(contract.identityKeys.map((key) => [key, input[key] ?? null]));
+  const identitySource = offered ? continuationInput : input;
+  const identity = Object.fromEntries(contract.identityKeys.map((key) => [
+    key,
+    identitySource[key] ?? input[key] ?? null,
+  ]));
   return {
     offered,
     completed: !offered,
@@ -1270,38 +1284,12 @@ function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {
   return {
     name: definition.name,
     description: definition.description,
-    inputSchema: {
-      type: definition.inputSchema.type,
-      properties: { ...definition.inputSchema.properties },
-      required:
-        definition.inputSchema.required === undefined ? undefined : [...definition.inputSchema.required],
-      additionalProperties: definition.inputSchema.additionalProperties,
-    },
-    modelContract: cloneToolModelContract(definition.modelContract),
+    inputSchema: cloneToolInputSchema(definition.inputSchema),
+    outputSchema:
+      definition.outputSchema === undefined
+        ? undefined
+        : cloneToolJsonSchema(definition.outputSchema),
     metadata: normalizeToolMetadata(definition),
-  };
-}
-
-function cloneToolModelContract(definition: ToolDefinition["modelContract"]): ToolDefinition["modelContract"] {
-  if (definition === undefined) {
-    return undefined;
-  }
-  return {
-    purpose: definition.purpose,
-    whenToUse: definition.whenToUse === undefined ? undefined : [...definition.whenToUse],
-    whenNotToUse: definition.whenNotToUse === undefined ? undefined : [...definition.whenNotToUse],
-    inputNotes: definition.inputNotes === undefined ? undefined : [...definition.inputNotes],
-    usageNotes: definition.usageNotes === undefined ? undefined : [...definition.usageNotes],
-    outputNotes: definition.outputNotes === undefined ? undefined : [...definition.outputNotes],
-    examples: definition.examples === undefined
-      ? undefined
-      : definition.examples.map((example) => ({
-          title: example.title,
-          input: globalThis.structuredClone(example.input),
-        })),
-    runtimeHints: definition.runtimeHints === undefined
-      ? undefined
-      : definition.runtimeHints.map((hint) => ({ ...hint })),
   };
 }
 
@@ -1374,7 +1362,7 @@ function sanitizeError(error: unknown, toolName: string): SanitizedToolError {
 }
 
 function defaultToolErrorDomain(toolName: string, facts: ToolErrorFacts | undefined): ToolErrorDomain {
-  if (toolName === "shell_command" || toolName === "start_process" || toolName === "stop_process" || toolName === "inspect_process") {
+  if (toolName === "Shell" || toolName === "ProcessStop" || toolName === "ProcessRead") {
     return "process_error";
   }
   const code = typeof facts?.code === "string" ? facts.code.toLowerCase() : undefined;

@@ -270,8 +270,8 @@ export function createLocalShellCommandTool(
 
 function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): ToolDefinition {
   return {
-    name: "shell_command",
-    description: "Run a command in the current workspace shell. Use commandLine for shell syntax, or command and args for direct process execution.",
+    name: "Shell",
+    description: "Run a workspace command in the foreground or start it as an owned background process. Use ProcessRead and ProcessStop for background processes.",
     metadata: {
       category: "terminal",
       riskLevel: "medium",
@@ -285,113 +285,22 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         syntax: commandShell.syntax,
         platform: commandShell.platform,
         invocation: commandShell.invocation,
-        commandLineParameter: "commandLine",
+        commandLineParameter: "command",
         notes: commandShell.notes,
       }],
-    },
-    modelContract: {
-      purpose: "Run a real command in the current workspace shell and return stdout, stderr, exitCode, and shell metadata.",
-      whenToUse: [
-        "Use as the general-purpose workspace command tool for shell-native workflows such as builds, tests, git, package managers, environment probes, directory creation, file moves, and binary-file operations.",
-        "Use when a normal CLI command is the direct way to do the task.",
-      ],
-      whenNotToUse: [
-        "Do not use when read_file, list_dir, grep_files, edit_file, http_request, or browser_snapshot is the clearer direct fit.",
-      ],
-      inputNotes: [
-        "commandLine is the normal complete shell command line.",
-        "command plus args executes a program directly with argv and bypasses shell parsing.",
-        "background=true starts a workspace-session managed process and returns immediately with processId, pid, state, lifetime, logRef, diagnostic logPath, and stopCommand.",
-        "cwd optionally selects a workspace-relative working directory; omit it to run from the workspace root.",
-        `backgroundWaitMs watches a background command for early exit and initial logs; defaults to ${DEFAULT_BACKGROUND_WAIT_MS} and is capped at ${MAX_BACKGROUND_WAIT_MS}.`,
-        `waitForPort optionally waits for a localhost TCP port to become reachable after a background command starts; waitForPortTimeoutMs defaults to ${DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS} and is capped at ${MAX_WAIT_FOR_PORT_TIMEOUT_MS}.`,
-        `timeoutMs defaults to ${DEFAULT_COMMAND_TIMEOUT_MS} and is capped at ${MAX_COMMAND_TIMEOUT_MS}.`,
-        `Managed background logs preserve captured stdout/stderr up to ${DEFAULT_BACKGROUND_LOG_MAX_BYTES} bytes; a process that exceeds the host log boundary is terminated with an explicit command_log_limit process fact.`,
-      ],
-      runtimeHints: [
-        { label: "current shell", value: `${commandShell.label} (${commandShell.syntax})` },
-        { label: "executable", value: commandShell.executable },
-        { label: "invocation", value: commandShell.invocation.join(" ") },
-      ],
-      usageNotes: [
-        "Choose the command form yourself based on the current shell and the task.",
-        "Use commandLine for normal shell commands, pipelines, redirection, chaining, environment expansion, shell builtins, and shell-native quoting.",
-        "Prefer start_process for dev servers, file watchers, long-running demos, and other commands expected to keep running. background=true remains compatible and uses the same workspace-session lifetime by default.",
-        "Use command and args when quoting would be fragile, especially for inline scripts such as node -e, python -c, or paths and arguments that are easier to express as argv.",
-        "Use this tool for normal filesystem commands such as mkdir, rmdir, copy, move, and recursive cleanup.",
-        "For dev servers, combine background=true with waitForPort so the tool returns only after the local port is reachable or the port wait times out.",
-        "When background=true, do not append shell-native background operators such as POSIX & just to detach the process; the tool already returns pid, logRef, diagnostic logPath, and stopCommand.",
-        "Use cwd instead of repeated cd chaining when the command should run inside a project subdirectory.",
-        "Before relying on a command, you may probe the environment with ordinary shell commands such as where, which, command -v, or version checks.",
-      ],
-      outputNotes: [
-        `stdout and stderr are model-visible previews capped at ${MAX_COMMAND_STDOUT_CHARS} and ${MAX_COMMAND_STDERR_CHARS} characters for foreground command output; under those caps they contain the exact command text.`,
-        "stdoutTruncated/stderrTruncated, stdoutChars/stderrChars, and stdoutOmittedChars/stderrOmittedChars report the concrete truncation facts for those previews.",
-        "shell records the shell that executed the command.",
-        "cwd records the workspace-relative working directory used for the command.",
-        "timedOut is true when the foreground command exceeded timeoutMs; stdout/stderr contain captured output before termination.",
-        "background, processId, processState, lifetime, pid, logRef, logPath, and stopCommand describe managed background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
-        "Use logRef as the controlled command-log entry point. logPath is retained only as a diagnostic filesystem detail.",
-        "When output is truncated or a background log can keep growing, continuation.nextInput reads the controlled logRef.",
-        "durationMs records total observed tool execution time; portReady records whether waitForPort became reachable.",
-        "If background=true and waitForPort is already occupied before start, notStarted is true, exitCode is null, and preStartPortOccupancy records the port, pid when known, owner status, and observation source.",
-        "cancelled records foreground command cancellation; portWaitCancelled records cancellation while waiting for a background port.",
-        "If command and args are provided, execution bypasses shell parsing and uses direct argv execution.",
-        "A non-zero exitCode is command feedback; stdout/stderr remain command output previews, not interpreted recommendations.",
-      ],
-      examples: [
-        {
-          title: "Run tests",
-          input: { commandLine: "pnpm test", timeoutMs: 120000 },
-        },
-        {
-          title: "Probe environment",
-          input: { commandLine: commandShell.syntax === "cmd" ? "where rg" : "command -v rg" },
-        },
-        {
-          title: "Use shell pipeline",
-          input: { commandLine: commandShell.syntax === "cmd" ? "dir /s /b *.ts | findstr tool" : "find . -name '*.ts' | grep tool" },
-        },
-        {
-          title: "Bypass fragile shell quoting with argv",
-          input: {
-            commandLine: "node -e \"console.log('hello from argv mode')\"",
-            command: "node",
-            args: ["-e", "console.log('hello from argv mode')"],
-          },
-        },
-        {
-          title: "Start dev server in background",
-          input: { commandLine: "pnpm dev", cwd: "apps/web", background: true, waitForPort: 5173 },
-        },
-        {
-          title: "Run Python inline script with argv",
-          input: {
-            commandLine: "python -c \"print('hello from python argv mode')\"",
-            command: "python",
-            args: ["-c", "print('hello from python argv mode')"],
-          },
-        },
-      ],
     },
     inputSchema: {
       type: "object",
       properties: {
-        commandLine: {
-          type: "string",
-          description: `Recommended. A complete ${commandShell.syntax} shell command line for ${commandShell.label}. If command plus args are also provided, this is treated as the human-readable equivalent shown in the transcript.`,
-        },
         command: {
           type: "string",
-          description: "Optional direct program path or executable name. Use together with args when shell quoting would be fragile and the command should bypass shell parsing.",
-        },
-        args: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional argv list for direct program execution. When present with command, the runtime executes the program directly instead of parsing commandLine through the shell.",
+          minLength: 1,
+          description: `Complete ${commandShell.syntax} command for ${commandShell.label}. Runs from the workspace root unless cwd is set.`,
         },
         timeoutMs: {
-          type: "number",
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_COMMAND_TIMEOUT_MS,
           description: `Optional timeout in milliseconds. Defaults to ${DEFAULT_COMMAND_TIMEOUT_MS}; maximum ${MAX_COMMAND_TIMEOUT_MS}.`,
         },
         cwd: {
@@ -400,27 +309,10 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         },
         background: {
           type: "boolean",
-          description: "If true, start the command as a detached background process and return pid, logRef, diagnostic logPath, and stopCommand without waiting for the process to exit.",
-        },
-        lifetime: {
-          type: "string",
-          enum: ["run", "workspace_session"],
-          description: "Background process lifetime. Defaults to workspace_session so services survive the Agent run; run binds cleanup to the current run.",
-        },
-        backgroundWaitMs: {
-          type: "number",
-          description: `Optional background startup observation window in milliseconds. Defaults to ${DEFAULT_BACKGROUND_WAIT_MS}; maximum ${MAX_BACKGROUND_WAIT_MS}.`,
-        },
-        waitForPort: {
-          type: "number",
-          description: "Optional localhost TCP port to poll after a background command starts, useful for dev servers.",
-        },
-        waitForPortTimeoutMs: {
-          type: "number",
-          description: `Optional port wait timeout in milliseconds. Defaults to ${DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS}; maximum ${MAX_WAIT_FOR_PORT_TIMEOUT_MS}.`,
+          description: "Start an owned background process and return its processId without waiting for exit.",
         },
       },
-      required: [],
+      required: ["command"],
       additionalProperties: false,
     },
   };
@@ -527,7 +419,7 @@ function commandToolOutput(input: {
       ? { processId: input.processId }
       : {}),
     processState: input.result.processState,
-    lifetime: input.result.background === true ? input.lifetime : undefined,
+    lifetime: input.result.background === true || input.result.notStarted === true ? input.lifetime : undefined,
     pid: input.result.pid,
     logRef: input.result.logRef,
     logPath: input.result.logPath,
@@ -1276,7 +1168,7 @@ async function resolveCommandCwd(
   const target = resolveWorkspacePath(rootDirectory, typeof value === "string" && value.trim().length > 0 ? value : ".");
   const stat = await fs.stat(target.absolutePath);
   if (!stat.isDirectory()) {
-    throw new Error(`shell_command cwd must be a workspace directory: ${target.relativePath}`);
+    throw new Error(`shell cwd must be a workspace directory: ${target.relativePath}`);
   }
   return target;
 }

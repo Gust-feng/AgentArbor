@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelRequest } from "../../domain/intelligence/index.js";
+import type { ToolInputSchema } from "../../domain/tools/index.js";
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { NativeIntelligenceChannel } from "../../kernel/intelligence/channel.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
@@ -1089,7 +1090,7 @@ test("OpenAI-compatible Chat adapter gates parallel tool calls by visible tool r
   await provider.complete(createValidModelRequest({
     tools: [
       {
-        name: "read_file",
+        name: "read",
         description: "Read a file.",
         inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
         metadata: {
@@ -1105,7 +1106,7 @@ test("OpenAI-compatible Chat adapter gates parallel tool calls by visible tool r
   await provider.complete(createValidModelRequest({
     tools: [
       {
-        name: "shell_command",
+        name: "shell",
         description: "Run a shell command.",
         inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
         metadata: {
@@ -1605,6 +1606,31 @@ test("OpenAI-compatible Chat adapter streams MiniMax reasoning_details as reason
 
 test("OpenAI-compatible adapter maps tools, tool results, and provider tool calls", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
+  const inputSchema: ToolInputSchema = {
+    type: "object",
+    properties: {
+      mode: { type: "string", enum: ["fast", "safe"] },
+      target: { $ref: "#/$defs/target" },
+      retries: { type: "integer", minimum: 0, maximum: 3 },
+      slug: { type: "string", pattern: "^[a-z]+$" },
+      operation: { const: "lookup" },
+    },
+    required: ["mode", "target"],
+    additionalProperties: { type: "string" },
+    $defs: {
+      target: {
+        type: "object",
+        properties: { id: { type: "string", minLength: 1 } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+    },
+    oneOf: [
+      { required: ["mode"] },
+      { properties: { mode: { const: "safe" } } },
+    ],
+    dependentRequired: { mode: ["target"] },
+  };
   const fetch: FetchLike = async (_url, init) => {
     calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
     return {
@@ -1650,7 +1676,7 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
         {
           name: "web_search",
           description: "Search the web.",
-          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+          inputSchema,
         },
       ],
       toolChoice: "auto",
@@ -1695,7 +1721,7 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
       function: {
         name: "web_search",
         description: "Search the web.",
-        parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+        parameters: inputSchema,
       },
     },
   ]);

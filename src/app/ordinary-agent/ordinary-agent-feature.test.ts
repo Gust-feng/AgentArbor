@@ -3,10 +3,23 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import {
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxToolCall,
+  type ProviderStreams,
+} from "@earendil-works/pi-ai";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { createAgentSessionLoop } from "../../adapters/intelligence/agent-session-loop.js";
 import { FileSystemAgentSessionRepository } from "../../adapters/intelligence/file-system-agent-session-repository.js";
+import { createModelProviderBinding } from "../../adapters/intelligence/model-provider-binding.js";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
-import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
+import type {
+  ToolCallRequest,
+  ToolCallResult,
+  ToolDefinition,
+  ToolExecutionGateway,
+} from "../../domain/tools/index.js";
 import type {
   OrdinaryExecutionOutcome,
   OrdinaryExecutionPort,
@@ -15,6 +28,7 @@ import type {
 } from "./contracts.js";
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
+import { createOrdinaryAgentLoopExecutionPort } from "./agent-loop-execution.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
 import {
   createInitialOrdinaryRunState,
@@ -61,6 +75,117 @@ test("Ordinary feature persists completed, failed, and cancelled outcomes with S
   const cancelledState = await cancellation;
   assert.equal(cancelledState.status.kind, "cancelled");
   assert.equal(cancelledState.session.phase, "rollbackable");
+});
+
+test("Pi immediate schema failures become Ordinary facts before the tool-round checkpoint", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-pi-immediate-failure-"));
+  const executionEnvironment = new NodeExecutionEnv({ cwd: root });
+  const sessions = new FileSystemAgentSessionRepository({
+    fileSystem: executionEnvironment,
+    sessionsRoot: path.join(root, "sessions"),
+  });
+  const runId = "pi-schema-failure";
+  const sessionRef = await sessions.create({ sessionId: `${runId}-session`, sessionCwd: root });
+  const model = fauxProvider();
+  model.setResponses([
+    fauxAssistantMessage(
+      fauxToolCall("strict_tool", {}, { id: "schema-invalid-call" }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("continued after the rejected call"),
+  ]);
+  const binding = createModelProviderBinding({
+    protocol: "openai_responses",
+    baseUrl: "https://responses.example/v1",
+    profileId: "pi-immediate-failure-profile",
+    apiKey: "test-key",
+    model: "pi-immediate-failure-model",
+  }, { createResponsesTransport: () => providerStreams(model.provider) });
+  const definition: ToolDefinition = {
+    name: "strict_tool",
+    description: "Read one required path.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string", minLength: 1 } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    metadata: {
+      category: "filesystem",
+      riskLevel: "low",
+      operationType: "read-only",
+      requiresConfirmation: false,
+    },
+  };
+  const gateway: ToolExecutionGateway = {
+    list: () => [definition],
+    has: (name) => name === definition.name,
+    preflight(request) { return { status: "ready", request }; },
+    async execute() { throw new Error("Schema-invalid calls must not reach the executor."); },
+  };
+  const execution = createOrdinaryAgentLoopExecutionPort({
+    resources: {
+      async acquire(input) {
+        const lease = await sessions.acquire(input.sessionRef);
+        const loop = createAgentSessionLoop({
+          executionEnvironment,
+          modelRegistry: binding.modelRegistry,
+          selectedModel: binding.selectedModel,
+          agentSession: lease.session,
+        });
+        return {
+          loop,
+          resolvedMessages: [{ role: "user", content: input.runInput.userMessage }],
+          tools: {
+            definitions: [definition],
+            gateway,
+            context: {
+              callerAgentId: "ordinary-agent",
+              traceId: input.runId,
+              goalId: input.runId,
+              confirmationPolicy: "prompt",
+            },
+            permission: {
+              callerAgentId: "ordinary-agent",
+              allowedTools: [definition.name],
+              confirmationPolicy: "prompt",
+            },
+          },
+          revokeSessionTo: (target) => lease.revokeTo(target),
+          releaseSession: () => lease.release(),
+          release: () => loop.release(),
+        };
+      },
+    },
+  });
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution,
+    sessionRepository: sessions,
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => {
+    await feature.release();
+    await executionEnvironment.cleanup();
+    await removeTestDirectory(root);
+  });
+
+  await feature.commands.start({ ...startInput(runId), sessionRef });
+  const state = await waitForStatus(feature, runId, "completed");
+
+  assert.equal(state.status.kind === "completed" ? state.status.answer : undefined, "continued after the rejected call");
+  assert.equal(state.pendingToolRound, undefined);
+  assert.equal(state.toolCalls.length, 1);
+  assert.equal(state.toolCalls[0]?.status, "failed");
+  assert.equal(state.toolCalls[0]?.errorFacts?.code, "pi_tool_schema_validation_failed");
+  assert.equal(state.toolCalls[0]?.failureAttribution, "schema_validation");
+  assert.equal(
+    state.toolCalls.some((result) => result.errorFacts?.code === "tool_execution_outcome_unknown"),
+    false,
+  );
+  assert.equal(model.state.callCount, 2);
 });
 
 test("terminal run snapshot is saved before Session finalization", async (t) => {
@@ -153,12 +278,12 @@ test("approval continuation resumes the exact Session branch and persists resolv
     async execute(input) {
       const session = await prepareSession(input, run.sessions, { toolCalls: [{
         callId: request.toolCallFactId,
-        toolName: "shell_command",
+        toolName: "shell",
         input: { command: "write" },
       }] });
       const approval: ToolCallResult = {
         callId: request.toolCallFactId,
-        toolName: "shell_command",
+        toolName: "shell",
         input: { command: "write" },
         output: undefined,
         status: "approval_required",
@@ -210,8 +335,8 @@ test("successive approval pauses retain the original run cancellation controller
     async execute(input) {
       initialSignal = input.abortSignal;
       const session = await prepareSession(input, run.sessions, { toolCalls: [
-        { callId: first.toolCallFactId, toolName: "shell_command", input: { command: "a" } },
-        { callId: second.toolCallFactId, toolName: "shell_command", input: { command: "b" } },
+        { callId: first.toolCallFactId, toolName: "shell", input: { command: "a" } },
+        { callId: second.toolCallFactId, toolName: "shell", input: { command: "b" } },
       ] });
       return {
         status: "approval_required",
@@ -297,7 +422,7 @@ test("release closes a live approval continuation and finalizes its safe Session
   const order: string[] = [];
   const run = await fixture(t, {
     async execute(input) {
-      const session = await prepareSession(input, run.sessions, { toolCalls: [{ callId: request.toolCallFactId, toolName: "shell_command", input: { command: "write" } }] });
+      const session = await prepareSession(input, run.sessions, { toolCalls: [{ callId: request.toolCallFactId, toolName: "shell", input: { command: "write" } }] });
       return {
         status: "approval_required", session,
         toolCalls: [approvalResult(request)], usage: {}, confirmationRequests: [request],
@@ -321,8 +446,8 @@ test("tool facts reconcile in provider order after restart without replaying exe
   sessions.ensure(sessionRef);
   const startLeaf = sessions.append(sessionRef, "recovery-input");
   const assistantLeaf = sessions.appendToolCalls(sessionRef, "recovery-assistant", [
-    { callId: "call-1", toolName: "read_file", input: { path: "a.txt" } },
-    { callId: "call-2", toolName: "read_file", input: { path: "b.txt" } },
+    { callId: "call-1", toolName: "read", input: { path: "a.txt" } },
+    { callId: "call-2", toolName: "read", input: { path: "b.txt" } },
   ], startLeaf);
   const birth = ordinaryRunBirth();
   let state = createInitialOrdinaryRunState({ runId: "recovery-run", sessionRef, turn: ordinaryRunTurn("recovery-run"), runInput: { userMessage: "inspect" }, birth, recordedAt: clock()(), eventId: "created" });
@@ -417,7 +542,7 @@ test("restart reconciles a lost approval from a rolled-back file-system Session 
     content: [{
       type: "toolCall",
       id: request.toolCallFactId,
-      name: "shell_command",
+      name: "shell",
       arguments: { command: "write" },
     }],
     api: "openai-responses",
@@ -661,10 +786,10 @@ function confirmation(runId: string): ConfirmationRequest {
   return { confirmationId: `${runId}-confirmation`, toolCallFactId: `${runId}:tool-fact`, title: "Confirm command", actionSummary: "Run a command", affectedResources: ["workspace"], riskLevel: "medium", resumeAvailability: "live", requestedAt: "2026-01-01T00:00:02.000Z", sourceRefs: [] };
 }
 function approvalResult(request: ConfirmationRequest): ToolCallResult {
-  return { callId: request.toolCallFactId, toolName: "shell_command", input: { command: "write" }, output: undefined, status: "approval_required", durationMs: 0, confirmationRequest: request };
+  return { callId: request.toolCallFactId, toolName: "shell", input: { command: "write" }, output: undefined, status: "approval_required", durationMs: 0, confirmationRequest: request };
 }
 function completedTool(callId: string, file: string): ToolCallResult {
-  return { callId, toolName: "read_file", input: { path: file }, output: { content: file }, status: "completed", durationMs: 1 };
+  return { callId, toolName: "read", input: { path: file }, output: { content: file }, status: "completed", durationMs: 1 };
 }
 
 async function waitForStatus(feature: ReturnType<typeof createOrdinaryAgentFeature>, runId: string, status: OrdinaryRunState["status"]["kind"]): Promise<OrdinaryRunState> {
@@ -698,6 +823,12 @@ function clock(start = "2026-01-01T00:00:00.000Z") {
 function ids(initial = 0) {
   let value = initial;
   return (prefix: string) => `${prefix}-${++value}`;
+}
+function providerStreams(provider: ReturnType<typeof fauxProvider>["provider"]): ProviderStreams {
+  return {
+    stream: provider.stream.bind(provider),
+    streamSimple: provider.streamSimple.bind(provider),
+  };
 }
 function createGate() {
   let enter!: () => void;

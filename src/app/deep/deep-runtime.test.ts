@@ -241,14 +241,14 @@ function countOccurrences(content: string, needle: string): number {
 class ApprovalRequiredToolBroker implements ToolExecutionBroker {
   list(): ToolDefinition[] {
     return [{
-      name: "write_file",
+      name: "write",
       description: "Test write tool requiring confirmation.",
       inputSchema: { type: "object", properties: {}, additionalProperties: true },
     }];
   }
 
   has(name: string): boolean {
-    return name === "write_file";
+    return name === "write";
   }
 
   async execute(
@@ -359,7 +359,7 @@ function spawnApprovalChildDecisionResponse(): FakeModelProviderResponse {
           displayName: "文件核查",
           role: "file_review",
           objective: "尝试写入核查笔记，必要时等待确认。",
-          allowedTools: ["write_file"],
+          allowedTools: ["write"],
           inputRefs: ["goal:goal-runtime-test"],
         },
       ],
@@ -2210,7 +2210,7 @@ test("executeDeepRun child approval_required 投影为 blocked child run，不�
         toolCalls: [
           {
             callId: "call-write-approval",
-            toolName: "write_file",
+            toolName: "write",
             input: { path: "notes.md" },
           },
         ],
@@ -2233,9 +2233,9 @@ test("executeDeepRun child approval_required 投影为 blocked child run，不�
   assert.equal(child?.failureReason, "waiting for tool confirmation");
   assert.equal(child?.pendingApproval?.confirmationId, "confirm-call-write-approval");
   assert.equal(child?.pendingApproval?.toolCallId, "call-write-approval");
-  assert.equal(child?.pendingApproval?.toolName, "write_file");
-  assert.equal(child?.pendingApproval?.actionSummary, "运行 write_file");
-  assert.deepEqual(child?.pendingApproval?.affectedResources, ["write_file"]);
+  assert.equal(child?.pendingApproval?.toolName, "write");
+  assert.equal(child?.pendingApproval?.actionSummary, "运行 write");
+  assert.deepEqual(child?.pendingApproval?.affectedResources, ["write"]);
   assert.equal(child?.pendingApproval?.riskLevel, "medium");
   assert.equal(result.report?.childSummaries[0]?.status, "blocked");
   assert.equal(result.eventSequence.some((event) => event.type === "deep.child.blocked"), true);
@@ -2247,7 +2247,7 @@ test("executeDeepRun child approval_required 投影为 blocked child run，不�
   );
   assert.equal(
     persisted?.liveProjection?.children[0]?.pendingApproval?.toolName,
-    "write_file",
+    "write",
   );
   assert.equal(
     persisted?.liveProjection?.children[0]?.workflowItems?.some((item) => item.kind === "tool_waiting"),

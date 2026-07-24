@@ -6,13 +6,14 @@ import type {
   ToolExecutor,
   ToolFileDisplayOperation,
   ToolInputSchema,
-  ToolModelContract,
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
 } from "../../domain/tools/index.js";
 import {
   assertCanonicalToolName,
+  cloneToolInputSchema,
+  cloneToolJsonSchema,
   toolPresentationForDefinition,
   validateModelVisibleToolContract,
 } from "../../domain/tools/index.js";
@@ -37,7 +38,7 @@ export type ToolCatalogItem = {
   readonly displayDescription: string;
   readonly description: string;
   readonly inputSchema: ToolInputSchema;
-  readonly modelContract?: ToolModelContract;
+  readonly outputSchema?: ToolDefinition["outputSchema"];
   readonly category: ToolCategory;
   readonly categoryLabel: string;
   readonly riskLevel: ToolRiskLevel;
@@ -90,6 +91,11 @@ export class ToolRegistry {
         ...entry.executor,
         definition: {
           ...entry.executor.definition,
+          inputSchema: cloneToolInputSchema(entry.executor.definition.inputSchema),
+          outputSchema:
+            entry.executor.definition.outputSchema === undefined
+              ? undefined
+              : cloneToolJsonSchema(entry.executor.definition.outputSchema),
           metadata,
         },
       },
@@ -127,10 +133,10 @@ export class ToolRegistry {
           displayDescription: presentation.displayDescription,
           description: definition.description,
           inputSchema: cloneInputSchema(definition.inputSchema),
-          modelContract:
-            definition.modelContract === undefined
+          outputSchema:
+            definition.outputSchema === undefined
               ? undefined
-              : globalThis.structuredClone(definition.modelContract),
+              : cloneToolJsonSchema(definition.outputSchema),
           category: metadata.category,
           categoryLabel: presentation.categoryLabel,
           riskLevel: metadata.riskLevel,
@@ -166,12 +172,7 @@ export class ToolRegistry {
 }
 
 function cloneInputSchema(value: ToolInputSchema): ToolInputSchema {
-  return {
-    type: "object",
-    properties: globalThis.structuredClone(value.properties),
-    required: value.required === undefined ? undefined : [...value.required],
-    additionalProperties: value.additionalProperties,
-  };
+  return cloneToolInputSchema(value);
 }
 
 export function requireToolMetadata(definition: ToolDefinition): ToolDefinitionMetadata {
@@ -223,8 +224,7 @@ function uniqueScopes(scopes: readonly ToolRegistryScope[]): readonly ToolRegist
  * 「进模型可见集合」的硬门槛（FR-TOOL-001 / FR-TOOL-002）。
  *
  * 这里只校验 executor identity、客观 description、input schema 和执行/副作用元数据。
- * `modelContract` 的推荐用法、参数/输出说明、runtime hints 和 examples 不进入 provider
- * 输入；不得因为缺失这些元数据而隐藏可执行工具。真实 result/continuation 边界由
+ * 真实 result/continuation 边界由
  * ToolCenter 与 executor 行为契约验证，不用散文字段代替。
  *
  * scope 是 Host 自定义的路由标签，不能决定契约是否完整；所有默认启用且可用的

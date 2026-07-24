@@ -29,45 +29,8 @@ export function createReadSkillResourceTool(
   const resources = selectedSkillResources(skillContexts);
   return {
     definition: {
-      name: "read_skill_resource",
+      name: "SkillRead",
       description: "Read an indexed reference or asset from a skill selected for this run. Scripts are identified but not executed.",
-      modelContract: {
-        purpose: "Read supporting references or inspect asset metadata from a loaded skill package selected in this run.",
-        whenToUse: [
-          "Use after a selected skill says more detail is available in references or assets.",
-          "Use when the skill body is not enough and an indexed resource path is needed.",
-          "Use for skill-owned reference documents instead of reading package files through generic workspace tools.",
-        ],
-        whenNotToUse: [
-          "Do not use for workspace project files; use read_file for normal workspace content.",
-          "Do not use for skills that were not selected and loaded in this run.",
-          "Do not use to execute skill scripts; this tool only reports script metadata.",
-        ],
-        inputNotes: [
-          "skillId is required and must match a loaded selected skill.",
-          "path is required and must be one of that skill's indexed resources.",
-          "type is required: reference, asset, or script.",
-          "maxChars only applies to reference text and is capped by the runtime.",
-          "startChar continues a truncated reference from a non-negative safe UTF-16 offset and must not split a surrogate pair.",
-        ],
-        outputNotes: [
-          "Reference resources include content, hash, byte length, char count, and truncation facts.",
-          "truncated is true only when continuation.nextInput contains an executable, forward-only next window.",
-          "Assets and scripts never return raw file content; they return metadata and hashes only.",
-          "Scripts include requiresToolExecution/notExecutableByResolver and must go through normal tool confirmation if executed elsewhere.",
-        ],
-        runtimeHints: [
-          { label: "resource scope", value: "loaded selected skills for this run only" },
-          { label: "default maxChars", value: String(DEFAULT_MAX_CHARS) },
-          { label: "max maxChars", value: String(MAX_MAX_CHARS) },
-        ],
-        examples: [
-          {
-            title: "Read a skill reference",
-            input: { skillId: "repo-review", path: "references/checklist.md", type: "reference", maxChars: 12000 },
-          },
-        ],
-      },
       metadata: {
         category: "other",
         riskLevel: "low",
@@ -80,28 +43,29 @@ export function createReadSkillResourceTool(
           skillId: { type: "string", description: "Loaded selected skill id." },
           path: { type: "string", description: "Skill-package relative resource path, such as references/guide.md." },
           type: { type: "string", enum: ["reference", "asset", "script"], description: "Resource kind." },
-          maxChars: { type: "number", description: "Maximum reference characters to return." },
-          startChar: { type: "number", description: "Zero-based character offset for continuing a truncated reference." },
+          maxChars: { type: "integer", minimum: 1, maximum: MAX_MAX_CHARS, description: "Maximum reference characters to return." },
+          startChar: { type: "integer", minimum: 0, description: "Zero-based character offset for continuing a truncated reference." },
         },
         required: ["skillId", "path", "type"],
+        additionalProperties: false,
       },
     },
     execute: async (input, context) => {
       if (context.abortSignal?.aborted === true) {
-        throw new Error("read_skill_resource cancelled.");
+        throw new Error("skill_read cancelled.");
       }
       const record = asRecord(input);
       const skillId = stringOrFallback(record.skillId, "");
       const relativePath = stringOrFallback(record.path, "");
       const type = resourceTypeOrUndefined(record.type);
       if (skillId.length === 0) {
-        throw new Error("read_skill_resource requires skillId.");
+        throw new Error("skill_read requires skillId.");
       }
       if (relativePath.length === 0) {
-        throw new Error("read_skill_resource requires path.");
+        throw new Error("skill_read requires path.");
       }
       if (type === undefined) {
-        throw new Error("read_skill_resource type must be reference, asset, or script.");
+        throw new Error("skill_read type must be reference, asset, or script.");
       }
 
       const resource = resources.get(resourceKey(skillId, type, normalizeResourcePathForKey(relativePath)));
@@ -174,7 +138,7 @@ function startCharFromInput(value: unknown): number {
     return 0;
   }
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new Error("read_skill_resource startChar must be a non-negative safe integer.");
+    throw new Error("skill_read startChar must be a non-negative safe integer.");
   }
   return value;
 }

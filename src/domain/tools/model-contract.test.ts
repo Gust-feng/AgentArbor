@@ -8,8 +8,7 @@ import {
   validateModelVisibleToolContract,
 } from "./index.js";
 
-// 模型可见准入只守可执行事实；推荐用法、运行提示和示例是可选描述增强。
-// 真实结果与 continuation 由 ToolCenter/executor 行为测试覆盖，不用散文字段伪装完备性。
+// 模型可见准入只守定义事实；真实结果与 continuation 由 ToolCenter/executor 行为测试覆盖。
 
 function completeToolDefinition(): ToolDefinition {
   return {
@@ -26,16 +25,6 @@ function completeToolDefinition(): ToolDefinition {
       riskLevel: "low",
       operationType: "read-only",
       requiresConfirmation: false,
-    },
-    modelContract: {
-      purpose: "Fixture purpose.",
-      whenToUse: ["Use when a fixture value is required."],
-      whenNotToUse: ["Do not use for unrelated resources."],
-      inputNotes: ["key identifies the fixture value."],
-      usageNotes: ["The operation is read-only."],
-      outputNotes: ["Returns the observed value and an explicit continuation when truncated."],
-      runtimeHints: [{ label: "fixture source", value: "test" }],
-      examples: [{ input: { key: "demo" } }],
     },
   };
 }
@@ -60,31 +49,6 @@ test("validateModelVisibleToolContract accepts an executable factual contract", 
   assert.deepEqual(validation.missing, []);
 });
 
-test("validateModelVisibleToolContract does not require optional model guidance", () => {
-  const base = completeToolDefinition();
-  const withoutGuidance = { ...base, modelContract: undefined };
-  assert.deepEqual(validateModelVisibleToolContract(withoutGuidance), { ok: true, missing: [] });
-
-  for (const field of [
-    "purpose",
-    "whenToUse",
-    "whenNotToUse",
-    "inputNotes",
-    "usageNotes",
-    "outputNotes",
-    "runtimeHints",
-    "examples",
-  ]) {
-    const contract = { ...(base.modelContract as object) } as Record<string, unknown>;
-    delete contract[field];
-    const validation = validateModelVisibleToolContract({
-      ...base,
-      modelContract: contract as ToolDefinition["modelContract"],
-    });
-    assert.equal(validation.ok, true, `${field}: ${validation.missing.join(", ")}`);
-  }
-});
-
 test("validateModelVisibleToolContract requires identity and an objective description", () => {
   const blankName = validateModelVisibleToolContract({ ...completeToolDefinition(), name: "   " });
   assert.equal(blankName.ok, false);
@@ -103,7 +67,7 @@ test("validateModelVisibleToolContract requires an object input schema", () => {
     undefined,
     { type: "array", properties: {} },
     { type: "object", properties: [] },
-    { type: "object", properties: { key: { type: "string" } }, required: ["missing"] },
+    { type: "object", properties: { key: { type: "string" } }, required: [42] },
     { type: "object", properties: {}, additionalProperties: "yes" },
   ];
   for (const inputSchema of invalidSchemas) {
@@ -111,6 +75,23 @@ test("validateModelVisibleToolContract requires an object input schema", () => {
     assert.equal(validation.ok, false);
     assert.ok(validation.missing.includes("inputSchema"));
   }
+});
+
+test("validateModelVisibleToolContract accepts required names supplied by schema composition", () => {
+  const validation = validateModelVisibleToolContract(withInvalidInputSchema({
+    type: "object",
+    properties: {},
+    allOf: [{ $ref: "#/$defs/input" }],
+    $defs: {
+      input: {
+        type: "object",
+        properties: { key: { type: "string" } },
+        required: ["key"],
+      },
+    },
+    required: ["key"],
+  }));
+  assert.deepEqual(validation, { ok: true, missing: [] });
 });
 
 test("validateModelVisibleToolContract requires execution and side-effect metadata", () => {
@@ -142,19 +123,6 @@ test("validateModelVisibleToolContract requires execution and side-effect metada
 test("modelVisibleToolDescription exposes only the objective tool description", () => {
   const definition: ToolDefinition = {
     ...completeToolDefinition(),
-    modelContract: {
-      whenNotToUse: ["Limit fact."],
-      outputNotes: ["Result fact with continuation.nextInput."],
-      runtimeHints: [{ label: "shell", value: "PowerShell" }],
-      usageNotes: [
-        "Ordinary first note.",
-        "Second note contains background=true.",
-        "Ordinary final note.",
-      ],
-      inputNotes: ["Input fact."],
-      whenToUse: ["Optional recommendation.", "Ordinary first note."],
-      examples: [{ input: { key: "one" } }, { input: { key: "two" } }],
-    },
   };
   const description = modelVisibleToolDescription(definition);
 
@@ -167,11 +135,6 @@ test("modelVisibleToolDescription applies the explicit budget to its objective d
     {
       ...completeToolDefinition(),
       description: `Read a bounded resource. ${"objective detail ".repeat(40)}`,
-      modelContract: {
-        outputNotes: ["truncated=true includes continuation.nextInput for the unread range."],
-        runtimeHints: [{ label: "source", value: "workspace" }],
-        whenToUse: [`Optional recommendation ${"x".repeat(400)}`],
-      },
     },
     { maxChars: 220 }
   );
@@ -182,17 +145,10 @@ test("modelVisibleToolDescription applies the explicit budget to its objective d
   assert.doesNotMatch(description, /continuation\.nextInput|x{100}/);
 });
 
-test("an oversized objective is bounded without appending model contract prose", () => {
+test("an oversized objective is bounded without appending execution metadata", () => {
   const description = modelVisibleToolDescription({
     ...completeToolDefinition(),
     description: `Read a bounded resource. ${"objective detail ".repeat(800)}`,
-    modelContract: {
-      outputNotes: [
-        "truncated=true includes continuation.nextInput for the unread range.",
-      ],
-      runtimeHints: [{ label: "source", value: "workspace" }],
-      usageNotes: ["The operation is read-only and does not modify the resource."],
-    },
   });
 
   assert.equal(description.length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS, true);
@@ -201,27 +157,10 @@ test("an oversized objective is bounded without appending model contract prose",
   assert.doesNotMatch(description, /continuation\.nextInput|Runtime:|read-only/);
 });
 
-test("invalid optional examples cannot hide or break a factual tool description", () => {
-  const cyclic: Record<string, unknown> = {};
-  cyclic.self = cyclic;
-  const definition: ToolDefinition = {
-    ...completeToolDefinition(),
-    modelContract: {
-      examples: [{ input: cyclic }],
-    },
-  };
-
-  assert.doesNotThrow(() => modelVisibleToolDescription(definition));
-  assert.equal(modelVisibleToolDescription(definition), definition.description);
-});
-
 test("default model-visible description budget remains explicit and bounded", () => {
   const definition: ToolDefinition = {
     ...completeToolDefinition(),
     description: "y".repeat(MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS * 2),
-    modelContract: {
-      outputNotes: ["y".repeat(MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS * 2)],
-    },
   };
   assert.equal(
     modelVisibleToolDescription(definition).length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS,

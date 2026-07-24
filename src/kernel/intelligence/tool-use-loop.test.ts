@@ -94,8 +94,8 @@ test("executeToolUseLoop exposes only allowed registered tools to the model", as
   ]);
   const center = new TestToolBroker();
   center.register("web_search", async () => ({ ok: true }));
-  center.register("read_file", async () => ({ ok: true }));
-  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  center.register("read", async () => ({ ok: true }));
+  center.register("delete", async () => ({ ok: true }), "read-write");
 
   const result = await executeToolUseLoop(
     {
@@ -131,14 +131,6 @@ test("executeToolUseLoop uses frozen tool definitions instead of current broker 
       required: ["query"],
       additionalProperties: false,
     },
-    modelContract: {
-      purpose: "Use the frozen web search contract.",
-      whenToUse: ["Use for frozen search tests."],
-      inputNotes: ["query: frozen query text."],
-      outputNotes: ["Returns frozen search results."],
-      runtimeHints: [{ label: "source", value: "capability_snapshot" }],
-      examples: [{ input: { query: "AgentArbor" } }],
-    },
     metadata: {
       category: "research",
       riskLevel: "low",
@@ -163,7 +155,6 @@ test("executeToolUseLoop uses frozen tool definitions instead of current broker 
   const visibleTool = channel.requests[0]?.tools?.[0];
   assert.equal(visibleTool?.description, "Frozen web search contract from the run capability snapshot.");
   assert.deepEqual(visibleTool?.inputSchema.required, ["query"]);
-  assert.equal(visibleTool?.modelContract?.runtimeHints?.[0]?.value, "capability_snapshot");
 });
 
 test("executeToolUseLoop passes tools through request schema without mutating prompt messages", async () => {
@@ -172,7 +163,7 @@ test("executeToolUseLoop passes tools through request schema without mutating pr
   ]);
   const center = new TestToolBroker();
   center.register("web_search", async () => ({ ok: true }));
-  center.register("read_file", async () => ({ ok: true }));
+  center.register("read", async () => ({ ok: true }));
   const request = createValidModelRequest({
     sanitizedMessages: [
       { role: "system", content: "Follow the ordinary agent contract.", ref: "system:test" },
@@ -187,13 +178,13 @@ test("executeToolUseLoop passes tools through request schema without mutating pr
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["web_search", "read_file"],
+      allowedTools: ["web_search", "read"],
     },
     request
   );
 
   assert.equal(result.stoppedReason, "no_tool_calls");
-  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search", "read_file"]);
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search", "read"]);
   assert.deepEqual(
     channel.requests[0]?.sanitizedMessages.map((message) => ({
       role: message.role,
@@ -207,7 +198,7 @@ test("executeToolUseLoop passes tools through request schema without mutating pr
     }))
   );
   assert.equal(JSON.stringify(channel.requests[0]?.sanitizedMessages).includes("web_search"), false);
-  assert.equal(JSON.stringify(channel.requests[0]?.sanitizedMessages).includes("read_file"), false);
+  assert.equal(JSON.stringify(channel.requests[0]?.sanitizedMessages).includes("read"), false);
 });
 
 test("executeToolUseLoop can hide blocked internal tools from model-visible tools", async () => {
@@ -342,18 +333,18 @@ test("executeToolUseLoop preserves user message attachments across tool rounds",
 test("executeToolUseLoop carries model attachments from the execution output", async () => {
   const attachmentData = "aW1hZ2UtYnl0ZXM=";
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-read-image", "read_context_attachment_image"),
+    toolCallResponse("model-request-test", "call-read-image", "attachment_read_image"),
     textResponse("model-request-final", "Final answer after inspecting tool-provided image."),
   ]);
   const broker: ToolExecutionBroker = {
     list: () => [
       {
-        name: "read_context_attachment_image",
+        name: "attachment_read_image",
         description: "Projected image read tool.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
-    has: (name) => name === "read_context_attachment_image",
+    has: (name) => name === "attachment_read_image",
     execute: async (request, _context, _permission) => ({
       callId: request.callId,
       toolName: request.toolName,
@@ -382,7 +373,7 @@ test("executeToolUseLoop carries model attachments from the execution output", a
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["read_context_attachment_image"],
+      allowedTools: ["attachment_read_image"],
     },
     createValidModelRequest()
   );
@@ -711,19 +702,19 @@ test("executeToolUseLoop does not inject iteration warning near round limits", a
 
 test("executeToolUseLoop keeps transport-truncated tool messages recoverable with refs", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-1", "shell_command"),
+    toolCallResponse("model-request-test", "call-1", "shell"),
     completedResponse("model-request-final", { summary: "Final answer after truncation." }),
   ]);
   const verboseText = Array.from({ length: 240_000 }, (_, index) => String(index % 10)).join("");
   const center: ToolExecutionBroker = {
     list: () => [
       {
-        name: "shell_command",
+        name: "shell",
         description: "Verbose command tool.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
-    has: (name) => name === "shell_command",
+    has: (name) => name === "shell",
     execute: async (request, _context, _permission) => ({
       callId: request.callId,
       toolName: request.toolName,
@@ -750,7 +741,7 @@ test("executeToolUseLoop keeps transport-truncated tool messages recoverable wit
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command"],
+      allowedTools: ["shell"],
     },
     createValidModelRequest()
   );
@@ -781,7 +772,7 @@ test("executeToolUseLoop keeps transport-truncated tool messages recoverable wit
 
 test("executeToolUseLoop bounds sub-agent output and keeps explicit continuation", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-1", "call_sub_agent"),
+    toolCallResponse("model-request-test", "call-1", "agent_call"),
     completedResponse("model-request-final", { summary: "Final answer after sub-agent result." }),
   ]);
   const tail = "SUB_AGENT_LONG_OUTPUT_TAIL";
@@ -793,12 +784,12 @@ test("executeToolUseLoop bounds sub-agent output and keeps explicit continuation
   const center: ToolExecutionBroker = {
     list: () => [
       {
-        name: "call_sub_agent",
+        name: "agent_call",
         description: "Projected sub-agent tool.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
-    has: (name) => name === "call_sub_agent",
+    has: (name) => name === "agent_call",
     execute: async (request, _context, _permission) => ({
       callId: request.callId,
       toolName: request.toolName,
@@ -816,7 +807,7 @@ test("executeToolUseLoop bounds sub-agent output and keeps explicit continuation
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["call_sub_agent"],
+      allowedTools: ["agent_call"],
     },
     createValidModelRequest()
   );
@@ -832,7 +823,7 @@ test("executeToolUseLoop bounds sub-agent output and keeps explicit continuation
 
 test("executeToolUseLoop keeps oversized sub-agent output recoverable with continuation", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-1", "call_sub_agent"),
+    toolCallResponse("model-request-test", "call-1", "agent_call"),
     completedResponse("model-request-final", { summary: "Final answer after sub-agent continuation." }),
   ]);
   const subRunId = "sub-agent-run-long";
@@ -849,12 +840,12 @@ test("executeToolUseLoop keeps oversized sub-agent output recoverable with conti
   const center: ToolExecutionBroker = {
     list: () => [
       {
-        name: "call_sub_agent",
+        name: "agent_call",
         description: "Projected sub-agent tool.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
-    has: (name) => name === "call_sub_agent",
+    has: (name) => name === "agent_call",
     execute: async (request, _context, _permission) => ({
       callId: request.callId,
       toolName: request.toolName,
@@ -872,7 +863,7 @@ test("executeToolUseLoop keeps oversized sub-agent output recoverable with conti
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["call_sub_agent"],
+      allowedTools: ["agent_call"],
     },
     createValidModelRequest()
   );
@@ -903,7 +894,7 @@ test("executeToolUseLoop keeps oversized sub-agent output recoverable with conti
 
 test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable with every continuation", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-1", "call_sub_agents"),
+    toolCallResponse("model-request-test", "call-1", "agent_calls"),
     completedResponse("model-request-final", { summary: "Final answer after batch sub-agent continuations." }),
   ]);
   const firstContinuation = {
@@ -929,12 +920,12 @@ test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable wit
   const center: ToolExecutionBroker = {
     list: () => [
       {
-        name: "call_sub_agents",
+        name: "agent_calls",
         description: "Projected batch sub-agent tool.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
-    has: (name) => name === "call_sub_agents",
+    has: (name) => name === "agent_calls",
     execute: async (request, _context, _permission) => ({
       callId: request.callId,
       toolName: request.toolName,
@@ -958,7 +949,7 @@ test("executeToolUseLoop keeps oversized batch sub-agent outputs recoverable wit
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["call_sub_agents"],
+      allowedTools: ["agent_calls"],
     },
     createValidModelRequest()
   );
@@ -1081,18 +1072,18 @@ test("executeToolUseLoop derives model continuation from execution facts", async
 
 test("executeToolUseLoop preserves command stdout and stderr from execution facts", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-shell", "shell_command"),
+    toolCallResponse("model-request-test", "call-shell", "shell"),
     completedResponse("model-request-final", { summary: "Final answer with command output." }),
   ]);
   const broker: ToolExecutionBroker = {
     list: () => [
       {
-        name: "shell_command",
+        name: "shell",
         description: "Projected shell tool.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
-    has: (name) => name === "shell_command",
+    has: (name) => name === "shell",
     execute: async (request, _context, _permission) => ({
       callId: request.callId,
       toolName: request.toolName,
@@ -1115,7 +1106,7 @@ test("executeToolUseLoop preserves command stdout and stderr from execution fact
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command"],
+      allowedTools: ["shell"],
     },
     createValidModelRequest()
   );
@@ -1161,28 +1152,28 @@ test("executeToolUseLoop sends full workspace tool facts to the next model turn"
     {
       ...completedResponse("model-request-test", undefined),
       toolCalls: [
-        { callId: "call-read-file", toolName: "read_file", input: { path: "README.md" } },
-        { callId: "call-grep", toolName: "grep_files", input: { query: "AgentArbor" } },
-        { callId: "call-command", toolName: "shell_command", input: { command: "pnpm", args: ["test"] } },
+        { callId: "call-read-file", toolName: "read", input: { path: "README.md" } },
+        { callId: "call-grep", toolName: "grep", input: { query: "AgentArbor" } },
+        { callId: "call-command", toolName: "shell", input: { command: "pnpm", args: ["test"] } },
       ],
       finishReason: "tool_call",
     },
     textResponse("model-request-final", "Final answer with tool facts."),
   ]);
   const center = new ExecutionFactToolBroker({
-    read_file: {
+    read: {
       path: "README.md",
       bytes: 42,
       content: "# AgentArbor\nA local desktop agent workspace.",
       truncated: false,
     },
-    grep_files: {
+    grep: {
       query: "AgentArbor",
       path: ".",
       matches: [{ path: "README.md", line: 1, preview: "# AgentArbor" }],
       truncated: false,
     },
-    shell_command: {
+    shell: {
       command: "pnpm",
       args: ["test"],
       exitCode: 0,
@@ -1199,7 +1190,7 @@ test("executeToolUseLoop sends full workspace tool facts to the next model turn"
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["read_file", "grep_files", "shell_command"],
+      allowedTools: ["read", "grep", "shell"],
       approvedConfirmationIds: ["confirmation-call-command"],
     },
     createValidModelRequest()
@@ -1714,8 +1705,8 @@ test("executeToolUseLoop keeps read-only URL confirmations on the approval pause
     {
       ...completedResponse("model-request-test", undefined),
       toolCalls: [
-        { callId: "call-local-url", toolName: "read", input: { url: "http://localhost:3000/debug" } },
-        { callId: "call-read-file", toolName: "read_file", input: { path: "README.md" } },
+        { callId: "call-local-url", toolName: "web_fetch", input: { url: "http://localhost:3000/debug" } },
+        { callId: "call-read-file", toolName: "read", input: { path: "README.md" } },
       ],
       finishReason: "tool_call",
     },
@@ -1723,12 +1714,12 @@ test("executeToolUseLoop keeps read-only URL confirmations on the approval pause
   ]);
   const center = new TestToolBroker();
   const order: string[] = [];
-  center.register("read", async () => {
-    order.push("read");
+  center.register("web_fetch", async () => {
+    order.push("web_fetch");
     return { ok: true };
   }, "read-only");
-  center.register("read_file", async () => {
-    order.push("read_file");
+  center.register("read", async () => {
+    order.push("read");
     return { ok: true };
   }, "read-only");
   const request = createValidModelRequest();
@@ -1739,7 +1730,7 @@ test("executeToolUseLoop keeps read-only URL confirmations on the approval pause
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["read", "read_file"],
+      allowedTools: ["web_fetch", "read"],
     },
     request
   );
@@ -1756,7 +1747,7 @@ test("executeToolUseLoop keeps read-only URL confirmations on the approval pause
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["read", "read_file"],
+      allowedTools: ["web_fetch", "read"],
       approvedConfirmationIds: ["confirmation-call-local-url"],
     },
     request,
@@ -1764,7 +1755,7 @@ test("executeToolUseLoop keeps read-only URL confirmations on the approval pause
   );
 
   assert.equal(resumed.stoppedReason, "completed");
-  assert.deepEqual(order, ["read", "read_file"]);
+  assert.deepEqual(order, ["web_fetch", "read"]);
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
 });
 
@@ -1773,8 +1764,8 @@ test("executeToolUseLoop executes non-read-only tool batches sequentially in mod
     {
       ...completedResponse("model-request-test", undefined),
       toolCalls: [
-        { callId: "call-edit-1", toolName: "edit_file", input: { path: "a.txt" } },
-        { callId: "call-edit-2", toolName: "edit_file", input: { path: "a.txt" } },
+        { callId: "call-edit-1", toolName: "edit", input: { path: "a.txt" } },
+        { callId: "call-edit-2", toolName: "edit", input: { path: "a.txt" } },
       ],
       finishReason: "tool_call",
     },
@@ -1782,7 +1773,7 @@ test("executeToolUseLoop executes non-read-only tool batches sequentially in mod
   ]);
   const center = new TestToolBroker();
   const order: string[] = [];
-  center.register("edit_file", async (input) => {
+  center.register("edit", async (input) => {
     order.push(String((input as { readonly path?: string }).path ?? "missing"));
     return { ok: true };
   }, "read-write");
@@ -1794,7 +1785,7 @@ test("executeToolUseLoop executes non-read-only tool batches sequentially in mod
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["edit_file"],
+      allowedTools: ["edit"],
       approvedConfirmationIds: ["confirmation-call-edit-1", "confirmation-call-edit-2"],
     },
     createValidModelRequest()
@@ -1808,11 +1799,11 @@ test("executeToolUseLoop executes non-read-only tool batches sequentially in mod
 test("executeToolUseLoop pauses on approval_required without final synthesis", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     completedResponse("model-request-final", { summary: "must not be requested before approval" }),
   ]);
   const center = new TestToolBroker();
-  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  center.register("delete", async () => ({ ok: true }), "read-write");
 
   const result = await executeToolUseLoop(
     {
@@ -1821,7 +1812,7 @@ test("executeToolUseLoop pauses on approval_required without final synthesis", a
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     createValidModelRequest()
@@ -1856,7 +1847,7 @@ test("approval pauses preserve partial sub-agent output across clones and unreso
     }]
   );
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-sub-agent", "call_sub_agent"),
+    toolCallResponse("model-request-test", "call-sub-agent", "agent_call"),
     textResponse("model-request-final", "Final answer after continuing the sub-agent."),
   ]);
   const center = new PartialApprovalToolBroker(partialOutput);
@@ -1867,7 +1858,7 @@ test("approval pauses preserve partial sub-agent output across clones and unreso
     callerAgentId: "agent-test",
     traceId: "trace-test",
     goalId: "goal-test",
-    allowedTools: ["call_sub_agent"],
+    allowedTools: ["agent_call"],
   };
 
   const paused = await executeToolUseLoop(options, request);
@@ -1942,7 +1933,7 @@ test("approval pauses preserve partial sub-agent output across clones and unreso
 test("approval tool messages keep nested partial-output continuation when transport truncates", () => {
   const message = toolResultMessage({
     callId: "call-large-approval",
-    toolName: "call_sub_agent",
+    toolName: "agent_call",
     input: {},
     output: {
       evidence: "x".repeat(230_000),
@@ -2242,7 +2233,7 @@ test("approval cancellation preserves pending partial output and attachments", a
     source: { kind: "data", mimeType: "image/png", data: attachmentData },
   }]);
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-sub-agent", "call_sub_agent"),
+    toolCallResponse("model-request-test", "call-sub-agent", "agent_call"),
     textResponse("model-request-final", "must not run after cancellation"),
   ]);
   const center = new PartialApprovalToolBroker(partialOutput);
@@ -2253,7 +2244,7 @@ test("approval cancellation preserves pending partial output and attachments", a
     callerAgentId: "agent-test",
     traceId: "trace-test",
     goalId: "goal-test",
-    allowedTools: ["call_sub_agent"],
+    allowedTools: ["agent_call"],
     publishToolEvent: (message: Parameters<NonNullable<ToolUseLoopOptions["publishToolEvent"]>>[0]) =>
       eventLog.append(message),
   };
@@ -2289,7 +2280,7 @@ test("approval cancellation preserves pending partial output and attachments", a
 test("confirmation decision cancellation preserves the pending tool fact", async () => {
   const partialOutput = { summary: "Keep this decision-time partial fact." };
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-sub-agent", "call_sub_agent"),
+    toolCallResponse("model-request-test", "call-sub-agent", "agent_call"),
     textResponse("model-request-final", "must not run after cancellation"),
   ]);
   const center = new PartialApprovalToolBroker(partialOutput);
@@ -2300,7 +2291,7 @@ test("confirmation decision cancellation preserves the pending tool fact", async
     callerAgentId: "agent-test",
     traceId: "trace-test",
     goalId: "goal-test",
-    allowedTools: ["call_sub_agent"],
+    allowedTools: ["agent_call"],
   };
   const paused = await executeToolUseLoop(baseOptions, request);
   const abort = new AbortController();
@@ -2326,7 +2317,7 @@ test("abort after approved execution keeps both pre-approval and completed facts
   const abort = new AbortController();
   const partialOutput = { summary: "Fact produced before approval." };
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-sub-agent", "call_sub_agent"),
+    toolCallResponse("model-request-test", "call-sub-agent", "agent_call"),
     textResponse("model-request-final", "must not run after cancellation"),
   ]);
   const center = new PartialApprovalToolBroker(partialOutput, () => abort.abort());
@@ -2337,7 +2328,7 @@ test("abort after approved execution keeps both pre-approval and completed facts
     callerAgentId: "agent-test",
     traceId: "trace-test",
     goalId: "goal-test",
-    allowedTools: ["call_sub_agent"],
+    allowedTools: ["agent_call"],
   };
   const paused = await executeToolUseLoop(baseOptions, request);
 
@@ -2434,7 +2425,7 @@ test("confirmation guidance returns partial sub-agent output and the decision to
     evidence: ["src/app/sub-agents/sub-agent-tools.ts"],
   };
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-sub-agent-guidance", "call_sub_agent"),
+    toolCallResponse("model-request-test", "call-sub-agent-guidance", "agent_call"),
     textResponse("model-request-final", "I used the completed evidence and followed the guidance."),
   ]);
   const center = new PartialApprovalToolBroker(partialOutput);
@@ -2445,7 +2436,7 @@ test("confirmation guidance returns partial sub-agent output and the decision to
     callerAgentId: "agent-test",
     traceId: "trace-test",
     goalId: "goal-test",
-    allowedTools: ["call_sub_agent"],
+    allowedTools: ["agent_call"],
   };
   const paused = await executeToolUseLoop(options, request);
 
@@ -2550,7 +2541,7 @@ test("confirmation denial returns partial sub-agent output and the denial to the
     summary: "Completed evidence remains useful after the pending action is denied.",
   };
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-sub-agent-denied", "call_sub_agent"),
+    toolCallResponse("model-request-test", "call-sub-agent-denied", "agent_call"),
     textResponse("model-request-final", "I kept the completed evidence and did not perform the action."),
   ]);
   const center = new PartialApprovalToolBroker(partialOutput);
@@ -2561,7 +2552,7 @@ test("confirmation denial returns partial sub-agent output and the denial to the
     callerAgentId: "agent-test",
     traceId: "trace-test",
     goalId: "goal-test",
-    allowedTools: ["call_sub_agent"],
+    allowedTools: ["agent_call"],
   };
   const paused = await executeToolUseLoop(options, request);
 
@@ -2594,12 +2585,12 @@ test("confirmation denial returns partial sub-agent output and the denial to the
 
 test("resumeToolUseLoopFromApproval executes only a matching approved confirmation", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     completedResponse("model-request-final", { summary: "Final answer after approved delete." }),
   ]);
   const center = new TestToolBroker();
   const eventLog = new InMemoryEventLog();
-  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  center.register("delete", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -2608,7 +2599,7 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     request
@@ -2622,7 +2613,7 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
       approvedConfirmationIds: ["confirmation-call-delete"],
       publishToolEvent: (message) => eventLog.append(message),
     },
@@ -2650,13 +2641,13 @@ test("resumeToolUseLoopFromApproval waits for tool completion before requesting 
   const channel = new SequenceIntelligenceChannel([
     {
       ...completedResponse("model-request-test", undefined),
-      toolCalls: [{ callId: "call-shell", toolName: "shell_command", input: { command: "dir" } }],
+      toolCalls: [{ callId: "call-shell", toolName: "shell", input: { command: "dir" } }],
       finishReason: "tool_call",
     },
     textResponse("model-request-final", "Final answer after command output."),
   ]);
   const center = new TestToolBroker();
-  center.register("shell_command", async () => {
+  center.register("shell", async () => {
     await commandFinished;
     return {
       stdout: "README.md\nsrc\n",
@@ -2672,7 +2663,7 @@ test("resumeToolUseLoopFromApproval waits for tool completion before requesting 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command"],
+      allowedTools: ["shell"],
     },
     request
   );
@@ -2685,7 +2676,7 @@ test("resumeToolUseLoopFromApproval waits for tool completion before requesting 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command"],
+      allowedTools: ["shell"],
       approvedConfirmationIds: ["confirmation-call-shell"],
     },
     request,
@@ -2711,8 +2702,8 @@ test("resumeToolUseLoopFromApproval continues the remaining tool calls in the sa
     {
       ...completedResponse("model-request-test", undefined),
       toolCalls: [
-        { callId: "call-shell", toolName: "shell_command", input: { command: "echo" } },
-        { callId: "call-read", toolName: "read_file", input: { path: "README.md" } },
+        { callId: "call-shell", toolName: "shell", input: { command: "echo" } },
+        { callId: "call-read", toolName: "read", input: { path: "README.md" } },
       ],
       finishReason: "tool_call",
     },
@@ -2720,12 +2711,12 @@ test("resumeToolUseLoopFromApproval continues the remaining tool calls in the sa
   ]);
   const center = new TestToolBroker();
   const order: string[] = [];
-  center.register("shell_command", async () => {
-    order.push("shell_command");
+  center.register("shell", async () => {
+    order.push("shell");
     return { ok: true };
   }, "execute");
-  center.register("read_file", async () => {
-    order.push("read_file");
+  center.register("read", async () => {
+    order.push("read");
     return { ok: true };
   }, "read-only");
   const request = createValidModelRequest();
@@ -2736,7 +2727,7 @@ test("resumeToolUseLoopFromApproval continues the remaining tool calls in the sa
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command", "read_file"],
+      allowedTools: ["shell", "read"],
     },
     request
   );
@@ -2750,7 +2741,7 @@ test("resumeToolUseLoopFromApproval continues the remaining tool calls in the sa
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command", "read_file"],
+      allowedTools: ["shell", "read"],
       approvedConfirmationIds: ["confirmation-call-shell"],
     },
     request,
@@ -2758,7 +2749,7 @@ test("resumeToolUseLoopFromApproval continues the remaining tool calls in the sa
   );
 
   assert.equal(resumed.stoppedReason, "completed");
-  assert.deepEqual(order, ["shell_command", "read_file"]);
+  assert.deepEqual(order, ["shell", "read"]);
   assert.equal(resumed.toolCalls.length, 2);
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
 });
@@ -2769,15 +2760,15 @@ test("approval pause cloning preserves attachments from tools completed earlier 
     {
       ...completedResponse("model-request-test", undefined),
       toolCalls: [
-        { callId: "call-image", toolName: "read_context_attachment_image", input: { attachmentId: "ctx-image" } },
-        { callId: "call-shell", toolName: "shell_command", input: { command: "echo approved" } },
+        { callId: "call-image", toolName: "attachment_read_image", input: { attachmentId: "ctx-image" } },
+        { callId: "call-shell", toolName: "shell", input: { command: "echo approved" } },
       ],
       finishReason: "tool_call",
     },
     textResponse("model-request-final", "Final answer after image and command."),
   ]);
   const center = new TestToolBroker();
-  center.register("read_context_attachment_image", async () => withToolModelAttachments(
+  center.register("attachment_read_image", async () => withToolModelAttachments(
     { attachmentId: "ctx-image", readable: true },
     [{
       kind: "image",
@@ -2785,7 +2776,7 @@ test("approval pause cloning preserves attachments from tools completed earlier 
       attachmentId: "ctx-image",
     }]
   ), "read-only");
-  center.register("shell_command", async () => ({ exitCode: 0 }), "execute");
+  center.register("shell", async () => ({ exitCode: 0 }), "execute");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -2794,7 +2785,7 @@ test("approval pause cloning preserves attachments from tools completed earlier 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["read_context_attachment_image", "shell_command"],
+      allowedTools: ["attachment_read_image", "shell"],
     },
     request
   );
@@ -2809,7 +2800,7 @@ test("approval pause cloning preserves attachments from tools completed earlier 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["read_context_attachment_image", "shell_command"],
+      allowedTools: ["attachment_read_image", "shell"],
       approvedConfirmationIds: ["confirmation-call-shell"],
     },
     request,
@@ -2832,8 +2823,8 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
     {
       ...completedResponse("model-request-test", undefined),
       toolCalls: [
-        { callId: "call-shell-a", toolName: "shell_command", input: { command: "cat a.txt" } },
-        { callId: "call-shell-b", toolName: "shell_command", input: { command: "cat b.txt" } },
+        { callId: "call-shell-a", toolName: "shell", input: { command: "cat a.txt" } },
+        { callId: "call-shell-b", toolName: "shell", input: { command: "cat b.txt" } },
       ],
       finishReason: "tool_call",
     },
@@ -2841,7 +2832,7 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
   ]);
   const center = new TestToolBroker();
   const executedCommands: string[] = [];
-  center.register("shell_command", async (input) => {
+  center.register("shell", async (input) => {
     const command = String((input as { readonly command?: string }).command ?? "");
     executedCommands.push(command);
     return {
@@ -2858,7 +2849,7 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command"],
+      allowedTools: ["shell"],
     },
     request
   );
@@ -2876,7 +2867,7 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command"],
+      allowedTools: ["shell"],
       approvedConfirmationIds: ["confirmation-call-shell-a"],
     },
     request,
@@ -2897,7 +2888,7 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command"],
+      allowedTools: ["shell"],
       approvedConfirmationIds: ["confirmation-call-shell-b"],
     },
     request,
@@ -2916,11 +2907,11 @@ test("resumeToolUseLoopFromApproval waits for every approval in a model-requeste
 
 test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without executing", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     completedResponse("model-request-final", { summary: "must not be requested" }),
   ]);
   const center = new TestToolBroker();
-  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  center.register("delete", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -2929,7 +2920,7 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
     },
     request
   );
@@ -2957,7 +2948,7 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
       approvedConfirmationIds: ["confirmation-other"],
     },
     request,
@@ -2975,11 +2966,11 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
 
 test("resumeToolUseLoopFromApproval requires the matching confirmation before continuing", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     textResponse("model-request-final", "Final answer after approved delete."),
   ]);
   const center = new TestToolBroker();
-  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  center.register("delete", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -2988,7 +2979,7 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
     },
     request
   );
@@ -3001,7 +2992,7 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
       approvedConfirmationIds: ["confirmation-other"],
     },
     request,
@@ -3017,7 +3008,7 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
       approvedConfirmationIds: ["confirmation-call-delete"],
     },
     request,
@@ -3031,11 +3022,11 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
 
 test("resumeToolUseLoopFromApproval does not execute pending tool if resumed policy no longer allows it", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     textResponse("model-request-final", "Final answer after denied delete."),
   ]);
   const center = new PermissionIgnoringToolBroker();
-  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  center.register("delete", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -3044,7 +3035,7 @@ test("resumeToolUseLoopFromApproval does not execute pending tool if resumed pol
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
     },
     request
   );
@@ -3076,11 +3067,11 @@ test("resumeToolUseLoopFromApproval does not execute pending tool if resumed pol
 test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible tool feedback", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     textResponse("model-request-final", "我不会执行删除，改为说明可选方案。"),
   ]);
   const center = new TestToolBroker();
-  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  center.register("delete", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -3089,7 +3080,7 @@ test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     request
@@ -3102,7 +3093,7 @@ test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["delete_file"],
+      allowedTools: ["delete"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     request,
@@ -3125,11 +3116,11 @@ test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible 
 
 test("confirmation decision with the wrong id never executes an otherwise approved tool", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     textResponse("model-request-final", "must not run for wrong confirmation id"),
   ]);
   const center = new TestToolBroker();
-  center.register("delete_file", async () => ({ deleted: true }), "read-write");
+  center.register("delete", async () => ({ deleted: true }), "read-write");
   const request = createValidModelRequest();
   const baseOptions = {
     intelligenceChannel: channel,
@@ -3137,7 +3128,7 @@ test("confirmation decision with the wrong id never executes an otherwise approv
     callerAgentId: "agent-test",
     traceId: "trace-test",
     goalId: "goal-test",
-    allowedTools: ["delete_file"],
+    allowedTools: ["delete"],
   };
   const paused = await executeToolUseLoop(baseOptions, request);
 
@@ -3157,10 +3148,10 @@ test("confirmation decision with the wrong id never executes an otherwise approv
 
 test("confirmation resume rejects inconsistent pending approval identity", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
   ]);
   const center = new TestToolBroker();
-  center.register("delete_file", async () => ({ deleted: true }), "read-write");
+  center.register("delete", async () => ({ deleted: true }), "read-write");
   const request = createValidModelRequest();
   const options = {
     intelligenceChannel: channel,
@@ -3168,7 +3159,7 @@ test("confirmation resume rejects inconsistent pending approval identity", async
     callerAgentId: "agent-test",
     traceId: "trace-test",
     goalId: "goal-test",
-    allowedTools: ["delete_file"],
+    allowedTools: ["delete"],
   };
   const paused = await executeToolUseLoop(options, request);
   const forged = {
@@ -3250,16 +3241,16 @@ test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped bat
     {
       ...completedResponse("model-request-test", undefined),
       toolCalls: [
-        { callId: "call-shell", toolName: "shell_command", input: { command: "pnpm test" } },
-        { callId: "call-read", toolName: "read_file", input: { path: "README.md" } },
+        { callId: "call-shell", toolName: "shell", input: { command: "pnpm test" } },
+        { callId: "call-read", toolName: "read", input: { path: "README.md" } },
       ],
       finishReason: "tool_call",
     },
     textResponse("model-request-final", "收到指导，我会改用安全说明。"),
   ]);
   const center = new TestToolBroker();
-  center.register("shell_command", async () => ({ ok: true }), "execute");
-  center.register("read_file", async () => ({ ok: true }), "read-only");
+  center.register("shell", async () => ({ ok: true }), "execute");
+  center.register("read", async () => ({ ok: true }), "read-only");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -3268,7 +3259,7 @@ test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped bat
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command", "read_file"],
+      allowedTools: ["shell", "read"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     request
@@ -3281,7 +3272,7 @@ test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped bat
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["shell_command", "read_file"],
+      allowedTools: ["shell", "read"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     request,
@@ -3433,7 +3424,7 @@ class ExecutionFactToolBroker implements ToolExecutionBroker {
   constructor(private readonly factsByToolName: Readonly<Record<string, unknown>>) {}
 
   list(): ToolDefinition[] {
-    return Object.keys(this.factsByToolName).map((name) => testToolDefinition(name, name === "shell_command" ? "execute" : "read-only"));
+    return Object.keys(this.factsByToolName).map((name) => testToolDefinition(name, name === "shell" ? "execute" : "read-only"));
   }
 
   has(name: string): boolean {
@@ -3673,7 +3664,7 @@ class PartialApprovalToolBroker implements ToolExecutionBroker {
 
   list(): ToolDefinition[] {
     return [{
-      name: "call_sub_agent",
+      name: "agent_call",
       description: "Sub-agent tool that can pause after producing partial output.",
       metadata: {
         category: "other",
@@ -3686,7 +3677,7 @@ class PartialApprovalToolBroker implements ToolExecutionBroker {
   }
 
   has(name: string): boolean {
-    return name === "call_sub_agent";
+    return name === "agent_call";
   }
 
   async execute(

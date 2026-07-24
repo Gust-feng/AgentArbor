@@ -7,12 +7,16 @@ import type {
   ToolExecutionContext,
   ToolExecutionGateway,
   ToolFactValue,
+  ToolDefinition,
   ToolInputSchema,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
+import type { ProgressiveToolVisibilityCostGate } from "./tool-definition-visibility-cost.js";
 import type { AgentSessionEntryRef, AgentSessionExecutionRefs, AgentSessionWriteCheckpoint } from "./agent-session.js";
 
 export type AgentLoopToolBoundary = {
+  /** Complete model contracts frozen when the owning run was created. */
+  readonly definitions: readonly ToolDefinition[];
   readonly gateway: ToolExecutionGateway;
   readonly context: ToolExecutionContext;
   readonly permission: ToolPermissionCheck;
@@ -33,9 +37,42 @@ export type AgentLoopAgentToolInvocation = {
  */
 export type AgentLoopAgentTool = {
   readonly toolName: string;
-  readonly toolDescription: string;
-  readonly inputSchema: ToolInputSchema;
   resolve(input: ToolFactValue): Promise<AgentLoopAgentToolInvocation>;
+};
+
+/**
+ * Compact, run-frozen catalog information for a deferred tool. The complete
+ * input/output contract stays in the corresponding frozen ToolDefinition and
+ * is only made model-visible after an explicit load operation.
+ */
+export type AgentLoopDeferredToolCatalogEntry = {
+  readonly name: string;
+  readonly displayName: string;
+  readonly description: string;
+  readonly source: {
+    readonly kind: "mcp";
+    readonly id: string;
+    readonly label: string;
+  };
+  readonly definitionHash: string;
+};
+
+/**
+ * Provider-neutral model visibility policy for one frozen run. `allowedTools`
+ * remains the complete execution permission set; this plan only controls which
+ * already-authorized definitions are active in the next model request.
+ */
+export type AgentLoopToolVisibilityPlan = {
+  readonly policyId: "mcp-progressive/v1";
+  readonly snapshotId: string;
+  /** Frozen economics reused when a delegated Agent receives a narrower tool set. */
+  readonly costGate: ProgressiveToolVisibilityCostGate;
+  readonly initiallyVisibleToolNames: readonly string[];
+  readonly deferredTools: readonly AgentLoopDeferredToolCatalogEntry[];
+  readonly controls: {
+    readonly search: ToolDefinition;
+    readonly load: ToolDefinition;
+  };
 };
 
 export type AgentLoopInput = {
@@ -43,6 +80,8 @@ export type AgentLoopInput = {
   readonly messages: readonly ModelMessage[];
   readonly tools: AgentLoopToolBoundary;
   readonly agentTools?: readonly AgentLoopAgentTool[];
+  /** Optional run-frozen progressive model visibility policy. */
+  readonly toolVisibilityPlan?: AgentLoopToolVisibilityPlan;
   readonly abortSignal: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
   /** Provider-normalized visible reasoning text for the active model turn. */

@@ -27,7 +27,7 @@ test("real AI smoke traverses the production Agent Session loop through a local 
 
   assert.equal(summary.status, "completed", summary.status === "failed" ? summary.message : undefined);
   if (summary.status !== "completed") return;
-  assert.equal(summary.answer, "Observed the workspace root through list_dir.");
+  assert.equal(summary.answer, "Observed the workspace root through list.");
   assert.equal(summary.toolCallCount, 1);
   assert.equal(provider.requests.length, 2);
   assert.equal(provider.requests[0]?.authorization, "Bearer sk-smoke-test");
@@ -160,7 +160,7 @@ function completedExecution(answer: string): OrdinaryExecutionPort {
 function completedToolResult(): ToolCallResult {
   return {
     callId: "smoke-list-dir",
-    toolName: "list_dir",
+    toolName: "list",
     input: { path: "." },
     output: { entries: ["README.md", "src"] },
     status: "completed",
@@ -253,7 +253,7 @@ function confirmation(runId: string): ConfirmationRequest {
 function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
   return {
     callId: request.toolCallFactId,
-    toolName: "shell_command",
+    toolName: "shell",
     input: { commandLine: "echo smoke" },
     output: undefined,
     status: "approval_required",
@@ -318,14 +318,14 @@ async function handleOpenAICompatibleRequest(
           index: 0,
           id: "smoke-list-root",
           type: "function",
-          function: { name: "list_dir", arguments: JSON.stringify({ path: "." }) },
+          function: { name: "list", arguments: JSON.stringify({ path: "." }) },
         }],
       },
       finishReason: "tool_calls",
     }));
   } else {
     writeSse(response, completionChunk({
-      delta: { role: "assistant", content: "Observed the workspace root through list_dir." },
+      delta: { role: "assistant", content: "Observed the workspace root through list." },
       finishReason: "stop",
     }));
   }

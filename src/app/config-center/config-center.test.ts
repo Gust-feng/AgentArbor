@@ -1416,7 +1416,7 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
         lastVerifiedAt: "2026-05-12",
       },
     });
-    const toolStates = await configCenter.updateToolState({ name: "shell_command", enabled: false });
+    const toolStates = await configCenter.updateToolState({ name: "shell", enabled: false });
     const mcpServers = await configCenter.upsertMcpServer({
       serverId: "local-docs",
       label: "Local Docs",
@@ -1469,7 +1469,7 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
     assert.equal(safeOverride.find((override) => override.model === "safe-custom-model")?.capabilities.preferredApiStyle, "responses");
     assert.equal(safeOverride.find((override) => override.model === "safe-custom-model")?.capabilities.stability, "preview");
     assert.equal(safeOverride.find((override) => override.model === "safe-custom-model")?.capabilities.lastVerifiedAt, "2026-05-12");
-    assert.equal(toolStates.find((state) => state.name === "shell_command")?.enabled, false);
+    assert.equal(toolStates.find((state) => state.name === "shell")?.enabled, false);
     const mcpServer = mcpServers.find((server) => server.serverId === "local-docs");
     assert.equal(mcpServer?.enabled, true);
     assert.equal(mcpServer?.description, "Local documentation tools.");
@@ -1565,7 +1565,48 @@ test("ConfigCenter preserves MCP tool cache across policy edits and clears it wh
       {
         name: "lookup",
         description: "Lookup docs.",
-        inputSchema: { type: "object", properties: { query: { type: "string" } } },
+        inputSchema: {
+          type: "object",
+          properties: {
+            mode: { type: "string", enum: ["fast", "safe"] },
+            target: { $ref: "#/$defs/target" },
+            retries: { type: "integer", minimum: 0, maximum: 3 },
+            slug: { type: "string", pattern: "^[a-z]+$" },
+            operation: { const: "lookup" },
+          },
+          required: ["mode", "target"],
+          additionalProperties: { type: "string" },
+          $defs: {
+            target: {
+              type: "object",
+              properties: { id: { type: "string", minLength: 1 } },
+              required: ["id"],
+              additionalProperties: false,
+            },
+          },
+          oneOf: [
+            { required: ["mode"] },
+            { properties: { mode: { const: "safe" } } },
+          ],
+          dependentRequired: { mode: ["target"] },
+        },
+        outputSchema: {
+          type: "object",
+          properties: {
+            results: {
+              type: "array",
+              items: { $ref: "#/$defs/result" },
+            },
+          },
+          required: ["results"],
+          $defs: {
+            result: {
+              type: "object",
+              properties: { score: { type: "number", minimum: 0, maximum: 1 } },
+              required: ["score"],
+            },
+          },
+        },
         annotations: { readOnlyHint: true },
       },
     ];
@@ -1597,6 +1638,8 @@ test("ConfigCenter preserves MCP tool cache across policy edits and clears it wh
       autoApprovedTools: ["lookup"],
     });
     const preserved = afterPolicyEdit.find((server) => server.serverId === "docs");
+    const reloaded = new ConfigCenter({ settingsStore, secretStore });
+    const reloadedServer = (await reloaded.listMcpServers()).find((server) => server.serverId === "docs");
     const afterDescriptionClear = await configCenter.upsertMcpServer({
       serverId: "docs",
       description: "",
@@ -1609,6 +1652,10 @@ test("ConfigCenter preserves MCP tool cache across policy edits and clears it wh
     const changed = (await configCenter.listMcpServers()).find((server) => server.serverId === "docs");
 
     assert.deepEqual(preserved?.cachedTools?.map((tool) => tool.name), ["lookup"]);
+    assert.deepEqual(preserved?.cachedTools?.[0]?.inputSchema, cachedTools[0]?.inputSchema);
+    assert.deepEqual(preserved?.cachedTools?.[0]?.outputSchema, cachedTools[0]?.outputSchema);
+    assert.deepEqual(reloadedServer?.cachedTools?.[0]?.inputSchema, cachedTools[0]?.inputSchema);
+    assert.deepEqual(reloadedServer?.cachedTools?.[0]?.outputSchema, cachedTools[0]?.outputSchema);
     assert.deepEqual(preserved?.cachedReferences?.prompts.map((prompt) => prompt.name), ["draft"]);
     assert.deepEqual(preserved?.cachedReferences?.resources.map((resource) => resource.name), ["guide"]);
     assert.equal(preserved?.description, "Internal docs lookup.");

@@ -269,15 +269,17 @@ function uniqueExternalSources(values: readonly ExternalSourceDisplayItem[]): re
 }
 
 function isDirectoryListingTool(toolName: string): boolean {
-  return toolName === "list_dir" ||
-    toolName === "list_files" ||
-    toolName === "list_context_attachment_files" ||
-    toolName === "inspect_context_attachment_archive";
+  const normalized = toolName.toLowerCase();
+  return normalized === "list" || normalized === "glob" ||
+    normalized === "list_files" ||
+    normalized === "attachmentlistfiles" ||
+    normalized === "attachmentinspectarchive";
 }
 
 function isFileSearchTool(toolName: string): boolean {
-  return toolName === "grep_files" ||
-    toolName === "search_context_attachment_files";
+  const normalized = toolName.toLowerCase();
+  return normalized === "grep" ||
+    normalized === "attachmentsearchfiles";
 }
 
 function fileToolDisplayForOperation(
@@ -384,16 +386,16 @@ function fileOperationKind(
       operation: explicitOperation,
     };
   }
-  if (toolName === "edit_file") {
+  if (toolName === "edit") {
     return { kind: "edit", operation: "edit" };
   }
-  if (toolName === "create_file") {
+  if (toolName === "create") {
     return { kind: "write", operation: "create" };
   }
-  if (toolName === "delete_file") {
+  if (toolName === "delete") {
     return { kind: "write", operation: "delete" };
   }
-  if (toolName === "write_file") {
+  if (toolName === "write") {
     return {
       kind: "write",
       operation: booleanOrUndefined(outputRecord.append) ?? booleanOrUndefined(inputRecord.append) ? "append" : "write",
@@ -404,10 +406,10 @@ function fileOperationKind(
 
 function isBuiltInFileToolName(toolName: string): boolean {
   const normalized = toolName.trim().toLowerCase();
-  return normalized === "write_file" ||
-    normalized === "create_file" ||
-    normalized === "delete_file" ||
-    normalized === "edit_file";
+  return normalized === "write" ||
+    normalized === "create" ||
+    normalized === "delete" ||
+    normalized === "edit";
 }
 
 function fileDisplayOperationOrUndefined(value: unknown): ToolFileDisplayOperation | undefined {

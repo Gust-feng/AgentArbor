@@ -121,16 +121,16 @@ for (const implementation of implementations) {
   test(`${implementation.name} persists only Multi-Agent capability facts`, async () => {
     const fixture = await implementation.create();
     try {
-      const base = capabilitySnapshotWithTools(["read_file"]);
+      const base = capabilitySnapshotWithTools(["read"]);
       const ordinarySnapshot = {
         ...base,
         toolCatalog: {
           ...base.toolCatalog,
           tools: [
             ...base.toolCatalog.tools,
-            { ...base.toolCatalog.tools[0]!, name: "spawn_sub_agent", catalogOnly: true },
+            { ...base.toolCatalog.tools[0]!, name: "agent_spawn", catalogOnly: true },
           ],
-          allowedTools: [...base.toolCatalog.allowedTools, "spawn_sub_agent"],
+          allowedTools: [...base.toolCatalog.allowedTools, "agent_spawn"],
         },
         skillTrigger: {
           mode: "keyword",
@@ -152,9 +152,9 @@ for (const implementation of implementations) {
       assert.equal("skillCatalog" in persistedSnapshot, false);
       assert.equal("subAgentCatalog" in persistedSnapshot, false);
       assert.equal("skillTrigger" in persistedSnapshot, false);
-      assert.deepEqual(persistedSnapshot.toolCatalog.allowedTools, ["read_file"]);
+      assert.deepEqual(persistedSnapshot.toolCatalog.allowedTools, ["read"]);
       assert.equal(
-        persistedSnapshot.toolCatalog.tools.some((tool) => tool.name === "spawn_sub_agent"),
+        persistedSnapshot.toolCatalog.tools.some((tool) => tool.name === "agent_spawn"),
         false,
       );
       assert.deepEqual(

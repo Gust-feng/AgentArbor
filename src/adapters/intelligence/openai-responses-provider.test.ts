@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelRequest } from "../../domain/intelligence/index.js";
+import type { ToolInputSchema } from "../../domain/tools/index.js";
 import { OpenAIResponsesProvider } from "./openai-responses-provider.js";
 import type { FetchLike } from "./openai-fetch-bridge.js";
 import { OPENAI_RESPONSES_OUTPUT_ITEMS_EXTENSION } from "./openai-responses-continuation.js";
@@ -211,7 +212,7 @@ test("OpenAI Responses rejects per-file and request-wide file limits before tran
       {
         role: "tool",
         toolCallId: "call-file",
-        toolName: "mcp__read_file",
+        toolName: "mcp__read",
         content: "Tool file output.",
         attachments: [{
           kind: "file",
@@ -380,6 +381,31 @@ test("OpenAI Responses adapter preserves sanitized transport failure", async () 
 
 test("OpenAI Responses adapter maps tools to function format and extracts tool calls from output", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
+  const inputSchema: ToolInputSchema = {
+    type: "object",
+    properties: {
+      mode: { type: "string", enum: ["fast", "safe"] },
+      target: { $ref: "#/$defs/target" },
+      retries: { type: "integer", minimum: 0, maximum: 3 },
+      slug: { type: "string", pattern: "^[a-z]+$" },
+      operation: { const: "lookup" },
+    },
+    required: ["mode", "target"],
+    additionalProperties: { type: "string" },
+    $defs: {
+      target: {
+        type: "object",
+        properties: { id: { type: "string", minLength: 1 } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+    },
+    oneOf: [
+      { required: ["mode"] },
+      { properties: { mode: { const: "safe" } } },
+    ],
+    dependentRequired: { mode: ["target"] },
+  };
   const fetch: FetchLike = async (_url, init) => {
     calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
     return {
@@ -414,7 +440,7 @@ test("OpenAI Responses adapter maps tools to function format and extracts tool c
         {
           name: "web_search",
           description: "Search the web.",
-          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+          inputSchema,
         },
       ],
       toolChoice: "auto",
@@ -432,7 +458,7 @@ test("OpenAI Responses adapter maps tools to function format and extracts tool c
       type: "function",
       name: "web_search",
       description: "Search the web.",
-      parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      parameters: inputSchema,
       strict: false,
     },
   ]);
@@ -479,7 +505,7 @@ test("OpenAI Responses adapter can include provider-native web search", async ()
   await provider.complete(createValidModelRequest({
     tools: [
       {
-        name: "read_file",
+        name: "read",
         description: "Read a file.",
         inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
       },
@@ -493,7 +519,7 @@ test("OpenAI Responses adapter can include provider-native web search", async ()
     },
     {
       type: "function",
-      name: "read_file",
+      name: "read",
       description: "Read a file.",
       parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
       strict: false,
@@ -535,7 +561,7 @@ test("OpenAI Responses adapter gates parallel tool calls by visible tool risk", 
   await provider.complete(createValidModelRequest({
     tools: [
       {
-        name: "read_file",
+        name: "read",
         description: "Read a file.",
         inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
         metadata: {
@@ -551,7 +577,7 @@ test("OpenAI Responses adapter gates parallel tool calls by visible tool risk", 
   await provider.complete(createValidModelRequest({
     tools: [
       {
-        name: "shell_command",
+        name: "shell",
         description: "Run a shell command.",
         inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
         metadata: {

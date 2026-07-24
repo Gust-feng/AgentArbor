@@ -13,7 +13,7 @@ import { createLocalReadFileTool } from "./local-workspace-read-tools.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-test("real read_file results from 110k through 128k reach the model once and in full", async () => {
+test("real read results from 110k through 128k reach the model once and in full", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-read-model-message-"));
   try {
     const center = new ToolCenter();
@@ -25,9 +25,9 @@ test("real read_file results from 110k through 128k reach the model once and in 
       const filename = `source-${size}.txt`;
       await writeFile(path.join(root, filename), content, "utf8");
       const result = await center.execute(
-        { callId: `call-read-${size}`, toolName: "read_file", input: { path: filename } },
+        { callId: `call-read-${size}`, toolName: "read", input: { path: filename } },
         context,
-        { callerAgentId: context.callerAgentId, allowedTools: ["read_file"] }
+        { callerAgentId: context.callerAgentId, allowedTools: ["read"] }
       );
 
       const message = toolResultMessage(result);
@@ -52,7 +52,7 @@ test("real read_file results from 110k through 128k reach the model once and in 
   }
 });
 
-test("escaped read_file content stays model-visible through repeated character-range reads", async () => {
+test("escaped read content stays model-visible through repeated character-range reads", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-read-model-message-escaped-"));
   try {
     const center = new ToolCenter();
@@ -66,9 +66,9 @@ test("escaped read_file content stays model-visible through repeated character-r
     let reconstructed = "";
     for (let index = 0; index < 10 && nextInput !== undefined; index += 1) {
       const result = await center.execute(
-        { callId: `call-read-escaped-${index}`, toolName: "read_file", input: nextInput },
+        { callId: `call-read-escaped-${index}`, toolName: "read", input: nextInput },
         context,
-        { callerAgentId: context.callerAgentId, allowedTools: ["read_file"] }
+        { callerAgentId: context.callerAgentId, allowedTools: ["read"] }
       );
       const message = toolResultMessage(result);
       const payload = JSON.parse(message.content) as {

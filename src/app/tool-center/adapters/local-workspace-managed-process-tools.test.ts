@@ -10,6 +10,7 @@ import {
 } from "../../runtime-guard/index.js";
 import { ensurePidExited } from "./background-process-test-utils.js";
 import { createLocalManagedProcessTools } from "./local-workspace-managed-process-tools.js";
+import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
 
 const context = {
   callerAgentId: "agent-test",
@@ -21,27 +22,29 @@ const context = {
 test("managed process tools start, inspect, and stop a workspace-session service by processId", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-managed-process-"));
   const registry = new InMemoryProcessRegistry();
-  const tools = createLocalManagedProcessTools(root, {
+  const options = {
     processRegistry: registry,
     processTerminator: createPlatformProcessTerminator(),
-  });
-  const startProcess = requiredTool(tools, "start_process");
-  const inspectProcess = requiredTool(tools, "inspect_process");
-  const stopProcess = requiredTool(tools, "stop_process");
+  };
+  const tools = createLocalManagedProcessTools(root, options);
+  const startProcess = createLocalShellCommandTool(root, options);
+  const inspectProcess = requiredTool(tools, "ProcessRead");
+  const stopProcess = requiredTool(tools, "ProcessStop");
   let pid: number | undefined;
 
   try {
     const started = asRecord(await startProcess.execute({
       command: process.execPath,
       args: ["-e", "console.log('managed-ready'); setInterval(() => {}, 1000);"],
+      background: true,
       backgroundWaitMs: 50,
     }, context));
     pid = typeof started.pid === "number" ? started.pid : undefined;
 
-    assert.equal(started.state, "running");
+    assert.equal(started.processState, "running");
     assert.equal(started.lifetime, "workspace_session");
     assert.equal(typeof started.processId, "string");
-    assert.equal(started.exitCode, undefined);
+    assert.equal(started.exitCode, null);
 
     const processId = String(started.processId);
     const inspected = asRecord(await inspectProcess.execute({ processId }, context));
@@ -64,7 +67,7 @@ test("managed process tools start, inspect, and stop a workspace-session service
   }
 });
 
-test("inspect_process lists only managed processes inside its workspace", async () => {
+test("process_inspect lists only managed processes inside its workspace", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-managed-process-list-"));
   const registry = new InMemoryProcessRegistry();
   registry.register({
@@ -94,7 +97,7 @@ test("inspect_process lists only managed processes inside its workspace", async 
     const inspectProcess = requiredTool(createLocalManagedProcessTools(root, {
       processRegistry: registry,
       processTerminator: createPlatformProcessTerminator(),
-    }), "inspect_process");
+    }), "ProcessRead");
     const result = asRecord(await inspectProcess.execute({}, context));
     const processes = result.processes as readonly Record<string, unknown>[];
 
@@ -104,26 +107,25 @@ test("inspect_process lists only managed processes inside its workspace", async 
   }
 });
 
-test("start_process returns not_started facts when the requested port is already occupied", async () => {
+test("process_start returns not_started facts when the requested port is already occupied", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-managed-process-occupied-"));
   const registry = new InMemoryProcessRegistry();
   const server = createNetServer();
   try {
     const port = await listenOnUnusedLocalPort(server);
-    const startProcess = requiredTool(createLocalManagedProcessTools(root, {
+    const startProcess = createLocalShellCommandTool(root, {
       processRegistry: registry,
-      processTerminator: createPlatformProcessTerminator(),
-    }), "start_process");
+    });
     const result = asRecord(await startProcess.execute({
       command: process.execPath,
       args: ["-e", "setInterval(() => {}, 1000);"],
+      background: true,
       waitForPort: port,
     }, context));
 
-    assert.equal(result.state, "not_started");
+    assert.equal(result.notStarted, true);
     assert.equal(result.lifetime, "workspace_session");
     assert.equal(result.processId, undefined);
-    assert.equal(result.notStarted, true);
     assert.equal(registry.listAll().length, 0);
   } finally {
     await closeServer(server);

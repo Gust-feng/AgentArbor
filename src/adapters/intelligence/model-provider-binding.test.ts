@@ -38,6 +38,36 @@ test("model provider binding maps both supported protocols without model-name ga
   assert.equal(responses.selectedModel.provider, "agentarbor-responses-profile");
 });
 
+test("model provider binding does not infer native tool search from a provider profile", () => {
+  const officialOpenAI = createModelProviderBinding({
+    protocol: "openai_responses",
+    baseUrl: "https://api.openai.com/v1",
+    profileId: "official-openai-responses",
+    providerProfileId: "openai",
+    apiKey: "key",
+    model: "gpt-5",
+  }, { createResponsesTransport: fauxStreams });
+  const compatible = createModelProviderBinding({
+    protocol: "openai_responses",
+    baseUrl: "https://compatible.example/v1",
+    profileId: "compatible-responses",
+    providerProfileId: "openai_compatible",
+    apiKey: "key",
+    model: "compatible-model",
+  }, { createResponsesTransport: fauxStreams });
+  const unclassified = createModelProviderBinding({
+    protocol: "openai_responses",
+    baseUrl: "https://api.openai.com/v1",
+    profileId: "unclassified-responses",
+    apiKey: "key",
+    model: "gpt-5",
+  }, { createResponsesTransport: fauxStreams });
+
+  assert.equal(officialOpenAI.selectedModel.compat, undefined);
+  assert.equal(compatible.selectedModel.compat, undefined);
+  assert.equal(unclassified.selectedModel.compat, undefined);
+});
+
 test("model provider binding preserves the frozen vision capability in the Pi model", () => {
   const vision = createModelProviderBinding({
     protocol: "openai_responses",
@@ -91,6 +121,27 @@ test("model provider binding maps the explicit Chat provider dialect into Pi com
     reasoning_effort: "high",
     thinking: { type: "enabled" },
   });
+});
+
+test("model provider binding does not infer deferred tool loading from a Kimi model name", () => {
+  const kimi = createModelProviderBinding({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: "https://api.moonshot.cn/v1",
+    profileId: "moonshot-profile",
+    providerProfileId: "moonshot",
+    apiKey: "key",
+    model: "kimi-k3",
+  }, { createChatCompletionsTransport: fauxStreams });
+
+  assert.equal(
+    (kimi.selectedModel.compat as { readonly requiresReasoningContentOnAssistantMessages?: boolean })
+      .requiresReasoningContentOnAssistantMessages,
+    true,
+  );
+  assert.equal(
+    (kimi.selectedModel.compat as { readonly deferredToolsMode?: unknown }).deferredToolsMode,
+    undefined,
+  );
 });
 
 test("model provider binding keeps unconditional Chat dialect controls without request settings", () => {
@@ -169,14 +220,14 @@ test("model provider binding preserves non-streaming and hosted web search in pr
     payload: {
       model: "search-model",
       stream: true,
-      tools: [{ type: "function", name: "read_file" }],
+      tools: [{ type: "function", name: "read" }],
     },
     tools: [],
   }), {
     model: "search-model",
     stream: false,
     tools: [
-      { type: "function", name: "read_file" },
+      { type: "function", name: "read" },
       { type: "web_search", search_context_size: "medium" },
     ],
   });

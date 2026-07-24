@@ -11,6 +11,7 @@ import type {
   AgentLoopInput,
   AgentLoopResult,
   AgentLoopToolBoundary,
+  AgentLoopToolVisibilityPlan,
 } from "../model-runtime/index.js";
 import {
   createOrdinaryAgentLoopExecutionPort,
@@ -21,13 +22,14 @@ import { ordinaryCapabilityResolution, ordinaryRunBirth } from "./test-support.j
 
 test("completed execution maps Session facts and releases its run resources once", async () => {
   let received: AgentLoopInput | undefined;
+  const visibilityPlan = progressiveVisibilityPlan();
   const fixture = executionFixture({
     async execute(input) {
       received = input;
       return completedResult();
     },
     async release() { return undefined; },
-  });
+  }, { toolVisibilityPlan: visibilityPlan });
   const outcome = await fixture.execution.execute(executionInput());
 
   assert.deepEqual(outcome, {
@@ -39,6 +41,7 @@ test("completed execution maps Session facts and releases its run resources once
   });
   assert.equal(received?.instructions, ordinaryRunBirth().instructions);
   assert.equal(received?.tools, fixture.resources.tools);
+  assert.equal(received?.toolVisibilityPlan, visibilityPlan);
   assert.equal(fixture.releaseCount(), 1);
 });
 
@@ -345,8 +348,6 @@ test("the acquirer may reattach ephemeral inputs and contribute native agent too
   }];
   const agentTool: AgentLoopAgentTool = {
     toolName: "call_reviewer",
-    toolDescription: "Delegate review.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
     async resolve() {
       return {
         agentName: "reviewer",
@@ -389,6 +390,7 @@ function executionFixture(
   options: {
     readonly resolvedMessages?: readonly ModelMessage[];
     readonly agentTools?: readonly AgentLoopAgentTool[];
+    readonly toolVisibilityPlan?: AgentLoopToolVisibilityPlan;
     readonly capabilityResolution?: OrdinaryAgentLoopRunResources["capabilityResolution"];
     readonly onAcquire?: (input: AcquireOrdinaryAgentLoopRunResourcesInput) => void;
   } = {},
@@ -399,6 +401,7 @@ function executionFixture(
     resolvedMessages: options.resolvedMessages ?? [{ role: "user", content: "hello" }],
     tools: toolBoundary(),
     ...(options.agentTools === undefined ? {} : { agentTools: options.agentTools }),
+    ...(options.toolVisibilityPlan === undefined ? {} : { toolVisibilityPlan: options.toolVisibilityPlan }),
     ...(options.capabilityResolution === undefined ? {} : { capabilityResolution: options.capabilityResolution }),
     async release() { releases += 1; },
   };
@@ -413,6 +416,35 @@ function executionFixture(
       },
     }),
     releaseCount: () => releases,
+  };
+}
+
+function progressiveVisibilityPlan(): AgentLoopToolVisibilityPlan {
+  const controlDefinition = (name: string) => ({
+    name,
+    description: `${name} control`,
+    inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+    metadata: {
+      category: "mcp" as const,
+      riskLevel: "low" as const,
+      operationType: "read-only" as const,
+      requiresConfirmation: false,
+    },
+  });
+  return {
+    policyId: "mcp-progressive/v1",
+    snapshotId: "snapshot-visibility-forwarding",
+    costGate: {
+      minimumDeferredDefinitionTokens: 12_800,
+      minimumNetDefinitionSavingsTokens: 320,
+      definitionSerialization: { api: "openai-responses", includeStrict: true },
+    },
+    initiallyVisibleToolNames: [],
+    deferredTools: [],
+    controls: {
+      search: controlDefinition("mcp_search"),
+      load: controlDefinition("mcp_load"),
+    },
   };
 }
 
@@ -503,6 +535,7 @@ function toolBoundary(): AgentLoopToolBoundary {
     },
   };
   return {
+    definitions: [],
     gateway,
     context: { callerAgentId: "ordinary-agent", traceId: "trace-1", goalId: "run-1" },
     permission: { callerAgentId: "ordinary-agent", allowedTools: [] },

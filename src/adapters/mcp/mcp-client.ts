@@ -58,6 +58,7 @@ export type McpToolInfo = {
     readonly title?: string;
     readonly readOnlyHint?: boolean;
     readonly destructiveHint?: boolean;
+    readonly idempotentHint?: boolean;
     readonly openWorldHint?: boolean;
   };
 };
@@ -292,6 +293,7 @@ export class McpClientWrapper {
         title: tool.annotations.title,
         readOnlyHint: tool.annotations.readOnlyHint,
         destructiveHint: tool.annotations.destructiveHint,
+        idempotentHint: tool.annotations.idempotentHint,
         openWorldHint: tool.annotations.openWorldHint,
       },
     }));

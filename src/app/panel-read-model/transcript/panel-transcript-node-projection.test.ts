@@ -22,7 +22,7 @@ test("timeline projection keeps settled model activity and tools while excluding
     node({ nodeId: "body", kind: "body", eventType: "model.output.completed", sequence: 4, text: "正文" }),
     node({ nodeId: "thinking", kind: "thinking", eventType: "model.reasoning.completed", sequence: 1, text: "先确认目标" }),
     node({ nodeId: "side-output", kind: "system", eventType: "model.output.side", sequence: 2, text: "准备读取项目说明" }),
-    node({ nodeId: "tool", kind: "tool", eventType: "tool.completed", phase: "completed", sequence: 3, toolName: "read_file", summary: "README.md" }),
+    node({ nodeId: "tool", kind: "tool", eventType: "tool.completed", phase: "completed", sequence: 3, toolName: "read", summary: "README.md" }),
   ]);
 
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking", "side-output", "tool"]);
@@ -177,7 +177,7 @@ test("activity projection keeps requested and completed tool phases as a full ac
       eventType: "tool.requested",
       phase: "executing",
       sequence: 1,
-      toolName: "read_file",
+      toolName: "read",
       summary: "README.md",
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
@@ -187,7 +187,7 @@ test("activity projection keeps requested and completed tool phases as a full ac
       eventType: "tool.completed",
       phase: "completed",
       sequence: 2,
-      toolName: "read_file",
+      toolName: "read",
       summary: "README.md",
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
@@ -232,7 +232,7 @@ test("visible transcript projection aggregates adjacent completed file reads wit
       eventType: "tool.completed",
       phase: "completed",
       sequence: 2,
-      toolName: "read_file",
+      toolName: "read",
       display: { kind: "generic_tool_summary", action: "读取文件", items: ["file README.md"] },
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
@@ -242,7 +242,7 @@ test("visible transcript projection aggregates adjacent completed file reads wit
       eventType: "tool.completed",
       phase: "completed",
       sequence: 3,
-      toolName: "read_file",
+      toolName: "read",
       display: { kind: "generic_tool_summary", action: "读取文件", items: ["file package.json"] },
       refs: [{ kind: "tool_call", id: "tool-2" }],
     }),
@@ -261,7 +261,7 @@ test("activity projection hides preparing tool requests that are represented by 
       eventType: "tool.requested",
       phase: "preparing",
       sequence: 1,
-      toolName: "delete_file",
+      toolName: "delete",
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
     node({
@@ -316,7 +316,7 @@ test("visible transcript projection keeps preparing tool requests that explain a
       eventType: "tool.requested",
       phase: "preparing",
       sequence: 1,
-      toolName: "delete_file",
+      toolName: "delete",
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
     node({
@@ -380,7 +380,7 @@ test("visible transcript projection keeps successful command results with output
       eventType: "tool.completed",
       phase: "completed",
       sequence: 1,
-      toolName: "shell_command",
+      toolName: "shell",
       display: {
         kind: "command_summary",
         commandLine: "pnpm dev",

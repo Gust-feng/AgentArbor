@@ -6,7 +6,7 @@
 
 ## 决策
 
-AgentArbor 不设置单轮工具数量上限、同批工具结果总预算或按关键词隐藏工具。默认上下文按 256K 能力使用；每个工具结果的完整模型可见包络独立使用固定 6,000-token 硬上限，`read_tool_output` 每页使用同一边界。
+AgentArbor 不设置单轮工具数量上限、同批工具结果总预算或按关键词隐藏工具。默认上下文按 256K 能力使用；每个工具结果的完整模型可见包络独立使用固定 6,000-token 硬上限，`read_output` 每页使用同一边界。
 
 正常 builtin 工具拥有自己的输出策略：文件、目录和搜索由 producer 分页；命令保留有界 stdout/stderr 与完整日志引用；HTTP GET 和 browser snapshot 从一次已保存快照继续；MCP、Sub-Agent 和其他无通用分页契约的超大结果由 Host-owned ToolOutputStore 保留完整 evidence。Sub-Agent 仍把完整结果作为父 Ordinary 工具事实交回，不自动摘要；ToolCenter 只负责统一最终交付守卫，不能替工具选择摘要语义。
 

@@ -16,7 +16,7 @@ test("tool execution observation records concurrency without serializing the inn
   let bothStarted!: () => void;
   const started = new Promise<void>((resolve) => { bothStarted = resolve; });
   const definition = {
-    name: "read_file",
+    name: "read",
     description: "Read a file.",
     inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
     metadata: {
@@ -40,9 +40,9 @@ test("tool execution observation records concurrency without serializing the inn
     },
   };
   const observed = new ToolExecutionObservationGateway(inner, { record: (event) => { events.push(event); } });
-  const request = (callId: string): ToolCallRequest => ({ callId, toolName: "read_file", input: {} });
+  const request = (callId: string): ToolCallRequest => ({ callId, toolName: "read", input: {} });
   const context = { callerAgentId: "ordinary", traceId: "run-1", goalId: "run-1", toolCallId: "call" };
-  const permission = { callerAgentId: "ordinary", allowedTools: ["read_file"] };
+  const permission = { callerAgentId: "ordinary", allowedTools: ["read"] };
 
   const first = observed.execute(request("call-1"), context, permission);
   const second = observed.execute(request("call-2"), context, permission);

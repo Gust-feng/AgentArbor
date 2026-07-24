@@ -709,14 +709,14 @@ test("MultiAgentFeature retries a known live child projection without continuing
     execution: {
       modelRounds: 1,
       toolRounds: 1,
-      toolCalls: [{ callId: "live-tool-call", toolName: "write_file", status: "completed" as const }],
+      toolCalls: [{ callId: "live-tool-call", toolName: "write", status: "completed" as const }],
     },
     executionHistory: [
       ...(child.executionHistory ?? []),
       {
         modelRounds: 1,
         toolRounds: 1,
-        toolCalls: [{ callId: "live-tool-call", toolName: "write_file", status: "completed" as const }],
+        toolCalls: [{ callId: "live-tool-call", toolName: "write", status: "completed" as const }],
         outcome: "completed" as const,
         recordedAt: completedAt,
       },
@@ -2222,7 +2222,7 @@ function pendingApprovalRunChannel(): IntelligenceChannel {
                   displayName: "文件核查",
                   role: "file_review",
                   objective: "执行需要用户确认的写入并报告结果。",
-                  allowedTools: ["write_file"],
+                  allowedTools: ["write"],
                   inputRefs: [],
                 }],
                 childOperations: [],
@@ -2247,7 +2247,7 @@ function pendingApprovalRunChannel(): IntelligenceChannel {
       if (request.purpose === "deep_child_material") {
         return fixtureModelResponse(request, undefined, [{
           callId: "call-write-approval",
-          toolName: "write_file",
+          toolName: "write",
           input: { path: "notes.md", content: "fixture" },
         }]);
       }
@@ -2296,7 +2296,7 @@ function directChildInstructionChannel(): IntelligenceChannel {
       if (requestCount === 1) {
         return fixtureModelResponse(request, undefined, [{
           callId: "call-write-direct-child",
-          toolName: "write_file",
+          toolName: "write",
           input: { path: "notes.md", content: "direct child instruction" },
         }]);
       }
@@ -2373,14 +2373,14 @@ class ApprovalFixtureToolBroker implements ToolExecutionBroker {
 
   list(): ToolDefinition[] {
     return [{
-      name: "write_file",
+      name: "write",
       description: "Fixture write tool.",
       inputSchema: { type: "object", properties: {}, additionalProperties: true },
     }];
   }
 
   has(name: string): boolean {
-    return name === "write_file";
+    return name === "write";
   }
 
   async execute(
@@ -2410,7 +2410,7 @@ class ApprovalFixtureToolBroker implements ToolExecutionBroker {
         confirmationId: "confirm-call-write-approval",
         toolCallFactId: request.factId ?? request.callId,
         title: "需要确认工具调用",
-        actionSummary: "运行 write_file",
+        actionSummary: "运行 write",
         affectedResources: ["notes.md"],
         riskLevel: "medium",
         requestedAt: "2026-07-12T00:00:00.000Z",
@@ -2422,11 +2422,12 @@ class ApprovalFixtureToolBroker implements ToolExecutionBroker {
 
 function approvalCapabilitySnapshot(): BasicAgentCapabilitySnapshot {
   const tool: CapabilityToolCatalogItem = {
-    name: "write_file",
+    name: "write",
     displayName: "写入文件",
     displayDescription: "写入测试文件。",
     description: "Fixture write tool.",
     inputSchema: { type: "object", properties: {}, additionalProperties: true },
+    definitionHash: `sha256:${"0".repeat(64)}`,
     category: "workspace",
     categoryLabel: "工作区",
     riskLevel: "high",

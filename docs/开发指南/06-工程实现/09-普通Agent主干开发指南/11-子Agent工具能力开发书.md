@@ -9,7 +9,7 @@ Sub-Agent 是 Ordinary Agent 的工具能力，不是独立运行模式，也不
 ```text
 OrdinaryAgentFeature
   -> Pi AgentHarness loop
-      -> call_sub_agent / spawn_sub_agent
+      -> agent_call / agent_spawn
           -> Agent Session nested Agent
               -> parent ToolExecutionGateway -> ToolCenter
           -> complete result -> parent model
@@ -21,8 +21,8 @@ OrdinaryAgentFeature
 
 | 工具 | 用途 |
 | --- | --- |
-| `call_sub_agent` | 调用一个已登记且已启用的专家。 |
-| `spawn_sub_agent` | 为本次调用创建一个不持久化的一次性专家。 |
+| `agent_call` | 调用一个已登记且已启用的专家。 |
+| `agent_spawn` | 为本次调用创建一个不持久化的一次性专家。 |
 
 旧批量与专用续读工具已退役。批量调用由父模型按需发起多个 AgentTool 调用；长结果直接作为当前 AgentTool 的完整结果返回，不保存额外续读状态。
 
@@ -32,7 +32,7 @@ OrdinaryAgentFeature
 
 - 发现、解析、校验和登记 `SUB_AGENT.md`。
 - 向 capability catalog 贡献两个 catalog-only 工具定义，并与冻结 run 的普通工具边界使用同一曝光决策。
-- 为每个冻结的 Ordinary run 生成 `call_sub_agent` / `spawn_sub_agent` AgentTool 定义。
+- 为每个冻结的 Ordinary run 生成 `agent_call` / `agent_spawn` AgentTool 定义。
 - 把工具输入解析为 Agent Session nested Agent 的 instructions、input、caller identity 和工具权限。
 - 对 Sub-Agent 工具权限做确定性收窄并阻止递归。
 
@@ -54,7 +54,7 @@ Sub-Agent 模块不拥有 Ordinary run 状态、conversation、持久化、确�
 
 | 字段 | 含义 |
 | --- | --- |
-| `name` | 专家名称，供 `call_sub_agent` 选择。 |
+| `name` | 专家名称，供 `agent_call` 选择。 |
 | `description` | 简短职责说明，进入工具目录描述。 |
 | `enabled` | 是否可用于新 run。 |
 | `allowed-tools` | 在父 run 工具权限内进一步收窄。 |
@@ -64,7 +64,7 @@ Markdown 正文作为专家 instructions 的主体。加载时校验文件、fro
 
 发现根支持 `builtin`、`user`、`project` 和显式 custom root。重名时按已冻结的 root precedence 选择一个定义；运行中不因磁盘文件变化偷偷替换本轮专家事实。
 
-## `call_sub_agent`
+## `agent_call`
 
 输入：
 
@@ -82,7 +82,7 @@ Markdown 正文作为专家 instructions 的主体。加载时校验文件、fro
 - 专家 instructions 由 `SUB_AGENT.md` 正文、名称、描述和固定的局部任务约束组成。
 - 实际工具集合是父 run 当前允许且真实可执行的工具，再与定义中的 `allowed-tools` 取交集。
 
-## `spawn_sub_agent`
+## `agent_spawn`
 
 输入：
 
@@ -92,7 +92,7 @@ Markdown 正文作为专家 instructions 的主体。加载时校验文件、fro
   "instructions": "只检查公开 API 的兼容性和错误语义。",
   "task": "审查本次 API 调整",
   "context": null,
-  "allowed_tools": ["read_file", "grep_files"]
+  "allowed_tools": ["read", "grep"]
 }
 ```
 
@@ -114,7 +114,7 @@ Sub-Agent 权限只允许收窄：
   - 所有 Sub-Agent AgentTool
 ```
 
-`call_sub_agent`、`spawn_sub_agent` 以及已经退役的旧 Sub-Agent 工具名都从 nested Agent 工具集合中排除。nested Agent 因此不能再派生 Sub-Agent，也不能绕过父 run 权限。
+`agent_call`、`agent_spawn` 以及已经退役的旧 Sub-Agent 工具名都从 nested Agent 工具集合中排除。nested Agent 因此不能再派生 Sub-Agent，也不能绕过父 run 权限。
 
 专家内部的机械工具调用复用父 Ordinary 的 `ToolExecutionGateway` 与 ToolCenter，不创建第二套 registry、broker 或确认门。命令确认、拒绝、取消和恢复继续使用父 run 的 Ordinary continuation；已完成的工具调用不能因恢复而重复执行。
 
@@ -142,9 +142,9 @@ Sub-Agent 与 Deep child 独立：
 
 变更 Sub-Agent 能力时至少验证：
 
-- `call_sub_agent` 只暴露冻结目录中已启用的专家。
+- `agent_call` 只暴露冻结目录中已启用的专家。
 - 两个 AgentTool 只通过 catalog-only definition 和冻结 run 工具边界曝光，ToolRegistry 中不存在假 executor。
-- `spawn_sub_agent` 对 `null`、空数组、合法收窄和越权工具输入的行为明确。
+- `agent_spawn` 对 `null`、空数组、合法收窄和越权工具输入的行为明确。
 - nested Agent 只能使用父 run 已授权且真实可执行的工具。
 - 所有 Sub-Agent AgentTool 均从 nested Agent 工具集合中排除。
 - 工具确认能够在父 Ordinary run 中暂停和恢复，且不重复执行已完成工具。

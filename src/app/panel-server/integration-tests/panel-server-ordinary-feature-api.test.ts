@@ -576,7 +576,7 @@ test("Ordinary SSE delivers request, progress and completion continuously withou
     executionInput?.onTextDelta?.("lo");
     const request = {
       callId: "call-live-command",
-      toolName: "shell_command",
+      toolName: "shell",
       input: { commandLine: "pnpm test" },
     } as const;
     executionInput?.onToolRequested?.(request);
@@ -780,7 +780,7 @@ function completedExecutionWithTool(answer: string, usage: OrdinaryExecutionOutc
 function completedToolResult(): ToolCallResult {
   return {
     callId: "call-read",
-    toolName: "read_file",
+    toolName: "read",
     input: { path: "README.md" },
     output: { content: "read result" },
     status: "completed",
@@ -932,7 +932,7 @@ function confirmation(runId: string): ConfirmationRequest {
 function approvalToolResult(request: ConfirmationRequest): ToolCallResult {
   return {
     callId: request.toolCallFactId,
-    toolName: "shell_command",
+    toolName: "shell",
     input: { commandLine: "echo approved" },
     output: undefined,
     status: "approval_required",

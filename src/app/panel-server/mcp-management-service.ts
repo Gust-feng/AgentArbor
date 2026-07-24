@@ -6,7 +6,11 @@ import {
   type McpReferenceInfo,
 } from "../../adapters/mcp/index.js";
 import type { McpCachedReferenceInfo, McpCachedToolInfo, McpServerSettings } from "../../domain/config/index.js";
-import { canonicalNamespacedToolName } from "../../domain/tools/index.js";
+import {
+  canonicalNamespacedToolName,
+  cloneToolInputSchema,
+  cloneToolJsonSchema,
+} from "../../domain/tools/index.js";
 import type { CapabilityCenter } from "../capability/capability-center.js";
 import type { ConfigCenter } from "../config-center/index.js";
 import { PanelHttpError } from "./http-utils.js";
@@ -262,8 +266,8 @@ function cachedToolFromMcpTool(tool: ReturnType<McpManager["getServerTools"]>[nu
     name: tool.name,
     title: tool.title,
     description: tool.description,
-    inputSchema: { ...tool.inputSchema },
-    outputSchema: tool.outputSchema === undefined ? undefined : { ...tool.outputSchema },
+    inputSchema: cloneToolInputSchema(tool.inputSchema),
+    outputSchema: tool.outputSchema === undefined ? undefined : cloneToolJsonSchema(tool.outputSchema),
     annotations: tool.annotations === undefined ? undefined : { ...tool.annotations },
   };
 }

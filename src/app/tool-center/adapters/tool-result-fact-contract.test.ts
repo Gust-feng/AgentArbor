@@ -8,13 +8,13 @@ import { projectToolDisplay } from "../../tool-projection/tool-display-projectio
 import { ToolCenter } from "../tool-center.js";
 import { createHttpRequestTool, type HttpRequestFetchLike } from "./http-request-tool.js";
 import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
-import { createLocalGrepFilesTool, createLocalListDirTool, createLocalReadFileTool } from "./local-workspace-read-tools.js";
+import { createLocalGlobTool, createLocalGrepFilesTool, createLocalReadFileTool } from "./local-workspace-read-tools.js";
 import { createLocalEditFileTool } from "./local-workspace-write-tools.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 const suggestionPattern = /\btry\b|\bprovide\b|\bsuggest|\brecommend\b|recoveryHint|\u5efa\u8bae/iu;
 
-test("shell_command returns small stdout and stderr exactly without truncation facts", async () => {
+test("shell returns small stdout and stderr exactly without truncation facts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-shell-small-"));
   try {
     const shell = createLocalShellCommandTool(root);
@@ -37,7 +37,7 @@ test("shell_command returns small stdout and stderr exactly without truncation f
   }
 });
 
-test("shell_command reports factual truncation and omitted counts only after output caps are exceeded", async () => {
+test("shell reports factual truncation and omitted counts only after output caps are exceeded", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-shell-large-"));
   try {
     const stdoutChars = 70_000;
@@ -70,13 +70,13 @@ test("ToolCenter preserves command logRef in model-visible command facts", async
       env: {},
       workspaceRoot: root,
       playwrightAvailable: false,
-      toolCatalogNames: ["shell_command"],
+      toolCatalogNames: ["shell"],
     });
     const center = registry.createToolCenter("desktop-basic");
     const result = await center.execute(
       {
         callId: "call-shell-log-ref",
-        toolName: "shell_command",
+        toolName: "shell",
         input: {
           command: process.execPath,
           args: ["-e", "process.stdout.write('z'.repeat(20000));"],
@@ -85,7 +85,7 @@ test("ToolCenter preserves command logRef in model-visible command facts", async
       context,
       {
         callerAgentId: context.callerAgentId,
-        allowedTools: ["shell_command"],
+        allowedTools: ["shell"],
         approvedConfirmationIds: ["confirmation-call-shell-log-ref"],
       }
     );
@@ -105,20 +105,20 @@ test("ToolCenter preserves command logRef in model-visible command facts", async
   }
 });
 
-test("ToolCenter read can consume shell_command command-log refs", async () => {
+test("ToolCenter read can consume shell command-log refs", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-shell-log-read-"));
   try {
     const registry = createDesktopBasicToolRegistry({
       env: {},
       workspaceRoot: root,
       playwrightAvailable: false,
-      toolCatalogNames: ["shell_command", "read"],
+      toolCatalogNames: ["shell", "read"],
     });
     const center = registry.createToolCenter("desktop-basic");
     const shellResult = await center.execute(
       {
         callId: "call-shell-log-readable",
-        toolName: "shell_command",
+        toolName: "shell",
         input: {
           command: process.execPath,
           args: ["-e", "process.stdout.write('readable-log-start\\n' + 'q'.repeat(20000) + '\\nreadable-log-end');"],
@@ -127,7 +127,7 @@ test("ToolCenter read can consume shell_command command-log refs", async () => {
       context,
       {
         callerAgentId: context.callerAgentId,
-        allowedTools: ["shell_command", "read"],
+        allowedTools: ["shell", "read"],
         approvedConfirmationIds: ["confirmation-call-shell-log-readable"],
       }
     );
@@ -139,7 +139,7 @@ test("ToolCenter read can consume shell_command command-log refs", async () => {
       context,
       {
         callerAgentId: context.callerAgentId,
-        allowedTools: ["shell_command", "read"],
+        allowedTools: ["shell", "read"],
       }
     );
     const readContent = asDirectToolFacts(readResult.output);
@@ -165,14 +165,14 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
       env: {},
       workspaceRoot: root,
       playwrightAvailable: false,
-      toolCatalogNames: ["shell_command"],
+      toolCatalogNames: ["shell"],
     });
     const center = registry.createToolCenter("desktop-basic");
     const stdout = `start-${"x".repeat(4_000)}-end`;
     const result = await center.execute(
       {
         callId: "call-shell-projection",
-        toolName: "shell_command",
+        toolName: "shell",
         input: {
           command: process.execPath,
           args: ["-e", `process.stdout.write(${JSON.stringify(stdout)});`],
@@ -181,7 +181,7 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
       context,
       {
         callerAgentId: context.callerAgentId,
-        allowedTools: ["shell_command"],
+        allowedTools: ["shell"],
         approvedConfirmationIds: ["confirmation-call-shell-projection"],
       }
     );
@@ -205,32 +205,31 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
   }
 });
 
-test("edit_file dryRun and failures return edit facts without recovery suggestions", async () => {
+test("edit success and failures return exact replacement facts without recovery suggestions", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-edit-"));
   try {
     await writeFile(path.join(root, "notes.txt"), "same\nsame\n", "utf8");
     const editFile = createLocalEditFileTool(root);
 
-    const dryRun = asDirectToolFacts(await editFile.execute({
+    const edited = asDirectToolFacts(await editFile.execute({
       path: "notes.txt",
-      dryRun: true,
-      edits: [{ oldText: "same\n", newText: "once\n", occurrence: 1 }],
+      edits: [{ oldText: "same\nsame", newText: "once\nsame" }],
     }, context));
-    assert.equal(dryRun.dryRun, true);
-    assert.equal(dryRun.wouldReplace, 1);
-    assert.equal(dryRun.replacements, 0);
-    assert.equal(typeof dryRun.beforeHash, "string");
-    assert.equal(typeof dryRun.afterHash, "string");
-    assert.equal(asRecord(dryRun.diff).status, "available");
-    assert.doesNotMatch(JSON.stringify(dryRun), suggestionPattern);
+    assert.equal(edited.changed, true);
+    assert.equal(edited.replacements, 1);
+    assert.equal(typeof edited.beforeHash, "string");
+    assert.equal(typeof edited.afterHash, "string");
+    assert.equal(asRecord(edited.diff).status, "available");
+    assert.doesNotMatch(JSON.stringify(edited), suggestionPattern);
+
+    await writeFile(path.join(root, "notes.txt"), "same\nsame\n", "utf8");
 
     await assert.rejects(
       () => editFile.execute({ path: "notes.txt", edits: [{ oldText: "same", newText: "once" }] }, context),
       (error: unknown) => {
         const message = errorMessage(error);
-        assert.match(message, /matched 2 locations/);
-        assert.match(message, /editIndex=1/);
-        assert.match(message, /availableMatches=2/);
+        assert.match(message, /must match exactly once/);
+        assert.match(message, /matches=2/);
         assert.doesNotMatch(message, suggestionPattern);
         return true;
       }
@@ -240,7 +239,7 @@ test("edit_file dryRun and failures return edit facts without recovery suggestio
   }
 });
 
-test("grep_files exposes skipped facts only when the search engine can observe them", async () => {
+test("grep exposes skipped facts only when the search engine can observe them", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-grep-"));
   try {
     await writeFile(path.join(root, "match.txt"), "needle\n", "utf8");
@@ -266,7 +265,7 @@ test("grep_files exposes skipped facts only when the search engine can observe t
   }
 });
 
-test("ToolCenter exposes plain next ranges for bounded local read, list, and grep results", async () => {
+test("ToolCenter exposes executable nextInput for bounded local read, glob, and grep results", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-continuation-"));
   try {
     for (let index = 1; index <= 5; index += 1) {
@@ -274,67 +273,78 @@ test("ToolCenter exposes plain next ranges for bounded local read, list, and gre
     }
     const center = new ToolCenter();
     const readFileTool = createLocalReadFileTool(root);
-    const readFileGuidance = [
-      ...(readFileTool.definition.modelContract?.usageNotes ?? []),
-      ...(readFileTool.definition.modelContract?.outputNotes ?? []),
-    ].join("\n");
-    assert.match(readFileGuidance, /pass nextStartChar as the startChar input/);
-    assert.match(readFileGuidance, /nextStartLine as the startLine input/);
     center.register(readFileTool);
-    center.register(createLocalListDirTool(root));
+    center.register(createLocalGlobTool(root));
     center.register(createLocalGrepFilesTool(root, { ripgrepSearch: false }));
 
     const read = await center.execute(
-      { callId: "call-read-continuation", toolName: "read_file", input: { path: "note-1.txt", startLine: 1, endLine: 1 } },
+      { callId: "call-read-continuation", toolName: "Read", input: { path: "note-1.txt", startLine: 1, endLine: 1 } },
       context,
-      { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
+      { callerAgentId: context.callerAgentId, allowedTools: ["Read", "Glob", "Grep"] }
     );
     const readOutput = asDirectToolFacts(read.output);
     assert.equal(read.status, "completed");
     assert.equal(readOutput.truncated, true);
     assert.equal(readOutput.nextStartLine, 2);
-    assert.equal(readOutput.continuation, undefined);
+    assert.deepEqual(asRecord(asRecord(readOutput.continuation).nextInput), {
+      path: "note-1.txt",
+      startLine: 2,
+    });
 
     await writeFile(path.join(root, "long.txt"), "abcdefghij", "utf8");
     const charRead = await center.execute(
-      { callId: "call-read-char-continuation", toolName: "read_file", input: { path: "long.txt", maxLength: 5 } },
+      { callId: "call-read-char-continuation", toolName: "Read", input: { path: "long.txt", maxLength: 5 } },
       context,
-      { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
+      { callerAgentId: context.callerAgentId, allowedTools: ["Read", "Glob", "Grep"] }
     );
     const charReadOutput = asDirectToolFacts(charRead.output);
     assert.equal(charRead.status, "completed");
     assert.equal(charReadOutput.truncated, true);
     assert.equal(charReadOutput.nextStartChar, 4);
     assert.equal(charReadOutput.nextStartLine, undefined);
-    assert.equal(charReadOutput.continuation, undefined);
+    assert.deepEqual(asRecord(asRecord(charReadOutput.continuation).nextInput), {
+      path: "long.txt",
+      maxLength: 5,
+      startChar: 4,
+    });
 
-    const listed = await center.execute(
-      { callId: "call-list-continuation", toolName: "list_dir", input: { path: ".", limit: 2 } },
+    const globbed = await center.execute(
+      { callId: "call-glob-continuation", toolName: "Glob", input: { pattern: "*.txt", path: ".", limit: 2 } },
       context,
-      { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
+      { callerAgentId: context.callerAgentId, allowedTools: ["Read", "Glob", "Grep"] }
     );
-    const listOutput = asDirectToolFacts(listed.output);
-    assert.equal(listed.status, "completed");
-    assert.equal(listOutput.truncated, true);
-    assert.equal(listOutput.nextOffset, 2);
-    assert.equal(listOutput.continuation, undefined);
+    const globOutput = asDirectToolFacts(globbed.output);
+    assert.equal(globbed.status, "completed");
+    assert.equal(globOutput.truncated, true);
+    assert.equal(globOutput.nextOffset, 2);
+    assert.deepEqual(asRecord(asRecord(globOutput.continuation).nextInput), {
+      pattern: "*.txt",
+      path: ".",
+      limit: 2,
+      offset: 2,
+    });
 
     const grep = await center.execute(
-      { callId: "call-grep-continuation", toolName: "grep_files", input: { path: ".", query: "needle", limit: 2 } },
+      { callId: "call-grep-continuation", toolName: "Grep", input: { path: ".", query: "needle", limit: 2 } },
       context,
-      { callerAgentId: context.callerAgentId, allowedTools: ["read_file", "list_dir", "grep_files"] }
+      { callerAgentId: context.callerAgentId, allowedTools: ["Read", "Glob", "Grep"] }
     );
     const grepOutput = asDirectToolFacts(grep.output);
     assert.equal(grep.status, "completed");
     assert.equal(grepOutput.truncated, true);
     assert.equal(grepOutput.nextOffset, 2);
-    assert.equal(grepOutput.continuation, undefined);
+    assert.deepEqual(asRecord(asRecord(grepOutput.continuation).nextInput), {
+      query: "needle",
+      path: ".",
+      limit: 2,
+      offset: 2,
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local read, list, and JS grep report cancellation instead of completed output", async () => {
+test("local read, glob, and JS grep report cancellation instead of completed output", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-cancellation-"));
   try {
     await writeFile(path.join(root, "note.txt"), "needle\n", "utf8");
@@ -344,8 +354,8 @@ test("local read, list, and JS grep report cancellation instead of completed out
         input: { path: "note.txt" },
       },
       {
-        tool: createLocalListDirTool(root),
-        input: { path: "." },
+        tool: createLocalGlobTool(root),
+        input: { pattern: "*.txt", path: "." },
       },
       {
         tool: createLocalGrepFilesTool(root, { ripgrepSearch: false }),
@@ -376,7 +386,7 @@ test("local read, list, and JS grep report cancellation instead of completed out
   }
 });
 
-test("grep_files forwards AbortSignal to the search runner and preserves cancellation", async () => {
+test("grep forwards AbortSignal to the search runner and preserves cancellation", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-rg-cancellation-"));
   try {
     let markStarted: (() => void) | undefined;
@@ -401,9 +411,9 @@ test("grep_files forwards AbortSignal to the search runner and preserves cancell
     const center = new ToolCenter();
     center.register(grep);
     const resultPromise = center.execute(
-      { callId: "call-cancel-rg", toolName: "grep_files", input: { path: ".", query: "needle" } },
+      { callId: "call-cancel-rg", toolName: "grep", input: { path: ".", query: "needle" } },
       { ...context, abortSignal: controller.signal },
-      { callerAgentId: context.callerAgentId, allowedTools: ["grep_files"] },
+      { callerAgentId: context.callerAgentId, allowedTools: ["grep"] },
     );
 
     await started;

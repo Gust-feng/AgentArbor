@@ -27,40 +27,8 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
   const automation = options.automation ?? createPlaywrightBrowserAutomation();
   return {
     definition: {
-      name: "browser_snapshot",
+      name: "WebFetch",
       description: "Read rendered text from an HTTP(S) page in an isolated browser session.",
-      modelContract: {
-        purpose: "Open an HTTP or HTTPS page in a fresh Playwright browser session and return the page title, final URL, and body text snapshot.",
-        whenToUse: [
-          "Use when a web page needs to be inspected beyond search snippets and the current rendered page text matters.",
-          "Use for pages that need browser rendering but do not require the user's logged-in browser session.",
-        ],
-        whenNotToUse: [
-          "Do not use for API endpoints, simple raw HTTP fetches, logged-in browser sessions, or interactive browser control; use http_request for raw HTTP and a real browser bridge for interactive browsing.",
-          "Do not use for non-HTTP URLs.",
-        ],
-        inputNotes: [
-          "url is required and must use http or https.",
-          "waitMs optionally waits after load and is capped at 5000ms.",
-          "maxTextChars optionally caps returned body text.",
-          "startChar continues a truncated body text snapshot from any non-negative safe character offset.",
-        ],
-        outputNotes: [
-          "url is the final page URL after navigation.",
-          "title is the browser page title when available.",
-          "text is the returned body text snapshot.",
-          "hasMoreAfter reports whether more text exists; continuation.nextInput provides the executable next snapshot.",
-          "truncated is true only when continuation.nextInput contains an executable, forward-only next snapshot.",
-        ],
-        runtimeHints: [
-          { label: "browser engine", value: "Playwright Chromium when available" },
-          { label: "session state", value: "fresh isolated browser session; no existing login state" },
-          { label: "max text chars", value: String(MAX_BROWSER_TEXT_CHARS) },
-        ],
-        examples: [
-          { title: "Read rendered page text", input: { url: "https://example.com", waitMs: 500, maxTextChars: 12000 } },
-        ],
-      },
       metadata: {
         category: "web",
         riskLevel: "medium",
@@ -70,12 +38,17 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
       inputSchema: {
         type: "object",
         properties: {
-          url: { type: "string", description: "HTTP or HTTPS URL to open." },
-          waitMs: { type: "number", description: "Optional wait time after page load, max 5000ms." },
-          maxTextChars: { type: "number", description: "Optional maximum text characters to return." },
-          startChar: { type: "number", description: "Zero-based body text offset for continuing a truncated snapshot." },
-          snapshotRef: { type: "string", description: "Opaque snapshot reference from continuation.nextInput; do not construct manually." },
+          url: { type: "string", minLength: 1, description: "HTTP or HTTPS URL to open." },
+          waitMs: { type: "integer", minimum: 1, maximum: 5_000, description: "Optional wait time after page load, max 5000ms." },
+          maxTextChars: { type: "integer", minimum: 1, maximum: MAX_BROWSER_TEXT_CHARS, description: "Optional maximum text characters to return." },
+          startChar: { type: "integer", minimum: 0, description: "Zero-based body text offset for continuing a truncated snapshot." },
+          snapshotRef: { type: "string", minLength: 1, description: "Opaque snapshot reference from continuation.nextInput; do not construct manually." },
         },
+        oneOf: [
+          { required: ["url"], not: { required: ["snapshotRef"] } },
+          { required: ["snapshotRef"], not: { anyOf: [{ required: ["url"] }, { required: ["waitMs"] }] } },
+        ],
+        additionalProperties: false,
       },
     },
     execute: async (input, context) => {
@@ -89,12 +62,12 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
         if (options.outputStore === undefined) {
           throw new ToolOutputStoreError(
             "invalid_tool_output_store_configuration",
-            "browser_snapshot continuation storage is unavailable.",
+            "web_fetch continuation storage is unavailable.",
           );
         }
         const slice = await options.outputStore.read(snapshotRef, { startChar, maxChars: maxTextChars });
         if (slice === undefined) {
-          throw new ToolOutputStoreError("tool_output_not_found", "browser_snapshot retained snapshot was not found.");
+          throw new ToolOutputStoreError("tool_output_not_found", "web_fetch retained snapshot was not found.");
         }
         const continuation = slice.hasMoreAfter
           ? { nextInput: { snapshotRef, maxTextChars, startChar: slice.startChar + slice.textChars } }
@@ -119,7 +92,7 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
         if (context.abortSignal?.aborted === true || (error instanceof Error && error.name === "AbortError")) {
           throw error;
         }
-        throw new BrowserSnapshotError("browser_navigation_failed", "browser_snapshot could not navigate and capture the page.", error);
+        throw new BrowserSnapshotError("browser_navigation_failed", "web_fetch could not navigate and capture the page.", error);
       });
       const fullText = snapshot.text ?? "";
       const text = fullText.slice(startChar, safeWindowEnd(startChar, maxTextChars));
@@ -129,8 +102,8 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
         ? await options.outputStore.retain({
             mediaType: "text/plain",
             content: fullText,
-            sourceToolName: "browser_snapshot",
-            sourceCallId: context.toolCallId ?? "browser_snapshot",
+            sourceToolName: "WebFetch",
+            sourceCallId: context.toolCallId ?? "WebFetch",
             sourceFactId: context.toolCallId,
             ownerId: context.traceId,
           })
@@ -203,7 +176,7 @@ async function loadPlaywright(): Promise<PlaywrightModule> {
     const dynamicImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<PlaywrightModule>;
     return await dynamicImport("playwright");
   } catch {
-    throw new Error("browser_snapshot requires Playwright to be installed and available in this workspace.");
+    throw new Error("web_fetch requires Playwright to be installed and available in this workspace.");
   }
 }
 
@@ -231,7 +204,7 @@ function requireHttpUrl(value: unknown): string {
   const text = value.trim();
   const parsed = new URL(text);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("browser_snapshot only accepts HTTP or HTTPS URLs.");
+    throw new Error("web_fetch only accepts HTTP or HTTPS URLs.");
   }
   return parsed.toString();
 }
@@ -255,7 +228,7 @@ function startCharFromInput(value: unknown): number {
     return 0;
   }
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new Error("browser_snapshot startChar must be a non-negative safe integer.");
+    throw new Error("web_fetch startChar must be a non-negative safe integer.");
   }
   return value;
 }

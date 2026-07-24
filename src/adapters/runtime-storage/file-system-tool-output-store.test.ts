@@ -99,7 +99,7 @@ test("ToolCenter publishes a durable evidence continuation without duplicating t
   const result = await center.execute(
     { callId: "provider-call", factId: "ordinary-run-1/tool:provider-call", toolName: source.definition.name, input: {} },
     context,
-    { callerAgentId: context.callerAgentId, allowedTools: [source.definition.name, "read_tool_output"] },
+    { callerAgentId: context.callerAgentId, allowedTools: [source.definition.name, "read_output"] },
   );
   assert.equal(result.status, "completed");
   const delivery = result.output as {

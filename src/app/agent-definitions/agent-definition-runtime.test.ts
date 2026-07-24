@@ -9,7 +9,7 @@ import {
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 
 test("AgentDefinition runtime creates ordinary turn policy without round limits", () => {
-  const allowedTools = ["read_file", "web_search"] as const;
+  const allowedTools = ["read", "web_search"] as const;
   const policy = createAgentTurnPolicyFromDefinition({
     agentDefinition: DESKTOP_ROOT_AGENT,
     traceId: "trace-test",
@@ -65,7 +65,7 @@ test("AgentDefinition runtime carries explicit ordinary loop round limits", () =
     },
     traceId: "trace-round-limits",
     goalId: "goal-round-limits",
-    allowedTools: ["read_file"],
+    allowedTools: ["read"],
   });
 
   assert.equal(policy.maxModelRounds, 0);

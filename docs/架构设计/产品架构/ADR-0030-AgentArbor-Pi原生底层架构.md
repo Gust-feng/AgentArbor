@@ -51,7 +51,7 @@ AgentArbor 只允许增加必要的薄适配：类型转换、错误归类、事
 
 - Ordinary conversation/run lifecycle、完成语义、排队、取消准入和业务事件。
 - ToolCenter 的 executor catalog、冻结工具边界、权限、命令确认和唯一执行事实。
-- `ToolCallResult`、完整工具证据、`ToolOutputStore` 与 `read_tool_output`。
+- `ToolCallResult`、完整工具证据、`ToolOutputStore` 与 `read_output`。
 - MCP、Skills、附件、工作区、受管进程和 Host 资源生命周期。
 - capability snapshot、AgentDefinition 和本轮冻结事实。
 - Ordinary repository、HTTP/SSE facade 和 Panel read-model。

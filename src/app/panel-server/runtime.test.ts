@@ -22,8 +22,8 @@ test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary c
     });
 
     const ordinarySnapshot = await runtime.capabilityCenter.snapshot();
-    assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "call_sub_agent")?.catalogOnly, true);
-    assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "spawn_sub_agent")?.catalogOnly, true);
+    assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "agent_call")?.catalogOnly, true);
+    assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "agent_spawn")?.catalogOnly, true);
 
   } finally {
     await runtime?.ordinaryAgentFeature.release();
@@ -41,7 +41,7 @@ async function writeSubAgentPackage(root: string): Promise<void> {
       "name: reviewer",
       "description: Review a bounded task.",
       "enabled: true",
-      "allowedTools: [read_file]",
+      "allowedTools: [read]",
       "---",
       "",
       "Review the supplied task.",

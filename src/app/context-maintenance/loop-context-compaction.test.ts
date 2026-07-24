@@ -19,8 +19,8 @@ test("new tool results crossing the threshold compact old context and remain raw
       { role: "system", content: "system" },
       { role: "user", content: "old context ".repeat(70), ref: "old-context" },
       { role: "user", content: "Current user message: inspect", ref: "context:goal:inspect" },
-      { role: "assistant", content: "", toolCalls: [{ callId: "call-1", toolName: "read_file", input: {} }] },
-      { role: "tool", content: "x".repeat(200), toolCallId: "call-1", toolName: "read_file" },
+      { role: "assistant", content: "", toolCalls: [{ callId: "call-1", toolName: "read", input: {} }] },
+      { role: "tool", content: "x".repeat(200), toolCallId: "call-1", toolName: "read" },
     ],
     tools: [],
     intelligenceChannel: channel,
@@ -43,7 +43,7 @@ test("physical-window pressure compacts old context but preserves the latest uns
   const channel = new TestIntelligenceChannel("short summary");
   const toolCalls = Array.from({ length: 12 }, (_, index) => ({
     callId: `latest-${index}`,
-    toolName: "read_file",
+    toolName: "read",
     input: {},
   }));
   const result = await compactAgentLoopContextIfNeeded({
@@ -84,8 +84,8 @@ test("required current and unseen tool messages consume the recent token budget"
       { role: "user", content: "old context ".repeat(70), ref: "old-context" },
       { role: "user", content: `Current user message: ${"inspect ".repeat(10)}`, ref: "context:goal:inspect" },
       { role: "assistant", content: "earlier round that should be compacted", ref: "earlier-round" },
-      { role: "assistant", content: "", toolCalls: [{ callId: "call-latest", toolName: "read_file", input: {} }] },
-      { role: "tool", content: "latest result", toolCallId: "call-latest", toolName: "read_file" },
+      { role: "assistant", content: "", toolCalls: [{ callId: "call-latest", toolName: "read", input: {} }] },
+      { role: "tool", content: "latest result", toolCallId: "call-latest", toolName: "read" },
     ],
     tools: [],
     intelligenceChannel: channel,
@@ -120,7 +120,7 @@ test("neutral loop context compaction replaces compactible messages with a conti
       { role: "user", content: "Current user message: current task", ref: "context:goal:loop" },
     ],
     tools: [{
-      name: "read_file",
+      name: "read",
       description: "Read files",
       inputSchema: { type: "object", properties: {} },
       metadata: {
@@ -159,7 +159,7 @@ test("loop context compaction never preserves only part of a parallel tool inter
   const channel = new TestIntelligenceChannel("## Goal\nContinue after the complete tool batch.");
   const toolCalls = Array.from({ length: 12 }, (_, index) => ({
     callId: `call-${index}`,
-    toolName: "read_file",
+    toolName: "read",
     input: { path: `src/file-${index}.ts` },
   }));
   const result = await compactAgentLoopContextIfNeeded({
@@ -193,8 +193,8 @@ test("loop context compaction never preserves only part of a parallel tool inter
   assert.equal(result.messages.some((message) => message.role === "tool"), false);
   assert.equal(result.messages.some((message) => (message.toolCalls?.length ?? 0) > 0), false);
   const compactionInput = JSON.stringify(channel.requests[0]?.sanitizedMessages);
-  assert.equal(compactionInput.includes("read_file#call-0"), true);
-  assert.equal(compactionInput.includes("toolResultFor: read_file#call-11"), true);
+  assert.equal(compactionInput.includes("read#call-0"), true);
+  assert.equal(compactionInput.includes("toolResultFor: read#call-11"), true);
 });
 
 test("recent token budget preserves a complete parallel tool interaction in original order", async () => {
@@ -212,12 +212,12 @@ test("recent token budget preserves a complete parallel tool interaction in orig
         content: "",
         ref: "recent-tool-call",
         toolCalls: [
-          { callId: "call-a", toolName: "read_file", input: { path: "a.ts" } },
-          { callId: "call-b", toolName: "read_file", input: { path: "b.ts" } },
+          { callId: "call-a", toolName: "read", input: { path: "a.ts" } },
+          { callId: "call-b", toolName: "read", input: { path: "b.ts" } },
         ],
       },
-      { role: "tool", content: "result-a", toolCallId: "call-a", toolName: "read_file", ref: "recent-result-a" },
-      { role: "tool", content: "result-b", toolCallId: "call-b", toolName: "read_file", ref: "recent-result-b" },
+      { role: "tool", content: "result-a", toolCallId: "call-a", toolName: "read", ref: "recent-result-a" },
+      { role: "tool", content: "result-b", toolCallId: "call-b", toolName: "read", ref: "recent-result-b" },
     ],
     tools: [],
     intelligenceChannel: channel,
@@ -251,7 +251,7 @@ test("loop context budget includes tool arguments and protocol continuation item
         ref: "model:large-tool-call",
         toolCalls: [{
           callId: "call-large-input",
-          toolName: "write_file",
+          toolName: "write",
           input: { content: "x".repeat(1_400) },
         }],
         protocolExtensions: {
@@ -265,7 +265,7 @@ test("loop context budget includes tool arguments and protocol continuation item
         role: "tool",
         content: "written",
         toolCallId: "call-large-input",
-        toolName: "write_file",
+        toolName: "write",
         ref: "tool-result:call-large-input",
       },
       { role: "user", content: "Current user message: continue", ref: "context:goal:protocol-budget" },

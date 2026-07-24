@@ -24,7 +24,7 @@ import type {
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 import type { OrdinaryToolMetricsSnapshot } from "./tool-runtime-metrics.js";
 
-export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v4" as const;
+export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v5" as const;
 export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v2" as const;
 
 export type OrdinaryFeatureErrorCode =

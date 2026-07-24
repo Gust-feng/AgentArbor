@@ -37,42 +37,50 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.deepEqual(toolNames, [
       "search",
       "read",
-      "read_file",
-      "list_dir",
-      "grep_files",
-      "create_file",
-      "write_file",
-      "edit_file",
-      "delete_file",
-      "shell_command",
-      "start_process",
-      "inspect_process",
-      "stop_process",
-      "list_context_attachments",
-      "read_context_attachment_text",
-      "read_context_attachment_pdf_text",
-      "read_context_attachment_image",
-      "inspect_context_attachment_table",
-      "read_context_attachment_table",
-      "inspect_context_attachment_archive",
-      "list_context_attachment_files",
-      "search_context_attachment_files",
+      "read",
+      "list",
+      "grep",
+      "create",
+      "write",
+      "edit",
+      "delete",
+      "shell",
+      "process_start",
+      "process_inspect",
+      "process_stop",
+      "attachment_list",
+      "attachment_read_text",
+      "attachment_read_pdf",
+      "attachment_read_image",
+      "attachment_inspect_table",
+      "attachment_read_table",
+      "attachment_inspect_archive",
+      "attachment_list_files",
+      "attachment_search_files",
       "http_request",
     ]);
     assert.equal(toolNames.includes("create_directory"), false);
     assert.equal(toolNames.includes("http_request"), true);
     assert.equal(toolNames.includes("read_binary_file"), false);
 
-    const shellDefinition = center.list().find((tool) => tool.name === "shell_command");
+    const shellDefinition = center.list().find((tool) => tool.name === "shell");
     assert.notEqual(shellDefinition, undefined);
-    const shellSyntax = requireShellSyntax(shellDefinition!.metadata?.runtimeHints?.[0]?.syntax);
-    assert.equal("background" in shellDefinition!.inputSchema.properties, true);
-    assert.equal("backgroundWaitMs" in shellDefinition!.inputSchema.properties, true);
+    const shellSyntax = requireShellSyntax(
+      shellDefinition!.metadata?.runtimeHints?.find((hint) => hint.kind === "command_shell")?.syntax,
+    );
+    assert.equal("background" in shellDefinition!.inputSchema.properties, false);
+    assert.equal("backgroundWaitMs" in shellDefinition!.inputSchema.properties, false);
     assert.equal("cwd" in shellDefinition!.inputSchema.properties, true);
-    assert.match(modelVisibleToolDescription(shellDefinition!), /^Run a command in the current workspace shell\./);
+    assert.match(modelVisibleToolDescription(shellDefinition!), /^Run one command in the current workspace and wait for its exit\./);
     assert.doesNotMatch(modelVisibleToolDescription(shellDefinition!), /background=true|dev servers/);
 
-    const mkdir = await executeTool("call-mkdir", "shell_command", { commandLine: platformMakeDirectoryCommand("demo") });
+    const startDefinition = center.list().find((tool) => tool.name === "process_start");
+    assert.notEqual(startDefinition, undefined);
+    assert.equal("background" in startDefinition!.inputSchema.properties, false);
+    assert.equal("backgroundWaitMs" in startDefinition!.inputSchema.properties, true);
+    assert.equal("waitForPort" in startDefinition!.inputSchema.properties, true);
+
+    const mkdir = await executeTool("call-mkdir", "shell", { commandLine: platformMakeDirectoryCommand("demo") });
     assert.equal(mkdir.status, "completed");
     assert.equal((await stat(path.join(workspace, "demo"))).isDirectory(), true);
 
@@ -84,16 +92,16 @@ test("tool capability acceptance supports a demo-building workflow without comma
       "</html>",
       "",
     ].join("\n");
-    const write = await executeTool("call-write", "write_file", { path: "demo/index.html", content: html });
+    const write = await executeTool("call-write", "write", { path: "demo/index.html", content: html });
     assert.equal(write.status, "completed");
     assert.equal(resultFact(write).path, "demo/index.html");
     assert.equal(projectToolDisplay({ callId: write.callId, toolName: write.toolName, input: write.input }, write.output).kind, "file_change_summary");
 
-    const read = await executeTool("call-read", "read_file", { path: "demo/index.html" });
+    const read = await executeTool("call-read", "read", { path: "demo/index.html" });
     assert.equal(read.status, "completed");
     assert.match(String(resultFact(read).content), /demo-ready/);
 
-    const validate = await executeTool("call-validate", "shell_command", {
+    const validate = await executeTool("call-validate", "shell", {
       commandLine: `${process.execPath} -e "const fs=require('fs'); console.log(fs.readFileSync('index.html','utf8').includes('demo-ready') ? 'validated' : 'missing')"`,
       command: process.execPath,
       args: ["-e", "const fs=require('fs'); console.log(fs.readFileSync('index.html','utf8').includes('demo-ready') ? 'validated' : 'missing')"],
@@ -103,7 +111,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal(resultFact(validate).cwd, "demo");
     assert.match(String(resultFact(validate).stdout), /validated/);
 
-    const commandFailure = await executeTool("call-command-failure", "shell_command", {
+    const commandFailure = await executeTool("call-command-failure", "shell", {
       command: process.execPath,
       args: ["-e", "console.error('structured command failure'); process.exit(7);"],
     });
@@ -131,13 +139,13 @@ test("tool capability acceptance supports a demo-building workflow without comma
       "server.listen(port, '127.0.0.1', () => console.log(`HTTP_READY:${port}`));",
       "",
     ].join("\n");
-    const writeServer = await executeTool("call-write-server", "write_file", {
+    const writeServer = await executeTool("call-write-server", "write", {
       path: "demo/server.mjs",
       content: serverSource,
     });
     assert.equal(writeServer.status, "completed");
 
-    const server = await executeTool("call-start-server", "shell_command", {
+    const server = await executeTool("call-start-server", "shell", {
       commandLine: `${process.execPath} server.mjs ${port}`,
       command: process.execPath,
       args: ["server.mjs", String(port)],
@@ -190,7 +198,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal(httpNotFoundContent.statusCode, 404);
     assert.match(httpNotFoundContent.body ?? "", /demo-missing/);
 
-    const stoppedServer = await executeTool("call-stop-server", "shell_command", {
+    const stoppedServer = await executeTool("call-stop-server", "shell", {
       commandLine: backgroundStopCommand,
       timeoutMs: 2_000,
     });
@@ -200,7 +208,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal(stoppedServer.status, "completed");
     await waitUntil(async () => !(await canConnectToLocalhostPort(port)), 5_000);
 
-    const largeOutput = await executeTool("call-large-output", "shell_command", {
+    const largeOutput = await executeTool("call-large-output", "shell", {
       command: process.execPath,
       args: ["-e", "process.stdout.write('x'.repeat(140000));"],
     });
@@ -213,7 +221,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal((largeContent.stdout?.length ?? 0) <= 16_000, true);
 
     const startedAt = Date.now();
-    const timedOut = await executeTool("call-timeout", "shell_command", {
+    const timedOut = await executeTool("call-timeout", "shell", {
       command: process.execPath,
       args: ["-e", "console.log('before-timeout'); setTimeout(() => {}, 5000);"],
       timeoutMs: 200,
@@ -231,7 +239,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.match(timedOutContent.stderr ?? "", /timed out after 200ms/);
     assert.equal(Date.now() - startedAt < 4_000, true);
 
-    const background = await executeTool("call-background", "shell_command", {
+    const background = await executeTool("call-background", "shell", {
       command: process.execPath,
       args: ["-e", "console.log('server-ready'); setTimeout(() => {}, 5000);"],
       background: true,
@@ -260,7 +268,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       }
     });
 
-    const stopped = await executeTool("call-stop-background", "shell_command", {
+    const stopped = await executeTool("call-stop-background", "shell", {
       commandLine: backgroundStopCommand,
       timeoutMs: 2_000,
     });
@@ -270,7 +278,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal(stopped.status, "completed");
     await delay(100);
 
-    const shellBackground = await executeTool("call-shell-native-background", "shell_command", {
+    const shellBackground = await executeTool("call-shell-native-background", "shell", {
       commandLine: shellBackgroundLogCommand(shellSyntax),
       background: true,
       backgroundWaitMs: 1_000,
@@ -298,7 +306,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       }
     });
 
-    const shellBackgroundStopped = await executeTool("call-stop-shell-native-background", "shell_command", {
+    const shellBackgroundStopped = await executeTool("call-stop-shell-native-background", "shell", {
       commandLine: shellBackgroundStopCommand,
       timeoutMs: 2_000,
     });
@@ -309,7 +317,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     await delay(100);
   } finally {
     if (shellBackgroundStopCommand !== undefined) {
-      await executeTool("call-stop-shell-native-background-finally", "shell_command", {
+      await executeTool("call-stop-shell-native-background-finally", "shell", {
         commandLine: shellBackgroundStopCommand,
         timeoutMs: 2_000,
       }).catch(() => undefined);
@@ -317,7 +325,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       await delay(50);
     }
     if (backgroundStopCommand !== undefined) {
-      await executeTool("call-stop-background-finally", "shell_command", {
+      await executeTool("call-stop-background-finally", "shell", {
         commandLine: backgroundStopCommand,
         timeoutMs: 2_000,
       }).catch(() => undefined);

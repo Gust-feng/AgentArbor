@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { SessionError } from "@earendil-works/pi-agent-core";
+import {
+  createModels,
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxToolCall,
+} from "@earendil-works/pi-ai";
+import type {
+  AgentLoopInput,
+  AgentLoopToolVisibilityPlan,
+} from "../../app/model-runtime/agent-loop.js";
+import type { ToolDefinition, ToolExecutionGateway } from "../../domain/tools/index.js";
+import { createAgentSessionLoop } from "./agent-session-loop.js";
 import {
   AgentSessionRepositoryError,
   FileSystemAgentSessionRepository,
@@ -59,7 +71,7 @@ test("file-system agent session repository reads the active branch while its wri
   const userEntryId = await writer.session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
   const assistantEntryId = await writer.session.appendMessage({
     role: "assistant",
-    content: [{ type: "toolCall", id: "call-1", name: "read_file", arguments: { path: "README.md" } }],
+    content: [{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "README.md" } }],
     api: "openai-responses",
     provider: "test",
     model: "test",
@@ -79,7 +91,7 @@ test("file-system agent session repository reads the active branch while its wri
   assert.deepEqual(await fixture.repository.readToolCalls({
     sessionRef: ref,
     assistantEntryRef: { sessionId: ref.sessionId, entryId: assistantEntryId },
-  }), [{ callId: "call-1", toolName: "read_file", input: { path: "README.md" } }]);
+  }), [{ callId: "call-1", toolName: "read", input: { path: "README.md" } }]);
 
   await writer.release();
 });
@@ -146,8 +158,8 @@ test("file-system agent session repository reads active tool calls and reconcile
   const assistantEntryId = await lease.session.appendMessage({
     role: "assistant",
     content: [
-      { type: "toolCall", id: "call-1", name: "read_file", arguments: { path: "README.md" } },
-      { type: "toolCall", id: "call-2", name: "list_dir", arguments: { path: "." } },
+      { type: "toolCall", id: "call-1", name: "read", arguments: { path: "README.md" } },
+      { type: "toolCall", id: "call-2", name: "list", arguments: { path: "." } },
     ],
     api: "openai-responses",
     provider: "test",
@@ -160,12 +172,12 @@ test("file-system agent session repository reads active tool calls and reconcile
   const assistantEntryRef = { sessionId: ref.sessionId, entryId: assistantEntryId };
 
   assert.deepEqual(await fixture.repository.readToolCalls({ sessionRef: ref, assistantEntryRef }), [
-    { callId: "call-1", toolName: "read_file", input: { path: "README.md" } },
-    { callId: "call-2", toolName: "list_dir", input: { path: "." } },
+    { callId: "call-1", toolName: "read", input: { path: "README.md" } },
+    { callId: "call-2", toolName: "list", input: { path: "." } },
   ]);
   const orderedResults = [
-    { callId: "call-1", toolName: "read_file", input: { path: "README.md" }, output: { content: "read" }, status: "completed" as const, durationMs: 1 },
-    { callId: "call-2", toolName: "list_dir", input: { path: "." }, output: ["src"], status: "completed" as const, durationMs: 1 },
+    { callId: "call-1", toolName: "read", input: { path: "README.md" }, output: { content: "read" }, status: "completed" as const, durationMs: 1 },
+    { callId: "call-2", toolName: "list", input: { path: "." }, output: ["src"], status: "completed" as const, durationMs: 1 },
   ];
   await assert.rejects(
     fixture.repository.reconcileToolResultEntries({
@@ -215,6 +227,157 @@ test("file-system agent session repository reads active tool calls and reconcile
   assert.deepEqual(await fixture.repository.getActiveBranchEntryRefs(ref), firstBranch);
 });
 
+test("file-system agent session recovery does not infer protocol activation markers from public tool output", async (t) => {
+  const fixture = await repositoryFixture(t);
+  const ref = await fixture.repository.create({ sessionId: "deferred-session", sessionCwd: fixture.workspace });
+  const lease = await fixture.repository.acquire(ref);
+  const assistantEntryId = await lease.session.appendMessage({
+    role: "assistant",
+    content: [{
+      type: "toolCall",
+      id: "load-call",
+      name: "mcp_load",
+      arguments: { tool_names: ["mcp_search", "mcp_fetch"] },
+    }],
+    api: "openai-responses",
+    provider: "test",
+    model: "test",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "toolUse",
+    timestamp: Date.now(),
+  });
+  await lease.release();
+
+  await fixture.repository.reconcileToolResultEntries({
+    sessionRef: ref,
+    assistantEntryRef: { sessionId: ref.sessionId, entryId: assistantEntryId },
+    orderedResults: [{
+      callId: "load-call",
+      toolName: "mcp_load",
+      input: { tool_names: ["mcp_search", "mcp_fetch"] },
+      output: {
+        kind: "tool_visibility_activation",
+        activatedToolNames: ["mcp_search", "mcp_fetch"],
+        alreadyLoaded: [],
+        remainingDeferredToolCount: 0,
+        availableFrom: "next_model_request",
+      },
+      status: "completed",
+      durationMs: 1,
+    }],
+  });
+
+  const restored = await fixture.repository.acquire(ref);
+  const toolResultEntry = (await restored.session.getBranch()).at(-1);
+  await restored.release();
+  assert.equal(toolResultEntry?.type, "message");
+  if (toolResultEntry?.type !== "message" || toolResultEntry.message.role !== "toolResult") {
+    assert.fail("Expected the reconciled leaf to be a tool result message.");
+  }
+  assert.equal(toolResultEntry.message.addedToolNames, undefined);
+});
+
+test("file-system agent session reopens with a fresh MCP active set while retaining the durable activation marker", async (t) => {
+  const fixture = await repositoryFixture(t);
+  const ref = await fixture.repository.create({ sessionId: "progressive-session", sessionCwd: fixture.workspace });
+  const definition = fileSystemMcpToolDefinition("docs__lookup");
+  const gateway: ToolExecutionGateway = {
+    list: () => [globalThis.structuredClone(definition)],
+    has: (name) => name === definition.name,
+    preflight: (request) => ({ status: "ready", request }),
+    execute: async () => { throw new Error("The deferred MCP executor must not run in this lifecycle test."); },
+  };
+  const visibilityPlan = fileSystemProgressiveVisibilityPlan(definition);
+  const inputFor = (userMessage: string, runId: string): AgentLoopInput => ({
+    instructions: "You are the Ordinary Agent.",
+    messages: [
+      { role: "system", content: "You are the Ordinary Agent." },
+      { role: "user", content: userMessage },
+    ],
+    tools: {
+      definitions: [globalThis.structuredClone(definition)],
+      gateway,
+      context: { callerAgentId: "ordinary", traceId: runId, goalId: runId },
+      permission: { callerAgentId: "ordinary", allowedTools: [definition.name] },
+    },
+    toolVisibilityPlan: visibilityPlan,
+    abortSignal: new AbortController().signal,
+  });
+  const faux = fauxProvider();
+  const models = createModels();
+  models.setProvider(faux.provider);
+
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: [definition.name] }, { id: "load-first" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("first run complete"),
+  ]);
+  const firstLease = await fixture.repository.acquire(ref);
+  const firstLoop = createAgentSessionLoop({
+    executionEnvironment: fixture.fileSystem,
+    modelRegistry: models,
+    selectedModel: faux.getModel(),
+    agentSession: firstLease.session,
+  });
+  try {
+    const first = await firstLoop.execute(inputFor("load the documentation tool", "first-run"));
+    assert.equal(first.status, "completed", first.status === "failed" ? first.error : undefined);
+    assert.equal(first.toolResults.find((result) => result.toolName === "mcp_load")?.status, "completed");
+  } finally {
+    await firstLoop.release();
+    await firstLease.release();
+  }
+
+  const reopenedRepository = new FileSystemAgentSessionRepository({
+    fileSystem: fixture.fileSystem,
+    sessionsRoot: fixture.sessionsRoot,
+  });
+  const secondLease = await reopenedRepository.acquire(ref);
+  let secondRequest: {
+    readonly toolNames: readonly string[];
+    readonly historicalLoadFound: boolean;
+    readonly historicalAddedToolNames?: readonly string[];
+  } | undefined;
+  faux.setResponses([(context) => {
+    const historicalLoad = context.messages.find((message) =>
+      message.role === "toolResult" && message.toolName === "mcp_load");
+    const historicalAddedToolNames = historicalLoad?.role === "toolResult"
+      ? historicalLoad.addedToolNames
+      : undefined;
+    secondRequest = {
+      toolNames: (context.tools ?? []).map((tool) => tool.name),
+      historicalLoadFound: historicalLoad !== undefined,
+      ...(historicalAddedToolNames === undefined
+        ? {}
+        : { historicalAddedToolNames: [...historicalAddedToolNames] }),
+    };
+    return fauxAssistantMessage("second run complete");
+  }]);
+  const secondLoop = createAgentSessionLoop({
+    executionEnvironment: fixture.fileSystem,
+    modelRegistry: models,
+    selectedModel: faux.getModel(),
+    agentSession: secondLease.session,
+  });
+  try {
+    const second = await secondLoop.execute(inputFor("continue with a fresh run", "second-run"));
+    assert.equal(second.status, "completed", second.status === "failed" ? second.error : undefined);
+  } finally {
+    await secondLoop.release();
+    await secondLease.release();
+  }
+
+  assert.deepEqual(secondRequest, {
+    toolNames: ["mcp_search", "mcp_load"],
+    historicalLoadFound: true,
+  });
+  const sessionPath = path.join(fixture.sessionsRoot, ...ref.storageKey.split("/"));
+  assert.deepEqual(durableToolActivationMarkers(await readFile(sessionPath, "utf8"), "mcp_load"), [
+    [definition.name],
+  ]);
+});
+
 test("file-system agent session repository surfaces malformed JSONL instead of opening a partial session", async (t) => {
   const fixture = await repositoryFixture(t);
   const ref = await fixture.repository.create({ sessionId: "session-one", sessionCwd: fixture.workspace });
@@ -257,7 +420,7 @@ test("file-system agent session repository restores a pending tool branch after 
   const safeEntryId = await lease.session.appendMessage({ role: "user", content: "write", timestamp: 1 });
   const assistantEntryId = await lease.session.appendMessage({
     role: "assistant",
-    content: [{ type: "toolCall", id: "call-1", name: "write_file", arguments: { path: "a.txt" } }],
+    content: [{ type: "toolCall", id: "call-1", name: "write", arguments: { path: "a.txt" } }],
     api: "openai-responses",
     provider: "test",
     model: "test",
@@ -278,7 +441,7 @@ test("file-system agent session repository restores a pending tool branch after 
     recoveryLeafRef: { sessionId: ref.sessionId, entryId: safeEntryId },
     orderedResults: [{
       callId: "call-1",
-      toolName: "write_file",
+      toolName: "write",
       input: { path: "a.txt" },
       output: undefined,
       status: "failed",
@@ -302,7 +465,7 @@ test("file-system agent session repository refuses to revive a stale tool branch
   const safeEntryId = await lease.session.appendMessage({ role: "user", content: "write", timestamp: 1 });
   const assistantEntryId = await lease.session.appendMessage({
     role: "assistant",
-    content: [{ type: "toolCall", id: "call-1", name: "write_file", arguments: { path: "a.txt" } }],
+    content: [{ type: "toolCall", id: "call-1", name: "write", arguments: { path: "a.txt" } }],
     api: "openai-responses",
     provider: "test",
     model: "test",
@@ -323,7 +486,7 @@ test("file-system agent session repository refuses to revive a stale tool branch
       recoveryLeafRef: { sessionId: ref.sessionId, entryId: safeEntryId },
       orderedResults: [{
         callId: "call-1",
-        toolName: "write_file",
+        toolName: "write",
         input: { path: "a.txt" },
         output: undefined,
         status: "failed",
@@ -367,6 +530,107 @@ test("file-system agent session repository delete is idempotent and refuses an a
     (error: unknown) => error instanceof AgentSessionRepositoryError && error.code === "agent_session_not_found",
   );
 });
+
+function fileSystemMcpToolDefinition(name: string): ToolDefinition {
+  return {
+    name,
+    description: `Execute frozen MCP tool ${name}.`,
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string", minLength: 1 } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    metadata: {
+      category: "mcp",
+      riskLevel: "low",
+      operationType: "read-only",
+      requiresConfirmation: false,
+    },
+  };
+}
+
+function fileSystemProgressiveVisibilityPlan(definition: ToolDefinition): AgentLoopToolVisibilityPlan {
+  return {
+    policyId: "mcp-progressive/v1",
+    snapshotId: "file-system-progressive-session",
+    costGate: {
+      minimumDeferredDefinitionTokens: 1,
+      minimumNetDefinitionSavingsTokens: 1,
+      definitionSerialization: { api: "openai-responses", includeStrict: true },
+    },
+    initiallyVisibleToolNames: [],
+    deferredTools: [{
+      name: definition.name,
+      displayName: definition.name,
+      description: definition.description,
+      source: { kind: "mcp", id: "docs", label: "Documentation" },
+      definitionHash: `sha256:${definition.name}`,
+    }],
+    controls: {
+      search: {
+        name: "mcp_search",
+        description: "Search the frozen MCP tool catalog without loading or executing tools.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", minLength: 1, maxLength: 200 },
+            server_id: { type: "string", minLength: 1, maxLength: 128 },
+            cursor: { type: "integer", minimum: 0 },
+            limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
+          },
+          additionalProperties: false,
+        },
+        metadata: {
+          category: "mcp",
+          riskLevel: "low",
+          operationType: "read-only",
+          requiresConfirmation: false,
+        },
+      },
+      load: {
+        name: "mcp_load",
+        description: "Expose authorized frozen MCP definitions from the next model request.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            tool_names: {
+              type: "array",
+              minItems: 1,
+              maxItems: 16,
+              uniqueItems: true,
+              items: { type: "string", minLength: 1, maxLength: 128 },
+            },
+          },
+          required: ["tool_names"],
+          additionalProperties: false,
+        },
+        metadata: {
+          category: "mcp",
+          riskLevel: "low",
+          operationType: "read-write",
+          requiresConfirmation: false,
+        },
+      },
+    },
+  };
+}
+
+function durableToolActivationMarkers(serializedSession: string, toolName: string): readonly unknown[] {
+  return serializedSession
+    .split(/\r?\n/u)
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as unknown)
+    .flatMap((entry) => {
+      if (!isRecord(entry) || entry.type !== "message" || !isRecord(entry.message)) return [];
+      if (entry.message.role !== "toolResult" || entry.message.toolName !== toolName) return [];
+      return [entry.message.addedToolNames];
+    });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 async function repositoryFixture(t: test.TestContext) {
   const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-session-repository-"));

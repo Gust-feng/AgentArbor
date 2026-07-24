@@ -16,14 +16,14 @@ test("Sub-Agent contributions resolve a frozen definition and narrow inherited m
   const root = await subAgentRoot(t, [{
     name: "review-expert",
     description: "Review implementation facts.",
-    allowedTools: ["read_file", "shell_command", "spawn_sub_agent"],
+    allowedTools: ["read", "shell", "agent_spawn"],
     body: "Review carefully and report concrete evidence.",
   }]);
   const registry = new SubAgentRegistry({ roots: [root] });
   const tools = await createSubAgentAgentTools({
     registry,
-    parentAllowedTools: ["read_file", "write_file", "spawn_sub_agent"],
-    executableTools: ["read_file", "write_file", "spawn_sub_agent"],
+    parentAllowedTools: ["read", "write", "agent_spawn"],
+    executableTools: ["read", "write", "agent_spawn"],
     exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME, SPAWN_SUB_AGENT_TOOL_NAME],
     dynamicSpawnAvailable: true,
   });
@@ -33,8 +33,6 @@ test("Sub-Agent contributions resolve a frozen definition and narrow inherited m
     SPAWN_SUB_AGENT_TOOL_NAME,
   ]);
   const call = tools[0]!;
-  assert.deepEqual(call.inputSchema.required, ["sub_agent_name", "task", "context"]);
-  assert.equal(call.inputSchema.additionalProperties, false);
   const invocation = await call.resolve({
     sub_agent_name: "review-expert",
     task: "Review the patch",
@@ -43,27 +41,27 @@ test("Sub-Agent contributions resolve a frozen definition and narrow inherited m
 
   assert.equal(invocation.agentName, "review-expert");
   assert.equal(invocation.callerAgentId, "sub-agent:review-expert");
-  assert.deepEqual(invocation.allowedTools, ["read_file"]);
+  assert.deepEqual(invocation.allowedTools, ["read"]);
   assert.match(invocation.instructions, /Review carefully/u);
   assert.match(invocation.input, /Review the patch/u);
   assert.match(invocation.input, /Focus on cancellation/u);
+  const withoutContext = await call.resolve({
+    sub_agent_name: "review-expert",
+    task: "Review without extra context",
+  });
+  assert.doesNotMatch(withoutContext.input, /Context:/u);
 });
 
-test("spawn_sub_agent distinguishes inheritance, no tools, explicit narrowing, and permission expansion", async (t) => {
+test("agent_spawn distinguishes inheritance, no tools, explicit narrowing, and permission expansion", async (t) => {
   const root = await subAgentRoot(t, []);
   const [spawn] = await createSubAgentAgentTools({
     registry: new SubAgentRegistry({ roots: [root] }),
-    parentAllowedTools: ["read_file", "shell_command", "call_sub_agent"],
-    executableTools: ["read_file", "shell_command", "call_sub_agent"],
+    parentAllowedTools: ["read", "shell", "agent_call"],
+    executableTools: ["read", "shell", "agent_call"],
     exposedToolNames: [SPAWN_SUB_AGENT_TOOL_NAME],
     dynamicSpawnAvailable: true,
   });
   assert.equal(spawn?.toolName, SPAWN_SUB_AGENT_TOOL_NAME);
-  assert.doesNotMatch(
-    JSON.stringify(spawn?.inputSchema),
-    /uniqueItems/u,
-    "OpenAI Agent.asTool() always uses strict mode, whose schema subset does not support uniqueItems",
-  );
 
   const base = {
     role: "focused-reviewer",
@@ -72,22 +70,28 @@ test("spawn_sub_agent distinguishes inheritance, no tools, explicit narrowing, a
     context: null,
   } as const;
   assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: null })).allowedTools, [
-    "read_file",
-    "shell_command",
+    "read",
+    "shell",
   ]);
+  assert.deepEqual((await spawn!.resolve({
+    role: base.role,
+    instructions: base.instructions,
+    task: base.task,
+  })).allowedTools, ["read", "shell"]);
   assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: [] })).allowedTools, []);
-  assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: ["read_file"] })).allowedTools, ["read_file"]);
+  assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: ["read"] })).allowedTools, ["read"]);
+  // Duplicate requests are normalized without changing the granted tool identity.
   assert.deepEqual(
-    (await spawn!.resolve({ ...base, allowed_tools: ["read_file", "read_file"] })).allowedTools,
-    ["read_file"],
+    (await spawn!.resolve({ ...base, allowed_tools: ["read", "read"] })).allowedTools,
+    ["read"],
   );
   await assert.rejects(
-    spawn!.resolve({ ...base, allowed_tools: ["write_file"] }),
-    /requested unavailable tools: write_file/u,
+    spawn!.resolve({ ...base, allowed_tools: ["write"] }),
+    /requested unavailable tools: write/u,
   );
 });
 
-test("call_sub_agent fails closed when the discovered definition body changes", async (t) => {
+test("agent_call fails closed when the discovered definition body changes", async (t) => {
   const root = await subAgentRoot(t, [{
     name: "hash-expert",
     description: "Checks frozen definitions.",
@@ -109,7 +113,7 @@ test("call_sub_agent fails closed when the discovered definition body changes", 
   );
 });
 
-test("call_sub_agent is absent when the frozen catalog has no enabled specialist", async (t) => {
+test("agent_call is absent when the frozen catalog has no enabled specialist", async (t) => {
   const root = await subAgentRoot(t, [{
     name: "disabled-expert",
     description: "Disabled.",
@@ -136,22 +140,22 @@ test("Sub-Agent AgentTools only materialize names allowed by the frozen run boun
 
   const callOnly = await createSubAgentAgentTools({
     registry,
-    parentAllowedTools: ["read_file"],
-    executableTools: ["read_file"],
+    parentAllowedTools: ["read"],
+    executableTools: ["read"],
     exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME],
     dynamicSpawnAvailable: true,
   });
   const none = await createSubAgentAgentTools({
     registry,
-    parentAllowedTools: ["read_file"],
-    executableTools: ["read_file"],
+    parentAllowedTools: ["read"],
+    executableTools: ["read"],
     exposedToolNames: [],
     dynamicSpawnAvailable: true,
   });
   const unavailableSpawn = await createSubAgentAgentTools({
     registry,
-    parentAllowedTools: ["read_file"],
-    executableTools: ["read_file"],
+    parentAllowedTools: ["read"],
+    executableTools: ["read"],
     exposedToolNames: [SPAWN_SUB_AGENT_TOOL_NAME],
     dynamicSpawnAvailable: false,
   });
@@ -180,7 +184,7 @@ test("Sub-Agent catalog contribution never installs a fake ToolCenter executor",
   ]);
   const callDescription = contribution.definitions.find((definition) => definition.name === CALL_SUB_AGENT_TOOL_NAME)?.description;
   const spawnDescription = contribution.definitions.find((definition) => definition.name === SPAWN_SUB_AGENT_TOOL_NAME)?.description;
-  assert.equal(callDescription, "Delegate one bounded task to an available specialist. Available specialists: reviewer: Reviews one bounded change.");
+  assert.equal(callDescription, "Delegate one bounded task to an available specialist.");
   assert.equal(spawnDescription, "Delegate one bounded task to a temporary specialist.");
   assert.doesNotMatch(spawnDescription, /saved|delegate to another agent/u);
   assert.equal(registry.createToolCenter("desktop-basic").has(CALL_SUB_AGENT_TOOL_NAME), false);

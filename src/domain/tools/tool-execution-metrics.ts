@@ -1,6 +1,6 @@
 import type { ToolOperationType } from "./contracts.js";
 
-export type ToolMetricContinuationKind = "native" | "read_tool_output";
+export type ToolMetricContinuationKind = "native" | "read_output";
 export type ToolMetricRetentionReason =
   | "body_limit"
   | "envelope_limit"

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";
 
-test("normalizeToolDisplayForOperation consumes the canonical edit_file unified diff", () => {
+test("normalizeToolDisplayForOperation consumes the canonical edit unified diff", () => {
   const display = normalizeToolDisplayForOperation({
-    toolName: "edit_file",
+    toolName: "edit",
     input: {
       path: "src/app/example.ts",
       edits: [
@@ -41,7 +41,7 @@ test("normalizeToolDisplayForOperation consumes the canonical edit_file unified 
 
 test("normalizeToolDisplayForOperation does not reconstruct an edit diff from input", () => {
   const display = normalizeToolDisplayForOperation({
-    toolName: "edit_file",
+    toolName: "edit",
     input: {
       path: "notes/demo.md",
       anchor: "old line",
@@ -111,9 +111,9 @@ test("normalizeToolDisplayForOperation keeps one multi-file tool call as a file 
   assert.equal(display.kind === "file_change_group" ? display.files[1]?.operation : undefined, "create");
 });
 
-test("normalizeToolDisplayForOperation derives write_file display without output display", () => {
+test("normalizeToolDisplayForOperation derives write display without output display", () => {
   const display = normalizeToolDisplayForOperation({
-    toolName: "write_file",
+    toolName: "write",
     input: {
       path: "notes/demo.md",
       content: "hello\nworld\n",
@@ -138,7 +138,7 @@ test("normalizeToolDisplayForOperation derives write_file display without output
 
 test("normalizeToolDisplayForOperation does not invent a changed line for empty file content", () => {
   const display = normalizeToolDisplayForOperation({
-    toolName: "create_file",
+    toolName: "create",
     input: {
       path: "notes/empty.md",
       content: "",
@@ -154,7 +154,7 @@ test("normalizeToolDisplayForOperation does not invent a changed line for empty 
 
 test("normalizeToolDisplayForOperation derives built-in create and delete operations", () => {
   const createDisplay = normalizeToolDisplayForOperation({
-    toolName: "create_file",
+    toolName: "create",
     input: {
       path: "src/new.ts",
       content: "export const value = 1;\n",
@@ -165,7 +165,7 @@ test("normalizeToolDisplayForOperation derives built-in create and delete operat
     },
   });
   const deleteDisplay = normalizeToolDisplayForOperation({
-    toolName: "delete_file",
+    toolName: "delete",
     input: {
       path: "src/old.ts",
       content: "RAW_BODY_SHOULD_NOT_SURFACE",
@@ -187,7 +187,7 @@ test("normalizeToolDisplayForOperation derives built-in create and delete operat
 
 test("normalizeToolDisplayForOperation derives file display from top-level facts", () => {
   const display = normalizeToolDisplayForOperation({
-    toolName: "write_file",
+    toolName: "write",
     input: {
       path: "notes/existing.md",
       content: "new body",
@@ -227,7 +227,7 @@ test("normalizeToolDisplayForOperation derives explicit custom file operation wi
 
 test("normalizeToolDisplayForOperation derives structured directory listings from list facts", () => {
   const display = normalizeToolDisplayForOperation({
-    toolName: "list_dir",
+    toolName: "list",
     input: {
       path: ".",
       depth: 1,
@@ -258,11 +258,11 @@ test("normalizeToolDisplayForOperation derives structured directory listings fro
 
 test("normalizeToolDisplayForOperation preserves directory and search targets while tools are running", () => {
   const directory = normalizeToolDisplayForOperation({
-    toolName: "list_dir",
+    toolName: "list",
     input: { path: "src/app", depth: 2 },
   });
   const search = normalizeToolDisplayForOperation({
-    toolName: "grep_files",
+    toolName: "grep",
     input: { query: "tool.requested", path: "src" },
   });
 
@@ -288,7 +288,7 @@ test("normalizeToolDisplayForOperation uses a concrete unknown tool name and req
 
 test("normalizeToolDisplayForOperation derives structured file search results ahead of generic attachment display", () => {
   const display = normalizeToolDisplayForOperation({
-    toolName: "search_context_attachment_files",
+    toolName: "attachment_search_files",
     input: {
       attachmentId: "ctx_project",
       query: "needle",
@@ -347,7 +347,7 @@ test("normalizeToolDisplayForOperation turns MCP web text into sources without a
 test("normalizeToolDisplayForOperation keeps complete canonical diffs without truncation markers", () => {
   const body = Array.from({ length: 220 }, (_, index) => `+line ${index + 1}`).join("\n");
   const display = normalizeToolDisplayForOperation({
-    toolName: "edit_file",
+    toolName: "edit",
     input: { path: "src/large.ts" },
     output: {
       path: "src/large.ts",

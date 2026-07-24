@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ProviderStreams } from "@earendil-works/pi-ai";
-import type { CapabilityToolCatalogItem } from "../../domain/config/index.js";
+import type {
+  CapabilityMcpCatalogItem,
+  CapabilityMcpToolCatalogItem,
+  CapabilityToolCatalogItem,
+} from "../../domain/config/index.js";
 import type { ModelMessage, ModelRequest } from "../../domain/intelligence/index.js";
 import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../../domain/soil/index.js";
 import { toolPresentationForDefinition, type ToolDefinition, type ToolExecutor } from "../../domain/tools/index.js";
@@ -26,10 +30,12 @@ import type { AgentHostRunResources } from "./agent-run-resources.js";
 import type { AgentToolRegistryContribution } from "../tool-center/index.js";
 import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import { createReadToolOutputTool } from "../tool-center/adapters/tool-output-read-tool.js";
+import { createLocalReadFileTool } from "../tool-center/adapters/local-workspace-read-tools.js";
+import { createReadSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { CodedExecutionError } from "../execution-errors/index.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
 
-const AGENT_TOOL_NAMES = ["call_sub_agent", "spawn_sub_agent"];
+const AGENT_TOOL_NAMES = ["agent_call", "agent_spawn"];
 
 test("Ordinary Host resources preserve canonical context and expose mechanical, MCP, Skill, and native Sub-Agent capabilities", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-run-resources-"));
@@ -138,33 +144,121 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   assert.equal(acquired.resolvedMessages.at(-1)?.attachments?.[0]?.attachmentId, "screen");
   assert.equal(acquired.resolvedMessages.at(-1)?.content.includes("Review Skill"), true);
   assert.equal(acquired.resolvedMessages.at(-1)?.content.includes("review the image"), true);
-  assert.equal(acquired.tools.permission.allowedTools.includes("read_file"), true);
+  assert.equal(acquired.tools.permission.allowedTools.includes("read"), true);
   assert.equal(acquired.tools.permission.allowedTools.includes("mcp_lookup"), true);
-  assert.equal(acquired.tools.permission.allowedTools.includes("read_skill_resource"), true);
+  assert.equal(acquired.tools.permission.allowedTools.includes("skill_read"), true);
   assert.equal(acquired.tools.context.confirmationPolicy, "prompt");
   assert.equal(acquired.tools.permission.confirmationPolicy, "prompt");
   assert.equal(acquired.capabilityResolution?.snapshotId, snapshot.snapshotId);
   assert.deepEqual(acquired.capabilityResolution?.allowedTools, [
     ...acquired.tools.permission.allowedTools,
-    "call_sub_agent",
-    "spawn_sub_agent",
+    "agent_call",
+    "agent_spawn",
   ]);
   assert.equal(acquired.capabilityResolution?.runMode, "agent");
   assert.equal(AGENT_TOOL_NAMES.some((name) => acquired.tools.gateway.has(name)), false);
-  assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["call_sub_agent", "spawn_sub_agent"]);
+  assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["agent_call", "agent_spawn"]);
+  assert.equal(loopConfig?.toolDefinitionTokenCounter?.("visible definition"), "visible definition".length);
+  loopConfig?.onProviderToolDefinitionMetrics?.({
+    toolCount: 2,
+    totalTokens: 19,
+    tools: [{
+      toolName: "read",
+      operationType: "read-only",
+      definitionHash: "definition-hash",
+      definitionTokens: 11,
+    }],
+  });
+  const toolMetrics = acquired.toolMetrics?.snapshot();
+  assert.equal(toolMetrics?.definitionRequestCount, 1);
+  assert.equal(toolMetrics?.definitionToolCount.max, 2);
+  assert.equal(toolMetrics?.totalDefinitionTokens.max, 19);
+  assert.equal(toolMetrics?.tools[0]?.definitionHash, "definition-hash");
+  assert.equal(toolMetrics?.tools[0]?.definitionTokens.max, 11);
   const deniedSpawn = await acquirer.acquire(executionInput(
     snapshot,
     {
-      permissionBoundaryRefs: ["deny:tool:spawn_sub_agent"],
+      permissionBoundaryRefs: ["deny:tool:agent_spawn"],
     },
   ));
-  assert.deepEqual(deniedSpawn.agentTools?.map((tool) => tool.toolName), ["call_sub_agent"]);
+  assert.deepEqual(deniedSpawn.agentTools?.map((tool) => tool.toolName), ["agent_call"]);
 
   await acquired.release();
   await acquired.release();
   await deniedSpawn.release();
   assert.equal(loopReleases, 2);
   assert.equal(hostReleases, 2);
+});
+
+test("Ordinary Host resources defer costly MCP definitions without narrowing execution authorization", async () => {
+  const baseSnapshot = capabilitySnapshot(process.cwd(), []);
+  const snapshot = {
+    ...baseSnapshot,
+    modelCapabilities: {
+      ...baseSnapshot.modelCapabilities,
+      protocolProfileId: "openai" as const,
+    },
+  };
+  const tokenCounter = progressiveTokenCounter("mcp_lookup");
+  let loopConfig: AgentSessionLoopOptions | undefined;
+  const acquirer = createOrdinaryAgentRunResourceAcquirer({
+    host: {} as never,
+    sessionRepository: sessionRepository(),
+    soilStore: createMinimalReadonlySoilStore([]),
+    resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
+    resolveSubAgentRoots: () => [],
+  }, {
+    async prepareHostResources() {
+      return resources(snapshot, process.cwd(), () => undefined);
+    },
+    createSessionLoop(input) {
+      loopConfig = input;
+      return loop(() => undefined);
+    },
+    createTokenCounter: () => tokenCounter,
+  });
+
+  const acquired = await acquirer.acquire(executionInput(snapshot, { permissionBoundaryRefs: [] }));
+
+  assert.equal(acquired.tools.permission.allowedTools.includes("mcp_lookup"), true);
+  assert.equal(acquired.toolVisibilityPlan?.policyId, "mcp-progressive/v1");
+  assert.deepEqual(acquired.toolVisibilityPlan?.deferredTools.map((tool) => tool.name), ["mcp_lookup"]);
+  assert.equal(acquired.toolVisibilityPlan?.initiallyVisibleToolNames.includes("mcp_lookup"), false);
+  assert.equal(loopConfig?.toolDefinitionTokenCounter, tokenCounter.countText);
+
+  await acquired.release();
+});
+
+test("Ordinary Host resources keep MCP definitions direct when the tokenizer is a fallback", async () => {
+  const baseSnapshot = capabilitySnapshot(process.cwd(), []);
+  const snapshot = {
+    ...baseSnapshot,
+    modelCapabilities: {
+      ...baseSnapshot.modelCapabilities,
+      protocolProfileId: "openai" as const,
+    },
+  };
+  const matched = progressiveTokenCounter("mcp_lookup");
+  const fallbackCounter: AgentLoopTokenCounter = { ...matched, tokenizerMatch: "fallback" };
+  const acquirer = createOrdinaryAgentRunResourceAcquirer({
+    host: {} as never,
+    sessionRepository: sessionRepository(),
+    soilStore: createMinimalReadonlySoilStore([]),
+    resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
+    resolveSubAgentRoots: () => [],
+  }, {
+    async prepareHostResources() {
+      return resources(snapshot, process.cwd(), () => undefined);
+    },
+    createSessionLoop: () => loop(() => undefined),
+    createTokenCounter: () => fallbackCounter,
+  });
+
+  const acquired = await acquirer.acquire(executionInput(snapshot, { permissionBoundaryRefs: [] }));
+
+  assert.equal(acquired.tools.permission.allowedTools.includes("mcp_lookup"), true);
+  assert.equal(acquired.toolVisibilityPlan, undefined);
+  await acquired.release();
 });
 
 test("Ordinary Host resources run retained Skill evidence and confirmation through the real Agent Session loop", async (t) => {
@@ -188,7 +282,7 @@ test("Ordinary Host resources run retained Skill evidence and confirmation throu
   const snapshot = capabilitySnapshot(root, [], [outputReader.definition, confirmed.definition]);
   const model = fauxProvider();
   model.setResponses([
-    fauxAssistantMessage(fauxToolCall("read_skill_resource", {
+    fauxAssistantMessage(fauxToolCall("skill_read", {
       skillId: "review-skill",
       path: "references/guide.md",
       type: "reference",
@@ -198,7 +292,7 @@ test("Ordinary Host resources run retained Skill evidence and confirmation throu
       const visible = JSON.stringify(context.messages.at(-1));
       assert.match(visible, /tool-output:\/\/vertical-skill-evidence/u);
       assert.equal(visible.includes("SKILL_EVIDENCE_END"), false);
-      return fauxAssistantMessage(fauxToolCall("read_tool_output", {
+      return fauxAssistantMessage(fauxToolCall("read_output", {
         ref: "tool-output://vertical-skill-evidence",
         startChar: 0,
         maxChars: 20_000,
@@ -304,8 +398,8 @@ test("Ordinary Host resources run retained Skill evidence and confirmation throu
   assert.equal(model.state.callCount, 4);
   assert.equal(confirmedExecutions, 1);
   assert.deepEqual(accepted, [
-    { toolName: "read_skill_resource", status: "completed" },
-    { toolName: "read_tool_output", status: "completed" },
+    { toolName: "skill_read", status: "completed" },
+    { toolName: "read_output", status: "completed" },
     { toolName: "confirmed_fixture", status: "approval_required" },
     { toolName: "confirmed_fixture", status: "completed" },
   ]);
@@ -488,7 +582,7 @@ test("Ordinary run release cleans run resources without discarding retained outp
   const retained = await outputStore.retain({
     mediaType: "text/plain",
     content: "continue reading this result",
-    sourceToolName: "shell_command",
+    sourceToolName: "shell",
     sourceCallId: "call-retained-output",
     ownerId: "run-cleanup",
   });
@@ -617,23 +711,61 @@ function capabilitySnapshot(
   agentToolDefinitions: readonly ToolDefinition[] = [],
 ): OrdinaryRunBirth["capabilitySnapshot"] {
   const base = ordinaryRunBirth().capabilitySnapshot;
+  const mcpLookup = mcpCatalogTool("mcp_lookup");
   const tools = [
-    tool("read_file", ["workspace", "desktop-basic"]),
-    tool("read_skill_resource", ["desktop-basic"]),
-    tool("mcp_lookup", ["mcp"]),
-    ...agentToolDefinitions.map(capabilityToolFromDefinition),
+    capabilityToolFromDefinition(
+      createLocalReadFileTool(workspaceRoot).definition,
+      ["workspace", "desktop-basic"],
+    ),
+    capabilityToolFromDefinition(createReadSkillResourceTool().definition, ["desktop-basic"]),
+    mcpLookup,
+    ...agentToolDefinitions.map((definition) => capabilityToolFromDefinition(definition)),
   ];
   return {
     ...base,
     toolCatalog: { scope: "desktop-basic", tools, allowedTools: tools.map((item) => item.name) },
+    mcpCatalog: [mcpServerCatalog(mcpLookup)],
     subAgentCatalog,
     workspace: { ...base.workspace, workspaceDirectory: workspaceRoot },
   };
 }
 
-function capabilityToolFromDefinition(definition: ToolDefinition): CapabilityToolCatalogItem {
+function mcpCatalogTool(name: string): CapabilityMcpToolCatalogItem {
+  const item = capabilityToolFromDefinition(executor(name).definition, ["mcp"]);
+  return {
+    ...item,
+    protocolName: name,
+  };
+}
+
+function mcpServerCatalog(tool: CapabilityMcpToolCatalogItem): CapabilityMcpCatalogItem {
+  return {
+    serverId: "fixture-mcp",
+    label: "Fixture MCP",
+    transport: "stdio",
+    enabled: true,
+    confirmationMode: "unsafe_only",
+    availability: "configured",
+    runtimeStatus: "configured",
+    envSecretRefCount: 0,
+    authSecretRefCount: 0,
+    toolExposureMode: "all",
+    enabledTools: [tool.protocolName],
+    autoApprovedTools: [],
+    tools: [tool],
+    exposedTools: [tool],
+    updatedAt: "2026-07-22T00:00:00.000Z",
+  };
+}
+
+function capabilityToolFromDefinition(
+  definition: ToolDefinition,
+  scopes: CapabilityToolCatalogItem["scopes"] = ["desktop-basic"],
+): CapabilityToolCatalogItem {
   const metadata = definition.metadata;
   assert.notEqual(metadata, undefined);
+  const definitionHash = toolDefinitionContractHash(definition);
+  if (definitionHash === undefined) throw new Error(`Missing hash for ${definition.name}`);
   const presentation = toolPresentationForDefinition(definition);
   return {
     name: definition.name,
@@ -641,36 +773,18 @@ function capabilityToolFromDefinition(definition: ToolDefinition): CapabilityToo
     displayDescription: presentation.displayDescription,
     description: definition.description,
     inputSchema: globalThis.structuredClone(definition.inputSchema),
+    outputSchema: definition.outputSchema,
     category: metadata!.category,
     categoryLabel: presentation.categoryLabel,
     riskLevel: metadata!.riskLevel,
     riskLabel: presentation.riskLabel,
     operationType: metadata!.operationType,
+    fileOperation: metadata!.fileOperation,
     operationLabel: presentation.operationLabel,
     requiresConfirmation: metadata!.requiresConfirmation,
     confirmationLabel: presentation.confirmationLabel,
-    definitionHash: toolDefinitionContractHash(definition),
-    scopes: ["desktop-basic"],
-    enabled: true,
-    availability: "available",
-  };
-}
-
-function tool(name: string, scopes: CapabilityToolCatalogItem["scopes"]): CapabilityToolCatalogItem {
-  return {
-    name,
-    displayName: name,
-    displayDescription: `${name} tool`,
-    description: `${name} tool`,
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    category: name === "mcp_lookup" ? "mcp" : name === "read_skill_resource" ? "other" : "filesystem",
-    categoryLabel: "Tool",
-    riskLevel: "low",
-    riskLabel: "Low",
-    operationType: "read-only",
-    operationLabel: "Read",
-    requiresConfirmation: false,
-    confirmationLabel: "No confirmation",
+    definitionHash,
+    runtimeHints: metadata!.runtimeHints,
     scopes,
     enabled: true,
     availability: "available",
@@ -724,6 +838,19 @@ function observingTokenCounter(observedText: string[]): AgentLoopTokenCounter {
   };
 }
 
+function progressiveTokenCounter(...expensiveToolNames: readonly string[]): AgentLoopTokenCounter {
+  const base = characterTokenCounter();
+  return {
+    ...base,
+    tokenizerMatch: "model",
+    countText(text) {
+      return base.countText(text) + expensiveToolNames
+        .filter((name) => text.includes(`\"name\":\"${name}\"`))
+        .length * 20_000;
+    },
+  };
+}
+
 function executor(name: string): ToolExecutor {
   return {
     definition: {
@@ -768,7 +895,7 @@ async function createSubAgentRoot(root: string): Promise<string> {
     "---",
     'name: "reviewer"',
     'description: "Review implementation facts."',
-    'allowed-tools: ["read_file"]',
+    'allowed-tools: ["read"]',
     "---",
     "",
     "Review carefully and report complete evidence.",

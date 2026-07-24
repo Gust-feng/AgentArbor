@@ -4,16 +4,16 @@ import { capabilitySnapshotWithTools } from "./deep-child-agent-runner-test-supp
 import { projectMultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 
 test("projectMultiAgentCapabilitySnapshot keeps Deep facts and removes Ordinary-only catalogs", () => {
-  const base = capabilitySnapshotWithTools(["read_file"]);
+  const base = capabilitySnapshotWithTools(["read"]);
   const source = {
     ...base,
     toolCatalog: {
       ...base.toolCatalog,
       tools: [
         ...base.toolCatalog.tools,
-        { ...base.toolCatalog.tools[0]!, name: "call_sub_agent", catalogOnly: true },
+        { ...base.toolCatalog.tools[0]!, name: "agent_call", catalogOnly: true },
       ],
-      allowedTools: [...base.toolCatalog.allowedTools, "call_sub_agent"],
+      allowedTools: [...base.toolCatalog.allowedTools, "agent_call"],
     },
     skillTrigger: {
       mode: "model",
@@ -38,8 +38,8 @@ test("projectMultiAgentCapabilitySnapshot keeps Deep facts and removes Ordinary-
   assert.equal("skillCatalog" in projected, false);
   assert.equal("subAgentCatalog" in projected, false);
   assert.equal("skillTrigger" in projected, false);
-  assert.deepEqual(projected.toolCatalog.allowedTools, ["read_file"]);
-  assert.deepEqual(projected.toolCatalog.tools.map((tool) => tool.name), ["read_file"]);
+  assert.deepEqual(projected.toolCatalog.allowedTools, ["read"]);
+  assert.deepEqual(projected.toolCatalog.tools.map((tool) => tool.name), ["read"]);
   assert.deepEqual(projected.mcpCatalog, source.mcpCatalog);
   assert.deepEqual(projected.workspace, source.workspace);
   assert.deepEqual(projected.toolConfirmation, source.toolConfirmation);

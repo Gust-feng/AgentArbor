@@ -7,7 +7,7 @@ test("OrdinaryToolMetricsCollector aggregates definition, execution and scheduli
   metrics.recordDefinitionRequest(2, 600);
   metrics.record({
     kind: "definition",
-    toolName: "read_file",
+    toolName: "read",
     operationType: "read-only",
     definitionHash: "abc123",
     definitionTokens: 240,
@@ -16,7 +16,7 @@ test("OrdinaryToolMetricsCollector aggregates definition, execution and scheduli
   });
   metrics.record({
     kind: "execution",
-    toolName: "read_file",
+    toolName: "read",
     operationType: "read-only",
     status: "completed",
     inputTokens: 12,
@@ -30,7 +30,7 @@ test("OrdinaryToolMetricsCollector aggregates definition, execution and scheduli
   });
   metrics.record({
     kind: "execution",
-    toolName: "read_file",
+    toolName: "read",
     operationType: "read-only",
     status: "completed",
     finalEnvelopeTokens: 200,
@@ -40,7 +40,7 @@ test("OrdinaryToolMetricsCollector aggregates definition, execution and scheduli
   });
   metrics.record({
     kind: "scheduling",
-    toolName: "read_file",
+    toolName: "read",
     operationType: "read-only",
     queueWaitMs: 4,
     executionMs: 20,

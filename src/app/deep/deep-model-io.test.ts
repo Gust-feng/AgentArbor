@@ -143,13 +143,13 @@ test("deepDecisionMessages explains child budgets as optional without showing a 
 test("deepIntakeMessages projects executable tools and routes workspace operations to collaboration", () => {
   const messages = deepIntakeMessages({
     message: "你可以操控文件夹吗",
-    capabilitySnapshot: capabilitySnapshotWithTools(["read_file", "shell_command"]),
+    capabilitySnapshot: capabilitySnapshotWithTools(["read", "shell"]),
   });
   const prompt = messages.map((message) => message.content).join("\n");
 
   assert.match(prompt, /可用工具清单/);
-  assert.match(prompt, /read_file/);
-  assert.match(prompt, /shell_command/);
+  assert.match(prompt, /read/);
+  assert.match(prompt, /shell/);
   assert.match(prompt, /列目录、读取\/修改文件、查看当前工作区、执行命令/);
   assert.match(prompt, /不得声称没有文件、终端、工作区或底层工具/);
   assert.match(prompt, /start_collaboration/);
@@ -169,15 +169,15 @@ test("deepDecisionMessages instructs manager to spawn children for file and term
     evidenceRefs: [],
     permissionBoundaryRefs: [],
     maxChildren: 4,
-    capabilitySnapshot: capabilitySnapshotWithTools(["read_file", "shell_command"]),
+    capabilitySnapshot: capabilitySnapshotWithTools(["read", "shell"]),
   });
   const prompt = messages.map((message) => message.content).join("\n");
 
   assert.match(prompt, /查看工作区或收集一手文件\/终端证据/);
   assert.match(prompt, /不能声称没有工具/);
   assert.match(prompt, /childSpec.allowedTools/);
-  assert.match(prompt, /read_file/);
-  assert.match(prompt, /shell_command/);
+  assert.match(prompt, /read/);
+  assert.match(prompt, /shell/);
 });
 
 test("deepDecisionMessages projects recent blocked child reason for parent review", () => {
@@ -207,7 +207,7 @@ test("deepDecisionMessages projects recent blocked child reason for parent revie
             displayName: "文件核查",
             role: "file_review",
             objective: "核查需要写入确认的文件。",
-            allowedTools: ["write_file"],
+            allowedTools: ["write"],
             inputRefs: ["goal:1"],
           },
           status: "blocked",
@@ -420,14 +420,16 @@ function capabilityTool(name: string): CapabilityToolCatalogItem {
     displayName: name,
     displayDescription: `${name} tool`,
     description: `${name} tool`,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    definitionHash: `sha256:${"0".repeat(64)}`,
     category: "workspace",
     categoryLabel: "Workspace",
     riskLevel: "low",
     riskLabel: "Low",
-    operationType: name === "shell_command" ? "execute" : "read-only",
-    operationLabel: name === "shell_command" ? "Execute command" : "Read file",
-    requiresConfirmation: name === "shell_command",
-    confirmationLabel: name === "shell_command" ? "Requires confirmation" : "No confirmation required",
+    operationType: name === "shell" ? "execute" : "read-only",
+    operationLabel: name === "shell" ? "Execute command" : "Read file",
+    requiresConfirmation: name === "shell",
+    confirmationLabel: name === "shell" ? "Requires confirmation" : "No confirmation required",
     scopes: ["desktop-basic"],
     enabled: true,
     availability: "available",

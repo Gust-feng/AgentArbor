@@ -9,14 +9,14 @@ import {
 
 test("tool security policy only blocks unsupported URL protocols", () => {
   const ftp = evaluateToolCallSecurity({
-    request: { callId: "call-ftp", toolName: "browser_snapshot", input: { url: "ftp://example.test/file" } },
-    definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
+    request: { callId: "call-ftp", toolName: "web_fetch", input: { url: "ftp://example.test/file" } },
+    definition: toolDefinition("web_fetch", readOnlyMetadata()),
     metadata: readOnlyMetadata(),
     context: { platform: "linux" },
   });
   const token = evaluateToolCallSecurity({
-    request: { callId: "call-token", toolName: "browser_snapshot", input: { url: "https://example.test/?access_token=sk-secret" } },
-    definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
+    request: { callId: "call-token", toolName: "web_fetch", input: { url: "https://example.test/?access_token=sk-secret" } },
+    definition: toolDefinition("web_fetch", readOnlyMetadata()),
     metadata: readOnlyMetadata(),
     context: { platform: "linux" },
   });
@@ -27,7 +27,7 @@ test("tool security policy only blocks unsupported URL protocols", () => {
 });
 
 test("tool security policy never lets confirmation bypass hard URL blocks", () => {
-  const request = { callId: "call-ftp", toolName: "browser_snapshot", input: { url: "ftp://example.test/file" } };
+  const request = { callId: "call-ftp", toolName: "web_fetch", input: { url: "ftp://example.test/file" } };
   const metadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     operationType: "external-submit",
@@ -36,7 +36,7 @@ test("tool security policy never lets confirmation bypass hard URL blocks", () =
   };
   const decision = evaluateToolCallSecurity({
     request,
-    definition: toolDefinition("browser_snapshot", metadata),
+    definition: toolDefinition("web_fetch", metadata),
     metadata,
     context: {
       platform: "linux",
@@ -50,10 +50,10 @@ test("tool security policy never lets confirmation bypass hard URL blocks", () =
 });
 
 test("tool security policy allows local and private URL reads without confirmation", () => {
-  const request = { callId: "call-local", toolName: "browser_snapshot", input: { url: "http://localhost:3000" } };
+  const request = { callId: "call-local", toolName: "web_fetch", input: { url: "http://localhost:3000" } };
   const decision = evaluateToolCallSecurity({
     request,
-    definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
+    definition: toolDefinition("web_fetch", readOnlyMetadata()),
     metadata: readOnlyMetadata(),
     context: { platform: "linux", approvedConfirmationIds: [confirmationIdForToolCall(request.callId)] },
   });
@@ -71,8 +71,8 @@ test("tool security policy allows local, private, and metadata URLs", () => {
     "http://169.254.169.254/latest/meta-data",
   ]) {
     const decision = evaluateToolCallSecurity({
-      request: { callId: `call-${url}`, toolName: "browser_snapshot", input: { url } },
-      definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
+      request: { callId: `call-${url}`, toolName: "web_fetch", input: { url } },
+      definition: toolDefinition("web_fetch", readOnlyMetadata()),
       metadata: readOnlyMetadata(),
       context: { platform: "linux" },
     });
@@ -83,8 +83,8 @@ test("tool security policy allows local, private, and metadata URLs", () => {
 
 test("tool security policy allows normal external read-only URLs", () => {
   const decision = evaluateToolCallSecurity({
-    request: { callId: "call-web", toolName: "browser_snapshot", input: { url: "https://example.test/page?q=agent" } },
-    definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
+    request: { callId: "call-web", toolName: "web_fetch", input: { url: "https://example.test/page?q=agent" } },
+    definition: toolDefinition("web_fetch", readOnlyMetadata()),
     metadata: readOnlyMetadata(),
     context: { platform: "linux" },
   });
@@ -93,7 +93,7 @@ test("tool security policy allows normal external read-only URLs", () => {
 });
 
 test("tool security policy gates explicit confirmation tools unless exact confirmation is approved", () => {
-  const request = { callId: "call-shell", toolName: "shell_command", input: { commandLine: "pnpm test" } };
+  const request = { callId: "call-shell", toolName: "shell", input: { commandLine: "pnpm test" } };
   const metadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     category: "terminal",
@@ -101,7 +101,7 @@ test("tool security policy gates explicit confirmation tools unless exact confir
     riskLevel: "high",
     requiresConfirmation: true,
   };
-  const definition = toolDefinition("shell_command", metadata);
+  const definition = toolDefinition("shell", metadata);
   const pending = evaluateToolCallSecurity({
     request,
     definition,
@@ -143,7 +143,7 @@ test("tool security policy gates explicit confirmation tools unless exact confir
 });
 
 test("tool security policy lets full access mode skip confirmation-gated tools", () => {
-  const request = { callId: "call-shell-full-access", toolName: "shell_command", input: { commandLine: "pnpm test" } };
+  const request = { callId: "call-shell-full-access", toolName: "shell", input: { commandLine: "pnpm test" } };
   const metadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     category: "terminal",
@@ -153,7 +153,7 @@ test("tool security policy lets full access mode skip confirmation-gated tools",
   };
   const decision = evaluateToolCallSecurity({
     request,
-    definition: toolDefinition("shell_command", metadata),
+    definition: toolDefinition("shell", metadata),
     metadata,
     context: { platform: "win32", confirmationPolicy: "full_access" },
   });
@@ -164,7 +164,7 @@ test("tool security policy lets full access mode skip confirmation-gated tools",
 test("tool security policy uses full argv text for shell confirmations without commandLine", () => {
   const request = {
     callId: "call-python",
-    toolName: "shell_command",
+    toolName: "shell",
     input: { command: "python", args: ["-c", "print('ok')"] },
   };
   const metadata: ToolDefinitionMetadata = {
@@ -176,7 +176,7 @@ test("tool security policy uses full argv text for shell confirmations without c
   };
   const pending = evaluateToolCallSecurity({
     request,
-    definition: toolDefinition("shell_command", metadata),
+    definition: toolDefinition("shell", metadata),
     metadata,
     context: { platform: "win32" },
   });

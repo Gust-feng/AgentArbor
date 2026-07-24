@@ -88,27 +88,8 @@ export function createContextAttachmentTools(options: ContextAttachmentToolOptio
 export function createListContextAttachmentsTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
   return {
     definition: {
-      name: "list_context_attachments",
+      name: "AttachmentList",
       description: "List user-provided context attachments available to this run without exposing local absolute paths.",
-      modelContract: {
-        usageNotes: [
-          "List current Task Soil context attachments by attachmentId, kind, title, summary, MIME type, byte length, and available operations.",
-          "Use before reading or searching an attachment when the attachmentId is unknown.",
-          "This tool returns references and metadata only; it does not return file contents.",
-          "Local absolute paths are intentionally not returned. Use attachmentId with the attachment tools instead.",
-        ],
-        outputNotes: [
-          "attachments[] contains attachmentId, kind, title, summary, MIME type, byte length, authorization, and supported operations.",
-          "count is the number of returned attachments.",
-          "Attachments with authorized=false cannot be read by attachment tools in this run.",
-        ],
-        runtimeHints: [
-          { label: "source", value: "current Task Soil contextRefs" },
-        ],
-        examples: [
-          { title: "List available attachments", input: {} },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -135,34 +116,8 @@ export function createListContextAttachmentsTool(options: ContextAttachmentToolO
 export function createReadContextAttachmentTextTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
   return {
     definition: {
-      name: "read_context_attachment_text",
+      name: "AttachmentRead",
       description: "Read a text file attachment, or a focused text file inside an attached project, using attachmentId instead of a local path.",
-      modelContract: {
-        usageNotes: [
-          "Read textual content from a current context attachment selected by attachmentId or ref.",
-          "For file attachments, omit path. For project attachments, path is required and must be relative to the attached project root.",
-          "Use startLine/endLine to inspect a focused range or continue through a large file.",
-          "Use continuation.nextInput to continue a truncated character or line window.",
-          "maxLength applies to whole-file/startChar reads; do not combine maxLength with startLine/endLine.",
-          "Do not use for images, PDFs, archives, spreadsheets, or binary files; the tool will return non-text metadata instead of content.",
-          "Local absolute paths are not accepted as input and are not returned in output.",
-        ],
-        outputNotes: [
-          "content contains UTF-8 text when the attachment target is readable text.",
-          "binary or readable=false means the attachment cannot be read as text by this tool.",
-          "path is relative to the attachment root for project attachments and never a local absolute path.",
-          "hasMoreAfter reports whether more text exists; continuation.nextInput provides the executable next read.",
-          "truncated and hasMoreAfter indicate whether another focused read may be needed.",
-        ],
-        runtimeHints: [
-          { label: "max file bytes without line range", value: String(MAX_LOCAL_WORKSPACE_FILE_BYTES) },
-          { label: "max returned chars", value: String(DEFAULT_MAX_CHARS) },
-        ],
-        examples: [
-          { title: "Read attached text file", input: { attachmentId: "ctx_notes", maxLength: 20000 } },
-          { title: "Read file inside attached project", input: { attachmentId: "ctx_project", path: "src/index.ts", startLine: 1, endLine: 120 } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -196,7 +151,7 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment text target could not be read.");
       if (!stat.isFile()) {
-        throw new Error("read_context_attachment_text expects a file target.");
+        throw new Error("attachment_read_text expects a file target.");
       }
       const binary = isLikelyBinaryPath(target.targetAbsolutePath) || await fileHasNulByte(target.targetAbsolutePath, stat.size);
       if (binary) {
@@ -217,21 +172,21 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
       const hasStartChar = record.startChar !== undefined;
       const startChar = optionalSafeIntegerAtLeast(
         record.startChar,
-        "read_context_attachment_text startChar",
+        "attachment_read_text startChar",
         0,
       ) ?? 0;
       if (lineRange !== undefined && hasStartChar) {
-        throw new Error("read_context_attachment_text cannot combine startChar with startLine/endLine.");
+        throw new Error("attachment_read_text cannot combine startChar with startLine/endLine.");
       }
       if (lineRange !== undefined && record.maxLength !== undefined) {
-        throw new Error("read_context_attachment_text cannot combine maxLength with startLine/endLine; request a smaller line range instead.");
+        throw new Error("attachment_read_text cannot combine maxLength with startLine/endLine; request a smaller line range instead.");
       }
       if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES && lineRange === undefined) {
         throw new Error("Attachment text target is too large to read safely without a line range.");
       }
       const maxLength = optionalSafeIntegerAtLeast(
         record.maxLength,
-        "read_context_attachment_text maxLength",
+        "attachment_read_text maxLength",
         MIN_CHARACTER_WINDOW_CHARS,
       ) ?? DEFAULT_MAX_CHARS;
       const content = lineRange === undefined
@@ -241,7 +196,7 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
           : sliceLines(await readAttachmentTextFile(target.targetAbsolutePath), lineRange);
       const truncated = content.content.length > maxLength;
       if (lineRange !== undefined && truncated) {
-        throw new Error("read_context_attachment_text line range exceeds the text return budget; request fewer lines so continuation does not skip unread text.");
+        throw new Error("attachment_read_text line range exceeds the text return budget; request fewer lines so continuation does not skip unread text.");
       }
       const returned = truncateText(content.content, maxLength);
       const returnedTextChars = returnedRawTextChars(content.content, maxLength);
@@ -297,32 +252,8 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
 export function createReadContextAttachmentPdfTextTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
   return {
     definition: {
-      name: "read_context_attachment_pdf_text",
+      name: "AttachmentReadPdf",
       description: "Extract best-effort text from a text-native PDF context attachment using attachmentId instead of a local path.",
-      modelContract: {
-        usageNotes: [
-          "Use for PDF context attachments when the model needs textual content from the document.",
-          "For project attachments, path is required and must point to the PDF file inside the attached project.",
-          "This is a conservative built-in extractor for text-native PDFs; scanned PDFs, OCR, complex encodings, and image-only pages may return no_extractable_pdf_text.",
-          "Use read_context_attachment_text for normal text files and table tools for tables; do not paste PDF bytes into the prompt.",
-          "startChar continues a truncated extracted text window from a zero-based character offset.",
-          "Local absolute paths are not accepted as input and are not returned in output.",
-        ],
-        outputNotes: [
-          "readable=true means bounded PDF text was extracted for the model.",
-          "content contains best-effort text, with hasMoreAfter/truncated indicating whether content was clipped.",
-          "continuation.nextInput provides the executable next PDF text window when truncated is true.",
-          "reason explains unsupported, scanned, encrypted, or unreadable PDF cases without returning local paths.",
-        ],
-        runtimeHints: [
-          { label: "max PDF bytes", value: String(MAX_PDF_BYTES) },
-          { label: "default returned chars", value: String(DEFAULT_PDF_MAX_CHARS) },
-        ],
-        examples: [
-          { title: "Read attached PDF text", input: { attachmentId: "ctx_report_pdf", maxLength: 50000 } },
-          { title: "Read PDF inside project", input: { attachmentId: "ctx_project", path: "docs/report.pdf" } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -354,7 +285,7 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment PDF target could not be read.");
       if (!stat.isFile()) {
-        throw new Error("read_context_attachment_pdf_text expects a file target.");
+        throw new Error("attachment_read_pdf expects a file target.");
       }
       const format = tableTargetFormat(entry.ref, target.targetPath);
       if (format !== "pdf") {
@@ -402,21 +333,21 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
       }
       const maxLength = optionalSafeIntegerAtLeast(
         record.maxLength,
-        "read_context_attachment_pdf_text maxLength",
+        "attachment_read_pdf maxLength",
         MIN_CHARACTER_WINDOW_CHARS,
       ) ?? DEFAULT_PDF_MAX_CHARS;
       const startChar = optionalSafeIntegerAtLeast(
         record.startChar,
-        "read_context_attachment_pdf_text startChar",
+        "attachment_read_pdf startChar",
         0,
       ) ?? 0;
       if (startChar > extracted.text.length) {
         throw new Error(
-          `read_context_attachment_pdf_text startChar ${startChar} exceeds charCount ${extracted.text.length}.`,
+          `attachment_read_pdf startChar ${startChar} exceeds charCount ${extracted.text.length}.`,
         );
       }
       if (!isUtf16CodeUnitBoundary(extracted.text, startChar)) {
-        throw new Error("read_context_attachment_pdf_text startChar must not split a UTF-16 surrogate pair.");
+        throw new Error("attachment_read_pdf startChar must not split a UTF-16 surrogate pair.");
       }
       const endChar = utf16SafeWindowEnd(extracted.text, startChar, maxLength);
       const returned = extracted.text.slice(startChar, endChar);
@@ -458,32 +389,8 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
 export function createListContextAttachmentFilesTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
   return {
     definition: {
-      name: "list_context_attachment_files",
+      name: "AttachmentListFiles",
       description: "List files under an attached project folder using attachmentId and attachment-relative paths.",
-      modelContract: {
-        usageNotes: [
-          "List files and folders inside a project or workspace context attachment.",
-          "Use this before reading a file inside a selected local project or attached project folder.",
-          "path is optional and defaults to the attachment root. It must be relative to the attachment root.",
-          "depth defaults to 1 and is capped; limit caps returned entries; offset continues a truncated listing.",
-          "Local absolute paths are not accepted or returned.",
-        ],
-        outputNotes: [
-          "entries[] contains attachment-relative path, name, kind, byte size, and depth.",
-          "totalEntries is the full enumerated count when traversal completes.",
-          "hasMoreAfter reports whether more entries exist; continuation.nextInput provides the executable next page.",
-          "If more entries exist beyond the supported offset range, the tool fails with entriesPreview and listingComplete=false.",
-          "truncated=true only appears with an executable continuation.",
-        ],
-        runtimeHints: [
-          { label: "max depth", value: String(MAX_LIST_DEPTH) },
-          { label: "max entries", value: String(MAX_LIST_ENTRIES) },
-          { label: "max continuation offset", value: String(MAX_LIST_OFFSET) },
-        ],
-        examples: [
-          { title: "List attached project root", input: { attachmentId: "ctx_project", depth: 2, limit: 80 } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -515,11 +422,11 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
         projectPathRequired: false,
       });
       if (target.rootKind !== "project") {
-        throw new Error("list_context_attachment_files expects a project or workspace attachment.");
+        throw new Error("attachment_list_files expects a project or workspace attachment.");
       }
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment directory target could not be read.");
       if (!stat.isDirectory()) {
-        throw new Error("list_context_attachment_files expects an attachment-relative directory path.");
+        throw new Error("attachment_list_files expects an attachment-relative directory path.");
       }
       const depth = Math.min(MAX_LIST_DEPTH, positiveInteger(record.depth) ?? DEFAULT_LIST_DEPTH);
       const limit = Math.min(MAX_LIST_ENTRIES, positiveInteger(record.limit) ?? MAX_LIST_ENTRIES);
@@ -559,8 +466,8 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
         return {
           kind: "tool_call_result",
           result: {
-            callId: context.toolCallId ?? "list_context_attachment_files",
-            toolName: "list_context_attachment_files",
+            callId: context.toolCallId ?? "AttachmentListFiles",
+            toolName: "AttachmentListFiles",
             input: input as ToolFactValue,
             output: {
               ...observation,
@@ -601,33 +508,8 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
 export function createSearchContextAttachmentFilesTool(options: ContextAttachmentToolOptions = {}): ToolExecutor {
   return {
     definition: {
-      name: "search_context_attachment_files",
+      name: "AttachmentSearchFiles",
       description: "Search text files inside an attached project or text attachment using attachmentId and attachment-relative paths.",
-      modelContract: {
-        usageNotes: [
-          "Search text files inside a current context attachment for a case-insensitive plain-text query.",
-          "Use this to locate relevant files or passages in an attached local project before reading them.",
-          "For project attachments, path optionally narrows search to an attachment-relative directory or file.",
-          "For file attachments, omit path; the tool searches that file only.",
-          "offset optionally continues a previously truncated search with the same query/path.",
-          "Do not use regular expressions. Local absolute paths are not accepted or returned.",
-        ],
-        outputNotes: [
-          "matches[] includes attachment-relative path, 1-based line, and preview.",
-          "Skipped binary, too-large, unreadable, generated, or non-file entries are counted.",
-          "hasMoreAfter reports whether more matches exist; continuation.nextInput provides the executable next page.",
-          "If more matches exist beyond the supported offset range, the tool fails with matchesPreview and searchComplete=false.",
-          "truncated=true only appears with an executable continuation.",
-        ],
-        runtimeHints: [
-          { label: "max matches", value: String(MAX_SEARCH_MATCHES) },
-          { label: "max file bytes", value: String(MAX_LOCAL_WORKSPACE_FILE_BYTES) },
-          { label: "max continuation offset", value: String(MAX_SEARCH_OFFSET) },
-        ],
-        examples: [
-          { title: "Search attached project", input: { attachmentId: "ctx_project", query: "TODO", path: "src", limit: 20 } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -652,7 +534,7 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
       const record = asRecord(input);
       const query = stringOrFallback(record.query, "");
       if (query.length === 0) {
-        throw new Error("search_context_attachment_files requires a non-empty query.");
+        throw new Error("attachment_search_files requires a non-empty query.");
       }
       const entry = requireAttachmentEntry(options.taskSoil, record);
       assertAttachmentAuthorized(entry);
@@ -710,8 +592,8 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
         return {
           kind: "tool_call_result",
           result: {
-            callId: context.toolCallId ?? "search_context_attachment_files",
-            toolName: "search_context_attachment_files",
+            callId: context.toolCallId ?? "AttachmentSearchFiles",
+            toolName: "AttachmentSearchFiles",
             input: input as ToolFactValue,
             output: {
               ...observation,

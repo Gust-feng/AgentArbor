@@ -2,10 +2,10 @@ import type {
   ToolCategory,
   ToolDefinition,
   ToolFileDisplayOperation,
-  ToolInputSchema,
   ToolOperationType,
   ToolRiskLevel,
 } from "./contracts.js";
+import { cloneToolInputSchema, cloneToolJsonSchema } from "./schema.js";
 
 export type ModelVisibleToolContractValidation = {
   readonly ok: boolean;
@@ -24,8 +24,7 @@ export type ModelVisibleToolDescriptionOptions = {
  * Provider 已独立接收输入 schema；模型只需要工具的客观能力摘要。运行时策略、确认、
  * provider 协议、存储和展示细节不属于工具选择信息，不能拼接进模型上下文。
  *
- * `modelContract` 保留在 capability snapshot 中供产品侧使用，但不再隐式扩大 provider 的
- * tool description。跨字段约束应优先进入 schema，动态 continuation 以实际工具结果表达。
+ * 跨字段约束应优先进入 schema，动态 continuation 以实际工具结果表达。
  */
 export function modelVisibleToolDescription(
   definition: ToolDefinition,
@@ -43,7 +42,6 @@ export function modelVisibleToolDescription(
  * 另由 ToolCenter 归一化为 `ToolCallResult`，截断时必须在输出顶层提供真实
  * `continuation / continuations`。这些运行时事实不能用一段 `outputNotes` 散文伪装成静态校验。
  *
- * 可选的 `modelContract` 不是模型可见工具契约的一部分，不能隐藏一个本来可执行的工具。
  */
 export function validateModelVisibleToolContract(
   definition: ToolDefinition
@@ -55,8 +53,17 @@ export function validateModelVisibleToolContract(
   if (!hasText(definition.description)) {
     missing.push("description");
   }
-  if (!isToolInputSchema(definition.inputSchema)) {
+  try {
+    cloneToolInputSchema(definition.inputSchema);
+  } catch {
     missing.push("inputSchema");
+  }
+  if (definition.outputSchema !== undefined) {
+    try {
+      cloneToolJsonSchema(definition.outputSchema);
+    } catch {
+      missing.push("outputSchema");
+    }
   }
   const metadata = definition.metadata;
   if (metadata === undefined) {
@@ -157,30 +164,6 @@ function isFileOperation(value: unknown): value is ToolFileDisplayOperation {
     value === "edit" ||
     value === "delete"
   );
-}
-
-function isToolInputSchema(value: unknown): value is ToolInputSchema {
-  if (!isRecord(value) || value.type !== "object" || !isRecord(value.properties)) {
-    return false;
-  }
-  const properties = value.properties;
-  if (
-    value.required !== undefined &&
-    (!Array.isArray(value.required) ||
-      value.required.some(
-        (item) => typeof item !== "string" || item.length === 0 || !(item in properties)
-      ))
-  ) {
-    return false;
-  }
-  return (
-    value.additionalProperties === undefined ||
-    typeof value.additionalProperties === "boolean"
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function hasText(value: unknown): value is string {

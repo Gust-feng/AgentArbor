@@ -31,7 +31,11 @@ output/
 .cospec
 .opencode
 .claude
-.agents
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/tool-design/
+!.agents/skills/tool-design/**
 .agentarbor
 .trae
 .trellis/

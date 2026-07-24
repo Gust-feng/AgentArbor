@@ -208,7 +208,7 @@ test("Ordinary approval pauses require the exact approval tool facts", () => {
   };
   const approvalFact = {
     callId: request.toolCallFactId,
-    toolName: "shell_command",
+    toolName: "shell",
     input: { command: "write" },
     output: undefined,
     status: "approval_required" as const,
@@ -266,7 +266,7 @@ test("Ordinary tool facts are idempotent, ordered, and reject conflicting resolv
   });
   const result = {
     callId: "call-1",
-    toolName: "read_file",
+    toolName: "read",
     input: { path: "README.md" },
     status: "completed" as const,
     output: { content: "first" },
@@ -301,7 +301,7 @@ test("Ordinary nested tool facts require one known root owner and cannot form an
   });
   const rootResult = {
     callId: "delegation-call",
-    toolName: "call_sub_agent",
+    toolName: "agent_call",
     input: { agentId: "reviewer" },
     output: { answer: "reviewed" },
     status: "completed" as const,
@@ -316,7 +316,7 @@ test("Ordinary nested tool facts require one known root owner and cannot form an
     callId: "read-call",
     factId: "delegation-call/tool:read-call",
     parentToolCallFactId: "delegation-call",
-    toolName: "read_file",
+    toolName: "read",
     input: { path: "README.md" },
     output: { content: "contents" },
     status: "completed" as const,
@@ -394,7 +394,7 @@ test("Ordinary nested results never close their parent's pending root tool round
       callId: "delegation-call",
       factId: "delegation-call/tool:delegation-call",
       parentToolCallFactId: "delegation-call",
-      toolName: "read_file",
+      toolName: "read",
       input: { path: "README.md" },
       output: { content: "contents" },
       status: "completed",
@@ -408,7 +408,7 @@ test("Ordinary nested results never close their parent's pending root tool round
     state: withNested,
     result: {
       callId: "delegation-call",
-      toolName: "call_sub_agent",
+      toolName: "agent_call",
       input: { agentId: "reviewer" },
       output: { answer: "reviewed" },
       status: "completed",
@@ -468,7 +468,7 @@ test("Ordinary pending root rounds freeze the Session assistant ref and provider
     state: accepted,
     result: {
       callId: "root-call",
-      toolName: "read_file",
+      toolName: "read",
       input: { path: "README.md" },
       output: { content: "contents" },
       status: "completed",
@@ -482,7 +482,7 @@ test("Ordinary pending root rounds freeze the Session assistant ref and provider
     state: partiallyResolved,
     result: {
       callId: "second-call",
-      toolName: "list_dir",
+      toolName: "list",
       input: { path: "." },
       output: ["README.md"],
       status: "completed",
@@ -508,7 +508,7 @@ test("Ordinary pending root rounds freeze the Session assistant ref and provider
 
   assert.throws(() => reconcileInterruptedOrdinaryToolRound({
     state: accepted,
-    orderedToolCalls: [{ callId: "second-call", toolName: "list_dir", input: { path: "." } }],
+    orderedToolCalls: [{ callId: "second-call", toolName: "list", input: { path: "." } }],
     recordedAt: "2026-01-01T00:00:04.000Z",
   }), /does not match its provider-ordered Session tool calls/u);
 });
@@ -568,7 +568,7 @@ test("terminal Ordinary states can close a pending Session tool round during rec
     state: pending,
     result: {
       callId: "root-call",
-      toolName: "shell_command",
+      toolName: "shell",
       input: { command: "write" },
       output: undefined,
       status: "failed",

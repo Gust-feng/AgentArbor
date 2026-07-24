@@ -163,24 +163,23 @@ export function isFileReadNode(node: ProjectableTranscriptNode): boolean {
   if (isFileMutationToolName(toolName) || mentionsFileMutation(genericText) || mentionsFileMutation(node.title.toLowerCase())) {
     return false;
   }
-  return toolName === "read" ||
-    toolName === "read_file" ||
+  return toolName === "Read" ||
+    toolName === "ResearchRead" ||
     toolName.startsWith("read_") ||
-    action === "read_file" ||
+    action === "read" ||
     action.includes("读取文件") ||
     node.title.includes("读取文件");
 }
 
 function isFileMutationToolName(toolName: string): boolean {
-  return toolName === "write_file" ||
-    toolName === "create_file" ||
-    toolName === "delete_file" ||
-    toolName === "edit_file" ||
-    toolName.includes("write_file") ||
-    toolName.includes("create_file") ||
-    toolName.includes("delete_file") ||
+  return toolName === "Write" ||
+    toolName === "Delete" ||
+    toolName === "Edit" ||
+    toolName.includes("write") ||
+    toolName.includes("create") ||
+    toolName.includes("delete") ||
     toolName.includes("remove_file") ||
-    toolName.includes("edit_file") ||
+    toolName.includes("edit") ||
     toolName.includes("patch") ||
     toolName.includes("replace");
 }
@@ -191,10 +190,10 @@ function mentionsFileMutation(value: string): boolean {
     value.includes("删除文件") ||
     value.includes("编辑文件") ||
     value.includes("修改文件") ||
-    value.includes("write_file") ||
-    value.includes("create_file") ||
-    value.includes("delete_file") ||
-    value.includes("edit_file") ||
+    value.includes("write") ||
+    value.includes("create") ||
+    value.includes("delete") ||
+    value.includes("edit") ||
     value.includes("write file") ||
     value.includes("create file") ||
     value.includes("delete file") ||

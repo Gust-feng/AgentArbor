@@ -226,7 +226,7 @@ test("AgentDefinitionRegistry rejects tool visibility drift for hashed refs", ()
     ...customAgent,
     toolVisibilityProfile: {
       ...customAgent.toolVisibilityProfile,
-      hiddenToolNames: ["shell_command"],
+      hiddenToolNames: ["shell"],
     },
   };
   const registry = new AgentDefinitionRegistry([changedAgent]);

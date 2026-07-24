@@ -45,15 +45,15 @@ test("context attachment table tools inspect and read selected CSV without expos
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
       allowedTools: [
-        "list_context_attachments",
-        "inspect_context_attachment_table",
-        "read_context_attachment_table",
+        "attachment_list",
+        "attachment_inspect_table",
+        "attachment_read_table",
       ],
     };
     const listed = await center.execute(
       {
         callId: "call:list-table",
-        toolName: "list_context_attachments",
+        toolName: "attachment_list",
         input: {},
       },
       TOOL_CONTEXT,
@@ -62,7 +62,7 @@ test("context attachment table tools inspect and read selected CSV without expos
     const inspected = await center.execute(
       {
         callId: "call:inspect-table",
-        toolName: "inspect_context_attachment_table",
+        toolName: "attachment_inspect_table",
         input: { attachmentId: "ctx_sales_csv", sampleRows: 2 },
       },
       TOOL_CONTEXT,
@@ -71,7 +71,7 @@ test("context attachment table tools inspect and read selected CSV without expos
     const read = await center.execute(
       {
         callId: "call:read-table",
-        toolName: "read_context_attachment_table",
+        toolName: "attachment_read_table",
         input: { attachmentId: "ctx_sales_csv", startRow: 2, rowCount: 1 },
       },
       TOOL_CONTEXT,
@@ -122,13 +122,13 @@ test("context attachment table read returns executable row continuation facts", 
     const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
-      allowedTools: ["read_context_attachment_table"],
+      allowedTools: ["attachment_read_table"],
     };
 
     const firstRead = await center.execute(
       {
         callId: "call:read-table-continuation-1",
-        toolName: "read_context_attachment_table",
+        toolName: "attachment_read_table",
         input: { attachmentId: "ctx_project_table", path: "data/sales.csv", startRow: 2, rowCount: 1, headerRow: true },
       },
       TOOL_CONTEXT,
@@ -155,7 +155,7 @@ test("context attachment table read returns executable row continuation facts", 
     const secondRead = await center.execute(
       {
         callId: "call:read-table-continuation-2",
-        toolName: "read_context_attachment_table",
+        toolName: "attachment_read_table",
         input: normalizeToolFactValue(nextInput),
       },
       TOOL_CONTEXT,
@@ -201,13 +201,13 @@ test("context attachment table tools read TSV inside selected local project", as
     const result = await center.execute(
       {
         callId: "call:read-tsv",
-        toolName: "read_context_attachment_table",
+        toolName: "attachment_read_table",
         input: { attachmentId: "ctx_project_table", path: "data/metrics.tsv", startRow: 2 },
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["read_context_attachment_table"],
+        allowedTools: ["attachment_read_table"],
       }
     );
     const modelVisible = JSON.stringify(result.output);
@@ -251,15 +251,15 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
       allowedTools: [
-        "list_context_attachments",
-        "inspect_context_attachment_table",
-        "read_context_attachment_table",
+        "attachment_list",
+        "attachment_inspect_table",
+        "attachment_read_table",
       ],
     };
     const listed = await center.execute(
       {
         callId: "call:list-xlsx",
-        toolName: "list_context_attachments",
+        toolName: "attachment_list",
         input: {},
       },
       TOOL_CONTEXT,
@@ -268,7 +268,7 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
     const inspected = await center.execute(
       {
         callId: "call:inspect-xlsx",
-        toolName: "inspect_context_attachment_table",
+        toolName: "attachment_inspect_table",
         input: { attachmentId: "ctx_workbook", sheetName: "Sales", sampleRows: 1 },
       },
       TOOL_CONTEXT,
@@ -277,7 +277,7 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
     const read = await center.execute(
       {
         callId: "call:read-xlsx",
-        toolName: "read_context_attachment_table",
+        toolName: "attachment_read_table",
         input: { attachmentId: "ctx_workbook", sheetIndex: 1, startRow: 2, rowCount: 1 },
       },
       TOOL_CONTEXT,
@@ -286,7 +286,7 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
     const notes = await center.execute(
       {
         callId: "call:inspect-xlsx-notes",
-        toolName: "inspect_context_attachment_table",
+        toolName: "attachment_inspect_table",
         input: { attachmentId: "ctx_workbook", sheetName: "notes", sampleRows: 1 },
       },
       TOOL_CONTEXT,
@@ -295,7 +295,7 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
     const bounded = await center.execute(
       {
         callId: "call:read-xlsx-bounded",
-        toolName: "read_context_attachment_table",
+        toolName: "attachment_read_table",
         input: { attachmentId: "ctx_workbook", sheetName: "Sales", startRow: 2, rowCount: 999 },
       },
       TOOL_CONTEXT,
@@ -356,13 +356,13 @@ test("context attachment XLSX reads fail explicitly for corruption, cancellation
     const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
-      allowedTools: ["inspect_context_attachment_table"],
+      allowedTools: ["attachment_inspect_table"],
     };
 
     const corrupt = await center.execute(
       {
         callId: "call:inspect-corrupt-xlsx",
-        toolName: "inspect_context_attachment_table",
+        toolName: "attachment_inspect_table",
         input: { attachmentId: "ctx_corrupt_xlsx" },
       },
       TOOL_CONTEXT,
@@ -371,7 +371,7 @@ test("context attachment XLSX reads fail explicitly for corruption, cancellation
     const tooLarge = await center.execute(
       {
         callId: "call:inspect-large-xlsx",
-        toolName: "inspect_context_attachment_table",
+        toolName: "attachment_inspect_table",
         input: { attachmentId: "ctx_large_xlsx" },
       },
       TOOL_CONTEXT,
@@ -382,7 +382,7 @@ test("context attachment XLSX reads fail explicitly for corruption, cancellation
     const cancelled = await center.execute(
       {
         callId: "call:inspect-cancelled-xlsx",
-        toolName: "inspect_context_attachment_table",
+        toolName: "attachment_inspect_table",
         input: { attachmentId: "ctx_valid_xlsx" },
       },
       { ...TOOL_CONTEXT, abortSignal: controller.signal },
@@ -426,13 +426,13 @@ test("context attachment table tools report unsupported legacy XLS spreadsheet f
     const result = await center.execute(
       {
         callId: "call:inspect-xlsx",
-        toolName: "inspect_context_attachment_table",
+        toolName: "attachment_inspect_table",
         input: { attachmentId: "ctx_workbook" },
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["inspect_context_attachment_table"],
+        allowedTools: ["attachment_inspect_table"],
       }
     );
     const modelVisible = JSON.stringify(result.output);

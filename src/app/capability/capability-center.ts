@@ -19,6 +19,8 @@ import type {
 } from "../../domain/config/index.js";
 import type { SkillDefinition } from "../../domain/basic-agent/index.js";
 import {
+  cloneToolInputSchema,
+  cloneToolJsonSchema,
   canonicalNamespacedToolName,
   canonicalToolName,
   canonicalToolNamespacePrefix,
@@ -318,7 +320,7 @@ function capabilityAllowedToolNames(input: {
   readonly catalogOnlyAllowedTools: readonly string[];
 }): readonly string[] {
   return [
-    ...input.desktopAllowedTools.filter((name) => name !== "read_skill_resource"),
+    ...input.desktopAllowedTools.filter((name) => name !== "SkillRead"),
     ...input.mcpAllowedTools,
     ...input.catalogOnlyAllowedTools,
   ];
@@ -602,16 +604,11 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     displayName: tool.displayName,
     displayDescription: tool.displayDescription,
     description: tool.description,
-    inputSchema: {
-      type: "object",
-      properties: globalThis.structuredClone(tool.inputSchema.properties),
-      required: tool.inputSchema.required === undefined ? undefined : [...tool.inputSchema.required],
-      additionalProperties: tool.inputSchema.additionalProperties,
-    },
-    modelContract:
-      tool.modelContract === undefined
+    inputSchema: cloneToolInputSchema(tool.inputSchema),
+    outputSchema:
+      tool.outputSchema === undefined
         ? undefined
-        : globalThis.structuredClone(tool.modelContract),
+        : cloneToolJsonSchema(tool.outputSchema),
     category: tool.category,
     categoryLabel: tool.categoryLabel,
     riskLevel: tool.riskLevel,
@@ -645,10 +642,10 @@ function catalogOnlyToolItem(
     displayName: presentation.displayName,
     displayDescription: presentation.displayDescription,
     description: definition.description,
-    inputSchema: globalThis.structuredClone(definition.inputSchema),
-    modelContract: definition.modelContract === undefined
+    inputSchema: cloneToolInputSchema(definition.inputSchema),
+    outputSchema: definition.outputSchema === undefined
       ? undefined
-      : globalThis.structuredClone(definition.modelContract),
+      : cloneToolJsonSchema(definition.outputSchema),
     category: metadata.category,
     categoryLabel: presentation.categoryLabel,
     riskLevel: metadata.riskLevel,
@@ -713,8 +710,8 @@ function mcpCatalogItemForServer(
       name: tool.name,
       title: tool.title,
       description: tool.description,
-      inputSchema: { ...tool.inputSchema },
-      outputSchema: tool.outputSchema === undefined ? undefined : { ...tool.outputSchema },
+      inputSchema: cloneToolInputSchema(tool.inputSchema),
+      outputSchema: tool.outputSchema === undefined ? undefined : cloneToolJsonSchema(tool.outputSchema),
       annotations: tool.annotations === undefined ? undefined : { ...tool.annotations },
     })),
     promptCount: server.cachedReferences?.prompts.length,

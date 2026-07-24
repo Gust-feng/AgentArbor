@@ -23,7 +23,7 @@ const TOOL_CONTEXT: ToolExecutionContext = {
   goalId: "goal-tool-output-test",
 };
 
-test("InMemoryToolOutputStore and read_tool_output reconstruct exact retained text across forward continuations", async () => {
+test("InMemoryToolOutputStore and read_output reconstruct exact retained text across forward continuations", async () => {
   const store = deterministicStore();
   const content = "alpha-中文-beta-0123456789-omega";
   const retained = await store.retain({
@@ -69,7 +69,7 @@ test("InMemoryToolOutputStore and read_tool_output reconstruct exact retained te
   assert.equal(await store.read(retained.ref, { startChar: 0, maxChars: 2 }), undefined);
 });
 
-test("read_tool_output never splits an emoji surrogate pair across windows", async () => {
+test("read_output never splits an emoji surrogate pair across windows", async () => {
   const store = deterministicStore();
   const content = "A😀B";
   const retained = await store.retain({
@@ -94,7 +94,7 @@ test("read_tool_output never splits an emoji surrogate pair across windows", asy
   assert.equal(first.content + second.content + third.content, content);
 });
 
-test("read_tool_output exposes a complete model-visible tool contract", () => {
+test("read_output exposes a complete model-visible tool contract", () => {
   const tool = createReadToolOutputTool(deterministicStore());
   assert.deepEqual(validateModelVisibleToolContract(tool.definition), { ok: true, missing: [] });
 });
@@ -224,7 +224,7 @@ test("InMemoryToolOutputStore clear removes retained facts and resets capacity",
   assert.equal((await store.read(second.ref, { startChar: 0, maxChars: 6 }))?.content, "second");
 });
 
-test("read_tool_output rejects invalid windows and never emits a zero-progress continuation", async () => {
+test("read_output rejects invalid windows and never emits a zero-progress continuation", async () => {
   const store = deterministicStore();
   const retained = await store.retain(retainInput("abcdefghij", "call-window"));
   const tool = createReadToolOutputTool(store);
@@ -247,7 +247,7 @@ test("read_tool_output rejects invalid windows and never emits a zero-progress c
   assert.equal(nextInput.startChar, 2);
 });
 
-test("read_tool_output stays within the inline budget under worst-case JSON escaping", async () => {
+test("read_output stays within the inline budget under worst-case JSON escaping", async () => {
   const store = deterministicStore();
   const retained = await store.retain(retainInput(
     "\u0000".repeat(MAX_TOOL_OUTPUT_READ_CHARS + 1),
@@ -264,7 +264,7 @@ test("read_tool_output stays within the inline budget under worst-case JSON esca
   assert.equal(output.hasMoreAfter, true);
 });
 
-test("read_tool_output uses the same fixed token page budget as producer results", async () => {
+test("read_output uses the same fixed token page budget as producer results", async () => {
   const store = deterministicStore();
   const retained = await store.retain(retainInput("x".repeat(8_000), "call-token-page"));
   const counter = { countText: (text: string) => text.length };
@@ -284,7 +284,7 @@ test("read_tool_output uses the same fixed token page budget as producer results
   assert.equal(asReadInput(output.continuation?.nextInput).startChar, output.textChars);
 });
 
-test("read_tool_output fits the final model projection while preserving its actual input and fact id", async () => {
+test("read_output fits the final model projection while preserving its actual input and fact id", async () => {
   const store = deterministicStore();
   const retained = await store.retain(retainInput("reader content", "call-reader-source"));
   const counter = createOpenAITokenCounter("gpt-4o");
@@ -297,9 +297,9 @@ test("read_tool_output fits the final model projection while preserving its actu
   const factId = "reader-fact-actual";
 
   const result = await center.execute(
-    { callId: "call-reader-actual", factId, toolName: "read_tool_output", input },
+    { callId: "call-reader-actual", factId, toolName: "read_output", input },
     TOOL_CONTEXT,
-    { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["read_tool_output"] },
+    { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["read_output"] },
   );
   const message = canonicalToolResultMessage(result);
   const output = result.output as ReadToolOutput;
@@ -312,7 +312,7 @@ test("read_tool_output fits the final model projection while preserving its actu
   assert.equal(counter.countText(JSON.stringify(message)) <= 6_000, true);
 });
 
-test("read_tool_output shrinks escaped windows for long provenance without skipping content", async () => {
+test("read_output shrinks escaped windows for long provenance without skipping content", async () => {
   const store = deterministicStore();
   const content = "\u0000".repeat(MAX_TOOL_OUTPUT_READ_CHARS + 17);
   const retained = await store.retain({
@@ -351,7 +351,7 @@ test("independent ToolCenters share the configured store and rebuild large read-
   const store = deterministicStore();
   const producerRegistry = createAgentToolRegistry({
     toolOutputStore: store,
-    toolCatalogNames: ["read_tool_output"],
+    toolCatalogNames: ["read_output"],
   });
   const fixtures = [
     {
@@ -393,7 +393,7 @@ test("independent ToolCenters share the configured store and rebuild large read-
   const producerCenter = producerRegistry.createToolCenter("agent-basic");
   const readerCenter = createAgentToolRegistry({
     toolOutputStore: store,
-    toolCatalogNames: ["read_tool_output"],
+    toolCatalogNames: ["read_output"],
   }).createToolCenter("agent-basic");
 
   for (const fixture of fixtures) {
@@ -402,7 +402,7 @@ test("independent ToolCenters share the configured store and rebuild large read-
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: [fixture.toolName, "read_tool_output"],
+        allowedTools: [fixture.toolName, "read_output"],
       },
     );
     const delivery = result.output as {
@@ -483,13 +483,13 @@ async function readAllRetainedContent(
     const result = await center.execute(
       {
         callId: `read-shared-output-${segments.length + 1}`,
-        toolName: "read_tool_output",
+        toolName: "read_output",
         input,
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["read_tool_output"],
+        allowedTools: ["read_output"],
       },
     );
     assert.equal(result.status, "completed");

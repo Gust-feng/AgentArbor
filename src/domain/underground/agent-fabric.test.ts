@@ -120,13 +120,13 @@ test("ChildAgentRun can represent a blocked child without treating it as failed"
       modelRounds: 1,
       toolRounds: 0,
       toolCalls: [
-        { callId: "call-needs-approval", toolName: "write_file", status: "approval_required" },
+        { callId: "call-needs-approval", toolName: "write", status: "approval_required" },
       ],
     },
     pendingApproval: {
       confirmationId: "confirmation-call-needs-approval",
       toolCallId: "call-needs-approval",
-      toolName: "write_file",
+      toolName: "write",
       title: "需要确认工具调用",
       actionSummary: "写入 notes.md",
       affectedResources: ["notes.md"],
@@ -146,7 +146,7 @@ test("ChildAgentRun can represent a blocked child without treating it as failed"
   assert.equal(blocked.executionHistory?.length, 1);
   assert.equal(blocked.executionHistory?.[0]?.outcome, "blocked");
   assert.equal(blocked.pendingApproval?.confirmationId, "confirmation-call-needs-approval");
-  assert.equal(blocked.pendingApproval?.toolName, "write_file");
+  assert.equal(blocked.pendingApproval?.toolName, "write");
   assert.deepEqual(blocked.pendingApproval?.affectedResources, ["notes.md"]);
   assert.equal(blocked.uncertainty, "Child Agent needs confirmation before continuing.");
   assert.equal(blocked.completedAt, "2026-05-07T00:00:02.000Z");

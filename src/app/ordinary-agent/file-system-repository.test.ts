@@ -9,7 +9,7 @@ import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js
 import { ordinaryAgentSessionRef, ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 import { OrdinaryToolMetricsCollector } from "./tool-runtime-metrics.js";
 
-test("file repository atomically replaces the v4 snapshot and advances revisions", async (t) => {
+test("file repository atomically replaces the v5 snapshot and advances revisions", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-repository-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -100,8 +100,35 @@ test("file repository explicitly rejects ordinary-run/v3 without migration", asy
   await assert.rejects(
     repository.get("v2-run"),
     (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
-      error.message.includes("ordinary-run/v4"),
+      error.message.includes("ordinary-run/v5"),
   );
+});
+
+test("file repository rejects a tool catalog missing the frozen schema or hash", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-incomplete-tool-contract-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const saved = await repository.save(state("incomplete-tool-contract", "2026-01-01T00:00:00.000Z"), 0);
+  const snapshotPath = path.join(root, "runs", "incomplete-tool-contract", "snapshot.json");
+  const savedDocument = JSON.parse(JSON.stringify(saved)) as {
+    state: { birth: { capabilitySnapshot: { toolCatalog: { tools: Array<Record<string, unknown>> } } } };
+  };
+  savedDocument.state.birth.capabilitySnapshot.toolCatalog.tools.push({
+    name: "read",
+    description: "Read a workspace file.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    definitionHash: `sha256:${"0".repeat(64)}`,
+    enabled: true,
+    availability: "available",
+  });
+  for (const field of ["inputSchema", "definitionHash"]) {
+    const invalidDocument = JSON.parse(JSON.stringify(savedDocument)) as typeof savedDocument;
+    delete invalidDocument.state.birth.capabilitySnapshot.toolCatalog.tools[0]![field];
+    await fs.writeFile(snapshotPath, JSON.stringify(invalidDocument), "utf8");
+    await assert.rejects(repository.get("incomplete-tool-contract"), (error: unknown) =>
+      error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible",
+    );
+  }
 });
 
 test("file repository round-trips a provider-ordered pending Session tool round", async (t) => {
@@ -256,7 +283,7 @@ test("file repository round-trips optional latest Agent request usage and reject
   );
 });
 
-test("file repository restores v4 snapshots with or without optional tool metrics", async (t) => {
+test("file repository restores v5 snapshots with or without optional tool metrics", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-metrics-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -267,7 +294,7 @@ test("file repository restores v4 snapshots with or without optional tool metric
   const collector = new OrdinaryToolMetricsCollector();
   collector.record({
     kind: "execution",
-    toolName: "read_file",
+    toolName: "read",
     operationType: "read-only",
     status: "completed",
     rawBodyTokens: 120,
@@ -276,7 +303,7 @@ test("file repository restores v4 snapshots with or without optional tool metric
   });
   collector.record({
     kind: "execution",
-    toolName: "shell_command",
+    toolName: "shell",
     operationType: "execute",
     status: "completed",
     rawBodyTokens: 20,
@@ -350,7 +377,7 @@ test("file repository round-trips nested tool facts that share one provider call
   const parents = ["parent-a", "parent-b"];
   const rootToolCalls = parents.map((parent) => ({
     callId: parent,
-    toolName: "call_sub_agent",
+    toolName: "agent_call",
     input: { agentId: parent },
     output: { answer: parent },
     status: "completed" as const,
@@ -408,7 +435,7 @@ test("file repository rejects malformed or orphaned nested tool fact graphs", as
   const repository = createFileSystemOrdinaryRunRepository(root);
   const rootResult = {
     callId: "delegation-call",
-    toolName: "call_sub_agent",
+    toolName: "agent_call",
     input: { agentId: "reviewer" },
     output: { answer: "reviewed" },
     status: "completed" as const,
@@ -418,7 +445,7 @@ test("file repository rejects malformed or orphaned nested tool fact graphs", as
     callId: "read-call",
     factId: "delegation-call/tool:read-call",
     parentToolCallFactId: "delegation-call",
-    toolName: "read_file",
+    toolName: "read",
     input: { path: "README.md" },
     output: { content: "contents" },
     status: "completed" as const,

@@ -40,13 +40,13 @@ test("context attachment tools read selected local file by attachmentId without 
     const result = await center.execute(
       {
         callId: "call:read-local",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: { attachmentId: "ctx_local_file" },
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["read_context_attachment_text"],
+        allowedTools: ["attachment_read_text"],
       }
     );
     const modelVisible = JSON.stringify(result.output);
@@ -89,13 +89,13 @@ test("context attachment text read returns executable character continuation", a
     const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
-      allowedTools: ["read_context_attachment_text"],
+      allowedTools: ["attachment_read_text"],
     };
 
     const firstRead = await center.execute(
       {
         callId: "call:read-text-window-1",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: { attachmentId: "ctx_long_text", maxLength: 5 },
       },
       TOOL_CONTEXT,
@@ -118,7 +118,7 @@ test("context attachment text read returns executable character continuation", a
     const secondRead = await center.execute(
       {
         callId: "call:read-text-window-2",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: normalizeToolFactValue(firstNextInput),
       },
       TOOL_CONTEXT,
@@ -152,13 +152,13 @@ test("context attachment text continuation keeps emoji surrogate pairs intact", 
     const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
-      allowedTools: ["read_context_attachment_text"],
+      allowedTools: ["attachment_read_text"],
     };
 
     const first = await center.execute(
       {
         callId: "call:read-unicode-window-1",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: { attachmentId: "ctx_unicode_text", maxLength: 3 },
       },
       TOOL_CONTEXT,
@@ -168,7 +168,7 @@ test("context attachment text continuation keeps emoji surrogate pairs intact", 
     const second = await center.execute(
       {
         callId: "call:read-unicode-window-2",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: normalizeToolFactValue(asRecord(asRecord(firstFacts.continuation).nextInput)),
       },
       TOOL_CONTEXT,
@@ -183,7 +183,7 @@ test("context attachment text continuation keeps emoji surrogate pairs intact", 
     const split = await center.execute(
       {
         callId: "call:read-unicode-window-split",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: { attachmentId: "ctx_unicode_text", maxLength: 3, startChar: 2 },
       },
       TOOL_CONTEXT,
@@ -225,18 +225,18 @@ test("context attachment text read rejects a character window too small to advan
     const result = await center.execute(
       {
         callId: "call:read-text-minimum",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: { attachmentId: "ctx_small_text_window", maxLength: 2 },
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["read_context_attachment_text"],
+        allowedTools: ["attachment_read_text"],
       }
     );
 
     assert.equal(result.status, "failed");
-    assert.match(String(result.error), /read_context_attachment_text maxLength must be at least 3/);
+    assert.match(String(result.error), /attachment_read_text maxLength must be at least 3/);
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
     await fs.rm(localRoot, { recursive: true, force: true });
@@ -264,13 +264,13 @@ test("context attachment text read rejects invalid explicit maxLength values", a
       const result = await center.execute(
         {
           callId: `call:invalid-attachment-max-length:${String(maxLength)}`,
-          toolName: "read_context_attachment_text",
+          toolName: "attachment_read_text",
           input: { attachmentId: "ctx_invalid_text_window", maxLength },
         },
         TOOL_CONTEXT,
         {
           callerAgentId: TOOL_CONTEXT.callerAgentId,
-          allowedTools: ["read_context_attachment_text"],
+          allowedTools: ["attachment_read_text"],
         },
       );
       assert.equal(result.status, "failed");
@@ -280,17 +280,17 @@ test("context attachment text read rejects invalid explicit maxLength values", a
       const result = await center.execute(
         {
           callId: `call:invalid-attachment-start-char:${String(startChar)}`,
-          toolName: "read_context_attachment_text",
+          toolName: "attachment_read_text",
           input: { attachmentId: "ctx_invalid_text_window", startChar },
         },
         TOOL_CONTEXT,
         {
           callerAgentId: TOOL_CONTEXT.callerAgentId,
-          allowedTools: ["read_context_attachment_text"],
+          allowedTools: ["attachment_read_text"],
         },
       );
       assert.equal(result.status, "failed");
-      assert.match(String(result.error), /read_context_attachment_text startChar/);
+      assert.match(String(result.error), /attachment_read_text startChar/);
     }
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
@@ -325,13 +325,13 @@ test("context attachment text read rejects line ranges with maxLength to avoid s
     const result = await center.execute(
       {
         callId: "call:read-text-line-maxlength",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: { attachmentId: "ctx_long_lines", startLine: 1, endLine: 2, maxLength: 5 },
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["read_context_attachment_text"],
+        allowedTools: ["attachment_read_text"],
       }
     );
 
@@ -371,14 +371,14 @@ test("context attachment PDF tool extracts text-native PDF content and rejects i
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
       allowedTools: [
-        "list_context_attachments",
-        "read_context_attachment_pdf_text",
+        "attachment_list",
+        "attachment_read_pdf",
       ],
     };
     const listed = await center.execute(
       {
         callId: "call:list-pdf",
-        toolName: "list_context_attachments",
+        toolName: "attachment_list",
         input: {},
       },
       TOOL_CONTEXT,
@@ -387,7 +387,7 @@ test("context attachment PDF tool extracts text-native PDF content and rejects i
     const read = await center.execute(
       {
         callId: "call:read-pdf",
-        toolName: "read_context_attachment_pdf_text",
+        toolName: "attachment_read_pdf",
         input: { attachmentId: "ctx_report_pdf" },
       },
       TOOL_CONTEXT,
@@ -409,7 +409,7 @@ test("context attachment PDF tool extracts text-native PDF content and rejects i
       const invalid = await center.execute(
         {
           callId: `call:read-pdf-invalid-${String(maxLength)}`,
-          toolName: "read_context_attachment_pdf_text",
+          toolName: "attachment_read_pdf",
           input: { attachmentId: "ctx_report_pdf", maxLength },
         },
         TOOL_CONTEXT,
@@ -449,15 +449,15 @@ test("context attachment tools browse search and read files inside selected loca
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
       allowedTools: [
-        "list_context_attachment_files",
-        "search_context_attachment_files",
-        "read_context_attachment_text",
+        "attachment_list_files",
+        "attachment_search_files",
+        "attachment_read_text",
       ],
     };
     const listed = await center.execute(
       {
         callId: "call:list-project",
-        toolName: "list_context_attachment_files",
+        toolName: "attachment_list_files",
         input: { attachmentId: "ctx_project", depth: 2 },
       },
       TOOL_CONTEXT,
@@ -466,7 +466,7 @@ test("context attachment tools browse search and read files inside selected loca
     const searched = await center.execute(
       {
         callId: "call:search-project",
-        toolName: "search_context_attachment_files",
+        toolName: "attachment_search_files",
         input: { attachmentId: "ctx_project", query: "needle" },
       },
       TOOL_CONTEXT,
@@ -475,7 +475,7 @@ test("context attachment tools browse search and read files inside selected loca
     const read = await center.execute(
       {
         callId: "call:read-project-file",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: { attachmentId: "ctx_project", path: "src/index.ts" },
       },
       TOOL_CONTEXT,
@@ -523,13 +523,13 @@ test("context attachment list and search tools expose executable continuation of
     const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
-      allowedTools: ["list_context_attachment_files", "search_context_attachment_files"],
+      allowedTools: ["attachment_list_files", "attachment_search_files"],
     };
 
     const listed = await center.execute(
       {
         callId: "call:list-project-continuation",
-        toolName: "list_context_attachment_files",
+        toolName: "attachment_list_files",
         input: { attachmentId: "ctx_project", path: "src", depth: 1, limit: 2 },
       },
       TOOL_CONTEXT,
@@ -547,7 +547,7 @@ test("context attachment list and search tools expose executable continuation of
     const secondListed = await center.execute(
       {
         callId: "call:list-project-continuation-2",
-        toolName: "list_context_attachment_files",
+        toolName: "attachment_list_files",
         input: normalizeToolFactValue(listNextInput),
       },
       TOOL_CONTEXT,
@@ -563,7 +563,7 @@ test("context attachment list and search tools expose executable continuation of
     const searched = await center.execute(
       {
         callId: "call:search-project-continuation",
-        toolName: "search_context_attachment_files",
+        toolName: "attachment_search_files",
         input: { attachmentId: "ctx_project", query: "needle", path: "src", limit: 2 },
       },
       TOOL_CONTEXT,
@@ -582,7 +582,7 @@ test("context attachment list and search tools expose executable continuation of
     const secondSearched = await center.execute(
       {
         callId: "call:search-project-continuation-2",
-        toolName: "search_context_attachment_files",
+        toolName: "attachment_search_files",
         input: normalizeToolFactValue(searchNextInput),
       },
       TOOL_CONTEXT,
@@ -630,13 +630,13 @@ test("context attachment list and search tools fail honestly at the offset ceili
     const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: workspace });
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
-      allowedTools: ["list_context_attachment_files", "search_context_attachment_files"],
+      allowedTools: ["attachment_list_files", "attachment_search_files"],
     };
 
     const listed = await center.execute(
       {
         callId: "call:list-project-ceiling",
-        toolName: "list_context_attachment_files",
+        toolName: "attachment_list_files",
         input: { attachmentId: "ctx_project", path: "listing", depth: 1, limit: 1, offset: 10_000 },
       },
       TOOL_CONTEXT,
@@ -660,7 +660,7 @@ test("context attachment list and search tools fail honestly at the offset ceili
     const searched = await center.execute(
       {
         callId: "call:search-project-ceiling",
-        toolName: "search_context_attachment_files",
+        toolName: "attachment_search_files",
         input: { attachmentId: "ctx_project", path: "search/matches.txt", query: "needle", limit: 80, offset: 10_000 },
       },
       TOOL_CONTEXT,
@@ -708,13 +708,13 @@ test("context attachment tools reject refs outside current Task Soil permissions
     const result = await center.execute(
       {
         callId: "call:denied",
-        toolName: "read_context_attachment_text",
+        toolName: "attachment_read_text",
         input: { attachmentId: "ctx_denied" },
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["read_context_attachment_text"],
+        allowedTools: ["attachment_read_text"],
       }
     );
     const modelVisible = JSON.stringify(result);

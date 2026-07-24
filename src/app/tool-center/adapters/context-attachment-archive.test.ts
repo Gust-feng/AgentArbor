@@ -41,14 +41,14 @@ test("context attachment archive tools inspect selected ZIP without extracting o
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
       allowedTools: [
-        "list_context_attachments",
-        "inspect_context_attachment_archive",
+        "attachment_list",
+        "attachment_inspect_archive",
       ],
     };
     const listed = await center.execute(
       {
         callId: "call:list-zip",
-        toolName: "list_context_attachments",
+        toolName: "attachment_list",
         input: {},
       },
       TOOL_CONTEXT,
@@ -57,7 +57,7 @@ test("context attachment archive tools inspect selected ZIP without extracting o
     const inspected = await center.execute(
       {
         callId: "call:inspect-zip",
-        toolName: "inspect_context_attachment_archive",
+        toolName: "attachment_inspect_archive",
         input: { attachmentId: "ctx_archive" },
       },
       TOOL_CONTEXT,

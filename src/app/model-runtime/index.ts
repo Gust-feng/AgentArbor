@@ -1,6 +1,11 @@
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelRequest, ModelToolChoice } from "../../domain/intelligence/index.js";
-import type { ToolDefinition, ToolDefinitionMetadata } from "../../domain/tools/index.js";
+import {
+  cloneToolInputSchema,
+  cloneToolJsonSchema,
+  type ToolDefinition,
+  type ToolDefinitionMetadata,
+} from "../../domain/tools/index.js";
 
 export {
   fetchModelRuntimeModelCatalog,
@@ -26,7 +31,9 @@ export type {
   AgentLoopInput,
   AgentLoopAgentTool,
   AgentLoopAgentToolInvocation,
+  AgentLoopDeferredToolCatalogEntry,
   AgentLoopResult,
+  AgentLoopToolVisibilityPlan,
   AgentLoopToolBoundary,
 } from "./agent-loop.js";
 export type {
@@ -36,7 +43,16 @@ export type {
   AgentSessionRepository,
   AgentSessionWriteCheckpoint,
 } from "./agent-session.js";
-export { canonicalToolResultMessage } from "./tool-result-message.js";
+export {
+  canonicalToolResultMessage,
+} from "./tool-result-message.js";
+export {
+  isProgressiveToolVisibilityCostEffective,
+  progressiveToolVisibilityCostGate,
+  serializeModelVisibleToolDefinitions,
+  type ModelVisibleToolDefinitionTokenCounter,
+  type ProgressiveToolVisibilityCostGate,
+} from "./tool-definition-visibility-cost.js";
 
 export type ModelRuntimeRequestPlan = {
   readonly requestId: string;
@@ -103,40 +119,15 @@ function cloneToolDefinition(tool: ToolDefinition): ToolDefinition {
   return {
     name: tool.name,
     description: tool.description,
-    inputSchema: {
-      type: tool.inputSchema.type,
-      properties: { ...tool.inputSchema.properties },
-      required: tool.inputSchema.required === undefined ? undefined : [...tool.inputSchema.required],
-      additionalProperties: tool.inputSchema.additionalProperties,
-    },
-    modelContract: cloneToolModelContract(tool.modelContract),
+    inputSchema: cloneToolInputSchema(tool.inputSchema),
+    outputSchema:
+      tool.outputSchema === undefined
+        ? undefined
+        : cloneToolJsonSchema(tool.outputSchema),
     metadata: tool.metadata === undefined ? undefined : {
       ...tool.metadata,
       runtimeHints: cloneRuntimeHints(tool.metadata.runtimeHints),
     },
-  };
-}
-
-function cloneToolModelContract(contract: ToolDefinition["modelContract"]): ToolDefinition["modelContract"] {
-  if (contract === undefined) {
-    return undefined;
-  }
-  return {
-    purpose: contract.purpose,
-    whenToUse: contract.whenToUse === undefined ? undefined : [...contract.whenToUse],
-    whenNotToUse: contract.whenNotToUse === undefined ? undefined : [...contract.whenNotToUse],
-    inputNotes: contract.inputNotes === undefined ? undefined : [...contract.inputNotes],
-    usageNotes: contract.usageNotes === undefined ? undefined : [...contract.usageNotes],
-    outputNotes: contract.outputNotes === undefined ? undefined : [...contract.outputNotes],
-    examples: contract.examples === undefined
-      ? undefined
-      : contract.examples.map((example) => ({
-          title: example.title,
-          input: globalThis.structuredClone(example.input),
-        })),
-    runtimeHints: contract.runtimeHints === undefined
-      ? undefined
-      : contract.runtimeHints.map((hint) => ({ ...hint })),
   };
 }
 

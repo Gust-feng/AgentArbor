@@ -10,6 +10,7 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
+  MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS,
   modelVisibleToolDescription,
   toolModelAttachmentsFromOutput,
   type ToolExecutorResult,
@@ -731,7 +732,6 @@ test("createMcpToolExecutor creates correct namespaced ToolExecutor", async () =
   assert.equal(executor.definition.metadata?.operationType, "execute");
   const validation = validateModelVisibleToolContract(executor.definition);
   assert.equal(validation.ok, true, validation.missing.join(", "));
-  assert.equal(executor.definition.modelContract, undefined);
 
   await client.disconnect();
 });
@@ -742,6 +742,9 @@ test("MCP tool identity is canonicalized once while remote invocation keeps the 
   const executor = createMcpToolExecutor(client, tool, "my-server");
 
   assert.equal(executor.definition.name, "my_server__query_docs");
+  const identity = executor.definition.metadata?.runtimeHints?.find((hint) => hint.kind === "mcp_tool");
+  assert.equal(identity?.serverId, "my-server");
+  assert.equal(identity?.protocolName, "query-docs");
   assert.deepEqual(
     await executor.execute(
       { query: "identity" },
@@ -753,7 +756,8 @@ test("MCP tool identity is canonicalized once while remote invocation keeps the 
   await client.disconnect();
 });
 
-test("createCachedMcpToolExecutor compacts verbose MCP descriptions for model visibility", () => {
+test("createCachedMcpToolExecutor preserves MCP description facts and defers provider budgeting", () => {
+  const finalConstraint = `Workflow guidance: ${"preserve server constraint ".repeat(30).trim()}.`;
   const executor = createCachedMcpToolExecutor(
     {
       name: "docs_search",
@@ -761,7 +765,7 @@ test("createCachedMcpToolExecutor compacts verbose MCP descriptions for model vi
         "Search documentation for a query and return the most relevant passages.",
         "Use this for current API references that are not already present in the workspace.",
         "",
-        "Workflow guidance: first inspect internal docs, then compare external docs, then draft a structured summary with citations and follow-up suggestions.",
+        finalConstraint,
       ].join("\n"),
       inputSchema: {
         type: "object",
@@ -773,13 +777,12 @@ test("createCachedMcpToolExecutor compacts verbose MCP descriptions for model vi
     "docs"
   );
 
-  assert.equal(
-    executor.definition.description,
-    "Search documentation for a query and return the most relevant passages. Use this for current API references that are not already present in the workspace."
-  );
-  assert.equal(executor.definition.modelContract, undefined);
-  assert.equal(executor.definition.description.includes("Workflow guidance"), false);
-  assert.match(modelVisibleToolDescription(executor.definition), /^Search documentation for a query/m);
+  assert.equal(executor.definition.description.includes(finalConstraint), true);
+  assert.equal(executor.definition.description.includes("\n"), false);
+  const modelDescription = modelVisibleToolDescription(executor.definition);
+  assert.equal(modelDescription.length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS, true);
+  assert.match(modelDescription, /^Search documentation for a query/m);
+  assert.match(modelDescription, /…\[truncated\]$/u);
 });
 
 test("MCP canonical name collisions fail during registration", () => {

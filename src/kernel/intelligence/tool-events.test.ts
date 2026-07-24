@@ -38,7 +38,7 @@ test("tool events trust ToolCenter facts, preserve evidence, and snapshot mutabl
   const requested = createToolRequestedMessage({
     request: {
       callId: "call-read",
-      toolName: "read_file",
+      toolName: "read",
       input: requestInput,
     },
     context: toolContext(),
@@ -105,7 +105,7 @@ test("tool events keep one bounded fact snapshot and preserve executable continu
   const requested = createToolRequestedMessage({
     request: {
       callId: "call-large",
-      toolName: "read_file",
+      toolName: "read",
       input: { path: "large.txt", note: "i".repeat(20_000) },
     },
     context: toolContext(),
@@ -162,7 +162,7 @@ function outputRecord(value: unknown): Readonly<Record<string, unknown>> {
 function toolResult(overrides: Partial<ToolCallResult> = {}): ToolCallResult {
   return {
     callId: "call-read",
-    toolName: "read_file",
+    toolName: "read",
     input: { path: "README.md" },
     output: { path: "README.md", content: "hello" },
     status: "completed",

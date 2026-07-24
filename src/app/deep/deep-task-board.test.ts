@@ -18,7 +18,7 @@ function sampleSpec(id: string): DeepChildSpec {
     displayName: `${id} 展示名`,
     role: id,
     objective: `${id} 目标`,
-    allowedTools: ["search", "read"],
+    allowedTools: ["research_search", "research_read"],
     inputRefs: ["goal:1"],
   };
 }
@@ -176,7 +176,7 @@ test("markBlocked 可携带安全确认投影，snapshot 深拷贝且不保存 r
   board.markBlocked(task.taskId, summary, {
     confirmationId: "confirm-call-write",
     toolCallId: "call-write",
-    toolName: "write_file",
+    toolName: "write",
     title: "需要确认",
     actionSummary: "写入 notes.md",
     affectedResources: ["notes.md"],
@@ -189,7 +189,7 @@ test("markBlocked 可携带安全确认投影，snapshot 深拷贝且不保存 r
   const snapshot = board.snapshot();
   const pending = snapshot.tasks[0].pendingApproval;
   assert.equal(pending?.confirmationId, "confirm-call-write");
-  assert.equal(pending?.toolName, "write_file");
+  assert.equal(pending?.toolName, "write");
   assert.deepEqual(pending?.affectedResources, ["notes.md"]);
   assert.equal(Object.keys(pending ?? {}).includes("resume"), false);
 

@@ -141,11 +141,11 @@ provider 失败、404、超时或流式连接断开若不能安全重试，会�
 
 ## 持久化与恢复
 
-会话与运行持久化由 `OrdinaryAgentFeature` 自己负责。它只从 `ordinary-conversation/v2` 的 Session ref 和 Pi active leaf 读取上下文，并在 `ordinary-run/v4` snapshot 中保存 Session refs、工具事实、usage、状态和展示 checkpoint；Panel、旧 RuntimeDatabase 和 UI read-model 都不是恢复来源。
+会话与运行持久化由 `OrdinaryAgentFeature` 自己负责。它只从 `ordinary-conversation/v2` 的 Session ref 和 Pi active leaf 读取上下文，并在 `ordinary-run/v5` snapshot 中保存 Session refs、工具事实、usage、状态和展示 checkpoint；Panel、旧 RuntimeDatabase 和 UI read-model 都不是恢复来源。
 
 Pi Session entries 只属于 Pi 的恢复与持久化边界，不进入公开 conversation API 或 SSE；展示层消费单向 read-model，不能因模型恢复需要而把系统提示或 provider continuation 暴露成产品响应，也不能用展示摘要覆盖模型仍可使用的工具正文。
 
-能够完整内联的工具事实直接保存在 `ordinary-run/v4`。超过内联边界的完整正文、结构化 JSON 或失败证据写入 Host-owned `runtime/tool-evidence/`，run snapshot 只保存预览、稳定 `tool-output://` 引用、字符数、byte length、SHA-256 与 continuation 输入。该引用跨进程可读；完整读取不会删除审计证据，删除所属 conversation 时才由 Ordinary 按 run owner 回收。
+能够完整内联的工具事实直接保存在 `ordinary-run/v5`。超过内联边界的完整正文、结构化 JSON 或失败证据写入 Host-owned `runtime/tool-evidence/`，run snapshot 只保存预览、稳定 `tool-output://` 引用、字符数、byte length、SHA-256 与 continuation 输入。该引用跨进程可读；完整读取不会删除审计证据，删除所属 conversation 时才由 Ordinary 按 run owner 回收。
 
 Ordinary SSE 只是实时观察通道，不拥有运行事实。相邻文本增量可以短窗口合并；Node 写缓冲区返回背压信号时必须等待 `drain`，积压超过本地连接上限时只关闭该观察连接，不取消 Agent。前端随后通过 cursor、run view 和持久化终态对账，不要求逐 token 重放。
 

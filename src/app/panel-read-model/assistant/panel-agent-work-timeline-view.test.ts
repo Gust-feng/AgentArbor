@@ -68,7 +68,7 @@ test("agent work timeline view does not show historical confirmations as pending
         eventType: "tool.failed",
         phase: "failed",
         summary: "python 3 · Sandbox policy rejected command.",
-        toolName: "shell_command",
+        toolName: "shell",
         refs: [{ kind: "tool_call", id: "call-command" }],
       }),
     ],

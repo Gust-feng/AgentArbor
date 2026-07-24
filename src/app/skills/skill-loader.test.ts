@@ -390,8 +390,8 @@ test("discoverSkills parses nested metadata, compatibility, license, and allowed
         "      - patch",
         "      - review",
         "allowed-tools:",
-        "  - read_file",
-        "  - shell_command",
+        "  - read",
+        "  - shell",
         "---",
         "",
         "Patch body.",
@@ -411,7 +411,7 @@ test("discoverSkills parses nested metadata, compatibility, license, and allowed
         tags: ["patch", "review"],
       },
     });
-    assert.deepEqual(skill?.allowedTools, ["read_file", "shell_command"]);
+    assert.deepEqual(skill?.allowedTools, ["read", "shell"]);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -444,7 +444,7 @@ test("discoverSkills parses standard YAML frontmatter features", async () => {
         "  priority: 3",
         "  labels: { surface: skills, source: yaml }",
         "compatibility: { platform: agentarbor, agent: desktop_agent }",
-        "allowed-tools: [read_file, shell_command]",
+        "allowed-tools: [read, shell]",
         "---",
         "",
         "YAML body.",
@@ -467,7 +467,7 @@ test("discoverSkills parses standard YAML frontmatter features", async () => {
       },
     });
     assert.deepEqual(skill?.compatibility, { platform: "agentarbor", agent: "desktop_agent" });
-    assert.deepEqual(skill?.allowedTools, ["read_file", "shell_command"]);
+    assert.deepEqual(skill?.allowedTools, ["read", "shell"]);
     assert.equal(skill?.loadError, undefined);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

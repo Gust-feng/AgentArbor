@@ -63,9 +63,9 @@ test("thinking copy keeps the entire thought in the expanded detail", () => {
   const text = [
     "Let me analyze the results:",
     "",
-    "**list_dir**: Workspace has37 entries, mostly markdown files related to capability demos.",
+    "**list**: Workspace has37 entries, mostly markdown files related to capability demos.",
     "**search**: Successfully returned web search results about AI Agent capabilities in2025.",
-    "**shell_command**: Failed - python3 was rejected by sandbox policy.",
+    "**shell**: Failed - python3 was rejected by sandbox policy.",
   ].join("\n");
   const copy = readableThinkingCopy(text);
 
@@ -118,7 +118,7 @@ test("tool activity copy presents concrete generic targets", () => {
     kind: "tool",
     eventType: "tool.requested",
     phase: "preparing",
-    toolName: "delete_file",
+    toolName: "delete",
     display: {
       kind: "generic_tool_summary",
       action: "删除文件",
@@ -130,12 +130,12 @@ test("tool activity copy presents concrete generic targets", () => {
   assert.equal(copy?.detail, "Z:\\AgentArbor\\tmp.txt");
 });
 
-test("tool activity copy labels write_file as write when only summary carries the path", () => {
+test("tool activity copy labels write as write when only summary carries the path", () => {
   const copy = activityLineForNode(node({
     kind: "tool",
     eventType: "tool.requested",
     phase: "executing",
-    toolName: "write_file",
+    toolName: "write",
     summary: "路径：src/generated.txt",
   }));
 
@@ -171,7 +171,7 @@ test("tool activity copy removes redundant target prefixes", () => {
     kind: "tool",
     eventType: "tool.requested",
     phase: "executing",
-    toolName: "read_file",
+    toolName: "read",
     display: {
       kind: "generic_tool_summary",
       action: "读取文件",
@@ -193,7 +193,7 @@ test("tool activity copy removes redundant target prefixes", () => {
     kind: "tool",
     eventType: "tool.requested",
     phase: "executing",
-    toolName: "shell_command",
+    toolName: "shell",
     display: {
       kind: "generic_tool_summary",
       action: "命令",
@@ -212,7 +212,7 @@ test("tool activity strips internal incomplete wrappers from concrete targets", 
       kind: "tool",
       eventType: "tool.failed",
       phase: "failed",
-      toolName: "list_dir",
+      toolName: "list",
       display: {
         kind: "generic_tool_summary",
         action: "浏览目录",
@@ -223,7 +223,7 @@ test("tool activity strips internal incomplete wrappers from concrete targets", 
       kind: "tool",
       eventType: "tool.failed",
       phase: "failed",
-      toolName: "read_file",
+      toolName: "read",
       display: {
         kind: "generic_tool_summary",
         action: "读取文件",
@@ -244,7 +244,7 @@ test("tool failure attribution distinguishes invalid parameters from failed exec
       kind: "tool",
       eventType: "tool.failed",
       phase: "failed",
-      toolName: "read_file",
+      toolName: "read",
       summary: "读取文件失败。",
       error: "path must be a non-empty string",
       failureAttribution: "schema_validation",
@@ -253,7 +253,7 @@ test("tool failure attribution distinguishes invalid parameters from failed exec
       kind: "tool",
       eventType: "tool.failed",
       phase: "failed",
-      toolName: "shell_command",
+      toolName: "shell",
       summary: "命令失败。",
       error: "spawn pnpm ENOENT",
       failureAttribution: "execution_failure",
@@ -284,7 +284,7 @@ test("completed generic file deletion does not create a redundant content card",
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "delete_file",
+      toolName: "delete",
       display: {
         kind: "generic_tool_summary",
         action: "删除文件",
@@ -302,7 +302,7 @@ test("tool activity copy keeps a running command concise", () => {
     kind: "tool",
     eventType: "tool.requested",
     phase: "executing",
-    toolName: "shell_command",
+    toolName: "shell",
     display: {
       kind: "command_summary",
       command: "git",
@@ -322,7 +322,7 @@ test("tool activity leads preserve complete paths instead of inserting ellipses"
     kind: "tool",
     eventType: "tool.completed",
     phase: "completed",
-    toolName: "read_file",
+    toolName: "read",
     display: {
       kind: "read_result",
       title: path,
@@ -339,7 +339,7 @@ test("tool activity copy keeps aggregated file details expandable", () => {
     kind: "tool",
     eventType: "tool.completed",
     phase: "completed",
-    toolName: "read_file",
+    toolName: "read",
     display: {
       kind: "generic_tool_summary",
       action: "读取文件",
@@ -379,7 +379,7 @@ test("generic directory activity collapses into one structured entries section",
     kind: "tool",
     eventType: "tool.completed",
     phase: "completed",
-    toolName: "list_dir",
+    toolName: "list",
     display: {
       kind: "generic_tool_summary",
       action: "浏览目录",
@@ -465,9 +465,9 @@ test("remote reads and browser snapshots expose links without partial page previ
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "browser_snapshot",
+      toolName: "web_fetch",
       display: {
-        kind: "browser_snapshot",
+        kind: "web_fetch",
         title: "AgentArbor guide",
         url: "https://example.com/guide",
       },
@@ -508,7 +508,7 @@ test("directory listing activity keeps only scannable paths and real warnings", 
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "list_dir",
+      toolName: "list",
       display: {
         kind: "directory_listing",
         path: ".",
@@ -547,7 +547,7 @@ test("completed empty directory activity stays minimal", () => {
       kind: "tool",
       eventType: "tool.requested",
       phase: "executing",
-      toolName: "list_dir",
+      toolName: "list",
       display: {
         kind: "directory_listing",
         path: ".",
@@ -559,7 +559,7 @@ test("completed empty directory activity stays minimal", () => {
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "list_dir",
+      toolName: "list",
       display: {
         kind: "directory_listing",
         path: ".",
@@ -586,7 +586,7 @@ test("file search activity keeps query, matches, and skipped details structured"
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "search_context_attachment_files",
+      toolName: "attachment_search_files",
       display: {
         kind: "file_search_results",
         query: "needle",
@@ -627,7 +627,7 @@ test("file search activity treats match limit as low-noise expanded context", ()
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "grep_files",
+      toolName: "grep",
       display: {
         kind: "file_search_results",
         query: "needle",
@@ -649,7 +649,7 @@ test("command copy keeps failure detail out of the primary headline", () => {
     kind: "tool",
     eventType: "tool.failed",
     phase: "failed",
-    toolName: "shell_command",
+    toolName: "shell",
     display: {
       kind: "command_summary",
       command: "pnpm",
@@ -788,7 +788,7 @@ test("tool activity copy keeps preview-only read results visible", () => {
     kind: "tool",
     eventType: "tool.completed",
     phase: "completed",
-    toolName: "read_file",
+    toolName: "read",
     display: {
       kind: "read_result",
       contentPreview: "export const value = 1;\nexport const next = 2;",
@@ -807,7 +807,7 @@ test("file change activity remains visible when only the preview is available", 
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "edit_file",
+      toolName: "edit",
       display: {
         kind: "file_diff_preview",
         preview: "@@ line 1\n- old\n+ new",
@@ -826,7 +826,7 @@ test("file change activity uses event summary as diff when display preview is mi
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "edit_file",
+      toolName: "edit",
       summary: "@@ line 1\n- old\n+ new",
       display: {
         kind: "file_diff_preview",
@@ -931,7 +931,7 @@ test("activity item projection derives stable render metadata outside React comp
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "read_file",
+      toolName: "read",
       summary: "README.md",
     }),
   ]);
@@ -951,7 +951,7 @@ test("tool activity derives the default line from display instead of presentatio
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "shell_command",
+      toolName: "shell",
       display: {
         kind: "command_summary",
         commandLine: "pnpm test",
@@ -1000,7 +1000,7 @@ test("failed command lead keeps raw stderr in detail instead of repeating it in 
     kind: "tool",
     eventType: "tool.failed",
     phase: "failed",
-    toolName: "shell_command",
+    toolName: "shell",
     display: {
       kind: "command_summary",
       command: "pnpm",
@@ -1046,7 +1046,7 @@ test("display activity items collapse requested and terminal tool phases into on
       kind: "tool",
       eventType: "tool.requested",
       phase: "executing",
-      toolName: "read_file",
+      toolName: "read",
       summary: "目标：README.md",
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
@@ -1054,7 +1054,7 @@ test("display activity items collapse requested and terminal tool phases into on
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "read_file",
+      toolName: "read",
       summary: "README.md · 120 bytes",
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
@@ -1072,7 +1072,7 @@ test("read result activity keeps the target line minimal", () => {
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "read_file",
+      toolName: "read",
       display: {
         kind: "read_result",
         uri: "Agent.md · 11567 bytes · lines 300-319 of 319",
@@ -1118,7 +1118,7 @@ test("display activity items show a pending command approval once with the concr
       kind: "tool",
       eventType: "tool.requested",
       phase: "preparing",
-      toolName: "shell_command",
+      toolName: "shell",
       display: {
         kind: "command_summary",
         command: "pnpm",
@@ -1181,7 +1181,7 @@ test("activity items expose command status badges and structured sections", () =
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "shell_command",
+      toolName: "shell",
       display: {
         kind: "command_summary",
         command: "pnpm",
@@ -1210,7 +1210,7 @@ test("command detail prefers full bounded stdout and stderr previews", () => {
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "shell_command",
+      toolName: "shell",
       display: {
         kind: "command_summary",
         commandLine: "pnpm test",
@@ -1233,7 +1233,7 @@ test("long command summaries stay short while detail preserves the exact command
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "shell_command",
+      toolName: "shell",
       display: {
         kind: "command_summary",
         commandLine: command,
@@ -1251,7 +1251,7 @@ test("long command summaries stay short while detail preserves the exact command
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "shell_command",
+      toolName: "shell",
       display: {
         kind: "command_summary",
         commandLine: "python -m http.server 4173 --bind 0.0.0.0",
@@ -1292,7 +1292,7 @@ test("display activity items preserve requested detail and terminal preview for 
       kind: "tool",
       eventType: "tool.requested",
       phase: "executing",
-      toolName: "edit_file",
+      toolName: "edit",
       display: {
         kind: "file_diff_preview",
         path: "src/app.ts",
@@ -1303,7 +1303,7 @@ test("display activity items preserve requested detail and terminal preview for 
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "edit_file",
+      toolName: "edit",
       display: {
         kind: "file_diff_preview",
         path: "src/app.ts",
@@ -1328,7 +1328,7 @@ test("display activity items keep requested file diff when completion has no pre
       kind: "tool",
       eventType: "tool.requested",
       phase: "executing",
-      toolName: "edit_file",
+      toolName: "edit",
       display: {
         kind: "file_diff_preview",
         path: "src/app.ts",
@@ -1340,7 +1340,7 @@ test("display activity items keep requested file diff when completion has no pre
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "edit_file",
+      toolName: "edit",
       display: {
         kind: "file_diff_preview",
         path: "src/app.ts",
@@ -1363,7 +1363,7 @@ test("file creation activity shows new content as a file change diff", () => {
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "create_file",
+      toolName: "create",
       display: {
         kind: "file_change_summary",
         operation: "create",
@@ -1386,7 +1386,7 @@ test("file edit activity keeps full diff headers in detail", () => {
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "edit_file",
+      toolName: "edit",
       display: {
         kind: "file_diff_preview",
         path: "src/app.ts",
@@ -1414,7 +1414,7 @@ test("file edit line delta counts code that begins with diff header characters",
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "edit_file",
+      toolName: "edit",
       display: {
         kind: "file_diff_preview",
         path: "src/counter.ts",
@@ -1438,7 +1438,7 @@ test("file deletion activity remains visible even without a content preview", ()
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "delete_file",
+      toolName: "delete",
       display: {
         kind: "file_change_summary",
         operation: "delete",
@@ -1458,7 +1458,7 @@ test("sub-agent AgentTool facts remain visible as standard tool activity", () =>
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "call_sub_agent",
+      toolName: "agent_call",
       summary: "已调用子 Agent：research-expert",
       refs: [{ kind: "tool_call", id: "tool-sub-agent-1" }],
     }),
@@ -1474,7 +1474,7 @@ test("sub-agent activity shows the specialist and delegated task instead of gene
     kind: "tool",
     eventType: "tool.requested",
     phase: "executing",
-    toolName: "call_sub_agent",
+    toolName: "agent_call",
     display: {
       kind: "agent_task",
       agentName: "review-expert",
@@ -1498,7 +1498,7 @@ test("nested sub-agent tool activity appears under its delegation instead of as 
       kind: "tool",
       eventType: "tool.requested",
       phase: "executing",
-      toolName: "call_sub_agent",
+      toolName: "agent_call",
       display: {
         kind: "agent_task",
         agentName: "review-expert",
@@ -1517,7 +1517,7 @@ test("nested sub-agent tool activity appears under its delegation instead of as 
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "read_file",
+      toolName: "read",
       display: { kind: "read_result", title: "src/config.ts", contentPreview: "export const config = {};" },
       refs: [{ kind: "tool_call", id: "nested-read-fact" }],
       parentToolCallFactId: "delegate-fact",
@@ -1540,7 +1540,7 @@ test("directory activity uses its own tool kind and concrete path", () => {
     kind: "tool",
     eventType: "tool.requested",
     phase: "executing",
-    toolName: "list_dir",
+    toolName: "list",
     display: {
       kind: "directory_listing",
       path: "src/components",
@@ -1558,7 +1558,7 @@ test("live file and directory activity state names the action and concrete targe
       kind: "tool",
       eventType: "tool.requested",
       phase: "executing",
-      toolName: "read_file",
+      toolName: "read",
       display: {
         kind: "read_result",
         title: "src/app/panel-ui/src/components/transcript-timeline.tsx",
@@ -1568,7 +1568,7 @@ test("live file and directory activity state names the action and concrete targe
       kind: "tool",
       eventType: "tool.requested",
       phase: "executing",
-      toolName: "list_dir",
+      toolName: "list",
       display: {
         kind: "directory_listing",
         path: "src/app/panel-ui/src/components",

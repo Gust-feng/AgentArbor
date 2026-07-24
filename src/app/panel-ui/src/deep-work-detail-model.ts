@@ -1018,7 +1018,7 @@ function workflowItemToolName(item: DeepLiveChildWorkflowItem): string | undefin
     return detailMatch[1];
   }
   const kind = item.kind.trim();
-  if (/^(search|read|edit|write|command|shell|web|list_dir|grep|rg)$/i.test(kind)) {
+  if (/^(search|read|edit|write|command|shell|web|list|grep|rg)$/i.test(kind)) {
     return kind;
   }
   return undefined;
@@ -1032,7 +1032,7 @@ function toolKindFromName(toolName: string | undefined): DeepWorklineItemViewMod
   if (normalized.includes("search") || normalized === "rg" || normalized === "grep") {
     return "search";
   }
-  if (normalized.includes("read") || normalized === "cat" || normalized === "list_dir") {
+  if (normalized.includes("read") || normalized === "cat" || normalized === "list") {
     return "read";
   }
   if (normalized.includes("edit") || normalized.includes("write") || normalized.includes("patch")) {

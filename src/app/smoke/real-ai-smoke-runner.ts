@@ -48,7 +48,7 @@ export type RunRealAiSmokeOptions = {
 };
 
 const DEFAULT_GOAL = [
-  "Use the list_dir tool to inspect the current workspace root.",
+  "Use the list tool to inspect the current workspace root.",
   "Then return a concise, evidence-based optimization report that cites the observed entries.",
 ].join(" ");
 const submitSchema = z.object({

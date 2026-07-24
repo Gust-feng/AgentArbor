@@ -193,22 +193,22 @@ test("normalizeDeepChildRoundLimit defaults to 200 and clamps manager overshoot"
 
 test("runDeepChildAgent intersects parent prompt tools with the frozen child run permissions", async () => {
   const parentSpec = sampleChildSpec({
-    allowedTools: ["search", "read_file"],
+    allowedTools: ["research_search", "research_read"],
     objective: "尝试通过文件读取和搜索核查风险。",
   });
-  const frozenRunSpec = { ...parentSpec, allowedTools: ["search"] };
+  const frozenRunSpec = { ...parentSpec, allowedTools: ["research_search"] };
   const childRun = makeChildRun(frozenRunSpec);
   const channel = new SequenceChannel([
-    toolCallResponse("call-read", "read_file", { path: "secret.txt" }),
+      toolCallResponse("call-read", "research_read", { path: "secret.txt" }),
     completedJsonResponse({
       summary: "权限外工具未执行，材料仅记录授权边界。",
-      findings: ["read_file 未授权给该 child run"],
+        findings: ["research_read 未授权给该 child run"],
       evidenceRefs: [],
       uncertainty: "缺少文件读取证据。",
       confidence: 0.31,
     }),
   ]);
-  const broker = new RecordingToolBroker(["search", "read_file"]);
+  const broker = new RecordingToolBroker(["research_search", "research_read"]);
   const turnRuntime = createDeepTurnRuntime({
     intelligenceChannel: channel,
     toolCenter: broker,
@@ -224,14 +224,14 @@ test("runDeepChildAgent intersects parent prompt tools with the frozen child run
     goalId: "goal-test",
   });
 
-  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["search"]);
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["research_search"]);
   assert.deepEqual(broker.executedToolNames(), []);
-  assert.equal(result.execution.toolCalls[0]?.toolName, "read_file");
+  assert.equal(result.execution.toolCalls[0]?.toolName, "research_read");
   assert.equal(result.execution.toolCalls[0]?.status, "failed");
   assert.equal(result.summary.status, "completed");
 });
 
-test("runDeepChildAgent inherits read_tool_output as a transport companion without expanding business tools", async () => {
+test("runDeepChildAgent inherits read_output as a transport companion without expanding business tools", async () => {
   const sourceToolName = "synthetic_large_output";
   const forbiddenToolName = "parent_only_business_tool";
   const retainedRef = "tool-output://deep-child-large-output";
@@ -242,7 +242,7 @@ test("runDeepChildAgent inherits read_tool_output as a transport companion witho
   const childRun = makeChildRun(childSpec);
   const channel = new SequenceChannel([
     toolCallResponse("call-large-output", sourceToolName, {}),
-    toolCallResponse("call-read-output", "read_tool_output", {
+    toolCallResponse("call-read-output", "read_output", {
       ref: retainedRef,
       startChar: 0,
       maxChars: MAX_TOOL_OUTPUT_READ_CHARS,
@@ -286,7 +286,7 @@ test("runDeepChildAgent inherits read_tool_output as a transport companion witho
     capabilitySnapshot: capabilitySnapshotWithTools([
       sourceToolName,
       forbiddenToolName,
-      "read_tool_output",
+      "read_output",
     ]),
   });
 
@@ -296,16 +296,16 @@ test("runDeepChildAgent inherits read_tool_output as a transport companion witho
   assert.deepEqual(
     channel.requests.map((request) => request.tools?.map((tool) => tool.name)),
     [
-      [sourceToolName, "read_tool_output"],
-      [sourceToolName, "read_tool_output"],
-      [sourceToolName, "read_tool_output"],
+      [sourceToolName, "read_output"],
+      [sourceToolName, "read_output"],
+      [sourceToolName, "read_output"],
     ],
   );
   assert.deepEqual(
     result.execution.toolCalls.map((toolCall) => [toolCall.toolName, toolCall.status]),
     [
       [sourceToolName, "completed"],
-      ["read_tool_output", "completed"],
+      ["read_output", "completed"],
     ],
   );
   assert.deepEqual(result.summary.spec.allowedTools, [sourceToolName]);
@@ -319,14 +319,14 @@ test("runDeepChildAgent inherits read_tool_output as a transport companion witho
 
 test("runDeepChildAgent maps approval_required to a blocked child Agent run", async () => {
   const childSpec = sampleChildSpec({
-    allowedTools: ["write_file"],
+    allowedTools: ["write"],
     objective: "需要写入文件时先等待用户确认。",
   });
   const childRun = makeChildRun(childSpec);
   const channel = new SequenceChannel([
-    toolCallResponse("call-write", "write_file", { path: "notes.md" }),
+    toolCallResponse("call-write", "write", { path: "notes.md" }),
   ]);
-  const broker = new RecordingToolBroker(["write_file"], ["write_file"]);
+  const broker = new RecordingToolBroker(["write"], ["write"]);
   const turnRuntime = createDeepTurnRuntime({
     intelligenceChannel: channel,
     toolCenter: broker,
@@ -355,10 +355,10 @@ test("runDeepChildAgent maps approval_required to a blocked child Agent run", as
   assert.equal(result.pendingContinuation?.confirmationId, "confirm-call-write");
   assert.equal(result.pendingContinuation?.pendingApproval.confirmationId, "confirm-call-write");
   assert.equal(result.completedRun.pendingApproval?.toolCallId, "call-write");
-  assert.equal(result.completedRun.pendingApproval?.toolName, "write_file");
+  assert.equal(result.completedRun.pendingApproval?.toolName, "write");
   assert.equal(result.completedRun.pendingApproval?.title, "需要确认工具调用");
-  assert.equal(result.completedRun.pendingApproval?.actionSummary, "运行 write_file");
-  assert.deepEqual(result.completedRun.pendingApproval?.affectedResources, ["write_file"]);
+  assert.equal(result.completedRun.pendingApproval?.actionSummary, "运行 write");
+  assert.deepEqual(result.completedRun.pendingApproval?.affectedResources, ["write"]);
   assert.equal(result.completedRun.pendingApproval?.riskLevel, "medium");
   assert.deepEqual(result.completedRun.pendingApproval?.sourceRefs, ["call-write"]);
   assert.equal(channel.requests.length, 1);

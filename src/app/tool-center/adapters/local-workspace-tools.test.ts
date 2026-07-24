@@ -6,11 +6,9 @@ import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  createLocalCreateFileTool,
-  createLocalDeleteFileTool,
   createLocalEditFileTool,
+  createLocalGlobTool,
   createLocalGrepFilesTool,
-  createLocalListDirTool,
   createLocalReadFileTool,
   createLocalShellCommandTool,
   createLocalWorkspaceSandboxPolicy,
@@ -18,6 +16,7 @@ import {
 } from "./local-workspace-tools.js";
 import { ensurePidExited } from "./background-process-test-utils.js";
 import { createDefaultCommandShellConfig } from "./local-workspace-command-tools.js";
+import { LocalWorkspaceFileState } from "./local-workspace-file-state.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 const sourceDirectory = path.join(process.cwd(), "src", "app", "tool-center", "adapters");
@@ -66,15 +65,15 @@ test("local workspace adapter keeps sandbox policy and tool families split from 
   assert.equal(commandSource.includes("function runProgramCommand"), true);
   assert.equal(commandSource.includes("function commandToolOutput"), true);
   assert.equal(readSource.includes("export function createLocalReadFileTool"), true);
-  assert.equal(readSource.includes("export function createLocalListDirTool"), true);
+  assert.equal(readSource.includes("export function createLocalListDirTool"), false);
   assert.equal(readSource.includes("export function createLocalGrepFilesTool"), true);
   assert.equal(readSource.includes("async function grepPath"), true);
   assert.equal(writeSource.includes("export function createLocalWriteFileTool"), true);
-  assert.equal(writeSource.includes("export function createLocalCreateFileTool"), true);
+  assert.equal(writeSource.includes("export function createLocalCreateFileTool"), false);
   assert.equal(writeSource.includes("export function createLocalEditFileTool"), true);
-  assert.equal(writeSource.includes("export function createLocalDeleteFileTool"), true);
-  assert.equal(writeSource.includes("function parseAnchorEdits"), true);
-  assert.equal(writeSource.includes("function locateAnchorEdits"), true);
+  assert.equal(writeSource.includes("export function createLocalDeleteFileTool"), false);
+  assert.equal(writeSource.includes("function parseExactEdits"), true);
+  assert.equal(writeSource.includes("function locateExactEdits"), true);
   assert.equal(commonSource.includes("export function resolveWorkspacePath"), true);
   assert.equal(commonSource.includes("export function asRecord"), true);
 });
@@ -112,14 +111,13 @@ test("default command shell follows AgentArbor Windows auto-detection order", as
   }
 });
 
-test("local workspace tools read, list, and grep within workspace boundary", async () => {
+test("local workspace tools read and grep within workspace boundary", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     await mkdir(path.join(root, "src"));
     await writeFile(path.join(root, "src", "note.txt"), "alpha\nneedle beta\n", "utf8");
 
     const readFile = createLocalReadFileTool(root);
-    const listDir = createLocalListDirTool(root);
     const grepFiles = createLocalGrepFilesTool(root);
 
     const read = await readFile.execute({ path: "src/note.txt" }, context);
@@ -137,17 +135,16 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
     assert.equal(rangedReadFacts.hasMoreBefore, true);
     assert.equal(rangedReadFacts.hasMoreAfter, true);
     assert.equal(rangedReadFacts.nextStartLine, 3);
-    assert.equal(rangedReadFacts.continuation, undefined);
+    assert.deepEqual(asRecord(asRecord(rangedReadFacts.continuation).nextInput), {
+      path: "src/note.txt",
+      startLine: 3,
+    });
 
     const emptyRangeRead = await readFile.execute({ path: "src/note.txt", startLine: 20, endLine: 21 }, context);
     const emptyRangeFacts = asDirectToolFacts(emptyRangeRead);
     assert.equal(emptyRangeFacts.content, "");
     assert.equal(emptyRangeFacts.hasMoreBefore, true);
     assert.equal(emptyRangeFacts.hasMoreAfter, false);
-
-    const listed = await listDir.execute({ path: "src" }, context);
-    const entries = asDirectToolFacts(listed).entries as readonly { readonly path: string }[];
-    assert.deepEqual(entries.map((entry) => entry.path), ["note.txt"]);
 
     const grep = await grepFiles.execute({ path: "src", query: "needle" }, context);
     const matches = asDirectToolFacts(grep).matches as readonly { readonly path: string; readonly line: number }[];
@@ -157,45 +154,80 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
   }
 });
 
-test("local list_dir and grep_files return plain next offsets without continuation objects", async () => {
+test("C05 exposes a concise PascalCase workspace tool surface", () => {
+  assert.equal(createLocalReadFileTool().definition.name, "Read");
+  assert.equal(createLocalGrepFilesTool().definition.name, "Grep");
+  assert.equal(createLocalGlobTool().definition.name, "Glob");
+  assert.equal(createLocalWriteFileTool().definition.name, "Write");
+  assert.equal(createLocalEditFileTool().definition.name, "Edit");
+  assert.equal(createLocalShellCommandTool().definition.name, "Shell");
+  assert.deepEqual(Object.keys(createLocalShellCommandTool().definition.inputSchema.properties), [
+    "command", "timeoutMs", "cwd", "background",
+  ]);
+  const editItemProperties = asRecord(asRecord(createLocalEditFileTool().definition.inputSchema.properties.edits).items).properties;
+  assert.deepEqual(Object.keys(asRecord(editItemProperties)), ["oldText", "newText"]);
+});
+
+test("C05 requires Read before modifying an existing file and rejects stale reads", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-c04-read-before-write-"));
+  try {
+    const target = path.join(root, "note.txt");
+    await writeFile(target, "before\n", "utf8");
+    const fileState = new LocalWorkspaceFileState();
+    const readTool = createLocalReadFileTool(root, { fileState });
+    const writeTool = createLocalWriteFileTool(root, { fileState });
+    const editTool = createLocalEditFileTool(root, { fileState });
+
+    await assert.rejects(
+      () => writeTool.execute({ path: "note.txt", content: "blind overwrite\n" }, context),
+      /has not been read.*Use Read/,
+    );
+    await readTool.execute({ path: "note.txt" }, context);
+    await editTool.execute({ path: "note.txt", edits: [{ oldText: "before", newText: "after" }] }, context);
+    await writeFile(target, "external change with a different size\n", "utf8");
+    await assert.rejects(
+      () => editTool.execute({ path: "note.txt", edits: [{ oldText: "external", newText: "stale" }] }, context),
+      /changed after it was read.*Read it again/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local grep returns complete executable continuations", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-continuation-"));
   try {
     await mkdir(path.join(root, "src"));
     for (let index = 1; index <= 5; index += 1) {
       await writeFile(path.join(root, "src", `note-${index}.txt`), `needle ${index}\n`, "utf8");
     }
-    const listDir = createLocalListDirTool(root);
     const grepFiles = createLocalGrepFilesTool(root, { ripgrepSearch: false });
-
-    const firstList = asDirectToolFacts(await listDir.execute({ path: "src", limit: 2 }, context));
-    const firstListResult = firstList;
-    assert.equal(firstList.truncated, true);
-    assert.equal(firstListResult.hasMoreAfter, true);
-    assert.equal(firstList.nextOffset, 2);
-    assert.equal(firstList.continuation, undefined);
-    assert.equal(firstListResult.entriesReturned, 2);
-
-    const secondList = asDirectToolFacts(await listDir.execute({ path: "src", limit: 2, offset: 2 }, context));
-    const secondListResult = secondList;
-    assert.equal(secondListResult.offset, 2);
-    assert.equal(secondListResult.entriesReturned, 2);
-    assert.equal(secondList.nextOffset, 4);
-    assert.equal(secondList.continuation, undefined);
 
     const firstGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 2 }, context));
     const firstGrepResult = firstGrep;
     assert.equal(firstGrep.truncated, true);
     assert.equal(firstGrepResult.hasMoreAfter, true);
     assert.equal(firstGrep.nextOffset, 2);
-    assert.equal(firstGrep.continuation, undefined);
+    const firstGrepNextInput = asRecord(asRecord(firstGrep.continuation).nextInput);
+    assert.deepEqual(firstGrepNextInput, {
+      query: "needle",
+      path: "src",
+      limit: 2,
+      offset: 2,
+    });
     assert.equal(firstGrepResult.matchesReturned, 2);
 
-    const secondGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 2, offset: 2 }, context));
+    const secondGrep = asDirectToolFacts(await grepFiles.execute(firstGrepNextInput, context));
     const secondGrepResult = secondGrep;
     assert.equal(secondGrepResult.offset, 2);
     assert.equal(secondGrepResult.matchesReturned, 2);
     assert.equal(secondGrep.nextOffset, 4);
-    assert.equal(secondGrep.continuation, undefined);
+    assert.deepEqual(asRecord(asRecord(secondGrep.continuation).nextInput), {
+      query: "needle",
+      path: "src",
+      limit: 2,
+      offset: 4,
+    });
 
     const exactGrep = asDirectToolFacts(await grepFiles.execute({ path: "src", query: "needle", limit: 5 }, context));
     const exactGrepResult = exactGrep;
@@ -207,7 +239,135 @@ test("local list_dir and grep_files return plain next offsets without continuati
   }
 });
 
-test("local grep_files caps oversized offsets before collecting matches", async () => {
+test("local read keeps output-budget continuations executable without text gaps", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-budget-continuation-"));
+  try {
+    const content = "0123456789".repeat(900);
+    await writeFile(path.join(root, "long.txt"), content, "utf8");
+    const readFileTool = createLocalReadFileTool(root, {
+      outputTokenCounter: { countText: (text) => text.length },
+    });
+    let input: Record<string, unknown> = { path: "long.txt", maxLength: content.length + 1 };
+    let reconstructed = "";
+    let pages = 0;
+
+    for (;;) {
+      const output = asDirectToolFacts(await readFileTool.execute(input, context));
+      reconstructed += String(output.content).slice(0, Number(output.textChars));
+      pages += 1;
+      assert.equal(pages <= 20, true, "read continuation must make bounded forward progress");
+      if (output.continuation === undefined) {
+        assert.equal(output.truncated, false);
+        break;
+      }
+      const nextInput = asRecord(asRecord(output.continuation).nextInput);
+      assert.deepEqual(nextInput, {
+        path: "long.txt",
+        maxLength: content.length + 1,
+        startChar: reconstructed.length,
+      });
+      assert.equal(output.truncated, true);
+      input = nextInput;
+    }
+
+    assert.equal(pages > 1, true);
+    assert.equal(reconstructed, content);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read excludes a producer ellipsis from a second output-budget cursor", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-double-truncation-"));
+  try {
+    const content = "A😀BCDEFGHI";
+    await writeFile(path.join(root, "unicode.txt"), content, "utf8");
+    const readFileTool = createLocalReadFileTool(root, {
+      outputTokenCounter: {
+        countText: (text) => text.includes('"textChars":4') ? 10_000 : text.length,
+      },
+    });
+    let input: Record<string, unknown> = { path: "unicode.txt", maxLength: 5 };
+    let reconstructed = "";
+    let pages = 0;
+
+    for (;;) {
+      const output = asDirectToolFacts(await readFileTool.execute(input, context));
+      const textChars = Number(output.textChars);
+      reconstructed += String(output.content).slice(0, textChars);
+      pages += 1;
+      assert.equal(pages <= 10, true, "double truncation must keep making forward progress");
+      if (output.continuation === undefined) {
+        break;
+      }
+      const nextInput = asRecord(asRecord(output.continuation).nextInput);
+      assert.equal(nextInput.startChar, reconstructed.length);
+      input = nextInput;
+    }
+
+    assert.equal(pages > 1, true);
+    assert.equal(reconstructed, content);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local glob and grep keep output-budget continuation filters complete", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-collection-budget-continuation-"));
+  try {
+    for (let index = 0; index < 90; index += 1) {
+      await writeFile(
+        path.join(root, `file-${String(index).padStart(3, "0")}-${"x".repeat(40)}.txt`),
+        "needle\n",
+        "utf8",
+      );
+    }
+    const outputTokenCounter = { countText: (text: string) => text.length };
+    const glob = createLocalGlobTool(root, { outputTokenCounter });
+    const firstGlob = asDirectToolFacts(await glob.execute({ pattern: "*.txt", path: ".", limit: 90 }, context));
+    const firstGlobNextInput = asRecord(asRecord(firstGlob.continuation).nextInput);
+
+    assert.equal(Number(firstGlob.matchesReturned) < 90, true);
+    assert.deepEqual(firstGlobNextInput, {
+      pattern: "*.txt",
+      path: ".",
+      limit: 90,
+      offset: firstGlob.matchesReturned,
+    });
+    const secondGlob = asDirectToolFacts(await glob.execute(firstGlobNextInput, context));
+    assert.equal(secondGlob.offset, firstGlob.matchesReturned);
+
+    const matches = Array.from({ length: 80 }, (_value, index) => ({
+      path: `src/match-${index}.txt`,
+      line: index + 1,
+      preview: `needle ${"y".repeat(200)}`,
+    }));
+    const grepFiles = createLocalGrepFilesTool(root, {
+      outputTokenCounter,
+      ripgrepSearch: async (request) => matches.slice(0, request.limit),
+    });
+    const firstGrep = asDirectToolFacts(await grepFiles.execute({
+      query: "Needle",
+      path: ".",
+      limit: 80,
+    }, context));
+    const firstGrepNextInput = asRecord(asRecord(firstGrep.continuation).nextInput);
+
+    assert.equal(Number(firstGrep.matchesReturned) < 80, true);
+    assert.deepEqual(firstGrepNextInput, {
+      query: "Needle",
+      path: ".",
+      limit: 80,
+      offset: firstGrep.matchesReturned,
+    });
+    const secondGrep = asDirectToolFacts(await grepFiles.execute(firstGrepNextInput, context));
+    assert.equal(secondGrep.offset, firstGrep.matchesReturned);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local grep caps oversized offsets before collecting matches", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-offset-cap-"));
   try {
     let observedCollectLimit = 0;
@@ -239,7 +399,7 @@ test("local grep_files caps oversized offsets before collecting matches", async 
   }
 });
 
-test("local grep_files fails honestly when matches exceed the supported offset ceiling", async () => {
+test("local grep fails honestly when matches exceed the supported offset ceiling", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-offset-boundary-"));
   try {
     const observedCollectLimits: number[] = [];
@@ -261,7 +421,7 @@ test("local grep_files fails honestly when matches exceed the supported offset c
 
     assert.equal(executed.kind, "tool_call_result");
     assert.equal(result.status, "failed");
-    assert.equal(asRecord(result.errorFacts).code, "grep_files_offset_limit_reached");
+    assert.equal(asRecord(result.errorFacts).code, "grep_offset_limit_reached");
     assert.equal(asRecord(result.errorFacts).retryable, false);
     assert.equal(output.truncated, undefined);
     assert.equal(output.continuation, undefined);
@@ -278,7 +438,28 @@ test("local grep_files fails honestly when matches exceed the supported offset c
   }
 });
 
-test("local read_file returns a plain next character offset for maxLength windows", async () => {
+test("local grep does not emit a non-forward output-budget continuation at the offset ceiling", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-offset-budget-boundary-"));
+  try {
+    const grepFiles = createLocalGrepFilesTool(root, {
+      outputTokenCounter: { countText: () => 10_000 },
+      ripgrepSearch: async (request) => Array.from({ length: request.limit - 80 }, (_value, index) => ({
+        path: `src/match-${index}.txt`,
+        line: 1,
+        preview: `needle ${index}`,
+      })),
+    });
+
+    await assert.rejects(
+      () => grepFiles.execute({ path: ".", query: "needle", limit: 80, offset: 10_000 }, context),
+      /Grep metadata exceeds the fixed model result budget/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local read returns a complete character continuation for maxLength windows", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-char-continuation-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -293,20 +474,25 @@ test("local read_file returns a plain next character offset for maxLength window
     assert.equal(firstResult.textChars, 4);
     assert.equal(firstResult.charCount, 10);
     assert.equal(firstRead.nextStartChar, 4);
-    assert.equal(firstRead.continuation, undefined);
+    const firstNextInput = asRecord(asRecord(firstRead.continuation).nextInput);
+    assert.deepEqual(firstNextInput, { path: "src/long.txt", maxLength: 5, startChar: 4 });
 
-    const secondRead = asDirectToolFacts(await readFileTool.execute({ path: "src/long.txt", maxLength: 5, startChar: 4 }, context));
+    const secondRead = asDirectToolFacts(await readFileTool.execute(firstNextInput, context));
     const secondResult = secondRead;
     assert.equal(secondResult.content, "efgh…");
     assert.equal(secondResult.startChar, 4);
     assert.equal(secondRead.nextStartChar, 8);
-    assert.equal(secondRead.continuation, undefined);
+    assert.deepEqual(asRecord(asRecord(secondRead.continuation).nextInput), {
+      path: "src/long.txt",
+      maxLength: 5,
+      startChar: 8,
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local read_file next character offset keeps emoji surrogate pairs intact", async () => {
+test("local read next character offset keeps emoji surrogate pairs intact", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-read-unicode-window-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -317,7 +503,7 @@ test("local read_file next character offset keeps emoji surrogate pairs intact",
       { path: "src/unicode.txt", maxLength: 3 },
       context,
     ));
-    const secondInput = { path: "src/unicode.txt", maxLength: 3, startChar: first.nextStartChar };
+    const secondInput = asRecord(asRecord(first.continuation).nextInput);
     const second = asDirectToolFacts(await readFileTool.execute(secondInput, context));
 
     assert.equal(first.content, "A…");
@@ -333,7 +519,7 @@ test("local read_file next character offset keeps emoji surrogate pairs intact",
   }
 });
 
-test("local read_file rejects a character window too small to advance", async () => {
+test("local read rejects a character window too small to advance", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-char-minimum-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -342,14 +528,14 @@ test("local read_file rejects a character window too small to advance", async ()
 
     await assert.rejects(
       () => readFileTool.execute({ path: "src/long.txt", maxLength: 2 }, context),
-      /read_file maxLength must be at least 3/
+      /read maxLength must be at least 3/
     );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local read_file rejects invalid explicit maxLength values instead of using the default", async () => {
+test("local read rejects invalid explicit maxLength values instead of using the default", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-read-invalid-window-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -359,13 +545,13 @@ test("local read_file rejects invalid explicit maxLength values instead of using
     for (const maxLength of [0, -1, 1, 2, 1.5, "1"] as const) {
       await assert.rejects(
         () => readFileTool.execute({ path: "src/long.txt", maxLength }, context),
-        /read_file maxLength must be at least 3 and a safe integer/,
+        /read maxLength must be at least 3 and a safe integer/,
       );
     }
     for (const startChar of [-1, 1.5, "1", 11] as const) {
       await assert.rejects(
         () => readFileTool.execute({ path: "src/long.txt", startChar }, context),
-        /read_file startChar/,
+        /read startChar/,
       );
     }
   } finally {
@@ -373,7 +559,7 @@ test("local read_file rejects invalid explicit maxLength values instead of using
   }
 });
 
-test("local read_file rejects line ranges with maxLength to avoid skipped text", async () => {
+test("local read rejects line ranges with maxLength to avoid skipped text", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-read-line-maxlength-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -389,7 +575,7 @@ test("local read_file rejects line ranges with maxLength to avoid skipped text",
   }
 });
 
-test("local grep_files prefers ripgrep runner and records the search engine", async () => {
+test("local grep prefers ripgrep runner and records the search engine", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     let called = false;
@@ -414,7 +600,7 @@ test("local grep_files prefers ripgrep runner and records the search engine", as
   }
 });
 
-test("local grep_files falls back to JS recursion when ripgrep is unavailable", async () => {
+test("local grep falls back to JS recursion when ripgrep is unavailable", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -434,7 +620,7 @@ test("local grep_files falls back to JS recursion when ripgrep is unavailable", 
   }
 });
 
-test("local grep_files JS fallback skips Git internals like the ripgrep path", async () => {
+test("local grep JS fallback skips Git internals like the ripgrep path", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-grep-git-"));
   try {
     await mkdir(path.join(root, ".git"), { recursive: true });
@@ -453,7 +639,7 @@ test("local grep_files JS fallback skips Git internals like the ripgrep path", a
   }
 });
 
-test("local read_file rejects paths outside workspace", async () => {
+test("local read rejects paths outside workspace", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const readFile = createLocalReadFileTool(root);
@@ -466,7 +652,7 @@ test("local read_file rejects paths outside workspace", async () => {
   }
 });
 
-test("local read_file preserves line endings so returned ranges can be edited exactly", async () => {
+test("local read preserves line endings so returned ranges can be edited exactly", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-line-endings-"));
   try {
     const file = path.join(root, "windows.txt");
@@ -491,7 +677,7 @@ test("local read_file preserves line endings so returned ranges can be edited ex
   }
 });
 
-test("local read_file preserves line endings while streaming a large line range", async () => {
+test("local read preserves line endings while streaming a large line range", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-large-line-range-"));
   try {
     const file = path.join(root, "large.txt");
@@ -509,12 +695,16 @@ test("local read_file preserves line endings while streaming a large line range"
     assert.equal(result.content, `${lines[1]}\r\n${lines[2]}`);
     assert.equal(result.hasMoreAfter, true);
     assert.equal(result.nextStartLine, 4);
+    assert.deepEqual(asRecord(asRecord(result.continuation).nextInput), {
+      path: "large.txt",
+      startLine: 4,
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local read_file reports invalid UTF-8 instead of returning replacement text", async () => {
+test("local read reports invalid UTF-8 instead of returning replacement text", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-invalid-utf8-"));
   try {
     const file = path.join(root, "invalid.txt");
@@ -531,16 +721,16 @@ test("local read_file reports invalid UTF-8 instead of returning replacement tex
   }
 });
 
-test("local create_file and edit_file stay inside the local strategy sandbox", async () => {
+test("local Write creates or rewrites and Edit stays inside the local strategy sandbox", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
-    const createFile = createLocalCreateFileTool(root);
+    const writeFileTool = createLocalWriteFileTool(root);
     const editFile = createLocalEditFileTool(root);
 
-    const created = await createFile.execute({ path: "notes/result.md", content: "# Title\n\nbody\n" }, context);
+    const created = await writeFileTool.execute({ path: "notes/result.md", content: "# Title\n\nbody\n" }, context);
     const edited = await editFile.execute({
       path: "notes/result.md",
-      edits: [{ anchor: "body", replacement: "updated body" }],
+      edits: [{ oldText: "body", newText: "updated body" }],
     }, context);
     const createdFacts = asDirectToolFacts(created);
     const editedFacts = asDirectToolFacts(edited);
@@ -552,25 +742,21 @@ test("local create_file and edit_file stay inside the local strategy sandbox", a
     assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "# Title\n\nupdated body\n");
 
     await assert.rejects(
-      () => createFile.execute({ path: "notes/result.md", content: "overwrite" }, context),
-      /already exists/
-    );
-    await assert.rejects(
-      () => createFile.execute({ path: "../outside.md", content: "nope" }, context),
+      () => writeFileTool.execute({ path: "../outside.md", content: "nope" }, context),
       /outside the workspace boundary/
     );
     await mkdir(path.join(root, ".trellis"));
-    const trellisCreated = await createFile.execute({ path: ".trellis/local.md", content: "allowed body" }, context);
+    const trellisCreated = await writeFileTool.execute({ path: ".trellis/local.md", content: "allowed body" }, context);
     assert.equal(asDirectToolFacts(trellisCreated).path, ".trellis/local.md");
-    const overwritten = await createFile.execute({ path: "notes/result.md", content: "overwritten", overwrite: true }, context);
-    assert.equal(asDirectToolFacts(overwritten).overwrite, true);
+    const overwritten = await writeFileTool.execute({ path: "notes/result.md", content: "overwritten" }, context);
+    assert.equal(asDirectToolFacts(overwritten).operation, "write");
     assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "overwritten");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local edit_file validates all anchors before writing and rejects ambiguous edits", async () => {
+test("local edit validates every exact replacement before writing", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const file = path.join(root, "notes.txt");
@@ -580,8 +766,8 @@ test("local edit_file validates all anchors before writing and rejects ambiguous
     await editFile.execute({
       path: "notes.txt",
       edits: [
-        { anchor: "alpha", replacement: "ALPHA" },
-        { anchor: "gamma", replacement: "GAMMA" },
+        { oldText: "alpha", newText: "ALPHA" },
+        { oldText: "gamma", newText: "GAMMA" },
       ],
     }, context);
     assert.equal(await readFile(file, "utf8"), "ALPHA\nbeta\nGAMMA\n");
@@ -589,22 +775,15 @@ test("local edit_file validates all anchors before writing and rejects ambiguous
     await writeFile(file, "same\nsame\n", "utf8");
     await assert.rejects(
       () => editFile.execute({ path: "notes.txt", edits: [{ oldText: "same", newText: "once" }] }, context),
-      /matched 2 locations/
+      /must match exactly once.*matches=2/
     );
     assert.equal(await readFile(file, "utf8"), "same\nsame\n");
 
-    await editFile.execute({
-      path: "notes.txt",
-      edits: [{ oldText: "same", newText: "second", occurrence: 2 }],
-    }, context);
-    assert.equal(await readFile(file, "utf8"), "same\nsecond\n");
-
-    await writeFile(file, "same\nsame\nsame\n", "utf8");
-    await editFile.execute({
-      path: "notes.txt",
-      edits: [{ oldText: "same", newText: "middle", startLine: 2, endLine: 2 }],
-    }, context);
-    assert.equal(await readFile(file, "utf8"), "same\nmiddle\nsame\n");
+    await assert.rejects(
+      () => editFile.execute({ path: "notes.txt", edits: [{ oldText: "missing", newText: "value" }] }, context),
+      /must match exactly once.*matches=0/
+    );
+    assert.equal(await readFile(file, "utf8"), "same\nsame\n");
 
     await writeFile(file, "same\nsame\n", "utf8");
     await assert.rejects(
@@ -615,22 +794,15 @@ test("local edit_file validates all anchors before writing and rejects ambiguous
           { oldText: "same", newText: "one" },
         ],
       }, context),
-      /matched 2 locations|overlap/
+      /must match exactly once.*matches=2|overlap/
     );
-
-    await assert.rejects(
-      () => editFile.execute({
-        path: "notes.txt",
-        edits: [{ oldText: "same", newText: "missing", occurrence: 2, startLine: 1, endLine: 1 }],
-      }, context),
-      /did not overlap the requested line range/
-    );
+    assert.equal(await readFile(file, "utf8"), "same\nsame\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("local edit_file rejects binary targets before dryRun or write", async () => {
+test("local edit rejects binary targets", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-binary-edit-"));
   try {
     const file = path.join(root, "image.bin");
@@ -643,17 +815,7 @@ test("local edit_file rejects binary targets before dryRun or write", async () =
         path: "image.bin",
         edits: [{ oldText: "alpha", newText: "ALPHA" }],
       }, context),
-      /edit_file target is binary or non-text: image\.bin; bytes=10/
-    );
-    assert.deepEqual(await readFile(file), original);
-
-    await assert.rejects(
-      () => editFile.execute({
-        path: "image.bin",
-        dryRun: true,
-        edits: [{ oldText: "beta", newText: "BETA" }],
-      }, context),
-      /edit_file target is binary or non-text: image\.bin; bytes=10/
+      /File is binary or non-text: image\.bin; bytes=10/
     );
     assert.deepEqual(await readFile(file), original);
   } finally {
@@ -661,7 +823,7 @@ test("local edit_file rejects binary targets before dryRun or write", async () =
   }
 });
 
-test("local edit_file preserves an existing UTF-8 byte order mark", async () => {
+test("local edit preserves an existing UTF-8 byte order mark", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-bom-edit-"));
   try {
     const file = path.join(root, "bom.txt");
@@ -686,36 +848,13 @@ test("local edit_file preserves an existing UTF-8 byte order mark", async () => 
 
 test("local write tools do not require confirmation", async () => {
   const writeFileTool = createLocalWriteFileTool();
-  const createFileTool = createLocalCreateFileTool();
   const editFileTool = createLocalEditFileTool();
-  const deleteFileTool = createLocalDeleteFileTool();
 
   assert.equal(writeFileTool.definition.metadata?.requiresConfirmation, false);
-  assert.equal(createFileTool.definition.metadata?.requiresConfirmation, false);
   assert.equal(editFileTool.definition.metadata?.requiresConfirmation, false);
-  assert.equal(deleteFileTool.definition.metadata?.requiresConfirmation, false);
 });
 
-test("local delete_file deletes only regular files", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
-  try {
-    await mkdir(path.join(root, "dir"));
-    await writeFile(path.join(root, "dir", "note.txt"), "remove me", "utf8");
-    const deleteFile = createLocalDeleteFileTool(root);
-
-    const deleted = await deleteFile.execute({ path: "dir/note.txt" }, context);
-    assert.equal(asDirectToolFacts(deleted).path, "dir/note.txt");
-    await assert.rejects(() => readFile(path.join(root, "dir", "note.txt"), "utf8"), /ENOENT/);
-    await assert.rejects(
-      () => deleteFile.execute({ path: "dir" }, context),
-      /regular file path/
-    );
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("local shell_command uses the workspace shell and confirmation metadata", async () => {
+test("local shell uses the workspace shell and confirmation metadata", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -724,12 +863,17 @@ test("local shell_command uses the workspace shell and confirmation metadata", a
     const syntax = shellSyntaxFromTool(shellCommand);
 
     assert.equal(shellCommand.definition.metadata?.requiresConfirmation, true);
-    assert.deepEqual(shellCommand.definition.inputSchema.required, []);
-    assert.equal("args" in shellCommand.definition.inputSchema.properties, true);
+    assert.deepEqual(shellCommand.definition.inputSchema.required, ["command"]);
+    assert.equal(shellCommand.definition.inputSchema.anyOf, undefined);
+    assert.equal("commandLine" in shellCommand.definition.inputSchema.properties, false);
+    assert.equal("args" in shellCommand.definition.inputSchema.properties, false);
     assert.equal("background" in shellCommand.definition.inputSchema.properties, true);
     assert.equal("cwd" in shellCommand.definition.inputSchema.properties, true);
-    assert.equal("backgroundWaitMs" in shellCommand.definition.inputSchema.properties, true);
+    assert.equal("backgroundWaitMs" in shellCommand.definition.inputSchema.properties, false);
+    assert.equal("waitForPort" in shellCommand.definition.inputSchema.properties, false);
+    assert.equal("lifetime" in shellCommand.definition.inputSchema.properties, false);
     assert.equal(shellCommand.definition.metadata?.runtimeHints?.[0]?.kind, "command_shell");
+    assert.equal(shellCommand.definition.metadata?.runtimeHints?.[0]?.commandLineParameter, "command");
 
     const echoed = await shellCommand.execute({ commandLine: shellEchoCommand("hello workspace", syntax) }, context);
     const shellStyleEchoed = await shellCommand.execute({ commandLine: shellEchoCommand("approval-review", syntax) }, context);
@@ -790,7 +934,7 @@ test("local shell_command uses the workspace shell and confirmation metadata", a
   }
 });
 
-test("local shell_command bounds foreground process lifetime and output volume", async () => {
+test("local shell bounds foreground process lifetime and output volume", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const shellCommand = createLocalShellCommandTool(root);
@@ -825,7 +969,7 @@ test("local shell_command bounds foreground process lifetime and output volume",
   }
 });
 
-test("local shell_command can start long-running commands in the background with a log path", async () => {
+test("local shell can start long-running commands in the background with a log path", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const shellCommand = createLocalShellCommandTool(root);
@@ -857,7 +1001,7 @@ test("local shell_command can start long-running commands in the background with
   }
 });
 
-test("local shell_command waits for a background server port", async () => {
+test("local shell waits for a background server port", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const port = await unusedLocalPort();
@@ -892,7 +1036,7 @@ test("local shell_command waits for a background server port", async () => {
   }
 });
 
-test("local shell_command reports when a requested background port is not ready", async () => {
+test("local shell reports when a requested background port is not ready", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const port = await unusedLocalPort();
@@ -920,7 +1064,7 @@ test("local shell_command reports when a requested background port is not ready"
   }
 });
 
-test("local shell_command captures shell-native background command output", async () => {
+test("local shell captures shell-native background command output", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const shellCommand = createLocalShellCommandTool(root);
@@ -951,7 +1095,7 @@ test("local shell_command captures shell-native background command output", asyn
   }
 });
 
-test("local shell_command reports background commands that exit immediately", async () => {
+test("local shell reports background commands that exit immediately", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const shellCommand = createLocalShellCommandTool(root);
@@ -973,7 +1117,7 @@ test("local shell_command reports background commands that exit immediately", as
   }
 });
 
-test("local shell_command reports background commands that fail during the startup observation window", async () => {
+test("local shell reports background commands that fail during the startup observation window", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const shellCommand = createLocalShellCommandTool(root);
@@ -996,7 +1140,7 @@ test("local shell_command reports background commands that fail during the start
   }
 });
 
-test("local shell_command falls back to shell execution for Windows cmd shims while preserving direct argv for executables", async () => {
+test("local shell falls back to shell execution for Windows cmd shims while preserving direct argv for executables", async () => {
   if (process.platform !== "win32") {
     return;
   }

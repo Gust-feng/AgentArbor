@@ -93,7 +93,7 @@ export function requireAttachmentEntry(
   const attachmentId = stringOrUndefined(record.attachmentId);
   const ref = stringOrUndefined(record.ref);
   if (attachmentId === undefined && ref === undefined) {
-    throw new Error("Provide attachmentId from list_context_attachments or a non-local context ref.");
+    throw new Error("Provide attachmentId from attachment_list or a non-local context ref.");
   }
   const found = attachmentEntries(taskSoil).find((entry) =>
     (attachmentId !== undefined && entry.attachmentId === attachmentId) ||

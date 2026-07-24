@@ -29,32 +29,8 @@ export function createInspectContextAttachmentArchiveTool(
 ): ToolExecutor {
   return {
     definition: {
-      name: "inspect_context_attachment_archive",
+      name: "AttachmentInspectArchive",
       description: "Inspect a ZIP archive context attachment and return bounded internal entry metadata without extracting files.",
-      modelContract: {
-        usageNotes: [
-          "Inspect a ZIP archive from a current context attachment selected by attachmentId or ref.",
-          "For project attachments, path is required and must point to the archive file inside the attached project.",
-          "This tool only lists ZIP entries; it does not extract files or read archive contents.",
-          "offset continues a truncated archive listing.",
-          "Use this before deciding whether an archive needs explicit extraction or a project attachment workflow.",
-          "Local absolute paths are not accepted as input and are not returned in output.",
-        ],
-        outputNotes: [
-          "archive=true means the archive directory was parsed.",
-          "entries[] contains archive-internal path, kind, byte size, compressed byte size, and unsafePath when a name is not safe to extract.",
-          "continuation.nextInput provides the next executable archive entry window when truncated is true.",
-          "reason explains unsupported archive formats such as tar/gz/7z without returning local paths.",
-        ],
-        runtimeHints: [
-          { label: "supported formats", value: "zip" },
-          { label: "max returned entries", value: String(MAX_ARCHIVE_LIST_ENTRIES) },
-        ],
-        examples: [
-          { title: "Inspect attached ZIP", input: { attachmentId: "ctx_archive", limit: 80 } },
-          { title: "Inspect ZIP inside project", input: { attachmentId: "ctx_project", path: "assets/project.zip" } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -86,7 +62,7 @@ export function createInspectContextAttachmentArchiveTool(
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment archive target could not be read.");
       if (!stat.isFile()) {
-        throw new Error("inspect_context_attachment_archive expects a file target.");
+        throw new Error("attachment_inspect_archive expects a file target.");
       }
       const format = tableTargetFormat(entry.ref, target.targetPath);
       if (format !== "archive" || archiveTargetExtension(entry.ref, target.targetPath) !== ".zip") {

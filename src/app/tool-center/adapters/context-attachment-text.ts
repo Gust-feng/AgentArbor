@@ -38,10 +38,10 @@ export function parseLineRange(
   const start = startLine ?? 1;
   const end = explicitEndLine ?? start + DEFAULT_READ_LINE_COUNT - 1;
   if (end < start) {
-    throw new Error("read_context_attachment_text endLine must be greater than or equal to startLine.");
+    throw new Error("attachment_read_text endLine must be greater than or equal to startLine.");
   }
   if (end - start + 1 > MAX_READ_LINE_COUNT) {
-    throw new Error(`read_context_attachment_text line range is too large; request at most ${MAX_READ_LINE_COUNT} lines at a time.`);
+    throw new Error(`attachment_read_text line range is too large; request at most ${MAX_READ_LINE_COUNT} lines at a time.`);
   }
   return { startLine: start, endLine: end };
 }
@@ -49,12 +49,12 @@ export function parseLineRange(
 export function charWindowContent(raw: string, requestedStartChar: number): ReadContentWindow {
   if (requestedStartChar > raw.length) {
     throw new Error(
-      `read_context_attachment_text startChar ${requestedStartChar} exceeds charCount ${raw.length}.`,
+      `attachment_read_text startChar ${requestedStartChar} exceeds charCount ${raw.length}.`,
     );
   }
   const startChar = requestedStartChar;
   if (!isUtf16CodeUnitBoundary(raw, startChar)) {
-    throw new Error("read_context_attachment_text startChar must not split a UTF-16 surrogate pair.");
+    throw new Error("attachment_read_text startChar must not split a UTF-16 surrogate pair.");
   }
   return {
     content: raw.slice(startChar),

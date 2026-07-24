@@ -131,55 +131,8 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
   const maxBodyChars = Math.max(1, Math.floor(options.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS));
   return {
     definition: {
-      name: "http_request",
+      name: "HttpRequest",
       description: "Send a bounded stateless HTTP or HTTPS request and return status, headers, response body, duration, and truncation state.",
-      modelContract: {
-        purpose: "Send a stateless HTTP or HTTPS request for API inspection, local dev server checks, and simple endpoint debugging.",
-        whenToUse: [
-          "Use for JSON or text API endpoints when raw HTTP status, headers, and body are needed.",
-          "Use for local development servers or external HTTP resources that do not require browser rendering.",
-          "Use HEAD when only status and headers are needed.",
-        ],
-        whenNotToUse: [
-          "Do not use for rendered page inspection, logged-in browser sessions, OAuth flows, or browser-only pages; use browser_snapshot when the current rendered page text matters.",
-          "Do not use for non-HTTP URLs.",
-          "Do not use for file uploads or file downloads.",
-        ],
-        inputNotes: [
-          "url is required and must use http or https.",
-          "method defaults to GET and supports GET, HEAD, POST, PUT, and DELETE.",
-          "headers is an optional object of string header values.",
-          "body may be a string or JSON-serializable value for POST, PUT, or DELETE; GET and HEAD do not accept a body.",
-          "startChar continues a truncated GET response from a zero-based character offset; it is not accepted for side-effecting methods.",
-          `timeoutMs defaults to ${DEFAULT_TIMEOUT_MS} and is capped at ${options.maxTimeoutMs ?? MAX_TIMEOUT_MS}.`,
-        ],
-        usageNotes: [
-          "Non-2xx HTTP responses are successful tool results; inspect statusCode and body instead of treating them as tool failures.",
-          "HEAD returns an empty body and does not read the response body.",
-          "This tool does not persist cookies or authentication state between calls.",
-        ],
-        outputNotes: [
-          "statusCode and statusText contain the HTTP response status.",
-          "headers is a plain object of response headers.",
-          "body is bounded text and may be empty.",
-          "hasMoreAfter reports whether more body text exists; continuation.nextInput provides the executable next GET window.",
-          "A POST, PUT, or DELETE whose response body cannot fit completely returns a failed observation with bodyPreview and responseBodyComplete=false; requestCompleted/retryable facts are carried by the error and no continuation is emitted.",
-          "A GET that reaches the continuation ceiling while more body remains also returns a failed observation instead of completed+truncated without a continuation.",
-          `truncated is true only for a completed GET window that can continue, after exceeding ${maxBodyChars} characters or the shared serialized body budget.`,
-          "durationMs is measured inside the HTTP tool and may differ slightly from the outer tool event duration.",
-        ],
-        runtimeHints: [
-          { label: "session state", value: "no OAuth flow, no cookie jar, no upload or download handling" },
-          { label: "default timeoutMs", value: String(DEFAULT_TIMEOUT_MS) },
-          { label: "max body chars", value: String(maxBodyChars) },
-          { label: "max startChar", value: String(MAX_BODY_START_CHAR) },
-        ],
-        examples: [
-          { title: "GET JSON", input: { url: "https://api.example.test/status" } },
-          { title: "HEAD only", input: { method: "HEAD", url: "https://example.test/" } },
-          { title: "POST JSON", input: { method: "POST", url: "http://localhost:3000/api/items", body: { name: "demo" } } },
-        ],
-      },
       metadata: {
         category: "web",
         riskLevel: "medium",
@@ -189,7 +142,7 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
       inputSchema: {
         type: "object",
         properties: {
-          url: { type: "string", description: "HTTP or HTTPS URL to request." },
+          url: { type: "string", minLength: 1, description: "HTTP or HTTPS URL to request." },
           method: { type: "string", enum: ["GET", "HEAD", "POST", "PUT", "DELETE"], description: "HTTP method. Defaults to GET." },
           headers: {
             type: "object",
@@ -197,10 +150,34 @@ export function createHttpRequestTool(options: HttpRequestToolOptions = {}): Too
             description: "Optional request headers with string values.",
           },
           body: { description: "Optional string or JSON-serializable request body for POST, PUT, or DELETE." },
-          startChar: { type: "number", description: "Zero-based body character offset for continuing a truncated GET response." },
-          responseRef: { type: "string", description: "Opaque GET response reference from continuation.nextInput; do not construct manually." },
-          timeoutMs: { type: "number", description: `Optional timeout in milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS}.` },
+          startChar: { type: "integer", minimum: 0, maximum: MAX_BODY_START_CHAR, description: "Zero-based body character offset for continuing a truncated GET response." },
+          responseRef: { type: "string", minLength: 1, description: "Opaque GET response reference from continuation.nextInput; do not construct manually." },
+          timeoutMs: { type: "integer", minimum: 1, maximum: options.maxTimeoutMs ?? MAX_TIMEOUT_MS, description: `Optional timeout in milliseconds. Defaults to ${options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS}.` },
         },
+        oneOf: [
+          { required: ["url"], not: { required: ["responseRef"] } },
+          {
+            required: ["responseRef"],
+            not: { anyOf: [
+              { required: ["url"] },
+              { required: ["method"] },
+              { required: ["headers"] },
+              { required: ["body"] },
+              { required: ["timeoutMs"] },
+            ] },
+          },
+        ],
+        allOf: [
+          {
+            if: { properties: { method: { enum: ["HEAD", "POST", "PUT", "DELETE"] } }, required: ["method"] },
+            then: { not: { required: ["startChar"] } },
+          },
+          {
+            if: { properties: { method: { enum: ["GET", "HEAD"] } }, required: ["method"] },
+            then: { not: { required: ["body"] } },
+          },
+          { not: { allOf: [{ required: ["body"] }, { not: { required: ["method"] } }] } },
+        ],
         additionalProperties: false,
       },
     },
@@ -281,8 +258,8 @@ async function executeHttpRequest(
       ? await options.outputStore.retain({
           mediaType: "text/plain",
           content: bodyResult.fullBody,
-          sourceToolName: "http_request",
-          sourceCallId: context.toolCallId ?? "http_request",
+          sourceToolName: "HttpRequest",
+          sourceCallId: context.toolCallId ?? "HttpRequest",
           sourceFactId: context.toolCallId,
           ownerId: context.traceId,
         })
@@ -317,8 +294,8 @@ async function executeHttpRequest(
       return {
         kind: "tool_call_result",
         result: {
-          callId: context.toolCallId ?? "http_request",
-          toolName: "http_request",
+          callId: context.toolCallId ?? "HttpRequest",
+          toolName: "HttpRequest",
           input: input as ToolFactValue | undefined,
           output: incompleteHttpResponseOutput(output),
           status: "failed",

@@ -625,7 +625,7 @@ test("tool progress replaces the live request and terminal events remove the vol
     id: "tool-live:call-1",
     sequence: 2,
     type: "tool.requested",
-    toolName: "shell_command",
+    toolName: "shell",
     refs: [{ kind: "tool_call", id: "call-1" }],
     detail: { display: { kind: "command_summary", commandLine: "pnpm test" } },
   });
@@ -633,7 +633,7 @@ test("tool progress replaces the live request and terminal events remove the vol
     id: "tool-live:call-1",
     sequence: 3,
     type: "tool.progress",
-    toolName: "shell_command",
+    toolName: "shell",
     refs: [{ kind: "tool_call", id: "call-1" }],
     detail: {
       display: {

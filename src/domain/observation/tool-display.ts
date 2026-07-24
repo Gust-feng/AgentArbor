@@ -38,7 +38,7 @@ export type ToolDisplayProjection =
       readonly error?: string;
     }
   | {
-      readonly kind: "browser_snapshot";
+      readonly kind: "web_fetch";
       readonly title?: string;
       readonly url?: string;
     }

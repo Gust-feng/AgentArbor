@@ -24,7 +24,7 @@ test("model provider round trip completes a non-streaming Chat tool turn", async
       tool_calls: [{
         id: "call-read",
         type: "function",
-        function: { name: "read_file", arguments: '{"path":"README.md"}' },
+        function: { name: "read", arguments: '{"path":"README.md"}' },
       }],
     }, "tool_calls"),
     chatCompletion({ content: "tool evidence accepted" }, "stop"),
@@ -275,6 +275,7 @@ function loopInput(
       { role: "user", content: userMessage },
     ],
     tools: {
+      definitions: gateway.list(),
       gateway,
       context: { callerAgentId: "ordinary", traceId: "roundtrip", goalId: "roundtrip" },
       permission: { callerAgentId: "ordinary", allowedTools: gateway.list().map((tool) => tool.name) },
@@ -286,7 +287,7 @@ function loopInput(
 
 function readFileGateway(onExecute: () => void): ToolExecutionGateway {
   const definition: ToolDefinition = {
-    name: "read_file",
+    name: "read",
     description: "Read a file.",
     inputSchema: {
       type: "object",

@@ -18,7 +18,7 @@ export function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderSt
   const goalAnchor = stripTrailingSentencePunctuation(fakeGoalAnchorFromRequest(request));
   const normalized = goalAnchor.toLowerCase();
   const hasToolMessage = request.sanitizedMessages.some((message) => message.role === "tool");
-  const canUseSearch = request.toolChoice !== "none" && request.tools?.some((tool) => tool.name === "search") === true;
+  const canUseSearch = request.toolChoice !== "none" && request.tools?.some((tool) => tool.name === "ResearchSearch") === true;
   if (needsDesktopFileAuthorization(goalAnchor) && !hasAuthorizedFilePreview(request)) {
     const answer =
       "我现在还不能直接看到你的桌面文件。请先通过附件选择具体文件或文件夹，或给出只读文件引用；拿到授权材料后，我可以继续帮你梳理、总结或分析。";
@@ -29,7 +29,7 @@ export function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderSt
       toolCalls: [
         {
           callId: "call-desktop-agent-search",
-          toolName: "search",
+          toolName: "ResearchSearch",
           input: {
             query: goalAnchor,
             sources: includesAny(normalized, ["网页", "web", "搜索", "搜一下", "查一下"]) ? ["web", "codebase"] : ["codebase"],
@@ -297,7 +297,7 @@ function fakeWorkSessionChildSpecs(goalAnchor: string): readonly Record<string, 
       displayName: "代码阅读",
       role: "codebase_reader",
       objective: `Read the current project structure and identify concrete weak points for ${goalAnchor}.`,
-      allowedTools: ["search", "read"],
+      allowedTools: ["ResearchSearch", "ResearchRead"],
       inputRefs: ["task-soil:current", "workspace:current"],
     },
     {
@@ -305,7 +305,7 @@ function fakeWorkSessionChildSpecs(goalAnchor: string): readonly Record<string, 
       displayName: "架构评审",
       role: "architecture_reviewer",
       objective: `Review whether the runtime architecture can produce useful work for ${goalAnchor}.`,
-      allowedTools: ["search", "read"],
+      allowedTools: ["ResearchSearch", "ResearchRead"],
       inputRefs: ["task-soil:current", "docs:architecture"],
     },
   ];

@@ -1399,7 +1399,7 @@
           id: "read-existing-ui",
           tool: {
             kind: "read",
-            name: "read_file",
+            name: "read",
             target: "panel-ui/transcript-timeline.tsx",
           },
           execution: { phase: "completed" },
@@ -1508,7 +1508,7 @@
           id: "edit-preview-contract",
           tool: {
             kind: "edit",
-            name: "edit_file",
+            name: "edit",
             target: "tool-display-preview.html",
           },
           execution: { phase: "completed" },
@@ -1555,7 +1555,7 @@
           id: "command-lint-finished",
           tool: {
             kind: "command",
-            name: "shell_command",
+            name: "shell",
             target: "pnpm lint:panel",
           },
           execution: { phase: "completed" },
@@ -1597,7 +1597,7 @@
           id: "command-verify-running",
           tool: {
             kind: "command",
-            name: "shell_command",
+            name: "shell",
             target: "pnpm typecheck:panel",
           },
           execution: { phase: "executing" },
@@ -1643,7 +1643,7 @@
           id: "command-build-failed",
           tool: {
             kind: "command",
-            name: "shell_command",
+            name: "shell",
             target: "pnpm build:node",
           },
           execution: { phase: "failed" },

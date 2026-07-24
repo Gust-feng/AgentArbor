@@ -41,14 +41,15 @@ export function toolStreamDetail(
 ): PanelRunStreamEventDetail {
   const toolName = stringOrUndefined(payload.toolName) ?? "tool";
   const input = asRecord(payload.input);
-  const output = asRecord(payload.output);
+  const output = payload.output;
+  const outputRecord = asRecord(output);
   const display = projectToolDisplay({
     callId: stringOrUndefined(payload.callId) ?? "panel-tool",
     toolName,
     input: cloneToolFactValue(input),
   }, output);
-  const errorDomain = errorDomainFromToolFacts(payload, output);
-  const errorFacts = errorFactsFromToolFacts(payload, output);
+  const errorDomain = errorDomainFromToolFacts(payload, outputRecord);
+  const errorFacts = errorFactsFromToolFacts(payload, outputRecord);
   return {
     kind: "tool",
     display,

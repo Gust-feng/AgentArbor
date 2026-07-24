@@ -9,11 +9,14 @@ import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolDefinition, ToolExecutionBroker } from "../../domain/tools/index.js";
 import type { CapabilityAgentProfile } from "./capability-policy.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent/desktop-agent-contracts.js";
+import type { AgentLoopToolVisibilityPlan } from "../model-runtime/agent-loop.js";
+import type { ModelVisibleToolDefinitionTokenCounter } from "../model-runtime/tool-definition-visibility-cost.js";
 import { frozenToolDefinitionsForRun } from "./capability-tool-definitions.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 import { createRunCapabilityPlan } from "../model-runtime/model-capability-registry.js";
 import { toolDefinitionContractHash } from "./tool-definition-contract.js";
 import { hasReadableSelectedSkillResources } from "../skills/skill-resource-tool.js";
+import { resolveMcpFirstToolVisibilityPlan } from "./run-tool-visibility-policy.js";
 
 export type ResolveRunToolBoundaryInput = {
   readonly agentDefinition: CapabilityAgentProfile;
@@ -29,6 +32,8 @@ export type ResolveRunToolBoundaryInput = {
   readonly toolCenter?: ToolExecutionBroker;
   readonly agentToolDefinitions?: readonly ToolDefinition[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  /** Model-specific counter used only to decide whether progressive definitions save context. */
+  readonly toolDefinitionTokenCounter?: ModelVisibleToolDefinitionTokenCounter;
 };
 
 export type ResolvedRunToolBoundary = {
@@ -37,6 +42,8 @@ export type ResolvedRunToolBoundary = {
   /** Pi AgentTools allowed by the same frozen capability resolution. */
   readonly allowedAgentToolNames: readonly string[];
   readonly toolDefinitions: readonly ToolDefinition[];
+  /** Optional run-frozen policy for progressively exposing long-tail MCP definitions. */
+  readonly toolVisibilityPlan?: AgentLoopToolVisibilityPlan;
   readonly capabilityResolution?: RunCapabilityResolution;
 };
 
@@ -46,6 +53,7 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
       allowedTools: [],
       allowedAgentToolNames: [],
       toolDefinitions: [],
+      toolVisibilityPlan: undefined,
       capabilityResolution: undefined,
     };
   }
@@ -54,9 +62,9 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
     modelCapabilities: input.modelCapabilities ?? input.snapshot.modelCapabilities,
   });
   const capabilityResolution = addSelectedSkillToolDeclarationWarnings(
-    reconcileRunCapabilityResolutionForSelectedSkillResources(
-      hidePresetSubAgentToolsWithoutEnabledCatalog(
-        restrictRunCapabilityResolutionToExecutableTools(
+    restrictRunCapabilityResolutionToExecutableTools(
+      reconcileRunCapabilityResolutionForSelectedSkillResources(
+        hidePresetSubAgentToolsWithoutEnabledCatalog(
           resolveRunCapabilities({
             snapshot: input.snapshot,
             skillCatalog: input.skillCatalog,
@@ -66,18 +74,18 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
             platform: input.platform,
             capabilityPlan,
           }),
-          input.toolCenter,
-          input.snapshot,
-          input.agentToolDefinitions,
+          input.subAgentCatalog,
         ),
-        input.subAgentCatalog
+        {
+          toolCenter: input.toolCenter,
+          skillContexts: input.skillContexts ?? [],
+        },
       ),
-      {
-        toolCenter: input.toolCenter,
-        skillContexts: input.skillContexts ?? [],
-      }
+      input.toolCenter,
+      input.snapshot,
+      input.agentToolDefinitions,
     ),
-    input.skillContexts ?? []
+    input.skillContexts ?? [],
   );
   const agentToolDefinitions = new Map(
     (input.agentToolDefinitions ?? []).map((definition) => [definition.name, definition]),
@@ -92,17 +100,24 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
     snapshot: input.snapshot,
     allowedTools: capabilityResolution.allowedTools,
   });
+  const toolDefinitions = frozenDefinitions;
+  const toolVisibilityPlan = resolveMcpFirstToolVisibilityPlan({
+    snapshot: input.snapshot,
+    executionAllowedToolNames: allowedTools,
+    allowedAgentToolNames,
+    frozenDefinitions: toolDefinitions,
+    toolDefinitionTokenCounter: input.toolDefinitionTokenCounter,
+  });
   return {
     allowedTools,
     allowedAgentToolNames,
-    toolDefinitions: frozenDefinitions.map((definition) =>
-      agentToolDefinitions.get(definition.name) ?? definition
-    ),
+    toolDefinitions,
+    toolVisibilityPlan,
     capabilityResolution,
   };
 }
 
-const PRESET_SUB_AGENT_TOOL_NAMES = new Set(["call_sub_agent"]);
+const PRESET_SUB_AGENT_TOOL_NAMES = new Set(["Agent"]);
 
 export function hidePresetSubAgentToolsWithoutEnabledCatalog(
   resolution: RunCapabilityResolution,
@@ -201,12 +216,9 @@ function toolContractMatchesFrozenSnapshot(
   frozenToolsByName: ReadonlyMap<string, AgentCapabilitySnapshot["toolCatalog"]["tools"][number]>
 ): boolean {
   const frozenHash = frozenToolsByName.get(toolName)?.definitionHash;
-  if (frozenHash === undefined) {
-    return true;
-  }
   const currentDefinition = executableDefinitions.get(toolName);
   const currentHash = currentDefinition === undefined ? undefined : toolDefinitionContractHash(currentDefinition);
-  return currentHash !== undefined && currentHash === frozenHash;
+  return frozenHash !== undefined && currentHash !== undefined && currentHash === frozenHash;
 }
 
 export function reconcileRunCapabilityResolutionForSelectedSkillResources(
@@ -217,15 +229,15 @@ export function reconcileRunCapabilityResolutionForSelectedSkillResources(
   }
 ): RunCapabilityResolution {
   const selectedSkillResources = hasReadableSelectedSkillResources(input.skillContexts);
-  const readSkillResourceExecutable = input.toolCenter?.has("read_skill_resource") === true;
-  const exposure = resolution.toolExposures.find((tool) => tool.name === "read_skill_resource");
+  const readSkillResourceExecutable = input.toolCenter?.has("SkillRead") === true;
+  const exposure = resolution.toolExposures.find((tool) => tool.name === "SkillRead");
   if (exposure === undefined) {
     return resolution;
   }
   if (selectedSkillResources && readSkillResourceExecutable && exposure.reasonCode === "not_in_run_scope") {
-    const allowedTools = [...resolution.allowedTools, "read_skill_resource"];
+    const allowedTools = [...resolution.allowedTools, "SkillRead"];
     const toolExposures = resolution.toolExposures.map((tool) =>
-        tool.name === "read_skill_resource"
+        tool.name === "SkillRead"
           ? { ...tool, modelVisible: true, reasonCode: "selected_skill_resources_available" as const, reason: "当前已选中技能提供可读资源。" }
           : tool
       );
@@ -239,14 +251,14 @@ export function reconcileRunCapabilityResolutionForSelectedSkillResources(
   if (selectedSkillResources || exposure.reasonCode !== "not_in_run_scope" && !exposure.modelVisible) {
     return resolution;
   }
-  const allowedTools = resolution.allowedTools.filter((toolName) => toolName !== "read_skill_resource");
+  const allowedTools = resolution.allowedTools.filter((toolName) => toolName !== "SkillRead");
   const warnings = capabilityWarningsAfterSkillResourceRestriction({
     warnings: resolution.warnings,
     hiddenSkillResourceTool: exposure.modelVisible || exposure.reasonCode === "not_in_run_scope",
     noModelVisibleTools: allowedTools.length === 0,
   });
   const toolExposures = resolution.toolExposures.map((tool) =>
-      tool.name === "read_skill_resource"
+      tool.name === "SkillRead"
         ? { ...tool, modelVisible: false, reasonCode: "selected_skill_resources_unavailable" as const, reason: "当前没有已选中且可读的技能资源。" }
         : tool
     );
@@ -383,13 +395,13 @@ function capabilityWarningsAfterSkillResourceRestriction(input: {
   readonly noModelVisibleTools: boolean;
 }): readonly string[] {
   const next = input.warnings.filter((warning) =>
-    warning !== "当前没有已选中且可读的技能资源，已隐藏 read_skill_resource。"
+    warning !== "当前没有已选中且可读的技能资源，已隐藏 skill_read。"
   );
   if (
     input.hiddenSkillResourceTool &&
-    !next.includes("当前没有已选中且可读的技能资源，已隐藏 read_skill_resource。")
+    !next.includes("当前没有已选中且可读的技能资源，已隐藏 skill_read。")
   ) {
-    next.push("当前没有已选中且可读的技能资源，已隐藏 read_skill_resource。");
+    next.push("当前没有已选中且可读的技能资源，已隐藏 skill_read。");
   }
   return next;
 }

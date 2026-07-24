@@ -24,10 +24,10 @@ test("CapabilityCenter exposes the shared tool-output reader when the Host provi
       toolOutputStore: new InMemoryToolOutputStore(),
     }).snapshot();
 
-    const reader = snapshot.toolCatalog.tools.find((tool) => tool.name === "read_tool_output");
+    const reader = snapshot.toolCatalog.tools.find((tool) => tool.name === "read_output");
     assert.equal(reader?.availability, "available");
     assert.equal(reader?.enabled, true);
-    assert.equal(snapshot.toolCatalog.allowedTools.includes("read_tool_output"), true);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("read_output"), true);
   } finally {
     await removeTestDirectory(directory);
   }
@@ -175,14 +175,14 @@ test("CapabilityCenter discovers project sub-agents and tools from the effective
       "run-helper:project",
     ]);
     assert.equal(runSnapshot.subAgentCatalog[0]?.sourceRootId, "project");
-    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agent"), true);
-    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("spawn_sub_agent"), true);
-    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("call_sub_agents"), false);
-    assert.equal(runSnapshot.toolCatalog.tools.find((tool) => tool.name === "call_sub_agent")?.catalogOnly, true);
-    assert.equal(runSnapshot.toolCatalog.tools.find((tool) => tool.name === "spawn_sub_agent")?.catalogOnly, true);
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("agent_call"), true);
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("agent_spawn"), true);
+    assert.equal(runSnapshot.toolCatalog.allowedTools.includes("agent_calls"), false);
+    assert.equal(runSnapshot.toolCatalog.tools.find((tool) => tool.name === "agent_call")?.catalogOnly, true);
+    assert.equal(runSnapshot.toolCatalog.tools.find((tool) => tool.name === "agent_spawn")?.catalogOnly, true);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("read_sub_agent_output"), false);
     assert.equal(panelCatalog.scope, "desktop-basic");
-    assert.equal(panelCatalog.tools.some((tool) => tool.name === "call_sub_agent"), false);
+    assert.equal(panelCatalog.tools.some((tool) => tool.name === "agent_call"), false);
     assert.equal(panelCatalog.allowedTools.every((name) =>
       panelCatalog.tools.some((tool) => tool.name === name && tool.enabledByDefault)), true);
     assert.equal(panelCatalog.tools.every((tool) => tool.inputSchema.type === "object"), true);
@@ -233,7 +233,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
         "  owner: platform",
         "  priority: 3",
         "  secretPath: do-not-leak",
-        "allowed-tools: [read_file, docs__lookup]",
+        "allowed-tools: [read, docs__lookup]",
         "scripts: [scripts/review.js]",
         "references: [refs/checklist.md]",
         "assets: [assets/logo.txt]",
@@ -273,7 +273,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
         supportsToolCalling: true,
       },
     });
-    await configCenter.updateToolState({ name: "shell_command", enabled: false });
+    await configCenter.updateToolState({ name: "shell", enabled: false });
     await configCenter.upsertMcpServer({
       serverId: "docs",
       label: "Docs",
@@ -297,8 +297,45 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
           description: "Lookup docs through MCP.",
           inputSchema: {
             type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
+            properties: {
+              mode: { type: "string", enum: ["fast", "safe"] },
+              target: { $ref: "#/$defs/target" },
+              retries: { type: "integer", minimum: 0, maximum: 3 },
+              slug: { type: "string", pattern: "^[a-z]+$" },
+              operation: { const: "lookup" },
+            },
+            required: ["mode", "target"],
+            additionalProperties: { type: "string" },
+            $defs: {
+              target: {
+                type: "object",
+                properties: { id: { type: "string", minLength: 1 } },
+                required: ["id"],
+                additionalProperties: false,
+              },
+            },
+            oneOf: [
+              { required: ["mode"] },
+              { properties: { mode: { const: "safe" } } },
+            ],
+            dependentRequired: { mode: ["target"] },
+          },
+          outputSchema: {
+            type: "object",
+            properties: {
+              results: {
+                type: "array",
+                items: { $ref: "#/$defs/result" },
+              },
+            },
+            required: ["results"],
+            $defs: {
+              result: {
+                type: "object",
+                properties: { score: { type: "number", minimum: 0, maximum: 1 } },
+                required: ["score"],
+              },
+            },
           },
           annotations: { readOnlyHint: true },
         },
@@ -316,16 +353,16 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.activeModel.secretConfigured, true);
     assert.equal(snapshot.modelCapabilities.contextWindowTokens, 48_000);
     assert.equal(snapshot.modelCapabilities.supportsToolCalling, true);
-    assert.equal(snapshot.toolCatalog.allowedTools.includes("shell_command"), false);
-    assert.equal(snapshot.toolCatalog.allowedTools.includes("browser_snapshot"), false);
-    assert.equal(snapshot.toolCatalog.allowedTools.includes("read_skill_resource"), false);
-    assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "unavailable");
-    assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "read_skill_resource")?.displayName, "读取技能资源");
-    assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "read_skill_resource")?.enabled, true);
-    const shellTool = snapshot.toolCatalog.tools.find((tool) => tool.name === "shell_command");
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("shell"), false);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("web_fetch"), false);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("skill_read"), false);
+    assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "web_fetch")?.availability, "unavailable");
+    assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "skill_read")?.displayName, "读取技能资源");
+    assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "skill_read")?.enabled, true);
+    const shellTool = snapshot.toolCatalog.tools.find((tool) => tool.name === "shell");
     assert.equal(shellTool?.inputSchema?.properties.commandLine !== undefined, true);
-    assert.match(shellTool?.modelContract?.purpose ?? "", /stdout/);
-    assert.equal((shellTool?.modelContract?.examples?.length ?? 0) > 0, true);
+    assert.match(shellTool?.description ?? "", /^Run one command/);
+    assert.equal(shellTool?.definitionHash?.startsWith("sha256:"), true);
     assert.deepEqual(snapshot.skillCatalog.map((skill) => `${skill.name}:${skill.enabled}`), [
       "disabled-skill:false",
       "invalid-skill:false",
@@ -351,7 +388,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(reviewSkill?.license, "MIT");
     assert.deepEqual(reviewSkill?.compatibility, { agent: "desktop_agent", platform: "cross-platform" });
     assert.deepEqual(reviewSkill?.metadata, { owner: "platform", priority: 3 });
-    assert.deepEqual(reviewSkill?.allowedTools, ["read_file", "docs__lookup"]);
+    assert.deepEqual(reviewSkill?.allowedTools, ["read", "docs__lookup"]);
     assert.equal(reviewSkill?.validationStatus, "valid");
     assert.match(reviewSkill?.contentHash ?? "", /^sha256:/);
     assert.match(reviewSkill?.bodyHash ?? "", /^sha256:/);
@@ -370,7 +407,53 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.mcpCatalog[0]?.authSecretRefCount, 0);
     assert.deepEqual(snapshot.mcpCatalog[0]?.tools.map((tool) => tool.name), ["docs__lookup"]);
     assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
-    assert.equal(snapshot.toolCatalog.tools.some((tool) => tool.name === "docs__lookup" && tool.scopes.includes("mcp")), true);
+    const cachedMcpTool = snapshot.mcpCatalog[0]?.cachedTools?.[0];
+    const discoveredMcpTool = snapshot.mcpCatalog[0]?.tools[0];
+    const exposedMcpTool = snapshot.mcpCatalog[0]?.exposedTools[0];
+    const frozenMcpTool = snapshot.toolCatalog.tools.find((tool) => tool.name === "docs__lookup");
+    for (const tool of [cachedMcpTool, discoveredMcpTool, exposedMcpTool, frozenMcpTool]) {
+      const inputSchema = tool?.inputSchema;
+      assert.ok(inputSchema);
+      assert.deepEqual(inputSchema.properties, {
+        mode: { type: "string", enum: ["fast", "safe"] },
+        target: { $ref: "#/$defs/target" },
+        retries: { type: "integer", minimum: 0, maximum: 3 },
+        slug: { type: "string", pattern: "^[a-z]+$" },
+        operation: { const: "lookup" },
+      });
+      assert.deepEqual(inputSchema.$defs, {
+        target: {
+          type: "object",
+          properties: { id: { type: "string", minLength: 1 } },
+          required: ["id"],
+          additionalProperties: false,
+        },
+      });
+      assert.deepEqual(inputSchema.oneOf, [
+        { required: ["mode"] },
+        { properties: { mode: { const: "safe" } } },
+      ]);
+      assert.deepEqual(inputSchema.dependentRequired, { mode: ["target"] });
+      assert.deepEqual(inputSchema.additionalProperties, { type: "string" });
+      assert.deepEqual(tool?.outputSchema, {
+        type: "object",
+        properties: {
+          results: {
+            type: "array",
+            items: { $ref: "#/$defs/result" },
+          },
+        },
+        required: ["results"],
+        $defs: {
+          result: {
+            type: "object",
+            properties: { score: { type: "number", minimum: 0, maximum: 1 } },
+            required: ["score"],
+          },
+        },
+      });
+    }
+    assert.equal(frozenMcpTool?.scopes.includes("mcp"), true);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("docs__lookup"), true);
     assert.equal(snapshot.toolConfirmation?.policy, "prompt");
     assert.equal(snapshot.toolConfirmation?.shellCommandRequiresConfirmation, true);
@@ -667,7 +750,7 @@ async function writeTestSubAgentPackage(root: string, packageName: string, descr
       `name: ${packageName}`,
       `description: ${description}`,
       "enabled: true",
-      "allowedTools: [read_file]",
+      "allowedTools: [read]",
       "maxSteps: 12",
       "---",
       "",

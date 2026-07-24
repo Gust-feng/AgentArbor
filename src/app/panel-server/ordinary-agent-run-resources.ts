@@ -5,6 +5,7 @@ import {
   createAgentSessionLoop,
   createModelCollectionChannel,
   createModelProviderBinding,
+  type AgentSessionToolDefinitionMetrics,
 } from "../../adapters/intelligence/index.js";
 import type { AgentSessionEntryRef, AgentSessionRef } from "../model-runtime/agent-session.js";
 import type { ModelMessage } from "../../domain/intelligence/index.js";
@@ -173,6 +174,11 @@ export function createOrdinaryAgentRunResourceAcquirer(
         const tokenCounter = (dependencies.createTokenCounter ?? createOpenAITokenCounter)(
           input.birth.config.model,
         );
+        const toolDefinitionTokenCounter =
+          input.birth.capabilitySnapshot.modelCapabilities.protocolProfileId === "openai" &&
+          tokenCounter.tokenizerMatch === "model"
+            ? tokenCounter.countText
+            : undefined;
         const toolCenter = createAgentToolCenterFactory(options.host.providerFetch, resources)(toolRuntime, {
           taskSoil,
           outputTokenCounter: tokenCounter,
@@ -207,6 +213,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
             toolCenter,
             agentToolDefinitions: subAgentToolCatalog.definitions,
             skillContexts,
+            toolDefinitionTokenCounter,
           });
         } catch (error) {
           throw expectedOrWrappedExecutionError(
@@ -216,7 +223,13 @@ export function createOrdinaryAgentRunResourceAcquirer(
           );
         }
         const observedToolGateway = new ToolExecutionObservationGateway(toolCenter, toolMetrics);
-        const tools = ordinaryToolBoundary(input, definition, observedToolGateway, toolBoundary.allowedTools);
+        const tools = ordinaryToolBoundary(
+          input,
+          definition,
+          observedToolGateway,
+          toolBoundary.allowedTools,
+          toolBoundary.toolDefinitions,
+        );
         const agentTools = await createSubAgentAgentTools({
           registry,
           parentAllowedTools: toolBoundary.allowedTools,
@@ -245,6 +258,10 @@ export function createOrdinaryAgentRunResourceAcquirer(
           selectedModel: providerBinding.selectedModel,
           thinkingLevel: providerBinding.thinkingLevel,
           transformProviderPayload: providerBinding.transformProviderPayload,
+          toolDefinitionTokenCounter: tokenCounter.countText,
+          onProviderToolDefinitionMetrics: (metrics) => {
+            recordProviderToolDefinitionMetrics(toolMetrics, metrics);
+          },
           agentSession: sessionLease.session,
         });
         const ownedLoop = loop;
@@ -272,6 +289,9 @@ export function createOrdinaryAgentRunResourceAcquirer(
           ...(toolBoundary.capabilityResolution === undefined
             ? {}
             : { capabilityResolution: toolBoundary.capabilityResolution }),
+          ...(toolBoundary.toolVisibilityPlan === undefined
+            ? {}
+            : { toolVisibilityPlan: toolBoundary.toolVisibilityPlan }),
           ...(agentTools.length === 0 ? {} : { agentTools }),
           release,
         };
@@ -290,6 +310,24 @@ export function createOrdinaryAgentRunResourceAcquirer(
       }
     },
   };
+}
+
+function recordProviderToolDefinitionMetrics(
+  collector: OrdinaryToolMetricsCollector,
+  metrics: AgentSessionToolDefinitionMetrics,
+): void {
+  collector.recordDefinitionRequest(metrics.toolCount, metrics.totalTokens);
+  for (const tool of metrics.tools) {
+    collector.record({
+      kind: "definition",
+      toolName: tool.toolName,
+      operationType: tool.operationType,
+      definitionHash: tool.definitionHash,
+      definitionTokens: tool.definitionTokens,
+      totalDefinitionTokens: metrics.totalTokens,
+      toolCount: metrics.toolCount,
+    });
+  }
 }
 
 async function createCustomProviderBindingForRun(
@@ -381,8 +419,10 @@ function ordinaryToolBoundary(
   definition: AgentDefinition,
   gateway: AgentLoopToolBoundary["gateway"],
   allowedTools: readonly string[],
+  definitions: AgentLoopToolBoundary["definitions"],
 ): AgentLoopToolBoundary {
   return {
+    definitions,
     gateway,
     context: {
       callerAgentId: definition.agentId,

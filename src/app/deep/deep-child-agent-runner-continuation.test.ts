@@ -189,21 +189,21 @@ test("continueDeepChildAgent does not start the model loop when write-ahead admi
 
 test("resumeDeepChildAgent approves a blocked child confirmation and completes the same child run", async () => {
   const childSpec = sampleChildSpec({
-    allowedTools: ["write_file"],
+    allowedTools: ["write"],
     objective: "确认后继续同一个子 Agent 写入证据并输出材料。",
   });
   const childRun = makeChildRun(childSpec);
   const channel = new SequenceChannel([
-    toolCallResponse("call-write", "write_file", { path: "notes.md" }),
+    toolCallResponse("call-write", "write", { path: "notes.md" }),
     completedJsonResponse({
       summary: "确认后继续执行同一个子 Agent，并补齐写入后的材料。",
       findings: ["写入确认通过后，子 Agent 使用同一条工具 loop 完成材料输出"],
-      evidenceRefs: ["tool:write_file:oauth-risk"],
+      evidenceRefs: ["tool:write:oauth-risk"],
       uncertainty: "仍需父层综合判断是否纳入最终结论。",
       confidence: 0.69,
     }),
   ]);
-  const broker = new RecordingToolBroker(["write_file"], ["write_file"]);
+  const broker = new RecordingToolBroker(["write"], ["write"]);
   const contextStore = new InMemoryDeepChildLoopContextStore();
   const turnRuntime = createDeepTurnRuntime({
     intelligenceChannel: channel,
@@ -249,7 +249,7 @@ test("resumeDeepChildAgent approves a blocked child confirmation and completes t
   );
   assert.equal(resumed.completedRun.executionHistory?.[0]?.toolCalls[0]?.status, "approval_required");
   assert.equal(resumed.completedRun.executionHistory?.[1]?.toolCalls[0]?.status, "completed");
-  assert.deepEqual(broker.executedToolNames(), ["write_file"]);
+  assert.deepEqual(broker.executedToolNames(), ["write"]);
   assert.equal(channel.requests.length, 2);
   assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.role === "tool"), true);
   const contextRef = createDeepChildLoopContextRef(childRun.childRunId);
@@ -262,21 +262,21 @@ test("resumeDeepChildAgent approves a blocked child confirmation and completes t
 
 test("resumeDeepChildAgent exposes a known tool result when only loop-context persistence fails", async () => {
   const childSpec = sampleChildSpec({
-    allowedTools: ["write_file"],
+    allowedTools: ["write"],
     objective: "确认后写入一次，并在 context 持久化失败时保留已知执行结果。",
   });
   const childRun = makeChildRun(childSpec);
   const channel = new SequenceChannel([
-    toolCallResponse("call-write", "write_file", { path: "notes.md" }),
+    toolCallResponse("call-write", "write", { path: "notes.md" }),
     completedJsonResponse({
       summary: "写入已执行，等待补写 continuation context。",
       findings: ["写入工具仅执行一次"],
-      evidenceRefs: ["tool:write_file:oauth-risk"],
+      evidenceRefs: ["tool:write:oauth-risk"],
       uncertainty: "无。",
       confidence: 0.8,
     }),
   ]);
-  const broker = new RecordingToolBroker(["write_file"], ["write_file"]);
+  const broker = new RecordingToolBroker(["write"], ["write"]);
   const contextStore = new InMemoryDeepChildLoopContextStore();
   const turnRuntime = createDeepTurnRuntime({ intelligenceChannel: channel, toolCenter: broker });
   const blocked = await runDeepChildAgent({
@@ -315,13 +315,13 @@ test("resumeDeepChildAgent exposes a known tool result when only loop-context pe
       return true;
     },
   );
-  assert.deepEqual(broker.executedToolNames(), ["write_file"]);
+  assert.deepEqual(broker.executedToolNames(), ["write"]);
 
   contextStore.upsert = originalUpsert;
   assert.ok(knownResult);
   const persisted = await retryDeepChildAgentPostExecutionPersistence(knownResult, contextStore);
   assert.equal(persisted.pendingPersistence, undefined);
-  assert.deepEqual(broker.executedToolNames(), ["write_file"]);
+  assert.deepEqual(broker.executedToolNames(), ["write"]);
   assert.equal(channel.requests.length, 2);
 });
 

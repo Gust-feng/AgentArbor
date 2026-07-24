@@ -23,7 +23,7 @@ const processContext = {
 } as typeof context & { readonly runId: string; readonly toolCallId: string };
 const commandLogRefPrefix = "command-log://";
 
-test("shell_command returns stable foreground cancellation facts", async () => {
+test("shell returns stable foreground cancellation facts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const registry = createRecordingProcessRegistry();
@@ -65,7 +65,7 @@ test("shell_command returns stable foreground cancellation facts", async () => {
   }
 });
 
-test("shell_command preserves foreground exit code and stdout stderr facts", async () => {
+test("shell preserves foreground exit code and stdout stderr facts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const registry = createRecordingProcessRegistry();
@@ -96,7 +96,7 @@ test("shell_command preserves foreground exit code and stdout stderr facts", asy
   }
 });
 
-test("shell_command reports bounded stdout and stderr progress before completion", async () => {
+test("shell reports bounded stdout and stderr progress before completion", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-progress-"));
   try {
     const progress: ToolExecutionProgress[] = [];
@@ -129,7 +129,7 @@ test("shell_command reports bounded stdout and stderr progress before completion
   }
 });
 
-test("shell_command records background process facts and port wait facts", async () => {
+test("shell records background process facts and port wait facts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const registry = createRecordingProcessRegistry();
@@ -194,7 +194,7 @@ test("shell_command records background process facts and port wait facts", async
   }
 });
 
-test("shell_command terminates a child when app shutdown closes process registration", async () => {
+test("shell terminates a child when app shutdown closes process registration", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const registry = new InMemoryProcessRegistry();
@@ -228,7 +228,7 @@ test("shell_command terminates a child when app shutdown closes process registra
   }
 });
 
-test("shell_command returns background metadata when waitForPort is cancelled", async () => {
+test("shell returns background metadata when waitForPort is cancelled", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const port = await unusedLocalPort();
@@ -289,7 +289,7 @@ test("shell_command returns background metadata when waitForPort is cancelled", 
   }
 });
 
-test("shell_command returns a controlled logRef for background command logs", async () => {
+test("shell returns a controlled logRef for background command logs", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const registry = createRecordingProcessRegistry();
@@ -323,7 +323,7 @@ test("shell_command returns a controlled logRef for background command logs", as
   }
 });
 
-test("shell_command terminates a managed background process instead of dropping output at the log boundary", async () => {
+test("shell terminates a managed background process instead of dropping output at the log boundary", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-log-limit-"));
   const registry = new InMemoryProcessRegistry();
   const shellCommand = createLocalShellCommandTool(root, {
@@ -366,7 +366,7 @@ test("shell_command terminates a managed background process instead of dropping 
   }
 });
 
-test("shell_command marks a detached background process exited after the startup window", async () => {
+test("shell marks a detached background process exited after the startup window", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const registry = createRecordingProcessRegistry();
@@ -417,7 +417,7 @@ test("command log maintenance removes expired logs and preserves active logs", a
   }
 });
 
-test("shell_command returns a controlled logRef for truncated foreground output", async () => {
+test("shell returns a controlled logRef for truncated foreground output", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const shellCommand = createLocalShellCommandTool(root);
@@ -439,7 +439,7 @@ test("shell_command returns a controlled logRef for truncated foreground output"
   }
 });
 
-test("shell_command returns factual background waitForPort timeout state", async () => {
+test("shell returns factual background waitForPort timeout state", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const port = await unusedLocalPort();
@@ -482,7 +482,7 @@ test("shell_command returns factual background waitForPort timeout state", async
   }
 });
 
-test("shell_command records post-start external port occupant facts", async () => {
+test("shell records post-start external port occupant facts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   const server = createNetServer();
   let listenTimer: ReturnType<typeof setTimeout> | undefined;
@@ -552,7 +552,7 @@ test("shell_command records post-start external port occupant facts", async () =
   }
 });
 
-test("shell_command returns pre-start occupied port facts without starting a duplicate server", async () => {
+test("shell returns pre-start occupied port facts without starting a duplicate server", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   const server = createNetServer();
   try {
@@ -623,7 +623,7 @@ test("shell_command returns pre-start occupied port facts without starting a dup
   }
 });
 
-test("shell_command marks pre-start occupied ports as owned when registry has the active process", async () => {
+test("shell marks pre-start occupied ports as owned when registry has the active process", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   const server = createNetServer();
   try {
@@ -695,7 +695,7 @@ test("shell_command marks pre-start occupied ports as owned when registry has th
   }
 });
 
-test("shell_command keeps pre-start port ownership unknown without an observed pid match", async () => {
+test("shell keeps pre-start port ownership unknown without an observed pid match", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   const server = createNetServer();
   try {

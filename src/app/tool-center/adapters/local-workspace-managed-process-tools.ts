@@ -2,7 +2,6 @@ import path from "node:path";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import type { ProcessTerminator, ProcessRecord } from "../../runtime-guard/index.js";
 import {
-  createLocalShellCommandTool,
   type LocalCommandProcessRegistry,
   type LocalWorkspaceCommandToolOptions,
 } from "./local-workspace-command-tools.js";
@@ -15,85 +14,10 @@ export function createLocalManagedProcessTools(
   rootDirectory: string,
   options: LocalManagedProcessToolOptions = {},
 ): readonly ToolExecutor[] {
-  const shellCommand = createLocalShellCommandTool(rootDirectory, options);
   return [
-    createStartProcessTool(shellCommand, options.processRegistry),
     createInspectProcessTool(rootDirectory, options.processRegistry),
     createStopProcessTool(rootDirectory, options.processRegistry, options.processTerminator),
   ];
-}
-
-function createStartProcessTool(
-  shellCommand: ToolExecutor,
-  processRegistry: LocalCommandProcessRegistry | undefined,
-): ToolExecutor {
-  return {
-    definition: {
-      name: "start_process",
-      description: "Start a workspace process that remains available after the current Agent run and can be inspected or stopped by processId.",
-      metadata: {
-        category: "terminal",
-        riskLevel: "medium",
-        operationType: "execute",
-        requiresConfirmation: true,
-      },
-      modelContract: {
-        purpose: "Start a long-running workspace service or watcher and return a stable processId, readiness facts, and a controlled log reference.",
-        whenToUse: [
-          "Use for dev servers, file watchers, preview servers, and other commands expected to keep running after this Agent run.",
-          "Use inspect_process with the returned processId to verify state and stop_process to terminate it.",
-        ],
-        whenNotToUse: [
-          "Use shell_command for one-shot commands that should wait for an exit code.",
-        ],
-        outputNotes: [
-          "state is running, exited, or not_started; a running process has no exitCode yet.",
-          "processId is the stable identity for later inspection and stopping; pid is diagnostic only.",
-          "not_started means no process was created, for example because waitForPort was already occupied; the returned occupancy facts explain why.",
-          "The default lifetime is workspace_session and survives the current Agent run until explicitly stopped or the Workbench shuts down.",
-        ],
-      },
-      inputSchema: processStartInputSchema(),
-    },
-    execute: async (input, context) => {
-      if (processRegistry === undefined) {
-        throw new Error("start_process requires the Host process registry.");
-      }
-      const record = asRecord(input);
-      const output = asRecord(await shellCommand.execute({
-        ...record,
-        background: true,
-        lifetime: record.lifetime ?? "workspace_session",
-      }, context));
-      const processId = stringValue(output.processId);
-      const {
-        processState: _processState,
-        background: _background,
-        exitCode,
-        ...facts
-      } = output;
-      const lifetime = stringValue(output.lifetime) ?? stringValue(record.lifetime) ?? "workspace_session";
-      if (output.notStarted === true) {
-        return {
-          ...facts,
-          state: "not_started",
-          lifetime,
-          ...(typeof exitCode === "number" ? { exitCode } : {}),
-        };
-      }
-      if (processId === undefined) {
-        throw new Error("start_process did not receive a stable processId from the Host process registry.");
-      }
-      const state = stringValue(output.processState) ?? (output.exitCode === null ? "running" : "exited");
-      return {
-        ...facts,
-        processId,
-        state,
-        lifetime,
-        ...(typeof exitCode === "number" ? { exitCode } : {}),
-      };
-    },
-  };
 }
 
 function createInspectProcessTool(
@@ -102,7 +26,7 @@ function createInspectProcessTool(
 ): ToolExecutor {
   return {
     definition: {
-      name: "inspect_process",
+      name: "ProcessRead",
       description: "Inspect one managed workspace process by processId, or list managed processes in the current workspace.",
       metadata: {
         category: "terminal",
@@ -110,22 +34,17 @@ function createInspectProcessTool(
         operationType: "read-only",
         requiresConfirmation: false,
       },
-      modelContract: {
-        purpose: "Read current process state, command, lifetime, pid diagnostic, ports, and log references without executing or changing the process.",
-        whenToUse: ["Use after start_process or when recovering a processId from earlier conversation context."],
-        outputNotes: ["A supplied processId returns found=false when it is absent or outside this workspace. Without processId, only this workspace's managed records are listed."],
-      },
       inputSchema: {
         type: "object",
         properties: {
-          processId: { type: "string", description: "Stable process identity returned by start_process." },
+          processId: { type: "string", description: "Stable process identity returned by Shell with background=true." },
         },
         additionalProperties: false,
       },
     },
     execute: async (input) => {
       if (processRegistry?.get === undefined || processRegistry.listAll === undefined) {
-        throw new Error("inspect_process requires the Host process registry.");
+        throw new Error("process_inspect requires the Host process registry.");
       }
       const processId = stringValue(asRecord(input).processId);
       if (processId !== undefined) {
@@ -150,7 +69,7 @@ function createStopProcessTool(
 ): ToolExecutor {
   return {
     definition: {
-      name: "stop_process",
+      name: "ProcessStop",
       description: "Stop one owned managed workspace process by stable processId and return the observed termination result.",
       metadata: {
         category: "terminal",
@@ -158,15 +77,10 @@ function createStopProcessTool(
         operationType: "execute",
         requiresConfirmation: true,
       },
-      modelContract: {
-        purpose: "Terminate an existing workspace process without reconstructing or replaying its original shell command.",
-        whenToUse: ["Use the exact processId returned by start_process or inspect_process."],
-        outputNotes: ["stopStatus distinguishes stopped, already_stopped, not_found, not_owned, unknown, and failed."],
-      },
       inputSchema: {
         type: "object",
         properties: {
-          processId: { type: "string", description: "Stable process identity returned by start_process." },
+          processId: { type: "string", description: "Stable process identity returned by Shell with background=true." },
         },
         required: ["processId"],
         additionalProperties: false,
@@ -174,11 +88,11 @@ function createStopProcessTool(
     },
     execute: async (input) => {
       if (processRegistry?.get === undefined || processRegistry.stopOwned === undefined || processTerminator === undefined) {
-        throw new Error("stop_process requires the Host process registry and process terminator.");
+        throw new Error("process_stop requires the Host process registry and process terminator.");
       }
       const processId = stringValue(asRecord(input).processId);
       if (processId === undefined) {
-        throw new Error("stop_process processId must be a non-empty string.");
+        throw new Error("process_stop processId must be a non-empty string.");
       }
       const record = processRegistry.get(processId);
       if (record === undefined || !isInsideWorkspace(rootDirectory, record.cwd)) {
@@ -206,27 +120,6 @@ function createStopProcessTool(
       }
       return { processId, stopStatus: result.status, ...processFacts(result.process) };
     },
-  };
-}
-
-function processStartInputSchema() {
-  return {
-    type: "object" as const,
-    properties: {
-      commandLine: { type: "string" as const, description: "Complete shell command line to start." },
-      command: { type: "string" as const, description: "Direct executable name or path." },
-      args: { type: "array" as const, items: { type: "string" as const }, description: "Direct argv values." },
-      cwd: { type: "string" as const, description: "Workspace-relative working directory." },
-      lifetime: {
-        type: "string" as const,
-        enum: ["run", "workspace_session"] as const,
-        description: "run is cleaned with the current run; workspace_session survives the run and ends on explicit stop or Workbench shutdown.",
-      },
-      backgroundWaitMs: { type: "number" as const, description: "Startup observation window in milliseconds." },
-      waitForPort: { type: "number" as const, description: "Local TCP port to wait for after startup." },
-      waitForPortTimeoutMs: { type: "number" as const, description: "Maximum local port readiness wait." },
-    },
-    additionalProperties: false as const,
   };
 }
 

@@ -569,7 +569,7 @@ test("ordinary timeline shows full reasoning while hiding the internal model req
         kind: "tool",
         eventType: "tool.failed",
         phase: "failed",
-        toolName: "list_dir",
+        toolName: "list",
         display: { kind: "generic_tool_summary", action: "浏览目录", summary: "浏览目录未完成: assets." },
         sequence: 3,
       }),

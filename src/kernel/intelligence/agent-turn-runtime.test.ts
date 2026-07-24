@@ -429,10 +429,10 @@ test("AgentTurnRuntime executeAutonomous pauses on explicit fuel limits before p
 test("AgentTurnRuntime returns approval_required and resumes with a matching confirmation", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     completedResponse("model-request-final", { summary: "Final answer after approval." }),
   ]);
-  const broker = new PermissionAwareToolBroker(["delete_file"], { delete_file: "read-write" });
+  const broker = new PermissionAwareToolBroker(["delete"], { delete: "read-write" });
   const runtime = new AgentTurnRuntime({
     intelligenceChannel: channel,
     toolCenter: broker,
@@ -440,7 +440,7 @@ test("AgentTurnRuntime returns approval_required and resumes with a matching con
   });
 
   const paused = await executeFull(runtime, createTurnInput({
-    allowedTools: ["delete_file"],
+    allowedTools: ["delete"],
     maxModelRounds: 3,
   }));
 
@@ -466,17 +466,17 @@ test("AgentTurnRuntime returns approval_required and resumes with a matching con
 
 test("AgentTurnRuntime resumeAutonomous requires matching confirmation and then returns provider-stop output", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete"),
     textResponse("model-request-final", "Final answer after approved delete."),
   ]);
-  const broker = new PermissionAwareToolBroker(["delete_file"], { delete_file: "read-write" });
+  const broker = new PermissionAwareToolBroker(["delete"], { delete: "read-write" });
   const runtime = new AgentTurnRuntime({
     intelligenceChannel: channel,
     toolCenter: broker,
   });
 
   const paused = await executeFinal(runtime, createTurnInput({
-    allowedTools: ["delete_file"],
+    allowedTools: ["delete"],
     maxModelRounds: 3,
   }));
 

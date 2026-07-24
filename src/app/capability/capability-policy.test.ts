@@ -16,15 +16,15 @@ import { restrictRunCapabilityResolutionToExecutableTools } from "./run-tool-bou
 test("run capability policy hides disabled, unavailable, denied, and mode-internal tools", () => {
   const snapshot = capabilitySnapshot([
     tool("search", "read-only"),
-    tool("shell_command", "execute"),
-    tool("browser_snapshot", "read-only", { availability: "unavailable" }),
-    tool("write_file", "read-write", { enabled: false }),
+    tool("shell", "execute"),
+    tool("web_fetch", "read-only", { availability: "unavailable" }),
+    tool("write", "read-write", { enabled: false }),
     tool("underground_probe", "read-only", { scopes: ["underground"] }),
     tool("mcp_docs_search", "external-submit", { scopes: ["mcp"], category: "mcp" }),
   ]);
   const taskSoil = createTaskSoil({
     rawGoal: "research safely",
-    permissionBoundaryRefs: ["deny:tool:shell_command"],
+    permissionBoundaryRefs: ["deny:tool:shell"],
   });
 
   const resolution = resolveRunCapabilities({
@@ -39,10 +39,10 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
   assert.equal(resolution.agentDisplayName, DESKTOP_ROOT_AGENT.displayName);
   assert.equal(resolution.toolVisibilityProfileId, DESKTOP_ROOT_AGENT.toolVisibilityProfile.profileId);
   assert.deepEqual(resolution.allowedTools, ["search", "mcp_docs_search"]);
-  assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.modelVisible, false);
-  assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.requiresConfirmation, true);
-  assert.equal(resolution.toolExposures.find((item) => item.name === "browser_snapshot")?.reason, "当前不可用。");
-  assert.equal(resolution.toolExposures.find((item) => item.name === "write_file")?.reason, "工具已在配置中停用。");
+  assert.equal(resolution.toolExposures.find((item) => item.name === "shell")?.modelVisible, false);
+  assert.equal(resolution.toolExposures.find((item) => item.name === "shell")?.requiresConfirmation, true);
+  assert.equal(resolution.toolExposures.find((item) => item.name === "web_fetch")?.reason, "当前不可用。");
+  assert.equal(resolution.toolExposures.find((item) => item.name === "write")?.reason, "工具已在配置中停用。");
   assert.equal(resolution.toolExposures.find((item) => item.name === "underground_probe")?.modelVisible, false);
   assert.equal(resolution.toolExposures.find((item) => item.name === "mcp_docs_search")?.modelVisible, true);
   assert.match(resolution.warnings.join("\n"), /隐藏/);
@@ -50,8 +50,8 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
 
 test("run capability policy derives workspace delete capability from the explicit fileOperation contract", () => {
   const snapshot = capabilitySnapshot([
-    tool("write_file", "read-write"),
-    tool("delete_file", "read-write", { fileOperation: "delete" }),
+    tool("write", "read-write"),
+    tool("delete", "read-write", { fileOperation: "delete" }),
   ]);
 
   const resolution = resolveRunCapabilities({
@@ -61,7 +61,7 @@ test("run capability policy derives workspace delete capability from the explici
   });
 
   assert.equal(
-    resolution.toolExposures.find((item) => item.name === "delete_file")?.fileOperation,
+    resolution.toolExposures.find((item) => item.name === "delete")?.fileOperation,
     "delete"
   );
   assert.equal(resolution.capabilityPlan.fileOperations?.canWriteWorkspace, true);
@@ -70,7 +70,7 @@ test("run capability policy derives workspace delete capability from the explici
 
 test("run capability policy does not infer delete capability without an explicit delete contract", () => {
   const snapshot = capabilitySnapshot([
-    tool("write_file", "read-write"),
+    tool("write", "read-write"),
   ]);
 
   const resolution = resolveRunCapabilities({
@@ -201,7 +201,7 @@ test("run capability policy lets model override close OpenAI-compatible tool exp
 
 test("run capability policy projects full access confirmation policy without hiding tool risk", () => {
   const baseSnapshot = capabilitySnapshot([
-    tool("shell_command", "execute"),
+    tool("shell", "execute"),
   ]);
   const snapshot: BasicAgentCapabilitySnapshot = {
     ...baseSnapshot,
@@ -210,7 +210,7 @@ test("run capability policy projects full access confirmation policy without hid
       label: "完全访问",
       shellCommandConfirmation: "skipped_by_full_access",
       shellCommandRequiresConfirmation: false,
-      summary: "shell_command 会跳过逐条确认。",
+      summary: "shell 会跳过逐条确认。",
       riskDisclosure: "这不是 sandbox；工具仍经过 ToolCenter、事件、runtime facts 和日志。",
       updatedAt: "2026-05-13T00:00:00.000Z",
     },
@@ -221,9 +221,9 @@ test("run capability policy projects full access confirmation policy without hid
     goal: "run command without prompt",
     agentDefinition: DESKTOP_ROOT_AGENT,
   });
-  const shell = resolution.toolExposures.find((item) => item.name === "shell_command");
+  const shell = resolution.toolExposures.find((item) => item.name === "shell");
 
-  assert.deepEqual(resolution.allowedTools, ["shell_command"]);
+  assert.deepEqual(resolution.allowedTools, ["shell"]);
   assert.equal(shell?.requiresConfirmation, true);
   assert.equal(shell?.confirmationPolicy, "full_access");
   assert.equal(shell?.reason, "可用，当前完全访问会跳过逐条确认。");
@@ -232,7 +232,7 @@ test("run capability policy projects full access confirmation policy without hid
 test("run capability policy never expands beyond snapshot allowed tools", () => {
   const baseSnapshot = capabilitySnapshot([
     tool("search", "read-only"),
-    tool("read_file", "read-only"),
+    tool("read", "read-only"),
   ]);
   const snapshot = {
     ...baseSnapshot,
@@ -249,13 +249,13 @@ test("run capability policy never expands beyond snapshot allowed tools", () => 
   });
 
   assert.deepEqual(resolution.allowedTools, ["search"]);
-  assert.equal(resolution.toolExposures.find((item) => item.name === "read_file")?.modelVisible, false);
+  assert.equal(resolution.toolExposures.find((item) => item.name === "read")?.modelVisible, false);
   assert.equal(
-    resolution.toolExposures.find((item) => item.name === "read_file")?.reason,
+    resolution.toolExposures.find((item) => item.name === "read")?.reason,
     "不在本轮可用范围内。"
   );
   assert.equal(
-    resolution.toolExposures.find((item) => item.name === "read_file")?.reasonCode,
+    resolution.toolExposures.find((item) => item.name === "read")?.reasonCode,
     "not_in_run_scope"
   );
 });
@@ -264,8 +264,8 @@ test("executable restriction only counts tools that were model-visible before ex
   const resolution = resolveRunCapabilities({
     snapshot: capabilitySnapshot([
       tool("search", "read-only"),
-      tool("read_file", "read-only"),
-      tool("write_file", "read-write", { enabled: false }),
+      tool("read", "read-only"),
+      tool("write", "read-write", { enabled: false }),
       tool("underground_probe", "read-only", { scopes: ["underground"] }),
     ]),
     goal: "inspect executable boundary",
@@ -274,11 +274,11 @@ test("executable restriction only counts tools that were model-visible before ex
 
   const restricted = restrictRunCapabilityResolutionToExecutableTools(resolution, undefined);
 
-  assert.deepEqual(resolution.allowedTools, ["search", "read_file"]);
+  assert.deepEqual(resolution.allowedTools, ["search", "read"]);
   assert.deepEqual(restricted.allowedTools, []);
   assert.equal(restricted.toolExposures.find((item) => item.name === "search")?.reason, "本轮没有可执行的工具运行器。");
-  assert.equal(restricted.toolExposures.find((item) => item.name === "read_file")?.reason, "本轮没有可执行的工具运行器。");
-  assert.equal(restricted.toolExposures.find((item) => item.name === "write_file")?.reason, "工具已在配置中停用。");
+  assert.equal(restricted.toolExposures.find((item) => item.name === "read")?.reason, "本轮没有可执行的工具运行器。");
+  assert.equal(restricted.toolExposures.find((item) => item.name === "write")?.reason, "工具已在配置中停用。");
   assert.equal(restricted.toolExposures.find((item) => item.name === "underground_probe")?.reason, "当前模式不可用。");
   assert.equal(
     restricted.warnings.some((warning) => warning === "本轮有 2 个策略可见工具没有对应的工具执行器。"),
@@ -486,6 +486,8 @@ function tool(
     displayName: presentation.displayName,
     displayDescription: presentation.displayDescription,
     description: `${name} tool`,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    definitionHash: `sha256:${"0".repeat(64)}`,
     category: operationType === "execute" ? "terminal" : "workspace",
     categoryLabel: presentation.categoryLabel,
     riskLevel: operationType === "read-only" ? "low" : "high",

@@ -158,7 +158,7 @@ export function resolveActivityToolKind(item: {
   if (item.displayKind === "search_results" || item.displayKind === "file_search_results") return "search";
   if (item.displayKind === "directory_listing") return "directory";
   if (item.displayKind === "read_result") return "read";
-  if (item.displayKind === "browser_snapshot" || item.displayKind === "http_response") return "web";
+  if (item.displayKind === "web_fetch" || item.displayKind === "http_response") return "web";
   if (item.displayKind === "agent_task") return "agent";
   if (
     item.displayKind === "file_change_summary" ||
@@ -386,7 +386,7 @@ function activityLeadForNode(
       monospace: !remote,
     });
   }
-  if (display?.kind === "browser_snapshot") {
+  if (display?.kind === "web_fetch") {
     const subject = cleanToolTargetText(display.title ?? display.url) ?? copy.detail;
     return makeActivityLead({
       action,
@@ -635,7 +635,7 @@ function activityExpandedSectionsForNode(
     if (display.error !== undefined) {
       sections.push({ title: "错误", content: display.error, tone: "danger" });
     }
-  } else if (display?.kind === "browser_snapshot") {
+  } else if (display?.kind === "web_fetch") {
     const source = sourceSection("来源", {
       title: display.title ?? display.url,
       url: display.url,
@@ -1549,21 +1549,21 @@ function toolVerb(node: ProjectableTranscriptNode): string {
   const toolName = normalizedToolName(node.toolName);
   const action = display?.kind === "generic_tool_summary" ? display.action?.toLowerCase() ?? "" : "";
   const fileMutationVerb = fileMutationVerbForTool(toolName, display);
-  if (display?.kind === "agent_task" || toolName === "call_sub_agent" || toolName === "spawn_sub_agent") return "委派";
-  if (display?.kind === "command_summary" || toolName === "shell_command" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) return "命令";
-  if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search" || toolName.includes("grep")) return "搜索";
+  if (display?.kind === "agent_task" || toolName === "agent" || toolName === "agentspawn") return "委派";
+  if (display?.kind === "command_summary" || toolName === "shell" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) return "命令";
+  if (display?.kind === "search_results" || toolName === "researchsearch" || toolName === "websearch" || toolName.includes("grep")) return "搜索";
   if (display?.kind === "file_search_results") return "搜索";
   if (display?.kind === "directory_listing") return "查看";
-  if (display?.kind === "http_response" || toolName === "http_request") return "请求";
+  if (display?.kind === "http_response" || toolName === "httprequest") return "请求";
   if (fileMutationVerb !== undefined) return fileMutationVerb;
   if (display?.kind === "generic_tool_summary") {
     const role = genericToolRole(toolName, display);
     if (role !== undefined) return role;
   }
   if (display?.kind === "read_result") return "读取";
-  if (display?.kind === "browser_snapshot" || toolName === "browser_snapshot" || toolName.includes("browser")) return "网页";
-  if (toolName === "list_dir" || toolName === "list_files" || toolName.includes("list") || toolName.includes("dir")) return "查看";
-  if (toolName === "read" || toolName === "read_file" || toolName.startsWith("read_") || toolName.includes("file")) return "读取";
+  if (display?.kind === "web_fetch" || toolName === "webfetch" || toolName.includes("browser")) return "网页";
+  if (toolName === "list" || toolName === "list_files" || toolName.includes("list") || toolName.includes("dir")) return "查看";
+  if (toolName === "read" || toolName === "researchread" || toolName.startsWith("read") || toolName.includes("file")) return "读取";
   if (action.includes("读取")) return "读取";
   if (action.includes("搜索") || action.includes("查找")) return "搜索";
   if (action.includes("浏览")) return "网页";
@@ -1604,42 +1604,42 @@ function fileMutationVerbForTool(
   const genericText = display?.kind === "generic_tool_summary"
     ? [display.action, display.summary].filter((value): value is string => value !== undefined).join(" ").toLowerCase()
     : "";
-  if (toolName === "delete_file" || toolName.includes("delete_file") || toolName.includes("remove_file") || mentionsDeleteFile(genericText)) {
+  if (toolName === "delete" || toolName.includes("delete") || toolName.includes("remove_file") || mentionsDeleteFile(genericText)) {
     return "删除";
   }
-  if (toolName === "create_file" || toolName.includes("create_file") || mentionsCreateFile(genericText)) {
+  if (toolName === "create" || toolName.includes("create") || mentionsCreateFile(genericText)) {
     return "创建";
   }
   if (
     display?.kind === "file_diff_preview" ||
-    toolName === "edit_file" ||
-    toolName.includes("edit_file") ||
+    toolName === "edit" ||
+    toolName.includes("edit") ||
     toolName.includes("patch") ||
     toolName.includes("replace") ||
     mentionsEditFile(genericText)
   ) {
     return "编辑";
   }
-  if (display?.kind === "file_change_summary" || toolName === "write_file" || toolName.includes("write_file") || mentionsWriteFile(genericText)) {
+  if (display?.kind === "file_change_summary" || toolName === "write" || toolName.includes("write") || mentionsWriteFile(genericText)) {
     return "写入";
   }
   return undefined;
 }
 
 function mentionsWriteFile(value: string): boolean {
-  return value.includes("写入文件") || value.includes("write_file") || value.includes("write file") || value.includes("written");
+  return value.includes("写入文件") || value.includes("write") || value.includes("write file") || value.includes("written");
 }
 
 function mentionsCreateFile(value: string): boolean {
-  return value.includes("创建文件") || value.includes("create_file") || value.includes("create file") || value.includes("created");
+  return value.includes("创建文件") || value.includes("create") || value.includes("create file") || value.includes("created");
 }
 
 function mentionsDeleteFile(value: string): boolean {
-  return value.includes("删除文件") || value.includes("delete_file") || value.includes("delete file") || value.includes("deleted");
+  return value.includes("删除文件") || value.includes("delete") || value.includes("delete file") || value.includes("deleted");
 }
 
 function mentionsEditFile(value: string): boolean {
-  return value.includes("编辑文件") || value.includes("修改文件") || value.includes("edit_file") || value.includes("edit file");
+  return value.includes("编辑文件") || value.includes("修改文件") || value.includes("edit") || value.includes("edit file");
 }
 
 function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy, "detail" | "expandedDetail"> | undefined {
@@ -1679,7 +1679,7 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
   if (display?.kind === "read_result") {
     return readableToolTarget(readResultTarget(display, node.summary)) ?? fallbackToolTargetCopy(node);
   }
-  if (display?.kind === "browser_snapshot") {
+  if (display?.kind === "web_fetch") {
     return readableToolTarget(cleanToolTargetText(display.title ?? display.url ?? node.summary)) ?? fallbackToolTargetCopy(node);
   }
   if (display?.kind === "http_response") {
@@ -1784,7 +1784,7 @@ function fallbackToolTargetText(node: ProjectableTranscriptNode): string | undef
       cleanToolTargetText(display.title ?? display.url ?? display.uri) ??
       fallbackToolActionText(node);
   }
-  if (display?.kind === "browser_snapshot") {
+  if (display?.kind === "web_fetch") {
     return cleanToolTargetText(display.title ?? display.url) ?? fallbackToolActionText(node);
   }
   if (display?.kind === "http_response") {

@@ -126,13 +126,13 @@ test("developer tool statistics render only aggregate metrics and provide an emp
     statistics: {
       ...populated.statistics,
       metricsDroppedCount: 2,
-      toolBreakdown: [toolBreakdown("read_file")],
+      toolBreakdown: [toolBreakdown("read")],
     },
   })));
   const populatedView = renderDeveloperToolStatistics();
 
   await screen.findByText("工具详情");
-  expect(screen.getByText("read_file")).toBeTruthy();
+  expect(screen.getByText("read")).toBeTruthy();
   expect(screen.getByText("5.9K tok")).toBeTruthy();
   expect(screen.getByText("2", { selector: ".usage-v3-details-total strong" })).toBeTruthy();
   expect(screen.queryByText(/README\.md/u)).toBeNull();

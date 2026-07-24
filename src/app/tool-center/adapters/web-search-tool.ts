@@ -58,20 +58,8 @@ const DEFAULT_MAX_RESULTS = 5;
 export function createWebSearchTool(options: WebSearchToolOptions = {}): ToolExecutor {
   return {
     definition: {
-      name: "web_search",
+      name: "WebSearch",
       description: "Search the web for current information only when a real provider is configured. Without a provider, returns no_search_provider and does not claim a search occurred.",
-      modelContract: {
-        usageNotes: [
-          "Use this for live/current web lookup only.",
-          "If status is no_search_provider, no live web search was performed; tell the user or choose another available source.",
-          "Do not treat an empty no_search_provider result as evidence that nothing exists on the web.",
-        ],
-        outputNotes: [
-          "searched is true only when a provider request was attempted.",
-          "status no_search_provider means the tool did not access the web.",
-          "results contain provider snippets, not full page reads.",
-        ],
-      },
       metadata: {
         category: "web",
         riskLevel: "low",

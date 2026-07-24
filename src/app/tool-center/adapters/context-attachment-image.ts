@@ -38,41 +38,8 @@ export function createReadContextAttachmentImageTool(
 ): ToolExecutor {
   return {
     definition: {
-      name: "read_context_attachment_image",
+      name: "AttachmentReadImage",
       description: "Read an image context attachment as an ephemeral model vision input using attachmentId instead of a local path.",
-      modelContract: {
-        purpose: "Pass a current image attachment, or an image file inside an attached project, to the model as vision input.",
-        whenToUse: [
-          "Use when the model must inspect visual content from an attached image.",
-          "Use after list_context_attachments or list_context_attachment_files identifies an image attachment or image file.",
-        ],
-        whenNotToUse: [
-          "Do not use for normal text, PDFs, tables, archives, or non-image binary files.",
-        ],
-        inputNotes: [
-          "attachmentId selects the current Task Soil attachment and is preferred over ref.",
-          "For file attachments, omit path. For project or workspace attachments, path is required and must be relative to that attachment root.",
-          "detail may be auto, low, or high; auto is the default.",
-        ],
-        usageNotes: [
-          "Local absolute paths are not accepted as input and are not returned in output.",
-          "The JSON output contains only metadata; the image bytes are attached as ephemeral model input for the next model round.",
-          "If the selected model does not support vision input, the tool reports a non-readable reason instead of attaching bytes.",
-        ],
-        outputNotes: [
-          "modelInput.attached=true means the image was attached to the next model request.",
-          "path is relative to the attachment root for project attachments and never a local absolute path.",
-          "reason explains unsupported format, size, unreadable file, or missing model vision support.",
-        ],
-        runtimeHints: [
-          { label: "max image bytes", value: String(MAX_IMAGE_ATTACHMENT_BYTES) },
-          { label: "supported formats", value: "png, jpg, jpeg, gif, webp" },
-        ],
-        examples: [
-          { title: "Read attached image", input: { attachmentId: "ctx_screenshot", detail: "auto" } },
-          { title: "Read image inside attached project", input: { attachmentId: "ctx_project", path: "assets/screen.png", detail: "high" } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",

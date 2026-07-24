@@ -17,7 +17,7 @@ Desktop Shell / Panel
   -> neutral AgentLoop
   -> Agent Session adapter（Pi AgentHarness/Session）
   -> ToolCenter / Confirmation
-  -> ordinary-run/v4 + Pi Session facts
+  -> ordinary-run/v5 + Pi Session facts
   -> one-way read-model
 ```
 
@@ -29,7 +29,7 @@ Ordinary 的正式模型-工具循环由 Pi AgentHarness/Session 承担。`Agent
 - `ordinary routes` 只解析 HTTP/SSE 请求并调用 feature command/query，不推导完成语义，不重建模型历史。
 - `AgentLoop` 只负责机械性的模型-工具-模型执行、流式文本、取消和 live confirmation continuation；业务完成、持久化与恢复由 Ordinary 决定。
 - `ToolCenter` 负责工具执行、权限和命令确认，返回中性 `ToolCallResult`；它不拥有 Ordinary 状态或跨 feature 事件。
-- Ordinary 使用 `ordinary-run/v4` 文件快照、Pi Session 和独立的 `ordinary-conversation/v2` 控制文档。它不与 Multi-Agent 共享业务仓储。
+- Ordinary 使用 `ordinary-run/v5` 文件快照、Pi Session 和独立的 `ordinary-conversation/v2` 控制文档。它不与 Multi-Agent 共享业务仓储。
 
 ## 基础能力优先
 
@@ -48,7 +48,7 @@ Ordinary 的正式模型-工具循环由 Pi AgentHarness/Session 承担。`Agent
 
 - Ordinary 是默认入口，不因任务复杂、历史状态或模型判断自动升级为 Multi-Agent。
 - Multi-Agent 只通过显式 `/api/deep/*` 功能入口运行，内部状态与 Ordinary 隔离。
-- Sub-Agent 只贡献 `call_sub_agent` 和 `spawn_sub_agent` 两个 Pi AgentTool；调用与结果进入父 Ordinary run，不能递归，也不建立独立 trace store 或 read-model。
+- Sub-Agent 只贡献 `agent_call` 和 `agent_spawn` 两个 Pi AgentTool；调用与结果进入父 Ordinary run，不能递归，也不建立独立 trace store 或 read-model。
 - Task Soil、Plan、Aboveground、Fruits、Governance 和 Global Soil 是按真实需求出生的长期能力，不是普通请求的必经阶段。
 - 普通回答、工具结果、错误、文件正文和 stdout/stderr 不得被“安全摘要”或展示投影替换。UI 摘要只能是额外展示字段。
 

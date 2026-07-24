@@ -73,7 +73,7 @@ function skillBlock(context: DesktopAgentSkillContext): string {
     resources.length === 0
       ? undefined
       : [
-          "Skill resources (read with read_skill_resource when needed):",
+          "Skill resources (read with skill_read when needed):",
           ...resources,
         ].join("\n"),
   ].filter(isString).join("\n");

@@ -248,6 +248,8 @@ function capabilityTool(name: string): CapabilityToolCatalogItem {
     displayName: name,
     displayDescription: `${name} tool`,
     description: `${name} tool`,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    definitionHash: `sha256:${"0".repeat(64)}`,
     category: "other",
     categoryLabel: "Other",
     riskLevel: "low",

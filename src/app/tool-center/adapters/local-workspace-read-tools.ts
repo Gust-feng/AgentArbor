@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import { TextDecoder } from "node:util";
-import type { ToolExecutor, ToolFactValue } from "../../../domain/tools/index.js";
+import type { ToolContinuation, ToolExecutor, ToolFactValue } from "../../../domain/tools/index.js";
 import {
   asRecord,
   decodeUtf8Text,
@@ -40,9 +40,8 @@ import {
 const DEFAULT_MAX_CHARS = 128_000;
 const MIN_CHARACTER_WINDOW_CHARS = 3;
 const READ_FILE_CONTENT_JSON_MAX_CHARS = DEFAULT_MAX_INLINE_TOOL_CONTENT_JSON_CHARS;
-const MAX_LIST_ENTRIES = 200;
-const DEFAULT_LIST_DEPTH = 1;
-const MAX_LIST_DEPTH = 3;
+const MAX_GLOB_MATCHES = 200;
+const MAX_GLOB_OFFSET = 10_000;
 const COLLECTION_ITEMS_JSON_MAX_CHARS = 120_000;
 const MAX_GREP_MATCHES = 80;
 const MAX_GREP_OFFSET = 10_000;
@@ -53,15 +52,6 @@ const DEFAULT_READ_LINE_COUNT = 200;
 const RIPGREP_TIMEOUT_MS = 10_000;
 
 type GrepMatch = { readonly path: string; readonly line: number; readonly preview: string };
-type ListDirEntry = {
-  /** Path relative to the requested list root; the root itself is returned once on the page. */
-  readonly path: string;
-  readonly name: string;
-  readonly kind: "directory" | "file" | "symlink" | "other";
-  readonly bytes?: number;
-  readonly depth: number;
-};
-
 type ReadContentWindow = {
   readonly content: string;
   readonly range?: { readonly startLine: number; readonly endLine: number };
@@ -72,6 +62,11 @@ type ReadContentWindow = {
   readonly textChars?: number;
   readonly charCount?: number;
   readonly nextStartChar?: number;
+};
+
+type ReadFileContinuationSeed = {
+  readonly path: string;
+  readonly maxLength: number;
 };
 
 type GrepSkippedReason =
@@ -116,36 +111,11 @@ export type RipgrepSearchRunner = (request: {
 
 export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceReadToolOptions = {}): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
+  const fileState = options.fileState;
   return {
     definition: {
-      name: "read_file",
+      name: "Read",
       description: "Read a UTF-8 text file under the local workspace. Supports optional 1-based startLine/endLine windows for large or focused reads.",
-      modelContract: {
-        usageNotes: [
-          "Read a workspace-relative UTF-8 text file and return content plus file metadata.",
-          "Use when you need exact file contents before explaining, editing, or debugging.",
-          "Use after list_dir or grep_files identifies a relevant file.",
-          "Do not use for binary files or files larger than the workspace file-size limit.",
-          "path is required and must be workspace-relative.",
-          "Use startLine/endLine for focused reads or to continue through a large file.",
-          "When hasMoreAfter is true, call read_file again: pass nextStartChar as the startChar input, or nextStartLine as the startLine input.",
-          "maxLength optionally limits returned characters for whole-file/startChar reads; do not combine maxLength with startLine/endLine.",
-        ],
-        outputNotes: [
-          "content contains the returned text when the file is textual.",
-          "binary is true when the file appears binary and no text content is returned.",
-          "reason is invalid_utf8 when the file cannot be decoded losslessly as UTF-8.",
-          "hasMoreAfter reports whether more text exists; copy nextStartChar to startChar or nextStartLine to startLine in the next plain read_file call.",
-          "truncated tells whether more content may be needed.",
-        ],
-        runtimeHints: [
-          { label: "workspace root", value: "current configured local workspace" },
-          { label: "max file bytes", value: String(MAX_LOCAL_WORKSPACE_FILE_BYTES) },
-        ],
-        examples: [
-          { title: "Read source file", input: { path: "src/app/example.ts", maxLength: 20000 } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -155,13 +125,20 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Workspace-relative file path." },
-          maxLength: { type: "number", minimum: MIN_CHARACTER_WINDOW_CHARS, description: "Maximum characters to return; must be at least 3 so every truncated UTF-16 window can advance." },
-          startLine: { type: "number", description: "Optional 1-based first line to return." },
-          endLine: { type: "number", description: "Optional 1-based last line to return. When omitted with startLine, returns a bounded window." },
-          startChar: { type: "number", minimum: 0, description: "Optional zero-based character offset for continuing a truncated text window." },
+          path: { type: "string", minLength: 1, description: "Workspace-relative file path." },
+          maxLength: { type: "integer", minimum: MIN_CHARACTER_WINDOW_CHARS, maximum: DEFAULT_MAX_CHARS, description: "Maximum characters to return; must be at least 3 so every truncated UTF-16 window can advance." },
+          startLine: { type: "integer", minimum: 1, description: "Optional 1-based first line to return." },
+          endLine: { type: "integer", minimum: 1, description: "Optional 1-based last line to return. When omitted with startLine, returns a bounded window." },
+          startChar: { type: "integer", minimum: 0, description: "Optional zero-based character offset for continuing a truncated text window." },
         },
         required: ["path"],
+        allOf: [
+          { not: { required: ["startChar", "startLine"] } },
+          { not: { required: ["startChar", "endLine"] } },
+          { not: { required: ["maxLength", "startLine"] } },
+          { not: { required: ["maxLength", "endLine"] } },
+        ],
+        additionalProperties: false,
       },
     },
     execute: async (input, context) => {
@@ -172,8 +149,9 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       const stat = await fs.stat(target.absolutePath);
       throwIfAborted(context.abortSignal);
       if (!stat.isFile()) {
-        throw new Error(`read_file expects a file path: ${target.relativePath}`);
+        throw new Error(`Read expects a file path: ${target.relativePath}`);
       }
+      await fileState?.remember(target.absolutePath);
       const probe = Buffer.alloc(Math.min(stat.size, 8192));
       const handle = await fs.open(target.absolutePath, "r");
       try {
@@ -191,19 +169,19 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         };
       }
       const lineRange = parseLineRange(record);
-      const startChar = optionalSafeIntegerAtLeast(record.startChar, "read_file startChar", 0);
+      const startChar = optionalSafeIntegerAtLeast(record.startChar, "read startChar", 0);
       if (lineRange !== undefined && startChar !== undefined) {
-        throw new Error("read_file cannot combine startChar with startLine/endLine.");
+        throw new Error("read cannot combine startChar with startLine/endLine.");
       }
       if (lineRange !== undefined && record.maxLength !== undefined) {
-        throw new Error("read_file cannot combine maxLength with startLine/endLine; request a smaller line range instead.");
+        throw new Error("read cannot combine maxLength with startLine/endLine; request a smaller line range instead.");
       }
       if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES && lineRange === undefined) {
         throw new Error(`File is too large to read safely without a line range: ${target.relativePath}`);
       }
       const maxLength = optionalSafeIntegerAtLeast(
         record.maxLength,
-        "read_file maxLength",
+        "read maxLength",
         MIN_CHARACTER_WINDOW_CHARS,
       ) ?? DEFAULT_MAX_CHARS;
       let content: ReadContentWindow;
@@ -229,7 +207,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       throwIfAborted(context.abortSignal);
       const returned = truncateReadFileContent(content.content, maxLength);
       if (lineRange !== undefined && returned.truncated) {
-        throw new Error("read_file line range exceeds the text return budget; request fewer lines so the next read does not skip unread text.");
+        throw new Error("read line range exceeds the text return budget; request fewer lines so the next read does not skip unread text.");
       }
       const returnedTextChars = returned.rawChars;
       const nextStartChar = content.startChar === undefined
@@ -257,45 +235,31 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         truncated: hasMoreAfter,
         nextStartChar: nextStartChar ?? (returned.truncated ? returnedTextChars : undefined),
         nextStartLine,
+        continuation: readFileContinuation({
+          path: target.relativePath,
+          maxLength,
+          nextStartChar: nextStartChar ?? (returned.truncated ? returnedTextChars : undefined),
+          nextStartLine,
+        }),
       };
-      return fitReadOutput(output, options.outputTokenCounter, context.toolCallId);
+      return fitReadOutput(
+        output,
+        options.outputTokenCounter,
+        context.toolCallId,
+        lineRange === undefined
+          ? { path: target.relativePath, maxLength }
+          : undefined,
+      );
     },
   };
 }
 
-export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceReadToolOptions = {}): ToolExecutor {
+export function createLocalGlobTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceReadToolOptions = {}): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
   return {
     definition: {
-      name: "list_dir",
-      description: "List files and folders under a local workspace directory with relative paths, kinds, sizes, and continuation facts.",
-      modelContract: {
-        usageNotes: [
-          "List a workspace directory and return one root path plus relative entry paths, kinds, byte sizes, and counts.",
-          "Use to discover project structure before reading or editing files.",
-          "Use when the exact file path is unknown.",
-          "Do not use for text search inside files; use grep_files for that.",
-          "path is optional and defaults to the workspace root.",
-          "depth defaults to 1 and cannot exceed 3.",
-          "limit optionally caps returned entries and cannot exceed the tool maximum.",
-          "offset selects the next entry window after a bounded result.",
-        ],
-        outputNotes: [
-          "entries contains relative paths, entry names, traversal depths, kinds, and optional byte sizes.",
-          "totalEntries is the full enumerated entry count when traversal completes.",
-          "scanComplete reports whether the requested tree was fully enumerated.",
-          "hasMoreAfter reports whether more entries exist; nextOffset identifies the next plain list_dir call.",
-          "truncated tells whether not all entries were returned.",
-        ],
-        runtimeHints: [
-          { label: "workspace root", value: "current configured local workspace" },
-          { label: "max entries", value: String(MAX_LIST_ENTRIES) },
-        ],
-        examples: [
-          { title: "List root", input: { path: ".", limit: 80 } },
-          { title: "List source directory", input: { path: "src/app" } },
-        ],
-      },
+      name: "Glob",
+      description: "Find workspace files recursively by glob pattern. Use patterns such as * or **/* to inspect directory contents, and Grep for file content.",
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -305,58 +269,44 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_R
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Workspace-relative directory path. Defaults to workspace root." },
-          depth: { type: "number", description: "Recursive listing depth. Defaults to 1 and is capped at 3." },
-          limit: { type: "number", description: "Maximum entries to return." },
-          offset: { type: "number", description: "Zero-based entry offset used to continue a truncated listing." },
+          pattern: { type: "string", minLength: 1, description: "File glob such as **/*.ts or src/*.{js,ts}." },
+          path: { type: "string", description: "Workspace-relative directory to search. Defaults to workspace root." },
+          limit: { type: "integer", minimum: 1, maximum: MAX_GLOB_MATCHES, description: "Maximum matching paths to return." },
+          offset: { type: "integer", minimum: 0, maximum: MAX_GLOB_OFFSET, description: "Zero-based match offset for continuation." },
         },
+        required: ["pattern"],
+        additionalProperties: false,
       },
     },
     execute: async (input, context) => {
       throwIfAborted(context.abortSignal);
       const record = asRecord(input);
+      const pattern = stringOrFallback(record.pattern, "");
+      if (pattern.length === 0) throw new Error("Glob requires a non-empty pattern.");
       const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, "."));
-      assertSandboxAllowed(sandboxPolicy, sandboxRequest("list", rootDirectory, target.relativePath));
-      const targetStat = await fs.stat(target.absolutePath);
-      throwIfAborted(context.abortSignal);
-      if (!targetStat.isDirectory()) {
-        throw new Error(`list_dir expects a directory path: ${target.relativePath}`);
-      }
-      const requestedDepth = positiveInteger(record.depth) ?? DEFAULT_LIST_DEPTH;
-      const depth = Math.min(MAX_LIST_DEPTH, requestedDepth);
-      const limit = Math.min(MAX_LIST_ENTRIES, positiveInteger(record.limit) ?? MAX_LIST_ENTRIES);
-      const offset = nonNegativeInteger(record.offset) ?? 0;
-      const listed = await listDirectoryTree({
-        absolutePath: target.absolutePath,
-        rootDirectory,
-        maxDepth: depth,
-        limit,
-        offset,
-        abortSignal: context.abortSignal,
-      });
-      throwIfAborted(context.abortSignal);
-      const entries = jsonBoundedItems(listed.entries, COLLECTION_ITEMS_JSON_MAX_CHARS);
-      const hasMoreAfter = listed.hasMoreAfter || entries.length < listed.entries.length;
-      const nextOffset = hasMoreAfter ? offset + entries.length : undefined;
-      const output = {
-        refId: `workspace:dir:${target.relativePath}`,
+      assertSandboxAllowed(sandboxPolicy, sandboxRequest("search", rootDirectory, target.relativePath));
+      const stat = await fs.stat(target.absolutePath);
+      if (!stat.isDirectory()) throw new Error(`Glob expects a directory path: ${target.relativePath}`);
+      const limit = Math.min(MAX_GLOB_MATCHES, positiveInteger(record.limit) ?? MAX_GLOB_MATCHES);
+      const offset = boundedOffset(record.offset, MAX_GLOB_OFFSET);
+      const collected = await globFiles(target.absolutePath, globPatternRegExp(pattern), offset + limit + 1, context.abortSignal);
+      const page = collected.slice(offset, offset + limit);
+      const hasMoreAfter = collected.length > offset + page.length;
+      const nextOffset = hasMoreAfter ? offset + page.length : undefined;
+      return fitCollectionOutput({
+        refId: `workspace:glob:${safeRefToken(pattern)}`,
         path: target.relativePath,
-        depth,
+        pattern,
+        matches: page,
+        matchesReturned: page.length,
         offset,
         limit,
-        maxDepth: MAX_LIST_DEPTH,
-        maxEntries: MAX_LIST_ENTRIES,
-        entries,
-        entriesReturned: entries.length,
-        totalEntries: listed.totalEntries,
-        scanComplete: listed.scanComplete,
-        unreadableDirectories: listed.unreadableDirectories,
-        unreadableSamples: listed.unreadableSamples,
-        hasMoreAfter,
         truncated: hasMoreAfter,
         nextOffset,
-      };
-      return fitCollectionOutput(output, "entries", options.outputTokenCounter, context.toolCallId);
+        continuation: nextOffset === undefined ? undefined : {
+          nextInput: { pattern, path: target.relativePath, offset: nextOffset, limit },
+        },
+      }, "matches", "Glob", options.outputTokenCounter, context.toolCallId);
     },
   };
 }
@@ -366,37 +316,8 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
   const ripgrepSearch = options.ripgrepSearch === false ? undefined : options.ripgrepSearch ?? searchWithRipgrep;
   return {
     definition: {
-      name: "grep_files",
+      name: "Grep",
       description: "Search text files under the local workspace for a plain-text query. Uses ripgrep when available, with a JS recursive fallback.",
-      modelContract: {
-        usageNotes: [
-          "Search workspace text files for a case-insensitive plain-text query and return file paths with line previews.",
-          "Use to locate code, docs, symbols, or phrases before reading files.",
-          "Use when you need line numbers and previews for likely matches.",
-          "Do not use for regular expressions; this tool searches plain text only.",
-          "Do not use for binary files or generated folders skipped by the workspace search.",
-          "query is required and must be non-empty.",
-          "path optionally narrows search to a workspace-relative directory or file.",
-          "limit optionally caps returned matches.",
-          "offset selects another bounded match window with the same query/path and is capped to the tool maximum.",
-        ],
-        outputNotes: [
-          "matches[] includes path, 1-based line, and preview.",
-          "engine records whether ripgrep or the JS fallback produced the result.",
-          "The JS fallback reports factual skipped file counts and samples. The ripgrep path leaves skipped facts unavailable rather than inventing them.",
-          "hasMoreAfter reports whether more matches exist; nextOffset identifies the next plain grep_files call.",
-          "If more matches exist beyond the supported offset range, the tool fails with the observed matchesPreview and searchComplete=false.",
-          "truncated=true only appears when nextOffset is available.",
-        ],
-        runtimeHints: [
-          { label: "workspace root", value: "current configured local workspace" },
-          { label: "max matches", value: String(MAX_GREP_MATCHES) },
-          { label: "max offset", value: String(MAX_GREP_OFFSET) },
-        ],
-        examples: [
-          { title: "Find a function name", input: { query: "createAgentToolRegistry", path: "src", limit: 20 } },
-        ],
-      },
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -406,12 +327,13 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
       inputSchema: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Plain-text query to search for, case-insensitive." },
+          query: { type: "string", minLength: 1, description: "Plain-text query to search for, case-insensitive." },
           path: { type: "string", description: "Workspace-relative directory or file path. Defaults to workspace root." },
-          limit: { type: "number", description: "Maximum matches to return." },
-          offset: { type: "number", description: "Zero-based match offset used to continue a truncated search." },
+          limit: { type: "integer", minimum: 1, maximum: MAX_GREP_MATCHES, description: "Maximum matches to return." },
+          offset: { type: "integer", minimum: 0, maximum: MAX_GREP_OFFSET, description: "Zero-based match offset used to continue a truncated search." },
         },
         required: ["query"],
+        additionalProperties: false,
       },
     },
     execute: async (input, context) => {
@@ -419,7 +341,7 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
       const record = asRecord(input);
       const query = stringOrFallback(record.query, "");
       if (query.length === 0) {
-        throw new Error("grep_files requires a non-empty query.");
+        throw new Error("grep requires a non-empty query.");
       }
       const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, "."));
       assertSandboxAllowed(sandboxPolicy, sandboxRequest("search", rootDirectory, target.relativePath));
@@ -493,8 +415,8 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         return {
           kind: "tool_call_result",
           result: {
-            callId: context.toolCallId ?? "grep_files",
-            toolName: "grep_files",
+            callId: context.toolCallId ?? "Grep",
+            toolName: "Grep",
             input: input as ToolFactValue,
             output: {
               ...observation,
@@ -502,10 +424,10 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
               searchComplete: false,
             },
             status: "failed",
-            error: "grep_files found more matches than can be observed within the supported offset range.",
+            error: "grep found more matches than can be observed within the supported offset range.",
             errorDomain: "runtime_error",
             errorFacts: {
-              code: "grep_files_offset_limit_reached",
+              code: "grep_offset_limit_reached",
               retryable: false,
             },
           },
@@ -517,70 +439,240 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         searchComplete: !hasMoreAfter,
         truncated: hasMoreAfter,
         nextOffset,
+        continuation: grepFilesContinuation({
+          query,
+          path: target.relativePath,
+          limit,
+          nextOffset,
+        }),
       };
-      return fitCollectionOutput(output, "matches", options.outputTokenCounter, context.toolCallId);
+      return fitCollectionOutput(output, "matches", "Grep", options.outputTokenCounter, context.toolCallId);
     },
   };
+}
+
+function readFileContinuation(input: {
+  readonly path: string;
+  readonly maxLength: number;
+  readonly nextStartChar?: number;
+  readonly nextStartLine?: number;
+}): ToolContinuation | undefined {
+  if (input.nextStartChar !== undefined) {
+    return {
+      nextInput: {
+        path: input.path,
+        maxLength: input.maxLength,
+        startChar: input.nextStartChar,
+      },
+    };
+  }
+  if (input.nextStartLine !== undefined) {
+    return {
+      nextInput: {
+        path: input.path,
+        startLine: input.nextStartLine,
+      },
+    };
+  }
+  return undefined;
+}
+
+function globFilesContinuation(input: {
+  readonly pattern: string;
+  readonly path: string;
+  readonly limit: number;
+  readonly nextOffset?: number;
+}): ToolContinuation | undefined {
+  return input.nextOffset === undefined
+    ? undefined
+    : {
+        nextInput: {
+          pattern: input.pattern,
+          path: input.path,
+          limit: input.limit,
+          offset: input.nextOffset,
+        },
+      };
+}
+
+function grepFilesContinuation(input: {
+  readonly query: string;
+  readonly path: string;
+  readonly limit: number;
+  readonly nextOffset?: number;
+}): ToolContinuation | undefined {
+  return input.nextOffset === undefined
+    ? undefined
+    : {
+        nextInput: {
+          query: input.query,
+          path: input.path,
+          limit: input.limit,
+          offset: input.nextOffset,
+        },
+      };
 }
 
 function fitReadOutput<T extends Readonly<Record<string, unknown>> & { readonly content: string }>(
   output: T,
   counter: ToolOutputTokenCounter | undefined,
   callId: string | undefined,
+  continuationSeed: ReadFileContinuationSeed | undefined,
 ): T {
-  if (counter === undefined || modelOutputFits("read_file", output, counter, callId)) return output;
+  if (counter === undefined || modelOutputFits("Read", output, counter, callId)) return output;
+  if (continuationSeed === undefined) {
+    throw new Error("read line-range output exceeds the fixed model result budget; request fewer lines.");
+  }
+  // `truncateReadFileContent` may already have appended a display ellipsis.
+  // `textChars` is the authoritative raw UTF-16 prefix length; never count
+  // that marker as source content when calculating the replay cursor.
+  const rawContentLength = typeof output.textChars === "number" &&
+    Number.isSafeInteger(output.textChars) && output.textChars >= 0
+    ? Math.min(output.textChars, output.content.length)
+    : output.content.length;
+  const rawContent = output.content.slice(0, rawContentLength);
   let low = 0;
-  let high = output.content.length;
+  let high = rawContent.length;
   let best: T | undefined;
   while (low <= high) {
     const requestedLength = Math.floor((low + high) / 2);
-    const length = utf16SafePrefixLength(output.content, requestedLength);
+    const length = utf16SafePrefixLength(rawContent, requestedLength);
     const startChar = typeof output.startChar === "number" ? output.startChar : 0;
+    const candidateHasMoreAfter = output.hasMoreAfter === true || length < rawContent.length;
     const candidate = {
       ...output,
-      content: output.content.slice(0, length),
+      content: candidateHasMoreAfter ? `${rawContent.slice(0, length)}…` : rawContent,
       textChars: length,
-      hasMoreAfter: true,
-      truncated: true,
-      nextStartChar: startChar + length,
+      hasMoreAfter: candidateHasMoreAfter,
+      truncated: candidateHasMoreAfter,
+      nextStartChar: candidateHasMoreAfter ? startChar + length : undefined,
       nextStartLine: undefined,
+      continuation: candidateHasMoreAfter
+        ? readFileContinuation({
+            ...continuationSeed,
+            nextStartChar: startChar + length,
+          })
+        : undefined,
     } as T;
-    if (length > 0 && modelOutputFits("read_file", candidate, counter, callId)) {
+    if (length > 0 && modelOutputFits("Read", candidate, counter, callId)) {
       best = candidate;
       low = requestedLength + 1;
     } else {
       high = requestedLength - 1;
     }
   }
-  if (best === undefined) throw new Error("read_file metadata exceeds the fixed model result budget.");
+  if (best === undefined) throw new Error("read metadata exceeds the fixed model result budget.");
   return best;
+}
+
+async function globFiles(
+  directory: string,
+  pattern: RegExp,
+  collectLimit: number,
+  abortSignal: AbortSignal | undefined,
+  prefix = "",
+  output: string[] = [],
+): Promise<readonly string[]> {
+  if (output.length >= collectLimit) return output;
+  throwIfAborted(abortSignal);
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    if (output.length >= collectLimit) break;
+    throwIfAborted(abortSignal);
+    if (shouldSkipEntry(entry.name)) continue;
+    const relative = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      await globFiles(path.join(directory, entry.name), pattern, collectLimit, abortSignal, relative, output);
+    } else if (entry.isFile() && pattern.test(relative)) {
+      output.push(relative);
+    }
+  }
+  return output;
+}
+
+function globPatternRegExp(pattern: string): RegExp {
+  const alternatives = expandGlobBraces(pattern.replaceAll("\\", "/"));
+  const sources = alternatives.map((value) => {
+    let source = "";
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index]!;
+      if (character === "*" && value[index + 1] === "*") {
+        if (value[index + 2] === "/") {
+          source += "(?:.*/)?";
+          index += 2;
+        } else {
+          source += ".*";
+          index += 1;
+        }
+      } else if (character === "*") {
+        source += "[^/]*";
+      } else if (character === "?") {
+        source += "[^/]";
+      } else {
+        source += character.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+      }
+    }
+    return source;
+  });
+  return new RegExp(`^(?:${sources.join("|")})$`);
+}
+
+function expandGlobBraces(pattern: string): readonly string[] {
+  const match = /\{([^{}]+)\}/.exec(pattern);
+  if (match === null || match.index === undefined) return [pattern];
+  const before = pattern.slice(0, match.index);
+  const after = pattern.slice(match.index + match[0].length);
+  return match[1]!.split(",").flatMap((choice) => expandGlobBraces(`${before}${choice}${after}`));
 }
 
 function fitCollectionOutput<T extends Readonly<Record<string, unknown>>>(
   output: T,
-  collectionKey: "entries" | "matches",
+  collectionKey: "matches",
+  toolName: "Glob" | "Grep",
   counter: ToolOutputTokenCounter | undefined,
   callId: string | undefined,
 ): T {
-  if (counter === undefined || modelOutputFits(collectionKey === "entries" ? "list_dir" : "grep_files", output, counter, callId)) {
+  if (counter === undefined || modelOutputFits(toolName, output, counter, callId)) {
     return output;
   }
   const items = Array.isArray(output[collectionKey]) ? output[collectionKey] : [];
-  const toolName = collectionKey === "entries" ? "list_dir" : "grep_files";
   let low = 1;
   let high = items.length;
   let best: T | undefined;
   while (low <= high) {
     const count = Math.floor((low + high) / 2);
     const offset = typeof output.offset === "number" ? output.offset : 0;
+    const nextOffset = offset + count;
+    const maxOffset = toolName === "Glob" ? MAX_GLOB_OFFSET : MAX_GREP_OFFSET;
+    if (nextOffset > maxOffset) {
+      // A producer page at the grep offset ceiling may still need to be split
+      // for the model envelope. Do not manufacture a replay input that the
+      // executor will clamp back to the same ceiling and repeat a page.
+      high = count - 1;
+      continue;
+    }
     const candidate = {
       ...output,
       [collectionKey]: items.slice(0, count),
-      [collectionKey === "entries" ? "entriesReturned" : "matchesReturned"]: count,
+      matchesReturned: count,
       hasMoreAfter: true,
       truncated: true,
-      nextOffset: offset + count,
-      ...(collectionKey === "matches" ? { searchComplete: false } : {}),
+      nextOffset,
+      continuation: toolName === "Glob"
+        ? globFilesContinuation({
+            pattern: stringFact(output.pattern, ""),
+            path: stringFact(output.path, "."),
+            limit: numberFact(output.limit, MAX_GLOB_MATCHES),
+            nextOffset,
+          })
+        : grepFilesContinuation({
+            query: stringFact(output.query, ""),
+            path: stringFact(output.path, "."),
+            limit: numberFact(output.limit, MAX_GREP_MATCHES),
+            nextOffset,
+          }),
+      ...(toolName === "Grep" ? { searchComplete: false } : {}),
     } as T;
     if (modelOutputFits(toolName, candidate, counter, callId)) {
       best = candidate;
@@ -591,6 +683,14 @@ function fitCollectionOutput<T extends Readonly<Record<string, unknown>>>(
   }
   if (best === undefined) throw new Error(`${toolName} metadata exceeds the fixed model result budget.`);
   return best;
+}
+
+function stringFact(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function numberFact(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function modelOutputFits(
@@ -611,89 +711,6 @@ function modelOutputFits(
   return counter.countText(JSON.stringify(message)) <= DEFAULT_MAX_INLINE_TOOL_RESULT_TOKENS;
 }
 
-async function listDirectoryTree(input: {
-  readonly absolutePath: string;
-  readonly rootDirectory: string;
-  readonly maxDepth: number;
-  readonly limit: number;
-  readonly offset: number;
-  readonly abortSignal?: AbortSignal;
-}): Promise<{
-  readonly entries: readonly ListDirEntry[];
-  readonly totalEntries?: number;
-  readonly scanComplete: boolean;
-  readonly unreadableDirectories: number;
-  readonly unreadableSamples: readonly { readonly path: string; readonly errorCode?: string }[];
-  readonly hasMoreAfter: boolean;
-}> {
-  const entries: ListDirEntry[] = [];
-  const unreadableSamples: { path: string; errorCode?: string }[] = [];
-  let totalEntries = 0;
-  let unreadableDirectories = 0;
-  let stoppedEarly = false;
-  const stopAfter = input.offset + input.limit + 1;
-
-  async function visit(directory: string, currentDepth: number): Promise<void> {
-    throwIfAborted(input.abortSignal);
-    if (currentDepth >= input.maxDepth || stoppedEarly) {
-      return;
-    }
-    const children = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
-      unreadableDirectories += 1;
-      pushUnreadableDirectorySample(input.rootDirectory, directory, error, unreadableSamples);
-      return undefined;
-    });
-    throwIfAborted(input.abortSignal);
-    if (children === undefined) {
-      return;
-    }
-
-    children.sort((left, right) => left.name.localeCompare(right.name));
-    for (const child of children) {
-      throwIfAborted(input.abortSignal);
-      if (totalEntries >= stopAfter) {
-        stoppedEarly = true;
-        return;
-      }
-      const absoluteChild = path.join(directory, child.name);
-      const entryDepth = currentDepth + 1;
-      totalEntries += 1;
-      const entryIndex = totalEntries - 1;
-      if (entryIndex >= input.offset && entries.length < input.limit) {
-        const stat = await fs.stat(absoluteChild).catch(() => undefined);
-        throwIfAborted(input.abortSignal);
-        entries.push({
-          path: relativeListEntryPath(input.absolutePath, absoluteChild),
-          name: child.name,
-          kind: directoryEntryKind(child),
-          bytes: stat?.size,
-          depth: entryDepth,
-        });
-      }
-      if (child.isDirectory()) {
-        await visit(absoluteChild, entryDepth);
-        if (stoppedEarly) {
-          return;
-        }
-      }
-    }
-  }
-
-  await visit(input.absolutePath, 0);
-  return {
-    entries,
-    totalEntries: stoppedEarly ? undefined : totalEntries,
-    scanComplete: !stoppedEarly,
-    unreadableDirectories,
-    unreadableSamples,
-    hasMoreAfter: totalEntries > input.offset + entries.length,
-  };
-}
-
-function relativeListEntryPath(listRoot: string, absolutePath: string): string {
-  return path.relative(listRoot, absolutePath).split(path.sep).join("/");
-}
-
 function jsonBoundedItems<T>(items: readonly T[], maxChars: number): readonly T[] {
   const selected: T[] = [];
   for (const item of items) {
@@ -704,28 +721,6 @@ function jsonBoundedItems<T>(items: readonly T[], maxChars: number): readonly T[
     selected.push(item);
   }
   return selected;
-}
-
-function directoryEntryKind(entry: import("node:fs").Dirent): ListDirEntry["kind"] {
-  if (entry.isDirectory()) return "directory";
-  if (entry.isFile()) return "file";
-  if (entry.isSymbolicLink()) return "symlink";
-  return "other";
-}
-
-function pushUnreadableDirectorySample(
-  rootDirectory: string,
-  absolutePath: string,
-  error: unknown,
-  samples: { path: string; errorCode?: string }[]
-): void {
-  if (samples.length >= MAX_SKIPPED_SAMPLES) {
-    return;
-  }
-  samples.push({
-    path: toWorkspaceRelative(rootDirectory, absolutePath),
-    errorCode: nodeErrorCode(error),
-  });
 }
 
 async function grepPath(
@@ -910,10 +905,10 @@ function parseLineRange(record: Readonly<Record<string, unknown>>): { readonly s
   const start = startLine ?? 1;
   const end = explicitEndLine ?? start + DEFAULT_READ_LINE_COUNT - 1;
   if (end < start) {
-    throw new Error("read_file endLine must be greater than or equal to startLine.");
+    throw new Error("read endLine must be greater than or equal to startLine.");
   }
   if (end - start + 1 > MAX_READ_LINE_COUNT) {
-    throw new Error(`read_file line range is too large; request at most ${MAX_READ_LINE_COUNT} lines at a time.`);
+    throw new Error(`read line range is too large; request at most ${MAX_READ_LINE_COUNT} lines at a time.`);
   }
   return { startLine: start, endLine: end };
 }
@@ -928,11 +923,11 @@ function boundedOffset(value: unknown, maxOffset: number): number {
 
 function charWindowContent(raw: string, requestedStartChar: number): ReadContentWindow {
   if (requestedStartChar > raw.length) {
-    throw new Error(`read_file startChar ${requestedStartChar} exceeds charCount ${raw.length}.`);
+    throw new Error(`read startChar ${requestedStartChar} exceeds charCount ${raw.length}.`);
   }
   const startChar = requestedStartChar;
   if (!isUtf16CodeUnitBoundary(raw, startChar)) {
-    throw new Error("read_file startChar must not split a UTF-16 surrogate pair.");
+    throw new Error("read startChar must not split a UTF-16 surrogate pair.");
   }
   return {
     content: raw.slice(startChar),

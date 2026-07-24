@@ -49,7 +49,7 @@ async function assertLatestContextContract(store: DeepChildLoopContextStore): Pr
     id: "function-call-context-1",
     type: "function_call",
     call_id: "call-context-1",
-    name: "read_file",
+    name: "read",
     arguments: JSON.stringify({ path: "requirements.md" }),
   }];
 

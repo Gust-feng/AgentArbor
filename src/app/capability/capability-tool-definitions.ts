@@ -1,5 +1,10 @@
 import type { AgentCapabilitySnapshot, CapabilityToolCatalogItem } from "../../domain/config/index.js";
-import type { ToolDefinition, ToolInputSchema } from "../../domain/tools/index.js";
+import {
+  cloneToolInputSchema,
+  cloneToolJsonSchema,
+  type ToolDefinition,
+  type ToolInputSchema,
+} from "../../domain/tools/index.js";
 
 export function frozenToolDefinitionsForRun(input: {
   readonly snapshot: AgentCapabilitySnapshot | undefined;
@@ -19,10 +24,10 @@ export function toolDefinitionFromCapabilityTool(tool: CapabilityToolCatalogItem
     name: tool.name,
     description: tool.description,
     inputSchema: cloneInputSchema(tool),
-    modelContract:
-      tool.modelContract === undefined
+    outputSchema:
+      tool.outputSchema === undefined
         ? undefined
-        : globalThis.structuredClone(tool.modelContract),
+        : cloneToolJsonSchema(tool.outputSchema),
     metadata: {
       category: tool.category,
       riskLevel: tool.riskLevel,
@@ -38,14 +43,8 @@ export function toolDefinitionFromCapabilityTool(tool: CapabilityToolCatalogItem
 }
 
 function cloneInputSchema(tool: CapabilityToolCatalogItem): ToolInputSchema {
-  const maybeSchema = (tool as { readonly inputSchema?: ToolInputSchema }).inputSchema;
-  if (maybeSchema === undefined) {
-    return { type: "object", properties: {}, additionalProperties: true };
+  if (tool.inputSchema === undefined) {
+    throw new Error(`Frozen tool ${tool.name} is missing its input schema.`);
   }
-  return {
-    type: "object",
-    properties: globalThis.structuredClone(maybeSchema.properties),
-    required: maybeSchema.required === undefined ? undefined : [...maybeSchema.required],
-    additionalProperties: maybeSchema.additionalProperties,
-  };
+  return cloneToolInputSchema(tool.inputSchema);
 }

@@ -3,11 +3,11 @@ import type {
   ToolConfirmationPolicy,
   ToolFileDisplayOperation,
   ToolInputSchema,
-  ToolModelContract,
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
 } from "../tools/contracts.js";
+import type { ToolJsonSchema } from "../tools/schema.js";
 
 export type SubAgentSourceKind = "builtin" | "project" | "user" | "plugin" | "custom";
 
@@ -214,8 +214,8 @@ export type McpCachedToolInfo = {
   readonly name: string;
   readonly title?: string;
   readonly description?: string;
-  readonly inputSchema: Record<string, unknown>;
-  readonly outputSchema?: Record<string, unknown>;
+  readonly inputSchema: ToolInputSchema;
+  readonly outputSchema?: ToolJsonSchema;
   readonly annotations?: {
     readonly title?: string;
     readonly readOnlyHint?: boolean;
@@ -444,8 +444,8 @@ export type CapabilityToolCatalogItem = {
   readonly displayName: string;
   readonly displayDescription: string;
   readonly description: string;
-  readonly inputSchema?: ToolInputSchema;
-  readonly modelContract?: ToolModelContract;
+  readonly inputSchema: ToolInputSchema;
+  readonly outputSchema?: ToolJsonSchema;
   readonly category: ToolCategory;
   readonly categoryLabel: string;
   readonly riskLevel: ToolRiskLevel;
@@ -456,7 +456,7 @@ export type CapabilityToolCatalogItem = {
   readonly requiresConfirmation: boolean;
   readonly confirmationLabel: string;
   readonly runtimeHints?: readonly ToolRuntimeHint[];
-  readonly definitionHash?: string;
+  readonly definitionHash: string;
   readonly scopes: readonly CapabilityToolScope[];
   readonly enabled: boolean;
   readonly availability: "available" | "unavailable";

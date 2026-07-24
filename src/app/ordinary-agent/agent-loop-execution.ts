@@ -8,6 +8,7 @@ import type {
   AgentLoopInput,
   AgentLoopResult,
   AgentLoopToolBoundary,
+  AgentLoopToolVisibilityPlan,
 } from "../model-runtime/index.js";
 import type {
   OrdinaryExecutionContinuation,
@@ -24,6 +25,7 @@ export type OrdinaryAgentLoopRunResources = {
   readonly resolvedMessages: readonly ModelMessage[];
   readonly tools: AgentLoopToolBoundary;
   readonly agentTools?: readonly AgentLoopAgentTool[];
+  readonly toolVisibilityPlan?: AgentLoopToolVisibilityPlan;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly toolMetrics?: import("./tool-runtime-metrics.js").OrdinaryToolMetricsCollector;
   /** Revokes this run's Session writer to its last feature-accepted protocol boundary. */
@@ -89,6 +91,9 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           messages: resources.resolvedMessages,
           tools: resources.tools,
           ...(resources.agentTools === undefined ? {} : { agentTools: resources.agentTools }),
+          ...(resources.toolVisibilityPlan === undefined
+            ? {}
+            : { toolVisibilityPlan: resources.toolVisibilityPlan }),
           abortSignal: executionInput.abortSignal,
           onTextDelta: executionInput.onTextDelta,
           onReasoningDelta: executionInput.onReasoningDelta,

@@ -151,7 +151,7 @@ test("panel usage statistics merges persisted tool histograms without exposing i
   const tool = response.statistics.toolBreakdown?.[0];
 
   assert.equal(response.statistics.metricsDroppedCount, 2);
-  assert.equal(tool?.toolName, "read_file");
+  assert.equal(tool?.toolName, "read");
   assert.equal(tool?.calls, 2);
   assert.deepEqual(tool?.rawBodyTokens, { p50: 128, p95: 6_000, p99: 6_000 });
   assert.deepEqual(tool?.rawEnvelopeTokens, { p50: 256, p95: 8_192, p99: 8_192 });
@@ -227,7 +227,7 @@ function toolMetrics(rawBodyTokens: number, rawEnvelopeTokens: number, finalEnve
   const collector = new OrdinaryToolMetricsCollector();
   collector.record({
     kind: "execution",
-    toolName: "read_file",
+    toolName: "read",
     operationType: "read-only",
     status: "completed",
     rawBodyTokens,

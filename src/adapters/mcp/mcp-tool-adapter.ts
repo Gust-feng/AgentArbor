@@ -9,6 +9,8 @@ import type {
 } from "../../domain/tools/index.js";
 import {
   canonicalNamespacedToolName,
+  cloneToolInputSchema,
+  cloneToolJsonSchema,
   normalizeToolFactValue,
   withToolModelAttachments,
 } from "../../domain/tools/index.js";
@@ -237,7 +239,7 @@ function createMcpToolDefinition(
   confirmationStrategy: McpToolConfirmationStrategy
 ): ToolExecutor["definition"] {
   const namespacedName = canonicalNamespacedToolName(serverId, tool.name);
-  const compactDescription = compactMcpToolDescription(tool, serverId);
+  const description = normalizeMcpToolDescription(tool, serverId);
   const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, {
     serverId,
     toolName: tool.name,
@@ -245,68 +247,35 @@ function createMcpToolDefinition(
   }) as ToolDefinitionMetadata;
   return {
     name: namespacedName,
-    description: compactDescription,
+    description,
     inputSchema: toolInputSchema(tool),
+    outputSchema: tool.outputSchema === undefined ? undefined : cloneToolJsonSchema(tool.outputSchema),
     metadata,
   };
 }
 
 function toolInputSchema(tool: McpToolInfo): ToolInputSchema {
-  return {
-    type: "object",
-    properties: recordOrEmpty(tool.inputSchema.properties),
-    required: stringArrayOrUndefined(tool.inputSchema.required),
-    additionalProperties: typeof tool.inputSchema.additionalProperties === "boolean"
-      ? tool.inputSchema.additionalProperties
-      : undefined,
-  };
+  return cloneToolInputSchema(tool.inputSchema);
 }
 
-function compactMcpToolDescription(tool: McpToolInfo, serverId: string): string {
-  const primary = compactTextBlock(tool.description);
+function normalizeMcpToolDescription(tool: McpToolInfo, serverId: string): string {
+  const primary = normalizeTextBlock(tool.description);
   if (primary !== undefined) {
     return primary;
   }
-  const title = compactTextBlock(tool.title);
+  const title = normalizeTextBlock(tool.title);
   if (title !== undefined) {
     return title;
   }
   return `Call MCP tool ${tool.name} on server ${serverId}.`;
 }
 
-function compactTextBlock(value: string | undefined): string | undefined {
+function normalizeTextBlock(value: string | undefined): string | undefined {
   if (value === undefined) {
     return undefined;
   }
-  const normalized = value
-    .replace(/\r\n/g, "\n")
-    .split(/\n\s*\n/u)[0]
-    ?.replace(/\s+/g, " ")
-    .trim();
-  if (normalized === undefined || normalized.length === 0) {
-    return undefined;
-  }
-  const limitedSentences = firstSentences(normalized, 2);
-  return truncateAtWordBoundary(limitedSentences, 220);
-}
-
-function firstSentences(value: string, limit: number): string {
-  const matches = value.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/gu) ?? [];
-  const selected = matches
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-    .slice(0, limit);
-  return selected.length === 0 ? value : selected.join(" ");
-}
-
-function truncateAtWordBoundary(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  const slice = value.slice(0, maxChars - 1).trimEnd();
-  const cutoff = slice.lastIndexOf(" ");
-  const trimmed = (cutoff >= 80 ? slice.slice(0, cutoff) : slice).trimEnd();
-  return `${trimmed}\u2026`;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length === 0 ? undefined : normalized;
 }
 
 export type McpToolOutput = {
@@ -396,6 +365,15 @@ function inferToolMetadataFromMcpAnnotations(
       riskLevel,
       operationType,
     }),
+    runtimeHints: [{
+      kind: "mcp_tool",
+      serverId: options.serverId,
+      protocolName: options.toolName,
+      readOnlyHint: annotations?.readOnlyHint,
+      destructiveHint: annotations?.destructiveHint,
+      idempotentHint: annotations?.idempotentHint,
+      openWorldHint: annotations?.openWorldHint,
+    }],
   };
 }
 

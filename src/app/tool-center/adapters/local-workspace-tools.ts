@@ -6,13 +6,11 @@ export type { LocalWorkspaceSandboxPolicyOptions } from "./local-workspace-sandb
 
 export {
   createLocalGrepFilesTool,
-  createLocalListDirTool,
+  createLocalGlobTool,
   createLocalReadFileTool,
 } from "./local-workspace-read-tools.js";
 
 export {
-  createLocalCreateFileTool,
-  createLocalDeleteFileTool,
   createLocalEditFileTool,
   createLocalWriteFileTool,
 } from "./local-workspace-write-tools.js";

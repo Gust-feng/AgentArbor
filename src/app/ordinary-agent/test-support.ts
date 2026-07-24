@@ -78,7 +78,7 @@ export function ordinaryRunBirth(): OrdinaryRunBirth {
         preferredApiStyle: "responses",
         stability: "stable",
       },
-      toolCatalog: { scope: "desktop-basic", tools: [], allowedTools: ["read_file"] },
+      toolCatalog: { scope: "desktop-basic", tools: [], allowedTools: ["read"] },
       skillCatalog: [],
       subAgentCatalog: [],
       mcpCatalog: [],

@@ -19,7 +19,11 @@ import type {
   ToolExecutionContext,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
-import { toolDisplayName } from "../../domain/tools/index.js";
+import {
+  cloneToolInputSchema,
+  cloneToolJsonSchema,
+  toolDisplayName,
+} from "../../domain/tools/index.js";
 import type { ConstraintRef } from "../../domain/constraints.js";
 import { createId, nowIso } from "../id.js";
 import { createFailedModelResponseFromError } from "./failures.js";
@@ -406,16 +410,11 @@ function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {
   return {
     name: definition.name,
     description: definition.description,
-    inputSchema: {
-      type: "object",
-      properties: globalThis.structuredClone(definition.inputSchema.properties),
-      required: definition.inputSchema.required === undefined ? undefined : [...definition.inputSchema.required],
-      additionalProperties: definition.inputSchema.additionalProperties,
-    },
-    modelContract:
-      definition.modelContract === undefined
+    inputSchema: cloneToolInputSchema(definition.inputSchema),
+    outputSchema:
+      definition.outputSchema === undefined
         ? undefined
-        : globalThis.structuredClone(definition.modelContract),
+        : cloneToolJsonSchema(definition.outputSchema),
     metadata:
       definition.metadata === undefined
         ? undefined

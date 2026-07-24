@@ -31,6 +31,7 @@ Workbench
 - [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)：保留 Multi-Agent 的 manager、TaskBoard、scheduler、child 和 parent synthesis 闭环。
 - [ADR-0026-子Agent工具能力架构](ADR-0026-子Agent工具能力架构.md)：Sub-Agent 是 Ordinary Agent 工具能力。
 - [ADR-0027-工具执行事实与单向消费架构](ADR-0027-工具执行事实与单向消费架构.md)：工具执行事实链与单向投影。
+- [ADR-0031-工具定义保真与渐进曝光边界](ADR-0031-工具定义保真与渐进曝光边界.md)：定义保真、曝光/执行授权/确认分离、MCP 成本门控与 Pi active set 边界。
 
 ## 历史或部分取代决策
 

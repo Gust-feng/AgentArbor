@@ -7,6 +7,7 @@ import type {
   McpToolExposureMode,
   ToolStateSettings,
 } from "../../domain/config/index.js";
+import { cloneToolInputSchema, cloneToolJsonSchema } from "../../domain/tools/index.js";
 import {
   ConfigSchemaValidationError,
   asRecord,
@@ -221,14 +222,21 @@ function parseMcpCachedTools(value: unknown): readonly McpCachedToolInfo[] {
     if (name === undefined) {
       continue;
     }
-    parsed.push({
-      name,
-      title: optionalString(record.title),
-      description: optionalString(record.description),
-      inputSchema: asRecord(record.inputSchema),
-      outputSchema: optionalRecord(record.outputSchema),
-      annotations: parseMcpToolAnnotations(record.annotations),
-    });
+    try {
+      parsed.push({
+        name,
+        title: optionalString(record.title),
+        description: optionalString(record.description),
+        inputSchema: cloneToolInputSchema(record.inputSchema),
+        outputSchema: record.outputSchema === undefined
+          ? undefined
+          : cloneToolJsonSchema(record.outputSchema),
+        annotations: parseMcpToolAnnotations(record.annotations),
+      });
+    } catch {
+      // A cached catalog is advisory. Ignore an invalid entry instead of
+      // publishing a schema whose constraints were only partially retained.
+    }
   }
   return normalizeMcpCachedTools(parsed);
 }
@@ -246,8 +254,10 @@ function normalizeMcpCachedTools(value: readonly McpCachedToolInfo[]): readonly 
       name,
       title: optionalString(tool.title),
       description: optionalString(tool.description),
-      inputSchema: asRecord(tool.inputSchema),
-      outputSchema: optionalRecord(tool.outputSchema),
+      inputSchema: cloneToolInputSchema(tool.inputSchema),
+      outputSchema: tool.outputSchema === undefined
+        ? undefined
+        : cloneToolJsonSchema(tool.outputSchema),
       annotations: parseMcpToolAnnotations(tool.annotations),
     });
   }
@@ -377,11 +387,6 @@ function parseMcpToolAnnotations(value: unknown): McpCachedToolInfo["annotations
     openWorldHint: typeof record.openWorldHint === "boolean" ? record.openWorldHint : undefined,
   };
   return Object.values(annotations).some((item) => item !== undefined) ? annotations : undefined;
-}
-
-function optionalRecord(value: unknown): Record<string, unknown> | undefined {
-  const record = asRecord(value);
-  return Object.keys(record).length === 0 ? undefined : record;
 }
 
 function isDefined<T>(value: T | undefined): value is T {

@@ -12,7 +12,11 @@ import {
   fauxToolCall,
   type Context,
 } from "@earendil-works/pi-ai";
-import type { AgentLoopAgentTool, AgentLoopInput } from "../../app/model-runtime/agent-loop.js";
+import type {
+  AgentLoopAgentTool,
+  AgentLoopInput,
+  AgentLoopToolVisibilityPlan,
+} from "../../app/model-runtime/agent-loop.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -45,6 +49,950 @@ test("agent session loop completes a direct answer in the injected Session with 
   assert.equal(result.session?.startLeafRef, null);
   assert.equal(result.session?.inputEntryRef?.sessionId, "run-1");
   assert.equal(result.session?.latestLeafRef?.sessionId, "run-1");
+  await loop.release();
+});
+
+test("provider definition metrics use the allowed active subset on every model request", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "read-call" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("evidence accepted"),
+  ]);
+  const definitions = [
+    toolDefinition("read", "read-only"),
+    toolDefinition("write", "read-write"),
+  ];
+  const gateway = gatewayForDefinitions(definitions, async (request) => ({
+    ...request,
+    output: "contents",
+    status: "completed",
+    durationMs: 1,
+  }));
+  const transformedTools: string[][] = [];
+  const observedMetrics: Array<{
+    readonly toolCount: number;
+    readonly totalTokens: number;
+    readonly tools: readonly { readonly toolName: string; readonly definitionTokens: number }[];
+  }> = [];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    transformProviderPayload: ({ payload, tools }) => {
+      transformedTools.push(tools.map((tool) => tool.name));
+      return payload;
+    },
+    toolDefinitionTokenCounter: (serialized) => serialized.length,
+    onProviderToolDefinitionMetrics: (metrics) => { observedMetrics.push(metrics); },
+  });
+  const input = loopInput(gateway);
+
+  const result = await loop.execute({
+    ...input,
+    tools: {
+      ...input.tools,
+      permission: { ...input.tools.permission, allowedTools: ["read"] },
+    },
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(transformedTools, [["read"], ["read"]]);
+  assert.equal(observedMetrics.length, 2);
+  for (const metrics of observedMetrics) {
+    assert.equal(metrics.toolCount, 1);
+    assert.equal(metrics.totalTokens > 0, true);
+    assert.deepEqual(metrics.tools.map((tool) => tool.toolName), ["read"]);
+    assert.equal((metrics.tools[0]?.definitionTokens ?? 0) > 0, true);
+  }
+  assert.deepEqual((await fixture.session.getBranch()).flatMap((entry) =>
+    entry.type === "active_tools_change" ? [entry.activeToolNames] : []), [["read"]]);
+  await loop.release();
+});
+
+test("provider definition metrics record an empty active tool set without serialized content", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  fixture.faux.setResponses([fauxAssistantMessage("no tools needed")]);
+  const observed: unknown[] = [];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    onProviderToolDefinitionMetrics: (metrics) => { observed.push(metrics); },
+  });
+
+  const result = await loop.execute(loopInput(emptyGateway()));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(observed, [{ toolCount: 0, totalTokens: 0, tools: [] }]);
+  await loop.release();
+});
+
+test("provider tools use run-frozen definitions while execution stays bound to the live gateway", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  fixture.faux.setResponses([fauxAssistantMessage("no execution needed")]);
+  const live = toolDefinition("read", "read-only");
+  const frozen: ToolDefinition = {
+    ...live,
+    description: "Frozen read contract.",
+    inputSchema: {
+      type: "object",
+      properties: { frozenPath: { type: "string" } },
+      required: ["frozenPath"],
+      additionalProperties: false,
+    },
+  };
+  const gateway = gatewayForDefinitions([live], async (request) => ({
+    ...request,
+    output: "unused",
+    status: "completed",
+    durationMs: 0,
+  }));
+  const observed: Array<readonly ToolDefinition[]> = [];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    transformProviderPayload: ({ payload, tools }) => {
+      observed.push(tools);
+      return payload;
+    },
+  });
+  const input = loopInput(gateway);
+  const result = await loop.execute({
+    ...input,
+    tools: { ...input.tools, definitions: [frozen] },
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(observed[0]?.[0]?.description, frozen.description);
+  assert.deepEqual(observed[0]?.[0]?.inputSchema, frozen.inputSchema);
+  assert.notEqual(observed[0]?.[0]?.description, live.description);
+  await loop.release();
+});
+
+test("provider definition metrics include model-visible AgentTools", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  fixture.faux.setResponses([fauxAssistantMessage("delegation is unnecessary")]);
+  const observedNames: string[][] = [];
+  const observedOperations: string[][] = [];
+  const gateway = gatewayFor({
+    definition: undefined,
+    execute: async () => { throw new Error("No mechanical tools are available."); },
+    deliverResult: async (result) => result,
+  });
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    onProviderToolDefinitionMetrics: (metrics) => {
+      observedNames.push(metrics.tools.map((tool) => tool.toolName));
+      observedOperations.push(metrics.tools.map((tool) => tool.operationType));
+    },
+  });
+
+  const result = await loop.execute(loopInput(gateway, {
+    agentTools: [delegatedAgentTool([])],
+  }));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(observedNames, [["agent_call"]]);
+  assert.deepEqual(observedOperations, [["read-write"]]);
+  await loop.release();
+});
+
+test("progressive MCP search exposes a compact frozen catalog and a replayable continuation", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definitions = [
+    toolDefinition("read", "read-only"),
+    mcpToolDefinition("docs__lookup"),
+    mcpToolDefinition("docs__search"),
+  ];
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("mcp_search", { query: "docs", limit: 1 }, { id: "search-1" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("catalog inspected"),
+  ]);
+  const gateway = gatewayForDefinitions(definitions, async (request) => ({
+    ...request,
+    output: "must not execute an MCP tool during search",
+    status: "completed",
+    durationMs: 1,
+  }));
+  const accepted: ToolCallResult[] = [];
+  const observedTools: string[][] = [];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    transformProviderPayload: ({ payload, tools }) => {
+      observedTools.push(tools.map((tool) => tool.name));
+      return payload;
+    },
+  });
+  const result = await loop.execute(loopInput(gateway, {
+    tools: {
+      ...loopInput(gateway).tools,
+      permission: {
+        ...loopInput(gateway).tools.permission,
+        allowedTools: definitions.map((definition) => definition.name),
+      },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: ["read"],
+      deferred: [
+        { name: "docs__lookup", displayName: "Lookup docs", description: "Look up docs.", serverId: "docs" },
+        { name: "docs__search", displayName: "Search docs", description: "Search docs.", serverId: "docs" },
+      ],
+    }),
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+  }));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(observedTools, [
+    ["read", "mcp_search", "mcp_load"],
+    ["read", "mcp_search", "mcp_load"],
+  ]);
+  const searchResult = accepted.find((item) => item.toolName === "mcp_search");
+  assert.equal(searchResult?.status, "completed");
+  const searchOutput = searchResult?.output as {
+    readonly matches?: readonly Record<string, unknown>[];
+    readonly totalMatches?: number;
+    readonly returned?: number;
+    readonly continuation?: { readonly nextInput?: Record<string, unknown> };
+  } | undefined;
+  assert.deepEqual(searchOutput?.matches, [{
+    name: "docs__lookup",
+    displayName: "Lookup docs",
+    description: "Look up docs.",
+    source: { kind: "mcp", id: "docs", label: "Documentation" },
+    loaded: false,
+  }]);
+  assert.equal(searchOutput?.totalMatches, 2);
+  assert.equal(searchOutput?.returned, 1);
+  assert.deepEqual(searchOutput?.continuation?.nextInput, {
+    query: "docs",
+    cursor: 1,
+    limit: 1,
+  });
+  const serialized = JSON.stringify(searchResult?.output);
+  assert.equal(serialized.includes("inputSchema"), false);
+  assert.equal(serialized.includes("protocolName"), false);
+  assert.equal(serialized.includes("definitionHash"), false);
+  assert.equal(serialized.includes("sha256"), false);
+  assert.equal(accepted.some((item) => item.toolName === "docs__lookup"), false);
+  await loop.release();
+});
+
+test("progressive MCP loading reveals the frozen definition on the next request and records its load point", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definitions = [
+    toolDefinition("read", "read-only"),
+    mcpToolDefinition("docs__lookup"),
+    mcpToolDefinition("docs__search"),
+  ];
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: ["docs__lookup"] }, { id: "load-1" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("docs__lookup", { query: "agent" }, { id: "mcp-1" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("MCP result accepted"),
+  ]);
+  let executions = 0;
+  const gateway = gatewayForDefinitions(definitions, async (request) => {
+    executions += 1;
+    return { ...request, output: { answer: "found" }, status: "completed", durationMs: 1 };
+  });
+  const observedTools: string[][] = [];
+  const observedSchemas: Array<Record<string, unknown>[]> = [];
+  const observedMetrics: string[][] = [];
+  const accepted: ToolCallResult[] = [];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    transformProviderPayload: ({ payload, tools }) => {
+      observedTools.push(tools.map((tool) => tool.name));
+      observedSchemas.push(tools.map((tool) => ({
+        name: tool.name,
+        inputSchema: tool.inputSchema,
+      })));
+      return payload;
+    },
+    onProviderToolDefinitionMetrics: (metrics) => {
+      observedMetrics.push(metrics.tools.map((tool) => tool.toolName));
+    },
+  });
+  const base = loopInput(gateway);
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: definitions.map((definition) => definition.name) },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: ["read"],
+      deferred: [
+        { name: "docs__lookup", displayName: "Lookup docs", description: "Look up docs.", serverId: "docs" },
+        { name: "docs__search", displayName: "Search docs", description: "Search docs.", serverId: "docs" },
+      ],
+    }),
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(executions, 1);
+  assert.deepEqual(observedTools, [
+    ["read", "mcp_search", "mcp_load"],
+    ["read", "mcp_search", "mcp_load", "docs__lookup"],
+    ["read", "mcp_search", "mcp_load", "docs__lookup"],
+  ]);
+  assert.deepEqual(observedMetrics, observedTools);
+  const loadResult = accepted.find((item) => item.toolName === "mcp_load");
+  assert.deepEqual(loadResult?.output, {
+    kind: "tool_visibility_activation",
+    activatedToolNames: ["docs__lookup"],
+    alreadyLoaded: [],
+    remainingDeferredToolCount: 1,
+    availableFrom: "next_model_request",
+  });
+  assert.deepEqual(
+    (await fixture.session.getBranch())
+      .filter((entry) => entry.type === "message" && entry.message.role === "toolResult")
+      .map((entry) => entry.type === "message" && entry.message.role === "toolResult"
+        ? { toolName: entry.message.toolName, addedToolNames: entry.message.addedToolNames }
+        : undefined),
+    [
+      { toolName: "mcp_load", addedToolNames: ["docs__lookup"] },
+      { toolName: "docs__lookup", addedToolNames: undefined },
+    ],
+  );
+  const loadedDefinition = observedSchemas[1]?.find((definition) => definition.name === "docs__lookup");
+  assert.deepEqual(loadedDefinition?.inputSchema, definitions[1]?.inputSchema);
+  await loop.release();
+});
+
+test("a loaded MCP tool still passes through the confirmation boundary", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const baseDefinition = mcpToolDefinition("docs__write");
+  const definition: ToolDefinition = {
+    ...baseDefinition,
+    metadata: {
+      category: "mcp",
+      riskLevel: "medium",
+      operationType: "read-write",
+      requiresConfirmation: true,
+    },
+  };
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: [definition.name] }, { id: "write-load" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall(definition.name, { query: "write" }, { id: "write-call" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("write completed"),
+  ]);
+  let executions = 0;
+  const confirmationRequest = {
+    confirmationId: "confirm-mcp-write",
+    toolCallFactId: "write-call",
+    title: "Write through MCP",
+    actionSummary: "Write through the documentation MCP server",
+    affectedResources: ["docs"],
+    riskLevel: "medium" as const,
+    requestedAt: "2026-07-22T00:00:00.000Z",
+    sourceRefs: [],
+  };
+  const gateway = gatewayFor({
+    definition,
+    preflight: (request) => ({
+      status: "approval_required",
+      result: {
+        ...request,
+        output: undefined,
+        status: "approval_required",
+        durationMs: 0,
+        confirmationRequest,
+      },
+    }),
+    execute: async (request) => {
+      executions += 1;
+      return { ...request, output: "written", status: "completed", durationMs: 1 };
+    },
+  });
+  const accepted: ToolCallResult[] = [];
+  const loop = createAgentSessionLoop({ ...fixture, transformProviderPayload: ({ payload }) => payload });
+  const base = loopInput(gateway);
+  const paused = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: [definition.name] },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: [],
+      deferred: [{ name: definition.name, displayName: "Write", description: "Write", serverId: "docs" }],
+    }),
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+  });
+
+  assert.equal(paused.status, "approval_required");
+  if (paused.status !== "approval_required") return;
+  assert.equal(executions, 0);
+  assert.deepEqual(paused.confirmationRequests, [confirmationRequest]);
+  const completed = await paused.continuation.decide({
+    decision: {
+      confirmationId: confirmationRequest.confirmationId,
+      decision: "approve_once",
+      decidedAt: "2026-07-22T00:00:01.000Z",
+    },
+    abortSignal: new AbortController().signal,
+  });
+
+  assert.equal(completed.status, "completed", completed.status === "failed" ? completed.error : undefined);
+  assert.equal(executions, 1);
+  assert.deepEqual(accepted.map((toolResult) => toolResult.status), ["completed", "approval_required", "completed"]);
+  await loop.release();
+});
+
+test("progressive MCP loading is atomic for invalid names and idempotent across repeated union loads", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definitions = [mcpToolDefinition("docs__one"), mcpToolDefinition("docs__two")];
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: ["docs__one", "docs__missing"] }, { id: "invalid-load" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: ["docs__one"] }, { id: "load-one" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: ["docs__one"] }, { id: "load-one-again" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: ["docs__two"] }, { id: "load-two" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("all MCP tools loaded"),
+  ]);
+  let executions = 0;
+  const gateway = gatewayForDefinitions(definitions, async (request) => {
+    executions += 1;
+    return { ...request, output: "unexpected MCP execution", status: "completed", durationMs: 1 };
+  });
+  const observedTools: string[][] = [];
+  const accepted: ToolCallResult[] = [];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    transformProviderPayload: ({ payload, tools }) => {
+      observedTools.push(tools.map((tool) => tool.name));
+      return payload;
+    },
+  });
+  const base = loopInput(gateway);
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: definitions.map((definition) => definition.name) },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: [],
+      deferred: [
+        { name: "docs__one", displayName: "One", description: "One", serverId: "docs" },
+        { name: "docs__two", displayName: "Two", description: "Two", serverId: "docs" },
+      ],
+    }),
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(executions, 0);
+  assert.deepEqual(observedTools, [
+    ["mcp_search", "mcp_load"],
+    ["mcp_search", "mcp_load"],
+    ["mcp_search", "mcp_load", "docs__one"],
+    ["mcp_search", "mcp_load", "docs__one"],
+    ["docs__one", "docs__two"],
+  ]);
+  assert.equal(accepted[0]?.status, "failed");
+  assert.equal(accepted[0]?.errorFacts?.code, "tool_visibility_tool_not_loadable");
+  assert.deepEqual(accepted[0]?.errorFacts?.invalidToolNames, ["docs__missing"]);
+  assert.deepEqual(accepted[1]?.output, {
+    kind: "tool_visibility_activation",
+    activatedToolNames: ["docs__one"],
+    alreadyLoaded: [],
+    remainingDeferredToolCount: 1,
+    availableFrom: "next_model_request",
+  });
+  assert.deepEqual(accepted[2]?.output, {
+    kind: "tool_visibility_activation",
+    activatedToolNames: [],
+    alreadyLoaded: ["docs__one"],
+    remainingDeferredToolCount: 1,
+    availableFrom: "next_model_request",
+  });
+  assert.deepEqual(accepted[3]?.output, {
+    kind: "tool_visibility_activation",
+    activatedToolNames: ["docs__two"],
+    alreadyLoaded: [],
+    remainingDeferredToolCount: 0,
+    availableFrom: "next_model_request",
+  });
+  await loop.release();
+});
+
+test("a hallucinated unloaded MCP call never reaches its executor", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definition = mcpToolDefinition("docs__lookup");
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("docs__lookup", { query: "never" }, { id: "hallucinated" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("the tool was unavailable"),
+  ]);
+  let executions = 0;
+  const gateway = gatewayForDefinitions([definition], async (request) => {
+    executions += 1;
+    return { ...request, output: "must not run", status: "completed", durationMs: 1 };
+  });
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    transformProviderPayload: ({ payload }) => payload,
+  });
+  const base = loopInput(gateway);
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: [definition.name] },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: [],
+      deferred: [{ name: definition.name, displayName: "Lookup", description: "Lookup", serverId: "docs" }],
+    }),
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(executions, 0);
+  assert.equal(result.toolResults.length, 1);
+  assert.deepEqual(result.toolResults[0], {
+    callId: "hallucinated",
+    toolName: "docs__lookup",
+    input: { query: "never" },
+    output: undefined,
+    status: "failed",
+    error: "Tool docs__lookup not found",
+    errorDomain: "runtime_error",
+    errorFacts: { code: "pi_tool_call_rejected", doNotBlindlyRetry: true },
+    durationMs: 0,
+  });
+  await loop.release();
+});
+
+test("same-batch MCP loading cannot make a deferred call visible to its originating request", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definition = mcpToolDefinition("docs__lookup");
+  fixture.faux.setResponses([
+    fauxAssistantMessage([
+      fauxToolCall("mcp_load", { tool_names: [definition.name] }, { id: "same-batch-load" }),
+      fauxToolCall(definition.name, { query: "too early" }, { id: "same-batch-call" }),
+    ], { stopReason: "toolUse" }),
+    fauxAssistantMessage("the tool is available on the next request"),
+  ]);
+  let executions = 0;
+  const gateway = gatewayForDefinitions([definition], async (request) => {
+    executions += 1;
+    return { ...request, output: { answer: "must not execute" }, status: "completed", durationMs: 1 };
+  });
+  const accepted: ToolCallResult[] = [];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    transformProviderPayload: ({ payload }) => payload,
+  });
+  const base = loopInput(gateway);
+
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: [definition.name] },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: [],
+      deferred: [{ name: definition.name, displayName: "Lookup", description: "Lookup", serverId: "docs" }],
+    }),
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(executions, 0);
+  assert.equal(accepted.find((item) => item.callId === "same-batch-load")?.status, "completed");
+  const rejected = accepted.find((item) => item.callId === "same-batch-call");
+  assert.equal(rejected?.status, "failed");
+  assert.equal(rejected?.errorFacts?.code, "pi_tool_call_rejected");
+  assert.equal(rejected?.failureAttribution, undefined);
+  await loop.release();
+});
+
+test("Pi schema rejection becomes a canonical fact before the tool-round checkpoint", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("read", {}, { id: "invalid-schema" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("invalid input corrected"),
+  ]);
+  const accepted = new Map<string, ToolCallResult>();
+  const gateway = gatewayFor({
+    definition: toolDefinition("read", "read-only"),
+    execute: async () => { throw new Error("schema-invalid calls must not execute"); },
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, {
+    onToolResult: async (toolResult) => { accepted.set(toolResult.callId, toolResult); },
+    onSessionWriteCheckpoint: async (checkpoint) => {
+      if (checkpoint.kind !== "tool_result_entries_committed") return;
+      for (const callId of checkpoint.toolCallIds) {
+        assert.equal(accepted.has(callId), true, `missing canonical fact for ${callId}`);
+      }
+    },
+  }));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  const rejected = accepted.get("invalid-schema");
+  assert.equal(rejected?.status, "failed");
+  assert.equal(rejected?.errorFacts?.code, "pi_tool_schema_validation_failed");
+  assert.equal(rejected?.failureAttribution, "schema_validation");
+  assert.match(rejected?.error ?? "", /path/u);
+  await loop.release();
+});
+
+test("Pi executor exceptions retain their exact error as canonical execution failures", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "executor-throw" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("execution failure observed"),
+  ]);
+  const gateway = gatewayFor({
+    definition: toolDefinition("read", "read-only"),
+    execute: async () => { throw new Error("disk exploded exactly"); },
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  const failed = result.toolResults.find((toolResult) => toolResult.callId === "executor-throw");
+  assert.equal(failed?.error, "disk exploded exactly");
+  assert.equal(failed?.errorFacts?.code, "pi_tool_execution_failed");
+  assert.equal(failed?.failureAttribution, "execution_failure");
+  await loop.release();
+});
+
+test("load activation rolls the ordered active set back when Ordinary rejects the fact", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definition = mcpToolDefinition("docs__lookup");
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: [definition.name] }, { id: "rejected-load" }), {
+      stopReason: "toolUse",
+    }),
+  ]);
+  const gateway = gatewayForDefinitions([definition], async (request) => ({
+    ...request,
+    output: "must not execute",
+    status: "completed",
+    durationMs: 1,
+  }));
+  const loop = createAgentSessionLoop(fixture);
+  const base = loopInput(gateway);
+
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: [definition.name] },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: [],
+      deferred: [{ name: definition.name, displayName: "Lookup", description: "Lookup", serverId: "docs" }],
+    }),
+    onToolResult: async () => { throw new Error("ordinary persistence unavailable"); },
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "tool_result_acceptance_failed");
+  assert.equal(fixture.faux.state.callCount, 1);
+  const activeChanges = (await fixture.session.getBranch()).flatMap((entry) =>
+    entry.type === "active_tools_change" ? [entry.activeToolNames] : []);
+  assert.deepEqual(activeChanges, [
+    ["mcp_search", "mcp_load"],
+    [definition.name],
+    ["mcp_search", "mcp_load"],
+  ]);
+  const context = await fixture.session.buildContext();
+  assert.deepEqual(context.activeToolNames, ["mcp_search", "mcp_load"]);
+  const toolResultEntries = (await fixture.session.getBranch()).flatMap((entry) =>
+    entry.type === "message" && entry.message.role === "toolResult" ? [entry.message] : []);
+  assert.equal(toolResultEntries[0]?.addedToolNames, undefined);
+  await loop.release();
+});
+
+test("a new run resets active tools and hides historical activation markers without rewriting Session", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definition = mcpToolDefinition("docs__lookup");
+  const gateway = gatewayForDefinitions([definition], async (request) => ({
+    ...request,
+    output: "MCP evidence",
+    status: "completed",
+    durationMs: 1,
+  }));
+  const base = loopInput(gateway);
+  const progressiveInput = {
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: [definition.name] },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: [],
+      deferred: [{ name: definition.name, displayName: "Lookup", description: "Lookup", serverId: "docs" }],
+    }),
+  } satisfies AgentLoopInput;
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: [definition.name] }, { id: "first-load" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("first run complete"),
+  ]);
+  const firstLoop = createAgentSessionLoop(fixture);
+  const first = await firstLoop.execute(progressiveInput);
+  assert.equal(first.status, "completed", first.status === "failed" ? first.error : undefined);
+  await firstLoop.release();
+
+  fixture.faux.setResponses([(context) => {
+    const historicalLoad = context.messages.find((message) =>
+      message.role === "toolResult" && message.toolName === "mcp_load");
+    assert.equal(historicalLoad?.role === "toolResult" ? historicalLoad.addedToolNames : undefined, undefined);
+    return fauxAssistantMessage("second run complete");
+  }]);
+  const secondLoop = createAgentSessionLoop(fixture);
+  const second = await secondLoop.execute({
+    ...progressiveInput,
+    messages: [
+      { role: "system", content: "You are the Ordinary Agent." },
+      { role: "user", content: "second run" },
+    ],
+  });
+  assert.equal(second.status, "completed", second.status === "failed" ? second.error : undefined);
+  await secondLoop.release();
+
+  const branch = await fixture.session.getBranch();
+  const durableLoad = branch.find((entry) =>
+    entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "mcp_load");
+  assert.deepEqual(
+    durableLoad?.type === "message" && durableLoad.message.role === "toolResult"
+      ? durableLoad.message.addedToolNames
+      : undefined,
+    [definition.name],
+  );
+  assert.deepEqual(branch.flatMap((entry) =>
+    entry.type === "active_tools_change" ? [entry.activeToolNames] : []), [
+    ["mcp_search", "mcp_load"],
+    [definition.name],
+    ["mcp_search", "mcp_load"],
+  ]);
+});
+
+test("delegated agents receive a fresh narrowed progressive catalog", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const mcpDefinition = mcpToolDefinition("docs__lookup");
+  const mechanicalDefinitions = [mcpDefinition];
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: ["docs__lookup"] }, { id: "parent-load" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "delegate" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("mcp_load", { tool_names: ["docs__lookup"] }, { id: "child-load" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("docs__lookup", { query: "child" }, { id: "child-mcp" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("child evidence"),
+    fauxAssistantMessage("parent synthesis"),
+  ]);
+  const observedTools: string[][] = [];
+  let executions = 0;
+  const gatewayBase = gatewayForDefinitions(mechanicalDefinitions, async (request) => {
+    executions += 1;
+    return { ...request, output: "MCP evidence", status: "completed", durationMs: 1 };
+  });
+  const gateway = {
+    ...gatewayBase,
+    deliverResult: async (result: ToolCallResult) => result,
+  };
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    toolDefinitionTokenCounter: progressiveCounter("docs__lookup"),
+    transformProviderPayload: ({ payload, tools }) => {
+      observedTools.push(tools.map((tool) => tool.name));
+      return payload;
+    },
+  });
+  const base = loopInput(gateway, { agentTools: [delegatedAgentTool([mcpDefinition.name])] });
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: [mcpDefinition.name] },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: ["agent_call"],
+      deferred: [{ name: mcpDefinition.name, displayName: "Lookup", description: "Lookup", serverId: "docs" }],
+    }),
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(executions, 1);
+  assert.deepEqual(observedTools, [
+    ["agent_call", "mcp_search", "mcp_load"],
+    ["agent_call", "docs__lookup"],
+    ["mcp_search", "mcp_load"],
+    ["docs__lookup"],
+    ["docs__lookup"],
+    ["agent_call", "docs__lookup"],
+  ]);
+  await loop.release();
+});
+
+test("a delegated same-batch load cannot make the deferred call visible early", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definition = mcpToolDefinition("docs__lookup");
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "delegate-same-batch" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage([
+      fauxToolCall("mcp_load", { tool_names: [definition.name] }, { id: "child-same-batch-load" }),
+      fauxToolCall(definition.name, { query: "too early" }, { id: "child-same-batch-call" }),
+    ], { stopReason: "toolUse" }),
+    fauxAssistantMessage("child observed the rejection"),
+    fauxAssistantMessage("parent observed the child result"),
+  ]);
+  let executions = 0;
+  const gatewayBase = gatewayForDefinitions([definition], async (request) => {
+    executions += 1;
+    return { ...request, output: "must not execute", status: "completed", durationMs: 1 };
+  });
+  const gateway = { ...gatewayBase, deliverResult: async (result: ToolCallResult) => result };
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    toolDefinitionTokenCounter: progressiveCounter(definition.name),
+    transformProviderPayload: ({ payload }) => payload,
+  });
+  const base = loopInput(gateway, { agentTools: [delegatedAgentTool([definition.name])] });
+
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: [definition.name] },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: ["agent_call"],
+      deferred: [{ name: definition.name, displayName: "Lookup", description: "Lookup", serverId: "docs" }],
+    }),
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(executions, 0);
+  const rejected = result.toolResults.find((toolResult) => toolResult.callId === "child-same-batch-call");
+  assert.equal(rejected?.parentToolCallFactId, "delegate-same-batch");
+  assert.equal(rejected?.status, "failed");
+  assert.equal(rejected?.errorFacts?.code, "pi_tool_call_rejected");
+  await loop.release();
+});
+
+test("delegated agents expose a small narrowed MCP set directly instead of inheriting parent controls", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definitions = [mcpToolDefinition("docs__one"), mcpToolDefinition("docs__two")];
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "delegate-small" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("child did not need a tool"),
+    fauxAssistantMessage("parent synthesis"),
+  ]);
+  const gatewayBase = gatewayForDefinitions(definitions, async (request) => ({
+    ...request,
+    output: "unused",
+    status: "completed",
+    durationMs: 1,
+  }));
+  const gateway = { ...gatewayBase, deliverResult: async (result: ToolCallResult) => result };
+  const observedTools: string[][] = [];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    toolDefinitionTokenCounter: (serialized) => serialized.length,
+    transformProviderPayload: ({ payload, tools }) => {
+      observedTools.push(tools.map((tool) => tool.name));
+      return payload;
+    },
+  });
+  const base = loopInput(gateway, { agentTools: [delegatedAgentTool([definitions[0]!.name])] });
+
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: definitions.map((definition) => definition.name) },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: ["agent_call"],
+      deferred: definitions.map((definition) => ({
+        name: definition.name,
+        displayName: definition.name,
+        description: definition.description,
+        serverId: "docs",
+      })),
+    }),
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(observedTools, [
+    ["agent_call", "mcp_search", "mcp_load"],
+    ["docs__one"],
+    ["agent_call", "mcp_search", "mcp_load"],
+  ]);
+  await loop.release();
+});
+
+test("delegated Pi immediate failures become nested canonical facts", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "delegate-immediate" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("ghost_tool", { query: "missing" }, { id: "child-ghost" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("child recovered"),
+    fauxAssistantMessage("parent recovered"),
+  ]);
+  const baseGateway = emptyGateway();
+  const gateway = {
+    ...baseGateway,
+    deliverResult: async (result: ToolCallResult) => result,
+  };
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, {
+    agentTools: [delegatedAgentTool([])],
+  }));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  const nested = result.toolResults.find((toolResult) => toolResult.callId === "child-ghost");
+  assert.equal(nested?.parentToolCallFactId, "delegate-immediate");
+  assert.equal(nested?.error, "Tool ghost_tool not found");
+  assert.equal(nested?.errorFacts?.code, "pi_tool_call_rejected");
+  assert.equal(result.toolResults.some((toolResult) => toolResult.callId === "delegate-immediate"), true);
   await loop.release();
 });
 
@@ -149,6 +1097,68 @@ test("agent session loop does not call the provider when cancellation is already
   assert.match(result.status === "cancelled" ? result.error ?? "" : "", /cancelled by user/);
   assert.equal(fixture.faux.state.callCount, 0);
   await loop.release();
+});
+
+test("Pi immediate cancellation becomes a canonical cancelled tool fact", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("ghost_tool", { query: "cancel me" }, { id: "immediate-cancel" }), {
+      stopReason: "toolUse",
+    }),
+  ]);
+  const cancellation = new AbortController();
+  const accepted: ToolCallResult[] = [];
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(emptyGateway(), {
+    abortSignal: cancellation.signal,
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+    onSessionWriteCheckpoint: async (checkpoint) => {
+      if (checkpoint.kind === "assistant_tool_call_entry_committed") {
+        cancellation.abort(new Error("cancelled during tool dispatch"));
+      }
+    },
+  }));
+
+  assert.equal(result.status, "cancelled");
+  const cancelled = accepted.find((toolResult) => toolResult.callId === "immediate-cancel");
+  assert.equal(cancelled?.status, "cancelled");
+  assert.equal(cancelled?.errorFacts?.code, "pi_tool_call_cancelled");
+  await loop.release();
+});
+
+test("loop release classifies an in-flight Pi immediate result as cancelled", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("ghost_tool", { query: "release me" }, { id: "release-immediate" }), {
+      stopReason: "toolUse",
+    }),
+  ]);
+  let checkpointEntered!: () => void;
+  let releaseCheckpoint!: () => void;
+  const checkpointReady = new Promise<void>((resolve) => { checkpointEntered = resolve; });
+  const checkpointGate = new Promise<void>((resolve) => { releaseCheckpoint = resolve; });
+  const accepted: ToolCallResult[] = [];
+  const loop = createAgentSessionLoop(fixture);
+  const run = loop.execute(loopInput(emptyGateway(), {
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+    onSessionWriteCheckpoint: async (checkpoint) => {
+      if (checkpoint.kind !== "assistant_tool_call_entry_committed") return;
+      checkpointEntered();
+      await checkpointGate;
+    },
+  }));
+
+  await checkpointReady;
+  const release = loop.release();
+  releaseCheckpoint();
+  await release;
+  const result = await run;
+
+  assert.equal(result.status, "cancelled");
+  const cancelled = accepted.find((toolResult) => toolResult.callId === "release-immediate");
+  assert.equal(cancelled?.status, "cancelled");
+  assert.equal(cancelled?.errorFacts?.code, "pi_tool_call_cancelled");
 });
 
 test("agent session loop preserves proven provider stop classifications", async (t) => {
@@ -316,7 +1326,7 @@ test("agent session loop bounds a twenty-turn session with repeated tool rounds 
     if (context.messages.at(-1)?.role === "user") {
       toolCallSequence += 1;
       return fauxAssistantMessage(
-        fauxToolCall("read_file", { path: "README.md" }, { id: `read-${toolCallSequence}` }),
+        fauxToolCall("read", { path: "README.md" }, { id: `read-${toolCallSequence}` }),
         { stopReason: "toolUse" },
       );
     }
@@ -325,7 +1335,7 @@ test("agent session loop bounds a twenty-turn session with repeated tool rounds 
   fixture.faux.setResponses(Array.from({ length: 100 }, () => response));
   let toolExecutions = 0;
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     execute: async (request) => {
       toolExecutions += 1;
       return {
@@ -372,14 +1382,14 @@ test("agent session loop bounds a twenty-turn session with repeated tool rounds 
 test("agent session loop sends one ToolCenter fact back to the model in callback order", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("read_file", { path: "README.md" }, { id: "read-call" }), {
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "read-call" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("read complete"),
   ]);
   const order: string[] = [];
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     execute: async (request) => ({
       ...request,
       output: "contents",
@@ -431,8 +1441,8 @@ test("agent session loop reads an oversized ToolCenter result through Pi continu
       stopReason: "toolUse",
     }),
     () => {
-      assert.ok(continuationInput, "ToolCenter did not provide a read_tool_output continuation.");
-      return fauxAssistantMessage(fauxToolCall("read_tool_output", continuationInput, { id: "report-read" }), {
+      assert.ok(continuationInput, "ToolCenter did not provide a read_output continuation.");
+      return fauxAssistantMessage(fauxToolCall("read_output", continuationInput, { id: "report-read" }), {
         stopReason: "toolUse",
       });
     },
@@ -452,7 +1462,7 @@ test("agent session loop reads an oversized ToolCenter result through Pi continu
   assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
   assert.equal(result.status === "completed" ? result.finalText : undefined, "report recovered");
   assert.equal(producerExecutions, 1);
-  assert.deepEqual(accepted.map((item) => item.toolName), ["produce_report", "read_tool_output"]);
+  assert.deepEqual(accepted.map((item) => item.toolName), ["produce_report", "read_output"]);
   assert.equal(typeof (accepted[0]?.output as { readonly contentRef?: unknown })?.contentRef, "string");
   assert.match(JSON.stringify(accepted[1]?.output), /report-line/u);
   await loop.release();
@@ -543,7 +1553,7 @@ test("agent session loop fails unsupported tool attachments instead of dropping 
 test("agent session loop pauses when a read-only executor discovers approval during execution", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("read_file", { path: "private.txt" }, { id: "dynamic-read" }), {
+    fauxAssistantMessage(fauxToolCall("read", { path: "private.txt" }, { id: "dynamic-read" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("private read complete"),
@@ -561,7 +1571,7 @@ test("agent session loop pauses when a read-only executor discovers approval dur
   const accepted: ToolCallResult[] = [];
   let executeCount = 0;
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     execute: async (request, _context, permission) => {
       executeCount += 1;
       if (permission.approvedConfirmationIds?.includes("confirm-dynamic-read") !== true) {
@@ -607,15 +1617,15 @@ test("agent session loop keeps concurrent dynamic approvals pending until each i
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
     fauxAssistantMessage([
-      fauxToolCall("read_file", { path: "private-a.txt" }, { id: "dynamic-a" }),
-      fauxToolCall("read_file", { path: "private-b.txt" }, { id: "dynamic-b" }),
+      fauxToolCall("read", { path: "private-a.txt" }, { id: "dynamic-a" }),
+      fauxToolCall("read", { path: "private-b.txt" }, { id: "dynamic-b" }),
     ], { stopReason: "toolUse" }),
     fauxAssistantMessage("both private reads completed"),
   ]);
   const accepted: ToolCallResult[] = [];
   let executeCount = 0;
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     execute: async (request, _context, permission) => {
       executeCount += 1;
       const confirmationId = `confirm-${request.callId}`;
@@ -685,7 +1695,7 @@ test("agent session loop keeps concurrent dynamic approvals pending until each i
 test("agent session loop denial rejects only the pending call and lets the model continue", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("write_file", { path: "a.txt" }, { id: "write-call" }), {
+    fauxAssistantMessage(fauxToolCall("write", { path: "a.txt" }, { id: "write-call" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("I will use another approach."),
@@ -694,7 +1704,7 @@ test("agent session loop denial rejects only the pending call and lets the model
   const accepted: ToolCallResult[] = [];
   const confirmationRequest = writeConfirmationRequest();
   const gateway = gatewayFor({
-    definition: toolDefinition("write_file", "read-write"),
+    definition: toolDefinition("write", "read-write"),
     preflight: (request) => ({
       status: "approval_required",
       result: {
@@ -743,7 +1753,7 @@ test("agent session loop denial rejects only the pending call and lets the model
 test("agent session loop executes an approved tool exactly once", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("write_file", { path: "a.txt" }, { id: "write-call" }), {
+    fauxAssistantMessage(fauxToolCall("write", { path: "a.txt" }, { id: "write-call" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("write complete"),
@@ -753,7 +1763,7 @@ test("agent session loop executes an approved tool exactly once", async (t) => {
   let executeCount = 0;
   const confirmationRequest = writeConfirmationRequest();
   const gateway = gatewayFor({
-    definition: toolDefinition("write_file", "read-write"),
+    definition: toolDefinition("write", "read-write"),
     preflight: (request) => ({
       status: "approval_required",
       result: { ...request, output: undefined, status: "approval_required", durationMs: 0, confirmationRequest },
@@ -793,14 +1803,14 @@ test("agent session loop releases one static approval while retaining the remain
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
     fauxAssistantMessage([
-      fauxToolCall("read_file", { path: "a.txt" }, { id: "read-a" }),
-      fauxToolCall("read_file", { path: "b.txt" }, { id: "read-b" }),
+      fauxToolCall("read", { path: "a.txt" }, { id: "read-a" }),
+      fauxToolCall("read", { path: "b.txt" }, { id: "read-b" }),
     ], { stopReason: "toolUse" }),
     fauxAssistantMessage("both private files were read"),
   ]);
   const executions: string[] = [];
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     preflight: (request) => ({
       status: "approval_required",
       result: {
@@ -857,7 +1867,7 @@ test("agent session loop releases one static approval while retaining the remain
 test("agent session loop preserves the original cancellation signal after approval", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("write_file", { path: "a.txt" }, { id: "write-call" }), {
+    fauxAssistantMessage(fauxToolCall("write", { path: "a.txt" }, { id: "write-call" }), {
       stopReason: "toolUse",
     }),
   ]);
@@ -867,7 +1877,7 @@ test("agent session loop preserves the original cancellation signal after approv
   let observedToolSignal: AbortSignal | undefined;
   const confirmationRequest = writeConfirmationRequest();
   const gateway = gatewayFor({
-    definition: toolDefinition("write_file", "read-write"),
+    definition: toolDefinition("write", "read-write"),
     preflight: (request) => ({
       status: "approval_required",
       result: { ...request, output: undefined, status: "approval_required", durationMs: 0, confirmationRequest },
@@ -903,14 +1913,14 @@ test("agent session loop preserves the original cancellation signal after approv
 test("agent session loop release cancels a tool waiting for approval without executing it", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("write_file", { path: "a.txt" }, { id: "write-call" }), {
+    fauxAssistantMessage(fauxToolCall("write", { path: "a.txt" }, { id: "write-call" }), {
       stopReason: "toolUse",
     }),
   ]);
   const accepted: ToolCallResult[] = [];
   let executeCount = 0;
   const gateway = gatewayFor({
-    definition: toolDefinition("write_file", "read-write"),
+    definition: toolDefinition("write", "read-write"),
     preflight: (request) => ({
       status: "approval_required",
       result: {
@@ -943,13 +1953,13 @@ test("agent session loop release cancels a tool waiting for approval without exe
 test("agent session loop stops after the owning feature rejects a tool fact", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("read_file", { path: "README.md" }, { id: "read-call" }), {
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "read-call" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("must not be reached"),
   ]);
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     execute: async (request) => ({
       ...request,
       output: "contents",
@@ -988,10 +1998,10 @@ test("agent session loop rejects delegated tools when complete result delivery i
 test("agent session loop keeps delegated transcripts isolated while preserving nested tool facts", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("call_sub_agent", { task: "inspect" }, { id: "shared-call" }), {
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "shared-call" }), {
       stopReason: "toolUse",
     }),
-    fauxAssistantMessage(fauxToolCall("read_file", { path: "README.md" }, { id: "shared-call" }), {
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "shared-call" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("delegated result"),
@@ -1002,7 +2012,7 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   let observedCallerAgentId: string | undefined;
   let observedAllowedTools: readonly string[] | undefined;
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     execute: async (request, context, permission) => {
       observedCallerAgentId = context.callerAgentId;
       observedAllowedTools = permission.allowedTools;
@@ -1022,13 +2032,13 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   const loop = createAgentSessionLoop(fixture);
 
   const result = await loop.execute(loopInput(gateway, {
-    agentTools: [delegatedAgentTool(["read_file"])],
+    agentTools: [delegatedAgentTool(["read"])],
     onToolResult: async (toolResult) => { accepted.push(toolResult); },
   }));
 
   assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
   assert.equal(result.status === "completed" ? result.finalText : undefined, "parent synthesis");
-  assert.deepEqual(accepted.map((item) => item.toolName), ["read_file", "call_sub_agent"]);
+  assert.deepEqual(accepted.map((item) => item.toolName), ["read", "agent_call"]);
   const nested = accepted[0];
   assert.equal(nested?.callId, "shared-call");
   assert.equal(nested?.factId, "agent-tool:11:shared-call/tool:shared-call");
@@ -1042,8 +2052,8 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   assert.equal(accepted[1]?.delegatedExecution?.usage.requestCount, 2);
   assert.equal(result.usage.requestCount, 4);
   assert.equal(observedCallerAgentId, "sub-agent:reviewer");
-  assert.deepEqual(observedAllowedTools, ["read_file"]);
-  assert.deepEqual(delivered.map((item) => item.toolName), ["call_sub_agent"]);
+  assert.deepEqual(observedAllowedTools, ["read"]);
+  assert.deepEqual(delivered.map((item) => item.toolName), ["agent_call"]);
   assert.equal(delivered[0]?.output, "delegated result");
   const rootMessages = (await fixture.session.getBranch()).flatMap((entry) =>
     entry.type === "message" ? [entry.message] : []);
@@ -1057,10 +2067,10 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
 test("delegated tool approval resumes once with the continuation abort signal", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("call_sub_agent", { task: "write" }, { id: "delegate-call" }), {
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "write" }, { id: "delegate-call" }), {
       stopReason: "toolUse",
     }),
-    fauxAssistantMessage(fauxToolCall("write_file", { path: "a.txt" }, { id: "nested-write" }), {
+    fauxAssistantMessage(fauxToolCall("write", { path: "a.txt" }, { id: "nested-write" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("delegated write complete"),
@@ -1070,7 +2080,7 @@ test("delegated tool approval resumes once with the continuation abort signal", 
   let executeCount = 0;
   let observedAbortSignal: AbortSignal | undefined;
   const gateway = gatewayFor({
-    definition: toolDefinition("write_file", "read-write"),
+    definition: toolDefinition("write", "read-write"),
     preflight: (request) => ({
       status: "approval_required",
       result: {
@@ -1100,7 +2110,7 @@ test("delegated tool approval resumes once with the continuation abort signal", 
   const loop = createAgentSessionLoop(fixture);
 
   const paused = await loop.execute(loopInput(gateway, {
-    agentTools: [delegatedAgentTool(["write_file"])],
+    agentTools: [delegatedAgentTool(["write"])],
   }));
 
   assert.equal(paused.status, "approval_required");
@@ -1123,10 +2133,10 @@ test("delegated tool approval resumes once with the continuation abort signal", 
 test("denying a delegated tool call does not stop the child or parent model loops", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("call_sub_agent", { task: "write" }, { id: "delegate-deny" }), {
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "write" }, { id: "delegate-deny" }), {
       stopReason: "toolUse",
     }),
-    fauxAssistantMessage(fauxToolCall("write_file", { path: "a.txt" }, { id: "nested-deny" }), {
+    fauxAssistantMessage(fauxToolCall("write", { path: "a.txt" }, { id: "nested-deny" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("delegated agent adapted after denial"),
@@ -1136,7 +2146,7 @@ test("denying a delegated tool call does not stop the child or parent model loop
   let executeCount = 0;
   const accepted: ToolCallResult[] = [];
   const gateway = gatewayFor({
-    definition: toolDefinition("write_file", "read-write"),
+    definition: toolDefinition("write", "read-write"),
     preflight: (request) => ({
       status: "approval_required",
       result: {
@@ -1165,7 +2175,7 @@ test("denying a delegated tool call does not stop the child or parent model loop
   const loop = createAgentSessionLoop(fixture);
 
   const paused = await loop.execute(loopInput(gateway, {
-    agentTools: [delegatedAgentTool(["write_file"])],
+    agentTools: [delegatedAgentTool(["write"])],
     onToolResult: async (result) => { accepted.push(result); },
   }));
   assert.equal(paused.status, "approval_required");
@@ -1188,10 +2198,10 @@ test("denying a delegated tool call does not stop the child or parent model loop
 test("rejecting a nested tool fact stops both delegated and parent provider loops", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("call_sub_agent", { task: "inspect" }, { id: "delegate-persistence" }), {
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "delegate-persistence" }), {
       stopReason: "toolUse",
     }),
-    fauxAssistantMessage(fauxToolCall("read_file", { path: "README.md" }, { id: "nested-persistence" }), {
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "nested-persistence" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("child must not continue"),
@@ -1199,7 +2209,7 @@ test("rejecting a nested tool fact stops both delegated and parent provider loop
   ]);
   const accepted: ToolCallResult[] = [];
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     execute: async (request) => ({
       ...request,
       output: "contents",
@@ -1211,7 +2221,7 @@ test("rejecting a nested tool fact stops both delegated and parent provider loop
   const loop = createAgentSessionLoop(fixture);
 
   const result = await loop.execute(loopInput(gateway, {
-    agentTools: [delegatedAgentTool(["read_file"])],
+    agentTools: [delegatedAgentTool(["read"])],
     onToolResult: async (toolResult) => {
       accepted.push(toolResult);
       if (toolResult.parentToolCallFactId !== undefined) {
@@ -1224,24 +2234,24 @@ test("rejecting a nested tool fact stops both delegated and parent provider loop
   assert.equal(result.status === "failed" ? result.errorCode : undefined, "tool_result_acceptance_failed");
   assert.equal(fixture.faux.state.callCount, 2);
   assert.equal(accepted.some((item) => item.parentToolCallFactId !== undefined), true);
-  assert.equal(accepted.some((item) => item.toolName === "call_sub_agent"), true);
+  assert.equal(accepted.some((item) => item.toolName === "agent_call"), true);
   await loop.release();
 });
 
 test("releasing the parent loop cancels a delegated approval wait without executing it", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("call_sub_agent", { task: "write" }, { id: "delegate-release" }), {
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "write" }, { id: "delegate-release" }), {
       stopReason: "toolUse",
     }),
-    fauxAssistantMessage(fauxToolCall("write_file", { path: "a.txt" }, { id: "nested-release" }), {
+    fauxAssistantMessage(fauxToolCall("write", { path: "a.txt" }, { id: "nested-release" }), {
       stopReason: "toolUse",
     }),
   ]);
   let executeCount = 0;
   const accepted: ToolCallResult[] = [];
   const gateway = gatewayFor({
-    definition: toolDefinition("write_file", "read-write"),
+    definition: toolDefinition("write", "read-write"),
     preflight: (request) => ({
       status: "approval_required",
       result: {
@@ -1270,7 +2280,7 @@ test("releasing the parent loop cancels a delegated approval wait without execut
   const loop = createAgentSessionLoop(fixture);
 
   const paused = await loop.execute(loopInput(gateway, {
-    agentTools: [delegatedAgentTool(["write_file"])],
+    agentTools: [delegatedAgentTool(["write"])],
     onToolResult: async (result) => { accepted.push(result); },
   }));
   assert.equal(paused.status, "approval_required");
@@ -1282,31 +2292,31 @@ test("releasing the parent loop cancels a delegated approval wait without execut
   assert.equal(accepted.some((result) =>
     result.parentToolCallFactId === "delegate-release" && result.status === "cancelled"), true);
   assert.equal(accepted.some((result) =>
-    result.toolName === "call_sub_agent" && result.parentToolCallFactId === undefined && result.status === "cancelled"), true);
+    result.toolName === "agent_call" && result.parentToolCallFactId === undefined && result.status === "cancelled"), true);
   await loop.release();
 });
 
 test("delegated agents cannot expand the parent tool boundary or recurse", async (t) => {
   const fixture = await createFixture(t);
   fixture.faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("call_sub_agent", { task: "expand" }, { id: "delegate-outside" }), {
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "expand" }, { id: "delegate-outside" }), {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage("parent handled delegation failure"),
   ]);
   const gateway = gatewayFor({
-    definition: toolDefinition("read_file", "read-only"),
+    definition: toolDefinition("read", "read-only"),
     execute: async () => { throw new Error("Nested execution must not start."); },
     deliverResult: async (result) => result,
   });
   const loop = createAgentSessionLoop(fixture);
 
   const result = await loop.execute(loopInput(gateway, {
-    agentTools: [delegatedAgentTool(["write_file", "call_sub_agent"])],
+    agentTools: [delegatedAgentTool(["write", "agent_call"])],
   }));
 
   assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
-  const delegatedResult = result.toolResults.find((item) => item.toolName === "call_sub_agent");
+  const delegatedResult = result.toolResults.find((item) => item.toolName === "agent_call");
   assert.equal(delegatedResult?.status, "failed");
   assert.match(delegatedResult?.error ?? "", /outside the parent boundary/u);
   assert.equal(fixture.faux.state.callCount, 2);
@@ -1337,10 +2347,35 @@ async function createFixture(
   };
 }
 
+async function createPayloadAwareFixture(
+  t: test.TestContext,
+  options?: Parameters<typeof fauxProvider>[0],
+) {
+  const fixture = await createFixture(t, options);
+  const original = fixture.faux.provider;
+  const provider: typeof original = {
+    ...original,
+    stream(model, context, streamOptions) {
+      void Promise.resolve(streamOptions?.onPayload?.({ tools: context.tools }, model)).catch(() => undefined);
+      return original.stream(model, context, streamOptions);
+    },
+    streamSimple(model, context, streamOptions) {
+      void Promise.resolve(streamOptions?.onPayload?.({ tools: context.tools }, model)).catch(() => undefined);
+      return original.streamSimple(model, context, streamOptions);
+    },
+  };
+  const modelRegistry = createModels();
+  modelRegistry.setProvider(provider);
+  const selectedModel = modelRegistry.getModel(provider.id, fixture.selectedModel.id);
+  if (selectedModel === undefined) throw new Error("Payload-aware faux provider did not expose its selected model.");
+  return { ...fixture, modelRegistry, selectedModel };
+}
+
 function loopInput(
   gateway: ToolExecutionGateway,
   overrides: Partial<AgentLoopInput> = {},
 ): AgentLoopInput {
+  const contributedDefinitions = (overrides.agentTools ?? []).map((tool) => delegatedAgentToolDefinition(tool.toolName));
   return {
     instructions: "You are the Ordinary Agent.",
     messages: [
@@ -1348,12 +2383,31 @@ function loopInput(
       { role: "user", content: "help" },
     ],
     tools: {
+      definitions: [...gateway.list(), ...contributedDefinitions],
       gateway,
       context: { callerAgentId: "ordinary", traceId: "run-1", goalId: "run-1" },
       permission: { callerAgentId: "ordinary", allowedTools: gateway.list().map((tool) => tool.name) },
     },
     abortSignal: new AbortController().signal,
     ...overrides,
+  };
+}
+
+function delegatedAgentToolDefinition(name: string): ToolDefinition {
+  return {
+    name,
+    description: "Call a specialist Agent for one bounded task.",
+    inputSchema: {
+      type: "object",
+      properties: { task: { type: "string" } },
+      additionalProperties: true,
+    },
+    metadata: {
+      category: "other",
+      riskLevel: "medium",
+      operationType: "read-write",
+      requiresConfirmation: false,
+    },
   };
 }
 
@@ -1384,16 +2438,25 @@ function gatewayFor(input: {
   };
 }
 
+function gatewayForDefinitions(
+  definitions: readonly ToolDefinition[],
+  execute: (
+    request: ToolCallRequest,
+    context: ToolExecutionContext,
+    permission: ToolPermissionCheck,
+  ) => Promise<ToolCallResult>,
+): ToolExecutionGateway {
+  return {
+    list: () => [...globalThis.structuredClone(definitions)],
+    has: (name) => definitions.some((definition) => definition.name === name),
+    preflight: (request) => ({ status: "ready", request }),
+    execute,
+  };
+}
+
 function delegatedAgentTool(allowedTools: readonly string[]): AgentLoopAgentTool {
   return {
-    toolName: "call_sub_agent",
-    toolDescription: "Call a reviewer for one bounded task.",
-    inputSchema: {
-      type: "object",
-      properties: { task: { type: "string" } },
-      required: ["task"],
-      additionalProperties: false,
-    },
+    toolName: "agent_call",
     resolve: async () => ({
       agentName: "reviewer",
       instructions: "Review the delegated task and return the complete result.",
@@ -1421,6 +2484,112 @@ function toolDefinition(name: string, operationType: "read-only" | "read-write")
       requiresConfirmation: operationType !== "read-only",
     },
   };
+}
+
+function mcpToolDefinition(name: string): ToolDefinition {
+  return {
+    name,
+    description: `Execute frozen MCP tool ${name}.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1 },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+      additionalProperties: false,
+    },
+    metadata: {
+      category: "mcp",
+      riskLevel: "low",
+      operationType: "read-only",
+      requiresConfirmation: false,
+    },
+  };
+}
+
+function progressivePlan(input: {
+  readonly initialNames: readonly string[];
+  readonly deferred: readonly {
+    readonly name: string;
+    readonly displayName: string;
+    readonly description: string;
+    readonly serverId: string;
+  }[];
+}): AgentLoopToolVisibilityPlan {
+  return {
+    policyId: "mcp-progressive/v1",
+    snapshotId: "progressive-test-snapshot",
+    costGate: {
+      minimumDeferredDefinitionTokens: 1,
+      minimumNetDefinitionSavingsTokens: 1,
+      definitionSerialization: { api: "openai-responses", includeStrict: true },
+    },
+    initiallyVisibleToolNames: input.initialNames,
+    deferredTools: input.deferred.map((tool) => ({
+      name: tool.name,
+      displayName: tool.displayName,
+      description: tool.description,
+      source: { kind: "mcp", id: tool.serverId, label: "Documentation" },
+      definitionHash: `sha256:${tool.name}`,
+    })),
+    controls: {
+      search: {
+        name: "mcp_search",
+        description: "Search the frozen MCP tool catalog without loading or executing tools.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", minLength: 1, maxLength: 200 },
+            server_id: { type: "string", minLength: 1, maxLength: 128 },
+            cursor: { type: "integer", minimum: 0 },
+            limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
+          },
+          additionalProperties: false,
+        },
+        metadata: {
+          category: "mcp",
+          riskLevel: "low",
+          operationType: "read-only",
+          requiresConfirmation: false,
+        },
+      },
+      load: {
+        name: "mcp_load",
+        description: "Expose authorized frozen MCP definitions from the next model request.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            tool_names: {
+              type: "array",
+              minItems: 1,
+              maxItems: 16,
+              uniqueItems: true,
+              items: { type: "string", minLength: 1, maxLength: 128 },
+            },
+          },
+          required: ["tool_names"],
+          additionalProperties: false,
+        },
+        metadata: {
+          category: "mcp",
+          riskLevel: "low",
+          operationType: "read-write",
+          requiresConfirmation: false,
+        },
+      },
+    },
+  };
+}
+
+function progressiveCounter(...expensiveToolNames: readonly string[]): (serialized: string) => number {
+  return (serialized) => serialized.length +
+    expensiveToolNames.filter((name) => serialized.includes(`\"name\":\"${name}\"`)).length * 20_000;
 }
 
 function oversizedReportTool(execute: ToolExecutor["execute"]): ToolExecutor {

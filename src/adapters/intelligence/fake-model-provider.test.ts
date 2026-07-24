@@ -290,7 +290,7 @@ test("FakeModelProvider desktop agent answers directly and can request authorize
       },
       tools: [
         {
-          name: "search",
+          name: "research_search",
           description: "Search authorized sources.",
           inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
         },
@@ -318,7 +318,7 @@ test("FakeModelProvider desktop agent answers directly and can request authorize
   assert.equal(answer.textOutput?.includes("AgentArbor 桌面助手"), true);
   assert.equal(ordinaryComplex.status, "completed");
   assert.equal(ordinaryComplex.finishReason, "tool_call");
-  assert.equal(ordinaryComplex.toolCalls?.[0]?.toolName, "search");
+  assert.equal(ordinaryComplex.toolCalls?.[0]?.toolName, "research_search");
   assert.equal(ordinaryWithoutTools.status, "completed");
   assert.equal(ordinaryWithoutTools.finishReason, "stop");
   assert.equal(ordinaryWithoutTools.textOutput?.includes("桌面任务处理"), true);

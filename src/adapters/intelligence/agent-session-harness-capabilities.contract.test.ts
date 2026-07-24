@@ -135,7 +135,7 @@ test("agent session harness can pause a tool call for external confirmation and 
   const faux = fauxProvider();
   models.setProvider(faux.provider);
   faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("write_file", {}, { id: "write-file" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxToolCall("write", {}, { id: "write-file" }), { stopReason: "toolUse" }),
     fauxAssistantMessage("write approved"),
   ]);
   let executeCount = 0;
@@ -150,8 +150,8 @@ test("agent session harness can pause a tool call for external confirmation and 
     models,
     model: faux.getModel(),
     tools: [{
-      name: "write_file",
-      label: "write_file",
+      name: "write",
+      label: "write",
       description: "Write a file after AgentArbor confirmation.",
       parameters,
       executionMode: "sequential",
@@ -189,7 +189,7 @@ test("agent session harness returns one denied tool call to the model and contin
   const faux = fauxProvider();
   models.setProvider(faux.provider);
   faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("write_file", {}, { id: "denied-write" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxToolCall("write", {}, { id: "denied-write" }), { stopReason: "toolUse" }),
     fauxAssistantMessage("continued after denial"),
   ]);
   let executeCount = 0;
@@ -204,8 +204,8 @@ test("agent session harness returns one denied tool call to the model and contin
     models,
     model: faux.getModel(),
     tools: [{
-      name: "write_file",
-      label: "write_file",
+      name: "write",
+      label: "write",
       description: "Write a file after AgentArbor confirmation.",
       parameters,
       executionMode: "sequential",

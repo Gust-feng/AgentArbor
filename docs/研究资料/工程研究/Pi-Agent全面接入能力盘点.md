@@ -198,7 +198,7 @@ Harness 要求注入 `ExecutionEnv`，但不会自动把 env 的 shell/filesyste
 ### 4.8 Skills 接线
 
 - 可以复用 `Skill` 格式、`loadSourcedSkills()`、显式 `skill()` invocation 和 system-prompt 格式。
-- AgentArbor 仍负责 source precedence、启停、stateKey、正文 hash、frozen catalog、allowed-tools 声明、resource index、eval/doctor 和 `read_skill_resource` 权限。
+- AgentArbor 仍负责 source precedence、启停、stateKey、正文 hash、frozen catalog、allowed-tools 声明、resource index、eval/doctor 和 `skill_read` 权限。
 - 用 `setResources()` 把本轮冻结 Skill 投影给 Harness；不能让 Pi loader 在 run 中重新扫描磁盘并扩张已冻结能力。
 
 ## 5. 仍归 AgentArbor

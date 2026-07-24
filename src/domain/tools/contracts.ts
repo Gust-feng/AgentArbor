@@ -1,48 +1,15 @@
 import type { ConfirmationRequest } from "../confirmation/contracts.js";
 import type { ModelInputAttachment } from "../intelligence/model-input-attachments.js";
 import type { ToolFactValue } from "./fact-value.js";
+import type { ToolJsonSchema, ToolJsonSchemaValue } from "./schema.js";
 
 export type ToolInputSchema = {
   readonly type: "object";
-  readonly properties: Record<string, unknown>;
+  readonly properties: Record<string, ToolJsonSchemaValue>;
   readonly required?: readonly string[];
-  readonly additionalProperties?: boolean;
-};
-
-export type ToolUsageExample = {
-  readonly title?: string;
-  readonly input: Readonly<Record<string, unknown>>;
-};
-
-export type ToolModelRuntimeHint = {
-  readonly label: string;
-  readonly value: string;
-};
-
-/**
- * 模型可见工具的可选描述增强。它可以补充适用边界、参数约束、结果事实和运行环境，
- * 但不是工具进入模型可见集合的准入证明。
- *
- * 可见性由冻结权限、真实 executor/runtime 可用性、provider 协议能力和客观资源决定。
- * 这里的推荐用法、运行提示和示例不得成为隐藏路由，也不得通过关键词规则替模型选工具。
- */
-export type ToolModelContract = {
-  /** 可选补充目标说明；客观 `ToolDefinition.description` 始终是 provider 描述的主体。 */
-  readonly purpose?: string;
-  /** 可选适用性说明；只作信息补充，工具选择仍属于模型判断。 */
-  readonly whenToUse?: readonly string[];
-  /** 可选非能力/不适用边界。 */
-  readonly whenNotToUse?: readonly string[];
-  /** 可选参数补充；正式输入边界仍由 `inputSchema` 定义。 */
-  readonly inputNotes?: readonly string[];
-  /** 可选跨参数约束、平台差异或副作用说明。 */
-  readonly usageNotes?: readonly string[];
-  /** 可选输出说明；真实结果/截断/continuation 边界由 `ToolCallResult` 与 executor 行为承担。 */
-  readonly outputNotes?: readonly string[];
-  /** 可选参数示例。 */
-  readonly examples?: readonly ToolUsageExample[];
-  /** 可选冻结运行环境提示（如 current shell、平台）。 */
-  readonly runtimeHints?: readonly ToolModelRuntimeHint[];
+  readonly additionalProperties?: boolean | ToolJsonSchema;
+  /** Preserve JSON Schema keywords not interpreted by the host. */
+  readonly [keyword: string]: unknown;
 };
 
 export type ToolCategory = "research" | "workspace" | "filesystem" | "terminal" | "web" | "mcp" | "other";
@@ -93,6 +60,15 @@ export type ToolRuntimeHint =
       readonly invocation: readonly string[];
       readonly commandLineParameter: string;
       readonly notes: readonly string[];
+    }
+  | {
+      readonly kind: "mcp_tool";
+      readonly serverId: string;
+      readonly protocolName: string;
+      readonly readOnlyHint?: boolean;
+      readonly destructiveHint?: boolean;
+      readonly idempotentHint?: boolean;
+      readonly openWorldHint?: boolean;
     };
 
 /**
@@ -158,7 +134,8 @@ export type ToolDefinition = {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: ToolInputSchema;
-  readonly modelContract?: ToolModelContract;
+  /** Optional provider/MCP output contract, retained without forcing validation. */
+  readonly outputSchema?: ToolJsonSchema;
   readonly metadata?: ToolDefinitionMetadata;
 };
 

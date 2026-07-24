@@ -34,7 +34,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     workspaceRoot: root,
     playwrightAvailable: false,
     processRegistry: registry,
-    toolCatalogNames: ["create_file", "write_file", "read", "shell_command", "http_request"],
+    toolCatalogNames: ["create", "write", "read", "shell", "http_request"],
   });
   const center = toolRegistry.createToolCenter("desktop-basic");
   const allowedTools = center.list().map((tool) => tool.name);
@@ -42,15 +42,15 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
   let cleaned = false;
 
   try {
-    assert.deepEqual(allowedTools, ["read", "create_file", "write_file", "shell_command", "http_request"]);
+    assert.deepEqual(allowedTools, ["read", "create", "write", "shell", "http_request"]);
 
-    const createPackage = await executeTool("call-create-package", "create_file", {
+    const createPackage = await executeTool("call-create-package", "create", {
       path: "demo/package.json",
       content: JSON.stringify({ type: "module", scripts: { dev: "node server.mjs" } }, null, 2),
     });
     assert.equal(createPackage.status, "completed");
 
-    const writeHtml = await executeTool("call-write-index", "write_file", {
+    const writeHtml = await executeTool("call-write-index", "write", {
       path: "demo/public/index.html",
       content: [
         "<!doctype html>",
@@ -63,14 +63,14 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     });
     assert.equal(writeHtml.status, "completed");
 
-    const writeServer = await executeTool("call-write-server", "write_file", {
+    const writeServer = await executeTool("call-write-server", "write", {
       path: "demo/server.mjs",
       content: demoServerSource(),
     });
     assert.equal(writeServer.status, "completed");
 
     const port = await unusedLocalPort();
-    const startServer = await executeTool("call-start-demo-server", "shell_command", {
+    const startServer = await executeTool("call-start-demo-server", "shell", {
       command: process.execPath,
       args: ["server.mjs", String(port)],
       cwd: "demo",
@@ -234,7 +234,7 @@ test("runtime guard starts a background dev server, records waitForPort, and cle
   }
 });
 
-test("shell_command reports an external occupied port as notStarted without spawning a duplicate process", async () => {
+test("shell reports an external occupied port as notStarted without spawning a duplicate process", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-runtime-guard-e2e-"));
   const server = createNetServer();
   try {

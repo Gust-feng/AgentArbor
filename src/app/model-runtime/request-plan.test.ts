@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelRequest } from "../../domain/intelligence/index.js";
-import type { ToolDefinition, ToolOperationType } from "../../domain/tools/index.js";
+import type {
+  ToolDefinition,
+  ToolInputSchema,
+  ToolJsonSchema,
+  ToolOperationType,
+} from "../../domain/tools/index.js";
 import { createModelRuntimeRequestPlan } from "./index.js";
 
 test("model runtime request plan emits strict schemas for structured-output capable models", () => {
@@ -22,9 +27,75 @@ test("model runtime request plan emits strict schemas for structured-output capa
   assert.equal(plan.tools[0]?.inputSchema.additionalProperties, false);
 });
 
+test("model runtime request plan preserves complete JSON Schema contracts", () => {
+  const inputSchema: ToolInputSchema = {
+    type: "object",
+    properties: {
+      mode: { type: "string", enum: ["fast", "safe"] },
+      target: { $ref: "#/$defs/target" },
+      retries: { type: "integer", minimum: 0, maximum: 3 },
+      slug: { type: "string", pattern: "^[a-z]+$" },
+      operation: { const: "lookup" },
+    },
+    required: ["mode", "target"],
+    additionalProperties: { type: "string" },
+    $defs: {
+      target: {
+        type: "object",
+        properties: { id: { type: "string", minLength: 1 } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+    },
+    oneOf: [
+      { required: ["mode"] },
+      { properties: { mode: { const: "safe" } } },
+    ],
+    dependentRequired: { mode: ["target"] },
+  };
+  const outputSchema: ToolJsonSchema = {
+    type: "object",
+    properties: {
+      results: {
+        type: "array",
+        items: { $ref: "#/$defs/result" },
+      },
+    },
+    required: ["results"],
+    $defs: {
+      result: {
+        type: "object",
+        properties: { score: { type: "number", minimum: 0, maximum: 1 } },
+        required: ["score"],
+      },
+    },
+  };
+  const definition: ToolDefinition = {
+    ...tool("schema_fidelity", "read-only"),
+    inputSchema,
+    outputSchema,
+  };
+  const loosePlan = createModelRuntimeRequestPlan({
+    request: request([definition]),
+    modelCapabilities: capabilities({ supportsStructuredOutputs: false }),
+  });
+  const strictPlan = createModelRuntimeRequestPlan({
+    request: request([definition]),
+    modelCapabilities: capabilities({ supportsStructuredOutputs: true }),
+  });
+
+  assert.deepEqual(loosePlan.tools[0]?.inputSchema, inputSchema);
+  assert.deepEqual(loosePlan.tools[0]?.outputSchema, outputSchema);
+  assert.deepEqual(strictPlan.tools[0]?.inputSchema, {
+    ...inputSchema,
+    additionalProperties: false,
+  });
+  assert.deepEqual(strictPlan.tools[0]?.outputSchema, outputSchema);
+});
+
 test("model runtime request plan disables parallel calls when any model-visible tool is risky", () => {
   const plan = createModelRuntimeRequestPlan({
-    request: request([tool("search", "read-only"), tool("shell_command", "execute")]),
+    request: request([tool("search", "read-only"), tool("shell", "execute")]),
     modelCapabilities: capabilities({
       supportsToolCalling: true,
       supportsParallelToolCalls: true,

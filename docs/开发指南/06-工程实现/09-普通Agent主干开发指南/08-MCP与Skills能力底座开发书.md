@@ -10,7 +10,7 @@ Capability snapshot
   -> Ordinary run resources
   -> AgentLoop
   -> ToolCenter gateway + Pi AgentTool
-  -> ordinary-run/v4 facts + Pi Session tool messages
+  -> ordinary-run/v5 facts + Pi Session tool messages
 ```
 
 - 能力在 run 创建时冻结；运行中配置变化只影响新 run。
@@ -45,7 +45,7 @@ Skill loader 使用标准 YAML parser 读取 `SKILL.md` frontmatter，发现 met
 - 只有用户显式选择语义路由时，才发起 `skill_routing` 模型请求。
 - 未选中的 Skill 正文和资源不进入模型上下文。
 - 正文加载时必须与 frozen catalog hash 一致，否则 fail closed。
-- `read_skill_resource` 只读取本轮 selected + loaded Skill 的 indexed resource；reference 可以返回文本，asset/script 只返回 metadata，script 不自动执行。
+- `skill_read` 只读取本轮 selected + loaded Skill 的 indexed resource；reference 可以返回文本，asset/script 只返回 metadata，script 不自动执行。
 - `evals/` 只服务本地 doctor/eval，不进入运行时资源索引。
 
 Skill 启停和 `markUsed` 只使用 source-qualified `stateKey` 的 v2 状态文件。旧 `skillId`、旧版本和损坏状态视为空状态，不迁移、不修复、不回退。
@@ -56,12 +56,12 @@ Skill 启停和 `markUsed` 只使用 source-qualified `stateKey` 的 v2 状态�
 
 Sub-Agent 只向 Ordinary Agent Session loop 贡献两个 AgentTool：
 
-- `call_sub_agent`：调用已登记专家。
-- `spawn_sub_agent`：创建一次性专家。
+- `agent_call`：调用已登记专家。
+- `agent_spawn`：创建一次性专家。
 
 AgentTool definition 进入冻结 capability catalog，但不向普通 ToolRegistry 注册 stub executor。运行时由 Agent Session adapter 执行 nested agent；权限以父 run 冻结工具为上限，Sub-Agent 声明只能进一步收窄。nested tool set 强制排除全部 Sub-Agent 工具，因此不能递归。
 
-完整输出直接回到父模型并形成 Ordinary 标准 tool facts。旧 `call_sub_agents`、专用续读工具、自研 runner、事件/trace store 和独立 Panel read-model 已删除。
+完整输出直接回到父模型并形成 Ordinary 标准 tool facts。旧 `agent_calls`、专用续读工具、自研 runner、事件/trace store 和独立 Panel read-model 已删除。
 
 ## Session 上下文
 

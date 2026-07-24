@@ -11,17 +11,17 @@ test("Desktop Agent model input keeps the stable prompt first and preserves prio
     {
       role: "assistant",
       content: "",
-      toolCalls: [{ callId: "call-read", toolName: "read_file", input: { path: "README.md" } }],
+      toolCalls: [{ callId: "call-read", toolName: "read", input: { path: "README.md" } }],
       protocolExtensions: {
         openai_responses_output_items: [{
           type: "function_call",
           call_id: "call-read",
-          name: "read_file",
+          name: "read",
           arguments: "{\"path\":\"README.md\"}",
         }],
       },
     },
-    { role: "tool", content: "README CONTENT", toolCallId: "call-read", toolName: "read_file" },
+    { role: "tool", content: "README CONTENT", toolCallId: "call-read", toolName: "read" },
     { role: "assistant", content: "first answer" },
   ];
   const taskSoil = createTaskSoil({

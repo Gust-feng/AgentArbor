@@ -52,23 +52,28 @@ test("ToolCenter keeps the tool fact unchanged when its metrics sink fails and c
 test("ToolCenter links producer-native continuation pages without retaining their input", async () => {
   const metricEvents: ToolExecutionMetricEvent[] = [];
   const center = new ToolCenter({ metricsSink: { record: (event) => metricEvents.push(event) } });
-  center.register(testTool("read_file", async (input) => {
+  center.register(testTool("read", async (input) => {
     const startChar = Number((input as { readonly startChar?: unknown }).startChar ?? 0);
     return startChar === 0
-      ? { content: "first", textChars: 5, hasMoreAfter: true, nextStartChar: 5 }
+      ? {
+          content: "first",
+          textChars: 5,
+          hasMoreAfter: true,
+          continuation: { nextInput: { path: "README.md", startChar: 5 } },
+        }
       : { content: "last", textChars: 4, hasMoreAfter: false };
   }, "read-only"));
   const context = { callerAgentId: "agent-test", traceId: "trace-native-chain", goalId: "goal-test" };
 
   await center.execute(
-    { callId: "native-page-1", toolName: "read_file", input: { path: "README.md" } },
+    { callId: "native-page-1", toolName: "read", input: { path: "README.md" } },
     context,
-    allowTools("read_file"),
+    allowTools("read"),
   );
   await center.execute(
-    { callId: "native-page-2", toolName: "read_file", input: { path: "README.md", startChar: 5 } },
+    { callId: "native-page-2", toolName: "read", input: { path: "README.md", startChar: 5 } },
     context,
-    allowTools("read_file"),
+    allowTools("read"),
   );
 
   const pages = metricEvents.filter((event): event is Extract<ToolExecutionMetricEvent, { readonly kind: "execution" }> =>
@@ -141,15 +146,15 @@ test("ToolCenter preflight returns a detached ready request without execution or
 test("ToolCenter preflight returns the exact confirmation fact without execution", () => {
   let executions = 0;
   const center = new ToolCenter({ platform: "win32" });
-  center.register(testTool("delete_file", async () => {
+  center.register(testTool("delete", async () => {
     executions += 1;
     return { deleted: true };
   }, "read-write", { requiresConfirmation: true }));
 
   const preflight = center.preflight(
-    { callId: "call-preflight-delete", toolName: "delete_file", input: { path: "notes.txt" } },
+    { callId: "call-preflight-delete", toolName: "delete", input: { path: "notes.txt" } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("delete_file"),
+    allowTools("delete"),
   );
 
   assert.equal(preflight.status, "approval_required");
@@ -204,7 +209,7 @@ test("ToolCenter uses scoped fact identity for confirmation while preserving pro
 test("ToolCenter preflight blocks policy, registration, permission, and invalid-fact failures without execution", () => {
   let executions = 0;
   const center = new ToolCenter();
-  center.register(testTool("browser_snapshot", async () => {
+  center.register(testTool("web_fetch", async () => {
     executions += 1;
     return { ok: true };
   }));
@@ -217,11 +222,11 @@ test("ToolCenter preflight blocks policy, registration, permission, and invalid-
       callId: "call-ftp",
       factId: "agent-tool:8:parent-b/tool:call-ftp",
       parentToolCallFactId: "agent-tool:8:parent-b",
-      toolName: "browser_snapshot",
+      toolName: "web_fetch",
       input: { url: "ftp://example.test/file" },
     },
     context,
-    allowTools("browser_snapshot"),
+    allowTools("web_fetch"),
   );
   const unknown = center.preflight(
     { callId: "call-unknown", toolName: "unknown", input: {} },
@@ -229,23 +234,23 @@ test("ToolCenter preflight blocks policy, registration, permission, and invalid-
     allowTools("unknown"),
   );
   const unauthorized = center.preflight(
-    { callId: "call-denied", toolName: "browser_snapshot", input: {} },
+    { callId: "call-denied", toolName: "web_fetch", input: {} },
     context,
     allowTools("other"),
   );
   const wrongCaller = center.preflight(
-    { callId: "call-wrong-caller", toolName: "browser_snapshot", input: {} },
+    { callId: "call-wrong-caller", toolName: "web_fetch", input: {} },
     context,
-    { callerAgentId: "other-agent", allowedTools: ["browser_snapshot"] },
+    { callerAgentId: "other-agent", allowedTools: ["web_fetch"] },
   );
   const invalid = center.preflight(
     {
       callId: "call-invalid",
-      toolName: "browser_snapshot",
+      toolName: "web_fetch",
       input: circular as unknown as ToolCallRequest["input"],
     },
     context,
-    allowTools("browser_snapshot"),
+    allowTools("web_fetch"),
   );
 
   assert.equal(executions, 0);
@@ -272,20 +277,20 @@ test("ToolCenter preflight blocks policy, registration, permission, and invalid-
 test("ToolCenter execute reuses preflight and invokes an approved executor exactly once", async () => {
   let executions = 0;
   const center = new ToolCenter({ platform: "win32" });
-  center.register(testTool("shell_command", async () => {
+  center.register(testTool("shell", async () => {
     executions += 1;
     return { exitCode: 0 };
   }, "execute", { requiresConfirmation: true }));
   const request: ToolCallRequest = {
     callId: "call-approved-once",
-    toolName: "shell_command",
+    toolName: "shell",
     input: { commandLine: "pnpm test" },
   };
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-  const preflight = center.preflight(request, context, allowTools("shell_command"));
+  const preflight = center.preflight(request, context, allowTools("shell"));
   const result = await center.execute(request, context, {
-    ...allowTools("shell_command"),
+    ...allowTools("shell"),
     approvedConfirmationIds: ["confirmation-call-approved-once"],
   });
 
@@ -377,26 +382,26 @@ test("ToolCenter gates any tool metadata that requires confirmation before execu
     writes += 1;
     return { ok: true };
   }, "read-write"));
-  center.register(testTool("delete_file", async () => {
+  center.register(testTool("delete", async () => {
     deletes += 1;
     return { ok: true };
   }, "read-write", { requiresConfirmation: true }));
-  center.register(testTool("shell_command", async () => {
+  center.register(testTool("shell", async () => {
     executes += 1;
     return { ok: true };
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-  const write = await center.execute({ callId: "call-write", toolName: "custom_write", input: {} }, context, allowTools("custom_write", "delete_file", "shell_command"));
+  const write = await center.execute({ callId: "call-write", toolName: "custom_write", input: {} }, context, allowTools("custom_write", "delete", "shell"));
   const deleteResult = await center.execute(
-    { callId: "call-delete", toolName: "delete_file", input: { path: "notes.txt" } },
+    { callId: "call-delete", toolName: "delete", input: { path: "notes.txt" } },
     context,
-    allowTools("custom_write", "delete_file", "shell_command")
+    allowTools("custom_write", "delete", "shell")
   );
   const execute = await center.execute(
-    { callId: "call-exec", toolName: "shell_command", input: { commandLine: "pnpm test" } },
+    { callId: "call-exec", toolName: "shell", input: { commandLine: "pnpm test" } },
     context,
-    allowTools("custom_write", "delete_file", "shell_command")
+    allowTools("custom_write", "delete", "shell")
   );
 
   assert.equal(write.status, "completed");
@@ -415,29 +420,29 @@ test("ToolCenter gates any tool metadata that requires confirmation before execu
   assert.equal(executes, 0);
 });
 
-test("ToolCenter keeps shell_command behind confirmation until the same confirmation id is approved", async () => {
+test("ToolCenter keeps shell behind confirmation until the same confirmation id is approved", async () => {
   let executes = 0;
   const center = new ToolCenter({ platform: "win32" });
-  center.register(testTool("shell_command", async () => {
+  center.register(testTool("shell", async () => {
     executes += 1;
     return { commandLine: "pnpm test", exitCode: 0 };
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
   const request = {
     callId: "call-command",
-    toolName: "shell_command",
+    toolName: "shell",
     input: { commandLine: "pnpm test" },
   };
 
   const pending = await center.execute(
     request,
     context,
-    allowTools("shell_command")
+    allowTools("shell")
   );
   const result = await center.execute(
     request,
     context,
-    { ...allowTools("shell_command"), approvedConfirmationIds: ["confirmation-call-command"] }
+    { ...allowTools("shell"), approvedConfirmationIds: ["confirmation-call-command"] }
   );
 
   assert.equal(pending.status, "approval_required");
@@ -532,7 +537,7 @@ test("ToolCenter preserves approval_required when partial output retention fails
   const result = await center.execute(
     { callId: "call-parent", toolName: "delegating_tool", input: {} },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("delegating_tool", "read_tool_output"),
+    allowTools("delegating_tool", "read_output"),
   );
 
   assert.equal(result.status, "approval_required");
@@ -562,7 +567,7 @@ test("ToolCenter marks completed side-effect delivery failed without inviting a 
   const result = await center.execute(
     { callId: "call-submit", toolName: "submit_fixture", input: {} },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("submit_fixture", "read_tool_output"),
+    allowTools("submit_fixture", "read_output"),
   );
   const delivery = result.output as Readonly<Record<string, unknown>>;
 
@@ -686,7 +691,7 @@ test("ToolCenter retains oversized successful read-only output without rerunning
   const result = await center.execute(
     { callId: "call-oversized-read", toolName: "oversized_read", input: { path: "large.txt" } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("oversized_read", "read_tool_output"),
+    allowTools("oversized_read", "read_output"),
   );
   const output = result.output as Readonly<Record<string, unknown>>;
 
@@ -714,7 +719,7 @@ test("ToolCenter applies a fixed token budget to the complete model-visible resu
   const result = await center.execute(
     { callId: "call-token-bounded", toolName: "token_bounded_read", input: {} },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("token_bounded_read", "read_tool_output"),
+    allowTools("token_bounded_read", "read_output"),
   );
   const output = result.output as Readonly<Record<string, unknown>>;
   const envelope = JSON.stringify(canonicalToolResultMessage(result));
@@ -746,7 +751,7 @@ test("ToolCenter applies the same retained envelope to a catalog-only Sub-Agent 
   center.register(createReadToolOutputTool(store));
   const raw: ToolCallResult = {
     callId: "call-sub-agent-large",
-    toolName: "call_sub_agent",
+    toolName: "agent_call",
     input: { task: "inspect" },
     output: `complete-sub-agent-output:${"x".repeat(3_000)}`,
     status: "completed",
@@ -755,7 +760,7 @@ test("ToolCenter applies the same retained envelope to a catalog-only Sub-Agent 
 
   const delivered = await center.deliverResult(
     raw,
-    allowTools("read_tool_output"),
+    allowTools("read_output"),
     "run-sub-agent-large",
   );
   const output = delivered.output as Readonly<Record<string, unknown>>;
@@ -765,9 +770,9 @@ test("ToolCenter applies the same retained envelope to a catalog-only Sub-Agent 
   assert.equal(counter.countText(JSON.stringify(canonicalToolResultMessage(delivered))) <= 1_000, true);
   const continuation = output.continuation as { readonly nextInput: ToolCallRequest["input"] };
   const read = await center.execute(
-    { callId: "read-sub-agent-large", toolName: "read_tool_output", input: continuation.nextInput },
+    { callId: "read-sub-agent-large", toolName: "read_output", input: continuation.nextInput },
     { callerAgentId: "agent-test", traceId: "run-sub-agent-large", goalId: "goal-test" },
-    allowTools("read_tool_output"),
+    allowTools("read_output"),
   );
   assert.match(String((read.output as Readonly<Record<string, unknown>>).content), /complete-sub-agent-output/u);
 });
@@ -833,7 +838,7 @@ test("ToolCenter retains oversized explicit failure evidence without losing orig
       durationMs: 1,
     },
   })));
-  const permission = allowTools("explicit_retained_failure", "read_tool_output");
+  const permission = allowTools("explicit_retained_failure", "read_output");
 
   const result = await center.execute(
     { callId: "call-explicit-retained-failure", toolName: "explicit_retained_failure", input: {} },
@@ -846,7 +851,7 @@ test("ToolCenter retains oversized explicit failure evidence without losing orig
   const read = await center.execute(
     {
       callId: "read-explicit-retained-failure",
-      toolName: "read_tool_output",
+      toolName: "read_output",
       input: delivery.continuation?.nextInput,
     },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -966,10 +971,10 @@ test("ToolCenter attributes executor-reported failures to execution", async () =
   assert.equal(result.failureAttribution, "execution_failure");
 });
 
-test("ToolCenter retains oversized thrown stderr and HTTP-like bodies behind read_tool_output", async () => {
+test("ToolCenter retains oversized thrown stderr and HTTP-like bodies behind read_output", async () => {
   const cases = [
     {
-      toolName: "shell_command",
+      toolName: "shell",
       message: "shell command failed with exit code 1",
       errorDomain: "process_error" as const,
       evidenceName: "stderr",
@@ -1002,7 +1007,7 @@ test("ToolCenter retains oversized thrown stderr and HTTP-like bodies behind rea
       });
     }));
 
-    const permission = allowTools(fixture.toolName, "read_tool_output");
+    const permission = allowTools(fixture.toolName, "read_output");
     const result = await center.execute(
       { callId: `call-${fixture.toolName}`, toolName: fixture.toolName, input: {} },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -1027,7 +1032,7 @@ test("ToolCenter retains oversized thrown stderr and HTTP-like bodies behind rea
     const read = await center.execute(
       {
         callId: `read-${fixture.toolName}`,
-        toolName: "read_tool_output",
+        toolName: "read_output",
         input: delivery.continuation?.nextInput,
       },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -1055,7 +1060,7 @@ test("ToolCenter retained output and error previews do not split UTF-16 surrogat
   center.register(testTool("large_unicode_error", async () => {
     throw new Error(`${"e".repeat(3_998)}😀error-tail`);
   }));
-  const permission = allowTools("large_unicode_output", "large_unicode_error", "read_tool_output");
+  const permission = allowTools("large_unicode_output", "large_unicode_error", "read_output");
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
   const output = await center.execute(
@@ -1163,16 +1168,16 @@ test("ToolCenter rejects invalid explicit statuses and approval requests", async
 test("ToolCenter lets full access mode execute confirmation-gated shell commands", async () => {
   let executes = 0;
   const center = new ToolCenter({ platform: "win32" });
-  center.register(testTool("shell_command", async () => {
+  center.register(testTool("shell", async () => {
     executes += 1;
     return { commandLine: "pnpm test", exitCode: 0 };
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
   const result = await center.execute(
-    { callId: "call-command-full-access", toolName: "shell_command", input: { commandLine: "pnpm test" } },
+    { callId: "call-command-full-access", toolName: "shell", input: { commandLine: "pnpm test" } },
     context,
-    { ...allowTools("shell_command"), confirmationPolicy: "full_access" }
+    { ...allowTools("shell"), confirmationPolicy: "full_access" }
   );
 
   assert.equal(result.status, "completed");
@@ -1183,23 +1188,23 @@ test("ToolCenter lets full access mode execute confirmation-gated shell commands
 test("ToolCenter executes the same non-command tool call only after matching confirmation approval", async () => {
   let deletes = 0;
   const center = new ToolCenter({ platform: "win32" });
-  center.register(testTool("delete_file", async () => {
+  center.register(testTool("delete", async () => {
     deletes += 1;
     return { ok: true };
   }, "read-write", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
-  const request = { callId: "call-delete", toolName: "delete_file", input: { path: "notes.txt" } };
+  const request = { callId: "call-delete", toolName: "delete", input: { path: "notes.txt" } };
 
-  const pending = await center.execute(request, context, allowTools("delete_file"));
+  const pending = await center.execute(request, context, allowTools("delete"));
   const wrongApproval = await center.execute(
     request,
     context,
-    { ...allowTools("delete_file"), approvedConfirmationIds: ["confirmation-other"] }
+    { ...allowTools("delete"), approvedConfirmationIds: ["confirmation-other"] }
   );
   const approved = await center.execute(
     request,
     context,
-    { ...allowTools("delete_file"), approvedConfirmationIds: ["confirmation-call-delete"] }
+    { ...allowTools("delete"), approvedConfirmationIds: ["confirmation-call-delete"] }
   );
 
   assert.equal(pending.status, "approval_required");
@@ -1210,7 +1215,7 @@ test("ToolCenter executes the same non-command tool call only after matching con
 
 test("tool display projection preserves command facts without redaction", async () => {
   const center = new ToolCenter();
-  center.register(testTool("shell_command", async () => ({
+  center.register(testTool("shell", async () => ({
     command: "pnpm",
     args: ["test"],
     exitCode: 0,
@@ -1219,9 +1224,9 @@ test("tool display projection preserves command facts without redaction", async 
   }), "read-only"));
 
   const result = await center.execute(
-    { callId: "call-shell", toolName: "shell_command", input: { command: "pnpm", args: ["test"] } },
+    { callId: "call-shell", toolName: "shell", input: { command: "pnpm", args: ["test"] } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("shell_command")
+    allowTools("shell")
   );
 
   assert.equal(result.status, "completed");
@@ -1260,7 +1265,7 @@ test("tool display projection preserves search facts", async () => {
 
 test("tool display projection ignores oldText/newText preview fields", async () => {
   const center = new ToolCenter({ platform: "linux" });
-  center.register(testTool("edit_file", async () => ({
+  center.register(testTool("edit", async () => ({
     path: "notes.md",
     previousLength: 32,
     nextLength: 18,
@@ -1270,7 +1275,7 @@ test("tool display projection ignores oldText/newText preview fields", async () 
   const result = await center.execute(
     {
       callId: "call-edit",
-      toolName: "edit_file",
+      toolName: "edit",
       input: {
         path: "notes.md",
         oldText: "old file body sk-edit-secret",
@@ -1278,7 +1283,7 @@ test("tool display projection ignores oldText/newText preview fields", async () 
       },
     },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("edit_file")
+    allowTools("edit")
   );
 
   const display = displayFor(result);
@@ -1293,7 +1298,7 @@ test("tool display projection ignores oldText/newText preview fields", async () 
 
 test("ToolCenter file diff display exposes the canonical unified diff without redaction", async () => {
   const center = new ToolCenter({ platform: "linux" });
-  center.register(testTool("edit_file", async () => ({
+  center.register(testTool("edit", async () => ({
     path: "notes.md",
     previousLength: 32,
     nextLength: 36,
@@ -1307,14 +1312,14 @@ test("ToolCenter file diff display exposes the canonical unified diff without re
   const result = await center.execute(
     {
       callId: "call-edit-preview",
-      toolName: "edit_file",
+      toolName: "edit",
       input: {
         path: "notes.md",
         edits: [{ anchor: "old visible line\napi_key=sk-edit-secret", replacement: "new visible line\napi_key=sk-edit-secret" }],
       },
     },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("edit_file")
+    allowTools("edit")
   );
 
   const display = displayFor(result);
@@ -1328,7 +1333,7 @@ test("ToolCenter file diff display exposes the canonical unified diff without re
 
 test("ToolCenter file diff display does not fall back to edit input when the canonical diff is unavailable", async () => {
   const center = new ToolCenter({ platform: "linux" });
-  center.register(testTool("edit_file", async () => ({
+  center.register(testTool("edit", async () => ({
     path: "notes.md",
     previousLength: 20,
     nextLength: 22,
@@ -1346,14 +1351,14 @@ test("ToolCenter file diff display does not fall back to edit input when the can
   const result = await center.execute(
     {
       callId: "call-edit-occurrence",
-      toolName: "edit_file",
+      toolName: "edit",
       input: {
         path: "notes.md",
         edits: [{ oldText: "same", newText: "updated", occurrence: 2, startLine: 3, endLine: 3 }],
       },
     },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("edit_file")
+    allowTools("edit")
   );
 
   const display = displayFor(result);
@@ -1366,7 +1371,7 @@ test("ToolCenter file diff display does not fall back to edit input when the can
 
 test("ToolCenter file change display exposes bounded create preview without redaction", async () => {
   const center = new ToolCenter({ platform: "linux" });
-  center.register(testTool("create_file", async () => ({
+  center.register(testTool("create", async () => ({
     path: "created.md",
     bytes: 42,
   }), "read-write"));
@@ -1374,14 +1379,14 @@ test("ToolCenter file change display exposes bounded create preview without reda
   const result = await center.execute(
     {
       callId: "call-create-preview",
-      toolName: "create_file",
+      toolName: "create",
       input: {
         path: "created.md",
         content: "visible created line\npassword=sk-create-secret",
       },
     },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("create_file")
+    allowTools("create")
   );
 
   const display = displayFor(result);
@@ -1395,7 +1400,7 @@ test("ToolCenter file change display exposes bounded create preview without reda
 
 test("ToolCenter preserves adapter error facts in failed results and projections", async () => {
   const center = new ToolCenter();
-  center.register(testTool("shell_command", async () => {
+  center.register(testTool("shell", async () => {
     throw Object.assign(new Error("spawn pnpm ENOENT"), {
       code: "ENOENT",
       facts: {
@@ -1408,9 +1413,9 @@ test("ToolCenter preserves adapter error facts in failed results and projections
   }));
 
   const result = await center.execute(
-    { callId: "call-shell-failed", toolName: "shell_command", input: { command: "pnpm", args: ["missing"] } },
+    { callId: "call-shell-failed", toolName: "shell", input: { command: "pnpm", args: ["missing"] } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    allowTools("shell_command")
+    allowTools("shell")
   );
   assert.equal(result.status, "failed");
   assert.equal(result.errorDomain, "process_error");
@@ -1422,48 +1427,12 @@ test("ToolCenter preserves adapter error facts in failed results and projections
 
 test("ToolCenter list returns cloned metadata", () => {
   const center = new ToolCenter();
-  center.register(testTool("read_file", async () => ({ ok: true }), "read-only"));
+  center.register(testTool("read", async () => ({ ok: true }), "read-only"));
 
   const listed = center.list();
   (listed[0]!.metadata as { category: string }).category = "web";
 
   assert.equal(center.list()[0]?.metadata?.category, "other");
-});
-
-test("ToolCenter list returns cloned model contracts", () => {
-  const center = new ToolCenter();
-  const executor = testTool("read_file", async () => ({ ok: true }), "read-only");
-  center.register({
-    ...executor,
-    definition: {
-      ...executor.definition,
-      modelContract: {
-        purpose: "Read a file.",
-        whenToUse: ["Need file contents."],
-        whenNotToUse: ["Need to edit."],
-        inputNotes: ["path is required."],
-        usageNotes: ["Read before editing."],
-        outputNotes: ["result.content has text."],
-        runtimeHints: [{ label: "workspace root", value: "current workspace" }],
-        examples: [{ title: "Read", input: { path: "README.md" } }],
-      },
-    },
-  });
-
-  const listed = center.list()[0]!;
-  const listedContract = listed.modelContract! as {
-    readonly examples: readonly { readonly input: { path: string } }[];
-    readonly runtimeHints: { label: string; value: string }[];
-    readonly whenToUse: string[];
-  };
-  listedContract.whenToUse.push("mutated");
-  listedContract.examples[0]!.input.path = "changed.md";
-  listedContract.runtimeHints[0]!.value = "changed";
-
-  const fresh = center.list()[0]!.modelContract!;
-  assert.deepEqual(fresh.whenToUse, ["Need file contents."]);
-  assert.deepEqual(fresh.examples?.[0]?.input, { path: "README.md" });
-  assert.equal(fresh.runtimeHints?.[0]?.value, "current workspace");
 });
 
 test("ToolCenter keeps undefined as a valid completed result", async () => {
